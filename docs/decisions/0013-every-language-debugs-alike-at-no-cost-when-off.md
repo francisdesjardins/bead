@@ -326,9 +326,9 @@ metrics reads Bead's families once its queries are rewritten: `bead` for `rpc`, 
 publishes through `System.Diagnostics.Metrics`, scrapes Bead's text apart; a `Meter` beside the
 registry on the C# side is a decision of its own, which meets the Tenth Man.
 
-**Series are paid for every procedure declared, failed or not.** 61 a procedure in the server
-families, 74 in the client ones, the notifications' besides: 100 procedures answered make 6,100
-series in a side's server families, and the ceiling, 1,000 procedures, 61,000. A peer cannot widen
+**Series are paid for every procedure declared, failed or not.** 62 a procedure in the server
+families, 75 in the client ones, the notifications' besides: 100 procedures answered make 6,200
+series in a side's server families, and the ceiling, 1,000 procedures, 62,000. A peer cannot widen
 any of it: a code no name covers is `_OTHER`, a procedure unknown `_OTHER`. An application cannot
 pass it: a declaration past the ceiling is refused as the side is built. Each family keeps a table
 of the codes its exits can end with, and no series waits at 0 for a code its exits never reach.

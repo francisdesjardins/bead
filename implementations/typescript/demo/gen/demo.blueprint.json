@@ -1,0 +1,190 @@
+{
+  "format": "bead-blueprint/1",
+  "proto": {
+    "files": [
+      {
+        "package": "demo.v1",
+        "path": "demo/v1/sign_up.proto"
+      }
+    ],
+    "messages": [
+      {
+        "fields": [
+          {
+            "description": "A DNS label's shape (RFC 1035 2.3.1): a lower-case letter, then letters, digits or hyphens.",
+            "fieldName": "name",
+            "fieldNumber": 1,
+            "jsonName": "name",
+            "presence": "implicit",
+            "type": {
+              "scalar": "string"
+            }
+          },
+          {
+            "description": "From 1 to 10.",
+            "fieldName": "seats",
+            "fieldNumber": 2,
+            "jsonName": "seats",
+            "presence": "implicit",
+            "type": {
+              "scalar": "int32"
+            }
+          },
+          {
+            "description": "A local part, an @ and a domain with a dot, within RFC 5321's 254 octets of a path.",
+            "fieldName": "email",
+            "fieldNumber": 3,
+            "jsonName": "email",
+            "presence": "implicit",
+            "type": {
+              "scalar": "string"
+            }
+          },
+          {
+            "description": "An E.164 number: a +, then 7 to 15 digits, the first not 0.",
+            "fieldName": "phone",
+            "fieldNumber": 4,
+            "jsonName": "phone",
+            "presence": "implicit",
+            "type": {
+              "scalar": "string"
+            }
+          }
+        ],
+        "file": "demo/v1/sign_up.proto",
+        "fullName": "demo.v1.SignUpRequest",
+        "rules": {
+          "fields": [
+            {
+              "fieldName": "name",
+              "fieldNumber": 1,
+              "presence": "implicit",
+              "rules": {
+                "string": {
+                  "max_len": "63",
+                  "min_len": "1",
+                  "pattern": "^[a-z][a-z0-9-]*$"
+                }
+              },
+              "type": {
+                "scalar": "string"
+              }
+            },
+            {
+              "fieldName": "seats",
+              "fieldNumber": 2,
+              "presence": "implicit",
+              "rules": {
+                "int32": {
+                  "gte": 1,
+                  "lte": 10
+                }
+              },
+              "type": {
+                "scalar": "int32"
+              }
+            },
+            {
+              "fieldName": "email",
+              "fieldNumber": 3,
+              "presence": "implicit",
+              "rules": {
+                "string": {
+                  "max_len": "254",
+                  "pattern": "^[^@ ]+@[^@ .]+(\\.[^@ .]+)+$"
+                }
+              },
+              "type": {
+                "scalar": "string"
+              }
+            },
+            {
+              "fieldName": "phone",
+              "fieldNumber": 4,
+              "presence": "implicit",
+              "rules": {
+                "string": {
+                  "pattern": "^\\+[1-9][0-9]{6,14}$"
+                }
+              },
+              "type": {
+                "scalar": "string"
+              }
+            }
+          ],
+          "message": {
+            "oneof": [
+              {
+                "fields": [
+                  "email",
+                  "phone"
+                ],
+                "required": true
+              }
+            ]
+          },
+          "oneofs": []
+        }
+      },
+      {
+        "fields": [
+          {
+            "fieldName": "welcome",
+            "fieldNumber": 1,
+            "jsonName": "welcome",
+            "presence": "implicit",
+            "type": {
+              "scalar": "string"
+            }
+          }
+        ],
+        "file": "demo/v1/sign_up.proto",
+        "fullName": "demo.v1.SignUpResponse"
+      }
+    ]
+  },
+  "requires": [
+    "validate"
+  ],
+  "reservedServices": {
+    "ids": [],
+    "names": []
+  },
+  "services": [
+    {
+      "description": "Signs a visitor up for a workshop, once the request holds to its rules.",
+      "failures": [],
+      "procedures": [
+        {
+          "admission": "none",
+          "description": "Holds seats for a name, to be confirmed by email or by phone.",
+          "failures": [],
+          "procedureId": 1,
+          "procedureKind": "request",
+          "procedureName": "signUp",
+          "request": {
+            "encoding": "proto",
+            "message": "demo.v1.SignUpRequest"
+          },
+          "result": {
+            "encoding": "proto",
+            "message": "demo.v1.SignUpResponse"
+          }
+        }
+      ],
+      "proto": {
+        "file": "demo/v1/sign_up.proto",
+        "fullName": "demo.v1.SignUpService"
+      },
+      "reserved": {
+        "failureCodes": [],
+        "procedureIds": [],
+        "procedureNames": []
+      },
+      "serviceId": 2,
+      "serviceName": "SignUp",
+      "serviceRevision": 1
+    }
+  ],
+  "specVersion": "0.8.0"
+}

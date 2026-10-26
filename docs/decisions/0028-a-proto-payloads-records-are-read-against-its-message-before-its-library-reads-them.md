@@ -1,16 +1,16 @@
 # 0028 — A `proto` payload's records are read against its message before its library reads them
 
 - **Status**: accepted
-- **Scope**: the protocol and both runtimes: in [`spec/spec.md`](../../spec/spec.md), 17.9.3's
-  count of a group and a map's entry, 17.9.5 and 17.9.6; the check of a `proto` payload's records,
-  the TypeScript side's `@francisdesjardins/bead/proto` and the C# side's `Bead.Protobuf` assembly;
-  the contract of generated code, at 3; `spec/codecs.proto`, `spec/codecs.json`'s `proto` rows, its
-  schema and its generator; protobuf's conformance suite and the differential, through
-  `tools/protobuf-conformance.mjs`, its pin, each side's testee and failure list, and their CI job;
-  the support matrix's `proto` rows. What section 17 states of `proto`, and why it restates none of
-  protobuf's format, is
-  [0031](0031-a-proto-payload-is-protobufs-format-and-bead-states-only-its-own.md)'s;
-  the codec of two functions,
+- **Scope**: the protocol and both runtimes: in [`spec/spec.md`](../../spec/spec.md), 17.9.3's count
+  of a group and a map's entry, 17.9.5 and 17.9.6; the check of a `proto` payload's records, the
+  TypeScript side's `@francisdesjardins/bead/proto` and the C# side's `Bead.Protobuf` assembly; the
+  contract of generated code from 3, whose code first calls the check; `spec/codecs.proto`,
+  `spec/codecs.json`'s `proto` rows, its schema and its generator; protobuf's conformance suite and
+  the differential, through `tools/protobuf-conformance.mjs`, its pin, each side's testee and
+  failure list, and their CI job; the support matrix's `proto` rows. What section 17 states of
+  `proto`, and why it restates none of protobuf's format, is
+  [0031](0031-a-proto-payload-is-protobufs-format-and-bead-states-only-its-own.md)'s; the codec of
+  two functions,
   [0018](0018-a-services-procedures-are-typed-descriptors-served-and-called-through-one-layer.md)'s;
   the generated codec, and what a target writes beside what a runtime does,
   [0022](0022-a-proto-becomes-one-checked-blueprint-and-each-language-is-generated-from-it.md)'s;
@@ -112,14 +112,14 @@ once, at first use, and cached by its descriptor, in a `WeakMap` and a `Conditio
 field number to what its records take, and the shapes of the messages it holds, so a message holds
 itself.
 
-- **TypeScript**: the subpath `@francisdesjardins/bead/proto`, `src/proto/records.ts`,
-  `checkProtoRecords(bytes, schema)`, which throws a `SyntaxError`, as the other codecs do for bytes
-  that do not read. `schema` is a `DescMessage` by `import type` from `@bufbuild/protobuf`, nothing
-  imported at run time; `@bufbuild/protobuf` is an optional peer dependency, in the range generated
-  code needs, and stays a development dependency. The check reads `fields`, `number`, `fieldKind`,
-  `scalar`, `listKind`, `mapKey`, `mapKind`, `message` and `delimitedEncoding`, a scalar's kind as
-  `descriptor.proto`'s type number, which `ScalarType` carries; a change of that shape fails the
-  generated code's type-check.
+- **TypeScript**: the subpath `@francisdesjardins/bead/proto`, `src/proto/proto.ts`, and its
+  `checkProtoRecords(bytes, schema)`, in `src/proto/records.ts`, which throws a `SyntaxError`, as
+  the other codecs do for bytes that do not read. `schema` is a `DescMessage` by `import type` from
+  `@bufbuild/protobuf`, nothing imported at run time; `@bufbuild/protobuf` is an optional peer
+  dependency, in the range generated code needs, and stays a development dependency. The check reads
+  `fields`, `number`, `fieldKind`, `scalar`, `listKind`, `mapKey`, `mapKind`, `message` and
+  `delimitedEncoding`, a scalar's kind as `descriptor.proto`'s type number, which `ScalarType`
+  carries; a change of that shape fails the generated code's type-check.
 - **C#**: the assembly `Bead.Protobuf`, `src/Bead.Protobuf/`, in `Bead.slnx`, which references
   Google.Protobuf at its central pin and nothing else,
   `ProtoRecords.Check(ReadOnlySpan<byte> bytes, MessageDescriptor message)`, which throws a
@@ -168,15 +168,19 @@ an entry with an undeclared field apart. `WIRE` makes the first break no evoluti
 **17.9.3 counts a group and a map's entry as a message**, as each is one on the wire ("Maps"), and
 as Google.Protobuf counts them.
 
-**The generated codec calls the check: generated code's contract 3.** TypeScript:
+**The generated codec calls the check, from generated code's contract 3 on.** TypeScript:
 `decode: (bytes) => { checkProtoRecords(bytes, FooSchema); return fromBinary(…); }`,
-`checkProtoRecords` imported from `@francisdesjardins/bead/proto`, and
-`GENERATED_CODE_SUPPORTS_VERSION_3`. C#:
-`global::Bead.Protobuf.ProtoRecords.Check(bytes.Span, global::Foo.Descriptor);` before the framing,
-and `GeneratedCode.SupportsVersion3`. Generated code that calls the check needs an export a runtime
-without it lacks, which is what moves the counter. **The runtime holds contract 3 alone**, on both
-sides: it holds no `GENERATED_CODE_SUPPORTS_VERSION_2` and no `GeneratedCode.SupportsVersion2`, so
-code that names 2, an earlier beadc's, fails its type-check and its build until it is regenerated.
+`checkProtoRecords` imported from `@francisdesjardins/bead/proto`. C#:
+`global::Bead.Protobuf.ProtoRecords.Check(bytes.Span, global::Foo.Descriptor);` before the framing.
+3 is the contract whose code first calls it, since generated code that calls the check needs an
+export a runtime without it lacks, which is what moves the counter. **The runtimes hold 4 and 5**,
+on both sides, 4 since a request's rules are generated
+([0035](0035-a-payload-that-reads-is-held-to-its-messages-rules-before-its-resolver-sees-it.md))
+and 5 for a route table
+([0037](0037-a-procedure-is-also-an-http-route-which-a-gateway-answers-as-one-more-client-of-its-server.md)),
+and none older: they hold no `GENERATED_CODE_SUPPORTS_VERSION_2` or `_3` and no
+`GeneratedCode.SupportsVersion2` or `SupportsVersion3`, so code that names 2 or 3, an earlier
+beadc's, fails its type-check and its build until it is regenerated.
 A runtime keeps a constant while it still serves the code that names it, and one that would run
 version-2 code unchecked no longer serves it as Bead conforms: before 1.0.0, an older constant goes
 once the code that names it no longer conforms through the runtime; from 1.0.0, it stays for the
@@ -252,10 +256,12 @@ codec, the check in front:
   edition 2023 and the two editions variants, and `Probe`, for the side's target, builds its testee,
   and runs
   `conformance_test_runner --enforce_recommended --maximum_edition MAX --failure_list <the side's list> <testee>`.
-  **Its floor**: a side's successes and its expected failures are
-  2,833, and its skips 2,816; the runner closes a text-format suite after it, whose 909 tests a
-  testee skips, since Bead's `proto` carries no text form. Each count moves only with the pin. A
-  third language adds its testee's command.
+  **Its floor**: a side's successes and its expected failures are 5,601, and its skips 48, its JSON
+  tests answered through Bead's mapping of protobuf's JSON
+  ([0037](0037-a-procedure-is-also-an-http-route-which-a-gateway-answers-as-one-more-client-of-its-server.md));
+  the runner closes a text-format suite after it, whose 909 tests a testee skips, since Bead's
+  `proto` carries no text form. Each count moves only with the pin, or with a form the testees
+  answer. A third language adds its testee's command.
 - **The testees**, `implementations/typescript/tools/protobuf-conformance/` on the TypeScript side's
   own install, type-checked by its own `tsconfig.json` once its code is generated, since the side's
   type-check and lint cannot read it without that code, and `implementations/dotnet/tools/Bead.ProtobufConformance/`, outside `Bead.slnx`
@@ -263,17 +269,20 @@ codec, the check in front:
   `packages.lock.json`, restored locked, and its format run by name. Nothing of protobuf's is
   committed: its test protos, under BSD-3-Clause, are ejected at run time from the pinned package,
   and the code generated from them is written at run time.
-- **A skip never hides a test**: a testee answers `skipped` only for a JSON, text or JSPB request or
-  output, and for `protobuf_test_messages.edition_unstable`'s message, an unstable edition no stock
-  generator compiles; and a binary request for any other message it lacks with `runtime_error`,
-  which fails it.
+- **A skip never hides a test**: a testee answers `skipped` only for a text or JSPB request or
+  output, for a JSON test that asks an unknown member ignored, which Bead's mapping refuses and
+  takes no option to ignore, and for `protobuf_test_messages.edition_unstable`'s message, an
+  unstable edition no stock generator compiles; and a binary request for any other message it lacks
+  with `runtime_error`, which fails it.
 - **The failure lists**, `failing.txt` beside each testee, each line the test and the runner's
   message, its reason on the comment line above; the runner fails a listed test that passes, so the
   list is held both ways. The TypeScript side's names
   `Recommended.Editions.ProtobufInput.RejectInvalidUtf8.String.Extension`, an extension read as an
   unknown field since the generated codec gives no registry; the C# side's, the same and
   `Required.*.ProtobufInput.UnknownOrdering.ProtobufOutput`, since Google.Protobuf writes a
-  message's unknown fields back by number and wire type, a platform row.
+  message's unknown fields back by number and wire type, a platform row; and each names besides the
+  two JSON tests of an extension's JSON name, which Bead's mapping reads as no field of its message
+  ([0037](0037-a-procedure-is-also-an-http-route-which-a-gateway-answers-as-one-more-client-of-its-server.md)).
 
 **How the pin moves.** One runner serves both libraries. The tool fails when `runner.json`'s
 `upstreamVersion` and Google.Protobuf's pin name different protobuf releases, `v36` and `3.36`
@@ -301,7 +310,8 @@ U+FEFF in a proto payload" is open, as it says why, and "A proto string no strin
 writer" is a platform row
 ([0031](0031-a-proto-payload-is-protobufs-format-and-bead-states-only-its-own.md)).
 
-**Code that names contract 2 is regenerated**, on both sides, before it builds against the runtime.
+**Code that names contract 2 or 3 is regenerated**, on both sides, before it builds against the
+runtime.
 A C# project that binds `proto` references `Bead.Protobuf`; a TypeScript one carries
 `@bufbuild/protobuf` for its messages, which `./proto` takes as a peer.
 
@@ -357,7 +367,7 @@ the answer that holds:
 | Probe has no map, no repeated field and no group, so no entry, nor the review's corpus, can reach the cases above, which is why they slipped past all three proofs                                                                                                                                                         | Accepted: `spec/codecs.proto` is edition 2023, with field presence implicit so that the earlier entries keep their readings. `Probe` holds a packed `repeated uint32`, a `repeated fixed32`, a `map<string, Probe>` and a delimited `Probe`, which is a group on the wire; protoc, protoc-gen-es and Grpc.Tools each compile it. `make_codecs.py` writes the entries. The review's corpus, pointed at the widened `Probe`, is played through both generated readers, and stays a gate, as `tools/protobuf-conformance.mjs differential`.                                                                             |
 | A shape written by beadc is a second copy of the descriptor. It goes stale under external messages, re-resolves features and map entries, freezes a table format at contract 3, and avoids a tie to the libraries that generated code already has. C#'s double walk is unmeasured                                          | Accepted, as (a): the runtime builds each message's shape from the library's own descriptor, once, cached by the descriptor. TypeScript does it in the subpath `./proto`, by `import type` with an optional peer dependency; C# in the `Bead.Protobuf` assembly, so `Bead.Core` still references no Google.Protobuf. No table exists to go stale or to freeze, and the library resolves features and entries itself. (b) is refused: it reads the descriptor too, and adds a table to check against it. C#'s cost is measured, at most 54% of the read, and the check is held under the library's read on every row. |
 | The user's decision is too narrow: it covers the wire-type rule on Probe's fields, not whether the rule reaches into map entries, nor the second leveling an entry's undeclared field needs                                                                                                                                | Accepted: two levelings were put to the user, each with its Leveled down row and its entries, and the user took both. The wire-type rule reaches into entries. The point the dissenter checked and did not press, that buf's `WIRE` flags every change between singular and repeated, is the reason the first breaks no evolution beadc passes.                                                                                                                                                                                                                                                                      |
-| The CI floor of 2,832 successes fails the C# run, which has 2,828 successes and 5 expected failures                                                                                                                                                                                                                        | Accepted: the floor is the side's successes plus its expected failures, 2,833 on both sides, with 2,816 skips. Both move only with the pin.                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| The CI floor of 2,832 successes fails the C# run, which has 2,828 successes and 5 expected failures                                                                                                                                                                                                                        | Accepted: the floor is the side's successes plus its expected failures, the same on both sides, beside its skips; both move only with the pin, or with a form the testees answer, as protobuf's JSON ([0037](0037-a-procedure-is-also-an-http-route-which-a-gateway-answers-as-one-more-client-of-its-server.md))                                                                                                                                                                                                                                                                                                    |
 | The suite's location crosses the toolchains: a 10 MB runner in the TypeScript lockfile installed everywhere, the C# gate on the TypeScript install, a C# testee whose place under the solution's gates is unsaid, and no procedure for moving the pin                                                                      | In part: the goal is taken, but not the location. A root `package.json` would break 0005 ("The root's tools are Node scripts without dependencies"), so the runner is fetched by its pinned sha512, as `builder/protoc.json` and its fetch script do for protoc, into an ignored, cached folder, with no lockfile. The TypeScript lockfile does not carry it. The C# testee sits under `Directory.Build.props`, outside `Bead.slnx`, with its own lock file, and its format is run by name. This record states how the pin moves with either library.                                                                |
 | Keeping version 2 lets code generated before the check run unchecked on a runtime that claims to refuse those payloads                                                                                                                                                                                                     | Accepted: the runtime holds contract 3 alone, on both sides, so code that names 2 fails its type-check and build until it is regenerated. The reason is the runtime's own rule ("while the runtime still serves the code that names it"): a runtime that would run version-2 code unchecked no longer serves it as Bead conforms. `generated-code.ts` and its C# twin state the rule before and after 1.0.0.                                                                                                                                                                                                         |
 | Filing the unknown ordering as `open` contradicts the matrix's own kinds, 17.9 and the row's own text, and the draft gives no criterion for when a side may go past its library                                                                                                                                            | Accepted: the row is `platform`, lifting when Google.Protobuf keeps the order. This record states the criterion: a side may narrow what reads before its library, never read or write in its place. The check is a refusal before a read. Reordering a write would replace the library's writer, which 17.9 does not allow.                                                                                                                                                                                                                                                                                          |

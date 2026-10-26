@@ -27,10 +27,12 @@
 // A testee is a conformance testee, as protobuf's runner drives one: on its standard input, each
 // ConformanceRequest after its length, a 32-bit little-endian integer; on its standard output, each
 // ConformanceResponse alike. It reads and writes each message through the codec of the procedure
-// that binds it, by the message's full name; it answers `skipped` for a JSON, text or JSPB payload or
-// output, and for `protobuf_test_messages.edition_unstable`'s message, which no stock generator
-// compiles, alone, and `runtime_error` for a binary request of any other message it lacks, so a
-// message gone fails rather than skips.
+// that binds it, by the message's full name, and its JSON by the side's own mapping of protobuf's
+// JSON, the one its gateway answers by (decision 0037); it answers `skipped` for a text or JSPB
+// payload or output, for a test of ignoring unknown JSON members, which Bead's mapping always
+// refuses, and for `protobuf_test_messages.edition_unstable`'s message, which no stock generator
+// compiles, alone, and `runtime_error` for a request of any other message it lacks, so a message
+// gone fails rather than skips.
 //
 // The suite runs `--enforce_recommended --maximum_edition MAX` with the side's failure list, whose
 // every line pins a test and the runner's message, its reason on the comment line above: the runner

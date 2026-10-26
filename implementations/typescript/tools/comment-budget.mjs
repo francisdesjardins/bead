@@ -178,7 +178,8 @@ function sourceFiles(from, into = []) {
   for (const entry of readdirSync(from, { withFileTypes: true })) {
     const path = resolve(from, entry.name);
     if (entry.isDirectory()) {
-      if (entry.name !== 'node_modules' && entry.name !== 'dist') {
+      // a `generated` folder is its generator's words, held to it by its own check
+      if (entry.name !== 'node_modules' && entry.name !== 'dist' && entry.name !== 'generated') {
         sourceFiles(path, into);
       }
     } else if (/\.tsx?$/.test(entry.name)) {

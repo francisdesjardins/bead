@@ -5,12 +5,13 @@ and reports which of them each implementation's tests read.
 
 Every spec/*.json has its schema in spec/schemas/, and every schema its file; each file follows its
 schema, which follows JSON Schema 2020-12, and holds no key twice (RFC 7493); each repeats the
-version of the document it belongs to, spec/spec.md's as its specVersion, or spec/debugging.md's,
-the companion's, as its debuggingVersion; no group holds two entries of one name, which a reader
-looking one up by name would never reach; each group of vectors.json is named by a section of the
-spec, which names no other, and each of the companion's files by a line of its own; every unit an
-entry cites is one of its document's — a clause, an item of its numbered list, a row of its table —
-and spec/units.txt and spec/debugging-units.txt list every unit of each, its front matter and each
+version of the document it belongs to, spec/spec.md's as its specVersion, spec/debugging.md's, the
+companion's, as its debuggingVersion, or spec/transcoding.md's, the transcoding's, as its
+transcodingVersion; no group holds two entries of one name, which a reader looking one up by name
+would never reach; each group of vectors.json is named by a section of the spec, which names no
+other, and each of a companion's files by a line of its own; every unit an entry cites is one of its
+document's — a clause, an item of its numbered list, a row of its table — and spec/units.txt,
+spec/debugging-units.txt and spec/transcoding-units.txt list every unit of each, its front matter and each
 section's lead among them, cited or the reason none cites it, each reason held by its rule, with the
 sha256 of its text, which moves only where --write-units names the unit; an advance follows a timer
 armed, and in the transports' cases ends on its due at the latest; a debug filter keeps fixtures the
@@ -20,10 +21,11 @@ companion's help and type, its buckets rising under the companion's bounds, each
 canonical number for its bound, each _count the sum of its handled counts, none started below
 handled; each implementation's tests read every group, the conversations, the transports' cases,
 a case of which may name the row of docs/support.md it crosses, the clock cases, the debug filters, the
-metrics, the codecs' payloads and values and the identities' names, ids, folds and procedure kinds,
+metrics, the codecs' payloads and values, the identities' names, ids, folds and procedure kinds, the
+validations' verdicts and details, and the transcoding's groups,
 an entry of either naming, where it crosses a row of docs/support.md, a row that names the file and
-the entry; the encodings section 17 states are the codecs' schema's, each played, and spec.md names
-each .proto of spec/, and no other; the durations name each place by one id and each input by one
+the entry; the encodings section 17 states are the codecs' schema's, each played, and spec.md or
+transcoding.md names each .proto of spec/, and no other; the durations name each place by one id and each input by one
 name, give every place an outcome for every input in their order, cite at each place only what it
 observes, and name, where they cross a row of docs/support.md, a row that names the file and them;
 each implementation plays them in one harness, which names every place, through one helper, which
@@ -39,9 +41,10 @@ Exit 1 on any of them.
 
   python spec/check.py --write-units [unit…]
 
-writes spec/units.txt and spec/debugging-units.txt: a unit the document gained, with the status ?,
-which its author replaces; a unit renumbered, under its new key; no unit the document lost; and the
-hash of each unit it names, 15.7 for spec.md's, debugging:4.2 for the companion's, and of no other,
+writes spec/units.txt, spec/debugging-units.txt and spec/transcoding-units.txt: a unit the document
+gained, with the status ?, which its author replaces; a unit renumbered, under its new key; no unit
+the document lost; and the hash of each unit it names, 15.7 for spec.md's, debugging:4.2 for the
+companion's, transcoding:5.2 for the transcoding's, and of no other,
 printing what plays each. A unit whose text moved and that it does not name still fails.
 
   python spec/check.py --write-blueprints
@@ -64,6 +67,7 @@ from referencing import Registry, Resource
 
 from generators.debugging_version import debugging_version
 from generators.spec_version import spec_version
+from generators.transcoding_version import transcoding_version
 
 SPEC = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(SPEC)
@@ -87,6 +91,7 @@ META = {'$schema', '$comment', 'specVersion'}
 LEDGERS = {
     'spec': (os.path.join(SPEC, 'units.txt'), 'spec/spec.md', ''),
     'debugging': (os.path.join(SPEC, 'debugging-units.txt'), 'spec/debugging.md', 'debugging:'),
+    'transcoding': (os.path.join(SPEC, 'transcoding-units.txt'), 'spec/transcoding.md', 'transcoding:'),
 }
 
 
@@ -100,11 +105,12 @@ def ledger_header(document):
 
 
 # the units --write-units acknowledges, by their document: 15.7 is spec.md's, debugging:4.2 the
-# companion's; None when it is not given, an empty set when it names none
+# companion's, transcoding:5.2 the transcoding's; None when it is not given, an empty set when it
+# names none
 WRITE_UNITS = None
 
 if '--write-units' in sys.argv[1:]:
-    WRITE_UNITS = {'spec': set(), 'debugging': set()}
+    WRITE_UNITS = {document: set() for document in LEDGERS}
 
     for argument in sys.argv[sys.argv.index('--write-units') + 1:]:
         if argument.startswith('--'):
@@ -122,11 +128,11 @@ REASONS = ('lead', 'defines', 'twins', 'builder', 'open', 'owed')
 # carries none, since it would state a requirement no entry plays
 KEY_WORDS = re.compile(r'\b(?:MUST|SHALL|SHOULD|MAY|REQUIRED|RECOMMENDED|OPTIONAL)\b')
 
-# how a test names a unit it holds, by its own number: spec 15.10, or debugging 4.2 for the
-# companion's; "spec 12.2, 12.6" names both. Never by its clause's number, and never by §, which the
-# matrix keeps for an RFC's sections
+# how a test names a unit it holds, by its own number: spec 15.10, debugging 4.2 for the companion's,
+# or transcoding 5.2 for the transcoding's; "spec 12.2, 12.6" names both. Never by its clause's
+# number, and never by §, which the matrix keeps for an RFC's sections
 UNIT_NUMBER = r'\d+(?:\.\d+)+(?!\.?\d)'
-NAMING = re.compile(rf'\b(spec|debugging) ({UNIT_NUMBER}(?:(?:,| and) {UNIT_NUMBER})*)')
+NAMING = re.compile(rf'\b(spec|debugging|transcoding) ({UNIT_NUMBER}(?:(?:,| and) {UNIT_NUMBER})*)')
 
 # where a test names a unit: the line that declares it or its group — a call of test, it or describe
 # on the TypeScript side and beadc's, a [Fact], a [Theory] or a public class, Task or void on the C#
@@ -139,6 +145,11 @@ ATTRIBUTE = re.compile(r'\s*\[')
 # beadc's tests, which hold what of the spec the builder alone does
 BUILDER_TESTS = ('builder/src', '.test.ts')
 
+# the transcoding's groups (0037), each by its file's name before it, since vectors.json holds a group
+# of failures of its own
+TRANSCODING_GROUPS = tuple(f'transcoding/{group}' for group in ('templates', 'readings', 'writings', 'bindings',
+                                                                 'failures', 'events', 'exchanges'))
+
 # the files of entries each side's tests read whole, beside the groups of vectors, and their groups
 WHOLE = {
     'conversations': ('conversations',),
@@ -148,12 +159,17 @@ WHOLE = {
     'metrics': ('expositions', 'exits'),
     'codecs': ('payloads', 'values'),
     'identities': ('names', 'ids', 'folds', 'procedureKinds'),
+    'validations': ('verdicts', 'details'),
+    'transcoding': TRANSCODING_GROUPS,
 }
 
 # the companion's files, which repeat its version and cite its units, each named by a line of it, and
 # the groups that cite them (0013)
 COMPANION = {'debug-filters': 'Debug filters', 'metrics': 'Metrics'}
 COMPANION_GROUPS = ('filters', 'sources', 'expositions', 'exits')
+
+# the transcoding's file, which repeats its version and cites its units, named by a line of it (0037)
+TRANSCODING = {'transcoding': 'Transcoding'}
 
 # where each implementation's tests are, the files among them, how they name a group of vectors, and
 # how they name a file they read whole: a language that joins adds its row
@@ -273,10 +289,12 @@ if problems:
 
 version = spec_version()
 companion_version = debugging_version()
+transcoding = transcoding_version()
 
-# each file repeats the version of the document it belongs to, and the companion's files the companion's
+# each file repeats the version of the document it belongs to, and each companion's files its own
 for name, document in documents.items():
     key, stated, by = (('debuggingVersion', companion_version, 'debugging.md') if name in COMPANION
+                       else ('transcodingVersion', transcoding, 'transcoding.md') if name in TRANSCODING
                        else ('specVersion', version, 'spec.md'))
 
     if key not in document:
@@ -456,6 +474,12 @@ named['names'] = documents['identities']['names']
 named['ids'] = documents['identities']['ids']
 named['folds'] = documents['identities']['folds']
 named['procedureKinds'] = documents['identities']['procedureKinds']
+# the validations' verdicts and details (0035)
+named['verdicts'] = documents['validations']['verdicts']
+named['details'] = documents['validations']['details']
+# the transcoding's groups (0037)
+for group in TRANSCODING_GROUPS:
+    named[group] = documents['transcoding'][group.split('/')[1]]
 
 for group, entries in named.items():
     seen = set()
@@ -652,8 +676,8 @@ for line in re.findall(r'^_Vectors:.*$', text, re.MULTILINE):
         elif part != 'every refusal':
             problems.append(f'spec.md: "{line}" names {part!r}, no group')
 
-for line in re.findall(r'^_(?:Conversations|Transports|Durations|Identities|Codecs):.*$', text, re.MULTILINE):
-    found = re.fullmatch(r'_(?:Conversations|Transports|Durations|Identities|Codecs): `spec/(\S+)\.json`\._', line)
+for line in re.findall(r'^_(?:Conversations|Transports|Durations|Identities|Codecs|Validations):.*$', text, re.MULTILINE):
+    found = re.fullmatch(r'_(?:Conversations|Transports|Durations|Identities|Codecs|Validations): `spec/(\S+)\.json`\._', line)
 
     if found is None or found.group(1) not in documents:
         problems.append(f'spec.md: {line!r} names no file of spec/')
@@ -681,16 +705,34 @@ for line in re.findall(r'^_(?:Debug filters|Metrics):.*$', companion, re.MULTILI
 for name in sorted(set(COMPANION) - companion_named):
     problems.append(f'{name}.json is named by no "_{COMPANION[name]}:" line of debugging.md')
 
-# a .proto of spec/ holds the message the codecs' proto rows read, which the spec names, between
-# backticks, as it names each of its files; and it names none that spec/ does not hold
+# the transcoding names its file by a line of its own, as the companion names each of its own
+with open(os.path.join(SPEC, 'transcoding.md'), encoding='utf-8') as file:
+    transcoding_text = file.read()
+
+transcoding_named = set()
+
+for line in re.findall(r'^_Transcoding:.*$', transcoding_text, re.MULTILINE):
+    found = re.fullmatch(r'_(Transcoding): `spec/(\S+)\.json`\._', line)
+
+    if found is None or TRANSCODING.get(found.group(2)) != found.group(1):
+        problems.append(f'transcoding.md: {line!r} names no file of the transcoding' + "'" + 's in spec/')
+    else:
+        transcoding_named.add(found.group(2))
+
+for name in sorted(set(TRANSCODING) - transcoding_named):
+    problems.append(f'{name}.json is named by no "_{TRANSCODING[name]}:" line of transcoding.md')
+
+# a .proto of spec/ holds the messages a file of entries reads, which the spec or the transcoding names,
+# between backticks, as each names its files; and neither names one that spec/ does not hold
 protos = {name for name in os.listdir(SPEC) if name.endswith('.proto')}
-protos_named = set(re.findall(r'`spec/([\w-]+\.proto)`', text))
+protos_named = {name for document_text in (text, transcoding_text)
+                for name in re.findall(r'`spec/([\w-]+\.proto)`', document_text)}
 
 for name in sorted(protos - protos_named):
-    problems.append(f'spec/{name} is named by no line of spec.md')
+    problems.append(f'spec/{name} is named by no line of spec.md or transcoding.md')
 
 for name in sorted(protos_named - protos):
-    problems.append(f'spec.md names spec/{name}, which spec/ does not hold')
+    problems.append(f'spec.md or transcoding.md names spec/{name}, which spec/ does not hold')
 
 # the encodings section 17 states, each a clause of its own, "17.n. `name`:", are those the codecs'
 # schema holds, and the codecs' entries play each of them
@@ -797,30 +839,39 @@ def units_of(document):
 
 # each document's units, which the files that belong to it cite: a clause, an item or a row, never a
 # front matter or a lead
-units = {'spec': units_of(text), 'debugging': units_of(companion)}
+units = {'spec': units_of(text), 'debugging': units_of(companion), 'transcoding': units_of(transcoding_text)}
 citeable = {document: {key for key, each in found.items() if each['kind'] in ('clause', 'item', 'row')}
             for document, found in units.items()}
 # what cites each unit, by its group and its name, or a place of durations by its id
-citing = {'spec': {}, 'debugging': {}}
+citing = {document: {} for document in LEDGERS}
 
 # the clock cases cite none: they hold the test clocks to one meaning of advance, which the spec does
-# not state; the companion's groups cite its units, and every other group the spec's
+# not state; each companion's groups cite its units, and every other group the spec's; a transcoding
+# entry cites the spec's behind spec:, the core's step a gateway's client plays (0037)
 for group, entries in named.items():
-    document = 'debugging' if group in COMPANION_GROUPS else 'spec'
+    own = ('debugging' if group in COMPANION_GROUPS else 'transcoding' if group in TRANSCODING_GROUPS
+           else 'spec')
 
     for entry in entries if group != 'clocks' else ():
-        for unit in entry['clauses']:
-            if unit not in citeable[document]:
-                problems.append(f'{group}: {entry["name"]!r} cites {unit}, which {document}.md does not have')
+        for cited_unit in entry['clauses']:
+            document, _, unit = cited_unit.rpartition(':')
+            document = document or own
 
-            citing[document].setdefault(unit, []).append(f'{group} {entry["name"]!r}')
+            if unit not in citeable.get(document, ()):
+                problems.append(f'{group}: {entry["name"]!r} cites {cited_unit}, which {document}.md does not have')
 
+            citing.setdefault(document, {}).setdefault(unit, []).append(f'{group} {entry["name"]!r}')
+
+# a place cites the spec's units, and a gateway's the transcoding's behind transcoding: (0037)
 for place in places:
-    for unit in place['clauses']:
-        if unit not in citeable['spec']:
-            problems.append(f'durations: {place["id"]} cites {unit}, which spec.md does not have')
+    for cited_unit in place['clauses']:
+        document, _, unit = cited_unit.rpartition(':')
+        document = document or 'spec'
 
-        citing['spec'].setdefault(unit, []).append(f'durations {place["id"]}')
+        if unit not in citeable.get(document, ()):
+            problems.append(f'durations: {place["id"]} cites {cited_unit}, which {document}.md does not have')
+
+        citing.setdefault(document, {}).setdefault(unit, []).append(f'durations {place["id"]}')
 
 
 def digest(key, text):
@@ -946,8 +997,8 @@ def ledger_of(path, listing):
     return kept
 
 
-owed = {'spec': [], 'debugging': []}
-reasoned = {'spec': {}, 'debugging': {}}
+owed = {document: [] for document in LEDGERS}
+reasoned = {document: {} for document in LEDGERS}
 
 for document in sorted(set(WRITE_UNITS or ()) - set(LEDGERS)):
     problems.append(f'--write-units names {", ".join(sorted(WRITE_UNITS[document]))} of {document}, which is no '
@@ -1490,6 +1541,11 @@ vectors_total = sum(len(vectors[group]) for group in groups)
 ways_total = sum(len(place['ways']) for place in places)
 
 
+# the transcoding's groups, each counted by its name where a row states it (0037)
+TRANSCODING_COUNTS = [(1, rf'(?:^|\b){{n}} {group.split("/")[1]}\b', len(named[group]), f'the transcoding\'s {group.split("/")[1]}')
+                      for group in TRANSCODING_GROUPS]
+
+
 def played_by_each(count):
     """The cells that say each side plays every entry of a file, by its count."""
     return [(column, r'^all {n}\b', count, f'entries the {side} side plays') for column, side in enumerate(SIDES, 2)]
@@ -1555,6 +1611,15 @@ COUNTS = {
             (1, r'\b{n} exits', len(named['exits']), 'exits'),
             *played_by_each(len(named['expositions']) + len(named['exits'])),
         ],
+        'spec/validations.json': [
+            (1, r'^{n} verdicts', len(named['verdicts']), 'verdicts'),
+            (1, r'\b{n} details', len(named['details']), 'details'),
+            *played_by_each(len(named['verdicts']) + len(named['details'])),
+        ],
+        'spec/transcoding.json': [
+            *TRANSCODING_COUNTS,
+            *played_by_each(sum(len(named[group]) for group in TRANSCODING_GROUPS)),
+        ],
     },
     'README.md': {
         'spec/vectors.json': [
@@ -1583,6 +1648,11 @@ COUNTS = {
             (1, r'^{n} expositions', len(named['expositions']), 'expositions'),
             (1, r'\b{n} exits', len(named['exits']), 'exits'),
         ],
+        'spec/validations.json': [
+            (1, r'^{n} verdicts', len(named['verdicts']), 'verdicts'),
+            (1, r'\b{n} details', len(named['details']), 'details'),
+        ],
+        'spec/transcoding.json': TRANSCODING_COUNTS,
         'spec/interop-blueprint.json': [
             (1, r'\bits {n} service\b', len(documents['interop-blueprint']['services']), "the blueprint's services"),
             (1, r'\bits {n} procedures', len(api), "the blueprint's procedures"),
@@ -1631,7 +1701,8 @@ def reasons_of(document):
                      for reason in REASONS)
 
 
-print(f'spec: {version}, its companion {companion_version}; {len(documents)} files, each under its schema; '
+print(f'spec: {version}, its companion {companion_version}, its transcoding {transcoding}; {len(documents)} files, '
+      'each under its schema; '
       f'{sum(len(vectors[group]) for group in groups)} vectors in {len(groups)} groups, each named by '
       f'the spec; {len(named["conversations"])} conversations; {len(named["transports"])} transports\' '
       f'cases; {len(named["clocks"])} clock cases; {len(places)} places of durations, by '
@@ -1642,10 +1713,13 @@ print(f'spec: {version}, its companion {companion_version}; {len(documents)} fil
       f'{len(stated)} encodings; {len(named["names"])} names, {len(named["ids"])} ids and revisions and '
       f'{len(named["procedureKinds"])} procedure kinds, each declared '
       f'{len(documents["identities"]["ways"])} ways, and '
-      f'{len(named["folds"])} folds; '
+      f'{len(named["folds"])} folds; {len(named["verdicts"])} verdicts and {len(named["details"])} details; '
       f'{len(units["spec"])} units of the spec, {len(citing["spec"])} cited and {reasons_of("spec")}, in '
       f'units.txt; {len(units["debugging"])} of the companion, {len(citing["debugging"])} cited and '
-      f'{reasons_of("debugging")}, in debugging-units.txt; {counted} counts of the tables of files of '
+      f'{reasons_of("debugging")}, in debugging-units.txt; {len(units["transcoding"])} of the transcoding, '
+      f'{len(citing["transcoding"])} cited and {reasons_of("transcoding")}, in transcoding-units.txt; '
+      f'{", ".join(f"{len(named[group])} {group.split(chr(47))[1]}" for group in TRANSCODING_GROUPS)} of the '
+      f'transcoding; {counted} counts of the tables of files of '
       f'docs/support.md and the README, each as its files hold it; {len(TEST_KEYS)} published test keys, which none of '
       f'the {len(tracked)} files git lists names outside spec/, the tests and the interop service.')
 

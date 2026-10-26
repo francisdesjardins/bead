@@ -85,19 +85,23 @@ public sealed class PendingCallsTests
     [Fact]
     public void Reserves_a_call_id_until_its_timer_fires_the_later_end_of_two_standing()
     {
-        var time = new FakeTimeProvider();
+        var time = new RouterCoreTests.RequesterClock();
         var calls = CallsOf(RouterSide.Client, OptionsOf(time));
 
         calls.Reserve(new CallAddress(1, "a"), TimeSpan.FromMilliseconds(40));
         calls.Reserve(new CallAddress(1, "a"), TimeSpan.FromMilliseconds(10));
         calls.Reserve(new CallAddress(3, "a"), TimeSpan.FromMilliseconds(10));
         calls.Reserve(new CallAddress(3, "a"), TimeSpan.FromMilliseconds(40));
+        Assert.Equal([TimeSpan.FromMilliseconds(40), TimeSpan.FromMilliseconds(10), TimeSpan.FromMilliseconds(40)], time.Armed.Select((timer) => { return timer.Delay; }));
+        Assert.Equal([time.Armed[1]], time.Armed.Where((timer) => { return timer.IsCleared; }));
         Assert.Equal((true, true, false), (calls.IsReserved(1, "a"), calls.IsReserved(3, "a"), calls.IsReserved(1, "b")));
 
         // the timer replaced frees nothing
         time.Advance(TimeSpan.FromMilliseconds(10));
         Assert.Equal((true, true), (calls.IsReserved(1, "a"), calls.IsReserved(3, "a")));
-        time.Advance(TimeSpan.FromMilliseconds(30));
+        time.Advance(TimeSpan.FromMilliseconds(29));
+        Assert.Equal((true, true), (calls.IsReserved(1, "a"), calls.IsReserved(3, "a")));
+        time.Advance(TimeSpan.FromMilliseconds(1));
         Assert.Equal((false, false), (calls.IsReserved(1, "a"), calls.IsReserved(3, "a")));
     }
 
@@ -128,15 +132,21 @@ public sealed class PendingCallsTests
         Assert.False(calls.IsReserved(1, "a"));
     }
 
-    // a deadline of its own: a wall clock that leaps an hour at each reading moves no reservation
+    // a deadline of its own: a wall clock that leaps an hour on, or a day back, at each reading
+    // moves no reservation
     [Fact]
     public void Keeps_the_later_end_of_two_reservations_by_the_monotonic_reading_never_the_wall_clock()
     {
-        var time = new FakeTimeProvider();
+        var time = new RouterCoreTests.RequesterClock();
         var calls = CallsOf(RouterSide.Client, OptionsOf(new LeapingClock(time)));
 
         calls.Reserve(new CallAddress(1, "a"), TimeSpan.FromMilliseconds(40));
         calls.Reserve(new CallAddress(1, "a"), TimeSpan.FromMilliseconds(10));
+        calls.Reserve(new CallAddress(1, "a"), TimeSpan.FromMilliseconds(20));
+        Assert.Equal([TimeSpan.FromMilliseconds(40)], time.Armed.Select((timer) =>
+        {
+            return timer.Delay;
+        }));
         time.Advance(TimeSpan.FromMilliseconds(39));
         Assert.True(calls.IsReserved(1, "a"));
         time.Advance(TimeSpan.FromMilliseconds(1));
@@ -230,7 +240,8 @@ public sealed class PendingCallsTests
         Assert.Equal([first, second, third, fourth], removed);
     }
 
-    // the test's clock, its wall reading an hour later at each reading, as a clock set by hand moves
+    // the test's clock, its wall reading an hour on, then a day back, in turn at each reading, as a
+    // clock set by hand moves
     private sealed class LeapingClock(TimeProvider clock) : TimeProvider
     {
         private long _readings;
@@ -245,7 +256,7 @@ public sealed class PendingCallsTests
 
         public override DateTimeOffset GetUtcNow()
         {
-            return clock.GetUtcNow() + TimeSpan.FromHours(Interlocked.Increment(ref _readings));
+            return clock.GetUtcNow() + (Interlocked.Increment(ref _readings) % 2 == 1 ? TimeSpan.FromHours(1) : -TimeSpan.FromDays(1));
         }
 
         public override long GetTimestamp()

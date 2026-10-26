@@ -1,0 +1,164 @@
+{
+  "earlier": [
+    {
+      "op": "replace",
+      "path": "/requires",
+      "value": ["validate"]
+    },
+    {
+      "op": "add",
+      "path": "/proto",
+      "value": {
+        "files": [
+          {
+            "package": "x.v1",
+            "path": "x/v1/x.proto"
+          }
+        ],
+        "messages": [
+          {
+            "file": "x/v1/x.proto",
+            "fullName": "x.v1.Echo",
+            "rules": {
+              "fields": [
+                {
+                  "fieldName": "inner",
+                  "fieldNumber": 1,
+                  "presence": "explicit",
+                  "type": {
+                    "message": "x.v1.Inner"
+                  }
+                }
+              ],
+              "message": {},
+              "oneofs": []
+            }
+          },
+          {
+            "file": "x/v1/x.proto",
+            "fullName": "x.v1.Inner",
+            "rules": {
+              "fields": [
+                {
+                  "fieldName": "names",
+                  "fieldNumber": 1,
+                  "presence": "implicit",
+                  "type": {
+                    "scalar": "string"
+                  },
+                  "label": "repeated",
+                  "rules": {
+                    "repeated": {
+                      "items": {
+                        "string": {
+                          "max_len": "8"
+                        }
+                      }
+                    }
+                  }
+                }
+              ],
+              "message": {},
+              "oneofs": []
+            }
+          }
+        ]
+      }
+    },
+    {
+      "op": "replace",
+      "path": "/services/0/procedures/0/request",
+      "value": {
+        "encoding": "proto",
+        "message": "x.v1.Echo"
+      }
+    }
+  ],
+  "current": [
+    {
+      "op": "replace",
+      "path": "/requires",
+      "value": ["validate"]
+    },
+    {
+      "op": "add",
+      "path": "/proto",
+      "value": {
+        "files": [
+          {
+            "package": "x.v1",
+            "path": "x/v1/x.proto"
+          }
+        ],
+        "messages": [
+          {
+            "file": "x/v1/x.proto",
+            "fullName": "x.v1.Echo",
+            "rules": {
+              "fields": [
+                {
+                  "fieldName": "inner",
+                  "fieldNumber": 1,
+                  "presence": "explicit",
+                  "type": {
+                    "message": "x.v1.Inner"
+                  }
+                }
+              ],
+              "message": {},
+              "oneofs": []
+            }
+          },
+          {
+            "file": "x/v1/x.proto",
+            "fullName": "x.v1.Inner",
+            "rules": {
+              "fields": [
+                {
+                  "fieldName": "names",
+                  "fieldNumber": 1,
+                  "presence": "implicit",
+                  "type": {
+                    "scalar": "string"
+                  },
+                  "label": "repeated",
+                  "rules": {
+                    "repeated": {
+                      "items": {
+                        "string": {
+                          "max_len": "4"
+                        }
+                      }
+                    }
+                  }
+                }
+              ],
+              "message": {},
+              "oneofs": []
+            }
+          }
+        ]
+      }
+    },
+    {
+      "op": "replace",
+      "path": "/services/0/procedures/0/request",
+      "value": {
+        "encoding": "proto",
+        "message": "x.v1.Echo"
+      }
+    },
+    {
+      "op": "replace",
+      "path": "/services/0/serviceRevision",
+      "value": 3
+    }
+  ],
+  "findings": [
+    {
+      "rule": "PROCEDURE_RULES_TIGHTENED",
+      "pointer": "/services/0/procedures/0/request/message",
+      "subject": "service:1/procedure:1"
+    }
+  ]
+}

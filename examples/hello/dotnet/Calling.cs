@@ -30,7 +30,8 @@ public static class Calling
     }
 
     // what a refused or failed call answered: a failure of HelloService's catalogue by its name, an
-    // admission refused by its detail; anything else is thrown again
+    // admission refused by its detail, a request its rules refused by its violations, the detail's
+    // lines as they came; anything else is thrown again
     private static string FailureOf(FailureException exception)
     {
         if (HelloFailures.Is(exception, HelloFailures.SayHello.Nameless))
@@ -38,14 +39,14 @@ public static class Calling
             return $"NAMELESS, {exception.Failure.Detail}";
         }
 
-        if (HelloFailures.Is(exception, HelloFailures.CountDown.TooFar))
-        {
-            return $"TOO_FAR, {exception.Failure.Detail}";
-        }
-
         if (exception.Failure is { Scope: FailureScope.Protocol, Code: (ushort)ProtocolCode.AccessDenied })
         {
             return $"ACCESS_DENIED, {exception.Failure.Detail}";
+        }
+
+        if (exception.Failure is { Scope: FailureScope.Protocol, Code: (ushort)ProtocolCode.PayloadInvalid })
+        {
+            return $"PAYLOAD_INVALID, {exception.Failure.Detail}";
         }
 
         ExceptionDispatchInfo.Throw(exception);

@@ -93,12 +93,15 @@ public sealed record ProcedureBindings<TRequest, TResult>
     public required IPayloadCodec<TResult> Result { get; init; }
 
     /// <summary>
-    /// What checks a request's value: the server side calls it once the request decoded, before
-    /// its resolver; the client side before the request is written, when its options say so. None
-    /// checks nothing. What a value it refuses is answered with is no rule yet: one that throws is
-    /// answered as a resolver that throws, and fails a call before it goes.
+    /// What judges a request's value by its procedure's rules (spec section 18): the side that
+    /// answers judges every request once it decoded, before its resolver, and answers one it refuses
+    /// <see cref="ProtocolCode.PayloadInvalid"/>; the side that asks judges it before it is written,
+    /// when its options say so, and fails the call before it goes with a
+    /// <see cref="FailureException"/> of that code. None judges nothing; one that throws is answered
+    /// as a resolver that throws, and fails a call before it goes. beadc generates it from a
+    /// <c>proto</c> binding's protovalidate rules.
     /// </summary>
-    public Action<TRequest>? Validate { get; init; }
+    public RequestValidator<TRequest>? Validate { get; init; }
 }
 
 /// <summary>A notifying procedure's admission and its payloads' codecs.</summary>
@@ -119,8 +122,8 @@ public sealed record ProcedureBindings<TRequest, TResult, TNotification>
     /// <summary>Its notifications' codec.</summary>
     public required IPayloadCodec<TNotification> Notification { get; init; }
 
-    /// <summary>As <see cref="ProcedureBindings{TRequest, TResult}.Validate"/> says.</summary>
-    public Action<TRequest>? Validate { get; init; }
+    /// <summary>As <see cref="ProcedureBindings{TRequest, TResult}.Validate"/> says: a subscribing request is judged as a plain one.</summary>
+    public RequestValidator<TRequest>? Validate { get; init; }
 }
 
 /// <summary>
@@ -165,14 +168,14 @@ public sealed class RequestProcedure<TService, TRequest, TResult, TFailure> : IS
     /// <summary>Its bindings.</summary>
     public ProcedureBindings<TRequest, TResult> Bindings { get; }
 
-    object IDescribedProcedure.RequesterOn(ServiceManager services, bool validates)
+    object IDescribedProcedure.RequesterOn(ServiceManager services, RequesterJudging judging)
     {
         return services.GetRequest(
             Procedure,
-            new RequestDependencies<TRequest, TResult> { Serializer = new ClientCodecs<TRequest, TResult>((Bindings.Request, Bindings.Result), validates ? Bindings.Validate : null) });
+            new RequestDependencies<TRequest, TResult> { Serializer = new ClientCodecs<TRequest, TResult>((Bindings.Request, Bindings.Result), RequestJudge<TRequest>.Of(Bindings.Validate, (judging, services))) });
     }
 
-    object? IDescribedProcedure.NotificationOn(ServiceManager services, int? window)
+    object? IDescribedProcedure.NotificationOn(ServiceManager services, (int? Window, RequesterJudging Judging) made)
     {
         return null;
     }
@@ -222,21 +225,21 @@ public sealed class RequestProcedure<TService, TRequest, TResult, TNotification,
     /// <summary>Its bindings.</summary>
     public ProcedureBindings<TRequest, TResult, TNotification> Bindings { get; }
 
-    object IDescribedProcedure.RequesterOn(ServiceManager services, bool validates)
+    object IDescribedProcedure.RequesterOn(ServiceManager services, RequesterJudging judging)
     {
         return services.GetRequest(
             Procedure,
-            new RequestDependencies<TRequest, TResult> { Serializer = new ClientCodecs<TRequest, TResult>((Bindings.Request, Bindings.Result), validates ? Bindings.Validate : null) });
+            new RequestDependencies<TRequest, TResult> { Serializer = new ClientCodecs<TRequest, TResult>((Bindings.Request, Bindings.Result), RequestJudge<TRequest>.Of(Bindings.Validate, (judging, services))) });
     }
 
-    object? IDescribedProcedure.NotificationOn(ServiceManager services, int? window)
+    object? IDescribedProcedure.NotificationOn(ServiceManager services, (int? Window, RequesterJudging Judging) made)
     {
         return services.GetNotification(
             Procedure,
             new NotificationDependencies<TRequest, TResult, TNotification>
             {
-                Serializer = new ClientNotificationCodecs<TRequest, TResult, TNotification>(Bindings),
-                Window = window,
+                Serializer = new ClientNotificationCodecs<TRequest, TResult, TNotification>(Bindings, RequestJudge<TRequest>.Of(Bindings.Validate, (made.Judging, services))),
+                Window = made.Window,
             });
     }
 }
@@ -283,14 +286,14 @@ public sealed class CommandProcedure<TService, TRequest, TResult, TFailure> : IS
     /// <summary>Its bindings.</summary>
     public ProcedureBindings<TRequest, TResult> Bindings { get; }
 
-    object IDescribedProcedure.RequesterOn(ServiceManager services, bool validates)
+    object IDescribedProcedure.RequesterOn(ServiceManager services, RequesterJudging judging)
     {
         return services.GetCommand(
             Procedure,
-            new RequestDependencies<TRequest, TResult> { Serializer = new ClientCodecs<TRequest, TResult>((Bindings.Request, Bindings.Result), validates ? Bindings.Validate : null) });
+            new RequestDependencies<TRequest, TResult> { Serializer = new ClientCodecs<TRequest, TResult>((Bindings.Request, Bindings.Result), RequestJudge<TRequest>.Of(Bindings.Validate, (judging, services))) });
     }
 
-    object? IDescribedProcedure.NotificationOn(ServiceManager services, int? window)
+    object? IDescribedProcedure.NotificationOn(ServiceManager services, (int? Window, RequesterJudging Judging) made)
     {
         return null;
     }
@@ -304,13 +307,59 @@ internal interface IDescribedProcedure
 {
     /// <summary>
     /// A requester of it on <paramref name="services"/>, as a <c>Func</c> of its request to a
-    /// <see cref="BoundCall{TResponse}"/>: a command's, or a request's; its request checked before it
-    /// is written when <paramref name="validates"/>.
+    /// <see cref="BoundCall{TResponse}"/>: a command's, or a request's; its request judged before it
+    /// is written as <paramref name="judging"/> says.
     /// </summary>
-    object RequesterOn(ServiceManager services, bool validates);
+    object RequesterOn(ServiceManager services, RequesterJudging judging);
 
-    /// <summary>Its notification on <paramref name="services"/>, at its window; none for a procedure that does not notify.</summary>
-    object? NotificationOn(ServiceManager services, int? window);
+    /// <summary>
+    /// Its notification on <paramref name="services"/>, at its window, its subscribing request judged
+    /// as a plain one; none for a procedure that does not notify.
+    /// </summary>
+    object? NotificationOn(ServiceManager services, (int? Window, RequesterJudging Judging) made);
+}
+
+/// <summary>Whether a side's requesters judge a request's value before it is written, and whether they stop at its first violation.</summary>
+internal sealed record RequesterJudging
+{
+    /// <summary>None judges, as a side's options say by default.</summary>
+    public static RequesterJudging None { get; } = new();
+
+    /// <summary>Whether a requester judges its request before it is written.</summary>
+    public bool Validates { get; init; }
+
+    /// <summary>Whether its judging stops at the first violation.</summary>
+    public bool FailFast { get; init; }
+}
+
+/// <summary>
+/// What judges a request before its requester writes it (spec 18.2): a value its rules refuse is a
+/// <see cref="FailureException"/> of <see cref="ProtocolCode.PayloadInvalid"/>, raised here, its
+/// detail written under its router's bound, which its service manager hands its router as the call's
+/// refusal, so that it fails before it goes, counted.
+/// </summary>
+/// <typeparam name="TRequest">What a request carries.</typeparam>
+internal sealed class RequestJudge<TRequest>(RequestValidator<TRequest> validate, (bool FailFast, ServiceManager Services) judging)
+{
+    /// <summary>The judge of a requester's requests, when its side validates and its procedure has rules; none otherwise.</summary>
+    public static RequestJudge<TRequest>? Of(RequestValidator<TRequest>? validate, (RequesterJudging Judging, ServiceManager Services) made)
+    {
+        return made.Judging.Validates && validate is not null ? new RequestJudge<TRequest>(validate, (made.Judging.FailFast, made.Services)) : null;
+    }
+
+    /// <summary>Judges <paramref name="request"/>, and throws a PAYLOAD_INVALID where its rules refuse it.</summary>
+    public void Judge(TRequest request)
+    {
+        var bound = judging.Services.DetailBytes;
+        var judged = validate(request, new ValidateOptions { FailFast = judging.FailFast, MaximumBytes = bound });
+
+        if (judged.Refuses)
+        {
+            throw new FailureException(
+                Failure.OfProtocol(ProtocolCode.PayloadInvalid, Violations.DetailOf(judged, bound)),
+                new FailureException.Raised(FailureOrigin.Local, judging.Services.Side));
+        }
+    }
 }
 
 /// <summary>What every descriptor does with the procedure it is given.</summary>
@@ -335,13 +384,13 @@ internal static class Descriptors
     }
 }
 
-/// <summary>How the side that asks writes a request and reads its result, by its codecs, its request checked first when given what checks it.</summary>
-internal sealed class ClientCodecs<TRequest, TResult>((IPayloadCodec<TRequest> Request, IPayloadCodec<TResult> Result) codecs, Action<TRequest>? validate)
+/// <summary>How the side that asks writes a request and reads its result, by its codecs, its request judged first when given its judge.</summary>
+internal sealed class ClientCodecs<TRequest, TResult>((IPayloadCodec<TRequest> Request, IPayloadCodec<TResult> Result) codecs, RequestJudge<TRequest>? judge)
     : IRequestSerializerClient<TRequest, TResult>
 {
     public ReadOnlyMemory<byte> Encode(TRequest request)
     {
-        validate?.Invoke(request);
+        judge?.Judge(request);
 
         return codecs.Request.Encode(request);
     }
@@ -352,12 +401,17 @@ internal sealed class ClientCodecs<TRequest, TResult>((IPayloadCodec<TRequest> R
     }
 }
 
-/// <summary>How the side that subscribes writes its request and reads its result and its notifications, by its codecs.</summary>
-internal sealed class ClientNotificationCodecs<TRequest, TResult, TNotification>(ProcedureBindings<TRequest, TResult, TNotification> bindings)
+/// <summary>
+/// How the side that subscribes writes its request and reads its result and its notifications, by
+/// its codecs, its request judged first when given its judge, as a plain request's is.
+/// </summary>
+internal sealed class ClientNotificationCodecs<TRequest, TResult, TNotification>(ProcedureBindings<TRequest, TResult, TNotification> bindings, RequestJudge<TRequest>? judge)
     : INotificationSerializerClient<TRequest, TResult, TNotification>
 {
     public ReadOnlyMemory<byte> Encode(TRequest request)
     {
+        judge?.Judge(request);
+
         return bindings.Request.Encode(request);
     }
 

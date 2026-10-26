@@ -1,4 +1,5 @@
 using Bead.Tests;
+using Bead.Transcoding.Http;
 using Bead.Transport.WebSockets;
 
 namespace Bead.Transport.Http.Tests;
@@ -86,10 +87,6 @@ public sealed partial class DurationsTests
         {
             ["options"] = new(nameof(HttpTransportServerOptions.ExchangeTimeout), ExchangeTimeoutByOptions),
         }),
-        ["httpTransportServer.inactivityTimeout"] = (nameof(HttpTransportServerOptions.InactivityTimeout), new()
-        {
-            ["options"] = new(nameof(HttpTransportServerOptions.InactivityTimeout), ServerIdleByOptions),
-        }),
         ["httpTransportServer.maximumWait"] = (nameof(HttpTransportServerOptions.MaximumWait), new()
         {
             ["options"] = new(nameof(HttpTransportServerOptions.MaximumWait), MaximumWaitByOptions),
@@ -97,18 +94,22 @@ public sealed partial class DurationsTests
         ["httpTransportServer.sendGracePeriod"] = (nameof(HttpTransportServerOptions.SendGracePeriod), new()
         {
             ["options"] = new(nameof(HttpTransportServerOptions.SendGracePeriod), SendGracePeriodByHttpOptions),
+            ["gateway"] = new(nameof(HttpGatewayOptions.SendGracePeriod), SendGracePeriodByGateway),
         }),
         ["httpTransportServer.headersTimeout"] = (nameof(HttpTransportServerOptions.HeadersTimeout), new()
         {
             ["options"] = new(nameof(HttpTransportServerOptions.HeadersTimeout), HeadersTimeoutByHttpOptions),
+            ["gateway"] = new(nameof(HttpGatewayOptions.HeadersTimeout), HeadersTimeoutByGateway),
         }),
         ["httpTransportServer.bodyGracePeriod"] = (nameof(HttpTransportServerOptions.BodyGracePeriod), new()
         {
             ["options"] = new(nameof(HttpTransportServerOptions.BodyGracePeriod), BodyGracePeriodByOptions),
+            ["gateway"] = new(nameof(HttpGatewayOptions.BodyGracePeriod), BodyGracePeriodByGateway),
         }),
-        ["httpTransportClient.inactivityTimeout"] = (nameof(HttpTransportClientOptions.InactivityTimeout), new()
+        ["httpTransport.inactivityTimeout"] = (nameof(HttpTransportServerOptions.InactivityTimeout), new()
         {
-            ["options"] = new(nameof(HttpTransportClientOptions.InactivityTimeout), ClientInactivityByOptions),
+            ["client"] = new(nameof(HttpTransportClientOptions.InactivityTimeout), InactivityTimeoutByClient),
+            ["server"] = new(nameof(HttpTransportServerOptions.InactivityTimeout), InactivityTimeoutByServer),
         }),
         ["httpTransportClient.wait"] = (nameof(HttpTransportClientOptions.Wait), new()
         {
@@ -123,18 +124,20 @@ public sealed partial class DurationsTests
             ["client"] = new(nameof(WebSocketTransportClientOptions.Heartbeat), HeartbeatByClient),
             ["server"] = new(nameof(WebSocketTransportServerOptions.Heartbeat), HeartbeatByServer),
         }),
+        ["webSocketTransport.closeTimeout"] = ("a close timeout", new()
+        {
+            ["client"] = new(nameof(WebSocketTransportClientOptions.CloseTimeout), CloseTimeoutByClient),
+            ["server"] = new(nameof(WebSocketTransportServerOptions.CloseTimeout), CloseTimeoutByServer),
+        }),
         ["transportClient.connectTimeout"] = ("a connect's timeout", new()
         {
             ["http"] = new(nameof(HttpConnectOptions.Timeout), ConnectTimeoutByHttp),
             ["webSocket"] = new(nameof(WebSocketConnectOptions.Timeout), ConnectTimeoutByWebSocket),
+            ["memory"] = new(nameof(MemoryConnectOptions.Timeout), ConnectTimeoutByMemory),
         }),
         ["transportClient.reconnectionDelay"] = ("a delay", new()
         {
             ["function"] = new(nameof(TransportReconnectOptions.Delay), ReconnectionDelayByFunction),
-        }),
-        ["webSocketTransportServer.closeTimeout"] = ("a close timeout", new()
-        {
-            ["options"] = new(nameof(WebSocketTransportServerOptions.CloseTimeout), CloseTimeoutByOptions),
         }),
         ["webSocketTransportServer.sendGracePeriod"] = (nameof(WebSocketTransportServerOptions.SendGracePeriod), new()
         {
@@ -143,6 +146,14 @@ public sealed partial class DurationsTests
         ["webSocketTransportServer.headersTimeout"] = (nameof(WebSocketTransportServerOptions.HeadersTimeout), new()
         {
             ["options"] = new(nameof(WebSocketTransportServerOptions.HeadersTimeout), HeadersTimeoutByWebSocketOptions),
+        }),
+        ["gateway.timeout"] = (nameof(HttpGatewayOptions.Timeout), new()
+        {
+            ["options"] = new(nameof(HttpGatewayOptions.Timeout), TimeoutByGateway),
+        }),
+        ["gateway.heartbeat"] = (nameof(HttpGatewayOptions.Heartbeat), new()
+        {
+            ["options"] = new(nameof(HttpGatewayOptions.Heartbeat), HeartbeatByGateway),
         }),
     };
 
@@ -159,6 +170,14 @@ public sealed partial class DurationsTests
     private static Observed HeldAt(TimeSpan held)
     {
         return new Observed(held, null);
+    }
+
+    // ! the due of the one timer armed, never for none: two or more fail, rather than read as never
+    private static TimeSpan DueOf(IReadOnlyList<TimeSpan> dues)
+    {
+        Assert.True(dues.Count <= 1, $"one timer at most, not {dues.Count}");
+
+        return dues is [var due] ? due : Never;
     }
 
     private static Observed Refused(ArgumentOutOfRangeException refusal)

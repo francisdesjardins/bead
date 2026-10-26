@@ -55,12 +55,15 @@ export interface IFailureCatalogue<Name extends string> {
 
 // the codes of an application failure, as spec 9.5 numbers them
 const LARGEST_CODE = 0xffff;
+// the ids of a service a side declares, as spec 16.2 and 16.3 number them: 0 is the protocol's
+const LARGEST_SERVICE_ID = 0xffff;
 
 // definition
 
 /**
- * A service's catalogue, frozen: its names, each with its code, and its service's id. A code that is
- * not a whole number from 1 to 65535, or two names of one code, is a {@link ProgrammerError}.
+ * A service's catalogue, frozen: its names, each with its code, and its service's id. A service's id
+ * or a code that is not a whole number from 1 to 65535, or two names of one code, is a
+ * {@link ProgrammerError}.
  *
  * @example
  * import { failuresOf } from '@francisdesjardins/bead/service';
@@ -75,6 +78,13 @@ export const failuresOf = <const Name extends string>(catalogue: {
 }): IFailureCatalogue<Name> => {
   const codes = Object.freeze({ ...catalogue.codes });
   const { serviceId } = catalogue;
+
+  if (!Number.isInteger(serviceId) || serviceId < 1 || serviceId > LARGEST_SERVICE_ID) {
+    throw new ProgrammerError(
+      `a service's id is a whole number from 1 to 65535, not ${String(serviceId)}`
+    );
+  }
+
   // each code's name, so a code is listed once
   const named = new Map<number, string>();
 

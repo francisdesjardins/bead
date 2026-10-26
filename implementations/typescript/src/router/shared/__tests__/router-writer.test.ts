@@ -1,6 +1,7 @@
 import { setTimeout as sleep } from 'node:timers/promises';
 import { expect, test } from '@playwright/test';
 import {
+  CLIENT_FAILURES,
   CredentialScheme,
   EnvelopeKind,
   FailureScope,
@@ -255,7 +256,7 @@ test.describe('createRouterCore', () => {
       expect(answersOf(sent)).toEqual([['a', 'failure', 1, ProtocolCode.ENVELOPE_TOO_LARGE]]);
     });
 
-    test('cut a failure’s detail to what its envelope holds, and to its own limit, both ways', async () => {
+    test('cut a failure’s detail to its envelope’s room, and to its own limit, both ways', async () => {
       const detail = 'x'.repeat(100);
       const failure = { code: 1, detail, scope: FailureScope.APPLICATION };
 
@@ -294,6 +295,23 @@ test.describe('createRouterCore', () => {
       );
 
       await expect(asking).rejects.toMatchObject({ detail: 'abcd' });
+
+      const client = createPort({ failures: CLIENT_FAILURES });
+      using clientCore = createRouterCore(client.port, { limits: { maximumDetailBytes: 10 } });
+      const asked = clientCore.request(Uint8Array.of(1), {
+        connectionHandle: 'a',
+        options: { timeout: 5_000 },
+        procedure: echo,
+      });
+      clientCore.receive(
+        envelopeOf({
+          kind: EnvelopeKind.FAILURE,
+          header: { kind: EnvelopeKind.FAILURE, callId: 1 },
+          failure: { code: 7, detail, scope: FailureScope.APPLICATION },
+        }),
+        'a'
+      );
+      await expect(asked).rejects.toMatchObject({ detail: 'x'.repeat(10) });
     });
   });
 
@@ -301,21 +319,26 @@ test.describe('createRouterCore', () => {
     test('refuse a notification too large for one envelope, and send one that fits', async () => {
       const { port, sent } = createPort();
       using core = createRouterCore(port, { limits });
-      const notificationOf = (length: number): OutgoingEnvelope => {
+      const notificationOf = (length: number, callId: number): OutgoingEnvelope => {
         return {
-          header: { callId: 2, kind: EnvelopeKind.NOTIFICATION },
+          header: { callId, kind: EnvelopeKind.NOTIFICATION },
           kind: EnvelopeKind.NOTIFICATION,
           payload: new Uint8Array(length),
         };
       };
 
-      await expect(core.send(notificationOf(57), 'a')).rejects.toMatchObject({
-        code: ProtocolCode.PAYLOAD_TOO_LARGE,
-        detail: 'an envelope is 64 bytes at most, not 65',
-      });
-      await core.send(notificationOf(56), 'a');
+      for (const callId of [1, 2]) {
+        await expect(core.send(notificationOf(57, callId), 'a')).rejects.toMatchObject({
+          code: ProtocolCode.PAYLOAD_TOO_LARGE,
+          detail: 'an envelope is 64 bytes at most, not 65',
+        });
+        await core.send(notificationOf(56, callId), 'a');
+      }
 
-      expect(piecesOf(sent)).toEqual([[EnvelopeKind.NOTIFICATION, 2]]);
+      expect(piecesOf(sent)).toEqual([
+        [EnvelopeKind.NOTIFICATION, 1],
+        [EnvelopeKind.NOTIFICATION, 2],
+      ]);
     });
   });
 });

@@ -9,10 +9,12 @@ import {
 } from '../../server/http-transport-server';
 import type { TransportServerConnectionHandle } from '../../server/types';
 import {
+  CancelError,
   ConnectError,
   GenericError,
   ProgrammerError,
   ReadyStateError,
+  ReconnectError,
   TimeoutError,
 } from '../../shared/errors';
 import {
@@ -74,6 +76,11 @@ const startServer = async () => {
   });
   const { port } = await server.start({ address: host, findOpenPort: true });
   const closes: [boolean, TransportServerConnectionHandle][] = [];
+  const connections: TransportServerConnectionHandle[] = [];
+
+  server.on('connection', (...[, , connectionHandle]) => {
+    connections.push(connectionHandle);
+  });
 
   server.on('close', (wasClean, connectionHandle) => {
     closes.push([wasClean, connectionHandle]);
@@ -81,6 +88,7 @@ const startServer = async () => {
 
   return {
     closes,
+    connections,
     port,
     server,
     [Symbol.asyncDispose]: () => {
@@ -134,6 +142,397 @@ const connectFake = async (respond?: Parameters<typeof createFakeFetch>[0]) => {
 };
 
 // definition
+
+test('releases a late reconnection answer without opening after cancellation', async () => {
+  const fake = createFakeFetch();
+  const entered = Promise.withResolvers<void>();
+  const released = Promise.withResolvers<void>();
+  const cancelling = new AbortController();
+  await using client = createHTTPTransportClient({
+    isListening: false,
+    fetch: (url, init) => {
+      const pending = fake.fetch(url, { ...init, signal: undefined });
+      if (fake.calls.length === 3) {
+        entered.resolve();
+      }
+      if (fake.calls.length === 4) {
+        released.resolve();
+      }
+      return pending;
+    },
+  });
+  const first = client.connect({ host, port: 8080 });
+  fake.calls[0]?.answer({ status: 201, headers: { [CONNECTION_TOKEN_HEADER]: 'T'.repeat(22) } });
+  await first;
+  const closes: boolean[][] = [];
+  client.on('close', (...flags) => {
+    closes.push(flags);
+  });
+  const outcome = client
+    .reconnect({ signal: cancelling.signal, delay: 0 })
+    .catch((reason: unknown) => {
+      return reason;
+    });
+  await entered.promise;
+  cancelling.abort();
+  expect(await outcome).toBeInstanceOf(CancelError);
+  expect(client.isClosed()).toBe(true);
+  fake.calls[2]?.answer({ status: 201, headers: { [CONNECTION_TOKEN_HEADER]: 'T'.repeat(22) } });
+  await released.promise;
+  expect(closes).toEqual([]);
+  expect(
+    fake.calls.map((call) => {
+      return call.init.method;
+    })
+  ).toEqual(['POST', 'DELETE', 'POST', 'DELETE']);
+});
+
+test('bounds an unresponsive HTTP connect by cancellation timeout and disposal', async () => {
+  for (const ending of ['cancel', 'timeout', 'dispose']) {
+    const clock = createTestClock();
+    const answer = Promise.withResolvers<ReturnType<typeof responseOf>>();
+    const entered = Promise.withResolvers<void>();
+    const released = Promise.withResolvers<void>();
+    const methods: string[] = [];
+    const cancelling = new AbortController();
+    await using client = createHTTPTransportClient({
+      clock,
+      isListening: false,
+      fetch: (_url, init) => {
+        methods.push(init.method);
+        if (init.method === 'DELETE') {
+          released.resolve();
+          return Promise.resolve(responseOf({ status: 204 }));
+        }
+        entered.resolve();
+        return answer.promise;
+      },
+    });
+    const outcome = client
+      .connect({ host, port: 8080, timeout: 100, signal: cancelling.signal })
+      .catch((reason: unknown) => {
+        return reason;
+      });
+    await entered.promise;
+    if (ending === 'cancel') {
+      cancelling.abort();
+    } else if (ending === 'timeout') {
+      await clock.tickAsync(100);
+    } else {
+      (client as ITransportClientInternal<object, never>)[dispose]();
+    }
+    const failure = await outcome;
+    expect(failure).toBeInstanceOf(
+      ending === 'cancel' ? CancelError : ending === 'timeout' ? TimeoutError : ConnectError
+    );
+    expect(client.isClosed()).toBe(true);
+    expect(client.socket).toBeNull();
+    answer.resolve(
+      responseOf({ status: 201, headers: { [CONNECTION_TOKEN_HEADER]: 'T'.repeat(22) } })
+    );
+    await released.promise;
+    expect(methods).toEqual(['POST', 'DELETE']);
+    expect(client.isClosed()).toBe(true);
+  }
+});
+
+test('settles a send and loses its connection when a supplied answer throws as it is read', async () => {
+  for (const field of ['redirected', 'refusal', 'content-length']) {
+    const reason = new Error('answer read failed');
+    let calls = 0;
+    await using client = createHTTPTransportClient({
+      isListening: false,
+      fetch: () => {
+        calls += 1;
+        const response = responseOf({
+          status: calls === 1 ? 201 : field === 'refusal' ? 400 : 200,
+          headers: { [CONNECTION_TOKEN_HEADER]: 'T'.repeat(22), 'content-type': BEAD_MEDIA_TYPE },
+        });
+        if (calls === 2) {
+          if (field === 'redirected') {
+            Object.defineProperty(response, 'redirected', {
+              get: () => {
+                throw reason;
+              },
+            });
+          } else {
+            response.headers.get = () => {
+              throw reason;
+            };
+          }
+        }
+        return Promise.resolve(response);
+      },
+    });
+    await client.connect({ host, port: 8080 });
+    const told: string[] = [];
+    const errors: Error[] = [];
+    client.on('error', (error) => {
+      errors.push(error);
+      told.push('error');
+    });
+    client.on('close', () => {
+      told.push('close');
+    });
+    const closed = nextEvent(client, 'close');
+    await expect(
+      client.send({ data: envelopeOf(ENVELOPE_KINDS.REQUEST, { callId: 1 }) })
+    ).resolves.toBeUndefined();
+    expect(await closed).toEqual([false, false]);
+    expect(client.isClosed()).toBe(true);
+    expect(told).toEqual(['error', 'close']);
+    expect(errors).toHaveLength(1);
+    expect(errors[0]).toMatchObject({
+      message: 'the HTTP executor failed: answer read failed',
+      cause: reason,
+    });
+    expect(calls).toBe(3);
+  }
+});
+
+test('loses an exchange whose executor fails and reports it once before closing', async () => {
+  for (const path of ['send', 'answer', 'listen', 'listen-body', 'close']) {
+    for (const reason of [
+      new Error('executor refused'),
+      new DOMException('executor refused', 'AbortError'),
+    ]) {
+      const fake = createFakeFetch();
+      const listening = path.startsWith('listen');
+      await using client = createHTTPTransportClient({ fetch: fake.fetch, isListening: listening });
+      const connecting = client.connect({ host, port: 8080 });
+      fake.calls[0]?.answer({
+        status: 201,
+        headers: {
+          [CONNECTION_TOKEN_HEADER]: 'T'.repeat(22),
+          ...(listening ? { [LISTEN_HEADER]: '?1' } : {}),
+        },
+      });
+      await connecting;
+      const told: string[] = [];
+      const errors: Error[] = [];
+      client.on('error', (error) => {
+        errors.push(error);
+        told.push('error');
+      });
+      client.on('close', () => {
+        told.push('close');
+      });
+      const closed = nextEvent(client, 'close');
+      if (path === 'close') {
+        const closing = client.disconnect();
+        fake.calls[1]?.fail(reason);
+        await closing;
+      } else if (path === 'listen') {
+        fake.calls[1]?.fail(reason);
+      } else if (path === 'listen-body') {
+        fake.calls[1]?.answer({
+          status: 200,
+          headers: { 'content-type': BEAD_BATCH_MEDIA_TYPE, [SEQUENCE_HEADER]: '1' },
+          pieces: [reason],
+        });
+      } else {
+        const sending = client.send({ data: envelopeOf(ENVELOPE_KINDS.REQUEST, { callId: 1 }) });
+        if (path === 'send') {
+          fake.calls[1]?.fail(reason);
+        } else {
+          fake.calls[1]?.answer({
+            status: 200,
+            headers: { 'content-type': BEAD_MEDIA_TYPE },
+            later: Promise.reject(reason),
+          });
+        }
+        await expect(sending).resolves.toBeUndefined();
+      }
+      expect(await closed).toEqual([path === 'close', false]);
+      expect(client.isClosed()).toBe(true);
+      expect(told).toEqual(['error', 'close']);
+      expect(errors).toHaveLength(1);
+      expect(errors[0]).toMatchObject({
+        message: 'the HTTP executor failed: executor refused',
+        cause: reason,
+      });
+      expect(
+        fake.calls.map((call) => {
+          return call.init.method;
+        })
+      ).toEqual([
+        'POST',
+        listening ? 'GET' : path === 'close' ? 'DELETE' : 'POST',
+        ...(path === 'close' ? [] : ['DELETE']),
+      ]);
+    }
+  }
+});
+
+test('counts a synchronous executor throw as handed over and observes a failed release', async () => {
+  const reason = new Error('executor refused');
+  let calls = 0;
+  await using client = createHTTPTransportClient({
+    isListening: false,
+    fetch: () => {
+      calls += 1;
+      if (calls === 1) {
+        return Promise.resolve(
+          responseOf({ status: 201, headers: { [CONNECTION_TOKEN_HEADER]: 'T'.repeat(22) } })
+        );
+      }
+      throw reason;
+    },
+  });
+  await client.connect({ host, port: 8080 });
+  const errors: Error[] = [];
+  client.on('error', (error) => {
+    errors.push(error);
+  });
+  const closed = nextEvent(client, 'close');
+  await expect(
+    client.send({ data: envelopeOf(ENVELOPE_KINDS.REQUEST, { callId: 1 }) })
+  ).resolves.toBeUndefined();
+  expect(await closed).toEqual([false, false]);
+  expect(client.isClosed()).toBe(true);
+  expect(calls).toBe(3);
+  expect(errors).toHaveLength(1);
+  expect(errors[0]).toMatchObject({
+    message: 'the HTTP executor failed: executor refused',
+    cause: reason,
+  });
+});
+
+test('cancels a reconnection whose last attempt closes before cancellation is checked', async () => {
+  const { client: transport, fake } = await connectFake((init) => {
+    return responseOf(
+      init.method === 'POST'
+        ? { headers: { [CONNECTION_TOKEN_HEADER]: 'T'.repeat(22) }, status: 201 }
+        : { status: 204 }
+    );
+  });
+  await using client = transport;
+  const cancelling = new AbortController();
+  const reason = new Error('the attempt closes before the cancellation check');
+  const closes: boolean[][] = [];
+  const errors: Error[] = [];
+  const connect = client.connect;
+  let attempts = 0;
+
+  client.on('close', (...flags) => {
+    closes.push(flags);
+  });
+  client.on('error', (error) => {
+    errors.push(error);
+  });
+  client.connect = async (options) => {
+    await connect(options);
+    attempts += 1;
+    expect(client.isOpen()).toBe(true);
+    await client.disconnect({ isQuick: true });
+    cancelling.abort(reason);
+  };
+
+  const cancelled: unknown = await client
+    .reconnect({ maxAttempts: 1, signal: cancelling.signal })
+    .catch((error: unknown) => {
+      return error;
+    });
+
+  expect(cancelled).toBeInstanceOf(CancelError);
+  expect(cancelled).toMatchObject({ cause: reason, message: 'the reconnection was cancelled' });
+  expect([attempts, client.isClosed(), closes, errors]).toEqual([1, true, [[true, true]], []]);
+  expect(
+    fake.calls.map(({ init }) => {
+      return init.method;
+    })
+  ).toEqual(['POST', 'DELETE', 'POST', 'DELETE']);
+});
+
+test('refuses a connection disposed between its answer and the end of connect', async () => {
+  const fake = createFakeFetch();
+  const client = createHTTPTransportClient({ isListening: false, fetch: fake.fetch });
+  const closes: boolean[][] = [];
+  const errors: Error[] = [];
+
+  client.on('close', (...flags) => {
+    closes.push(flags);
+  });
+  client.on('error', (error) => {
+    errors.push(error);
+  });
+
+  try {
+    const connecting = client.connect({ host, port: 8_080 });
+    const outcome = connecting.catch((reason: unknown) => {
+      return reason;
+    });
+
+    fake.calls[0]?.answer({ headers: { [CONNECTION_TOKEN_HEADER]: 'T'.repeat(22) }, status: 201 });
+    queueMicrotask(() => {
+      (client as ITransportClientInternal<object, never>)[dispose]();
+    });
+
+    expect(await outcome).toMatchObject({
+      message: 'the transport client was disposed as it connected',
+      name: 'ConnectError',
+    });
+    expect([client.isClosed(), client.socket, closes, errors]).toEqual([true, null, [], []]);
+    expect(fake.calls[0]?.init.signal?.aborted).toBe(true);
+    expect(fake.calls[1]?.init).toMatchObject({ keepalive: true, method: 'DELETE' });
+
+    const again = client.connect({ host, port: 8_080 });
+
+    fake.calls[2]?.answer({ headers: { [CONNECTION_TOKEN_HEADER]: 'T'.repeat(22) }, status: 201 });
+    await again;
+    expect(client.isOpen()).toBe(true);
+    await client.disconnect({ isQuick: true });
+    expect([client.isClosed(), closes, errors]).toEqual([true, [[true, true]], []]);
+    expect(fake.calls[3]?.init).toMatchObject({ keepalive: true, method: 'DELETE' });
+  } finally {
+    (client as ITransportClientInternal<object, never>)[dispose]();
+  }
+});
+
+test('releases a replacement opened by its close listener before dispose completes', async () => {
+  const { client, fake } = await connectFake((init) => {
+    return responseOf(
+      init.method === 'POST'
+        ? { headers: { [CONNECTION_TOKEN_HEADER]: 'T'.repeat(22) }, status: 201 }
+        : { status: 204 }
+    );
+  });
+  const closes: boolean[][] = [];
+  const errors: Error[] = [];
+  let replacement: Promise<unknown> | undefined;
+
+  client.on('close', (...flags) => {
+    closes.push(flags);
+    replacement = client.connect({ host, port: 8_080 }).catch((reason: unknown) => {
+      return reason;
+    });
+  });
+  client.on('error', (error) => {
+    errors.push(error);
+  });
+
+  try {
+    await client[Symbol.asyncDispose]();
+    expect(client.isClosed()).toBe(true);
+    expect(replacement).toBeDefined();
+    const outcome = await replacement;
+
+    expect(outcome === undefined || outcome instanceof ConnectError).toBe(true);
+    expect([client.isClosed(), client.socket, closes, errors]).toEqual([
+      true,
+      null,
+      [[true, false]],
+      [],
+    ]);
+    expect(
+      fake.calls.map(({ init }) => {
+        return init.method;
+      })
+    ).toEqual(['POST', 'DELETE', 'POST', 'DELETE']);
+  } finally {
+    (client as ITransportClientInternal<object, never>)[dispose]();
+  }
+});
 
 test.describe('createHTTPTransportClient, what it carries', () => {
   test('carries a credential beside an envelope, in its POST’s Authorization, and is secure under https or to a loopback host, judged by the URL it was given', async () => {
@@ -651,6 +1050,8 @@ test.describe('createHTTPTransportClient', () => {
   });
 
   test('lets go of a connection drawn as its connect gave up, and closes even when the server cannot hear its DELETE', async () => {
+    expect(DISCONNECT_TIMEOUT).toBe(5_000);
+
     const drawn = createFakeFetch();
     const client = createHTTPTransportClient({ isListening: false, fetch: drawn.fetch });
     const connecting = client.connect({ host, port: 80 });
@@ -659,7 +1060,9 @@ test.describe('createHTTPTransportClient', () => {
     drawn.calls[0]?.answer({ headers: { [CONNECTION_TOKEN_HEADER]: 'T'.repeat(22) }, status: 201 });
     (client as ITransportClientInternal<object, never>)[dispose]();
 
-    await expect(connecting).rejects.toThrow(new ConnectError('disposed while connecting'));
+    await expect(connecting).rejects.toThrow(
+      new ConnectError('the transport client was disposed as it connected')
+    );
     expect(drawn.calls[1]?.init).toMatchObject({
       headers: { [CONNECTION_TOKEN_HEADER]: 'T'.repeat(22) },
       method: 'DELETE',
@@ -818,9 +1221,10 @@ test.describe('createHTTPTransportClient', () => {
     const slow = createFakeFetch();
     const late = createHTTPTransportClient({ isListening: false, fetch: slow.fetch });
 
-    await expect(late.connect({ host, port: 80, timeout: 20 })).rejects.toBeInstanceOf(
-      TimeoutError
-    );
+    const lateConnecting = late.connect({ host, port: 80, timeout: 20 });
+
+    await expect(lateConnecting).rejects.toBeInstanceOf(TimeoutError);
+    await expect(lateConnecting).rejects.toThrow(new TimeoutError(20));
     expect(slow.calls[0]?.init.signal?.aborted).toBe(true);
     expect(CONNECT_DEFAULTS.pathname).toBe('/bead');
   });
@@ -842,7 +1246,9 @@ test.describe('createHTTPTransportClient', () => {
 
     (disposed as ITransportClientInternal<object, never>)[dispose]();
 
-    await expect(attempt).rejects.toThrow(new ConnectError('disposed while connecting'));
+    await expect(attempt).rejects.toThrow(
+      new ConnectError('the transport client was disposed as it connected')
+    );
   });
 
   test('disconnects quickly without waiting on the server, which is told all the same', async () => {
@@ -857,9 +1263,14 @@ test.describe('createHTTPTransportClient', () => {
 
   test('reconnects to a connection drawn anew', async () => {
     await using started = await startServer();
-    const { port, server } = started;
+    const { closes, port, server } = started;
     const client = createHTTPTransportClient({ isListening: false });
 
+    const clientCloses: unknown[] = [];
+
+    client.on('close', (...args) => {
+      clientCloses.push(args);
+    });
     await client.connect({ host, port });
 
     const first = handleOf(server);
@@ -868,7 +1279,34 @@ test.describe('createHTTPTransportClient', () => {
 
     expect(client.isOpen()).toBe(true);
     expect(handleOf(server)).not.toBe(first);
+    const opened = handleOf(server);
+
+    await expect
+      .poll(() => {
+        return closes;
+      })
+      .toEqual([[true, first]]);
+    expect(server.gauges().connectionHandles).toEqual(new Set([opened]));
+    expect(clientCloses).toEqual([]);
     await client.disconnect();
+  });
+
+  test('rejects with a ReconnectError caused by a ConnectError when the server is gone', async () => {
+    await using started = await startServer();
+    const { port, server } = started;
+    const client = createHTTPTransportClient({ isListening: false });
+
+    await client.connect({ host, port });
+    await server.stop();
+
+    // one attempt, for a port nothing listens on takes some systems two seconds to refuse
+    const reason = await client.reconnect({ maxAttempts: 1 }).catch((error: unknown) => {
+      return error;
+    });
+
+    expect(reason).toBeInstanceOf(ReconnectError);
+    expect((reason as ReconnectError).cause).toBeInstanceOf(ConnectError);
+    expect(client.isClosed()).toBe(true);
   });
 
   test('reconnects though a reconnect listener throws, the throw reported, the next listener told', async () => {
@@ -876,10 +1314,11 @@ test.describe('createHTTPTransportClient', () => {
     const { port, server } = started;
     const client = createHTTPTransportClient({ isListening: false });
     const reported: Error[] = [];
+    const thrown = new Error('a reconnect listener that throws');
     let told = 0;
 
     client.on('reconnect', () => {
-      throw new Error('a reconnect listener that throws');
+      throw thrown;
     });
     client.on('reconnect', () => {
       told += 1;
@@ -896,6 +1335,8 @@ test.describe('createHTTPTransportClient', () => {
     expect(client.isOpen()).toBe(true);
     expect(handleOf(server)).not.toBe(first);
     expect(told).toBe(1);
+    expect(reported).toEqual([thrown]);
+    expect(reported[0]).toBe(thrown);
     expect(
       reported.map((error) => {
         return error.message;
@@ -997,6 +1438,20 @@ const methodsOf = (fake: ReturnType<typeof createFakeFetch>) => {
   }).length;
 
   return { last: methods.at(-1), listens };
+};
+
+/** What `client` tells as its connection ends, in order: each error's message, then its close. */
+const endOf = (client: HTTPTransportClient): unknown[][] => {
+  const told: unknown[][] = [];
+
+  client.on('error', (error) => {
+    told.push(['error', error.message]);
+  });
+  client.on('close', (wasClean, wasQuick) => {
+    told.push(['close', wasClean, wasQuick]);
+  });
+
+  return told;
 };
 
 /** The closes `client` tells, as they come: read when wanted, never waited on. */
@@ -1186,14 +1641,21 @@ test.describe('createHTTPTransportClient, listening', () => {
         return marks.length;
       })
       .toBe(1);
-    (await callBy('GET'))?.answer(batch(1, envelopeOf(ENVELOPE_KINDS.RESULT, { callId: 3 })));
+    (await callBy('GET'))?.answer(
+      batch(
+        1,
+        envelopeOf(ENVELOPE_KINDS.RESULT, { callId: 3 }),
+        envelopeOf(ENVELOPE_KINDS.FAILURE, { callId: 3 }),
+        envelopeOf(0x13, { callId: 1 })
+      )
+    );
     await expect
       .poll(() => {
         return marks.length;
       })
-      .toBe(2);
+      .toBe(4);
 
-    expect(marks).toEqual([undefined, true]);
+    expect(marks).toEqual([undefined, true, true, true]);
     await client.disconnect({ isQuick: true });
   });
 
@@ -1241,9 +1703,14 @@ test.describe('createHTTPTransportClient, listening', () => {
     }
 
     // a 200 of another type — a proxy's page — is lost too, its body unread
+    let reads = 0;
+
     fake.calls.at(-1)?.answer({
       body: new TextEncoder().encode('<html>'),
       headers: { 'content-type': 'text/html' },
+      onRead: () => {
+        reads += 1;
+      },
       status: 200,
     });
     await waitOut(30_000);
@@ -1276,13 +1743,27 @@ test.describe('createHTTPTransportClient, listening', () => {
         return true;
       })
     );
+    expect(
+      delays.slice(1, -1).some((delay, index) => {
+        const wait = [1_000, 2_000, 4_000, 8_000, 16_000, 30_000, 30_000, 30_000][index] ?? 0;
+
+        return delay > wait / 2 + 1 && delay < wait;
+      })
+    ).toBe(true);
+    expect(reads).toBe(0);
     expect([client.isOpen(), fake.calls.length]).toEqual([true, 13]);
 
     // what was cut on its way comes whole at last, and is heard once
-    (await callOf(12))?.answer(batch(1, envelope));
+    (await callOf(12))?.answer({
+      ...batch(1, envelope),
+      onRead: () => {
+        reads += 1;
+      },
+    });
 
     expect((await callOf(13))?.init.headers).toMatchObject({ [AFTER_HEADER]: '1' });
     expect(heard).toEqual([[...envelope]]);
+    expect(reads).toBeGreaterThan(0);
     expect(RETRY_DELAYS).toEqual({ ceiling: 30_000, first: 1_000 });
     await client.disconnect({ isQuick: true });
   });
@@ -1489,6 +1970,118 @@ test.describe('createHTTPTransportClient, listening', () => {
     await atLimit.client.disconnect({ isQuick: true });
   });
 
+  // spec 15.1
+  test('tells an envelope past maximumBodyBytes, an answer’s or a batch’s, on error before its close, naming the bound and its value', async () => {
+    const answers = [
+      {
+        body: new Uint8Array(17),
+        headers: { 'content-length': '17', 'content-type': BEAD_MEDIA_TYPE },
+      },
+      { body: new Uint8Array(17), headers: { 'content-type': BEAD_MEDIA_TYPE } },
+      // an answer of another type, a gateway's: its close alone
+      { body: new TextEncoder().encode('<html>'), headers: { 'content-type': 'text/html' } },
+    ];
+    const toldOf: unknown[][][] = [];
+
+    for (const answer of answers) {
+      const fake = createFakeFetch();
+      const client = createHTTPTransportClient({
+        fetch: fake.fetch,
+        isListening: false,
+        maximumBodyBytes: 16,
+      });
+      const connecting = client.connect({ host, port: 80 });
+
+      fake.calls[0]?.answer({
+        headers: { [CONNECTION_TOKEN_HEADER]: 'T'.repeat(22) },
+        status: 201,
+      });
+      await connecting;
+
+      const told = endOf(client);
+      const closed = nextEvent(client, 'close');
+      const sending = client.send({ data: envelopeOf(ENVELOPE_KINDS.REQUEST, { callId: 1 }) });
+
+      fake.calls[1]?.answer({ ...answer, status: 200 });
+      await sending;
+      await closed;
+      toldOf.push(told);
+    }
+
+    const listening = await connectListening({ maximumBodyBytes: 24 });
+    const told = endOf(listening.client);
+    const closed = nextEvent(listening.client, 'close');
+
+    (await listening.callOf(1))?.answer({
+      ...batch(1),
+      body: Uint8Array.of(0, 0, 0, 25, ...new Uint8Array(25)),
+    });
+    await closed;
+    toldOf.push(told);
+
+    const pastOf = (bytes: number) => {
+      return [
+        [
+          'error',
+          `the connection is closed: an envelope past its maximumBodyBytes, ${String(bytes)} bytes`,
+        ],
+        ['close', false, false],
+      ];
+    };
+
+    expect(toldOf).toEqual([pastOf(16), pastOf(16), [['close', false, false]], pastOf(24)]);
+  });
+
+  // spec 15.1
+  test('tells a batch that does not read on error before its close, saying what of it does not, and a refusal of its listen by its close alone', async () => {
+    const envelope = envelopeOf(0x13, { callId: 1 });
+    const framed = batchOf(envelope);
+    const answers = [
+      { ...batch(1, envelope), headers: { 'content-type': BEAD_BATCH_MEDIA_TYPE } },
+      {
+        ...batch(1, envelope),
+        headers: { 'content-type': BEAD_BATCH_MEDIA_TYPE, [SEQUENCE_HEADER]: '2' },
+      },
+      { ...batch(1), body: Uint8Array.of(0, 0, 0, 0, ...framed) },
+      { ...batch(1), body: new Uint8Array(0) },
+      { ...batch(1), isBodiless: true },
+      { ...batch(1), body: Uint8Array.of(...framed, 0, 0) },
+      { ...batch(1), body: Uint8Array.of(...framed, ...framed.slice(0, 6)) },
+      { headers: { [REFUSAL_HEADER]: 'listen-undeclared' }, status: 409 },
+      { headers: { [REFUSAL_HEADER]: CONNECTION_UNKNOWN }, status: 404 },
+    ];
+    const toldOf: unknown[][][] = [];
+
+    for (const answer of answers) {
+      const { callOf, client } = await connectListening({ maximumBodyBytes: 24 });
+      const told = endOf(client);
+      const closed = nextEvent(client, 'close');
+
+      (await callOf(1))?.answer(answer);
+      await closed;
+      toldOf.push(told);
+    }
+
+    const unread = (why: string) => {
+      return [
+        ['error', `the connection is closed: a batch that does not read, ${why}`],
+        ['close', false, false],
+      ];
+    };
+
+    expect(toldOf).toEqual([
+      unread('its bead-sequence not 1'),
+      unread('its bead-sequence not 1'),
+      unread('an envelope of 0 bytes'),
+      unread('it holds no envelope'),
+      unread('it holds no envelope'),
+      unread('it ends within an envelope'),
+      unread('it ends within an envelope'),
+      [['close', false, false]],
+      [['close', false, false]],
+    ]);
+  });
+
   test('asks the server to wait its wait held, a fraction rounded to the nearest whole millisecond', async () => {
     const { callOf, client } = await connectListening({ wait: 1.5 });
 
@@ -1497,16 +2090,25 @@ test.describe('createHTTPTransportClient, listening', () => {
   });
 
   test('pauses between listens that bring nothing, and listens no more once its connection went', async () => {
-    const { callOf, client, fake } = await connectListening({ pause: 60, wait: 0 });
+    const clock = createTestClock();
+    const { callOf, client, fake, heard } = await connectListening({ clock, pause: 60, wait: 0 });
 
     expect((await callOf(1))?.init.headers).toMatchObject({ [WAIT_HEADER]: '0' });
     (await callOf(1))?.answer({ status: 204 });
-    await new Promise((resolve) => {
-      setTimeout(resolve, 20);
-    });
+    await expect
+      .poll(() => {
+        return clock.armed.some(({ delay }) => {
+          return delay === 60;
+        });
+      })
+      .toBe(true);
+    await clock.tickAsync(20);
+    expect(fake.calls).toHaveLength(2);
+    await clock.tickAsync(39);
 
     // not yet
     expect(fake.calls).toHaveLength(2);
+    await clock.tickAsync(1);
     await callOf(2);
 
     // gone while it listens: what its listen brings back is heard by nobody, and it listens no more
@@ -1526,6 +2128,7 @@ test.describe('createHTTPTransportClient, listening', () => {
         return init.method;
       })
     ).toEqual(['POST', 'GET', 'GET', 'POST', 'DELETE']);
+    expect(heard).toEqual([]);
   });
 
   test('hears the rest of a batch when a listener throws, the throw reported', async () => {
@@ -1559,6 +2162,8 @@ test.describe('createHTTPTransportClient, listening', () => {
       .toBe(2);
 
     // the listener after it told of both, the throw reported once, as it was thrown
+    expect((await callOf(2))?.init.headers).toMatchObject({ [AFTER_HEADER]: '2' });
+    expect(heard).toHaveLength(2);
     expect(told).toHaveLength(2);
     expect(reported).toHaveLength(1);
     expect(reported[0]).toBe(thrown);
@@ -1838,9 +2443,15 @@ test.describe('createHTTPTransportClient, redirects', () => {
         upstream: started.port,
       });
       const client = createHTTPTransportClient({ isListening: false });
+      const heard: unknown[] = [];
+
+      client.on('message', ({ data }) => {
+        heard.push(data);
+      });
 
       await client.connect({ host, port: redirecting.port });
 
+      const connectionHandle = started.connections[0];
       const closed = nextEvent(client, 'close');
 
       await expect(
@@ -1854,6 +2465,12 @@ test.describe('createHTTPTransportClient, redirects', () => {
           return redirecting.forwarded;
         })
         .toEqual(['POST', 'DELETE']);
+      await expect
+        .poll(() => {
+          return started.closes;
+        })
+        .toEqual([[true, connectionHandle]]);
+      expect([client.isClosed(), started.server.clients, heard]).toEqual([true, [], []]);
     }
 
     expect(target.heard).toEqual([]);
@@ -1881,6 +2498,11 @@ test.describe('createHTTPTransportClient, redirects', () => {
 
     await client.connect({ host, port: redirecting.port });
 
+    let listensAtMessage: number | undefined;
+
+    client.once('message', () => {
+      listensAtMessage = listens;
+    });
     const message = nextEvent(client, 'message');
 
     void started.server.send({ data: envelope }, handleOf(started.server));
@@ -1888,11 +2510,12 @@ test.describe('createHTTPTransportClient, redirects', () => {
     // lost at once, listened again at once, lost, then after a wait drawn between 0.5 and 1 s heard
     const [{ data }] = (await message) as [ITransportMessage];
 
-    expect([[...new Uint8Array(data as ArrayBuffer)], client.isOpen(), listens]).toEqual([
+    expect([[...new Uint8Array(data as ArrayBuffer)], client.isOpen(), listensAtMessage]).toEqual([
       [...envelope],
       true,
       3,
     ]);
+    expect(target.heard).toEqual([]);
     await client.disconnect();
     expect(target.heard).toEqual([]);
   });
@@ -1915,6 +2538,7 @@ test.describe('createHTTPTransportClient, redirects', () => {
 
       await client.connect({ host, port: redirecting.port });
 
+      const connectionHandle = handleOf(started.server);
       const closed = nextEvent(client, 'close');
 
       await expect(
@@ -1926,6 +2550,11 @@ test.describe('createHTTPTransportClient, redirects', () => {
           return redirecting.forwarded;
         })
         .toEqual(['POST', 'DELETE']);
+      await expect
+        .poll(() => {
+          return started.closes;
+        })
+        .toEqual([[true, connectionHandle]]);
     }
 
     // a listen: listened again, its connection kept
@@ -1967,6 +2596,7 @@ test.describe('createHTTPTransportClient, redirects', () => {
   });
 
   test('catches a redirect followed all the same: its connect fails, and a send or a listen loses its connection', async () => {
+    const exchanges: string[] = [];
     // a 302 turns a POST into a GET, a 307 keeps it a POST
     for (const [status, method] of [
       [302, 'GET'],
@@ -1987,6 +2617,7 @@ test.describe('createHTTPTransportClient, redirects', () => {
           new ConnectError('the server drew no connection: a redirect followed')
         );
         expect([client.isClosed(), target.heard]).toEqual([true, [method]]);
+        exchanges.push(...target.heard);
       }
 
       // a send: the target's answer unheard, and the connection released at the origin
@@ -2008,6 +2639,7 @@ test.describe('createHTTPTransportClient, redirects', () => {
         });
         await client.connect({ host, port: redirecting.port });
 
+        const connectionHandle = started.connections[0];
         const closed = nextEvent(client, 'close');
 
         await expect(
@@ -2020,6 +2652,13 @@ test.describe('createHTTPTransportClient, redirects', () => {
           })
           .toEqual(['POST', 'DELETE']);
         expect([heard, target.heard]).toEqual([[], [method]]);
+        await expect
+          .poll(() => {
+            return started.closes;
+          })
+          .toEqual([[true, connectionHandle]]);
+        expect([client.isClosed(), started.server.clients]).toEqual([true, []]);
+        exchanges.push(...target.heard);
       }
 
       // a listen, a GET either way: the target's batch unheard, and the connection released at
@@ -2045,6 +2684,7 @@ test.describe('createHTTPTransportClient, redirects', () => {
 
         await client.connect({ host, port: redirecting.port });
 
+        const connectionHandle = started.connections[0];
         expect(await closed).toEqual([false, false]);
         await expect
           .poll(() => {
@@ -2052,8 +2692,21 @@ test.describe('createHTTPTransportClient, redirects', () => {
           })
           .toEqual(['POST', 'DELETE']);
         expect([heard, target.heard]).toEqual([[], ['GET']]);
+        await expect
+          .poll(() => {
+            return started.closes;
+          })
+          .toEqual([[true, connectionHandle]]);
+        expect([client.isClosed(), started.server.clients]).toEqual([true, []]);
+        exchanges.push(...target.heard);
       }
     }
+    expect(exchanges).toEqual(['GET', 'GET', 'GET', 'POST', 'POST', 'GET']);
+    expect(
+      exchanges.filter((method) => {
+        return method === 'DELETE';
+      })
+    ).toHaveLength(0);
   });
 
   test('judges a redirect before its mark, and a status of 0, a page’s opaque redirect, as one: its connect fails, a send is lost and a listen listened again', async () => {

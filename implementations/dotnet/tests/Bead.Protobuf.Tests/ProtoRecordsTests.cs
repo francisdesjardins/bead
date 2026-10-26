@@ -1,5 +1,6 @@
 using Bead.Codecs.V1;
 using Google.Protobuf;
+using Google.Protobuf.Reflection;
 
 namespace Bead.Protobuf.Tests;
 
@@ -10,6 +11,20 @@ namespace Bead.Protobuf.Tests;
 /// </summary>
 public sealed class ProtoRecordsTests
 {
+    [Fact]
+    public void Refuses_reserved_wire_types_on_unknown_fields_as_well_as_known_fields()
+    {
+        foreach (var hexadecimal in new[] { "A0 06 01", "1A 03 A0 06 01" })
+        {
+            ProtoRecords.Check(BytesOf(hexadecimal), Probe.Descriptor);
+        }
+
+        foreach (var hexadecimal in new[] { "0E", "0F", "A6 06", "A7 06", "1A 02 A6 06", "1A 02 A7 06" })
+        {
+            Refuses(hexadecimal);
+        }
+    }
+
     // helpers
 
     // bytes as the conformance files write them, in hexadecimal, a space between two
@@ -74,6 +89,59 @@ public sealed class ProtoRecordsTests
     }
 
     // definition
+
+    [Fact]
+    public void Reads_enum_map_values_as_varints_and_refuses_other_wire_types_or_undeclared_entry_fields()
+    {
+        var file = new FileDescriptorProto
+        {
+            Name = "enum-map.proto",
+            Package = "coverage",
+            Syntax = "proto3",
+            EnumType = { new EnumDescriptorProto { Name = "Choice", Value = { new EnumValueDescriptorProto { Name = "ZERO", Number = 0 }, new EnumValueDescriptorProto { Name = "ONE", Number = 1 } } } },
+            MessageType =
+            {
+                new DescriptorProto
+                {
+                    Name = "Map",
+                    Field = { new FieldDescriptorProto { Name = "values", Number = 1, Label = FieldDescriptorProto.Types.Label.Repeated, Type = FieldDescriptorProto.Types.Type.Message, TypeName = ".coverage.Map.ValuesEntry" } },
+                    NestedType =
+                    {
+                        new DescriptorProto
+                        {
+                            Name = "ValuesEntry",
+                            Options = new MessageOptions { MapEntry = true },
+                            Field =
+                            {
+                                new FieldDescriptorProto { Name = "key", Number = 1, Type = FieldDescriptorProto.Types.Type.String },
+                                new FieldDescriptorProto { Name = "value", Number = 2, Type = FieldDescriptorProto.Types.Type.Enum, TypeName = ".coverage.Choice" },
+                            },
+                        },
+                    },
+                },
+            },
+        };
+        var message = FileDescriptor.BuildFromByteStrings([file.ToByteString()])[0].MessageTypes[0];
+
+        foreach (var hex in new[]
+        {
+            "", "0A 00", "0A 03 0A 01 61", "0A 02 10 01", "0A 05 0A 01 61 10 01", "0A 05 10 01 0A 01 61", "0A 02 10 7F", "0A 04 10 01 10 00",
+        })
+        {
+            ProtoRecords.Check(BytesOf(hex), message);
+        }
+
+        foreach (var hex in new[]
+        {
+            "0A 02 12 00", "0A 05 15 00 00 00 00", "0A 02 13 14", "0A 02 18 01", "0A 02 10 80", "0A 02 08 01",
+        })
+        {
+            Assert.Throws<FormatException>(() =>
+            {
+                ProtoRecords.Check(BytesOf(hex), message);
+            });
+        }
+    }
 
     [Fact]
     public void Takes_every_record_a_message_holds_a_group_closed_by_its_own_end_group_a_map_of_messages_a_repeated_scalar_packed_or_not_and_an_unknown_field_of_each_wire_type_skipped()
@@ -237,7 +305,7 @@ public sealed class ProtoRecordsTests
     }
 
     [Fact]
-    public void Builds_a_messages_shape_once_from_its_descriptor_a_message_that_holds_itself_among_them()
+    public void Builds_a_message_s_shape_once_from_its_descriptor_a_message_that_holds_itself_among_them()
     {
         var shape = ProtoRecords.ShapeOf(Probe.Descriptor);
 
@@ -258,7 +326,7 @@ public sealed class ProtoRecordsTests
 
     // spec 17.9.5
     [Fact]
-    public void Refuses_a_field_at_a_wire_type_its_type_does_not_take_in_a_maps_entry_too()
+    public void Refuses_a_field_at_a_wire_type_its_type_does_not_take_in_a_map_s_entry_too()
     {
         // text at the varint wire type, number at the length-delimited and the fixed32, child at the
         // varint, stamps at the varint, delimited at the length-delimited, child at the start group
@@ -279,7 +347,7 @@ public sealed class ProtoRecordsTests
 
     // spec 17.9.6
     [Fact]
-    public void Refuses_a_maps_entry_with_a_field_it_does_not_declare()
+    public void Refuses_a_map_s_entry_with_a_field_it_does_not_declare()
     {
         Refuses("62 0C 1A 0A 01 7A 12 06 0A 04 61 62 63 64");
         Refuses("62 05 0A 00 1A 01 7A");

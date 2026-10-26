@@ -16,7 +16,7 @@ option (bead.file) = {
 service InteropService {
   option (bead.service) = {
     id: 1
-    revision: 1
+    revision: 2
     failures: "InteropFailure"
   };
 
@@ -134,6 +134,12 @@ service InteropService {
   // Ends every credential's session of an issuer.
   rpc EndSessionsOf(bead.Json) returns (bead.Json) {
     option (bead.procedure) = {id: 18};
+  }
+
+  // Counts the names it is given, held to the rules each server judges it by before its resolver:
+  // 50 at most, each of 1 to 3 characters.
+  rpc Checked(bead.Json) returns (bead.Json) {
+    option (bead.procedure) = {id: 19};
   }
 }
 

@@ -62,6 +62,20 @@ test.describe('the descriptors', () => {
     }).toThrow(ProgrammerError);
   });
 
+  test('refuses a descriptor without a procedure', () => {
+    for (const procedure of [undefined, null, 1, 'echo']) {
+      expect(() => {
+        return requestOf({ ...sayHello, procedure } as never);
+      }).toThrow(new ProgrammerError('a descriptor holds its procedure'));
+      expect(() => {
+        return commandOf({ ...sayHello, procedure } as never);
+      }).toThrow(new ProgrammerError('a descriptor holds its procedure'));
+      expect(() => {
+        return requestOf({ ...sayHello, notification: text, procedure } as never);
+      }).toThrow(new ProgrammerError('a descriptor holds its procedure'));
+    }
+  });
+
   test('refuses a codec missing', () => {
     for (const init of [
       { ...sayHello, request: undefined },

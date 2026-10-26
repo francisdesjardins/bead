@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using Bead.Interop;
+using Microsoft.Extensions.Time.Testing;
 
 namespace Bead.Tests;
 
@@ -14,7 +15,9 @@ public sealed partial class RouterCoreTests
     // helpers
 
     // records the state at a counted call's end, on the core's scheduler
-    private sealed class TeardownClock : TimeProvider
+    // ! its time stands still: no timer of the core's fires, and an answer held for credit never
+    // stalls past its inactivity timeout before the close, however slow the machine
+    private sealed class TeardownClock : FakeTimeProvider
     {
         public Action? Reading { get; set; }
 

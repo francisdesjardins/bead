@@ -1,0 +1,27 @@
+[
+  {
+    "rule": "VALIDATE_RULE_UNSUPPORTED",
+    "line": 18,
+    "column": 3
+  },
+  {
+    "rule": "VALIDATE_RULE_UNSUPPORTED",
+    "line": 23,
+    "column": 21
+  },
+  {
+    "rule": "VALIDATE_RULE_UNSUPPORTED",
+    "line": 24,
+    "column": 23
+  },
+  {
+    "rule": "VALIDATE_RULE_UNSUPPORTED",
+    "line": 28,
+    "column": 29
+  },
+  {
+    "rule": "VALIDATE_RULE_UNSUPPORTED",
+    "line": 30,
+    "column": 52
+  }
+]

@@ -1,0 +1,22 @@
+[
+  {
+    "rule": "HTTP_RULE_FIELD",
+    "line": 42,
+    "column": 7
+  },
+  {
+    "rule": "HTTP_RULE_FIELD",
+    "line": 44,
+    "column": 7
+  },
+  {
+    "rule": "HTTP_RULE_FIELD",
+    "line": 48,
+    "column": 7
+  },
+  {
+    "rule": "HTTP_RULE_FIELD",
+    "line": 52,
+    "column": 7
+  }
+]

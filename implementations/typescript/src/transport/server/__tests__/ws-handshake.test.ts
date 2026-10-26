@@ -239,6 +239,30 @@ test.describe('refusalOfHandshake', () => {
     expect(answerOf(requestOf([['Origin', 'http://a.example\tb']]))).toEqual(ORIGIN);
   });
 
+  test('refuses first, unmarked, a target holding an octet other than visible ASCII or a path whose percent-decoding holds NUL, whatever else the request holds, over HTTP/2 among it, and takes one percent-encoded', () => {
+    // in its path or its query, in absolute-form; from a host it does not take, under another
+    // method, with no upgrade, over HTTP/2
+    expect(
+      [
+        requestOf([], { url: '/?a\u0001b' }),
+        requestOf([], { url: '/\u007F' }),
+        requestOf([], { url: '/a\tb' }),
+        requestOf([], { url: '/é' }),
+        requestOf([], { url: '/%00' }),
+        requestOf([], { url: 'http://bead.test/a\u0001b' }),
+        requestOf([['Host', 'elsewhere.test']], { url: '/\u0001', without: ['host'] }),
+        requestOf([], { method: 'POST', url: '/\u0001', without: ['upgrade'] }),
+        requestOf([], { httpVersion: '2.0', url: '/\u0001' }),
+      ].map(answerOf)
+    ).toEqual(
+      Array.from({ length: 9 }, () => {
+        return HOST;
+      })
+    );
+    // what a target percent-encodes is no octet of it, NUL in a query among them
+    expect(answerOf(requestOf([], { url: '/?a%01%00' }))).toBe('taken');
+  });
+
   test('refuses a host it does not take before anything else of the request is read', () => {
     const elsewhere = [['Host', 'elsewhere.test']] as const;
 
@@ -402,6 +426,11 @@ test.describe('refusalOfHandshake', () => {
         requestOf([['Sec-WebSocket-Protocol', '']]),
         requestOf([['Sec-WebSocket-Protocol', 'bead/1']]),
         requestOf([['Content-Length', '5']]),
+        requestOf([['Content-Length', 'abc']]),
+        requestOf([
+          ['Content-Length', '0'],
+          ['Content-Length', '5'],
+        ]),
         requestOf([['Transfer-Encoding', 'chunked']]),
         requestOf(
           [
@@ -412,7 +441,7 @@ test.describe('refusalOfHandshake', () => {
         ),
       ].map(answerOf)
     ).toEqual(
-      Array.from({ length: 19 }, () => {
+      Array.from({ length: 21 }, () => {
         return MALFORMED;
       })
     );
@@ -496,6 +525,31 @@ test.describe('refusalOfHandshake', () => {
           return HOST;
         }),
       ]);
+      expect(
+        [
+          naming('localhost:8080'),
+          naming('A.LocalHost'),
+          naming('localhost:8080', [['Origin', 'http://localhost:8080']]),
+          naming('localhost:8080', [['Origin', 'https://bead.example']]),
+          naming('elsewhere.test', [['Origin', 'http://elsewhere.test']]),
+          naming('elsewhere.test', [], { method: 'POST', without: ['upgrade', 'connection'] }),
+          naming(':8080'),
+          requestOf([], { httpVersion: '2.0', method: 'POST', without: ['host'] }),
+          requestOf([], { without: ['host'] }),
+          naming('[::1'),
+        ].map(answerGiven(hosts))
+      ).toEqual([
+        'taken',
+        'taken',
+        'taken',
+        ORIGIN,
+        HOST_REFUSED,
+        HOST_REFUSED,
+        HOST_REFUSED,
+        HOST_REFUSED,
+        HOST,
+        HOST,
+      ]);
     }
 
     // no Host beside a target in absolute-form, as an HTTP/1.0 request may send it, its target
@@ -519,6 +573,15 @@ test.describe('refusalOfHandshake', () => {
         naming('[::1', [], { method: 'POST' }),
       ].map(answerGiven(['*']))
     ).toEqual(['taken', 'taken', ORIGIN, 'taken', UPGRADE, HOST]);
+    expect(
+      [
+        naming('xn---bad-cpa.test', [['Origin', 'http://xn---bad-cpa.test']]),
+        naming(':8080'),
+        naming('elsewhere.test', [['Origin', 'https://bead.example']]),
+        requestOf([], { httpVersion: '2.0', method: 'POST', without: ['host'] }),
+        requestOf([], { without: ['host'] }),
+      ].map(answerGiven(['*']))
+    ).toEqual([ORIGIN, 'taken', ORIGIN, METHOD, HOST]);
   });
 });
 

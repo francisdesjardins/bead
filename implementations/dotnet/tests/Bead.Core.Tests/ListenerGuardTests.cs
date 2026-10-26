@@ -21,6 +21,23 @@ public sealed class ListenerGuardTests
             reported.Add((reason, connectionHandle));
         });
         var thrown = new InvalidOperationException("a listener that throws");
+        var messages = new List<(byte Value, string ConnectionHandle)>();
+        Action<TransportMessage, string>? message = null;
+
+        message += (_, _) =>
+        {
+            throw thrown;
+        };
+        message += (received, connectionHandle) =>
+        {
+            messages.Add((received.Bytes.Span[0], connectionHandle));
+        };
+        const string A = "type=WS;ip=10.0.0.1;port=1;ordinal=1";
+        const string B = "type=WS;ip=10.0.0.2;port=2;ordinal=2";
+
+        guard.Tell(message, (new TransportMessage(new byte[] { 1 }, false), A));
+        guard.Tell(message, (new TransportMessage(new byte[] { 2 }, false), B));
+        Assert.Equal([((byte)1, A), ((byte)2, B)], messages);
         var told = new List<string>();
         Action<string>? connection = null;
         Action<bool, string>? close = null;
@@ -73,7 +90,11 @@ public sealed class ListenerGuardTests
         guard.Tell<string>(null, Handle);
 
         Assert.Equal([$"connection {Handle}", $"close False {Handle}", "closed True False", "reconnect"], told);
-        Assert.Equal([(thrown, Handle), (thrown, Handle), (thrown, null), (thrown, null)], reported);
+        Assert.Equal([(thrown, A), (thrown, B), (thrown, Handle), (thrown, Handle), (thrown, null), (thrown, null)], reported);
+        Assert.All(reported, (report) =>
+        {
+            Assert.Same(thrown, report.Reason);
+        });
     }
 
     [Fact]

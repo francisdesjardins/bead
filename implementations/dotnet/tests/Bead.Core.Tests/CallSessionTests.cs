@@ -16,12 +16,21 @@ public sealed class CallSessionTests
     // definition
 
     [Fact]
+    public void Names_a_scheme_to_come_by_the_word_scheme_and_its_number_in_the_order_of_the_numbers()
+    {
+        Assert.Equal(
+            "OPAQUE, ELSEWHERE, scheme 4, scheme 65535",
+            CallSession.CredentialSchemesDetailOf([(CredentialScheme)65_535, CredentialScheme.Elsewhere, (CredentialScheme)4, CredentialScheme.Opaque, (CredentialScheme)4]));
+        Assert.Equal("", CallSession.CredentialSchemesDetailOf([]));
+    }
+
+    [Fact]
     public void CredentialSchemesDetailOf_names_the_schemes_a_side_takes_in_the_order_of_their_numbers_a_comma_and_a_space_between()
     {
         Assert.Equal("OPAQUE", CallSession.CredentialSchemesDetailOf([CredentialScheme.Opaque]));
         Assert.Equal(
             "OPAQUE, JWT, ELSEWHERE",
-            CallSession.CredentialSchemesDetailOf([CredentialScheme.Elsewhere, CredentialScheme.Opaque, CredentialScheme.Jwt]));
+            CallSession.CredentialSchemesDetailOf([CredentialScheme.Elsewhere, CredentialScheme.Opaque, CredentialScheme.Jwt, CredentialScheme.Opaque]));
         Assert.Equal("OPAQUE, ELSEWHERE", CallSession.CredentialSchemesDetailOf([CredentialScheme.Elsewhere, CredentialScheme.Opaque]));
     }
 
@@ -74,8 +83,9 @@ public sealed class CallSessionTests
 
         Assert.Null(presented);
         Assert.Null(carried);
-        Assert.Equal((ushort)ProtocolCode.SessionRequired, refusal!.Code);
-        Assert.Equal(FailureScope.Protocol, refusal.Scope);
+        Assert.Equal(
+            ((ushort)ProtocolCode.SessionRequired, FailureScope.Protocol, "no session is known for OPAQUE to stand for"),
+            (refusal!.Code, refusal.Scope, refusal.Detail));
     }
 
     [Fact]
@@ -105,16 +115,32 @@ public sealed class CallSessionTests
         };
         const ushort Unreachable = (ushort)ProtocolCode.DestinationUnreachable;
 
-        Assert.Equal(Unreachable, uncarried(Credential.Elsewhere(), (false, true)));
-        Assert.Equal(Unreachable, uncarried(Credential.Elsewhere(), (true, false)));
-        Assert.Equal(Unreachable, uncarried(Credential.Jwt("a.b.c"), (true, false)));
-        Assert.Null(uncarried(Credential.Jwt("a.b.c"), (false, true)));
-        Assert.Null(uncarried(Credential.Elsewhere(), (true, true)));
+        var transports = new[] { (true, true), (false, true), (true, false), (false, false) };
+        var credentials = new Credential?[] { null, Credential.Opaque(Token), Credential.Jwt("a.b.c"), Credential.Elsewhere() };
+        ushort?[][] expected =
+        [
+            [null, null, null, null],
+            [null, null, null, null],
+            [null, null, Unreachable, Unreachable],
+            [null, Unreachable, Unreachable, Unreachable],
+        ];
 
-        foreach (var any in new[] { (false, false), (true, true) })
+        for (var index = 0; index < credentials.Length; index += 1)
         {
-            Assert.Null(uncarried(null, any));
-            Assert.Null(uncarried(Credential.Opaque(Token), any));
+            Assert.Equal(expected[index], transports.Select((transport) =>
+            {
+                return uncarried(credentials[index], transport);
+            }));
+        }
+
+        Assert.Equal(
+            "its transport does not carry the credential ELSEWHERE stands for beside an envelope: none, or another",
+            CallSession.UncarriedOf(Credential.Elsewhere(), (false, true))?.Detail);
+        foreach (var credential in new[] { Credential.Jwt("a.b.c"), Credential.Elsewhere() })
+        {
+            Assert.Equal(
+                "its transport leaves the machine in the clear, which a bearer credential never crosses",
+                CallSession.UncarriedOf(credential, (true, false))?.Detail);
         }
     }
 
@@ -127,6 +153,18 @@ public sealed class CallSessionTests
         Assert.NotEqual(grace, grace with { Issuer = "https://b.example" });
         Assert.NotEqual(grace, new SessionIdentifier { Scheme = CredentialScheme.Jwt, Issuer = "https://a.example", Sid = "grace" });
         Assert.NotEqual(grace, new SessionIdentifier { Scheme = CredentialScheme.Elsewhere, Id = "grace" });
+
+        var keys = new SessionIdentifier?[]
+        {
+            null, grace, grace with { Issuer = "https://b.example" },
+            new() { Scheme = CredentialScheme.Jwt, Issuer = "https://a.example", Sid = "grace" },
+            new() { Scheme = CredentialScheme.Elsewhere, Id = "grace" },
+            grace with { Sub = "Grace" },
+            new() { Scheme = CredentialScheme.Elsewhere, Id = "é" },
+            new() { Scheme = CredentialScheme.Elsewhere, Id = "é" },
+        };
+
+        Assert.Equal(keys.Length, keys.ToHashSet().Count);
 
         // octet for octet: a case or a normal form of its own is another
         Assert.NotEqual(grace, grace with { Sub = "Grace" });

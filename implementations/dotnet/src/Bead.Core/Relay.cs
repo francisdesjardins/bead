@@ -35,10 +35,17 @@ public sealed record RelayOptions
     internal Action<Span<byte>>? Fill { get; init; }
 }
 
-/// <summary>A destination, as its registration names it.</summary>
+/// <summary>A destination, as its registration names it, and whether its connection closed.</summary>
 /// <param name="DestinationId">The destination, from 1 to 2³² − 1.</param>
 /// <param name="Label">What the application calls it, for a list of its own.</param>
-public sealed record Destination(uint DestinationId, string? Label);
+public sealed record Destination(uint DestinationId, string? Label)
+{
+    /// <summary>
+    /// Whether the connection of the relay's own it names closed, or had as it was registered: it is
+    /// unreachable until it is registered anew. Never, for a router the relay calls through.
+    /// </summary>
+    public bool IsClosed { get; init; }
+}
 
 /// <summary>How a destination is registered.</summary>
 public sealed record DestinationOptions
@@ -48,6 +55,16 @@ public sealed record DestinationOptions
 
     /// <summary>What the application calls it, for a list of its own.</summary>
     public string? Label { get; init; }
+
+    /// <summary>
+    /// The registration this one replaces, the one its destination holds now: the new one takes its
+    /// place at once, under the relay's lock, so a request in between finds the destination, never
+    /// DESTINATION_UNKNOWN, and the one replaced takes nothing out after. Its destination is this
+    /// one's. Whether to replace a destination, its connection closed or not, is the application's
+    /// to decide; one that is not the registration of its destination now is an
+    /// <see cref="ArgumentException"/>.
+    /// </summary>
+    public DestinationRegistration? Replaces { get; init; }
 
     /// <summary>
     /// How long leg B waits for its answer, the relay's at most; the relay's when none. From 1 to
@@ -101,19 +118,29 @@ public interface IRouterTarget
     Task<RouterResult> Request(ReadOnlyMemory<byte> payload, RouterRequest request);
 }
 
-/// <summary>A destination registered: what names it, and what takes it out.</summary>
+/// <summary>A destination registered: what names it, whether its connection closed, and what takes it out.</summary>
 public sealed class DestinationRegistration
 {
+    private readonly Func<Destination> _destination;
     private readonly Func<bool> _unregister;
 
-    internal DestinationRegistration(Destination destination, Func<bool> unregister)
+    internal DestinationRegistration(Func<Destination> destination, Func<bool> unregister)
     {
-        Destination = destination;
+        _destination = destination;
         _unregister = unregister;
     }
 
-    /// <summary>The destination, as it was registered.</summary>
-    public Destination Destination { get; }
+    /// <summary>
+    /// The destination, as it was registered, and whether its connection closed, as it is now: read at
+    /// each access.
+    /// </summary>
+    public Destination Destination
+    {
+        get
+        {
+            return _destination();
+        }
+    }
 
     /// <summary>
     /// Takes the destination out, unless another took its id since; whether it did. A call relayed
@@ -142,6 +169,16 @@ internal sealed record RelayRouter
 
     /// <summary>Whether a connection of the relay's own takes a request of the relay's.</summary>
     public required Func<string, bool> IsTwoWay { get; init; }
+
+    /// <summary>
+    /// Whether the router holds a connection of the relay's own, open: a destination registered on one
+    /// it does not is closed from its registration. Every one is when not said; asked under the
+    /// relay's lock, from any thread.
+    /// </summary>
+    public Func<string, bool> IsOpen { get; init; } = (_) =>
+    {
+        return true;
+    };
 
     /// <summary>Whether a connection of the relay's own carries a credential beside an envelope; none does when not said.</summary>
     public Func<string, bool> CarriesCredential { get; init; } = (_) =>
@@ -216,8 +253,8 @@ internal sealed class Relay
 
     /// <summary>
     /// Marks the destinations on a connection of the relay's own that closed: each is unreachable
-    /// until the application unregisters it and registers it anew, so a newcomer under the same
-    /// handle is never taken for it.
+    /// until the application registers it anew, on another connection, since no connection takes its
+    /// handle again. Its router holds the connection no longer before it calls it.
     /// </summary>
     public void CloseConnection(string connectionHandle)
     {
@@ -233,14 +270,14 @@ internal sealed class Relay
         }
     }
 
-    /// <summary>The destinations registered, each as its registration names it.</summary>
+    /// <summary>The destinations registered, each as its registration names it, and whether its connection closed.</summary>
     public IReadOnlyList<Destination> Destinations()
     {
         lock (_gate)
         {
             return [.. _registrations.Values.Select((registration) =>
             {
-                return registration.Destination;
+                return registration.Listed;
             })];
         }
     }
@@ -299,10 +336,14 @@ internal sealed class Relay
     }
 
     /// <summary>
-    /// Registers a target as a destination: given, or drawn. A timeout is rounded to the nearest whole
-    /// millisecond; one neither infinite nor from 1 to 2³¹ − 1, zero among them, is an
-    /// <see cref="ArgumentOutOfRangeException"/>; a destination of 0, or registered already, or an
-    /// audience that is not a string of well-formed Unicode, an <see cref="ArgumentException"/>.
+    /// Registers a target as a destination: given, drawn, or the one of the registration it replaces,
+    /// in its place under one lock. A connection the router no longer holds is registered closed. A
+    /// timeout is rounded to the nearest whole millisecond; one neither infinite nor from 1 to
+    /// 2³¹ − 1, zero among them, is an <see cref="ArgumentOutOfRangeException"/>; a destination of 0,
+    /// or registered already, unless <see cref="DestinationOptions.Replaces"/> names the registration
+    /// that holds it, a registration replaced that does not hold its destination, or another than the
+    /// destination given, or an audience that is not a string of well-formed Unicode, an
+    /// <see cref="ArgumentException"/>.
     /// </summary>
     public DestinationRegistration Register(object target, DestinationOptions? options)
     {
@@ -318,31 +359,59 @@ internal sealed class Relay
             JwtVerifier.AssertHeld(([], [audience]));
         }
 
+        var replaces = options?.Replaces;
+        var given = options?.DestinationId ?? replaces?.Destination.DestinationId;
+
+        if (replaces is not null && replaces.Destination.DestinationId != given)
+        {
+            throw new ArgumentException($"a registration replaces the one of its own destination, {given}, not {replaces.Destination.DestinationId}", nameof(options));
+        }
+
         lock (_gate)
         {
-            if (options?.DestinationId is { } given && _registrations.ContainsKey(given))
+            // ! the registration replaced is the one that holds its id now: a caller holding one taken
+            // out, or replaced already, would take a destination it does not hold
+            if (replaces is not null && _registrations.GetValueOrDefault(given!.Value)?.Handed != replaces)
             {
-                throw new ArgumentException($"destination {given} is registered already", nameof(options));
+                throw new ArgumentException($"destination {given} is not registered by the registration it replaces", nameof(options));
             }
 
-            var destinationId = options?.DestinationId ?? DrawDestinationId();
+            if (replaces is null && given is { } taken && _registrations.ContainsKey(taken))
+            {
+                throw new ArgumentException($"destination {taken} is registered already", nameof(options));
+            }
 
-            // the relay's timeout is the longest any leg B waits: a destination's own stays under it
+            var destinationId = given ?? DrawDestinationId();
+
+            // the relay's timeout is the longest any leg B waits: a destination's own stays under it;
+            // a connection its router no longer holds closed before it was registered: it is
+            // unreachable from now on, and nothing is forwarded to it (spec 14.4)
             var registration = new Registration(new Destination(destinationId, options?.Label), (target, ShorterOf(timeout, _timeout)))
             {
                 Audience = options?.Audience,
+                IsClosed = target is ConnectionTarget connection && !_router.IsOpen(connection.ConnectionHandle),
             };
 
+            registration.Handed = new DestinationRegistration(
+                () =>
+                {
+                    return registration.Listed;
+                },
+                () =>
+                {
+                    // its own registration alone: one that took its id since stays
+                    lock (_gate)
+                    {
+                        return _registrations.GetValueOrDefault(destinationId) == registration && _registrations.Remove(destinationId);
+                    }
+                });
+
+            // * one replaced gives its place at once, its position kept: a request in between finds
+            // the destination, never DESTINATION_UNKNOWN, and a call bound to the one replaced
+            // finishes with it
             _registrations[destinationId] = registration;
 
-            return new DestinationRegistration(registration.Destination, () =>
-            {
-                // its own registration alone: one that took its id since stays
-                lock (_gate)
-                {
-                    return _registrations.GetValueOrDefault(destinationId) == registration && _registrations.Remove(destinationId);
-                }
-            });
+            return registration.Handed;
         }
     }
 
@@ -464,7 +533,7 @@ internal sealed class Relay
             { Scheme: CredentialScheme.Elsewhere } when !carries
                 => UnreachableOf(destinationId, "its transport does not carry the credential ELSEWHERE stands for beside an envelope: none, or another"),
             { Scheme: CredentialScheme.Jwt or CredentialScheme.Elsewhere } when !isSecure
-                => UnreachableOf(destinationId, "it is reached off the machine in the clear, which a bearer credential never crosses"),
+                => UnreachableOf(destinationId, "its transport leaves the machine in the clear, which a bearer credential never crosses"),
             _ => null,
         };
     }
@@ -599,7 +668,7 @@ internal sealed class Relay
     }
 
     // a destination registered: its target, how long leg B waits, the audience it verifies, whether
-    // its connection closed
+    // its connection closed, and the registration its application holds
     private sealed class Registration(Destination destination, (object Target, TimeSpan Timeout) leg)
     {
         public Destination Destination { get; } = destination;
@@ -610,7 +679,20 @@ internal sealed class Relay
 
         public string? Audience { get; init; }
 
-        // for a connection of the relay's own: set once it closed, whoever takes its handle next
+        // what the application holds of it, which a registration that replaces it names
+        public DestinationRegistration? Handed { get; set; }
+
+        // the destination as it is now, whether its connection closed with it
+        public Destination Listed
+        {
+            get
+            {
+                return Destination with { IsClosed = IsClosed };
+            }
+        }
+
+        // for a connection of the relay's own: set once it closed, or as it is registered on one its
+        // router no longer holds; never unset, since no connection takes its handle again
         public volatile bool IsClosed;
     }
 

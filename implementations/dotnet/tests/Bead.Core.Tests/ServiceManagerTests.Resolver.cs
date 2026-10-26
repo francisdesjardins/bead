@@ -9,6 +9,43 @@ namespace Bead.Tests;
 public sealed partial class ServiceManagerTests
 {
     [Fact]
+    public async Task Traces_an_application_failure_as_the_answer_with_its_request_and_duration()
+    {
+        var clock = new FakeTimeProvider(Started);
+        var router = new RecordingRouter { Clock = clock };
+        var manager = new ServiceManager(router);
+        var seen = RecordDebug(manager);
+        var failure = Failure.OfApplication(7, "why");
+        var resolver = manager.GetRequestResolver(Echo, Answered())((_, response) =>
+        {
+            clock.Advance(TimeSpan.FromMilliseconds(30));
+
+            return response.Fail(failure);
+        });
+
+        await resolver.Handle(PropsOf(Encode(new Text("hi")))).WaitAsync(Patience, Cancelled);
+
+        Assert.Equal([new Responded(Target, null, failure)], router.Responses);
+        Assert.Equal(2, seen.Count);
+        Assert.Equal<(Exception?, DebugDirection, object?, object?, TimeSpan?, DateTimeOffset)>(
+            [
+                (null, DebugDirection.Rx, new Text("hi"), null, null, Started),
+                (null, DebugDirection.Tx, new Text("hi"), failure, TimeSpan.FromMilliseconds(30), Started),
+            ],
+            seen.Select((told) =>
+            {
+                return (told.Error, told.Event.Direction, told.Event.Rx, told.Event.Tx, told.Event.Duration, told.Event.StartedAt);
+            }));
+        Assert.Equal<(uint?, string?, DebugType)>(
+            [(Header.CallId, Handle, DebugType.Request), (Header.CallId, Handle, DebugType.Request)],
+            seen.Select((told) =>
+            {
+                return (told.Event.CallId, told.Event.ConnectionHandle, told.Event.Type);
+            }));
+        Assert.Empty(router.Reports);
+    }
+
+    [Fact]
     public async Task Hands_the_router_a_procedure_payload_limit_with_its_requests_and_its_resolver()
     {
         var router = new RecordingRouter();
@@ -113,6 +150,103 @@ public sealed partial class ServiceManagerTests
     }
 
     [Fact]
+    public async Task Answers_PAYLOAD_INVALID_to_a_request_its_rules_refuse_before_its_callback()
+    {
+        var router = new RecordingRouter { DetailBytes = 512 };
+        var reached = new List<string>();
+        var given = new List<ValidateOptions>();
+        var resolver = new ServiceManager(router).GetRequestResolver(Echo, Answered() with { FailFast = true, Validate = Judging(given) })((request, response) =>
+        {
+            reached.Add(request.Payload.Value);
+
+            return response.Answer(request.Payload);
+        });
+
+        await resolver.Handle(PropsOf(Encode(new Text("")))).WaitAsync(Patience, Cancelled);
+        await resolver.Handle(PropsOf(Encode(new Text("hi")))).WaitAsync(Patience, Cancelled);
+
+        Assert.Equal(["hi"], reached);
+        Assert.Equal(
+            [
+                new Responded(Target, null, Failure.OfProtocol(ProtocolCode.PayloadInvalid, RefusedDetail)),
+                new Responded(Target, new Text("hi"), null),
+            ],
+            router.Responses);
+
+        // * judged under its router's bound and its dependencies' failFast
+        Assert.Equal([new ValidateOptions { FailFast = true, MaximumBytes = 512 }, new ValidateOptions { FailFast = true, MaximumBytes = 512 }], given);
+    }
+
+    [Fact]
+    public async Task Answers_PROCEDURE_FAILED_to_rules_that_throw_and_hands_why_on_for_its_router_to_report()
+    {
+        var router = new RecordingRouter();
+        var manager = new ServiceManager(router);
+        var seen = RecordDebug(manager);
+        var broken = new ArgumentOutOfRangeException("request", "a rule that fails to judge");
+        var resolver = manager.GetRequestResolver(Echo, Answered() with
+        {
+            Validate = (_, _) =>
+            {
+                throw broken;
+            },
+        })((request, response) =>
+        {
+            return response.Answer(request.Payload);
+        });
+
+        Assert.Same(broken, await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() =>
+        {
+            return resolver.Handle(PropsOf(Encode(new Text("hi")))).WaitAsync(Patience, Cancelled);
+        }));
+        Assert.Equal([new Responded(Target, null, Failure.OfProtocol(ProtocolCode.ProcedureFailed))], router.Responses);
+        Assert.Equal<(DebugDirection, Exception?)>(
+            [(DebugDirection.Rx, null), (DebugDirection.Tx, broken)],
+            seen.Select((told) =>
+            {
+                return (told.Event.Direction, told.Error);
+            }));
+    }
+
+    // debugging 4.3
+    [Fact]
+    public async Task Traces_a_request_its_rules_refuse_its_rx_then_its_failure()
+    {
+        var time = new FakeTimeProvider(Started);
+        var manager = new ServiceManager(new RecordingRouter { Clock = time });
+        var seen = RecordDebug(manager);
+        var resolver = manager.GetRequestResolver(Echo, Answered() with { FailFast = true, Validate = Judging([]) })(Unanswering);
+
+        await resolver.Handle(PropsOf(Encode(new Text("")))).WaitAsync(Patience, Cancelled);
+
+        var received = new DebugEvent
+        {
+            CallId = 7,
+            ConnectionHandle = Handle,
+            Direction = DebugDirection.Rx,
+            ProcedureId = 1,
+            ProcedureName = "echo",
+            Rx = new Text(""),
+            ServiceId = 2,
+            ServiceRevision = 3,
+            StartedAt = Started,
+            Type = DebugType.Request,
+        };
+
+        Assert.Equal(
+            [
+                (null, received),
+                ((Exception?)null, received with
+                {
+                    Direction = DebugDirection.Tx,
+                    Duration = TimeSpan.Zero,
+                    Tx = Failure.OfProtocol(ProtocolCode.PayloadInvalid, RefusedDetail),
+                }),
+            ],
+            seen);
+    }
+
+    [Fact]
     public async Task A_request_before_request_refuses_is_answered_with_an_access_denied_seen_on_its_header_alone()
     {
         var router = new RecordingRouter();
@@ -137,6 +271,13 @@ public sealed partial class ServiceManagerTests
         Assert.Equal(["allowed"], reached);
         Assert.Equal([new AdmissionRequest(Handle, Header), new AdmissionRequest(Handle, Header with { CallId = 9 })], seen);
         Assert.Equal(Failure.OfProtocol(ProtocolCode.AccessDenied), router.Responses[0].Failure);
+        Assert.All(seen, (request) =>
+        {
+            Assert.Equal(["ConnectionHandle", "Header", "Session"], request.GetType().GetProperties().Select((property) =>
+            {
+                return property.Name;
+            }));
+        });
     }
 
     // a failure carries no side here — the router writes it as its own — so what is left to show is
@@ -414,60 +555,63 @@ public sealed partial class ServiceManagerTests
     [Fact]
     public async Task Tells_a_callback_that_fails_before_it_answers_as_an_answer_that_did_not_go_with_why_beside_it_nothing_more_for_one_that_fails_once_it_answered_nor_for_an_admission_that_fails()
     {
-        var time = new FakeTimeProvider(Started);
-        var manager = new ServiceManager(new RecordingRouter { Clock = time });
-        var seen = RecordDebug(manager);
-        var thrown = new InvalidOperationException("thrown");
-        var rejected = new InvalidOperationException("rejected");
-        var after = new InvalidOperationException("after");
-        var throwing = manager.GetRequestResolver(Echo, Answered())((_, _) =>
+        foreach (var (start, rejectDelay, answerDelay, afterDelay) in new[] { (DateTimeOffset.FromUnixTimeMilliseconds(1_767_225_600_000), 10, 0, 0), (Started, 20, 5, 5) })
         {
-            time.Advance(TimeSpan.FromMilliseconds(10));
-
-            throw thrown;
-        });
-        var rejecting = manager.GetRequestResolver(Echo with { ProcedureId = 2 }, Answered())((_, _) =>
-        {
-            time.Advance(TimeSpan.FromMilliseconds(20));
-
-            return Task.FromException(rejected);
-        });
-        var refusing = manager.GetRequestResolver(Echo with { ProcedureId = 3 }, Answered(new BeforeRequest((_) =>
-        {
-            throw thrown;
-        })))(Unanswering);
-        var answering = manager.GetRequestResolver(Echo with { ProcedureId = 4 }, Answered())(async (_, response) =>
-        {
-            time.Advance(TimeSpan.FromMilliseconds(5));
-            await response.Answer(new Text("hi"));
-            time.Advance(TimeSpan.FromMilliseconds(5));
-
-            throw after;
-        });
-        var request = PropsOf(Encode(new Text("hi")));
-
-        foreach (var resolver in new[] { throwing, rejecting, refusing, answering })
-        {
-            await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            var time = new FakeTimeProvider(start);
+            var manager = new ServiceManager(new RecordingRouter { Clock = time });
+            var seen = RecordDebug(manager);
+            var thrown = new InvalidOperationException("thrown");
+            var rejected = new InvalidOperationException("rejected");
+            var after = new InvalidOperationException("after");
+            var throwing = manager.GetRequestResolver(Echo, Answered())((_, _) =>
             {
-                return resolver.Handle(request).WaitAsync(Patience, Cancelled);
+                time.Advance(TimeSpan.FromMilliseconds(10));
+
+                throw thrown;
             });
-        }
-
-        // each pair shares its start; the step of no answer carries the request and why, timed
-        Assert.Equal<(DebugDirection, ushort, Exception?, object?, object?, DateTimeOffset, TimeSpan?)>(
-            [
-                (DebugDirection.Rx, 1, null, new Text("hi"), null, Started, null),
-                (DebugDirection.Tx, 1, thrown, new Text("hi"), null, Started, TimeSpan.FromMilliseconds(10)),
-                (DebugDirection.Rx, 2, null, new Text("hi"), null, Started.AddMilliseconds(10), null),
-                (DebugDirection.Tx, 2, rejected, new Text("hi"), null, Started.AddMilliseconds(10), TimeSpan.FromMilliseconds(20)),
-                (DebugDirection.Rx, 4, null, new Text("hi"), null, Started.AddMilliseconds(30), null),
-                (DebugDirection.Tx, 4, null, new Text("hi"), new Text("hi"), Started.AddMilliseconds(30), TimeSpan.FromMilliseconds(5)),
-            ],
-            seen.Select((told) =>
+            var rejecting = manager.GetRequestResolver(Echo with { ProcedureId = 2 }, Answered())((_, _) =>
             {
-                return (told.Event.Direction, told.Event.ProcedureId, told.Error, told.Event.Rx, told.Event.Tx, told.Event.StartedAt, told.Event.Duration);
-            }));
+                time.Advance(TimeSpan.FromMilliseconds(rejectDelay));
+
+                return Task.FromException(rejected);
+            });
+            var refusing = manager.GetRequestResolver(Echo with { ProcedureId = 3 }, Answered(new BeforeRequest((_) =>
+            {
+                throw thrown;
+            })))(Unanswering);
+            var answering = manager.GetRequestResolver(Echo with { ProcedureId = 4 }, Answered())(async (_, response) =>
+            {
+                time.Advance(TimeSpan.FromMilliseconds(answerDelay));
+                await response.Answer(new Text("hi"));
+                time.Advance(TimeSpan.FromMilliseconds(afterDelay));
+
+                throw after;
+            });
+            var request = PropsOf(Encode(new Text("hi")));
+
+            foreach (var (resolver, expected) in new[] { (throwing, thrown), (rejecting, rejected), (refusing, thrown), (answering, after) })
+            {
+                Assert.Same(expected, await Assert.ThrowsAsync<InvalidOperationException>(() =>
+                {
+                    return resolver.Handle(request).WaitAsync(Patience, Cancelled);
+                }));
+            }
+
+            // each pair shares its start; the step of no answer carries the request and why, timed
+            Assert.Equal<(DebugDirection, ushort, Exception?, object?, object?, DateTimeOffset, TimeSpan?, uint?, string?)>(
+                [
+                    (DebugDirection.Rx, 1, null, new Text("hi"), null, start, null, 7u, Handle),
+                    (DebugDirection.Tx, 1, thrown, new Text("hi"), null, start, TimeSpan.FromMilliseconds(10), 7u, Handle),
+                    (DebugDirection.Rx, 2, null, new Text("hi"), null, start.AddMilliseconds(10), null, 7u, Handle),
+                    (DebugDirection.Tx, 2, rejected, new Text("hi"), null, start.AddMilliseconds(10), TimeSpan.FromMilliseconds(rejectDelay), 7u, Handle),
+                    (DebugDirection.Rx, 4, null, new Text("hi"), null, start.AddMilliseconds(10 + rejectDelay), null, 7u, Handle),
+                    (DebugDirection.Tx, 4, null, new Text("hi"), new Text("hi"), start.AddMilliseconds(10 + rejectDelay), TimeSpan.FromMilliseconds(answerDelay), 7u, Handle),
+                ],
+                seen.Select((told) =>
+                {
+                    return (told.Event.Direction, told.Event.ProcedureId, told.Error, told.Event.Rx, told.Event.Tx, told.Event.StartedAt, told.Event.Duration, told.Event.CallId, told.Event.ConnectionHandle);
+                }));
+        }
     }
 
     // debugging 4.2 and 4.2.4
@@ -540,6 +684,7 @@ public sealed partial class ServiceManagerTests
         });
 
         Assert.Equal([(DebugDirection.Rx, DebugType.Request)], StepsOf(seen));
+        Assert.Null(Assert.Single(seen).Error);
     }
 
     [Fact]
@@ -632,7 +777,7 @@ public sealed partial class ServiceManagerTests
     }
 
     [Fact]
-    public void Is_the_resolver_one_to_answer_for_its_router_nothing_admits_a_failure_refuses_a_throw_goes_on()
+    public void Is_the_resolver_s_to_answer_for_its_router_nothing_admits_a_failure_refuses_a_throw_goes_on()
     {
         var manager = new ServiceManager(new RecordingRouter());
         var thrown = new InvalidOperationException("thrown");
@@ -676,28 +821,67 @@ public sealed partial class ServiceManagerTests
     [Fact]
     public async Task Admission_reads_the_call_s_session_its_router_resolved_and_so_does_the_callback_whoever_asks_it()
     {
-        var router = new RecordingRouter();
-        var admitted = new List<object?>();
-        var received = new List<object?>();
-        var resolver = new ServiceManager(router).GetRequestResolver(Echo, Answered(new BeforeRequest((request) =>
+        var ada = new CallSession { Data = "ada" };
+        var bob = new CallSession { Data = "bob" };
+        var read = new List<(string Phase, CallSession? Session)>();
+        var resolver = new ServiceManager(new RecordingRouter()).GetRequestResolver(Echo, Answered(new BeforeRequest((request) =>
         {
-            admitted.Add(request.Session?.Data);
+            read.Add(("admission", request.Session));
 
-            return true;
+            return request.Session is not null;
         })))((request, response) =>
         {
-            received.Add(request.Session?.Data);
+            read.Add(("callback", request.Session));
 
             return response.Answer(request.Payload);
         });
 
-        // asked here, then by its router, which hands the callback the session it resolved
-        await resolver.Handle(PropsOf(Encode(new Text("hi"))) with { Session = new CallSession { Data = "ada" } }).WaitAsync(Patience, Cancelled);
+        Assert.Null(resolver.Admit(new AdmissionRequest(Handle, Header) { Session = ada }));
+        await resolver.Handle(PropsOf(Encode(new Text("hi"))) with { IsAdmitted = true, Session = ada }).WaitAsync(Patience, Cancelled);
+        await resolver.Handle(PropsOf(Encode(new Text("hi"))) with { Session = ada }).WaitAsync(Patience, Cancelled);
         await resolver.Handle(PropsOf(Encode(new Text("hi")))).WaitAsync(Patience, Cancelled);
-        await resolver.Handle(PropsOf(Encode(new Text("hi"))) with { IsAdmitted = true, Session = new CallSession { Data = "bob" } }).WaitAsync(Patience, Cancelled);
 
-        Assert.Equal(["ada", null], admitted);
-        Assert.Equal(["ada", null, "bob"], received);
+        Assert.Equal(["admission", "callback", "admission", "callback", "admission"], read.Select((entry) =>
+        {
+            return entry.Phase;
+        }));
+        Assert.All(read.Take(4), (entry) =>
+        {
+            Assert.Same(ada, entry.Session);
+        });
+        Assert.Null(read[4].Session);
+
+        var admitted = new List<CallSession?>();
+        var received = new List<CallSession?>();
+        var permissive = new ServiceManager(new RecordingRouter()).GetRequestResolver(Echo, Answered(new BeforeRequest((request) =>
+        {
+            admitted.Add(request.Session);
+
+            return true;
+        })))((request, response) =>
+        {
+            received.Add(request.Session);
+
+            return response.Answer(request.Payload);
+        });
+
+        await permissive.Handle(PropsOf(Encode(new Text("hi"))) with { Session = ada }).WaitAsync(Patience, Cancelled);
+        await permissive.Handle(PropsOf(Encode(new Text("hi")))).WaitAsync(Patience, Cancelled);
+        await permissive.Handle(PropsOf(Encode(new Text("hi"))) with { IsAdmitted = true, Session = bob }).WaitAsync(Patience, Cancelled);
+
+        Assert.Equal(["ada", null], admitted.Select((session) =>
+        {
+            return session?.Data;
+        }));
+        Assert.Equal(["ada", null, "bob"], received.Select((session) =>
+        {
+            return session?.Data;
+        }));
+        Assert.Same(ada, admitted[0]);
+        Assert.Null(admitted[1]);
+        Assert.Same(ada, received[0]);
+        Assert.Null(received[1]);
+        Assert.Same(bob, received[2]);
     }
 
     [Fact]
@@ -705,6 +889,7 @@ public sealed partial class ServiceManagerTests
     {
         var router = new RecordingRouter();
         var asked = new List<uint>();
+        var handed = new List<string[]>();
         var resolver = new ServiceManager(router).GetRequestResolver(Echo, Answered(new BeforeRequest((request) =>
         {
             asked.Add(request.Header.CallId);
@@ -712,12 +897,18 @@ public sealed partial class ServiceManagerTests
             return false;
         })))((request, response) =>
         {
+            handed.Add([.. request.GetType().GetProperties().Select((property) =>
+            {
+                return property.Name;
+            })]);
+
             return response.Answer(request.Payload);
         });
 
         await resolver.Handle(PropsOf(Encode(new Text("hi"))) with { IsAdmitted = true }).WaitAsync(Patience, Cancelled);
 
         Assert.Empty(asked);
+        Assert.Equal(["ConnectionHandle", "Header", "Payload", "Session", "Signal"], Assert.Single(handed));
         Assert.Equal(new Text("hi"), Assert.Single(router.Responses).Payload);
     }
 

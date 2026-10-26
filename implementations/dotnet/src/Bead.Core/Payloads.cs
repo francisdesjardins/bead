@@ -169,6 +169,57 @@ internal static class Payloads
     }
 
     /// <summary>
+    /// The canonical form of the string <paramref name="text"/> (17.7.3), in UTF-8, its quotation
+    /// marks included: one holding a surrogate alone is refused, a <see cref="FormatException"/>.
+    /// </summary>
+    public static ReadOnlyMemory<byte> WriteJsonString(string text)
+    {
+        ArgumentNullException.ThrowIfNull(text);
+
+        var canonical = new Canonical(Written, text.Length + 2);
+
+        canonical.WriteString(text);
+
+        return canonical.Bytes;
+    }
+
+    /// <summary>
+    /// A number as ECMAScript's Number::toString writes its double (17.7.4), −0 as <c>0</c>; one that
+    /// is not finite has none, a <see cref="FormatException"/>.
+    /// </summary>
+    public static string NumberText(double value)
+    {
+        if (!double.IsFinite(value))
+        {
+            throw new FormatException(Written.NotFinite);
+        }
+
+        return Canonical.NumberOf(value);
+    }
+
+    /// <summary>
+    /// A 32-bit float as the shortest decimal that reads back to it, laid out as Number::toString
+    /// lays out a number of those digits, −0 as <c>0</c>; one that is not finite has none, a
+    /// <see cref="FormatException"/>.
+    /// </summary>
+    public static string NumberText(float value)
+    {
+        if (!float.IsFinite(value))
+        {
+            throw new FormatException(Written.NotFinite);
+        }
+
+        if (value == 0)
+        {
+            return "0";
+        }
+
+        var shortest = Canonical.NumberOfShortest(Math.Abs(value).ToString("R", CultureInfo.InvariantCulture));
+
+        return value < 0 ? "-" + shortest : shortest;
+    }
+
+    /// <summary>
     /// The string of a <c>text</c> payload (17.4): its bytes read as UTF-8, a leading U+FEFF kept as a
     /// character; bytes that are not UTF-8 refused.
     /// </summary>
@@ -241,7 +292,7 @@ internal static class Payloads
 
         // a number as ECMAScript's Number::toString writes its double (17.7.4), from the shortest
         // digits that read back to it, -0 as 0
-        private static string NumberOf(double value)
+        internal static string NumberOf(double value)
         {
             if (value == 0)
             {
@@ -253,7 +304,13 @@ internal static class Payloads
                 return "-" + NumberOf(-value);
             }
 
-            var shortest = value.ToString("R", CultureInfo.InvariantCulture);
+            return NumberOfShortest(value.ToString("R", CultureInfo.InvariantCulture));
+        }
+
+        // a positive number of the shortest digits given, as .NET's round-trip form writes them, laid
+        // out as Number::toString lays out its digits
+        internal static string NumberOfShortest(string shortest)
+        {
             var at = shortest.IndexOf('E', StringComparison.Ordinal);
             var mantissa = at < 0 ? shortest : shortest[..at];
             var exponent = at < 0 ? 0 : int.Parse(shortest[(at + 1)..], NumberStyles.AllowLeadingSign, CultureInfo.InvariantCulture);
@@ -389,7 +446,7 @@ internal static class Payloads
         // a string as JSON.stringify writes a well-formed one (17.7.3): each character as it is,
         // but " and \, five control characters as short escapes, and the others as \u in lower-case
         // hexadecimal
-        private void WriteString(string text)
+        internal void WriteString(string text)
         {
             Append((byte)'"');
 

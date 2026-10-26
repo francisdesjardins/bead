@@ -1,0 +1,23 @@
+{
+  "patch": [
+    {
+      "op": "add",
+      "path": "/services/0/procedures/8/http",
+      "value": {
+        "rules": [
+          {
+            "method": "POST",
+            "template": "/v1/clock",
+            "body": "*"
+          }
+        ]
+      }
+    }
+  ],
+  "findings": [
+    {
+      "rule": "HTTP_RULE_COMMAND",
+      "pointer": "/services/0/procedures/8/http/rules/0"
+    }
+  ]
+}

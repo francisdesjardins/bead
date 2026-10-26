@@ -39,7 +39,8 @@ export const credentialSchemesDetailOf = (schemes: Iterable<number>): string => 
       return first - second;
     })
     .map((scheme) => {
-      return SCHEME_NAMES.get(scheme) ?? String(scheme);
+      // a scheme to come by its number, as the header's refusals name it
+      return SCHEME_NAMES.get(scheme) ?? `scheme ${String(scheme)}`;
     })
     .join(', ');
 };
@@ -135,7 +136,7 @@ export const presentedCredentialOf = (
       if (token === undefined) {
         throw new FailureError({
           ...failures.sessionRequired,
-          detail: 'the call presents OPAQUE, and this side knows no session to present',
+          detail: 'no session is known for OPAQUE to stand for',
         });
       }
 

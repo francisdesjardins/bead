@@ -7,11 +7,15 @@
     "#hello": {
       "external": "./gen/external/hello/v1/hello_bead.ts",
       "default": "./gen/generate/hello/v1/hello_bead.ts"
+    },
+    "#hello/http": {
+      "external": "./gen/external/bead_http.ts",
+      "default": "./gen/generate/bead_http.ts"
     }
   },
   "scripts": {
-    "build": "esbuild src/main.ts --bundle --platform=node --format=esm --target=node24 --external:ws --outfile=dist/generate/hello.mjs",
-    "build:external": "yarn messages && esbuild src/main.ts --bundle --platform=node --format=esm --target=node24 --external:ws --conditions=external --outfile=dist/external/hello.mjs",
+    "build": "esbuild src/main.ts --bundle --preserve-symlinks --platform=node --format=esm --target=node24 --external:ws --outfile=dist/generate/hello.mjs",
+    "build:external": "yarn messages && esbuild src/main.ts --bundle --preserve-symlinks --platform=node --format=esm --target=node24 --external:ws --conditions=external --outfile=dist/external/hello.mjs",
     "check": "yarn messages && yarn type-check && yarn type-check:external && yarn type-check:consumer && yarn lint --deny-warnings && yarn format:check",
     "format": "oxfmt .",
     "format:check": "oxfmt --check .",
@@ -27,14 +31,14 @@
     "ws": "^8.22.0"
   },
   "devDependencies": {
-    "@bufbuild/buf": "1.74.0",
+    "@bufbuild/buf": "1.75.0",
     "@bufbuild/protoc-gen-es": "2.16.0",
     "@types/node": "^24.19.2",
     "@types/ws": "^8.18.2",
     "esbuild": "0.28.2",
-    "oxfmt": "0.73.0",
-    "oxlint": "^1.88.0",
-    "oxlint-tsgolint": "7.0.2004",
+    "oxfmt": "0.74.0",
+    "oxlint": "^1.89.0",
+    "oxlint-tsgolint": "7.0.2005",
     "typescript": "7.0.2"
   },
   "dependenciesMeta": {

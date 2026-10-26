@@ -9,6 +9,7 @@ import {
   CLOSE_EVENT,
   CONNECTION_TOKEN_HEADER,
   CONNECTION_UNKNOWN,
+  ERROR_EVENT,
   LISTEN_HEADER,
   MESSAGE_EVENT,
   REFUSAL_HEADER,
@@ -22,6 +23,8 @@ import {
   GenericError,
   ProgrammerError,
   ReadyStateError,
+  reasonMessage,
+  toError,
   wrapReason,
 } from '../shared/errors';
 import { noop } from '../shared/noop';
@@ -44,6 +47,7 @@ import {
 } from './transport-client';
 import type {
   FetchLike,
+  IFetchInit,
   HTTPTransportClient,
   IFetchResponseLike,
   IHTTPClientConnection,
@@ -170,12 +174,25 @@ const isFollowed = (response: IFetchResponseLike): boolean => {
   return response.redirected === true;
 };
 
+// * what this side closes a connection for of its own, as its `error` tells it before its close
+// (spec 15.1): an envelope past its bound, named with its value, as a WebSocket's 1009 is
+const pastBoundOf = (maximumBodyBytes: number): GenericError => {
+  return new GenericError(
+    `the connection is closed: an envelope past its maximumBodyBytes, ${String(maximumBodyBytes)} bytes`
+  );
+};
+
+// and a batch that does not read, saying what of it does not, as a WebSocket's protocol error
+const unreadOf = (why: string): GenericError => {
+  return new GenericError(`the connection is closed: a batch that does not read, ${why}`);
+};
+
 // the envelopes a chunk of a batch completes, in order, what is left of it kept for the next chunk;
-// none at all when a length announces nothing, or more than `limit`
+// none at all when a length announces nothing, or more than `limit`, which fails the connection
 const envelopesOf = (
   reading: IReading,
   { chunk, limit }: { chunk: Uint8Array; limit: number }
-): Uint8Array<ArrayBuffer>[] | undefined => {
+): Uint8Array<ArrayBuffer>[] | GenericError => {
   const envelopes: Uint8Array<ArrayBuffer>[] = [];
   let offset = 0;
 
@@ -190,8 +207,12 @@ const envelopesOf = (
       if (reading.lengthFilled === LENGTH_BYTES) {
         const length = new DataView(reading.length.buffer).getUint32(0);
 
-        if (length === 0 || length > limit) {
-          return undefined;
+        if (length === 0) {
+          return unreadOf('an envelope of 0 bytes');
+        }
+
+        if (length > limit) {
+          return pastBoundOf(limit);
         }
 
         reading.envelope = new Uint8Array(length);
@@ -264,6 +285,15 @@ const retryDelayOf = (losses: number): number => {
  * `inactivityTimeout` has passed, which loses the connection, as a refusal of the server's or a
  * batch that does not read does.
  *
+ * `error` tells what this side closes its connection for of its own (spec 15.1), each a
+ * {@link GenericError}: an envelope past `maximumBodyBytes`, an answer's or a batch's, "the
+ * connection is closed: an envelope past its maximumBodyBytes, N bytes"; a batch that does not
+ * read, "the connection is closed: a batch that does not read, …", saying what of it does not;
+ * an executor's own failure, "the HTTP executor failed: …", keeping its cause; each once,
+ * before its `close`, so a listener that throws keeps the close told. A server gone, a
+ * refusal of its own, a redirect, a timeout, an answer of another type and a network that failed
+ * tell their `close` alone.
+ *
  * @example
  * const client = createHTTPTransportClient();
  * client.on('message', ({ data }) => {});
@@ -299,9 +329,17 @@ export const createHTTPTransportClient = (
       // whether the URL of the last connect is secure
       let isSecure = false;
 
+      const execute = (url: string, init: IFetchInit): Promise<IFetchResponseLike> => {
+        try {
+          return fetchImpl(url, init);
+        } catch (reason) {
+          return Promise.reject(toError(reason));
+        }
+      };
+
       // a DELETE nobody waits on, which outlives a page that is closing
       const release = ({ connectionToken, url }: IDrawn): void => {
-        fetchImpl(url, {
+        void execute(url, {
           headers: { [CONNECTION_TOKEN_HEADER]: connectionToken },
           keepalive: true,
           method: 'DELETE',
@@ -309,8 +347,26 @@ export const createHTTPTransportClient = (
         }).then(drain, noop);
       };
 
-      // the connection is gone: its exchanges abort, and the client closes, as over a socket dropped
-      const lose = (connection: IDrawn, { isReleased }: { isReleased: boolean }): void => {
+      // the platform's network failure retries a listen; an executor's own failure ends it
+      const executorFailureOf = (
+        reason: unknown,
+        signal: AbortSignal
+      ): GenericError | undefined => {
+        if (signal.aborted || reason instanceof TypeError) {
+          return undefined;
+        }
+        return new GenericError(`the HTTP executor failed: ${reasonMessage(reason)}`, {
+          cause: reason,
+        });
+      };
+
+      // the connection is gone: its exchanges abort, and the client closes, as over a socket
+      // dropped; one this side failed of its own tells why on `error` first, then its close all the
+      // same, a listener of `error` that throws its platform's (spec 15.1)
+      const lose = (
+        connection: IDrawn,
+        { failure, isReleased }: { failure?: GenericError | undefined; isReleased: boolean }
+      ): void => {
         if (drawn !== connection) {
           return;
         }
@@ -325,7 +381,14 @@ export const createHTTPTransportClient = (
 
         if (!client.isReconnecting()) {
           setReadyStateClosed(client);
-          tell(CLOSE_EVENT, [false, false]);
+
+          try {
+            if (failure !== undefined) {
+              client.emit(ERROR_EVENT, failure);
+            }
+          } finally {
+            tell(CLOSE_EVENT, [false, false]);
+          }
         }
       };
 
@@ -350,22 +413,40 @@ export const createHTTPTransportClient = (
 
         const declared = Number(response.headers.get('content-length') ?? Number.NaN);
 
-        if (typeOf(response) !== BEAD_MEDIA_TYPE || declared > maximumBodyBytes) {
+        if (typeOf(response) !== BEAD_MEDIA_TYPE) {
           drain(response);
 
           return (lose(connection, { isReleased: true }), undefined);
+        }
+
+        if (declared > maximumBodyBytes) {
+          drain(response);
+
+          return (
+            lose(connection, { failure: pastBoundOf(maximumBodyBytes), isReleased: true }),
+            undefined
+          );
         }
 
         let body: ArrayBuffer;
 
         try {
           body = await response.arrayBuffer();
-        } catch {
-          return (lose(connection, { isReleased: true }), undefined);
+        } catch (reason) {
+          return (
+            lose(connection, {
+              failure: executorFailureOf(reason, connection.controller.signal),
+              isReleased: true,
+            }),
+            undefined
+          );
         }
 
         if (body.byteLength > maximumBodyBytes) {
-          return (lose(connection, { isReleased: true }), undefined);
+          return (
+            lose(connection, { failure: pastBoundOf(maximumBodyBytes), isReleased: true }),
+            undefined
+          );
         }
 
         // an exchange ended empty — cancelled — has nothing to say, and one past its connection's
@@ -377,13 +458,12 @@ export const createHTTPTransportClient = (
         return undefined;
       };
 
-      // one listen: each envelope it brings back heard as it comes whole, `cursor` advanced before —
-      // or what came instead: nothing, the connection gone, a refusal of the server's, a batch that
-      // does not read, or the listen lost before it brought anything whole
+      // one listen: each envelope heard as it comes whole, `cursor` advanced before — or what came
+      // instead, the error that fails the connection among it
       const listenOnce = async (
         connection: IDrawn,
         cursor: { after: number }
-      ): Promise<'broken' | 'gone' | 'heard' | 'lost' | 'nothing' | 'refused'> => {
+      ): Promise<'followed' | 'gone' | 'heard' | 'lost' | 'nothing' | 'refused' | GenericError> => {
         let response: IFetchResponseLike;
 
         // * at the connection's one URL, its counts in fields: a moving URL is a preflight each time
@@ -399,13 +479,13 @@ export const createHTTPTransportClient = (
             redirect: 'manual',
             signal: connection.controller.signal,
           });
-        } catch {
-          return 'lost';
+        } catch (reason) {
+          return executorFailureOf(reason, connection.controller.signal) ?? 'lost';
         }
 
         // followed all the same: its batch is never read, and listening again would go the same way
         if (isFollowed(response)) {
-          return (drain(response), 'broken');
+          return (drain(response), 'followed');
         }
 
         if (response.status !== 200 || typeOf(response) !== BEAD_BATCH_MEDIA_TYPE) {
@@ -426,11 +506,12 @@ export const createHTTPTransportClient = (
         }
 
         // numbered from the one after the last it heard, or it is no batch of this listen's
-        if (
-          integerOf(response.headers.get(SEQUENCE_HEADER)) !== cursor.after + 1 ||
-          response.body === null
-        ) {
-          return (drain(response), 'broken');
+        if (integerOf(response.headers.get(SEQUENCE_HEADER)) !== cursor.after + 1) {
+          return (drain(response), unreadOf(`its bead-sequence not ${String(cursor.after + 1)}`));
+        }
+
+        if (response.body === null) {
+          return unreadOf('it holds no envelope');
         }
 
         const reader = response.body.getReader();
@@ -446,8 +527,8 @@ export const createHTTPTransportClient = (
           for (let read = await reader.read(); !read.done; read = await reader.read()) {
             const envelopes = envelopesOf(reading, { chunk: read.value, limit: maximumBodyBytes });
 
-            if (envelopes === undefined) {
-              return 'broken';
+            if (envelopes instanceof GenericError) {
+              return envelopes;
             }
 
             for (const envelope of envelopes) {
@@ -461,15 +542,20 @@ export const createHTTPTransportClient = (
               hear(envelope.buffer, { mayOvertake: true });
             }
           }
-        } catch {
+        } catch (reason) {
           // cut on its way: what came whole was heard, and the rest comes again
-          return heard > 0 ? 'heard' : 'lost';
+          return (
+            executorFailureOf(reason, connection.controller.signal) ??
+            (heard > 0 ? 'heard' : 'lost')
+          );
         }
 
         // ended where an envelope ends, one at least; anything else is no batch
-        return heard > 0 && reading.envelope === undefined && reading.lengthFilled === 0
-          ? 'heard'
-          : 'broken';
+        if (reading.envelope !== undefined || reading.lengthFilled > 0) {
+          return unreadOf('it ends within an envelope');
+        }
+
+        return heard > 0 ? 'heard' : unreadOf('it holds no envelope');
       };
 
       // a wait between two listens, which `signal` cuts short: the connection's end, or the end of
@@ -535,6 +621,10 @@ export const createHTTPTransportClient = (
               continue;
             }
 
+            if (listened instanceof GenericError) {
+              return (lose(connection, { failure: listened, isReleased: true }), undefined);
+            }
+
             if (listened !== 'heard' && listened !== 'nothing') {
               return (lose(connection, { isReleased: listened !== 'gone' }), undefined);
             }
@@ -577,7 +667,7 @@ export const createHTTPTransportClient = (
           const url = `${secured ? 'https' : 'http'}://${authority}:${String(port)}${pathname.replace(/^\/?(.*)/u, '/$1')}`;
 
           isSecure = isSecureUrl(url);
-          const attempt = new AbortController();
+          const attempt = { controller: new AbortController(), isDisposed: false };
           let connection: IDrawn | undefined;
           let opened: IDrawn;
 
@@ -588,7 +678,10 @@ export const createHTTPTransportClient = (
                   setReadyStateConnecting(client);
                 }
 
-                rejectConnect = reject;
+                rejectConnect = (reason) => {
+                  attempt.isDisposed = true;
+                  reject(reason);
+                };
 
                 fetchImpl(url, {
                   headers: {
@@ -597,7 +690,7 @@ export const createHTTPTransportClient = (
                   },
                   method: 'POST',
                   redirect: 'manual',
-                  signal: attempt.signal,
+                  signal: attempt.controller.signal,
                 }).then(
                   (response) => {
                     const connectionToken = response.headers.get(CONNECTION_TOKEN_HEADER);
@@ -644,6 +737,12 @@ export const createHTTPTransportClient = (
                       url,
                     };
 
+                    if (attempt.controller.signal.aborted || attempt.isDisposed) {
+                      release(connection);
+                      connection = undefined;
+                      return undefined;
+                    }
+
                     return (resolve(connection), undefined);
                   },
                   (reason: unknown) => {
@@ -653,10 +752,14 @@ export const createHTTPTransportClient = (
               },
               { clock: client.clock, signal, timeout }
             );
+
+            if (attempt.isDisposed) {
+              throw new ConnectError('the transport client was disposed as it connected');
+            }
           } catch (reason) {
             // given up — timed out, cancelled, disposed — as it came: the connection drawn meanwhile
             // is let go, and the server told
-            attempt.abort();
+            attempt.controller.abort();
 
             if (connection !== undefined) {
               release(connection);
@@ -691,6 +794,7 @@ export const createHTTPTransportClient = (
 
           setReadyStateClosing(client);
           drawn = undefined;
+          let failure: GenericError | undefined;
 
           if (isQuick) {
             connection.controller.abort();
@@ -699,6 +803,8 @@ export const createHTTPTransportClient = (
             // the server ends it first, so what waits there learns it; then what waits here goes. Its
             // bound is the platform's, on the real clock, as a close handshake's: it bounds the
             // platform's own exchange with a server that does not answer (decision 0011)
+            // oxlint-disable-next-line no-restricted-properties -- a disconnect's bound is the platform's
+            const signal = AbortSignal.timeout(DISCONNECT_TIMEOUT);
             try {
               drain(
                 await fetchImpl(connection.url, {
@@ -706,12 +812,11 @@ export const createHTTPTransportClient = (
                   keepalive: true,
                   method: 'DELETE',
                   redirect: 'manual',
-                  // oxlint-disable-next-line no-restricted-properties -- a disconnect's bound is the platform's
-                  signal: AbortSignal.timeout(DISCONNECT_TIMEOUT),
+                  signal,
                 })
               );
-            } catch {
-              /* gone already, or unreachable: the connection ends here all the same */
+            } catch (reason) {
+              failure = executorFailureOf(reason, signal);
             }
 
             connection.controller.abort();
@@ -719,7 +824,13 @@ export const createHTTPTransportClient = (
 
           client.socket = null;
           setReadyStateClosed(client);
-          tell(CLOSE_EVENT, [isClean, isQuick]);
+          try {
+            if (failure !== undefined) {
+              client.emit(ERROR_EVENT, failure);
+            }
+          } finally {
+            tell(CLOSE_EVENT, [isClean, isQuick]);
+          }
         },
 
         send: ({ credential, data }) => {
@@ -740,7 +851,7 @@ export const createHTTPTransportClient = (
           }
 
           return createPromise((resolve, reject) => {
-            fetchImpl(connection.url, {
+            execute(connection.url, {
               body: data as BodyInit,
               headers: {
                 ...(credential === undefined ? {} : { authorization: credential }),
@@ -750,72 +861,85 @@ export const createHTTPTransportClient = (
               method: 'POST',
               redirect: 'manual',
               signal: connection.controller.signal,
-            }).then(
-              (response) => {
-                // followed all the same: whatever the other place answered goes unheard, and the
-                // connection whose token crossed is lost
-                if (isFollowed(response)) {
+            })
+              .then(
+                (response) => {
+                  // followed all the same: whatever the other place answered goes unheard, and the
+                  // connection whose token crossed is lost
+                  if (isFollowed(response)) {
+                    drain(response);
+                    resolve();
+
+                    return (lose(connection, { isReleased: true }), undefined);
+                  }
+
+                  if (response.ok) {
+                    resolve();
+
+                    return readAnswer(connection, response);
+                  }
+
+                  // a redirect's mark is left unread: no refusal of the transport's own is one
+                  const refusal = isRedirect(response.status)
+                    ? null
+                    : response.headers.get(REFUSAL_HEADER);
+
                   drain(response);
+
+                  // a status nothing marked — a gateway's — or a redirect says nothing of whether the
+                  // server had it: lost
+                  if (refusal === null) {
+                    resolve();
+
+                    return (lose(connection, { isReleased: true }), undefined);
+                  }
+
+                  // refused by the transport before the router saw it: nothing of it was tried
+                  reject(
+                    new GenericError(
+                      `the server refused the exchange: ${String(response.status)} ${refusal}`
+                    )
+                  );
+
+                  // its connection gone: told after the refusal is heard, so its caller learns first
+                  // that it was never tried
+                  if (refusal === CONNECTION_UNKNOWN) {
+                    const loseIt = (): void => {
+                      lose(connection, { isReleased: false });
+                    };
+
+                    // oxlint-disable-next-line no-restricted-properties -- a deferral to the next turn, which no clock times
+                    globalThis.setTimeout(loseIt, 0);
+                  }
+
+                  return undefined;
+                },
+                (reason: unknown) => {
+                  // lost before its head: whether the server had it is not known, so it counts as
+                  // handed over, and the connection closes, as a dropped socket's
                   resolve();
-
-                  return (lose(connection, { isReleased: true }), undefined);
+                  lose(connection, {
+                    failure: executorFailureOf(reason, connection.controller.signal),
+                    isReleased: true,
+                  });
                 }
-
-                if (response.ok) {
-                  resolve();
-
-                  return readAnswer(connection, response);
-                }
-
-                // a redirect's mark is left unread: no refusal of the transport's own is one
-                const refusal = isRedirect(response.status)
-                  ? null
-                  : response.headers.get(REFUSAL_HEADER);
-
-                drain(response);
-
-                // a status nothing marked — a gateway's — or a redirect says nothing of whether the
-                // server had it: lost
-                if (refusal === null) {
-                  resolve();
-
-                  return (lose(connection, { isReleased: true }), undefined);
-                }
-
-                // refused by the transport before the router saw it: nothing of it was tried
-                reject(
-                  new GenericError(
-                    `the server refused the exchange: ${String(response.status)} ${refusal}`
-                  )
-                );
-
-                // its connection gone: told after the refusal is heard, so its caller learns first
-                // that it was never tried
-                if (refusal === CONNECTION_UNKNOWN) {
-                  const loseIt = (): void => {
-                    lose(connection, { isReleased: false });
-                  };
-
-                  // oxlint-disable-next-line no-restricted-properties -- a deferral to the next turn, which no clock times
-                  globalThis.setTimeout(loseIt, 0);
-                }
-
-                return undefined;
-              },
-              () => {
-                // lost before its head: whether the server had it is not known, so it counts as
-                // handed over, and the connection closes, as a dropped socket's
+              )
+              .catch((reason: unknown) => {
+                // a supplied answer can fail as its fields or its body are read, after its head
                 resolve();
-                lose(connection, { isReleased: true });
-              }
-            );
+                lose(connection, {
+                  failure:
+                    executorFailureOf(reason, connection.controller.signal) ?? toError(reason),
+                  isReleased: true,
+                });
+              });
           });
         },
 
         [dispose]: () => {
           const connection = drawn;
 
-          rejectConnect?.(new ConnectError('disposed while connecting'));
+          rejectConnect?.(new ConnectError('the transport client was disposed as it connected'));
           drawn = undefined;
           client.socket = null;
 

@@ -3,8 +3,9 @@
 // The C# messages a project's `proto` bindings name, written by protoc's C# generator, the stock one,
 // from buf's set alone (`--descriptor_set_in`), never compiling a `.proto` (decision 0022): the files
 // that declare them and every file of the project they import, public; then `bead/options.proto`,
-// where they import it, in a run of its own with `internal_access`, so each project keeps its copy
-// to itself. Both runs take `base_namespace=`, protoc's own option, so each file lands in its
+// and protovalidate's `buf/validate/validate.proto` where an output keeps its options, where they
+// import them, in a run of their own with `internal_access`, so each project keeps its copy to
+// itself. Both runs take `base_namespace=`, protoc's own option, so each file lands in its
 // namespace's folder, `Bead/Messages/V1/Messages.cs`, and two files of one name in two packages
 // never meet.
 //
@@ -25,9 +26,11 @@ import { FileDescriptorSetSchema } from '@bufbuild/protobuf/wkt';
 import { temporaryFolderOf } from './config.ts';
 import { InputError } from './diagnostics.ts';
 import type { IBlueprint } from './model/blueprint.ts';
-import { OPTIONS_FILE } from './roots.ts';
+import { BEADC_FILES } from './roots.ts';
 import { pascalOf } from './targets/names.ts';
 import type { IGeneratedFile } from './targets/target.ts';
+import { withoutHttpOptions } from './http-options.ts';
+import { withoutValidateOptions } from './validate-options.ts';
 import { IMAGE } from './wrappers.ts';
 
 // types
@@ -180,9 +183,19 @@ export const requireProtoc = (): IFoundProtoc => {
  * its pin, or protoc's own refusal, in its words.
  */
 export const generateCSharpMessages = (
-  set: Uint8Array,
-  options: { readonly blueprint: IBlueprint; readonly folder?: string }
+  given: Uint8Array,
+  options: {
+    readonly blueprint: IBlueprint;
+    readonly folder?: string;
+    readonly keepValidateOptions?: boolean;
+    readonly keepHttpOptions?: boolean;
+  }
 ): readonly IGeneratedFile[] => {
+  // * protovalidate's options taken out of what protoc is handed, beadc compiling a request's rules
+  // itself, unless the output keeps them (decision 0035)
+  // * and google.api.http, beadc writing a route table itself, unless the output keeps it (0037)
+  const validated = options.keepValidateOptions === true ? given : withoutValidateOptions(given);
+  const set = options.keepHttpOptions === true ? validated : withoutHttpOptions(validated);
   const descriptors = fromBinary(FileDescriptorSetSchema, set);
   const dependencies = new Map(
     descriptors.file.map((file) => {
@@ -215,7 +228,7 @@ export const generateCSharpMessages = (
     'protoc-',
     options.folder === undefined ? {} : { folder: options.folder }
   );
-  // in the set's order, which is buf's, Bead's options in a run of their own
+  // in the set's order, which is buf's, beadc's own files in a run of their own
   const ordered = descriptors.file
     .map((file) => {
       return file.name;
@@ -228,14 +241,14 @@ export const generateCSharpMessages = (
       out: join(folder, 'public'),
       option: 'base_namespace=',
       files: ordered.filter((name) => {
-        return name !== OPTIONS_FILE;
+        return !BEADC_FILES.has(name);
       }),
     },
     {
       out: join(folder, 'internal'),
       option: 'internal_access,base_namespace=',
       files: ordered.filter((name) => {
-        return name === OPTIONS_FILE;
+        return BEADC_FILES.has(name);
       }),
     },
   ];

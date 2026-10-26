@@ -141,7 +141,7 @@ public sealed class InteropTests(InteropTests.TypeScriptServer server) : IClassF
     // the credential given
     private async Task<Connected> ConnectedOver(string transport, string? credential = null)
     {
-        var (port, httpPort) = await server.Ports();
+        var (port, httpPort, _) = await server.Ports();
 
         if (transport == WebSocket)
         {
@@ -242,11 +242,49 @@ public sealed class InteropTests(InteropTests.TypeScriptServer server) : IClassF
 
         var echo = InteropProcedures.Echo.Procedure;
 
-        Assert.Equal((ushort)ProtocolCode.ProcedureUnknown, (await FailureOf(RequesterOf(client, (echo with { ProcedureId = 99 }, null))(JsonOf("null")))).Code);
-        Assert.Equal((ushort)ProtocolCode.ServiceUnknown, (await FailureOf(RequesterOf(client, (echo with { ServiceId = 9 }, null))(JsonOf("null")))).Code);
-        Assert.Equal("this procedure admits nobody", (await FailureOf(client.Interop.Denied(JsonOf("null")))).Detail);
+        var unknownProcedure = await FailureOf(RequesterOf(client, (echo with { ProcedureId = 99 }, null))(JsonOf("null")));
+        var unknownService = await FailureOf(RequesterOf(client, (echo with { ServiceId = 9 }, null))(JsonOf("null")));
+        var denied = await FailureOf(client.Interop.Denied(JsonOf("null")));
+
+        Assert.Equal(((ushort)ProtocolCode.ProcedureUnknown, FailureScope.Protocol), (unknownProcedure.Code, unknownProcedure.Scope));
+        Assert.Equal(((ushort)ProtocolCode.ServiceUnknown, FailureScope.Protocol), (unknownService.Code, unknownService.Scope));
+        Assert.Equal(((ushort)ProtocolCode.AccessDenied, "this procedure admits nobody"), (denied.Code, denied.Detail));
         Assert.Equal((ushort)ProtocolCode.ProcedureFailed, (await FailureOf(client.Interop.Broken(JsonOf("null")))).Code);
         Assert.Equal((ushort)ProtocolCode.PayloadUndecodable, (await FailureOf(RequesterOf(client, (echo, new NotJson()))(JsonOf("null")))).Code);
+    }
+
+    // * the detail as the server writes it, lines of canonical JSON, byte for byte
+    [Theory(Skip = Reason, SkipUnless = nameof(IsInterop))]
+    [InlineData(WebSocket)]
+    [InlineData(Http)]
+    public async Task A_request_its_rules_refuse_is_answered_PAYLOAD_INVALID_its_violations_in_its_detail(string transport)
+    {
+        await using var client = await ConnectedOver(transport);
+
+        var failure = await Assert.ThrowsAsync<FailureException>(() =>
+        {
+            return client.Interop.Checked(JsonOf("{\"names\":[\"ab\",\"\",\"abcd\"]}"))().WaitAsync(Patience, Cancelled);
+        });
+
+        Assert.Equal((ushort)ProtocolCode.PayloadInvalid, failure.Code);
+        Assert.Equal(FailureScope.Protocol, failure.Scope);
+        Assert.Equal(
+            string.Join(
+                '\n',
+                "{\"bounds\":{\"min_len\":\"1\"},\"fieldPath\":\"names[1]\",\"message\":\"must be at least 1 characters\",\"ruleId\":\"string.min_len\"}",
+                "{\"bounds\":{\"max_len\":\"3\"},\"fieldPath\":\"names[2]\",\"message\":\"must be at most 3 characters\",\"ruleId\":\"string.max_len\"}",
+                "{\"more\":0}"),
+            failure.Detail);
+    }
+
+    [Theory(Skip = Reason, SkipUnless = nameof(IsInterop))]
+    [InlineData(WebSocket)]
+    [InlineData(Http)]
+    public async Task Checked_answers_the_count_of_the_names_its_rules_take(string transport)
+    {
+        await using var client = await ConnectedOver(transport);
+
+        Assert.Equal(2, (await client.Interop.Checked(JsonOf("{\"names\":[\"a\",\"bc\"]}"))().WaitAsync(Patience, Cancelled)).GetInt32());
     }
 
     [Theory(Skip = Reason, SkipUnless = nameof(IsInterop))]
@@ -365,9 +403,9 @@ public sealed class InteropTests(InteropTests.TypeScriptServer server) : IClassF
 
         Assert.Equal((ushort)ProtocolCode.SessionRequired, refused.Code);
         Assert.Equal("\"ada\"", (await client.Interop.Login(JsonOf("{\"name\":\"ada\"}"))().WaitAsync(Patience, Cancelled)).GetRawText());
-        Assert.NotNull(client.Router.SessionToken);
+        Assert.Matches("^[A-Za-z0-9_-]{22}$", client.Router.SessionToken.ToString());
         Assert.Equal("\"ada\"", (await client.Interop.Whoami(JsonOf("null"))().WaitAsync(Patience, Cancelled)).GetRawText());
-        await client.Interop.Logout(JsonOf("null"))().WaitAsync(Patience, Cancelled);
+        Assert.Equal("null", (await client.Interop.Logout(JsonOf("null"))().WaitAsync(Patience, Cancelled)).GetRawText());
         Assert.Null(client.Router.SessionToken);
     }
 
@@ -472,11 +510,15 @@ public sealed class InteropTests(InteropTests.TypeScriptServer server) : IClassF
         {
             return System.Buffers.Text.Base64Url.EncodeToString(JsonSerializer.SerializeToUtf8Bytes(value));
         };
+        var now = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
         var signingInput = $"{part(new Dictionary<string, string> { ["alg"] = "HS256", ["typ"] = "at+jwt" })}.{part(new Dictionary<string, object>
         {
-            ["aud"] = "bead-interop",
-            ["exp"] = DateTimeOffset.UtcNow.AddHours(1).ToUnixTimeSeconds(),
+            ["aud"] = InteropCredentials.Of(TimeProvider.System).Audience!,
+            ["client_id"] = "bead-interop-client",
+            ["exp"] = now + 3_600,
+            ["iat"] = now,
             ["iss"] = key.Issuer,
+            ["jti"] = "at-interop-0001",
             ["sub"] = "grace",
         })}";
         var signature = System.Security.Cryptography.HMACSHA256.HashData(
@@ -485,6 +527,8 @@ public sealed class InteropTests(InteropTests.TypeScriptServer server) : IClassF
 
         client.Router.Credential = Credential.Jwt($"{signingInput}.{System.Buffers.Text.Base64Url.EncodeToString(signature)}");
 
+        // a login opens the connection's session, whatever the call presents
+        Assert.Equal("\"ada\"", (await client.Interop.Login(JsonOf("{\"name\":\"ada\"}"))().WaitAsync(Patience, Cancelled)).GetRawText());
         Assert.Equal("\"grace\"", (await client.Interop.Whoami(JsonOf("null"))().WaitAsync(Patience, Cancelled)).GetRawText());
 
         var refused = await Assert.ThrowsAsync<FailureException>(() =>
@@ -495,6 +539,9 @@ public sealed class InteropTests(InteropTests.TypeScriptServer server) : IClassF
         Assert.Equal(((ushort)ProtocolCode.AccessDenied, FailureOrigin.Peer), (refused.Code, refused.Origin));
         Assert.Equal("a call in a credential's session ends no connection's session", refused.Detail);
         Assert.NotNull(client.Router.Credential);
+
+        // the connection's session stays, a call presenting none running in it
+        Assert.Equal("\"ada\"", (await client.Interop.Whoami(JsonOf("null"))(new RequestOptions { Credential = Credential.None }).WaitAsync(Patience, Cancelled)).GetRawText());
     }
 
     [Theory(Skip = Reason, SkipUnless = nameof(IsInterop))]
@@ -502,6 +549,18 @@ public sealed class InteropTests(InteropTests.TypeScriptServer server) : IClassF
     [InlineData(Http)]
     public async Task An_ELSEWHERE_goes_in_each_POST_s_Authorization_over_HTTP_and_in_its_upgrade_s_over_a_WebSocket_whoami_answers_the_sub_it_names(string transport)
     {
+        if (transport == WebSocket)
+        {
+            // its upgrade carries none: a call presenting one fails before it goes
+            await using var bare = await ConnectedOver(transport);
+            var none = await Assert.ThrowsAsync<FailureException>(() =>
+            {
+                return bare.Interop.Whoami(JsonOf("null"))(new RequestOptions { Credential = Credential.Elsewhere("Interop sub=ada") }).WaitAsync(Patience, Cancelled);
+            });
+
+            Assert.Equal(((ushort)ProtocolCode.DestinationUnreachable, FailureOrigin.Local), (none.Code, none.Origin));
+        }
+
         // * the one place one side's client writes the field and the other side's server reads it
         await using var client = await ConnectedOver(transport, "Interop sub=ada");
 
@@ -633,10 +692,10 @@ public sealed class InteropTests(InteropTests.TypeScriptServer server) : IClassF
     {
         private readonly SemaphoreSlim _starting = new(1, 1);
         private Process? _process;
-        private (int Port, int HttpPort) _ports;
+        private (int Port, int HttpPort, int GatewayPort) _ports;
 
         /// <summary>The ports it listens on, over WebSocket and over HTTP, once started.</summary>
-        public async Task<(int Port, int HttpPort)> Ports()
+        public async Task<(int Port, int HttpPort, int GatewayPort)> Ports()
         {
             await _starting.WaitAsync(TestContext.Current.CancellationToken);
 
@@ -693,7 +752,7 @@ public sealed class InteropTests(InteropTests.TypeScriptServer server) : IClassF
             return Path.Combine(Root(), "implementations", "typescript");
         }
 
-        private static async Task<(Process Process, (int Port, int HttpPort) Ports)> Start()
+        private static async Task<(Process Process, (int Port, int HttpPort, int GatewayPort) Ports)> Start()
         {
             if (!CanStartTypeScript.Value)
             {
@@ -715,9 +774,9 @@ public sealed class InteropTests(InteropTests.TypeScriptServer server) : IClassF
                 {
                     using var document = JsonDocument.Parse(line);
 
-                    if (document.RootElement.TryGetProperty("port", out var port) && document.RootElement.TryGetProperty("httpPort", out var httpPort))
+                    if (document.RootElement.TryGetProperty("port", out var port) && document.RootElement.TryGetProperty("httpPort", out var httpPort) && document.RootElement.TryGetProperty("gatewayPort", out var gatewayPort))
                     {
-                        return (process, (port.GetInt32(), httpPort.GetInt32()));
+                        return (process, (port.GetInt32(), httpPort.GetInt32(), gatewayPort.GetInt32()));
                     }
                 }
                 catch (JsonException)

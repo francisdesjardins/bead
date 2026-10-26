@@ -9,6 +9,7 @@ export const RECONNECT_EVENT = 'reconnect';
 export const REFUSAL_EVENT = 'refusal';
 
 export const TRANSPORT_HTTP = 'HTTP';
+export const TRANSPORT_MEMORY = 'MEMORY';
 export const TRANSPORT_WORKER = 'WORKER';
 export const TRANSPORT_WS = 'WS';
 
@@ -63,16 +64,32 @@ export const CONNECTION_UNKNOWN = 'connection-unknown';
 /**
  * What a worker transport posts besides envelopes, which go as bytes: a connect, with the port its
  * connection takes; its acceptance, on that port; and the close of either end, which a port does not
- * tell by itself.
+ * tell by itself — clean, or, from the client, lost.
  */
 export const WORKER_MESSAGES = Object.freeze({
   CLOSE: 'bead-close',
   CONNECT: 'bead-connect',
+  LOST: 'bead-lost',
   OPEN: 'bead-open',
 });
 
+/**
+ * How long a WebSocket's close handshake may take by default, a client's or a server's: a peer that
+ * never answers is dropped after it (spec 15.3).
+ */
+export const CLOSE_TIMEOUT = 5_000;
+
 /** `'arraybuffer'` rather than `'blob'`: an envelope is read synchronously, and a `Blob` cannot be. */
 export const TRANSPORT_WEBSOCKET_BINARYTYPE = 'arraybuffer' as const;
+
+/**
+ * What `ws` codes the errors of what it reads by: each a protocol error, or a message past its
+ * `maxPayload`, {@link WS_TOO_BIG_CODE}, each failing its connection (RFC 6455 §7.1.7).
+ */
+export const WS_ERROR_CODE_PREFIX = 'WS_ERR_';
+
+/** The code `ws` gives a message past its `maxPayload`, which fails its connection with 1009. */
+export const WS_TOO_BIG_CODE = 'WS_ERR_UNSUPPORTED_MESSAGE_LENGTH';
 
 // types
 
@@ -85,6 +102,7 @@ export type RECONNECT_EVENT = typeof RECONNECT_EVENT;
 export type REFUSAL_EVENT = typeof REFUSAL_EVENT;
 
 export type TRANSPORT_HTTP = typeof TRANSPORT_HTTP;
+export type TRANSPORT_MEMORY = typeof TRANSPORT_MEMORY;
 export type TRANSPORT_WORKER = typeof TRANSPORT_WORKER;
 export type TRANSPORT_WS = typeof TRANSPORT_WS;
-export type TRANSPORTS = TRANSPORT_HTTP | TRANSPORT_WORKER | TRANSPORT_WS;
+export type TRANSPORTS = TRANSPORT_HTTP | TRANSPORT_MEMORY | TRANSPORT_WORKER | TRANSPORT_WS;

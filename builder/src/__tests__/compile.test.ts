@@ -1,3 +1,14 @@
+import {
+  cpSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  rmdirSync,
+  rmSync,
+} from 'node:fs';
+import { tmpdir } from 'node:os';
+import { dirname, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { fromBinary } from '@bufbuild/protobuf';
@@ -5,7 +16,7 @@ import { BinaryReader } from '@bufbuild/protobuf/wire';
 import { type FileDescriptorProto, FileDescriptorSetSchema } from '@bufbuild/protobuf/wkt';
 import { expect, test } from '@playwright/test';
 
-import { compile } from '../compile.ts';
+import { compile, lintRules, OPTIONS_ROOT } from '../compile.ts';
 import { InputError } from '../diagnostics.ts';
 import { blueprintOf } from '../front-end/blueprint-of.ts';
 import { readSet } from '../front-end/input.ts';
@@ -16,6 +27,45 @@ const UNCOMPILED = fileURLToPath(new URL('../../test/proto/PROCEDURE_OPTIONS/', 
 // buf's ImageFileExtension, by the field number an image's file carries it at, and its is_import
 const IMAGE_FILE_EXTENSION = 8042;
 const IS_IMPORT = 1;
+
+test('compiles a project with its options on the project’s drive and removes the run’s copy', () => {
+  const folder = mkdtempSync(join(tmpdir(), 'beadc-other-drive-'));
+  const root = join(folder, 'proto');
+
+  try {
+    mkdirSync(root);
+    cpSync(FIXTURES, root, { recursive: true });
+
+    for (const image of [false, true]) {
+      expect(compile([root], { folder, image })).toEqual(compile([FIXTURES], { image }));
+    }
+    expect(compile([FIXTURES], { folder: relative(process.cwd(), FIXTURES) })).toEqual(
+      compile([FIXTURES])
+    );
+
+    // * a root at the project folder also contains the temporary module and an editor's copy.
+    cpSync(OPTIONS_ROOT, join(root, '.beadc/include'), { recursive: true });
+    expect(compile([root], { folder: root })).toEqual(compile([FIXTURES]));
+    expect(readdirSync(join(root, '.beadc'))).toEqual(['include']);
+    rmSync(join(root, '.beadc/include'), { recursive: true });
+    rmdirSync(join(root, '.beadc'));
+    expect(compile([root])).toEqual(compile([FIXTURES]));
+    expect(
+      lintRules([root], { folder, files: [join(root, 'bead/interop/v1/interop.proto')] })
+    ).toEqual([]);
+    expect(() => {
+      return compile([root], { folder, files: [join(root, 'absent.proto')] });
+    }).toThrow(InputError);
+    expect(() => {
+      return lintRules([root], { folder, files: [join(root, 'absent.proto')] });
+    }).toThrow(InputError);
+    expect(existsSync(join(folder, '.beadc'))).toBe(false);
+    expect(existsSync(join(root, '.beadc'))).toBe(false);
+  } finally {
+    expect(dirname(folder)).toBe(resolve(tmpdir()));
+    rmSync(folder, { recursive: true, force: true });
+  }
+});
 
 // whether buf's image marks `file` an import, read from its ImageFileExtension; none in a set
 const isImportOf = (file: FileDescriptorProto): boolean | undefined => {
@@ -51,8 +101,11 @@ test("compiles the roots after beadc's options, imports and source info included
   expect(names).toContain('google/protobuf/descriptor.proto');
   expect(names).toContain('bead/options.proto');
   expect(names).toContain('bead/interop/v1/interop.proto');
+  expect(names).toContain('buf/validate/validate.proto');
   expect(set.file.at(-1)?.sourceCodeInfo?.location.length).toBeGreaterThan(0);
-  expect(fromBinary(FileDescriptorSetSchema, compile([UNCOMPILED])).file.length).toBe(3);
+  // * the root's file, beadc's four and their imports: descriptor.proto, then the duration, the
+  // timestamp and the field mask protovalidate's options name, and googleapis' pair
+  expect(fromBinary(FileDescriptorSetSchema, compile([UNCOMPILED])).file.length).toBe(9);
 });
 
 test("buf's refusal is an input error, its messages as they came", () => {

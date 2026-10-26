@@ -54,6 +54,9 @@ const PORT = /^\d+$/u;
 // §8.2.1)
 const VISIBLE_FIELD = /^(?:[!-~](?:[\t -~]*[!-~])?)?$/u;
 
+// a target of visible ASCII alone, a URI's characters (RFC 3986 §2)
+const VISIBLE_TARGET = /^[!-~]*$/u;
+
 // the two schemes whose target in absolute-form names the request's authority, written as HTTP
 // servers read them, in lower case
 const ABSOLUTE_FORM = /^https?:\/\//u;
@@ -229,6 +232,27 @@ export const hasVisibleFields = (rawHeaders: readonly string[]): boolean => {
   }
 
   return true;
+};
+
+/**
+ * Whether a request's target, as it came, is one a server reads (spec 15.12): visible ASCII alone,
+ * a URI's characters (RFC 3986 §2), in its path and its query, in origin-form or absolute-form, and
+ * a path whose percent-decoding holds no NUL. A control character, HTAB and a bare CR among them, a
+ * space, DEL and an octet past ASCII, which a request carries as the character of its Latin-1 code,
+ * are none; any other percent-encoded octet is taken, `%00` in a query among them, and so are the
+ * visible characters a URI leaves out, a `#` among them, which opens no fragment. A request that
+ * holds another is answered 400 unmarked, or over HTTP/2 its stream reset, before anything else of
+ * it is judged.
+ */
+export const isVisibleTarget = (target: string | undefined): boolean => {
+  if (target === undefined) {
+    return true;
+  }
+
+  const index = target.indexOf('?');
+  const path = index === -1 ? target : target.slice(0, index);
+
+  return VISIBLE_TARGET.test(target) && !path.includes('%00');
 };
 
 /**
@@ -474,7 +498,7 @@ export const assertOrigins = (origins: readonly string[] | undefined): void => {
   for (const entry of origins ?? []) {
     if (entry === '*') {
       throw new ProgrammerError(
-        'origins has no wildcard: it names each origin a page comes from besides the server’s own'
+        'origins has no wildcard, not *: it names each origin a page comes from besides the server’s own'
       );
     }
 

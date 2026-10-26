@@ -5,19 +5,20 @@ public sealed class RouterLimitsTests
 {
     // constants
 
-    // limits that break one rule each, by the rule they break
+    // limits that break one rule each, by the words that refuse them: a limit out of its range by its
+    // name, and limits that do not hold together by the rule they break
     public static TheoryData<string, RouterLimits> Broken { get; } = new()
     {
-        { "every limit is above 0, but for the transfers and the detail", RouterLimits.Default with { WindowBytes = 0 } },
-        { "every limit is above 0, but for the transfers and the detail", RouterLimits.Default with { MaximumTransfers = -1 } },
-        { "every limit is above 0, but for the transfers and the detail", RouterLimits.Default with { MaximumDetailBytes = -1 } },
-        { "an envelope is 64 bytes at least", RouterLimits.Default with { MaximumEnvelopeBytes = 63, ChunkBytes = 63 } },
-        { "a chunk's envelope is 64 bytes at least, and an envelope at most", RouterLimits.Default with { ChunkBytes = 63 } },
-        { "a chunk's envelope is 64 bytes at least, and an envelope at most", RouterLimits.Default with { ChunkBytes = 1_024, MaximumEnvelopeBytes = 1_023 } },
-        { "a chunk's envelope is 64 bytes at least, and an envelope at most", RouterLimits.Default with { ChunkBytes = 2_049, MaximumEnvelopeBytes = 2_048 } },
-        { "a window holds two chunks at least, so a sender waits for no credit it is owed", RouterLimits.Default with { WindowBytes = (2 * LimitDefaults.ChunkBytes) - 1 } },
-        { "a payload fits in the budget of the transfers received", RouterLimits.Default with { BufferedBytesBudget = LimitDefaults.MaximumPayloadBytes - 1 } },
-        { "a payload fits in the budget of the transfers received", RouterLimits.Default with { MaximumPayloadBytes = 268_435_457 } },
+        { "WindowBytes is a whole number above 0, not 0", RouterLimits.Default with { WindowBytes = 0 } },
+        { "MaximumTransfers is a whole number, not -1", RouterLimits.Default with { MaximumTransfers = -1 } },
+        { "MaximumDetailBytes is a whole number, not -1", RouterLimits.Default with { MaximumDetailBytes = -1 } },
+        { "the router's limits do not hold together: an envelope is 64 bytes at least", RouterLimits.Default with { MaximumEnvelopeBytes = 63, ChunkBytes = 63 } },
+        { "the router's limits do not hold together: a chunk's envelope is 64 bytes at least, and an envelope at most", RouterLimits.Default with { ChunkBytes = 63 } },
+        { "the router's limits do not hold together: a chunk's envelope is 64 bytes at least, and an envelope at most", RouterLimits.Default with { ChunkBytes = 1_024, MaximumEnvelopeBytes = 1_023 } },
+        { "the router's limits do not hold together: a chunk's envelope is 64 bytes at least, and an envelope at most", RouterLimits.Default with { ChunkBytes = 2_049, MaximumEnvelopeBytes = 2_048 } },
+        { "the router's limits do not hold together: a window holds two chunks at least, so a sender waits for no credit it is owed", RouterLimits.Default with { WindowBytes = (2 * LimitDefaults.ChunkBytes) - 1 } },
+        { "the router's limits do not hold together: a payload fits in the budget of the transfers received", RouterLimits.Default with { BufferedBytesBudget = LimitDefaults.MaximumPayloadBytes - 1 } },
+        { "the router's limits do not hold together: a payload fits in the budget of the transfers received", RouterLimits.Default with { MaximumPayloadBytes = 268_435_457 } },
     };
 
     // definition
@@ -29,25 +30,25 @@ public sealed class RouterLimitsTests
         var limits = RouterLimits.Default;
 
         Assert.Equal(
-            (16_778_240, 1_048_576, 4_194_304, 16_777_216, 268_435_456, 4, 1_024, TimeSpan.FromSeconds(30), 1_024),
+            (16_778_240, 1_048_576, 4_194_304, 16_777_216, 268_435_456, 4, 1_024, TimeSpan.FromSeconds(30), 1_024, 64),
             (limits.MaximumEnvelopeBytes, limits.ChunkBytes, limits.WindowBytes, limits.MaximumPayloadBytes, limits.BufferedBytesBudget,
-                limits.MaximumTransfers, limits.MaximumChunkRuns, limits.TransferInactivityTimeout, limits.MaximumDetailBytes));
+                limits.MaximumTransfers, limits.MaximumChunkRuns, limits.TransferInactivityTimeout, limits.MaximumDetailBytes, limits.MaximumAnsweringCalls));
         Assert.Same(limits, limits.Validate());
 
-        // room for the longest request header between an envelope and its payload
-        Assert.True(limits.MaximumEnvelopeBytes - limits.MaximumPayloadBytes >= 40);
+        // a peer that splits nothing sends a whole payload in one envelope, the longest header before it
+        Assert.True(limits.MaximumEnvelopeBytes - limits.MaximumPayloadBytes >= 1_020);
     }
 
     [Theory]
     [MemberData(nameof(Broken))]
-    public void Refuses_limits_that_do_not_hold_together_each_by_its_own_rule(string rule, RouterLimits limits)
+    public void Refuses_limits_that_do_not_hold_together_each_by_its_own_rule(string words, RouterLimits limits)
     {
         ArgumentNullException.ThrowIfNull(limits);
         var failure = Assert.Throws<ArgumentException>(() =>
         {
             return limits.Validate();
         });
-        Assert.Equal($"the router's limits do not hold together: {rule}", failure.Message);
+        Assert.Equal(words, failure.Message);
 
         // the edges hold, a transfer's inactivity of a millisecond among them
         var edges = RouterLimits.Default with
@@ -77,10 +78,10 @@ public sealed class RouterLimitsTests
     {
         foreach (var maximumAnsweringCalls in new[] { 0, -1, int.MinValue })
         {
-            Assert.Throws<ArgumentException>(() =>
+            Assert.Equal($"MaximumAnsweringCalls is a whole number above 0, not {maximumAnsweringCalls}", Assert.Throws<ArgumentException>(() =>
             {
                 return (RouterLimits.Default with { MaximumAnsweringCalls = maximumAnsweringCalls }).Validate();
-            });
+            }).Message);
         }
 
         // a call at once holds, and the default is 64

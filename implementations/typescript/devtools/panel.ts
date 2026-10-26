@@ -36,7 +36,7 @@ import { spanOfCalls } from './model/state';
 import { clockOf, numberOf } from './model/words';
 import { callRowsOf, envelopeListRowsOf } from './views/calls';
 import { type DetailTab, detailOf } from './views/detail';
-import { make, noteOf } from './views/dom';
+import { make, noteOf, replaceKeeping } from './views/dom';
 import { metricsViewOf } from './views/metrics';
 import { stateViewOf } from './views/state';
 import { fitThreadLabels } from './views/thread';
@@ -220,6 +220,8 @@ export const startPanel = (host: IPanelHost): void => {
   };
   // the share Enter restores, by placement, once it has sent the detail to its least
   const restored: Record<Placement, number | undefined> = { bottom: undefined, right: undefined };
+  // the call and tab the detail last drew, which a redraw of the same keeps as its reader left it
+  let detailShown: string | undefined;
 
   const placementOf = (): Placement => {
     if (split.layout === 'auto') {
@@ -613,6 +615,7 @@ export const startPanel = (host: IPanelHost): void => {
     const call = selectedCall();
 
     if (call === undefined) {
+      detailShown = undefined;
       shown.detail.replaceChildren(
         ...(state.hidden === undefined ? [] : [noteOf(state.hidden)]),
         noteOf(
@@ -623,19 +626,27 @@ export const startPanel = (host: IPanelHost): void => {
       return;
     }
 
-    shown.detail.replaceChildren(
-      ...detailOf(call, {
-        context: {
-          client: clientOf(call.source),
-          copy,
-          earlier: earlierOf(call),
-          nameOf,
-          now: Date.now(),
-          openResource: host.openResource,
-        },
-        tab: state.detailTab,
-      })
-    );
+    // * what a reader left in a call's detail is kept while that call and tab stay shown alone
+    const subject = `${String(call.key)} ${state.detailTab}`;
+    const nodes = detailOf(call, {
+      context: {
+        client: clientOf(call.source),
+        copy,
+        earlier: earlierOf(call),
+        nameOf,
+        now: Date.now(),
+        openResource: host.openResource,
+      },
+      tab: state.detailTab,
+    });
+
+    if (subject === detailShown) {
+      replaceKeeping(shown.detail, nodes);
+    } else {
+      shown.detail.replaceChildren(...nodes);
+      detailShown = subject;
+    }
+
     fitThreadLabels(shown.detail);
   };
 
@@ -723,7 +734,7 @@ export const startPanel = (host: IPanelHost): void => {
           return;
         }
 
-        shown.state.replaceChildren(
+        replaceKeeping(shown.state, [
           ...stateViewOf({
             at: state.at,
             calls,
@@ -735,10 +746,10 @@ export const startPanel = (host: IPanelHost): void => {
               draw();
             },
             span: spanOfCalls(calls),
-          })
-        );
+          }),
+        ]);
       } else if (state.view === 'timeline') {
-        shown.timeline.replaceChildren(
+        replaceKeeping(shown.timeline, [
           ...timelineViewOf({
             calls: visibleCalls(),
             isAllClients: isEveryClient(),
@@ -750,12 +761,12 @@ export const startPanel = (host: IPanelHost): void => {
             },
             range: state.range,
             span: spanOfCalls(calls),
-          })
-        );
+          }),
+        ]);
       } else if (state.view === 'metrics') {
-        shown.metrics.replaceChildren(...metricsOfView());
+        replaceKeeping(shown.metrics, metricsOfView());
       } else {
-        shown.wire.replaceChildren(
+        replaceKeeping(shown.wire, [
           ...wireViewOf({
             copy,
             exchanges: state.exchanges,
@@ -763,20 +774,14 @@ export const startPanel = (host: IPanelHost): void => {
             nameOf: (address) => {
               return state.book.nameOf(address);
             },
-          })
-        );
+          }),
+        ]);
       }
     });
   };
 
-  // an open exposition stays open across a redraw
   const metricsOfView = (): Node[] => {
-    const open = new Set(
-      [...shown.metrics.querySelectorAll<HTMLElement>('details[open]')].map((details) => {
-        return details.closest<HTMLElement>('[data-source]')?.dataset['source'];
-      })
-    );
-    const views = metricsViewOf({
+    return metricsViewOf({
       expositions: state.expositions,
       history: state.history,
       onProcedure: (procedure) => {
@@ -791,18 +796,6 @@ export const startPanel = (host: IPanelHost): void => {
         })
         .filter(isShownSource),
     });
-
-    for (const view of views) {
-      if (view instanceof HTMLElement && open.has(view.dataset['source'])) {
-        const details = view.querySelector('details');
-
-        if (details !== null) {
-          details.open = true;
-        }
-      }
-    }
-
-    return views;
   };
 
   const drawSources = (): void => {

@@ -41,10 +41,16 @@ promise to be decided at once, on the day of the first release.
    wire ([0013](0013-every-language-debugs-alike-at-no-cost-when-off.md)), runs on this axis under a
    version of its own: its files repeat it as their `debuggingVersion`, it moves by the same rule, a
    code the wire gains moving both, and a release whose companion moved tags `debugging-v` and that
+   version. So does the transcoding's companion, `spec/transcoding.md`, which states what a gateway
+   answers over HTTP of a service's procedures
+   ([0037](0037-a-procedure-is-also-an-http-route-which-a-gateway-answers-as-one-more-client-of-its-server.md)):
+   its file repeats it as its `transcodingVersion`, it moves by the same rule, a status a gateway
+   answers moving it alone, and a release whose transcoding moved tags `transcoding-v` and that
    version.
 
-   `tools/release.mjs` moves every version in the release commit, the C# lock files' project ranges
-   with them, an example's among them, and sets each document's tag at the `v*` that
+   `tools/release.mjs` moves every version in the release commit, each document's by its own move,
+   `--spec`, `--debugging` and `--transcoding`, the C# lock files' project ranges with them, an
+   example's among them, and sets each document's tag at the `v*` that
    `git flow release finish` makes; `tools/check-versions.mjs` holds them
    ([0006](0006-a-rule-has-its-gate.md)). It moves as well the image an example's wrappers name and
    the `specVersion` of a blueprint an example generated, which the `examples` job holds to what

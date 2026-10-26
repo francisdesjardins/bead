@@ -84,6 +84,26 @@ describe('measure', () => {
       ['src/a.ts']
     );
   });
+
+  test('leaves out what a build writes under obj/, a source generator’s code among it', () => {
+    const { rows } = measure(
+      [
+        coberturaOf('src/Lib/Routes.cs', '<line number="1" hits="1"/>'),
+        coberturaOf(
+          'src/Lib/obj/Debug/net10.0/Gen/RegexGenerator.g.cs',
+          '<line number="1" hits="0"/>'
+        ),
+      ],
+      ['src/']
+    );
+
+    assert.deepEqual(
+      rows.map((row) => {
+        return row.name;
+      }),
+      ['src/Lib/Routes.cs']
+    );
+  });
 });
 
 describe('judge', () => {

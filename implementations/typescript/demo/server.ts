@@ -8,7 +8,11 @@ import { WebSocketServer } from 'ws';
 import { createMetricsRegistry } from '../src/router/shared/metrics-registry';
 import type { HealthStatus } from '../src/server/health';
 import { createHTTPServer } from '../src/server/http-server';
+import { createServer as createBeadServer } from '../src/server/server';
 import { createWSServer } from '../src/server/ws-server';
+import { createHTTPGateway } from '../src/transcoding/http-gateway';
+import { createMemoryTransportServer } from '../src/transport/server/memory-transport-server';
+import { HTTP_PROBLEM_TYPES, HTTP_ROUTES, OPENAPI_DOCUMENT } from './gen/typescript/bead_http';
 import { isRole, offer, SILENCE_MILLISECONDS } from './offer';
 import { pathOf, relayExchanges, relayUpgrades } from './relay';
 import { credentialsOf, issueToken, keyOf, secretOf } from './token';
@@ -54,6 +58,15 @@ const FILES = Object.freeze({
   '/': { path: new URL('../index.html', import.meta.url), type: 'text/html; charset=utf-8' },
   '/page.js': { path: new URL('./page.js', import.meta.url), type: 'text/javascript' },
   '/worker.js': { path: new URL('./worker.js', import.meta.url), type: 'text/javascript' },
+  // penumbra's two sheets, the DevTools panel's copy, under the page's skin
+  '/penumbra/tokens.skin.base.css': {
+    path: new URL('../../devtools/penumbra/tokens.skin.base.css', import.meta.url),
+    type: 'text/css',
+  },
+  '/penumbra/tokens.system.css': {
+    path: new URL('../../devtools/penumbra/tokens.system.css', import.meta.url),
+    type: 'text/css',
+  },
 });
 
 // helpers
@@ -108,13 +121,37 @@ const overHTTP = createHTTPServer({
   },
 });
 
+// * the sign-up's routes over HTTP and JSON, `POST /api/SignUp/signUp` and `/openapi.json`: a
+// gateway, one more client of a Bead server of its own, each exchange its own connection over the
+// in-memory transport (decision 0037), mounted on the public port beside the page
+const overMemory = createBeadServer(
+  { transport: createMemoryTransportServer() },
+  {
+    connectionInactivityTimeout: SILENCE_MILLISECONDS,
+    credentials: CREDENTIALS,
+    metricsRegistry: METRICS_REGISTRY,
+  }
+);
+const gateway = createHTTPGateway({
+  document: OPENAPI_DOCUMENT,
+  problemTypes: HTTP_PROBLEM_TYPES,
+  routes: HTTP_ROUTES,
+  transport: overMemory.transport,
+});
+
+gateway.on('error', (reason) => {
+  process.stderr.write(`gateway: ${reason.message}\n`);
+});
+
 offer(overWebSocket, METRICS_REGISTRY);
 offer(overHTTP, METRICS_REGISTRY);
+offer(overMemory, METRICS_REGISTRY);
 
 // each Bead server on a local port the system picks, reached through the public one alone
 const [wsTarget, httpTarget] = await Promise.all([
   overWebSocket.transport.start({ address: '127.0.0.1', findOpenPort: true }),
   overHTTP.transport.start({ address: '127.0.0.1', findOpenPort: true }),
+  overMemory.transport.start(),
 ]);
 const exchanges = relayExchanges(httpTarget);
 
@@ -146,6 +183,11 @@ const pages = createServer((request, reply) => {
     return (exchanges(request, reply), undefined);
   }
 
+  // the gateway's routes and its document, which it claims; any other path is the page's
+  if (gateway.listener(request, reply)) {
+    return undefined;
+  }
+
   if (pathOf(request) === HEALTH_PATHNAME) {
     return (answerHealth(reply), undefined);
   }
@@ -175,7 +217,7 @@ pages.requestTimeout = 60_000;
 pages.on('upgrade', relayUpgrades({ pathname: BEAD_PATHNAME, target: wsTarget }));
 pages.listen(HTTP_PORT, HTTP_ADDRESS);
 process.stdout.write(
-  `Bead, a demo: http://localhost:${String(HTTP_PORT)} (Ctrl+C to stop)
+  `Bead, a demo: http://localhost:${String(HTTP_PORT)}, its sign-up over HTTP at /api/SignUp/signUp (Ctrl+C to stop)
 `
 );
 
@@ -183,4 +225,6 @@ process.once('SIGINT', () => {
   pages.close();
   void overWebSocket[Symbol.asyncDispose]();
   void overHTTP[Symbol.asyncDispose]();
+  void gateway[Symbol.asyncDispose]();
+  void overMemory[Symbol.asyncDispose]();
 });

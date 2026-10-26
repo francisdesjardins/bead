@@ -1,6 +1,7 @@
 import { expect, test } from '@playwright/test';
 import { ProgrammerError } from '../../../transport/shared/errors';
 import { createRouterClient } from '../../client/router-client';
+import { createRouterServer } from '../../server/router-server';
 import {
   areOneName,
   checkDeclaration,
@@ -28,7 +29,7 @@ const reasonOf = (procedure: IProcedure): string | undefined => {
     expect(error).toBeInstanceOf(ProgrammerError);
 
     return Object.values(IdentityRefusal).find((reason) => {
-      return (error as Error).message.endsWith(`: ${reason}`);
+      return (error as Error).message.includes(` is ${reason}: `);
     });
   }
 
@@ -101,19 +102,19 @@ test.describe('checkDeclaration', () => {
       checkDeclaration({ ...echo, serviceId: 0 });
     }).toThrow(
       new ProgrammerError(
-        'a procedure is declared at a service and a procedure from 1 to 65535, of a revision from 1 to 2147483647, not at 0/1 of revision 3: out of its range'
+        '"echo" at 0/1, revision 3, is out of its range: a service and a procedure are from 1 to 65535, a revision from 1 to 2147483647 (spec 16.2)'
       )
     );
     expect(() => {
       checkDeclaration({ ...echo, procedureName: '_OTHER' });
     }).toThrow(
       new ProgrammerError(
-        `a procedure's name is a lower-case ASCII letter, then 62 ASCII letters and digits at most, not "_OTHER": off its form`
+        `"_OTHER" at 2/1 is off its form: a procedure's name is a lower-case ASCII letter, then up to 62 ASCII letters or digits (spec 16.4)`
       )
     );
   });
 
-  test('a declaration refused declares nothing, before its registry is asked', async () => {
+  test('a refused declaration declares nothing, its registry holding no series of it', async () => {
     const registry = createMetricsRegistry();
     using router = createRouterClient(
       {
@@ -133,7 +134,7 @@ test.describe('checkDeclaration', () => {
 
     expect(() => {
       router.declareRequester({ ...echo, serviceRevision: 0 });
-    }).toThrow(/: out of its range$/);
+    }).toThrow(/ is out of its range: /);
     await expect(
       router.registerNotification({
         ...echo,
@@ -142,13 +143,73 @@ test.describe('checkDeclaration', () => {
           return Promise.resolve([]);
         },
       })
-    ).rejects.toThrow(/: off its form$/);
+    ).rejects.toThrow(/ is off its form: /);
     expect(registry.exposition().text).toBe(before);
 
     // the address it was refused at is free, under its name
     router.declareRequester(echo);
 
-    expect(registry.exposition().text).not.toBe(before);
+    expect(registry.exposition().text.split(String.fromCharCode(0x0a))).toContain(
+      'bead_client_call_started_total{service="2",procedure="echo",type="request"} 0'
+    );
+  });
+
+  test('checks a declaration before the router’s reasons and its registry’s', async () => {
+    const transport = {
+      off: () => {
+        return undefined;
+      },
+      on: () => {
+        return undefined;
+      },
+      send: () => {
+        return Promise.resolve();
+      },
+    };
+    using server = createRouterServer(transport, { metricsRegistry: createMetricsRegistry() });
+    using client = createRouterClient(transport, { metricsRegistry: createMetricsRegistry() });
+    const named = { ...echo, procedureName: 'Echo' };
+
+    server.registerResolver(
+      Object.assign(() => {
+        return Promise.resolve();
+      }, echo)
+    );
+    server.declareRequester(echo);
+    client.declareRequester(echo);
+
+    // the address is registered, and held under another name: the form refuses first
+    expect(() => {
+      server.registerResolver(
+        Object.assign(() => {
+          return Promise.resolve();
+        }, named)
+      );
+    }).toThrow(/ is off its form: /);
+    expect(() => {
+      server.declareRequester(named);
+    }).toThrow(/ is off its form: /);
+    await expect(
+      client.registerNotification({
+        ...named,
+        trigger: () => {
+          return Promise.resolve([]);
+        },
+      })
+    ).rejects.toThrow(/ is off its form: /);
+  });
+
+  // * no JSON text holds a surrogate alone (RFC 7493 §2.1), so the file leaves it here
+  test('refuses a name holding a surrogate alone off its form, and folds none but an ASCII letter', () => {
+    const high = String.fromCharCode(0xd800);
+    const low = String.fromCharCode(0xdc00);
+
+    expect(reasonOf({ ...echo, procedureName: `a${high}b` })).toBe(IdentityRefusal.OFF_ITS_FORM);
+    expect(reasonOf({ ...echo, procedureName: `echo${low}` })).toBe(IdentityRefusal.OFF_ITS_FORM);
+    expect(isProcedureName(`a${high}${String.fromCharCode(0xde00)}`)).toBe(false);
+    expect(areOneName(`a${high}`, `A${high}`)).toBe(true);
+    expect(areOneName(`a${high}`, `a${low}`)).toBe(false);
+    expect(areOneName('[', '{')).toBe(false);
   });
 });
 
@@ -189,7 +250,11 @@ test.describe('checkProcedureKind', () => {
   test('refuses a kind its way does not take, against its kind, and takes a procedure that states none', () => {
     expect(() => {
       checkProcedureKind({ ...echo, procedureKind: 'request' }, 'server-requester');
-    }).toThrow(/^echo is a request; a server's router makes commands: against its kind$/);
+    }).toThrow(
+      new ProgrammerError(
+        `"echo" at 2/1 is against its kind: a request, which a requester on a server's router does not take; it takes a command (spec 16.11)`
+      )
+    );
 
     for (const way of ['client-requester', 'server-resolver', 'client-notification'] as const) {
       expect(() => {

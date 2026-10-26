@@ -67,7 +67,11 @@ counted per transport from 1 and never reset, a stop and a start included. It is
 connection is taken, after the check for a socket already gone and, on the C# side, after the
 accept, so ranks run in the order connections were taken; the C# side's count of arrivals is its
 rank. Every handle reads `type=…;ip=…;` and ends `ordinal=n`, a socket's carrying `port=…` between,
-which also tells apart the handles two WebSocket transports of one process draw at the same rank.
+which tells a reader of a trace which socket, and one without it, `type=HTTP` and `type=MEMORY`
+among them, none. A handle tells two types apart, never two transports of one type, which may draw
+one handle for two sockets from one address and port at the same rank, so two transports of one type
+are never joined
+([0036](0036-an-in-memory-transport-joins-two-routers-of-one-process-and-a-server-takes-several-transports-through-one.md)).
 
 **A handle's form is its implementation's**, written for a reader of a trace; the spec promises none,
 and an application compares a handle whole. The TypeScript type states the two forms as template

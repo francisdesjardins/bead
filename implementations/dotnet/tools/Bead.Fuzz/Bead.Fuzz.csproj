@@ -1,9 +1,9 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <!-- Bead's parsers fed raw bytes, guided by coverage: the targets the TypeScript side's
        tools/fuzz holds, one for one. libFuzzer runs this executable as its child, one target by
-       its name, once SharpFuzz has instrumented Bead.Core in a copy of its build; tools/fuzz.mjs at
-       the root does both. It builds and is formatted with the solution, and needs neither the
-       fuzzer nor the instrumentation to. -->
+       its name, once SharpFuzz has instrumented Bead.Core and Bead.Transport.WebSockets in a copy
+       of its build; tools/fuzz.mjs at the root does both. It builds and is formatted with the
+       solution, and needs neither the fuzzer nor the instrumentation to. -->
   <PropertyGroup>
     <OutputType>Exe</OutputType>
     <RootNamespace>Bead.Fuzz</RootNamespace>
@@ -18,6 +18,12 @@
 
   <ItemGroup>
     <ProjectReference Include="../../src/Bead.Core/Bead.Core.csproj" />
+    <ProjectReference Include="../../src/Bead.Transport.WebSockets/Bead.Transport.WebSockets.csproj" />
     <PackageReference Include="SharpFuzz" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- the JWT target's keys, as the verdicts write them -->
+    <Content Include="../../../../spec/vectors.json" Link="vectors.json" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 </Project>

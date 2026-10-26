@@ -39,10 +39,10 @@ test("prints a procedure's deprecation and its payload limit in its procedure, a
   );
 
   expect(content).toContain(
-    '        new global::Bead.Procedure { ServiceId = 1, ProcedureId = 1, ProcedureName = "echo", ServiceRevision = 1, MaximumPayloadBytes = 1024, Deprecation = new global::Bead.ProcedureDeprecation { Message = "Use \\"other\\", a\\nline later." } },\n'
+    '        new global::Bead.Procedure { ServiceId = 1, ProcedureId = 1, ProcedureName = "echo", ServiceRevision = 2, MaximumPayloadBytes = 1024, Deprecation = new global::Bead.ProcedureDeprecation { Message = "Use \\"other\\", a\\nline later." } },\n'
   );
   expect(content).toContain(
-    '        new global::Bead.Procedure { ServiceId = 1, ProcedureId = 2, ProcedureName = "fail", ServiceRevision = 1, Deprecation = new global::Bead.ProcedureDeprecation() },\n'
+    '        new global::Bead.Procedure { ServiceId = 1, ProcedureId = 2, ProcedureName = "fail", ServiceRevision = 2, Deprecation = new global::Bead.ProcedureDeprecation() },\n'
   );
 });
 

@@ -44,9 +44,13 @@ jobs:
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
-          python-version: '3.14'
+          python-version: '3.14.9'
+      # ! before the generators: make_validations.py matches its patterns by google-re2
+      - run: >-
+          python -m pip install --disable-pip-version-check -q --require-hashes --only-binary=:all:
+          -r spec/requirements.txt
       - run: python spec/generators/make_vectors.py
       - run: python spec/generators/make_conversations.py
       - run: python spec/generators/make_transports.py
@@ -56,13 +60,34 @@ jobs:
       - run: python spec/generators/make_metrics.py
       - run: python spec/generators/make_codecs.py
       - run: python spec/generators/make_identities.py
+      - run: python spec/generators/make_validations.py
+      - run: python spec/generators/make_transcoding.py
       - run: git diff --exit-code -- spec
       - name: No file the generators wrote is new
         run: test -z "$(git status --porcelain -- spec)"
-      - run: >-
-          python -m pip install --disable-pip-version-check -q --require-hashes --only-binary=:all:
-          -r spec/requirements.txt
       - run: python spec/check.py
+
+  # ── Playwright ───────────────────────────────────────────────────────────────
+  # The version of `@playwright/test` the TypeScript side pins, which names Microsoft's image of it:
+  # the jobs that run a browser run in that image, Chromium and what it needs already there, so no
+  # job installs a browser, and no copy of the version stands anywhere else.
+  playwright:
+    name: Playwright's version
+    runs-on: ubuntu-26.04
+    timeout-minutes: 2
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          sparse-checkout: implementations/typescript/package.json
+          sparse-checkout-cone-mode: false
+      # ! an exact version alone names an image: a range names none
+      - id: version
+        run: >-
+          node -e "const v = require('./implementations/typescript/package.json').devDependencies['@playwright/test'];
+          if (!/^[0-9]+[.][0-9]+[.][0-9]+$/.test(v)) { throw new Error('@playwright/test is ' + v + ', no exact version'); }
+          console.log('version=' + v)" >> "$GITHUB_OUTPUT"
 
   # ── TypeScript ───────────────────────────────────────────────────────────────
   # The TypeScript side's own gate: types, lint and its plugin's cases, format, comment budget, doc
@@ -72,8 +97,13 @@ jobs:
   # `engines.node` declares, so the floor holds by a run.
   typescript:
     name: TypeScript (Node ${{ matrix.node }})
+    needs: playwright
     runs-on: ubuntu-26.04
     timeout-minutes: 15
+    # the image of the Playwright the side pins, Chromium in it: no browser to install
+    container:
+      image: mcr.microsoft.com/playwright:v${{ needs.playwright.outputs.version }}-resolute
+      options: --ipc=host
     strategy:
       fail-fast: false
       matrix:
@@ -120,12 +150,14 @@ jobs:
       # The demo's static build, the folder francisdesjardins.ca serves: bundling it is the check.
       - run: $YARN playground:build:file
       # The DevTools extension, built, then tested on the current line: its pure modules, and itself
-      # loaded in Chromium against the static build above, which needs the browser installed.
+      # loaded in Chromium against the static build above, the image's own browser.
       - run: $YARN devtools:build
       - if: matrix.node == '26'
-        run: $YARN playwright install --with-deps chromium
-      - if: matrix.node == '26'
         run: $YARN test:devtools
+      # The demo's own tests on the current line: its procedures in Node, and its page, the static
+      # build above, in Chromium.
+      - if: matrix.node == '26'
+        run: $YARN test:demo
       # The root's own files, from the README to this CI, under the TypeScript side's formatter; the
       # tool holds their list. The conformance files are left to their generators.
       - name: Format of the root's files
@@ -141,7 +173,7 @@ jobs:
   # TypeScript server, which `dotnet test` starts with Node, then the TypeScript client against the
   # C# server; then a page of another origin in Chromium against both sides' HTTP servers, what
   # proves a browser reads their CORS answer. Only the TypeScript side is installed, for its interop
-  # server and its page, and Chromium.
+  # server and its page; Chromium is the Playwright image's.
   #
   # `BEAD_INTEROP_REQUIRED=1` turns an interop that would skip into one that fails: here a skip
   # could only be a path to the other side gone wrong.
@@ -151,8 +183,13 @@ jobs:
   # `Directory.Build.props`: a restore that would change a `packages.lock.json` fails.
   dotnet:
     name: .NET
+    needs: playwright
     runs-on: ubuntu-26.04
     timeout-minutes: 20
+    # the image of the Playwright the TypeScript side pins, for the page of another origin's Chromium
+    container:
+      image: mcr.microsoft.com/playwright:v${{ needs.playwright.outputs.version }}-resolute
+      options: --ipc=host
     env:
       BEAD_INTEROP_REQUIRED: 1
     defaults:
@@ -170,7 +207,7 @@ jobs:
           node-version: ${{ env.NODE_VERSION }}
       - run: $YARN install --immutable
         working-directory: implementations/typescript
-      - run: dotnet format Bead.slnx --verify-no-changes --exclude ../../builder/test/golden/csharp interop/Bead.Interop/Generated
+      - run: dotnet format Bead.slnx --verify-no-changes --exclude ../../builder/test/golden/csharp interop/Bead.Interop/Generated tests/Bead.Protobuf.Tests/Generated
       # every project, which `dotnet test` does not: it builds the test projects alone
       - run: dotnet build Bead.slnx
       # the tests under coverage, one cobertura report per test project, then what they ran held to
@@ -191,8 +228,6 @@ jobs:
           retention-days: 14
       - run: $YARN test:interop
         working-directory: implementations/typescript
-      - run: $YARN playwright install --with-deps chromium
-        working-directory: implementations/typescript
       - run: $YARN test:browser
         working-directory: implementations/typescript
 
@@ -204,7 +239,8 @@ jobs:
   # among them, whose blueprint is the spec's byte for byte in either line ending, and the goldens of
   # both targets, protoc's C# messages among them; then beadc itself over the interop's blueprint,
   # its rules and its form, then each side's interop to what beadc generates from the root's
-  # `beadc.yaml`, then, on Linux, `beadc breaking`, the interop's blueprint and `examples/hello`
+  # `beadc.yaml`, and the demo's sign-up service to what it generates from the demo's, then, on
+  # Linux, `beadc breaking`, the interop's blueprint and `examples/hello`
   # against the last release that carries one, from 0.3.0. On Windows, where buf and protoc are
   # other binaries, on the current line; on Linux, on the floor `engines.node` declares too. The C#
   # goldens build in the .NET job, which has the SDK. The wrappers, `beadc.sh` and `beadc.ps1`, are
@@ -307,6 +343,15 @@ jobs:
       - name: Each side's interop, what beadc generates from its blueprint
         working-directory: .
         run: node builder/src/cli.ts generate --check
+      - name: The demo's sign-up service, what beadc generates from its .proto
+        working-directory: implementations/typescript/demo
+        run: node ../../../builder/src/cli.ts generate --check
+      - name: Each side's validators of spec/validations.proto, what beadc generates for it
+        working-directory: .
+        run: node tools/check-validations.mjs
+      - name: Each side's route table and document of spec/transcoding.proto, what beadc generates for it
+        working-directory: .
+        run: node tools/check-transcoding.mjs
       # ! beadc breaking, against the last release, the interop's blueprint and examples/hello's:
       # the last release carries both, and one without fails the step, so it never passes by
       # comparing nothing. The last release is the newest
@@ -334,7 +379,11 @@ jobs:
           fi
           git archive --format=tar "$tag" | node builder/src/cli.ts breaking --against - --error-format github --fail-on-warning
           cd examples/hello
-          git archive --format=tar "$tag" | node ../../builder/src/cli.ts breaking --against - --error-format github --fail-on-warning
+          # countDown's count past 10 is a rule of its .proto, which retires HELLO_FAILURE_TOO_FAR
+          git archive --format=tar "$tag" | node ../../builder/src/cli.ts breaking --against - --error-format github --fail-on-warning \
+            --except PROCEDURE_RULES_TIGHTENED@service:1/procedure:2 \
+            --except NAME_NO_DELETE@service:1/failure:2 \
+            --except buf:ENUM_VALUE_NO_DELETE@hello/v1/hello.proto
 
   # ── Examples ─────────────────────────────────────────────────────────────────
   # Each project of examples/, written as a consumer writes one, its runtimes from their source: a
@@ -342,7 +391,8 @@ jobs:
   # their source; then examples/hello: beadc on Node from builder/ holds its generated files and
   # writes the copy of Bead's options its external builds read; buf's lint and layout over its
   # .proto; each half's gates and both its builds; then each client against each server, both
-  # modes of each half, sixteen pairs, every one writing transcript.txt, every server ending clean.
+  # modes of each half, sixteen pairs, each server's gateway asked after its client, every one
+  # writing transcript.txt, every server ending clean.
   # On the current line and on the floor the TypeScript half's engines.node declares. The wrappers
   # run over it on the builder job's image legs, where the image is.
   examples:
@@ -420,8 +470,9 @@ jobs:
 
   # ── Protobuf conformance ─────────────────────────────────────────────────────
   # Protobuf's conformance suite through each side's generated `proto` codec, the check of a
-  # payload's records in front of its library, binary, recommended enforced, every edition, at the
-  # release both libraries pin (decision 0028): the runner `tools/protobuf-conformance/runner.json`
+  # payload's records in front of its library, and its mapping of protobuf's JSON, binary and JSON,
+  # recommended enforced, every edition, at the release both libraries pin (decisions 0028 and
+  # 0037): the runner `tools/protobuf-conformance/runner.json`
   # pins, fetched and checked by its sha512 as protoc is by its sha256, against each side's testee
   # and its failure list, which the runner holds both ways, then the floor of tests run; then one
   # corpus of Probe through both testees, read alike. A job of its own: it needs both runtimes,
@@ -481,6 +532,68 @@ jobs:
         run: dotnet format Bead.ProtobufConformance.csproj --verify-no-changes --exclude Generated
       - name: One corpus through both sides
         run: node tools/protobuf-conformance.mjs differential
+
+  # ── protovalidate differential ───────────────────────────────────────────────
+  # spec/validations.json's verdicts and a corpus mutated from them through each side's generated
+  # validators and through protovalidate-es, at its pin (decision 0035): the packages
+  # `tools/protovalidate-differential/pin.json` pins, fetched and checked by their sha512 before a
+  # byte of them is read; the violations compared as protovalidate's own conformance compares them,
+  # sorted by rule id then path, a path by its elements, every word and forKey equal. The oracle over
+  # the verdicts alone first, then each side's testee. A job of its own, beside the protobuf
+  # conformance: it needs both runtimes, beadc and protoc, which no other job has together.
+  protovalidate-differential:
+    name: protovalidate differential
+    runs-on: ubuntu-26.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          global-json-file: implementations/dotnet/global.json
+          cache: true
+          cache-dependency-path: implementations/dotnet/**/packages.lock.json
+      - name: Locate the Yarn cache
+        id: yarn-cache
+        working-directory: builder
+        run: echo "dir=$($YARN config get cacheFolder)" >> "$GITHUB_OUTPUT"
+      # The download cache, not `node_modules`: cache what was downloaded, always install.
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ steps.yarn-cache.outputs.dir }}
+          key: protovalidate-differential-yarn-cache-${{ runner.os }}-${{ hashFiles('builder/yarn.lock', 'implementations/typescript/yarn.lock') }}
+          restore-keys: protovalidate-differential-yarn-cache-${{ runner.os }}-
+      # `--immutable` fails if `yarn.lock` would change.
+      - run: $YARN install --immutable
+        working-directory: implementations/typescript
+      - run: $YARN install --immutable
+        working-directory: builder
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: builder/.protoc
+          key: protoc-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('builder/protoc.json') }}
+      # assigned first: a failed fetch fails the step
+      - name: protoc, by its pin's sha256
+        working-directory: builder
+        run: |
+          protoc="$(node tools/fetch-protoc.mjs)"
+          echo "BEADC_PROTOC=$protoc" >> "$GITHUB_ENV"
+      # the oracle's packages, unpacked, by the pin they were checked against
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: tools/protovalidate-differential/.oracle
+          key: protovalidate-differential-${{ runner.os }}-${{ hashFiles('tools/protovalidate-differential/pin.json') }}
+      - name: protovalidate-es over the verdicts
+        run: node tools/protovalidate-differential.mjs oracle
+      - name: The corpus through the TypeScript side's validators
+        run: node tools/protovalidate-differential.mjs typescript
+      - name: The corpus through the C# side's validators
+        run: node tools/protovalidate-differential.mjs csharp
+      - name: The C# testee's format
+        working-directory: implementations/dotnet/tools/Bead.ProtovalidateDifferential
+        run: dotnet format Bead.ProtovalidateDifferential.csproj --verify-no-changes --exclude Generated
 
   # ── Commits ──────────────────────────────────────────────────────────────────
   # Every commit subject the push or the pull request brings is a Conventional Commit; merges are
@@ -546,7 +659,7 @@ jobs:
             echo "::error title=actions::an action above is not pinned by a commit's full sha"
             exit 1
           fi
-      # Every dependency of every lockfile, the three yarn.lock, the C# side's packages.lock.json
+      # Every dependency of every lockfile, the five yarn.lock, the C# side's packages.lock.json
       # and the spec's requirements.txt, against the advisories OSV knows, the scanner at its
       # digest. A known vulnerability fails the job.
       - name: The dependencies, against the known advisories
@@ -561,7 +674,7 @@ jobs:
       - name: The code, under Semgrep's community rules
         run: >-
           docker run --rm -v "$PWD:/src:ro" -w /src
-          semgrep/semgrep:1.181.0@sha256:81474464c1f07483ba0682a44787fd93c91397419762a04abe2bafaae396304b
+          semgrep/semgrep:1.182.1@sha256:451b3d875c00dac7ed5db5293e584a07de11449a409c10b3c2d2652f429630b6
           semgrep scan --config p/typescript --config p/csharp --config p/github-actions --config p/secrets
           --metrics=off --error --exclude node_modules --exclude builder/test/golden
           --exclude '**/Generated' --exclude '**/generated' --exclude '**/dist' --exclude .claude
@@ -572,7 +685,18 @@ jobs:
   ci-ok:
     name: CI ok
     if: always()
-    needs: [spec, typescript, dotnet, builder, examples, protobuf-conformance, commits]
+    needs:
+      [
+        spec,
+        playwright,
+        typescript,
+        dotnet,
+        builder,
+        examples,
+        protobuf-conformance,
+        protovalidate-differential,
+        commits,
+      ]
     runs-on: ubuntu-26.04
     timeout-minutes: 2
     steps:

@@ -9,6 +9,13 @@ namespace Bead;
 public interface IServerTransport : IRouterServerTransport
 {
     /// <summary>
+    /// The type every handle it draws begins with, one of <see cref="TransportTypes"/> (spec 15.1),
+    /// which tells its connections from another type's; none for one whose handles are of several
+    /// types, a <see cref="JoinedServerTransport"/>'s, which no join takes.
+    /// </summary>
+    string? Type { get; }
+
+    /// <summary>
     /// A listen held on a connection, true, once its refusals passed, and its end, false, while the
     /// connection stands: over HTTP alone, whose listen is no silence (spec 13.7). A transport that
     /// has no listen never raises it, as this default.

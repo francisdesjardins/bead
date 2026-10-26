@@ -111,7 +111,7 @@ const assertDepth = (text: string): void => {
       depth += 1;
 
       if (depth > DEPTH) {
-        throw new SyntaxError(`the payload is nested deeper than ${String(DEPTH)}`);
+        throw new SyntaxError(`a json payload nests deeper than ${String(DEPTH)}`);
       }
     } else if (code === CLOSE_ARRAY || code === CLOSE_OBJECT) {
       depth -= 1;
@@ -122,11 +122,11 @@ const assertDepth = (text: string): void => {
 /** Throws when `value`, a leaf, is a number past a double or a string holding a surrogate alone. */
 const assertLeaf = (value: unknown): void => {
   if (typeof value === 'number' && !Number.isFinite(value)) {
-    throw new SyntaxError('the payload holds a number past the largest double');
+    throw new SyntaxError('a json payload holds a number past the largest double');
   }
 
   if (typeof value === 'string' && !value.isWellFormed()) {
-    throw new SyntaxError('the payload holds a surrogate alone');
+    throw new SyntaxError('a json payload holds a surrogate alone');
   }
 };
 
@@ -149,7 +149,7 @@ const settle = (value: unknown): unknown => {
 
     for (const name of names) {
       if (typeof name === 'string' && !name.isWellFormed()) {
-        throw new SyntaxError('the payload holds a surrogate alone');
+        throw new SyntaxError('a json payload holds a surrogate alone');
       }
 
       const item = record[name];
@@ -342,11 +342,11 @@ const readJson = (bytes: Uint8Array): JsonValue => {
   try {
     text = STRICT_UTF8.decode(bytes);
   } catch (reason) {
-    throw new SyntaxError('the payload is not UTF-8', { cause: reason });
+    throw new SyntaxError('a json payload is not UTF-8', { cause: reason });
   }
 
   if (text.charCodeAt(0) === BYTE_ORDER_MARK) {
-    throw new SyntaxError('the payload starts with a byte order mark');
+    throw new SyntaxError('a json payload starts with a byte order mark');
   }
 
   // * before the parse, so a peer never chooses how deep it goes
@@ -357,7 +357,7 @@ const readJson = (bytes: Uint8Array): JsonValue => {
   try {
     value = JSON.parse(text);
   } catch (reason) {
-    throw new SyntaxError(`the payload is not JSON: ${(reason as Error).message}`, {
+    throw new SyntaxError('a json payload is not one JSON text', {
       cause: reason,
     });
   }
@@ -368,7 +368,7 @@ const readJson = (bytes: Uint8Array): JsonValue => {
   value = settle(names.isEscaped ? buildJson(text) : value);
 
   if (!names.isOnce) {
-    throw new SyntaxError('the payload names a member twice');
+    throw new SyntaxError('a json payload names a member twice');
   }
 
   // * what JSON.parse gives, every leaf checked: a JSON value
@@ -447,7 +447,7 @@ const writeJson = (value: unknown): Uint8Array<ArrayBuffer> => {
 
     if (typeof given === 'number') {
       if (!Number.isFinite(given)) {
-        throw new TypeError(`the value holds a number that is not finite, ${String(given)}`);
+        throw new TypeError('a json value holds a number that is not finite');
       }
 
       return given === 0 ? 0 : given;
@@ -455,18 +455,18 @@ const writeJson = (value: unknown): Uint8Array<ArrayBuffer> => {
 
     if (typeof given === 'string') {
       if (!given.isWellFormed()) {
-        throw new TypeError('the value holds a surrogate alone');
+        throw new TypeError('a json value holds a surrogate alone');
       }
 
       return given;
     }
 
     if (typeof given !== 'object' || !(Array.isArray(given) || isPlain(given))) {
-      throw new TypeError(`the value holds what JSON has no value for, ${kindOf(given)}`);
+      throw new TypeError(`a json value holds what JSON has no value for, ${kindOf(given)}`);
     }
 
     if (depth === DEPTH) {
-      throw new TypeError(`the value is nested deeper than ${String(DEPTH)}`);
+      throw new TypeError(`a json value nests deeper than ${String(DEPTH)}`);
     }
 
     if (Array.isArray(given)) {
@@ -474,7 +474,9 @@ const writeJson = (value: unknown): Uint8Array<ArrayBuffer> => {
 
       for (let index = 0; index < given.length; index += 1) {
         if (!Object.hasOwn(given, index)) {
-          throw new TypeError('the value holds what JSON has no value for, an array with a hole');
+          throw new TypeError(
+            'a json value holds what JSON has no value for, an array with a hole'
+          );
         }
 
         items[index] = copy(given[index], depth + 1);
@@ -488,7 +490,7 @@ const writeJson = (value: unknown): Uint8Array<ArrayBuffer> => {
 
     for (const name of Object.keys(record).toSorted()) {
       if (!name.isWellFormed()) {
-        throw new TypeError('the value holds a surrogate alone');
+        throw new TypeError('a json value holds a surrogate alone');
       }
 
       const first = name.charCodeAt(0);
@@ -520,7 +522,7 @@ const readText = (bytes: Uint8Array): string => {
   try {
     return STRICT_UTF8.decode(bytes);
   } catch (reason) {
-    throw new SyntaxError('the payload is not UTF-8', { cause: reason });
+    throw new SyntaxError('a text payload is not UTF-8', { cause: reason });
   }
 };
 
@@ -531,7 +533,7 @@ const writeText = (text: unknown): Uint8Array<ArrayBuffer> => {
   }
 
   if (!text.isWellFormed()) {
-    throw new TypeError('the text holds a surrogate alone');
+    throw new TypeError('a text value holds a surrogate alone');
   }
 
   return ENCODER.encode(text);

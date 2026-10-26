@@ -1,0 +1,113 @@
+syntax = "proto3";
+
+package bead.messages.v1;
+
+import "bead/options.proto";
+import "buf/validate/validate.proto";
+import "google/protobuf/wrappers.proto";
+
+option (bead.file) = {
+  admission: {
+    none: {}
+  }
+};
+
+// Registers a member, its request held to protovalidate's rules, which beadc compiles into each
+// side's validator.
+service RegistryService {
+  option (bead.service) = {
+    id: 4
+    revision: 1
+  };
+
+  // Registers a member.
+  rpc Register(Member) returns (Member.Receipt) {
+    option (bead.procedure) = {id: 1};
+  }
+}
+
+// A member's level, a rule holding it to the values declared.
+enum Level {
+  LEVEL_UNSPECIFIED = 0;
+  LEVEL_BASIC = 1;
+  LEVEL_GOLD = 2;
+}
+
+// A member, each of its fields held to a rule of the first set.
+message Member {
+  option (buf.validate.message).oneof = {
+    fields: [
+      "email",
+      "phone"
+    ]
+    required: true
+  };
+
+  // What registering answers, held to no rule: a result is never judged.
+  message Receipt {
+    int64 number = 1;
+  }
+
+  // A name of letters, its marks and its separators, 64 characters at most: a class of Unicode's
+  // under a counted repetition.
+  string name = 1 [(buf.validate.field).string.pattern = "^\\p{L}[\\p{L}\\p{M} '-]{0,63}$"];
+  // A nickname, set or not, of 3 characters at least once set.
+  google.protobuf.StringValue nickname = 2 [(buf.validate.field).string.min_len = 3];
+  // An age, from 13 to 130.
+  int32 age = 3 [(buf.validate.field).int32 = {
+    gte: 13
+    lte: 130
+  }];
+  // A score past 1 or below -1, never between.
+  double score = 4 [(buf.validate.field).double = {
+    gt: 1
+    lt: -1
+  }];
+  // Its level, one its enum declares.
+  Level level = 5 [(buf.validate.field).enum.defined_only = true];
+  // Its tags, 1 to 5, each of 8 characters at most, each once.
+  repeated string tags = 6 [(buf.validate.field).repeated = {
+    min_items: 1
+    max_items: 5
+    unique: true
+    items: {
+      string: {max_len: 8}
+    }
+  }];
+  // Its labels, each key of 2 characters at least, each value not negative.
+  map<string, int64> labels = 7 [(buf.validate.field).map = {
+    keys: {
+      string: {min_len: 2}
+    }
+    values: {
+      int64: {gte: 0}
+    }
+  }];
+  // A photo, a PNG by its signature.
+  bytes photo = 8 [(buf.validate.field).bytes.prefix = "\x89PNG"];
+  // Its email or its phone, exactly one, as the message's own rule holds.
+  string email = 9 [(buf.validate.field).string.contains = "@"];
+  // Its phone, its digits alone.
+  string phone = 10;
+  // Where it lives, its own rules judged once set.
+  Address address = 11 [(buf.validate.field).required = true];
+  // How it pays, one way or the other, one required.
+  oneof payment {
+    option (buf.validate.oneof).required = true;
+    // A card's number, 16 digits.
+    string card = 12 [(buf.validate.field).string.len = 16];
+    // An account's number, positive.
+    uint64 account = 13 [(buf.validate.field).uint64.gt = 0];
+  }
+  // A motto, set or not, of 140 characters at most once set.
+  optional string motto = 14 [(buf.validate.field).string.max_len = 140];
+}
+
+// An address, its country two letters.
+message Address {
+  // The country, ISO 3166-1's two letters.
+  string country = 1 [(buf.validate.field).string = {
+    len: 2
+    pattern: "^[A-Z]{2}$"
+  }];
+}

@@ -117,7 +117,8 @@ const files = (options = {}) => {
 const roots = [];
 after(() => {
   for (const root of roots) {
-    rmSync(root, { recursive: true, force: true });
+    // Windows holds a folder a process just let go a moment longer: its removal is retried
+    rmSync(root, { recursive: true, force: true, maxRetries: 10 });
   }
 });
 
@@ -251,9 +252,14 @@ describe('versions, texts and modes', () => {
     assert.equal(modeOf({ ref: 'feature/x', base: 'develop' }), MODES.develop);
   });
 
-  test("each file of spec/ is its document's, the companion's found by debuggingVersion", () => {
+  test("each file of spec/ is its document's, a companion's found by its version's key", () => {
     const read = (path) => {
-      return { 'spec/metrics.json': '{ "debuggingVersion": "0.1.0" }' }[path] ?? '{}';
+      return (
+        {
+          'spec/metrics.json': '{ "debuggingVersion": "0.1.0" }',
+          'spec/transcoding.json': '{ "transcodingVersion": "0.1.0" }',
+        }[path] ?? '{}'
+      );
     };
     const cases = {
       'spec/spec.md': ['spec'],
@@ -265,7 +271,12 @@ describe('versions, texts and modes', () => {
       'spec/debugging.md': ['debugging'],
       'spec/units.txt': ['spec'],
       'spec/debugging-units.txt': ['debugging'],
-      'spec/schemas/common.schema.json': ['spec', 'debugging'],
+      'spec/transcoding.md': ['transcoding'],
+      'spec/transcoding.json': ['transcoding'],
+      'spec/transcoding.proto': ['transcoding'],
+      'spec/transcoding-units.txt': ['transcoding'],
+      'spec/schemas/transcoding.schema.json': ['transcoding'],
+      'spec/schemas/common.schema.json': ['spec', 'debugging', 'transcoding'],
       'spec/generators/make_vectors.py': [],
       'spec/check.py': [],
       'spec/requirements.txt': [],
@@ -278,7 +289,7 @@ describe('versions, texts and modes', () => {
 
   test("a version's own move is masked", () => {
     const text = (version) => {
-      return `**Version: ${version}**, of\n{ "specVersion": "${version}", "debuggingVersion": "${version}" }`;
+      return `**Version: ${version}**, of\n{ "specVersion": "${version}", "debuggingVersion": "${version}", "transcodingVersion": "${version}" }`;
     };
     assert.equal(unversioned(text('0.2.0')), unversioned(text('0.1.0')));
     assert.notEqual(unversioned(`${text('0.1.0')}x`), unversioned(text('0.1.0')));
@@ -314,6 +325,7 @@ describe('versions, texts and modes', () => {
       documents: {
         spec: { present: true, stated: '0.1.0', files: {} },
         debugging: { present: false, stated: null, files: {} },
+        transcoding: { present: false, stated: null, files: {} },
       },
     };
     const problems = judge(versions, {

@@ -1,0 +1,12 @@
+[
+  {
+    "rule": "HTTP_RULE_TEMPLATE",
+    "line": 34,
+    "column": 7
+  },
+  {
+    "rule": "HTTP_RULE_TEMPLATE",
+    "line": 36,
+    "column": 7
+  }
+]

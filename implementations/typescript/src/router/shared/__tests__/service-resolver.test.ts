@@ -32,6 +32,49 @@ import {
 
 test.describe('createServiceManager', () => {
   test.describe('getRequestResolver', () => {
+    test('traces an application failure as the answer with its request and duration', async () => {
+      const clock = createTestClock(1_000);
+      const { calls, router } = createFakeRouter('server', clock);
+      const manager = createServiceManager(router);
+      const seen = recordDebug(manager);
+      const failure = { code: 7, detail: 'why' };
+      const resolver = manager.getRequestResolver(echo, { serializer: serverSerializer })((
+        _request,
+        response
+      ) => {
+        clock.tick(30);
+
+        return response(null, failure);
+      });
+
+      await resolver(propsOf(encode({ text: 'hi' })));
+
+      expect(calls.respond).toEqual([
+        {
+          request: { connectionHandle, header },
+          response: { failure: { ...failure, scope: FailureScope.APPLICATION } },
+        },
+      ]);
+      expect(seen).toHaveLength(2);
+      expect(
+        seen.map(({ error, info }) => {
+          return [error, info.direction, info.rx, info.tx, info.duration, info.startedAt];
+        })
+      ).toEqual([
+        [null, 'rx', { text: 'hi' }, undefined, undefined, 1_000],
+        [null, 'tx', { text: 'hi' }, failure, 30, 1_000],
+      ]);
+      expect(
+        seen.map(({ info }) => {
+          return [info.callId, info.connectionHandle, info.type];
+        })
+      ).toEqual([
+        [header.callId, connectionHandle, 'request'],
+        [header.callId, connectionHandle, 'request'],
+      ]);
+      expect(calls.report).toEqual([]);
+    });
+
     test('hands the router a procedure’s payload limit, with its requests and its resolver, and nothing else it carries', async () => {
       const { calls, router } = createFakeRouter();
       const manager = createServiceManager(router);
@@ -56,13 +99,13 @@ test.describe('createServiceManager', () => {
 
       expect(() => {
         manager.getRequestResolver(named, { serializer: serverSerializer });
-      }).toThrow(/: off its form$/);
+      }).toThrow(/ is off its form: /);
       expect(() => {
         manager.getCommandResolver(named, { serializer: serverSerializer });
-      }).toThrow(/: off its form$/);
+      }).toThrow(/ is off its form: /);
       expect(() => {
         manager.getNotificationResolver(ranged, { serializer: serverSerializer });
-      }).toThrow(/: out of its range$/);
+      }).toThrow(/ is out of its range: /);
     });
 
     test('makes and registers the resolver only once it is given its callback', () => {
@@ -84,6 +127,7 @@ test.describe('createServiceManager', () => {
     test('hands the callback a frozen, decoded request, and sends its answer back', async () => {
       const { calls, router } = createFakeRouter();
       const manager = createServiceManager(router);
+      const handed: unknown[] = [];
       let frozen = false;
 
       const resolver = manager.getRequestResolver(echo, { serializer: serverSerializer })((
@@ -91,6 +135,7 @@ test.describe('createServiceManager', () => {
         response
       ) => {
         frozen = Object.isFrozen(request);
+        handed.push(request.payload, request.connectionHandle, request.header);
 
         return response({ text: `${request.payload.text}!` });
       });
@@ -98,6 +143,8 @@ test.describe('createServiceManager', () => {
       await resolver(propsOf(encode({ text: 'hi' })));
 
       expect(frozen).toBe(true);
+      expect(handed).toEqual([{ text: 'hi' }, connectionHandle, header]);
+      expect(handed[2]).toBe(header);
       expect(calls.respond).toEqual([
         { request: { connectionHandle, header }, response: { payload: encode({ text: 'hi!' }) } },
       ]);
@@ -171,10 +218,12 @@ test.describe('createServiceManager', () => {
       const manager = createServiceManager(router);
       const reached: string[] = [];
       const seen: string[][] = [];
+      const handed: unknown[] = [];
 
       const resolver = manager.getRequestResolver(echo, {
         beforeRequest: (request) => {
           seen.push(Object.keys(request));
+          handed.push(request);
 
           return request.header.callId === 9;
         },
@@ -192,6 +241,10 @@ test.describe('createServiceManager', () => {
       expect(seen).toEqual([
         ['connectionHandle', 'header', 'session'],
         ['connectionHandle', 'header', 'session'],
+      ]);
+      expect(handed).toEqual([
+        { connectionHandle, header, session: undefined },
+        { connectionHandle, header: { ...header, callId: 9 }, session: undefined },
       ]);
       expect(calls.respond[0]?.response).toEqual({ failure: SERVER_FAILURES.accessDenied });
     });
@@ -436,13 +489,15 @@ test.describe('createServiceManager', () => {
 
     // debugging 4.1.10, 4.2.3 and 4.2.4
     test('tells the request it received and the answer it sent with that request’s call id and connection', async () => {
-      const manager = createServiceManager(createFakeRouter().router);
+      const clock = createTestClock(1_000);
+      const manager = createServiceManager(createFakeRouter('server', clock).router);
       const seen = recordDebug(manager);
 
       const resolver = manager.getRequestResolver(echo, { serializer: serverSerializer })((
         request,
         response
       ) => {
+        clock.tick(30);
         return response({ text: `${request.payload.text}!` });
       });
 
@@ -463,7 +518,24 @@ test.describe('createServiceManager', () => {
         ['rx', { text: 'hi' }, undefined, true, header.callId, connectionHandle],
         ['tx', { text: 'hi' }, { text: 'hi!' }, false, header.callId, connectionHandle],
       ]);
-      expect(seen[1]?.info.duration).toBeLessThan(1_000);
+      expect(seen[1]?.info.duration).toBe(30);
+      const received = {
+        callId: 7,
+        connectionHandle,
+        direction: 'rx',
+        procedureId: 1,
+        procedureName: 'echo',
+        rx: { text: 'hi' },
+        serviceId: 2,
+        serviceRevision: 3,
+        startedAt: 1_000,
+        type: 'request',
+      };
+      expect(
+        seen.map(({ info }) => {
+          return info;
+        })
+      ).toEqual([received, { ...received, direction: 'tx', duration: 30, tx: { text: 'hi!' } }]);
     });
 
     test('a received call starts as it arrives: its admission and its decoding count in its duration', async () => {
@@ -500,75 +572,88 @@ test.describe('createServiceManager', () => {
 
     // debugging 4.2, 4.2.4 and 4.3
     test('tells a callback that fails before it answers as an answer that did not go, with why beside it; nothing more for one that fails once it answered, nor for an admission that fails', async () => {
-      const start = Date.UTC(2026, 0, 1);
-      const clock = createTestClock(start);
-      const manager = createServiceManager(createFakeRouter('server', clock).router);
-      const seen = recordDebug(manager);
-      const thrown = new Error('thrown');
-      const rejected = new Error('rejected');
-      const after = new Error('after');
+      for (const [instant, rejectDelay, answerDelay, afterDelay] of [
+        [Date.UTC(2026, 0, 1), 10, 0, 0],
+        [1_000, 20, 5, 5],
+      ] as const) {
+        const start = instant;
+        const clock = createTestClock(start);
+        const manager = createServiceManager(createFakeRouter('server', clock).router);
+        const seen = recordDebug(manager);
+        const thrown = new Error('thrown');
+        const rejected = new Error('rejected');
+        const after = new Error('after');
 
-      // each takes 10 ms before it fails
-      const throwing = manager.getRequestResolver(echo, { serializer: serverSerializer })(() => {
-        clock.tick(10);
+        // the first throws after 10 ms; the next uses its own delay
+        const throwing = manager.getRequestResolver(echo, { serializer: serverSerializer })(() => {
+          clock.tick(10);
 
-        throw thrown;
-      });
-      const rejecting = manager.getRequestResolver(
-        { ...echo, procedureId: 2 },
-        { serializer: serverSerializer }
-      )(() => {
-        clock.tick(10);
+          throw thrown;
+        });
+        const rejecting = manager.getRequestResolver(
+          { ...echo, procedureId: 2 },
+          { serializer: serverSerializer }
+        )(() => {
+          clock.tick(rejectDelay);
 
-        return Promise.reject(rejected);
-      });
-      const refusing = manager.getRequestResolver(
-        { ...echo, procedureId: 3 },
-        {
-          beforeRequest: () => {
-            throw thrown;
-          },
-          serializer: serverSerializer,
-        }
-      )(() => {
-        return Promise.resolve();
-      });
-      const failingOnceAnswered = manager.getRequestResolver(
-        { ...echo, procedureId: 4 },
-        { serializer: serverSerializer }
-      )(async (request, response) => {
-        await response(request.payload);
+          return Promise.reject(rejected);
+        });
+        const refusing = manager.getRequestResolver(
+          { ...echo, procedureId: 3 },
+          {
+            beforeRequest: () => {
+              throw thrown;
+            },
+            serializer: serverSerializer,
+          }
+        )(() => {
+          return Promise.resolve();
+        });
+        const failingOnceAnswered = manager.getRequestResolver(
+          { ...echo, procedureId: 4 },
+          { serializer: serverSerializer }
+        )(async (request, response) => {
+          clock.tick(answerDelay);
+          await response(request.payload);
+          clock.tick(afterDelay);
 
-        throw after;
-      });
+          throw after;
+        });
 
-      const request = propsOf(encode({ text: 'hi' }));
+        const request = propsOf(encode({ text: 'hi' }));
 
-      await expect(throwing(request)).rejects.toBe(thrown);
-      await expect(rejecting(request)).rejects.toBe(rejected);
-      await expect(refusing(request)).rejects.toBe(thrown);
-      await expect(failingOnceAnswered(request)).rejects.toBe(after);
+        await expect(throwing(request)).rejects.toBe(thrown);
+        await expect(rejecting(request)).rejects.toBe(rejected);
+        await expect(refusing(request)).rejects.toBe(thrown);
+        await expect(failingOnceAnswered(request)).rejects.toBe(after);
 
-      expect(
-        seen.map(({ error, info }) => {
-          return [
-            info.procedureId,
-            info.direction,
-            info.tx,
-            error,
-            info.startedAt,
-            info.duration,
-            info.callId,
-          ];
-        })
-      ).toEqual([
-        [1, 'rx', undefined, null, start, undefined, header.callId],
-        [1, 'tx', undefined, thrown, start, 10, header.callId],
-        [2, 'rx', undefined, null, start + 10, undefined, header.callId],
-        [2, 'tx', undefined, rejected, start + 10, 10, header.callId],
-        [4, 'rx', undefined, null, start + 20, undefined, header.callId],
-        [4, 'tx', { text: 'hi' }, null, start + 20, 0, header.callId],
-      ]);
+        expect(
+          seen.map(({ error, info }) => {
+            return [
+              info.procedureId,
+              info.direction,
+              info.tx,
+              error,
+              info.startedAt,
+              info.duration,
+              info.callId,
+              info.connectionHandle,
+              info.rx,
+            ];
+          })
+        ).toEqual(
+          [
+            [1, 'rx', undefined, null, start, undefined, header.callId],
+            [1, 'tx', undefined, thrown, start, 10, header.callId],
+            [2, 'rx', undefined, null, start + 10, undefined, header.callId],
+            [2, 'tx', undefined, rejected, start + 10, rejectDelay, header.callId],
+            [4, 'rx', undefined, null, start + 10 + rejectDelay, undefined, header.callId],
+            [4, 'tx', { text: 'hi' }, null, start + 10 + rejectDelay, answerDelay, header.callId],
+          ].map((row) => {
+            return [...row, connectionHandle, { text: 'hi' }];
+          })
+        );
+      }
     });
 
     // debugging 4.2 and 4.2.4
@@ -643,9 +728,9 @@ test.describe('createServiceManager', () => {
       );
       expect(
         seen.map(({ error, info }) => {
-          return [info.direction, error];
+          return [info.direction, info.type, error];
         })
-      ).toEqual([['rx', null]]);
+      ).toEqual([['rx', 'request', null]]);
     });
   });
 
@@ -815,7 +900,7 @@ test.describe('createServiceManager', () => {
     test('reads the call’s session its router resolved, and so does the callback, whoever asks it', async () => {
       const { router } = createFakeRouter();
       const session = Object.freeze({ data: 'ada' });
-      const read: unknown[] = [];
+      const read: [string, unknown][] = [];
       const resolver = createServiceManager(router).getRequestResolver(echo, {
         beforeRequest: (request) => {
           read.push(['admission', request.session]);
@@ -842,6 +927,35 @@ test.describe('createServiceManager', () => {
         ['callback', session],
         ['admission', undefined],
       ]);
+      for (const entry of read.slice(0, 4)) {
+        expect(entry[1]).toBe(session);
+      }
+
+      const bob = Object.freeze({ data: 'bob' });
+      const admitted: unknown[] = [];
+      const received: unknown[] = [];
+      const permissive = createServiceManager(createFakeRouter().router).getRequestResolver(echo, {
+        beforeRequest: (request) => {
+          admitted.push(request.session);
+
+          return true;
+        },
+        serializer: serverSerializer,
+      })((request, response) => {
+        received.push(request.session);
+
+        return response(request.payload);
+      });
+
+      await permissive({ ...propsOf(encode({ text: 'hi' })), session });
+      await permissive(propsOf(encode({ text: 'hi' })));
+      await permissive({ ...propsOf(encode({ text: 'hi' })), isAdmitted: true, session: bob });
+
+      expect(admitted).toEqual([session, undefined]);
+      expect(received).toEqual([session, undefined, bob]);
+      expect(admitted[0]).toBe(session);
+      expect(received[0]).toBe(session);
+      expect(received[2]).toBe(bob);
     });
 
     test('is not asked again of a request its router admitted', async () => {

@@ -12,6 +12,8 @@
 
   <ItemGroup>
     <ProjectReference Include="../../../implementations/dotnet/src/Bead.Transport.WebSockets/Bead.Transport.WebSockets.csproj" />
+    <!-- the gateway its server answers HTTP/JSON by, beside WebSocket, in process (decision 0037) -->
+    <ProjectReference Include="../../../implementations/dotnet/src/Bead.Transcoding.Http/Bead.Transcoding.Http.csproj" />
     <!-- the check a proto codec runs before Google.Protobuf reads, which it carries -->
     <ProjectReference Include="../../../implementations/dotnet/src/Bead.Protobuf/Bead.Protobuf.csproj" />
     <PackageReference Include="Google.Protobuf" />
@@ -27,5 +29,8 @@
   <ItemGroup Condition="'$(HelloMessages)' == 'external'">
     <Protobuf Include="../proto/hello/v1/hello.proto" ProtoRoot="../proto" AdditionalImportDirs="../.beadc/include" GrpcServices="None" />
     <Protobuf Include="../.beadc/include/bead/options.proto" ProtoRoot="../.beadc/include" GrpcServices="None" Access="Internal" />
+    <!-- protovalidate's options, which the .proto imports for its rules: beadc compiled those into
+         its validators, and Grpc.Tools needs the file to generate the messages beside them -->
+    <Protobuf Include="../.beadc/include/buf/validate/validate.proto" ProtoRoot="../.beadc/include" GrpcServices="None" Access="Internal" />
   </ItemGroup>
 </Project>

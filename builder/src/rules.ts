@@ -14,14 +14,16 @@ export const Severity = Object.freeze({
 } as const);
 
 /**
- * Where a rule applies: on a `.proto` input, or on any blueprint, one written by hand included; or
- * between two blueprints, the earlier and the current, under `beadc breaking`.
+ * Where a rule applies: on a `.proto` input, or on any blueprint, one written by hand included;
+ * between two blueprints, the earlier and the current, under `beadc breaking`; or between a
+ * blueprint and the targets `beadc generate` writes it with.
  */
 export const Level = Object.freeze({
   PROTO: 'proto',
   BLUEPRINT: 'blueprint',
   BOTH: 'proto and blueprint',
   BREAKING: 'breaking',
+  GENERATE: 'generate',
 } as const);
 
 /**
@@ -34,17 +36,25 @@ export const Category = Object.freeze({
   API: 'API',
 } as const);
 
+/**
+ * The category of the rules a client of the earlier's HTTP routes meets (decision 0037): each still
+ * reaches its procedure, and its JSON reads the same. Never a call's `--category`: it is held under
+ * either, wherever the earlier blueprint states an HTTP member or the project writes a document.
+ */
+export const HTTP_CATEGORY = 'HTTP';
+
 // types
 
 export type Severity = (typeof Severity)[keyof typeof Severity];
 export type Level = (typeof Level)[keyof typeof Level];
 export type Category = (typeof Category)[keyof typeof Category];
+export type RuleCategory = Category | typeof HTTP_CATEGORY;
 
 /** A rule: where it applies, how severe its findings are, and a breaking rule's category. */
 export interface IRule {
   readonly level: Level;
   readonly severity: Severity;
-  readonly category?: Category;
+  readonly category?: RuleCategory;
 }
 
 // definition
@@ -61,8 +71,28 @@ export const RULES = Object.freeze({
   PAYLOAD_TYPE_FIELD: { level: Level.PROTO, severity: Severity.ERROR },
   OPTIONS_COPY: { level: Level.PROTO, severity: Severity.ERROR },
   CSHARP_NAMESPACE: { level: Level.PROTO, severity: Severity.ERROR },
+  VALIDATE_COPY: { level: Level.PROTO, severity: Severity.ERROR },
+  VALIDATE_RULE_UNSUPPORTED: { level: Level.PROTO, severity: Severity.ERROR },
+  VALIDATE_PATTERN_LARGE: { level: Level.PROTO, severity: Severity.ERROR },
+  VALIDATE_RULES_UNPLAYED: { level: Level.PROTO, severity: Severity.WARNING },
+  // google.api.http on a .proto (decision 0037)
+  HTTP_COPY: { level: Level.PROTO, severity: Severity.ERROR },
+  HTTP_RULE_FIELD: { level: Level.PROTO, severity: Severity.ERROR },
+  HTTP_RULE_BODY: { level: Level.PROTO, severity: Severity.ERROR },
+  HTTP_RULE_RESPONSE_BODY: { level: Level.PROTO, severity: Severity.ERROR },
+  HTTP_RULE_CUSTOM: { level: Level.PROTO, severity: Severity.ERROR },
+  HTTP_RULE_NESTED: { level: Level.PROTO, severity: Severity.ERROR },
+  HTTP_RULE_BODY_DIFFERS: { level: Level.PROTO, severity: Severity.WARNING },
+  HTTP_QUERY_UNBINDABLE: { level: Level.PROTO, severity: Severity.WARNING },
+  HTTP_UPDATE_MASK: { level: Level.PROTO, severity: Severity.WARNING },
+  HTTP_ANY: { level: Level.PROTO, severity: Severity.WARNING },
   // on both
   ADMISSION_EMPTY: { level: Level.BOTH, severity: Severity.ERROR },
+  HTTP_RULE_TEMPLATE: { level: Level.BOTH, severity: Severity.ERROR },
+  HTTP_RULE_COMMAND: { level: Level.BOTH, severity: Severity.ERROR },
+  HTTP_BINDING_NATIVE: { level: Level.BOTH, severity: Severity.ERROR },
+  HTTP_GET_UNMARKED: { level: Level.BOTH, severity: Severity.WARNING },
+  HTTP_GET_UNBINDABLE: { level: Level.BOTH, severity: Severity.WARNING },
   // on any blueprint, in their order: its JSON, its format, its features, its schema
   BLUEPRINT_JSON: { level: Level.BLUEPRINT, severity: Severity.ERROR },
   FORMAT_UNKNOWN: { level: Level.BLUEPRINT, severity: Severity.ERROR },
@@ -89,6 +119,13 @@ export const RULES = Object.freeze({
   PROTO_FILE: { level: Level.BLUEPRINT, severity: Severity.ERROR },
   NAME_TARGET: { level: Level.BOTH, severity: Severity.ERROR },
   DESCRIPTION_TARGET: { level: Level.BLUEPRINT, severity: Severity.ERROR },
+  VALIDATE_RULE_FIT: { level: Level.BLUEPRINT, severity: Severity.ERROR },
+  // what `generate` holds a blueprint to: each output's target generates every feature it requires
+  FEATURE_UNGENERATED: { level: Level.GENERATE, severity: Severity.ERROR },
+  // and the routes one gateway serves, and an output that asks for HTTP of its target
+  HTTP_ROUTE_OVERLAP: { level: Level.GENERATE, severity: Severity.ERROR },
+  HTTP_ROUTE_RESERVED: { level: Level.GENERATE, severity: Severity.ERROR },
+  HTTP_UNGENERATED: { level: Level.GENERATE, severity: Severity.ERROR },
   SPEC_VERSION_NEWER: { level: Level.BLUEPRINT, severity: Severity.WARNING },
   // between two blueprints, by id: what a peer of the earlier meets
   SERVICE_NO_DELETE: { level: Level.BREAKING, severity: Severity.ERROR, category: Category.WIRE },
@@ -121,6 +158,11 @@ export const RULES = Object.freeze({
     severity: Severity.ERROR,
     category: Category.WIRE,
   },
+  PROCEDURE_RULES_TIGHTENED: {
+    level: Level.BREAKING,
+    severity: Severity.ERROR,
+    category: Category.WIRE,
+  },
   // and what code written against the earlier's generated API meets
   SERVICE_SAME_NAME: { level: Level.BREAKING, severity: Severity.ERROR, category: Category.API },
   SERVICE_SAME_FILE: { level: Level.BREAKING, severity: Severity.ERROR, category: Category.API },
@@ -140,6 +182,18 @@ export const RULES = Object.freeze({
   },
   NAME_NO_DELETE: { level: Level.BREAKING, severity: Severity.ERROR, category: Category.API },
   SERVICE_REVISION: { level: Level.BREAKING, severity: Severity.ERROR, category: Category.API },
+  // and what a client of the earlier's HTTP routes meets
+  HTTP_ROUTE_NO_DELETE: {
+    level: Level.BREAKING,
+    severity: Severity.ERROR,
+    category: HTTP_CATEGORY,
+  },
+  HTTP_GET_NO_DELETE: { level: Level.BREAKING, severity: Severity.ERROR, category: HTTP_CATEGORY },
+  HTTP_ROUTE_SHADOWED: {
+    level: Level.BREAKING,
+    severity: Severity.ERROR,
+    category: HTTP_CATEGORY,
+  },
   // and what the run says of itself: a comparison not run, an earlier that contradicts itself, a
   // waiver that waived nothing
   PROTO_SKIPPED: { level: Level.BREAKING, severity: Severity.WARNING },

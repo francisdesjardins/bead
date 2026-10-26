@@ -1,9 +1,11 @@
 #!/usr/bin/env node
 // ── The options' generated code is what its generator writes ─────────────────
-// `src/generated/bead/options_pb.ts` is committed, and the front end reads a .proto's options
-// through it; it is left out of the formatter and the lint, which judge code the builder writes. So
-// this writes it again, apart, from `buf.gen.yaml` and `proto/bead/options.proto`, and fails on any
-// difference: a file edited by hand, or the options or the generator moved without it.
+// `src/generated/bead/options_pb.ts`, `src/generated/buf/validate/validate_pb.ts` and
+// `src/generated/google/api/{annotations,http}_pb.ts` are committed, and the front end reads a
+// .proto's options through them, Bead's, protovalidate's and google.api.http; they are
+// left out of the formatter and the lint, which judge code the builder writes. So this writes them
+// again, apart, from `buf.gen.yaml` and `proto/`, and fails on any difference: a file edited by
+// hand, or the options or the generator moved without it.
 //
 // Usage, from builder/; `yarn check` runs the first:
 //   node tools/check-options.mjs           # check (exit 1 on a difference)
@@ -16,7 +18,12 @@ import { join } from 'node:path';
 
 const ROOT = process.cwd();
 const BUF = join(ROOT, 'node_modules', '@bufbuild', 'buf', 'bin', 'buf');
-const GENERATED = 'src/generated/bead/options_pb.ts';
+const GENERATED = [
+  'src/generated/bead/options_pb.ts',
+  'src/generated/buf/validate/validate_pb.ts',
+  'src/generated/google/api/annotations_pb.ts',
+  'src/generated/google/api/http_pb.ts',
+];
 
 const WRITE = process.argv.includes('--write');
 
@@ -38,17 +45,19 @@ const apart = mkdtempSync(join(tmpdir(), 'beadc-options-'));
 try {
   generate(apart);
 
-  const written = readFileSync(join(apart, GENERATED));
-  const committed = readFileSync(join(ROOT, GENERATED));
+  for (const generated of GENERATED) {
+    const written = readFileSync(join(apart, generated));
+    const committed = readFileSync(join(ROOT, generated));
 
-  if (!written.equals(committed)) {
-    console.error(
-      `check-options: ${GENERATED} differs from what buf.gen.yaml writes; run \`yarn options:generate\``
-    );
-    process.exit(1);
+    if (!written.equals(committed)) {
+      console.error(
+        `check-options: ${generated} differs from what buf.gen.yaml writes; run \`yarn options:generate\``
+      );
+      process.exit(1);
+    }
+
+    console.log(`check-options: ${generated} is what buf.gen.yaml writes`);
   }
-
-  console.log(`check-options: ${GENERATED} is what buf.gen.yaml writes`);
 } finally {
   rmSync(apart, { force: true, recursive: true });
 }

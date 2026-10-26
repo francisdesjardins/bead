@@ -1,0 +1,32 @@
+syntax = "proto3";
+
+package x.v1;
+
+import "bead/options.proto";
+import "buf/validate/validate.proto";
+
+option (bead.file) = {
+  admission: {
+    none: {}
+  }
+};
+
+// Asks for a count.
+message CountRequest {}
+
+// A result, whose rules no side judges: Bead judges a request alone.
+message CountResponse {
+  int32 count = 1 [(buf.validate.field).int32.gte = 0];
+}
+
+// A count, its result held to a rule no side plays.
+service XService {
+  option (bead.service) = {
+    id: 1
+    revision: 1
+  };
+
+  rpc Count(CountRequest) returns (CountResponse) {
+    option (bead.procedure) = {id: 1};
+  }
+}

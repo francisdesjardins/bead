@@ -26,6 +26,7 @@ import type {
   IResolverSeries,
   IRouterMetrics,
 } from './metrics-registry';
+import type { IJudged, IValidateOptions } from './violations';
 
 // declarations
 
@@ -882,6 +883,8 @@ export interface IRouterLike<Handle extends string = ConnectionHandle> {
   /** The clock it runs on, its transport's, which what is built on it runs on too. */
   readonly clock: IClock;
   readonly failures: IRouterFailures;
+  /** Its limits, which bound the detail of a failure it writes (spec 7.4). */
+  readonly limits: IRouterLimits;
 
   /**
    * The failure the router answered a request with in its resolver's place — a server's, as the
@@ -947,6 +950,11 @@ export interface IRouterLike<Handle extends string = ConnectionHandle> {
       onCallId?: ((callId: CallId) => void) | undefined;
       options: IResolvedRequestOptions;
       procedure: IProcedure;
+      /**
+       * What refuses the call once it started, before it goes, as its requester judged it: a value
+       * its rules refuse (spec 18.2). It draws no call id, and its payload goes nowhere.
+       */
+      refusal?: Error | undefined;
       /** The series its requester's declaration gave; a call that carries none counts as `_OTHER`. */
       series?: IProcedureSeries | undefined;
       subscribes?: INotificationLike | undefined;
@@ -1266,7 +1274,11 @@ export interface INotification<RequestPayload, NotificationPayload> extends INot
   ): IRegistrar;
 }
 
-export interface INotificationDependencies<RequestPayload, ResponsePayload, NotificationPayload> {
+export interface INotificationDependencies<
+  RequestPayload,
+  ResponsePayload,
+  NotificationPayload,
+> extends IValidateDependencies<RequestPayload> {
   serializer: INotificationSerializerClient<RequestPayload, ResponsePayload, NotificationPayload>;
   /**
    * Tells the other end to stop notifying, given the call id of the subscription and the answer that
@@ -1369,7 +1381,10 @@ export interface IRequest<
   (requestPayload: RequestPayload): IBoundCall<ResponsePayload, RequestOptionsParameters<Handle>>;
 }
 
-export interface IRequestDependencies<RequestPayload, ResponsePayload> {
+export interface IRequestDependencies<
+  RequestPayload,
+  ResponsePayload,
+> extends IValidateDependencies<RequestPayload> {
   serializer: IRequestSerializerClient<RequestPayload, ResponsePayload>;
 }
 
@@ -1421,7 +1436,7 @@ export interface IRequestResolverDependencies<
   RequestPayload,
   ResponsePayload,
   Handle extends string = ConnectionHandle,
-> {
+> extends IValidateDependencies<RequestPayload> {
   /**
    * Whether the request may reach the callback, asked on its header before its payload is read — the
    * router asks it, or the resolver itself, for a router that does not; a {@link ProgrammerError}
@@ -1430,6 +1445,19 @@ export interface IRequestResolverDependencies<
    */
   beforeRequest?: IBeforeRequest<Handle> | undefined;
   serializer: IRequestSerializerServer<RequestPayload, ResponsePayload>;
+}
+
+/**
+ * What judges a request's value by its procedure's rules (spec 18): the side that answers, once its
+ * payload reads and before its resolver; a requester, before it writes its value. A judging that
+ * refuses it is answered, or fails the call, PAYLOAD_INVALID, its violations in its detail, written
+ * under the router's bound; a `validate` that throws is the side's own error.
+ */
+export interface IValidateDependencies<RequestPayload> {
+  /** Stops at the first violation, protovalidate's `failFast`; every rule is judged otherwise. */
+  failFast?: boolean | undefined;
+  /** The request's rules, judged into what its detail carries; none judges nothing. */
+  validate?: ((request: RequestPayload, options: IValidateOptions) => IJudged) | undefined;
 }
 
 /**

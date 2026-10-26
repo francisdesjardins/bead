@@ -23,12 +23,16 @@ import type {
   AnsweredName,
   CommandName,
   GivenOf,
-  IServiceDescriptor,
   NotifyingName,
   ServiceProcedures,
   ValueOf,
 } from './descriptors';
-import { listedResponseOf, type ServiceResolverCallback, validated } from './service-server';
+import {
+  type IJudgingOptions,
+  judgingOf,
+  listedResponseOf,
+  type ServiceResolverCallback,
+} from './service-server';
 
 // interfaces
 
@@ -70,11 +74,10 @@ export interface IServiceClient<S extends ServiceProcedures> {
 
 /**
  * What a client side of a service is given besides its Bead client: the window of each procedure
- * that notifies, by its name, and whether each requester validates.
+ * that notifies, by its name; whether each requester judges its value by its rules, and whether a
+ * judging stops at its first violation, a command's it answers among them.
  */
-export interface IServiceClientOptions<S extends ServiceProcedures> {
-  /** Whether each requester runs its descriptor's `validate` before it encodes; not when none. */
-  readonly validates?: boolean | undefined;
+export interface IServiceClientOptions<S extends ServiceProcedures> extends IJudgingOptions {
   /** The window of each procedure that notifies, a whole number above 0; one not given, unpaced. */
   readonly windows?:
     | {
@@ -103,7 +106,9 @@ type AnyCallback = (
  * `options.windows` gives it — unpaced when none — and `on`, for the commands it answers. A window
  * for a procedure that does not notify, or one that is not a whole number above 0, is a
  * {@link ProgrammerError}, and so is a second client side over one Bead client at another window.
- * With `validates`, each requester runs its descriptor's `validate` before it encodes a request.
+ * With `validates`, each requester judges its value by its descriptor's `validate` before it writes
+ * it: a value its rules refuse fails its call before anything goes, PAYLOAD_INVALID (spec 18.2). A
+ * command it answers is judged by its rules before its resolver, always.
  *
  * @example
  * import { createServiceClient, PAYLOAD_CODECS, requestOf } from '@francisdesjardins/bead/service';
@@ -126,7 +131,7 @@ export const createServiceClient = <const S extends ServiceProcedures>(
   client: IClient,
   options: IServiceClientOptions<S> = {}
 ): IServiceClient<S> => {
-  const { validates = false } = options;
+  const { failFast, validates = false } = options;
   const windows: Readonly<Record<string, number | undefined>> = options.windows ?? {};
   const services = client.services;
   const callbacks = new Set<string>();
@@ -139,23 +144,11 @@ export const createServiceClient = <const S extends ServiceProcedures>(
 
   for (const name of Object.keys(windows)) {
     if (!notifying(name)) {
-      throw new ProgrammerError(`${name} does not notify, and takes no window`);
+      throw new ProgrammerError(
+        `a window is given for ${name}, which is no procedure of this service that notifies`
+      );
     }
   }
-
-  // how each procedure's request is written: validated first, when the options say so
-  const encoderOf = (descriptor: IServiceDescriptor): ((value: unknown) => Uint8Array) => {
-    const encode = descriptor.request.encode as (value: unknown) => Uint8Array;
-    const { validate } = descriptor;
-
-    return validates && validate !== undefined
-      ? (value) => {
-          validate(value);
-
-          return encode(value);
-        }
-      : encode;
-  };
 
   const request: Record<string, unknown> = {};
   const notifications: Record<string, unknown> = {};
@@ -169,15 +162,18 @@ export const createServiceClient = <const S extends ServiceProcedures>(
 
     const serializer = {
       decode: result.decode,
-      encode: encoderOf(descriptor),
+      encode: descriptor.request.encode as (value: unknown) => Uint8Array,
     };
+    // judged before it is written, when the options say so
+    const judging = judgingOf(descriptor, { failFast, judges: validates });
 
-    request[name] = services.getRequest(procedure, { serializer });
+    request[name] = services.getRequest(procedure, { ...judging, serializer });
 
     if (procedure.procedureKind === ProcedureKind.NOTIFIES) {
       const window = windows[name];
 
       notifications[name] = services.getNotification(procedure, {
+        ...judging,
         serializer: {
           ...serializer,
           decodeNotification: notification?.decode as (bytes: Uint8Array) => unknown,
@@ -202,12 +198,12 @@ export const createServiceClient = <const S extends ServiceProcedures>(
 
       if (typeof admission === 'object') {
         throw new ProgrammerError(
-          `${procedure.procedureName} is admitted by the hook ${admission.hook}, and a client side is given no hook`
+          `${procedure.procedureName} is admitted by the hook ${admission.hook}, which a client side is given none of`
         );
       }
 
       if (callbacks.has(name)) {
-        throw new ProgrammerError(`${name} has a resolver already`);
+        throw new ProgrammerError(`${name} is already a registered resolver`);
       }
 
       // * a command's session, as a server's requireSession, with the client router's own refusal
@@ -223,13 +219,12 @@ export const createServiceClient = <const S extends ServiceProcedures>(
 
       services.getCommandResolver(procedure, {
         ...(beforeRequest === undefined ? {} : { beforeRequest }),
+        ...judgingOf(descriptor, { failFast, judges: true }),
         serializer: {
           decode: requestCodec.decode,
           encode: result.encode as (value: unknown) => Uint8Array,
         },
       })(async (props, response) => {
-        validated(descriptor, props);
-
         await callback(
           props,
           listedResponseOf(response as INotificationResponse<unknown, ResolverFailure>, {

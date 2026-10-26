@@ -30,20 +30,29 @@ Thumbs.db
 # beadc's own folder beside a beadc.yaml, the root's among them: what it extracts or writes for a run
 .beadc/
 
-# protobuf's conformance runner, fetched by its pin, what tools/protobuf-conformance.mjs works in,
-# and the code it generates into each side's testee
+# protobuf's conformance runner and protovalidate-es, fetched by their pins, what
+# tools/protobuf-conformance.mjs and tools/protovalidate-differential.mjs work in, and the code each
+# generates into each side's testee
 tools/protobuf-conformance/.runner/
 tools/protobuf-conformance/.work/
+tools/protovalidate-differential/.oracle/
+tools/protovalidate-differential/.work/
 implementations/typescript/tools/protobuf-conformance/generated/
 implementations/dotnet/tools/Bead.ProtobufConformance/Generated/
+implementations/typescript/tools/protovalidate-differential/generated/
+implementations/dotnet/tools/Bead.ProtovalidateDifferential/Generated/
 
 # What tools/fuzz.mjs keeps on each machine: each side's corpora, grown from the seeds it writes,
-# its findings, the TypeScript side's bundles and its install of Jazzer.js's state, and the C#
-# side's fuzzer and instrumenter, fetched by their pin, with the build they instrument
+# its findings, the TypeScript side's bundles and its install of Jazzer.js's state, beadc's alike,
+# and the C# side's fuzzer and instrumenter, fetched by their pin, with the build they instrument
 implementations/typescript/tools/fuzz/corpus/
 implementations/typescript/tools/fuzz/findings/
 implementations/typescript/tools/fuzz/.build/
 implementations/typescript/tools/fuzz/.yarn/
+builder/tools/fuzz/corpus/
+builder/tools/fuzz/findings/
+builder/tools/fuzz/.build/
+builder/tools/fuzz/.yarn/
 implementations/dotnet/tools/Bead.Fuzz/corpus/
 implementations/dotnet/tools/Bead.Fuzz/findings/
 implementations/dotnet/tools/Bead.Fuzz/.fuzzer/

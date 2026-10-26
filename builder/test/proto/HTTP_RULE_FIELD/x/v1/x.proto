@@ -1,0 +1,58 @@
+syntax = "proto3";
+
+package x.v1;
+
+import "bead/options.proto";
+import "google/api/annotations.proto";
+
+option (bead.file) = {
+  admission: {
+    none: {}
+  }
+};
+
+// A request of every kind of field a route meets.
+message Request {
+  string name = 1;
+  repeated string tags = 2;
+  Inner sub = 3;
+  map<string, int32> labels = 4;
+}
+
+// What a request holds inside.
+message Inner {
+  string name = 1;
+}
+
+// A result.
+message Response {
+  string name = 1;
+}
+
+// Variables that bind no scalar.
+service XService {
+  option (bead.service) = {
+    id: 1
+    revision: 1
+  };
+  // Reads.
+  rpc Get(Request) returns (Response) {
+    option (bead.procedure) = {id: 1};
+    option (google.api.http) = {
+      post: "/v1/{missing}"
+      body: "*"
+      additional_bindings {
+        post: "/v1/a/{tags}"
+        body: "*"
+      }
+      additional_bindings {
+        post: "/v1/b/{sub}"
+        body: "*"
+      }
+      additional_bindings {
+        post: "/v1/c/{labels.x}"
+        body: "*"
+      }
+    };
+  }
+}

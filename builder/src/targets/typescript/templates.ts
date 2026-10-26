@@ -4,7 +4,8 @@
 // its descriptors, its catalogue, its resolvers' and its options' types, a server class where only
 // resolvers are written, and a client class holding a requester of each procedure by its name; the
 // file's contract with the runtime follows its services. A `proto` codec has the runtime check a
-// payload's records by its message's descriptor before protobuf-es reads it (decision 0028). Every
+// payload's records by its message's descriptor before protobuf-es reads it (decision 0028), and a
+// request whose message holds rules is judged by the validator of its rules (decision 0035). Every
 // import is a symbol, so protoplugin writes each once and aliases a clash; every doc comment is
 // `f.jsDoc`'s, which writes `*/` as `*\/`. A deprecation is marked `@deprecated` on each
 // declaration the file writes for it, as protoc-gen-es marks a deprecated rpc, and a name `on`, `of`
@@ -34,6 +35,8 @@ export interface ITemplateOptions {
   readonly protoRuntime: string;
   /** The descriptor of a message a `proto` binding names, by its full name. */
   readonly messageOf: (fullName: string) => DescMessage;
+  /** The function of rules of each message a request's rules reach, by its full name. */
+  readonly validators: ReadonlyMap<string, string>;
 }
 
 // constants
@@ -115,7 +118,7 @@ export const printService = (
   f: GeneratedFile,
   details: ITemplateOptions & { readonly service: IServiceEntry }
 ): void => {
-  const { service, runtime, protoRuntime, messageOf } = details;
+  const { service, runtime, protoRuntime, messageOf, validators } = details;
   const name = service.serviceName;
   const shown = service.proto?.fullName ?? name;
   const procedures = `${name}Procedures`;
@@ -273,6 +276,23 @@ export const printService = (
     f.print('    procedure: ', procedureOf(procedure, service), ',');
     f.print('    request: ', codecOf(procedure.request), ',');
     f.print('    result: ', codecOf(procedure.result), ',');
+
+    // * a request's rules, where its message has some: judged by the runtime's validator
+    const rules =
+      procedure.request.message === undefined
+        ? undefined
+        : validators.get(procedure.request.message);
+
+    if (rules !== undefined && procedure.request.message !== undefined) {
+      f.print(
+        '    validate: ',
+        f.import('validatorOf', protoRuntime),
+        '(',
+        f.importSchema(messageOf(procedure.request.message)),
+        `, ${rules}),`
+      );
+    }
+
     f.print('  }),');
   }
 

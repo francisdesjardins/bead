@@ -14,12 +14,16 @@ import type {
   Data,
   EmitterListener,
   IEventIteratorOptions,
+  IEventMethods,
   IGauges,
   IReadyStateMethods,
+  IMemoryPeerLike,
+  IMemoryTransportServerLike,
   ITransportMessage,
   IWorkerMessageEventLike,
   IWorkerPortLike,
 } from '../shared/types';
+import type { IHTTPPolicyOption } from './http-policy';
 import type { IHeadBoundServerLike, ILingeringSocketLike } from './server-bounds';
 
 // interfaces
@@ -404,19 +408,26 @@ export interface IWebSocketServerLike {
 export interface IWebSocketServerConstructor {
   /**
    * `server` is the transport's own HTTP server, which `ws` upgrades on and leaves open when it
-   * closes.
+   * closes; `closeTimeout`, the transport's, which `ws` waits on a close within, its own 1009's
+   * among them, from ws 8.22.
    */
-  new (options: { maxPayload?: number | undefined; server: Server }): IWebSocketServerLike;
+  new (options: {
+    closeTimeout?: number | undefined;
+    maxPayload?: number | undefined;
+    server: Server;
+  }): IWebSocketServerLike;
 }
 
 export interface IWSTransportServerOptions extends ITransportServerOptions {
   /** Defaults to {@link TRANSPORT_WEBSOCKET_BINARYTYPE}, for every connection. */
   binaryType?: 'arraybuffer' | 'blob' | 'nodebuffer' | undefined;
   /**
-   * Milliseconds a connection gets to answer a close before it is dropped, which bounds `close` and
-   * `stop`, on the real clock whatever `clock` is: it bounds the platform's own close handshake.
-   * From 1 to 2³¹ − 1, rounded to the nearest whole one, or `Infinity` to wait without end; any
-   * other, 0 among them, is a {@link ProgrammerError}. Defaults to {@link CLOSE_TIMEOUT}.
+   * Milliseconds a connection gets to answer a close before it is dropped, which bounds `close`,
+   * `stop` and the 1009 a message past `maxPayload` fails it with, on the real clock whatever
+   * `clock` is: it bounds the platform's own close handshake, and is given to `ws` as its own. From
+   * 1 to 2³¹ − 1, rounded to the nearest whole one, or `Infinity` to wait without end, which the
+   * timer `ws` arms on every close holds to 2³¹ − 1; any other, 0 among them, is a
+   * {@link ProgrammerError}. Defaults to {@link CLOSE_TIMEOUT}.
    */
   closeTimeout?: number | undefined;
   /**
@@ -452,9 +463,11 @@ export interface IWSTransportServerOptions extends ITransportServerOptions {
    */
   hosts?: readonly string[] | undefined;
   /**
-   * The largest message a connection may send, in bytes; `ws` closes a connection that sends a
-   * larger one with 1009. Defaults to {@link MAXIMUM_MESSAGE_BYTES}, the default envelope's limit: a
-   * router whose `maximumEnvelopeBytes` is raised needs it raised alike, as `createWSServer` does.
+   * The largest message a connection may send, in bytes, the spec's `maximumMessageBytes`; `ws`
+   * fails a connection that sends a larger one with 1009, reported on `error` naming the bound, its
+   * close unclean whatever the peer answers (spec 15.3). Defaults to {@link MAXIMUM_MESSAGE_BYTES},
+   * the default envelope's limit: a router whose `maximumEnvelopeBytes` is raised needs it raised
+   * alike, as `createWSServer` does.
    */
   maxPayload?: number | undefined;
   /**
@@ -584,6 +597,8 @@ export interface IHTTPRequestLike {
   /** `1.0`, `1.1` or `2.0`: an HTTP/1.1 request names its host, which an HTTP/1.0 one may not. */
   readonly httpVersion: string;
   readonly httpVersionMajor: number;
+  /** Whether its body came whole; Node's has it, and HTTP/2's compatibility one. */
+  readonly complete?: boolean | undefined;
   readonly method?: string | undefined;
   /**
    * Its fields as they came, each name before its value: what counts an `Authorization` or a
@@ -645,7 +660,11 @@ export interface IHTTPServerLike extends IHeadBoundServerLike {
   on(event: 'session', listener: (session: IHTTPSessionLike) => void): unknown;
 }
 
-export interface IHTTPTransportServerOptions extends ITransportServerOptions {
+/**
+ * An HTTP transport server's options: its members one by one, or a policy of them (spec 15.12),
+ * which `httpPolicyOf` builds and a gateway takes too, its members given once, there or here.
+ */
+export interface IHTTPTransportServerOptions extends ITransportServerOptions, IHTTPPolicyOption {
   /**
    * The bytes of body the exchanges under way may hold together, counted as they come; past them,
    * an exchange is refused 503. Defaults to {@link BODY_BYTES_BUDGET}.
@@ -689,7 +708,8 @@ export interface IHTTPTransportServerOptions extends ITransportServerOptions {
    * its name passes this check and is refused by `origins`'. An entry with a port, an empty one, one
    * that is no host, or `*` beside another is a {@link ProgrammerError} as the server is built. A refusal is told on the wire, to an HTTP client, and by the server's
    * `refusal`. An HTTP/1.1 request without a `Host`, with two, or with an authority that is no host is answered
-   * 400 before it, unmarked, as HTTP answers it (RFC 9112 §3.2); over HTTP/2, its stream is reset.
+   * 400 before it, unmarked, as HTTP answers it (RFC 9112 §3.2); over HTTP/2, its stream is reset,
+   * as is that of a request with neither `:authority` nor `Host`, under `*` too (RFC 9113 §8.3.1).
    */
   hosts?: readonly string[] | undefined;
   /**
@@ -721,8 +741,9 @@ export interface IHTTPTransportServerOptions extends ITransportServerOptions {
   maximumConnectionsPerAddress?: number | undefined;
   /**
    * The bytes one connection's outbox holds — what the server sent of its own and no listen
-   * acknowledged yet; past them, the connection closes, as one whose client fell behind, reported on
-   * `error`. Defaults to {@link MAXIMUM_OUTBOX_BYTES}.
+   * acknowledged yet; past them, the connection is dropped, its client behind, reported on `error`
+   * naming `maximumOutboxBytes` and its value, its close unclean (spec 15.9). Defaults to
+   * {@link MAXIMUM_OUTBOX_BYTES}.
    */
   maximumOutboxBytes?: number | undefined;
   /**
@@ -747,9 +768,9 @@ export interface IHTTPTransportServerOptions extends ITransportServerOptions {
   /**
    * The slowest, in bytes a second, a socket may take an answer, or a listen's batch, once
    * `sendGracePeriod` passed, as Kestrel holds a response to its `MinResponseDataRate`, judged each
-   * second on the real clock: an answer or a batch past its deadline is lost, its connection closed
-   * at both ends and reported on `error` naming it (spec 15.7, 15.12). A whole number; 0 holds
-   * none. Defaults to {@link MINIMUM_SEND_BYTES_PER_SECOND}.
+   * second on the real clock: an answer or a batch past its deadline is lost, its connection dropped
+   * at both ends and reported on `error` naming it and `sendGracePeriod` with their values (spec
+   * 15.7, 15.12). A whole number; 0 holds none. Defaults to {@link MINIMUM_SEND_BYTES_PER_SECOND}.
    */
   minimumSendBytesPerSecond?: number | undefined;
   /**
@@ -824,6 +845,94 @@ export type HTTPTransportServer = ITransportServer<IDrawnConnection, IDrawingReq
    */
   isTwoWay(connectionHandle: TransportServerConnectionHandle): boolean;
 };
+
+// ── Joined ────────────────────────────────────────────────────────────────────
+
+// interfaces
+
+/**
+ * What a join asks of each transport server it joins — met by each of this package's: the type its
+ * handles open with, its connections' flags, sends and closes, its events, its gauges and its stop.
+ */
+export interface IJoinableTransportServer {
+  /** The clock it runs on, which every transport joined shares; none, and it names none. */
+  readonly clock?: IClock | undefined;
+  /** What each handle it draws opens with, `type=…;`, which no other transport joined shares. */
+  readonly type: string;
+  carriesCredential?(connectionHandle: TransportServerConnectionHandle): boolean;
+  close(connectionHandle: TransportServerConnectionHandle): Promise<boolean>;
+  gauges?(): IGauges<TransportServerConnectionHandle>;
+  isSecure?(connectionHandle: TransportServerConnectionHandle): boolean;
+  isTwoWay?(connectionHandle: TransportServerConnectionHandle): boolean;
+  off<K extends TRANSPORT_SERVER_EVENTS>(
+    event: K,
+    listener: EmitterListener<TransportServerEventMap[K]>
+  ): unknown;
+  on<K extends TRANSPORT_SERVER_EVENTS>(
+    event: K,
+    listener: EmitterListener<TransportServerEventMap[K]>
+  ): unknown;
+  send(
+    message: ITransportMessage,
+    connectionHandle: TransportServerConnectionHandle
+  ): Promise<void>;
+  stop(): Promise<void>;
+}
+
+/**
+ * One transport server over several (spec 15.14), which a server is built on as on any: each
+ * connection is the transport's that drew its handle, which its flags, its sends and its closes go
+ * to; each transport's events are its own, told on; its stop and its gauges reach each.
+ */
+export interface IJoinedTransportServer<
+  Transports extends readonly IJoinableTransportServer[] = readonly IJoinableTransportServer[],
+> extends IEventMethods<TransportServerEventMap, IJoinedTransportServer<Transports>> {
+  /** The clock every transport joined runs on; none when none names one. */
+  readonly clock: IClock | undefined;
+  /** The transports it joins, in the order it was given them: what an application starts. */
+  readonly transports: Transports;
+
+  /** As the transport that drew the handle says; `false` for a handle none of them drew. */
+  carriesCredential(connectionHandle: TransportServerConnectionHandle): boolean;
+  /** Closes one connection through its transport; `false` for a handle none of them drew. */
+  close(connectionHandle: TransportServerConnectionHandle): Promise<boolean>;
+  /**
+   * What every transport holds, summed: each count and each ceiling of one name added, their
+   * connections and their anomalies together; a transport that counts nothing, its connections as
+   * its events told them.
+   */
+  gauges(): IGauges<TransportServerConnectionHandle>;
+  /** As the transport that drew the handle says; `false` for a handle none of them drew. */
+  isSecure(connectionHandle: TransportServerConnectionHandle): boolean;
+  /** As the transport that drew the handle says, two-way without it; `false` for one none drew. */
+  isTwoWay(connectionHandle: TransportServerConnectionHandle): boolean;
+  /** Hands a message to one connection through its transport; dropped for a handle none drew. */
+  send(
+    message: ITransportMessage,
+    connectionHandle: TransportServerConnectionHandle
+  ): Promise<void>;
+  /**
+   * Stops every transport it joins, and settles once each has: rejected with the first that
+   * rejected, in their order, once the others settled.
+   */
+  stop(): Promise<void>;
+  /** What `await using` calls: {@link IJoinedTransportServer.stop}. */
+  [Symbol.asyncDispose](): Promise<void>;
+}
+
+// ── Memory ────────────────────────────────────────────────────────────────────
+
+// types
+
+/** An in-memory transport server's options: the clock it runs on, and nothing else to bound. */
+export type IMemoryTransportServerOptions = ITransportServerOptions;
+
+/**
+ * A server of the in-memory transport: each connection's socket is its client's end, the address
+ * and port it gave; what a client connects to by {@link IMemoryTransportServerLike.accept}.
+ */
+export type MemoryTransportServer = ITransportServer<IMemoryPeerLike, undefined> &
+  IMemoryTransportServerLike;
 
 // ── Worker ────────────────────────────────────────────────────────────────────
 

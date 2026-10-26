@@ -146,6 +146,7 @@ test.describe('session tokens', () => {
       'ABEiM0RVZneImaq7zN3u_wA',
       'ABEiM0RVZneImaq7zN3u+w',
       'ABEiM0RVZneImaq7zN3u/w',
+      'ABEiM0RVZneImaq7zN3u w',
       'ABEiM0RVZneImaq7zN3u_w==',
       'ABEiM0RVZneImaq7zN3uAB',
       'AAAAAAAAAAAAAAAAAAAAAA',

@@ -14,7 +14,7 @@
     "The server is given the interop service's credentials: credentials.jwt, its keys, its audience, and its key set with the issuers it answers for, which answers on the server's clock as its words say, and with maximumWaitingCalls, the most calls that wait for one issuer's deadline at once; and credentials.elsewhere, its verifier, which settles on the server's clock as its words say. A server whose limits hold chunkBytes or maximumEnvelopeBytes under 1,024 bytes is given no JWT key and no key set, which section 12.2 forbids beside them, and takes no JWT. A JWT a send presents is written as its characters' bytes, as any header byte is.",
     "clauses are the units of spec.md an entry checks: a clause, 9.2; an item of its numbered list, 9.2.5; a row of its table, counted from 1, 15.6.8."
   ],
-  "specVersion": "0.7.0",
+  "specVersion": "0.8.0",
   "wallClock": "2026-01-01T00:00:00Z",
   "conversations": [
     {
@@ -270,6 +270,121 @@
               "code": 50,
               "scope": 0,
               "relays": 0
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "a request its rules refuse is answered PAYLOAD_INVALID, its violations in its detail",
+      "clauses": [
+        "9.5",
+        "17.2.1",
+        "18.2",
+        "18.6"
+      ],
+      "steps": [
+        {
+          "send": "A1 10 00 03  00 00 00 01  00 01 00 13 | 7B 22 6E 61 6D 65 73 22 3A 5B 22 22 2C 22 61 62 63 64 22 2C 22 61 62 22 5D 7D"
+        },
+        {
+          "expect": {
+            "kind": 18,
+            "callId": 1,
+            "failure": {
+              "code": 52,
+              "scope": 0,
+              "relays": 0,
+              "detail": "{\"bounds\":{\"min_len\":\"1\"},\"fieldPath\":\"names[0]\",\"message\":\"must be at least 1 characters\",\"ruleId\":\"string.min_len\"}\n{\"bounds\":{\"max_len\":\"3\"},\"fieldPath\":\"names[1]\",\"message\":\"must be at most 3 characters\",\"ruleId\":\"string.max_len\"}\n{\"more\":0}"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "a detail holds the first violations whole, and counts the rest",
+      "clauses": [
+        "18.2",
+        "18.6"
+      ],
+      "steps": [
+        {
+          "send": "A1 10 00 03  00 00 00 01  00 01 00 13 | 7B 22 6E 61 6D 65 73 22 3A 5B 22 22 2C 22 22 2C 22 22 2C 22 22 2C 22 22 2C 22 22 2C 22 22 2C 22 22 2C 22 22 2C 22 22 2C 22 22 2C 22 22 2C 22 22 2C 22 22 2C 22 22 2C 22 22 2C 22 22 2C 22 22 2C 22 22 2C 22 22 2C 22 22 2C 22 22 2C 22 22 2C 22 22 2C 22 22 2C 22 22 2C 22 22 2C 22 22 2C 22 22 2C 22 22 2C 22 22 2C 22 22 2C 22 22 2C 22 22 2C 22 22 2C 22 22 2C 22 22 2C 22 22 2C 22 22 2C 22 22 2C 22 22 2C 22 22 2C 22 22 2C 22 22 2C 22 22 2C 22 22 2C 22 22 2C 22 22 2C 22 22 2C 22 22 2C 22 22 5D 7D"
+        },
+        {
+          "expect": {
+            "kind": 18,
+            "callId": 1,
+            "failure": {
+              "code": 52,
+              "scope": 0,
+              "relays": 0,
+              "detail": "{\"bounds\":{\"max_items\":\"50\"},\"fieldPath\":\"names\",\"message\":\"must contain no more than 50 item(s)\",\"ruleId\":\"repeated.max_items\"}\n{\"bounds\":{\"min_len\":\"1\"},\"fieldPath\":\"names[0]\",\"message\":\"must be at least 1 characters\",\"ruleId\":\"string.min_len\"}\n{\"bounds\":{\"min_len\":\"1\"},\"fieldPath\":\"names[1]\",\"message\":\"must be at least 1 characters\",\"ruleId\":\"string.min_len\"}\n{\"bounds\":{\"min_len\":\"1\"},\"fieldPath\":\"names[2]\",\"message\":\"must be at least 1 characters\",\"ruleId\":\"string.min_len\"}\n{\"bounds\":{\"min_len\":\"1\"},\"fieldPath\":\"names[3]\",\"message\":\"must be at least 1 characters\",\"ruleId\":\"string.min_len\"}\n{\"bounds\":{\"min_len\":\"1\"},\"fieldPath\":\"names[4]\",\"message\":\"must be at least 1 characters\",\"ruleId\":\"string.min_len\"}\n{\"bounds\":{\"min_len\":\"1\"},\"fieldPath\":\"names[5]\",\"message\":\"must be at least 1 characters\",\"ruleId\":\"string.min_len\"}\n{\"bounds\":{\"min_len\":\"1\"},\"fieldPath\":\"names[6]\",\"message\":\"must be at least 1 characters\",\"ruleId\":\"string.min_len\"}\n{\"more\":44}"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "a request its rules take reaches its resolver",
+      "clauses": [
+        "18.2"
+      ],
+      "steps": [
+        {
+          "send": "A1 10 00 03  00 00 00 01  00 01 00 13 | 7B 22 6E 61 6D 65 73 22 3A 5B 22 61 22 2C 22 62 63 64 22 5D 7D"
+        },
+        {
+          "expect": {
+            "kind": 17,
+            "callId": 1,
+            "payload": "32"
+          }
+        }
+      ]
+    },
+    {
+      "name": "a request of checked that is not JSON is answered PAYLOAD_UNDECODABLE",
+      "clauses": [
+        "9.2.9",
+        "9.5"
+      ],
+      "steps": [
+        {
+          "send": "A1 10 00 03  00 00 00 01  00 01 00 13 | FF"
+        },
+        {
+          "expect": {
+            "kind": 18,
+            "callId": 1,
+            "failure": {
+              "code": 50,
+              "scope": 0,
+              "relays": 0
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "a request of checked of another shape breaks required at names",
+      "clauses": [
+        "18.2",
+        "18.3"
+      ],
+      "steps": [
+        {
+          "send": "A1 10 00 03  00 00 00 01  00 01 00 13 | 7B 22 6E 61 6D 65 73 22 3A 33 7D"
+        },
+        {
+          "expect": {
+            "kind": 18,
+            "callId": 1,
+            "failure": {
+              "code": 52,
+              "scope": 0,
+              "relays": 0,
+              "detail": "{\"fieldPath\":\"names\",\"message\":\"value is required\",\"ruleId\":\"required\"}\n{\"more\":0}"
             }
           }
         }
@@ -6880,8 +6995,9 @@
       ]
     },
     {
-      "name": "a destination dies with its connection, whoever opens it next, until it is registered anew",
+      "name": "a destination stays registered while its connection is open, dies with it, and lives again once a connection opened since registers it anew",
       "clauses": [
+        "14.1",
         "14.3.4",
         "14.4"
       ],
@@ -6894,6 +7010,9 @@
         },
         {
           "open": "device"
+        },
+        {
+          "open": "device2"
         },
         {
           "send": "A1 10 00 03  00 00 00 01  00 01 00 0C | 7B 22 6E 61 6D 65 22 3A 22 61 64 61 22 7D",
@@ -6919,6 +7038,23 @@
             "payload": "31 32"
           },
           "on": "device"
+        },
+        {
+          "send": "A1 10 00 03  00 00 00 01  00 01 00 0F | 7B 22 64 65 73 74 69 6E 61 74 69 6F 6E 22 3A 31 32 7D",
+          "on": "device2"
+        },
+        {
+          "expect": {
+            "kind": 18,
+            "callId": 1,
+            "failure": {
+              "code": 8,
+              "scope": 1,
+              "relays": 0,
+              "detail": "that destination is registered already"
+            }
+          },
+          "on": "device2"
         },
         {
           "close": true,
@@ -6965,37 +7101,8 @@
         },
         {
           "expect": {
-            "kind": 18,
+            "kind": 17,
             "callId": 1,
-            "failure": {
-              "code": 8,
-              "scope": 1,
-              "relays": 0,
-              "detail": "that destination is registered already"
-            }
-          },
-          "on": "device"
-        },
-        {
-          "send": "A1 10 00 03  00 00 00 03  00 01 00 10 | 6E 75 6C 6C",
-          "on": "device"
-        },
-        {
-          "expect": {
-            "kind": 17,
-            "callId": 3,
-            "payload": "74 72 75 65"
-          },
-          "on": "device"
-        },
-        {
-          "send": "A1 10 00 03  00 00 00 05  00 01 00 0F | 7B 22 64 65 73 74 69 6E 61 74 69 6F 6E 22 3A 31 32 7D",
-          "on": "device"
-        },
-        {
-          "expect": {
-            "kind": 17,
-            "callId": 5,
             "payload": "31 32"
           },
           "on": "device"

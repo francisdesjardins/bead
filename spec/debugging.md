@@ -12,13 +12,19 @@ goes on the wire. Sections 6 to 12 each name the conformance file that checks th
 name none: the support matrix, [`docs/support.md`](../docs/support.md), names the twin tests that
 hold what of them a test can. The why of each rule is in the decisions:
 
+- [0001](../docs/decisions/0001-the-envelope-sits-at-fixed-offsets.md): a call to a connection that
+  is not open, as a closing connection's teardown fails it (9.7);
 - [0013](../docs/decisions/0013-every-language-debugs-alike-at-no-cost-when-off.md): the whole of it;
 - [0016](../docs/decisions/0016-a-json-payload-has-one-form-whichever-side-writes-it.md): the
   payloads it writes (4.3, 10.1);
 - [0017](../docs/decisions/0017-ids-are-for-life-and-a-procedures-name-takes-one-ascii-form.md): the
-  names it reads (1.2, 6.10, 7.3, 8.3).
+  names it reads (1.2, 6.10, 7.3, 8.3);
+- [0033](../docs/decisions/0033-a-side-bounds-what-a-peer-holds-of-it.md): a call past those its
+  connection has it answer, and a requester's call past its bounds (9.4, 9.6);
+- [0035](../docs/decisions/0035-a-payload-that-reads-is-held-to-its-messages-rules-before-its-resolver-sees-it.md):
+  a request its rules refuse, traced and counted (4.3, 4.4, 9.4, 9.6).
 
-**Version: 0.3.0**. Each of its conformance files repeats it as its `debuggingVersion`, and follows
+**Version: 0.4.0**. Each of its conformance files repeats it as its `debuggingVersion`, and follows
 its schema in [`schemas/`](schemas/). It moves by `spec.md`'s rule, under a version of its own
 ([0008](../docs/decisions/0008-three-version-axes-and-names-qualified-by-their-owner.md)): the minor
 when an implementation that conforms to its last version must change to conform to this one, the
@@ -112,7 +118,7 @@ them, since its call may still read what it changed.
 | -------------------------------------------------------------------------------------------------- | --------- | ----------------------------------------------------------- |
 | a call made                                                                                        | `tx`      | its own, once its router drew its id; none if refused first |
 | its answer, or its failure                                                                         | `rx`      | the call made's                                             |
-| a request received, once admitted and decoded                                                      | `rx`      | its request's                                               |
+| a request received, once admitted, decoded and judged by its rules                                 | `rx`      | its request's                                               |
 | the answer it sends, its failure to go at that start, or its resolver's failure before it answered | `tx`      | its request's                                               |
 | a notification sent, and its failure to go at that start                                           | `tx`      | none: it goes to each subscription under that one's id      |
 | a notification heard, or its failure to decode                                                     | `rx`      | none: its subscription's call names it                      |
@@ -131,13 +137,16 @@ once it answered.
 4.3. A request refused by its admission, or whose admission fails, answered `PROCEDURE_FAILED`
 (`spec.md` 9.2, step 6), or whose payload does not decode, is not traced: no step of it was told,
 and none of its answer is; nor is a call whose value does not write, which is not made (`spec.md`
-17.2). A relayed call is no call of a service manager's at the relay: neither of its legs is traced
-as one, and their envelopes are, each leg under its own call id (5.1).
+17.2). A request whose payload reads and whose rules refuse it is traced: its `rx` step, decoded,
+then its `tx` step with the `PAYLOAD_INVALID` its side answered (`spec.md` 18.2). A relayed call is
+no call of a service manager's at the relay: neither of its legs is traced as one, and their
+envelopes are, each leg under its own call id (5.1).
 
 4.4. A call made names its call once its router drew its id, and its `tx` step is told then; one its
-router refuses before drawing an id names none, and its `tx` step is told as it is refused. Its `tx`
-step comes before its `rx` step. A call id names its call on its connection while the call is open:
-once it ended, its router may draw it again (`spec.md` 9.1).
+router refuses before drawing an id names none, and its `tx` step is told as it is refused: a value
+its rules refuse before it goes among them (`spec.md` 18.2). Its `tx` step comes before its `rx`
+step. A call id names its call on its connection while the call is open: once it ended, its router
+may draw it again (`spec.md` 9.1).
 
 ## 5. The trace of envelopes
 
@@ -275,22 +284,22 @@ families. A count never makes a series.
 
 7.6. The codes a family's exits can end with, by section 9's and section 10's tables:
 
-| Series                                                                | Its codes                                                                                                                                                                                                                                                 |
-| --------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| a procedure's in the server families                                  | 12: `SESSION_REQUIRED`, `ACCESS_DENIED`, `PAYLOAD_TOO_LARGE`, `CAPACITY_EXCEEDED`, `CREDENTIAL_UNSUPPORTED`, `SUBSCRIPTION_UNSUPPORTED`, `CHUNK_INVALID`, `CREDIT_EXCEEDED`, `PAYLOAD_UNDECODABLE`, `TRANSFER_STALLED`, `PROCEDURE_FAILED`, `application` |
-| a procedure's in the client families, and `_OTHER`'s in both          | 24: section 8's 22, `application` and `_OTHER`, since a peer's answer, or a relay's, can carry any                                                                                                                                                        |
-| a procedure's in the notification families, as the side that notifies | 24, as a procedure's in the client families, since its application ends a subscription with the failure it chooses (`spec.md` 11.7, item 2)                                                                                                               |
-| a procedure's in the notification families, as the side that hears    | 24, as a procedure's in the client families                                                                                                                                                                                                               |
+| Series                                                                | Its codes                                                                                                                                                                                                                                                                    |
+| --------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| a procedure's in the server families                                  | 13: `SESSION_REQUIRED`, `ACCESS_DENIED`, `PAYLOAD_TOO_LARGE`, `CAPACITY_EXCEEDED`, `CREDENTIAL_UNSUPPORTED`, `SUBSCRIPTION_UNSUPPORTED`, `CHUNK_INVALID`, `CREDIT_EXCEEDED`, `PAYLOAD_UNDECODABLE`, `TRANSFER_STALLED`, `PAYLOAD_INVALID`, `PROCEDURE_FAILED`, `application` |
+| a procedure's in the client families, and `_OTHER`'s in both          | 25: section 8's 23, `application` and `_OTHER`, since a peer's answer, or a relay's, can carry any                                                                                                                                                                           |
+| a procedure's in the notification families, as the side that notifies | 25, as a procedure's in the client families, since its application ends a subscription with the failure it chooses (`spec.md` 11.7, item 2)                                                                                                                                  |
+| a procedure's in the notification families, as the side that hears    | 25, as a procedure's in the client families                                                                                                                                                                                                                                  |
 
 A route refused, a header that does not read and a relayed call are `_OTHER`'s, which is why a
 procedure's server series take none of their codes.
 
-7.7. So a procedure takes 61 series in the server families: 44 in the histogram, its 42 buckets, its
-`_sum` and its `_count`; 1 started; and 16 handled, `result`, `cancelled`, `closed` and `error`, and
-`failure` under each of its 12 codes. It takes 74 in the client families: 44, 1, and 29 handled,
-`timeout` besides and 24 codes. It takes 27 in the notification families of the side that notifies,
-2 sent and 25 dropped, its 24 codes and none; and 26 in those of the side that hears, 1 heard and 25
-dropped, the same 25. `_OTHER` takes 73 series in the server families of a router and 74 in
+7.7. So a procedure takes 62 series in the server families: 44 in the histogram, its 42 buckets, its
+`_sum` and its `_count`; 1 started; and 17 handled, `result`, `cancelled`, `closed` and `error`, and
+`failure` under each of its 13 codes. It takes 75 in the client families: 44, 1, and 30 handled,
+`timeout` besides and 25 codes. It takes 28 in the notification families of the side that notifies,
+2 sent and 26 dropped, its 25 codes and none; and 27 in those of the side that hears, 1 heard and 26
+dropped, the same 26. `_OTHER` takes 74 series in the server families of a router and 75 in
 its client families.
 
 ## 8. The families
@@ -399,6 +408,7 @@ otherwise (7.3).
 | its request's transfer ended before its payload is whole: a chunk refused, or nothing came (12.6, 12.7)                             | `failure`   | `CHUNK_INVALID`, `CREDIT_EXCEEDED`, `TRANSFER_STALLED`                                |
 | its header does not read, and it is answered (9.6.2)                                                                                | `failure`   | `ENVELOPE_MALFORMED`, `LAYOUT_UNSUPPORTED`, `ENVELOPE_TOO_LARGE`                      |
 | a payload its procedure cannot read (9.5)                                                                                           | `failure`   | `PAYLOAD_UNDECODABLE`                                                                 |
+| its payload reads and its procedure's rules refuse it (18.2)                                                                        | `failure`   | `PAYLOAD_INVALID`                                                                     |
 | a resolver that fails before it answers, or a result its side cannot send (9.5, 12.1)                                               | `failure`   | `PROCEDURE_FAILED`                                                                    |
 | a procedure's own failure, or a refusal of admission its resolver answers (9.5)                                                     | `failure`   | `application`; the refusal's name                                                     |
 | its subscription's queue past its bounds before its answer (11.10)                                                                  | `failure`   | `CAPACITY_EXCEEDED`                                                                   |
@@ -421,6 +431,7 @@ subscription and is refused in its own answer, its queue past its bounds before 
 | it presents a credential its transport cannot carry, before it goes (13.4)                                                                                                    | `failure`   | `DESTINATION_UNREACHABLE`         |
 | no call id is free, or its calls waiting on the connection number `maximumAnsweringCalls`, before it goes (9.1)                                                               | `failure`   | `CAPACITY_EXCEEDED`               |
 | its payload past its limit, a transfer its side sends none of, or one its header leaves no opening, past 1,020 bytes or without a byte within `chunkBytes` (12.1, 12.2, 12.3) | `failure`   | `PAYLOAD_TOO_LARGE`               |
+| its value its rules refuse, before it goes, in the turn it started (18.2)                                                                                                     | `failure`   | `PAYLOAD_INVALID`                 |
 | a result comes whole (9.7, 12.6), whether its requester decodes it or not                                                                                                     | `result`    |                                   |
 | a failure comes (9.7), passed on by relays or not (7.5)                                                                                                                       | `failure`   | its name, `application`, `_OTHER` |
 | its router ends it once it went: an answer that does not read (9.6.3), its result's transfer refused (12.3, 12.6)                                                             | `failure`   | its name                          |

@@ -173,7 +173,8 @@ const framingOf = ({ fields, status }: IResponseHead): 'chunked' | 'end' | numbe
     return 0;
   }
 
-  if (fields.get('transfer-encoding')?.toLowerCase().includes('chunked') === true) {
+  // * chunked as the last coding names it (RFC 9112 6.3), as the C# side's peer reads it
+  if (/(?:^|,)\s*chunked\s*$/iu.test(fields.get('transfer-encoding') ?? '')) {
     return 'chunked';
   }
 
@@ -299,7 +300,8 @@ export const createResponseReader = (
 
       const reason = read === undefined ? 'the head' : 'the body';
 
-      isLost = read === undefined;
+      // * lost: no status line came whole before the stream ended, as the C# side's peer reads it
+      isLost = read === undefined && !pending.includes('\r\n');
 
       fail(error ?? new Error(`the stream ended before ${reason} was whole`));
     },

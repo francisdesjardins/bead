@@ -7,6 +7,396 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-10-26
+
+### Added
+
+- Generated HTTP clients on both sides: an output with `http: true` writes a typed
+  `<Service>HttpClient` beside its route table, over fetch or HttpClient, calling the default
+  routes with Bead's JSON mapping, reading problems as Bead failures and notifications as an
+  asynchronous event stream; credentials destined off the machine in the clear fail before
+  dispatch, redirects are refused, and a stream never reconnects automatically. Both clients take
+  the gateway URL first and optional options last; TypeScript calls procedures directly and reads
+  subscriptions through `subscribe<Procedure>`, matching the C# methods.
+
+- The demo answers its sign-up over HTTP and JSON: the internal demo mounts a gateway of beadc's
+  route table on its public port, `POST /api/SignUp/signUp` and `/openapi.json`, and the page shows
+  the same sign-up as a `curl` and the gateway's answer, a refusal as RFC 9457's problem, written
+  by the runtime's own mapping where its server is a Web Worker.
+- The demo shows the same service on both sides: `examples/hello`'s resolvers, server and client,
+  its TypeScript file beside its C# one, one tab a role, written from the repository's files by
+  `demo/make-samples.ts` and held to them by the demo's tests.
+- Three more fuzz targets: `jwt`, the JWT verifier, and `ws-handshake`, the WebSocket upgrade's
+  judgement, on both sides, seeded from `spec/vectors.json`'s verdicts and `spec/transports.json`'s
+  upgrades; `blueprint`, beadc's blueprint reader and its form, from `builder/tools/fuzz/`, seeded
+  from the repository's blueprints.
+- Payload rules: protovalidate's `buf.validate` rules on a `proto` request, read by beadc into the
+  blueprint under the feature `validate` and generated as native validators on both sides; a server
+  judges every request before its resolver, a client before it sends when its options say so, and
+  `failFast` stops at the first violation (spec 18, decision 0035).
+- `PAYLOAD_INVALID` (52): a payload that reads and breaks a rule, its violations in its detail as
+  lines of canonical JSON, a cut keeping its whole lines (spec 8.1, 9.5, 18.6).
+- beadc builds a pattern's DFA ahead of time, its classes from its own Unicode 17.0.0 tables, and a
+  target declares the features it generates.
+- `spec/validations.json` and `spec/validations.proto`, written by
+  `spec/generators/make_validations.py`, its patterns judged by RE2 itself, `google-re2`, pinned in
+  `spec/requirements.txt`, and Unicode's files pinned by `spec/generators/ucd.json`; the interop's
+  `checked`, its conversations and its exit; each side's validators of it held to what beadc
+  writes by `tools/check-validations.mjs`; and the differential against protovalidate-es, in CI.
+- beadc runs buf's `PROTOVALIDATE` lint rule, and refuses a rule it does not compile;
+  `beadc breaking`'s `PROCEDURE_RULES_TIGHTENED`.
+- The in-memory transport, on both sides: two routers of one process, each envelope whole, once and
+  in order in a later turn, a credential and the caller's address beside each request, transfers
+  taken (spec 15.13, decision 0036). Each side's conversations play through a pair of it, and the C#
+  side's service tests link a server and a client through it.
+- A joined server transport, on both sides: one server takes its connections from several
+  transports, each handle its own transport's (spec 15.14, decision 0036).
+- Each side's bench measures calls in memory, and `exchange.*`: a connection drawn, called once and
+  closed, as a gateway draws one per HTTP exchange.
+- HTTP/JSON transcoding, on both sides: a gateway that answers each procedure's
+  `POST /api/<Service>/<procedure>`, `GET` there for one marked `NO_SIDE_EFFECTS`, and each
+  `google.api.http` rule as written, one route a path by the peers' precedence, one Bead connection
+  per exchange through the in-memory transport into the application's own server, joined;
+  protobuf's JSON mapping read and written by Bead's own mapping, one form on both sides, the binary
+  payload its stock library's; failures as `application/problem+json`, a status by where its code
+  arose, `PAYLOAD_INVALID` 422 with its violations, a body, a query or a variable its reading
+  refuses 400 in the mapping's words, where the request carried it in a `pointer`, a JSON Pointer
+  into the body as written that names what holds a key past 64 bytes, or a `parameter`, its name
+  cut; a refusal of its own in the companion's words, which `spec/transcoding.json`
+  holds, naming its gate or its bound and nothing its request carried, a request of no type to a
+  route that takes a body 415 and a body HTTP cannot frame refused as HTTP refuses it; each failure
+  it answers 500 or above but `PROCEDURE_FAILED` reported on the gateway's `error`, an error of its
+  own answered with its code alone, and none of an exception's words in a problem (spec 9.0);
+  notifications as Server-Sent Events at the reader's pace, each event an id, a reconnection
+  answered 204 (`spec/transcoding.md` 0.1.0, decision 0037). A gateway counts an `accept` weight it
+  cannot read as 1, refuses two `content-type` fields 415, answers 304 an `if-none-match` that holds
+  `*` among other tags, takes a raw or text route's query of empty sequences, and drops a stream
+  past `maximumUnsentBytes` before any byte of it goes. It refuses, as it is built, a route whose
+  method is none of `http.proto`'s, that has no template or whose template is off its grammar,
+  naming the route, two routes of one method that tie, naming both, and a notification where its
+  procedure does not notify, or none where it does. Each side binds a request's message from the
+  variables its gateway decoded of the route it matched, its query and its body: `bindRequest`, and
+  the C# side's `HttpBinding.Bind`, of a message and its `BindingOptions`. A target that holds an
+  octet past US-ASCII is refused 400 as HTTP refuses it, unmarked.
+  The TypeScript gateway's own listener listens on `localhost`, both loopbacks, by default, once
+  until it stops, and gives its address.
+- beadc reads `google.api.http` and `idempotency_level` into the blueprint's routes and messages'
+  shapes, under no feature, and writes one OpenAPI 3.1.1 document a blueprint, embedded byte for byte
+  with a route table in each output with `http: true`; its rules `HTTP_*`; `beadc breaking`'s
+  category `HTTP`, held under `WIRE` and `API` wherever a blueprint states a route, buf's
+  `WIRE_JSON` among it.
+- `spec/transcoding.md`, the transcoding's companion, its units in `spec/transcoding-units.txt`,
+  which `spec/check.py` holds as it holds the spec's; `spec/transcoding.proto` and
+  `spec/transcoding.json`, written by `spec/generators/make_transcoding.py`, which reads and writes
+  every body beside protobuf's own Python library, pinned in `spec/requirements.txt`, and names each
+  edge where it parts; an entry cites `spec.md`'s units behind `spec:`, `spec:9.2.5`.
+- Protobuf's conformance suite's JSON tests through each side's mapping of protobuf's JSON, 5,601
+  tests binary and JSON, the same two failures listed on both sides.
+- `tools/check-transcoding.mjs`, which holds each side's route table and document of
+  `spec/transcoding.proto` to what beadc writes, in CI's `builder` job.
+- Each side's bench measures `transcoding.read.*` and `transcoding.write.*`: Bead's mapping of
+  protobuf's JSON against its stock library's, on a message of every kind of field, and
+  `--transcoding` runs those alone.
+- `examples/hello` serves its service over HTTP too, by a gateway on a port of its own beside its
+  WebSocket one, one server joined; `pairs.mjs` asks each server's gateway what a person asks with
+  curl, and `transcript.txt` holds its answers.
+- `spec/durations.json`'s places `gateway.timeout` and `gateway.heartbeat`, and the way `gateway` of
+  `httpTransportServer.headersTimeout`, `httpTransportServer.bodyGracePeriod` and
+  `httpTransportServer.sendGracePeriod`, a gateway's bounds being 15.12's; a gateway's place cites
+  `transcoding.md`'s units, `transcoding:9.2`.
+- The DevTools panel reads a `PAYLOAD_INVALID`'s detail with the package's own reader: a call's
+  Overview tables its violations, a row each with its field, rule, words and bounds, then what the
+  closing line counts, that its side stopped, or that the detail was cut; the Wire view sums one up
+  on its line.
+- The demo's sign-up, a service beadc generates from the demo's own `.proto`, its request held to
+  protovalidate's rules: a refusal's violations each under its field, marked `aria-invalid` and
+  described by them, one of no field above the form, and "Validate before sending" refusing before
+  anything goes; `yarn test:demo` runs the demo's tests, and CI holds its generated code.
+
+### Changed
+
+- The spec moves to 0.8.0 (`spec-v0.8.0`), its companion, `spec/debugging.md`, to 0.4.0
+  (`debugging-v0.4.0`), and the transcoding's companion, `spec/transcoding.md`, is first released,
+  at 0.1.0 (`transcoding-v0.1.0`).
+- The documents are brought to 0.7.0: the records, the spec and its companions in form alone, the
+  READMEs and the matrix; no record moves, and the broker, a third language's core, the close code
+  carried on `close` and the CEL step of payload rules stay ahead.
+- The TypeScript side names a credential scheme to come `scheme 4` in `CREDENTIAL_UNSUPPORTED`'s
+  detail, as the C# side and its own header refusals do, where it wrote the bare number.
+- The builder, the TypeScript side and the example use Buf 1.75 and the current Oxlint and Oxfmt
+  pins, their indirect dependencies refreshed, `fast-uri` past its four advisories among them; the
+  C# side and the example use .NET SDK 10.0.403; CI uses Python 3.14.9 and Semgrep 1.182.1, and the
+  builder's image Node 26.12.1.
+- The demo shows its parts in scenes, one a tab: its calls, its payload rules beside the same
+  sign-up over HTTP, the sign-up's OpenAPI document, its server and its metrics, and its code, both
+  sides side by side; the address's fragment names the scene shown, the logs stay in a rail beside
+  them that a visitor folds away, and its type scale, spacing and radii are penumbra's.
+- A descriptor's `validate` gives its violations, and is given `failFast` and the bound of what it
+  holds; a violation is answered `PAYLOAD_INVALID`, no longer `PROCEDURE_FAILED`, by the service
+  manager. Generated code names `GENERATED_CODE_SUPPORTS_VERSION_4`, `GeneratedCode.SupportsVersion4`;
+  the runtimes no longer carry version 3, so code generated before this release must be regenerated.
+- The companion counts `PAYLOAD_INVALID` among each family's codes: a procedure takes 62 series in
+  the server families and 75 in the client ones, `_OTHER` 74 and 75 (debugging 7.6, 7.7). Its 9.4's
+  rows from its thirteenth on are one later, past the new one, and its 9.6's from its fifth on.
+- The interop service is at revision 2, `checked` among its procedures.
+- The example's count past 10 is a rule of its `.proto`, its failure retired, its service at
+  revision 2.
+- Spec 15.3 states that a side fails a connection with 1009 past its `maximumMessageBytes` (RFC
+  6455 §7.1.7): it drains until the peer's close or its close timeout, its close unclean whatever
+  code the peer answers with, and the side reports it naming the bound and its value. A side's close
+  timeout, 5 seconds by default, bounds each closing handshake it begins, which a client SHOULD hold
+  where its platform lets it. Spec 15.1 states what a side's transport, a client's as a server's, reports
+  on its `error`: what it ends a connection for of its own — a protocol error, a 1009, a drop, or
+  over HTTP an envelope past `maximumBodyBytes` and a batch that does not read — each once, as the
+  connection ends, before its close, and a listener's throw; never a peer gone without its closing
+  handshake, one its heartbeat drops, its own abort past its close timeout, nor over HTTP a server
+  gone, a refusal of its own, an exchange lost or its inactivity timeout.
+- Spec 13.4 and 14.3 count an in-memory transport among what never leaves the machine, and 15.1
+  what it carries beside an envelope.
+- `spec/durations.json`'s `transportClient.connectTimeout` gains the way `memory`, the in-memory
+  client's connect.
+- Generated code that writes a route table names `GENERATED_CODE_SUPPORTS_VERSION_5`,
+  `GeneratedCode.SupportsVersion5`; the runtimes carry 4 and 5, so a project that generates no route
+  table regenerates nothing.
+- The HTTP transport's options take one policy object of hosts, origins, proxies and bounds, which a
+  gateway takes too; a member given in it and beside it is refused, whatever its value.
+- Decision 0008's axis carries the transcoding's companion beside the debugging one: its file repeats
+  its `transcodingVersion`, and a release whose transcoding moved tags `transcoding-v`;
+  `tools/release.mjs prepare` takes `--transcoding <move>`, and `tools/check-versions.mjs` holds its
+  version and its tag.
+- Decision 0022 states that a member the blueprint adds under no feature is a minor of
+  `bead-blueprint/1`, which every older reader refuses by its closed schema, and that `requires`
+  names what a target must play.
+- The C# side's `IServerTransport` names the type its handles begin with, `Type`, which a join
+  reads, and a connect refused before anything goes is a `ConnectException`, as the TypeScript
+  side's `ConnectError`.
+- Spec 15.12 states that a client bounds what it reads, an answer or an envelope a batch brings, by
+  `maximumBodyBytes`, as both HTTP clients do.
+- Both WebSocket servers report a drop as `<handle> is dropped: …`, naming `maximumUnsentBytes`, or
+  `minimumSendBytesPerSecond` and `sendGracePeriod`, in the spec's spelling with their values,
+  where the TypeScript side wrote `the client fell behind: …` and the C# side its option's name
+  alone.
+- Both HTTP servers report a drop in that shape, `<handle> is dropped: …`, naming
+  `maximumOutboxBytes`, or `minimumSendBytesPerSecond` and `sendGracePeriod`, with their values,
+  the pace's sentence the WebSocket's own, where the TypeScript side wrote `the client fell
+  behind: …` and the C# side `<handle> is dropped behind its <Option>`, no value.
+- `spec/durations.json` names a WebSocket's close timeout `webSocketTransport.closeTimeout`, by two
+  ways, `client` and `server`, as `webSocketTransport.heartbeat` is, and both sides' harnesses play
+  each, where `webSocketTransportServer.closeTimeout` was the server's place alone, its outcomes
+  played by each client's tests.
+- `spec/durations.json` holds an HTTP connection's inactivity timeout as one place,
+  `httpTransport.inactivityTimeout`, by two ways, `client` and `server`, where
+  `httpTransportServer.inactivityTimeout` and `httpTransportClient.inactivityTimeout` held the same
+  outcomes apart: two owners share a place where the spec names one option for both and every
+  column of the file agrees (decision 0014). The file holds 27 places, by 43 ways.
+- Each destination a server's router lists says whether its connection closed, `isClosed` and
+  `Destination.IsClosed`, its registration's as it is now; `registerDestination` takes `replaces`,
+  the registration the caller holds, whose id the new one takes at once, under one lock on the C#
+  side, so no relayed call meanwhile is answered `DESTINATION_UNKNOWN` (spec 14.1, 14.4, decision
+  0019). Registering an id that is taken stays refused, closed or not: who may register which
+  destination is the application's to decide, and the relay checks nobody.
+- The interop service keeps its registrations by destination id: `register` refuses code 8 only a
+  destination whose connection is open, or one that is no connection's, and registers anew in its
+  place one whose connection closed; `unregister` takes out its caller's own.
+- The conversation of a destination dead with its connection opens the device again as a new
+  connection, under a handle never given, which registers the destination anew; each side's
+  scripted player draws a new handle when a name opens again, and the conversations played in
+  memory are 170 of the 175.
+- The Web Worker client tells its worker's `error`, an exception its script did not catch, once as
+  the connection ends, before its close, unclean, naming the error's message and where it was
+  thrown; its server hears that close unclean, by `bead-lost`, as it hears a `disconnect` that is
+  not clean (spec 15.1, decision 0036).
+- The TypeScript side's transport client and server refuse a start or a connect in the C# side's
+  words: `the transport client is already open`, `the transport server is already connecting`,
+  `the transport server is starting`; a reconnect and a dispose as it connects too:
+  `the transport client is already reconnecting`, `the transport client was never connected`,
+  `the transport client cannot reconnect while <state>` and `the transport client was disposed as
+  it connected`. Its service client and server refuse a second resolver as `<name> is already a
+  registered resolver`, a window for what does not notify as `a window is given for <name>, which is
+  no procedure of this service that notifies`, and a command a hook admits as `<name> is admitted by
+  the hook <hook>, which a client side is given none of`. A send or a disconnect unless open is a
+  `ReadyStateError` in those words too, `the transport client is uninitialized, not open`, its `got`
+  and `expected` kept.
+- A server's options name the form to write where an entry is refused for its form alone, on both
+  sides: a hosts entry with a port names the host without it, a trusted proxy in brackets names
+  its bare address, and the refused origins wildcard names `*`.
+- The TypeScript side refuses a procedure's declaration in the C# side's words, naming it and the
+  clause: `"echo" at 0/1, revision 3, is out of its range: a service and a procedure are from 1 to
+  65535, a revision from 1 to 2147483647 (spec 16.2)`, and alike off its form and against its kind.
+- The TypeScript side's json and text payloads refuse in the C# side's words, naming their encoding:
+  `a json payload is not UTF-8`, `a text payload is not UTF-8`, `a json payload is not one JSON
+  text`, `a json value holds a surrogate alone`, and the rest alike.
+- A metrics registry that refuses a name says it alike on both sides, `the metrics registry holds
+  1/1 as "echo", and is given "other": another name at its address`, as the TypeScript side wrote
+  it, its ceiling naming the families it passes; and limits too small for a JWT say on both sides that `a side that takes or presents a JWT
+  holds a chunk's envelope and an envelope of 1,024 bytes at least`, as the C# side wrote it.
+- The TypeScript side's `TimeoutError` says what the C# side says at each wait: a call past its
+  timeout `no answer came in 10 milliseconds`, a key set's ask at its deadline `the key set's ask
+  for <issuer> was unsettled as its deadline was reached`, and a connection `timed out after 10ms`;
+  it takes its words beside its `timeout`, which it keeps. A call on an ask unsettled at its
+  deadline fails with that `TimeoutError`, as the C# side's with its `TimeoutException`, and one on
+  an ask that failed with `the key set's ask for <issuer> failed`, its issuer unquoted.
+- `tools/check-details.mjs` holds each allowed site itself: each carries its marker, `// ! a detail
+  of the side's own words: <why>`, on its line or right above it, and its file counts its marked
+  sites, so a new site beside an allowed one fails by its line and a site moved holds.
+
+### Fixed
+
+- Connect cancellation, timeout and disposal bound each supplied provider or HTTP executor even
+  when it ignores cancellation. WebSocket clients join one live credential-provider call per
+  client. An abandoned call is cancelled and waited out within the next attempt's own bound, then
+  the provider is called anew. Clients observe late failures and notify provider completion outside
+  the connect's continuation.
+  A provider's own cancellation is its failure; a late HTTP connection is released. A provider's
+  completion callback runs after connect settles and cannot refuse that connect.
+- Generated HTTP clients read gateway refusals and intermediary statuses as Bead failures, keep
+  status and Retry-After in their detail, distinguish body bounds from malformed payloads and lost
+  streams, and accept a base URL path. Authorization follows the transports' field check; event
+  decoding is bounded and linear. C# disposes only its own handler; fetch uses same-origin credentials.
+- HTTP clients count an exchange whose executor fails after dispatch as handed over and lose the
+  connection. An executor's own failure is reported once before the close; answer reads, listens
+  and disconnects reach their ending on both sides, including a cancellation the executor raises.
+- Every gateway response body obeys its send pace and maximumUnsentBytes bound: whole answers,
+  problems, the OpenAPI document and events. Whole bodies go in slices of at most 64 KiB; a drop
+  reports its bound once and releases the exchange and socket, cancelling a stream's call.
+  Stream writes settle in order and return each notification's credit. The byte bound includes
+  the host's exposed pending bytes and the write handed to it.
+
+- beadc retries temporary work area creation when a concurrent invocation removes its empty
+  `.beadc` parent, with at most three attempts.
+- The TypeScript HTTP client releases a connection disposed between its 201 response and the end
+  of connect, refusing the connect and ending Closed as the C# client does.
+- A client's disposal releases a replacement its close listener opens before disposal settles.
+  TypeScript's transport clients and the C# WebSocket client end Closed with no kept connection,
+  as the C# HTTP client does.
+- The C# gateway writes its heartbeat comment a heartbeat after its stream's last write, armed again
+  by each write, as the TypeScript side does, where it wrote one each heartbeat whatever went; and
+  it refuses a JSON text nested past 202 levels as `nested past 100` before its message is read,
+  where it answered `not JSON` past 256.
+- A relay words alike, on both sides, the `DESTINATION_UNREACHABLE` it answers a call whose
+  credential leg B cannot carry: `it verifies another audience than the one the token names, or
+  none`, `it was registered with no audience`, and `its transport leaves the machine in the clear,
+  which a bearer credential never crosses`, where the TypeScript side said each its own way and the
+  C# side the last another.
+- The C# server's gauges count the credentials' sessions it keeps and those of them timed,
+  `credentialSessions` and `timedCredentialSessions`, as the TypeScript server's do.
+- The TypeScript session manager times a session stored with a token of its own on a connection
+  that held none as one whose token it draws, as the C# side does: its gauges count it among
+  `timedConnections`.
+- The C# HTTP server tells nothing of a connection after its close: an envelope whose connection a
+  `DELETE` closes as it is handed on is answered the 404 marked `connection-unknown`, as the
+  TypeScript side answers it, where the router could hear it after the close and hold the
+  connection for good; a connection's opening and its listens are told before its close too.
+- The DevTools panel's redraws keep what their reader did: a block scrolled stays scrolled and a
+  section opened or closed stays so, the Metrics view's exposition among them, as each second's
+  reading redraws the view, and a call's detail keeps its folded branches while that call and tab
+  stay shown.
+- beadc compiles and lints projects on another drive than its installation, using a temporary copy
+  of its options under the project's `.beadc/`.
+- The TypeScript WebSocket client over `ws` offers no `permessage-deflate`, as the C# client does,
+  so a third-party server cannot negotiate compression on one side alone.
+- The demo's relay forwards a listen's `bead-after` and `bead-wait`, which the HTTP server needs:
+  the page over `?transport=http` connects again, where every listen was refused 400 `malformed`.
+- The TypeScript servers report a server not yet started as insecure unless its application says
+  otherwise or it has TLS, as the C# servers do.
+- The TypeScript HTTP server writes an answer that comes before its request's body is whole with
+  `connection: close`, its connection closed in stages, as spec 15.12 states and the C# side does,
+  where it kept the connection alive.
+- The C# HTTP server resets, over HTTP/2, the stream of a request with neither `:authority` nor
+  `host`, `PROTOCOL_ERROR`, under any hosts, `*` among them (RFC 9113 §8.3.1), as the TypeScript
+  side's does, where it answered 403 `host-refused`.
+- Both HTTP servers, both WebSocket servers and both gateways answer a request whose target holds an
+  octet other than visible ASCII — a control character, HTAB and a bare CR among them, a space, DEL
+  or an octet past US-ASCII — in its path or its query, or whose path's percent-decoding holds NUL,
+  400 unmarked over HTTP/1.1 and its stream reset `PROTOCOL_ERROR` over HTTP/2, before anything else
+  of it is judged, and tell no refusal (spec 15.12, transcoding 3.6, decision 0026): the C# side
+  took a control character, which it upgraded at a WebSocket's address and answered a marked 404 at
+  a path not its own, and the TypeScript side took `%00` in a path, which its gateway bound in a
+  variable. `%00` in a query, and every other octet percent-encoded, stay taken.
+- The C# gateway resets over HTTP/2 the stream of a request whose field or target HTTP refuses of
+  its own, `PROTOCOL_ERROR`, nothing written, as the TypeScript gateway does, where it answered 400.
+- The C# WebSocket server refuses an upgrade whose `Content-Length` is not zeros alone, a line it
+  cannot read or two lines among them, 400 `malformed`, as the TypeScript side does.
+- The C# WebSocket server tells a peer that drops without its closing handshake, its TCP
+  connection ended or reset, by its unclean `Close` alone, no `Error`, as the TypeScript side does.
+- Both WebSocket servers tell a message past `maximumMessageBytes` by one `error` of their own,
+  `<handle> is closed with 1009: a message past its maximumMessageBytes, N bytes`, a `GenericError`
+  keeping `ws`'s error as its `cause` on the TypeScript side, an `InvalidDataException` on the C#
+  side, which told none; then an unclean close, which the C# side told clean when the peer's answer
+  was a 1000.
+- Both WebSocket servers report a connection's error once its close or its drop began, and tell its
+  close all the same, so a listener of `error` that throws keeps no connection open, a drop's among
+  them. The C# server tells at most one `Error` a connection: none past its own 1009, its drop, its
+  abort after `CloseTimeout`, or its heartbeat's drop.
+- The TypeScript WebSocket server gives `ws` its `closeTimeout`, so a peer that never answers its
+  1009 is dropped after it rather than after `ws`'s own 30 seconds.
+- The TypeScript WebSocket client takes `closeTimeout`, `CLOSE_TIMEOUT` by default, 5 seconds, held
+  as the server's, and gives it to `ws`, so a server that never answers its `disconnect` or its 1009
+  is dropped after it, as the C# client's `CloseTimeout` drops it, rather than after `ws`'s own 30
+  seconds; over the global `WebSocket`, its platform bounds its close.
+- Both HTTP servers report a drop once its connection's end began, its exchanges cut, then tell
+  its close all the same, so a listener of `error` that throws keeps no connection open; a
+  connection two late answers drop is reported once.
+- Both WebSocket clients tell, once open, a protocol error on `error`, and a message past their
+  `maximumMessageBytes` as `the connection is closed with 1009: a message past its
+  maximumMessageBytes, N bytes`, a `GenericError` keeping `ws`'s error as its `cause` on the
+  TypeScript side, an `InvalidDataException` on the C# side, then their unclean close: the
+  TypeScript client told none once open, and the C# client told its own 1009 only when its server
+  never answered, as its abort. Over the global `WebSocket`, whose `error` cannot be told from a
+  drop, the TypeScript client tells none.
+- The C# WebSocket client tells no error for a server gone without its closing handshake, its
+  heartbeat's drop or its own abort past `CloseTimeout`, and tells its close all the same when a
+  listener of `Error` throws, where the close was lost.
+- Both HTTP clients tell, before their close, an envelope past `maximumBodyBytes`, an answer's or a
+  batch's, as `the connection is closed: an envelope past its maximumBodyBytes, N bytes`, and a
+  batch that does not read as `the connection is closed: a batch that does not read, …`, saying
+  what of it does not, each an error of their own, where they told their close alone.
+- The C# client validates a notifying procedure's subscribing request under `Validates`, as the
+  TypeScript side does.
+- The TypeScript service manager names a notification's window as the C# side does, `window 4`
+  or `no window`, in the error of a second ask for it with another.
+- A destination registered on a connection its router no longer holds is closed from its
+  registration, unreachable at once, and never forwarded to (spec 14.4).
+- A Web Worker client whose worker errs before the connection opens, its script failing to load,
+  fails its connect with a `ConnectError` at once, rather than after its timeout.
+- The C# in-memory server settles a connect in the turn after its listeners heard the connection,
+  as the TypeScript side does, so a close of theirs fails the connect, where the client opened on a
+  connection already closed.
+- An in-memory connect given up on, by a dispose, its token or its clock, draws no connection: the
+  TypeScript client hands its server an aborted signal, `accept(peer, { signal })`, which the
+  TypeScript server honours. A cancel or a timeout met as its server draws the connection holds on
+  both sides until the connect settles, what was drawn closed unclean and no close told, where the
+  C# client opened it and a reconnection then closed it clean, and the TypeScript client left it
+  open.
+- The C# in-memory client carries an empty credential as none, as an empty field does and the
+  TypeScript client does, where its server was handed an empty one.
+- The TypeScript join refuses a transport that names no type, a join among them, with a
+  `ProgrammerError`, as the C# side does, where it took one whose handles no transport owned.
+- A TypeScript transport client's reconnection its signal ends rejects with a `CancelError`
+  worded `the reconnection was cancelled`, as the C# side words it, the signal's reason its
+  `cause`, where it said nothing.
+- The C# interop service is offered whole by one service server, `checked` with its rules among
+  its procedures, as the TypeScript side offers it, where a second one answered `checked`.
+- The C# side's `FailureException.Header` stays redacted, its credential's scheme alone, whatever
+  header it is given, as the TypeScript side's `FailureError` keeps it, where a header given from
+  outside the router kept its credential.
+- The TypeScript side's refusal of a debug filter given whole names a kind's number quoted as JSON
+  writes a string, `not "153"`, as the C# side does (debugging 6.7, 6.8), where it named it bare.
+- The TypeScript `failuresOf` refuses a service id that is no whole number from 1 to 65535 with a
+  `ProgrammerError`, as the C# side's `FailureCatalogue` does (spec 16.2, 16.3), where it took one.
+- The C# side refuses a router's limit out of its range by its name and its value
+  (`WindowBytes is a whole number above 0, not 0`), the limits in the order of their names, and
+  words a paced request that opens no subscription as the TypeScript side words it, where it said
+  one rule for every limit.
+- The C# metrics registry refuses a declaration in the TypeScript side's sentences, the name held
+  and the name given quoted as JSON writes them, the families it overflows named and the spec's
+  reason last, where its sentences were its own.
+- The TypeScript side's `SESSION_REQUIRED` for an `OPAQUE` call before any session, and its refusal
+  of an empty transfer opening, read as the C# side's: `no session is known for OPAQUE to stand
+  for`, and `… of its payload at least, not 0`.
+- The TypeScript side's pending calls hold a reservation's timeout as the C# side's do, refusing
+  one past the longest timer or under a millisecond, where they reserved for the default.
+
 ## [0.6.0] - 2026-10-20
 
 ### Added
@@ -1527,7 +1917,8 @@ duration }`: on the C# side `StartedAt`, a `DateTimeOffset`, and `Duration`, a `
   workflows.
 - The licence, Apache-2.0.
 
-[Unreleased]: https://github.com/francisdesjardins/bead/compare/v0.6.0...develop
+[Unreleased]: https://github.com/francisdesjardins/bead/compare/v0.7.0...develop
+[0.7.0]: https://github.com/francisdesjardins/bead/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/francisdesjardins/bead/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/francisdesjardins/bead/compare/v0.4.1...v0.5.0
 [0.4.1]: https://github.com/francisdesjardins/bead/compare/v0.4.0...v0.4.1

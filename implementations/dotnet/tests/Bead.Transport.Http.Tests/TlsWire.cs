@@ -43,6 +43,7 @@ internal sealed class TlsWire : IAsyncDisposable
 
     private readonly TcpClient _tcp;
     private readonly SslStream _tls;
+    private int _nextStream = 1;
 
     private TlsWire(TcpClient tcp, SslStream tls)
     {
@@ -148,16 +149,50 @@ internal sealed class TlsWire : IAsyncDisposable
 
     /// <summary>
     /// One request over HTTP/2, of the fields given after <c>:method</c>, <c>:scheme</c> and
-    /// <c>:path</c>, its stream ended with its head: what its stream was answered, its status and
-    /// its mark, or the code its stream was reset with, or its session ended with before any answer.
+    /// <c>:path</c>, each but one the fields given name, its stream ended with its head: what its
+    /// stream was answered, its status and its mark, or the code its stream was reset with, or its
+    /// session ended with before any answer.
     /// </summary>
     public async Task<TlsAnswer> Ask(IReadOnlyList<(string Name, string Value)> fields)
     {
-        (string, string)[] request = [(":method", "POST"), (":scheme", "https"), (":path", "/bead"), .. fields];
-
         await _tls.WriteAsync(Preface, Cancelled);
         await _tls.WriteAsync(FrameOf((Settings, 0, 0), []), Cancelled);
-        await _tls.WriteAsync(FrameOf((Headers, EndStream | EndHeaders, 1), BlockOf(request)), Cancelled);
+
+        // ! the server's SETTINGS acknowledged before the request goes, so nothing is written once a
+        // session may end: a write that meets a session Kestrel ended draws a reset, which takes its
+        // GOAWAY, unread, with it
+        while (true)
+        {
+            var (type, flags, _, _) = await ReadFrame();
+
+            if (type == Settings && (flags & Acknowledged) == 0)
+            {
+                await _tls.WriteAsync(FrameOf((Settings, Acknowledged, 0), []), Cancelled);
+
+                break;
+            }
+        }
+
+        return await AskNext(fields);
+    }
+
+    /// <summary>A POST on the next client stream of the same HTTP/2 session.</summary>
+    public async Task<TlsAnswer> AskNext(IReadOnlyList<(string Name, string Value)> fields)
+    {
+        // ! a pseudo-header the fields given name takes the place of its default, every one before
+        // any regular field (RFC 9113 §8.3)
+        (string Name, string Value)[] defaults = [(":method", "POST"), (":scheme", "https"), (":path", "/bead")];
+        (string, string)[] request = [.. defaults.Where((field) =>
+        {
+            return !fields.Any((given) =>
+            {
+                return given.Name == field.Name;
+            });
+        }), .. fields];
+        var streamId = _nextStream;
+
+        _nextStream += 2;
+        await _tls.WriteAsync(FrameOf((Headers, EndStream | EndHeaders, streamId), BlockOf(request)), Cancelled);
 
         while (true)
         {
@@ -167,7 +202,7 @@ internal sealed class TlsWire : IAsyncDisposable
             {
                 await _tls.WriteAsync(FrameOf((Settings, Acknowledged, 0), []), Cancelled);
             }
-            else if (stream == 1 && type == ResetStream)
+            else if (stream == streamId && type == ResetStream)
             {
                 return new TlsAnswer(null, null, BinaryPrimitives.ReadUInt32BigEndian(payload));
             }
@@ -177,7 +212,7 @@ internal sealed class TlsWire : IAsyncDisposable
                 // stream id
                 return new TlsAnswer(null, null, null, BinaryPrimitives.ReadUInt32BigEndian(payload.AsSpan(4)));
             }
-            else if (stream == 1 && type == Headers)
+            else if (stream == streamId && type == Headers)
             {
                 return new HeaderBlock(payload).Answer();
             }

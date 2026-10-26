@@ -6,6 +6,8 @@ import type {
   Data,
   EmitterListener,
   IEventIteratorOptions,
+  IMemoryEndLike,
+  IMemoryTransportServerLike,
   IReadyStateMethods,
   ITransportMessage,
   IWorkerPortLike,
@@ -136,9 +138,10 @@ export interface ITransportClient<
    * Connects again with the options of the last accepted `connect`, replacing an open socket without
    * a `close`. Attempts that run out end CLOSED without a `close`; a cancel after a successful
    * attempt disconnects, which emits one; a misuse or an already aborted signal leaves the state as it
-   * was. Rejects with a {@link ProgrammerError}, a {@link ReconnectError} or a {@link CancelError};
-   * an error thrown by `tap` passes through, and so does a {@link ProgrammerError} an attempt
-   * rejects with, which the next would meet again.
+   * was. Rejects with a {@link ProgrammerError}, a {@link ReconnectError} or a {@link CancelError},
+   * `the reconnection was cancelled`, its signal's reason its `cause`; an error thrown by `tap`
+   * passes through, and so does a {@link ProgrammerError} an attempt rejects with, which the next
+   * would meet again.
    */
   reconnect(options?: ITransportClientReconnectOptions): Promise<void>;
   removeAllListeners(event?: TRANSPORT_CLIENT_EVENTS): this;
@@ -224,7 +227,10 @@ export type TransportClientEventMap = {
   close: [wasClean: boolean, wasQuick: boolean];
   /**
    * What a listener of its `message`, its `close` or its `reconnect` threw, which changes nothing the
-   * client does. A failure of the connection itself shows as `connect` rejecting, or as `close`.
+   * client does; and, once open, what the client closes its connection for of its own — a protocol
+   * error, a message or an envelope past its bound, a batch that does not read — once, as the
+   * connection ends, before its `close` (spec 15.1). A connect that fails rejects; a server or a
+   * network that ends the connection shows as `close` alone.
    */
   error: [error: Error];
   /**
@@ -312,13 +318,19 @@ export interface IWebSocketLike {
 /** `CONNECTING` and `OPEN` are read from the injected constructor, so `ws` and the global agree. */
 export interface IWebSocketConstructor {
   /**
-   * `options` is `ws`'s alone, its `headers` written on the upgrade; the global `WebSocket` takes
-   * two parameters, and still meets it.
+   * `options` is `ws`'s alone, its `headers` written on the upgrade, its `closeTimeout` what it
+   * waits on a close within, its own 1009's among them, from ws 8.22; `perMessageDeflate: false`
+   * offers no compression. The global `WebSocket` takes two parameters, and still meets it.
    */
   new (
     url: string,
     protocols?: string | string[],
-    options?: { headers?: Record<string, string>; maxPayload?: number }
+    options?: {
+      closeTimeout?: number;
+      headers?: Record<string, string>;
+      maxPayload?: number;
+      perMessageDeflate?: false;
+    }
   ): IWebSocketLike;
   readonly CONNECTING: number;
   readonly OPEN: number;
@@ -337,12 +349,16 @@ export interface IWSTransportClientConnectOptions extends ITransportClientAddres
    */
   credential?: string | undefined;
   /**
-   * What hands the credential its upgrade carries, called at each attempt, the first connect's and
-   * every reconnection's, before its upgrade goes, with the attempt's `signal`: where a credential
+   * What hands the credential its upgrade awaits at each attempt, the first connect's and
+   * every reconnection's, before its upgrade goes, with the call's `signal`: where a credential
    * past its end is renewed, as SignalR's `accessTokenFactory` is. Refused as `credential` is, and
    * beside it. What it throws fails that attempt, its cause, which a reconnection counts as a refused
    * connect; a value it hands that is no field value fails it with a {@link ProgrammerError}, which
    * a reconnection does not try again.
+   * Only one call is pending per client; an attempt joins a live call. A call abandoned by its last
+   * waiter is cancelled in a later turn; another attempt waits for it to settle, then calls anew.
+   * Cancellation, timeout and disposal bound each wait. The provider's own cancellation is its
+   * failure while the attempt's signal stays live.
    */
   credentialProvider?: ((options: { signal: AbortSignal }) => string | Promise<string>) | undefined;
   /** Prefixed with a single leading slash. */
@@ -361,6 +377,16 @@ export interface IWSTransportClientOptions extends ITransportClientOptions {
    */
   binaryType?: 'arraybuffer' | 'blob' | 'nodebuffer' | undefined;
   /**
+   * Milliseconds the server gets to answer a close before it is dropped, which bounds `disconnect`,
+   * a dispose's close and the 1009 a message past `maxPayload` fails it with, on the real clock
+   * whatever `clock` is: it bounds the platform's own close handshake, and is given to `ws` as its
+   * own. From 1 to 2³¹ − 1, rounded to the nearest whole one, or `Infinity` to wait without end,
+   * which the timer `ws` arms on every close holds to 2³¹ − 1; any other, 0 among them, is a
+   * {@link ProgrammerError}. The global `WebSocket` takes none, its platform's bound applying.
+   * Defaults to {@link CLOSE_TIMEOUT}.
+   */
+  closeTimeout?: number | undefined;
+  /**
    * Milliseconds between two pings of the server, rounded to the nearest whole one, from 1 to
    * 2³¹ − 1, and `Infinity` for none; 0 is refused: a server that has not answered one by the next
    * is dropped, and the client closes. Defaults to {@link HEARTBEAT}. Only a socket that can ping
@@ -369,7 +395,8 @@ export interface IWSTransportClientOptions extends ITransportClientOptions {
   heartbeat?: number | undefined;
   /**
    * The largest message it reads, in bytes, where its `WebSocket` takes a bound — `ws`'s, which
-   * closes a connection that sends a larger one with 1009; the global `WebSocket` takes none, its
+   * closes a connection that sends a larger one with 1009, told on `error` naming it and its value;
+   * the global `WebSocket` takes none, its
    * platform's bound applying. Defaults to {@link MAXIMUM_MESSAGE_BYTES}, the default envelope's
    * limit: a router whose `maximumEnvelopeBytes` is raised needs it raised alike, as
    * `createWSClient` does.
@@ -455,9 +482,9 @@ export interface IHTTPTransportClientOptions extends ITransportClientOptions {
    */
   isListening?: boolean | undefined;
   /**
-   * The largest answer taken, in bytes: an envelope's limit; one past it loses the connection. It is
-   * checked once the answer is read, and it bounds each envelope a listen brings back, alone, as it
-   * comes. Defaults to {@link MAXIMUM_BODY_BYTES}.
+   * The largest answer taken, in bytes: an envelope's limit; one past it closes the connection, told
+   * on `error` first, naming it and its value. It is checked once the answer is read, and it bounds
+   * each envelope a listen brings back, alone, as it comes. Defaults to {@link MAXIMUM_BODY_BYTES}.
    */
   maximumBodyBytes?: number | undefined;
   /**
@@ -484,18 +511,59 @@ export type HTTPTransportClient = ITransportClient<
   IHTTPTransportClientConnectOptions
 >;
 
+// ── Memory ────────────────────────────────────────────────────────────────────
+
+// interfaces
+
+/** What an in-memory connect takes besides: who connects, as its server's router is to see it. */
+export interface IMemoryTransportClientConnectOptions extends ITransportClientConnectOptions {
+  /**
+   * The address its server hands with each envelope and names its connection by (spec 15.13): the
+   * caller a gateway connects for, say; `local` when not given. Visible ASCII but `;`, which ends a
+   * handle's part; any other is a {@link ProgrammerError}.
+   */
+  address?: string | undefined;
+  /** The port its server hands beside the address: a whole number from 0 to 65535; none by default. */
+  port?: number | undefined;
+}
+
+export interface IMemoryTransportClientOptions extends ITransportClientOptions {
+  /** What it connects to: an in-memory transport server of the same process. */
+  server: IMemoryTransportServerLike;
+}
+
+// types
+
+/** A client of the in-memory transport: its socket is its server's end of the connection. */
+export type MemoryTransportClient = ITransportClient<
+  IMemoryEndLike,
+  IMemoryTransportClientConnectOptions
+>;
+
 // ── Worker ────────────────────────────────────────────────────────────────────
 
 // interfaces
 
 /**
+ * What a worker's `error` says, the shape of HTML's `ErrorEvent`: each member where it is given, none
+ * for a script that failed to load.
+ */
+export interface IWorkerErrorEventLike {
+  readonly colno?: number;
+  readonly filename?: string;
+  readonly lineno?: number;
+  readonly message?: string;
+}
+
+/**
  * What a page posts its connects to: a `Worker`, or any port to one. Its `error`, when it has one,
- * loses the connection.
+ * fails the connect under way, or closes the connection, unclean, told first on the client's
+ * `error`.
  */
 export interface IWorkerLike {
-  addEventListener?(type: 'error', listener: () => void): void;
+  addEventListener?(type: 'error', listener: (event: IWorkerErrorEventLike) => void): void;
   postMessage(message: unknown, transfer: readonly unknown[]): void;
-  removeEventListener?(type: 'error', listener: () => void): void;
+  removeEventListener?(type: 'error', listener: (event: IWorkerErrorEventLike) => void): void;
 }
 
 /** A connection's two ends: the client's own, and the one it hands the worker. */

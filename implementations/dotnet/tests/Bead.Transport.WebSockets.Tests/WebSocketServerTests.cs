@@ -1369,6 +1369,8 @@ public sealed class WebSocketServerTests
 
         Assert.Equal((ushort)ProtocolCode.DestinationLost, lost.Code);
         Assert.Equal(legB, Assert.Single(reported).ConnectionHandle);
-        Assert.Contains(nameof(WebSocketTransportServerOptions.MaximumUnsentBytes), Assert.Single(reported).Reason.Message, StringComparison.Ordinal);
+        Assert.Equal(
+            $"{legB} is dropped: what waits for its socket would pass maximumUnsentBytes, 256 bytes",
+            Assert.IsType<IOException>(Assert.Single(reported).Reason).Message);
     }
 }

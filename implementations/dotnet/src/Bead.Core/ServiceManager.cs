@@ -13,6 +13,13 @@ public interface IRouterLike
     TimeProvider Clock { get; }
 
     /// <summary>
+    /// The bound of a failure's detail the router writes, in bytes: its limits' detail, within what
+    /// one envelope of its limits holds (spec 7.4). A <see cref="ProtocolCode.PayloadInvalid"/>'s
+    /// detail is written under it, so that it goes whole (18.6).
+    /// </summary>
+    int DetailBytes { get; }
+
+    /// <summary>
     /// Registers a resolver; one out of its range, off its form or against its kind (spec 16.10), or a
     /// second one for its procedure, is an <see cref="ArgumentException"/>.
     /// </summary>
@@ -212,7 +219,10 @@ public sealed class BeforeRequest
     }
 }
 
-/// <summary>What a resolver of a procedure needs: how its payloads are written, and who it admits.</summary>
+/// <summary>
+/// What a resolver of a procedure needs: how its payloads are written, who it admits, and the rules
+/// a request is judged by.
+/// </summary>
 /// <typeparam name="TRequest">What a request carries.</typeparam>
 /// <typeparam name="TResponse">What a result carries.</typeparam>
 public sealed record RequestResolverDependencies<TRequest, TResponse>
@@ -222,6 +232,17 @@ public sealed record RequestResolverDependencies<TRequest, TResponse>
 
     /// <summary>Who it admits, on a request's header; everyone when none.</summary>
     public BeforeRequest? BeforeRequest { get; init; }
+
+    /// <summary>
+    /// What judges a request once it decoded, before its callback (spec 18.2): one it refuses is
+    /// answered <see cref="ProtocolCode.PayloadInvalid"/>, its violations in its detail, and its
+    /// callback never sees it; one that throws, <see cref="ProtocolCode.ProcedureFailed"/>, and
+    /// reported. None judges nothing.
+    /// </summary>
+    public RequestValidator<TRequest>? Validate { get; init; }
+
+    /// <summary>Whether <see cref="Validate"/> stops at its first violation (18.5); it judges every rule when false.</summary>
+    public bool FailFast { get; init; }
 }
 
 /// <summary>A request as a resolver's callback receives it: decoded.</summary>
@@ -338,7 +359,10 @@ public interface INotificationSerializerServer<TRequest, TResponse, TNotificatio
     ReadOnlyMemory<byte> EncodeNotification(TNotification notification);
 }
 
-/// <summary>What a resolver of a notification needs: how its payloads are written, and who it admits.</summary>
+/// <summary>
+/// What a resolver of a notification needs: how its payloads are written, who it admits, and the
+/// rules a request is judged by.
+/// </summary>
 /// <typeparam name="TRequest">What a request carries.</typeparam>
 /// <typeparam name="TResponse">What a result carries.</typeparam>
 /// <typeparam name="TNotification">What a notification carries.</typeparam>
@@ -349,6 +373,12 @@ public sealed record NotificationResolverDependencies<TRequest, TResponse, TNoti
 
     /// <summary>Who it admits, on a request's header; everyone when none.</summary>
     public BeforeRequest? BeforeRequest { get; init; }
+
+    /// <summary>As <see cref="RequestResolverDependencies{TRequest, TResponse}.Validate"/> says.</summary>
+    public RequestValidator<TRequest>? Validate { get; init; }
+
+    /// <summary>As <see cref="RequestResolverDependencies{TRequest, TResponse}.FailFast"/> says.</summary>
+    public bool FailFast { get; init; }
 }
 
 /// <summary>How a notification's callback answers: as any callback does, and it may subscribe first.</summary>
@@ -573,6 +603,24 @@ public sealed partial class ServiceManager
         }
     }
 
+    // the bound a detail its requesters write goes under: its router's
+    internal int DetailBytes
+    {
+        get
+        {
+            return _router.DetailBytes;
+        }
+    }
+
+    // the side its requesters raise their failures on: its router's
+    internal RouterSide Side
+    {
+        get
+        {
+            return _router.Side;
+        }
+    }
+
     /// <summary>
     /// The notification of <paramref name="procedure"/>, which callbacks register on: the first
     /// registration subscribes, by a request that opens a subscription — paced, with a window — and
@@ -682,8 +730,8 @@ public sealed partial class ServiceManager
     /// <summary>
     /// The resolver of <paramref name="procedure"/>: given its callback, it is registered on the
     /// router. A request is answered once — by its callback, by a refusal of its admission, with
-    /// PAYLOAD_UNDECODABLE when it does not decode, or with PROCEDURE_FAILED when its callback
-    /// throws before it answered.
+    /// PAYLOAD_UNDECODABLE when it does not decode, with PAYLOAD_INVALID when its rules refuse it, or
+    /// with PROCEDURE_FAILED when its rules or its callback throw before it answered.
     /// </summary>
     public Func<RequestResolverCallback<TRequest, TResponse>, IRequestResolver> GetRequestResolver<TRequest, TResponse>(
         Procedure procedure,
@@ -717,6 +765,7 @@ public sealed partial class ServiceManager
                     Procedure = procedure,
                     Serializer = dependencies.Serializer,
                     BeforeRequest = dependencies.BeforeRequest,
+                    Judging = (dependencies.Validate, dependencies.FailFast),
                     Callback = (request, response) =>
                     {
                         return callback(request, response);
@@ -772,6 +821,7 @@ public sealed partial class ServiceManager
                 Procedure = procedure,
                 Serializer = made.Dependencies.Serializer,
                 BeforeRequest = made.Dependencies.BeforeRequest,
+                Judging = (made.Dependencies.Validate, made.Dependencies.FailFast),
                 Callback = (request, response) =>
                 {
                     return callback(request, response);

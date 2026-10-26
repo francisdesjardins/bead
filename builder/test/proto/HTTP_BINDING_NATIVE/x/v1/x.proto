@@ -1,0 +1,29 @@
+syntax = "proto3";
+
+package x.v1;
+
+import "bead/options.proto";
+import "google/api/annotations.proto";
+
+option (bead.file) = {
+  admission: {
+    none: {}
+  }
+};
+
+// Rules that bind what a JSON payload has none of.
+service XService {
+  option (bead.service) = {
+    id: 1
+    revision: 1
+  };
+  // Answers its request.
+  rpc Echo(bead.Json) returns (bead.Json) {
+    option (bead.procedure) = {id: 1};
+    option (google.api.http) = {
+      post: "/v1/{name}"
+      body: "name"
+      response_body: "name"
+    };
+  }
+}

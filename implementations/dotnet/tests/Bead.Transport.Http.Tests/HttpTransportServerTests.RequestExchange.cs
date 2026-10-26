@@ -106,31 +106,38 @@ public sealed partial class HttpTransportServerTests
 
         // cancelled, and still coming past the limit: refused, and read no more — each piece counted
         // though none is kept
-        using var endless = await Wire.Open(_port);
-
-        await endless.Write(PostHead(connectionToken, "Transfer-Encoding: chunked"));
-        await endless.Write(ChunkOf(request[..16]));
-        await Until(() =>
+        foreach (var size in new[] { 40, 64 })
         {
-            return Count("waitingExchanges") == 1;
-        });
+            using var endless = await Wire.Open(_port);
 
-        using (var cancel = await Fetch(PostOf(connectionToken, EnvelopeOf(EnvelopeKind.Cancel, 1))))
-        {
-            Assert.Equal(204, (int)cancel.StatusCode);
+            await endless.Write(PostHead(connectionToken, "Transfer-Encoding: chunked"));
+            await endless.Write(ChunkOf(request[..16]));
+            await Until(() =>
+            {
+                return Count("waitingExchanges") == 1;
+            });
+
+            using (var cancel = await Fetch(PostOf(connectionToken, EnvelopeOf(EnvelopeKind.Cancel, 1))))
+            {
+                Assert.Equal(204, (int)cancel.StatusCode);
+            }
+
+            await endless.Write(ChunkOf(new byte[size]));
+            if (size == 40)
+            {
+                await Until(() =>
+                {
+                    return Count("bodyBytes") == 56;
+                });
+            }
+            await endless.Write(ChunkOf(new byte[size]));
+
+            var refused = await endless.ReadHead();
+
+            Assert.Equal((413, HttpRefusals.TooLarge, "close"), (refused.Status, refused.Headers[HttpTransport.RefusalHeader], refused.Headers["connection"]));
         }
 
-        await endless.Write(ChunkOf(new byte[40]));
-        await Until(() =>
-        {
-            return Count("bodyBytes") == 56;
-        });
-        await endless.Write(ChunkOf(new byte[40]));
-
-        var refused = await endless.ReadHead();
-
-        Assert.Equal((413, HttpRefusals.TooLarge, "close"), (refused.Status, refused.Headers[HttpTransport.RefusalHeader], refused.Headers["connection"]));
-        Assert.Equal([EnvelopeKind.Cancel, EnvelopeKind.Cancel], KindsHandedOn());
+        Assert.Equal([EnvelopeKind.Cancel, EnvelopeKind.Cancel, EnvelopeKind.Cancel], KindsHandedOn());
     }
 
     // spec 15.12.4
@@ -180,6 +187,17 @@ public sealed partial class HttpTransportServerTests
         await filling.Write(EnvelopeOf(EnvelopeKind.Request, (7, 8)));
 
         Assert.Equal(200, (await filling.ReadHead()).Status);
+        await Until(() =>
+        {
+            return _messages.Count == 3 && Count("bodyBytes") == 8;
+        });
+        await holding.Write(new byte[8]);
+
+        Assert.Equal(200, (await holding.ReadHead()).Status);
+        await Until(() =>
+        {
+            return _messages.Count == 4 && Count("bodyBytes") == 0;
+        });
     }
 
     [Fact]
@@ -237,6 +255,7 @@ public sealed partial class HttpTransportServerTests
         var (head, body) = await coming.Read();
 
         Assert.Equal((200, Convert.ToHexString(answer)), (head.Status, Convert.ToHexString(body)));
+        Assert.Equal("close", head.Headers.GetValueOrDefault("connection"));
 
         // the rest of it changes nothing: it is never handed on, and its socket, its body not read
         // on, closes behind its answer

@@ -83,7 +83,7 @@ const codeOf = (outcome: ChunkOutcome | IProtocolFailure): number | string => {
 // definition
 
 test.describe('chunkPayloadBytes', () => {
-  test('is what an envelope of the chunk size holds past its header, an envelope at most', () => {
+  test('sizes a chunk as what an envelope of the chunk size holds past its header, an envelope at most', () => {
     const limits = { chunkBytes: 1_048_576, maximumEnvelopeBytes: 16_778_240 };
 
     expect(CHUNK_HEADER_BYTES).toBe(16);
@@ -127,7 +127,7 @@ test.describe('chunkPayloadBytes', () => {
 
 test.describe('createOutgoingTransfer', () => {
   // spec 12.11
-  test('lays the plan’s 20 MiB out byte by byte: its opening, a credit, a chunk with more, the last', () => {
+  test('lays the spec’s 20 MiB out byte by byte: its opening, a credit, a chunk with more, the last', () => {
     const total = 20_971_520;
     const payload = patternOf(total);
     const openingHeader = {
@@ -280,7 +280,10 @@ test.describe('createOutgoingTransfer', () => {
 
 test.describe('createIncomingTransfer', () => {
   test('refuses an opening that holds its whole total, and one without a byte of its payload', () => {
-    for (const opening of [patternOf(4), new Uint8Array(0)]) {
+    for (const [opening, detail] of [
+      [patternOf(4), 'an opening of 4 bytes holds its whole total of 4'],
+      [new Uint8Array(0), 'an opening carries one byte of its payload at least, not 0'],
+    ] as const) {
       const refused = createIncomingTransfer(opening, {
         failures: SERVER_FAILURES,
         limits: { maximumChunkRuns: 4, windowBytes: 8 },
@@ -290,6 +293,7 @@ test.describe('createIncomingTransfer', () => {
 
       expect(refused, String(opening.length)).toMatchObject({
         code: ProtocolCode.CHUNK_INVALID,
+        detail,
         side: 'server',
       });
     }
@@ -501,6 +505,13 @@ test.describe('createIncomingTransfer', () => {
     expect(incoming.creditEnd).toBe(9);
   });
 
+  test('halves an odd window exactly, 64 bytes short of half of 129 and 65 not', () => {
+    const incoming = incomingOf(patternOf(1), { total: 1_000, windowBytes: 129 });
+
+    expect(incoming.creditToGrant(64)).toBeUndefined();
+    expect(incoming.creditToGrant(65)).toBe(66);
+  });
+
   test('carries 100 KiB through envelopes of 1,024 bytes and a window of 8 KiB, a few credits apart', () => {
     const limits = { chunkBytes: 1_024, maximumEnvelopeBytes: 1_024, windowBytes: 8_192 };
     const total = 102_400;
@@ -541,7 +552,6 @@ test.describe('createIncomingTransfer', () => {
     expect(incoming.payload()).toEqual(payload);
     // 101 chunks after the opening of 1,004 bytes; a credit each half window, not each chunk
     expect(chunks).toBe(101);
-    expect(credits).toBeGreaterThan(1);
-    expect(credits).toBeLessThan(chunks / 2);
+    expect(credits).toBe(20);
   });
 });

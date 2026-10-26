@@ -8,6 +8,7 @@ import {
   type ITransportClient,
   type ITransportClientAddressOptions,
   type ITransportClientInternal,
+  type ITransportClientDefineOptions,
   ProgrammerError,
   ReconnectError,
   setReadyStateClosed,
@@ -23,6 +24,12 @@ import { noop } from '../../shared/noop';
 import * as errors from '../../shared/errors';
 import * as readyState from '../../shared/ready-state';
 
+/** What a reconnection its signal ended rejects with, as both sides word it. */
+const RECONNECTION_CANCELLED = Object.freeze({
+  message: 'the reconnection was cancelled',
+  name: 'CancelError',
+});
+
 /** The drop only an implementation reaches, as the base and the transport use it. */
 const drop = (client: ITransportClient<object, never>): void => {
   (client as ITransportClientInternal<object, never>)[dispose]();
@@ -33,8 +40,10 @@ const createStubClient = (options?: { clock?: TestClock; failures?: number; hang
   const calls: string[] = [];
   let failuresLeft = options?.failures ?? 0;
   let failureCount = 0;
+  let defineOptions: ITransportClientDefineOptions | undefined;
 
-  const client = createTransportClient<object, ITransportClientAddressOptions>((client) => {
+  const client = createTransportClient<object, ITransportClientAddressOptions>((client, given) => {
+    defineOptions = given;
     return {
       clock: options?.clock,
 
@@ -75,10 +84,42 @@ const createStubClient = (options?: { clock?: TestClock; failures?: number; hang
     };
   });
 
-  return { calls, client };
+  return { calls, client, defineOptions: defineOptions as ITransportClientDefineOptions };
 };
 
 const target = { host: 'h', port: 1 };
+
+test('calls each listener though one throws, reporting a client’s throw with no connection', async () => {
+  const { client, defineOptions } = createStubClient();
+  const thrown = new Error('a listener that throws');
+  const told: unknown[][] = [];
+  const reported: unknown[][] = [];
+
+  await client.connect(target);
+  client.on('close', () => {
+    throw thrown;
+  });
+  client.on('close', (clean, quick) => {
+    told.push(['closed', clean, quick]);
+  });
+  client.on('reconnect', () => {
+    throw thrown;
+  });
+  client.on('reconnect', () => {
+    told.push(['reconnect']);
+  });
+  client.on('error', (...args) => {
+    reported.push(args);
+  });
+
+  expect(defineOptions.tell('close', [true, false])).toBe(true);
+  await client.reconnect();
+  expect(told).toEqual([['closed', true, false], ['reconnect']]);
+  expect(reported).toEqual([[thrown], [thrown]]);
+  expect(reported[0]?.[0]).toBe(thrown);
+  expect(reported[1]?.[0]).toBe(thrown);
+  await client.disconnect();
+});
 
 test.describe('@francisdesjardins/bead/transport-client', () => {
   test('re-exports the internals as the same bindings', () => {
@@ -169,7 +210,7 @@ test.describe('createTransportClient', () => {
 
     await client.connect(target);
     await expect(client.connect({ host: 'h', port: 2 })).rejects.toThrow(
-      'transport is already opened'
+      'the transport client is already open'
     );
 
     expect(calls).toEqual(['connect:1']);
@@ -181,7 +222,7 @@ test.describe('createTransportClient', () => {
     await client.connect(target);
     setReadyStateClosing(client);
 
-    await expect(client.connect(target)).rejects.toThrow('transport is already closing');
+    await expect(client.connect(target)).rejects.toThrow('the transport client is already closing');
     expect(calls).toEqual(['connect:1']);
   });
 
@@ -191,7 +232,7 @@ test.describe('createTransportClient', () => {
       await using client = opened.client;
       await client.connect(target);
     }
-    expect(opened.calls).toEqual(['connect:1', 'disconnect']);
+    expect(opened.calls).toEqual(['connect:1', 'disconnect', 'dispose']);
     expect(opened.client.isClosed()).toBe(true);
 
     const fresh = createStubClient();
@@ -267,7 +308,9 @@ test.describe('createTransportClient #reconnect', () => {
     await client.connect(target);
     setReadyStateConnecting(client);
 
-    await expect(client.reconnect()).rejects.toThrow('cannot reconnect while connecting');
+    await expect(client.reconnect()).rejects.toThrow(
+      'the transport client cannot reconnect while connecting'
+    );
   });
 
   test('rejects with a ProgrammerError while closing', async () => {
@@ -276,7 +319,9 @@ test.describe('createTransportClient #reconnect', () => {
     await client.connect(target);
     setReadyStateClosing(client);
 
-    await expect(client.reconnect()).rejects.toThrow('cannot reconnect while closing');
+    await expect(client.reconnect()).rejects.toThrow(
+      'the transport client cannot reconnect while closing'
+    );
   });
 
   test('rejects with a ProgrammerError when already reconnecting, and leaves the first one alone', async () => {
@@ -285,7 +330,9 @@ test.describe('createTransportClient #reconnect', () => {
     await expect(client.connect(target)).rejects.toBeInstanceOf(ConnectError);
     const first = client.reconnect({ delay: 20 });
 
-    await expect(client.reconnect()).rejects.toThrow('already reconnecting');
+    await expect(client.reconnect()).rejects.toThrow(
+      'the transport client is already reconnecting'
+    );
     expect(client.isReconnecting()).toBe(true);
 
     await first;
@@ -307,10 +354,12 @@ test.describe('createTransportClient #reconnect', () => {
     });
     await waiting.promise;
 
-    await expect(client.connect(target)).rejects.toThrow('transport is already reconnecting');
+    await expect(client.connect(target)).rejects.toThrow(
+      'the transport client is already reconnecting'
+    );
 
     controller.abort();
-    await expect(reconnecting).rejects.toBeInstanceOf(CancelError);
+    await expect(reconnecting).rejects.toMatchObject(RECONNECTION_CANCELLED);
   });
 
   test('passes on what "tap" throws, ending CLOSED, with no attempt after it and no wait left armed', async () => {
@@ -433,7 +482,7 @@ test.describe('createTransportClient #reconnect', () => {
     expect(taps).toEqual([[10, 1]]);
   });
 
-  test('passes the previous wait to a "delay" function', async () => {
+  test('hands its "delay" function the wait before and the attempt that failed', async () => {
     const { client } = createStubClient({ failures: 5 });
     const seen: [number | undefined, number][] = [];
 
@@ -480,6 +529,33 @@ test.describe('createTransportClient #reconnect', () => {
     expect(calls).toEqual(['connect:1', 'connect:1']);
   });
 
+  test('makes five attempts a second apart when told nothing', async () => {
+    const clock = createTestClock();
+    const { calls, client } = createStubClient({ clock, failures: 10 });
+    const taps: [number, number][] = [];
+
+    await expect(client.connect(target)).rejects.toBeInstanceOf(ConnectError);
+
+    const reconnecting = client.reconnect({
+      // each wait moved by as it is armed, so the next attempt follows
+      tap: (nextDelay, attempt) => {
+        taps.push([nextDelay, attempt]);
+        clock.tick(nextDelay);
+      },
+    });
+
+    await expect(reconnecting).rejects.toBeInstanceOf(ReconnectError);
+    await expect(reconnecting).rejects.toHaveProperty('message', 'attempt 5 reached');
+    expect(taps).toEqual([
+      [1_000, 1],
+      [1_000, 2],
+      [1_000, 3],
+      [1_000, 4],
+    ]);
+    expect(calls).toHaveLength(1 + 5);
+    expect(delaysOn(clock)).toEqual([]);
+  });
+
   test('rejects a maxAttempts that is not a number, leaving the state as it was', async () => {
     const { calls, client } = createStubClient();
 
@@ -521,8 +597,8 @@ test.describe('createTransportClient #reconnect', () => {
       },
     });
 
-    await expect(reconnecting).rejects.toBeInstanceOf(CancelError);
-    await expect(reconnecting).rejects.toHaveProperty('message', '');
+    // * worded as the C# side words it, its signal's reason kept as its cause
+    await expect(reconnecting).rejects.toMatchObject(RECONNECTION_CANCELLED);
     await expect(reconnecting).rejects.toHaveProperty('cause', 'why');
     expect(Date.now() - started).toBeLessThan(1_000);
     expect(calls).toEqual(['connect:1', 'connect:1']);
@@ -534,7 +610,7 @@ test.describe('createTransportClient #reconnect', () => {
     await opened.client.connect(target);
     await expect(
       opened.client.reconnect({ delay: 0, signal: AbortSignal.abort() })
-    ).rejects.toBeInstanceOf(CancelError);
+    ).rejects.toMatchObject(RECONNECTION_CANCELLED);
     expect(opened.client.isOpen()).toBe(true);
     expect(opened.calls).toEqual(['connect:1']);
 
@@ -549,7 +625,7 @@ test.describe('createTransportClient #reconnect', () => {
           controller.abort();
         },
       })
-    ).rejects.toBeInstanceOf(CancelError);
+    ).rejects.toMatchObject(RECONNECTION_CANCELLED);
     expect(failing.calls).toEqual(['connect:1', 'connect:1']);
   });
   test('aborts the attempt in flight when the signal aborts', async () => {
@@ -566,6 +642,7 @@ test.describe('createTransportClient #reconnect', () => {
     });
     controller.abort('why');
 
+    await expect(reconnecting).rejects.toMatchObject(RECONNECTION_CANCELLED);
     await expect(reconnecting).rejects.toHaveProperty('cause', 'why');
     expect(calls).toEqual(['connect:1', 'connect:1']);
     expect(client.isClosed()).toBe(true);
@@ -593,8 +670,8 @@ test.describe('createTransportClient #reconnect', () => {
       controller.abort();
     };
 
-    await expect(client.reconnect({ delay: 0, signal: controller.signal })).rejects.toBeInstanceOf(
-      CancelError
+    await expect(client.reconnect({ delay: 0, signal: controller.signal })).rejects.toMatchObject(
+      RECONNECTION_CANCELLED
     );
 
     expect(calls).toEqual(['connect:1', 'dispose', 'connect:1', 'disconnect']);

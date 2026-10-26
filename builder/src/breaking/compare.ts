@@ -9,9 +9,11 @@
 // keeps code written against the earlier's generated API compiling and meaning the same, so a
 // service or a procedure gone is its finding even where `WIRE` waives it, deprecated, then its id
 // reserved. A revision is never lowered, and moves where its service changed: a finding of any
-// rule, an addition, a deprecation, or a message its bindings reach where both sides are buf images,
-// with what of its file reaches the wire or a target's API. Read through the model, never as bytes:
-// an earlier in another member or array order, and a description, change nothing.
+// rule, an addition, a deprecation, a request's rules changed either way, or a message its bindings
+// reach where both sides are buf images, with what of its file reaches the wire or a target's API. Read through the model, never as bytes:
+// an earlier in another member or array order, and a description, change nothing. The category
+// `HTTP`, what a client of the earlier's routes meets, is held under either where a run asks it
+// (`http.ts`, decision 0037), beside the wire: no revision moves for it.
 
 // dependencies
 
@@ -39,7 +41,9 @@ import {
   sortFindings,
 } from '../model/blueprint.ts';
 import { areOneName } from '../model/identity.ts';
-import { Category, type IRule, RULES, type RuleName } from '../rules.ts';
+import { Category, HTTP_CATEGORY, type IRule, RULES, type RuleName } from '../rules.ts';
+import { httpBreakingOf } from './http.ts';
+import { rulesChangedOf, tighteningsOf } from './rules.ts';
 
 // types
 
@@ -60,6 +64,11 @@ export interface ICompareOptions {
   readonly placeOf: PlaceOf;
   /** The two sides' messages, where both are buf images. */
   readonly messages?: { readonly earlier: MessageIndex; readonly current: MessageIndex };
+  /**
+   * Where the category `HTTP` is held (decision 0037): the prefix the routes are under. Left out,
+   * no HTTP rule runs.
+   */
+  readonly http?: { readonly prefix: string };
 }
 
 // a finding before its place: its rule, its pointer into the current, its subject, the service it
@@ -681,6 +690,34 @@ export const compareBlueprints = (current: IBlueprint, options: ICompareOptions)
         changed.add(serviceId);
       }
 
+      // * a request's rules, where both sides bind one message: tightened, a peer's request the
+      // earlier took is refused; changed either way, the revision moves (decision 0035)
+      const requested = before.request.message;
+
+      if (
+        requested !== undefined &&
+        before.request.encoding === 'proto' &&
+        after.request.encoding === 'proto' &&
+        requested === after.request.message
+      ) {
+        const sides = { earlier, current };
+        const tightened = tighteningsOf(sides, requested);
+
+        if (tightened.length > 0) {
+          find({
+            rule: 'PROCEDURE_RULES_TIGHTENED',
+            pointer: `${procedure}/request/message`,
+            message: `${procedureNamed}'s request, ${requested}, is held to tighter rules: ${tightened[0] ?? ''}${
+              tightened.length > 1 ? `, and ${String(tightened.length - 1)} more` : ''
+            }; a request an earlier peer sends is refused`,
+            subject: procedureSubject,
+            serviceId,
+          });
+        } else if (rulesChangedOf(sides, requested)) {
+          changed.add(serviceId);
+        }
+      }
+
       const listedBefore = codesOf(before, was);
       const listedNow = codesOf(after, now);
 
@@ -821,10 +858,20 @@ export const compareBlueprints = (current: IBlueprint, options: ICompareOptions)
     }
   });
 
+  // * what a client of the earlier's routes meets, held under either category; beside the wire, no
+  // revision moves for it
+  if (options.http !== undefined) {
+    findings.push(...httpBreakingOf(current, { earlier, prefix: options.http.prefix }));
+  }
+
   const kept = findings.filter((finding) => {
     const rule: IRule = RULES[finding.rule];
 
-    return options.category === Category.API || rule.category === Category.WIRE;
+    return (
+      options.category === Category.API ||
+      rule.category === Category.WIRE ||
+      rule.category === HTTP_CATEGORY
+    );
   });
 
   return sortFindings(

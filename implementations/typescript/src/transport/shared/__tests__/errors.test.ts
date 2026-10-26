@@ -49,15 +49,19 @@ test.describe('errors', () => {
 
   test('ReadyStateError names both states', () => {
     const error = new ReadyStateError(ReadyState.CLOSED, ReadyState.OPEN);
-    expect(error.message).toBe('ReadyState Error: got CLOSED expected OPEN');
+    expect(error.message).toBe('the transport client is closed, not open');
     expect(error.got).toBe(ReadyState.CLOSED);
     expect(error.expected).toBe(ReadyState.OPEN);
   });
 
-  test('TimeoutError keeps the milliseconds waited, and says them', () => {
+  test('TimeoutError keeps the milliseconds waited, and says them, or the words it is given', () => {
     const error = new TimeoutError(5_000);
     expect(error.timeout).toBe(5_000);
-    expect(error.message).toContain('5000');
+    expect(error.message).toBe('timed out after 5000ms');
+
+    const unanswered = new TimeoutError(10, 'no answer came in 10 milliseconds');
+    expect(unanswered.timeout).toBe(10);
+    expect(unanswered.message).toBe('no answer came in 10 milliseconds');
   });
 
   test('keeps the original reason as cause', () => {

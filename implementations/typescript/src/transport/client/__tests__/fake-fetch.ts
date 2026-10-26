@@ -20,6 +20,8 @@ export interface IFakeCall {
     isBodyLost?: boolean;
     /** Its body, once this settles: the head comes first. */
     later?: Promise<Uint8Array>;
+    /** Called when the response body is read. */
+    onRead?: () => void;
     /** Its body as a stream reads it, piece by piece; an error cuts it there. */
     pieces?: readonly (Error | Uint8Array)[];
     /** It says its fetch followed a redirect, as one given may all the same. */
@@ -36,6 +38,7 @@ export const responseOf = ({
   isBodiless = false,
   isBodyLost = false,
   later,
+  onRead,
   pieces,
   redirected,
   status,
@@ -45,6 +48,7 @@ export const responseOf = ({
   isBodiless?: boolean;
   isBodyLost?: boolean;
   later?: Promise<Uint8Array>;
+  onRead?: () => void;
   pieces?: readonly (Error | Uint8Array)[];
   redirected?: boolean;
   status: number;
@@ -61,6 +65,7 @@ export const responseOf = ({
   const stream = new ReadableStream<Uint8Array>(
     {
       pull: async (controller) => {
+        onRead?.();
         if (isBodyLost) {
           return (controller.error(new TypeError('terminated')), undefined);
         }
@@ -85,6 +90,7 @@ export const responseOf = ({
 
   return {
     arrayBuffer: () => {
+      onRead?.();
       if (isBodyLost) {
         return Promise.reject(new TypeError('terminated'));
       }

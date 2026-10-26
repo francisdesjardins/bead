@@ -1,0 +1,34 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!--
+    HTTP/JSON transcoding's layer (decision 0037, spec/transcoding.md): http.proto's templates,
+    a request bound from its route, Bead's own mapping of protobuf's JSON over each message's
+    descriptor, the problems a failure is answered with, the events a stream is written as and the
+    HTTP caller a generated client delegates to. Bead.Transcoding.Http holds the listener. What a route table of an output with
+    `http: true` names, HttpRoute and HttpPayload, is here. The TypeScript side's twin is
+    @francisdesjardins/bead/transcoding.
+  -->
+  <PropertyGroup>
+    <RootNamespace>Bead.Transcoding</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../Bead.Core/Bead.Core.csproj" />
+    <ProjectReference Include="../Bead.Protobuf/Bead.Protobuf.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- the library a project that binds proto references already, for its generated messages -->
+    <PackageReference Include="Google.Protobuf" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Bead.Transcoding.Http" />
+    <InternalsVisibleTo Include="Bead.Transcoding.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- what Bead times takes the clock it is given, never the platform's own: 0011 -->
+    <PackageReference Include="Microsoft.CodeAnalysis.BannedApiAnalyzers" PrivateAssets="all" />
+    <AdditionalFiles Include="../BannedSymbols.txt" />
+  </ItemGroup>
+</Project>

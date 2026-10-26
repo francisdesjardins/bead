@@ -56,7 +56,7 @@ test.describe.configure({ retries: 0 });
 
 test.describe('readEnvelope and writeEnvelope', () => {
   for (const { bytes, envelope, name } of VECTORS.envelopes) {
-    test(`read ${name}, and write it back`, () => {
+    test(`reads ${name}, and writes it back`, () => {
       const expected = envelopeOf(envelope);
 
       expect(readEnvelope(fromHexadecimal(bytes), limits)).toEqual(expected);
@@ -65,7 +65,7 @@ test.describe('readEnvelope and writeEnvelope', () => {
   }
 
   for (const { bytes, code, detail, maximumEnvelopeBytes, name } of VECTORS.envelopeRefusals) {
-    test(`refuse ${name}`, () => {
+    test(`refuses ${name}`, () => {
       expect(
         failureOf(() => {
           return readEnvelope(fromHexadecimal(bytes), {
@@ -73,9 +73,19 @@ test.describe('readEnvelope and writeEnvelope', () => {
             ...(maximumEnvelopeBytes === undefined ? {} : { maximumEnvelopeBytes }),
           });
         })
-      ).toMatchObject({ code, side: 'server', ...(detail === undefined ? {} : { detail }) });
+      ).toMatchObject({
+        code,
+        origin: 'local',
+        scope: FailureScope.PROTOCOL,
+        side: 'server',
+        ...(detail === undefined ? {} : { detail }),
+      });
     });
   }
+
+  test('skip an advisory envelope', () => {
+    expect(readEnvelope(fromHexadecimal('A1 80 00 02  00 00 00 03 | 01'), limits)).toBeUndefined();
+  });
 
   test('copy the payload, even out of a pooled Buffer', () => {
     const bytes = fromHexadecimal(`A1 11 00 02  00 00 00 03 | 01 02 03`);
@@ -223,8 +233,8 @@ test.describe('readFailure', () => {
       expect(
         failureOf(() => {
           return readFailure(fromHexadecimal(record), options);
-        }).code
-      ).toBe(code);
+        })
+      ).toMatchObject({ code, origin: 'local', scope: FailureScope.PROTOCOL, side: 'server' });
     });
   }
 
@@ -242,8 +252,8 @@ test.describe('readFailure', () => {
     };
 
     expect(readFailure(record(encode('a'.repeat(1_025))), options).detail).toBe('a'.repeat(1_024));
-    expect(readFailure(record(encode(`${'a'.repeat(1_022)}😀`)), options).detail).toBe(
-      'a'.repeat(1_022)
+    expect(readFailure(record(encode(`${'a'.repeat(1_021)}😀`)), options).detail).toBe(
+      'a'.repeat(1_021)
     );
     expect(readFailure(record(encode(`${'a'.repeat(1_020)}😀`)), options).detail).toBe(
       `${'a'.repeat(1_020)}😀`
@@ -306,6 +316,7 @@ test.describe('writeFailure', () => {
     expect(detailOf(`${'a'.repeat(1_022)}€`)).toBe('a'.repeat(1_022));
     expect(detailOf(`${'a'.repeat(1_021)}😀`)).toBe('a'.repeat(1_021));
     expect(detailOf(`${'a'.repeat(1_020)}😀`)).toBe(`${'a'.repeat(1_020)}😀`);
+    expect(detailOf('')).toBe('');
     expect(writeFailure({ code: 1, detail: 'abcdef', scope: FailureScope.PROTOCOL }, 3)).toEqual(
       fromHexadecimal(`00 01 00 00  ${ascii('abc')}`)
     );

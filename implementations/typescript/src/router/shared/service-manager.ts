@@ -36,6 +36,11 @@ import type {
 
 // helpers
 
+/** A notification's window as an error names it: `window 4`, or `no window` for an unpaced one. */
+const windowOf = (window: number | undefined): string => {
+  return window === undefined ? 'no window' : `window ${String(window)}`;
+};
+
 /**
  * What sets `asked` apart from `known`, two asks for one procedure, as a phrase for an error;
  * `undefined` when they are the same ask.
@@ -220,7 +225,7 @@ export const createServiceManager = <Handle extends string = ConnectionHandle>(
         differenceOf(known.procedure, procedure) ??
         (known.window === dependencies.window
           ? undefined
-          : `window ${String(known.window)}, not ${String(dependencies.window)}`);
+          : `${windowOf(known.window)}, not ${windowOf(dependencies.window)}`);
 
       if (difference !== undefined) {
         throw new ProgrammerError(

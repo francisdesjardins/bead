@@ -1,0 +1,7 @@
+[
+  {
+    "rule": "HTTP_RULE_BODY_DIFFERS",
+    "line": 36,
+    "column": 7
+  }
+]

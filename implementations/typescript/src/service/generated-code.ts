@@ -9,15 +9,16 @@
 /**
  * The contract this runtime supports: the descriptors, the catalogue, the payload codecs and the
  * service layer of `./service`, its options typed by the service, a client side's Bead client
- * apart from them, and the check of a `proto` payload's records of `./proto`, which a codec calls
- * before its library reads. The counter moves only when generated code needs what the runtime did
+ * apart from them, a descriptor's `validate` judged into its violations, and of `./proto` the check
+ * of a `proto` payload's records, which a codec calls before its library reads, and the validators
+ * a request's rules are generated over. The counter moves only when generated code needs what the runtime did
  * not have. Before 1.0.0, an older constant goes once the code that names it no longer conforms
  * through this runtime, as code that reads a `proto` payload unchecked does not; from 1.0.0, it
  * stays for the whole major.
  *
  * @example
- * import { GENERATED_CODE_SUPPORTS_VERSION_3 } from '@francisdesjardins/bead/service';
+ * import { GENERATED_CODE_SUPPORTS_VERSION_4 } from '@francisdesjardins/bead/service';
  *
- * void GENERATED_CODE_SUPPORTS_VERSION_3;
+ * void GENERATED_CODE_SUPPORTS_VERSION_4;
  */
-export const GENERATED_CODE_SUPPORTS_VERSION_3 = true;
+export const GENERATED_CODE_SUPPORTS_VERSION_4 = true;

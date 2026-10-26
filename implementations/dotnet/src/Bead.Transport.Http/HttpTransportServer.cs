@@ -1,5 +1,6 @@
 using System.Buffers.Binary;
 using System.Buffers.Text;
+using System.Globalization;
 using System.IO.Pipelines;
 using System.Net;
 using System.Security.Cryptography;
@@ -19,8 +20,21 @@ namespace Bead.Transport.Http;
 /// <summary>How an HTTP transport server holds its connections, and what it bounds.</summary>
 public sealed record HttpTransportServerOptions
 {
+    private readonly long _bodyBytesBudget = 268_435_456;
+
     /// <summary>The bytes of body the exchanges under way may hold together: 256 MiB by default; past it, 503.</summary>
-    public long BodyBytesBudget { get; init; } = 268_435_456;
+    public long BodyBytesBudget
+    {
+        get
+        {
+            return _bodyBytesBudget;
+        }
+        init
+        {
+            _bodyBytesBudget = value;
+            _given |= HttpPolicyMembers.BodyBytesBudget;
+        }
+    }
 
     /// <summary>
     /// How long a request handed on waits for its answer: 5 minutes by default; from 1 to
@@ -29,6 +43,8 @@ public sealed record HttpTransportServerOptions
     /// </summary>
     public TimeSpan ExchangeTimeout { get; init; } = TimeSpan.FromMinutes(5);
 
+    private readonly IReadOnlyList<string>? _hosts;
+
     /// <summary>
     /// The hosts a request may name besides those every server takes — <c>localhost</c>, a name
     /// under <c>.localhost</c>, an IPv6 address in brackets and an IPv4 address — each a host
@@ -36,6 +52,8 @@ public sealed record HttpTransportServerOptions
     /// host in punycode: none besides when none or empty. A request names its host by its
     /// authority: an absolute-form target's, else its <c>Host</c>, which carries HTTP/2's
     /// <c>:authority</c> (spec 15.12). <c>*</c>, alone, takes every host, an empty one and none,
+    /// but over HTTP/2 a request with neither <c>:authority</c> nor <c>host</c>, whose stream is
+    /// reset, <c>PROTOCOL_ERROR</c>, under any hosts (RFC 9113 §8.3.1),
     /// and makes none of their origins its own: the server's own origin is its request's authority
     /// only when its host is taken by name, one every server takes or one listed here, so under
     /// <c>*</c> a page that rebinds its name to the server's address is refused 403,
@@ -46,7 +64,23 @@ public sealed record HttpTransportServerOptions
     /// cluster, names it here, or refuses it 403, <c>host-refused</c>, which the transport tells
     /// through <see cref="HttpTransportServer.Refusal"/>.
     /// </summary>
-    public IReadOnlyList<string>? Hosts { get; init; }
+    public IReadOnlyList<string>? Hosts
+    {
+        get
+        {
+            return _hosts;
+        }
+        init
+        {
+            _hosts = value;
+
+            // null is none given, as an option left out is
+            if (value is not null)
+            {
+                _given |= HttpPolicyMembers.Hosts;
+            }
+        }
+    }
 
     /// <summary>
     /// How long a connection may go with no exchange under way: 5 minutes by default; from 1 to
@@ -55,39 +89,107 @@ public sealed record HttpTransportServerOptions
     /// </summary>
     public TimeSpan InactivityTimeout { get; init; } = TimeSpan.FromMinutes(5);
 
+    private readonly int _maximumBodyBytes = LimitDefaults.MaximumEnvelopeBytes;
+
     /// <summary>The largest body: a router's largest envelope by default; past it, 413.</summary>
-    public int MaximumBodyBytes { get; init; } = LimitDefaults.MaximumEnvelopeBytes;
+    public int MaximumBodyBytes
+    {
+        get
+        {
+            return _maximumBodyBytes;
+        }
+        init
+        {
+            _maximumBodyBytes = value;
+            _given |= HttpPolicyMembers.MaximumBodyBytes;
+        }
+    }
+
+    private readonly int _maximumConnections = 10_000;
 
     /// <summary>The connections drawn at once: 10,000 by default.</summary>
-    public int MaximumConnections { get; init; } = 10_000;
+    public int MaximumConnections
+    {
+        get
+        {
+            return _maximumConnections;
+        }
+        init
+        {
+            _maximumConnections = value;
+            _given |= HttpPolicyMembers.MaximumConnections;
+        }
+    }
+
+    private readonly int _maximumConnectionsPerAddress = 64;
 
     /// <summary>The connections one address holds at once: 64 by default.</summary>
-    public int MaximumConnectionsPerAddress { get; init; } = 64;
+    public int MaximumConnectionsPerAddress
+    {
+        get
+        {
+            return _maximumConnectionsPerAddress;
+        }
+        init
+        {
+            _maximumConnectionsPerAddress = value;
+            _given |= HttpPolicyMembers.MaximumConnectionsPerAddress;
+        }
+    }
 
     /// <summary>
     /// The bytes one connection's outbox holds: two of the largest envelopes by default; past it, the
-    /// connection closes, reported through <see cref="HttpTransportServer.Error"/> (spec 15.9).
+    /// connection is dropped, reported through <see cref="HttpTransportServer.Error"/> naming
+    /// <c>maximumOutboxBytes</c> and its value (spec 15.9).
     /// </summary>
     public long MaximumOutboxBytes { get; init; } = 2L * LimitDefaults.MaximumEnvelopeBytes;
+
+    private readonly int _minimumSendBytesPerSecond = ServerBounds.MinimumSendBytesPerSecond;
 
     /// <summary>
     /// The slowest a client may take an answer, or a listen's batch, in bytes a second, once
     /// <see cref="SendGracePeriod"/> passed: 240 by default, Kestrel's <c>MinResponseDataRate</c>,
     /// which this replaces (spec 15.12). Each answer of <i>S</i> bytes is given the longer of the grace
-    /// and <i>S</i> at this rate; one its socket still holds past that is lost, its connection closed
-    /// at both ends and reported through <see cref="HttpTransportServer.Error"/>, naming the bound
-    /// (spec 15.7). 0 holds none, on a network the application trusts; below 0 is an
-    /// <see cref="ArgumentOutOfRangeException"/> as the transport is built. On the real clock, as what
-    /// it bounds is the platform's socket.
+    /// and <i>S</i> at this rate; one its socket still holds past that is lost, its connection dropped
+    /// at both ends and reported through <see cref="HttpTransportServer.Error"/>, naming the bound and
+    /// its grace with their values (spec 15.7). 0 holds none, on a network the application trusts;
+    /// below 0 is an <see cref="ArgumentOutOfRangeException"/> as the transport is built. On the real
+    /// clock, as what it bounds is the platform's socket.
     /// </summary>
-    public int MinimumSendBytesPerSecond { get; init; } = ServerBounds.MinimumSendBytesPerSecond;
+    public int MinimumSendBytesPerSecond
+    {
+        get
+        {
+            return _minimumSendBytesPerSecond;
+        }
+        init
+        {
+            _minimumSendBytesPerSecond = value;
+            _given |= HttpPolicyMembers.MinimumSendBytesPerSecond;
+        }
+    }
+
+    private readonly TimeSpan _sendGracePeriod = ServerBounds.SendGracePeriod;
 
     /// <summary>
     /// The least time an answer is given to be taken by its socket: 5 seconds by default; from 1 to
     /// <see cref="Clocks.LongestTimer"/> milliseconds, rounded to the nearest whole one; zero and
     /// infinite are refused (spec 15.12). On the real clock.
     /// </summary>
-    public TimeSpan SendGracePeriod { get; init; } = ServerBounds.SendGracePeriod;
+    public TimeSpan SendGracePeriod
+    {
+        get
+        {
+            return _sendGracePeriod;
+        }
+        init
+        {
+            _sendGracePeriod = value;
+            _given |= HttpPolicyMembers.SendGracePeriod;
+        }
+    }
+
+    private readonly TimeSpan _headersTimeout = ServerBounds.HeadersTimeout;
 
     /// <summary>
     /// How long a request's head may take to come whole: 30 seconds by default, Kestrel's
@@ -96,7 +198,20 @@ public sealed record HttpTransportServerOptions
     /// milliseconds, rounded to the nearest whole one; zero and infinite are refused. On the real
     /// clock, as the platform's parser holds it.
     /// </summary>
-    public TimeSpan HeadersTimeout { get; init; } = ServerBounds.HeadersTimeout;
+    public TimeSpan HeadersTimeout
+    {
+        get
+        {
+            return _headersTimeout;
+        }
+        init
+        {
+            _headersTimeout = value;
+            _given |= HttpPolicyMembers.HeadersTimeout;
+        }
+    }
+
+    private readonly int _minimumBodyBytesPerSecond = ServerBounds.MinimumBodyBytesPerSecond;
 
     /// <summary>
     /// The slowest a body may come, in bytes a second, once <see cref="BodyGracePeriod"/> passed since
@@ -106,14 +221,38 @@ public sealed record HttpTransportServerOptions
     /// connection kept (spec 15.12). A whole number above 0; any other is an
     /// <see cref="ArgumentOutOfRangeException"/> as the transport is built.
     /// </summary>
-    public int MinimumBodyBytesPerSecond { get; init; } = ServerBounds.MinimumBodyBytesPerSecond;
+    public int MinimumBodyBytesPerSecond
+    {
+        get
+        {
+            return _minimumBodyBytesPerSecond;
+        }
+        init
+        {
+            _minimumBodyBytesPerSecond = value;
+            _given |= HttpPolicyMembers.MinimumBodyBytesPerSecond;
+        }
+    }
+
+    private readonly TimeSpan _bodyGracePeriod = ServerBounds.BodyGracePeriod;
 
     /// <summary>
     /// How long a body comes before its rate is held: 5 seconds by default; from 1 to
     /// <see cref="Clocks.LongestTimer"/> milliseconds, rounded to the nearest whole one; zero and
     /// infinite are refused (spec 15.12). On the server's clock.
     /// </summary>
-    public TimeSpan BodyGracePeriod { get; init; } = ServerBounds.BodyGracePeriod;
+    public TimeSpan BodyGracePeriod
+    {
+        get
+        {
+            return _bodyGracePeriod;
+        }
+        init
+        {
+            _bodyGracePeriod = value;
+            _given |= HttpPolicyMembers.BodyGracePeriod;
+        }
+    }
 
     /// <summary>
     /// The longest a listen waits for something to bring back: 30 seconds by default, under an
@@ -142,6 +281,8 @@ public sealed record HttpTransportServerOptions
     // takes its router's number for none given alone
     internal bool IsMaximumWaitingExchangesGiven { get; private init; }
 
+    private readonly IReadOnlyList<string> _origins = [];
+
     /// <summary>
     /// The origins an exchange that sends an <c>Origin</c> may come from besides the server's own,
     /// <c>http://</c> or <c>https://</c> followed by its request's authority when its host is taken
@@ -155,10 +296,23 @@ public sealed record HttpTransportServerOptions
     /// <see cref="ArgumentException"/> as the transport is built: a page that sends <c>null</c> is
     /// served from an origin, which is named here.
     /// </summary>
-    public IReadOnlyList<string> Origins { get; init; } = [];
+    public IReadOnlyList<string> Origins
+    {
+        get
+        {
+            return _origins;
+        }
+        init
+        {
+            _origins = value;
+            _given |= HttpPolicyMembers.Origins;
+        }
+    }
 
     /// <summary>The path the transport answers on.</summary>
     public string Pathname { get; init; } = HttpTransport.Pathname;
+
+    private readonly IReadOnlyList<string>? _trustedProxies;
 
     /// <summary>
     /// The proxies it believes <c>X-Forwarded-For</c> from (spec 15.12): none by default, the
@@ -177,7 +331,25 @@ public sealed record HttpTransportServerOptions
     /// near its ceiling. A bound by address counts as one the users behind one NAT, and as many the
     /// addresses of one IPv6 network.
     /// </summary>
-    public IReadOnlyList<string>? TrustedProxies { get; init; }
+    public IReadOnlyList<string>? TrustedProxies
+    {
+        get
+        {
+            return _trustedProxies;
+        }
+        init
+        {
+            _trustedProxies = value;
+
+            // null is none given, as an option left out is
+            if (value is not null)
+            {
+                _given |= HttpPolicyMembers.TrustedProxies;
+            }
+        }
+    }
+
+    private readonly int _unnamedProxies;
 
     /// <summary>
     /// How many proxies on every path to it <see cref="TrustedProxies"/> does not name (spec 15.12):
@@ -192,7 +364,18 @@ public sealed record HttpTransportServerOptions
     /// such proxies, straight to its socket or past one it counts, is read by entries its client
     /// wrote, so a server so reachable names its proxies instead.
     /// </summary>
-    public int UnnamedProxies { get; init; }
+    public int UnnamedProxies
+    {
+        get
+        {
+            return _unnamedProxies;
+        }
+        init
+        {
+            _unnamedProxies = value;
+            _given |= HttpPolicyMembers.UnnamedProxies;
+        }
+    }
 
     /// <summary>The certificate it serves TLS with, HTTP/2 and HTTP/1.1 on one port; plain HTTP/1.1 when none.</summary>
     public X509Certificate2? Certificate { get; init; }
@@ -210,6 +393,53 @@ public sealed record HttpTransportServerOptions
     /// stop's grace bounds the platform's own, on the real clock.
     /// </summary>
     public TimeProvider? Clock { get; init; }
+
+    /// <summary>
+    /// The policy every listener of its application judges by (decision 0037): its hosts, its
+    /// origins, its proxies and its bounds, given once to this transport and a gateway alike, each
+    /// member it gives taken in place of this record's of its name, which it leaves ungiven. A
+    /// member given in it and beside it, whatever its value, its default among them, is an
+    /// <see cref="ArgumentException"/>; none, this record's members alone.
+    /// </summary>
+    public HttpPolicy? Policy { get; init; }
+
+    // ! the members a policy may give that this record was given, each init marking its own: a with
+    // expression copies them, so a record built from another keeps what that one was given
+    private readonly HttpPolicyMembers _given;
+
+    // whether a member a policy may give was given here, whatever its value
+    internal bool IsGiven(HttpPolicyMembers member)
+    {
+        return (_given & member) == member;
+    }
+
+    // the policy's members in place of this record's, where it is given: one given in it and beside
+    // it refused, so that a listener never takes one value of two in silence
+    internal HttpTransportServerOptions PolicyApplied()
+    {
+        if (Policy is not { } policy)
+        {
+            return this;
+        }
+
+        return this with
+        {
+            Policy = null,
+            Hosts = HttpPolicy.Taken(nameof(Hosts), (Hosts, IsGiven(HttpPolicyMembers.Hosts), policy.Hosts)),
+            Origins = HttpPolicy.Taken(nameof(Origins), (Origins, IsGiven(HttpPolicyMembers.Origins), policy.Origins)) ?? [],
+            TrustedProxies = HttpPolicy.Taken(nameof(TrustedProxies), (TrustedProxies, IsGiven(HttpPolicyMembers.TrustedProxies), policy.TrustedProxies)),
+            UnnamedProxies = HttpPolicy.Taken(nameof(UnnamedProxies), (UnnamedProxies, IsGiven(HttpPolicyMembers.UnnamedProxies), policy.UnnamedProxies)),
+            BodyBytesBudget = HttpPolicy.Taken(nameof(BodyBytesBudget), (BodyBytesBudget, IsGiven(HttpPolicyMembers.BodyBytesBudget), policy.BodyBytesBudget)),
+            MaximumBodyBytes = HttpPolicy.Taken(nameof(MaximumBodyBytes), (MaximumBodyBytes, IsGiven(HttpPolicyMembers.MaximumBodyBytes), policy.MaximumBodyBytes)),
+            HeadersTimeout = HttpPolicy.Taken(nameof(HeadersTimeout), (HeadersTimeout, IsGiven(HttpPolicyMembers.HeadersTimeout), policy.HeadersTimeout)),
+            MinimumBodyBytesPerSecond = HttpPolicy.Taken(nameof(MinimumBodyBytesPerSecond), (MinimumBodyBytesPerSecond, IsGiven(HttpPolicyMembers.MinimumBodyBytesPerSecond), policy.MinimumBodyBytesPerSecond)),
+            BodyGracePeriod = HttpPolicy.Taken(nameof(BodyGracePeriod), (BodyGracePeriod, IsGiven(HttpPolicyMembers.BodyGracePeriod), policy.BodyGracePeriod)),
+            MinimumSendBytesPerSecond = HttpPolicy.Taken(nameof(MinimumSendBytesPerSecond), (MinimumSendBytesPerSecond, IsGiven(HttpPolicyMembers.MinimumSendBytesPerSecond), policy.MinimumSendBytesPerSecond)),
+            SendGracePeriod = HttpPolicy.Taken(nameof(SendGracePeriod), (SendGracePeriod, IsGiven(HttpPolicyMembers.SendGracePeriod), policy.SendGracePeriod)),
+            MaximumConnections = HttpPolicy.Taken(nameof(MaximumConnections), (MaximumConnections, IsGiven(HttpPolicyMembers.MaximumConnections), policy.MaximumConnections)),
+            MaximumConnectionsPerAddress = HttpPolicy.Taken(nameof(MaximumConnectionsPerAddress), (MaximumConnectionsPerAddress, IsGiven(HttpPolicyMembers.MaximumConnectionsPerAddress), policy.MaximumConnectionsPerAddress)),
+        };
+    }
 }
 
 /// <summary>Where an HTTP transport server listens.</summary>
@@ -323,7 +553,7 @@ public sealed partial class HttpTransportServer : IServerTransport, IAsyncDispos
     /// </summary>
     public HttpTransportServer(HttpTransportServerOptions? options = null)
     {
-        var given = options ?? new HttpTransportServerOptions();
+        var given = (options ?? new HttpTransportServerOptions()).PolicyApplied();
 
         HostsAndOrigins.AssertHosts(given.Hosts, nameof(HttpTransportServerOptions.Hosts));
         HostsAndOrigins.AssertOrigins(given.Origins, nameof(HttpTransportServerOptions.Origins));
@@ -376,16 +606,16 @@ public sealed partial class HttpTransportServer : IServerTransport, IAsyncDispos
             ReleaseBody = ReleaseBody,
             Classify = Classify,
             FinishBody = FinishBody,
-            BeginHandOff = BeginHandOff,
+            Handing = (connection) =>
+            {
+                return Handing?.Invoke(connection.ConnectionHandle) ?? Task.CompletedTask;
+            },
+            HandOn = HandOn,
             WaitAfterHandOff = WaitAfterHandOff,
             Finish = Finish,
             EndEarly = EndEarly,
             Lose = Lose,
             Cancel = Cancel,
-            Message = (message, connection) =>
-            {
-                _listeners.Tell(Message, (message, connection.ConnectionHandle));
-            },
             AddressOf = AddressOf,
             Drop = Drop,
             Answering = () =>
@@ -425,8 +655,15 @@ public sealed partial class HttpTransportServer : IServerTransport, IAsyncDispos
     public event Action<TransportServerRefusal>? Refusal;
 
     /// <summary>
-    /// What a listener of its events threw, with the handle of the connection it was told of: the
-    /// transport went on as if it returned (spec 15.1). With an empty handle for a throw of a
+    /// What went wrong on a connection, with its handle (spec 15.1): a bound it is dropped behind,
+    /// <see cref="HttpTransportServerOptions.MaximumOutboxBytes"/> or
+    /// <see cref="HttpTransportServerOptions.MinimumSendBytesPerSecond"/> past
+    /// <see cref="HttpTransportServerOptions.SendGracePeriod"/>, an <see cref="IOException"/> naming
+    /// the bound in the spec's spelling and its value, told once, as its connection ends, its end
+    /// begun, before its unclean <see cref="Close"/>, so a listener that throws keeps nothing open; or
+    /// what a listener of its events threw, as it threw, the transport going on as if it returned.
+    /// Never a client gone, an exchange lost, or a connection closed past its exchange or inactivity
+    /// timeout, which its unclean <see cref="Close"/> tells. With an empty handle for a throw of a
     /// <see cref="Refusal"/> listener alone, which names no connection; never the server's own
     /// failure, as the TypeScript side's can be: Kestrel tells a failure of its own only to its logs.
     /// </summary>
@@ -449,6 +686,12 @@ public sealed partial class HttpTransportServer : IServerTransport, IAsyncDispos
     internal event Action<string>? Holding;
 
     /// <summary>
+    /// Each envelope read whole, before it is handed on, with its connection's handle: the tests' way
+    /// to close its connection in between, by a <c>DELETE</c> as its client sends one.
+    /// </summary>
+    internal Func<string, Task>? Handing { get; set; }
+
+    /// <summary>
     /// Each answer, before it is written, with its exchange's abort: the tests' way to drop its
     /// socket in between and to wait until the server is told, where a socket that takes the
     /// answer whole at once would win the race.
@@ -467,6 +710,15 @@ public sealed partial class HttpTransportServer : IServerTransport, IAsyncDispos
         get
         {
             return _life.ReadyState;
+        }
+    }
+
+    /// <summary>Its type, <see cref="TransportTypes.Http"/>, which every handle it draws begins with.</summary>
+    public string Type
+    {
+        get
+        {
+            return TransportTypes.Http;
         }
     }
 
@@ -802,10 +1054,10 @@ public sealed partial class HttpTransportServer : IServerTransport, IAsyncDispos
             }
         }
 
-        // * reported, naming its bound, as it closes: its client fell behind (spec 15.9)
+        // * dropped, its client behind, then reported naming its bound and its value (spec 15.9)
         if (overflowing is not null)
         {
-            Drop((overflowing, nameof(HttpTransportServerOptions.MaximumOutboxBytes)));
+            Drop((overflowing, string.Create(CultureInfo.InvariantCulture, $"its outbox would pass maximumOutboxBytes, {_options.MaximumOutboxBytes} bytes")));
         }
 
         // its body still coming: its answer goes now, and it is never handed on
@@ -1045,12 +1297,40 @@ public sealed partial class HttpTransportServer : IServerTransport, IAsyncDispos
         return Volatile.Read(ref isLate);
     }
 
-    // a connection dropped behind a bound of its own, reported naming it before its close (spec
-    // 15.9, 15.12): its exchange lost, as an answer that could not be written is (spec 15.7)
-    private void Drop((Drawn Connection, string Bound) dropped)
+    // ! a connection dropped behind a bound of its own (spec 15.9, 15.12), its exchange lost, as an
+    // answer that could not be written is (spec 15.7): its end begun, then reported, why naming the
+    // bound in the spec's spelling and its value; once, as it ends, before its unclean close, which
+    // is told even when a listener of Error throws, what it threw going on to its caller (spec 15.1)
+    private void Drop((Drawn Connection, string Why) dropped)
     {
-        Error?.Invoke(new IOException($"{dropped.Connection.ConnectionHandle} is dropped behind its {dropped.Bound}"), dropped.Connection.ConnectionHandle);
-        CloseDrawn(dropped.Connection, false);
+        var (connection, why) = dropped;
+        List<PipeReader>? interrupted = null;
+
+        try
+        {
+            lock (connection.Telling)
+            {
+                interrupted = Take(connection);
+
+                if (interrupted is null)
+                {
+                    return;
+                }
+
+                try
+                {
+                    Error?.Invoke(ServerBounds.DroppedOf(connection.ConnectionHandle, why), connection.ConnectionHandle);
+                }
+                finally
+                {
+                    _listeners.Tell(Close, (false, connection.ConnectionHandle));
+                }
+            }
+        }
+        finally
+        {
+            Interrupt(interrupted);
+        }
     }
 
     private async Task Exchange(HttpContext context)
@@ -1061,8 +1341,9 @@ public sealed partial class HttpTransportServer : IServerTransport, IAsyncDispos
         // refuses 400 an octet that is no UTF-8, and decodes the rest, a character past ASCII among
         // them, and takes a control character, or a value with a space or a tab at either end over
         // HTTP/2 (RFC 9113 §8.2.1), which this refuses as HTTP refuses a malformed field — over
-        // HTTP/2 by resetting the stream, PROTOCOL_ERROR, as Kestrel resets one of its own
-        if (!HttpServerFields.HasVisibleFields(request))
+        // HTTP/2 by resetting the stream, PROTOCOL_ERROR, as Kestrel resets one of its own; and so a
+        // target past visible ASCII, which Kestrel takes as it takes a control character in a field
+        if (!HttpServerFields.HasVisibleFields(request) || !HttpServerFields.IsVisibleTarget(context))
         {
             if (HttpServerFields.ResetMalformedFields(context))
             {
@@ -1081,7 +1362,15 @@ public sealed partial class HttpTransportServer : IServerTransport, IAsyncDispos
         // so it is read from the target as it came, and judged as HTTP judges a Host
         var targetAuthority = HttpServerFields.TargetAuthorityOf(context);
 
-        if (targetAuthority is not null && !HostsAndOrigins.IsAuthority(targetAuthority))
+        // ! an HTTP/2 request with neither :authority nor host is malformed (RFC 9113 §8.3.1), under
+        // * as under any hosts: its stream reset, PROTOCOL_ERROR, as Node's HTTP/2 resets it before
+        // any listener, where Kestrel hands it on with an empty Host
+        if (HttpProtocol.IsHttp2(request.Protocol) && request.Headers.Host.Count == 0 && HttpServerFields.ResetMalformedFields(context))
+        {
+            return;
+        }
+
+        if (!HttpServerFields.IsTakenTarget(context))
         {
             await HttpServerFields.RefuseAsHttp(context, StatusCodes.Status400BadRequest);
 
@@ -1229,6 +1518,12 @@ public sealed partial class HttpTransportServer : IServerTransport, IAsyncDispos
                 _byToken[connection.ConnectionToken] = connection;
                 _perAddress[address] = _perAddress.GetValueOrDefault(address) + 1;
                 Rest(connection);
+
+                // ! its telling lock taken as it is registered, under the transport's lock here
+                // alone, since no other thread holds the lock of a connection it cannot find yet:
+                // its opening is told before anything else of it, a close a stop or its idle timer
+                // begins at once among it; released before the first await, a lock being its thread's
+                connection.Telling.Enter();
             }
         }
 
@@ -1239,7 +1534,14 @@ public sealed partial class HttpTransportServer : IServerTransport, IAsyncDispos
             return;
         }
 
-        _listeners.Tell(Connection, connection.ConnectionHandle);
+        try
+        {
+            _listeners.Tell(Connection, connection.ConnectionHandle);
+        }
+        finally
+        {
+            connection.Telling.Exit();
+        }
 
         // the listen taken, said back, so a client whose header something on the way dropped never
         // listens where it would be refused
@@ -1325,18 +1627,40 @@ public sealed partial class HttpTransportServer : IServerTransport, IAsyncDispos
         return (false, false);
     }
 
-    // a request about to go on to the router: whether it was answered first, and handed on when not
-    private bool BeginHandOff(Waiting waiting)
+    // ! an envelope read whole, told to the router as one with what the registry holds, so never
+    // after its connection's close: its connection gone, it ends untold, its client learning it is
+    // gone; a request answered as it came is never handed on, and one handed on is owed its answer
+    private HandOff HandOn((Drawn Connection, Waiting Waiting, TransportMessage Message) call)
     {
-        bool isAnswered;
+        var (connection, waiting, message) = call;
 
-        lock (_gate)
+        lock (connection.Telling)
         {
-            isAnswered = waiting.IsEnded;
-            waiting.IsDelivered = !isAnswered;
+            lock (_gate)
+            {
+                if (_drawn.GetValueOrDefault(connection.ConnectionHandle) != connection)
+                {
+                    waiting.IsEnded = true;
+                    waiting.Ended.TrySetResult(new Ending { IsGone = true });
+
+                    return HandOff.Gone;
+                }
+
+                if (waiting.Prefix is { Kind: EnvelopeKind.Request })
+                {
+                    if (waiting.IsEnded)
+                    {
+                        return HandOff.Answered;
+                    }
+
+                    waiting.IsDelivered = true;
+                }
+            }
+
+            _listeners.Tell(Message, (message, connection.ConnectionHandle));
         }
 
-        return isAnswered;
+        return HandOff.Told;
     }
 
     // a request handed on: whether it still waits for its answer, its timer armed when it does
@@ -1609,7 +1933,7 @@ public sealed partial class HttpTransportServer : IServerTransport, IAsyncDispos
 
         try
         {
-            _listeners.Tell(Listen, (true, connection.ConnectionHandle));
+            TellListen((true, connection));
             listening.Told.TrySetResult();
 
             var ending = await listening.Ended.Task.WaitAsync(context.RequestAborted);
@@ -1622,13 +1946,13 @@ public sealed partial class HttpTransportServer : IServerTransport, IAsyncDispos
                 HttpServerFields.StampOf(response);
                 response.ContentType = HttpTransport.BatchMediaType;
                 response.ContentLength = ending.Bytes.Length;
-                response.Headers[HttpTransport.SequenceHeader] = sequence.ToString(System.Globalization.CultureInfo.InvariantCulture);
+                response.Headers[HttpTransport.SequenceHeader] = sequence.ToString(CultureInfo.InvariantCulture);
 
                 // ! at its pace: past it, an answer that could not be written, its exchange lost, its
                 // connection dropped at both ends, reported (spec 15.7, 15.12)
                 if (await WritePaced(context, (ending.Bytes, (_options.MinimumSendBytesPerSecond, _options.SendGracePeriod))))
                 {
-                    Drop((connection, nameof(HttpTransportServerOptions.MinimumSendBytesPerSecond)));
+                    Drop((connection, ServerBounds.LateOf((_options.MinimumSendBytesPerSecond, _options.SendGracePeriod))));
 
                     return;
                 }
@@ -1647,8 +1971,6 @@ public sealed partial class HttpTransportServer : IServerTransport, IAsyncDispos
         }
         finally
         {
-            bool isDrawn;
-
             lock (_gate)
             {
                 listening.Timer?.Dispose();
@@ -1659,9 +1981,8 @@ public sealed partial class HttpTransportServer : IServerTransport, IAsyncDispos
                 }
 
                 connection.Open -= 1;
-                isDrawn = _drawn.GetValueOrDefault(connection.ConnectionHandle) == connection;
 
-                if (isDrawn)
+                if (_drawn.GetValueOrDefault(connection.ConnectionHandle) == connection)
                 {
                     Rest(connection);
                 }
@@ -1674,9 +1995,27 @@ public sealed partial class HttpTransportServer : IServerTransport, IAsyncDispos
                 await replacer.Told.Task;
             }
 
+            TellListen((false, connection));
+        }
+    }
+
+    // a listen held, or ended, told while its connection stands, as one with its close: never after
+    private void TellListen((bool IsHeld, Drawn Connection) listen)
+    {
+        var (isHeld, connection) = listen;
+
+        lock (connection.Telling)
+        {
+            bool isDrawn;
+
+            lock (_gate)
+            {
+                isDrawn = _drawn.GetValueOrDefault(connection.ConnectionHandle) == connection;
+            }
+
             if (isDrawn)
             {
-                _listeners.Tell(Listen, (false, connection.ConnectionHandle));
+                _listeners.Tell(Listen, (isHeld, connection.ConnectionHandle));
             }
         }
     }
@@ -1764,20 +2103,51 @@ public sealed partial class HttpTransportServer : IServerTransport, IAsyncDispos
         connection.Idle = null;
     }
 
-    // out of the registry before its close is told; each exchange still waiting learns its connection
-    // is gone — by the marked 404 until its request is handed on, then by its exchange cut after its
-    // head, as a lost one is: a request handed on ran, which no refusal may deny
     private void CloseDrawn(Drawn connection, bool isClean)
     {
-        // the bodies still coming of the requests waiting, whose reads are ended, so each is answered
-        // the marked 404 now, its head not out
+        List<PipeReader>? interrupted = null;
+
+        try
+        {
+            lock (connection.Telling)
+            {
+                interrupted = Take(connection);
+
+                if (interrupted is not null)
+                {
+                    _listeners.Tell(Close, (isClean, connection.ConnectionHandle));
+                }
+            }
+        }
+        finally
+        {
+            Interrupt(interrupted);
+        }
+    }
+
+    // the bodies still coming of the requests a close ended, their reads ended so each is answered
+    // the marked 404 now, its head not out: once its close is told, nothing held
+    private static void Interrupt(List<PipeReader>? interrupted)
+    {
+        foreach (var reading in interrupted ?? [])
+        {
+            reading.CancelPendingRead();
+        }
+    }
+
+    // a connection's end begun, under its telling lock: out of the registry, each exchange still
+    // waiting told by the marked 404 until its request is handed on, then by its exchange cut after
+    // its head, as a lost one is: a request handed on ran, which no refusal may deny. What reads the
+    // bodies of those still coming, for its caller to end; none once its end began already
+    private List<PipeReader>? Take(Drawn connection)
+    {
         var interrupted = new List<PipeReader>();
 
         lock (_gate)
         {
             if (_drawn.GetValueOrDefault(connection.ConnectionHandle) != connection)
             {
-                return;
+                return null;
             }
 
             _drawn.Remove(connection.ConnectionHandle);
@@ -1827,12 +2197,7 @@ public sealed partial class HttpTransportServer : IServerTransport, IAsyncDispos
             }
         }
 
-        foreach (var reading in interrupted)
-        {
-            reading.CancelPendingRead();
-        }
-
-        _listeners.Tell(Close, (isClean, connection.ConnectionHandle));
+        return interrupted;
     }
 
     // a listen held until something comes for it, or its wait is over; touched under the lock
@@ -1862,6 +2227,14 @@ public sealed partial class HttpTransportServer : IServerTransport, IAsyncDispos
 
         // its client said at connect that it listens: the server may send of its own
         public bool IsListening { get; } = isListening;
+
+        // ! what is told of it — its opening, an envelope, a listen, its close — told one at a time,
+        // each as one with what the registry holds as it is told, as the TypeScript side's one thread
+        // tells them: it leaves the registry only under this lock, its close told with it, so nothing
+        // of it is told after its close. Taken before the transport's lock, never under it but as
+        // it is drawn; its listeners are told under it, the router's posting to its scheduler and
+        // returning, so a listener that waits on another exchange of its connection waits for ever
+        public Lock Telling { get; } = new();
 
         // the rank it was drawn at, which its handle ends with
         public required long Ordinal { get; init; }

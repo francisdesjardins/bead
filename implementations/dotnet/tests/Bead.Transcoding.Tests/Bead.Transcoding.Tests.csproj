@@ -1,0 +1,37 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <!-- xUnit v3 runs its tests as a program of their own -->
+    <OutputType>Exe</OutputType>
+    <IsPackable>false</IsPackable>
+    <RootNamespace>Bead.Transcoding.Tests</RootNamespace>
+    <!-- a test says what it shows by its name -->
+    <NoWarn>$(NoWarn);CS1591</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.TimeProvider.Testing" />
+    <PackageReference Include="xunit.v3" />
+    <PackageReference Include="Microsoft.Testing.Extensions.CodeCoverage" />
+    <PackageReference Include="Google.Protobuf" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Using Include="Xunit" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../../src/Bead.Transcoding.Http/Bead.Transcoding.Http.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- the map-key fixtures, compiled from the protobuf tests' generated message without a second copy -->
+    <Compile Include="../Bead.Protobuf.Tests/Generated/Bead/Validations/V1/Validations.cs" Link="Generated/Validations.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- what a gateway answers of spec/transcoding.proto, which Generated/ holds as beadc writes it,
+         its route table and its document among it, an output with http: true -->
+    <Content Include="../../../../spec/transcoding.json" Link="transcoding.json" CopyToOutputDirectory="PreserveNewest" />
+    <None Update="Generated/openapi.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+</Project>

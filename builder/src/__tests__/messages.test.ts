@@ -41,7 +41,11 @@ test('generates bead/options_pb.ts beside a file that imports it', () => {
     files.map((file) => {
       return file.name;
     })
-  ).toEqual(['bead/options_pb.ts', 'bead/messages/v1/messages_pb.ts']);
+  ).toEqual([
+    'bead/options_pb.ts',
+    'bead/messages/v1/messages_pb.ts',
+    'bead/messages/v1/rules_pb.ts',
+  ]);
   expect(files[1]?.content).toContain(' from "../../options_pb.ts";\n');
   expect(files[1]?.content).toContain(' from "@bufbuild/protobuf/wkt";\n');
 
@@ -56,9 +60,12 @@ test('generates bead/options_pb.ts beside a file that imports it', () => {
 test("writes protoc-gen-es's output as buf generate does", () => {
   const messages = checked(MESSAGES);
   const out = test.info().outputPath('buf-generate');
+  // * rules.proto's messages lose protovalidate's options, which validate-options.test.ts holds
   const files = generateMessages(messages.set, {
     blueprint: messages.blueprint,
     importExtension: 'ts',
+  }).filter((file) => {
+    return file.name !== 'bead/messages/v1/rules_pb.ts';
   });
 
   // buf generate over beadc's options and the fixture, the stock plugin under the Node that runs it

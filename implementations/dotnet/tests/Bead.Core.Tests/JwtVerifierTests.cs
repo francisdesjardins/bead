@@ -154,6 +154,78 @@ public sealed class JwtVerifierTests
     }
 
     [Fact]
+    public async Task Refuses_an_HS256_signature_of_the_wrong_byte_length_before_reading_the_clock()
+    {
+        var vector = Vectors.Of("jwtVerdicts", Holding);
+        var token = vector.GetProperty("token").GetString()!;
+        var parts = token.Split('.');
+        var signature = Base64Url.DecodeFromChars(parts[2]);
+        var reads = 0;
+        var props = PropsOf(vector) with
+        {
+            Now = () =>
+            {
+                reads += 1;
+
+                return MillisecondsOf(vector);
+            },
+        };
+
+        Assert.Equal(32, signature.Length);
+
+        foreach (var length in new[] { 31, 33 })
+        {
+            var bytes = new byte[length];
+
+            signature.AsSpan(0, Math.Min(length, signature.Length)).CopyTo(bytes);
+
+            var malformed = $"{parts[0]}.{parts[1]}.{Base64Url.EncodeToString(bytes)}";
+            var refused = await JwtVerifier.VerifyJwt(malformed, props);
+
+            Assert.False(refused.Holds);
+            Assert.Equal(JwtRefusal.Signature, refused.Reason);
+            Assert.Equal(0, reads);
+        }
+
+        Assert.True((await JwtVerifier.VerifyJwt(token, props)).Holds);
+        Assert.Equal(1, reads);
+    }
+
+    [Fact]
+    public void Reads_unverified_JWTs_only_when_all_three_parts_decode()
+    {
+        var parts = Vectors.Of("jwtVerdicts", Holding).GetProperty("token").GetString()!.Split('.');
+        var header = parts[0];
+        var claims = parts[1];
+        var encode = (string text) =>
+        {
+            return Base64Url.EncodeToString(Encoding.UTF8.GetBytes(text));
+        };
+
+        foreach (var token in new[]
+        {
+            "",
+            "a.b",
+            $"{header}.{claims}.AA.extra",
+            $"{encode("[]")}.{claims}.AA",
+            $"{encode("no JSON")}.{claims}.AA",
+            $"{header}.{encode("[]")}.AA",
+            $"{header}.{encode("no JSON")}.AA",
+            $"{header}.{claims}.*",
+        })
+        {
+            Assert.Null(JwtVerifier.ReadUnverified(token));
+        }
+
+        // * a one-byte signature is readable here: only the verifier judges its signature.
+        var read = JwtVerifier.ReadUnverified($"{header}.{claims}.AA");
+
+        Assert.NotNull(read);
+        Assert.True(JsonElement.DeepEquals(ElementOf(Encoding.UTF8.GetString(Base64Url.DecodeFromChars(header))), read.Value.Header));
+        Assert.True(JsonElement.DeepEquals(ElementOf(Encoding.UTF8.GetString(Base64Url.DecodeFromChars(claims))), read.Value.Claims));
+    }
+
+    [Fact]
     public async Task Gives_the_claims_set_of_a_token_that_holds_whole_past_its_document()
     {
         var vector = Vectors.Of("jwtVerdicts", Holding);
@@ -170,7 +242,7 @@ public sealed class JwtVerifierTests
     }
 
     [Fact]
-    public async Task Read_the_wall_clock_once_the_signature_verifies_so_a_verification_that_waits_past_a_token_s_end_refuses_it_at_exp()
+    public async Task Reads_the_wall_clock_once_the_signature_verifies_so_a_verification_that_waits_past_a_token_s_end_refuses_it_at_exp()
     {
         var vector = Vectors.Of("jwtVerdicts", Holding);
         var token = vector.GetProperty("token").GetString()!;
@@ -229,7 +301,9 @@ public sealed class JwtVerifierTests
         var jwk = ElementOf($$"""{"k":"{{key.Jwk.GetProperty("k").GetString()}}","key_ops":["verify\ud800"],"kty":"oct"}""");
         var props = PropsOf(vector) with { Keys = [key with { Jwk = jwk }] };
 
-        Assert.Equal(JwtRefusal.Key, (await JwtVerifier.VerifyJwt(vector.GetProperty("token").GetString()!, props)).Reason);
+        var verdict = await JwtVerifier.VerifyJwt(vector.GetProperty("token").GetString()!, props);
+
+        Assert.Equal<(bool, JwtRefusal?)>((false, JwtRefusal.Key), (verdict.Holds, verdict.Reason));
     }
 
     [Fact]
@@ -249,9 +323,9 @@ public sealed class JwtVerifierTests
         // characters once read, the first holding a backslash
         await JwtVerifier.VerifyJwt(headed($$"""{"{{first}}":0,"alg":"HS256","typ":"at+jwt","\\u00":1}"""), PropsOf(vector));
 
-        Assert.Equal(
-            JwtRefusal.Crit,
-            (await JwtVerifier.VerifyJwt(headed($$"""{"{{first}}":0,"alg":"HS256","typ":"at+jwt","\u0063rit":["exp"]}"""), PropsOf(vector))).Reason);
+        var verdict = await JwtVerifier.VerifyJwt(headed($$"""{"{{first}}":0,"alg":"HS256","typ":"at+jwt","\u0063rit":["exp"]}"""), PropsOf(vector));
+
+        Assert.Equal<(bool, JwtRefusal?)>((false, JwtRefusal.Crit), (verdict.Holds, verdict.Reason));
     }
 
     [Fact]

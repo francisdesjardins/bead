@@ -9,6 +9,7 @@ import {
   stopServer,
 } from '../../transport/shared/__tests__/fixtures';
 import { createFakeWebSocket } from '../../transport/client/__tests__/fake-websocket';
+import { CLOSE_TIMEOUT } from '../../transport/client/ws-transport-client';
 import { bytesOf, readEnvelope, writeEnvelope } from '../../router/shared/envelope';
 import { CredentialScheme } from '../../router/shared/constants';
 import { toSessionToken } from '../../router/shared/identifiers';
@@ -140,7 +141,11 @@ test('createWSClient takes a message of an envelope at most, more when the trans
     const { FakeWebSocket, sockets } = createFakeWebSocket();
     const Recording = Object.assign(
       // oxlint-disable-next-line prefer-arrow-callback -- the transport calls it with `new`, which an arrow refuses
-      function (_url: string, _protocols: unknown, options?: { maxPayload?: number }) {
+      function (
+        _url: string,
+        _protocols: unknown,
+        options?: { closeTimeout?: number; maxPayload?: number; perMessageDeflate?: false }
+      ) {
         given.push(options);
 
         return new (FakeWebSocket as unknown as new () => object)();
@@ -153,7 +158,9 @@ test('createWSClient takes a message of an envelope at most, more when the trans
     sockets.at(-1)?.fireOpen();
     await connecting;
 
-    expect(given).toEqual([{ maxPayload: expected }]);
+    expect(given).toEqual([
+      { closeTimeout: CLOSE_TIMEOUT, maxPayload: expected, perMessageDeflate: false },
+    ]);
     await client[Symbol.asyncDispose]();
   }
 

@@ -30,8 +30,10 @@ type Upgrade = [request: IncomingMessage, socket: Duplex, head: Buffer];
 // what an exchange takes on to the Bead server: what it reads, and the host and origin it checks a
 // browser's against — nothing else, so no header of the way in reaches it
 const FORWARDED = Object.freeze([
+  'bead-after',
   'bead-connection-token',
   'bead-listen',
+  'bead-wait',
   'content-encoding',
   'content-length',
   'content-type',
@@ -136,8 +138,8 @@ export const relayExchanges = (
         headers,
         host: target.address,
         method: request.method,
-        // the Bead path and a listen's query: the pages server sends nothing else here, so an
-        // absolute target, which would name another host, never comes
+        // the Bead path: the pages server sends nothing else here, so an absolute target, which
+        // would name another host, never comes
         path: request.url,
         port: target.port,
       },

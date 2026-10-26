@@ -1,0 +1,10 @@
+{
+  "google/api/annotations.proto": {
+    "from": "https://github.com/googleapis/googleapis/blob/14a161a98ef045be80c12ab69d924504a756f109/google/api/annotations.proto",
+    "sha256": "e79ea741cb605a65e78ca322174764a4af9fde1962c1631e12b84c4934ba9a6c"
+  },
+  "google/api/http.proto": {
+    "from": "https://github.com/googleapis/googleapis/blob/14a161a98ef045be80c12ab69d924504a756f109/google/api/http.proto",
+    "sha256": "ead99129aa15dd5f6233942030c72eec33bc0d7b1c7c260dc143293ef66c5b78"
+  }
+}

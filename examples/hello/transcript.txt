@@ -1,6 +1,12 @@
 countDown before sayHello: ACCESS_DENIED, say hello first
 sayHello Bead: Hello, Bead!
 sayHello, nameless: Hello, Ada!
-countDown from 11: TOO_FAR, a count starts at 10 at most
+countDown from 11: PAYLOAD_INVALID, {"bounds":{"lte":10},"fieldPath":"from","message":"must be less than or equal to 10","ruleId":"int32.lte"}
+{"more":0}
 countDown from 3: 3 2 1 0, one at a time
 sayHello, nameless again: NAMELESS, nobody to greet
+POST /api/Hello/sayHello {"name":"Ada"}: 200 application/json, {"greeting":"Hello, Ada!"}
+POST /api/Hello/sayHello {}: 500 application/problem+json, {"code":64,"scope":"protocol","status":500,"title":"PROCEDURE_FAILED","type":"tag:francisdesjardins.ca,2026:bead/PROCEDURE_FAILED"}
+POST /api/Hello/countDown {"from":11}: 403 application/problem+json, {"code":33,"detail":"say hello first","scope":"protocol","status":403,"title":"ACCESS_DENIED","type":"tag:francisdesjardins.ca,2026:bead/ACCESS_DENIED"}
+POST /api/Hello/countDown {"from":3}: 403 application/problem+json, {"code":33,"detail":"say hello first","scope":"protocol","status":403,"title":"ACCESS_DENIED","type":"tag:francisdesjardins.ca,2026:bead/ACCESS_DENIED"}
+GET /openapi.json: 200 application/json, gen/openapi.json, beadc's, byte for byte

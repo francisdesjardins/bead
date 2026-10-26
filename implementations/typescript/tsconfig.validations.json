@@ -1,0 +1,15 @@
+{
+  // What beadc generates for spec/validations.proto into src/proto/__tests__/generated/, which the
+  // root's tools/check-validations.mjs holds to its generator: type-checked apart, `yarn
+  // type-check`'s second pass, since `tsconfig.json` leaves it out and its test loads it by its URL.
+  // TODO beadc's TypeScript target leaves a map's `entry` unread where only its keys hold rules,
+  // and a field's `value` where only `required` judges it: once it writes neither,
+  // `noUnusedLocals` holds here again, and the folder joins `tsconfig.json`
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "lib": ["ES2024", "ESNext.Disposable", "ESNext.Iterator", "DOM"],
+    "noUnusedLocals": false,
+    "types": ["node"]
+  },
+  "include": ["src/proto/__tests__/generated/**/*.ts"]
+}

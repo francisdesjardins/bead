@@ -1,0 +1,61 @@
+{
+  "earlier": [
+    {
+      "op": "add",
+      "path": "/services/0/procedures/0/http",
+      "value": {
+        "rules": [
+          {
+            "method": "POST",
+            "template": "/api/**",
+            "body": "*"
+          }
+        ]
+      }
+    }
+  ],
+  "current": [
+    {
+      "op": "add",
+      "path": "/services/0/procedures/0/http",
+      "value": {
+        "rules": [
+          {
+            "method": "POST",
+            "template": "/api/**",
+            "body": "*"
+          }
+        ]
+      }
+    },
+    {
+      "op": "add",
+      "path": "/services/0/procedures/-",
+      "value": {
+        "procedureId": 20,
+        "procedureName": "added",
+        "procedureKind": "request",
+        "request": {
+          "encoding": "json"
+        },
+        "result": {
+          "encoding": "json"
+        },
+        "admission": "none",
+        "failures": []
+      }
+    },
+    {
+      "op": "replace",
+      "path": "/services/0/serviceRevision",
+      "value": 3
+    }
+  ],
+  "findings": [
+    {
+      "rule": "HTTP_ROUTE_SHADOWED",
+      "pointer": "/services/0/procedures/19/procedureName",
+      "subject": "service:1/procedure:20"
+    }
+  ]
+}

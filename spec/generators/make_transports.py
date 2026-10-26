@@ -428,6 +428,22 @@ cases = [
          connect('latin', fields={'origin': 'http://café.example'}), unmarked('latin'),
          connect('other', fields={'x-other': 'café'}), unmarked('other'),
          connect('tab', fields={'origin': 'http://a.example	b'}), refused('tab', 403, 'origin-refused')]),
+    # 15.12: a target of visible ASCII, a URI's characters (RFC 3986 §2), as both HTTP servers take
+    # it; each octet the target holds is the character itself, é the one octet of its Latin-1 code
+    ('a target holding an octet other than visible ASCII — a control character, HTAB, a bare CR or DEL — in its path or its query, or a path whose percent-decoding holds NUL, is answered 400 unmarked before its host, its path or its origin is judged, and no refusal is told; one percent-encoded, %00 in a query among them, is taken',
+     ['15.6', '15.12'], {'hosts': ['bead.test']}, [
+         send('query', 'POST', '/bead?a\x01b', fields={'content-type': BEAD}), unmarked('query'),
+         send('path', 'POST', '/be\x01ad', fields={'content-type': BEAD}), unmarked('path'),
+         send('tab', 'POST', '/bead?a\tb', fields={'content-type': BEAD}), unmarked('tab'),
+         send('return', 'POST', '/bead?a\rb', fields={'content-type': BEAD}), unmarked('return'),
+         send('delete', 'POST', '/bead?a\x7fb', fields={'content-type': BEAD}), unmarked('delete'),
+         send('latin', 'POST', '/bead?é', fields={'content-type': BEAD}), unmarked('latin'),
+         send('absolute', 'POST', 'http://{host}/bead?a\x01b', fields={'content-type': BEAD}), unmarked('absolute'),
+         send('elsewhere', 'POST', '/bead?a\x01b', host='elsewhere.test', fields={'content-type': BEAD}),
+         unmarked('elsewhere'),
+         send('nul', 'POST', '/be%00ad', fields={'content-type': BEAD}), unmarked('nul'),
+         send('encoded', 'POST', '/bead?a%01b%7F%00', fields={'content-type': BEAD}),
+         expect('encoded', 201, fields={'bead-connection-token': {'capture': 'token', 'shape': 'token'}})]),
     ('an exchange from an origin the server does not take is refused 403, marked', ['15.6.5', '15.12'], None, [
         connect(fields={'origin': 'https://elsewhere.test'}), refused('connect', 403, 'origin-refused')]),
     ('an exchange from an origin the server takes is served', ['15.12'], {'origins': ['https://bead.test']}, [
@@ -922,7 +938,7 @@ websocket = [
     ('a text message is no envelope: it is reported ENVELOPE_MALFORMED, and answered nothing', ['15.2'], {}, [
         *upgrade(), message('socket', text='x'), {'report': 1, 'on': 'socket'},
         message('socket', binary=request(3, 'echo', '"y"')), heard('socket', envelope=result(3, '"y"'))]),
-    ('a message past the side\'s own limit closes its connection with 1009', ['15.3', '12.2.1'], {'limits': SMALL}, [
+    ('a message past the side\'s own limit fails its connection with 1009', ['15.3', '12.2.1'], {'limits': SMALL}, [
         *upgrade(), message('socket', binary=request(1, 'echo', '"' + 'x' * 51 + '"')), heard('socket', close=TOO_BIG)]),
     # 15.1 and 15.2: the Authorization of an upgrade from no page, carried beside every envelope of its
     # connection; the verifier holds a value of its grammar alone, so whoami answers only if its
@@ -987,6 +1003,14 @@ websocket = [
          handshake('latin', {'origin': 'http://café.example'}), unmarked('latin'),
          handshake('other', {'x-other': 'café'}), unmarked('other'),
          handshake('tab', {'origin': 'http://a.example	b'}), refused('tab', 403, 'origin-refused', UPGRADE_REFUSED)]),
+    ('a request at a WebSocket\'s address whose target holds an octet other than visible ASCII — a control character, HTAB or DEL — in its path or its query, or whose path\'s percent-decoding holds NUL, is answered 400 unmarked, and no refusal is told; one percent-encoded, %00 in a query among them, is upgraded',
+     ['15.2', '15.2.1', '15.12'], {}, [
+         handshake('query', target='/?a\x01b'), unmarked('query'),
+         handshake('delete', target='/\x7f'), unmarked('delete'),
+         handshake('tab', target='/a\tb'), unmarked('tab'),
+         handshake('nul', target='/%00'), unmarked('nul'),
+         *upgrade('encoded', target='/?a%01%00'), message('encoded', binary=ECHO),
+         heard('encoded', envelope=result(1, '"x"'))]),
     # 15.2 and 15.12: a request is taken from the hosts an HTTP exchange is, whatever else it holds,
     # and an upgrade from its origins
     ('a request naming a host the server does not take is refused 403, marked, whatever its method, its upgrade or its form',

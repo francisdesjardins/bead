@@ -1239,7 +1239,9 @@ test('answers leg A DESTINATION_LOST when its leg B over WebSocket is dropped be
     `GET / HTTP/1.1\r\nHost: ${host}\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n` +
       `Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Version: 13\r\n\r\n`
   );
-  server.router.registerDestination({ connectionHandle: await connected }, { destinationId: 7 });
+  const legB = await connected;
+
+  server.router.registerDestination({ connectionHandle: legB }, { destinationId: 7 });
 
   const client = createWSClient({ transport: { WebSocket } });
 
@@ -1283,7 +1285,7 @@ test('answers leg A DESTINATION_LOST when its leg B over WebSocket is dropped be
       })
     ).toEqual([]);
     expect(drops).toEqual([
-      'the client fell behind: what waits for its socket would pass maximumUnsentBytes, 65536 bytes',
+      `${legB} is dropped: what waits for its socket would pass maximumUnsentBytes, 65536 bytes`,
     ]);
   } finally {
     device.destroy();

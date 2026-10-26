@@ -230,6 +230,7 @@ export const createTransportServer = <Socket extends object, Request>(
     port: 0,
   };
   let stopping: Promise<void> | undefined;
+  let hasStarted = false;
 
   // each listener within a guard (spec 15.1): what one throws is reported with the connection it
   // was told of, and the transport goes on as if it returned
@@ -310,11 +311,12 @@ export const createTransportServer = <Socket extends object, Request>(
           .toArray()
       );
     },
-    // what its application says stands in front of it is believed first, whatever it listens on
+    // what its application says stands in front of it is believed first, whatever it listens on;
+    // before its first start, no bound address makes it secure
     isSecure: () => {
       return (
         implementation.secure ??
-        (implementation.isSecure === true || isLoopbackHost(startOptions.address))
+        (implementation.isSecure === true || (hasStarted && isLoopbackHost(startOptions.address)))
       );
     },
     gauges: () => {
@@ -335,7 +337,7 @@ export const createTransportServer = <Socket extends object, Request>(
     },
     start: async (options) => {
       if (!server.isUninitialized() && !server.isClosed()) {
-        throw new ProgrammerError(`server is already ${getReadyStateName(server)}`);
+        throw new ProgrammerError(`the transport server is already ${getReadyStateName(server)}`);
       }
 
       const { defaults } = implementation;
@@ -354,6 +356,7 @@ export const createTransportServer = <Socket extends object, Request>(
         const boundAddress = await implementation.start({ ...startOptions, signal });
 
         startOptions = { ...startOptions, ...boundAddress };
+        hasStarted = true;
 
         setReadyStateOpen(server);
 
@@ -374,7 +377,7 @@ export const createTransportServer = <Socket extends object, Request>(
       }
 
       if (server.isConnecting()) {
-        return Promise.reject(new ProgrammerError('server is starting'));
+        return Promise.reject(new ProgrammerError('the transport server is starting'));
       }
 
       setReadyStateClosing(server);

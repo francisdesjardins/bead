@@ -13,11 +13,12 @@ less than a millisecond nor past 2³¹ − 1, and none for a fraction
 ([0011](0011-every-side-takes-its-time-from-a-clock-it-is-given.md)). The values users write do not
 reach a timer alike: 0.41 s is 410 ms in JavaScript and 409.9999 ms in .NET.
 
-Twenty-six places take such a duration, from a call's timeout to a WebSocket server's close timeout.
-Some are reached more than one way: a reserve and a cancel, a relay's own timeout and a
-destination's, every transport's connect. Few inputs tell two readings of 1.4 apart — a half up from
-a half to the even, a value as given from as rounded at the ceiling, −1 ms, NaN — and a table of
-inputs that misses them proves neither reading.
+Twenty-seven places take such a duration, by 43 ways, from a call's timeout to a gateway's
+heartbeat. Some are reached more than one way: a reserve and a cancel, a relay's own timeout and a
+destination's, every transport's connect, the in-memory client's among them, a client and its server
+over HTTP and over WebSocket, and an HTTP server and a gateway at three of 15.12's places. Few
+inputs tell two readings of 1.4 apart — a half up from a half to the even, a value as given from as
+rounded at the ceiling, −1 ms, NaN — and a table of inputs that misses them proves neither reading.
 
 A file must not pin what the spec leaves to each side. A refusal's words are each side's: the C#
 side's message carries .NET's ` (Parameter '…')`, which its tests skip; each side names an option in
@@ -25,10 +26,11 @@ its language's case, `exchangeTimeout` and `ExchangeTimeout`, as
 [0004](0004-one-behaviour-in-every-language.md) has a name; and a C side would report a code, not
 English. Nor may it pin a default no clause states: 9.9, 10.3, 12.2.8, 13.7, 14.4, 15.3 and 15.12
 state theirs, but no clause gives a client's connect its 30 s, its `wait` its 25 s or its
-reconnection its 1 s, nor a WebSocket server's close its 5 s, whose bound the transports' client
-part aligns with the clients', a decision of its own (0004, 0011). And the two platforms are not
-given a duration alike: a JavaScript number holds the milliseconds as written, where a .NET
-`TimeSpan` counts ticks of 100 ns and truncates to them what it is given.
+reconnection its 1 s. Nor does a place observed by its refusal alone carry the default its clause
+states, which nothing in the file would read: a WebSocket's heartbeat, 30 s, and its close timeout,
+5 s (15.3), each side's tests hold. And the two platforms are not given a duration alike: a
+JavaScript number holds the milliseconds as written, where a .NET `TimeSpan` counts ticks of 100 ns
+and truncates to them what it is given.
 
 Four ways were weighed:
 
@@ -79,21 +81,32 @@ and the key stays. A place carries besides:
   the server layer over a transport that gives it none;
 - `observed`: `held`, what the place holds is read, at every place on the clock a side is given;
   `refusal`, whether it refuses alone, at those on the real clock (0011), whose timers no test clock
-  reaches: the heartbeat, a WebSocket server's close timeout, and each server's `sendGracePeriod`
-  and `headersTimeout` ([0033](0033-a-side-bounds-what-a-peer-holds-of-it.md)). A place observed by
-  its refusal has no default in the file, since nothing would read it;
+  reaches: a WebSocket's heartbeat and its close timeout, its client's and its server's, and each
+  server's `sendGracePeriod` and `headersTimeout`, a gateway's among them
+  ([0033](0033-a-side-bounds-what-a-peer-holds-of-it.md)); and at a gateway's heartbeat. A place
+  observed by its refusal has no default in the file, since nothing would read it;
 - `clauses`, the units of the spec it checks, each for what it observes of it, and nothing else:
   1.4, which holds and refuses its durations; its `neverClause`; and its default's clause.
+
+**Two owners share a place, as its ways, when the spec names one option for both and every column
+the file holds agrees**: its kind, its never and that clause, its default and its clause, what is
+observed of it, and so its outcomes. The place's owner is then what both are, and its ways `client`
+and `server`: `httpTransport.inactivityTimeout` (15.12), `webSocketTransport.heartbeat` and
+`webSocketTransport.closeTimeout` (15.3). A place's ways share what the file observes, not
+everything the duration bounds: an HTTP client's inactivity ends its listens and a server's a
+connection drawn, and each way's harness reads its own side's timer. Where one column differs, each
+owner keeps a place of its own.
 
 `server.connectionInactivityTimeout` is the server layer's option, which 13.7 leaves without end
 when not given; an HTTP server gives its own 30 s (15.12.10), which `spec/transports.json`'s
 `defaults` holds and both sides check, and the place's `state` says so.
-`httpTransportClient.inactivityTimeout` is the HTTP client's inactivity timeout, which 15.12 names
-for both sides: 5 minutes by default, and without end if given so. `httpTransportClient.pause`'s at
-once is 15.10's "listen again at once", stated with a schedule no file checks: the file leaves it
-out, as it leaves out the defaults no clause states. `webSocketTransportServer.closeTimeout` is the
-server's alone: the C# client's close timeout is the client part's to align with the TypeScript
-client, which has none, and stays an open row of the matrix (0011).
+`httpTransport.inactivityTimeout` is an HTTP connection's inactivity timeout, which 15.12 names for
+both sides: 5 minutes by default, and without end if given so, its client's and its server's alike.
+`httpTransportClient.pause`'s at once is 15.10's "listen again at once", stated with a schedule no
+file checks: the file leaves it out, as it leaves out the defaults no clause states.
+`webSocketTransport.closeTimeout` is a WebSocket's close timeout by two ways, its client's and its
+server's, as `webSocketTransport.heartbeat` is: each harness plays both, and each WebSocket client's
+tests play its client's way besides.
 
 **One table of inputs serves every place.** An input is given in one of five forms, each a value a
 user writes on every platform:
@@ -175,8 +188,9 @@ platform's word for never, `Infinity` and `infinite`, is its side's: this record
 **The spec states what the file checks**: section 1 names it; 1.4 refuses a value that is no number
 and says what a delay is; 15.12 says how a client times its own inactivity; 15.9 parts a peer's
 `wait` from an application's. The defaults no clause states — a client's connect, its `wait`, its
-reconnection's delay, a WebSocket server's close — stay out of the file until the client part states
-them.
+reconnection's delay — stay out of the file, and so do those 15.3 states for the places observed by
+their refusal alone, a WebSocket's heartbeat and its close timeout, and the 30 s transcoding 8.7
+states for a gateway's heartbeat: each side's tests hold them.
 
 **The defaults two files state come from one table.** 15.12's defaults are `spec/transports.json`'s
 `defaults` too: `make_durations.py` and `make_transports.py` read them from one module of the
@@ -204,9 +218,10 @@ duration it is given is the durations file's.
 ## The Tenth Man
 
 The decision met the Tenth Man ([0009](0009-conventional-commits-git-flow-and-the-tenth-man.md)) in
-three rounds, two on the rule and one on the file, where the user chose what it asked: the defaults
-no clause states left out of the file, and the HTTP transports' places on the clock a side is given
-observed `held`. Its objections, each with the answer that holds:
+four rounds: two on the rule; one on the file, where the user chose what it asked — the defaults no
+clause states left out of the file, and the HTTP transports' places on the clock a side is given
+observed `held`; and one on the places two owners share. Its objections, each with the answer that
+holds:
 
 ### On durations
 
@@ -249,3 +264,16 @@ observed `held`. Its objections, each with the answer that holds:
 | 15.12 names its timeouts for both sides, yet the HTTP client's 5 minutes were left out                                                                                                                           | Accepted: 15.12 says a client times its inactivity by `inactivityTimeout` alike, 15.10 names the timer, and the client's place cites 15.12.9 and holds its 5 minutes.                                                                                                                   |
 | A default that depends on state or on the transport passes for the wrong reason when its place is built with nothing given                                                                                       | Accepted: a default names the ways that read it and the state it holds in, a way that cannot leave its duration out is `required`, and the server layer's default says an HTTP server gives its own 30 s.                                                                               |
 | The places observed by their refusal carry held values and defaults no harness reads                                                                                                                             | Accepted: such a place writes `taken`, with no `held`, and has no default in the file.                                                                                                                                                                                                  |
+
+### On the places two owners share
+
+| Objection                                                                                                         | Answer                                                                                                                                                                                  |
+| ----------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| The close timeout's default was said to be out of the file because no clause states it, where 15.3 states its 5 s | Accepted: it is out because its place is observed by its refusal alone, as the heartbeat's 30 s is, and each side's tests hold both.                                                    |
+| Comments and the TypeScript README named a WebSocket server's close timeout alone, the clients' bounded too       | Accepted: each names a WebSocket's close timeout, its client's and its server's.                                                                                                        |
+| The C# client's twin promised a rounding it did not check                                                         | Accepted: it reads the close timeout its connections are built with, as the TypeScript twin reads what `ws` is handed.                                                                  |
+| The clients' never differed unseen: the TypeScript client hands `ws` 2³¹ − 1 ms, the C# client waits without end  | Accepted: a twin pair waits on a server without end for an infinite close timeout, and the matrix states the TypeScript side's cap.                                                     |
+| No rule said when two owners share a place                                                                        | Accepted: when the spec names one option for both and every column the file holds agrees; `httpTransport.inactivityTimeout` is the HTTP client's and server's, whose columns all agree. |
+| A place renamed changes what a conforming harness answers to, and was told as a test                              | Accepted: the HTTP place shared is a feature of the spec; no alias and no version, with no third language before 1.0.                                                                   |
+| The C# twin played every input of a place, whichever way it plays                                                 | Accepted: `Durations.Played(place, way)` plays nothing of a way this side is excused from, as the TypeScript twin skips it.                                                             |
+| The close timeout's place sat apart from the heartbeat's, its twin in shape                                       | Accepted: beside it, in the generator, the file and both harnesses.                                                                                                                     |

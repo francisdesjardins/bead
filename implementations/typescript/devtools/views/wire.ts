@@ -3,13 +3,14 @@
 // For a page whose clients announce nothing: each exchange of the HTTP transport the Network panel
 // saw, a line each — its time, its method and its path as they were, its status, the bytes each way —
 // and its envelopes beneath, read with the package's codec, each procedure named where a client of
-// the page told its name. A `POST` with no body is a listen.
+// the page told its name, a PAYLOAD_INVALID's violations summed up on its line. A `POST` with no body
+// is a listen.
 
 // dependencies
 
 import { EnvelopeKind } from '../../src/router/shared/constants';
 import { conversationOf } from '../model/snippets';
-import { bytesOf, clockOf, codeNameOf, envelopeLineOf } from '../model/words';
+import { bytesOf, clockOf, envelopeLineOf, failureLineOf, violationsReadOf } from '../model/words';
 import type { IWireEnvelope, IWireReading } from '../wire';
 import { make } from './dom';
 
@@ -61,10 +62,23 @@ const envelopeTextOf = (
     `#${String(header['callId'] ?? '')}`,
     ...(name === undefined ? [] : [name]),
     ...(payloadBytes === undefined ? [] : [bytesOf(payloadBytes)]),
-    ...(failure === undefined
-      ? []
-      : [`${codeNameOf(failure.code)}${failure.detail === '' ? '' : `: ${failure.detail}`}`]),
+    ...(failure === undefined ? [] : [failureLineOf(failure)]),
   ].join(' · ');
+};
+
+/** An envelope's line: its words, and a PAYLOAD_INVALID's whole detail where its line sums it up. */
+const envelopeLineViewOf = (
+  envelope: IWireEnvelope,
+  { arrow, nameOf }: { arrow: string; nameOf: IWireView['nameOf'] }
+): HTMLElement => {
+  const { failure } = envelope;
+  const isSummed = failure !== undefined && violationsReadOf(failure) !== undefined;
+
+  return make('div', {
+    attributes: { title: isSummed ? failure.detail : undefined },
+    className: isSummed ? 'summed' : undefined,
+    text: `${arrow} ${envelopeTextOf(envelope, nameOf)}`,
+  });
 };
 
 const linesOf = (
@@ -81,7 +95,7 @@ const linesOf = (
 
   return [
     ...reading.envelopes.map((envelope) => {
-      return make('div', { text: `${arrow} ${envelopeTextOf(envelope, nameOf)}` });
+      return envelopeLineViewOf(envelope, { arrow, nameOf });
     }),
     ...(reading.problem === undefined
       ? []

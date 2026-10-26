@@ -1,0 +1,32 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!--
+    A gateway of HTTP/JSON transcoding on Kestrel (decision 0037, spec/transcoding.md): an HTTP
+    listener of its own, or an endpoint an ASP.NET Core application maps, which judges a request by
+    the HTTP server's gates, binds it, and calls its procedure through one Bead connection per
+    exchange, in process over the in-memory transport its application's server takes through a join.
+    The TypeScript side's twin is @francisdesjardins/bead/http-gateway.
+  -->
+  <PropertyGroup>
+    <RootNamespace>Bead.Transcoding.Http</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../Bead.Transcoding/Bead.Transcoding.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Bead.Transcoding.Tests" />
+    <!-- the durations' harness reads back what a gateway holds of its options -->
+    <InternalsVisibleTo Include="Bead.Transport.Http.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- what Bead times takes the clock it is given, never the platform's own: 0011 -->
+    <PackageReference Include="Microsoft.CodeAnalysis.BannedApiAnalyzers" PrivateAssets="all" />
+    <AdditionalFiles Include="../BannedSymbols.txt" />
+  </ItemGroup>
+</Project>

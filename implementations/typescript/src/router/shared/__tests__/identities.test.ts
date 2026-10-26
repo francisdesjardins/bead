@@ -65,8 +65,11 @@ interface IFoldEntry extends IEntry {
 
 // types
 
-/** Declares `procedure` one way, on a router of its own, and settles as the declaration does. */
-type Way = (procedure: IProcedure) => Promise<unknown>;
+/** Declares a procedure one way and settles as the declaration does. */
+type Declare = (procedure: IProcedure) => Promise<unknown>;
+
+/** A router of its own, and a way of declaring on it. */
+type Way = () => Disposable & { declare: Declare };
 
 // constants
 
@@ -81,6 +84,14 @@ const IDENTITIES = JSON.parse(
 };
 
 const LANGUAGE = 'TypeScript';
+
+// what every way takes, declared after a refusal to show the refusal declared nothing
+const ECHO: IProcedure = Object.freeze({
+  procedureId: 1,
+  procedureName: 'echo',
+  serviceId: 1,
+  serviceRevision: 1,
+});
 
 // each reason of the file, by how this side's refusal ends
 const REASONS: readonly string[] = Object.values(IdentityRefusal);
@@ -131,7 +142,10 @@ const isExcused = (entry: IEntry): boolean => {
   });
 };
 
-/** The reason `thrown` refuses for, read back from this side's sentence; none for no refusal. */
+/**
+ * The reason `thrown` refuses for, read back from this side's sentence; none for no refusal, and
+ * its whole message for a sentence that gives none, so it never reads as taken.
+ */
 const reasonOf = (thrown: unknown): string | undefined => {
   if (thrown === undefined) {
     return undefined;
@@ -139,15 +153,30 @@ const reasonOf = (thrown: unknown): string | undefined => {
 
   expect(thrown).toBeInstanceOf(ProgrammerError);
 
-  return REASONS.find((reason) => {
-    return (thrown as Error).message.endsWith(`: ${reason}`);
-  });
+  const { message } = thrown as Error;
+
+  return (
+    REASONS.find((reason) => {
+      // * the procedure named, then its reason after `is`, as the C# side words it
+      return message.includes(` is ${reason}: `);
+    }) ?? message
+  );
 };
 
-/** What `way` throws or rejects with as it declares `procedure`; none when it is taken. */
-const thrownBy = async (way: Way, procedure: IProcedure): Promise<unknown> => {
+/** A way of declaring on `router`, disposed with it. */
+const wayOn = (router: Disposable, declare: Declare): Disposable & { declare: Declare } => {
+  return {
+    [Symbol.dispose]: () => {
+      router[Symbol.dispose]();
+    },
+    declare,
+  };
+};
+
+/** What `declare` throws or rejects with as it declares `procedure`; none when it is taken. */
+const thrownBy = async (declare: Declare, procedure: IProcedure): Promise<unknown> => {
   try {
-    await way(procedure);
+    await declare(procedure);
   } catch (error) {
     return error;
   }
@@ -157,72 +186,89 @@ const thrownBy = async (way: Way, procedure: IProcedure): Promise<unknown> => {
 
 // the ways a side declares, by the file's ids
 const WAYS: Readonly<Record<string, Way>> = Object.freeze({
-  'client-notification': async (procedure: IProcedure) => {
-    using router = createRouterClient(clientTransport());
+  'client-notification': () => {
+    const router = createRouterClient(clientTransport());
 
-    await router.registerNotification({
-      ...procedure,
-      trigger: () => {
-        return Promise.resolve([]);
-      },
+    return wayOn(router, async (procedure) => {
+      await router.registerNotification({
+        ...procedure,
+        trigger: () => {
+          return Promise.resolve([]);
+        },
+      });
     });
   },
-  'client-requester': (procedure: IProcedure) => {
-    using router = createRouterClient(clientTransport());
+  'client-requester': () => {
+    const router = createRouterClient(clientTransport());
 
-    return Promise.resolve(router.declareRequester(procedure));
+    return wayOn(router, (procedure) => {
+      return Promise.resolve(router.declareRequester(procedure));
+    });
   },
-  'client-resolver': (procedure: IProcedure) => {
-    using router = createRouterClient(clientTransport());
+  'client-resolver': () => {
+    const router = createRouterClient(clientTransport());
 
-    router.registerResolver(resolverOf(procedure));
+    return wayOn(router, (procedure) => {
+      router.registerResolver(resolverOf(procedure));
 
-    return Promise.resolve();
+      return Promise.resolve();
+    });
   },
-  'server-requester': (procedure: IProcedure) => {
-    using router = createRouterServer(serverTransport());
+  'server-requester': () => {
+    const router = createRouterServer(serverTransport());
 
-    return Promise.resolve(router.declareRequester(procedure));
+    return wayOn(router, (procedure) => {
+      return Promise.resolve(router.declareRequester(procedure));
+    });
   },
-  'server-notification-resolver': (procedure: IProcedure) => {
-    using router = createRouterServer(serverTransport());
+  'server-notification-resolver': () => {
+    const router = createRouterServer(serverTransport());
 
-    // a resolver that notifies, as a router tells one: its `notify` a function
-    router.registerResolver(
-      Object.assign(resolverOf(procedure), {
-        notify: () => {
-          return Promise.resolve();
-        },
-      })
-    );
+    return wayOn(router, (procedure) => {
+      // a resolver that notifies, as a router tells one: its `notify` a function
+      router.registerResolver(
+        Object.assign(resolverOf(procedure), {
+          notify: () => {
+            return Promise.resolve();
+          },
+        })
+      );
 
-    return Promise.resolve();
+      return Promise.resolve();
+    });
   },
-  'server-resolver': (procedure: IProcedure) => {
-    using router = createRouterServer(serverTransport());
+  'server-resolver': () => {
+    const router = createRouterServer(serverTransport());
 
-    router.registerResolver(resolverOf(procedure));
+    return wayOn(router, (procedure) => {
+      router.registerResolver(resolverOf(procedure));
 
-    return Promise.resolve();
+      return Promise.resolve();
+    });
   },
 });
 
 /**
- * Declares `procedure` each way the file lists, and holds each to `entry`'s outcome: refused at the
- * ways its `refusedAt` lists, or at every way without one, and taken at every other.
+ * Declares `procedure` each way the file lists, each on a router of its own, and holds each to
+ * `entry`'s outcome: refused at the ways its `refusedAt` lists, or at every way without one, and
+ * taken at every other; a refused one declaring nothing, as `ECHO` taken after it shows.
  */
 const expectEachWay = async (
   entry: IEntry & Pick<IProcedureKindEntry, 'refusedAt'>,
   procedure: IProcedure
 ): Promise<void> => {
   for (const id of IDENTITIES.ways) {
-    const way = WAYS[id] as Way;
-    const thrown = await thrownBy(way, procedure);
+    using way = (WAYS[id] as Way)();
+    const thrown = await thrownBy(way.declare, procedure);
     const isRefused = entry.refusedAt === undefined || entry.refusedAt.includes(id);
 
     expect(reasonOf(thrown), `${id}: ${String(thrown)}`).toBe(
       isRefused ? entry.refused : undefined
     );
+
+    if (thrown !== undefined) {
+      expect(await thrownBy(way.declare, ECHO), `${id}: echo, after its refusal`).toBeUndefined();
+    }
   }
 };
 
@@ -233,6 +279,17 @@ test.describe('the identities', () => {
 
   test('its table plays the ways the file lists, and no other', () => {
     expect(Object.keys(WAYS).toSorted()).toEqual(IDENTITIES.ways.toSorted());
+  });
+
+  test('plays every entry, none excused by a row of the matrix', () => {
+    expect(
+      [
+        ...IDENTITIES.names,
+        ...IDENTITIES.ids,
+        ...IDENTITIES.procedureKinds,
+        ...IDENTITIES.folds,
+      ].filter(isExcused)
+    ).toEqual([]);
   });
 
   for (const entry of IDENTITIES.names) {

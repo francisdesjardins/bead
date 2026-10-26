@@ -23,7 +23,8 @@ import {
   delaysOn,
   timersUntil,
 } from '../../../transport/shared/__tests__/fixtures';
-import { countedOf, envelopeOf } from '../../shared/__tests__/fixtures';
+import { countedOf, createPipedTransports, envelopeOf } from '../../shared/__tests__/fixtures';
+import { createRouterServer } from '../../server/router-server';
 import {
   CancelError,
   CLIENT_FAILURES,
@@ -126,6 +127,8 @@ const createScriptedTransport = ({
     reconnect: [];
   }>();
   const sent: (Envelope | undefined)[] = [];
+  // each envelope sent, as its bytes went
+  const raw: Uint8Array[] = [];
   const carried: (string | undefined)[] = [];
   const control = { sendError: undefined as Error | undefined };
 
@@ -136,6 +139,7 @@ const createScriptedTransport = ({
     on: emitter.on,
     send: ({ credential, data }) => {
       carried.push(credential);
+      raw.push(bytesOf(data).slice());
       sent.push(
         readEnvelope(bytesOf(data), {
           failures: SERVER_FAILURES,
@@ -157,7 +161,7 @@ const createScriptedTransport = ({
     emitter.emit('close', false, false);
   };
 
-  return { carried, close, control, deliver, emitter, sent, transport };
+  return { carried, close, control, deliver, emitter, raw, sent, transport };
 };
 
 // a JWT, which a client presents as it is given, and an ELSEWHERE, with what its transport carries
@@ -170,6 +174,10 @@ const CARRIES_NONE = (): boolean => {
 
 const ELSEWHERE = Object.freeze({
   carried: 'Bearer mF_9.B5f-4.1JqM',
+  scheme: CredentialScheme.ELSEWHERE,
+});
+const RENEWED_ELSEWHERE = Object.freeze({
+  carried: 'Bearer renewed',
   scheme: CredentialScheme.ELSEWHERE,
 });
 
@@ -474,13 +482,17 @@ test.describe('createRouterClient', () => {
       const calls = [
         router.request(new Uint8Array(0), { options: asking, procedure: service }),
         router.request(new Uint8Array(0), { options, procedure: service }),
+        router.request(new Uint8Array(0), {
+          options: { ...options, credential: { scheme: CredentialScheme.NONE } },
+          procedure: service,
+        }),
       ];
 
       // a session opened anew is the one presented next
       deliver(resultOf(97, { credential: OTHER_OPAQUE }));
       calls.push(router.request(new Uint8Array(0), { options: asking, procedure: service }));
 
-      for (const callId of [1, 3, 5]) {
+      for (const callId of [1, 3, 5, 7]) {
         deliver(resultOf(callId));
       }
 
@@ -495,8 +507,21 @@ test.describe('createRouterClient', () => {
       ).toEqual([
         [1, OPAQUE],
         [3, undefined],
-        [5, OTHER_OPAQUE],
+        [5, undefined],
+        [7, OTHER_OPAQUE],
       ]);
+
+      // once it ended, a call that asks fails before it goes again
+      deliver(resultOf(95, { credential: ENDED }));
+
+      await expect(
+        router.request(new Uint8Array(0), { options: asking, procedure: service })
+      ).rejects.toMatchObject({
+        code: ProtocolCode.SESSION_REQUIRED,
+        origin: 'local',
+        side: 'client',
+      });
+      expect(sent).toHaveLength(4);
     });
 
     test('writes the destination a request names, refuses a destination of 0, and writes none left undefined', async () => {
@@ -551,15 +576,20 @@ test.describe('createRouterClient', () => {
     });
 
     test('rejects every request still waiting when the connection closes', async () => {
-      const { close, transport } = createScriptedTransport();
+      const { close, deliver, transport } = createScriptedTransport();
       using router = createRouterClient(transport);
+
+      deliver(resultOf(9, { credential: OPAQUE }));
 
       const waiting = router.request(new Uint8Array(0), { options, procedure: service });
 
       await Promise.resolve();
+      expect(router.sessionToken).toBe(TOKEN);
       close();
 
+      // and the session it learned is forgotten with its connection
       await expect(waiting).rejects.toBeInstanceOf(DisconnectError);
+      expect(router.sessionToken).toBeUndefined();
     });
 
     test('rejects when the transport cannot send, and when the payload is too large', async () => {
@@ -586,8 +616,26 @@ test.describe('createRouterClient', () => {
       expect(sent).toHaveLength(1);
     });
 
+    test('refuses a payload that would go as a transfer where it sends none, before anything goes out', async () => {
+      const { sent, transport } = createScriptedTransport();
+      using router = createRouterClient(transport, { limits: { maximumTransfers: 0 } });
+
+      // * through its service manager, as an application calls: refused here, nothing sent
+      await expect(
+        createServiceManager(router).getRequest(service, { serializer: text })(
+          'x'.repeat(2 * 1_048_576)
+        )(options)
+      ).rejects.toMatchObject({
+        code: ProtocolCode.PAYLOAD_TOO_LARGE,
+        detail: expect.stringContaining('which this side sends none of'),
+        origin: 'local',
+        side: 'client',
+      });
+      expect(sent).toEqual([]);
+    });
+
     test('are held to the limits the router is built with, which must hold together, and show them', async () => {
-      const { deliver, sent, transport } = createScriptedTransport();
+      const { deliver, emitter, sent, transport } = createScriptedTransport();
       using router = createRouterClient(transport, { limits: { maximumPayloadBytes: 8 } });
       const heard: string[] = [];
 
@@ -618,9 +666,19 @@ test.describe('createRouterClient', () => {
       expect(heard).toEqual(['1 true']);
       deliver(resultOf(sent[0]?.header.callId ?? 0));
       await asking;
+
+      // limits that do not hold together build no router, and leave the transport as it was
+      const listenersOf = () => {
+        return (['close', 'message', 'reconnect'] as const).map((event) => {
+          return emitter.listenerCount(event);
+        });
+      };
+      const listeners = listenersOf();
+
       expect(() => {
         return createRouterClient(transport, { limits: { chunkBytes: 63 } });
       }).toThrow(ProgrammerError);
+      expect(listenersOf()).toEqual(listeners);
     });
   });
 
@@ -648,6 +706,12 @@ test.describe('createRouterClient', () => {
         [5, { scheme: CredentialScheme.ELSEWHERE }, ELSEWHERE.carried],
       ]);
       expect(router.credential).toEqual(ELSEWHERE);
+      // * each request's flags, the third byte: CREDENTIAL alone
+      expect(
+        scripted.raw.map((bytes) => {
+          return bytes[2];
+        })
+      ).toEqual([0x08, 0x08, 0x08]);
     });
 
     test('a call’s own credential wins over the default, NONE presents none whatever the default, and OPAQUE presents the session learned', async () => {
@@ -680,15 +744,19 @@ test.describe('createRouterClient', () => {
         [5, RENEWED_JWT, undefined],
         [7, { scheme: CredentialScheme.ELSEWHERE }, ELSEWHERE.carried],
       ]);
+      // a call's own changes no default
+      expect(router.credential).toEqual(JWT);
     });
 
     test('refuses OPAQUE as its default credential, and a JWT under limits that hold no header of 1020 bytes', () => {
       const { transport } = createScriptedTransport();
       const opaque = { scheme: CredentialScheme.OPAQUE } as unknown as typeof JWT;
 
-      expect(() => {
-        return createRouterClient(transport, { credential: opaque });
-      }).toThrow(ProgrammerError);
+      for (const refused of [opaque, OPAQUE as unknown as typeof JWT]) {
+        expect(() => {
+          return createRouterClient(transport, { credential: refused });
+        }).toThrow(ProgrammerError);
+      }
 
       using router = createRouterClient(transport, { credential: JWT });
 
@@ -781,6 +849,7 @@ test.describe('createRouterClient', () => {
         code: ProtocolCode.SESSION_REQUIRED,
         detail: 'the default credential was withdrawn',
         origin: 'local',
+        scope: FailureScope.PROTOCOL,
         side: 'client',
       });
 
@@ -974,7 +1043,13 @@ test.describe('createRouterClient', () => {
       const scripted = createScriptedTransport();
       using router = createRouterClient(scripted.transport, { credential: JWT });
       const withdrawn: unknown[][] = [];
-      const notification = notificationOf([]);
+      const dropped: unknown[] = [];
+      const notification: INotificationLike = {
+        ...notificationOf([]),
+        drop: (failure) => {
+          dropped.push(failure?.code);
+        },
+      };
 
       router.on('credentialWithdrawn', (...told) => {
         withdrawn.push(told);
@@ -994,6 +1069,8 @@ test.describe('createRouterClient', () => {
 
       expect(withdrawn).toEqual([]);
       expect(router.credential).toEqual(JWT);
+      // * dropped by the failure that ended it, alone
+      expect(dropped).toEqual([ProtocolCode.SESSION_REQUIRED]);
       expect(router.hasNotification(notification)).toBe(false);
     });
 
@@ -1041,13 +1118,19 @@ test.describe('createRouterClient', () => {
         withdrawn.push(told);
       });
 
-      await expect(
-        router.request(new Uint8Array(0), { options, procedure: service })
-      ).rejects.toMatchObject({
-        code: ProtocolCode.DESTINATION_UNREACHABLE,
-        origin: 'local',
-        side: 'client',
-      });
+      // its default, or a call's own
+      for (const credential of [undefined, RENEWED_ELSEWHERE]) {
+        await expect(
+          router.request(new Uint8Array(0), {
+            options: { ...options, credential },
+            procedure: service,
+          })
+        ).rejects.toMatchObject({
+          code: ProtocolCode.DESTINATION_UNREACHABLE,
+          origin: 'local',
+          side: 'client',
+        });
+      }
 
       // a JWT is carried in its block, whatever the transport carries beside it
       const jwt = router.request(new Uint8Array(0), {
@@ -1071,6 +1154,7 @@ test.describe('createRouterClient', () => {
         },
       });
       using overUpgrade = createRouterClient(upgraded.transport, { credential: ELSEWHERE });
+      const upgradedErrors = recordErrors(overUpgrade);
       const refused = await overUpgrade
         .request(new Uint8Array(0), { options, procedure: service })
         .catch((reason: unknown) => {
@@ -1079,6 +1163,8 @@ test.describe('createRouterClient', () => {
 
       expect(refused).toMatchObject({
         code: ProtocolCode.DESTINATION_UNREACHABLE,
+        detail:
+          'its transport does not carry the credential ELSEWHERE stands for beside an envelope: none, or another',
         origin: 'local',
       });
       expect(JSON.stringify(refused)).not.toContain(ELSEWHERE.carried);
@@ -1097,6 +1183,7 @@ test.describe('createRouterClient', () => {
       expect(presentedOf(upgraded)).toEqual([
         [1, { scheme: CredentialScheme.ELSEWHERE }, 'Interop sub=bob'],
       ]);
+      expect(upgradedErrors).toEqual([]);
     });
 
     test('fails a JWT or an ELSEWHERE over a transport not secure before it goes, DESTINATION_UNREACHABLE, where a call presenting none or OPAQUE goes', async () => {
@@ -1608,9 +1695,12 @@ test.describe('createRouterClient', () => {
       expect(triggered).toEqual([Uint8Array.of(5)]);
       expect(
         sent.map((envelope) => {
-          return envelope?.header.callId;
+          return [envelope?.kind, envelope?.header.callId];
         })
-      ).toEqual([1, 3]);
+      ).toEqual([
+        [EnvelopeKind.REQUEST, 1],
+        [EnvelopeKind.REQUEST, 3],
+      ]);
 
       // a failure on no subscription answers nothing
       deliver({
@@ -1679,12 +1769,13 @@ test.describe('createRouterClient', () => {
       const { close, deliver, emitter, transport } = createScriptedTransport();
       const router = createRouterClient(transport);
       const errors = recordErrors(router);
-      const dropped: string[] = [];
+      const dropped: unknown[][] = [];
       const named = (procedureName: string): INotificationLike => {
         return {
           ...service,
-          drop: () => {
-            dropped.push(procedureName);
+          // * with no failure: its connection, not the server, ended it
+          drop: (failure) => {
+            dropped.push([procedureName, failure]);
           },
           procedureName,
           trigger: () => {
@@ -1708,7 +1799,7 @@ test.describe('createRouterClient', () => {
       await subscribing;
       close();
 
-      expect(dropped).toEqual(['closed']);
+      expect(dropped).toEqual([['closed', undefined]]);
       expect(router.hasNotification(closed)).toBe(false);
 
       // nothing is bound any more: what comes under the old call id is reported
@@ -1716,12 +1807,19 @@ test.describe('createRouterClient', () => {
 
       expect(codesOf(errors)).toEqual([ProtocolCode.SUBSCRIPTION_UNKNOWN]);
 
-      await router.registerNotification(named('replaced'));
+      const replaced = named('replaced');
+
+      await router.registerNotification(replaced);
       emitter.emit('reconnect');
+      expect(router.hasNotification(replaced)).toBe(false);
       await router.registerNotification(disposed);
       router[Symbol.dispose]();
 
-      expect(dropped).toEqual(['closed', 'replaced', 'disposed']);
+      expect(dropped).toEqual([
+        ['closed', undefined],
+        ['replaced', undefined],
+        ['disposed', undefined],
+      ]);
       expect(router.hasNotification(disposed)).toBe(false);
     });
 
@@ -2075,6 +2173,62 @@ test.describe('createRouterClient', () => {
           payload: Uint8Array.of(7),
         },
       ]);
+
+      // * through a server's router: asked back by a command, as it answers a request of its own,
+      // its client answers it on the even call id the server drew
+      const pipe = createPipedTransports({ connectionHandle: 'type=WS;ip=127.0.0.1;ordinal=1' });
+      using server = createRouterServer(pipe.server);
+      using client = createRouterClient(pipe.client);
+      const clockOf: IProcedure = { ...service, procedureId: 3, procedureName: 'clock' };
+      const ask: IProcedure = { ...service, procedureId: 2, procedureName: 'ask' };
+      const received: unknown[] = [];
+      const serverServices = createServiceManager(server);
+      const asked = serverServices.getCommand(clockOf, { serializer: text });
+
+      serverServices.getRequestResolver(ask, { serializer: text })(
+        async ({ connectionHandle }, response) => {
+          return response(await asked('now')({ connectionHandle, timeout: 1_000 }));
+        }
+      );
+      createServiceManager(client).getCommandResolver(clockOf, { serializer: text })(
+        (_request, response) => {
+          return response('noon');
+        }
+      );
+      client.on('debug', ({ direction, header }) => {
+        if (direction === 'rx' && header.kind === EnvelopeKind.REQUEST) {
+          received.push(header.callId);
+        }
+      });
+      pipe.open();
+
+      await expect(
+        createServiceManager(client).getRequest(ask, { serializer: text })('')(options)
+      ).resolves.toBe('noon');
+      expect(received).toEqual([2]);
+    });
+
+    test('fails a command to no connection or to none named', async () => {
+      const pipe = createPipedTransports({
+        connectionHandle: 'type=WS;ip=127.0.0.1;port=50001;ordinal=1',
+      });
+      using server = createRouterServer(pipe.server);
+      using _client = createRouterClient(pipe.client);
+      const clockOf: IProcedure = { ...service, procedureId: 3, procedureName: 'clock' };
+      const command = createServiceManager(server).getCommand(clockOf, { serializer: text });
+
+      pipe.open();
+
+      // * through its server's service manager: a connection it does not hold, then none named
+      await expect(
+        command('now')({
+          connectionHandle: 'type=WS;ip=127.0.0.1;port=1;ordinal=1',
+          timeout: 1_000,
+        })
+      ).rejects.toBeInstanceOf(DisconnectError);
+      await expect(
+        command('now')({ timeout: 1_000 } as unknown as Parameters<ReturnType<typeof command>>[0])
+      ).rejects.toBeInstanceOf(ProgrammerError);
     });
 
     test('cancelled by the server, abort their resolver’s signal, and are answered by nothing', async () => {
@@ -2268,6 +2422,13 @@ test.describe('createRouterClient', () => {
         [10, ProtocolCode.SESSION_REQUIRED, 'the credential does not hold'],
         [12, ProtocolCode.CREDENTIAL_UNSUPPORTED, 'OPAQUE'],
       ]);
+      // * a client announces nothing, in a result or a failure
+      expect(sent).toHaveLength(6);
+      expect(
+        sent.filter((envelope) => {
+          return envelope !== undefined && 'credential' in envelope.header;
+        })
+      ).toEqual([]);
     });
 
     test('answers a command presenting ELSEWHERE whose transport carried nothing SESSION_REQUIRED, no credential came, and resolves one that carried a value by its verifier', async () => {
@@ -2672,6 +2833,73 @@ test.describe('createRouterClient', () => {
   });
 
   test.describe('metrics', () => {
+    test('keeps a notification refused by its registry unregistered and accepts the declared procedure afterward', async () => {
+      for (const [procedure, detail] of [
+        [
+          { ...service, procedureName: 'other' },
+          'the metrics registry holds 2/1 as "echo", and is given "other": another name at its address',
+        ],
+        [
+          { ...service, procedureId: 2 },
+          'the metrics registry holds "echo" at 2/1, and is given "echo" at 2/2: its name at another address',
+        ],
+        [
+          { ...service, procedureId: 2, procedureName: 'other' },
+          "the metrics registry's notification families name 1 procedures at most, and 2/2 is one more: past the ceiling",
+        ],
+      ] as const) {
+        const metricsRegistry = createMetricsRegistry({ maximumProcedures: 1 });
+        const source = createScriptedTransport();
+        using declaring = createRouterClient(source.transport, { metricsRegistry });
+        const held = notificationOf([]);
+
+        await declaring.registerNotification(held);
+
+        const { deliver, sent, transport } = createScriptedTransport();
+        using router = createRouterClient(transport, { metricsRegistry });
+        const errors = recordErrors(router);
+        const before = metricsRegistry.exposition();
+        const rejected = notificationOf([], procedure);
+        const registering = router.registerNotification(rejected);
+
+        await expect(registering).rejects.toBeInstanceOf(ProgrammerError);
+        await expect(registering).rejects.toThrow(detail);
+        expect(router.hasNotification(rejected)).toBe(false);
+        expect(declaring.hasNotification(held)).toBe(true);
+        expect(metricsRegistry.exposition()).toEqual(before);
+        expect(sent).toEqual([]);
+
+        const triggered: Uint8Array[] = [];
+        const accepted = notificationOf(triggered);
+
+        await router.registerNotification(accepted);
+
+        expect(router.hasNotification(accepted)).toBe(true);
+
+        const subscribing = router.request(new Uint8Array(0), {
+          options,
+          procedure: service,
+          subscribes: accepted,
+        });
+
+        deliver(resultOf(1));
+        await subscribing;
+        deliver(notificationEnvelopeOf(1));
+
+        expect(triggered).toEqual([new Uint8Array([5])]);
+        expect(countedOf(metricsRegistry)).toContain(
+          'bead_notifications_heard_total{service="2",procedure="echo"} 1'
+        );
+
+        await router.unregisterNotification(accepted);
+
+        expect(router.hasNotification(accepted)).toBe(false);
+        expect(declaring.hasNotification(held)).toBe(true);
+        expect(errors).toEqual([]);
+        expect(source.sent).toEqual([]);
+      }
+    });
+
     // a line of echo's series among the calls a client makes, requests, by the rest of its name, its
     // labels and its value
     const made = (rest: string): string => {
@@ -2777,7 +3005,7 @@ test.describe('createRouterClient', () => {
       expect(scripted.sent).toHaveLength(1);
     });
 
-    // debugging 9.6.11
+    // debugging 9.6.12
     test('counts a call its caller cancels as cancelled, and one its transport refuses as an error', async () => {
       const metricsRegistry = createMetricsRegistry();
       const { control, transport } = createScriptedTransport();
@@ -2810,7 +3038,7 @@ test.describe('createRouterClient', () => {
     // debugging 9.1.6, 10.2 and 10.3.3
     test('counts a notification heard under a subscription it holds, and a subscription dropped at this end by the failure that ends it or with its connection, never by its own cancel', async () => {
       const metricsRegistry = createMetricsRegistry();
-      const { close, deliver, transport } = createScriptedTransport();
+      const { close, deliver, sent, transport } = createScriptedTransport();
       using router = createRouterClient(transport, { clock: createTestClock(), metricsRegistry });
       const errors = recordErrors(router);
       const news = notificationOf([]);
@@ -2840,6 +3068,22 @@ test.describe('createRouterClient', () => {
       await subscribe(3);
       await router.unregisterNotification(news);
       await subscribe(5);
+
+      // a subscription not yet answered as its connection closes: none
+      const other = notificationOf([], { ...service, procedureId: 2, procedureName: 'other' });
+
+      await router.registerNotification(other);
+      void router
+        .request(new Uint8Array(0), {
+          options,
+          procedure: { ...service, procedureId: 2, procedureName: 'other' },
+          subscribes: other,
+        })
+        .catch(() => {
+          return undefined;
+        });
+      await sleep(0);
+      expect(sent.at(-1)?.header).toMatchObject({ kind: EnvelopeKind.REQUEST, procedureId: 2 });
       close();
 
       expect(codesOf(errors)).toEqual([ProtocolCode.SUBSCRIPTION_UNKNOWN]);

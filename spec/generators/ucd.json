@@ -1,0 +1,26 @@
+{
+  "$comment": "The files of the Unicode Character Database a pattern's classes are read from (spec 18.8.5, decision 0035), each pinned by its sha256: spec/generators/make_validations.py reads UnicodeData.txt and Scripts.txt for the verdicts of a Unicode class, and beadc's tables are generated from the same four. A version moves by a regeneration and a CHANGELOG line, never by a platform.",
+  "version": "17.0.0",
+  "files": [
+    {
+      "name": "UnicodeData.txt",
+      "url": "https://www.unicode.org/Public/17.0.0/ucd/UnicodeData.txt",
+      "sha256": "2e1efc1dcb59c575eedf5ccae60f95229f706ee6d031835247d843c11d96470c"
+    },
+    {
+      "name": "Scripts.txt",
+      "url": "https://www.unicode.org/Public/17.0.0/ucd/Scripts.txt",
+      "sha256": "9f5e50d3abaee7d6ce09480f325c706f485ae3240912527e651954d2d6b035bf"
+    },
+    {
+      "name": "PropertyValueAliases.txt",
+      "url": "https://www.unicode.org/Public/17.0.0/ucd/PropertyValueAliases.txt",
+      "sha256": "64e9a5f76f7a1e8b5a47d6a1f9a26522a251208f5276bdfa1559dac7cf2e827a"
+    },
+    {
+      "name": "CaseFolding.txt",
+      "url": "https://www.unicode.org/Public/17.0.0/ucd/CaseFolding.txt",
+      "sha256": "ff8d8fefbf123574205085d6714c36149eb946d717a0c585c27f0f4ef58c4183"
+    }
+  ]
+}

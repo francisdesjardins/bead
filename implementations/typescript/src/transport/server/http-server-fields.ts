@@ -81,12 +81,11 @@ export const RESPONSE_HEADERS = Object.freeze({
   'x-content-type-options': 'nosniff',
 });
 
-// what a preflight's answer from an origin `origins` names (spec 15.12) carries whatever method it
-// asks for: the browser judges its request against it
-const PREFLIGHT = Object.freeze({
-  'access-control-allow-methods': 'GET, POST, DELETE',
-  'access-control-max-age': '7200',
-});
+// the methods the transport's path takes, which its preflight's answer names (spec 15.12)
+const TRANSPORT_METHODS = Object.freeze(['GET', 'POST', 'DELETE']);
+
+// how long a browser keeps a preflight's answer, in seconds: what every one of them carries
+const PREFLIGHT_MAX_AGE = '7200';
 
 // HTTP/2's error code of a malformed request, which resets its stream (RFC 9113 §7, §8.1.1)
 const PROTOCOL_ERROR = 0x1;
@@ -175,15 +174,22 @@ export const listeningOf = (request: IHTTPRequestLike): boolean | undefined => {
   return bareItem?.type === BARE_ITEM_TYPES.BOOLEAN ? bareItem.value : undefined;
 };
 
-// a preflight's answer (spec 15.12): `authorization`, which no wildcard covers (Fetch §4.8); the
-// names asked, for a browser that caches names and no wildcard; then `*`. No `Vary` names what was
-// asked: no cache stores an answer to `OPTIONS` (RFC 9110 §9.3.7)
-export const preflightOf = (request: IHTTPRequestLike): IEnd => {
+// a preflight's answer (spec 15.12): the methods its path takes, the transport's by default;
+// `authorization`, which no wildcard covers (Fetch §4.8); the names asked, for a browser that caches
+// names and no wildcard; then `*`. No `Vary`: no cache stores an answer to `OPTIONS` (RFC 9110 §9.3.7)
+export const preflightOf = (
+  request: IHTTPRequestLike,
+  { methods = TRANSPORT_METHODS }: { methods?: readonly string[] } = {}
+): IEnd => {
   const asked = linesOf(request, 'access-control-request-headers').join(', ');
   const allowed = ['authorization', ...(asked === '' ? [] : [asked]), '*'];
 
   return {
-    headers: { ...PREFLIGHT, 'access-control-allow-headers': allowed.join(', ') },
+    headers: {
+      'access-control-allow-headers': allowed.join(', '),
+      'access-control-allow-methods': methods.join(', '),
+      'access-control-max-age': PREFLIGHT_MAX_AGE,
+    },
     status: 204,
   };
 };
@@ -247,6 +253,26 @@ export const endClosing = ({ request, response }: IExchangeIn, end: IEnd): void 
   endWith(response, { ...end, headers: { ...end.headers, connection: 'close' } });
 
   return undefined;
+};
+
+/**
+ * The fields of an answer written while its request's body still comes: over HTTP/1,
+ * `connection: close`, its socket closing in stages as `endClosing`'s, so what still comes is
+ * dropped, never read as a next request (RFC 9112 §9.6), as Kestrel closes it; none over HTTP/2,
+ * whose stream ends alone, or once the body came whole.
+ */
+export const closingOf = ({ request, response }: IExchangeIn): Readonly<Record<string, string>> => {
+  if (request.httpVersionMajor !== 1 || request.complete !== false) {
+    return {};
+  }
+
+  const { socket } = request;
+
+  if (typeof socket.removeListener === 'function' && typeof socket.destroy === 'function') {
+    lingerOn(socket as Parameters<typeof lingerOn>[0], response);
+  }
+
+  return { connection: 'close' };
 };
 
 // a malformed HTTP/2 request's end: its stream reset, nothing written (RFC 9113 §8.1.1)

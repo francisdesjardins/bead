@@ -1,6 +1,6 @@
 {
   "name": "@francisdesjardins/beadc",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "private": true,
   "description": "beadc, Bead's builder: compiles a .proto with buf into a blueprint, bead-blueprint/1, and checks a .proto or a blueprint by rule name.",
   "license": "Apache-2.0",
@@ -24,13 +24,16 @@
     "options:generate": "node tools/check-options.mjs --write",
     "test": "playwright test",
     "test:coverage": "c8 playwright test",
-    "type-check": "node node_modules/typescript-7/bin/tsc --noEmit && node node_modules/typescript-7/bin/tsc -p test/golden/typescript/tsconfig.json && node node_modules/typescript-7/bin/tsc -p test/golden/typescript/tsconfig.floor.json && node node_modules/typescript-7/bin/tsc -p test/consumer/tsconfig.json"
+    "type-check": "node node_modules/typescript-7/bin/tsc --noEmit && node node_modules/typescript-7/bin/tsc -p test/golden/typescript/tsconfig.json && node node_modules/typescript-7/bin/tsc -p test/golden/typescript/tsconfig.floor.json && node node_modules/typescript-7/bin/tsc -p test/consumer/tsconfig.json",
+    "unicode:check": "node tools/make-unicode.mjs --check",
+    "unicode:generate": "node tools/make-unicode.mjs"
   },
   "dependencies": {
-    "@bufbuild/buf": "1.74.0",
+    "@bufbuild/buf": "1.75.0",
     "@bufbuild/protobuf": "2.16.0",
     "@bufbuild/protoc-gen-es": "2.16.0",
     "@bufbuild/protoplugin": "2.16.0",
+    "@bufbuild/re2": "0.6.1",
     "ajv": "8.20.0",
     "yaml": "2.9.1"
   },
@@ -39,9 +42,9 @@
     "@playwright/test": "1.64.1",
     "@types/node": "^24.19.2",
     "c8": "12.0.0",
-    "oxfmt": "0.73.0",
-    "oxlint": "^1.88.0",
-    "oxlint-tsgolint": "7.0.2004",
+    "oxfmt": "0.74.0",
+    "oxlint": "^1.89.0",
+    "oxlint-tsgolint": "7.0.2005",
     "typescript-7": "npm:typescript@7.0.2"
   },
   "dependenciesMeta": {

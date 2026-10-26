@@ -10,12 +10,14 @@ import { expect, test } from '@playwright/test';
 
 import { compile } from '../../compile.ts';
 import { type IDiagnostic, InputError } from '../../diagnostics.ts';
-import { displayOf, OPTIONS_FILE } from '../../roots.ts';
+import { BEADC_FILES, displayOf, OPTIONS_FILE } from '../../roots.ts';
 import { Category } from '../../rules.ts';
 import { breaking, waiversOf } from '../breaking.ts';
 import {
   BUF_CATEGORY,
   BUF_EXCEPTED,
+  BUF_JSON_CATEGORY,
+  BUF_JSON_RULES,
   BUF_RULES,
   BUF_RULES_RUN,
   bufConfigOf,
@@ -106,8 +108,16 @@ test("BUF_RULES is buf's list at its pin", () => {
 test('bead/options.proto and an import dropped are never compared', () => {
   test.setTimeout(60_000);
 
-  const earlier = compile([EARLIER], { image: true });
-  const current = fromBinary(FileDescriptorSetSchema, compile([CURRENT], { image: true }));
+  // ! each parallel case owns its fixture copies and the .beadc parent a compile removes
+  const pair = test.info().outputPath('pair');
+  const earlierRoot = join(pair, 'earlier');
+  const currentRoot = join(pair, 'current');
+
+  cpSync(EARLIER, earlierRoot, { recursive: true });
+  cpSync(CURRENT, currentRoot, { recursive: true });
+
+  const earlier = compile([earlierRoot], { image: true });
+  const current = fromBinary(FileDescriptorSetSchema, compile([currentRoot], { image: true }));
   const options = current.file.find((file) => {
     return file.name === OPTIONS_FILE;
   });
@@ -120,19 +130,21 @@ test('bead/options.proto and an import dropped are never compared', () => {
   expect(procedure).toBeDefined();
 
   for (const category of Object.values(Category)) {
-    expect(bufConfigOf(category)).toMatchObject({ breaking: { ignore: [OPTIONS_FILE] } });
+    expect(bufConfigOf(category)).toMatchObject({
+      breaking: { ignore: [...BEADC_FILES] },
+    });
 
     const found = bufFindings(toBinary(FileDescriptorSetSchema, current), {
       earlier,
       category,
-      roots: [CURRENT],
+      roots: [currentRoot],
     });
 
     expect(found.length, category).toBeGreaterThan(0);
     expect(
       found.filter((diagnostic) => {
-        return /options|timestamp/u.test(
-          `${diagnostic.diagnostic.file} ${diagnostic.diagnostic.message}`
+        return (
+          diagnostic.path === OPTIONS_FILE || diagnostic.path === 'google/protobuf/timestamp.proto'
         );
       }),
       category
@@ -140,21 +152,37 @@ test('bead/options.proto and an import dropped are never compared', () => {
   }
 });
 
-test("BUF_RULES_RUN is what each category's use runs, at buf's pin", () => {
+test("BUF_RULES_RUN is what each category's use runs, at buf's pin, WIRE_JSON's beside WIRE's", () => {
   const listed = bufRules();
+  const ofCategory = (name: string): string[] => {
+    return listed
+      .filter((rule) => {
+        return !rule.deprecated && rule.categories.includes(name);
+      })
+      .map((rule) => {
+        return rule.id;
+      });
+  };
 
   for (const category of Object.values(Category)) {
     expect([...BUF_RULES_RUN[category]].sort(), category).toEqual(
-      listed
-        .filter((rule) => {
-          return !rule.deprecated && rule.categories.includes(BUF_CATEGORY[category]);
-        })
-        .map((rule) => {
-          return rule.id;
-        })
-        .sort()
+      [
+        ...new Set([
+          ...ofCategory(BUF_CATEGORY[category]),
+          ...(category === Category.WIRE ? BUF_JSON_RULES : []),
+        ]),
+      ].sort()
     );
   }
+
+  // * the category HTTP's: buf's WIRE_JSON beyond its WIRE
+  expect([...BUF_JSON_RULES].sort()).toEqual(
+    ofCategory(BUF_JSON_CATEGORY)
+      .filter((rule) => {
+        return !ofCategory('WIRE').includes(rule);
+      })
+      .sort()
+  );
 });
 
 test("a buf: waiver waives under its file or its folder, as buf's ignore_only matches one, and names a rule its category runs", () => {

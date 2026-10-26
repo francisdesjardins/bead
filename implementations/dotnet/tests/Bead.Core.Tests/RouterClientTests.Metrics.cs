@@ -1,4 +1,5 @@
 using Bead.Interop;
+using Microsoft.Extensions.Time.Testing;
 
 namespace Bead.Tests;
 
@@ -29,6 +30,64 @@ public sealed partial class RouterClientTests
     }
 
     // definition
+
+    [Fact]
+    public async Task Keeps_a_notification_refused_by_its_registry_unregistered_and_accepts_the_declared_procedure_afterward()
+    {
+        (Procedure Procedure, string Detail)[] refusals =
+        [
+            (Service with { ProcedureName = "other" }, "the metrics registry holds 2/1 as \"echo\", and is given \"other\": another name at its address"),
+            (Service with { ProcedureId = 2 }, "the metrics registry holds \"echo\" at 2/1, and is given \"echo\" at 2/2: its name at another address"),
+            (Service with { ProcedureId = 2, ProcedureName = "other" }, "the metrics registry's notification families name 1 procedures at most, and 2/2 is one more: past the ceiling"),
+        ];
+
+        foreach (var (procedure, detail) in refusals)
+        {
+            var registry = new MetricsRegistry(new MetricsRegistryOptions { MaximumProcedures = 1 });
+
+            using var declaring = new ScriptedRouter(new RouterClientOptions { MetricsRegistry = registry });
+
+            var held = new ScriptedNotification(Service);
+
+            await declaring.Router.RegisterNotification(held).WaitAsync(Patience, Cancelled);
+
+            using var scripted = new ScriptedRouter(new RouterClientOptions { MetricsRegistry = registry });
+
+            var (router, transport) = (scripted.Router, scripted.Transport);
+            var before = registry.Exposition();
+            var rejected = new ScriptedNotification(procedure);
+            var refusal = await Assert.ThrowsAsync<ArgumentException>(() =>
+            {
+                return router.RegisterNotification(rejected).WaitAsync(Patience, Cancelled);
+            });
+
+            Assert.StartsWith(detail, refusal.Message, StringComparison.Ordinal);
+            Assert.False(router.HasNotification(rejected));
+            Assert.True(declaring.Router.HasNotification(held));
+            Assert.Equal(before, registry.Exposition());
+            Assert.Empty(transport.Sent);
+
+            var accepted = new ScriptedNotification(Service);
+            var subscribing = await scripted.Subscribe(accepted);
+
+            Assert.True(router.HasNotification(accepted));
+            transport.Deliver(ResultOf(1));
+            await subscribing.WaitAsync(Patience, Cancelled);
+            transport.Deliver(NotificationOf(1));
+            await scripted.Settle();
+
+            Assert.Equal([5], accepted.Triggered);
+            Assert.Contains("bead_notifications_heard_total{service=\"2\",procedure=\"echo\"} 1", MetricsTests.CountsOf(registry));
+
+            await router.UnregisterNotification(accepted).WaitAsync(Patience, Cancelled);
+
+            Assert.False(router.HasNotification(accepted));
+            Assert.True(declaring.Router.HasNotification(held));
+            Assert.Empty(scripted.Errors);
+            Assert.Empty(declaring.Errors);
+            Assert.Empty(declaring.Transport.Sent);
+        }
+    }
 
     [Fact]
     public async Task One_registry_given_to_a_client_s_router_and_a_server_s_counts_a_call_at_each_of_its_ends_a_command_among_them()
@@ -167,16 +226,39 @@ public sealed partial class RouterClientTests
             });
         }
 
-        // OPAQUE with no session known, and an ELSEWHERE its transport cannot carry
-        var noSession = await Asked(RequestOf(null, Options with { Credential = Credential.Opaque() }));
-        var uncarried = await Asked(RequestOf(null, Options with { Credential = Credential.Elsewhere("x") }));
+        // * every turn of its router held behind a gate, both calls queued, then a read queued right
+        // behind them: what each did in its own turn is counted by then, and nothing after
+        List<string>? inTheirTurns = null;
+        Task<Exception> noSessionAsked;
+        Task<Exception> uncarriedAsked;
 
+        using (var gate = new ManualResetEventSlim())
+        {
+            router.Core.Loop.Post(() =>
+            {
+                gate.Wait(Patience);
+            });
+
+            // OPAQUE with no session known, and an ELSEWHERE its transport cannot carry
+            noSessionAsked = Asked(RequestOf(null, Options with { Credential = Credential.Opaque() }));
+            uncarriedAsked = Asked(RequestOf(null, Options with { Credential = Credential.Elsewhere("x") }));
+            router.Core.Loop.Post(() =>
+            {
+                inTheirTurns = [.. CallCountsOf(registry).Where((line) =>
+                {
+                    return line.Contains("procedure=\"echo\"", StringComparison.Ordinal);
+                }).Order(StringComparer.Ordinal)];
+            });
+            gate.Set();
+        }
+
+        var noSession = await noSessionAsked;
+        var uncarried = await uncarriedAsked;
+
+        await scripted.Settle();
         Assert.Equal(
             [MadeOf("duration_seconds_count{} 2"), MadeOf("handled_total{outcome=\"failure\",code=\"DESTINATION_UNREACHABLE\"} 1"), MadeOf("handled_total{outcome=\"failure\",code=\"SESSION_REQUIRED\"} 1"), MadeOf("started_total{} 2")],
-            CallCountsOf(registry).Where((line) =>
-            {
-                return line.Contains("procedure=\"echo\"", StringComparison.Ordinal);
-            }).Order(StringComparer.Ordinal));
+            inTheirTurns);
 
         using var aborted = new CancellationTokenSource();
 
@@ -218,17 +300,17 @@ public sealed partial class RouterClientTests
 
         await scripted.Settle();
         transport.Deliver(FailureOf(1, ProtocolCode.SessionRequired));
-        await Assert.ThrowsAsync<FailureException>(() =>
+        Assert.Equal((ushort)ProtocolCode.SessionRequired, (await Assert.ThrowsAsync<FailureException>(() =>
         {
             return refused.WaitAsync(Patience, Cancelled);
-        });
+        })).Code);
 
         var withdrawn = await Assert.ThrowsAsync<FailureException>(() =>
         {
             return Call().WaitAsync(Patience, Cancelled);
         });
 
-        Assert.Equal("the default credential was withdrawn", withdrawn.Failure.Detail);
+        Assert.Equal(((ushort)ProtocolCode.SessionRequired, "the default credential was withdrawn"), (withdrawn.Code, withdrawn.Failure.Detail));
         Assert.Equal(
             [MadeOf("duration_seconds_count{} 2"), MadeOf("handled_total{outcome=\"failure\",code=\"SESSION_REQUIRED\"} 2"), MadeOf("started_total{} 2")],
             CallCountsOf(registry).Where((line) =>
@@ -238,7 +320,7 @@ public sealed partial class RouterClientTests
         Assert.Single(transport.Sent);
     }
 
-    // debugging 9.6.11
+    // debugging 9.6.12
     [Fact]
     public async Task Counts_a_call_its_caller_cancels_as_cancelled_and_one_its_transport_refuses_as_an_error()
     {
@@ -260,10 +342,10 @@ public sealed partial class RouterClientTests
 
         scripted.Transport.Refusal = new IOException("this transport refuses");
 
-        await Assert.ThrowsAsync<IOException>(() =>
+        Assert.Equal("this transport refuses", (await Assert.ThrowsAsync<IOException>(() =>
         {
             return router.Request(ReadOnlyMemory<byte>.Empty, RequestOf() with { Series = series }).WaitAsync(Patience, Cancelled);
-        });
+        })).Message);
         Assert.Equal(
             [MadeOf("duration_seconds_count{} 2"), MadeOf("handled_total{outcome=\"cancelled\"} 1"), MadeOf("handled_total{outcome=\"error\"} 1"), MadeOf("started_total{} 2")],
             CallCountsOf(registry).Where((line) =>
@@ -324,5 +406,92 @@ public sealed partial class RouterClientTests
             {
                 return line.StartsWith("bead_notifications_", StringComparison.Ordinal) || line.StartsWith("bead_subscriptions_", StringComparison.Ordinal);
             }));
+    }
+
+    [Fact]
+    public async Task Observes_a_call_on_a_clock_whose_monotonic_reading_moves_by_100_µs_as_a_browser_s_does_as_0_or_100_µs()
+    {
+        var registry = new MetricsRegistry();
+        var fine = new FakeTimeProvider();
+
+        using var scripted = new ScriptedRouter(new RouterClientOptions { Clock = new SteppedTime(fine), MetricsRegistry = registry });
+
+        var (router, transport) = (scripted.Router, scripted.Transport);
+        var series = router.DeclareRequester(Service);
+
+        // a call of 30 µs, from where the clock is now
+        async Task CallOf30(uint callId)
+        {
+            var answering = router.Request(ReadOnlyMemory<byte>.Empty, RequestOf() with { Series = series });
+
+            await scripted.Settle();
+            fine.Advance(TimeSpan.FromMicroseconds(30));
+            transport.Deliver(ResultOf(callId));
+            await answering.WaitAsync(Patience, Cancelled);
+            await scripted.Settle();
+        }
+
+        // within one step of the reading, then across one
+        await CallOf30(1);
+        fine.Advance(TimeSpan.FromMicroseconds(50));
+        await CallOf30(3);
+
+        var lines = registry.Exposition().Text.Split('\n');
+
+        Assert.Equal(
+            [
+                MadeOf("duration_seconds_sum{} 0.0001"),
+                MadeOf("duration_seconds_count{} 2"),
+                MadeOf("handled_total{outcome=\"result\"} 2"),
+                MadeOf("started_total{} 2"),
+            ],
+            lines.Where((line) =>
+            {
+                return line.StartsWith("bead_client_call_", StringComparison.Ordinal)
+                    && line.Contains("procedure=\"echo\"", StringComparison.Ordinal)
+                    && !line.Contains("_bucket{", StringComparison.Ordinal)
+                    && !line.EndsWith(" 0", StringComparison.Ordinal);
+            }));
+
+        // the bucket of 0 holds the first, and the bucket of 100 µs, 0.0001, both
+        string BucketOf(string le, int count)
+        {
+            return $"bead_client_call_duration_seconds_bucket{{service=\"2\",procedure=\"echo\",type=\"request\",le=\"{le}\"}} {count}";
+        }
+
+        Assert.Equal(
+            [BucketOf("0.0", 1), BucketOf("1e-05", 1), BucketOf("5e-05", 1), BucketOf("0.0001", 2), BucketOf("0.0003", 2)],
+            lines.Where((line) =>
+            {
+                return line.StartsWith("bead_client_call_duration_seconds_bucket{service=\"2\"", StringComparison.Ordinal);
+            }).Take(5));
+    }
+
+    // a clock whose monotonic reading moves by 100 µs, as W3C High Resolution Time coarsens a
+    // browser's: 10,000 steps a second, on a fake clock's time, which only a test moves
+    private sealed class SteppedTime(FakeTimeProvider fine) : TimeProvider
+    {
+        public override long TimestampFrequency
+        {
+            get
+            {
+                return 10_000;
+            }
+        }
+
+        public override long GetTimestamp()
+        {
+            return fine.GetUtcNow().UtcTicks / (TimeSpan.TicksPerSecond / 10_000);
+        }
+
+        public override DateTimeOffset GetUtcNow()
+        {
+            return fine.GetUtcNow();
+        }
+
+        public override ITimer CreateTimer(TimerCallback callback, object? state, TimeSpan dueTime, TimeSpan period)
+        {
+            return fine.CreateTimer(callback, state, dueTime, period);
+        }
     }
 }

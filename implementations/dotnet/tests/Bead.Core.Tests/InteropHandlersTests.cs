@@ -29,6 +29,9 @@ public sealed class InteropHandlersTests
     {
         var refusal = EndSessionsOf.GetProperty("refusal").GetString();
 
+        Assert.NotEmpty(EndSessionsOf.GetProperty("takes").EnumerateArray());
+        Assert.NotEmpty(EndSessionsOf.GetProperty("refuses").EnumerateArray());
+
         foreach (var taken in EndSessionsOf.GetProperty("takes").EnumerateArray())
         {
             Assert.Equal(taken.GetProperty("issuer").GetString(), InteropHandlers.IssuerOf(taken.GetProperty("request")));

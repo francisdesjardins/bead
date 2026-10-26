@@ -157,10 +157,8 @@ test.describe('createSendingTransfers', () => {
       })
     ).toEqual([[], []]);
     expect(kept.offsets).toEqual([40]);
-    expect(sendings.gauges()).toMatchObject({
-      connectionHandles: new Set(['b']),
-      counts: { sendingTransfers: 1 },
-    });
+    expect(sendings.gauges().connectionHandles).toEqual(new Set(['b']));
+    expect(sendings.gauges().counts).toEqual({ sendingTransfers: 1 });
 
     // ended already, they end nothing more, and every connection's go
     sendings.closeAll('a');
@@ -168,10 +166,8 @@ test.describe('createSendingTransfers', () => {
     sendings.credit(other, 200);
 
     expect(kept.offsets).toEqual([40]);
-    expect(sendings.gauges()).toMatchObject({
-      connectionHandles: new Set(),
-      counts: { sendingTransfers: 0 },
-    });
+    expect(sendings.gauges().connectionHandles).toEqual(new Set());
+    expect(sendings.gauges().counts).toEqual({ sendingTransfers: 0 });
   });
 
   test('counts the transfers sent, and the connections they go to', () => {
@@ -180,10 +176,8 @@ test.describe('createSendingTransfers', () => {
 
     openOn(sendings, { call: { callId: 3, connectionHandle: 'a' } });
 
-    expect(sendings.gauges()).toMatchObject({
-      connectionHandles: new Set(['a']),
-      counts: { sendingTransfers: 2 },
-    });
+    expect(sendings.gauges().connectionHandles).toEqual(new Set(['a']));
+    expect(sendings.gauges().counts).toEqual({ sendingTransfers: 2 });
 
     sendings.close(sending);
 

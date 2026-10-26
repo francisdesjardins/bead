@@ -7,7 +7,7 @@
 
 // dependencies
 
-import type { Messages } from '../target.ts';
+import type { IHttpInput, Messages } from '../target.ts';
 
 // types
 
@@ -19,6 +19,8 @@ export interface ICSharpOptions {
    */
   readonly namespace?: string;
   readonly messages: Messages;
+  /** For an output with `http: true`: what its route table holds (decision 0037). */
+  readonly http?: IHttpInput;
 }
 
 // constants

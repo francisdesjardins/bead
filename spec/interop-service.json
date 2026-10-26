@@ -11,7 +11,7 @@
     "credentials.jwt: what the interop server verifies a JWT with (sections 13.8, 13.9), its clients given its keys and its audience alike, for the commands they receive. keys are two issuers' published test keys, each a JWK with its issuer and its one algorithm, whose private halves anyone can read: no configuration outside spec/, the tests and the interop service names one. audience is the audience the server verifies. keySet is the key set the server is given besides: issuers, the issuers it answers for, which the server is given with it, each with the keys it answers, published test keys, and what it answers, on the server's clock; maximumWaitingCalls, the most calls that wait for one issuer's deadline at once, which the server is given with it, small so that a conversation passes it; answers, what it does asked for any other.",
     "verifiers: what both sides' interop tests hold the interop service's own readers to, read from here. elsewhere, each value its ELSEWHERE verifier is given, as its transport carried it, and its verdict: holds, with the sub its session takes as its id and in its data, and its end when it has one; none; or rejects, with its rejection; at once, or once after milliseconds passed on its server's clock. endSessionsOf, the requests it takes, each with the issuer it reads, and those it refuses, each by throwing its refusal."
   ],
-  "specVersion": "0.7.0",
+  "specVersion": "0.8.0",
   "relay": {
     "admits": "requireCredential, a server's relay's admission by default: a call whose header presents a JWT, or an ELSEWHERE its transport carried, read from its credential scheme alone; any other, one that presents none or OPAQUE, is refused with ACCESS_DENIED, detail \"a relay admits by default only a credential it forwards\", in leg A's connection's session or in none. Before it, a scheme to come is refused with CREDENTIAL_UNSUPPORTED, detail \"OPAQUE, JWT, ELSEWHERE\", and an OPAQUE that does not hold, or an ELSEWHERE whose transport carried nothing, with SESSION_REQUIRED (section 14.3, step 1). A conversation's relay may give shareLegBSession in its place, which admits besides a call in any session of leg A's connection's, whatever its destination, and refuses a call in none that presented none with SESSION_REQUIRED, or requireSession, which tests the call's session, and so refuses every credential the relay forwards without verifying with ACCESS_DENIED, and a call in none that presented none with SESSION_REQUIRED (section 13.5)",
     "forwards": "what leg A presents, as section 14.2's table says: none for none or OPAQUE; a JWT, its same bytes, to a destination registered with the audience its aud names; an ELSEWHERE, the credential its transport carried moved to leg B's transport as it came, to a destination registered with an audience, over a connection whose transport carries one. A JWT or an ELSEWHERE it cannot so forward — to a destination of another audience or of none, over a connection that carries no credential, or in the clear off the machine — is refused with DESTINATION_UNREACHABLE (section 14.3, step 5)",
@@ -95,12 +95,12 @@
     {
       "procedureName": "register",
       "request": "{\"destination\":n}, with \"audience\":a, \"timeout\":t, or both",
-      "answers": "n, once it registered its caller's connection as the destination n, with the audience a, which that destination verifies, when given, and with none otherwise (section 14.1), leg B waiting t milliseconds at most for its answer when given, t held as section 1.4 holds a duration; a t under a millisecond or past 2³¹ − 1, as given, registers nothing and fails it, which its server answers with PROCEDURE_FAILED and reports; a destination registered already fails it, an application failure: code 8, detail \"that destination is registered already\""
+      "answers": "n, once it registered its caller's connection as the destination n, with the audience a, which that destination verifies, when given, and with none otherwise (section 14.1), leg B waiting t milliseconds at most for its answer when given, t held as section 1.4 holds a duration; a t under a millisecond or past 2³¹ − 1, as given, registers nothing and fails it, which its server answers with PROCEDURE_FAILED and reports; a destination registered already whose connection is open, or that is no connection of the server's, fails it, an application failure: code 8, detail \"that destination is registered already\", and one whose connection closed it registers anew, in its place at once (section 14.1). It checks nobody: any connection registers any destination, as section 14.1 leaves it to the application"
     },
     {
       "procedureName": "unregister",
       "request": "any JSON value",
-      "answers": "true, once it took out the destination its caller's connection registered last; false when there is none, or another took its id since"
+      "answers": "true, once it took out the destination its caller's connection registered last; false when there is none, or another connection registered it anew since"
     },
     {
       "procedureName": "endSession",
@@ -111,6 +111,11 @@
       "procedureName": "endSessionsOf",
       "request": "an issuer, an object of this member alone, a string: {\"issuer\":i}",
       "answers": "null, once it ended every credential's session of that issuer on every connection that keeps one — each JWT's whose identifier's issuer is i, octet for octet, whatever its sid or sub — each subscription they bounded failing SESSION_REQUIRED, and nothing else (section 13.10): an issuer no session kept names ends nothing, an ELSEWHERE's session names no issuer, and a credential that still holds opens its session anew. A request that names no issuer ends nothing and fails it, which its server answers with PROCEDURE_FAILED and reports"
+    },
+    {
+      "procedureName": "checked",
+      "request": "an object holding names, an array of strings, its other members aside, judged before its resolver by rules each server gives its descriptor by hand, as section 18 judges a request's (spec 18.1): names holds 50 items at most, repeated.max_items, its bounds {\"max_items\":\"50\"}; then each item, names[i], 1 character at least, string.min_len, its bounds {\"min_len\":\"1\"}, and 3 at most, string.max_len, its bounds {\"max_len\":\"3\"}, its characters counted as code points, the words of each as spec 18.8.6 gives them. A request that is no such object breaks required at names, \"value is required\", alone",
+      "answers": "the count of its names, a number, once its rules take it; PAYLOAD_INVALID where they refuse it, its violations in its detail (18.6), and its resolver never called"
     }
   ],
   "credentials": {

@@ -129,13 +129,17 @@ test("writes bead/options.proto's C# with internal_access beside a file that imp
   const messages = checked(MESSAGES);
   const files = generateCSharpMessages(messages.set, { blueprint: messages.blueprint });
 
-  expect(namesOf(files)).toEqual(['Bead/Messages/V1/Messages.cs', 'Bead/Protobuf/Options.cs']);
+  expect(namesOf(files)).toEqual([
+    'Bead/Messages/V1/Messages.cs',
+    'Bead/Messages/V1/Rules.cs',
+    'Bead/Protobuf/Options.cs',
+  ]);
 
   for (const file of files) {
     expect(file.content.startsWith(PROTOC_CSHARP_HEADER), file.name).toBe(true);
   }
 
-  const [ownMessages, options] = files;
+  const [ownMessages, , options] = files;
 
   expect(ownMessages?.content).toContain('  public sealed partial class Greeting : ');
   expect(ownMessages?.content).toContain('global::Bead.Protobuf.OptionsReflection.Descriptor');
@@ -148,8 +152,13 @@ test("writes protoc's C# from buf's set as protoc writes it from the .proto, its
   needsProtoc();
 
   const messages = checked(MESSAGES);
-  const fromSet = generateCSharpMessages(messages.set, { blueprint: messages.blueprint });
   const fromSource = protocFromSource(test.info().outputPath('from-source'));
+  // * rules.proto's messages lose protovalidate's options, which validate-options.test.ts holds
+  const fromSet = generateCSharpMessages(messages.set, { blueprint: messages.blueprint }).filter(
+    (file) => {
+      return fromSource.has(file.name);
+    }
+  );
 
   expect(namesOf(fromSet)).toEqual([...fromSource.keys()]);
 

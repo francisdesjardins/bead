@@ -6,16 +6,23 @@
 
 // dependencies
 
-import { readFileSync } from 'node:fs';
-import { setTimeout as sleep } from 'node:timers/promises';
 import { expect } from '@playwright/test';
 import { interopCredentialsOf } from '../../../../interop/credentials';
 import { offerInterop } from '../../../../interop/handlers';
 import { createServer } from '../../../server/server';
 import type { IServerTransportLike } from '../../../server/types';
+import {
+  createMemoryTransportClient,
+  type MemoryTransportClient,
+} from '../../../transport/client/memory-transport-client';
+import { createMemoryTransportServer } from '../../../transport/server/memory-transport-server';
 import type { TransportServerConnectionHandle } from '../../../transport/server/types';
 import { createEmitter } from '../../../transport/shared/emitter';
-import { createTestClock, duesOn } from '../../../transport/shared/__tests__/fixtures';
+import {
+  createTestClock,
+  duesOn,
+  type TestClock,
+} from '../../../transport/shared/__tests__/fixtures';
 import type { Data, ITransportMessage } from '../../../transport/shared/types';
 import { bytesOf } from '../../shared/envelope';
 import type { IMetricsRegistry } from '../../shared/metrics-registry';
@@ -97,18 +104,14 @@ interface ISent {
 
 // constants
 
-/** The instant every conversation's clock starts at, and every exit's. */
-export const { wallClock: WALL_CLOCK } = JSON.parse(
-  readFileSync(new URL('../../../../../../spec/conversations.json', import.meta.url), 'utf8')
-) as { wallClock: string };
-
 // the connection a conversation that opens none plays, opened before its first step
-const ONLY_CONNECTION = 'client';
+const ONLY_CONNECTION = 'connection';
 
-// how long an until waits on the real clock for its timer, and an expect or a report for what the
-// server sends: a JWT verified by Web Crypto settles off the event loop
-const PATIENCE = 3_000;
-const POLL = 5;
+// how long an until waits on the real clock for its timer
+const PATIENCE = 10_000;
+
+// what the server asks of Web Crypto as a JWT verifies, which settles off the event loop
+const WEB_CRYPTO_CALLS = ['importKey', 'verify'] as const;
 
 // a relay's admission, by the name a conversation gives it
 const ADMISSIONS = Object.freeze({ requireCredential, requireSession, shareLegBSession });
@@ -139,12 +142,13 @@ const STEP_KEYS: ReadonlySet<string> = new Set([
 // helpers
 
 /**
- * A transport server of the connections a conversation names, each under a handle of its own that a
- * connection opened again under the same name takes: it records what it sends on each, with the
+ * A transport server of the connections a conversation names, each under a handle of its own, and a
+ * connection opened again under the same name under a new one, its ordinal the next, as every
+ * transport draws a handle it never gave (spec 15.1): it records what it sends on each, with the
  * credential it is given beside it, delivers what it is given, with what its transport carried, and
  * says what each carries — a credential, and whether in the clear, as its open declared.
  */
-const createConnections = () => {
+const createScriptedConnections = () => {
   const emitter = createEmitter<{
     close: [wasClean: boolean, connectionHandle: TransportServerConnectionHandle];
     connection: [
@@ -154,17 +158,33 @@ const createConnections = () => {
     ];
     message: [message: ITransportMessage, connectionHandle: TransportServerConnectionHandle];
   }>();
+  // by name, its port, the handle of the connection it opened last, and how many it opened; every
+  // handle drawn, with its name
+  const ports = new Map<string, number>();
   const handles = new Map<string, TransportServerConnectionHandle>();
+  const opens = new Map<string, number>();
+  const drawn: [name: string, handle: TransportServerConnectionHandle][] = [];
   const opened = new Set<TransportServerConnectionHandle>();
   const oneWay = new Set<TransportServerConnectionHandle>();
   const carryingNone = new Set<TransportServerConnectionHandle>();
   const inTheClear = new Set<TransportServerConnectionHandle>();
   const sent = new Map<TransportServerConnectionHandle, ISent[]>();
+  // the handle of the connection `name` opened last, its ordinal how many it opened: the first
+  // named on the port 50001, the next on 50002
   const handleOf = (name: string): TransportServerConnectionHandle => {
-    const port = 50_001 + handles.size;
-    const handle = handles.get(name) ?? (`type=WS;ip=127.0.0.1;port=${port};ordinal=1` as const);
+    const known = handles.get(name);
 
+    if (known !== undefined) {
+      return known;
+    }
+
+    const port = ports.get(name) ?? 50_001 + ports.size;
+    const handle =
+      `type=WS;ip=127.0.0.1;port=${port};ordinal=${(opens.get(name) ?? 0) || 1}` as const;
+
+    ports.set(name, port);
     handles.set(name, handle);
+    drawn.push([name, handle]);
 
     return handle;
   };
@@ -237,6 +257,15 @@ const createConnections = () => {
         isTwoWay,
       }: { carriesCredential: boolean; isSecure: boolean; isTwoWay: boolean }
     ): void => {
+      // * a name opened before opens a new connection, under a handle never given
+      const count = (opens.get(name) ?? 0) + 1;
+
+      opens.set(name, count);
+
+      if (count > 1) {
+        handles.delete(name);
+      }
+
       const handle = handleOf(name);
 
       for (const [set, is] of [
@@ -254,12 +283,15 @@ const createConnections = () => {
       opened.add(handle);
       emitter.emit('connection', {}, {}, handle);
     },
+    start: (): Promise<void> => {
+      return Promise.resolve();
+    },
     transport,
     /** What was sent and not taken yet, by the name of its connection. */
     untaken: (): Record<string, (IExpected | undefined)[]> => {
       const untaken: Record<string, (IExpected | undefined)[]> = {};
 
-      for (const [name, handle] of handles) {
+      for (const [name, handle] of drawn) {
         const queue = sent.get(handle) ?? [];
 
         if (queue.length > 0) {
@@ -272,6 +304,120 @@ const createConnections = () => {
       return untaken;
     },
   };
+};
+
+/**
+ * The connections a conversation names over a real in-memory transport server on `clock`, a client
+ * of it for each, from `127.0.0.1` and a port of its own, as the scripted transport names them: what
+ * each client's transport hears, with what came beside it, kept for the steps that expect it.
+ */
+const createMemoryConnections = (clock: TestClock) => {
+  const transport = createMemoryTransportServer({ clock });
+  const clients = new Map<string, MemoryTransportClient>();
+  const ports = new Map<string, number>();
+  // the handle the server drew for each name's connection, the one it opened last
+  const handles = new Map<string, TransportServerConnectionHandle>();
+  const heard = new Map<string, ISent[]>();
+  const queueOf = (name: string): ISent[] => {
+    const queue = heard.get(name) ?? [];
+
+    heard.set(name, queue);
+
+    return queue;
+  };
+  const clientOf = (name: string): MemoryTransportClient => {
+    const client = clients.get(name);
+
+    if (client === undefined) {
+      throw new Error(`no step opened ${name}`);
+    }
+
+    return client;
+  };
+
+  return {
+    // unclean, as the scripted connections close
+    close: async (name: string): Promise<void> => {
+      await clientOf(name).disconnect({ isClean: false });
+    },
+    /** Closes every connection still open. */
+    closeAll: async (): Promise<void> => {
+      for (const client of clients.values()) {
+        await client[Symbol.asyncDispose]();
+      }
+    },
+    count: (): number => {
+      return [...heard.values()].reduce((total, queue) => {
+        return total + queue.length;
+      }, 0);
+    },
+    handleOf: (name: string): TransportServerConnectionHandle | undefined => {
+      return handles.get(name);
+    },
+    message: async (
+      name: string,
+      { credential, data }: { credential?: string; data: Data }
+    ): Promise<void> => {
+      await clientOf(name).send({ credential, data });
+    },
+    next: (name: string): ISent | undefined => {
+      return queueOf(name).shift();
+    },
+    // a pair of it stands for a connection secure and two-way alone, which carries no credential
+    // toward its client
+    open: async (
+      name: string,
+      _flags: { carriesCredential: boolean; isSecure: boolean; isTwoWay: boolean }
+    ): Promise<void> => {
+      const port = ports.get(name) ?? 50_001 + ports.size;
+      const client = clients.get(name) ?? createMemoryTransportClient({ clock, server: transport });
+
+      if (!clients.has(name)) {
+        client.on('message', ({ credential, data }) => {
+          queueOf(name).push({ bytes: bytesOf(data), credential });
+        });
+      }
+
+      ports.set(name, port);
+      clients.set(name, client);
+      transport.once('connection', (...[, , connectionHandle]) => {
+        handles.set(name, connectionHandle);
+      });
+      await client.connect({ address: '127.0.0.1', port });
+    },
+    start: async (): Promise<void> => {
+      await transport.start();
+    },
+    transport,
+    untaken: (): Record<string, (IExpected | undefined)[]> => {
+      const untaken: Record<string, (IExpected | undefined)[]> = {};
+
+      for (const [name, queue] of heard) {
+        if (queue.length > 0) {
+          untaken[name] = queue.map(({ bytes }) => {
+            return expectedOf(bytes);
+          });
+        }
+      }
+
+      return untaken;
+    },
+  };
+};
+
+/**
+ * Whether a pair of the in-memory transport stands for each connection `conversation` opens (spec
+ * 15.13): every one secure and two-way, and none a request its server sends expects carried toward
+ * its client, which an in-memory one never carries.
+ */
+export const isPlayedInMemory = ({ steps }: IConversation): boolean => {
+  return steps.every((step) => {
+    return (
+      step.secure !== false &&
+      step.twoWay !== false &&
+      !(step.expect?.kind === EnvelopeKind.REQUEST && step.carried !== undefined)
+    );
+  });
 };
 
 /**
@@ -306,27 +452,53 @@ const withTokens = (send: string, tokens: ReadonlyMap<string, Uint8Array>): stri
 };
 
 /**
- * What `take` gives, once it gives anything, or `undefined` once the patience is over: what the
- * server does as a JWT verifies, off the event loop, comes in its time.
+ * Counts the calls of Web Crypto under way, as a JWT verifies off the event loop, so that a settle
+ * waits for them as the C# side's scheduler waits for its work: each of `WEB_CRYPTO_CALLS` wrapped
+ * on `crypto.subtle` until the watch is disposed.
  */
-const within = async <Value>(take: () => Value | undefined): Promise<Value | undefined> => {
-  const deadline = Date.now() + PATIENCE;
+const watchWebCrypto = () => {
+  const { subtle } = globalThis.crypto;
+  let underWay = 0;
 
-  for (let taken = take(); ; taken = take()) {
-    if (taken !== undefined || Date.now() >= deadline) {
-      return taken;
-    }
+  for (const name of WEB_CRYPTO_CALLS) {
+    // oxlint-disable-next-line bead/options-last -- Web Crypto's own, whatever its calls take
+    const call = (subtle[name] as (...args: unknown[]) => Promise<unknown>).bind(subtle);
 
-    await sleep(POLL);
+    Object.defineProperty(subtle, name, {
+      configurable: true,
+      // oxlint-disable-next-line bead/options-last -- Web Crypto's own, whatever its calls take
+      value: (...args: unknown[]): Promise<unknown> => {
+        underWay += 1;
+
+        return call(...args).finally(() => {
+          underWay -= 1;
+        });
+      },
+      writable: true,
+    });
   }
+
+  return {
+    [Symbol.dispose]: (): void => {
+      for (const name of WEB_CRYPTO_CALLS) {
+        Reflect.deleteProperty(subtle, name);
+      }
+    },
+    underWay: (): number => {
+      return underWay;
+    },
+  };
 };
 
-/** Lets what the server does settle: turns of the event loop, until three in a row add nothing. */
-const settle = async (count: () => number): Promise<void> => {
+/**
+ * Lets what the server does settle: turns of the event loop, until no call of Web Crypto is under
+ * way and three turns in a row add nothing.
+ */
+const settle = async (count: () => number, underWay: () => number): Promise<void> => {
   let quiet = 0;
   let last = count();
 
-  while (quiet < 3) {
+  while (quiet < 3 || underWay() > 0) {
     await new Promise(setImmediate);
 
     const now = count();
@@ -359,12 +531,27 @@ const seriesOf = (text: string): Map<string, string> => {
  * the last counted, every other series unmoved, none made or gone.
  */
 export const playConversation = async (
-  { limits, pacing, relay, steps }: IConversation,
-  { metricsRegistry }: { metricsRegistry?: IMetricsRegistry | undefined }
+  conversation: IConversation,
+  {
+    inMemory = false,
+    metricsRegistry,
+    wallClock,
+  }: {
+    inMemory?: boolean | undefined;
+    metricsRegistry?: IMetricsRegistry | undefined;
+    /** The instant its file starts every case at. */
+    wallClock: string;
+  }
 ): Promise<void> => {
+  const { limits, pacing, relay, steps } = conversation;
   // the clock every layer runs on: only a step that moves time moves it
-  const clock = createTestClock(Date.parse(WALL_CLOCK));
-  const connections = createConnections();
+  const clock = createTestClock(Date.parse(wallClock));
+
+  if (inMemory && !isPlayedInMemory(conversation)) {
+    throw new Error('an in-memory pair stands for no connection of this conversation');
+  }
+
+  const connections = inMemory ? createMemoryConnections(clock) : createScriptedConnections();
   const relayOptions: IRelayOptions = {
     ...(relay?.beforeRoute === undefined ? {} : { beforeRoute: ADMISSIONS[relay.beforeRoute] }),
     ...(relay?.verifies === undefined ? {} : { verifies: relay.verifies }),
@@ -385,11 +572,17 @@ export const playConversation = async (
   const reports: IReport[] = [];
   // the tokens its answers announced, by the names its steps gave them
   const tokens = new Map<string, Uint8Array>();
+  using webCrypto = watchWebCrypto();
   const count = (): number => {
     return connections.count() + reports.length;
   };
-  // what the server did that its conversation did not expect: nothing, between steps
-  const expectNothingMore = (when: string): void => {
+  const settled = (): Promise<void> => {
+    return settle(count, webCrypto.underWay);
+  };
+  // what the server did that its conversation did not expect, once it settled: nothing, between
+  // steps
+  const expectNothingMore = async (when: string): Promise<void> => {
+    await settled();
     expect({ reports, sent: connections.untaken() }, when).toEqual({ reports: [], sent: {} });
   };
 
@@ -400,6 +593,7 @@ export const playConversation = async (
     });
   });
   offerInterop(server);
+  await connections.start();
 
   // every series at 0 as the case begins, once the server is built
   let exposed = seriesOf(metricsRegistry?.exposition().text ?? '');
@@ -409,7 +603,7 @@ export const playConversation = async (
       return step.open === undefined;
     })
   ) {
-    connections.open(ONLY_CONNECTION, {
+    await connections.open(ONLY_CONNECTION, {
       carriesCredential: true,
       isSecure: true,
       isTwoWay: true,
@@ -429,35 +623,37 @@ export const playConversation = async (
       ).toEqual([]);
 
       if (step.open !== undefined || step.send !== undefined || step.close === true) {
-        expectNothingMore(`before ${at}`);
+        await expectNothingMore(`before ${at}`);
       }
 
       if (step.open !== undefined) {
-        connections.open(step.open, {
+        await connections.open(step.open, {
           carriesCredential: step.carries !== false,
           isSecure: step.secure !== false,
           isTwoWay: step.twoWay !== false,
         });
-        await settle(count);
+        await settled();
       }
 
       if (step.send !== undefined) {
-        connections.message(on, {
+        await connections.message(on, {
           ...(step.carried === undefined ? {} : { credential: step.carried }),
           data: fromHexadecimal(withTokens(step.send, tokens)),
         });
-        await settle(count);
+        await settled();
       }
 
       if (step.close === true) {
-        connections.close(on);
-        await settle(count);
+        await connections.close(on);
+        await settled();
       }
 
+      // * what the server sends and reports is taken once it settled, at once, as the C# side takes
+      // it once its scheduler is idle
       if (step.expect !== undefined) {
-        const next = await within(() => {
-          return connections.next(on);
-        });
+        await settled();
+
+        const next = connections.next(on);
         const bytes = next?.bytes;
 
         expect(actualOf(bytes, step.expect), at).toEqual(step.expect);
@@ -476,9 +672,9 @@ export const playConversation = async (
       }
 
       if (step.report !== undefined) {
-        const report = await within(() => {
-          return reports.shift();
-        });
+        await settled();
+
+        const report = reports.shift();
 
         expect(report?.code, at).toBe(step.report);
 
@@ -500,7 +696,7 @@ export const playConversation = async (
 
       if (step.advance !== undefined) {
         await clock.tickAsync(step.advance);
-        await settle(count);
+        await settled();
       }
 
       if (step.wall !== undefined) {
@@ -508,7 +704,7 @@ export const playConversation = async (
       }
 
       if (step.counted !== undefined) {
-        await settle(count);
+        await settled();
 
         const now = seriesOf(metricsRegistry?.exposition().text ?? '');
 
@@ -525,9 +721,9 @@ export const playConversation = async (
       }
     }
 
-    expectNothingMore('at the end');
+    await expectNothingMore('at the end');
   } finally {
-    connections.closeAll();
+    await connections.closeAll();
     await server[Symbol.asyncDispose]();
   }
 };

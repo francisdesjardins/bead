@@ -157,7 +157,8 @@ public sealed class IdentitiesTests
                 return declare(procedure, (client, server));
             });
 
-            Assert.Contains(refused, refusal.Message, StringComparison.Ordinal);
+            // * the reason where its sentence states it, after `is`, as the TypeScript side reads it
+            Assert.Contains($" is {refused}: ", refusal.Message, StringComparison.Ordinal);
             await declare(Echo, (client, server)).WaitAsync(Cancelled);
         }
     }
@@ -251,10 +252,11 @@ public sealed class IdentitiesTests
     {
         var entry = EntryOf(("folds", name));
         var names = entry.GetProperty("names");
+        var (one, other) = (names[0].GetString()!, names[1].GetString()!);
+        var isOne = entry.GetProperty("one").GetBoolean();
 
-        Assert.Equal(
-            entry.GetProperty("one").GetBoolean(),
-            Identity.AreOneName(names[0].GetString()!, names[1].GetString()!));
+        // either way round
+        Assert.Equal((isOne, isOne), (Identity.AreOneName(one, other), Identity.AreOneName(other, one)));
     }
 
     [Fact]

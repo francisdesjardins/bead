@@ -146,8 +146,18 @@ test.describe('the envelope readers, fed mutations of the vectors', () => {
     expect(seeds.length).toBeGreaterThan(100);
   });
 
+  test('draws what the C# side draws for a seed', () => {
+    const below = generatorOf(1);
+
+    expect(
+      Array.from({ length: 8 }, () => {
+        return below(1_000);
+      })
+    ).toEqual([369, 689, 461, 695, 233, 504, 482, 210]);
+  });
+
   for (const seed of [1, 2]) {
-    test(`return or refuse with a failure, seed ${String(seed)}`, () => {
+    test(`reads or refuses with a failure every mutation of a vector, seed ${String(seed)}`, () => {
       const below = generatorOf(seed);
       const defects: (string | undefined)[] = [];
 
@@ -170,7 +180,7 @@ test.describe('the envelope readers, fed mutations of the vectors', () => {
     });
   }
 
-  test('report an error that is no failure', () => {
+  test('reports an exception that is no failure', () => {
     const defect = defectOf(() => {
       throw new TypeError('boom');
     }, Uint8Array.of(1));

@@ -9,7 +9,10 @@
   the host's place in 15.2's order; the address a server listens on by default, `localhost`, both
   loopbacks, its form, which 13.4's server half reads, and what it reports; the TypeScript HTTP
   transport's `createServer`, called once per address bound; the C# clients' race of a name's
-  address families. What `origins` takes, and a client's loopback (13.4), are
+  address families; and a gateway's own listener, on `localhost`, both loopbacks, by default, as a
+  transport's, its hosts judged by the same rules (transcoding 10.1,
+  [0037](0037-a-procedure-is-also-an-http-route-which-a-gateway-answers-as-one-more-client-of-its-server.md)).
+  What `origins` takes, and a client's loopback (13.4), are
   [0010](0010-a-request-presents-a-credential-of-a-scheme.md)'s; a connection's handle is
   [0025](0025-a-transport-draws-each-connections-handle-and-gives-none-twice.md)'s; the refusal a
   server tells, and a request's fields,

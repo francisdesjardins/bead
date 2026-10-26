@@ -65,7 +65,7 @@ public sealed class ServiceServerTests
     [Fact]
     public async Task Admits_every_call_with_none()
     {
-        await using var link = new ServiceLink();
+        await using var link = await ServiceLink.Open();
         var greeter = GreeterOf();
         var client = ClientOf(link);
 
@@ -81,7 +81,7 @@ public sealed class ServiceServerTests
     [Fact]
     public async Task Refuses_a_call_in_no_session_SESSION_REQUIRED()
     {
-        await using var link = new ServiceLink();
+        await using var link = await ServiceLink.Open();
         var greeter = GreeterOf();
         var client = ClientOf(link);
 
@@ -97,7 +97,7 @@ public sealed class ServiceServerTests
     [Fact]
     public async Task Refuses_with_a_hook_s_detail_ACCESS_DENIED_in_a_session_or_in_none()
     {
-        await using var link = new ServiceLink();
+        await using var link = await ServiceLink.Open();
         var greeter = GreeterOf(new AdmissionHook
         {
             Admits = (_) =>
@@ -138,7 +138,7 @@ public sealed class ServiceServerTests
     [Fact]
     public async Task Answers_PROCEDURE_FAILED_to_a_hook_that_throws_and_reports_it()
     {
-        await using var link = new ServiceLink();
+        await using var link = await ServiceLink.Open();
         var thrown = new InvalidOperationException("the hook broke");
         var greeter = GreeterOf(new AdmissionHook
         {
@@ -148,7 +148,12 @@ public sealed class ServiceServerTests
             },
         });
         var client = ClientOf(link);
+        var reported = new TaskCompletionSource<(Exception Reason, string? ConnectionHandle)>(TaskCreationOptions.RunContinuationsAsynchronously);
 
+        link.Server.Router.Error += (reason, connectionHandle) =>
+        {
+            reported.TrySetResult((reason, connectionHandle));
+        };
         greeter.On(GreeterProcedures.Shout, (request, response) =>
         {
             return response.Answer(request.Payload);
@@ -156,7 +161,12 @@ public sealed class ServiceServerTests
         greeter.Offer(link.Server);
 
         Assert.Equal((ushort)ProtocolCode.ProcedureFailed, await CodeOf(client.RequesterOf(GreeterProcedures.Shout)("hi")()));
-        Assert.Same(thrown, await link.FirstReported.WaitAsync(Patience, Cancelled));
+
+        // * reported with the connection of the call it failed
+        var (reason, connectionHandle) = await reported.Task.WaitAsync(Patience, Cancelled);
+
+        Assert.Same(thrown, reason);
+        Assert.Equal(ServiceLink.Handle, connectionHandle);
         Assert.Single(link.Reported);
     }
 
@@ -200,7 +210,7 @@ public sealed class ServiceServerTests
     [Fact]
     public async Task Answers_a_failure_its_procedure_lists()
     {
-        await using var link = new ServiceLink();
+        await using var link = await ServiceLink.Open();
         var greeter = GreeterOf();
         var client = ClientOf(link);
 
@@ -224,7 +234,7 @@ public sealed class ServiceServerTests
     [Fact]
     public async Task Registers_before_and_after_offer()
     {
-        await using var link = new ServiceLink();
+        await using var link = await ServiceLink.Open();
         var greeter = GreeterOf();
         var client = ClientOf(link);
 
@@ -245,7 +255,7 @@ public sealed class ServiceServerTests
     [Fact]
     public async Task Refuses_on_twice_offered_or_not()
     {
-        await using var link = new ServiceLink();
+        await using var link = await ServiceLink.Open();
         var greeter = GreeterOf();
         var other = new RequestProcedure<GreeterProcedures, string, string, NoFailure>(
             GreeterProcedures.Login.Procedure,
@@ -290,7 +300,7 @@ public sealed class ServiceServerTests
     [Fact]
     public async Task Refuses_a_second_offer()
     {
-        await using var link = new ServiceLink();
+        await using var link = await ServiceLink.Open();
         var greeter = GreeterOf();
 
         greeter.Offer(link.Server);
@@ -304,7 +314,7 @@ public sealed class ServiceServerTests
     [Fact]
     public async Task Makes_each_command_s_requester_once_as_it_is_offered_and_refuses_one_called_before()
     {
-        await using var link = new ServiceLink();
+        await using var link = await ServiceLink.Open();
         var server = new InterceptedServer(link.Server);
         var greeter = GreeterOf();
         var client = ClientOf(link);
@@ -336,10 +346,11 @@ public sealed class ServiceServerTests
     [Fact]
     public async Task Notifies_nothing_before_it_is_offered_and_resolves()
     {
-        await using var link = new ServiceLink();
+        await using var link = await ServiceLink.Open();
         var greeter = GreeterOf();
         var client = ClientOf(link);
-        var heard = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var heard = new List<string>();
+        var first = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var news = greeter.NotifierOf(GreeterProcedures.News);
 
         await news("before", null).WaitAsync(Patience, Cancelled);
@@ -353,20 +364,30 @@ public sealed class ServiceServerTests
 
         await using var registration = await client.NotificationOf(GreeterProcedures.News).Register("subscribe", (notification) =>
         {
-            heard.TrySetResult(notification);
+            lock (heard)
+            {
+                heard.Add(notification);
+            }
+
+            first.TrySetResult();
 
             return Task.CompletedTask;
         })().WaitAsync(Patience, Cancelled);
 
         await news("after", null).WaitAsync(Patience, Cancelled);
+        await first.Task.WaitAsync(Patience, Cancelled);
 
-        Assert.Equal("after", await heard.Task.WaitAsync(Patience, Cancelled));
+        // * every notification heard, collected: the one after its offer, once, none before
+        lock (heard)
+        {
+            Assert.Equal(["after"], heard);
+        }
     }
 
     [Fact]
     public async Task Lists_the_procedures_without_a_resolver_which_the_router_answers_PROCEDURE_UNKNOWN()
     {
-        await using var link = new ServiceLink();
+        await using var link = await ServiceLink.Open();
         var greeter = GreeterOf();
         var client = ClientOf(link);
 
@@ -388,7 +409,7 @@ public sealed class ServiceServerTests
     [Fact]
     public async Task Declares_each_resolver_and_requester_once_to_a_registry()
     {
-        await using var link = new ServiceLink();
+        await using var link = await ServiceLink.Open();
         var server = new InterceptedServer(link.Server);
         var greeter = GreeterOf();
 
@@ -421,29 +442,14 @@ public sealed class ServiceServerTests
     }
 
     [Fact]
-    public async Task Validates_a_request_before_its_resolver_as_its_descriptor_s_validate_holds_it()
+    public async Task Answers_PAYLOAD_INVALID_with_its_violations_to_a_request_its_rules_refuse_before_its_resolver()
     {
-        await using var link = new ServiceLink();
-        var echo = new RequestProcedure<EchoService, string, string, NoFailure>(
-            new Procedure { ServiceId = 8, ProcedureId = 1, ProcedureName = "echo", ServiceRevision = 1 },
-            new ProcedureBindings<string, string>
-            {
-                Admission = AdmissionRule.None,
-                Request = PayloadCodecs.Text,
-                Result = PayloadCodecs.Text,
-                Validate = (request) =>
-                {
-                    if (request.Length == 0)
-                    {
-                        throw new ArgumentOutOfRangeException(nameof(request), "an empty echo");
-                    }
-                },
-            });
-        var server = new ServiceServer<EchoService, string>([echo]);
-        var client = new ServiceClient<EchoService>([echo], link.Client);
+        await using var link = await ServiceLink.Open();
+        var server = new ServiceServer<CheckedProcedures, string>(CheckedProcedures.All);
+        var client = new ServiceClient<CheckedProcedures>(CheckedProcedures.All, link.Client);
         var seen = new List<string>();
 
-        server.On(echo, (request, response) =>
+        server.On(CheckedProcedures.Echo, (request, response) =>
         {
             seen.Add(request.Payload);
 
@@ -451,18 +457,94 @@ public sealed class ServiceServerTests
         });
         server.Offer(link.Server);
 
-        Assert.Equal("hi", await client.RequesterOf(echo)("hi")().WaitAsync(Patience, Cancelled));
-        Assert.Equal((ushort)ProtocolCode.ProcedureFailed, await CodeOf(client.RequesterOf(echo)("")()));
+        Assert.Equal("hi", await client.RequesterOf(CheckedProcedures.Echo)("hi")().WaitAsync(Patience, Cancelled));
+
+        var refused = await Assert.ThrowsAsync<FailureException>(() =>
+        {
+            return client.RequesterOf(CheckedProcedures.Echo)("")().WaitAsync(Patience, Cancelled);
+        });
+
+        Assert.Equal(((ushort)ProtocolCode.PayloadInvalid, FailureScope.Protocol), (refused.Code, refused.Scope));
+        Assert.Equal(FailureOrigin.Peer, refused.Origin);
+        Assert.Equal(CheckedProcedures.Detail, refused.Detail);
+
+        var violations = Violations.Of(refused.Failure);
+        var violation = Assert.Single(violations.Violations);
+
+        Assert.Equal(
+            ("string.min_len", "must be at least 1 characters", "{\"min_len\":\"1\"}", (long?)0),
+            (violation.RuleId, violation.Message, violation.Bounds?.GetRawText(), violations.More));
+
+        // * the protocol's answer, never its resolver's: nothing ran, nothing to report
+        Assert.Equal(["hi"], seen);
+        Assert.Empty(link.Reported);
+    }
+
+    [Fact]
+    public async Task Answers_PROCEDURE_FAILED_to_a_validate_that_throws_and_reports_it()
+    {
+        await using var link = await ServiceLink.Open();
+        var broken = new RequestProcedure<CheckedProcedures, string, string, NoFailure>(
+            CheckedProcedures.Echo.Procedure,
+            CheckedProcedures.BindingsOf((request, options) =>
+            {
+                if (request.Length == 0)
+                {
+                    throw new ArgumentOutOfRangeException(nameof(request), "a rule that cannot judge");
+                }
+
+                return CheckedProcedures.NotEmpty(request, options);
+            }));
+        var server = new ServiceServer<CheckedProcedures, string>([broken]);
+        var client = new ServiceClient<CheckedProcedures>([broken], link.Client);
+        var seen = new List<string>();
+
+        server.On(broken, (request, response) =>
+        {
+            seen.Add(request.Payload);
+
+            return response.Answer(request.Payload);
+        });
+        server.Offer(link.Server);
+
+        // * one it judges goes as ever; one it fails to judge fails, its resolver never reached
+        Assert.Equal("hi", await client.RequesterOf(broken)("hi")().WaitAsync(Patience, Cancelled));
+        Assert.Equal((ushort)ProtocolCode.ProcedureFailed, await CodeOf(client.RequesterOf(broken)("")()));
         Assert.Equal(["hi"], seen);
         Assert.IsType<ArgumentOutOfRangeException>(await link.FirstReported.WaitAsync(Patience, Cancelled));
         Assert.Single(link.Reported);
     }
 
-    /// <summary>A service of one request, whose descriptor checks its value.</summary>
-    public sealed class EchoService
+    [Fact]
+    public async Task Validates_a_command_before_it_goes_when_its_options_say_so()
     {
-        private EchoService()
+        await using var link = await ServiceLink.Open();
+        var validating = new ServiceServer<CheckedProcedures, string>(
+            CheckedProcedures.All,
+            new ServiceServerOptions<CheckedProcedures> { Admissions = new CheckedAdmissions(), Validates = true });
+        var client = new ServiceClient<CheckedProcedures>(CheckedProcedures.All, link.Client);
+        var heard = new List<string>();
+
+        client.On(CheckedProcedures.Shout, (request, response) =>
         {
-        }
+            heard.Add(request.Payload);
+
+            return response.Answer(request.Payload.ToUpperInvariant());
+        });
+        validating.Offer(link.Server);
+
+        var call = new RequestOptions { ConnectionHandle = ServiceLink.Handle };
+        var refused = await Assert.ThrowsAsync<FailureException>(() =>
+        {
+            return validating.CommandOf(CheckedProcedures.Shout)("")(call).WaitAsync(Patience, Cancelled);
+        });
+
+        // * refused here, before it went: the client never heard it
+        Assert.Equal((ushort)ProtocolCode.PayloadInvalid, refused.Code);
+        Assert.Equal((FailureOrigin.Local, RouterSide.Server), (refused.Origin, refused.Side));
+        Assert.Equal(CheckedProcedures.Detail, refused.Detail);
+        Assert.Empty(heard);
+        Assert.Equal("HI", await validating.CommandOf(CheckedProcedures.Shout)("hi")(call).WaitAsync(Patience, Cancelled));
+        Assert.Equal(["hi"], heard);
     }
 }

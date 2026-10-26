@@ -8,8 +8,12 @@
 
   <ItemGroup>
     <Compile Include="../../tests/Shared/JsonPayloads.cs" Link="JsonPayloads.cs" />
+    <!-- spec/transcoding.proto's messages, as beadc generates them, which Bead's mapping is measured on -->
+    <Compile Include="../../tests/Bead.Transcoding.Tests/Generated/Bead/Transcoding/V1/Transcoding.cs" Link="Transcoding.cs" />
+    <Compile Include="../../tests/Bead.Transcoding.Tests/Generated/Bead/Protobuf/Options.cs" Link="Options.cs" />
     <ProjectReference Include="../../src/Bead.Transport.Http/Bead.Transport.Http.csproj" />
     <ProjectReference Include="../../src/Bead.Transport.WebSockets/Bead.Transport.WebSockets.csproj" />
+    <ProjectReference Include="../../src/Bead.Transcoding/Bead.Transcoding.csproj" />
     <ProjectReference Include="../../interop/Bead.Interop/Bead.Interop.csproj" />
   </ItemGroup>
 </Project>

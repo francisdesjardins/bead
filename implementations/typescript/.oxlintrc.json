@@ -219,11 +219,22 @@
     // protoc-gen-es's, committed as it writes it: `tools/check-protobuf.mjs` holds it to its
     // generator
     "**/*_pb.ts",
+    // `demo/make-samples.ts`'s, which the demo's tests hold it to
+    "demo/samples.ts",
     // the plugin's cases, refused on purpose: `tools/check-oxlint-plugin.mjs` lints them apart
     "tools/oxlint-plugin.cases.ts",
+    // what beadc generates for spec/validations.proto, committed as it writes it:
+    // the root's `tools/check-validations.mjs` holds it to its generator, `tsconfig.validations.json`
+    // types it
+    "src/proto/__tests__/generated/**",
+    // what beadc generates for spec/transcoding.proto, committed as it writes it, its route table
+    // and its document among it: the root's `tools/check-transcoding.mjs` holds it to its generator
+    "src/transcoding/__tests__/generated/**",
     // protobuf's conformance testee, read with the code generated into it at run time alone:
     // `tools/protobuf-conformance.mjs` type-checks it then
     "tools/protobuf-conformance/**",
+    // protovalidate's differential testee, alike: `tools/protovalidate-differential.mjs` runs it
+    "tools/protovalidate-differential/**",
     // the bundles of the fuzz targets, which tools/fuzz.mjs at the root writes for Jazzer.js
     "tools/fuzz/.build/**",
     ".yarn/**"

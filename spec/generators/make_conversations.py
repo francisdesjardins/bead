@@ -7,6 +7,7 @@ import os
 import re
 from datetime import datetime
 
+from details import detail_of as violations_detail, judged, violation
 from spec_version import spec_version
 
 # the conformance files sit one folder up from their generators
@@ -23,7 +24,7 @@ ON_PURPOSE, REGISTERED_ALREADY = FAILURES['ON_PURPOSE'], FAILURES['REGISTERED_AL
 MALFORMED, LAYOUT_UNSUPPORTED, KIND_UNSUPPORTED, TOO_LARGE = 1, 2, 3, 4
 DESTINATION_UNKNOWN, SERVICE_UNKNOWN, PROCEDURE_UNKNOWN, CALL_UNKNOWN = 16, 18, 19, 20
 ACCESS_DENIED, PAYLOAD_TOO_LARGE = 33, 34
-PAYLOAD_UNDECODABLE, PROCEDURE_FAILED = 50, 64
+PAYLOAD_UNDECODABLE, PAYLOAD_INVALID, PROCEDURE_FAILED = 50, 52, 64
 REQUEST, RESULT, FAILURE, NOTIFICATION, CANCEL = 16, 17, 18, 19, 22
 CAPACITY_EXCEEDED = 35
 PROTOCOL, APPLICATION = 0, 1
@@ -179,6 +180,27 @@ assert NAMED_SCHEMES == SCHEMES_TAKEN
 
 # what SESSION_REQUIRED's detail says of a credential that does not resolve (9.2, step 6)
 NO_CREDENTIAL, DOES_NOT_HOLD = 'no credential came', 'the credential does not hold'
+
+# the bound of a failure's detail, maximumDetailBytes by default (7.3, 7.4)
+DETAIL_BYTES = 1024
+
+
+def checked_detail(names):
+    """The detail checked's rules give its names, as interop-service.json states them, or a request of
+    another shape, None: its violations in 18.5's order, written as 18.6 writes them."""
+    if names is None:
+        found = [violation('names', 'required', None, 'value is required')]
+    else:
+        found = [violation('names', 'repeated.max_items', {'max_items': '50'}, 'must contain no more than 50 item(s)')
+                 ] if len(names) > 50 else []
+
+        for index, name in enumerate(names):
+            if len(name) < 1:
+                found.append(violation(f'names[{index}]', 'string.min_len', {'min_len': '1'}, 'must be at least 1 characters'))
+            if len(name) > 3:
+                found.append(violation(f'names[{index}]', 'string.max_len', {'max_len': '3'}, 'must be at most 3 characters'))
+
+    return violations_detail(judged(found, maximum=DETAIL_BYTES), DETAIL_BYTES)
 
 
 def presenting(call_id, procedure, value, block):
@@ -818,6 +840,20 @@ conversations = [
         json_request(1, 'broken', 'null'), failure(1, PROCEDURE_FAILED, detail=''), report('exception')]),
     ('a payload that is not JSON is answered PAYLOAD_UNDECODABLE', ['9.5'], None, [
         request(1, 'echo', 'FF'), failure(1, PAYLOAD_UNDECODABLE)]),
+    # 18: checked's rules, which each server gives its descriptor by hand, judged once its payload
+    # reads and before its resolver, its violations in the detail of the PAYLOAD_INVALID it answers
+    ('a request its rules refuse is answered PAYLOAD_INVALID, its violations in its detail', ['9.5', '17.2.1', '18.2', '18.6'], None, [
+        json_request(1, 'checked', '{"names":["","abcd","ab"]}'),
+        failure(1, PAYLOAD_INVALID, detail=checked_detail(['', 'abcd', 'ab']))]),
+    ('a detail holds the first violations whole, and counts the rest', ['18.2', '18.6'], None, [
+        json_request(1, 'checked', '{"names":[' + ','.join(['""'] * 51) + ']}'),
+        failure(1, PAYLOAD_INVALID, detail=checked_detail([''] * 51))]),
+    ('a request its rules take reaches its resolver', ['18.2'], None, [
+        json_request(1, 'checked', '{"names":["a","bcd"]}'), result(1, '2')]),
+    ('a request of checked that is not JSON is answered PAYLOAD_UNDECODABLE', ['9.2.9', '9.5'], None, [
+        request(1, 'checked', 'FF'), failure(1, PAYLOAD_UNDECODABLE)]),
+    ('a request of checked of another shape breaks required at names', ['18.2', '18.3'], None, [
+        json_request(1, 'checked', '{"names":3}'), failure(1, PAYLOAD_INVALID, detail=checked_detail(None))]),
     # 17: a json payload read as section 17.5 reads it, and written in its canonical form, whichever side
     # answers; each of these reaches another outcome on a side that reads and writes as its platform does
     ('a payload outside ASCII is answered in its own characters, none escaped', ['17.7.3'], None, [
@@ -1220,14 +1256,17 @@ conversations += [
     sharing_leg_b(('a destination whose connection carries nothing back is answered DESTINATION_UNREACHABLE', ['14.3.4'], None, [
         opened('client'), opened('device', two_way=False), *logged_in(), *registered(),
         on(relayed(3, 'echo', '"x"'), 'client'), on(failure(3, DESTINATION_UNREACHABLE), 'client')])),
-    sharing_leg_b(('a destination dies with its connection, whoever opens it next, until it is registered anew',
-     ['14.3.4', '14.4'], None, [
-         opened('client'), opened('device'), *logged_in(), *registered(), closed('device'),
+    # a connection opened again is a new connection, under a handle its transport never gave
+    # (15.1): the destination stays dead on it until it registers the destination anew
+    sharing_leg_b(('a destination stays registered while its connection is open, dies with it, and lives again once a connection opened since registers it anew',
+     ['14.1', '14.3.4', '14.4'], None, [
+         opened('client'), opened('device'), opened('device2'), *logged_in(), *registered(),
+         on(json_request(1, 'register', '{"destination":%d}' % DEVICE), 'device2'),
+         on(failure(1, REGISTERED_ALREADY, APPLICATION, detail=REGISTERED), 'device2'),
+         closed('device'),
          on(relayed(3, 'echo', '"x"'), 'client'), on(failure(3, DESTINATION_UNREACHABLE), 'client'),
          opened('device'), on(relayed(5, 'echo', '"y"'), 'client'), on(failure(5, DESTINATION_UNREACHABLE), 'client'),
-         on(json_request(1, 'register', '{"destination":%d}' % DEVICE), 'device'), on(failure(1, REGISTERED_ALREADY, APPLICATION, detail=REGISTERED), 'device'),
-         on(json_request(3, 'unregister', 'null'), 'device'), on(result(3, 'true'), 'device'),
-         *registered(5), on(relayed(7, 'echo', '"z"'), 'client'), leg_b(2, 'echo', '"z"'),
+         *registered(), on(relayed(7, 'echo', '"z"'), 'client'), leg_b(2, 'echo', '"z"'),
          on(answer(2, '"z"'), 'device'), on(result(7, '"z"'), 'client')])),
     sharing_leg_b(('a destination taken out is answered DESTINATION_UNKNOWN', ['14.1'], None, [
         opened('client'), opened('device'), *logged_in(), *registered(),

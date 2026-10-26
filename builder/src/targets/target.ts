@@ -41,6 +41,17 @@ export type SourceNames =
   | { readonly blueprint: string }
   | { readonly proto: ReadonlyMap<string, string> };
 
+/**
+ * What an output with `http: true` writes beside its services (decision 0037): its routes' prefix,
+ * the OpenAPI document it embeds, byte for byte the one `generate` writes, and the base of an
+ * application failure's problem type, where `beadc.yaml` gives one.
+ */
+export interface IHttpInput {
+  readonly prefix: string;
+  readonly document: string;
+  readonly problemTypes?: string;
+}
+
 /** What a target generates from. */
 export interface ITargetInput {
   readonly blueprint: IBlueprint;
@@ -49,9 +60,16 @@ export interface ITargetInput {
   readonly sources: SourceNames;
 }
 
-/** A target: one language's files, from a checked blueprint. */
+/**
+ * A target: one language's files, from a checked blueprint, and the features of `requires` it
+ * generates, which `generate` holds a blueprint's to (FEATURE_UNGENERATED): a feature declared and
+ * played by one side alone is never written; and whether it writes a route table, which an output
+ * with `http: true` asks of it (HTTP_UNGENERATED).
+ */
 export interface ITarget<Options> {
   readonly name: string;
+  readonly features: ReadonlySet<string>;
+  readonly http: boolean;
   readonly generate: (input: ITargetInput, options: Options) => readonly IGeneratedFile[];
 }
 

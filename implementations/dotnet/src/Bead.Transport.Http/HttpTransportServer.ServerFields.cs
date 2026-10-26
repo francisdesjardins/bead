@@ -88,6 +88,24 @@ public sealed partial class HttpTransportServer
             return HostsAndOrigins.AuthorityOf(context.Request.Headers.Host, TargetAuthorityOf(context));
         }
 
+        // whether HTTP takes an HTTP/1 request's target, as HostsAndOrigins.IsTakenTarget says; over
+        // HTTP/2, Kestrel judged its :authority before the application runs
+        internal static bool IsTakenTarget(HttpContext context)
+        {
+            var request = context.Request;
+            var isHttp1 = HttpProtocol.IsHttp10(request.Protocol) || HttpProtocol.IsHttp11(request.Protocol);
+
+            return !isHttp1 || HostsAndOrigins.IsTakenTarget(context.Features.Get<IHttpRequestFeature>()?.RawTarget);
+        }
+
+        // whether a request's target is visible ASCII and its path's percent-decoding holds no NUL, as
+        // HostsAndOrigins.IsVisibleTarget says, over every protocol: Kestrel takes a control character
+        // in an HTTP/1.1 target, and its :path over HTTP/2, which it gives as its RawTarget
+        internal static bool IsVisibleTarget(HttpContext context)
+        {
+            return HostsAndOrigins.IsVisibleTarget(context.Features.Get<IHttpRequestFeature>()?.RawTarget);
+        }
+
         // the authority an HTTP/1 request's target names in absolute-form; none for another form, and
         // over HTTP/2, whose :authority Kestrel has put in the Host
         internal static string? TargetAuthorityOf(HttpContext context)

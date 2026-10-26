@@ -28,7 +28,7 @@ const LIMITS: IPacingLimits = Object.freeze({
 // definition
 
 test.describe('PACING_DEFAULTS and pacingLimitsOf', () => {
-  test('queue 64 notifications and 1 MiB at most by default, frozen', () => {
+  test('queue 64 notifications and 1 MiB at most by default', () => {
     expect(PACING_DEFAULTS).toEqual({
       maximumQueuedNotificationBytes: 1_048_576,
       maximumQueuedNotifications: 64,
@@ -36,9 +36,20 @@ test.describe('PACING_DEFAULTS and pacingLimitsOf', () => {
     expect(Object.isFrozen(PACING_DEFAULTS)).toBe(true);
     expect(pacingLimitsOf()).toEqual(PACING_DEFAULTS);
     expect(Object.isFrozen(pacingLimitsOf())).toBe(true);
+
+    // past its first credit, a pacing at the defaults queues 64 and no more
+    const pacing = createPacing(PACING_DEFAULTS);
+
+    expect(pacing.offer({ payload: payloadOf('sent') })).toBe('send');
+
+    for (let queued = 0; queued < 64; queued += 1) {
+      expect(pacing.offer({ payload: new Uint8Array(1) })).toBe('queued');
+    }
+
+    expect(pacing.offer({ payload: new Uint8Array(1) })).toBe('exceeded');
   });
 
-  test('take each limit given over the default, one left undefined keeping it', () => {
+  test('take each limit given over the default, one left out keeping it', () => {
     expect(
       pacingLimitsOf({ maximumQueuedNotificationBytes: undefined, maximumQueuedNotifications: 1 })
     ).toEqual({ maximumQueuedNotificationBytes: 1_048_576, maximumQueuedNotifications: 1 });

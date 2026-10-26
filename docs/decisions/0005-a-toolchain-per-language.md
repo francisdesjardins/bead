@@ -31,8 +31,9 @@ judges every file, and a version is held once.
   carries it was not installed; oxlint, its type-aware half on tsgolint, and oxfmt; TypeScript for
   the types; Playwright's runner for the tests, and c8 for their coverage. An install script is code
   of a dependency's author, run on every machine and every runner that installs, so every Yarn
-  project of the repository sets the same line, the builder's naming buf's alone and an example's
-  TypeScript half buf's and esbuild's; no tool fails when the line goes, so review holds it
+  project of the repository sets the same line, the builder's naming buf's alone, an example's
+  TypeScript half buf's and esbuild's, and each fuzz project's, the TypeScript side's and the
+  builder's under their `tools/fuzz/`, none; no tool fails when the line goes, so review holds it
   ([0006](0006-a-rule-has-its-gate.md)).
 - **C#**, in `implementations/dotnet`: `net10.0`; `global.json` pins the SDK and the test runner,
   Microsoft.Testing.Platform; `Directory.Build.props` holds every project to one set of rules
@@ -52,13 +53,17 @@ which git ignores. The builder and the examples are placed by
 toolchain, the house's rules by reference where its platform can and a copy held to them where it
 cannot. The root's tools are Node scripts without dependencies; one that needs a program fetches it
 by a pin and checks it before it runs it, as `tools/protobuf-conformance.mjs` fetches protobuf's
-conformance runner by `tools/protobuf-conformance/runner.json`, its sha512, and
-`builder/tools/fetch-protoc.mjs` protoc by `builder/protoc.json`, its sha256, into a folder git
-ignores, with no manifest and no lockfile
+conformance runner by `tools/protobuf-conformance/runner.json`, its sha512,
+`tools/protovalidate-differential.mjs` protovalidate-es and what it loads by
+`tools/protovalidate-differential/pin.json`, each package's sha512, `tools/fuzz.mjs` the C# side's
+fuzzer by `tools/fuzz/fuzzer.json`, its SHA-256, and `builder/tools/fetch-protoc.mjs` protoc by
+`builder/protoc.json`, its sha256, into a folder git ignores, with no manifest and no lockfile
 ([0028](0028-a-proto-payloads-records-are-read-against-its-message-before-its-library-reads-them.md)).
-The spec's are Python 3.14's: its generators use the standard library alone, and its check,
-`spec/check.py`, needs `jsonschema`, which `spec/requirements.in` names and `spec/requirements.txt`
-locks with every hash, installed with `--require-hashes --only-binary=:all:`.
+The spec's are Python 3.14's: its check, `spec/check.py`, needs `jsonschema`, and two of its
+generators a library each, `make_validations.py` `google-re2`, RE2 itself, and
+`make_transcoding.py` `protobuf`, protobuf's own Python library; `spec/requirements.in` names the
+three and `spec/requirements.txt` locks them with every hash, installed with
+`--require-hashes --only-binary=:all:`; the other generators use the standard library alone.
 
 **A language that joins comes the same way**: a folder under `implementations/`, its own native
 toolchain, and a CI job of its own. A part every language uses that is neither an implementation nor
@@ -85,7 +90,7 @@ the spec is placed by a decision of its own, as the builder and the examples are
   cobertura, and read by one root script, `tools/coverage-report.mjs`, which merges either. CI's
   `typescript` and `dotnet` jobs run it after their tests, each side held to its floor
   ([0006](0006-a-rule-has-its-gate.md)), and a clone runs the same commands.
-- Three lockfile formats: a `yarn.lock` for the TypeScript side, one for the builder and one for
-  each example's TypeScript half, at the TypeScript side's pins and locked versions where they share
-  a package, a `packages.lock.json` per C# project, an example's among them, and
-  `spec/requirements.txt`, so an upgrade is made side by side, never by one command.
+- Three lockfile formats: a `yarn.lock` for the TypeScript side, one for the builder, one for each
+  example's TypeScript half and one for each fuzz project, at the TypeScript side's pins and locked
+  versions where they share a package, a `packages.lock.json` per C# project, an example's among
+  them, and `spec/requirements.txt`, so an upgrade is made side by side, never by one command.

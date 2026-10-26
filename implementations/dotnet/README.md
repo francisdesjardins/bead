@@ -15,7 +15,7 @@ The .NET 10 SDK, as `global.json` pins it, with the test runner, Microsoft.Testi
 this folder:
 
 ```sh
-dotnet format Bead.slnx --verify-no-changes --exclude ../../builder/test/golden/csharp interop/Bead.Interop/Generated
+dotnet format Bead.slnx --verify-no-changes --exclude ../../builder/test/golden/csharp interop/Bead.Interop/Generated tests/Bead.Protobuf.Tests/Generated
 dotnet build Bead.slnx
 dotnet test --solution Bead.slnx
 ```
@@ -34,13 +34,21 @@ One solution, `Bead.slnx`:
 src/
   Bead.Core/                    the codec, the router's core, both sides' routers, the service,
                                 session and notification managers, the relay, the server over
-                                them, and the service layer a service is served and called through
+                                them, the service layer a service is served and called through,
+                                the in-memory transport and the joined server transport
   Bead.Protobuf/                the check of a proto payload's records against its message's
                                 descriptor, which a generated proto codec calls before
-                                Google.Protobuf reads them: Bead.Core references no Google.Protobuf
+                                Google.Protobuf reads them, and what the validators beadc generates
+                                are made of: Bead.Core references no Google.Protobuf
   Bead.Transport.WebSockets/    the server on Kestrel and the client on ClientWebSocket, one
                                 connection class for both
   Bead.Transport.Http/          the server on Kestrel and the client on HttpClient
+  Bead.Transcoding/             the transcoding layer, pure, no socket: a route table's types, its
+                                templates matched raw, a request bound from its route, Bead's own
+                                mapping of protobuf's JSON over a message's descriptor, a
+                                failure's problem and a stream's events
+  Bead.Transcoding.Http/        the gateway on Kestrel, which answers a service's procedures as
+                                HTTP routes, one more client of the application's server
   BannedSymbols.txt             what the banned-API analyzer refuses: the clock is given
 interop/
   Bead.Interop/                 the interop service, which both sides serve alike
@@ -64,11 +72,94 @@ tools/
   Bead.ProtobufConformance/     protobuf's conformance testee, outside the solution: its
                                 Generated/ is what tools/protobuf-conformance.mjs generates at run
                                 time; failing.txt, its failure list (decision 0028)
+  Bead.ProtovalidateDifferential/
+                                the protovalidate differential's testee, outside the solution: its
+                                Generated/ is what tools/protovalidate-differential.mjs generates
+                                at run time (decision 0035)
 ```
 
 A transport that needs a framework has a project of its own. Each transport server is a Kestrel
 application of its own: one port for both comes from a proxy in front, never from a server they
-share.
+share. The in-memory transport needs none, and lives in `Bead.Core`: `MemoryTransportClient` and
+`MemoryTransportServer`, two routers of one process, each envelope copied and handed on in a later
+turn, a credential and the client's address beside each request (spec 15.13). One server takes
+its connections from several transports through `JoinedServerTransport`, each handle its own
+transport's, two of one type refused (spec 15.14): an in-memory transport beside a WebSocket one,
+say, its service offered once.
+
+### HTTP/JSON transcoding, a gateway
+
+`HttpGateway`, in `Bead.Transcoding.Http`, answers a service's procedures as routes of HTTP
+([`spec/transcoding.md`](../../spec/transcoding.md), decision 0037), beside the wire, never in its
+place: each call goes through one more Bead client of the application's own server, across a
+`MemoryTransportServer` that server joined beside its WebSocket or HTTP one, so it meets the same
+router, admission, sessions and services, each offered once. It reads everything from the route
+table beadc writes in an output with `http: true`, `BeadHttp.cs`, whose `HttpRoutes.All`,
+`OpenApiDocument` and `ProblemTypes` it is given; `Bead.Transcoding` is the layer it reads them
+with.
+
+```csharp
+await using var memory = new MemoryTransportServer();
+await using var server = new Server<string>(new JoinedServerTransport([memory, webSocket]));
+await using var gateway = new HttpGateway(new HttpGatewayOptions
+{
+    Transport = memory,
+    Routes = HttpRoutes.All,
+    Document = HttpRoutes.OpenApiDocument.ToArray(),
+    ProblemTypes = HttpRoutes.ProblemTypes,
+});
+
+await memory.Start();
+await gateway.Start(new HttpGatewayStartOptions { Port = 8080 });
+```
+
+It routes, binds, reads and writes as the TypeScript side's gateway does, one form of every body
+on both sides, and its README says it whole: every procedure a client calls at
+`POST /api/<Service>/<procedure>`, one marked `NO_SIDE_EFFECTS` at `GET` and `HEAD` there too
+where the query carries its request, each `google.api.http` rule as written; Bead's own mapping of
+protobuf's JSON, never `JsonParser` or `JsonFormatter`; failures as `application/problem+json`;
+notifications as Server-Sent Events, paced by what the response takes. **The route is no guard**:
+a procedure answers its default route whatever rules map it, and what guards it is its admission.
+Each exchange draws one Bead connection, closed as its response ends. It judges a request by the
+HTTP transport's own gates from one `HttpPolicy`, which `HttpTransportServerOptions.Policy` takes
+too; a member given in the policy and beside it, at its default as at any value, is refused.
+It listens on its own port, or answers in the application's own Kestrel pipeline,
+`endpoints.MapBeadGateway(gateway)`, its fallback endpoint; one origin for `/bead` and `/api/…`
+comes from a proxy in front. It serves the document at `/openapi.json`, byte for byte, with its
+`etag`; Swagger UI is the application's to serve.
+
+Every body the gateway writes meets `MaximumUnsentBytes` and its send pace,
+`MinimumSendBytesPerSecond` after `SendGracePeriod`: whole answers, problems, the document and
+stream events. Whole bodies go in slices of at most 64 KiB, paced one slice at a time. A drop
+reports the bound on `Error`, releases the exchange's place and socket, and cancels a stream's call.
+
+The same `BeadHttp.cs` exports a client of each service, `<Service>HttpClient`, which calls its
+gateway through an `HttpClient` (`transcoding.md` 12) and is disposed with `using`:
+`new HelloHttpClient(uri, options)` takes the gateway's base URL, `http` or `https` with no
+userinfo, query or fragment, whose path prefixes each route, and its options an `HttpCallerOptions`
+of `Bead.Transcoding`, a `Handler`, a default `Authorization` and `MaximumBodyBytes`, 16,778,240 by
+default. Each procedure a client calls is a method, `hello.SayHello(request, options)`, the
+TypeScript side's `hello.sayHello` in .NET's case, on its default `POST` route alone, whatever rules
+map it, and one that notifies is also `hello.SubscribeCountDown(request, options)`, an async
+sequence of `HttpEvent`, its result first, `IsResult` and `Result`, then each `Notification`; ending
+its enumeration releases its response. `HttpCallOptions` takes a `CancellationToken`, an
+`Authorization` of its own and `WithoutAuthorization`, which presents none, its client's default
+either. An authorization is held to the transport's check of a field value, an `ArgumentException`
+otherwise, an empty one presenting none; one that would leave the machine in the clear fails
+`DestinationUnreachable` before anything is encoded or sent, by spec 13.4's rule on a URL. The
+handler the client makes follows no redirect, keeps no cookie and connects as RFC 8305 asks, through
+`HappyEyeballs`, and is disposed with it; a `Handler` given is the application's, never disposed,
+and one that would follow a redirect, an `HttpClientHandler` or a `SocketsHttpHandler` innermost of
+the `DelegatingHandler`s given whose `AllowAutoRedirect` is true, is an `ArgumentException` as the
+client is built, as the HTTP transport's client refuses one; a handler of another kind that
+follows all the same is caught by its answer's `RequestMessage`, gone to another URL, and fails the
+call, `DestinationLost`. A problem throws a `FailureException` of its code, its scope and its
+detail, and so does the failure that ends a stream; a problem of the gateway's own, which carries
+no code, is read by its `bead-refusal`, then by its status, and a status an intermediary answers by
+whether the procedure may have run, the status and its `Retry-After` kept in the failure's detail.
+Each whole answer and each event is held to `MaximumBodyBytes`, `PayloadTooLarge` past it; a body
+that does not read is `PayloadUndecodable`, and a stream cut before its failure `DestinationLost`,
+never reconnected.
 
 ### The parts of the core, the manager and the HTTP server
 
@@ -105,13 +196,17 @@ the listens, the outboxes and the server's life, under one lock on the C# side.
   core.
 - **The relay** is `Relay`, its registrations under a lock, since they are registered from any
   thread and read on the router's scheduler; a destination is a `ConnectionTarget` or an
-  `IRouterTarget`, which a client's router meets. A server's relay admits by default only a
-  credential it forwards, `RequireCredential`: a call presenting a `JWT` or an `ELSEWHERE`, by its
-  scheme alone unless the relay verifies, for its destination to verify; any other, one that
-  presents none or `OPAQUE`, in leg A's connection's session or in none, is refused
-  `ACCESS_DENIED`, its detail `a relay admits by default only a credential it forwards`, since leg
-  A's session opens nothing at the destination (spec 14.3, 14.7). A relay whose requesters log in at
-  it gives a `BeforeRoute` of its own, which checks the destination against the requester's session:
+  `IRouterTarget`, which a client's router meets. Each `Destination` it lists says whether its
+  connection closed; one registered on a connection the router no longer holds is closed at once,
+  and `DestinationOptions.Replaces`, the registration the application holds, takes its id in its
+  place under that lock, so no request meanwhile finds it unknown (spec 14.1, 14.4). A server's
+  relay admits by default only a credential it forwards, `RequireCredential`: a call presenting a
+  `JWT` or an `ELSEWHERE`, by its scheme alone unless the relay verifies, for its destination to
+  verify; any other, one that presents none or `OPAQUE`, in leg A's connection's session or in none,
+  is refused `ACCESS_DENIED`, its detail `a relay admits by default only a credential it forwards`,
+  since leg A's session opens nothing at the destination (spec 14.3, 14.7). A relay whose requesters
+  log in at it gives a `BeforeRoute` of its own, which checks the destination against the
+  requester's session:
 
   ```csharp
   // a requester reaches a destination its session names, or forwards a credential its
@@ -163,12 +258,12 @@ the listens, the outboxes and the server's life, under one lock on the C# side.
   place (spec 15.12): a body that comes slower than `MinimumBodyBytesPerSecond`, 240, once
   `BodyGracePeriod`, 5 s, passed is refused 408 `too-slow`, marked and told, its connection kept;
   an answer, or a listen's batch, its socket still holds past the longer of `SendGracePeriod` and
-  its bytes at `MinimumSendBytesPerSecond` is lost, its connection closed at both ends and reported
-  through `Error`, naming the bound, as an outbox past `MaximumOutboxBytes` is. A head is Kestrel's
-  `RequestHeadersTimeout`, the transport's `HeadersTimeout`, 30 s, on both transports, answered 408
-  as HTTP answers it. Every answer written before its body is whole closes its socket in stages
-  (RFC 9112 §9.6): its end flushed, what still comes read and dropped until its client closes or 2
-  seconds pass, so a reset never erases it.
+  its bytes at `MinimumSendBytesPerSecond` is lost, its connection dropped at both ends and
+  reported through `Error` as its connection ends, naming the bound and its value, as an outbox past
+  `MaximumOutboxBytes` is. A head is Kestrel's `RequestHeadersTimeout`, the transport's
+  `HeadersTimeout`, 30 s, on both transports, answered 408 as HTTP answers it. Every answer written
+  before its body is whole closes its socket in stages (RFC 9112 §9.6): its end flushed, what still
+  comes read and dropped until its client closes or 2 seconds pass, so a reset never erases it.
 - **A WebSocket server** bounds its connections as an HTTP server does, `MaximumConnections`,
   10,000, and `MaximumConnectionsPerAddress`, 64, an upgrade past them refused 503 `busy` before its
   101, its place taken as it is judged (spec 15.2, step 8), so behind a proxy it needs
@@ -176,7 +271,10 @@ the listens, the outboxes and the server's life, under one lock on the C# side.
   `MaximumConnectionsPerAddress`, gauged `largestAddressConnections`, before the first 503; and
   holds what waits for a client's socket to `MinimumSendBytesPerSecond` past `SendGracePeriod` and
   to `MaximumUnsentBytes`, the facade's drawn from its router's limits, a client behind either
-  dropped, its close unclean, and reported through `Error`, naming the bound.
+  dropped, its close unclean, and reported through `Error` as its connection ends, naming the bound
+  and its value. A message past `MaximumMessageBytes` fails its connection with 1009, drained until
+  the peer's close or `CloseTimeout`, its close unclean whatever the peer answers, and reported
+  through `Error` the same way (spec 15.3).
   `BeadHttpClient` is its client, as .NET's own is `HttpClient`.
   The connection's token, in `bead-connection-token`, is readable by script, where a socket is not:
   off the machine, HTTPS.
@@ -214,22 +312,32 @@ the listens, the outboxes and the server's life, under one lock on the C# side.
   stands for: over HTTP, each `POST`'s `Authorization`; over a WebSocket, its upgrade's, for every
   envelope of the connection, toward its server alone (spec 15.2, [decision
   0032](../../docs/decisions/0032-a-websocket-upgrade-from-no-page-carries-its-credential-beside-every-envelope.md)).
-  `WebSocketConnectOptions` takes it as `Credential`, a string, or as `CredentialProvider`, called
-  at each attempt, a reconnection's included, with the attempt's token, as SignalR's
-  `AccessTokenProvider` is: where a credential past its end is renewed. A connect refuses, an
-  `ArgumentException`, nothing moved: both given; one that is no field value — anything but visible
-  ASCII, spaces and tabs, or a space or a tab first or last (RFC 9110 §5.5), which the HTTP client
-  refuses alike before a send goes; one over `ws://` off the loopback. A value the provider hands
-  that is no field value fails its attempt alike, which a reconnection does not try again; what it
-  throws fails the attempt, a `WebSocketException` whose inner exception it is. `Carries` says what
-  a call may present: over HTTP any field value, over a WebSocket the bytes its upgrade carried
-  alone, compared by `CryptographicOperations.FixedTimeEquals`. An upgrade that carries an `Origin`
-  carries none, whatever its `Authorization`: a page's browser writes its own authentication on it.
-  One connection carries one credential: a client presents another by connecting again, and gives
-  its router's default the same bytes, from one source; between the two, a call fails before it
-  goes, `DESTINATION_UNREACHABLE`. A call's options present `Credential.Elsewhere(carried)`: the
-  header's `Credential.Elsewhere()`, nothing to carry, a JWT with no token and a scheme to come are
-  an `ArgumentException`, before the call starts (spec 13.4).
+  `WebSocketConnectOptions` takes it as `Credential`, a string, or as `CredentialProvider`, whose
+  value each attempt awaits, a reconnection's included, with the attempt's token, as SignalR's
+  `AccessTokenProvider` is: where a credential past its end is renewed. A client has one call of its
+  provider under way at a time, published under the client's lock and made once it is released: an
+  attempt that comes while one is waits for its outcome, and one that meets a call no attempt waits
+  on any more lets it settle before it calls again, each within its own bounds, its token, its
+  timeout and the client's dispose, which end it at once whatever the provider does. A value that
+  comes late is handed only to an attempt still waiting for it, and a failure that comes late is
+  observed, never left unobserved. The provider's token is cancelled once its attempt is over, its
+  callbacks run apart from the connect's ending, so none takes the place of its outcome; a provider
+  that cancels itself while that attempt's token is still live fails it as any failure of its does.
+  What else a connect awaits, the WebSocket's invoker and an HTTP client's `Handler`, is bounded
+  alike, one that ignores its token among them. A connect refuses, an `ArgumentException`, nothing
+  moved: both given; one that is no field value — anything but visible ASCII, spaces and tabs, or a
+  space or a tab first or last (RFC 9110 §5.5), which the HTTP client refuses alike before a send
+  goes; one over `ws://` off the loopback. A value the provider hands that is no field value fails
+  its attempt alike, which a reconnection does not try again; what it throws fails the attempt, a
+  `WebSocketException` whose inner exception it is. `Carries` says what a call may present: over
+  HTTP any field value, over a WebSocket the bytes its upgrade carried alone, compared by
+  `CryptographicOperations.FixedTimeEquals`. An upgrade that carries an `Origin` carries none,
+  whatever its `Authorization`: a page's browser writes its own authentication on it. One connection
+  carries one credential: a client presents another by connecting again, and gives its router's
+  default the same bytes, from one source; between the two, a call fails before it goes,
+  `DESTINATION_UNREACHABLE`. A call's options present `Credential.Elsewhere(carried)`: the header's
+  `Credential.Elsewhere()`, nothing to carry, a JWT with no token and a scheme to come are an
+  `ArgumentException`, before the call starts (spec 13.4).
 
   ```csharp
   // one source for the upgrade's credential and the router's default, renewed together
@@ -269,6 +377,24 @@ the listens, the outboxes and the server's life, under one lock on the C# side.
   field it does not declare among them (spec 17.9, [decision
   0028](../../docs/decisions/0028-a-proto-payloads-records-are-read-against-its-message-before-its-library-reads-them.md)).
   A project that binds `proto` references `Bead.Protobuf`, which carries Google.Protobuf with it.
+- **A `proto` request's rules** are protovalidate's options on its message, which beadc compiles
+  into each side's validator ([decision
+  0035](../../docs/decisions/0035-a-payload-that-reads-is-held-to-its-messages-rules-before-its-resolver-sees-it.md)):
+  `Validators.Of(rules)`, of `Bead.Protobuf`, makes the bindings' `Validate` of the rules it
+  generates, which judge the message into an `IViolationSink`. The sink holds the violations a
+  detail of `MaximumBytes` carries, each sized as its writer writes it, and counts the rest without
+  building their path, so a judging holds a detail's worth whatever the request breaks; under
+  `FailFast` it stops at the first. A `pattern` is a table beadc builds ahead of time,
+  `Pattern.Matches` walking it a cell a code point. Rules written by hand, a `json` binding's, are
+  judged alike through `Validators.Of`. The side that answers judges every request once it reads,
+  before its resolver, and answers one its rules refuse `PAYLOAD_INVALID`, its violations in its
+  detail, lines of canonical JSON that `Violations.Of` reads back; a client whose options say
+  `Validates`, or a server's for its commands, judges the value before it is written. Every verdict
+  of `spec/validations.json` plays through the validators beadc generates for
+  `spec/validations.proto`, in `tests/Bead.Protobuf.Tests/Generated/`, which the root's
+  `tools/check-validations.mjs` holds to beadc; the root's `tools/protovalidate-differential.mjs`
+  plays them against protovalidate-es through the testee in
+  `tools/Bead.ProtovalidateDifferential/`.
 - **The clock** is a `TimeProvider`, named `Clock`, which every layer takes and exposes ([decision
   0011](../../docs/decisions/0011-every-side-takes-its-time-from-a-clock-it-is-given.md)).
 
@@ -283,6 +409,11 @@ A field value that holds a control character other than HTAB, or a character pas
 answered 400 unmarked before anything else of the request is judged, at both transports, as HTTP
 answers a malformed field (spec 15.12): Kestrel refuses an octet that is no UTF-8 and takes a
 control character, which the transport refuses; over HTTP/2, its stream reset, `PROTOCOL_ERROR`.
+So is a request whose target holds an octet other than visible ASCII, in its path or its query, or
+whose path's percent-decoding holds NUL, `%00`: Kestrel takes a control character, HTAB, a bare CR
+and DEL in a target, which the transports and the gateway refuse over every protocol through
+`HostsAndOrigins.IsVisibleTarget`, and refuses `%00` in a path itself; `%00` in a query, and every
+other octet percent-encoded, are taken.
 So is one whose value starts or ends with a space or a tab, which RFC 9113 §8.2.1 calls malformed
 over HTTP/2, where Kestrel hands it on and the transport resets its stream; over HTTP/1.1 the parser
 strips it first (RFC 9110 §5.5).

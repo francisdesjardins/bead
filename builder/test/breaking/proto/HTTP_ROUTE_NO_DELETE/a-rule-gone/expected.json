@@ -1,0 +1,16 @@
+{
+  "WIRE": [
+    {
+      "rule": "HTTP_ROUTE_NO_DELETE",
+      "line": 28,
+      "column": 5
+    }
+  ],
+  "API": [
+    {
+      "rule": "HTTP_ROUTE_NO_DELETE",
+      "line": 28,
+      "column": 5
+    }
+  ]
+}

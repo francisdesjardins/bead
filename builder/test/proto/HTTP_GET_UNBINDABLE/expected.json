@@ -1,0 +1,7 @@
+[
+  {
+    "rule": "HTTP_GET_UNBINDABLE",
+    "line": 40,
+    "column": 5
+  }
+]

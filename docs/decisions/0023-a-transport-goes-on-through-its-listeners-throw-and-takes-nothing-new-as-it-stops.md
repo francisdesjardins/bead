@@ -133,9 +133,10 @@ reported the same way, and a connection it leaves untracked lives until its tran
 over HTTP at its `inactivityTimeout`.
 
 **An application listens for errors in two places**: on its router, for what spec 9.0 reports, and
-on its transport, for a socket's error and a listener's throw. A router that re-emits its
-transport's `error` widens `IRouterServerTransport` and `IRouterClientTransport` for every
-transport, and is a decision of its own, which meets the Tenth Man.
+on its transport, for what it ends a connection for of its own
+([0033](0033-a-side-bounds-what-a-peer-holds-of-it.md), spec 15.1) and a listener's throw. A router
+that re-emits its transport's `error` widens `IRouterServerTransport` and `IRouterClientTransport`
+for every transport, and is a decision of its own, which meets the Tenth Man.
 
 **A transport server's error with no connection stays a row of the support matrix**: Kestrel's own
 late errors go to its logger alone, so the C# side raises `Error` for a listener's throw and none

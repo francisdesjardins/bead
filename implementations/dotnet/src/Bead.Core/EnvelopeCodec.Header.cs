@@ -165,7 +165,7 @@ public static partial class EnvelopeCodec
         return $"0x{value:x2}";
     }
 
-    /// <summary>A credential scheme's name, for a detail; its number for a scheme to come.</summary>
+    /// <summary>A credential scheme's name, for a detail; <c>scheme</c> and its number for a scheme to come.</summary>
     internal static string SchemeNameOf(CredentialScheme scheme)
     {
         return scheme switch
@@ -272,7 +272,7 @@ public static partial class EnvelopeCodec
             if (!request.OpensSubscription)
             {
                 throw new ArgumentException(
-                    "a request paces nothing unless it opens a subscription",
+                    $"a {HexadecimalOf((int)request.Kind)} header paces nothing: a request that opens a subscription does, or a credit",
                     nameof(request));
             }
 

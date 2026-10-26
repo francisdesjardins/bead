@@ -17,7 +17,14 @@ import { checkBlueprintFile, checkRoots, type IChecked } from '../check.ts';
 import { type IConfig, parseConfig } from '../config.ts';
 import { InputError } from '../diagnostics.ts';
 import type { IBlueprint } from '../model/blueprint.ts';
-import { differencesOf, EDITOR_COPY, planOf, writeEditorCopy, writePlan } from '../generate.ts';
+import {
+  differencesOf,
+  EDITOR_COPY,
+  planOf,
+  ungeneratedOf,
+  writeEditorCopy,
+  writePlan,
+} from '../generate.ts';
 import { PROTOC_CSHARP_HEADER } from '../protoc.ts';
 import { needsProtoc } from './pinned.ts';
 
@@ -25,6 +32,7 @@ const CLI = fileURLToPath(new URL('../cli.ts', import.meta.url));
 const INTEROP = fileURLToPath(new URL('../../../spec/interop-blueprint.json', import.meta.url));
 const MESSAGES = fileURLToPath(new URL('../../test/messages/', import.meta.url));
 const OPTIONS = fileURLToPath(new URL('../../proto/bead/options.proto', import.meta.url));
+const VALIDATE = fileURLToPath(new URL('../../proto/buf/validate/validate.proto', import.meta.url));
 const MESSAGES_PROTO = 'bead/messages/v1/messages.proto';
 
 // a project in the running test's output folder: its beadc.yaml and its files, by their paths
@@ -172,10 +180,12 @@ test("writes the editor's copy for a .proto source and never compares it", () =>
     { proto: MESSAGES }
   );
   const copy = join(folder, ...EDITOR_COPY.split('/'), 'bead', 'options.proto');
+  const validate = join(folder, ...EDITOR_COPY.split('/'), 'buf', 'validate', 'validate.proto');
 
   generate(folder);
 
   expect(readFileSync(copy, 'utf8')).toBe(readFileSync(OPTIONS, 'utf8'));
+  expect(readFileSync(validate, 'utf8')).toBe(readFileSync(VALIDATE, 'utf8'));
   expect(existsSync(join(folder, 'gen', 'bead.blueprint.json'))).toBe(true);
   expect(existsSync(join(folder, 'gen', 'ts', 'bead', 'options_pb.ts'))).toBe(true);
   expect(existsSync(join(folder, 'gen', 'ts', 'bead', 'messages', 'v1', 'messages_pb.ts'))).toBe(
@@ -279,8 +289,10 @@ test("--check names a stale Bead.cs by its header and protoc's file by its heade
 
   expect(findingsOf(folder)).toEqual([
     'gen/Bead/Messages/V1/Messages.cs: no such file; beadc generate writes it',
+    'gen/Bead/Messages/V1/Rules.cs: no such file; beadc generate writes it',
     'gen/Bead/Protobuf/Options.cs: no such file; beadc generate writes it',
     'gen/Bead/Messages/V1/MessagesBead.cs: no such file; beadc generate writes it',
+    'gen/Bead/Messages/V1/RulesBead.cs: no such file; beadc generate writes it',
   ]);
 
   generate(folder);
@@ -585,5 +597,252 @@ test('writes a C# output from a blueprint at its root, in its namespace, and --c
   writeFileSync(written, readFileSync(written, 'utf8').replace('Acme.Interop;', 'Acme.Other;'));
   expect(findingsOf(folder)).toEqual([
     'gen/InteropBead.cs:8: line 8 differs from what beadc generate writes',
+  ]);
+});
+
+test("an output whose target generates no feature its blueprint requires is FEATURE_UNGENERATED, before a file is written; both of beadc's generate validate", () => {
+  const folder = projectOf(
+    [
+      'version: 1',
+      'source:',
+      '  proto: [proto]',
+      'outputs:',
+      '  - language: typescript',
+      '    out: gen/ts',
+      '  - language: csharp',
+      '    out: gen/cs',
+      '',
+    ].join('\n'),
+    { proto: MESSAGES }
+  );
+  const config = configOf(folder);
+  const checked = checkedOf(config);
+
+  expect(checked.blueprint?.requires).toEqual(['validate']);
+  expect(ungeneratedOf(config, { checked })).toEqual([]);
+
+  // * a target of a third language that judges nothing: refused, by the feature and the target
+  const judgesNothing = { name: 'elsewhere', features: new Set<string>(), http: false };
+  const found = ungeneratedOf(config, {
+    checked,
+    targets: { typescript: judgesNothing, csharp: judgesNothing },
+  });
+
+  expect(
+    found.map((diagnostic) => {
+      return [diagnostic.rule, diagnostic.severity, diagnostic.message];
+    })
+  ).toEqual([
+    [
+      'FEATURE_UNGENERATED',
+      'error',
+      'the elsewhere target generates no validate, which the blueprint requires: an output of it would let through what the other sides refuse',
+    ],
+    [
+      'FEATURE_UNGENERATED',
+      'error',
+      'the elsewhere target generates no validate, which the blueprint requires: an output of it would let through what the other sides refuse',
+    ],
+  ]);
+  expect(existsSync(join(folder, 'gen'))).toBe(false);
+});
+
+// a .proto of one service whose rules a gateway serves, written into a project's proto root
+const ROUTED = (rules: readonly (readonly [string, string])[]): string => {
+  return [
+    'syntax = "proto3";',
+    '',
+    'package x.v1;',
+    '',
+    'import "bead/options.proto";',
+    'import "google/api/annotations.proto";',
+    '',
+    'option (bead.file) = {',
+    '  admission: {',
+    '    none: {}',
+    '  }',
+    '};',
+    '',
+    '// A request.',
+    'message Request {',
+    '  string name = 1;',
+    '  string other = 2;',
+    '}',
+    '',
+    '// Routed.',
+    'service XService {',
+    '  option (bead.service) = {',
+    '    id: 1',
+    '    revision: 1',
+    '  };',
+    ...rules.flatMap(([name, template], index) => {
+      return [
+        '',
+        `  // ${name}.`,
+        `  rpc ${name}(Request) returns (Request) {`,
+        `    option (bead.procedure) = {id: ${String(index + 1)}};`,
+        `    option (google.api.http) = {post: "${template}", body: "*"};`,
+        '  }',
+      ];
+    }),
+    '}',
+    '',
+  ].join('\n');
+};
+
+const routedProject = (yaml: string, rules: readonly (readonly [string, string])[]): string => {
+  const folder = projectOf(yaml);
+
+  mkdirSync(join(folder, 'proto', 'x', 'v1'), { recursive: true });
+  writeFileSync(join(folder, 'proto', 'x', 'v1', 'x.proto'), ROUTED(rules));
+
+  return folder;
+};
+
+test("two rules of one method that tie are HTTP_ROUTE_OVERLAP, and a rule at /openapi.json, /bead or a default route's template HTTP_ROUTE_RESERVED, before a file is written", () => {
+  const folder = routedProject(
+    [
+      'version: 1',
+      'source:',
+      '  proto: [proto]',
+      'http:',
+      '  prefix: /rpc',
+      'outputs:',
+      '  - language: typescript',
+      '    out: gen/ts',
+      '    http: true',
+      '',
+    ].join('\n'),
+    [
+      ['One', '/v1/{name}'],
+      ['Two', '/v1/{other}'],
+      ['Three', '/openapi.json'],
+      ['Four', '/bead'],
+      ['Five', '/rpc/X/one'],
+      ['Six', '/api/X/one'],
+    ]
+  );
+  const config = configOf(folder);
+  const checked = checkedOf(config);
+
+  expect(checked.diagnostics).toEqual([]);
+  expect(
+    ungeneratedOf(config, { checked }).map((diagnostic) => {
+      return [diagnostic.rule, diagnostic.line, diagnostic.message];
+    })
+  ).toEqual([
+    [
+      'HTTP_ROUTE_OVERLAP',
+      36,
+      "POST /v1/{other} of X.two ties POST /v1/{name} of X.one: one template up to its variables' names, which no precedence tells apart (transcoding 3.5)",
+    ],
+    [
+      'HTTP_ROUTE_RESERVED',
+      42,
+      'POST /openapi.json of X.three is at /openapi.json, where a gateway serves its document, which a gateway keeps',
+    ],
+    [
+      'HTTP_ROUTE_RESERVED',
+      48,
+      "POST /bead of X.four is at /bead, the HTTP transport's pathname, which a gateway keeps",
+    ],
+    [
+      'HTTP_ROUTE_RESERVED',
+      54,
+      "POST /rpc/X/one of X.five is at /rpc/X/one, X.one's default route, which a gateway keeps",
+    ],
+  ]);
+  expect(existsSync(join(folder, 'gen'))).toBe(false);
+});
+
+test("an output with http: true whose target writes no route table is HTTP_UNGENERATED; both of beadc's write one", () => {
+  const folder = routedProject(
+    [
+      'version: 1',
+      'source:',
+      '  proto: [proto]',
+      'outputs:',
+      '  - language: typescript',
+      '    out: gen/ts',
+      '    http: true',
+      '  - language: csharp',
+      '    out: gen/cs',
+      '    messages: external',
+      '',
+    ].join('\n'),
+    [['One', '/v1/{name}']]
+  );
+  const config = configOf(folder);
+  const checked = checkedOf(config);
+  const routeless = { name: 'elsewhere', features: new Set(['validate']), http: false };
+
+  expect(ungeneratedOf(config, { checked })).toEqual([]);
+  expect(
+    ungeneratedOf(config, { checked, targets: { typescript: routeless, csharp: routeless } }).map(
+      (diagnostic) => {
+        return [diagnostic.rule, diagnostic.file, diagnostic.message];
+      }
+    )
+  ).toEqual([
+    [
+      'HTTP_UNGENERATED',
+      'beadc.yaml',
+      'outputs[0] asks http: true of the elsewhere target, which writes no route table: take http out of it, or give HTTP to an output whose target writes one',
+    ],
+  ]);
+});
+
+test('writes the document openapi.out names, and embeds it byte for byte in each output with http: true, its route table beside it; --check holds them, and clean takes a route table out', () => {
+  const yaml = (http: boolean): string => {
+    return [
+      'version: 1',
+      'source:',
+      '  proto: [proto]',
+      'openapi:',
+      '  out: gen/openapi.json',
+      '  title: Routed',
+      '  problemTypes: https://example.com/problems/',
+      'outputs:',
+      '  - language: typescript',
+      '    out: gen/ts',
+      ...(http ? ['    http: true'] : []),
+      '  - language: csharp',
+      '    out: gen/cs',
+      '    messages: external',
+      ...(http ? ['    http: true'] : []),
+      'clean: true',
+      '',
+    ].join('\n');
+  };
+  const folder = routedProject(yaml(true), [['One', '/v1/{name}']]);
+
+  generate(folder);
+
+  const document = readFileSync(join(folder, 'gen', 'openapi.json'), 'utf8');
+  const typescript = readFileSync(join(folder, 'gen', 'ts', 'bead_http.ts'), 'utf8');
+  const csharp = readFileSync(join(folder, 'gen', 'cs', 'X', 'V1', 'BeadHttp.cs'), 'utf8');
+  const embedded = /export const OPENAPI_DOCUMENT = (".*");$/mu.exec(typescript)?.[1];
+  const literal = /return (".*")u8;$/mu.exec(csharp)?.[1];
+
+  expect(JSON.parse(document)).toMatchObject({ info: { title: 'Routed', version: 'X.1' } });
+  expect(JSON.parse(embedded ?? '""')).toBe(document);
+  // * C#'s escapes are JSON's, its line ends besides written as \u escapes JSON reads alike
+  expect(JSON.parse(literal ?? '""')).toBe(document);
+  expect(typescript).toContain(
+    "export const HTTP_PROBLEM_TYPES = 'https://example.com/problems/';"
+  );
+  expect(typescript).toContain(
+    "      { method: 'POST', template: '/api/X/one', body: '*' },\n      { method: 'POST', template: '/v1/{name}', body: '*' },"
+  );
+  expect(csharp).toContain(
+    'private const bool Supported = global::Bead.GeneratedCode.SupportsVersion5;'
+  );
+  expect(findingsOf(folder)).toEqual([]);
+
+  // * http taken off: the route tables are a run's no longer, and clean takes them out
+  writeFileSync(join(folder, 'beadc.yaml'), yaml(false));
+  expect(findingsOf(folder)).toEqual([
+    'gen/ts/bead_http.ts: proto/x/v1/x.proto no longer gives it: beadc generate takes it out, under clean',
+    'gen/cs/X/V1/BeadHttp.cs: proto/x/v1/x.proto no longer gives it: beadc generate takes it out, under clean',
   ]);
 });

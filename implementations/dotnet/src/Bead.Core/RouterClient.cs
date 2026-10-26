@@ -254,6 +254,15 @@ public sealed class RouterClient : IRouterLike, IRouterTarget, IDisposable
         }
     }
 
+    /// <inheritdoc/>
+    public int DetailBytes
+    {
+        get
+        {
+            return Limits.DetailBytes;
+        }
+    }
+
     /// <summary>
     /// The session the server announced last, which the connection is: the client presents it only
     /// on a call whose options ask for it, <see cref="Credential.Opaque()"/>, never by default, and
@@ -529,8 +538,9 @@ public sealed class RouterClient : IRouterLike, IRouterTarget, IDisposable
 
             // ! fails closed: a default withdrawn never falls to the connection's session, or to
             // none, in silence; the call fails before it goes, counted once it starts, withdrawing
-            // nothing, until one is given again (spec/debugging.md 9.3)
-            Refusal = isWithdrawn ? Failure.OfProtocol(ProtocolCode.SessionRequired, "the default credential was withdrawn") : null,
+            // nothing, until one is given again (spec/debugging.md 9.3). A value its requester's
+            // rules refused comes first: it was judged before the call came
+            Refusal = request.Refusal ?? (isWithdrawn ? Failure.OfProtocol(ProtocolCode.SessionRequired, "the default credential was withdrawn") : null),
         };
 
         if (request.Subscribes is not { } subscribes)

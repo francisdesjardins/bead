@@ -6,8 +6,9 @@
 // client hold, a member a command, a procedure that notifies or its notification; a server class
 // where only resolvers are written; and a client class holding a requester of each procedure by its
 // rpc's name. A `proto` codec has `Bead.Protobuf` check a payload's records by its message's
-// descriptor before Google.Protobuf reads it (decision 0028). The file's contract with the runtime
-// follows its services. Every type is qualified from `global::`, so no type of the namespace takes
+// descriptor before Google.Protobuf reads it (decision 0028), and a request whose message holds rules
+// is judged by the runtime's validator of its class of rules (decision 0035). The file's contract
+// with the runtime follows its services. Every type is qualified from `global::`, so no type of the namespace takes
 // a runtime type's place; every description goes through `docOf`, the one writer of a documentation
 // comment. A deprecation is marked `[Obsolete]`, its text and Bead's diagnostic id, on each
 // declaration the file writes for it, as protoc's C# generator and gRPC's mark a deprecated rpc,
@@ -31,6 +32,8 @@ import { DEPRECATION_ID, deprecationTextOf } from '../target.ts';
 export interface ICSharpTemplateOptions {
   /** The C# type of a message a `proto` binding names, by its full name, qualified. */
   readonly messageOf: (fullName: string) => string;
+  /** The class of rules of each message a request's rules reach, by its full name. */
+  readonly validators: ReadonlyMap<string, string>;
 }
 
 // a member of a record or a holder: its documentation's lines, then its declaration
@@ -432,6 +435,18 @@ export const printService = (service: IServiceEntry, options: ICSharpTemplateOpt
     `${INDENT}}`
   );
 
+  // * a request's rules, where its message has some: judged by the runtime's validator of them
+  const validateLines = (procedure: IProcedureEntry): string[] => {
+    const message = procedure.request.message;
+    const rules = message === undefined ? undefined : options.validators.get(message);
+
+    return rules === undefined || message === undefined
+      ? []
+      : [
+          `${INDENT}${INDENT}${INDENT}Validate = global::Bead.Protobuf.Validators.Of<${options.messageOf(message)}>(${rules}.Check),`,
+        ];
+  };
+
   for (const procedure of service.procedures) {
     const bindings = `global::Bead.ProcedureBindings<${typesOf(procedure)}>`;
     const member = `${INDENT}${INDENT}${INDENT}`;
@@ -465,6 +480,7 @@ export const printService = (service: IServiceEntry, options: ICSharpTemplateOpt
       ...(procedure.notification === undefined
         ? []
         : codecLines('Notification', procedure.notification)),
+      ...validateLines(procedure),
       `${INDENT}${INDENT}});`
     );
   }

@@ -9,11 +9,7 @@
 import { readFileSync } from 'node:fs';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { expect, test } from '@playwright/test';
-import {
-  INTEROP_SERVICE,
-  interopCredentialsOf,
-  interopVerifierOf,
-} from '../../../../interop/credentials';
+import { INTEROP_SERVICE, interopCredentialsOf } from '../../../../interop/credentials';
 import { InteropClient, InteropProcedures } from '../../../../interop/generated/interop_bead';
 import { issuerOf, offerInterop, offerInteropClient } from '../../../../interop/handlers';
 import type { IClient } from '../../../client/types';
@@ -33,7 +29,7 @@ import type {
 } from '../../shared/types';
 import { createRouterServer, SERVER_FAILURES } from '../router-server';
 import { createSessionManager } from '../session-manager';
-import { type IConversation, playConversation, WALL_CLOCK } from './conversation-player';
+import { type IConversation, isPlayedInMemory, playConversation } from './conversation-player';
 
 // interfaces
 
@@ -58,9 +54,9 @@ interface IVerifiers {
 
 // constants
 
-const { conversations: CONVERSATIONS } = JSON.parse(
+const { conversations: CONVERSATIONS, wallClock: WALL_CLOCK } = JSON.parse(
   readFileSync(new URL('../../../../../../spec/conversations.json', import.meta.url), 'utf8')
-) as { conversations: IConversation[] };
+) as { conversations: IConversation[]; wallClock: string };
 
 const { verifiers: VERIFIERS } = JSON.parse(
   readFileSync(new URL('../../../../../../spec/interop-service.json', import.meta.url), 'utf8')
@@ -134,7 +130,7 @@ test("every procedure of the interop service's API is offered, on the side its k
   expect(client.names.toSorted()).toEqual(namesOf(true));
 });
 
-test("slow waits on its server's clock, which its router runs on, and answers once it has passed", async () => {
+test("answers slow once its server's clock passed its wait, never before", async () => {
   const clock = createTestClock();
   const pipe = createPipedTransports({
     connectionHandle: 'type=WS;ip=127.0.0.1;port=50001;ordinal=1',
@@ -177,7 +173,9 @@ test("slow waits on its server's clock, which its router runs on, and answers on
 
 test('the interop service’s ELSEWHERE verifier holds, refuses and fails each value as its words say, at its time on its server’s clock', async () => {
   const clock = createTestClock(Date.parse(WALL_CLOCK));
-  const verify = interopVerifierOf(clock);
+  // through the server's credentials, as its router asks them, its signal aborted before it goes
+  const { verify } = interopCredentialsOf(clock);
+  const signal = AbortSignal.abort();
   const { rejection, verdicts } = VERIFIERS.elsewhere;
 
   expect(verdicts.length).toBeGreaterThan(0);
@@ -188,7 +186,7 @@ test('the interop service’s ELSEWHERE verifier holds, refuses and fails each v
 
     let outcome: unknown = 'pending';
 
-    void verify(carried).then(
+    void Promise.resolve(verify!(carried, signal)).then(
       (session) => {
         outcome =
           session === undefined
@@ -275,9 +273,13 @@ test("the interop service's key set answers each issuer it names as its words sa
   ).toEqual([1, 1, 0, 1, 1]);
   expect([answered[0]?.[0]?.jwk.kid, answered[1]?.[0]?.jwk.kid]).toEqual([kid, kid]);
   expect(answered[0]?.[0]?.jwk.k).not.toBe(answered[1]?.[0]?.jwk.k);
-  expect([answered[3]?.[0]?.jwk.kid, answered[3]?.[0]?.jwk.k]).toEqual([
-    undefined,
-    answered[0]?.[0]?.jwk.k,
+  expect(
+    answered.slice(3).map((keys) => {
+      return [keys[0]?.jwk.kid, keys[0]?.jwk.k];
+    })
+  ).toEqual([
+    [undefined, answered[0]?.[0]?.jwk.k],
+    [undefined, answered[0]?.[0]?.jwk.k],
   ]);
   expect(answers[5]).toBe('pending');
   expect(duesOn(clock)).toEqual([]);
@@ -300,9 +302,7 @@ test("the interop service's key set answers each issuer it names as its words sa
   await sleep(0);
 
   expect(duesOn(clock)).toEqual([]);
-  expect(failure).toBe(
-    'the interop key set answers for no issuer https://unnamed.interop.bead.example'
-  );
+  expect(failure).toBe('the interop key set names no issuer https://unnamed.interop.bead.example');
 });
 
 test('the interop service’s endSessionsOf takes an issuer alone, a string, and throws for anything else', () => {
@@ -314,11 +314,11 @@ test('the interop service’s endSessionsOf takes an issuer alone, a string, and
     expect(issuerOf(request), JSON.stringify(request)).toBe(issuer);
   }
 
-  // undefined, which JSON cannot write, besides what the file refuses
+  // undefined, which JSON cannot write, besides what the file refuses: its words whole
   for (const request of [...refuses, undefined]) {
     expect(() => {
       return issuerOf(request);
-    }, JSON.stringify(request)).toThrow(refusal);
+    }, JSON.stringify(request)).toThrow(new Error(refusal));
   }
 });
 
@@ -328,7 +328,16 @@ test.describe('the conversations', () => {
 
   for (const conversation of CONVERSATIONS) {
     test(conversation.name, async () => {
-      await playConversation(conversation, {});
+      await playConversation(conversation, { wallClock: WALL_CLOCK });
     });
   }
+
+  // spec 15.13: each conversation whose connections a pair of it stands for, through a real one
+  test.describe('through the in-memory transport', () => {
+    for (const conversation of CONVERSATIONS.filter(isPlayedInMemory)) {
+      test(conversation.name, async () => {
+        await playConversation(conversation, { inMemory: true, wallClock: WALL_CLOCK });
+      });
+    }
+  });
 });

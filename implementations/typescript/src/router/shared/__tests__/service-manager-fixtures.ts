@@ -1,5 +1,5 @@
 import { type IClock, PLATFORM_CLOCK } from '../../../transport/shared/clock';
-import { failureTableOf } from '../constants';
+import { failureTableOf, LIMIT_DEFAULTS } from '../constants';
 import {
   ProgrammerError,
   type CallId,
@@ -151,6 +151,7 @@ export const createFakeRouter = (side: RouterSide = 'server', clock: IClock = PL
   const router: IRouterLike = {
     clock,
     failures: failureTableOf(side),
+    limits: LIMIT_DEFAULTS,
 
     answeredOf: () => {
       return undefined;
@@ -231,6 +232,11 @@ export const createFakeRouter = (side: RouterSide = 'server', clock: IClock = PL
     void notifications.get(keyOf(procedureAddress))?.trigger(encode(notification));
   };
 
+  /** What the router does with a notification for `procedureAddress`, settled once heard. */
+  const delivered = async (procedureAddress: IProcedureAddress, notification: IText) => {
+    await notifications.get(keyOf(procedureAddress))?.trigger(encode(notification));
+  };
+
   /**
    * What the router does when its connection closes, or the server ends each subscription with
    * `failure`: it lets go of each, and tells it.
@@ -250,7 +256,7 @@ export const createFakeRouter = (side: RouterSide = 'server', clock: IClock = PL
     return notifications.has(keyOf(procedureAddress));
   };
 
-  return { calls, control, deliver, drop, holds, router };
+  return { calls, control, deliver, delivered, drop, holds, router };
 };
 
 export const recordDebug = <Handle extends string>(manager: IServiceManager<Handle>) => {

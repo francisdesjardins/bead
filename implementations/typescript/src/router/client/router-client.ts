@@ -616,7 +616,10 @@ export const createRouterClient = <Transport extends IRouterClientTransportLike>
       core.registerResolver(resolver);
     },
     report,
-    request: (payload, { onCallId, onSent, options, procedure, series, subscribes }) => {
+    request: (
+      payload,
+      { onCallId, onSent, options, procedure, refusal: judged, series, subscribes }
+    ) => {
       const connectionHandle = SERVER_CONNECTION_HANDLE;
 
       // ! a programmer's error first, before the call starts, so it is never counted: only the
@@ -683,7 +686,16 @@ export const createRouterClient = <Transport extends IRouterClientTransportLike>
         );
       }
 
-      const sent = { connectionHandle, credential, onSent, options, procedure, refusal, series };
+      // * its requester's refusal before the router's own: its value was judged before it came
+      const sent = {
+        connectionHandle,
+        credential,
+        onSent,
+        options,
+        procedure,
+        refusal: judged ?? refusal,
+        series,
+      };
       const withdrawing = (reason: unknown): never => {
         withdraw(reason, presentedDefault);
 

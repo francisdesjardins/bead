@@ -1,9 +1,9 @@
-import { setTimeout as sleep } from 'node:timers/promises';
 import { expect, test } from '@playwright/test';
 import type { TransportServerConnectionHandle } from '../../../transport/server/types';
 import { createTestClock } from '../../../transport/shared/__tests__/fixtures';
 import { PLATFORM_CLOCK } from '../../../transport/shared/clock';
 import { createSessionManager } from '../../server/session-manager';
+import { judgeRules } from '../../../proto/validate';
 import { CredentialScheme } from '../constants';
 import {
   createServiceManager,
@@ -19,6 +19,7 @@ import {
   type IRouterLike,
   type ProcedureKind,
 } from '../service-manager';
+import type { IValidateOptions } from '../violations';
 import {
   type IText,
   answerOf,
@@ -33,6 +34,37 @@ import {
   serializer,
   serverSerializer,
 } from './service-manager-fixtures';
+
+// constants
+
+/** A text's rule: one character at least, its violation at `text`. */
+const NOT_EMPTY = Object.freeze({
+  bounds: Object.freeze({ min_len: '1' }),
+  message: 'must be at least 1 characters',
+  ruleId: 'string.min_len',
+});
+
+/** The detail PAYLOAD_INVALID carries of a text that breaks {@link NOT_EMPTY}. */
+const NOT_EMPTY_DETAIL =
+  '{"bounds":{"min_len":"1"},"fieldPath":"text","message":"must be at least 1 characters","ruleId":"string.min_len"}\n{"more":0}';
+
+// helpers
+
+/** A text's rules, judged as generated code judges a message's, the options each is given kept. */
+const textRulesOf = () => {
+  const given: IValidateOptions[] = [];
+  const validate = (request: IText, options: IValidateOptions) => {
+    given.push(options);
+
+    return judgeRules((sink) => {
+      sink.enter('text');
+
+      return request.text === '' && sink.add(NOT_EMPTY, request.text);
+    }, options);
+  };
+
+  return { given, validate };
+};
 
 // definition
 
@@ -109,7 +141,7 @@ test.describe('createServiceManager', () => {
   });
 
   test.describe('debug', () => {
-    test("refuses a clock that differs from its router's", () => {
+    test("runs on its router's clock, and refuses another", () => {
       const { router } = createFakeRouter('server', createTestClock());
 
       expect(createServiceManager(router, { clock: router.clock })).toBeDefined();
@@ -135,24 +167,44 @@ test.describe('createServiceManager', () => {
 
       const failing = manager.getRequest(echo, { serializer })({ text: 'x' })({ destinationId: 4 });
 
-      await expect(failing).rejects.toBeInstanceOf(FailureError);
-      await expect(failing).rejects.toMatchObject({
+      const failure: unknown = await failing.catch((reason: unknown) => {
+        return reason;
+      });
+
+      expect(failure).toBeInstanceOf(FailureError);
+      expect(failure).toMatchObject({
         cause: expect.any(SyntaxError),
         code: ProtocolCode.PAYLOAD_UNDECODABLE,
         destinationId: 4,
-        header: { callId: 7, kind: 0x11 },
         origin: 'local',
         procedureAddress: { procedureId: 1, serviceId: 2 },
         scope: FailureScope.PROTOCOL,
         side: 'client',
       });
+      expect((failure as FailureError).header).toStrictEqual(answer.header);
+
+      // what the decoder threw is its cause, and its detail says it
+      const { cause, detail } = failure as FailureError;
+
+      expect(detail).not.toBe('');
+      expect(detail).toBe((cause as Error).message);
+
+      // told as the call's answer: the failure, and what it carries
       expect(
         seen.map(({ error, info }) => {
-          return [info.direction, error instanceof FailureError, info.rx];
+          return [info.direction, error, info.rx];
         })
       ).toEqual([
-        ['tx', false, undefined],
-        ['rx', true, expect.objectContaining({ code: ProtocolCode.PAYLOAD_UNDECODABLE })],
+        ['tx', null, undefined],
+        [
+          'rx',
+          failure,
+          {
+            code: ProtocolCode.PAYLOAD_UNDECODABLE,
+            detail,
+            scope: FailureScope.PROTOCOL,
+          },
+        ],
       ]);
     });
   });
@@ -160,18 +212,24 @@ test.describe('createServiceManager', () => {
   test.describe('getNotificationResolver', () => {
     test('registers its resolver with its notify, for its router to declare it as the side that notifies', () => {
       const { calls, router } = createFakeRouter();
+      const manager = createServiceManager(router);
 
-      createServiceManager(router).getNotificationResolver(echo, { serializer: serverSerializer })(
-        () => {
-          return Promise.resolve();
-        }
-      );
+      manager.getRequestResolver(echo, { serializer: serverSerializer })(() => {
+        return Promise.resolve();
+      });
+      manager.getNotificationResolver(
+        { ...echo, procedureId: 2, procedureName: 'news' },
+        { serializer: serverSerializer }
+      )(() => {
+        return Promise.resolve();
+      });
 
+      // a router tells a procedure that notifies by its resolver, which notifies
       expect(
         calls.registerResolver.map((resolver) => {
-          return typeof (resolver as { notify?: unknown }).notify;
+          return typeof (resolver as { notify?: unknown }).notify === 'function';
         })
-      ).toEqual(['function']);
+      ).toEqual([false, true]);
     });
 
     test('notifies through the router with the encoded notification', async () => {
@@ -347,7 +405,7 @@ test.describe('createServiceManager', () => {
     });
 
     test('a failed notify resolves all the same, and only debug hears of it', async () => {
-      const { control, router } = createFakeRouter();
+      const { calls, control, router } = createFakeRouter();
       const manager = createServiceManager(router);
       const seen = recordDebug(manager);
       const failure = new Error('gone');
@@ -366,6 +424,15 @@ test.describe('createServiceManager', () => {
           return error;
         })
       ).toEqual([null, failure]);
+      expect(calls.notify).toHaveLength(1);
+      expect(
+        seen.map(({ info }) => {
+          return [info.direction, info.type];
+        })
+      ).toEqual([
+        ['tx', 'notification'],
+        ['tx', 'notification'],
+      ]);
     });
   });
 
@@ -442,19 +509,26 @@ test.describe('createServiceManager', () => {
     });
 
     test('callbacks registering at once share one request and one registration', async () => {
-      const { calls, deliver, router } = createFakeRouter();
+      const { calls, control, deliver, router } = createFakeRouter();
       const manager = createServiceManager(router);
       const heard: string[] = [];
       const notification = manager.getNotification(echo, { serializer });
+      const answered = Promise.withResolvers<IRouterResult>();
 
-      await Promise.all([
-        notification({ text: 'a' }, ({ text }) => {
-          heard.push(`a ${text}`);
-        })(),
-        notification({ text: 'b' }, ({ text }) => {
-          heard.push(`b ${text}`);
-        })(),
-      ]);
+      // the answer held, the second registers while the first one's request is in flight
+      control.answer = () => {
+        return answered.promise;
+      };
+
+      const first = notification({ text: 'a' }, ({ text }) => {
+        heard.push(`a ${text}`);
+      })();
+      const second = notification({ text: 'b' }, ({ text }) => {
+        heard.push(`b ${text}`);
+      })();
+
+      answered.resolve(answerOf(encode({ text: 'a' })));
+      await Promise.all([first, second]);
       deliver(echo, { text: 'news' });
 
       expect(calls.request.length).toBe(1);
@@ -668,8 +742,11 @@ test.describe('createServiceManager', () => {
       const manager = createServiceManager(router);
       const heard: string[] = [];
       const answered = Promise.withResolvers<IRouterResult>();
+      const requested = Promise.withResolvers<undefined>();
 
       control.answer = () => {
+        requested.resolve(undefined);
+
         return answered.promise;
       };
 
@@ -680,7 +757,8 @@ test.describe('createServiceManager', () => {
         }
       )();
 
-      await sleep(0);
+      // held by the router, its request in flight
+      await requested.promise;
       drop();
       answered.resolve(answerOf(encode({ text: 'ok' })));
 
@@ -764,9 +842,18 @@ test.describe('createServiceManager', () => {
       const manager = createServiceManager(router);
       const notification = manager.getNotification(echo, { serializer });
       const gate = Promise.withResolvers<undefined>();
+      const held = Promise.withResolvers<undefined>();
       const settled: string[] = [];
+      const registerNotification = router.registerNotification;
 
       control.subscribeGate = gate.promise;
+      router.registerNotification = (registering) => {
+        const subscribing = registerNotification(registering);
+
+        held.resolve(undefined);
+
+        return subscribing;
+      };
 
       const first = notification({ text: 'a' }, () => {
         return undefined;
@@ -775,7 +862,7 @@ test.describe('createServiceManager', () => {
       });
 
       // the router holds it now, and is still subscribing
-      await sleep(0);
+      await held.promise;
       expect(holds(echo)).toBe(true);
 
       const second = notification({ text: 'b' }, () => {
@@ -784,7 +871,8 @@ test.describe('createServiceManager', () => {
         settled.push('second');
       });
 
-      await sleep(10);
+      // whatever can run has run: neither settles while the router subscribes
+      await new Promise(setImmediate);
       expect(settled).toEqual([]);
 
       gate.resolve(undefined);
@@ -809,6 +897,8 @@ test.describe('createServiceManager', () => {
       ).rejects.toThrow('refused by the broker');
       expect(holds(echo)).toBe(false);
       expect(calls.unregisterNotification).toEqual(['echo']);
+      // the router cancels, by default, whatever its call may have left at the other end
+      expect(calls.unregisterOptions).toEqual([undefined]);
 
       control.subscribeError = undefined;
 
@@ -904,24 +994,41 @@ test.describe('createServiceManager', () => {
     });
 
     test('refuses a notification asked for again at another window, none against one among them, and gives the same at the same', () => {
-      const manager = createServiceManager(createFakeRouter('client').router);
-      const paced = { ...echo, procedureId: 71 };
-      const notification = manager.getNotification(paced, { serializer, window: 4 });
+      for (const [pacedId, unpacedId] of [
+        [71, 1],
+        [1, 9],
+      ] as const) {
+        const manager = createServiceManager(createFakeRouter('client').router);
+        const paced = { ...echo, procedureId: pacedId };
+        const unpacedProcedure = { ...echo, procedureId: unpacedId };
+        const notification = manager.getNotification(paced, { serializer, window: 4 });
 
-      expect(manager.getNotification(paced, { serializer, window: 4 })).toBe(notification);
-      expect(() => {
-        return manager.getNotification(paced, { serializer, window: 1 });
-      }).toThrow(/window 4, not 1/);
-      expect(() => {
-        return manager.getNotification(paced, { serializer });
-      }).toThrow(ProgrammerError);
+        expect(manager.getNotification(paced, { serializer, window: 4 })).toBe(notification);
+        expect(() => {
+          return manager.getNotification(paced, { serializer, window: 1 });
+        }).toThrow(
+          new ProgrammerError(
+            `2/${String(pacedId)} is already a notification with window 4, not window 1`
+          )
+        );
+        expect(() => {
+          return manager.getNotification(paced, { serializer });
+        }).toThrow(ProgrammerError);
 
-      const unpaced = manager.getNotification(echo, { serializer });
+        const unpaced = manager.getNotification(unpacedProcedure, { serializer });
 
-      expect(manager.getNotification(echo, { serializer })).toBe(unpaced);
-      expect(() => {
-        return manager.getNotification(echo, { serializer, window: 1 });
-      }).toThrow(ProgrammerError);
+        expect(manager.getNotification(unpacedProcedure, { serializer })).toBe(unpaced);
+        expect(() => {
+          return manager.getNotification(unpacedProcedure, { serializer, window: 1 });
+        }).toThrow(ProgrammerError);
+        expect(() => {
+          return manager.getNotification(unpacedProcedure, { serializer, window: 1 });
+        }).toThrow(
+          new ProgrammerError(
+            `2/${String(unpacedId)} is already a notification with no window, not window 1`
+          )
+        );
+      }
     });
 
     test("refuses a procedure off section 16 before its own reason, a notification's asked for otherwise", () => {
@@ -932,10 +1039,10 @@ test.describe('createServiceManager', () => {
 
       expect(() => {
         manager.getNotification({ ...echo, procedureName: 'Echo' }, { serializer });
-      }).toThrow(/: off its form$/);
+      }).toThrow(/ is off its form: /);
       expect(() => {
         manager.getNotification({ ...echo, serviceRevision: 0 }, { serializer });
-      }).toThrow(/: out of its range$/);
+      }).toThrow(/ is out of its range: /);
     });
 
     test('a trigger the router never registered is a programmer error', () => {
@@ -1021,6 +1128,125 @@ test.describe('createServiceManager', () => {
           return [info.direction, info.type, error];
         })
       ).toEqual([['rx', 'notification', failure]]);
+    });
+  });
+
+  test.describe('getRequestResolver', () => {
+    test('answers PAYLOAD_INVALID to a request its rules refuse, before its callback', async () => {
+      const { calls, router } = createFakeRouter();
+      const manager = createServiceManager({
+        ...router,
+        limits: { ...router.limits, maximumDetailBytes: 512 },
+      });
+      const { given, validate } = textRulesOf();
+      const seen: IText[] = [];
+
+      const resolver = manager.getRequestResolver(echo, {
+        failFast: true,
+        serializer: serverSerializer,
+        validate,
+      })((request, response) => {
+        seen.push(request.payload);
+
+        return response(request.payload);
+      });
+
+      await resolver(propsOf(encode({ text: '' })));
+      await resolver(propsOf(encode({ text: 'hi' })));
+
+      expect(seen).toEqual([{ text: 'hi' }]);
+      expect(calls.respond).toEqual([
+        {
+          request: { connectionHandle, header },
+          // * stopped at its first, as its failFast asks: its detail says so, never a count
+          response: {
+            failure: {
+              ...SERVER_FAILURES.payloadInvalid,
+              detail: NOT_EMPTY_DETAIL.replace('{"more":0}', '{"stopped":true}'),
+            },
+          },
+        },
+        { request: { connectionHandle, header }, response: { payload: encode({ text: 'hi' }) } },
+      ]);
+      // * judged under the detail's bound of its router, with its dependencies' failFast
+      expect(given).toEqual([
+        { failFast: true, maximumBytes: 512 },
+        { failFast: true, maximumBytes: 512 },
+      ]);
+    });
+
+    test('traces a request its rules refuse: its rx, then its failure', async () => {
+      const { router } = createFakeRouter('server', createTestClock(1_000));
+      const manager = createServiceManager(router);
+      const seen = recordDebug(manager);
+      const { validate } = textRulesOf();
+
+      const resolver = manager.getRequestResolver(echo, {
+        serializer: serverSerializer,
+        validate,
+      })((request, response) => {
+        return response(request.payload);
+      });
+
+      await resolver(propsOf(encode({ text: '' })));
+
+      const received = {
+        callId: 7,
+        connectionHandle,
+        direction: 'rx',
+        procedureId: 1,
+        procedureName: 'echo',
+        rx: { text: '' },
+        serviceId: 2,
+        serviceRevision: 3,
+        startedAt: 1_000,
+        type: 'request',
+      };
+
+      expect(seen).toEqual([
+        { error: null, info: received },
+        {
+          error: null,
+          info: {
+            ...received,
+            direction: 'tx',
+            duration: 0,
+            tx: { ...SERVER_FAILURES.payloadInvalid, detail: NOT_EMPTY_DETAIL },
+          },
+        },
+      ]);
+    });
+
+    test('answers PROCEDURE_FAILED to rules that throw, and hands why on for its router to report', async () => {
+      const { calls, router } = createFakeRouter();
+      const manager = createServiceManager(router);
+      const seen = recordDebug(manager);
+      const broken = new RangeError('a rule that fails to judge');
+
+      const resolver = manager.getRequestResolver(echo, {
+        serializer: serverSerializer,
+        validate: () => {
+          throw broken;
+        },
+      })((request, response) => {
+        return response(request.payload);
+      });
+
+      await expect(resolver(propsOf(encode({ text: 'hi' })))).rejects.toBe(broken);
+      expect(calls.respond).toEqual([
+        {
+          request: { connectionHandle, header },
+          response: { failure: SERVER_FAILURES.procedureFailed },
+        },
+      ]);
+      expect(
+        seen.map(({ error, info }) => {
+          return [info.direction, error];
+        })
+      ).toEqual([
+        ['rx', null],
+        ['tx', broken],
+      ]);
     });
   });
 

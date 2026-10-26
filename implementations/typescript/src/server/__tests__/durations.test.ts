@@ -6,6 +6,7 @@
 
 // dependencies
 
+import { EventEmitter } from 'node:events';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { isDeepStrictEqual } from 'node:util';
 import { expect, test } from '@playwright/test';
@@ -13,6 +14,7 @@ import { createRelay } from '../../router/server/relay';
 import { createSessionManager } from '../../router/server/session-manager';
 import type { RelayTarget } from '../../router/server/types';
 import { EnvelopeKind, LIMIT_DEFAULTS, SERVER_FAILURES } from '../../router/shared/constants';
+import { PAYLOAD_CODECS } from '../../router/shared/payloads';
 import { createRouterCore } from '../../router/shared/router-core';
 import { createServiceManager } from '../../router/shared/service-manager';
 import type {
@@ -25,6 +27,7 @@ import type {
 } from '../../router/shared/types';
 import { envelopeOf } from '../../router/shared/__tests__/fixtures';
 import { createHTTPTransportClient } from '../../transport/client/http-transport-client';
+import { createMemoryTransportClient } from '../../transport/client/memory-transport-client';
 import {
   createTransportClient,
   dispose,
@@ -75,6 +78,8 @@ import {
   timersBy,
   type TestClock,
 } from '../../transport/shared/__tests__/fixtures';
+import { requestOf } from '../../service/descriptors';
+import { createHTTPGateway, type IHTTPGatewayOptions } from '../../transcoding/http-gateway';
 import { createServer } from '../server';
 import type { IServerTransportLike } from '../types';
 
@@ -271,6 +276,7 @@ const createFakeRouter = () => {
   const router: IRouterLike = {
     clock: createTestClock(),
     failures: SERVER_FAILURES,
+    limits: LIMIT_DEFAULTS,
 
     answeredOf: () => {
       return undefined;
@@ -420,7 +426,10 @@ const callOfRouter: Way = async (given) => {
     const ended = await asking.settled;
 
     expect(ended).toBeInstanceOf(TimeoutError);
-    expect(ended).toHaveProperty('timeout', held);
+    expect(ended).toMatchObject({
+      message: `no answer came in ${String(held)} milliseconds`,
+      timeout: held,
+    });
   }
 
   return { held };
@@ -451,6 +460,19 @@ const reservationOf = (act: 'cancel' | 'reserve'): Way => {
         }),
         refusal,
       };
+    }
+
+    // a cancel sends its CANCEL, once
+    if (act === 'cancel') {
+      await sleep(0);
+
+      // an envelope's byte 1, its kind
+      expect(
+        sent.map((bytes) => {
+          return bytes[1];
+        }),
+        'its cancel sent'
+      ).toEqual([EnvelopeKind.CANCEL]);
     }
 
     return {
@@ -812,8 +834,8 @@ const exchangeOfOptions: Way = (given) => {
   );
 };
 
-// a connection drawn, with no exchange under way
-const restOfOptions: Way = (given) => {
+// an HTTP server's inactivity: a connection drawn, with no exchange under way
+const inactivityOfServer: Way = (given) => {
   return heldByHTTPServer(
     {
       drawn: () => {
@@ -926,8 +948,8 @@ const listeningOf = async (options: Record<string, number>) => {
   return { client, clock, fake };
 };
 
-// a client's own inactivity: the timer armed at its listens' first loss
-const clientRestOfOptions: Way = async (given) => {
+// an HTTP client's own inactivity: the timer armed at its listens' first loss
+const inactivityOfClient: Way = async (given) => {
   const listening = await listeningOf(optionOf('inactivityTimeout', given));
 
   if ('refusal' in listening) {
@@ -999,18 +1021,20 @@ const pauseOfOptions: Way = async (given) => {
   return { held };
 };
 
-// a WebSocket client's heartbeat, as it is built
-const heartbeatOfClient: Way = (given) => {
-  const { FakeWebSocket, sockets } = createFakeWebSocket();
-  const building = attempt(() => {
-    return createWSTransportClient({ WebSocket: FakeWebSocket, ...optionOf('heartbeat', given) });
-  });
+// a WebSocket client's option `name`, as it is built
+const ofWSClient = (name: 'closeTimeout' | 'heartbeat'): Way => {
+  return (given) => {
+    const { FakeWebSocket, sockets } = createFakeWebSocket();
+    const building = attempt(() => {
+      return createWSTransportClient({ WebSocket: FakeWebSocket, ...optionOf(name, given) });
+    });
 
-  return Promise.resolve(
-    'refusal' in building
-      ? { moved: movedOf({ 'a socket opened': sockets.length > 0 }), refusal: building.refusal }
-      : {}
-  );
+    return Promise.resolve(
+      'refusal' in building
+        ? { moved: movedOf({ 'a socket opened': sockets.length > 0 }), refusal: building.refusal }
+        : {}
+    );
+  };
 };
 
 // a WebSocket server's option `name`, as it is built
@@ -1069,7 +1093,7 @@ const connectTimed = async (
         'a connection started': hasMoved(),
         'a target kept for a reconnection': !(
           reconnection instanceof ProgrammerError &&
-          reconnection.message === 'transport was never connected'
+          reconnection.message === 'the transport client was never connected'
         ),
         'the client initialized': !client.isUninitialized(),
       }),
@@ -1091,7 +1115,7 @@ const connectTimed = async (
     expect(ended).toBeInstanceOf(CancelError);
   } else {
     expect(ended).toBeInstanceOf(TimeoutError);
-    expect(ended).toHaveProperty('timeout', held);
+    expect(ended).toMatchObject({ message: `timed out after ${String(held)}ms`, timeout: held });
   }
 
   expect(client.isClosed()).toBe(true);
@@ -1134,6 +1158,35 @@ const connectOfWebSocket: Way = (given) => {
       given,
       hasMoved: () => {
         return sockets.length > 0;
+      },
+    }
+  );
+};
+
+// an in-memory client's connect, its server never drawing the connection
+const connectOfMemory: Way = (given) => {
+  const clock = createTestClock();
+  const accepted: unknown[] = [];
+  const client = createMemoryTransportClient({
+    clock,
+    server: {
+      accept: (peer) => {
+        accepted.push(peer);
+
+        return new Promise(() => {});
+      },
+    },
+  });
+
+  return connectTimed(
+    { client, clock },
+    {
+      connect: (options) => {
+        return client.connect(options);
+      },
+      given,
+      hasMoved: () => {
+        return accepted.length > 0;
       },
     }
   );
@@ -1267,6 +1320,146 @@ const reconnectionOf = (as: 'function' | 'number'): Way => {
   };
 };
 
+/** A route of a gateway, its request and its result bytes as they are, at `/api/Durations/raw`. */
+const RAW_ROUTE = Object.freeze({
+  failures: {},
+  procedure: requestOf({
+    admission: 'none',
+    failures: {},
+    procedure: { procedureId: 1, procedureName: 'raw', serviceId: 9, serviceRevision: 1 },
+    request: PAYLOAD_CODECS.raw,
+    result: PAYLOAD_CODECS.raw,
+  }),
+  request: 'raw',
+  result: 'raw',
+  routes: [{ body: '*', method: 'POST', template: '/api/Durations/raw' }],
+} as const);
+
+/**
+ * A gateway of `options`, on the test's clock, whose in-memory server draws each connection and
+ * answers nothing; none built, refused, nothing moved.
+ */
+const buildGateway = (options: Partial<IHTTPGatewayOptions>) => {
+  return attempt(() => {
+    return createHTTPGateway({
+      routes: [RAW_ROUTE],
+      transport: {
+        accept: () => {
+          return Promise.resolve({ close: () => {}, receive: () => {} });
+        },
+      },
+      ...options,
+    });
+  });
+};
+
+/** A request of the gateway's `POST`, declaring `length` bytes, which `body` brings or none does. */
+const exchangeOfGateway = (
+  listener: ReturnType<typeof createHTTPGateway>['listener'],
+  { body, length }: { body?: Uint8Array; length: number }
+): EventEmitter => {
+  const request = Object.assign(new EventEmitter(), {
+    complete: false,
+    destroy: () => {},
+    headers: {
+      'content-length': String(length),
+      'content-type': 'application/octet-stream',
+      host: '127.0.0.1',
+    },
+    httpVersion: '1.1',
+    httpVersionMajor: 1,
+    method: 'POST',
+    rawHeaders: [
+      'host',
+      '127.0.0.1',
+      'content-type',
+      'application/octet-stream',
+      'content-length',
+      String(length),
+    ],
+    socket: { remoteAddress: '127.0.0.1', remotePort: 50_001 },
+    url: '/api/Durations/raw',
+  });
+  const response = Object.assign(new EventEmitter(), {
+    destroy: () => {},
+    end: () => {},
+    flushHeaders: () => {},
+    headersSent: false,
+    setHeader: () => {},
+    writableFinished: false,
+    write: () => {
+      return true;
+    },
+    writeHead: () => {},
+  });
+
+  listener(request, response);
+
+  if (body !== undefined) {
+    request.emit('data', body);
+    request.emit('end');
+  }
+
+  return request;
+};
+
+// a gateway's option `name`, as it is built
+const ofGateway = (name: 'headersTimeout' | 'heartbeat' | 'sendGracePeriod'): Way => {
+  return (given) => {
+    const building = buildGateway(optionOf(name, given));
+
+    return Promise.resolve('refusal' in building ? { moved: [], refusal: building.refusal } : {});
+  };
+};
+
+// a gateway's POST declaring a body that has not come: its body's pace, armed at its head
+const bodyGraceOfGateway: Way = (given) => {
+  const clock = createTestClock();
+  const building = buildGateway({ clock, ...optionOf('bodyGracePeriod', given) });
+
+  if ('refusal' in building) {
+    return Promise.resolve({ moved: [], refusal: building.refusal });
+  }
+
+  exchangeOfGateway(building.built.listener, { length: 100 });
+
+  return Promise.resolve({ held: dueOf(delaysOn(clock)) });
+};
+
+// a gateway's call, its body whole, its server answering never: the call's timeout, armed as it goes
+const timeoutOfGateway: Way = async (given) => {
+  const clock = createTestClock();
+  // what its server's end of the connection took: the request, once handed on
+  let received = 0;
+  const building = buildGateway({
+    clock,
+    ...optionOf('timeout', given),
+    transport: {
+      accept: () => {
+        return Promise.resolve({
+          close: () => {},
+          receive: () => {
+            received += 1;
+          },
+        });
+      },
+    },
+  });
+
+  if ('refusal' in building) {
+    return { moved: [], refusal: building.refusal };
+  }
+
+  exchangeOfGateway(building.built.listener, { body: Uint8Array.of(1), length: 1 });
+
+  // the connection drawn and the request handed on, each in a later turn
+  await turnsUntil(() => {
+    return received > 0;
+  });
+
+  return { held: dueOf(delaysOn(clock)) };
+};
+
 // what a way reports of an outcome the file holds, but a refusal
 const reportOf = ({ held, outcome }: IDurationOutcome): IReport => {
   switch (outcome) {
@@ -1345,29 +1538,33 @@ const PLAYED: Readonly<Record<string, IPlayed>> = Object.freeze({
     phrase: 'exchangeTimeout',
     ways: { options: exchangeOfOptions },
   },
-  'httpTransportServer.inactivityTimeout': {
-    phrase: 'inactivityTimeout',
-    ways: { options: restOfOptions },
-  },
   'httpTransportServer.maximumWait': {
     phrase: 'maximumWait',
     ways: { options: maximumWaitOfOptions },
   },
   'httpTransportServer.sendGracePeriod': {
     phrase: 'sendGracePeriod',
-    ways: { options: ofHTTPServer('sendGracePeriod') },
+    ways: { gateway: ofGateway('sendGracePeriod'), options: ofHTTPServer('sendGracePeriod') },
   },
   'httpTransportServer.headersTimeout': {
     phrase: 'headersTimeout',
-    ways: { options: ofHTTPServer('headersTimeout') },
+    ways: { gateway: ofGateway('headersTimeout'), options: ofHTTPServer('headersTimeout') },
   },
   'httpTransportServer.bodyGracePeriod': {
     phrase: 'bodyGracePeriod',
-    ways: { options: bodyGraceOfOptions },
+    ways: { gateway: bodyGraceOfGateway, options: bodyGraceOfOptions },
   },
-  'httpTransportClient.inactivityTimeout': {
+  'gateway.timeout': {
+    phrase: 'timeout',
+    ways: { options: timeoutOfGateway },
+  },
+  'gateway.heartbeat': {
+    phrase: 'heartbeat',
+    ways: { options: ofGateway('heartbeat') },
+  },
+  'httpTransport.inactivityTimeout': {
     phrase: 'inactivityTimeout',
-    ways: { options: clientRestOfOptions },
+    ways: { client: inactivityOfClient, server: inactivityOfServer },
   },
   'httpTransportClient.wait': {
     phrase: 'wait',
@@ -1379,19 +1576,24 @@ const PLAYED: Readonly<Record<string, IPlayed>> = Object.freeze({
   },
   'webSocketTransport.heartbeat': {
     phrase: 'a heartbeat',
-    ways: { client: heartbeatOfClient, server: ofWSServer('heartbeat') },
+    ways: { client: ofWSClient('heartbeat'), server: ofWSServer('heartbeat') },
+  },
+  'webSocketTransport.closeTimeout': {
+    phrase: 'a close timeout',
+    ways: { client: ofWSClient('closeTimeout'), server: ofWSServer('closeTimeout') },
   },
   'transportClient.connectTimeout': {
     phrase: "a connect's timeout",
-    ways: { http: connectOfHTTP, webSocket: connectOfWebSocket, worker: connectOfWorker },
+    ways: {
+      http: connectOfHTTP,
+      memory: connectOfMemory,
+      webSocket: connectOfWebSocket,
+      worker: connectOfWorker,
+    },
   },
   'transportClient.reconnectionDelay': {
     phrase: 'a delay',
     ways: { function: reconnectionOf('function'), number: reconnectionOf('number') },
-  },
-  'webSocketTransportServer.closeTimeout': {
-    phrase: 'a close timeout',
-    ways: { options: ofWSServer('closeTimeout') },
   },
   'webSocketTransportServer.sendGracePeriod': {
     phrase: 'sendGracePeriod',

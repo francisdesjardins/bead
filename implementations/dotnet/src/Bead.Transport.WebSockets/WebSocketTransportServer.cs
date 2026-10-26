@@ -3,6 +3,7 @@ using System.Globalization;
 using System.Net;
 using System.Net.WebSockets;
 using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.Connections;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Hosting.Server;
 using Microsoft.AspNetCore.Hosting.Server.Features;
@@ -17,9 +18,10 @@ namespace Bead.Transport.WebSockets;
 public sealed record WebSocketTransportServerOptions
 {
     /// <summary>
-    /// The largest message it reads, in bytes: one larger closes its connection with 1009. A
-    /// router's envelope limit at least, as the TypeScript side's <c>maxPayload</c> is; an
-    /// envelope's limit by default.
+    /// The largest message it reads, in bytes, the spec's <c>maximumMessageBytes</c>: one larger
+    /// fails its connection with 1009, reported through <see cref="WebSocketTransportServer.Error"/>
+    /// naming the bound, its close unclean whatever the peer answers (spec 15.3). A router's envelope
+    /// limit at least, as the TypeScript side's <c>maxPayload</c> is; an envelope's limit by default.
     /// </summary>
     public int? MaximumMessageBytes { get; init; }
 
@@ -305,11 +307,19 @@ public sealed class WebSocketTransportServer : IServerTransport, IAsyncDisposabl
     public event Action<TransportServerRefusal>? Refusal;
 
     /// <summary>
-    /// What went wrong on a connection, with its handle: its socket's failure, or what a listener of
-    /// its events threw, the transport going on as if it returned (spec 15.1). With an empty handle
-    /// for a throw of a <see cref="Refusal"/> listener alone, which names no connection; never the
-    /// server's own failure, as the TypeScript side's can be: Kestrel tells a failure after it
-    /// listens only to its logs.
+    /// What went wrong on a connection, with its handle (spec 15.1): a protocol error on it; a bound
+    /// it is dropped behind, an <see cref="IOException"/>, or a message past its
+    /// <see cref="WebSocketTransportServerOptions.MaximumMessageBytes"/> it is failed with 1009 for,
+    /// an <see cref="InvalidDataException"/>, each naming the bound in the spec's spelling and its
+    /// value; each told once, as its connection ends, its close begun, before its unclean
+    /// <see cref="Close"/>, so a listener that throws keeps nothing open. Or what a listener of its
+    /// events threw, as it threw, the transport going on as if it returned. Never a peer that drops
+    /// without its closing handshake, its TCP connection ended or reset, which its unclean
+    /// <see cref="Close"/> tells, nor a peer its heartbeat drops, nor its own abort of a peer that
+    /// never answered a close within <see cref="WebSocketTransportServerOptions.CloseTimeout"/>. With
+    /// an empty handle for a throw of a <see cref="Refusal"/> listener alone, which names no
+    /// connection; never the server's own failure, as the TypeScript side's can be: Kestrel tells a
+    /// failure after it listens only to its logs.
     /// </summary>
     public event Action<Exception, string>? Error;
 
@@ -364,6 +374,15 @@ public sealed class WebSocketTransportServer : IServerTransport, IAsyncDisposabl
         get
         {
             return _life.ReadyState;
+        }
+    }
+
+    /// <summary>Its type, <see cref="TransportTypes.WebSocket"/>, which every handle it draws begins with.</summary>
+    public string Type
+    {
+        get
+        {
+            return TransportTypes.WebSocket;
         }
     }
 
@@ -831,12 +850,6 @@ public sealed class WebSocketTransportServer : IServerTransport, IAsyncDisposabl
                 MinimumSendBytesPerSecond = _options.MinimumSendBytesPerSecond,
                 SendGracePeriod = _options.SendGracePeriod,
                 MaximumUnsentBytes = MaximumUnsentBytes,
-                Dropped = (bound) =>
-                {
-                    // * reported before its close, naming the bound it is dropped behind (RFC 6455
-                    // §7.1.7, "SHOULD log")
-                    Error?.Invoke(new IOException($"{connectionHandle} is dropped behind its {bound}"), connectionHandle);
-                },
             },
         });
         var closed = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -864,6 +877,8 @@ public sealed class WebSocketTransportServer : IServerTransport, IAsyncDisposabl
             _ = connection.CloseQuietly(WebSocketCloseStatus.EndpointUnavailable);
         }
 
+        Exception? failure = null;
+
         try
         {
             _listeners.Tell(Connection, connectionHandle);
@@ -876,10 +891,11 @@ public sealed class WebSocketTransportServer : IServerTransport, IAsyncDisposabl
         }
         catch (Exception reason) when (reason is WebSocketException or OperationCanceledException or IOException)
         {
-            // a socket dropped behind a bound was reported as it was: its abort says nothing more
-            if (!connection.IsDropped)
+            // a socket this side ended of its own, dropped, failed with 1009 or aborted past its close
+            // timeout, says nothing more as it goes: its end is told below, once
+            if (!connection.IsEndedHere && !IsPeerGone(reason))
             {
-                Error?.Invoke(reason, connectionHandle);
+                failure = reason;
             }
         }
         finally
@@ -890,17 +906,66 @@ public sealed class WebSocketTransportServer : IServerTransport, IAsyncDisposabl
 
             try
             {
-                // a connection the registry no longer holds tells no close: the stop's clear took it
-                if (_connections.TryRemove(new KeyValuePair<string, Held>(connectionHandle, held)))
-                {
-                    _listeners.Tell(Close, (socket.CloseStatus == WebSocketCloseStatus.NormalClosure, connectionHandle));
-                }
+                Ended(held, (failure ?? FailureOf(connection, connectionHandle), connectionHandle));
             }
             finally
             {
                 closed.TrySetResult();
             }
         }
+    }
+
+    // what this side ended a connection of its own for, named by its bound in the spec's spelling
+    // and its value (spec 15.3, 15.12): a drop, the socket aborted, its I/O cut short; a message
+    // past its bound, data it does not take, as SignalR reports a message past its own; none
+    // otherwise
+    private static Exception? FailureOf(WebSocketConnection connection, string connectionHandle)
+    {
+        if (connection.Dropped is { } why)
+        {
+            return ServerBounds.DroppedOf(connectionHandle, why);
+        }
+
+        return connection.IsTooBig ? connection.TooBigOf(connectionHandle) : null;
+    }
+
+    // * a connection's end, told once its read ended, its close or its abort begun: its one error,
+    // when it has one, then its close, unclean whenever this side ended it of its own, whatever the
+    // peer answered; so a listener of Error that throws stops nothing, and its close is told all
+    // the same, what it threw going on to Kestrel (spec 15.1)
+    private void Ended(Held held, (Exception? Failure, string ConnectionHandle) end)
+    {
+        var (failure, connectionHandle) = end;
+        var connection = held.Connection;
+
+        try
+        {
+            if (failure is not null)
+            {
+                Error?.Invoke(failure, connectionHandle);
+            }
+        }
+        finally
+        {
+            // a connection the registry no longer holds tells no close: the stop's clear took it
+            if (_connections.TryRemove(new KeyValuePair<string, Held>(connectionHandle, held)))
+            {
+                var isClean = failure is null && !connection.IsEndedHere && connection.Socket.CloseStatus == WebSocketCloseStatus.NormalClosure;
+
+                _listeners.Tell(Close, (isClean, connectionHandle));
+            }
+        }
+    }
+
+    // ! a peer gone without its closing handshake, its TCP connection ended or reset, is no error on
+    // its connection: its unclean close tells it, as the TypeScript side's does. .NET 10 raises each
+    // as ConnectionClosedPrematurely, nothing inside it, on Windows as on Linux; a protocol error as
+    // Faulted, which is told. So is a peer gone without a word that its heartbeat drops: .NET aborts
+    // it past its KeepAliveTimeout, its read meeting Kestrel's ConnectionAbortedException, which this
+    // side's own aborts, judged before, meet too
+    private static bool IsPeerGone(Exception reason)
+    {
+        return reason is WebSocketException { WebSocketErrorCode: WebSocketError.ConnectionClosedPrematurely } or ConnectionAbortedException;
     }
 
     // a connection as the server holds it: its socket's, its end as the server tells it, the rank it

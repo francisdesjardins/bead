@@ -1,6 +1,7 @@
+import { createHash } from 'node:crypto';
 import { once } from 'node:events';
 import { createServer as createNodeServer } from 'node:http';
-import type { AddressInfo } from 'node:net';
+import { createServer as createTcpServer, type AddressInfo, type Socket } from 'node:net';
 import { expect, test } from '@playwright/test';
 import { type WebSocket as WsWebSocket, WebSocketServer } from 'ws';
 import {
@@ -10,6 +11,7 @@ import {
   dispose,
   type ITransportClient,
   type ITransportClientInternal,
+  PLATFORM_CLOCK,
   ProgrammerError,
   ReadyState,
   ReadyStateError,
@@ -20,8 +22,17 @@ import {
 } from '../transport-client';
 import * as constants from '../../shared/constants';
 import {
+  DURATIONS,
+  givenOf,
+  isExcused,
+  outcomeOf,
+  refusalOf,
+} from '../../shared/__tests__/durations';
+import {
   allClosed,
   closedPort,
+  createTestClock,
+  delaysOn,
   host,
   IMPLEMENTATIONS,
   portOf,
@@ -30,8 +41,10 @@ import {
   spyIntervals,
   startServer,
   stopServer,
+  trapUncaught,
 } from '../../shared/__tests__/fixtures';
 import {
+  CLOSE_TIMEOUT,
   createWSTransportClient,
   HEARTBEAT,
   MAXIMUM_MESSAGE_BYTES,
@@ -40,6 +53,7 @@ import {
   type WSTransportClient,
 } from '../ws-transport-client';
 import { createWSTransportServer } from '../../server/ws-transport-server';
+import { hasIPv6Loopback } from '../../server/__tests__/addresses';
 import { createFakeWebSocket } from './fake-websocket';
 
 /** The drop only an implementation reaches, as the base and the transport use it. */
@@ -51,7 +65,7 @@ const drop = (client: ITransportClient<object, never>): void => {
  * Whether a client carries a credential, and is secure, once a connect to `target` was tried — the
  * judgement made from the URL it was given, its socket refused.
  */
-const judgedOf = async (target: { host: string; secured?: boolean }) => {
+const judgedOf = async (target: { host: string; secured?: boolean; port?: number }) => {
   const client = createWSTransportClient({
     // no constructor at all: the socket it would open is refused as it is made
     WebSocket: (() => {
@@ -59,10 +73,16 @@ const judgedOf = async (target: { host: string; secured?: boolean }) => {
     }) as unknown as IWebSocketConstructor,
   });
 
-  await client.connect({ ...target, port: 8_080 }).catch(() => {});
+  await client.connect({ port: 8_080, ...target }).catch(() => {});
 
   return [client.carries(BEARER), client.isSecure];
 };
+
+/** What a reconnection its signal ended rejects with, as both sides word it. */
+const RECONNECTION_CANCELLED = Object.freeze({
+  message: 'the reconnection was cancelled',
+  name: 'CancelError',
+});
 
 // a bearer credential, as RFC 6750 §2.1 writes one
 const BEARER = 'Bearer mF_9.B5f-4.1JqM';
@@ -120,6 +140,93 @@ for (const [label, TrackedWebSocket] of IMPLEMENTATIONS satisfies readonly (read
       await allClosed();
     });
 
+    test('releases a replacement opened by its close listener before dispose completes', async () => {
+      const closes: boolean[][] = [];
+      const errors: Error[] = [];
+      let replacement: Promise<unknown> | undefined;
+
+      client.on('close', (...flags) => {
+        closes.push(flags);
+        replacement = client.connect({ host, port }).catch((reason: unknown) => {
+          return reason;
+        });
+      });
+      client.on('error', (error) => {
+        errors.push(error);
+      });
+      await client.connect({ host, port });
+
+      try {
+        await client[Symbol.asyncDispose]();
+        expect(client.isClosed()).toBe(true);
+        expect(replacement).toBeDefined();
+        const outcome = await replacement;
+
+        expect(outcome === undefined || outcome instanceof ConnectError).toBe(true);
+        expect([client.isClosed(), client.socket, closes, errors]).toEqual([
+          true,
+          null,
+          [[true, false]],
+          [],
+        ]);
+        await expect
+          .poll(() => {
+            return server.clients.size;
+          })
+          .toBe(0);
+      } finally {
+        drop(client);
+      }
+    });
+
+    test('cancels a reconnection whose last attempt closes before cancellation is checked', async () => {
+      const cancelling = new AbortController();
+      const reason = new Error('the attempt closes before the cancellation check');
+      const closes: boolean[][] = [];
+      const errors: Error[] = [];
+      const closedAtServer: Promise<unknown>[] = [];
+
+      server.on('connection', (socket) => {
+        closedAtServer.push(once(socket, 'close'));
+      });
+      client.on('close', (...flags) => {
+        closes.push(flags);
+      });
+      client.on('error', (error) => {
+        errors.push(error);
+      });
+      await client.connect({ host, port });
+
+      const connect = client.connect;
+      let attempts = 0;
+
+      client.connect = async (options) => {
+        await connect(options);
+        attempts += 1;
+        expect(client.isOpen()).toBe(true);
+        await client.disconnect({ isQuick: true });
+        cancelling.abort(reason);
+      };
+
+      const cancelled: unknown = await client
+        .reconnect({ maxAttempts: 1, signal: cancelling.signal })
+        .catch((error: unknown) => {
+          return error;
+        });
+
+      await Promise.all(closedAtServer);
+      expect(cancelled).toBeInstanceOf(CancelError);
+      expect(cancelled).toMatchObject({ cause: reason, message: 'the reconnection was cancelled' });
+      expect([attempts, client.isClosed(), closes, errors, server.clients.size]).toEqual([
+        1,
+        true,
+        [[true, true]],
+        [],
+        0,
+      ]);
+      expect(closedAtServer).toHaveLength(2);
+    });
+
     test.describe('WSTransportClient #connect', () => {
       test('resolves when connecting to a valid endpoint', async () => {
         await client.connect({ host, port });
@@ -139,6 +246,61 @@ for (const [label, TrackedWebSocket] of IMPLEMENTATIONS satisfies readonly (read
         // a page's browser writes its own, which the server judges; the client, none
         expect(await upgraded).toBeUndefined();
       });
+
+      if (label === 'ws') {
+        test('offers no extension in its upgrade, permessage-deflate among them', async () => {
+          const offer = Promise.withResolvers<string | string[] | undefined>();
+          const refusing = await startServer({
+            perMessageDeflate: true,
+            verifyClient: (info, done) => {
+              offer.resolve(info.req.headers['sec-websocket-extensions']);
+              done(false, 503);
+            },
+          });
+
+          try {
+            await expect(client.connect({ host, port: portOf(refusing) })).rejects.toBeInstanceOf(
+              ConnectError
+            );
+            expect(await offer.promise).toBeUndefined();
+            expect(client.isClosed()).toBe(true);
+          } finally {
+            await stopServer(refusing);
+          }
+        });
+      } else {
+        test('leaves the global WebSocket’s extension offer to its platform', async () => {
+          const offers: (string | string[] | undefined)[] = [];
+          const extensions: string[] = [];
+
+          server.on('connection', (socket, request) => {
+            offers.push(request.headers['sec-websocket-extensions']);
+            extensions.push(socket.extensions);
+          });
+
+          const direct = new WebSocket(`ws://${host}:${String(port)}/`);
+
+          try {
+            await once(direct, 'open');
+            await client.connect({ host, port });
+            expect(offers).toHaveLength(2);
+            expect(offers[1]).toEqual(offers[0]);
+            expect(extensions).toEqual(['', '']);
+            expect(direct.extensions).toBe('');
+            expect(client.socket).toHaveProperty('extensions', '');
+            expect(client.isOpen()).toBe(true);
+          } finally {
+            if (direct.readyState === WebSocket.OPEN) {
+              const closed = once(direct, 'close');
+
+              direct.close();
+              await closed;
+            } else {
+              direct.close();
+            }
+          }
+        });
+      }
 
       test('rejects with a ConnectError on a port no URL can hold', async () => {
         await expect(client.connect({ host, port: 100_000 })).rejects.toBeInstanceOf(ConnectError);
@@ -191,7 +353,7 @@ for (const [label, TrackedWebSocket] of IMPLEMENTATIONS satisfies readonly (read
         await expect(client.connect({ host, port })).rejects.toBeInstanceOf(ProgrammerError);
 
         controller.abort();
-        await expect(reconnecting).rejects.toBeInstanceOf(CancelError);
+        await expect(reconnecting).rejects.toMatchObject(RECONNECTION_CANCELLED);
       });
 
       test('rejects a connect while a disconnect is pending', async () => {
@@ -209,16 +371,72 @@ for (const [label, TrackedWebSocket] of IMPLEMENTATIONS satisfies readonly (read
             pendingHandshakes.push(done);
           },
         });
+        // its timeout on the test clock, which alone moves it
+        const clock = createTestClock();
+        const timed = createWSTransportClient({ clock, WebSocket: TrackedWebSocket });
 
         try {
-          await expect(
-            client.connect({ host, port: portOf(gatedServer), timeout: 100 })
-          ).rejects.toBeInstanceOf(TimeoutError);
-          expect(client.isClosed()).toBe(true);
-          expect(client.socket).toBeNull();
+          const connecting = timed.connect({ host, port: portOf(gatedServer), timeout: 100 });
+          const refused = expect(connecting).rejects.toThrow(new TimeoutError(100));
+
+          // its handshake held at the server
+          await expect
+            .poll(() => {
+              return pendingHandshakes.length;
+            })
+            .toBe(1);
+          await clock.tickAsync(100);
+          await refused;
+
+          expect(timed.isClosed()).toBe(true);
+          expect(timed.socket).toBeNull();
 
           // the socket closes on its own, with the server still holding its handshake
           await allClosed();
+        } finally {
+          for (const done of pendingHandshakes) {
+            done(false);
+          }
+          await stopServer(gatedServer);
+        }
+      });
+
+      test('waits on its handshake without end with an infinite timeout until its signal aborts', async () => {
+        const pendingHandshakes: ((result: boolean) => void)[] = [];
+        const gatedServer = await startServer({
+          verifyClient: (_info, done) => {
+            pendingHandshakes.push(done);
+          },
+        });
+        const clock = createTestClock();
+        const waiting = createWSTransportClient({ clock, WebSocket: TrackedWebSocket });
+
+        try {
+          const controller = new AbortController();
+          const connecting = waiting.connect({
+            host,
+            port: portOf(gatedServer),
+            signal: controller.signal,
+            timeout: Infinity,
+          });
+          const cancelled = expect(connecting).rejects.toBeInstanceOf(CancelError);
+
+          await expect
+            .poll(() => {
+              return pendingHandshakes.length;
+            })
+            .toBe(1);
+
+          // a day, where the 30 seconds a timeout left at its default would have passed: no timer
+          // armed, and still connecting
+          await clock.tickAsync(86_400_000);
+
+          expect([waiting.isConnecting(), delaysOn(clock)]).toEqual([true, []]);
+
+          controller.abort('why');
+          await cancelled;
+
+          expect(waiting.isClosed()).toBe(true);
         } finally {
           for (const done of pendingHandshakes) {
             done(false);
@@ -305,6 +523,44 @@ for (const [label, TrackedWebSocket] of IMPLEMENTATIONS satisfies readonly (read
         ).rejects.toBeInstanceOf(ConnectError);
 
         expect([...sockets.keys()].at(-1)?.url).toMatch(/^wss:\/\/127\.0\.0\.1:\d+\/$/);
+
+        const hello = Promise.withResolvers<number>();
+        let peer: Socket | undefined;
+        const listener = createTcpServer((socket) => {
+          peer = socket;
+          socket.once('data', (bytes: Buffer) => {
+            hello.resolve(bytes[0] ?? -1);
+          });
+          socket.on('error', () => {});
+        });
+
+        listener.listen(0, host);
+        await once(listener, 'listening');
+
+        const controller = new AbortController();
+        const connecting = client
+          .connect({
+            host,
+            port: (listener.address() as AddressInfo).port,
+            secured: true,
+            signal: controller.signal,
+          })
+          .catch((reason: unknown) => {
+            return reason;
+          });
+
+        try {
+          expect(await hello.promise).toBe(0x16);
+          controller.abort();
+          expect(await connecting).toBeInstanceOf(CancelError);
+        } finally {
+          peer?.destroy();
+          await new Promise<void>((resolve) => {
+            listener.close(() => {
+              resolve();
+            });
+          });
+        }
       });
     });
 
@@ -366,6 +622,29 @@ for (const [label, TrackedWebSocket] of IMPLEMENTATIONS satisfies readonly (read
         await client.connect({ host, port });
         await client.disconnect();
         await expect(client.send({ data: 'HelloWorld' })).rejects.toBeInstanceOf(ReadyStateError);
+      });
+
+      test('delivers a fragmented message whole then the next message separately', async () => {
+        server.once('connection', (socket) => {
+          socket.send(Uint8Array.of(1, 2), { fin: false });
+          socket.send(Uint8Array.of(3), { fin: true });
+          socket.send(Uint8Array.of(4));
+        });
+        const messages: number[][] = [];
+        const both = new Promise<void>((resolve) => {
+          client.on('message', ({ data }) => {
+            expect(data).toBeInstanceOf(ArrayBuffer);
+            messages.push([...new Uint8Array(data as ArrayBuffer)]);
+            if (messages.length === 2) {
+              resolve();
+            }
+          });
+        });
+
+        await client.connect({ host, port });
+        await both;
+
+        expect(messages).toEqual([[1, 2, 3], [4]]);
       });
     });
 
@@ -442,7 +721,9 @@ for (const [label, TrackedWebSocket] of IMPLEMENTATIONS satisfies readonly (read
 
         server.once('connection', (socket) => {
           socket.send('first');
+          socket.send(Uint8Array.of(1));
           socket.send('second');
+          socket.send(Uint8Array.of(2));
         });
         client.once('message', () => {
           throw thrown;
@@ -454,7 +735,7 @@ for (const [label, TrackedWebSocket] of IMPLEMENTATIONS satisfies readonly (read
         const both = new Promise<void>((resolve) => {
           client.on('message', ({ data }) => {
             messages.push(data);
-            if (messages.length === 2) {
+            if (messages.length === 4) {
               resolve();
             }
           });
@@ -463,7 +744,14 @@ for (const [label, TrackedWebSocket] of IMPLEMENTATIONS satisfies readonly (read
         await client.connect({ host, port });
         await both;
 
-        expect(messages).toEqual(['first', 'second']);
+        expect(messages).toEqual([
+          'first',
+          expect.any(ArrayBuffer),
+          'second',
+          expect.any(ArrayBuffer),
+        ]);
+        expect([...new Uint8Array(messages[1] as ArrayBuffer)]).toEqual([1]);
+        expect([...new Uint8Array(messages[3] as ArrayBuffer)]).toEqual([2]);
         expect(reported).toHaveLength(1);
         expect(reported[0]).toBe(thrown);
         expect(client.isOpen()).toBe(true);
@@ -505,12 +793,19 @@ for (const [label, TrackedWebSocket] of IMPLEMENTATIONS satisfies readonly (read
 
       test('emits "close" with wasClean=true and wasQuick=false when the client disconnects', async () => {
         const closed = nextEvent(client, 'close');
+        const connection = nextConnection(server);
 
         await client.connect({ host, port });
+
+        const { socket } = await connection;
+        const serverClosed = once(socket, 'close');
+
         await client.disconnect();
 
         expect(await closed).toEqual([true, false]);
         expect(client.isClosed()).toBe(true);
+        // its 1000, at the server's end too
+        expect((await serverClosed)[0]).toBe(1000);
       });
 
       test('emits "close" with wasClean=true and wasQuick=true when the client quickly disconnects', async () => {
@@ -524,7 +819,7 @@ for (const [label, TrackedWebSocket] of IMPLEMENTATIONS satisfies readonly (read
         expect(client.socket).toBeNull();
       });
 
-      test('emits "close" with wasClean=false and wasQuick=false when the server disconnects', async () => {
+      test('emits "close" with wasClean=false and wasQuick=false when the server disconnects, and refuses a send after it', async () => {
         const closed = nextEvent(client, 'close');
 
         await client.connect({ host, port });
@@ -534,6 +829,9 @@ for (const [label, TrackedWebSocket] of IMPLEMENTATIONS satisfies readonly (read
 
         expect(await closed).toEqual([false, false]);
         expect(client.isClosed()).toBe(true);
+        await expect(client.send({ data: Uint8Array.of(1) })).rejects.toBeInstanceOf(
+          ReadyStateError
+        );
       });
 
       test('"[dispose]" during a disconnect settles it without a close, and the client can connect again', async () => {
@@ -652,7 +950,9 @@ for (const [label, TrackedWebSocket] of IMPLEMENTATIONS satisfies readonly (read
         await client.connect({ host, port });
         const disconnecting = client.disconnect();
 
-        await expect(client.reconnect()).rejects.toThrow('cannot reconnect while closing');
+        await expect(client.reconnect()).rejects.toThrow(
+          'the transport client cannot reconnect while closing'
+        );
         await disconnecting;
       });
 
@@ -895,6 +1195,26 @@ test.describe('WSTransportClient, with a scripted WebSocket', () => {
       'ws://127.0.0.1:8080/',
       'ws://example.test:8080/',
     ]);
+
+    for (const address of ['127.0.0.1', '::1']) {
+      if (address === '::1' && !(await hasIPv6Loopback())) {
+        continue;
+      }
+
+      const server = await startServer({ host: address });
+      const real = createWSTransportClient({ WebSocket: IMPLEMENTATIONS[1][1] });
+
+      try {
+        for (const host of address === '::1' ? ['::1', '[::1]'] : ['127.0.0.1', 'localhost']) {
+          await real.connect({ host, port: portOf(server) });
+          expect(real.isOpen()).toBe(true);
+          await real.disconnect();
+        }
+      } finally {
+        await stopServer(server);
+        await allClosed();
+      }
+    }
   });
 
   test('dispose drops a connecting socket even when its close throws', async () => {
@@ -910,7 +1230,7 @@ test.describe('WSTransportClient, with a scripted WebSocket', () => {
     expect(() => {
       drop(client);
     }).not.toThrow();
-    await expect(connecting).rejects.toThrow('disposed while connecting');
+    await expect(connecting).rejects.toThrow('the transport client was disposed as it connected');
     expect(sockets[0]?.closeCodes).toEqual([undefined]);
     expect(client.socket).toBeNull();
   });
@@ -923,22 +1243,415 @@ test.describe('WSTransportClient, what it carries', () => {
   // the Authorization lines of each upgrade `hearing` took, as they came
   const upgradesOf = (hearing: Awaited<ReturnType<typeof startRefusing>>) => {
     const heard: string[][] = [];
-
     hearing.upgrading.on('connection', (_socket, request) => {
       const { rawHeaders } = request;
-
       heard.push(
         rawHeaders.filter((_value, index) => {
           return index % 2 === 1 && rawHeaders[index - 1]?.toLowerCase() === 'authorization';
         })
       );
     });
-
     return heard;
   };
 
+  test('bounds an unresponsive WebSocket handshake by cancellation timeout and disposal', async () => {
+    for (const ending of ['cancel', 'timeout', 'dispose']) {
+      const clock = createTestClock();
+      const listener = createTcpServer();
+      listener.listen(0, host);
+      await once(listener, 'listening');
+      const accepted = once(listener, 'connection');
+      const cancelling = new AbortController();
+      await using client = createWSTransportClient({ clock, WebSocket: Ws });
+      const outcome = client
+        .connect({
+          host,
+          port: (listener.address() as AddressInfo).port,
+          timeout: 100,
+          signal: cancelling.signal,
+        })
+        .catch((reason: unknown) => {
+          return reason;
+        });
+      const [peer] = (await accepted) as [Socket];
+      peer.on('error', () => {});
+      try {
+        if (ending === 'cancel') {
+          cancelling.abort();
+        } else if (ending === 'timeout') {
+          await clock.tickAsync(100);
+        } else {
+          drop(client);
+        }
+        expect(await outcome).toBeInstanceOf(
+          ending === 'cancel' ? CancelError : ending === 'timeout' ? TimeoutError : ConnectError
+        );
+        expect(client.isClosed()).toBe(true);
+      } finally {
+        peer.destroy();
+        drop(client);
+        await new Promise<void>((resolve) => {
+          listener.close(() => {
+            resolve();
+          });
+        });
+      }
+    }
+  });
+
+  test('finishes a connect whose provider completion callback throws', async () => {
+    using trapped = trapUncaught();
+    const server = await startServer();
+    await using client = createWSTransportClient({ WebSocket: Ws });
+    const callback = Promise.withResolvers<void>();
+    const reason = new Error('provider callback failed');
+    let connected = false;
+    try {
+      await client.connect({
+        host,
+        port: portOf(server),
+        credentialProvider: ({ signal }) => {
+          signal.addEventListener(
+            'abort',
+            () => {
+              expect(connected).toBe(true);
+              callback.resolve();
+              throw reason;
+            },
+            { once: true }
+          );
+          return BEARER;
+        },
+      });
+      connected = true;
+      await callback.promise;
+      await new Promise(setImmediate);
+      expect(client.isOpen()).toBe(true);
+      expect(trapped.thrown).toEqual([reason]);
+      await client.disconnect({ isQuick: true });
+    } finally {
+      drop(client);
+      await allClosed();
+      await stopServer(server);
+    }
+  });
+
+  test('bounds a pending credential provider by cancellation timeout and disposal', async () => {
+    for (const ending of ['cancel', 'timeout', 'dispose']) {
+      for (const late of ['value', 'failure']) {
+        const clock = createTestClock();
+        const entered = Promise.withResolvers<AbortSignal>();
+        const answer = Promise.withResolvers<string>();
+        const cancelling = new AbortController();
+        await using client = createWSTransportClient({ clock, WebSocket: Ws });
+        const before = sockets.size;
+        const outcome = client
+          .connect({
+            host,
+            port: 8080,
+            timeout: 100,
+            signal: cancelling.signal,
+            credentialProvider: ({ signal }) => {
+              entered.resolve(signal);
+              return answer.promise;
+            },
+          })
+          .catch((reason: unknown) => {
+            return reason;
+          });
+        const signal = await entered.promise;
+        if (ending === 'cancel') {
+          cancelling.abort();
+        } else if (ending === 'timeout') {
+          await clock.tickAsync(100);
+        } else {
+          drop(client);
+        }
+        const reason = await outcome;
+        expect(reason).toBeInstanceOf(
+          ending === 'cancel' ? CancelError : ending === 'timeout' ? TimeoutError : ConnectError
+        );
+        expect(client.isClosed()).toBe(true);
+        expect(client.carries(BEARER)).toBe(false);
+        if (late === 'value') {
+          answer.resolve(BEARER);
+        } else {
+          answer.reject(new Error('late provider failure'));
+        }
+        if (!signal.aborted) {
+          await new Promise<void>((resolve) => {
+            signal.addEventListener(
+              'abort',
+              () => {
+                resolve();
+              },
+              { once: true }
+            );
+          });
+        }
+        await new Promise(setImmediate);
+        expect(sockets.size).toBe(before);
+      }
+    }
+  });
+
+  test('waits for an abandoned provider call to settle before invoking the provider anew', async () => {
+    for (const late of ['value', 'failure']) {
+      for (const next of ['value', 'failure']) {
+        const server = await startServer();
+        await using client = createWSTransportClient({ WebSocket: Ws });
+        const answer = Promise.withResolvers<string>();
+        const renewed = Promise.withResolvers<string>();
+        const entered = Promise.withResolvers<AbortSignal>();
+        const enteredAgain = Promise.withResolvers<AbortSignal>();
+        const aborted = Promise.withResolvers<void>();
+        const cancelling = new AbortController();
+        let calls = 0;
+        let settled = false;
+        const provider = async ({ signal }: { signal: AbortSignal }) => {
+          calls += 1;
+          if (calls === 1) {
+            signal.addEventListener(
+              'abort',
+              () => {
+                aborted.resolve();
+              },
+              { once: true }
+            );
+            entered.resolve(signal);
+            try {
+              const value = await answer.promise;
+              signal.throwIfAborted();
+              return value;
+            } finally {
+              settled = true;
+            }
+          }
+          expect(settled).toBe(true);
+          expect(signal.aborted).toBe(false);
+          enteredAgain.resolve(signal);
+          const value = await renewed.promise;
+          signal.throwIfAborted();
+          return value;
+        };
+        try {
+          const first = client
+            .connect({
+              host,
+              port: portOf(server),
+              credentialProvider: provider,
+              signal: cancelling.signal,
+            })
+            .catch((reason: unknown) => {
+              return reason;
+            });
+          const firstSignal = await entered.promise;
+          cancelling.abort();
+          expect(await first).toBeInstanceOf(CancelError);
+          const second = client.connect({
+            host,
+            port: portOf(server),
+            credentialProvider: provider,
+          });
+          const outcome = second.catch((reason: unknown) => {
+            return reason;
+          });
+          expect(calls).toBe(1);
+          expect(settled).toBe(false);
+          expect(client.isConnecting()).toBe(true);
+          await aborted.promise;
+          expect(firstSignal.aborted).toBe(true);
+          if (late === 'failure') {
+            answer.reject(new Error('abandoned provider failure'));
+          } else {
+            answer.resolve('Bearer abandoned');
+          }
+          const secondSignal = await enteredAgain.promise;
+          expect(calls).toBe(2);
+          expect(secondSignal).not.toBe(firstSignal);
+          expect(client.isConnecting()).toBe(true);
+          if (next === 'failure') {
+            const failure = new Error('renewed provider failure');
+            renewed.reject(failure);
+            expect(await outcome).toMatchObject({
+              message: 'the credential provider failed',
+              cause: failure,
+            });
+            expect(client.isClosed()).toBe(true);
+          } else {
+            renewed.resolve(BEARER);
+            await second;
+            expect(client.isOpen()).toBe(true);
+            expect(client.carries(BEARER)).toBe(true);
+            expect(client.carries('Bearer abandoned')).toBe(false);
+            await client.disconnect({ isQuick: true });
+          }
+          expect(calls).toBe(2);
+        } finally {
+          answer.resolve('');
+          renewed.resolve('');
+          drop(client);
+          await allClosed();
+          await stopServer(server);
+        }
+      }
+    }
+  });
+
+  test('bounds the wait for an abandoned provider call by cancellation, timeout and disposal', async () => {
+    for (const ending of ['cancel', 'timeout', 'dispose']) {
+      for (const late of ['value', 'failure']) {
+        const server = await startServer();
+        const clock = createTestClock();
+        await using client = createWSTransportClient({ clock, WebSocket: Ws });
+        const answer = Promise.withResolvers<string>();
+        const entered = Promise.withResolvers<void>();
+        const aborted = Promise.withResolvers<void>();
+        const cancelling = new AbortController();
+        const waiting = new AbortController();
+        let calls = 0;
+        const provider = async ({ signal }: { signal: AbortSignal }) => {
+          calls += 1;
+          signal.addEventListener(
+            'abort',
+            () => {
+              aborted.resolve();
+            },
+            { once: true }
+          );
+          entered.resolve();
+          const value = await answer.promise;
+          signal.throwIfAborted();
+          return value;
+        };
+        try {
+          const first = client
+            .connect({
+              host,
+              port: portOf(server),
+              credentialProvider: provider,
+              signal: cancelling.signal,
+            })
+            .catch((reason: unknown) => {
+              return reason;
+            });
+          await entered.promise;
+          cancelling.abort();
+          expect(await first).toBeInstanceOf(CancelError);
+          await aborted.promise;
+          const second = client
+            .connect({
+              host,
+              port: portOf(server),
+              credentialProvider: provider,
+              signal: waiting.signal,
+              timeout: 100,
+            })
+            .catch((reason: unknown) => {
+              return reason;
+            });
+          expect(client.isConnecting()).toBe(true);
+          expect(calls).toBe(1);
+          if (ending === 'cancel') {
+            waiting.abort();
+          } else if (ending === 'timeout') {
+            await clock.tickAsync(100);
+          } else {
+            drop(client);
+          }
+          const failure: unknown = await second;
+          if (ending === 'cancel') {
+            expect(failure).toBeInstanceOf(CancelError);
+          } else if (ending === 'timeout') {
+            expect(failure).toMatchObject({
+              name: 'TimeoutError',
+              message: 'timed out after 100ms',
+            });
+          } else {
+            expect(failure).toMatchObject({
+              name: 'ConnectError',
+              message: 'the transport client was disposed as it connected',
+            });
+          }
+          expect(client.isClosed()).toBe(true);
+          if (late === 'failure') {
+            answer.reject(new Error('abandoned provider failure'));
+          } else {
+            answer.resolve(BEARER);
+          }
+          await client.connect({ host, port: portOf(server) });
+          expect(client.isOpen()).toBe(true);
+          expect(client.carries(BEARER)).toBe(false);
+          expect(calls).toBe(1);
+          await client.disconnect({ isQuick: true });
+        } finally {
+          answer.resolve('');
+          drop(client);
+          await allClosed();
+          await stopServer(server);
+        }
+      }
+    }
+  });
+
+  test('keeps its timeout when the provider completion callback throws', async () => {
+    using trapped = trapUncaught();
+    const clock = createTestClock();
+    const entered = Promise.withResolvers<void>();
+    const callback = Promise.withResolvers<void>();
+    const answer = Promise.withResolvers<string>();
+    const reason = new Error('provider callback failed');
+    await using client = createWSTransportClient({ clock, WebSocket: Ws });
+    const outcome = client
+      .connect({
+        host,
+        port: 8080,
+        timeout: 100,
+        credentialProvider: ({ signal }) => {
+          signal.addEventListener(
+            'abort',
+            () => {
+              callback.resolve();
+              throw reason;
+            },
+            { once: true }
+          );
+          entered.resolve();
+          return answer.promise;
+        },
+      })
+      .catch((failure: unknown) => {
+        return failure;
+      });
+    await entered.promise;
+    await clock.tickAsync(100);
+    expect(await outcome).toMatchObject({ name: 'TimeoutError', message: 'timed out after 100ms' });
+    await callback.promise;
+    await new Promise(setImmediate);
+    expect(client.isClosed()).toBe(true);
+    expect(trapped.thrown).toEqual([reason]);
+    answer.reject(new Error('late provider failure'));
+  });
+
+  test('treats a provider own cancellation as its failure while the attempt stays live', async () => {
+    const reason = new DOMException('provider cancelled', 'AbortError');
+    await using client = createWSTransportClient({ WebSocket: Ws });
+    await expect(
+      client.connect({
+        host,
+        port: 8080,
+        credentialProvider: () => {
+          throw reason;
+        },
+      })
+    ).rejects.toMatchObject({ message: 'the credential provider failed', cause: reason });
+    expect(client.isClosed()).toBe(true);
+  });
+
   test('carries no credential its upgrade did not carry, and is secure under wss or to a loopback host, judged by the URL it was given', async () => {
-    expect(createWSTransportClient().isSecure).toBe(false);
+    const unstarted = createWSTransportClient();
+
+    expect([unstarted.carries(BEARER), unstarted.isSecure]).toEqual([false, false]);
     expect(
       await Promise.all([
         judgedOf({ host: 'bead.example', secured: true }),
@@ -947,6 +1660,9 @@ test.describe('WSTransportClient, what it carries', () => {
         judgedOf({ host: '::1' }),
         judgedOf({ host: 'bead.example' }),
         judgedOf({ host: '192.0.2.1' }),
+        judgedOf({ host: '192.0.2.1', secured: true }),
+        judgedOf({ host: '192.0.2.1', port: 80 }),
+        judgedOf({ host: '192.0.2.1', port: 443, secured: true }),
       ])
     ).toEqual([
       [false, true],
@@ -955,7 +1671,22 @@ test.describe('WSTransportClient, what it carries', () => {
       [false, true],
       [false, false],
       [false, false],
+      [false, true],
+      [false, false],
+      [false, true],
     ]);
+
+    const server = await startServer();
+    const connected = createWSTransportClient({ WebSocket: IMPLEMENTATIONS[1][1] });
+
+    try {
+      await connected.connect({ host, port: portOf(server) });
+      expect([connected.carries(BEARER), connected.isSecure]).toEqual([false, true]);
+      await connected.disconnect();
+    } finally {
+      await stopServer(server);
+      await allClosed();
+    }
   });
 
   // spec 15.1 and 15.2
@@ -971,6 +1702,12 @@ test.describe('WSTransportClient, what it carries', () => {
 
     // its Authorization, one line, as given
     expect(heard).toEqual([[BEARER]]);
+    const received = once([...hearing.upgrading.clients][0]!, 'message') as Promise<
+      [Buffer, boolean]
+    >;
+    await client.send({ credential: BEARER, data: new TextEncoder().encode('hello') });
+    const [data, isBinary] = await received;
+    expect([data.toString(), isBinary]).toEqual(['hello', true]);
     // those bytes alone, none a byte off, longer or shorter, nor trimmed of what a field cannot hold
     expect(client.carries(BEARER)).toBe(true);
     expect(
@@ -992,6 +1729,9 @@ test.describe('WSTransportClient, what it carries', () => {
     expect(client.carries(BEARER)).toBe(false);
 
     // none on an upgrade given none, an empty one among them
+    await client.connect({ host, port: hearing.port });
+    expect([client.carries(''), client.carries(BEARER)]).toEqual([false, false]);
+    await client.disconnect();
     for (const given of [undefined, '']) {
       const bare = createWSTransportClient({ WebSocket: Ws });
 
@@ -1000,7 +1740,7 @@ test.describe('WSTransportClient, what it carries', () => {
       await bare.disconnect();
     }
 
-    expect(heard).toEqual([[BEARER], [], []]);
+    expect(heard).toEqual([[BEARER], [], [], []]);
   });
 
   // spec 15.2
@@ -1045,6 +1785,21 @@ test.describe('WSTransportClient, what it carries', () => {
       handed,
     ]).toEqual([[['Bearer token-1'], ['Bearer token-3']], false, true, 3]);
     // each told when its attempt is over
+    await Promise.all(
+      signals.map((signal) => {
+        return signal.aborted
+          ? Promise.resolve()
+          : new Promise<void>((resolve) => {
+              signal.addEventListener(
+                'abort',
+                () => {
+                  resolve();
+                },
+                { once: true }
+              );
+            });
+      })
+    );
     expect(
       signals.map(({ aborted }) => {
         return aborted;
@@ -1117,7 +1872,7 @@ test.describe('WSTransportClient, what it carries', () => {
 
     // nothing moved: no state, no target a reconnection replays, no upgrade sent
     expect([called, client.isUninitialized(), heard]).toEqual([0, true, []]);
-    await expect(client.reconnect()).rejects.toThrow('transport was never connected');
+    await expect(client.reconnect()).rejects.toThrow('the transport client was never connected');
 
     // a provider's value, held alike once handed: the connect fails, and a reconnection does not
     // try again what no attempt would mend
@@ -1140,6 +1895,69 @@ test.describe('WSTransportClient, what it carries', () => {
       )
     );
     expect([called, provided.isClosed(), heard]).toEqual([2, true, [[BEARER]]]);
+  });
+
+  test('opens no connection when its credential provider settles after cancellation', async () => {
+    await using hearing = await startRefusing();
+    const heard = upgradesOf(hearing);
+    const entered = Promise.withResolvers<AbortSignal>();
+    const answer = Promise.withResolvers<string>();
+    const cancelling = new AbortController();
+    const errors: Error[] = [];
+    const closes: boolean[][] = [];
+    const before = sockets.size;
+    await using client = createWSTransportClient({ WebSocket: Ws });
+
+    client.on('error', (error) => {
+      errors.push(error);
+    });
+    client.on('close', (...flags) => {
+      closes.push(flags);
+    });
+
+    const connecting = client.connect({
+      credentialProvider: ({ signal }) => {
+        entered.resolve(signal);
+
+        return answer.promise;
+      },
+      host,
+      port: hearing.port,
+      signal: cancelling.signal,
+    });
+    const cancelled = expect(connecting).rejects.toBeInstanceOf(CancelError);
+    const providerSignal = await entered.promise;
+
+    try {
+      cancelling.abort();
+      await cancelled;
+      if (!providerSignal.aborted) {
+        await new Promise<void>((resolve) => {
+          providerSignal.addEventListener(
+            'abort',
+            () => {
+              resolve();
+            },
+            { once: true }
+          );
+        });
+      }
+      expect(providerSignal.aborted).toBe(true);
+    } finally {
+      answer.resolve(BEARER);
+    }
+
+    // * past the provider's continuation: a cancelled attempt never constructs its socket.
+    await new Promise(setImmediate);
+
+    expect([client.isClosed(), client.carries(BEARER), heard, errors, closes]).toEqual([
+      true,
+      false,
+      [],
+      [],
+      [],
+    ]);
+    expect(sockets.size).toBe(before);
   });
 
   test('refuses a credential and a credential provider given together', async () => {
@@ -1246,6 +2064,11 @@ test.describe('WSTransportClient, its message limit', () => {
     const [, TrackedWsWebSocket] = IMPLEMENTATIONS[1];
     const client = createWSTransportClient({ WebSocket: TrackedWsWebSocket });
     const connection = nextConnection(server);
+    const delivered: number[] = [];
+
+    client.on('message', ({ data }) => {
+      delivered.push((data as ArrayBuffer).byteLength);
+    });
 
     try {
       await client.connect({ host, port: portOf(server) });
@@ -1265,13 +2088,461 @@ test.describe('WSTransportClient, its message limit', () => {
         });
       });
 
+      const clientClosed = nextEvent(client, 'close');
+
       socket.send(new Uint8Array(MAXIMUM_MESSAGE_BYTES + 1));
 
       expect(await closed).toBe(1009);
+      await clientClosed;
+      expect(delivered).toEqual([16_778_240]);
+      expect(client.isClosed()).toBe(true);
     } finally {
       await stopServer(server);
       await allClosed();
     }
+  });
+});
+
+// a frame as a server writes it, unmasked, whole: its opcode, then its payload, up to 64 KiB
+const frameOf = (opcode: number, payload: Uint8Array): Buffer => {
+  const head =
+    payload.length < 126
+      ? [0x80 | opcode, payload.length]
+      : [0x80 | opcode, 126, payload.length >> 8, payload.length & 0xff];
+
+  return Buffer.concat([Buffer.from(head), payload]);
+};
+
+// a frame of an opcode RFC 6455 reserves, which fails the connection that reads it (§5.2)
+const RESERVED_FRAME = frameOf(0x3, Uint8Array.of(0x78));
+
+// a close with 1009, as a server answers one
+const CLOSE_1009 = frameOf(0x8, Uint8Array.of(0x03, 0xf1));
+
+// the code of a close a client sent, its payload masked, once it came; none for any other frame
+const closeCodeOfMasked = (frame: Buffer): number | undefined => {
+  if (((frame[0] ?? 0) & 0x0f) !== 0x8 || frame.length < 8) {
+    return undefined;
+  }
+
+  return (((frame[6] ?? 0) ^ (frame[2] ?? 0)) << 8) | ((frame[7] ?? 0) ^ (frame[3] ?? 0));
+};
+
+// a server that ends its socket, a FIN, once the client's close came, answering no close of its own
+const endOnClose = (socket: Socket): void => {
+  socket.on('data', (frame: Buffer) => {
+    if (closeCodeOfMasked(frame) !== undefined) {
+      socket.end();
+    }
+  });
+};
+
+/**
+ * An HTTP server that completes each upgrade by hand and hands the test its socket, raw: what goes
+ * after its 101 is the test's to write, and so is its end, its socket left half open once the client
+ * ended its own, as Node's HTTP server leaves it.
+ */
+const startRaw = async () => {
+  const http = createNodeServer();
+  const upgraded = new Set<Socket>();
+
+  // oxlint-disable-next-line bead/options-last -- Node's own, an `upgrade` listener's
+  http.on('upgrade', (request, socket) => {
+    const accept = createHash('sha1')
+      .update(`${String(request.headers['sec-websocket-key'])}258EAFA5-E914-47DA-95CA-C5AB0DC85B11`)
+      .digest('base64');
+
+    upgraded.add(socket as Socket);
+    socket.on('error', () => {});
+    socket.write(
+      `HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: ${accept}\r\n\r\n`
+    );
+  });
+  http.listen(0, host);
+  await once(http, 'listening');
+
+  return {
+    // the next socket it upgrades, its 101 written
+    next: () => {
+      return new Promise<Socket>((resolve) => {
+        // oxlint-disable-next-line bead/options-last -- Node's own, an `upgrade` listener's
+        http.once('upgrade', (_request, socket) => {
+          resolve(socket as Socket);
+        });
+      });
+    },
+    port: (http.address() as AddressInfo).port,
+    [Symbol.asyncDispose]: async () => {
+      for (const socket of upgraded) {
+        socket.destroy();
+      }
+
+      await new Promise((resolve) => {
+        http.close(resolve);
+      });
+      await allClosed();
+    },
+  };
+};
+
+// what a client tells once open, in order: each error's message, then its close
+const toldBy = (client: WSTransportClient): unknown[][] => {
+  const told: unknown[][] = [];
+
+  client.on('error', (error) => {
+    told.push(['error', error.message]);
+  });
+  client.on('close', (wasClean, wasQuick) => {
+    told.push(['close', wasClean, wasQuick]);
+  });
+
+  return told;
+};
+
+// spec 15.1
+test.describe('WSTransportClient, what its error tells', () => {
+  const [[, TrackedGlobal], [, TrackedWs]] = IMPLEMENTATIONS;
+
+  test('tells a server that drops without its closing handshake, by a FIN or a reset, by its unclean close alone, no error', async () => {
+    await using raw = await startRaw();
+    const drops = [
+      (socket: Socket) => {
+        socket.end();
+      },
+      // a linger of 0: its close an abort, a reset sent rather than a FIN (RFC 9293 §3.10.5)
+      (socket: Socket) => {
+        socket.resetAndDestroy();
+      },
+    ];
+
+    for (const drop of drops) {
+      const client = createWSTransportClient({ WebSocket: TrackedWs });
+      const told = toldBy(client);
+      const upgraded = raw.next();
+
+      await client.connect({ host, port: raw.port });
+
+      const closed = nextEvent(client, 'close');
+
+      drop(await upgraded);
+      await closed;
+
+      expect(told).toEqual([['close', false, false]]);
+    }
+  });
+
+  test('tells a protocol error on its connection once, then its unclean close', async () => {
+    await using raw = await startRaw();
+    const client = createWSTransportClient({ WebSocket: TrackedWs });
+    const told: unknown[][] = [];
+    const upgraded = raw.next();
+
+    client.on('error', (error) => {
+      told.push(['error', (error as Error & { code?: string }).code]);
+    });
+    client.on('close', (wasClean, wasQuick) => {
+      told.push(['close', wasClean, wasQuick]);
+    });
+    await client.connect({ host, port: raw.port });
+
+    const socket = await upgraded;
+    const closed = nextEvent(client, 'close');
+
+    // it ends its socket once the client's close came
+    endOnClose(socket);
+    socket.write(RESERVED_FRAME);
+    socket.write(RESERVED_FRAME);
+    await closed;
+
+    expect(told).toEqual([
+      ['error', 'WS_ERR_INVALID_OPCODE'],
+      ['close', false, false],
+    ]);
+    expect(client.isClosed()).toBe(true);
+  });
+
+  test('fails with 1009 a message past its bound, telling one error that names maximumMessageBytes, then an unclean close, even when its server answers its close', async () => {
+    await using raw = await startRaw();
+    const client = createWSTransportClient({ maxPayload: 1_024, WebSocket: TrackedWs });
+    const told = toldBy(client);
+    const causes: unknown[] = [];
+    const sent: (number | undefined)[] = [];
+    const upgraded = raw.next();
+
+    client.on('error', (error) => {
+      causes.push((error.cause as { code?: string } | undefined)?.code);
+    });
+    await client.connect({ host, port: raw.port });
+
+    const socket = await upgraded;
+    const closed = nextEvent(client, 'close');
+
+    // its close answered with a 1009 of its own, then its end
+    socket.on('data', (frame: Buffer) => {
+      const code = closeCodeOfMasked(frame);
+
+      if (code !== undefined) {
+        sent.push(code);
+        socket.end(CLOSE_1009);
+      }
+    });
+    socket.write(frameOf(0x2, new Uint8Array(4_096)));
+    await closed;
+
+    expect(told).toEqual([
+      [
+        'error',
+        'the connection is closed with 1009: a message past its maximumMessageBytes, 1024 bytes',
+      ],
+      ['close', false, false],
+    ]);
+    expect([causes, sent]).toEqual([['WS_ERR_UNSUPPORTED_MESSAGE_LENGTH'], [1009]]);
+  });
+
+  test('fails with 1009 a message past its bound for a server that never answers, telling one error, then an unclean close once its close timeout passed', async () => {
+    await using raw = await startRaw();
+    const client = createWSTransportClient({
+      closeTimeout: 200,
+      maxPayload: 1_024,
+      WebSocket: TrackedWs,
+    });
+    const told = toldBy(client);
+    const upgraded = raw.next();
+
+    await client.connect({ host, port: raw.port });
+
+    const socket = await upgraded;
+    const closed = nextEvent(client, 'close');
+    const began = performance.now();
+
+    // it reads its close and answers nothing, its socket held open
+    socket.write(frameOf(0x2, new Uint8Array(4_096)));
+    await closed;
+
+    expect(performance.now() - began).toBeGreaterThanOrEqual(150);
+    expect(told).toEqual([
+      [
+        'error',
+        'the connection is closed with 1009: a message past its maximumMessageBytes, 1024 bytes',
+      ],
+      ['close', false, false],
+    ]);
+  });
+
+  test('fails its connection on a protocol error whose error listener throws, telling its close all the same', async () => {
+    using uncaught = trapUncaught();
+    await using raw = await startRaw();
+    const client = createWSTransportClient({ WebSocket: TrackedWs });
+    const closes: unknown[][] = [];
+    const upgraded = raw.next();
+
+    client.on('error', () => {
+      throw new Error('an error listener that throws');
+    });
+    client.on('close', (wasClean, wasQuick) => {
+      closes.push([wasClean, wasQuick]);
+    });
+    await client.connect({ host, port: raw.port });
+
+    const socket = await upgraded;
+
+    endOnClose(socket);
+    socket.write(RESERVED_FRAME);
+
+    await expect
+      .poll(() => {
+        return closes;
+      })
+      .toEqual([[false, false]]);
+    // what the listener threw was Node's, once
+    expect(
+      uncaught.thrown.map((error) => {
+        return (error as Error).message;
+      })
+    ).toEqual(['an error listener that throws']);
+    expect(client.isClosed()).toBe(true);
+  });
+
+  test('tells no error once open over the global WebSocket, its close alone, for a FIN, a reset or a protocol error', async () => {
+    await using raw = await startRaw();
+    const drops = [
+      (socket: Socket) => {
+        socket.end();
+      },
+      (socket: Socket) => {
+        socket.resetAndDestroy();
+      },
+      (socket: Socket) => {
+        endOnClose(socket);
+        socket.write(RESERVED_FRAME);
+      },
+    ];
+
+    for (const drop of drops) {
+      const client = createWSTransportClient({ WebSocket: TrackedGlobal });
+      const told = toldBy(client);
+      const upgraded = raw.next();
+
+      await client.connect({ host, port: raw.port });
+
+      const closed = nextEvent(client, 'close');
+
+      drop(await upgraded);
+      await closed;
+
+      expect(told).toEqual([['close', false, false]]);
+    }
+  });
+});
+
+// spec 15.3
+test.describe('WSTransportClient, its close timeout', () => {
+  const [, [, TrackedWs]] = IMPLEMENTATIONS;
+
+  test('hands `maxPayload` and its close timeout to ws, an envelope’s limit and CLOSE_TIMEOUT when not given', async () => {
+    const given: unknown[] = [];
+    const client = createWSTransportClient({
+      // no socket at all, refused as it is made: what the constructor is handed is all it reads
+      WebSocket: function (_url: string, _protocols: unknown, options: { closeTimeout?: number }) {
+        given.push(options);
+
+        throw new Error('no socket');
+      } as unknown as IWebSocketConstructor,
+    });
+
+    await client.connect({ host, port: 8_080 }).catch(() => {});
+
+    expect(CLOSE_TIMEOUT).toBe(5_000);
+    expect(given).toEqual([
+      { closeTimeout: CLOSE_TIMEOUT, maxPayload: MAXIMUM_MESSAGE_BYTES, perMessageDeflate: false },
+    ]);
+  });
+
+  test('holds its close timeout to a whole number of milliseconds, rounded, refusing zero, and runs on the clock it is given', async () => {
+    const clock = createTestClock();
+
+    expect(createWSTransportClient({ clock }).clock).toBe(clock);
+    expect(createWSTransportClient().clock).toBe(PLATFORM_CLOCK);
+
+    // a WebSocket's close timeout, its client's way, which the durations' harness plays by its
+    // refusal; this loop holds, besides, what `ws` is handed
+    const place = DURATIONS.places.find(({ id }) => {
+      return id === 'webSocketTransport.closeTimeout';
+    });
+    const way = place?.ways.find(({ id }) => {
+      return id === 'client';
+    });
+
+    expect(way).toBeDefined();
+
+    for (const input of DURATIONS.inputs) {
+      if (place === undefined || way === undefined || isExcused(place, { input, way })) {
+        continue;
+      }
+
+      const duration = givenOf(input);
+      const given: unknown[] = [];
+      const building = (): WSTransportClient => {
+        return createWSTransportClient({
+          closeTimeout: duration,
+          WebSocket: function (
+            _url: string,
+            _protocols: unknown,
+            { closeTimeout }: { closeTimeout?: number }
+          ) {
+            given.push(closeTimeout);
+
+            throw new Error('no socket');
+          } as unknown as IWebSocketConstructor,
+        });
+      };
+
+      if (outcomeOf(place, input).outcome === 'refused') {
+        expect(building, input.name).toThrow(
+          new ProgrammerError(refusalOf(place, { given: duration, phrase: 'a close timeout' }))
+        );
+
+        continue;
+      }
+
+      await building()
+        .connect({ host, port: 8_080 })
+        .catch(() => {});
+
+      // `ws`'s timer holds what the transport holds, and never as the longest a timer holds
+      expect(given, input.name).toEqual([
+        duration === Infinity ? 2 ** 31 - 1 : Math.round(duration),
+      ]);
+    }
+  });
+
+  test('drops a server that never answers its disconnect once its close timeout passed, telling no error, its close as the disconnect said', async () => {
+    await using raw = await startRaw();
+    const client = createWSTransportClient({ closeTimeout: 200, WebSocket: TrackedWs });
+    const told = toldBy(client);
+    const sent: number[] = [];
+    const upgraded = raw.next();
+
+    await client.connect({ host, port: raw.port });
+
+    const socket = await upgraded;
+
+    // it reads its close and answers nothing, its socket held open
+    socket.on('data', (frame: Buffer) => {
+      const code = closeCodeOfMasked(frame);
+
+      if (code !== undefined) {
+        sent.push(code);
+      }
+    });
+
+    const began = performance.now();
+
+    await client.disconnect();
+
+    expect(performance.now() - began).toBeGreaterThanOrEqual(150);
+    expect([told, sent]).toEqual([[['close', true, false]], [1000]]);
+    expect(client.isClosed()).toBe(true);
+  });
+
+  test('waits on its server without end for a close timeout of Infinity, closing once it answers', async () => {
+    await using raw = await startRaw();
+    // ! `ws` is handed the longest a timer holds, 2³¹ − 1 ms, which it arms on every close
+    const client = createWSTransportClient({ closeTimeout: Infinity, WebSocket: TrackedWs });
+    const told = toldBy(client);
+    const sent: number[] = [];
+    const upgraded = raw.next();
+
+    await client.connect({ host, port: raw.port });
+
+    const socket = await upgraded;
+
+    // it reads its close and answers nothing, for longer than any close timeout of these tests
+    socket.on('data', (frame: Buffer) => {
+      const code = closeCodeOfMasked(frame);
+
+      if (code !== undefined) {
+        sent.push(code);
+      }
+    });
+
+    let isSettled = false;
+    const closing = client.disconnect().then(() => {
+      isSettled = true;
+    });
+
+    await new Promise((resolve) => {
+      setTimeout(resolve, 300);
+    });
+
+    expect([sent, isSettled]).toEqual([[1000], false]);
+
+    // its answer, then its end, as a server ends the closing handshake
+    socket.end(frameOf(0x8, Uint8Array.of(0x03, 0xe8)));
+    await closing;
+
+    expect(told).toEqual([['close', true, false]]);
+    expect(client.isClosed()).toBe(true);
   });
 });
 
@@ -1382,18 +2653,24 @@ test.describe('WSTransportClient, heartbeat', () => {
     ]);
   });
 
-  test('closes when its server leaves its pings unanswered, over ws', async () => {
+  test('closes when its server leaves its pings unanswered, telling no error', async () => {
     const server = await startServer({ autoPong: false });
     const [, TrackedWsWebSocket] = IMPLEMENTATIONS[1];
     const client = createWSTransportClient({
       heartbeat: 40,
       WebSocket: TrackedWsWebSocket as unknown as IWebSocketConstructor,
     });
+    const errors: Error[] = [];
+
+    client.on('error', (error) => {
+      errors.push(error);
+    });
 
     try {
       await client.connect({ host, port: portOf(server) });
 
       expect(await nextEvent(client, 'close')).toEqual([false, false]);
+      expect(errors).toEqual([]);
     } finally {
       await stopServer(server);
       await allClosed();

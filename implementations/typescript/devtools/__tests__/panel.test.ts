@@ -6,7 +6,7 @@ import { EnvelopeKind } from '../../src/router/shared/constants';
 import { writeEnvelope } from '../../src/router/shared/envelope';
 import type { BackgroundMessage } from '../messages';
 import { assertBuilt, EXTENSION } from './fixtures';
-import { IDS, T0, TRAFFIC } from './traffic';
+import { IDS, REFUSED_INVALID, T0, TRAFFIC } from './traffic';
 
 // interfaces
 
@@ -1085,6 +1085,11 @@ test.describe('the panel', () => {
     await page.click('[data-mode="envelopes"]');
 
     const rows = page.locator('#envelopes tr[data-key]');
+
+    // ! the rows drawn, all in one pass, before their keys are read: read at once, a slower runner
+    // finds none, and every step lands on the first row
+    await expect(rows.nth(1)).toBeVisible();
+
     const keys = await rows.evaluateAll((elements) => {
       return elements.map((element) => {
         return (element as HTMLElement).dataset['key'];
@@ -1167,6 +1172,33 @@ test.describe('the panel', () => {
     await rowOf(page, 'counter').click();
     await page.click('[data-detail="diff"]');
     await expect(page.locator('#detail .diff .added').first()).toHaveText('+   "value": 47');
+  });
+
+  test('tables the violations of a call its client’s validates refused before it went, wide and narrow', async ({
+    page,
+  }) => {
+    await openWithTraffic(page);
+    await deliver(page, { dropped: 0, records: [...REFUSED_INVALID], type: 'records' });
+
+    await rowOf(page, 'submit counted').click();
+
+    const table = page.locator('#detail .outcome-box table.violations');
+
+    await expect(page.locator('#detail .outcome-box')).toContainText('Failed: PAYLOAD_INVALID.');
+    await expect(table.locator('caption')).toHaveText('2 violations, in their order');
+    await expect(table.locator('tbody tr').first()).toHaveText(
+      'fromint32.ltemust be less than or equal to 10{"lte":10}'
+    );
+    await expect(page.locator('#detail .outcome-box .note')).toHaveText('and 3 more');
+
+    await rowOf(page, 'submit wordless').click();
+    await expect(table.locator('tbody tr')).toHaveCount(6);
+
+    for (const width of [360, 1280]) {
+      await resize(page, { height: 640, width });
+      expect(await isWholeOf(page, 'html')).toBe(true);
+      expect(await isWholeOf(page, '#detail')).toBe(true);
+    }
   });
 
   test('rebuilds the state at a moment the cursor stands on, replaying nothing', async ({
@@ -1337,6 +1369,84 @@ test.describe('the panel', () => {
     await page.locator('#metrics tr[data-procedure="read"] button').click();
     await expect(page.locator('[data-tab="calls"]')).toHaveAttribute('aria-selected', 'true');
     await expect(page.locator('#filter')).toHaveValue('read');
+  });
+
+  test('keeps an exposition opened and scrolled as its reader left it while each reading redraws the view', async ({
+    page,
+  }) => {
+    const expositionOf = (count: number): string => {
+      return Array.from({ length: 300 }, (_, at) => {
+        return `bead_client_call_started_total{service="1",procedure="p${String(at)}",type="request"} ${String(count)}`;
+      }).join('\n');
+    };
+    const placeOf = () => {
+      return page.locator('#metrics details.raw').evaluate((details) => {
+        return {
+          isOpen: (details as HTMLDetailsElement).open,
+          top: details.querySelector('pre')?.scrollTop,
+        };
+      });
+    };
+
+    await openPanel(page);
+    await deliver(page, { sources: [{ id: 1, protocol: 1, side: 'client' }], type: 'sources' });
+    await deliver(page, {
+      expositions: [{ source: 1, text: expositionOf(1) }],
+      type: 'expositions',
+    });
+    await page.click('[data-tab="metrics"]');
+    await page.locator('#metrics details.raw summary').click();
+    await page.locator('#metrics details.raw pre').evaluate((pre) => {
+      pre.scrollTop = 200;
+    });
+
+    await deliver(page, {
+      expositions: [{ source: 1, text: expositionOf(2) }],
+      type: 'expositions',
+    });
+    await expect(page.locator('#metrics details.raw pre')).toContainText('"p0",type="request"} 2');
+    expect(await placeOf()).toEqual({ isOpen: true, top: 200 });
+
+    await page.locator('#metrics details.raw summary').click();
+    await deliver(page, {
+      expositions: [{ source: 1, text: expositionOf(3) }],
+      type: 'expositions',
+    });
+    await expect(page.locator('#metrics details.raw pre')).toContainText('"p0",type="request"} 3');
+    expect((await placeOf()).isOpen).toBe(false);
+  });
+
+  test('keeps what its reader folded in a call’s detail while that call stays shown, and draws another call’s whole', async ({
+    page,
+  }) => {
+    const isFoldedOf = () => {
+      return page
+        .locator('#detail .tree details')
+        .first()
+        .evaluate((details) => {
+          return !(details as HTMLDetailsElement).open;
+        });
+    };
+
+    await openWithTraffic(page);
+    await rowOf(page, 'whoami').click();
+    await page.click('[data-detail="payload"]');
+    await page.locator('#detail .tree summary').first().click();
+    expect(await isFoldedOf()).toBe(true);
+
+    // * the tree drawn so far is marked, so that the redraw is seen to have drawn another
+    await page.locator('#detail .tree').evaluate((tree) => {
+      tree.setAttribute('data-drawn', 'before');
+    });
+    await deliver(page, { dropped: 0, records: TRAFFIC.slice(0, 1), type: 'records' });
+    await expect(page.locator('#detail .tree[data-drawn]')).toHaveCount(0);
+    await expect(page.locator('#detail .tree')).toBeVisible();
+    expect(await isFoldedOf()).toBe(true);
+
+    await rowOf(page, 'increment').click();
+    await rowOf(page, 'whoami').click();
+    await page.click('[data-detail="payload"]');
+    expect(await isFoldedOf()).toBe(false);
   });
 
   test('reads the HTTP transport’s exchanges from the Network panel’s entries, with the package’s codec, names learned from calls', async ({

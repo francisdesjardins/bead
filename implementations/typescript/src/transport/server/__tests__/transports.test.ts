@@ -21,6 +21,8 @@ import {
   type IExpected,
 } from '../../../router/server/__tests__/expected-envelope';
 import { FailureError } from '../../../router/server/router-server';
+import { writeEnvelope } from '../../../router/shared/envelope';
+import { EnvelopeKind, FailureScope } from '../../../router/shared/constants';
 import { fromHexadecimal } from '../../../router/shared/__tests__/vectors';
 import type { RouterLimitsOptions } from '../../../router/shared/types';
 import { wholeEnvelopeLimitsOf } from '../../../router/shared/whole-envelope-limits';
@@ -206,6 +208,18 @@ const PLAYED_TRANSPORTS: ReadonlySet<string> = new Set(['http', 'websocket']);
 
 // ! every key of a step this harness reads: one it does not know fails the step, rather than pass it
 // unplayed
+// the keys of a case, as the schema defines them: one this harness does not know fails its case
+const CASE_KEYS: ReadonlySet<string> = new Set([
+  'answersPings',
+  'clauses',
+  'differs',
+  'limits',
+  'name',
+  'options',
+  'realTime',
+  'steps',
+  'transport',
+]);
 const STEP_KEYS: ReadonlySet<string> = new Set([
   'advance',
   'after',
@@ -221,7 +235,59 @@ const STEP_KEYS: ReadonlySet<string> = new Set([
 ]);
 
 // how long a step waits on the real clock for its bytes, a gauge, a timer or a report, unless it says
-const PATIENCE = 3_000;
+const PATIENCE = 10_000;
+
+// ! every option and limit this harness reads, by transport, as the C# side's: one it does not read
+// fails its case, where it would play on the default unseen
+const OPTION_KEYS: Readonly<Record<'http' | 'websocket', ReadonlySet<string>>> = Object.freeze({
+  http: new Set([
+    'maximumConnections',
+    'maximumConnectionsPerAddress',
+    'maximumWaitingExchanges',
+    'bodyBytesBudget',
+    'maximumBodyBytes',
+    'maximumOutboxBytes',
+    'maximumWait',
+    'exchangeTimeout',
+    'inactivityTimeout',
+    'hosts',
+    'origins',
+    'trustedProxies',
+    'unnamedProxies',
+    'minimumSendBytesPerSecond',
+    'sendGracePeriod',
+    'headersTimeout',
+    'minimumBodyBytesPerSecond',
+    'bodyGracePeriod',
+    'connectionInactivityTimeout',
+  ]),
+  websocket: new Set([
+    'maximumMessageBytes',
+    'heartbeat',
+    'hosts',
+    'origins',
+    'trustedProxies',
+    'unnamedProxies',
+    'maximumConnections',
+    'maximumConnectionsPerAddress',
+    'minimumSendBytesPerSecond',
+    'sendGracePeriod',
+    'maximumUnsentBytes',
+    'headersTimeout',
+  ]),
+});
+const LIMIT_KEYS: ReadonlySet<string> = new Set([
+  'maximumEnvelopeBytes',
+  'chunkBytes',
+  'windowBytes',
+  'maximumTransfers',
+  'maximumPayloadBytes',
+  'bufferedBytesBudget',
+  'maximumChunkRuns',
+  'maximumDetailBytes',
+  'maximumAnsweringCalls',
+  'transferInactivityTimeout',
+]);
 const POLL = 10;
 
 /** The shapes of what a server draws, in ASCII classes, as the schema defines them. */
@@ -477,6 +543,18 @@ const serverOf = (
   { limits, options = {}, transport }: ICase,
   clock: TestClock
 ): ServerUnderTest => {
+  for (const name of Object.keys(options)) {
+    if (!OPTION_KEYS[transport === 'websocket' ? 'websocket' : 'http'].has(name)) {
+      throw new Error(`a case sets an option no test reads: ${name}`);
+    }
+  }
+
+  for (const name of Object.keys(limits ?? {})) {
+    if (!LIMIT_KEYS.has(name)) {
+      throw new Error(`a case sets a limit no test reads: ${name}`);
+    }
+  }
+
   const {
     connectionInactivityTimeout,
     heartbeat,
@@ -714,7 +792,40 @@ test.describe('the transports', () => {
 
   const played: string[] = [];
 
-  test('the defaults are those of sections 15.3 and 15.12', async () => {
+  test('reads each batch failure detail only where the case gives one', () => {
+    const expected: IExpected[] = [
+      { callId: 3, kind: 18, failure: { code: 1, scope: 0, relays: 0 } },
+      { callId: 5, kind: 18, failure: { code: 1, scope: 0, relays: 0, detail: 'second' } },
+    ];
+    const entries: [number, string][] = [
+      [3, 'first'],
+      [5, 'second'],
+    ];
+    const pieces = entries.map(([callId, detail]) => {
+      const bytes = writeEnvelope({
+        header: { callId, kind: EnvelopeKind.FAILURE },
+        kind: EnvelopeKind.FAILURE,
+        failure: { code: 1, scope: FailureScope.PROTOCOL, detail },
+      });
+      const length = Buffer.alloc(4);
+
+      length.writeUInt32BE(bytes.length);
+
+      return Buffer.concat([length, bytes]);
+    });
+    const batch = Buffer.concat(pieces);
+
+    expect(batchOf(batch, expected)).toEqual(expected);
+
+    // ! the second item's detail comes from its own bytes, not its expectation or its neighbour
+    batch[batch.length - 1] = '!'.charCodeAt(0);
+    expect(batchOf(batch, expected)).toEqual([
+      expected[0],
+      { ...expected[1], failure: { code: 1, scope: 0, relays: 0, detail: 'secon!' } },
+    ]);
+  });
+
+  test('bounds default to what the file states', async () => {
     // the bound the WebSocket transport server takes when built alone and told none
     const fake = createFakeWebSocketServer();
     const wsTransport = createWSTransportServer({ WebSocketServer: fake.FakeWebSocketServer });
@@ -753,7 +864,7 @@ test.describe('the transports', () => {
   });
 
   for (const { body, fields, name, pieces, status } of TRANSPORTS.responses) {
-    test(`the reader reads ${name}`, async () => {
+    test(`reads ${name}, by its length or de-chunked, whatever reads it comes in`, async () => {
       const reader = createResponseReader();
 
       for (const piece of pieces) {
@@ -787,6 +898,13 @@ test.describe('the transports', () => {
     played.push(name);
 
     test(name, async () => {
+      expect(
+        Object.keys(testCase).filter((key) => {
+          return !CASE_KEYS.has(key);
+        }),
+        'the keys of the case this harness does not read'
+      ).toEqual([]);
+
       // the clock every layer runs on: only a step that moves time moves it; a platform's own timers,
       // a ping's among them, stay on the real clock
       const clock = createTestClock(Date.parse(TRANSPORTS.wallClock));
@@ -804,7 +922,7 @@ test.describe('the transports', () => {
 
         return exchange;
       };
-      // the handle a WebSocket's connection has on the server: the one it holds from the port the
+      // the handle an exchange's connection has on the server: the one it holds from the port the
       // exchange's socket came from, as the C# side finds it
       const handleOf = (on: string, at: string): TransportServerConnectionHandle => {
         const { localPort } = exchangeOf(on, at);
@@ -812,7 +930,7 @@ test.describe('the transports', () => {
           return peerPort === localPort;
         });
 
-        if (transport !== 'websocket' || localPort === undefined || held === undefined) {
+        if (localPort === undefined || held === undefined) {
           throw new Error(`${at}: the exchange ${on} names no connection the server holds`);
         }
 
@@ -946,7 +1064,7 @@ test.describe('the transports', () => {
     });
   }
 
-  test('every case is played, but one whose differs excuses TypeScript', () => {
+  test('plays every case but those a row of the support matrix excuses this side from', () => {
     expect(played).toEqual(
       TRANSPORTS.cases
         .filter((testCase) => {

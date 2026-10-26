@@ -283,6 +283,20 @@
           "result": {
             "encoding": "json"
           }
+        },
+        {
+          "admission": "none",
+          "description": "Counts the names it is given, held to the rules each server judges it by before its resolver: 50 at most, each of 1 to 3 characters.",
+          "failures": [],
+          "procedureId": 19,
+          "procedureKind": "request",
+          "procedureName": "checked",
+          "request": {
+            "encoding": "json"
+          },
+          "result": {
+            "encoding": "json"
+          }
         }
       ],
       "reserved": {
@@ -292,8 +306,8 @@
       },
       "serviceId": 1,
       "serviceName": "Interop",
-      "serviceRevision": 1
+      "serviceRevision": 2
     }
   ],
-  "specVersion": "0.7.0"
+  "specVersion": "0.8.0"
 }

@@ -81,6 +81,32 @@ export const allClosed = async () => {
   sockets.clear();
 };
 
+/**
+ * What a test's listeners throw meanwhile, which reaches Node as an uncaught exception: taken from
+ * the runner's own listeners, which would fail the test, and given back to them once it ends.
+ */
+export const trapUncaught = (): Disposable & { thrown: unknown[] } => {
+  const thrown: unknown[] = [];
+  const runners = process.rawListeners('uncaughtException');
+  const trap = (error: unknown): void => {
+    thrown.push(error);
+  };
+
+  process.removeAllListeners('uncaughtException');
+  process.on('uncaughtException', trap);
+
+  return {
+    thrown,
+    [Symbol.dispose]: () => {
+      process.off('uncaughtException', trap);
+
+      for (const runner of runners) {
+        process.on('uncaughtException', runner as (error: Error) => void);
+      }
+    },
+  };
+};
+
 /** Both client implementations, tracked, for a suite to run on each. */
 export const IMPLEMENTATIONS = [
   ['the global WebSocket', track(WebSocket)],

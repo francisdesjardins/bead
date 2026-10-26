@@ -1,20 +1,22 @@
 // ── Check ─────────────────────────────────────────────────────────────────────
 
 // `beadc check` over one input, every stage in its order: a project's `.proto` roots — a copy of the
-// options among them, buf's compile, the `.proto` rules, then the blueprint they give, at the
+// options among them, Bead's or protovalidate's, buf's compile, buf's `PROTOVALIDATE` where a file
+// imports protovalidate's options, the `.proto` rules, then the blueprint they give, at the
 // blueprint's level — or a blueprint's file, read as bytes.
 
 // dependencies
 
 import { readFileSync } from 'node:fs';
 
-import { compile } from './compile.ts';
+import { compile, lintRules } from './compile.ts';
 import { hasError, type IDiagnostic, InputError } from './diagnostics.ts';
 import { blueprintOf } from './front-end/blueprint-of.ts';
 import { checkProto } from './front-end/check-proto.ts';
 import { readSet } from './front-end/input.ts';
+import { importsValidate } from './front-end/rules.ts';
 import { checkValue, type IBlueprint, type PlaceOf, readBlueprint } from './model/blueprint.ts';
-import { assertRoots, optionsCopiesOf, pathOnDisk } from './roots.ts';
+import { assertRoots, optionsCopiesOf, pathOnDisk, VALIDATE_FILE } from './roots.ts';
 
 // types
 
@@ -35,11 +37,15 @@ export interface IChecked {
 /**
  * Checks the `.proto` files of `roots`, or only `files` among them by their import paths; `image`
  * compiles buf's image, for `beadc breaking`, which reads as a set. Throws an {@link InputError} for
- * a root that is no folder or a set buf does not compile.
+ * a root that is no folder or a set buf does not compile. `folder` names the project's work area.
  */
 export const checkRoots = (
   roots: readonly string[],
-  options: { readonly files?: readonly string[]; readonly image?: boolean } = {}
+  options: {
+    readonly files?: readonly string[];
+    readonly image?: boolean;
+    readonly folder?: string;
+  } = {}
 ): IChecked => {
   assertRoots(roots);
 
@@ -59,6 +65,7 @@ export const checkRoots = (
     return path;
   });
   const set = compile(roots, {
+    ...(options.folder === undefined ? {} : { folder: options.folder }),
     ...(files === undefined ? {} : { files }),
     ...(options.image === true ? { image: true } : {}),
   });
@@ -66,7 +73,19 @@ export const checkRoots = (
     roots,
     ...(options.files === undefined ? {} : { files: options.files }),
   });
-  const proto = checkProto(input);
+  // * buf's own check that a field's rules are coherent, run only where a file states some
+  const linted = importsValidate(input, VALIDATE_FILE)
+    ? lintRules(roots, {
+        ...(options.folder === undefined ? {} : { folder: options.folder }),
+        files: input.files.flatMap((file) => {
+          const path = pathOnDisk(file.desc.proto.name, roots);
+
+          return path === undefined ? [] : [path];
+        }),
+      })
+    : [];
+  // * rules buf refuses are none beadc reads further
+  const proto = [...linted, ...checkProto(input, { rules: linted.length === 0 })];
 
   if (hasError(proto)) {
     return { diagnostics: proto, set };

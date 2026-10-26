@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Text.Json;
+using Bead.Protobuf;
 
 namespace Bead.Interop;
 
@@ -7,7 +8,8 @@ namespace Bead.Interop;
 /// The resolvers of Bead's interop service, its API <c>spec/interop-blueprint.json</c>, generated
 /// into <c>Generated/InteropBead.cs</c>, and its behaviour <c>spec/interop-service.json</c>, as the
 /// C# side answers them: what a client of any implementation calls, and what
-/// <c>spec/conversations.json</c> plays against. Only the resolvers and the hook are written here.
+/// <c>spec/conversations.json</c> plays against. Only the resolvers, the hook and the rules of
+/// <c>checked</c> are written here.
 /// </summary>
 public static class InteropHandlers
 {
@@ -17,6 +19,40 @@ public static class InteropHandlers
     private const string Question = "What time is it where you are?";
 
     private static readonly TimeSpan ClockTimeout = TimeSpan.FromSeconds(10);
+
+    // checked's rules, as interop-service.json states them: 50 names at most, each of 1 to 3
+    // characters, their sites as section 18 writes them
+    private const int MostNames = 50;
+    private const int FewestCharacters = 1;
+    private const int MostCharacters = 3;
+
+    private static readonly ViolationRule NamesRequired = new() { RuleId = "required", Message = "value is required" };
+
+    private static readonly ViolationRule MaxItems =
+        new() { RuleId = "repeated.max_items", Message = "must contain no more than 50 item(s)", Bounds = Validators.BoundsOf("{\"max_items\":\"50\"}") };
+
+    private static readonly ViolationRule MinLen =
+        new() { RuleId = "string.min_len", Message = "must be at least 1 characters", Bounds = Validators.BoundsOf("{\"min_len\":\"1\"}") };
+
+    private static readonly ViolationRule MaxLen =
+        new() { RuleId = "string.max_len", Message = "must be at most 3 characters", Bounds = Validators.BoundsOf("{\"max_len\":\"3\"}") };
+
+    // checked's validator, its rules judged into a sink as a generated one's are: the violations a
+    // detail of its bound carries, the rest counted
+    private static readonly RequestValidator<JsonElement> CheckedValidator = Validators.Of<JsonElement>(JudgeChecked);
+
+    // * checked, its descriptor made again from the generated one with its rules: the blueprint binds
+    // json, whose rules are a function its side is given (spec 18.1)
+    private static readonly RequestProcedure<InteropProcedures, JsonElement, JsonElement, NoFailure> Checked = new(
+        InteropProcedures.Checked.Procedure,
+        InteropProcedures.Checked.Bindings with { Validate = CheckedRules });
+
+    // the interop service's procedures: the generated ones, checked made again with its rules, so
+    // one service server answers them all, as the TypeScript side's does
+    private static readonly IReadOnlyList<IServiceProcedure<InteropProcedures>> Procedures = [.. InteropProcedures.All.Select((procedure) =>
+    {
+        return ReferenceEquals(procedure, InteropProcedures.Checked) ? Checked : procedure;
+    })];
 
     // helpers
 
@@ -79,6 +115,85 @@ public static class InteropHandlers
         };
     }
 
+    // the names checked is given: an object holding names, an array of strings, its other members
+    // aside; none for anything else
+    private static List<string>? NamesOf(JsonElement request)
+    {
+        if (request.ValueKind != JsonValueKind.Object
+            || !request.TryGetProperty("names", out var names)
+            || names.ValueKind != JsonValueKind.Array)
+        {
+            return null;
+        }
+
+        var held = new List<string>(names.GetArrayLength());
+
+        foreach (var name in names.EnumerateArray())
+        {
+            if (name.ValueKind != JsonValueKind.String)
+            {
+                return null;
+            }
+
+            held.Add(name.GetString()!);
+        }
+
+        return held;
+    }
+
+    /// <summary>
+    /// The rules of <c>checked</c>, by hand, as section 18 judges a request's: <c>names</c> holds 50
+    /// items at most, then each item 1 character at least and 3 at most, counted as code points; a
+    /// request that is no such object breaks <c>required</c> at <c>names</c>, alone. A judging under
+    /// failFast stops at its first violation.
+    /// </summary>
+    internal static Judged CheckedRules(JsonElement request, ValidateOptions options)
+    {
+        return CheckedValidator(request, options);
+    }
+
+    // checked's rules into its sink, in 18.5's order: names' own, then each name's
+    private static bool JudgeChecked(JsonElement request, IViolationSink sink)
+    {
+        var names = NamesOf(request);
+
+        sink.Enter("names");
+
+        if (names is null)
+        {
+            return sink.Add(NamesRequired, request);
+        }
+
+        if (names.Count > MostNames && sink.Add(MaxItems, names))
+        {
+            return true;
+        }
+
+        sink.Leave();
+
+        for (var index = 0; index < names.Count; index += 1)
+        {
+            var name = names[index];
+            var length = Validators.CodePointLength(name);
+
+            sink.EnterIndex("names", index);
+
+            if (length < FewestCharacters && sink.Add(MinLen, name))
+            {
+                return true;
+            }
+
+            if (length > MostCharacters && sink.Add(MaxLen, name))
+            {
+                return true;
+            }
+
+            sink.Leave();
+        }
+
+        return false;
+    }
+
     // the issuer endSessionsOf takes: an object of this member alone, a string — {"issuer"}
     internal static string IssuerOf(JsonElement request)
     {
@@ -110,25 +225,30 @@ public static class InteropHandlers
     // definition
 
     /// <summary>
-    /// The interop service, served on <paramref name="server"/>, its resolvers registered and
-    /// offered there. The calls to <c>slow</c> each connection cancelled are counted per
+    /// The interop service, served whole on <paramref name="server"/> by one service server,
+    /// <c>checked</c> with its rules among its procedures, its resolvers registered and offered
+    /// there. The calls to <c>slow</c> each connection cancelled are counted per
     /// connection, for <c>cancellations</c> to answer; a session holds the name its <c>login</c>
     /// gave, which <c>whoami</c> answers from its call's session, as it answers a credential's
     /// <c>sub</c>; the ticks of <c>ticks</c> and <c>tick</c> are held per connection and per
     /// session, its call's. A connection registers itself as a destination of the server's relay by
-    /// <c>register</c>, with the audience it verifies; the destination it registered last is kept
-    /// by its handle, once it closed too, for <c>unregister</c> to take out. <c>endSession</c> ends
+    /// <c>register</c>, with the audience it verifies, whoever it is; the destinations it registered
+    /// are kept by their id, each with the connection that registered it, and one whose connection
+    /// closed is registered anew in its place by the next <c>register</c> that names it.
+    /// <c>unregister</c> takes out the one its caller's connection registered last. <c>endSession</c> ends
     /// a credential's session on every connection that keeps it, and nothing else;
     /// <c>endSessionsOf</c>, every credential's session of an issuer alike. One service a server:
     /// the counts are its connections'.
     /// </summary>
-    public static InteropServer<string> Offer(IBeadServer<string> server)
+    public static ServiceServer<InteropProcedures, string> Offer(IBeadServer<string> server)
     {
         ArgumentNullException.ThrowIfNull(server);
 
         var sessionManager = server.Sessions;
         var router = server.Router;
-        var interop = new InteropServer<string>(new ServiceServerOptions<InteropProcedures>
+
+        // * the generated server's own body, over its procedures and checked with its rules
+        var interop = new ServiceServer<InteropProcedures, string>(Procedures, new ServiceServerOptions<InteropProcedures>
         {
             Admissions = new InteropAdmissions
             {
@@ -142,14 +262,17 @@ public static class InteropHandlers
                 },
             },
         });
+
+        // its command and its notifier, made as the generated server makes them
+        var clock = interop.CommandOf(InteropProcedures.Clock);
+        var ticks = interop.NotifierOf(InteropProcedures.Ticks);
         var cancellations = new ConcurrentDictionary<string, int>();
 
         // by connection and session, its call's — none for its connection's — the ticks held
         var holds = new Dictionary<(string ConnectionHandle, SessionIdentifier? Session), List<Hold>>();
 
-        // by connection, the destination it registered last: kept once it closed, so whoever
-        // connects under its handle next takes it out
-        var registered = new Dictionary<string, DestinationRegistration>();
+        // by destination, its registration and the connection that registered it, in the order registered
+        var registered = new OrderedDictionary<uint, (string ConnectionHandle, DestinationRegistration Registration)>();
 
         interop.On(InteropProcedures.Echo, (request, response) =>
         {
@@ -211,7 +334,7 @@ public static class InteropHandlers
         // the server asks its client back, by a command, before it answers
         interop.On(InteropProcedures.Ask, async (request, response) =>
         {
-            var time = await interop.Command.Clock(JsonSerializer.SerializeToElement(Question))(new RequestOptions
+            var time = await clock(JsonSerializer.SerializeToElement(Question))(new RequestOptions
             {
                 ConnectionHandle = request.ConnectionHandle,
                 Timeout = ClockTimeout,
@@ -280,7 +403,7 @@ public static class InteropHandlers
             var key = request.Payload.TryGetProperty("key", out var given) ? given.GetString() : null;
             var due = new List<Hold>();
 
-            await interop.Notify.Ticks(
+            await ticks(
                 request.Payload.GetProperty("value"),
                 new NotifyOptions
                 {
@@ -353,8 +476,11 @@ public static class InteropHandlers
             return response.Answer(JsonSerializer.SerializeToElement(NameOf(request.Session)));
         });
 
-        // its caller's connection, as the destination it names; looked up and registered under one
-        // lock, so two registers of one destination cannot both pass
+        // its caller's connection, as the destination it names, whoever calls; looked up and
+        // registered under one lock, so two registers of one destination cannot both pass: one
+        // registered already whose connection is open, or that is no connection's, is the caller's to
+        // hear about, not a mistake of the server's; one whose connection closed is registered anew,
+        // in its place at once
         interop.On(InteropProcedures.Register, (request, response) =>
         {
             var destinationId = request.Payload.GetProperty("destination").GetUInt32();
@@ -364,16 +490,29 @@ public static class InteropHandlers
 
             lock (registered)
             {
-                isTaken = router.Destinations().Any((destination) =>
+                var isRegistered = router.Destinations().Any((destination) =>
                 {
                     return destination.DestinationId == destinationId;
                 });
+                var replaced = registered.TryGetValue(destinationId, out var held) ? held.Registration : null;
+
+                isTaken = isRegistered && replaced?.Destination.IsClosed != true;
 
                 if (!isTaken)
                 {
-                    registered[request.ConnectionHandle] = router.RegisterDestination(
+                    var registration = router.RegisterDestination(
                         new ConnectionTarget(request.ConnectionHandle),
-                        new DestinationOptions { Audience = audience, DestinationId = destinationId, Timeout = timeout });
+                        new DestinationOptions
+                        {
+                            Audience = audience,
+                            DestinationId = destinationId,
+                            Replaces = isRegistered ? replaced : null,
+                            Timeout = timeout,
+                        });
+
+                    // ! taken out first, so the order kept is the order registered, the last one its connection's
+                    registered.Remove(destinationId);
+                    registered[destinationId] = (request.ConnectionHandle, registration);
                 }
             }
 
@@ -385,14 +524,23 @@ public static class InteropHandlers
             return response.Answer(JsonSerializer.SerializeToElement(destinationId));
         });
 
-        // the destination its caller's handle registered last, taken out and forgotten
+        // the destination its caller's connection registered last, taken out and forgotten
         interop.On(InteropProcedures.Unregister, (request, response) =>
         {
-            bool isTakenOut;
+            var isTakenOut = false;
 
             lock (registered)
             {
-                isTakenOut = registered.Remove(request.ConnectionHandle, out var registration) && registration.Unregister();
+                var own = registered.LastOrDefault((entry) =>
+                {
+                    return entry.Value.ConnectionHandle == request.ConnectionHandle;
+                });
+
+                if (own.Value.Registration is { } registration)
+                {
+                    registered.Remove(own.Key);
+                    isTakenOut = registration.Unregister();
+                }
             }
 
             return response.Answer(JsonSerializer.SerializeToElement(isTakenOut));
@@ -412,6 +560,12 @@ public static class InteropHandlers
         {
             await router.EndSessionsOf(IssuerOf(request.Payload));
             await response.Answer(Null);
+        });
+
+        // checked's resolver counts the names its rules took
+        interop.On(Checked, (request, response) =>
+        {
+            return response.Answer(JsonSerializer.SerializeToElement(NamesOf(request.Payload)!.Count));
         });
 
         interop.Offer(server);

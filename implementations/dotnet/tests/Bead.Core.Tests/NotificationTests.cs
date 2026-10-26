@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using System.Text.Json;
 using Bead.Interop;
+using Microsoft.Extensions.Time.Testing;
 
 namespace Bead.Tests;
 
@@ -23,7 +24,8 @@ public sealed class NotificationTests : IDisposable
     };
 
     private readonly SerialScheduler _scheduler = new();
-    private readonly ClientEnd _clientEnd = new();
+    // the client's clock moves only as a test moves it: a call id it reserves stays reserved
+    private readonly ClientEnd _clientEnd = new() { Clock = new FakeTimeProvider() };
     private readonly ServerEnd _serverEnd = new();
     private readonly RouterClient _client;
     private readonly Server<string> _server;
@@ -563,6 +565,14 @@ public sealed class NotificationTests : IDisposable
 
     private sealed class ServerEnd : IServerTransport
     {
+        public string? Type
+        {
+            get
+            {
+                return TransportTypes.WebSocket;
+            }
+        }
+
         public TimeProvider Clock { get; init; } = TimeProvider.System;
 
         public event Action<string>? Connection;

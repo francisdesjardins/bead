@@ -447,7 +447,13 @@ internal sealed partial class RouterCore
 
             _pendingCalls.Add(call, pendingRequest);
             request.OnCallId?.Invoke(callId);
-            Wait(timeout, (call, pendingRequest));
+
+            // a request that goes whole waits on its timeout; one that goes as a transfer, on its
+            // inactivity while it goes, which sending it arms
+            if (outgoing is null)
+            {
+                Wait(timeout, (call, pendingRequest));
+            }
 
             // its token ends it: rejected here, on the core's scheduler
             using var registration = token.Register(() =>

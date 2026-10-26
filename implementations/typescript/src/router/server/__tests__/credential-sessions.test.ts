@@ -50,6 +50,56 @@ const sessionOf = (end: number | undefined): ICallSession => {
 // definition
 
 test.describe('createCredentialSessions', () => {
+  test('keeps the latest credential end across subscriptions and clears its timers when the connection closes', async () => {
+    const { clock, ended, sessions: created } = createSessions();
+    using sessions = created;
+    const { notifications } = sessions;
+    const identifier: SessionIdentifier = { id: 'ada', scheme: CredentialScheme.ELSEWHERE };
+
+    notifications.register(news, {
+      callId: 1,
+      connectionHandle: first,
+      end: NOW + 1_000,
+      identifier,
+    });
+    notifications.register(other, {
+      callId: 3,
+      connectionHandle: first,
+      end: NOW + 2_000,
+      identifier,
+    });
+    notifications.register(news, {
+      callId: 1,
+      connectionHandle: second,
+      end: NOW + 3_000,
+      identifier,
+    });
+
+    expect(delaysOn(clock)).toEqual([2_000, 3_000]);
+    await clock.tickAsync(1_000);
+
+    expect(ended).toEqual([]);
+    notifications.unregister(1, first);
+    notifications.register(news, { callId: 5, connectionHandle: first, identifier });
+
+    expect(sessions.gauges().counts).toEqual({ credentialSessions: 2, timedCredentialSessions: 1 });
+    expect(delaysOn(clock)).toEqual([3_000]);
+    expect(
+      sessions.resolved({ data: 'ada', end: NOW + 1_500, identifier }, first).end
+    ).toBeUndefined();
+
+    sessions.clear(first);
+    sessions.clear(first);
+
+    expect(sessions.gauges().counts).toEqual({ credentialSessions: 1, timedCredentialSessions: 1 });
+    expect([...sessions.gauges().connectionHandles]).toEqual([second]);
+    await clock.tickAsync(2_000);
+
+    expect(ended).toEqual([{ connectionHandle: second, identifier }]);
+    expect(delaysOn(clock)).toEqual([]);
+    expect(sessions.gauges().counts).toEqual({ credentialSessions: 0, timedCredentialSessions: 0 });
+  });
+
   test('keeps a credential’s session from its first subscription on a connection to its last, timing its end meanwhile; its connection’s session it never keeps', () => {
     const { clock, sessions } = createSessions();
     const { notifications } = sessions;

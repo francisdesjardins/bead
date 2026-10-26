@@ -15,6 +15,9 @@ public sealed class RelayTests
 
     private const string Device = "type=WS;ip=127.0.0.1;port=50002;ordinal=1";
 
+    // the connection the device opened next, under a handle its transport never gave
+    private const string Second = "type=WS;ip=127.0.0.1;port=50002;ordinal=2";
+
     private static readonly TimeSpan Patience = TimeSpan.FromSeconds(10);
 
     private static readonly TimeSpan Infinite = Timeout.InfiniteTimeSpan;
@@ -139,6 +142,61 @@ public sealed class RelayTests
     // definition
 
     [Fact]
+    public async Task Refuses_bearer_credentials_when_a_destination_supplies_no_carriage_metadata_and_still_forwards_none_or_OPAQUE()
+    {
+        var test = new TestRelay();
+        var target = new RecordingTarget();
+
+        test.Relay.Register(new ConnectionTarget(Device), Seven with { Audience = "bead-interop" });
+        test.Relay.Register(new DefaultCarriageTarget(target), new DestinationOptions { Audience = "bead-interop", DestinationId = 8 });
+
+        foreach (var destinationId in new uint[] { 7, 8 })
+        {
+            foreach (var (callId, credential, detail) in new (uint, Credential, string)[]
+            {
+                (1, JwtFor("bead-interop"), "its transport leaves the machine in the clear, which a bearer credential never crosses"),
+                (3, Credential.Elsewhere(), "its transport does not carry the credential ELSEWHERE stands for beside an envelope: none, or another"),
+            })
+            {
+                var header = HeaderOf(callId, destinationId) with { Credential = credential };
+
+                await Handled(test.Relay.HandlerOf(header), PropsOf(header) with { IsAdmitted = false, TransportCredential = "Interop sub=ada" });
+
+                var (answer, answered) = test.Answers[^1];
+
+                Assert.Equal(Failure.OfProtocol(ProtocolCode.DestinationUnreachable, $"destination {destinationId} is unreachable: {detail}"), answer.Failure);
+                Assert.Same(header, answered.Header);
+            }
+        }
+
+        Assert.Empty(test.Own);
+        Assert.Empty(target.Asked);
+
+        foreach (var destinationId in new uint[] { 7, 8 })
+        {
+            foreach (var (callId, credential) in new (uint, Credential?)[] { (5, null), (7, Opaque()) })
+            {
+                var header = HeaderOf(callId, destinationId) with { Credential = credential };
+
+                await Handled(test.Relay.HandlerOf(header), PropsOf(header) with { IsAdmitted = false });
+            }
+        }
+
+        foreach (var requests in new[] { test.Own, target.Asked })
+        {
+            Assert.Equal(2, requests.Count);
+            Assert.All(requests, (asked) =>
+            {
+                Assert.Equal(Credential.None, asked.Options.Credential);
+                Assert.Equal(new byte[] { 1, 2, 3 }, asked.Payload.ToArray());
+            });
+        }
+
+        Assert.Equal<object>([new byte[] { 8 }, new byte[] { 8 }, new byte[] { 9 }, new byte[] { 9 }], FailuresOf(test.Answers).Skip(4));
+        Assert.Empty(test.Reports);
+    }
+
+    [Fact]
     public void Takes_the_audience_each_destination_verifies_gives_the_set_of_them_and_refuses_one_not_of_well_formed_Unicode()
     {
         var relay = new TestRelay().Relay;
@@ -205,15 +263,32 @@ public sealed class RelayTests
         relay.Register(new RecordingTarget { IsSecure = false }, new DestinationOptions { Audience = "bead-interop", DestinationId = 10 });
         relay.Register(new RecordingTarget(), new DestinationOptions { Audience = "bead-interop", DestinationId = 11 });
 
-        ushort? CodeOf((uint DestinationId, Credential? Credential) call)
+        Failure? RefusalOf((uint DestinationId, Credential? Credential) call)
         {
             var header = HeaderOf(1, call.DestinationId) with { Credential = call.Credential };
 
-            return relay.HandlerOf(header)!.Admit(new AdmissionRequest(First, header) { TransportCredential = "Interop sub=ada" })?.Code;
+            return relay.HandlerOf(header)!.Admit(new AdmissionRequest(First, header) { TransportCredential = "Interop sub=ada" });
         }
 
+        static Failure Unreachable((uint DestinationId, string Why) refused)
+        {
+            return Failure.OfProtocol(ProtocolCode.DestinationUnreachable, $"destination {refused.DestinationId} is unreachable: {refused.Why}");
+        }
+
+        const string Audience = "it verifies another audience than the one the token names, or none";
+        const string InTheClear = "its transport leaves the machine in the clear, which a bearer credential never crosses";
+
         // a JWT whose aud names another, or none, or that does not read
-        Assert.All(
+        Assert.Equal(
+            [
+                Unreachable((7, Audience)),
+                Unreachable((8, Audience)),
+                Unreachable((8, "it was registered with no audience")),
+                Unreachable((9, "its transport does not carry the credential ELSEWHERE stands for beside an envelope: none, or another")),
+                Unreachable((10, InTheClear)),
+                Unreachable((10, InTheClear)),
+                Unreachable((11, Audience)),
+            ],
             new (uint, Credential?)[]
             {
                 (7, interop),
@@ -223,28 +298,26 @@ public sealed class RelayTests
                 (10, interop),
                 (10, Credential.Elsewhere()),
                 (11, Credential.Jwt("a.b.c")),
-            },
-            (call) =>
-            {
-                Assert.Equal((ushort)ProtocolCode.DestinationUnreachable, CodeOf(call));
-            });
+            }.Select(RefusalOf));
 
         // what it can carry goes on; none and OPAQUE cross any leg B
         Assert.All(
             new (uint, Credential?)[] { (11, interop), (11, Credential.Elsewhere()), (9, interop), (8, null), (10, Opaque()) },
             (call) =>
             {
-                Assert.Null(CodeOf(call));
+                Assert.Null(RefusalOf(call));
             });
     }
 
     [Fact]
-    public void Answers_an_ELSEWHERE_DESTINATION_UNREACHABLE_over_a_leg_B_whose_upgrade_carried_the_relay_s_own_credential()
+    public async Task Answers_an_ELSEWHERE_DESTINATION_UNREACHABLE_over_a_leg_B_whose_upgrade_carried_the_relay_s_own_credential()
     {
-        var relay = new TestRelay().Relay;
+        var test = new TestRelay();
+        var relay = test.Relay;
+        var target = new RecordingTarget { CarriedByUpgrade = "Interop sub=relay" };
 
         // a WebSocket leg B, its upgrade carrying the relay's own credential
-        relay.Register(new RecordingTarget { CarriedByUpgrade = "Interop sub=relay" }, Seven with { Audience = "bead-interop" });
+        relay.Register(target, Seven with { Audience = "bead-interop" });
 
         Failure? RefusalOf(string carried)
         {
@@ -259,6 +332,13 @@ public sealed class RelayTests
         Assert.Equal(
             ((ushort)ProtocolCode.DestinationUnreachable, "destination 7 is unreachable: its transport does not carry the credential ELSEWHERE stands for beside an envelope: none, or another"),
             (refused?.Code, refused?.Detail));
+
+        var header = HeaderOf(1) with { Credential = Credential.Elsewhere() };
+
+        await Handled(relay.HandlerOf(header), PropsOf(header) with { IsAdmitted = false, TransportCredential = "Interop sub=ada" });
+        Assert.Equal<object>([refused!], FailuresOf(test.Answers));
+        Assert.Empty(target.Asked);
+        Assert.Empty(test.Own);
 
         // the very bytes its upgrade carried go
         Assert.Null(RefusalOf("Interop sub=relay"));
@@ -286,6 +366,7 @@ public sealed class RelayTests
             {
                 return asked.Options.Credential!.Value;
             }));
+        Assert.Equal(4, test.Answers.Count);
     }
 
     [Fact]
@@ -456,7 +537,7 @@ public sealed class RelayTests
             FailuresOf(test.Answers));
         Assert.Single(target.Asked);
 
-        // C# only: one its router admitted already goes on, not asked again
+        // one its router admitted already goes on, not asked again
         await Handled(test.Relay.HandlerOf(7), PropsOf(HeaderOf(1)));
 
         Assert.Equal(2, target.Asked.Count);
@@ -690,6 +771,7 @@ public sealed class RelayTests
         await Handled(test.Relay.HandlerOf(7), PropsOf(HeaderOf(1)) with { Signal = source.Token });
 
         Assert.Empty(test.Answers);
+        Assert.Empty(test.Reports);
     }
 
     // a destination is a uint here: one below 0, past 2³² − 1 or not whole has no twin
@@ -728,8 +810,7 @@ public sealed class RelayTests
     [Fact]
     public void Draws_a_destination_again_when_0_or_in_use()
     {
-        // its TypeScript twin, identifiers.test.ts:184, draws through the shared identifiers, a module
-        // this side does not have: its draw is the relay's own
+        // the relay's own draw, from the bytes the test fills
         var fills = new Queue<byte[]>([[0, 0, 0, 0], [0, 0, 0, 5], [0, 0, 1, 7]]);
         var relay = new TestRelay(Admitting with
         {
@@ -840,7 +921,7 @@ public sealed class RelayTests
     }
 
     [Fact]
-    public async Task Leaves_a_connection_of_its_own_unreachable_once_it_closed_whoever_takes_its_handle_next_until_registered_anew()
+    public async Task Leaves_a_connection_of_its_own_unreachable_once_it_closed_until_registered_anew_on_another_connection()
     {
         var test = new TestRelay();
         var target = new RecordingTarget();
@@ -852,13 +933,13 @@ public sealed class RelayTests
         // admitted as its payload came, then its connection closed: nothing is handed over
         var admitted = test.Relay.HandlerOf(7);
 
-        test.Relay.CloseConnection(Device);
+        test.Close(Device);
 
         var unreachable = Failure.OfProtocol(ProtocolCode.DestinationUnreachable, "destination 7 is unreachable: its connection closed");
 
         Assert.Equal(unreachable, test.Relay.HandlerOf(7)!.Admit(new AdmissionRequest(First, HeaderOf(1))));
 
-        // C# only: a subscription is refused before a connection closed, as the TypeScript side checks
+        // a subscription is refused before a connection closed
         Assert.Equal(
             Failure.OfProtocol(ProtocolCode.SubscriptionUnsupported, "this relay carries no subscription"),
             test.Relay.HandlerOf(7)!.Admit(new AdmissionRequest(First, HeaderOf(1) with { OpensSubscription = true })));
@@ -872,18 +953,130 @@ public sealed class RelayTests
         Assert.Equal([First], test.Own.Select(HandleOf));
         Assert.Single(target.Asked);
 
-        // it stays registered, and listed, until the application takes it out: its id is not free
-        Assert.Contains(new Destination(7, null), test.Relay.Destinations());
+        // it stays registered, and listed closed, until the application takes it out: its id is not
+        // free
+        Assert.Contains(new Destination(7, null) { IsClosed = true }, test.Relay.Destinations());
         Assert.Throws<ArgumentException>(() =>
         {
-            return test.Relay.Register(new ConnectionTarget(Device), Seven);
+            return test.Relay.Register(new ConnectionTarget(Second), Seven);
         });
         Assert.True(closed.Unregister());
 
-        test.Relay.Register(new ConnectionTarget(Device), Seven);
+        // registered anew, on another connection, it is asked
+        test.Relay.Register(new ConnectionTarget(Second), Seven);
         await Handled(test.Relay.HandlerOf(7), PropsOf(HeaderOf(9)));
 
-        Assert.Equal([First, Device], test.Own.Select(HandleOf));
+        Assert.Equal([First, Second], test.Own.Select(HandleOf));
+    }
+
+    [Fact]
+    public void Lists_whether_each_destination_s_connection_closed_as_its_registration_says_it_now()
+    {
+        var test = new TestRelay();
+        var onDevice = test.Relay.Register(new ConnectionTarget(Device), new DestinationOptions { DestinationId = 3 });
+        var onFirst = test.Relay.Register(new ConnectionTarget(First), new DestinationOptions { DestinationId = 5 });
+        var behind = test.Relay.Register(new RecordingTarget(), new DestinationOptions { DestinationId = 7, Label = "behind" });
+
+        Assert.Equal([false, false, false], [onDevice.Destination.IsClosed, onFirst.Destination.IsClosed, behind.Destination.IsClosed]);
+
+        test.Close(Device);
+
+        Assert.Equal(
+            [new Destination(3, null) { IsClosed = true }, new Destination(5, null), new Destination(7, "behind")],
+            test.Relay.Destinations());
+        Assert.Equal([true, false, false], [onDevice.Destination.IsClosed, onFirst.Destination.IsClosed, behind.Destination.IsClosed]);
+    }
+
+    [Fact]
+    public async Task Takes_the_place_of_the_registration_it_replaces_at_once_which_takes_nothing_out_after_and_refuses_one_that_does_not_hold_its_destination()
+    {
+        var test = new TestRelay();
+        var replaced = test.Relay.Register(new ConnectionTarget(Device), new DestinationOptions { DestinationId = 7, Label = "a" });
+
+        test.Close(Device);
+
+        // bound to the one replaced, a call finishes with it; the next goes to the one in its place,
+        // and none in between finds the destination unknown
+        var bound = test.Relay.HandlerOf(7);
+        var replacing = test.Relay.Register(new ConnectionTarget(Second), new DestinationOptions { Label = "b", Replaces = replaced });
+
+        await Handled(bound, PropsOf(HeaderOf(1)));
+        await Handled(test.Relay.HandlerOf(7), PropsOf(HeaderOf(3)));
+
+        Assert.Equal(7u, replacing.Destination.DestinationId);
+        Assert.Equal<object>(
+            [Failure.OfProtocol(ProtocolCode.DestinationUnreachable, "destination 7 is unreachable: its connection closed"), new byte[] { 8 }],
+            FailuresOf(test.Answers));
+        Assert.Equal([Second], test.Own.Select(HandleOf));
+        Assert.Equal([new Destination(7, "b")], test.Relay.Destinations());
+        Assert.False(replaced.Unregister());
+
+        // one open is replaced as well: whether to is the application's
+        var again = test.Relay.Register(new ConnectionTarget(First), new DestinationOptions { Replaces = replacing });
+
+        // a registration replaced already, or named beside another destination, holds nothing to replace
+        foreach (var options in new DestinationOptions[]
+        {
+            new() { Replaces = replaced },
+            new() { Replaces = replacing },
+            new() { DestinationId = 9, Replaces = again },
+        })
+        {
+            Assert.Throws<ArgumentException>(() =>
+            {
+                return test.Relay.Register(new ConnectionTarget(First), options);
+            });
+        }
+
+        // nor one taken out
+        Assert.True(again.Unregister());
+        Assert.Throws<ArgumentException>(() =>
+        {
+            return test.Relay.Register(new ConnectionTarget(First), new DestinationOptions { Replaces = again });
+        });
+        Assert.Empty(test.Relay.Destinations());
+    }
+
+    [Fact]
+    public async Task Registers_a_connection_its_router_no_longer_holds_closed_and_forwards_nothing_to_it()
+    {
+        var test = new TestRelay();
+
+        test.Close(Device);
+
+        var registration = test.Relay.Register(new ConnectionTarget(Device), Seven);
+        var unreachable = Failure.OfProtocol(ProtocolCode.DestinationUnreachable, "destination 7 is unreachable: its connection closed");
+
+        Assert.True(registration.Destination.IsClosed);
+        Assert.Equal([new Destination(7, null) { IsClosed = true }], test.Relay.Destinations());
+        Assert.Equal(unreachable, test.Relay.HandlerOf(7)!.Admit(new AdmissionRequest(First, HeaderOf(1))));
+
+        await Handled(test.Relay.HandlerOf(7), PropsOf(HeaderOf(3)));
+
+        Assert.Equal<object>([unreachable], FailuresOf(test.Answers));
+        Assert.Empty(test.Own);
+        Assert.Equal(new Dictionary<string, long> { ["closedDestinations"] = 1, ["destinations"] = 1 }, test.Relay.Gauges().Counts);
+    }
+
+    [Fact]
+    public void Refuses_an_id_taken_while_the_close_of_its_connection_is_not_heard_yet_and_closes_with_it_a_registration_that_replaced_it_then()
+    {
+        var test = new TestRelay();
+        var taken = test.Relay.Register(new ConnectionTarget(Device), Seven);
+
+        // its connection gone, its router not told yet: the destination is open, and taken
+        Assert.Throws<ArgumentException>(() =>
+        {
+            return test.Relay.Register(new ConnectionTarget(Second), Seven);
+        });
+        Assert.False(taken.Destination.IsClosed);
+
+        var replacing = test.Relay.Register(new ConnectionTarget(Device), new DestinationOptions { Replaces = taken });
+
+        test.Close(Device);
+
+        Assert.Equal([false, true], [taken.Destination.IsClosed, replacing.Destination.IsClosed]);
+        Assert.Equal([new Destination(7, null) { IsClosed = true }], test.Relay.Destinations());
     }
 
     [Fact]
@@ -916,6 +1109,23 @@ public sealed class RelayTests
     private sealed record Asked(ResolvedRequestOptions Options, ReadOnlyMemory<byte> Payload, Procedure Procedure);
 
     // a client's router a destination names, which records what it is asked and settles as told
+    // a target whose carriage and security take the interface defaults
+    private sealed class DefaultCarriageTarget(RecordingTarget target) : IRouterTarget
+    {
+        public RouterLimits Limits
+        {
+            get
+            {
+                return target.Limits;
+            }
+        }
+
+        public Task<RouterResult> Request(ReadOnlyMemory<byte> payload, RouterRequest request)
+        {
+            return target.Request(payload, request);
+        }
+    }
+
     private sealed class RecordingTarget(RouterLimits? limits = null) : IRouterTarget
     {
         public RouterLimits Limits { get; } = limits ?? RouterLimits.Default;
@@ -999,9 +1209,12 @@ public sealed class RelayTests
 
     // a relay under the options given — admitting every request unless they say otherwise — which
     // records each answer it writes, with the request it answers, each request of its own router's
-    // it makes, and each error it reports, as its message and whether leg A's connection came with it
+    // it makes, and each error it reports, as its message and whether leg A's connection came with
+    // it; Close closes a connection as its router does, which holds it no longer
     private sealed class TestRelay
     {
+        private readonly HashSet<string> _closed = [];
+
         // `isCarrying`: a connection of the relay's own carries a credential, and is secure
         public TestRelay(RelayOptions? options = null, bool isCarrying = false)
         {
@@ -1015,6 +1228,10 @@ public sealed class RelayTests
                     IsSecure = (_) =>
                     {
                         return isCarrying;
+                    },
+                    IsOpen = (connectionHandle) =>
+                    {
+                        return !_closed.Contains(connectionHandle);
                     },
                     IsTwoWay = (_) =>
                     {
@@ -1050,5 +1267,11 @@ public sealed class RelayTests
         public List<(string Message, bool IsLegA)> Reports { get; } = [];
 
         public Func<Action<bool>, Task<RouterResult>> Settle { get; set; } = Answering(new byte[] { 8 });
+
+        public void Close(string connectionHandle)
+        {
+            _closed.Add(connectionHandle);
+            Relay.CloseConnection(connectionHandle);
+        }
     }
 }

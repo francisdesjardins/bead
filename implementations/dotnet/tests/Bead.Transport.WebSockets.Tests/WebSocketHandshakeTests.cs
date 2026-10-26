@@ -158,6 +158,8 @@ public sealed class WebSocketHandshakeTests
         (400, WebSocketRefusals.Malformed, "GET / HTTP/1.1", ["Sec-WebSocket-Protocol: bead,,chat"]),
         (400, WebSocketRefusals.Malformed, "GET / HTTP/1.1", ["Sec-WebSocket-Protocol: bead,"]),
         (400, WebSocketRefusals.Malformed, "GET / HTTP/1.1", ["Content-Length: 5"]),
+        (400, WebSocketRefusals.Malformed, "GET / HTTP/1.1", ["Content-Length: abc"]),
+        (400, WebSocketRefusals.Malformed, "GET / HTTP/1.1", ["Content-Length: 0", "Content-Length: 5"]),
         (400, WebSocketRefusals.Malformed, "GET / HTTP/1.1", ["Transfer-Encoding: chunked"]),
         (400, WebSocketRefusals.Malformed, "GET / HTTP/1.1", ["Sec-WebSocket-Key: dGVzdA==", "Origin: https://elsewhere.test"]),
 
@@ -285,6 +287,33 @@ public sealed class WebSocketHandshakeTests
     }
 
     [Fact]
+    public void Refuses_first_unmarked_a_target_holding_an_octet_other_than_visible_ASCII_or_a_path_whose_percent_decoding_holds_NUL_whatever_else_the_request_holds_over_HTTP_2_among_it_and_takes_one_percent_encoded()
+    {
+        // in its path or its query, in absolute-form; from a host it does not take, under another
+        // method, with no upgrade, over HTTP/2
+        (string Start, string[] Fields)[] requests =
+        [
+            ("GET /?a\u0001b HTTP/1.1", []),
+            ("GET /\u007f HTTP/1.1", []),
+            ("GET /a\tb HTTP/1.1", []),
+            ("GET /é HTTP/1.1", []),
+            ("GET /%00 HTTP/1.1", []),
+            ("GET http://bead.test/a\u0001b HTTP/1.1", []),
+            ("GET /\u0001 HTTP/1.1", ["Host: elsewhere.test"]),
+            ("POST /\u0001 HTTP/1.1", ["Upgrade"]),
+            ("GET /\u0001 HTTP/2", []),
+        ];
+
+        Assert.All(requests, (request) =>
+        {
+            Assert.Equal((400, (string?)null), AnswerOf(request, Options));
+        });
+
+        // what a target percent-encodes is no octet of it, NUL in a query among them
+        Assert.Equal((101, (string?)null), AnswerOf(("GET /?a%01%00 HTTP/1.1", []), Options));
+    }
+
+    [Fact]
     public void Tells_a_request_s_authority_its_port_included_and_its_Origin_its_lines_joined_by_a_comma_and_a_space_as_the_judgement_reads_them_or_none()
     {
         // an empty Host the wire's cases hold, a request no socket carries dropping an empty field
@@ -341,6 +370,31 @@ public sealed class WebSocketHandshakeTests
             // never a Host HTTP refuses
             Assert.Equal((400, null), AnswerOf(("GET / HTTP/1.1", ["Host"]), options));
             Assert.Equal((400, null), AnswerOf(("GET / HTTP/1.1", ["Host: [::1"]), options));
+            foreach (var (start, fields, status, refusal) in new (string, string[], int, string?)[]
+            {
+                ("GET / HTTP/1.1", ["Host: localhost"], 101, null),
+                ("GET / HTTP/1.1", ["Host: a.localhost:8080", "Origin: http://a.localhost:8080"], 101, null),
+                ("GET / HTTP/1.1", ["Host: 127.0.0.1:8080", "Origin: https://127.0.0.1:8080"], 101, null),
+                ("GET http://127.0.0.1:8080/ HTTP/1.1", ["Origin: http://127.0.0.1:8080"], 101, null),
+                ("GET http://localhost/ HTTP/1.1", ["Host: bad host"], 101, null),
+                ("GET / HTTP/1.1", ["Host: rebind.example:8080", "Origin: http://rebind.example:8080"], 403, WebSocketRefusals.Host),
+                ("POST / HTTP/1.1", ["Host: rebind.example"], 403, WebSocketRefusals.Host),
+                ("GET / HTTP/1.1", ["Host: rebind.example", "Upgrade"], 403, WebSocketRefusals.Host),
+                ("GET http://rebind.example/ HTTP/1.1", ["Host: 127.0.0.1"], 403, WebSocketRefusals.Host),
+                ("GET / HTTP/1.1", ["Host: a*b.test"], 400, null),
+                ("GET http://a%41.test/ HTTP/1.1", [], 400, null),
+                ("GET http:/// HTTP/1.1", [], 400, null),
+                ("GET HTTP://127.0.0.1/ HTTP/1.1", [], 400, null),
+                ("GET ftp://127.0.0.1/ HTTP/1.1", [], 400, null),
+                ("GET http://localhost:/ HTTP/1.1", [], 400, null),
+                ("GET http://user@localhost/ HTTP/1.1", [], 400, null),
+                ("GET http://127.0.0.1/ HTTP/1.0", ["Host"], 426, WebSocketRefusals.Upgrade),
+                ("GET http://rebind.example/ HTTP/1.0", ["Host"], 403, WebSocketRefusals.Host),
+            })
+            {
+                var actual = AnswerOf((start, fields), options);
+                Assert.True((status, refusal) == actual, $"{start}: expected ({status}, {refusal ?? "unmarked"}), actual ({actual.Status}, {actual.Refusal ?? "unmarked"})");
+            }
         });
 
         // * takes every host, an empty one and none, and judges the rest as it would; a page of its
@@ -357,6 +411,7 @@ public sealed class WebSocketHandshakeTests
         Assert.Equal((426, WebSocketRefusals.Upgrade), AnswerOf(("GET / HTTP/1.0", ["Host"]), any));
         Assert.Equal((405, WebSocketRefusals.Method), AnswerOf(("POST / HTTP/2", ["Host"]), any));
         Assert.Equal((400, null), AnswerOf(("GET / HTTP/1.1", ["Host"]), any));
+        Assert.Equal((400, null), AnswerOf(("POST / HTTP/1.1", ["Host: [::1"]), any));
     }
 
     [Fact]

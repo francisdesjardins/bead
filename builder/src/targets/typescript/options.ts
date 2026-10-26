@@ -8,7 +8,7 @@
 
 // dependencies
 
-import type { Messages } from '../target.ts';
+import type { IHttpInput, Messages } from '../target.ts';
 
 // types
 
@@ -33,6 +33,11 @@ export interface ITypeScriptOptions {
   readonly messages: Messages;
   /** Where the messages are, relative to the output's folder, with slashes, for `external`. */
   readonly messagesOut?: string;
+  /**
+   * For an output with `http: true`: what its route table holds, and the module it imports its
+   * runtime from, as `runtime` names its own (decision 0037).
+   */
+  readonly http?: IHttpInput & { readonly runtime: string };
 }
 
 // constants
@@ -45,6 +50,12 @@ export const DEFAULT_RUNTIME = '@francisdesjardins/bead/service';
  * names none: the package's `proto` subpath (decision 0028).
  */
 export const DEFAULT_PROTO_RUNTIME = '@francisdesjardins/bead/proto';
+
+/**
+ * The module a route table imports its runtime from when `beadc.yaml` names none: the package's
+ * `transcoding` subpath (decision 0037).
+ */
+export const DEFAULT_HTTP_RUNTIME = '@francisdesjardins/bead/transcoding';
 
 /** The extensions `importExtension` takes, `ts` when it names none. */
 export const IMPORT_EXTENSIONS: readonly ImportExtension[] = Object.freeze(['none', 'js', 'ts']);

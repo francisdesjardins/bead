@@ -27,6 +27,12 @@ const STATIC = 'data-bead-transport="worker"';
 /** How the page loads its script, which this build names. */
 const SCRIPT = 'src="./page.js"';
 
+/** Penumbra's two sheets, the DevTools panel's copy, which the page links under its skin. */
+const SHEETS: readonly string[] = Object.freeze([
+  'penumbra/tokens.system.css',
+  'penumbra/tokens.skin.base.css',
+]);
+
 // helpers
 
 const pathOf = (relative: string, base: URL = DEMO): string => {
@@ -65,17 +71,34 @@ const [pageFile, workerFile] = await Promise.all(
 );
 const page = await readFile(pathOf('index.html'), 'utf8');
 
-// a page that no longer says where its server is, or loads its script otherwise, would ask what is
-// not there
-for (const expected of [SERVED, SCRIPT]) {
+// a sheet as the page links it
+const linkOf = (sheet: string): string => {
+  return `<link rel="stylesheet" href="${sheet}" />`;
+};
+
+// a page that no longer says where its server is, or loads its script or its sheets otherwise,
+// would ask what is not there
+for (const expected of [SERVED, SCRIPT, ...SHEETS.map(linkOf)]) {
   if (!page.includes(expected)) {
     throw new Error(`demo/index.html no longer carries ${expected}`);
   }
 }
 
+// * the sheets written into the page: the folder a host publishes stays the page and its scripts
+const sheets = await Promise.all(
+  SHEETS.map(async (sheet) => {
+    return { link: linkOf(sheet), text: await readFile(pathOf(`../devtools/${sheet}`), 'utf8') };
+  })
+);
+const sheeted = sheets.reduce((written, { link, text }) => {
+  return written.replace(link, () => {
+    return `<style>\n${text}</style>`;
+  });
+}, page);
+
 await writeFile(
   pathOf('index.html', OUT),
-  page
+  sheeted
     .replace(SERVED, `${STATIC} data-bead-worker="${String(workerFile)}"`)
     .replace(SCRIPT, `src="./${String(pageFile)}"`)
 );

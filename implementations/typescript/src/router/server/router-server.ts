@@ -537,7 +537,7 @@ export const createRouterServer = <Transport extends IRouterServerTransportLike>
   const onClose = (_: boolean, connectionHandle: TransportServerConnectionHandle): void => {
     dropWith(connectionHandle);
     connections.delete(connectionHandle);
-    // its destinations stay unreachable, whoever takes its handle next
+    // its destinations stay unreachable until each is registered anew, on another connection
     relay.closeConnection(connectionHandle);
     places.clear(connectionHandle);
     notifications.clean(connectionHandle);
@@ -547,7 +547,7 @@ export const createRouterServer = <Transport extends IRouterServerTransportLike>
   // a request of the router's own, to the connection its options name — the relay's leg B, too
   const request: IRouterServer<Transport>['request'] = (
     payload,
-    { onCallId, onSent, options: requestOptions, procedure, series, subscribes }
+    { onCallId, onSent, options: requestOptions, procedure, refusal: judged, series, subscribes }
   ) => {
     // ! a programmer's error first, before the call starts, so it is never counted
     if (subscribes !== undefined) {
@@ -617,7 +617,8 @@ export const createRouterServer = <Transport extends IRouterServerTransportLike>
       onSent,
       options: requestOptions,
       procedure,
-      refusal,
+      // * its requester's refusal before the router's own: its value was judged before it came
+      refusal: judged ?? refusal,
       series,
       transportCredential: carried,
     });
@@ -627,6 +628,10 @@ export const createRouterServer = <Transport extends IRouterServerTransportLike>
   const relay = createRelay({
     carriageOf,
     failures: SERVER_FAILURES,
+    // a connection the router follows: one it heard close, or never heard of, is not
+    isOpen: (connectionHandle) => {
+      return connections.has(connectionHandle);
+    },
     isTwoWay: (connectionHandle) => {
       return transport.isTwoWay?.(connectionHandle) ?? true;
     },

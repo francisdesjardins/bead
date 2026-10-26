@@ -1,0 +1,125 @@
+{
+  "category": "WIRE",
+  "earlier": [
+    {
+      "op": "replace",
+      "path": "/requires",
+      "value": ["validate"]
+    },
+    {
+      "op": "add",
+      "path": "/proto",
+      "value": {
+        "files": [
+          {
+            "package": "x.v1",
+            "path": "x/v1/x.proto"
+          }
+        ],
+        "messages": [
+          {
+            "file": "x/v1/x.proto",
+            "fullName": "x.v1.Echo",
+            "rules": {
+              "fields": [
+                {
+                  "fieldName": "name",
+                  "fieldNumber": 1,
+                  "presence": "explicit",
+                  "type": {
+                    "scalar": "string"
+                  },
+                  "oneof": "choice"
+                }
+              ],
+              "message": {},
+              "oneofs": [
+                {
+                  "oneofIndex": 0,
+                  "oneofName": "choice",
+                  "rules": {}
+                }
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "op": "replace",
+      "path": "/services/0/procedures/0/request",
+      "value": {
+        "encoding": "proto",
+        "message": "x.v1.Echo"
+      }
+    }
+  ],
+  "current": [
+    {
+      "op": "replace",
+      "path": "/requires",
+      "value": ["validate"]
+    },
+    {
+      "op": "add",
+      "path": "/proto",
+      "value": {
+        "files": [
+          {
+            "package": "x.v1",
+            "path": "x/v1/x.proto"
+          }
+        ],
+        "messages": [
+          {
+            "file": "x/v1/x.proto",
+            "fullName": "x.v1.Echo",
+            "rules": {
+              "fields": [
+                {
+                  "fieldName": "name",
+                  "fieldNumber": 1,
+                  "presence": "explicit",
+                  "type": {
+                    "scalar": "string"
+                  },
+                  "oneof": "choice"
+                }
+              ],
+              "message": {},
+              "oneofs": [
+                {
+                  "oneofIndex": 0,
+                  "oneofName": "choice",
+                  "rules": {
+                    "required": true
+                  }
+                }
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "op": "replace",
+      "path": "/services/0/procedures/0/request",
+      "value": {
+        "encoding": "proto",
+        "message": "x.v1.Echo"
+      }
+    },
+    {
+      "op": "replace",
+      "path": "/services/0/serviceRevision",
+      "value": 3
+    }
+  ],
+  "findings": [
+    {
+      "rule": "PROCEDURE_RULES_TIGHTENED",
+      "pointer": "/services/0/procedures/0/request/message",
+      "subject": "service:1/procedure:1"
+    }
+  ]
+}

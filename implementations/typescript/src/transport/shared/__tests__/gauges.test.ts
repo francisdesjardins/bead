@@ -32,6 +32,10 @@ test.describe('gaugesOf', () => {
       connectionHandles: new Set(['a', 'b']),
       counts: { calls: 3 },
     });
+    expect(gaugesOf({ counts: {}, connectionHandles: ['a', 'a', 'b'] }).connectionHandles).toEqual(
+      new Set(['a', 'b'])
+    );
+    expect(gaugesOf({ counts: {} }).counts).toEqual({});
   });
 });
 

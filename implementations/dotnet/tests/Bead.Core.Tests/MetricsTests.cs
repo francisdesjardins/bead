@@ -168,8 +168,11 @@ public sealed class MetricsTests
 
             if (declaration.TryGetProperty("refused", out var refused))
             {
-                // the reason is the sentence's own words; the sentence stays with the twins
-                Assert.Contains(refused.GetString()!, Assert.Throws<ArgumentException>(Declare).Message, StringComparison.Ordinal);
+                // the reason is the sentence's own words, its last; the sentence stays with the twins
+                var refusal = Assert.Throws<ArgumentException>(Declare);
+
+                Assert.Equal("procedure", refusal.ParamName);
+                Assert.EndsWith($": {refused.GetString()} (Parameter 'procedure')", refusal.Message, StringComparison.Ordinal);
 
                 continue;
             }

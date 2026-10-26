@@ -366,8 +366,12 @@ public sealed partial class DurationsTests
         {
             var created = sessions.Create(Handle);
             var session = sessions.Set(isConnection ? created with { ConnectionInactivityTimeout = null } : created with { SessionInactivityTimeout = null });
+            var held = (isConnection ? session.ConnectionInactivityTimeout : session.SessionInactivityTimeout)!.Value;
 
-            return Task.FromResult(HeldAt((isConnection ? session.ConnectionInactivityTimeout : session.SessionInactivityTimeout)!.Value));
+            // its timer armed for it, and none for never
+            Assert.Equal(held == Never ? [] : [held], clock.Dues());
+
+            return Task.FromResult(HeldAt(held));
         }
     }
 
@@ -378,40 +382,42 @@ public sealed partial class DurationsTests
     // was, and its timers as they were
     private static Task<Observed> SessionTimeoutBySetConnection(TimeSpan? given)
     {
-        return SessionTimeoutOf((sessions, _) =>
+        return SessionTimeoutOf(((sessions, _) =>
         {
             return sessions.Set(sessions.Create(Other) with { ConnectionInactivityTimeout = given }).ConnectionInactivityTimeout;
-        });
+        }, null));
     }
 
     private static Task<Observed> SessionTimeoutBySetSession(TimeSpan? given)
     {
-        return SessionTimeoutOf((sessions, _) =>
+        return SessionTimeoutOf(((sessions, _) =>
         {
             return sessions.Set(sessions.Create(Other) with { SessionInactivityTimeout = given }).SessionInactivityTimeout;
-        });
+        }, null));
     }
 
     private static Task<Observed> SessionTimeoutByUpdateConnection(TimeSpan? given)
     {
-        return SessionTimeoutOf((sessions, session) =>
+        return SessionTimeoutOf(((sessions, session) =>
         {
             return sessions.UpdateConnectionInactivityTimeout(session with { ConnectionInactivityTimeout = given })!.ConnectionInactivityTimeout;
-        });
+        }, OtherTimeout));
     }
 
     private static Task<Observed> SessionTimeoutByUpdateSession(TimeSpan? given)
     {
-        return SessionTimeoutOf((sessions, session) =>
+        return SessionTimeoutOf(((sessions, session) =>
         {
             return sessions.UpdateSessionInactivityTimeout(session with { SessionInactivityTimeout = given })!.SessionInactivityTimeout;
-        });
+        }, 2 * OtherTimeout));
     }
 
     // a session stored, both its timers armed, under a manager given none of its defaults; then the
-    // timeout the way gives back
-    private static Task<Observed> SessionTimeoutOf(Func<SessionManager<string>, Session<string>, TimeSpan?> timeoutOf)
+    // timeout the way gives back, its timer armed for it beside the others, in place of the one it
+    // replaced where it updates one, and none for never
+    private static Task<Observed> SessionTimeoutOf((Func<SessionManager<string>, Session<string>, TimeSpan?> TimeoutOf, TimeSpan? Replaced) way)
     {
+        var (timeoutOf, replaced) = way;
         var clock = new SteppingClock(Epoch);
 
         using var sessions = new SessionManager<string>(new SessionManagerOptions { Clock = clock });
@@ -419,9 +425,11 @@ public sealed partial class DurationsTests
         var session = sessions.Set(sessions.Create(Handle) with { ConnectionInactivityTimeout = OtherTimeout, SessionInactivityTimeout = 2 * OtherTimeout });
         var armed = clock.Dues();
 
+        TimeSpan held;
+
         try
         {
-            return Task.FromResult(HeldAt(timeoutOf(sessions, session)!.Value));
+            held = timeoutOf(sessions, session)!.Value;
         }
         catch (ArgumentOutOfRangeException refused)
         {
@@ -431,6 +439,22 @@ public sealed partial class DurationsTests
 
             return Task.FromResult(Refused(refused));
         }
+
+        var expected = armed.ToList();
+
+        if (replaced is { } timeout)
+        {
+            Assert.True(expected.Remove(timeout));
+        }
+
+        if (held != Never)
+        {
+            expected.Add(held);
+        }
+
+        Assert.Equal(expected.Order(), clock.Dues().Order());
+
+        return Task.FromResult(HeldAt(held));
     }
 
     // sessionManager.resetConnectionInactivityTimeout and sessionManager.resetSessionInactivityTimeout
@@ -481,7 +505,7 @@ public sealed partial class DurationsTests
 
         Assert.True(dues.Remove(OtherTimeout));
 
-        return Task.FromResult(HeldAt(dues is [var due] ? due : Never));
+        return Task.FromResult(HeldAt(DueOf(dues)));
     }
 
     // server.connectionInactivityTimeout
@@ -568,6 +592,14 @@ public sealed partial class DurationsTests
             get
             {
                 return TimeProvider.System;
+            }
+        }
+
+        public int DetailBytes
+        {
+            get
+            {
+                return LimitDefaults.MaximumDetailBytes;
             }
         }
 
@@ -733,6 +765,14 @@ public sealed partial class DurationsTests
     // to close, and counts the handlers on its events
     private sealed class ServerTransport : IServerTransport
     {
+        public string? Type
+        {
+            get
+            {
+                return TransportTypes.WebSocket;
+            }
+        }
+
         public required TimeProvider Clock { get; init; }
 
         public event Action<string>? Connection;

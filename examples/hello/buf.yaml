@@ -1,6 +1,7 @@
 # buf's workspace, for an editor, for buf lint, and for buf generate where a project's own build
 # writes its messages: beadc passes buf a configuration of its own and never reads this file.
-# .beadc/include holds the editor's copy of Bead's options, which beadc generate writes.
+# .beadc/include holds the editor's copy of Bead's options and protovalidate's, which beadc
+# generate writes.
 version: v2
 modules:
   - path: proto
@@ -13,3 +14,5 @@ modules:
       use: [STANDARD]
       # bead/options.proto's package is `bead`, as protobuf's own options name none
       except: [PACKAGE_VERSION_SUFFIX]
+      # protovalidate's validate.proto is Buf's to lint, googleapis' google/api Google's
+      ignore: [.beadc/include/buf/validate/validate.proto, .beadc/include/google/api]

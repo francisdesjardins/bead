@@ -67,26 +67,45 @@ public sealed class EnvelopeFuzzTests
         }
     }
 
-    private static byte[] Mutate(byte[] source, Random random)
+    // ! a xorshift32 generator, the TypeScript side's: below(count) is in [0, count), and one seed
+    // draws the same inputs on both sides, in the same order
+    private static Func<int, int> GeneratorOf(int seed)
+    {
+        var state = seed == 0 ? 1u : (uint)seed;
+
+        return (count) =>
+        {
+            state ^= state << 13;
+            state ^= state >> 17;
+            state ^= state << 5;
+
+            return (int)(state % (uint)count);
+        };
+    }
+
+    private static byte[] Mutate(byte[] source, Func<int, int> below)
     {
         var bytes = new List<byte>(source);
 
-        for (var round = 1 + random.Next(4); round > 0; round--)
+        for (var round = 1 + below(4); round > 0; round--)
         {
-            var at = random.Next(bytes.Count + 1);
+            var at = below(bytes.Count + 1);
 
-            switch (random.Next(7))
+            switch (below(7))
             {
-                case 0 when bytes.Count > 0:
-                    bytes[at % bytes.Count] ^= (byte)(1 << random.Next(8));
+                case 0:
+                    if (bytes.Count > 0)
+                    {
+                        bytes[at % bytes.Count] ^= (byte)(1 << below(8));
+                    }
 
                     break;
                 case 1:
-                    bytes.Insert(at, Interesting[random.Next(Interesting.Length)]);
+                    bytes.Insert(at, Interesting[below(Interesting.Length)]);
 
                     break;
                 case 2:
-                    bytes.RemoveRange(at, Math.Min(1 + random.Next(4), bytes.Count - at));
+                    bytes.RemoveRange(at, Math.Min(1 + below(4), bytes.Count - at));
 
                     break;
                 case 3:
@@ -94,21 +113,26 @@ public sealed class EnvelopeFuzzTests
 
                     break;
                 case 4:
-                    var other = Seeds[random.Next(Seeds.Count)];
+                    var other = Seeds[below(Seeds.Count)];
 
                     bytes.RemoveRange(at, bytes.Count - at);
-                    bytes.AddRange(other.Skip(random.Next(other.Length + 1)));
+                    bytes.AddRange(other.Skip(below(other.Length + 1)));
 
                     break;
-                case 5 when bytes.Count > 0:
-                    bytes[at % bytes.Count] = Interesting[random.Next(Interesting.Length)];
+                case 5:
+                    if (bytes.Count > 0)
+                    {
+                        bytes[at % bytes.Count] = Interesting[below(Interesting.Length)];
+                    }
 
                     break;
                 default:
-                    bytes.InsertRange(at, Enumerable.Range(0, 1 + random.Next(16)).Select(_ =>
+                    var inserted = 1 + below(16);
+
+                    bytes.InsertRange(at, Enumerable.Range(0, inserted).Select(_ =>
                     {
-                        return (byte)random.Next(256);
-                    }));
+                        return (byte)below(256);
+                    }).ToList());
 
                     break;
             }
@@ -139,6 +163,25 @@ public sealed class EnvelopeFuzzTests
 
     // definition
 
+    /// <summary>The vectors hold the bytes the mutations start from.</summary>
+    [Fact]
+    public void Finds_the_vectors_bytes()
+    {
+        Assert.True(Seeds.Count > 100, "the vectors hold their bytes");
+    }
+
+    /// <summary>The generator draws what the TypeScript side's draws for a seed, so a seed replays alike on both.</summary>
+    [Fact]
+    public void Draws_what_the_TypeScript_side_draws_for_a_seed()
+    {
+        var below = GeneratorOf(1);
+
+        Assert.Equal([369, 689, 461, 695, 233, 504, 482, 210], Enumerable.Range(0, 8).Select((_) =>
+        {
+            return below(1_000);
+        }));
+    }
+
     /// <summary>The readers return or refuse with a failure for every mutation of a vector.</summary>
     /// <param name="seed">The generator's seed.</param>
     [Theory]
@@ -146,13 +189,11 @@ public sealed class EnvelopeFuzzTests
     [InlineData(2)]
     public void Reads_or_refuses_with_a_failure_every_mutation_of_a_vector(int seed)
     {
-        var random = new Random(seed);
-
-        Assert.True(Seeds.Count > 100, "the vectors hold their bytes");
+        var below = GeneratorOf(seed);
 
         for (var count = 0; count < Inputs; count++)
         {
-            var input = Mutate(Seeds[random.Next(Seeds.Count)], random);
+            var input = Mutate(Seeds[below(Seeds.Count)], below);
 
             foreach (var side in new[] { RouterSide.Server, RouterSide.Client })
             {
@@ -189,6 +230,6 @@ public sealed class EnvelopeFuzzTests
                     [0x01]);
             });
 
-        Assert.Contains("InvalidOperationException: boom; input 01", thrown.Message, StringComparison.Ordinal);
+        Assert.Equal("InvalidOperationException: boom; input 01", thrown.Message);
     }
 }

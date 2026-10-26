@@ -1,8 +1,9 @@
 // ── Generate ──────────────────────────────────────────────────────────────────
 
 // `beadc generate`, once `check` passed over `beadc.yaml`'s source (decision 0022): for a `.proto`
-// source, the blueprint `beadc.yaml` names and the editor's copy of Bead's options; then each
-// output, its messages first, then its target's files. Every file is encoded whole and moved over
+// source, the blueprint `beadc.yaml` names and the editor's copy of Bead's options; the OpenAPI
+// document `beadc.yaml`'s `openapi.out` names (decision 0037); then each output, its messages first,
+// then its target's files, its route table and the document embedded where it says `http: true`. Every file is encoded whole and moved over
 // the one it replaces, as `beadc blueprint` writes; a file outside its output's folder, and two
 // files at one path, compared as a system that folds case compares them, are refused before
 // anything is written. Under `clean`, buf's opt-in, protoc never removing a file, a file of an
@@ -35,26 +36,45 @@ import { dirname, join, relative, sep } from 'node:path';
 
 import type { IChecked } from './check.ts';
 import { OPTIONS_ROOT } from './compile.ts';
-import { type IConfig, isInside, type Output } from './config.ts';
-import { InputError } from './diagnostics.ts';
+import { asksHttp, CONFIG_FILE, type IConfig, isInside, type Output } from './config.ts';
+import { diagnosticOf, type IDiagnostic, InputError, type IPlace } from './diagnostics.ts';
 import { generateMessages } from './messages.ts';
+import type { IBlueprint } from './model/blueprint.ts';
 import { formOf } from './model/form.ts';
+import {
+  DEFAULT_PREFIX,
+  DOCUMENT_PATH,
+  defaultTemplateOf,
+  shapeOf,
+  templateOf,
+  TRANSPORT_PATHNAME,
+} from './model/routes.ts';
+import { documentOf } from './openapi/document.ts';
 import {
   csharpPathOf,
   generateCSharpMessages,
   PROTOC_CSHARP_HEADER,
   PROTOC_CSHARP_SOURCE,
 } from './protoc.ts';
-import { OPTIONS_FILE, pathOnDisk } from './roots.ts';
+import { BEADC_FILES, pathOnDisk } from './roots.ts';
 import { csharpTarget } from './targets/csharp/csharp.ts';
 import {
   bindsMessages,
   type IGeneratedFile,
+  type IHttpInput,
+  type ITarget,
   type ITargetInput,
   Messages,
   type SourceNames,
 } from './targets/target.ts';
+import { DEFAULT_HTTP_RUNTIME } from './targets/typescript/options.ts';
 import { typescriptTarget } from './targets/typescript/typescript.ts';
+
+// constants
+
+// each language's official target, by the name `beadc.yaml` gives it
+const TARGETS: Readonly<Record<string, Pick<ITarget<unknown>, 'name' | 'features' | 'http'>>> =
+  Object.freeze({ typescript: typescriptTarget, csharp: csharpTarget });
 
 // types
 
@@ -100,8 +120,9 @@ export const EDITOR_COPY = '.beadc/include';
 /** The folders the walk of an output's folder never enters: a build's, and a package manager's. */
 export const UNWALKED: ReadonlySet<string> = new Set(['bin', 'obj', 'node_modules']);
 
-// what a TypeScript output's folder holds of beadc's: its services, and its messages when it writes them
-const SERVICES = /_bead\.ts$/u;
+// what a TypeScript output's folder holds of beadc's: its services, its route table, and its messages
+// when it writes them
+const SERVICES = /(?:_bead\.ts|(?:^|[\\/])bead_http\.ts)$/u;
 const MESSAGES = /_pb\.ts$/u;
 
 // a C# file, and the first line of a file beadc's targets write
@@ -176,22 +197,44 @@ const sourceOf = (content: string): string | undefined => {
     });
 };
 
+/** The document `config` asks of `blueprint`: its routes' prefix, its title and its security scheme. */
+export const documentTextOf = (blueprint: IBlueprint, config: IConfig): string => {
+  const { openapi } = config;
+
+  return documentOf(blueprint, {
+    prefix: config.http?.prefix ?? DEFAULT_PREFIX,
+    ...(openapi?.title === undefined ? {} : { title: openapi.title }),
+    ...(openapi?.security === undefined ? {} : { security: openapi.security }),
+  });
+};
+
 // one output's files, under its folder, a temporary folder made under the project's `folder`
 const outputFilesOf = (
   output: Output,
-  details: { readonly input: ITargetInput; readonly folder: string }
+  details: {
+    readonly input: ITargetInput;
+    readonly folder: string;
+    readonly http: IHttpInput;
+  }
 ): readonly IGeneratedFile[] => {
   const { input, folder } = details;
   const messages = input.set !== undefined && output.messages === Messages.GENERATE;
+  const set = input.set;
+  const keeps = {
+    ...(output.keepValidateOptions === true ? { keepValidateOptions: true } : {}),
+    ...(output.keepHttpOptions === true ? { keepHttpOptions: true } : {}),
+  };
+  const http = output.http === true ? details.http : undefined;
 
   if (output.language === 'csharp') {
     return [
-      ...(input.set === undefined || !messages
+      ...(set === undefined || !messages
         ? []
-        : generateCSharpMessages(input.set, { blueprint: input.blueprint, folder })),
+        : generateCSharpMessages(set, { blueprint: input.blueprint, folder, ...keeps })),
       ...csharpTarget.generate(input, {
         ...(output.namespace === undefined ? {} : { namespace: output.namespace }),
         messages: output.messages,
+        ...(http === undefined ? {} : { http }),
       }),
     ];
   }
@@ -200,11 +243,12 @@ const outputFilesOf = (
     output.messagesOut === undefined ? '' : slashed(output.out, output.messagesOut);
 
   return [
-    ...(input.set === undefined || !messages
+    ...(set === undefined || !messages
       ? []
-      : generateMessages(input.set, {
+      : generateMessages(set, {
           blueprint: input.blueprint,
           importExtension: output.importExtension,
+          ...keeps,
         })),
     ...typescriptTarget.generate(input, {
       importExtension: output.importExtension,
@@ -212,6 +256,9 @@ const outputFilesOf = (
       protoRuntime: output.protoRuntime,
       messages: output.messages,
       ...(messagesOut === '' ? {} : { messagesOut }),
+      ...(http === undefined
+        ? {}
+        : { http: { ...http, runtime: output.httpRuntime ?? DEFAULT_HTTP_RUNTIME } }),
     }),
   ];
 };
@@ -347,12 +394,24 @@ export const planOf = (config: IConfig, checked: IChecked): IPlan => {
     config.blueprint === undefined
       ? []
       : [{ path: config.blueprint, content: formOf(blueprint), source: configSource }];
+  // * one document a blueprint: the file `openapi.out` names and every output's embedding, one text
+  const http: IHttpInput = {
+    prefix: config.http?.prefix ?? DEFAULT_PREFIX,
+    document: asksHttp(config) ? documentTextOf(blueprint, config) : '',
+    ...(config.openapi?.problemTypes === undefined
+      ? {}
+      : { problemTypes: config.openapi.problemTypes }),
+  };
+
+  if (config.openapi?.out !== undefined) {
+    files.push({ path: config.openapi.out, content: http.document, source: configSource });
+  }
   const stale: IStaleFile[] = [];
   const left: IStaleFile[] = [];
 
   for (const output of config.outputs ?? []) {
     const messages = input.set !== undefined && output.messages === Messages.GENERATE;
-    const written = outputFilesOf(output, { input, folder: config.folder }).map((file) => {
+    const written = outputFilesOf(output, { input, folder: config.folder, http }).map((file) => {
       const path = join(output.out, ...file.name.split('/'));
       const source = sourceOf(file.content);
 
@@ -471,15 +530,144 @@ export const differencesOf = (plan: IPlan): IFileDifference[] => {
 };
 
 /**
- * Writes the editor's copy of Bead's options into `folder`, under {@link EDITOR_COPY}, by its
- * content: a copy of the file would carry its mode, which an image built from a Windows checkout
- * gives as 0755.
+ * Writes the editor's copy of Bead's options and of protovalidate's into `folder`, under
+ * {@link EDITOR_COPY}, by their content: a copy of a file would carry its mode, which an image built
+ * from a Windows checkout gives as 0755.
  */
 export const writeEditorCopy = (folder: string): void => {
-  const copy = join(folder, ...EDITOR_COPY.split('/'), ...OPTIONS_FILE.split('/'));
+  for (const file of BEADC_FILES) {
+    const copy = join(folder, ...EDITOR_COPY.split('/'), ...file.split('/'));
 
-  mkdirSync(dirname(copy), { recursive: true });
-  writeFileSync(copy, readFileSync(join(OPTIONS_ROOT, ...OPTIONS_FILE.split('/'))));
+    mkdirSync(dirname(copy), { recursive: true });
+    writeFileSync(copy, readFileSync(join(OPTIONS_ROOT, ...file.split('/'))));
+  }
+};
+
+// the routes one gateway serves that it cannot tell apart, or that take a path it keeps: two rules of
+// one method that tie under 3.5's precedence, one template up to its variables' names
+// (HTTP_ROUTE_OVERLAP); a rule at /openapi.json, at the HTTP transport's pathname, or at a default
+// route's own template (HTTP_ROUTE_RESERVED)
+const routeFindingsOf = (
+  blueprint: IBlueprint,
+  details: { readonly prefix: string; readonly placeOf: (pointer: string) => IPlace }
+): IDiagnostic[] => {
+  const diagnostics: IDiagnostic[] = [];
+  const reserved = new Map<string, string>([
+    [shapeOf(templateOf(DOCUMENT_PATH)), `${DOCUMENT_PATH}, where a gateway serves its document`],
+    [
+      shapeOf(templateOf(TRANSPORT_PATHNAME)),
+      `${TRANSPORT_PATHNAME}, the HTTP transport's pathname`,
+    ],
+  ]);
+  const seen = new Map<string, string>();
+
+  for (const service of blueprint.services) {
+    for (const procedure of service.procedures) {
+      if (procedure.procedureKind !== 'command') {
+        const template = defaultTemplateOf(service, { procedure, prefix: details.prefix });
+
+        reserved.set(
+          shapeOf(templateOf(template)),
+          `${template}, ${service.serviceName}.${procedure.procedureName}'s default route`
+        );
+      }
+    }
+  }
+
+  blueprint.services.forEach((service, serviceAt) => {
+    service.procedures.forEach((procedure, procedureAt) => {
+      if (procedure.procedureKind === 'command') {
+        return;
+      }
+
+      (procedure.http?.rules ?? []).forEach((rule, at) => {
+        const pointer = `/services/${String(serviceAt)}/procedures/${String(procedureAt)}/http/rules/${String(at)}/template`;
+        const shape = shapeOf(templateOf(rule.template));
+        const named = `${rule.method} ${rule.template} of ${service.serviceName}.${procedure.procedureName}`;
+        const kept = reserved.get(shape);
+        const tie = seen.get(`${rule.method} ${shape}`);
+
+        if (kept !== undefined) {
+          diagnostics.push(
+            diagnosticOf('HTTP_ROUTE_RESERVED', {
+              message: `${named} is at ${kept}, which a gateway keeps`,
+              place: details.placeOf(pointer),
+            })
+          );
+        } else if (tie !== undefined) {
+          diagnostics.push(
+            diagnosticOf('HTTP_ROUTE_OVERLAP', {
+              message: `${named} ties ${tie}: one template up to its variables' names, which no precedence tells apart (transcoding 3.5)`,
+              place: details.placeOf(pointer),
+            })
+          );
+        } else {
+          seen.set(`${rule.method} ${shape}`, named);
+        }
+      });
+    });
+  });
+
+  return diagnostics;
+};
+
+/**
+ * What `generate` holds `checked`'s blueprint to before a file is written: each feature it requires
+ * that an output's target does not generate, a FEATURE_UNGENERATED, since a rule declared and played
+ * by one side alone is never written (decision 0035); each output with `http: true` whose target
+ * writes no route table, an HTTP_UNGENERATED; and the routes one gateway serves, HTTP_ROUTE_OVERLAP's
+ * and HTTP_ROUTE_RESERVED's (decision 0037).
+ */
+export const ungeneratedOf = (
+  config: IConfig,
+  options: {
+    readonly checked: IChecked;
+    readonly targets?: Readonly<
+      Record<string, Pick<ITarget<unknown>, 'name' | 'features' | 'http'>>
+    >;
+  }
+): IDiagnostic[] => {
+  const { blueprint, placeOf } = options.checked;
+  const targets = options.targets ?? TARGETS;
+
+  if (blueprint === undefined) {
+    return [];
+  }
+
+  const features = (config.outputs ?? []).flatMap((output) => {
+    const target = targets[output.language];
+
+    return blueprint.requires.flatMap((feature, at) => {
+      return target === undefined || target.features.has(feature)
+        ? []
+        : [
+            diagnosticOf('FEATURE_UNGENERATED', {
+              message: `the ${target.name} target generates no ${feature}, which the blueprint requires: an output of it would let through what the other sides refuse`,
+              place: placeOf?.(`/requires/${String(at)}`) ?? { file: CONFIG_FILE },
+            }),
+          ];
+    });
+  });
+  const http = (config.outputs ?? []).flatMap((output, at) => {
+    const target = targets[output.language];
+
+    return output.http !== true || target === undefined || target.http
+      ? []
+      : [
+          diagnosticOf('HTTP_UNGENERATED', {
+            message: `outputs[${String(at)}] asks http: true of the ${target.name} target, which writes no route table: take http out of it, or give HTTP to an output whose target writes one`,
+            place: { file: CONFIG_FILE },
+          }),
+        ];
+  });
+  const routes = routeFindingsOf(blueprint, {
+    prefix: config.http?.prefix ?? DEFAULT_PREFIX,
+    placeOf: (pointer) => {
+      return placeOf?.(pointer) ?? { file: CONFIG_FILE, pointer };
+    },
+  });
+
+  return [...features, ...http, ...routes];
 };
 
 /**

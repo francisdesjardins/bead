@@ -1,10 +1,11 @@
 import { expect, test } from '@playwright/test';
-import { ProtocolCode } from '../../router/shared/constants';
+import { FailureScope, ProtocolCode } from '../../router/shared/constants';
 import { FailureError } from '../../router/shared/errors';
 import { PAYLOAD_CODECS } from '../../router/shared/payloads';
 import type { IProcedure, IRequestResolver } from '../../router/shared/types';
+import { violationsOf } from '../../router/shared/violations';
 import { ProgrammerError } from '../../transport/shared/errors';
-import { type IAdmissionHook, requestOf } from '../descriptors';
+import { commandOf, type IAdmissionHook, requestOf } from '../descriptors';
 import { createServiceClient } from '../service-client';
 import { createServiceServer } from '../service-server';
 import {
@@ -13,6 +14,9 @@ import {
   deprecationsIn,
   GreeterFailures,
   GreeterProcedures,
+  NOT_EMPTY,
+  NOT_EMPTY_DETAIL,
+  notEmpty,
 } from './fixtures';
 
 // helpers
@@ -387,7 +391,55 @@ test.describe('createServiceServer', () => {
     ]);
   });
 
-  test("validates a request before its resolver, as its descriptor's validate holds it", async () => {
+  test('answers PAYLOAD_INVALID with its violations to a request its rules refuse, before its resolver', async () => {
+    await using connected = await connectWorker();
+    const reported: unknown[] = [];
+    const seen: unknown[] = [];
+    const procedures = Object.freeze({
+      echo: requestOf({
+        admission: 'none',
+        failures: {},
+        procedure: { procedureId: 1, procedureName: 'echo', serviceId: 8, serviceRevision: 1 },
+        request: PAYLOAD_CODECS.text,
+        result: PAYLOAD_CODECS.text,
+        validate: notEmpty,
+      }),
+    });
+    const echo = createServiceServer(procedures);
+    const client = createServiceClient(procedures, connected.client);
+
+    connected.server.router.on('error', (error) => {
+      reported.push(error);
+    });
+    echo.on('echo', (request, response) => {
+      seen.push(request.payload);
+
+      return response(request.payload);
+    });
+    echo.offer(connected.server);
+
+    await expect(client.request.echo('hi')()).resolves.toBe('hi');
+
+    const refused = await client.request
+      .echo('')()
+      .catch((error: unknown) => {
+        return error as FailureError;
+      });
+
+    expect(refused).toBeInstanceOf(FailureError);
+    expect(refused).toMatchObject({
+      code: ProtocolCode.PAYLOAD_INVALID,
+      detail: NOT_EMPTY_DETAIL,
+      origin: 'peer',
+      scope: FailureScope.PROTOCOL,
+    });
+    expect(violationsOf(refused as FailureError)).toEqual({ more: 0, violations: [NOT_EMPTY] });
+    // * the protocol's answer, never its resolver's: nothing ran, nothing to report
+    expect(seen).toEqual(['hi']);
+    expect(reported).toEqual([]);
+  });
+
+  test('answers PROCEDURE_FAILED to a validate that throws, and reports it', async () => {
     await using connected = await connectWorker();
     const reported: unknown[] = [];
     const seen: unknown[] = [];
@@ -400,8 +452,10 @@ test.describe('createServiceServer', () => {
         result: PAYLOAD_CODECS.text,
         validate: (request: unknown) => {
           if (request === '') {
-            throw new RangeError('an empty echo');
+            throw new RangeError('a rule that fails to judge');
           }
+
+          return notEmpty(request);
         },
       }),
     });
@@ -422,6 +476,58 @@ test.describe('createServiceServer', () => {
     expect(await codeOf(client.request.echo('')())).toBe(ProtocolCode.PROCEDURE_FAILED);
     expect(seen).toEqual(['hi']);
     expect(reported).toEqual([expect.any(RangeError)]);
+  });
+
+  test('validates a command before it goes, when its options say so', async () => {
+    await using connected = await connectWorker();
+    const procedures = Object.freeze({
+      shout: commandOf({
+        admission: 'none',
+        failures: {},
+        procedure: { procedureId: 3, procedureName: 'shout', serviceId: 8, serviceRevision: 1 },
+        request: PAYLOAD_CODECS.text,
+        result: PAYLOAD_CODECS.text,
+        validate: notEmpty,
+      }),
+    });
+    const validating = createServiceServer(procedures, { validates: true });
+    const heard: unknown[] = [];
+    const client = createServiceClient(procedures, connected.client);
+    const failureOf = (call: Promise<unknown>): Promise<FailureError> => {
+      return call.then(
+        () => {
+          throw new Error('the command was taken');
+        },
+        (error: unknown) => {
+          return error as FailureError;
+        }
+      );
+    };
+
+    client.on('shout', (request, response) => {
+      heard.push(request.payload);
+
+      return response(request.payload.toUpperCase());
+    });
+    validating.offer(connected.server);
+
+    const refused = await failureOf(
+      validating.command.shout('')({ connectionHandle: CONNECTION, timeout: 1_000 })
+    );
+
+    expect(refused).toBeInstanceOf(FailureError);
+    // * refused on this side, before it went: its client heard nothing
+    expect(refused).toMatchObject({
+      code: ProtocolCode.PAYLOAD_INVALID,
+      detail: NOT_EMPTY_DETAIL,
+      origin: 'local',
+      side: 'server',
+    });
+    expect(heard).toEqual([]);
+    await expect(
+      validating.command.shout('hi')({ connectionHandle: CONNECTION, timeout: 1_000 })
+    ).resolves.toBe('HI');
+    expect(heard).toEqual(['hi']);
   });
 
   test("a mapped member keeps its descriptor's @deprecated", async () => {

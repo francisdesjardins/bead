@@ -4,8 +4,8 @@
 - **Scope**: the protocol, and every implementation's server transports and clients, over HTTP and
   at a WebSocket's address: in [`spec/spec.md`](../../spec/spec.md), the refusal a server's
   transport tells (15.1, and 15.2's refusals told), what a client names of a refusal it reads
-  (15.6), and the octets a request's field may hold (15.12). The marks and their order are 15.6's; a
-  server's hosts and the address it listens on are
+  (15.6), and the octets a request's field and its target may hold (15.12, and transcoding 3.6). The
+  marks and their order are 15.6's; a server's hosts and the address it listens on are
   [0024](0024-a-server-takes-the-loopbacks-names-ip-literals-and-the-hosts-it-is-told.md)'s; the
   guard a listener is called within is
   [0023](0023-a-transport-goes-on-through-its-listeners-throw-and-takes-nothing-new-as-it-stops.md)'s;
@@ -133,6 +133,30 @@ takes, as its server writes its own, with none of the fields every response on t
 ([0027](0027-an-http-server-answers-cors-to-the-origins-it-names-and-to-no-other.md)). So every
 string a refusal carries is printable, and the same on both sides.
 
+**A request's target is visible ASCII, and its path's percent-decoding holds no NUL** (spec 15.12):
+one that holds a control character, HTAB and a bare CR among them, a space, DEL or an octet past
+US-ASCII, in its path or its query, in origin-form or absolute-form, or a path that decodes to NUL,
+`%00`, is answered 400 unmarked over HTTP/1.1 and its stream reset `PROTOCOL_ERROR` over HTTP/2,
+before anything else of it is judged, at both transports and at a gateway
+([0037](0037-a-procedure-is-also-an-http-route-which-a-gateway-answers-as-one-more-client-of-its-server.md),
+transcoding 3.6), and told by none. A target holds a URI's characters
+([RFC 9112 §3.2](https://www.rfc-editor.org/rfc/rfc9112#section-3.2),
+[RFC 9113 §8.3.1](https://www.rfc-editor.org/rfc/rfc9113#section-8.3.1)), which are visible ASCII
+([RFC 3986 §2](https://www.rfc-editor.org/rfc/rfc3986#section-2)), and a request-line that holds
+another is invalid ([RFC 9112 §3](https://www.rfc-editor.org/rfc/rfc9112#section-3), a bare CR
+among them by [§2.2](https://www.rfc-editor.org/rfc/rfc9112#section-2.2)). Node's parser answers
+every such octet over HTTP/1.1, and nghttp2 resets a control character, a space or DEL in `:path`;
+Kestrel takes a control character, HTAB, a bare CR and DEL in an HTTP/1.1 target, and each but NUL,
+an octet past ASCII in UTF-8 among them, in `:path`. Each side writes what its server does not: the
+C# side through `HostsAndOrigins.IsVisibleTarget`, over every protocol, beside its fields'
+predicate, the TypeScript side through `isVisibleTarget`, beside `hasVisibleFields`. A NUL
+percent-encoded in a path is the one encoded octet refused, since Kestrel refuses it before an
+application runs and RFC 3986 §2.1 allows it: every side keeps to Kestrel's, a row of
+`docs/support.md`'s "Leveled down"; `%00` in a query, and every other octet percent-encoded, are
+taken. The visible characters a URI leaves out, `"`, `#`, `<`, `>`, `\`, `^`, `` ` ``, `{`, `|` and
+`}`, are taken as they came, as a page's browser sends some of them unencoded in a query, and a `#`
+opens no fragment: both servers keep it in the path.
+
 **A client names the status and the reason of a refusal it reads** (spec 15.6): the HTTP connect,
 "the server drew no connection: {status} {reason}", an unmarked status by its number alone; the
 WebSocket connect, "the server refused the upgrade: {status} {reason}", over `ws` through
@@ -160,6 +184,14 @@ since a token guessed is a request refused; the operator reads the restart's ech
 sides**, each side writing the 400 its platform does not: the C# side for a control character
 Kestrel takes, the TypeScript side for an octet past ASCII Node takes.
 
+**A target past visible ASCII is refused on both sides alike**: two cases of
+`spec/transports.json`, over HTTP and at a WebSocket's address, send the octets the rule names in a
+path and in a query, in absolute-form and from a host not taken, and `%00` in a path, each answered
+400 unmarked and told by none, one percent-encoded taken; an exchange of `spec/transcoding.json`
+pins it at a gateway, a path no route matches answered 400, not 404. Over HTTP/2, Kestrel ends the
+session on NUL or on a lone octet that is no UTF-8 in `:path`, as on a field, where Node resets the
+stream: the platform row of `docs/support.md` names both.
+
 **Over HTTP/2, each platform answers part of it before its transport reads the request**: Node's
 HTTP/2 parser, nghttp2, drops a field whose value holds a control character, so the TypeScript
 side's transport judges the request without it, where the C# side's resets the stream, and so does
@@ -180,7 +212,14 @@ server's
 `tells each refusal it judges of its own, its status, its reason, the request’s authority and origin and the client’s address and port, and nothing of HTTP’s own`
 and its `tells no refusal of the 404 that ends an exchange or a listen as its connection closes, …`;
 each WebSocket transport server's sentence at its address; each side's field predicate,
-`isVisibleField` and `IsVisibleField`, over one table; each transport server's
+`isVisibleField` and `IsVisibleField`, over one table, and its target predicate, `isVisibleTarget`
+and `IsVisibleTarget`, over another; each HTTP transport server's
+`resets over HTTP/2 the stream of a request whose target holds a control character, a space, DEL or an octet past ASCII, PROTOCOL_ERROR, and tells nothing`,
+each WebSocket handshake's
+`refuses first, unmarked, a target holding an octet other than visible ASCII or a path whose percent-decoding holds NUL, …`,
+and each gateway's
+`resets over HTTP/2 the stream of a request whose target or a field holds an octet past visible ASCII, PROTOCOL_ERROR, nothing written`;
+each transport server's
 `refuses as it would though a refusal listener throws, the throw reported with no connection`; each
 WebSocket client's `names the status and the reason of an upgrade refused`, and each HTTP client's
 connect named with its reason. `docs/support.md` names them.
@@ -192,7 +231,10 @@ one round, which
 [0024](0024-a-server-takes-the-loopbacks-names-ip-literals-and-the-hosts-it-is-told.md) shares for
 the address a server listens on; a field value's ends met it in
 [0029](0029-a-listen-names-its-cursor-and-its-wait-in-fields-of-its-own.md)'s round, which keeps its
-objections and answers. Its objections, each with the answer that holds:
+objections and answers; a request's target met it in a round of its own, at xhigh effort, beside
+[0037](0037-a-procedure-is-also-an-http-route-which-a-gateway-answers-as-one-more-client-of-its-server.md)'s
+rule on a target past US-ASCII at a gateway: ten objections, each accepted. Its objections, each
+with the answer that holds:
 
 ### On a refusal told and the default listening address
 
@@ -203,3 +245,18 @@ objections and answers. Its objections, each with the answer that holds:
 | The draft credits Happy Eyeballs for every client reaching `127.0.0.1` by `localhost`, but .NET does not race: both C# clients wait about two seconds a connect on Windows, as they do against a server on `0.0.0.0`; another process on `[::1]` and the same port answers every client by `localhost`; the draft's alternative, both loopbacks, has a cost it does not name, Kestrel refusing a dynamic port on `localhost` | Accepted: measured, .NET 2012–2054 ms by `localhost` against Node's and the browsers' milliseconds, the capture by `fetch`, `ws` and `HttpClient`, and Kestrel's refusal. Both C# clients race the families as RFC 8305 asks, through a `ConnectCallback`, as Node and the browsers do, against any one-family server, whatever the default. One loopback family or both was put to the user with its costs named either way, who chose both: a server listens on `localhost`, `127.0.0.1` then `::1` on one port, a drawn port drawn again when the other family holds it, which leaves the capture no address, measured on Windows and Linux, and listens on `127.0.0.1` alone, reported, where the IPv6 loopback is absent (0024); a server given one family keeps the residual, named in 15.12                               |
 | The draft's ground that HTTP's own refusals exclude the same things on both sides was never probed: its probe sent the characters `\x01`; with the bytes, a control character in `Origin` is Node's unmarked 400 and the C# side's marked 403, a byte past ASCII the reverse, so one request would be told on one side alone, the C# side's told origin carrying terminal escapes the draft's example prints as they are     | Accepted, and wider: re-probed, the mirror holds on every field, one the transport never reads included, and not on `Host`, which 0024's grammar holds on both. By the parity rule both sides take what both take, visible ASCII, SP and HTAB, and answer any other field value 400 unmarked before judging the request: RFC 9110 §5.5 calls the control characters invalid and keeps octets past ASCII out of every field defined since, and RFC 6454 §6.2 makes an origin ASCII; 15.12 says it. So every string a refusal carries is printable, and the READMEs' examples still quote what they print. Two cases, over HTTP and at a WebSocket's address, each told by neither side; the measured table stands in the Context in place of the draft's sentence                                                                 |
 | The record keeps three of the client record's five members and drops `Port` without a word, though 0024's round kept the peer's port in the handle as the tie to a proxy's or a firewall's log, which a refusal needs more than a connection                                                                                                                                                                                 | Accepted: `port`, the socket's peer port as `clients` reports it, the proxy's connection's behind a trusted proxy, on both sides. The conformance writes it `{port}`, which each runner fills with the local port of the socket its step sent from                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+
+### On a request's target
+
+| Objection                                                                                                                                                                                                                                                                                                                                    | Answer                                                                                                                                                                                                                                                                                                                                                                   |
+| -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| The draft refuses a target at the HTTP transport alone, though a server reads one at its WebSocket's address too (15.2, step 1): `GET /` U+0001 and `GET /?a` U+0001 `b` upgrade 101 on the C# side, where Node answers 400                                                                                                                  | Accepted: 15.2's step 1 names the target, the C# handshake judges it with its fields, and a case of `spec/transports.json` at a WebSocket's address pins it beside the fields' case                                                                                                                                                                                      |
+| `%00` in a path is answered unlike: Kestrel answers it 400, or resets its stream, before an application runs, where the TypeScript transport answers 404 marked and told, and its gateway binds `a` U+0000 `b` in a variable                                                                                                                 | Accepted: every side refuses a path whose percent-decoding holds NUL as HTTP refuses it, the TypeScript side by a check of its own. RFC 3986 §2.1 allows the octet, so the leveling is a row of `docs/support.md`'s "Leveled down", to lift once Kestrel takes it; `%00` in a query, and every other octet percent-encoded, are taken                                    |
+| The draft answers 400 over every protocol, though a malformed HTTP/2 request has its stream reset (RFC 9113 §8.3, §8.3.1, §8.1.1), as 15.12 has a field's; the C# transport judges a target over HTTP/1 alone, though Kestrel gives `:path` as its `RawTarget`, and the C# gateway's first gate writes a 400 over HTTP/2, a field's among it | Accepted: over HTTP/2 the stream is reset `PROTOCOL_ERROR`, nothing written; the C# check runs over every protocol in the fields' branch, and the C# gateway resets as the TypeScript one does, for a field and a target alike. Kestrel ends the session on NUL, or on a lone octet that is no UTF-8, in `:path`: the fields' platform row of `docs/support.md` names it |
+| The TypeScript side refuses nothing of its own and leans on Node's parser, which `insecureHTTPParser`, or another server `createServer` builds, relaxes                                                                                                                                                                                      | Accepted: an explicit `isVisibleTarget`, the NUL check with it, in the gate `hasVisibleFields` holds, at the transport, at a WebSocket's address and at a gateway's first gate, each leading into the same unmarked answer                                                                                                                                               |
+| A refusal marked `malformed`, judged where the path is, would tell what Node's parser answers unmarked before any Bead code runs; the C# side already turns `/be` U+0001 `ad` into a 404 `path-unknown`, marked and told                                                                                                                     | Accepted: unmarked, as HTTP answers it, with none of the fields every response on the path carries, judged before any gate, and told by none; marking it is refused                                                                                                                                                                                                      |
+| A gateway mounted on an application's server meets only what reaches its handler, so a rule stated for every request overreaches                                                                                                                                                                                                             | Accepted as written: a gateway refuses so every request it answers, and transcoding says no more than that                                                                                                                                                                                                                                                               |
+| The octet set is drawn loosely: HTAB is no control character "other than HTAB" here, a space is one, and the visible characters a URI leaves out are taken by both servers and sent unencoded by a page's browser in a query                                                                                                                 | Accepted: every octet but 0x21 to 0x7E, in the path and the query, origin-form or absolute-form, HTAB among them and the space named; `"`, `#`, `<`, `>`, `\`, `^`, `` ` ``, `{`, `                                                                                                                                                                                      | `and`}`stay taken, a`#` opening no fragment, which both servers keep in the path |
+| The draft cites RFC 3986 alone, which says what a URI holds and not what a server answers                                                                                                                                                                                                                                                    | Accepted: RFC 9112 §3, a request-line that is invalid answered 400, §2.2, a bare CR invalid, and §3.2, beside RFC 3986 §2 and RFC 9113 §8.3.1                                                                                                                                                                                                                            |
+| `spec/transports.json`'s schema writes a target `\S+`, which under Python's `re` holds no HTAB, no bare CR and none of 0x1C to 0x1F                                                                                                                                                                                                          | Accepted: a target is any octet but a space and LF, a bare CR among them, and no character past U+00FF, which no octet writes; `transcoding.json`'s pattern stays                                                                                                                                                                                                        |
+| A rule stated at the HTTP transport alone leaves the gateway and the WebSocket's address to infer it                                                                                                                                                                                                                                         | Accepted: 15.12 states it for every HTTP server, and 15.2's step 1 and transcoding 3.6 point to it                                                                                                                                                                                                                                                                       |

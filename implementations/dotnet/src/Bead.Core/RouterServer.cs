@@ -199,6 +199,10 @@ public sealed class RouterServer : IRouterLike, IDisposable
     private readonly RouterSeries? _metrics;
 
     private readonly HashSet<string> _connections = [];
+
+    // the connections open, as its relay asks of them from any thread: one is as its transport tells
+    // it, and one closed is taken out on its scheduler, before its relay hears of its close
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<string, bool> _open = new(StringComparer.Ordinal);
     private readonly NotificationManager _notifications;
     private readonly SubscriptionPlaces _places;
     private readonly Func<string, SessionToken?>? _sessionTokenOf;
@@ -232,7 +236,7 @@ public sealed class RouterServer : IRouterLike, IDisposable
         var clock = Clocks.Of((options?.Clock, transport.Clock), ("a server's router", "its transport"));
 
         Transport = transport;
-        _notifications = new NotificationManager((options?.Pacing ?? PacingLimits.Default).Validate());
+        _notifications = new NotificationManager(options?.Pacing ?? PacingLimits.Default);
         _places = new SubscriptionPlaces(
             _notifications,
             (connectionHandle) =>
@@ -262,6 +266,7 @@ public sealed class RouterServer : IRouterLike, IDisposable
             {
                 CarriesCredential = transport.CarriesCredential,
                 IsSecure = transport.IsSecure,
+                IsOpen = _open.ContainsKey,
                 IsTwoWay = transport.IsTwoWay,
                 Limits = _core.Limits,
                 Report = Report,
@@ -331,6 +336,15 @@ public sealed class RouterServer : IRouterLike, IDisposable
         }
     }
 
+    /// <inheritdoc/>
+    public int DetailBytes
+    {
+        get
+        {
+            return Limits.DetailBytes;
+        }
+    }
+
     /// <summary>Its transport.</summary>
     public IRouterServerTransport Transport { get; }
 
@@ -377,6 +391,7 @@ public sealed class RouterServer : IRouterLike, IDisposable
                 OnSent = request.OnSent,
                 Options = request.Options,
                 Procedure = request.Procedure,
+                Refusal = request.Refusal,
                 Series = request.Series,
             });
     }
@@ -496,11 +511,15 @@ public sealed class RouterServer : IRouterLike, IDisposable
 
     /// <summary>
     /// Registers a connection of the router's own as a destination, which the relay asks by a request
-    /// of the router's: the destination given, or drawn. Once that connection closes, the destination
-    /// is unreachable until it is registered anew, on another connection: no connection takes a
-    /// handle its transport gave before. A timeout under a millisecond, or past 2³¹ − 1 ms, is an
-    /// <see cref="ArgumentOutOfRangeException"/>; a destination of 0, or registered already, an
-    /// <see cref="ArgumentException"/>.
+    /// of the router's: the destination given, drawn, or the one of the registration it replaces.
+    /// Once that connection closes, the destination is unreachable until it is registered anew, on
+    /// another connection: no connection takes a handle its transport gave before; one this router no
+    /// longer holds is registered closed, and never forwarded to (spec 14.4). Who may register which
+    /// destination is the application's to decide: the relay checks nobody (spec 14.1). A timeout
+    /// under a millisecond, or past 2³¹ − 1 ms, is an <see cref="ArgumentOutOfRangeException"/>; a
+    /// destination of 0, or registered already, unless <see cref="DestinationOptions.Replaces"/>
+    /// names the registration that holds it, or a registration replaced that does not hold its
+    /// destination, an <see cref="ArgumentException"/>.
     /// </summary>
     public DestinationRegistration RegisterDestination(ConnectionTarget target, DestinationOptions? options = null)
     {
@@ -521,13 +540,28 @@ public sealed class RouterServer : IRouterLike, IDisposable
     }
 
     /// <summary>
-    /// What it and its parts hold — its core, its subscriptions' places, its notifications, its relay
-    /// — for the connections it follows, which it forgets as each closes; taken on its scheduler.
+    /// What it and its parts hold — its core, its subscriptions' places, its notifications, its relay,
+    /// the credentials' sessions it keeps and those of them timed — for the connections it follows,
+    /// which it forgets as each closes; taken on its scheduler.
     /// </summary>
     public Task<Gauges> Gauges()
     {
         return _core.Loop.Run(() =>
         {
+            var kept = Bead.Gauges.Of(
+                new Dictionary<string, long>
+                {
+                    ["credentialSessions"] = _kept.Count,
+                    ["timedCredentialSessions"] = _kept.Values.Count((each) =>
+                    {
+                        return each.Timer is not null;
+                    }),
+                },
+                _kept.Keys.Select((place) =>
+                {
+                    return place.ConnectionHandle;
+                }));
+
             return Task.FromResult(Bead.Gauges.Merge(
             [
                 Bead.Gauges.Of(new Dictionary<string, long> { ["connections"] = _connections.Count }, _connections),
@@ -535,6 +569,7 @@ public sealed class RouterServer : IRouterLike, IDisposable
                 _places.Gauges(),
                 _notifications.Gauges(),
                 _relay.Gauges(),
+                kept,
             ]));
         });
     }
@@ -668,6 +703,7 @@ public sealed class RouterServer : IRouterLike, IDisposable
         {
             DropEstablished(null);
             _connections.Clear();
+            _open.Clear();
             _places.Clear();
             _notifications.CleanAll();
             Forget(null);
@@ -935,6 +971,9 @@ public sealed class RouterServer : IRouterLike, IDisposable
 
     private void OnConnection(string connectionHandle)
     {
+        // ! open for its relay as its transport tells it, before its scheduler takes it: a
+        // destination registered on it from the transport's own listener is registered open
+        _open[connectionHandle] = true;
         _core.Post(() =>
         {
             _connections.Add(connectionHandle);
@@ -944,6 +983,11 @@ public sealed class RouterServer : IRouterLike, IDisposable
     private void OnMessage(TransportMessage message, string connectionHandle)
     {
         // a connection that speaks is open, even one opened before the router was built
+        if (!_open.ContainsKey(connectionHandle))
+        {
+            _open[connectionHandle] = true;
+        }
+
         _core.Post(() =>
         {
             _connections.Add(connectionHandle);
@@ -968,7 +1012,10 @@ public sealed class RouterServer : IRouterLike, IDisposable
         {
             _connections.Remove(connectionHandle);
 
-            // its destinations stay unreachable, whoever takes its handle next
+            // ! closed for its relay first: a destination registered on it from now on is registered
+            // closed, and each one before is marked so; each stays unreachable until it is registered
+            // anew, on another connection
+            _open.TryRemove(connectionHandle, out _);
             _relay.CloseConnection(connectionHandle);
             DropEstablished(connectionHandle);
             _places.Clear(connectionHandle);

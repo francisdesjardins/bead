@@ -1,4 +1,3 @@
-import { setTimeout as sleep } from 'node:timers/promises';
 import { expect, test } from '@playwright/test';
 import type { TransportServerConnectionHandle } from '../../../transport/server/types';
 import { createTestClock } from '../../../transport/shared/__tests__/fixtures';
@@ -46,30 +45,46 @@ test.describe('createServiceManager', () => {
 
     // debugging 4.1, 4.1.1, 4.1.2, 4.1.3, 4.1.4, 4.1.6 and 4.1.8
     test('tells each step of a request, with copies and, once answered, a duration', async () => {
-      const manager = createServiceManager(createFakeRouter().router);
-      const seen = recordDebug(manager);
+      const clock = createTestClock(1_000);
+      const { control, router } = createFakeRouter('server', clock);
+      const manager = createServiceManager(router);
+      const steps = recordDebug(manager);
       const payload = { text: 'hello' };
 
+      control.answer = (bytes) => {
+        clock.tick(30);
+
+        return Promise.resolve(answerOf(bytes));
+      };
+
       await manager.getRequest(echo, { serializer })(payload)();
+
+      // * a copy: the call's value changed after it, its steps tell it as it went
       payload.text = 'changed after';
 
-      expect(
-        seen.map(({ info }) => {
-          return [info.direction, info.type, info.tx, info.rx];
-        })
-      ).toEqual([
-        ['tx', 'request', { text: 'hello' }, undefined],
-        ['rx', 'request', { text: 'hello' }, { text: 'hello' }],
-      ]);
-      expect(seen[0]?.info.duration).toBeUndefined();
-      expect(seen[1]?.info.duration).toBeGreaterThanOrEqual(0);
-      expect(seen[1]?.info.duration).toBeLessThan(1_000);
-      expect(seen[1]?.info).toMatchObject({
+      const sent = {
+        callId: 7,
+        connectionHandle: undefined,
+        direction: 'tx',
+        duration: undefined,
+        options: { timeout: 5_000 },
         procedureId: 1,
         procedureName: 'echo',
+        rx: undefined,
         serviceId: 2,
         serviceRevision: 3,
-      });
+        startedAt: 1_000,
+        tx: { text: 'hello' },
+        type: 'request',
+      };
+
+      expect(steps).toEqual([
+        { error: null, info: sent },
+        {
+          error: null,
+          info: { ...sent, direction: 'rx', duration: 30, rx: { text: 'hello' } },
+        },
+      ]);
     });
 
     // debugging 4.1.10, 4.2.1 and 4.2.2
@@ -317,9 +332,8 @@ test.describe('createServiceManager', () => {
           await readingsOf(() => {
             return resolver.notify({ text: 'news' });
           }),
-          await readingsOf(async () => {
-            client.deliver(echo, { text: 'news' });
-            await sleep(0);
+          await readingsOf(() => {
+            return client.delivered(echo, { text: 'news' });
           }),
         ];
       };

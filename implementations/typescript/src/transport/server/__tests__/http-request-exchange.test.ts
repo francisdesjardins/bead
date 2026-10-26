@@ -134,25 +134,34 @@ test.describe('createHTTPTransportServer, its edges', () => {
 
     // cancelled, and still coming past the limit: refused, its socket closed in stages, and what
     // comes after dropped
-    const endless = exchangeOf(connectionToken, { 'transfer-encoding': 'chunked' });
+    for (const size of [40, 64]) {
+      const endless = exchangeOf(connectionToken, { 'transfer-encoding': 'chunked' });
 
-    endless.request.emit('data', request.subarray(0, 16));
-    fake.feed(exchangeOf(connectionToken).request, [
-      envelopeOf(ENVELOPE_KINDS.CANCEL, { callId: 1 }),
-    ]);
-    endless.request.emit('data', new Uint8Array(64));
-    endless.request.emit('data', new Uint8Array(64));
+      endless.request.emit('data', request.subarray(0, 16));
+      const cancelEndless = exchangeOf(connectionToken);
 
-    expect([
-      endless.response.status,
-      endless.response.headers?.['connection'],
-      endless.request.isDestroyed,
-    ]).toEqual([413, 'close', false]);
+      fake.feed(cancelEndless.request, [envelopeOf(ENVELOPE_KINDS.CANCEL, { callId: 1 })]);
+      expect(cancelEndless.response.status).toBe(204);
+      endless.request.emit('data', new Uint8Array(size));
+
+      if (size === 40) {
+        expect(server.gauges().counts['bodyBytes']).toBe(56);
+      }
+
+      endless.request.emit('data', new Uint8Array(size));
+
+      expect([
+        endless.response.status,
+        endless.response.headers?.[REFUSAL_HEADER],
+        endless.response.headers?.['connection'],
+        endless.request.isDestroyed,
+      ]).toEqual([413, REFUSALS.TOO_LARGE, 'close', false]);
+    }
     expect(
       namesOf(events, 'message').map(([, bytes]) => {
         return (bytes as number[])[1];
       })
-    ).toEqual([ENVELOPE_KINDS.CANCEL, ENVELOPE_KINDS.CANCEL]);
+    ).toEqual([ENVELOPE_KINDS.CANCEL, ENVELOPE_KINDS.CANCEL, ENVELOPE_KINDS.CANCEL]);
     await server.stop();
   });
 
@@ -182,6 +191,23 @@ test.describe('createHTTPTransportServer, its edges', () => {
 
     expect([declared.response.status, counted.response.status]).toEqual([200, 200]);
     expect(namesOf(events, 'message')).toHaveLength(2);
+
+    // up to the budget exactly, across exchanges: 8 bytes held, and 16 more
+    const holding = exchangeOf(connectionToken, { 'content-length': '16' });
+
+    holding.request.emit('data', envelopeOf(ENVELOPE_KINDS.REQUEST, { callId: 5 }));
+    expect(server.gauges().counts['bodyBytes']).toBe(8);
+
+    const filling = exchangeOf(connectionToken, { 'content-length': '16' });
+
+    fake.feed(filling.request, [envelopeOf(ENVELOPE_KINDS.REQUEST, { callId: 7, extra: 8 })]);
+    expect(filling.response.status).toBe(200);
+    expect(server.gauges().counts['bodyBytes']).toBe(8);
+    expect(namesOf(events, 'message')).toHaveLength(3);
+    fake.feed(holding.request, [new Uint8Array(8)]);
+    expect(holding.response.status).toBe(200);
+    expect(server.gauges().counts['bodyBytes']).toBe(0);
+    expect(namesOf(events, 'message')).toHaveLength(4);
     await server.stop();
   });
 
@@ -202,6 +228,53 @@ test.describe('createHTTPTransportServer, its edges', () => {
 
     expect(namesOf(events, 'message')).toEqual([]);
     await server.stop();
+    await using started = await startTransport();
+    const drawn = await connect(started.url, started.server);
+    const { read, socket } = await rawSocketOn(portOf(started.url));
+
+    try {
+      socket.write(postHeadOf(drawn.connectionToken, request.length));
+      socket.write(request.subarray(0, 12));
+      await expect
+        .poll(() => {
+          return started.server.gauges().counts['waitingExchanges'];
+        })
+        .toBe(1);
+      await started.server.send({ data: answer }, drawn.connectionHandle);
+      await expect
+        .poll(() => {
+          const end = read.text.indexOf('\r\n\r\n');
+
+          if (end < 0) {
+            return false;
+          }
+
+          return /transfer-encoding: chunked/iu.test(read.text.slice(0, end))
+            ? read.text.endsWith('\r\n0\r\n\r\n')
+            : read.text.length - end - 4 >= answer.length;
+        })
+        .toBe(true);
+      const end = read.text.indexOf('\r\n\r\n');
+      const head = read.text.slice(0, end);
+      const body = read.text.slice(end + 4);
+      const expected = Buffer.from(answer).toString('latin1');
+
+      expect(head).toMatch(/^HTTP\/1\.1 200/u);
+      expect(body).toBe(
+        /transfer-encoding: chunked/iu.test(head) ? `8\r\n${expected}\r\n0\r\n\r\n` : expected
+      );
+      expect(namesOf(started.events, 'message')).toEqual([]);
+      expect(head.toLowerCase()).toContain('\r\nconnection: close');
+      socket.write(request.subarray(12));
+      await expect
+        .poll(() => {
+          return read.isClosed;
+        })
+        .toBe(true);
+      expect(namesOf(started.events, 'message')).toEqual([]);
+    } finally {
+      socket.destroy();
+    }
   });
 });
 

@@ -25,6 +25,44 @@ test("the interop's blueprint spans no rule", () => {
   expect(rulesOf(interop())).toEqual([]);
 });
 
+test('reserves TypeScript subscription members for each notifying procedure', () => {
+  const blueprint = interop();
+  const [service] = blueprint.services;
+  const request = service?.procedures.find((procedure) => {
+    return procedure.procedureKind === 'request';
+  });
+
+  if (service === undefined || request === undefined) {
+    throw new Error('the interop blueprint declares a requesting service');
+  }
+
+  for (const notifying of service.procedures.filter((procedure) => {
+    return procedure.procedureKind === 'notifies';
+  })) {
+    const name = `subscribe${notifying.procedureName[0]?.toUpperCase()}${notifying.procedureName.slice(1)}`;
+    const changed = {
+      ...blueprint,
+      services: [
+        {
+          ...service,
+          procedures: [
+            ...service.procedures,
+            { ...request, procedureId: 65_535, procedureName: name },
+          ],
+        },
+      ],
+    };
+    const findings = checkBlueprint(changed, { placeOf });
+
+    expect(findings).toHaveLength(1);
+    expect(findings[0]).toMatchObject({
+      rule: 'NAME_TARGET',
+      pointer: `/services/0/procedures/${String(service.procedures.length)}/procedureName`,
+      message: `${name} is a member TypeScript's generated client holds already`,
+    });
+  }
+});
+
 test('one hook named twice is one hook, and two hooks one folded are refused', () => {
   const blueprint = structuredClone(interop()) as unknown as {
     services: { procedures: { admission: unknown }[] }[];

@@ -25,22 +25,21 @@ const say = (line: string): void => {
 };
 
 // what a refused or failed call answered: a failure of HelloService's catalogue by its name, an
-// admission refused by its detail; anything else is thrown again, as a catch has no type to filter by
+// admission refused by its detail, a request its rules refused by its violations, the detail's lines
+// as they came; anything else is thrown again, as a catch has no type to filter by
 const failureOf = (error: unknown): string => {
   if (HelloFailures.is(error, 'NAMELESS')) {
     return `NAMELESS, ${error.detail}`;
   }
 
-  if (HelloFailures.is(error, 'TOO_FAR')) {
-    return `TOO_FAR, ${error.detail}`;
-  }
+  if (error instanceof FailureError && error.scope === FailureScope.PROTOCOL) {
+    if (error.code === ProtocolCode.ACCESS_DENIED) {
+      return `ACCESS_DENIED, ${error.detail}`;
+    }
 
-  if (
-    error instanceof FailureError &&
-    error.scope === FailureScope.PROTOCOL &&
-    error.code === ProtocolCode.ACCESS_DENIED
-  ) {
-    return `ACCESS_DENIED, ${error.detail}`;
+    if (error.code === ProtocolCode.PAYLOAD_INVALID) {
+      return `PAYLOAD_INVALID, ${error.detail}`;
+    }
   }
 
   throw error;

@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process';
 import path from 'node:path';
 
 import { expect, test } from '@playwright/test';
@@ -5,6 +6,87 @@ import { expect, test } from '@playwright/test';
 import { againstOfText, type IConfig, isInside, parseConfig } from '../config.ts';
 import { InputError } from '../diagnostics.ts';
 import { DEFAULT_PROTO_RUNTIME, DEFAULT_RUNTIME } from '../targets/typescript/options.ts';
+
+// The filesystem seam lives in a child so parallel tests never see its replacement.
+const workspaceRace = (folder: string, options: { removals: number; code?: string }): void => {
+  execFileSync(
+    process.execPath,
+    [
+      '--input-type=module',
+      '-e',
+      `
+        import assert from 'node:assert/strict';
+        import fs from 'node:fs';
+        import { syncBuiltinESMExports } from 'node:module';
+        import path from 'node:path';
+
+        const [module, folder, scenario] = process.argv.slice(1);
+        const { removals, code } = JSON.parse(scenario);
+        const { temporaryFolderOf, BEADC_FOLDER } = await import(module);
+        const own = path.join(folder, BEADC_FOLDER);
+        const make = fs.mkdtempSync;
+        let attempts = 0;
+        let failure = Object.assign(new Error('filesystem refusal'), { code });
+
+        fs.mkdtempSync = (prefix, encoding) => {
+          assert.equal(path.dirname(prefix), own);
+          attempts += 1;
+          if (code !== undefined) {
+            throw failure;
+          }
+          if (attempts <= removals) {
+            // Only an empty parent goes, just as another invocation's cleanup removes it.
+            fs.rmdirSync(own);
+          }
+          try {
+            return make(prefix, encoding);
+          } catch (error) {
+            failure = error;
+            throw error;
+          }
+        };
+        syncBuiltinESMExports();
+
+        try {
+          if (removals >= 3 || code !== undefined) {
+            assert.throws(() => { temporaryFolderOf('buf-', { folder }); },
+              (error) => { return error === failure; });
+            assert.equal(attempts, code === undefined ? 3 : 1);
+            assert.equal(failure.code, code ?? 'ENOENT');
+          } else {
+            const made = temporaryFolderOf('buf-', { folder });
+            assert.equal(attempts, removals + 1);
+            assert.equal(path.dirname(made), own);
+            assert.ok(path.basename(made).startsWith('buf-'));
+            assert.deepEqual(fs.readdirSync(own), [path.basename(made)]);
+            fs.rmdirSync(made);
+          }
+        } finally {
+          fs.mkdtempSync = make;
+          syncBuiltinESMExports();
+        }
+      `,
+      new URL('../config.ts', import.meta.url).href,
+      folder,
+      JSON.stringify(options),
+    ],
+    { stdio: 'pipe' }
+  );
+};
+
+test('creates a temporary folder after a concurrent cleanup removes its parent', () => {
+  for (const removals of [1, 2]) {
+    workspaceRace(test.info().outputPath(`project-${String(removals)}`), { removals });
+  }
+});
+
+test('bounds temporary folder creation when concurrent cleanups keep removing its parent', () => {
+  workspaceRace(test.info().outputPath('project'), { removals: 3 });
+});
+
+test('passes a temporary folder creation error other than ENOENT straight to its caller', () => {
+  workspaceRace(test.info().outputPath('project'), { removals: 0, code: 'EACCES' });
+});
 
 test("a path outside the folder is refused in Windows' forms, a backslash, a drive letter and a second drive, through path.win32", () => {
   const folder = 'C:\\work\\project';
@@ -95,7 +177,7 @@ test("reads an output's keys and refuses another, a C# output's namespace for a 
         '    out: interop/generated',
         '    importExtension: none',
         '    runtime: ../../src/service/service',
-        '    protoRuntime: ../../src/proto/records',
+        '    protoRuntime: ../../src/proto/proto',
         '    messages: external',
         '    messagesOut: interop/messages',
         '',
@@ -107,7 +189,7 @@ test("reads an output's keys and refuses another, a C# output's namespace for a 
       out: '/work/interop/generated',
       importExtension: 'none',
       runtime: '../../src/service/service',
-      protoRuntime: '../../src/proto/records',
+      protoRuntime: '../../src/proto/proto',
       messages: 'external',
       messagesOut: '/work/interop/messages',
     },
@@ -279,4 +361,99 @@ test("reads clean, buf's opt-in, off unless set, and refuses one that is no bool
   expect(() => {
     return read('clean: yes please\n');
   }).toThrow(InputError);
+});
+
+test("reads keepValidateOptions, protovalidate's options kept in the messages an output generates, and only there", () => {
+  const folder = '/work';
+  const read = (output: string): IConfig => {
+    return parseConfig(
+      `version: 1\nsource:\n  proto: [proto]\noutputs:\n  - language: typescript\n    out: gen/ts\n${output}`,
+      { folder, path: path.posix }
+    );
+  };
+  const readCSharp = (output: string): IConfig => {
+    return parseConfig(
+      `version: 1\nsource:\n  proto: [proto]\noutputs:\n  - language: csharp\n    out: gen/cs\n${output}`,
+      { folder, path: path.posix }
+    );
+  };
+
+  expect(read('').outputs?.[0]?.keepValidateOptions).toBeUndefined();
+  expect(read('    keepValidateOptions: true\n').outputs?.[0]?.keepValidateOptions).toBe(true);
+  expect(readCSharp('    keepValidateOptions: true\n').outputs?.[0]?.keepValidateOptions).toBe(
+    true
+  );
+  expect(read('    keepValidateOptions: false\n').outputs?.[0]?.keepValidateOptions).toBe(false);
+  expect(() => {
+    return read('    keepValidateOptions: kept\n');
+  }).toThrow('outputs[0].keepValidateOptions is true or false');
+  expect(() => {
+    return read(
+      '    messages: external\n    messagesOut: gen/messages\n    keepValidateOptions: true\n'
+    );
+  }).toThrow(
+    "outputs[0].keepValidateOptions keeps protovalidate's options in the messages beadc generates, and only then"
+  );
+});
+
+test("reads http's prefix, openapi's out, title, security and problemTypes, an output's http, httpRuntime and keepHttpOptions, and refuses each off its form", () => {
+  const folder = '/work';
+  const read = (text: string): IConfig => {
+    return parseConfig(`version: 1\nsource:\n  proto: [proto]\n${text}`, {
+      folder,
+      path: path.posix,
+    });
+  };
+  const output = (keys: string): string => {
+    return `outputs:\n  - language: typescript\n    out: gen/ts\n${keys}`;
+  };
+
+  expect(read('').http).toBeUndefined();
+  expect(read('http:\n  prefix: /rpc/v1\n').http).toEqual({ prefix: '/rpc/v1' });
+  expect(read('http: {}\n').http).toEqual({ prefix: '/api' });
+  expect(
+    read(
+      'openapi:\n  out: gen/openapi.json\n  title: Hello\n  security: {type: apiKey, in: header, name: x-key}\n  problemTypes: https://example.com/problems/\n'
+    ).openapi
+  ).toEqual({
+    out: '/work/gen/openapi.json',
+    title: 'Hello',
+    security: { type: 'apiKey', in: 'header', name: 'x-key' },
+    problemTypes: 'https://example.com/problems/',
+  });
+
+  const [typescript] = read(output('    http: true\n    keepHttpOptions: true\n')).outputs ?? [];
+
+  expect(typescript).toMatchObject({
+    http: true,
+    httpRuntime: '@francisdesjardins/bead/transcoding',
+    keepHttpOptions: true,
+  });
+  expect(read(output('')).outputs?.[0]).not.toHaveProperty('httpRuntime');
+  expect(
+    read(output('    http: true\n    httpRuntime: ../runtime/transcoding\n')).outputs?.[0]
+  ).toMatchObject({ httpRuntime: '../runtime/transcoding' });
+
+  for (const [text, refusal] of [
+    ['http:\n  prefix: api\n', 'http.prefix is / and segments'],
+    ['http:\n  prefix: /api/\n', 'http.prefix is / and segments'],
+    ['http:\n  prefix: /a/../b\n', 'http.prefix is / and segments'],
+    ['http:\n  port: 80\n', 'http.port, a key beadc does not read'],
+    [
+      'openapi:\n  security: {type: magic}\n',
+      'openapi.security is an OpenAPI Security Scheme Object',
+    ],
+    ['openapi:\n  problemTypes: problems/\n', 'openapi.problemTypes is an absolute URI'],
+    ['openapi:\n  out: ../openapi.json\n', 'openapi.out: ../openapi.json is outside the folder'],
+    [output('    http: yes\n'), 'outputs[0].http is true or false'],
+    [output('    httpRuntime: ../runtime\n'), 'outputs[0].httpRuntime names the route table'],
+    [
+      output('    messages: external\n    messagesOut: gen/messages\n    keepHttpOptions: true\n'),
+      'outputs[0].keepHttpOptions keeps google.api.http in the messages beadc generates, and only then',
+    ],
+  ] as const) {
+    expect(() => {
+      return read(text);
+    }, text).toThrow(refusal);
+  }
 });

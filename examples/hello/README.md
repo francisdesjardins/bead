@@ -8,9 +8,20 @@ writes the same lines, [`transcript.txt`](transcript.txt), against either server
 
 `HelloService` holds what a service declares: `proto` messages; `sayHello`, which fails with a
 failure of its catalogue, `NAMELESS`, and, given no name, asks its caller's by `askName`, a command
-the client answers; and `countDown`, which fails past 10 with `TOO_FAR`, notifies a `Tick` a step
-to a client that asks for them at a window of 1, and is admitted by its hook, `greeted`, once the
-connection said hello. Both halves serve and call it over WebSocket.
+the client answers; and `countDown`, whose request a rule of its `.proto` holds to 10 at most,
+notifies a `Tick` a step to a client that asks for them at a window of 1, and is admitted by its
+hook, `greeted`, once the connection said hello. Both halves serve and call it over WebSocket, and
+both serve it over HTTP too, by a gateway on a port of its own: one server, `HelloService` offered
+on it once, takes its connections from its WebSocket transport and from an in-memory one, joined,
+which the gateway crosses as one more client of it, one Bead connection an HTTP exchange
+([`spec/transcoding.md`](../../spec/transcoding.md)).
+
+A rule is protovalidate's, `[(buf.validate.field).int32.lte = 10]`, which beadc compiles into each
+half's validator: the server judges every request once it reads, before its resolver, and answers
+one its rules refuse `PAYLOAD_INVALID`, its violations in its detail (spec 18). beadc compiles
+protovalidate's standard rules on a field, a `oneof` and a message, and refuses the rest, CEL among
+them, by `beadc check`. A rule judges the payload alone: what needs the session, as the name a
+nameless caller gives when asked, stays its resolver's, which answers `NAMELESS`.
 
 Its servers listen on `127.0.0.1`, the address each is given, where a server given none listens on
 `localhost`, both loopbacks, and name no hosts: every server takes `127.0.0.1`, which its clients
@@ -23,26 +34,44 @@ connect to, and refuses a page that rebinds its name to it (spec 15.12).
 | `beadc.yaml`, `proto/`, `buf.yaml` | what `beadc init hello` writes, each language's output split in two: its messages beadc's, or the platform's own       |
 | `beadc.sh`, `beadc.ps1`            | the wrappers that run beadc's image, as `beadc wrapper` prints them                                                    |
 | `gen/hello.blueprint.json`         | the blueprint beadc resolves the `.proto` into                                                                         |
+| `gen/openapi.json`                 | the OpenAPI document beadc writes of the blueprint, which each half embeds and its gateway serves byte for byte        |
 | `typescript/`                      | the TypeScript half, a Yarn project: `src/`, and `gen/`, beadc's output                                                |
 | `dotnet/`                          | the C# half, one project, `Hello.csproj`, under the C# side's rules by import: its sources, and `gen/`, beadc's output |
-| `pairs.mjs`, `transcript.txt`      | each client against each server, both message modes of each half, and what every client writes                         |
+| `pairs.mjs`, `transcript.txt`      | each client against each server, both message modes of each half, and what every client writes and its gateway answers |
 
-## What each client writes
+## What each client writes, and its gateway answers
 
 ```
 countDown before sayHello: ACCESS_DENIED, say hello first
 sayHello Bead: Hello, Bead!
 sayHello, nameless: Hello, Ada!
-countDown from 11: TOO_FAR, a count starts at 10 at most
+countDown from 11: PAYLOAD_INVALID, {"bounds":{"lte":10},"fieldPath":"from","message":"must be less than or equal to 10","ruleId":"int32.lte"}
+{"more":0}
 countDown from 3: 3 2 1 0, one at a time
 sayHello, nameless again: NAMELESS, nobody to greet
+POST /api/Hello/sayHello {"name":"Ada"}: 200 application/json, {"greeting":"Hello, Ada!"}
+POST /api/Hello/sayHello {}: 500 application/problem+json, {"code":64,"scope":"protocol","status":500,"title":"PROCEDURE_FAILED","type":"tag:francisdesjardins.ca,2026:bead/PROCEDURE_FAILED"}
+POST /api/Hello/countDown {"from":11}: 403 application/problem+json, {"code":33,"detail":"say hello first","scope":"protocol","status":403,"title":"ACCESS_DENIED","type":"tag:francisdesjardins.ca,2026:bead/ACCESS_DENIED"}
+POST /api/Hello/countDown {"from":3}: 403 application/problem+json, {"code":33,"detail":"say hello first","scope":"protocol","status":403,"title":"ACCESS_DENIED","type":"tag:francisdesjardins.ca,2026:bead/ACCESS_DENIED"}
+GET /openapi.json: 200 application/json, gen/openapi.json, beadc's, byte for byte
 ```
 
 The hook's refusal and its detail; a request and its answer; the server's command to its client
-before it answers, the client answering `Ada`; a failure of the catalogue by its name; the four
-ticks in their order, and how many of the client's callbacks ran at once, each holding itself
-10 ms: at a window of 1, one, and without it, the ticks overlap; then the catalogue's other
-failure, the client answering an empty name the second time it is asked.
+before it answers, the client answering `Ada`; a request its rule refuses, its detail as it came,
+a violation a line of canonical JSON, then the count of those it left out; the four ticks in their
+order, and how many of the client's callbacks ran at once, each holding itself 10 ms: at a window
+of 1, one, and without it, the ticks overlap; then the catalogue's failure by its name, the client
+answering an empty name the second time it is asked.
+
+Then what a person asks the gateway with curl, each request its own exchange and its own Bead
+connection, which ends with it, as `docs/support.md`'s "Leveled down" has it: a greeting, its
+result as JSON; one given no name, whose command `askName` the gateway's connection answers
+`SERVICE_UNKNOWN`, since an HTTP exchange has no way back to its caller while its request waits,
+so its resolver fails, `PROCEDURE_FAILED`, 500, the server writing that line to its standard error;
+a count past its rule and one within it, both refused by the hook, `ACCESS_DENIED`, 403, before the
+rule is judged, since no exchange's connection was ever greeted, a connection's session ending
+with its exchange; and the document, as beadc wrote it. Each failure is a problem, RFC 9457's, its
+type a `tag:` URI of its code.
 
 ## Generating
 
@@ -77,8 +106,11 @@ Given no `BEADC_IMAGE`, the wrappers run the image they name, as the engine find
 ./beadc.sh generate --check    # nothing to change
 ```
 
-`generate` also writes `.beadc/include/bead/options.proto`, Bead's options, which git ignores: the
-copy an editor reads, and the one each half's own generator reads where its messages are external.
+`generate` also writes `.beadc/include/bead/options.proto`, Bead's options,
+`.beadc/include/buf/validate/validate.proto`, protovalidate's, and
+`.beadc/include/google/api/http.proto` and `annotations.proto`, googleapis', which git ignores: the
+copies an editor reads, and the ones each half's own generator reads where its messages are
+external.
 Run `generate` once in a fresh clone before an external build.
 
 ## Building and running
@@ -91,7 +123,7 @@ yarn install --immutable
 yarn check                # types in both modes and as a consumer, lint, format
 yarn build                # dist/generate/hello.mjs: the messages beadc generated
 yarn build:external       # dist/external/hello.mjs: the messages buf generate writes with protoc-gen-es
-node dist/generate/hello.mjs serve        # {"port":n}, then serves until its input ends
+node dist/generate/hello.mjs serve        # {"port":n,"gateway":m}, then serves until its input ends
 node dist/generate/hello.mjs call <port>
 ```
 
@@ -107,19 +139,53 @@ dotnet bin/generate/Debug/net10.0/Hello.dll call <port>
 
 Each half takes `serve`, `serve <port>` or `call <port>`, a port its digits alone, at most 65535,
 and refuses any other arguments with its usage, exit 2. Each half in both modes built,
-`node pairs.mjs` plays each client against each server, sixteen pairs: a pair passes when its
-client writes `transcript.txt` byte for byte and exits 0, its server exits 0 once its input ends,
-and neither writes to its standard error. CI's `examples` job runs all of it, on Node 26 and on
-24.9, the floor the TypeScript half declares.
+`node pairs.mjs` plays each client against each server, sixteen pairs, then asks that server's
+gateway: a pair passes when its client exits 0 and what it writes, then the gateway's answers, are
+`transcript.txt` byte for byte, its server exits 0 once its input ends, the client writes nothing to
+its standard error, and the server only the line of its nameless gateway call. CI's `examples` job
+runs all of it, on Node 26 and on 24.9, the floor the TypeScript half declares.
+
+## Calling with the generated HTTP client
+
+Use the `gateway` port the server prints, on either side. Every output has `http: true`, so its
+route table also exports `HelloHttpClient`. In the TypeScript project, a source file calls it with
+fetch:
+
+```ts
+import { HelloHttpClient } from '#hello/http';
+
+const hello = new HelloHttpClient('http://127.0.0.1:8080');
+const answer = await hello.sayHello({ name: 'Ada' });
+console.log(answer.greeting);
+```
+
+In the C# project, the same call uses HttpClient through `Bead.Transcoding`:
+
+```csharp
+using Hello.V1;
+
+using var hello = new HelloHttpClient(new Uri("http://127.0.0.1:8080"));
+var answer = await hello.SayHello(new SayHelloRequest { Name = "Ada" });
+Console.WriteLine(answer.Greeting);
+```
+
+Replace `8080` with that gateway port. Each call uses its default POST route, and a problem throws
+`FailureError` or `FailureException` with its Bead code and scope. A notifying procedure exposes
+`hello.subscribeCountDown({ from: 3 })` or
+`hello.SubscribeCountDown(new CountDownRequest { From = 3 })`, an async sequence of its result then
+notifications. This service's `greeted` hook refuses that HTTP subscription: each exchange has its
+own Bead connection, and a greeting on another exchange greets another connection. A name must be
+given to `sayHello`, since HTTP answers no `askName` command.
 
 ## What a project outside this repository writes instead
 
-The example reaches each runtime from its source, as no runtime is published: the TypeScript half
-by Yarn's `portal:` protocol, the C# half by a `ProjectReference` of each assembly it uses,
-`Bead.Protobuf` among them, whose check its generated `proto` codecs call. A project of its own
-names each runtime as a package, by its name and a version:
-`"@francisdesjardins/bead": "<version>"`,
-`<PackageReference Include="FrancisDesjardins.Bead.Transport.WebSockets" Version="<version>" />` and
+The example reaches each runtime from its source, as no runtime is published: the TypeScript half by
+Yarn's `portal:` protocol, the C# half by a `ProjectReference` of each assembly it uses,
+`Bead.Transcoding.Http`, its gateway's, and `Bead.Protobuf`, whose check its generated `proto`
+codecs call, among them. A project of its own names each runtime as a package, by its name and a
+version: `"@francisdesjardins/bead": "<version>"`,
+`<PackageReference Include="FrancisDesjardins.Bead.Transport.WebSockets" Version="<version>" />`,
+`<PackageReference Include="FrancisDesjardins.Bead.Transcoding.Http" Version="<version>" />` and
 `<PackageReference Include="FrancisDesjardins.Bead.Protobuf" Version="<version>" />`.
 
 From source, the TypeScript runtime is its `.ts` files, which a consumer's compiler compiles under

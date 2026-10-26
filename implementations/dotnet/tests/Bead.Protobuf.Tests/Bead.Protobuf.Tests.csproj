@@ -22,6 +22,11 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!-- the payload rules' verdicts, which the validators beadc generated into Generated/ play -->
+    <Content Include="../../../../spec/validations.json" Link="validations.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <ItemGroup>
     <Using Include="Xunit" />
   </ItemGroup>
 

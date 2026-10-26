@@ -18,6 +18,9 @@ public sealed partial class RouterClientTests
 
     private static readonly SessionToken Token = SessionToken.Parse("AAECAwQFBgcICQoLDA0ODw");
 
+    // another session's, as a server opens one anew
+    private static readonly SessionToken OtherToken = SessionToken.Parse("AgICAgICAgICAgICAgICAg");
+
     // the procedure the scripted tests ask and subscribe: procedure 1 of service 2
     private static readonly Procedure Service = new() { ServiceId = 2, ProcedureId = 1, ProcedureName = "echo", ServiceRevision = 3 };
 
@@ -119,6 +122,26 @@ public sealed partial class RouterClientTests
         {
             return header is RequestHeader { CallId: 2 };
         });
+
+        // * one the server's bytes bring goes to the resolver registered for its procedure, with
+        // its connection and its payload, which answers it on its call id, and nothing else goes
+        using var scripted = new ScriptedRouter();
+        var seen = new List<(string ConnectionHandle, string Payload)>();
+
+        scripted.Router.RegisterResolver(new ScriptedResolver(Service, (props) =>
+        {
+            seen.Add((props.ConnectionHandle, Convert.ToHexString(props.Payload.Span)));
+
+            return scripted.Router.Respond(RouterAnswer.OfPayload(new byte[] { 7 }), new AnswerTarget(props.ConnectionHandle, props.Header));
+        }));
+        scripted.Transport.Deliver(new Envelope { Header = RequestHeaderOf(30), Payload = new byte[] { 3 } });
+        await scripted.Settle();
+
+        var answer = Assert.Single(scripted.Transport.Envelopes);
+
+        Assert.Equal([(RouterClient.ServerConnectionHandle, "03")], seen);
+        Assert.Equal((EnvelopeKind.Result, 30u, (Credential?)null, "07"), (answer.Kind, answer.Header.CallId, Assert.IsType<ResultHeader>(answer.Header).Credential, Convert.ToHexString(answer.Payload.Span)));
+        Assert.Empty(scripted.Errors);
     }
 
     [Fact]
@@ -183,7 +206,7 @@ public sealed partial class RouterClientTests
     [Fact]
     public async Task Offers_every_procedure_of_the_interop_service_s_API_on_the_side_its_kind_names()
     {
-        await using var link = new ServiceLink();
+        await using var link = await ServiceLink.Open();
 
         var server = new InterceptedServer(link.Server);
         var client = new InterceptedClient(link.Client);
@@ -210,6 +233,7 @@ public sealed partial class RouterClientTests
             }).Order(StringComparer.Ordinal);
         }
 
+        // * one service offered whole: checked, with its rules, among the procedures it answers
         Assert.Empty(interop.ProceduresWithoutResolver());
         Assert.Equal(NamesOf(false), ResolversOf(server.Intercepted));
         Assert.Equal(NamesOf(true), ResolversOf(client.Intercepted));
@@ -299,6 +323,104 @@ public sealed partial class RouterClientTests
         Assert.Equal(new ResultHeader { CallId = 1 }, answer.Header);
         Assert.Equal([9], answer.Payload.ToArray());
         Assert.Equal([RouterActivity.Request, RouterActivity.Response], activity);
+    }
+
+    [Fact]
+    public async Task Numbers_its_requests_1_3_and_pairs_each_result_with_its_own()
+    {
+        using var scripted = new ScriptedRouter();
+        var (router, transport) = (scripted.Router, scripted.Transport);
+
+        var first = router.Request(new byte[] { 1 }, RequestOf());
+        var second = router.Request(new byte[] { 2 }, RequestOf());
+
+        await scripted.Settle();
+        Assert.Equal([1u, 3u], transport.Envelopes.Select((envelope) =>
+        {
+            return envelope.Header.CallId;
+        }));
+
+        // answered in the other order: each result its own call's
+        transport.Deliver(new Envelope { Header = new ResultHeader { CallId = 3 }, Payload = new byte[] { 20 } });
+        transport.Deliver(new Envelope { Header = new ResultHeader { CallId = 1 }, Payload = new byte[] { 10 } });
+
+        Assert.Equal("0A", Convert.ToHexString((await first.WaitAsync(Patience, Cancelled)).Payload.Span));
+        Assert.Equal("14", Convert.ToHexString((await second.WaitAsync(Patience, Cancelled)).Payload.Span));
+    }
+
+    [Fact]
+    public async Task Rejects_with_the_failure_the_server_answers_as_the_server_s()
+    {
+        using var scripted = new ScriptedRouter();
+        var (router, transport) = (scripted.Router, scripted.Transport);
+
+        var refused = router.Request(ReadOnlyMemory<byte>.Empty, RequestOf());
+        var failed = router.Request(ReadOnlyMemory<byte>.Empty, RequestOf());
+
+        await scripted.Settle();
+        transport.Deliver(new Envelope { Header = new FailureHeader { CallId = 1 }, Failure = Failure.OfProtocol(ProtocolCode.ProcedureUnknown, "no procedure 1 in service 2") });
+        transport.Deliver(new Envelope { Header = new FailureHeader { CallId = 3 }, Failure = Failure.OfApplication(21, "out of range") });
+
+        var protocol = await Assert.ThrowsAsync<FailureException>(() =>
+        {
+            return refused.WaitAsync(Patience, Cancelled);
+        });
+        var application = await Assert.ThrowsAsync<FailureException>(() =>
+        {
+            return failed.WaitAsync(Patience, Cancelled);
+        });
+
+        Assert.Equal(
+            ((ushort)ProtocolCode.ProcedureUnknown, "no procedure 1 in service 2", FailureOrigin.Peer, RouterSide.Server),
+            (protocol.Code, protocol.Detail, protocol.Origin, protocol.Side));
+        Assert.Equal(((ushort)21, Service.Address, FailureScope.Application), (application.Code, application.ProcedureAddress, application.Scope));
+    }
+
+    [Fact]
+    public async Task Learns_the_session_from_a_result_s_opening_before_the_rest_of_its_transfer_comes()
+    {
+        using var scripted = new ScriptedRouter();
+        var (router, transport) = (scripted.Router, scripted.Transport);
+
+        var asking = router.Request(ReadOnlyMemory<byte>.Empty, RequestOf());
+
+        await scripted.Settle();
+        transport.Deliver(new Envelope { Header = new ResultHeader { CallId = 1, Credential = Token, Total = 100 }, Payload = new byte[16] });
+        await scripted.Settle();
+
+        // * learned from the opening, its transfer still under way
+        Assert.Equal(Token, router.SessionToken);
+        Assert.False(asking.IsCompleted);
+
+        transport.Deliver(new Envelope { Header = new ChunkHeader { CallId = 1, Offset = 16, IsLast = true }, Payload = new byte[84] });
+
+        Assert.Equal(new byte[100], (await asking.WaitAsync(Patience, Cancelled)).Payload.ToArray());
+    }
+
+    [Fact]
+    public async Task Rejects_when_the_transport_cannot_send_and_when_the_payload_is_too_large()
+    {
+        using var scripted = new ScriptedRouter();
+        var (router, transport) = (scripted.Router, scripted.Transport);
+        var refusal = new IOException("not open");
+
+        transport.Refusal = refusal;
+
+        // * the transport's own refusal, as it gave it
+        Assert.Same(refusal, await Assert.ThrowsAsync<IOException>(() =>
+        {
+            return router.Request(ReadOnlyMemory<byte>.Empty, RequestOf()).WaitAsync(Patience, Cancelled);
+        }));
+
+        transport.Refusal = null;
+
+        var tooLarge = await Assert.ThrowsAsync<FailureException>(() =>
+        {
+            return router.Request(new byte[0x1000001], RequestOf()).WaitAsync(Patience, Cancelled);
+        });
+
+        Assert.Equal(((ushort)ProtocolCode.PayloadTooLarge, FailureOrigin.Local, RouterSide.Client), (tooLarge.Code, tooLarge.Origin, tooLarge.Side));
+        Assert.Single(transport.Sent);
     }
 
     [Fact]
@@ -482,6 +604,27 @@ public sealed partial class RouterClientTests
 
         await router.UnregisterNotification(notification).WaitAsync(Patience, Cancelled);
         Assert.False(router.HasNotification(notification));
+    }
+
+    [Fact]
+    public async Task A_request_that_subscribes_says_it_opens_a_subscription_and_an_ordinary_one_does_not()
+    {
+        using var scripted = new ScriptedRouter();
+        var (router, transport) = (scripted.Router, scripted.Transport);
+        var notification = new ScriptedNotification(Service);
+
+        var subscribing = await scripted.Subscribe(notification);
+        var ordinary = router.Request(ReadOnlyMemory<byte>.Empty, RequestOf());
+
+        await scripted.Settle();
+        transport.Deliver(ResultOf(1));
+        transport.Deliver(ResultOf(3));
+        await Task.WhenAll(subscribing, ordinary).WaitAsync(Patience, Cancelled);
+
+        Assert.Equal([(1u, true), (3u, false)], transport.Envelopes.Select((envelope) =>
+        {
+            return (envelope.Header.CallId, Assert.IsType<RequestHeader>(envelope.Header).OpensSubscription);
+        }));
     }
 
     [Fact]
@@ -862,11 +1005,12 @@ public sealed partial class RouterClientTests
 
     // spec 11.7.3
     [Fact]
-    public async Task Forgets_each_notification_when_its_connection_closes_or_it_is_disposed_and_tells_it()
+    public async Task Forgets_each_notification_when_its_connection_closes_is_replaced_or_it_is_disposed_and_tells_it()
     {
         using var scripted = new ScriptedRouter();
         var (router, transport) = (scripted.Router, scripted.Transport);
         var closed = new ScriptedNotification(Service);
+        var replaced = new ScriptedNotification(Service);
         var disposed = new ScriptedNotification(Service);
 
         var subscribing = await scripted.Subscribe(closed);
@@ -883,10 +1027,18 @@ public sealed partial class RouterClientTests
         await scripted.Settle();
         Assert.Equal([nameof(ProtocolCode.SubscriptionUnknown)], CodesOf(scripted.Errors));
 
+        // its connection replaced, as a reconnection starts
+        await router.RegisterNotification(replaced).WaitAsync(Patience, Cancelled);
+        transport.Replace();
+        await scripted.Settle();
+        Assert.Null(Assert.Single(replaced.Dropped));
+        Assert.False(router.HasNotification(replaced));
+
         await router.RegisterNotification(disposed).WaitAsync(Patience, Cancelled);
         router.Dispose();
         await scripted.Settle();
         Assert.Single(closed.Dropped);
+        Assert.Single(replaced.Dropped);
         Assert.Null(Assert.Single(disposed.Dropped));
         Assert.False(router.HasNotification(disposed));
     }
@@ -912,6 +1064,12 @@ public sealed partial class RouterClientTests
         transport.CloseConnection();
         await scripted.Settle();
         Assert.True(Assert.Single(time.Timers.Skip(armed)).IsDisposed);
+
+        // * and none left armed on its clock at all
+        Assert.All(time.Timers, (timer) =>
+        {
+            Assert.True(timer.IsDisposed);
+        });
     }
 
     [Fact]
@@ -975,6 +1133,43 @@ public sealed partial class RouterClientTests
         await scripted.Done(notification, 3);
         await scripted.Done(notification, 2);
         Assert.Equal([4, 6, 8], transport.Credits);
+    }
+
+    // spec 11.11
+    [Fact]
+    public async Task Asks_for_its_subscription_paced_and_credits_each_notification_once_its_callbacks_settled()
+    {
+        using var scripted = new ScriptedRouter();
+        var transport = scripted.Transport;
+        var notification = new ScriptedNotification(Service) { Window = 1, IsHeld = true };
+
+        var subscribing = await scripted.Subscribe(notification);
+
+        transport.Deliver(ResultOf(1));
+        await subscribing.WaitAsync(Patience, Cancelled);
+        await scripted.Settle();
+
+        var asked = Assert.IsType<RequestHeader>(transport.Envelopes[0].Header);
+
+        Assert.Equal((true, true), (asked.OpensSubscription, asked.Paced));
+
+        // the first is credited by asking
+        Assert.Empty(transport.Credits);
+
+        transport.Deliver(NotificationOf(1, 1));
+        await scripted.Settle();
+        Assert.Empty(transport.Credits);
+
+        // * credited once its callbacks settled, not as it came
+        await scripted.Done(notification, 0);
+        Assert.Equal<long?>([2], transport.Credits);
+
+        transport.Deliver(NotificationOf(1, 2));
+        await scripted.Settle();
+        await scripted.Done(notification, 1);
+        Assert.Equal([1, 2], notification.Triggered);
+        Assert.Equal<long?>([2, 3], transport.Credits);
+        Assert.Empty(scripted.Errors);
     }
 
     // spec 11.11
@@ -1134,7 +1329,7 @@ public sealed partial class RouterClientTests
 
         var before = await Refused();
 
-        Assert.Equal(((ushort)ProtocolCode.SessionRequired, FailureOrigin.Local), (before.Code, before.Origin));
+        Assert.Equal(((ushort)ProtocolCode.SessionRequired, FailureOrigin.Local, RouterSide.Client), (before.Code, before.Origin, before.Side));
         Assert.Empty(transport.Sent);
 
         // learned, it goes on a call that asks, and on no other
@@ -1145,8 +1340,14 @@ public sealed partial class RouterClientTests
         _ = router.Request(ReadOnlyMemory<byte>.Empty, RequestOf(options: Options with { Credential = Credential.None }));
         await scripted.Settle();
 
+        // a session opened anew is the one presented next
+        transport.Deliver(ResultOf(97, OtherToken));
+        await scripted.Settle();
+        _ = router.Request(ReadOnlyMemory<byte>.Empty, RequestOf(options: Options with { Credential = Credential.Opaque() }));
+        await scripted.Settle();
+
         Assert.Equal(
-            [(1u, Credential.Opaque(Token)), (3u, null), (5u, null)],
+            [(1u, Credential.Opaque(Token)), (3u, null), (5u, null), (7u, Credential.Opaque(OtherToken))],
             transport.Envelopes.Select((envelope) =>
             {
                 return (envelope.Header.CallId, Assert.IsType<RequestHeader>(envelope.Header).Credential);
@@ -1158,8 +1359,8 @@ public sealed partial class RouterClientTests
 
         var ended = await Refused();
 
-        Assert.Equal(((ushort)ProtocolCode.SessionRequired, FailureOrigin.Local), (ended.Code, ended.Origin));
-        Assert.Equal(3, transport.Sent.Count);
+        Assert.Equal(((ushort)ProtocolCode.SessionRequired, FailureOrigin.Local, RouterSide.Client), (ended.Code, ended.Origin, ended.Side));
+        Assert.Equal(4, transport.Sent.Count);
     }
 
     [Fact]
@@ -1192,8 +1393,18 @@ public sealed partial class RouterClientTests
 
         Assert.Equal([(2u, false), (6u, true), (8u, true)], sessions);
         Assert.Equal(
-            [(4u, ProtocolCode.SessionRequired), (10u, ProtocolCode.SessionRequired), (12u, ProtocolCode.CredentialUnsupported)],
-            transport.Failures);
+            [
+                (4u, ProtocolCode.SessionRequired, "the credential does not hold"),
+                (10u, ProtocolCode.SessionRequired, "the credential does not hold"),
+                (12u, ProtocolCode.CredentialUnsupported, "OPAQUE"),
+            ],
+            transport.Envelopes.Where((envelope) =>
+            {
+                return envelope.Failure is not null;
+            }).Select((envelope) =>
+            {
+                return (envelope.Header.CallId, (ProtocolCode)envelope.Failure!.Code, envelope.Failure.Detail);
+            }));
 
         // a client announces nothing
         Assert.All(transport.Envelopes, (envelope) =>
@@ -1254,6 +1465,7 @@ public sealed partial class RouterClientTests
         await scripted.Settle();
         Assert.Equal(2, held.Count);
         Assert.Equal([(34u, ProtocolCode.CapacityExceeded)], transport.Failures);
+        Assert.Equal([(EnvelopeKind.Failure, 34u)], transport.Calls);
 
         // one answered, the next is taken
         await router.Respond(RouterAnswer.OfPayload(new byte[] { 1 }), new AnswerTarget(held[0].ConnectionHandle, held[0].Header));
@@ -1261,6 +1473,25 @@ public sealed partial class RouterClientTests
         await scripted.Settle();
         Assert.Equal(3, held.Count);
         Assert.Empty(scripted.Errors);
+    }
+
+    [Fact]
+    public void Refuses_a_second_resolver_for_one_procedure()
+    {
+        using var scripted = new ScriptedRouter();
+
+        scripted.Router.RegisterResolver(new ScriptedResolver(Service, (_) =>
+        {
+            return Task.CompletedTask;
+        }));
+
+        Assert.Throws<ArgumentException>(() =>
+        {
+            scripted.Router.RegisterResolver(new ScriptedResolver(Service, (_) =>
+            {
+                return Task.CompletedTask;
+            }));
+        });
     }
 
     [Fact]
@@ -1634,6 +1865,8 @@ public sealed partial class RouterClientTests
     {
         public TimeProvider Clock { get; init; } = TimeProvider.System;
 
+        public int DetailBytes { get; init; } = LimitDefaults.MaximumDetailBytes;
+
         public List<string> Names { get; } = [];
 
         public RouterSide Side
@@ -1750,6 +1983,8 @@ public sealed partial class RouterClientTests
         public event Action<TransportMessage>? Message;
 
         public event Action<bool, bool>? Close;
+
+        public event Action? Reconnect;
 
         // what a send fails with, once set: what it was given is recorded all the same
         public Exception? Refusal { get; set; }
@@ -1877,6 +2112,12 @@ public sealed partial class RouterClientTests
         public void CloseConnection()
         {
             Close?.Invoke(false, false);
+        }
+
+        // its connection replaced, as a reconnection starts: it tells no close
+        public void Replace()
+        {
+            Reconnect?.Invoke();
         }
 
         public bool Carries(string credential)
@@ -2234,6 +2475,14 @@ public sealed partial class RouterClientTests
 
         private sealed class ServerEnd : IServerTransport
         {
+            public string? Type
+            {
+                get
+                {
+                    return TransportTypes.WebSocket;
+                }
+            }
+
             public TimeProvider Clock { get; init; } = TimeProvider.System;
 
             public event Action<string>? Connection;

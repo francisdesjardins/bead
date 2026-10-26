@@ -5,6 +5,8 @@ using System.Text.Json;
 using Bead.Interop;
 using Bead.Tests;
 using Bead.Transport.Http;
+using Bead.Transcoding.V1;
+using Google.Protobuf;
 using Bead.Transport.WebSockets;
 
 namespace Bead.Benchmarks;
@@ -27,6 +29,7 @@ internal static class Program
         public int Runs { get; init; } = 3;
         public int Seconds { get; init; } = 3;
         public bool Json { get; init; }
+        public bool TranscodingOnly { get; init; }
     }
 
     private sealed record Dimensions
@@ -105,7 +108,11 @@ internal static class Program
         for (var at = 0; at < args.Length; at++)
         {
             var flag = args[at];
-            if (flag == "--json")
+            if (flag == "--transcoding")
+            {
+                options = options with { TranscodingOnly = true };
+            }
+            else if (flag == "--json")
             {
                 options = options with { Json = true };
             }
@@ -152,6 +159,40 @@ internal static class Program
         }
 
         return clock.Elapsed.TotalMilliseconds * 1_000_000 / rounds;
+    }
+
+    // Bead's mapping of protobuf's JSON against the stock library's, JsonParser and JsonFormatter, on
+    // transcoding.json's message of every kind of field, as a gateway reads a request and writes a
+    // result: a body read to its message's bytes, and bytes written to a body (decision 0037)
+    private static void Transcoding(Measurements results, int seconds)
+    {
+        using var file = JsonDocument.Parse(File.ReadAllText(Path.Combine(Root(), "spec", "transcoding.json")));
+        var every = file.RootElement.GetProperty("writings").EnumerateArray().First((entry) =>
+        {
+            return entry.GetProperty("message").GetString() == "bead.transcoding.v1.Everything" && entry.TryGetProperty("body", out _);
+        });
+        var payload = Convert.FromHexString(every.GetProperty("payload").GetString()!.Replace(" ", "", StringComparison.Ordinal));
+        var form = new Transcoding.JsonForm([Everything.Descriptor]);
+        var body = form.Write(Everything.Parser.ParseFrom(payload));
+        var row = new Dimensions { SizeBytes = body.Length, Unit = "ns" };
+
+        results.Record("transcoding.read.bead", Codec(() =>
+        {
+            _ = form.Read(Everything.Descriptor, body).ToByteArray();
+        }, (100, seconds)), row);
+        results.Record("transcoding.read.stock", Codec(() =>
+        {
+            _ = JsonParser.Default.Parse<Everything>(System.Text.Encoding.UTF8.GetString(body)).ToByteArray();
+        }, (100, seconds)), row);
+        results.Record("transcoding.write.bead", Codec(() =>
+        {
+            _ = form.Write(Everything.Parser.ParseFrom(payload));
+        }, (100, seconds)), row);
+        results.Record("transcoding.write.stock", Codec(() =>
+        {
+            _ = System.Text.Encoding.UTF8.GetBytes(JsonFormatter.Default.Format(Everything.Parser.ParseFrom(payload)));
+        }, (100, seconds)), row);
+
     }
 
     private static void Codecs(Measurements results, int seconds)
@@ -201,6 +242,54 @@ internal static class Program
 
     private sealed record ConnectOptions(int? Port = null, bool Large = false);
 
+    // A client over the in-memory transport: its router and services on a transport client of its own.
+    private sealed class MemoryClient : IClient
+    {
+        public MemoryClient()
+        {
+            Transport = new MemoryTransportClient();
+            Router = new RouterClient(Transport);
+            Services = new ServiceManager(Router);
+        }
+
+        public MemoryTransportClient Transport { get; }
+
+        public RouterClient Router { get; }
+
+        public ServiceManager Services { get; }
+
+        public Task Connect(MemoryTransportServer server)
+        {
+            return Transport.Connect(new MemoryConnectOptions { Server = server, Address = "127.0.0.1", Port = 50_000 });
+        }
+
+        public Task Disconnect(TransportDisconnectOptions? options = null)
+        {
+            return Transport.CloseConnection(options);
+        }
+
+        public Task Reconnect(TransportReconnectOptions? options = null)
+        {
+            return Transport.Reconnect(options);
+        }
+
+        public async ValueTask DisposeAsync()
+        {
+            Router.Dispose();
+            await Transport.DisposeAsync();
+        }
+    }
+
+    // A server of the interop service over the in-memory transport, started.
+    private static async Task<(Server<string> Server, MemoryTransportServer Transport)> MemoryServer()
+    {
+        var transport = new MemoryTransportServer();
+        var server = new Server<string>(transport);
+        InteropHandlers.Offer(server);
+        await transport.Start();
+        return (server, transport);
+    }
+
     private static async Task<Connection> Connect(string transport, ConnectOptions? options = null)
     {
         var settings = options ?? new ConnectOptions();
@@ -213,6 +302,16 @@ internal static class Program
         IClient? client = null;
         try
         {
+            if (transport == "memory")
+            {
+                var (memory, listening) = await MemoryServer();
+                server = memory;
+                var inMemory = new MemoryClient();
+                client = inMemory;
+                await inMemory.Connect(listening);
+                return new Connection(client, server);
+            }
+
             var port = settings.Port;
             if (port is null)
             {
@@ -313,6 +412,66 @@ internal static class Program
             }
 
             options.Results.Record("call.throughput", done / clock.Elapsed.TotalSeconds, row with { Unit = "calls/s" });
+        }
+    }
+
+    // * What a gateway pays per HTTP exchange (decision 0036): a client drawn, connected, called once
+    // and closed over the in-memory transport, against calls on one connection kept, which Calls
+    // measures over the same transport.
+    private static async Task Exchanges((Measurements Results, int Seconds) options)
+    {
+        var (server, transport) = await MemoryServer();
+        await using var serving = server;
+        foreach (var size in Sizes)
+        {
+            var body = JsonSerializer.SerializeToElement(new string('x', size));
+            var row = new Dimensions { Transport = "memory", SizeBytes = size };
+            async Task Exchange()
+            {
+                await using var client = new MemoryClient();
+                await client.Connect(transport);
+                _ = await new InteropClient(client).Echo(body)();
+                await client.Disconnect();
+            }
+
+            for (var index = 0; index < 500; index++)
+            {
+                await Exchange();
+            }
+
+            await Console.Error.WriteLineAsync($"exchanges local/memory/{size}");
+            var durations = new List<double>();
+            var clock = Stopwatch.StartNew();
+            while (clock.Elapsed.TotalSeconds < options.Seconds)
+            {
+                var before = Stopwatch.GetTimestamp();
+                await Exchange();
+                durations.Add(Stopwatch.GetElapsedTime(before).TotalMicroseconds);
+            }
+
+            durations.Sort();
+            foreach (var share in new[] { 0.5, 0.95, 0.99 })
+            {
+                options.Results.Record($"exchange.p{share * 100}", Percentile(durations, share), row);
+            }
+
+            var allocatedBefore = GC.GetTotalAllocatedBytes(true);
+            for (var index = 0; index < MemoryCalls; index++)
+            {
+                await Exchange();
+            }
+
+            var allocated = (GC.GetTotalAllocatedBytes(true) - allocatedBefore) / (double)MemoryCalls;
+            options.Results.Record("exchange.memory", allocated, row with { Unit = "B/exchange" });
+            var done = 0L;
+            clock.Restart();
+            while (clock.Elapsed.TotalSeconds < options.Seconds)
+            {
+                await Task.WhenAll(Enumerable.Range(0, Concurrency).Select((_) => { return Exchange(); }));
+                done += Concurrency;
+            }
+
+            options.Results.Record("exchange.throughput", done / clock.Elapsed.TotalSeconds, row with { Unit = "exchanges/s" });
         }
     }
 
@@ -544,16 +703,23 @@ internal static class Program
     {
         var options = Parse(args);
         var results = new Measurements();
-        await using var remote = await InteropProcess.Create();
+        await using var remote = options.TranscodingOnly ? null : await InteropProcess.Create();
         for (var run = 0; run < options.Runs; run++)
         {
             await Console.Error.WriteLineAsync($"run {run + 1}/{options.Runs}");
+            Transcoding(results, options.Seconds);
+
+            if (options.TranscodingOnly)
+            {
+                continue;
+            }
+
             Codecs(results, options.Seconds);
             foreach (var transport in new[] { "websocket", "http" })
             {
                 foreach (var scenario in new[] { "local", "interop" })
                 {
-                    var port = scenario == "interop" ? (int?)(transport == "http" ? remote.Ports.HttpPort : remote.Ports.Port) : null;
+                    var port = scenario == "interop" ? (int?)(transport == "http" ? remote!.Ports.HttpPort : remote!.Ports.Port) : null;
                     await using var connection = await Connect(transport, new ConnectOptions(Port: port));
                     await Calls(connection, (results, new Dimensions { Scenario = scenario, Transport = transport }, options.Seconds));
                     if (scenario == "local")
@@ -565,6 +731,13 @@ internal static class Program
                 await using var large = await Connect(transport, new ConnectOptions(Large: true));
                 await Transfer(large, (results, transport, options.Seconds));
             }
+
+            await using (var memory = await Connect("memory"))
+            {
+                await Calls(memory, (results, new Dimensions { Transport = "memory" }, options.Seconds));
+            }
+
+            await Exchanges((results, options.Seconds));
         }
 
         var node = JsonSerializer.Deserialize<JsonElement>(await Output("node", ["-p", "JSON.stringify({node:process.versions.node,v8:process.versions.v8,cpu:require('node:os').cpus()[0].model.trim(),count:require('node:os').cpus().length,platform:require('node:os').platform(),release:require('node:os').release(),architecture:require('node:os').arch()})"]));
@@ -596,6 +769,7 @@ internal static class Program
                 },
                 Transfer = "20 MiB JSON echo; websocket: chunks; http: whole envelope, 32 MiB limit; MiB/s counts both directions",
                 Interop = "calls only; normal interop server launcher, Release configuration",
+                MemoryTransport = "local only: calls on one in-memory connection kept, and exchanges, each a client and its connection drawn, called once and closed",
             },
             Measures = measures,
         };

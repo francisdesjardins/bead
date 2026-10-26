@@ -42,7 +42,10 @@ public sealed class TransportServerLifeTests
         var life = new TransportServerLife();
 
         Assert.Equal(ReadyState.Uninitialized, life.ReadyState);
-        Assert.Equal(Bound, await life.Start(Starting([])));
+        var bound = await life.Start(Starting([]));
+
+        Assert.Equal(Bound, bound);
+        Assert.Equal(("127.0.0.1", 50_000), (bound.Address, bound.Port));
         Assert.Equal(ReadyState.Open, life.ReadyState);
         Assert.False(life.IsStopping);
     }

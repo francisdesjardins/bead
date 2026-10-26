@@ -55,6 +55,29 @@ export interface IRange {
   readonly last: number;
 }
 
+/** An HTTP method a `google.api.http` rule's pattern names, in upper case (decision 0037). */
+export type HttpMethod = 'GET' | 'PUT' | 'POST' | 'DELETE' | 'PATCH';
+
+/** A `google.api.http` rule: its method, its path template, its body and its response body. */
+export interface IHttpRule {
+  readonly method: HttpMethod;
+  readonly template: string;
+  /** `*`, the request whole, or a top-level field's name; none for no body. */
+  readonly body?: string;
+  /** A top-level field of the result, whose JSON is the response's body. */
+  readonly responseBody?: string;
+}
+
+/** `descriptor.proto`'s `MethodOptions.idempotency_level`, but `IDEMPOTENCY_UNKNOWN`. */
+export type IdempotencyLevel = 'NO_SIDE_EFFECTS' | 'IDEMPOTENT';
+
+/** What a method's options say of its procedure over HTTP: its idempotency and its rules. */
+export interface IHttpEntry {
+  readonly idempotencyLevel?: IdempotencyLevel;
+  /** Its rules, each of `additional_bindings` one of its own, in their order. */
+  readonly rules: readonly IHttpRule[];
+}
+
 /** A procedure, resolved: no default, no inheritance. */
 export interface IProcedureEntry {
   readonly procedureId: number;
@@ -66,6 +89,8 @@ export interface IProcedureEntry {
   readonly admission: AdmissionRule;
   readonly failures: readonly string[];
   readonly maximumPayloadBytes?: number;
+  /** What its method's options say of it over HTTP, where they say anything (decision 0037). */
+  readonly http?: IHttpEntry;
   readonly description?: string;
   readonly deprecation?: IDeprecation;
 }
@@ -96,10 +121,122 @@ export interface IServiceEntry {
   readonly proto?: { readonly file: string; readonly fullName: string };
 }
 
-/** What a front end read of a `.proto`: its files and the messages a `proto` binding names. */
+/** A protobuf scalar, by its name in `descriptor.proto`'s `FieldDescriptorProto.Type`, lowered. */
+export type ScalarName =
+  | 'double'
+  | 'float'
+  | 'int64'
+  | 'uint64'
+  | 'int32'
+  | 'fixed64'
+  | 'fixed32'
+  | 'bool'
+  | 'string'
+  | 'bytes'
+  | 'uint32'
+  | 'sfixed32'
+  | 'sfixed64'
+  | 'sint32'
+  | 'sint64';
+
+/**
+ * A field's type, as its rules read it: a scalar, an enum or a message by its full name, or one of
+ * `google/protobuf/wrappers.proto`'s messages by the scalar it wraps.
+ */
+export type FieldType =
+  | { readonly scalar: ScalarName }
+  | { readonly enum: string }
+  | { readonly message: string }
+  | { readonly wrapper: ScalarName };
+
+/** A JSON value, as protobuf's JSON mapping writes a rule's member. */
+export type RuleValue =
+  | string
+  | number
+  | boolean
+  | readonly RuleValue[]
+  | { readonly [member: string]: RuleValue };
+
+/**
+ * A field's `(buf.validate.field)`, in protobuf's JSON mapping by proto names, as `validate.proto`
+ * writes them: a 64-bit integer as a string, a float's or a double's value as a string, the double it
+ * is (spec 17.7.4), a value not finite as `Infinity`, `-Infinity` or `NaN` (decision 0035).
+ */
+export type FieldRulesValue = { readonly [member: string]: RuleValue };
+
+/** A field a message's rules judge: one that holds a rule, or leads to a message that does. */
+export interface IFieldRulesEntry {
+  readonly fieldName: string;
+  readonly fieldNumber: number;
+  readonly type: FieldType;
+  /** `repeated`, or `map` with its key's scalar; none for a singular field. */
+  readonly label?: 'repeated' | 'map';
+  readonly key?: ScalarName;
+  /** Whether it tracks presence: a repeated field and a map never do. */
+  readonly presence: 'explicit' | 'implicit';
+  /** The `oneof` it is a member of, by its name. */
+  readonly oneof?: string;
+  readonly rules?: FieldRulesValue;
+}
+
+/** A `oneof`'s `(buf.validate.oneof)`, by its name and its index among its message's. */
+export interface IOneofRulesEntry {
+  readonly oneofIndex: number;
+  readonly oneofName: string;
+  readonly rules: { readonly required?: boolean };
+}
+
+/** A message's rules: its fields', by number, its own `(buf.validate.message)`, its oneofs'. */
+export interface IMessageRules {
+  readonly fields: readonly IFieldRulesEntry[];
+  readonly message: {
+    readonly oneof?: readonly { readonly fields: readonly string[]; readonly required?: boolean }[];
+  };
+  readonly oneofs: readonly IOneofRulesEntry[];
+}
+
+/** A field of a message, as a route binds it and a document describes it (decision 0037). */
+export interface IFieldEntry {
+  readonly fieldName: string;
+  readonly fieldNumber: number;
+  readonly jsonName: string;
+  readonly type: FieldType;
+  /** `repeated`, or `map` with its key's scalar; none for a singular field. */
+  readonly label?: 'repeated' | 'map';
+  readonly key?: ScalarName;
+  /** Whether it tracks presence: a repeated field and a map never do. */
+  readonly presence: 'explicit' | 'implicit';
+  /** The `oneof` it is a member of, by its name; a synthetic one never. */
+  readonly oneof?: string;
+  readonly description?: string;
+  readonly deprecated?: true;
+}
+
+/** A message a binding names, or a field of one reaches, or a request's rules reach, with its file. */
+export interface IMessageEntry {
+  readonly fullName: string;
+  readonly file: string;
+  /**
+   * Its fields, by number (decision 0037): left out of a well-known type, whose JSON is its own
+   * form, and of a blueprint an earlier beadc wrote.
+   */
+  readonly fields?: readonly IFieldEntry[];
+  /** Under the feature `validate`: its rules, where a request's rules reach it (decision 0035). */
+  readonly rules?: IMessageRules;
+}
+
+/** An enum a field names: its values in their declaration's order, an alias among them. */
+export interface IEnumEntry {
+  readonly fullName: string;
+  readonly file: string;
+  readonly values: readonly { readonly name: string; readonly number: number }[];
+}
+
+/** What a front end read of a `.proto`: its files, the messages its bindings reach, their enums. */
 export interface IProtoSource {
   readonly files: readonly { readonly path: string; readonly package: string }[];
-  readonly messages: readonly { readonly fullName: string; readonly file: string }[];
+  readonly messages: readonly IMessageEntry[];
+  readonly enums?: readonly IEnumEntry[];
 }
 
 /** A blueprint, `bead-blueprint/1`. */
@@ -125,8 +262,14 @@ export interface IReading {
 
 // constants
 
-/** The features of `requires` this beadc knows: none yet. */
-export const KNOWN_FEATURES: ReadonlySet<string> = new Set<string>();
+/**
+ * The feature a blueprint requires where a message carries its rules: a reader that does not know
+ * it refuses the blueprint, and never generates a side that judges nothing (decision 0035).
+ */
+export const VALIDATE_FEATURE = 'validate';
+
+/** The features of `requires` this beadc knows. */
+export const KNOWN_FEATURES: ReadonlySet<string> = new Set<string>([VALIDATE_FEATURE]);
 
 const BYTE_ORDER_MARK = '\uFEFF';
 
@@ -209,7 +352,7 @@ const RULE_OF_PLACE: readonly (readonly [RegExp, RuleName, string])[] = [
     "a failure's name is upper-case ASCII letters and digits in words parted by one underscore (builder/README.md)",
   ],
   [
-    /^\/(?:services\/\d+\/proto\/file|proto\/messages\/\d+\/file|proto\/files\/\d+\/path)$/u,
+    /^\/(?:services\/\d+\/proto\/file|proto\/(?:messages|enums)\/\d+\/file|proto\/files\/\d+\/path)$/u,
     'PROTO_FILE',
     'a proto path is a path from its root, parts by /, none . or .., ending in .proto',
   ],

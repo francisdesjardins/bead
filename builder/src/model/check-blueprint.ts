@@ -3,8 +3,9 @@
 // The rules at a blueprint's level that span entries, over a blueprint the format's schema took: one
 // id and one name a scope, folded as spec 16.6 folds; the reservations; a binding's encoding its
 // message's; a notification's result; a failure its service lacks; a `proto` binding's source, and a
-// `proto` path's file; and the names every official target generates or reserves, and the
-// descriptions every one writes.
+// `proto` path's file; the names every official target generates or reserves, and the descriptions
+// every one writes; under `validate`, a field's rules of its own type (VALIDATE_RULE_FIT); and the
+// HTTP rules any blueprint can judge (`check-http.ts`, decision 0037).
 
 // dependencies
 
@@ -20,7 +21,9 @@ import {
   xmlExcludedOf,
 } from '../targets/names.ts';
 import type { IBinding, IBlueprint, IRange, IServiceEntry } from './blueprint.ts';
+import { httpFindingsOf } from './check-http.ts';
 import { foldOf } from './identity.ts';
+import { fitFindingsOf } from './rules.ts';
 
 // constants
 
@@ -131,6 +134,9 @@ export const checkBlueprint = (
 
   (blueprint.proto?.messages ?? []).forEach((message, at) => {
     checkProtoFile(message.file, `/proto/messages/${String(at)}/file`);
+  });
+  (blueprint.proto?.enums ?? []).forEach((entry, at) => {
+    checkProtoFile(entry.file, `/proto/enums/${String(at)}/file`);
   });
 
   const checkService = (service: IServiceEntry, index: number): void => {
@@ -307,7 +313,15 @@ export const checkBlueprint = (
         });
       }
 
-      if (TYPESCRIPT_PROCEDURE_NAMES.has(procedure.procedureName)) {
+      if (
+        TYPESCRIPT_PROCEDURE_NAMES.has(procedure.procedureName) ||
+        service.procedures.some((candidate) => {
+          return (
+            candidate.procedureKind === 'notifies' &&
+            procedure.procedureName === `subscribe${upperFirst(candidate.procedureName)}`
+          );
+        })
+      ) {
         report('NAME_TARGET', {
           at: `${procedurePlace}/procedureName`,
           message: `${procedure.procedureName} is a member TypeScript's generated client holds already`,
@@ -315,7 +329,13 @@ export const checkBlueprint = (
       } else if (
         C_SHARP_PROCEDURE_NAMES.has(rpcName) ||
         C_SHARP_OBJECT_MEMBERS.has(rpcName) ||
-        classNames.has(rpcName)
+        classNames.has(rpcName) ||
+        service.procedures.some((candidate) => {
+          return (
+            candidate.procedureKind === 'notifies' &&
+            rpcName === `Subscribe${upperFirst(candidate.procedureName)}`
+          );
+        })
       ) {
         report('NAME_TARGET', {
           at: `${procedurePlace}/procedureName`,
@@ -385,6 +405,16 @@ export const checkBlueprint = (
   };
 
   blueprint.services.forEach(checkService);
+
+  // * a blueprint is read without its .proto, by `breaking` among others: the rules fit their
+  // fields here, a wrapper's its scalar's, as buf's PROTOVALIDATE holds them on a .proto
+  for (const finding of fitFindingsOf(blueprint)) {
+    report('VALIDATE_RULE_FIT', { at: finding.pointer, message: finding.message });
+  }
+
+  for (const finding of httpFindingsOf(blueprint)) {
+    report(finding.rule, { at: finding.pointer, message: finding.message });
+  }
 
   return diagnostics;
 };

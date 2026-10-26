@@ -1,4 +1,4 @@
-# syntax=docker/dockerfile:1.27@sha256:4edf897a3ffa55b89f906fc8cc78afdb3f1834cc9c7083565e611a8a7d5fe99e
+# syntax=docker/dockerfile:1.27.1@sha256:4edf897a3ffa55b89f906fc8cc78afdb3f1834cc9c7083565e611a8a7d5fe99e
 # ── beadc's image ─────────────────────────────────────────────────────────────────────────────────
 # beadc, Bead's builder, as it runs from builder/ on Node, in an image that only generates (decision
 # 0022). Built from the repository's root, since beadc's tests read spec/ and the files of each side
@@ -15,8 +15,8 @@
 # ! the frontend and the base by their digests: one Dockerfile dialect on every engine, and the
 # base named once, for its FROM and its labels. A release bumps both by hand, and shellcheck's in
 # ci.yml with them
-ARG NODE_IMAGE=node:26.12.0-trixie-slim
-ARG NODE_DIGEST=sha256:0d1e33586362bb9e608c4e751e7a9e7edb55c9ac11461ed5666af696cc461dd4
+ARG NODE_IMAGE=node:26.12.1-trixie-slim
+ARG NODE_DIGEST=sha256:36793bcbb160a6a16cede1e62b93f84e26b78a972a8a4c0b879c1c12f22761ec
 # ! the licences of what the image adds to its base, its label's expression, which
 # tools/licenses.mjs holds every package to; the base's own are its, under base.name and
 # /usr/share/doc

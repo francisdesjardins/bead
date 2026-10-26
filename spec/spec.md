@@ -63,22 +63,31 @@ to one meaning of `advance`. The why of each rule is in the decisions:
   peer — the calls it answers on a connection, a request's bytes, a WebSocket server's connections,
   what waits for a socket, a request that trickles — sections 9, 12 and 15;
 - [0034](../docs/decisions/0034-a-server-tells-each-access-it-refuses-never-the-credential.md): an
-  access a server refuses, told, section 13.12.
+  access a server refuses, told, section 13.12;
+- [0035](../docs/decisions/0035-a-payload-that-reads-is-held-to-its-messages-rules-before-its-resolver-sees-it.md):
+  payload rules, section 18;
+- [0036](../docs/decisions/0036-an-in-memory-transport-joins-two-routers-of-one-process-and-a-server-takes-several-transports-through-one.md):
+  the in-memory transport and the joined transport, section 15.
+- [0037](../docs/decisions/0037-a-procedure-is-also-an-http-route-which-a-gateway-answers-as-one-more-client-of-its-server.md):
+  a procedure also an HTTP route, its gateway one more client of its server, stated in the
+  companion `transcoding.md`.
 
-**Version: 0.7.0**, of layout `0xA1`. Each of its conformance files repeats it as its
+**Version: 0.8.0**, of layout `0xA1`. Each of its conformance files repeats it as its
 `specVersion`, and follows its schema in [`schemas/`](schemas/). The interop's blueprint,
 [`interop-blueprint.json`](interop-blueprint.json), and what its service does,
 [`interop-service.json`](interop-service.json), are files of this version, which the conversations
 play. **Status: every section is written.**
 
 What a side traces, filters and counts beside the wire is stated apart, under a version of its own,
-in its companion [`debugging.md`](debugging.md), whether a side builds those or leaves them out. A
-side conforms to the wire by sections 1 to 15, to what it declares by section 16, and to what its
-codecs write and read by section 17, for each encoding it offers: a relay, which reads no payload,
-offers none. A side does what each entry of the files that play those sections says, the clock
-cases holding `advance` to one meaning, but an entry whose `differs` names a row of the support
-matrix, [`docs/support.md`](../docs/support.md), and the side's language. A unit no entry cites
-binds it all the same.
+in its companion [`debugging.md`](debugging.md), whether a side builds those or leaves them out.
+What a side's gateway answers over HTTP of its procedures is stated apart, under a version of its
+own, in its companion [`transcoding.md`](transcoding.md), whether a side offers one or not. A
+side conforms to the wire by sections 1 to 15, to what it declares by section 16, to what its
+codecs write and read by section 17, for each encoding it offers, and to its procedures' rules by
+section 18: a relay, which reads no payload, offers none. A side does what each entry of the files
+that play those sections says, the clock cases holding `advance` to one meaning, but an entry whose
+`differs` names a row of the support matrix, [`docs/support.md`](../docs/support.md), and the
+side's language. A unit no entry cites binds it all the same.
 
 ## 1. Conventions
 
@@ -297,8 +306,9 @@ its route (16 to 31), its admission (32 to 47), its payload (48 to 63), then its
 | 18   | `SERVICE_UNKNOWN`          | 49   | `CREDIT_EXCEEDED`        |
 | 19   | `PROCEDURE_UNKNOWN`        | 50   | `PAYLOAD_UNDECODABLE`    |
 | 20   | `CALL_UNKNOWN`             | 51   | `TRANSFER_STALLED`       |
-| 21   | `SUBSCRIPTION_UNKNOWN`     | 64   | `PROCEDURE_FAILED`       |
-| 22   | `SUBSCRIPTION_UNSUPPORTED` | 65   | `DESTINATION_LOST`       |
+| 21   | `SUBSCRIPTION_UNKNOWN`     | 52   | `PAYLOAD_INVALID`        |
+| 22   | `SUBSCRIPTION_UNSUPPORTED` | 64   | `PROCEDURE_FAILED`       |
+|      |                            | 65   | `DESTINATION_LOST`       |
 
 8.2. `CAPACITY_EXCEEDED` says that the receiver holds as much as a bound of its own lets it, and
 takes no more: a request past the calls it answers on its connection at once (section 9.2,
@@ -389,8 +399,8 @@ first that applies:
 7. A subscription opened on a connection that carries nothing back: `SUBSCRIPTION_UNSUPPORTED`.
 8. A payload, or the total a transfer declares, past the procedure's limit or the receiver's:
    `PAYLOAD_TOO_LARGE`. A transfer the receiver takes none of: the same.
-9. Otherwise the request is dispatched to its resolver once its payload is whole, with its call's
-   session.
+9. Otherwise the request is dispatched once its payload is whole: read (section 17), judged by its
+   rules (section 18), then handed to its resolver, with its call's session.
 
 A credential's resolution MAY wait — a `JWT` verified by Web Crypto, a key set asked for a key, a
 service asked whether a token holds — and the admission after it does not. A request presenting
@@ -416,8 +426,9 @@ would settle a call it does not belong to.
 
 9.5. A resolver that fails before it answers MUST still answer, with `PROCEDURE_FAILED`, so its
 requester does not wait out its timeout. A payload its procedure cannot read (section 17) is
-answered with `PAYLOAD_UNDECODABLE`, before the resolver sees it. A procedure's own failure is an
-application failure, with a code from 1 to 65,535 of the procedure's own numbering.
+answered with `PAYLOAD_UNDECODABLE`, and one that reads and breaks its procedure's rules
+(section 18) with `PAYLOAD_INVALID`, before the resolver sees either. A procedure's own failure is
+an application failure, with a code from 1 to 65,535 of the procedure's own numbering.
 
 9.6. What does not read goes through one gate. A side MUST:
 
@@ -734,11 +745,11 @@ A client fails a call before it goes, and a server a command alike, with `DESTIN
 as a relay refuses a call its leg B cannot carry (section 14.3): nothing was tried, and its
 credential stays. It does so for a call that presents `ELSEWHERE` over a transport that cannot carry
 the credential it presents — a WebSocket whose upgrade carried other bytes, or none (section 15.2),
-a Web Worker, whose messages carry an envelope alone, a server's over HTTP or over a WebSocket
-(sections 15.9, 15.2) — and for one that presents a `JWT` or an `ELSEWHERE` over a transport that
-leaves the machine in the clear, since a bearer credential crosses only TLS off the machine
-([RFC 6750 §5.3](https://www.rfc-editor.org/rfc/rfc6750#section-5.3)). A transport is judged by
-what it is given, never by what a name resolves to. It is secure under TLS, its scheme `wss` or
+a Web Worker, whose messages carry an envelope alone, a server's over HTTP, over a WebSocket or in
+memory (sections 15.9, 15.2, 15.13) — and for one that presents a `JWT` or an `ELSEWHERE` over a
+transport that leaves the machine in the clear, since a bearer credential crosses only TLS off the
+machine ([RFC 6750 §5.3](https://www.rfc-editor.org/rfc/rfc6750#section-5.3)). A transport is judged
+by what it is given, never by what a name resolves to. It is secure under TLS, its scheme `wss` or
 `https`; on the loopback: a client by the host it names in its URL — `localhost` or a name that ends
 in `.localhost`, compared in ASCII lower case, an IPv4 address in 127.0.0.0/8, or the IPv6 loopback,
 `[::1]` in a URL — as the
@@ -746,16 +757,16 @@ in `.localhost`, compared in ASCII lower case, an IPv4 address in 127.0.0.0/8, o
 the W3C's Secure Contexts reads an origin, and as
 [Secure Contexts](https://www.w3.org/TR/secure-contexts/#is-origin-trustworthy) judges an origin
 potentially trustworthy; a server by the address it listens on (section 15.12), in 127.0.0.0/8,
-`::1`, or `localhost`, both; or when it never leaves the machine, a Web Worker or a router called in
-process. Every client reads a host alike: `127.0.0.1.` and `127.1`, which the parser reads as
-127.0.0.1, are on the loopback; a host it fails on, one followed by a space among them, is not, nor
-is `localhost.`, which it keeps as given. A client takes a `localhost` name on the loopback without
-resolving it, as Secure Contexts does where the platform resolves such names there alone
-([RFC 6761 §6.3](https://www.rfc-editor.org/rfc/rfc6761#section-6.3)): on a platform whose resolver
-sends one elsewhere, its application gives another host. Any other leaves the machine in the clear.
-A server cannot tell what stands in front of it: its application MAY say so, and is then believed
-whatever the server listens on — TLS terminated before it, which makes it secure, or a proxy that
-serves the network in the clear, which leaves it in the clear.
+`::1`, or `localhost`, both; or when it never leaves the machine, a Web Worker, an in-memory
+transport or a router called in process. Every client reads a host alike: `127.0.0.1.` and `127.1`,
+which the parser reads as 127.0.0.1, are on the loopback; a host it fails on, one followed by a
+space among them, is not, nor is `localhost.`, which it keeps as given. A client takes a `localhost`
+name on the loopback without resolving it, as Secure Contexts does where the platform resolves such
+names there alone ([RFC 6761 §6.3](https://www.rfc-editor.org/rfc/rfc6761#section-6.3)): on a
+platform whose resolver sends one elsewhere, its application gives another host. Any other leaves
+the machine in the clear. A server cannot tell what stands in front of it: its application MAY say
+so, and is then believed whatever the server listens on — TLS terminated before it, which makes it
+secure, or a proxy that serves the network in the clear, which leaves it in the clear.
 
 13.5. A credential that does not hold is refused at its resolution, whatever the procedure
 requires (section 9.2, step 6): a call never runs outside the session it presented. A procedure
@@ -993,7 +1004,12 @@ _Transports: `spec/transports.json`._
 `DESTINATION` names one goes on to what stands behind it: a router it calls through, or a connection
 of its own, asked by a request of the server's. Each destination answers the same procedures; the
 requester picks one by its destination. A side with no destination registered relays nothing: it
-answers a request that names any with `DESTINATION_UNKNOWN` (section 9.2).
+answers a request that names any with `DESTINATION_UNKNOWN` (section 9.2). A destination stays
+registered until its application takes it out, its connection closed or not, and registering one
+that is registered is refused, unless the registration names the one it replaces, whose place it
+takes at once, so that no request finds the destination unknown meanwhile. The application decides
+who may register which destination, as its `beforeRoute` decides who may reach one (section 14.7):
+the relay checks nobody.
 
 14.2. The relay terminates each leg: leg A, from the requester, and leg B, to the destination, each
 with its own call ids, limits and session. What crosses is the payload's bytes, undecoded, and the
@@ -1066,16 +1082,19 @@ resolving as section 9.2 says:
    transport cannot carry it (section 13.4): a WebSocket's, whose upgrade carried the relay's own
    credential or none, never leg A's; a `JWT` or an `ELSEWHERE` over a leg B that reaches off the
    machine in the clear, neither over TLS — `wss`, `https` — nor within the machine — the loopback,
-   a Web Worker, a router called in process — since a bearer credential crosses only TLS off the
-   machine ([RFC 6750 §5.3](https://www.rfc-editor.org/rfc/rfc6750#section-5.3)), which its sender
-   holds: `DESTINATION_UNREACHABLE`, since nothing was tried;
+   a Web Worker, an in-memory transport, a router called in process — since a bearer credential
+   crosses only TLS off the machine
+   ([RFC 6750 §5.3](https://www.rfc-editor.org/rfc/rfc6750#section-5.3)), which its sender holds:
+   `DESTINATION_UNREACHABLE`, since nothing was tried;
 6. a payload, or a transfer's total, past the smaller of the two legs' limits, leg B's header
    counted with its credential, call by call — a destination that takes no transfer takes what one
    of its envelopes holds behind that header: `PAYLOAD_TOO_LARGE`.
 
 14.4. A destination on a connection of the relay's own dies with that connection: once it closed,
 the destination is unreachable until it is registered anew, on another connection: no connection
-takes a handle its transport gave before (section 15.1). Leg B waits for its answer as long as its
+takes a handle its transport gave before (section 15.1). One registered on a connection its side no
+longer holds is unreachable from its registration, and nothing is forwarded to it. Each destination
+its side lists says whether its connection closed. Leg B waits for its answer as long as its
 destination says, and the relay's own timeout at most; by default, without end: the requester's own
 timeout governs, end to end, by its cancel. A cancel on leg A, or leg A's connection gone, cancels
 leg B, and leg A is answered nothing.
@@ -1138,33 +1157,48 @@ what one throws is reported, as section 9.0 reports an error, by its transport w
 it was told of; the listeners after it are called all the same, and the transport goes on as if it
 returned. A side awaits nothing a listener returns: what it settles to later is its platform's, as
 is what a listener of the transport's own `error` throws. A listener's throw refuses no connection,
-fails no exchange and closes nothing. A server's transport tells each refusal it judges of its own:
-a request it refuses as it arrives, in section 15.6's order, or whose body it refuses as it comes,
-marked in `bead-refusal`. It never tells the 404 that ends an exchange or a listen it had taken as
-their connection closes (section 15.7), which its close tells, nor what HTTP refuses of its own,
-unmarked. A refusal told carries its status, its reason, the request's authority and its `Origin`,
-each as it came, the field's lines joined by ", "
-([RFC 9110 §5.3](https://www.rfc-editor.org/rfc/rfc9110#section-5.3)), or none, and the client's
-address and port (section 15.12); nothing else of the request, so neither its target, nor its
-connection's token, nor a credential. It names no connection: a refusal is a request's, and a
-listener's throw is reported with none. A connection that closes ends what was under way on it
+fails no exchange and closes nothing. What a side's transport reports on its `error`, a client's as
+a server's, is what it ends a connection for of its own — a protocol error on it; a message it fails
+with 1009, or over HTTP an envelope past its `maximumBodyBytes`, an answer's or a batch's, and a
+connection a server drops behind a bound, each naming the bound and its value (sections 15.3,
+15.12); a batch that does not read, saying what of it does not (section 15.9); a Web Worker
+client's worker that errs, an exception its script did not catch, which ends no worker, named by its
+message and where its script threw it, its server told the close unclean — and what a listener
+throws, as it throws: a connection's own once, as it ends, its close or its drop begun, so that no
+listener's throw keeps it open, and before its close, which is then unclean. It reports no peer that
+drops without its closing handshake, its TCP connection ended or reset, nor one its heartbeat drops,
+nor its own drop of a peer that never answered a close within its close timeout, nor, over HTTP, a
+server gone, a refusal of its own, an answer of another type, an exchange lost or a listen given up
+past its inactivity timeout: each one's close tells it, unclean, but for a client's own
+`disconnect` left unanswered, whose close is told as the `disconnect` asked.
+A server's transport tells each refusal it judges of its own: a request it refuses as it arrives,
+in section 15.6's order, or whose body it refuses as it comes, marked in `bead-refusal`. It never
+tells the 404 that ends an exchange or a listen it had taken as their connection closes (section
+15.7), which its close tells, nor what HTTP refuses of its own, unmarked. A refusal told carries its
+status, its reason, the request's authority and its `Origin`, each as it came, the field's lines
+joined by ", " ([RFC 9110 §5.3](https://www.rfc-editor.org/rfc/rfc9110#section-5.3)), or none, and
+the client's address and port (section 15.12); nothing else of the request, so neither its target,
+nor its connection's token, nor a credential. It names no connection: a refusal is a request's, and
+a listener's throw is reported with none. A connection that closes ends what was under way on it
 (sections 9.4, 9.10, 12.10, 13.7). A server's transport hands the router each envelope it took with
 the address and port of what brought it — over HTTP its exchange's, read as section 15.12 reads it,
-whichever socket or proxy brought its connect; over a WebSocket its connection's; none over a Web
-Worker — which an access refused names (section 13.12). A transport may carry a credential beside
-an envelope, both ways: it hands the router what it carried with an envelope it took, and carries
-what the router gives it with one it sends. That credential is what a request presenting
-`ELSEWHERE` stands for (section 9.2, step 6), and nothing else: a request that presents none,
-`OPAQUE` or a `JWT` resolves as its header says, whatever its transport carried. Over HTTP, it is
-the `Authorization` field of a request's `POST` (section 15.5), each request's own; over a
-WebSocket, the `Authorization` field of an upgrade that carries no `Origin`, one for every envelope
-of the connection, toward its server alone (section 15.2). A transport says whether it carries the
-credential a call presents beside an envelope it sends — a client's over HTTP any field value, over
-a WebSocket the one its upgrade carried, compared in constant time; a Web Worker's none, nor a
-server's toward its client (sections 15.2, 15.9) — and whether it is secure — under TLS, on the
-loopback, or never leaving the machine — so that a side fails before it goes a call whose credential
-it cannot carry (section 13.4). No failure's detail, event, trace or log carries that credential,
-nor a header's: only its credential scheme.
+whichever socket or proxy brought its connect; over a WebSocket its connection's; over an in-memory
+transport those its client gave as it connected (section 15.13); none over a Web Worker — which an
+access refused names (section 13.12). A transport may carry a credential beside an envelope, both
+ways: it hands the router what it carried with an envelope it took, and carries what the router
+gives it with one it sends. That credential is what a request presenting `ELSEWHERE` stands for
+(section 9.2, step 6), and nothing else: a request that presents none, `OPAQUE` or a `JWT` resolves
+as its header says, whatever its transport carried. Over HTTP, it is the `Authorization` field of a
+request's `POST` (section 15.5), each request's own; over a WebSocket, the `Authorization` field of
+an upgrade that carries no `Origin`, one for every envelope of the connection, toward its server
+alone (section 15.2); over an in-memory transport, what its client hands with each request (section
+15.13). A transport says whether it carries the credential a call presents beside an envelope it
+sends — a client's over HTTP or in memory any field value, over a WebSocket the one its upgrade
+carried, compared in constant time; a Web Worker's none, nor a server's toward its client (sections
+15.2, 15.9, 15.13) — and whether it is secure — under TLS, on the loopback, or never leaving the
+machine — so that a side fails before it goes a call whose credential it cannot carry (section
+13.4). No failure's detail, event, trace or log carries that credential, nor a header's: only its
+credential scheme.
 
 ### WebSocket
 
@@ -1199,8 +1233,9 @@ a cookie, which a page's browser sends on its own, or from a subprotocol. A clie
 judges a request at its WebSocket's address in this order, and answers the first that applies:
 
 1. What HTTP refuses of its own, a `Host` missing or repeated, a target in absolute-form it does not
-   read, an authority that is no host, or a field that holds a control character or an octet past
-   US-ASCII (section 15.12), its HTTP server answers, unmarked.
+   read, an authority that is no host, a target that holds an octet other than visible ASCII or a
+   path whose percent-decoding holds NUL, or a field that holds a control character or an octet
+   past US-ASCII (section 15.12), its HTTP server answers, unmarked.
 2. A server takes an upgrade from the hosts an HTTP exchange is taken from (section 15.12): a
    request whose authority names a host it does not take, or none, is refused 403, its
    `bead-refusal` `host-refused`, whatever else it holds, since a page that rebinds its name to the
@@ -1241,13 +1276,21 @@ Each of these refusals but HTTP's own is marked as section 15.6 says, and told (
 connection; a 426 names `upgrade` in its `Connection`.
 
 15.3. A side MUST take a message of `maximumEnvelopeBytes` at least; past its own message limit,
-`maximumMessageBytes` — `maximumEnvelopeBytes` by default — it closes the connection with 1009. A
-side SHOULD ping its peer every `heartbeat` — 30 seconds by default, or never — and close a
-connection that left a ping unanswered, so a peer gone without a word ends in a close; a ping waits
-behind what was sent before it, so a peer that stops reading leaves it unanswered too. What waits
-for a server's socket is held besides as section 15.12 says. A side that closes says 1000; a server
-that stops, 1001, to each connection it holds, one whose opening handshake completes as its stop
-begins among them. A close with 1000 is the clean one.
+`maximumMessageBytes` — `maximumEnvelopeBytes` by default — it fails the connection with 1009
+([RFC 6455 §7.1.7](https://www.rfc-editor.org/rfc/rfc6455#section-7.1.7),
+[§7.4.1](https://www.rfc-editor.org/rfc/rfc6455#section-7.4.1),
+[§10.4](https://www.rfc-editor.org/rfc/rfc6455#section-10.4)): it sends its close, drains what
+still comes until the peer's close or its close timeout, then ends the connection, its close
+unclean whatever code the peer answers with; a side reports it, naming the bound and its value
+(section 15.1). A side's close timeout, 5 seconds by default, bounds each closing handshake it
+begins, its 1009 among them: a peer that has not answered by then is dropped, and a server tells its
+close unclean. A client SHOULD hold one where its platform lets it: a page's `WebSocket` bounds its
+close as its platform does. A side SHOULD ping its peer every `heartbeat` — 30 seconds by default,
+or never — and close a connection that left a ping unanswered, so a peer gone without a word ends
+in a close; a ping waits behind what was sent before it, so a peer that stops reading leaves it
+unanswered too. What waits for a server's socket is held besides as section 15.12 says. A side
+that closes says 1000; a server that stops, 1001, to each connection it holds, one whose opening
+handshake completes as its stop begins among them. A close with 1000 is the clean one.
 
 ### HTTP
 
@@ -1423,8 +1466,9 @@ come back. Both sides of an HTTP connection set `maximumTransfers` to 0, and a p
 envelope holds.
 
 15.12. A server bounds what its clients hold, and times what is under way, by these names; a client
-times its own inactivity by `inactivityTimeout`, its default and whether it may be without end
-alike (section 15.10):
+bounds what it reads, an answer or an envelope a batch brings, by `maximumBodyBytes`, its default
+alike, and times its own inactivity by `inactivityTimeout`, its default and whether it may be
+without end alike (section 15.10):
 
 | Bound                          | By default                                                                                                     | Bounds                                                                               | Transports      |
 | ------------------------------ | -------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------ | --------------- |
@@ -1503,7 +1547,9 @@ HTTP does, an HTTP/1.1 request without a `Host`, and one with more than one `Hos
 target in absolute-form it does not read, or an authority that is no host, before it reads anything
 else of it ([RFC 9112 §3.2](https://www.rfc-editor.org/rfc/rfc9112#section-3.2)): no refusal of the
 transport's own, unmarked. The `Host` beside a target in absolute-form is judged as one field line
-alone, which an HTTP/1.0 request may leave out. Over HTTP/2, it resets the stream of a request whose
+alone, which an HTTP/1.0 request may leave out. Over HTTP/2, it resets the stream of a request that
+names no host, with neither `:authority` nor `host`, whatever its hosts, `*` among them
+([RFC 9113 §8.3.1](https://www.rfc-editor.org/rfc/rfc9113#section-8.3.1)), or whose
 authority is no host, `PROTOCOL_ERROR`, no response written
 ([RFC 9113 §8.1.1](https://www.rfc-editor.org/rfc/rfc9113#section-8.1.1)). A field value that holds
 a control character other than HTAB, or an octet past US-ASCII, is answered alike, 400 unmarked over
@@ -1516,10 +1562,26 @@ so is every field Bead reads. A field value that starts or ends with a space or 
 too ([RFC 9113 §8.2.1](https://www.rfc-editor.org/rfc/rfc9113#section-8.2.1)): over HTTP/2 its
 stream is reset `PROTOCOL_ERROR`, judged with the rest of this rule, before anything else of the
 request; over HTTP/1.1 and at a WebSocket's address, the parser strips that whitespace first, no
-part of the value ([RFC 9110 §5.5](https://www.rfc-editor.org/rfc/rfc9110#section-5.5)). An empty
-`Host` is a host, and so is a name of invalid punycode. It takes the hosts a request may name
-besides those every server takes, `hosts`, and the origins an exchange may come from besides its
-own, `origins`, none when not given. Its own is its request's authority under `http` or `https`,
+part of the value ([RFC 9110 §5.5](https://www.rfc-editor.org/rfc/rfc9110#section-5.5)). A target
+that holds an octet other than visible ASCII — a control character, HTAB among them, a space, DEL,
+or an octet past US-ASCII — in its path or its query, in origin-form or absolute-form, is answered
+alike, 400 unmarked over HTTP/1.1, with none of the fields every response on the path carries, and
+its stream reset `PROTOCOL_ERROR` over HTTP/2, before anything else of the request is judged: a
+target holds a URI's characters
+([RFC 9112 §3.2](https://www.rfc-editor.org/rfc/rfc9112#section-3.2),
+[RFC 9113 §8.3.1](https://www.rfc-editor.org/rfc/rfc9113#section-8.3.1)), which are visible ASCII
+([RFC 3986 §2](https://www.rfc-editor.org/rfc/rfc3986#section-2)), and a request-line that holds
+another is invalid, answered 400 rather than read on
+([RFC 9112 §3](https://www.rfc-editor.org/rfc/rfc9112#section-3)), a bare CR in it among them
+([RFC 9112 §2.2](https://www.rfc-editor.org/rfc/rfc9112#section-2.2)). So is a path whose
+percent-decoding holds NUL, `%00`. What a target percent-encodes is otherwise no octet of it, and
+is taken, `%01` and `%7F` among them, and `%00` in a query. The visible characters a URI leaves out,
+`"`, `#`, `<`, `>`, `\`, `^`, `` ` ``, `{`, `|` and `}`, are taken as they came, as a page's browser
+sends some of them unencoded in a query
+([URL Standard](https://url.spec.whatwg.org/#query-percent-encode-set)); a `#` opens no fragment.
+An empty `Host` is a host, and so is a name of invalid punycode. It takes the hosts a request may
+name besides those every server takes, `hosts`, and the origins an exchange may come from besides
+its own, `origins`, none when not given. Its own is its request's authority under `http` or `https`,
 when its host is one the server takes by name — one every server takes, or one `hosts` lists —
 never by `*`: an `Origin` that is `http://` or `https://` followed by that authority, compared ASCII
 case-insensitively, the field read as the serialized origin it carries
@@ -1640,6 +1702,29 @@ family it tries first, racing them ([RFC 8305](https://www.rfc-editor.org/rfc/rf
 given one loopback, `127.0.0.1` or `::1`, leaves the other's port to any process that listens
 there, which then answers a client that tries that family first.
 
+### In memory
+
+15.13. An in-memory transport joins a client's router and a server's router of one process. A
+connect draws a connection on its server's side, its handle's type `MEMORY` (section 15.1), handed
+with the address and the port its client gave as it connected, or `local` and none. Each envelope
+is copied as it is sent, and handed on whole, once, in the order it was sent, in a later turn than
+its send, never within it. It carries the credential a client hands with a request beside it, any
+field value (section 15.5), and none toward a client: a server's command that presents `ELSEWHERE`
+over it fails before it goes, `DESTINATION_UNREACHABLE` (section 13.4). It never leaves the
+process, so both its ends are secure. It carries transfers under its routers' limits, and holds no
+bound, heartbeat or timeout of its own. Either end closes a connection, its other end told in a
+later turn, the close clean at the end that closed it. A server's transport that stops closes every
+connection it holds and takes no connect; a client's connect then fails before anything goes.
+
+### Joined
+
+15.14. A server MAY take its connections from several transports through one that joins them. A
+joined transport hands on each transport's events with the handle that transport drew, and each
+connection's sending, closing, credential and security are its own transport's. It MUST refuse to
+join two transports whose handles might be one. Its stop stops each, and its bounds and its gauges
+reach each, as section 15.1 has a transport's. It serves no port of its own: one port for two
+transports comes from a proxy in front of them.
+
 ## 16. Services and procedures
 
 _Identities: `spec/identities.json`._
@@ -1745,7 +1830,7 @@ writes one as its encoding says. A relay reads none (section 14.2).
 17.2. A payload that does not read, or a value that does not write, fails where it is:
 
 1. a request's payload is answered with `PAYLOAD_UNDECODABLE`, and its resolver never sees it
-   (section 9.5);
+   (section 9.5); a payload that reads is judged by its procedure's rules, as section 18 says;
 2. a result's payload fails its call at the requester with `PAYLOAD_UNDECODABLE`;
 3. a notification's payload is reported as `PAYLOAD_UNDECODABLE`, and no callback hears it;
 4. a request's value fails its call before anything goes out, and no call is made;
@@ -1846,3 +1931,167 @@ generator writes for the message. What is Bead's:
 Where two stock libraries part on what protobuf states no rule of, the support matrix says what
 each does. The `proto` rows of `spec/codecs.json` read and write `Probe`, the message of
 `spec/codecs.proto`.
+
+## 18. Payload rules
+
+_Validations: `spec/validations.json`._
+
+Its verdicts judge the messages of `spec/validations.proto`, each bound as a request, by the rules
+that file gives them.
+
+18.1. A procedure's request may be held to rules beyond its encoding: for a `proto` binding, those
+protovalidate's options give its message — `(buf.validate.field)`, `(buf.validate.oneof)` and
+`(buf.validate.message)` of `buf/validate/validate.proto` at
+[v1.2.2](https://github.com/bufbuild/protovalidate/blob/v1.2.2/proto/protovalidate/buf/validate/validate.proto)
+— each meaning what that file states of it; for any binding, a function its side is given. The
+rules judge the payload alone: what needs data or a call's context — a name already taken, a
+balance, a right — is its resolver's, which answers a failure of its procedure's own (section 9.5),
+never `PAYLOAD_INVALID`.
+
+18.2. A side that answers a request judges it on every call, once its payload reads and before its
+resolver sees it. A request its rules refuse is answered with `PAYLOAD_INVALID` and its violations
+(18.6), and its resolver never sees it. A requester MAY judge its request's value before it goes,
+when its application asks it to: a value its rules refuse fails its call before anything goes, with
+`PAYLOAD_INVALID` and the same detail, written under its own bound, as a call refused before it
+goes (section 9.1). A result and a notification are not judged. A side judges every rule, but
+holds of the violations no more than its detail can carry (18.6), and counts the rest. A rule that
+fails to judge, as an application's function that throws, is the side's own error:
+`PROCEDURE_FAILED`, reported (section 9.0).
+
+18.3. A violation is the breach of one rule:
+
+| Member      | What it holds                                                                                                                                                                                                                                                                                                |
+| ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `fieldPath` | the path from the request's message to the field (18.4); absent for a rule of the message itself                                                                                                                                                                                                             |
+| `ruleId`    | the rule's id, protovalidate's `rule_id`: a standard rule's, as `string.min_len`, `int32.gte_lte`, `required`, `enum.defined_only`; a CEL rule's own `id`                                                                                                                                                    |
+| `bounds`    | the members its rule takes, by their names in `validate.proto`, each as protobuf's JSON mapping writes its type: a 64-bit integer as a string, bytes in base64, a `float` as the double it is, a value not finite as `"Infinity"`, `"-Infinity"` or `"NaN"`; absent for a rule that takes none, a flag alone |
+| `message`   | its words (18.8)                                                                                                                                                                                                                                                                                             |
+| `forKey`    | `true` where it is a map key's; absent otherwise                                                                                                                                                                                                                                                             |
+
+18.4. A field's path is its fields' names from the request's message, each as its `.proto`
+declares it, by `.`, an item by its index and a map's entry by its key; a wrapper's field is named
+alone, never its `value`; a `oneof`'s `required` names the oneof:
+
+```abnf
+field-path = element *( "." element )
+element    = name [ "[" subscript "]" ]
+name       = ( ALPHA / "_" ) *( ALPHA / DIGIT / "_" )
+subscript  = ( [ "-" ] 1*DIGIT ) / "true" / "false" / json-string [ "..." ]
+```
+
+`json-string` is a string in section 17.7's form, RFC 8785's. A string key is written whole when
+its UTF-8 holds in 64 bytes; otherwise its first 64 bytes, back to the start of the character the
+cut fell in, followed by `...` outside its quotation marks, which no key's own characters can
+write. So `items[2].name`, `labels["zz"]`, `labels["a\tb"]`, `by_id[-1]`, `flags[true]`,
+`labels["kkkk…k"...]`, `choice`. The rendering is Bead's own: protovalidate's `FieldPath` is a
+list of elements, and its implementations render a string differently.
+
+18.5. A side judges every rule, its violations in this order: the message's fields, by
+their numbers, each by its `required`, then its `cel` rules in their order, then its type's rules
+by the numbers of their members in their rules' message, then a repeated field's items by index
+and a map's entries by key — integers ascending, `false` before `true`, strings by code points —
+each item, or each entry's key then its value, by the same steps, then the message it holds, when
+set, by the same steps; then the message's own rules: `cel_expression` and `cel` in their order,
+`(buf.validate.message).oneof` in its order, each oneof's `required` in their declaration's
+order. A side MAY stop at the first violation, when its application asks it to, and gives that one
+alone.
+
+18.6. `PAYLOAD_INVALID`'s detail is lines, joined by one U+000A and none after the last, each a
+JSON text in section 17.7's form: the first violations in 18.5's order, each an object of 18.3's
+members, then a closing line, `{"more":N}`, N the violations it leaves out, or `{"stopped":true}`
+where its side stopped at its first violation. A writer writes the violations in their order while
+they hold in the detail's bound (section 7.4) with 26 bytes kept for the closing line: each whole,
+or, where it does not hold whole, without its `message`, then without its `bounds` too; the first
+whose `fieldPath`, `ruleId` and `forKey` alone do not hold ends the lines, and is counted in `more`
+with every one after it. A writer writes no member empty: no `fieldPath` or `message` of `""`, no
+`bounds` of `{}`, no `forKey` but `true`; and N at most 2^53 − 1, the largest integer an I-JSON
+number holds exactly (RFC 7493 §2.2), a count past it written as 2^53 − 1. A detail whose bound
+holds no closing line is empty.
+
+```text
+{"bounds":{"lte":10},"fieldPath":"from","message":"must be less than or equal to 10","ruleId":"int32.lte"}
+{"more":0}
+```
+
+18.7. A reader reads a `PAYLOAD_INVALID`'s detail line by line, each read as section 17.5 reads a
+`json` payload: the lines that read as violations, up to the first that does not, are its
+violations, and a closing line its count. A detail cut by its reader's bound (section 7.3), or by a
+relay's on its other leg, keeps its whole lines; one with no closing line leaves what it left out
+uncounted. A member empty is absent, as protovalidate drops an empty field path or message: a
+`fieldPath` or a `message` of `""`, a `bounds` of `{}`, a `forKey` of `false`, the line kept; a
+`ruleId` of `""` is an id, an id-less CEL rule's. A closing line's N is an integer from 0 to
+2^53 − 1, its number read as section 17.6 reads one; any other is no closing line, and the detail
+is uncounted. A violation without its `message` takes the words 18.8.6 gives its rule from its
+`ruleId` and its `bounds`, where they give them; `required`'s and `message.oneof`'s depend on what
+was judged, and such a violation keeps none. A detail whose first line is neither — empty, or
+another text — gives none, and the failure stands by its code.
+
+18.8. What a rule reads:
+
+1. A field with explicit presence — a message, a wrapper, an `optional` field, a `oneof`'s member,
+   one whose edition's `field_presence` is `EXPLICIT` — is judged by `required` alone while unset,
+   a wrapper by its scalar's rules on its value once set, and as it reads once set, at its zero
+   too; one with implicit presence is judged as it reads, its zero when absent; a repeated field and
+   a map are never unset, empty being their zero. `required` refuses an unset field, an implicit
+   one at its zero, and an empty repeated field or map. `IGNORE_IF_ZERO_VALUE` judges nothing of a
+   field of implicit presence at its zero, a repeated field or a map empty among them, and is the
+   default on one of explicit presence; `IGNORE_ALWAYS` nothing of the field, nor of the message it
+   holds. A field a `(buf.validate.message).oneof` names takes `IGNORE_IF_ZERO_VALUE` unless it
+   states its own, and that rule counts it set as `required` reads it.
+2. A string's length counts its code points, its bytes its UTF-8 bytes.
+3. A number compares as its type: a `float` and its bounds as 32-bit floats, a 64-bit integer
+   whole, never through a double. NaN breaks every bound, `finite` refuses NaN and the
+   infinities, and a range whose lower member is past its upper takes the values outside it.
+4. `unique`, `in`, `not_in` and `const` compare as `==` does: `0.0` and `-0.0` are one, two NaN two.
+5. `pattern` is RE2's syntax, matched anywhere in the string unless anchored: `.` any character
+   but `\n`; `\d`, `\s`, `\w` and `\b` of ASCII; `$` at the string's end alone without `(?m)`;
+   `(?i)` by Unicode 17.0.0's simple case folding, and its classes of Unicode 17.0.0, whatever its
+   platform's. A side matches in time linear in the string's length, a constant per character
+   whatever the pattern, never by backtracking.
+6. A standard rule's words are those its rule in `validate.proto` writes, by its expression or,
+   where it gives one, its `message`: `%s` and `%d` writing an integer whole, a `float` or a
+   `double` as section 17.7.4 writes the double it is — a float's widened to a double — and NaN and
+   the infinities `NaN`, `Infinity` and `-Infinity`, a list as `[`, its items by `, `, `]`, a string
+   as it is; `%x` bytes in lower-case hexadecimal. The rules protovalidate plays itself give
+   `value is required` for `required`, `value must be one of the defined enum values` for
+   `enum.defined_only`, `exactly one field is required in oneof` for a oneof's `required`, and, for
+   `(buf.validate.message).oneof`, `only one of ` its fields by `, ` ` can be set`, or, where it
+   requires one, `one of ` its fields ` must be set`. A CEL rule's are its `message`, else the
+   string it gives, else `"` its expression `" returned false`. `spec/validations.json` holds each.
+   A reader gives the words of a violation from its `ruleId` and its `bounds` (18.7) to these ids
+   alone, of the rules beadc compiles, each by the template its rule formats in `validate.proto`,
+   each `%s`, `%d` or `%x` written from the member beside it, `N` any of the twelve number types:
+
+   - `N.const`, `bool.const`, `enum.const`: `must equal %s`, of `const`;
+   - `N.lt`, `N.lte`, `N.gt`, `N.gte`: `must be less than %s`, `must be less than or equal to %s`,
+     `must be greater than %s`, `must be greater than or equal to %s`, of their member;
+   - `N.gt_lt`, `N.gt_lte`, `N.gte_lt`, `N.gte_lte`: `must be greater than %s and less than %s`, its
+     lower member's words then its upper's by `and`, of its lower member then its upper; each
+     `_exclusive` alike, by `or`;
+   - `N.in`, `string.in`, `enum.in`: `must be in list %s`; `N.not_in`, `string.not_in`,
+     `enum.not_in`: `must not be in list %s`; of their member;
+   - `float.finite` and `double.finite`: `must be finite`; `enum.defined_only`:
+     `value must be one of the defined enum values`; `repeated.unique`:
+     `repeated value must contain unique items`; of no member;
+   - `string.const`: ``must equal `%s` ``; `string.len`, `string.min_len`, `string.max_len`:
+     `must be %s characters`, `must be at least %s characters`, `must be at most %s characters`;
+     `string.len_bytes`, `string.min_bytes`, `string.max_bytes`: `must be %s bytes`,
+     `must be at least %s bytes`, `must be at most %s bytes`; `string.pattern`, `string.prefix`,
+     `string.suffix`, `string.contains`, `string.not_contains`:
+     ``does not match regex pattern `%s` ``, ``does not have prefix `%s` ``,
+     ``does not have suffix `%s` ``, ``does not contain substring `%s` ``,
+     ``contains substring `%s` ``; of their member;
+   - `bytes.const`: `must be %x`; `bytes.len`, `bytes.min_len`, `bytes.max_len`: `must be %s bytes`,
+     `must be at least %s bytes`, `must be at most %s bytes`; `bytes.prefix`, `bytes.suffix`,
+     `bytes.contains`: `does not have prefix %x`, `does not have suffix %x`, `does not contain %x`;
+     of their member;
+   - `repeated.min_items`, `repeated.max_items`: `must contain at least %d item(s)`,
+     `must contain no more than %s item(s)`; `map.min_pairs`, `map.max_pairs`:
+     `map must be at least %d entries`, `map must be at most %d entries`; of their member.
+
+   `in` and `not_in` take a list of scalars, every other member a scalar: a string, a number,
+   `true` or `false`; `%x` takes a string of base64 as RFC 4648 §4 writes it, its standard alphabet,
+   padded, no white space. Any other id gives none — `bytes.pattern`, `bytes.in` and
+   `bytes.not_in`, which beadc does not compile, an id `validate.proto` does not define, as
+   `bool.in` or `enum.lt`, and a CEL rule's — nor does a member its template takes that is missing
+   or of another shape, a list nested among them.

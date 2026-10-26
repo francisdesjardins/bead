@@ -148,6 +148,9 @@ def default(clause, *, milliseconds=None, ways, state=None):
             'clause': clause, 'ways': ways, **({'state': state} if state else {})}
 
 
+# a gateway's options, which take the bounds of 15.12 by their names (transcoding 10.2)
+GATEWAY = way('gateway', "a gateway's options, as it is built")
+
 places = [
     {
         'id': 'call.timeout',
@@ -290,16 +293,6 @@ places = [
         'observed': 'held',
     },
     {
-        'id': 'httpTransportServer.inactivityTimeout',
-        'name': "an HTTP server's inactivity timeout",
-        'kind': 'timeout',
-        'never': 'taken',
-        'neverClause': '15.12',
-        'ways': [way('options', "the transport server's options, as it is built")],
-        'default': default('15.12.9', milliseconds=DEFAULTS['inactivityTimeout'], ways=['options']),
-        'observed': 'held',
-    },
-    {
         'id': 'httpTransportServer.maximumWait',
         'name': 'the longest an HTTP server holds a listen',
         'kind': 'timeout',
@@ -311,40 +304,43 @@ places = [
     },
     {
         'id': 'httpTransportServer.sendGracePeriod',
-        'name': "the least time an HTTP server gives an answer's bytes to be taken by its socket",
+        'name': "the least time an HTTP server, or a gateway, gives an answer's bytes to be taken by its socket",
         'kind': 'timeout',
         'never': 'refused',
         'neverClause': '15.12',
-        'ways': [way('options', "the transport server's options, as it is built")],
+        'ways': [way('options', "the transport server's options, as it is built"), GATEWAY],
         'observed': 'refusal',
     },
     {
         'id': 'httpTransportServer.headersTimeout',
-        'name': "how long an HTTP server lets a request's head take to come whole",
+        'name': "how long an HTTP server, or a gateway, lets a request's head take to come whole",
         'kind': 'timeout',
         'never': 'refused',
         'neverClause': '15.12',
-        'ways': [way('options', "the transport server's options, as it is built")],
+        'ways': [way('options', "the transport server's options, as it is built"), GATEWAY],
         'observed': 'refusal',
     },
     {
         'id': 'httpTransportServer.bodyGracePeriod',
-        'name': "how long an HTTP server lets a body come before its rate is held",
+        'name': "how long an HTTP server, or a gateway, lets a body come before its rate is held",
         'kind': 'timeout',
         'never': 'refused',
         'neverClause': '15.12',
-        'ways': [way('options', "the transport server's options, as it is built")],
-        'default': default('15.12.16', milliseconds=DEFAULTS['bodyGracePeriod'], ways=['options']),
+        'ways': [way('options', "the transport server's options, as it is built"), GATEWAY],
+        'default': default('15.12.16', milliseconds=DEFAULTS['bodyGracePeriod'], ways=['options', 'gateway']),
         'observed': 'held',
     },
     {
-        'id': 'httpTransportClient.inactivityTimeout',
-        'name': "an HTTP client's inactivity timeout",
+        'id': 'httpTransport.inactivityTimeout',
+        'name': "an HTTP connection's inactivity timeout, its client's or its server's",
         'kind': 'timeout',
         'never': 'taken',
         'neverClause': '15.12',
-        'ways': [way('options', "the transport client's options, as it is built")],
-        'default': default('15.12.9', milliseconds=DEFAULTS['inactivityTimeout'], ways=['options']),
+        'ways': [
+            way('client', "the transport client's options, as it is built"),
+            way('server', "the transport server's options, as it is built"),
+        ],
+        'default': default('15.12.9', milliseconds=DEFAULTS['inactivityTimeout'], ways=['client', 'server']),
         'observed': 'held',
     },
     {
@@ -376,6 +372,17 @@ places = [
         'observed': 'refusal',
     },
     {
+        'id': 'webSocketTransport.closeTimeout',
+        'name': "a WebSocket's close timeout, its client's or its server's",
+        'kind': 'timeout',
+        'never': 'taken',
+        'ways': [
+            way('client', "the transport client's options, as it is built"),
+            way('server', "the transport server's options, as it is built"),
+        ],
+        'observed': 'refusal',
+    },
+    {
         'id': 'transportClient.connectTimeout',
         'name': "a connect's timeout, on every transport",
         'kind': 'timeout',
@@ -383,6 +390,7 @@ places = [
         'ways': [
             way('http', "an HTTP client's connect"),
             way('webSocket', "a WebSocket client's connect"),
+            way('memory', "an in-memory client's connect"),
             way('worker', "a Web Worker client's connect", differs=('C#', WEB_WORKER)),
         ],
         'observed': 'held',
@@ -397,14 +405,6 @@ places = [
             way('number', 'a number', differs=('C#', DELAY_AS_A_NUMBER)),
         ],
         'observed': 'held',
-    },
-    {
-        'id': 'webSocketTransportServer.closeTimeout',
-        'name': "a WebSocket server's close timeout",
-        'kind': 'timeout',
-        'never': 'taken',
-        'ways': [way('options', "the transport server's options, as it is built")],
-        'observed': 'refusal',
     },
     {
         'id': 'webSocketTransportServer.sendGracePeriod',
@@ -422,6 +422,25 @@ places = [
         'never': 'refused',
         'neverClause': '15.12',
         'ways': [way('options', "the transport server's options, as it is built")],
+        'observed': 'refusal',
+    },
+    {
+        'id': 'gateway.timeout',
+        'name': "a gateway's call timeout",
+        'kind': 'timeout',
+        'never': 'taken',
+        'neverClause': 'transcoding:9.2',
+        'ways': [way('options', "the gateway's options, as it is built")],
+        'default': default('transcoding:9.2', milliseconds=5_000, ways=['options']),
+        'observed': 'held',
+    },
+    {
+        'id': 'gateway.heartbeat',
+        'name': "a gateway's heartbeat on a stream nothing else goes on",
+        'kind': 'timeout',
+        'never': 'taken',
+        'neverClause': 'transcoding:8.7',
+        'ways': [way('options', "the gateway's options, as it is built")],
         'observed': 'refusal',
     },
 ]
@@ -458,7 +477,9 @@ def outcome_of(value, place):
 
 
 def unit_order(unit):
-    return tuple(int(part) for part in unit.split('.'))
+    """A unit's place: the spec's first, then a companion's, behind its name and a colon."""
+    document, _, number = unit.rpartition(':')
+    return document, tuple(int(part) for part in number.split('.'))
 
 
 def clauses_of(place):
@@ -524,7 +545,7 @@ document = {
         "Bead's durations: what every place that takes a duration an application gives a side makes of every input (spec 1.4, decision 0014), which every implementation's harness plays at every place, by every way its surface takes that duration.",
         'inputs is one table, each input named, in one of five forms: milliseconds, a JSON number, given as it is on the TypeScript side and through TimeSpan.FromMilliseconds on the C# side; seconds, a JSON number as a user writes seconds, seconds * 1000 and TimeSpan.FromSeconds, each platform\'s arithmetic; never, Infinity and Timeout.InfiniteTimeSpan, which JSON has no number for; nan, IEEE 754\'s NaN, which JSON has none for either; json, a value that is no number, a string or a boolean, as a limit read from JSON may be.',
         'A place is keyed by its id, its owner and its duration, which nothing but a decision changes. name says what it is, for a reader. kind is delay, a wait before an act, which takes 0 as at once, or timeout, any other, which is never 0. never is taken, held without end, arming nothing; refused; or default, held as the place\'s default; neverClause is the clause that says so, where 1.4 does not alone.',
-        'clauses are the units of spec.md a place checks, each for what the place observes of it, and nothing else: 1.4, which holds and refuses its durations; its neverClause; and its default\'s clause. A unit is a clause, 9.2; an item of its numbered list, 9.2.5; or a row of its table, counted from 1, 15.12.8.',
+        'clauses are the units of spec.md a place checks, each for what the place observes of it, and nothing else: 1.4, which holds and refuses its durations; its neverClause; and its default\'s clause. A unit is a clause, 9.2; an item of its numbered list, 9.2.5; or a row of its table, counted from 1, 15.12.8. A gateway\'s place cites the units of transcoding.md behind transcoding:, transcoding:9.2.',
         'ways are each way the surface takes that duration, by an id stable in its place: each harness keeps a table from each place and way to a function that builds the place on its side\'s test clock, given one input or none, and fails when that table and this file differ by one. required marks a way whose duration cannot be left out.',
         'default is where a clause states one: its milliseconds, or never, with that clause, one of the place\'s own; ways, those a harness builds with nothing given to read it; state, where it holds only so. A default no clause states is left out.',
         'observed is held, where what the place holds is read: an option read back, the due of the timer it arms on the side\'s test clock, or the wait a listen asks; at once, no timer armed and the act done; never, no timer armed. Or refusal, for a place on the real clock (decision 0011), whose harness reads whether it refuses alone.',

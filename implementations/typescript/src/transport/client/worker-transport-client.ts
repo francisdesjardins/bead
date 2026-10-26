@@ -2,9 +2,9 @@
 
 // dependencies
 
-import { CLOSE_EVENT, MESSAGE_EVENT, WORKER_MESSAGES } from '../shared/constants';
+import { CLOSE_EVENT, ERROR_EVENT, MESSAGE_EVENT, WORKER_MESSAGES } from '../shared/constants';
 import { createPromise } from '../shared/create-promise';
-import { ConnectError, ProgrammerError, ReadyStateError } from '../shared/errors';
+import { ConnectError, GenericError, ProgrammerError, ReadyStateError } from '../shared/errors';
 import {
   getReadyState,
   ReadyState,
@@ -19,6 +19,7 @@ import { dispose } from './symbols';
 import { createTransportClient, DISCONNECT_DEFAULTS } from './transport-client';
 import type {
   ITransportClientConnectOptions,
+  IWorkerErrorEventLike,
   IWorkerTransportClientOptions,
   WorkerTransportClient,
 } from './types';
@@ -27,6 +28,7 @@ export { TRANSPORT_WORKER, WORKER_MESSAGES } from '../shared/constants';
 export type { IWorkerMessageEventLike, IWorkerPortLike } from '../shared/types';
 export type {
   IWorkerChannelLike,
+  IWorkerErrorEventLike,
   IWorkerLike,
   IWorkerTransportClientOptions,
   WorkerTransportClient,
@@ -39,17 +41,32 @@ export const CONNECT_DEFAULTS = Object.freeze({
   timeout: 10_000,
 } satisfies ITransportClientConnectOptions);
 
+// helpers
+
+// what a worker's error says, after what it erred: its message, where its script threw, each where
+// given — HTML's 0 and empty string are none
+const erredOf = ({ colno, filename, lineno, message }: IWorkerErrorEventLike): string => {
+  const said = message ? `: ${message}` : ', saying nothing';
+  const line = lineno ? `:${String(lineno)}${colno ? `:${String(colno)}` : ''}` : '';
+
+  return filename ? `${said} (at ${filename}${line})` : said;
+};
+
 // definition
 
 /**
  * A transport client to a server in a Web Worker: `connect` makes a `MessageChannel`, keeps one end,
  * posts the other to `worker` with `bead-connect`, and opens on the server's `bead-open`. Envelopes
- * go both ways as bytes, each copied and its buffer transferred; `disconnect` posts `bead-close`,
- * and the server's own closes it, since a port does not tell its close.
+ * go both ways as bytes, each copied and its buffer transferred; `disconnect` posts `bead-close`, or
+ * `bead-lost` when it is not clean, and the server's own closes it, since a port does not tell its
+ * close.
  *
  * A connect given up on posts `bead-close` on its end all the same, for a server that takes the port
- * later to end at once. A worker's `error` loses the connection; one terminated without a word is
- * not heard. A worker carries no credential beside an envelope: one given to `send` is not carried.
+ * later to end at once. A worker's `error` — an exception its script did not catch, or a script that
+ * failed to load — fails the connect under way with a `ConnectError` at once, or ends the connection
+ * of the client's own: told once on `error`, with the error's message and where it was thrown, then
+ * its close, unclean, its server told `bead-lost`. A worker terminated without a word is not heard. A
+ * worker carries no credential beside an envelope: one given to `send` is not carried.
  *
  * @example
  * const client = createWorkerTransportClient({ worker });
@@ -69,28 +86,41 @@ export const createWorkerTransportClient = ({
       // settles the connect in flight, so a dispose under it cannot leave it pending
       let rejectConnect: ((reason: Error) => void) | undefined;
 
-      // the connection ended at the other end, or with its worker: CLOSED, as a socket dropped; a
-      // worker that erred may still run, so its server is told all the same
-      const lose = (lost: IWorkerPortLike, isClean: boolean): void => {
+      // ended at the other end, or by its worker's error, which may leave it running: its server
+      // told all the same, the error before the close, whatever `error` throws (spec 15.1); unclean
+      // either way, as every client tells a close it did not ask for
+      const lose = (lost: IWorkerPortLike, failure?: GenericError): void => {
         if (port !== lost) {
           return;
         }
 
         port = undefined;
         client.socket = null;
-        lost.postMessage(WORKER_MESSAGES.CLOSE);
+        lost.postMessage(failure === undefined ? WORKER_MESSAGES.CLOSE : WORKER_MESSAGES.LOST);
         lost.close();
         worker.removeEventListener?.('error', onError);
 
         if (!client.isReconnecting()) {
           setReadyStateClosed(client);
-          tell(CLOSE_EVENT, [isClean, false]);
+
+          try {
+            if (failure !== undefined) {
+              client.emit(ERROR_EVENT, failure);
+            }
+          } finally {
+            tell(CLOSE_EVENT, [false, false]);
+          }
         }
       };
 
-      const onError = (): void => {
-        if (port !== undefined) {
-          lose(port, false);
+      // heard from the connect on: one under way fails, an open connection ends
+      const onError = (event: IWorkerErrorEventLike): void => {
+        if (rejectConnect !== undefined) {
+          rejectConnect(
+            new ConnectError(`its worker erred before the connection opened${erredOf(event)}`)
+          );
+        } else if (port !== undefined) {
+          lose(port, new GenericError(`its worker erred${erredOf(event)}`));
         }
       };
 
@@ -113,7 +143,7 @@ export const createWorkerTransportClient = ({
             }
 
             if (data === WORKER_MESSAGES.CLOSE) {
-              lose(opened, true);
+              lose(opened);
             }
           });
 
@@ -131,14 +161,17 @@ export const createWorkerTransportClient = ({
                   }
                 });
                 opened.start();
+                worker.addEventListener?.('error', onError);
                 worker.postMessage(WORKER_MESSAGES.CONNECT, [channel.port2]);
               },
               { clock: client.clock, signal, timeout }
             );
           } catch (reason) {
-            // given up on — timed out, cancelled, disposed: a server that takes the port later ends it
+            // given up on — timed out, cancelled, disposed, its worker erred: a server that takes the
+            // port later ends it
             opened.postMessage(WORKER_MESSAGES.CLOSE);
             opened.close();
+            worker.removeEventListener?.('error', onError);
 
             if (!client.isReconnecting()) {
               setReadyStateClosed(client);
@@ -151,7 +184,6 @@ export const createWorkerTransportClient = ({
 
           port = opened;
           client.socket = opened;
-          worker.addEventListener?.('error', onError);
           setReadyStateOpen(client);
         },
 
@@ -167,7 +199,8 @@ export const createWorkerTransportClient = ({
           setReadyStateClosing(client);
           port = undefined;
           client.socket = null;
-          closing.postMessage(WORKER_MESSAGES.CLOSE);
+          // its server hears the close as clean as it is
+          closing.postMessage(isClean ? WORKER_MESSAGES.CLOSE : WORKER_MESSAGES.LOST);
           closing.close();
           worker.removeEventListener?.('error', onError);
           setReadyStateClosed(client);
@@ -201,7 +234,7 @@ export const createWorkerTransportClient = ({
         [dispose]: () => {
           const dropped = port;
 
-          rejectConnect?.(new ConnectError('disposed while connecting'));
+          rejectConnect?.(new ConnectError('the transport client was disposed as it connected'));
           port = undefined;
           client.socket = null;
           worker.removeEventListener?.('error', onError);

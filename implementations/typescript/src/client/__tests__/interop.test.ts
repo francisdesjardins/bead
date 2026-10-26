@@ -21,6 +21,8 @@ import { offerInteropClient } from '../../../interop/handlers';
 import { PAYLOAD_CODECS } from '../../router/shared/payloads';
 import type { FetchLike } from '../../transport/client/types';
 import { noop } from '../../transport/shared/noop';
+import { TranscodingHttpClient } from '../../transcoding/__tests__/generated/bead_http';
+import { startTranscoding } from '../../transcoding/__tests__/transcoding-service';
 import { createHTTPClient, type HTTPClient } from '../http-client';
 import {
   CancelError,
@@ -34,8 +36,9 @@ import {
 
 // interfaces
 
-/** Where the C# server listens: over WebSocket, and over HTTP. */
+/** Where the C# server listens: over WebSocket, HTTP and the HTTP/JSON gateway. */
 interface IPorts {
+  gatewayPort: number;
   httpPort: number;
   port: number;
 }
@@ -90,6 +93,9 @@ const interopTokenOf = (sub: string): string => {
 };
 
 /** Whether the interop must run: a path to the other side gone wrong then fails, not skips. */
+/** How long a stream waits for its place, in milliseconds: the gateway keeps one stream an address. */
+const PATIENCE = 10_000;
+
 const REQUIRED = process.env['BEAD_INTEROP_REQUIRED'] === '1';
 
 const SLOW = { milliseconds: 3_600_000 };
@@ -146,10 +152,16 @@ const fetchInOrder = (): FetchLike => {
 /** The ports a line of the server says it listens on: `{"port":n,"httpPort":m}`; none for any other line. */
 const portsOfLine = (line: string): IPorts | undefined => {
   try {
-    const { httpPort, port } = JSON.parse(line) as { httpPort?: unknown; port?: unknown };
+    const { gatewayPort, httpPort, port } = JSON.parse(line) as {
+      gatewayPort?: unknown;
+      httpPort?: unknown;
+      port?: unknown;
+    };
 
-    return typeof port === 'number' && typeof httpPort === 'number'
-      ? { httpPort, port }
+    return typeof port === 'number' &&
+      typeof httpPort === 'number' &&
+      typeof gatewayPort === 'number'
+      ? { gatewayPort, httpPort, port }
       : undefined;
   } catch {
     return undefined;
@@ -180,6 +192,60 @@ const startServer = async (): Promise<{
   }
 
   throw new Error('the C# interop server ended before it said its port');
+};
+
+const isCapacityExceeded = (reason: unknown): boolean => {
+  return (reason as { code?: unknown } | undefined)?.code === ProtocolCode.CAPACITY_EXCEEDED;
+};
+
+const pause = (milliseconds: number): Promise<void> => {
+  return new Promise((resolve) => {
+    setTimeout(resolve, milliseconds);
+  });
+};
+
+// * a stream's end, once the gateway frees the place the test before held: busy before any entry, it goes again
+const failureOnceAdmitted = async (stream: () => Promise<void>): Promise<unknown> => {
+  const since = performance.now();
+
+  for (;;) {
+    const failure = await stream().then(
+      () => {
+        return new Error('the stream ended with no failure');
+      },
+      (reason: unknown) => {
+        return reason;
+      }
+    );
+
+    if (!isCapacityExceeded(failure) || performance.now() - since > PATIENCE) {
+      return failure;
+    }
+
+    await pause(50);
+  }
+};
+
+// a stream's first entry, once the gateway has its place, as failureOnceAdmitted waits for it
+const openedOnceAdmitted = async <T>(
+  open: () => AsyncIterator<T>
+): Promise<{ first: IteratorResult<T>; iterator: AsyncIterator<T> }> => {
+  const since = performance.now();
+
+  for (;;) {
+    const iterator = open();
+
+    try {
+      return { first: await iterator.next(), iterator };
+    } catch (reason) {
+      if (!isCapacityExceeded(reason) || performance.now() - since > PATIENCE) {
+        throw reason;
+      }
+
+      await iterator.return?.();
+      await pause(50);
+    }
+  }
 };
 
 // definition
@@ -215,6 +281,104 @@ test.describe('the C# server of the interop service', () => {
 
     server.stdin.end();
     await exited;
+  });
+
+  test('calls the other gateway with protobuf JSON and every native encoding', async () => {
+    const client = new TranscodingHttpClient(`http://${HOST}:${String(ports.gatewayPort)}`);
+
+    expect(await client.getBook({ name: 'shelves/a/books/b', revision: 7n })).toMatchObject({
+      name: 'shelves/a/books/b',
+      pages: 7n,
+      title: 'A tale',
+    });
+    expect(await client.text('Ada\r\nJosé')).toBe('Ada\r\nJosé');
+    expect(await client.raw(Uint8Array.of(0, 127, 255))).toEqual(Uint8Array.of(0, 127, 255));
+    expect(await client.json({ z: [true, null], a: 'José' })).toEqual({
+      a: 'José',
+      z: [true, null],
+    });
+  });
+
+  test('reads the other gateway problems and presents its authorization', async () => {
+    const client = new TranscodingHttpClient(`http://${HOST}:${String(ports.gatewayPort)}`);
+
+    await expect(client.fail({ detail: 'by choice' })).rejects.toMatchObject({
+      code: 1,
+      scope: FailureScope.APPLICATION,
+      detail: 'by choice',
+    });
+    await expect(client.whoAmI({})).rejects.toMatchObject({
+      code: ProtocolCode.SESSION_REQUIRED,
+      scope: FailureScope.PROTOCOL,
+    });
+    expect(await client.whoAmI({}, { authorization: 'Bearer good' })).toMatchObject({
+      session: 'ada',
+    });
+  });
+
+  test('reads the other gateway result notifications and ending failure', async () => {
+    const client = new TranscodingHttpClient(`http://${HOST}:${String(ports.gatewayPort)}`);
+    const received: { kind: string; value: number }[] = [];
+
+    const failure = await failureOnceAdmitted(async () => {
+      received.length = 0;
+
+      for await (const entry of client.subscribeTicks({ from: 2 })) {
+        received.push({
+          kind: entry.kind,
+          value: entry.kind === 'result' ? entry.value.ticks : entry.value.remaining,
+        });
+      }
+    });
+
+    expect(failure).toMatchObject({ code: 2, scope: FailureScope.APPLICATION });
+    expect(received).toEqual([
+      { kind: 'result', value: 2 },
+      { kind: 'notification', value: 1 },
+      { kind: 'notification', value: 0 },
+    ]);
+  });
+
+  test('reads the other gateway own route size and busy refusals', async () => {
+    const url = `http://${HOST}:${String(ports.gatewayPort)}`;
+    const missing = new TranscodingHttpClient(`${url}/missing`);
+    await expect(missing.json(null)).rejects.toMatchObject({
+      code: ProtocolCode.DESTINATION_UNREACHABLE,
+      origin: 'peer',
+      detail: 'the HTTP call answers 404; a path no route matches',
+    });
+    const client = new TranscodingHttpClient(url);
+    await expect(client.text('x'.repeat(1025))).rejects.toMatchObject({
+      code: ProtocolCode.PAYLOAD_TOO_LARGE,
+      origin: 'peer',
+    });
+    const { first, iterator } = await openedOnceAdmitted(() => {
+      return client.subscribeWatch({})[Symbol.asyncIterator]();
+    });
+    try {
+      expect(first).toMatchObject({ done: false, value: { kind: 'result' } });
+      await expect(async () => {
+        for await (const event of client.subscribeWatch({})) {
+          void event;
+        }
+      }).rejects.toMatchObject({
+        code: ProtocolCode.CAPACITY_EXCEEDED,
+        origin: 'peer',
+        detail: expect.stringContaining('the HTTP call answers 503; Retry-After: 1;'),
+      });
+    } finally {
+      await iterator.return?.();
+    }
+  });
+
+  test('compares the gateways OpenAPI documents byte for byte', async () => {
+    await using local = await startTranscoding();
+    const remote = await fetch(`http://${HOST}:${String(ports.gatewayPort)}/openapi.json`);
+    const own = await fetch(`http://${HOST}:${String(local.port)}/openapi.json`);
+
+    expect(remote.status).toBe(200);
+    expect(own.status).toBe(200);
+    expect(Buffer.from(await remote.arrayBuffer())).toEqual(Buffer.from(await own.arrayBuffer()));
   });
 
   for (const { carriesTransfers, create, label, portOf } of TRANSPORTS) {
@@ -259,6 +423,13 @@ test.describe('the C# server of the interop service', () => {
         await expect(interop().echo({ a: [1, 'two', null] })()).resolves.toEqual({
           a: [1, 'two', null],
         });
+
+        // and its bytes as the other side wrote them, its canonical form
+        const echoed = await client.services.getRequest(InteropProcedures.echo.procedure, {
+          serializer: PAYLOAD_CODECS.raw,
+        })(new TextEncoder().encode('{"a":[1,"two",null]}'))();
+
+        expect(new TextDecoder().decode(echoed)).toBe('{"a":[1,"two",null]}');
       });
 
       // the two codecs read each other's bytes: each side writes its members sorted, in UTF-8
@@ -322,6 +493,23 @@ test.describe('the C# server of the interop service', () => {
         ).rejects.toMatchObject({ code: ProtocolCode.PAYLOAD_UNDECODABLE });
       });
 
+      test('a request its rules refuse is answered PAYLOAD_INVALID, its violations in its detail', async () => {
+        // * the detail as the server writes it, lines of canonical JSON, byte for byte
+        await expect(interop().checked({ names: ['ab', '', 'abcd'] })()).rejects.toMatchObject({
+          code: ProtocolCode.PAYLOAD_INVALID,
+          detail: [
+            '{"bounds":{"min_len":"1"},"fieldPath":"names[1]","message":"must be at least 1 characters","ruleId":"string.min_len"}',
+            '{"bounds":{"max_len":"3"},"fieldPath":"names[2]","message":"must be at most 3 characters","ruleId":"string.max_len"}',
+            '{"more":0}',
+          ].join('\n'),
+          scope: FailureScope.PROTOCOL,
+        });
+      });
+
+      test('checked answers the count of the names its rules take', async () => {
+        await expect(interop().checked({ names: ['a', 'bc'] })()).resolves.toBe(2);
+      });
+
       test('a call cancelled by its signal is cancelled at the server too', async () => {
         const controller = new AbortController();
         const slow = interop().slow(SLOW)({ signal: controller.signal });
@@ -339,7 +527,7 @@ test.describe('the C# server of the interop service', () => {
         await expect(cancellationsReaching(1)).resolves.toBe(1);
       });
 
-      test('the server asks the command its client offers, and answers with what it answered', async () => {
+      test('answers the command the server asks', async () => {
         offerInteropClient(interop());
 
         await expect(interop().ask(null)()).resolves.toBe('noon');
@@ -393,7 +581,7 @@ test.describe('the C# server of the interop service', () => {
         await registration.unregister();
       });
 
-      test('a session opened is learned from its answer, and its end too', async () => {
+      test('learns a session opened from its answer, and its end too', async () => {
         await expect(interop().whoami(null)()).rejects.toMatchObject({
           code: ProtocolCode.SESSION_REQUIRED,
         });
@@ -423,14 +611,19 @@ test.describe('the C# server of the interop service', () => {
       });
 
       test('a JWT presented by default runs in its credential’s session: whoami answers its sub, and logout is refused ACCESS_DENIED', async () => {
-        client.router.credential = { scheme: CredentialScheme.JWT, token: interopTokenOf('grace') };
+        const credential = { scheme: CredentialScheme.JWT, token: interopTokenOf('grace') };
 
+        client.router.credential = credential;
+
+        // a login opens the connection's session, whatever the call presents
         await expect(interop().login({ name: 'ada' })()).resolves.toBe('ada');
         await expect(interop().whoami(null)()).resolves.toBe('grace');
         await expect(interop().logout(null)()).rejects.toMatchObject({
           code: ProtocolCode.ACCESS_DENIED,
           detail: "a call in a credential's session ends no connection's session",
+          origin: 'peer',
         });
+        expect(client.router.credential).toEqual(credential);
         // the connection's session stays, a call presenting none running in it
         await expect(
           interop().whoami(null)({ credential: { scheme: CredentialScheme.NONE } })
@@ -455,6 +648,15 @@ test.describe('the C# server of the interop service', () => {
         }
 
         await expect(interop().whoami(null)({ credential: elsewhere })).resolves.toBe('ada');
+
+        if (label === 'WebSocket') {
+          // over a WebSocket, those bytes alone: another credential fails before it goes
+          await expect(
+            interop().whoami(null)({
+              credential: { carried: 'Interop sub=bob', scheme: CredentialScheme.ELSEWHERE },
+            })
+          ).rejects.toMatchObject({ code: ProtocolCode.DESTINATION_UNREACHABLE, origin: 'local' });
+        }
       });
 
       test('login and register hold a duration as section 1.4 does: a fraction rounded, one under a millisecond or past 2³¹ − 1 refused with PROCEDURE_FAILED, nothing opened or registered', async () => {
@@ -485,10 +687,26 @@ test.describe('the C# server of the interop service', () => {
             sessionTimeout: 99.6,
           })()
         ).resolves.toBe('ada');
-        await sleep(400);
-        await expect(interop().whoami(null)()).rejects.toMatchObject({
-          code: ProtocolCode.SESSION_REQUIRED,
-        });
+
+        // ! the other side's timer may not have fired on a loaded runner, and an ask that finds the
+        // session still there counts afresh: ask again after each silence, until one ends it
+        let code: unknown;
+
+        for (let tries = 0; tries < 10 && code !== ProtocolCode.SESSION_REQUIRED; tries += 1) {
+          await sleep(400);
+          code = await interop()
+            .whoami(null)()
+            .then(
+              () => {
+                return undefined;
+              },
+              (reason: unknown) => {
+                return (reason as { code?: unknown }).code;
+              }
+            );
+        }
+
+        expect(code).toBe(ProtocolCode.SESSION_REQUIRED);
       });
 
       // HTTP carries no transfer: a payload is what one envelope holds

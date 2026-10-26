@@ -71,8 +71,9 @@ public sealed class EnvelopeCodecTests
             EnvelopeCodec.ReadEnvelope(bytes, options);
         });
 
-        Assert.Equal(vector.GetProperty("code").GetUInt16(), failure.Code);
-        Assert.Equal(RouterSide.Server, failure.Side);
+        Assert.Equal(
+            (vector.GetProperty("code").GetUInt16(), FailureScope.Protocol, FailureOrigin.Local, RouterSide.Server),
+            (failure.Code, failure.Scope, failure.Origin, failure.Side));
 
         if (vector.TryGetProperty("detail", out var detail))
         {
@@ -84,6 +85,49 @@ public sealed class EnvelopeCodecTests
     public void Skips_an_advisory_envelope()
     {
         Assert.Null(EnvelopeCodec.ReadEnvelope(Vectors.FromHexadecimal("A1 80 00 02  00 00 00 03 | 01"), Options));
+    }
+
+    [Fact]
+    public void Takes_an_envelope_of_the_largest_size_and_refuses_one_byte_more()
+    {
+        var exact = new byte[64];
+
+        Vectors.FromHexadecimal("A1 11 00 02  00 00 00 03").CopyTo(exact, 0);
+
+        Assert.Equal(EnvelopeKind.Result, EnvelopeCodec.ReadEnvelope(exact, Options)?.Kind);
+
+        var larger = new byte[65];
+
+        Vectors.FromHexadecimal("A1 11 00 02  00 00 00 03").CopyTo(larger, 0);
+
+        var failure = Assert.Throws<FailureException>(() =>
+        {
+            EnvelopeCodec.ReadEnvelope(larger, Options);
+        });
+
+        Assert.Equal(((ushort)ProtocolCode.EnvelopeTooLarge, RouterSide.Server), (failure.Code, failure.Side));
+
+        // what is not an envelope is malformed, however large
+        larger[0] = 0x0A;
+
+        Assert.Equal((ushort)ProtocolCode.EnvelopeMalformed, Assert.Throws<FailureException>(() =>
+        {
+            EnvelopeCodec.ReadEnvelope(larger, Options);
+        }).Code);
+    }
+
+    [Fact]
+    public void Cuts_a_failure_s_detail_to_the_bytes_it_is_given_a_character_whole()
+    {
+        var bytes = EnvelopeCodec.WriteEnvelope(
+            new Envelope
+            {
+                Header = new FailureHeader { CallId = 3 },
+                Failure = new Failure { Code = 1, Detail = "abcdéf", Scope = FailureScope.Protocol },
+            },
+            5);
+
+        Assert.Equal("abcd", EnvelopeCodec.ReadEnvelope(bytes, Options)?.Failure?.Detail);
     }
 
     [Fact]
@@ -118,12 +162,14 @@ public sealed class EnvelopeCodecTests
         var vector = Vectors.Of("failureRefusals", name);
         var record = Vectors.BytesOf(vector, "record");
 
+        var failure = Assert.Throws<FailureException>(() =>
+        {
+            EnvelopeCodec.ReadFailure(record, Options);
+        });
+
         Assert.Equal(
-            vector.GetProperty("code").GetUInt16(),
-            Assert.Throws<FailureException>(() =>
-            {
-                EnvelopeCodec.ReadFailure(record, Options);
-            }).Code);
+            (vector.GetProperty("code").GetUInt16(), FailureScope.Protocol, FailureOrigin.Local, RouterSide.Server),
+            (failure.Code, failure.Scope, failure.Origin, failure.Side));
     }
 
     [Fact]
@@ -132,29 +178,43 @@ public sealed class EnvelopeCodecTests
         var kept = $"{new string('a', 1_020)}😀";
         var cut = $"{new string('a', 1_021)}😀";
 
+        Assert.Equal(new string('a', 1_024), EnvelopeCodec.ReadFailure(RecordOf(new string('a', 1_025)), Options).Detail);
         Assert.Equal(kept, EnvelopeCodec.ReadFailure(RecordOf(kept), Options).Detail);
         Assert.Equal(new string('a', 1_021), EnvelopeCodec.ReadFailure(RecordOf(cut), Options).Detail);
     }
 
     // spec 7.4
-    [Theory]
-    [InlineData("abcdéf", 5, "abcd")]
-    [InlineData("abcdéf", 6, "abcdé")]
-    [InlineData("abc😀", 6, "abc")]
-    [InlineData("abc😀", 7, "abc😀")]
-    [InlineData("", 1_024, "")]
-    public void Writes_a_detail_cut_on_a_character_boundary(string detail, int maximumDetailBytes, string expected)
+    [Fact]
+    public void Cuts_the_detail_at_the_limit_at_a_character_s_boundary()
     {
-        var record = EnvelopeCodec.WriteFailure(
-            new Failure { Code = 19, Detail = detail, Scope = FailureScope.Protocol },
-            maximumDetailBytes);
+        static string DetailOf(string detail)
+        {
+            var record = EnvelopeCodec.WriteFailure(new Failure { Code = 1, Detail = detail, Scope = FailureScope.Protocol });
 
-        Assert.Equal(RecordOf(expected), record);
+            return Encoding.UTF8.GetString(record.AsSpan(4));
+        }
+
+        static string Letters(int count)
+        {
+            return new string('a', count);
+        }
+
+        Assert.Equal(1_024, LimitDefaults.MaximumDetailBytes);
+        Assert.Equal(Letters(1_024), DetailOf(Letters(1_100)));
+        Assert.Equal($"{Letters(1_022)}é", DetailOf($"{Letters(1_022)}é"));
+        Assert.Equal(Letters(1_023), DetailOf($"{Letters(1_023)}é"));
+        Assert.Equal(Letters(1_022), DetailOf($"{Letters(1_022)}€"));
+        Assert.Equal(Letters(1_021), DetailOf($"{Letters(1_021)}😀"));
+        Assert.Equal($"{Letters(1_020)}😀", DetailOf($"{Letters(1_020)}😀"));
+        Assert.Equal("", DetailOf(""));
+        Assert.Equal(
+            Vectors.FromHexadecimal("00 01 00 00  61 62 63"),
+            EnvelopeCodec.WriteFailure(new Failure { Code = 1, Detail = "abcdef", Scope = FailureScope.Protocol }, 3));
     }
 
     // spec 7.4
     [Fact]
-    public void Writes_a_lone_surrogate_as_a_replacement_character()
+    public void Writes_a_lone_surrogate_as_U_FFFD()
     {
         var record = EnvelopeCodec.WriteFailure(
             new Failure { Code = 19, Detail = "a\uD800b", Scope = FailureScope.Protocol });
@@ -169,6 +229,17 @@ public sealed class EnvelopeCodecTests
             new Failure { Code = 21, Relays = 2, Scope = FailureScope.Application });
 
         Assert.Equal(Vectors.FromHexadecimal("00 15 02 01"), record);
+
+        // the relays a failure crossed, from 0 to 255, which a byte holds alone; none by default
+        foreach (var relays in new byte[] { 0, 1, 255 })
+        {
+            var crossed = EnvelopeCodec.WriteFailure(new Failure { Code = 19, Relays = relays, Scope = FailureScope.Protocol });
+
+            Assert.Equal(relays, crossed[2]);
+            Assert.Equal(relays, EnvelopeCodec.ReadFailure(crossed, Options).Relays);
+        }
+
+        Assert.Equal(0, EnvelopeCodec.WriteFailure(new Failure { Code = 19, Scope = FailureScope.Protocol })[2]);
     }
 
     [Fact]
@@ -182,6 +253,12 @@ public sealed class EnvelopeCodecTests
         {
             EnvelopeCodec.WriteFailure(new Failure { Code = 19, Scope = (FailureScope)2 });
         });
+        Assert.Equal(
+            Vectors.FromHexadecimal("10 00 00 01"),
+            EnvelopeCodec.WriteFailure(new Failure { Code = 0x1000, Scope = FailureScope.Application }));
+        Assert.Equal(
+            Vectors.FromHexadecimal("FF FF 00 00"),
+            EnvelopeCodec.WriteFailure(new Failure { Code = 0xFFFF, Scope = FailureScope.Protocol }));
     }
 
     [Fact]

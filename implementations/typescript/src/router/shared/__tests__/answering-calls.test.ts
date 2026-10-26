@@ -71,7 +71,7 @@ test.describe('createAnsweringCalls', () => {
     ]);
   });
 
-  test('open a call as its request is dispatched, and find it again by that very header alone', () => {
+  test('opens a call as its request is dispatched, and finds it again by that very header alone', () => {
     const calls = createAnsweringCalls({ clock: createTestClock() });
     const header = headerOf(3);
     const controller = calls.open({ connectionHandle: 'a', header });
@@ -82,9 +82,10 @@ test.describe('createAnsweringCalls', () => {
     expect(calls.isAnswering({ connectionHandle: 'a', header })).toBe(true);
     // a copy was never dispatched: it finds no call, and is taken as one to answer
     expect(calls.controllerOf({ ...header })).toBeUndefined();
+    expect(calls.isAnswering({ connectionHandle: 'a', header: { ...header } })).toBe(true);
   });
 
-  test('answer a call no more once its answer goes out, while the call stays until closed; a copy of its header marks nothing', () => {
+  test('answers a call no more once its answer goes out, while the call stays until closed, a copy of its header marking nothing', () => {
     const calls = createAnsweringCalls({ clock: createTestClock() });
     const header = headerOf(3);
     const controller = calls.open({ connectionHandle: 'a', header });
@@ -104,7 +105,7 @@ test.describe('createAnsweringCalls', () => {
     expect(calls.has({ callId: 3, connectionHandle: 'a' })).toBe(false);
   });
 
-  test('answer a call no more once closed by its own controller, taken, or opened again', () => {
+  test('answers a call no more once closed by its own call, taken, or opened again', () => {
     const calls = createAnsweringCalls({ clock: createTestClock() });
     const call = { callId: 3, connectionHandle: 'a' };
     const first = headerOf(3);
@@ -129,7 +130,7 @@ test.describe('createAnsweringCalls', () => {
     expect(calls.isAnswering({ connectionHandle: 'a', header: second })).toBe(false);
   });
 
-  test('take out every call of a connection, or of every one, giving their controllers', () => {
+  test('takes out every call of a connection, or of every one, giving them', () => {
     const calls = createAnsweringCalls({ clock: createTestClock() });
     const first = calls.open({ connectionHandle: 'a', header: headerOf(3) });
     const second = calls.open({ connectionHandle: 'b', header: headerOf(3) });
@@ -142,7 +143,7 @@ test.describe('createAnsweringCalls', () => {
     expect([first.signal.aborted, second.signal.aborted]).toEqual([false, false]);
   });
 
-  test('give a call what it receives, and hear it leave once, whichever way the call leaves', () => {
+  test('gives a call what it receives, and hears it leave once, whichever way the call leaves', () => {
     const removed: string[] = [];
     const calls = createAnsweringCalls<Handle, IReceivingOf>({
       clock: createTestClock(),
@@ -181,7 +182,7 @@ test.describe('createAnsweringCalls', () => {
     expect(removed).toEqual(['closed', 'taken', 'gone']);
   });
 
-  test('keep a call that received a transfer abandoned once it ends, the oldest of a connection yielding', () => {
+  test('keeps a call that received a transfer abandoned once it ends, the oldest of a connection yielding', () => {
     const calls = createAnsweringCalls<Handle, IReceivingOf>({
       clock: createTestClock(),
       limits: { maximumTransfers: 2, transferInactivityTimeout: 250 },
@@ -243,7 +244,7 @@ test.describe('createAnsweringCalls', () => {
     expect(endsOf('b', [1])).toEqual([undefined]);
   });
 
-  test('forget a call abandoned once its transfer’s inactivity is over, on its clock, keeping no process alive', () => {
+  test('forgets a call abandoned once its transfer’s inactivity is over', () => {
     const clock = createTestClock();
     const calls = createAnsweringCalls<Handle, IReceivingOf>({
       clock,
@@ -259,13 +260,10 @@ test.describe('createAnsweringCalls', () => {
     calls.open({ connectionHandle: 'a', header: headerOf(3) });
 
     expect(
-      clock.armed.map(({ delay, handle }) => {
-        return [delay, hasRef(handle)];
+      clock.armed.map(({ delay }) => {
+        return delay;
       })
-    ).toEqual([
-      [250, false],
-      [250, false],
-    ]);
+    ).toEqual([250, 250]);
     // the call a request took stops its timer
     expect(clock.cleared).toEqual([clock.armed[1]?.handle]);
 
@@ -276,6 +274,25 @@ test.describe('createAnsweringCalls', () => {
     clock.tick(1);
 
     expect(calls.abandonedEndOf({ callId: 1, connectionHandle: 'a' })).toBeUndefined();
+    expect(calls.abandonedEndOf({ callId: 3, connectionHandle: 'a' })).toBeUndefined();
+  });
+
+  test('keeps no process alive for an abandoned call’s timer', () => {
+    const clock = createTestClock();
+    const calls = createAnsweringCalls<Handle, IReceivingOf>({
+      clock,
+      limits: { maximumTransfers: 4, transferInactivityTimeout: 250 },
+    });
+
+    calls.open({ connectionHandle: 'a', header: headerOf(1) });
+    calls.attach({ callId: 1, connectionHandle: 'a' }, receivingOf('', 10));
+    calls.take({ callId: 1, connectionHandle: 'a' });
+
+    expect(
+      clock.armed.map(({ handle }) => {
+        return hasRef(handle);
+      })
+    ).toEqual([false]);
   });
 
   test('count the calls answered and those abandoned, and the connections they belong to', () => {
@@ -287,16 +304,20 @@ test.describe('createAnsweringCalls', () => {
     calls.attach(call, receivingOf('abandoned', 4));
     calls.close(call, controller);
 
-    expect(calls.gauges()).toMatchObject({
-      connectionHandles: new Set(['a', 'b']),
-      counts: { abandonedCalls: 1, answeringCalls: 1 },
+    expect(calls.gauges().connectionHandles).toEqual(new Set(['a', 'b']));
+    expect(calls.gauges().counts).toEqual({
+      abandonedCalls: 1,
+      answeringCalls: 1,
+      largestAnsweringCalls: 1,
     });
 
     calls.takeAll();
 
-    expect(calls.gauges()).toMatchObject({
-      connectionHandles: new Set(),
-      counts: { abandonedCalls: 0, answeringCalls: 0 },
+    expect(calls.gauges().connectionHandles).toEqual(new Set());
+    expect(calls.gauges().counts).toEqual({
+      abandonedCalls: 0,
+      answeringCalls: 0,
+      largestAnsweringCalls: 0,
     });
   });
 

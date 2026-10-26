@@ -156,6 +156,24 @@ internal static class WebSocketHandshake
             && elements.Distinct(StringComparer.Ordinal).Count() == elements.Count;
     }
 
+    // no content: each Content-Length line is zeros alone, as written, never a length the platform
+    // read from it, which a line it cannot read leaves absent
+    private static bool IsNoContent(StringValues lines)
+    {
+        foreach (var line in lines)
+        {
+            if (string.IsNullOrEmpty(line) || line.Any((digit) =>
+            {
+                return digit != '0';
+            }))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
     // whether a Sec-WebSocket-Key is one field line of 16 bytes in base64 (RFC 6455 §4.2.1 item 5,
     // §11.3.1): 22 characters of the alphabet, then two pads
     private static bool IsKey(StringValues lines)
@@ -202,7 +220,7 @@ internal static class WebSocketHandshake
         return IsKey(headers.SecWebSocketKey)
             && (headers.SecWebSocketProtocol.Count == 0 || IsSubprotocolList(headers.SecWebSocketProtocol))
             && headers.Authorization.Count <= 1
-            && headers.ContentLength is null or 0
+            && IsNoContent(headers["Content-Length"])
             && headers.TransferEncoding.Count == 0;
     }
 
@@ -233,8 +251,9 @@ internal static class WebSocketHandshake
     /// <summary>
     /// What the server answers a request at its WebSocket's address, or none when it upgrades it:
     /// what HTTP refuses of its own, a field value that holds a control character but HTAB or a
-    /// character past ASCII, a <c>Host</c> missing or repeated, or an authority that is no host, 400
-    /// unmarked; a host not taken, 403; a method but GET or HEAD, 405; a request that asks no WebSocket, 426;
+    /// character past ASCII, a target that holds an octet other than visible ASCII or a path whose
+    /// percent-decoding holds NUL, a <c>Host</c> missing or repeated, or an authority that is no
+    /// host, 400 unmarked; a host not taken, 403; a method but GET or HEAD, 405; a request that asks no WebSocket, 426;
     /// a version but 13, 426, and one in two field lines, 400; a malformed upgrade, two
     /// <c>Authorization</c> lines among it, 400; an origin not taken, 403.
     /// </summary>
@@ -247,8 +266,9 @@ internal static class WebSocketHandshake
 
         // * a field HTTP would call malformed before anything else is judged (spec 15.12): Kestrel
         // refuses 400 an octet that is no UTF-8, and decodes the rest, a character past ASCII among
-        // them, and takes a control character, which this refuses as HTTP refuses a malformed field
-        var isVisible = headers.All((field) =>
+        // them, and takes a control character, which this refuses as HTTP refuses a malformed field;
+        // and so a target past visible ASCII, which Kestrel takes alike, over every protocol
+        var isVisible = HostsAndOrigins.IsVisibleTarget(request.HttpContext.Features.Get<IHttpRequestFeature>()?.RawTarget) && headers.All((field) =>
         {
             return field.Value.All((value) =>
             {
@@ -268,7 +288,7 @@ internal static class WebSocketHandshake
         var isHttp1 = HttpProtocol.IsHttp10(request.Protocol) || HttpProtocol.IsHttp11(request.Protocol);
         var targetAuthority = TargetAuthorityOf(request);
 
-        if (isHttp1 && !HostsAndOrigins.IsWellFormedHost(headers.Host, (HttpProtocol.IsHttp11(request.Protocol), targetAuthority)))
+        if (isHttp1 && (!HostsAndOrigins.IsTakenTarget(request.HttpContext.Features.Get<IHttpRequestFeature>()?.RawTarget) || !HostsAndOrigins.IsWellFormedHost(headers.Host, (HttpProtocol.IsHttp11(request.Protocol), targetAuthority))))
         {
             return BadRequest;
         }

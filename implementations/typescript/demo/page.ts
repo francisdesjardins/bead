@@ -32,6 +32,10 @@ import {
 } from './procedures';
 import { drawGlyph, GLYPH_BYTES, GLYPH_SIDE } from './glyph';
 import { createQuietCalls, watchDebug } from './debug';
+import { SignUpProcedures } from './gen/typescript/demo/v1/sign_up_bead';
+import { mountScenes } from './scenes';
+import { mountSides } from './sides';
+import { mountSignUp } from './sign-up';
 import {
   answeredOf,
   type IAnswered,
@@ -94,10 +98,16 @@ const READ_NAMES = READS.map(({ procedureName }) => {
   return procedureName;
 });
 
-/** The demo's procedures by id, so an envelope, which carries none of their names, shows one. */
-const PROCEDURE_NAMES: Readonly<Record<number, string>> = Object.fromEntries(
-  Object.values(CALLS).map(({ procedure }) => {
-    return [procedure.procedureId, procedure.procedureName];
+/**
+ * The demo's procedures by their service and their id, the sign-up's among them, so an envelope,
+ * which carries none of their names, shows one.
+ */
+const PROCEDURE_NAMES: Readonly<Record<string, string>> = Object.fromEntries(
+  [...Object.values(CALLS), ...Object.values(SignUpProcedures)].map(({ procedure }) => {
+    return [
+      `${String(procedure.serviceId)}/${String(procedure.procedureId)}`,
+      procedure.procedureName,
+    ];
   })
 );
 
@@ -171,9 +181,9 @@ const envelopeLineOf = ({ direction, header }: IRouterDebugInfo): string => {
   ];
 
   if (header.kind === EnvelopeKind.REQUEST) {
-    parts.push(
-      `${PROCEDURE_NAMES[header.procedureId] ?? '?'} (${String(header.serviceId)}/${String(header.procedureId)})`
-    );
+    const address = `${String(header.serviceId)}/${String(header.procedureId)}`;
+
+    parts.push(`${PROCEDURE_NAMES[address] ?? '?'} (${address})`);
 
     if (header.opensSubscription === true) {
       parts.push(header.paced === true ? 'paced subscription' : 'subscription');
@@ -372,15 +382,20 @@ const workerOf = (): IWorkerLike => {
 
 // what the page's client counts: the calls it made, and the commands it answered
 const metricsRegistry = createMetricsRegistry();
+// the sign-up's short-detail link bounds the client's own refusals, on any transport
+const limits =
+  new URLSearchParams(location.search).get('detail') === 'short'
+    ? { maximumDetailBytes: 256 }
+    : undefined;
 const workerClient =
   transport === 'worker'
-    ? createWorkerClient({ metricsRegistry, transport: { worker: workerOf() } })
+    ? createWorkerClient({ limits, metricsRegistry, transport: { worker: workerOf() } })
     : undefined;
 const client: IClient =
   workerClient ??
   (transport === 'http'
-    ? createHTTPClient({ metricsRegistry })
-    : createWSClient({ metricsRegistry }));
+    ? createHTTPClient({ limits, metricsRegistry })
+    : createWSClient({ limits, metricsRegistry }));
 const { services } = client;
 // the page's own port: the server relays the upgrade to the Bead server behind it
 const port = Number(
@@ -389,14 +404,14 @@ const port = Number(
 const pathname = document.body.dataset['beadPathname'] ?? '/';
 const shown = {
   burst: elementOf('burst'),
-  calls: elementOf('calls'),
+  calls: elementOf('calls-log'),
   // each a <details>, as the page declares it
   clientExposition: elementOf('client-exposition') as HTMLDetailsElement,
   clientMetrics: elementOf('client-metrics'),
   connection: elementOf('connection'),
   counter: elementOf('counter'),
   durations: elementOf('durations'),
-  envelopes: elementOf('envelopes'),
+  envelopes: elementOf('envelopes-log'),
   gauges: elementOf('gauges'),
   // a canvas, as the page declares it
   glyph: elementOf('glyph') as HTMLCanvasElement,
@@ -862,6 +877,12 @@ services.on('dropped', (procedure, failure) => {
 
 // a developer's own, to the console, as the `localStorage` of the page says, the reads aside
 watchDebug(client, { quiet: READS });
+
+// the sign-up, its request held to the rules of its .proto
+mountSignUp(client, { reasonOf });
+mountSides();
+// the scenes, one a tab, and the logs beside them
+mountScenes();
 
 // an exposition opened is written at once, from its last text
 for (const details of [shown.clientExposition, shown.serverExposition]) {

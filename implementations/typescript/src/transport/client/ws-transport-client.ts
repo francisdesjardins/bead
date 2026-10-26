@@ -4,12 +4,23 @@
 
 import {
   CLOSE_EVENT,
+  CLOSE_TIMEOUT,
+  ERROR_EVENT,
   MESSAGE_EVENT,
   REFUSAL_HEADER,
   TRANSPORT_WEBSOCKET_BINARYTYPE,
+  WS_ERROR_CODE_PREFIX,
+  WS_TOO_BIG_CODE,
 } from '../shared/constants';
+import { assertHeld, LONGEST_TIMER } from '../shared/clock';
 import { createPromise } from '../shared/create-promise';
-import { ConnectError, ProgrammerError, ReadyStateError, wrapReason } from '../shared/errors';
+import {
+  ConnectError,
+  ProgrammerError,
+  ReadyStateError,
+  tooBigOf,
+  wrapReason,
+} from '../shared/errors';
 import { assertHeartbeat, createHeartbeat, HEARTBEAT, type IHeartbeat } from '../shared/heartbeat';
 import { noop } from '../shared/noop';
 import { isSecureUrl } from '../shared/secure';
@@ -38,7 +49,7 @@ import type {
   WSTransportClient,
 } from './types';
 
-export { TRANSPORT_WEBSOCKET_BINARYTYPE } from '../shared/constants';
+export { CLOSE_TIMEOUT, TRANSPORT_WEBSOCKET_BINARYTYPE } from '../shared/constants';
 export { HEARTBEAT } from '../shared/heartbeat';
 export type {
   ICloseEventLike,
@@ -50,6 +61,16 @@ export type {
   IWSTransportClientOptions,
   WSTransportClient,
 } from './types';
+
+interface ICredentialWaiter {
+  resolve: (value: string) => void;
+  reject: (reason: unknown) => void;
+}
+
+interface IPendingCredential {
+  outcome: Promise<string>;
+  abandoned: boolean;
+}
 
 // constants
 
@@ -70,6 +91,19 @@ export const CONNECT_DEFAULTS = Object.freeze({
 /** The error an `error` event carries, when the implementation gives one. */
 const errorOf = (event: unknown): unknown => {
   return typeof event === 'object' && event !== null && 'error' in event ? event.error : undefined;
+};
+
+/**
+ * Whether an error fails the connection of this side's own: one `ws` codes, a protocol error or a
+ * message past its bound, as its receiver emits them. Its sender's own, a socket's and the global
+ * `WebSocket`'s carry no such code.
+ */
+const isOwnFailure = (error: unknown): error is Error & { code: string } => {
+  if (!(error instanceof Error) || !('code' in error)) {
+    return false;
+  }
+
+  return typeof error.code === 'string' && error.code.startsWith(WS_ERROR_CODE_PREFIX);
 };
 
 /**
@@ -135,10 +169,21 @@ const refusalOf = ({ headers, statusCode }: IUpgradeResponseLike): string => {
  * redirect: a 3xx answered to its upgrade fails its connect, its status named (spec 15.6). It is
  * secure under `wss`, or to a loopback host. Over `ws`, a message is an envelope at most by default,
  * {@link MAXIMUM_MESSAGE_BYTES}, and a larger one closes the connection with 1009; over the global
- * `WebSocket`, its platform's bound applies. Over `ws`, an upgrade refused fails the connect with
- * its status and its reason, "the server refused the upgrade: 403 host-refused"; the global
- * `WebSocket` reads nothing of it, as the WHATWG WebSockets Standard has a page's, and names its
- * close alone, 1006.
+ * `WebSocket`, its platform's bound applies. Over `ws`, each close it begins — its `disconnect`'s,
+ * a dispose's, its 1009 — waits on the server's answer `closeTimeout` at most, which `ws` is given,
+ * then drops the socket; over the global `WebSocket`, its platform bounds its close. Over `ws`, an
+ * upgrade refused fails the connect with its status and its reason, "the server refused the
+ * upgrade: 403 host-refused"; the global `WebSocket` reads nothing of it, as the WHATWG WebSockets
+ * Standard has a page's, and names its close alone, 1006.
+ *
+ * Once open, over `ws`, `error` tells what this side fails its connection for of its own (spec
+ * 15.1): a protocol error, `ws`'s own error, or a message past `maxPayload`, a
+ * `GenericError` "the connection is closed with 1009: a message past its maximumMessageBytes,
+ * N bytes" keeping `ws`'s error as its `cause`; each once, as the connection ends, before its
+ * unclean `close`, so a listener that throws keeps the close told. A server gone without its
+ * closing handshake, its heartbeat's drop, and `ws`'s own drop past `closeTimeout` tell their
+ * `close` alone; so does every unclean close over the global `WebSocket`, whose bare `error` cannot
+ * be told from a drop.
  *
  * @example
  * const client = createWSTransportClient();
@@ -151,6 +196,7 @@ export const createWSTransportClient = (options?: IWSTransportClientOptions): WS
   const {
     binaryType = TRANSPORT_WEBSOCKET_BINARYTYPE,
     clock,
+    closeTimeout: givenCloseTimeout = CLOSE_TIMEOUT,
     heartbeat: givenHeartbeat = HEARTBEAT,
     maxPayload = MAXIMUM_MESSAGE_BYTES,
     WebSocket = globalThis.WebSocket,
@@ -159,6 +205,7 @@ export const createWSTransportClient = (options?: IWSTransportClientOptions): WS
     ...options,
   };
   const heartbeat = assertHeartbeat(givenHeartbeat);
+  const closeTimeout = assertHeld('a close timeout', givenCloseTimeout);
 
   return createTransportClient<IWebSocketLike, IWSTransportClientConnectOptions>(
     (client, { tell }) => {
@@ -173,6 +220,10 @@ export const createWSTransportClient = (options?: IWSTransportClientOptions): WS
       let isSecure = false;
       // the credential the upgrade of the current connection carried; none before it opens
       let carried: string | undefined;
+      // the provider's one pending call; an abandoned outcome serves no attempt
+      let pendingCredential: IPendingCredential | undefined;
+      // each attempt still waiting for that call's outcome
+      const credentialWaiters = new Set<ICredentialWaiter>();
 
       // a drop closes as a network does, and the open socket's `onclose` reports it
       const beatOf = (socket: IWebSocketLike): IHeartbeat | undefined => {
@@ -263,6 +314,8 @@ export const createWSTransportClient = (options?: IWSTransportClientOptions): WS
           const url = urlOf({ ...CONNECT_DEFAULTS, ...connectOptions });
           // what the attempt's credential provider is told to give up by: the attempt settled
           const attempt = new AbortController();
+          let ended = false;
+          const providerAttempt: { pending?: IPendingCredential; waiter?: ICredentialWaiter } = {};
           let opened: IWebSocketLike | undefined;
 
           isSecure = isSecureUrl(url);
@@ -284,12 +337,20 @@ export const createWSTransportClient = (options?: IWSTransportClientOptions): WS
                   const written = given === '' ? undefined : given;
                   let socket: IWebSocketLike;
 
+                  // ! `closeTimeout`, `ws`'s own close timer, which it arms on every close, its
+                  // 1009 among them: the transport's, so a server that never answers is dropped
+                  // after one bound; for `Infinity`, the longest a timer holds, which Node would
+                  // take for 1 ms
                   try {
                     socket =
                       opened =
                       client.socket =
                         new WebSocket(url, protocols, {
+                          closeTimeout: closeTimeout === Infinity ? LONGEST_TIMER : closeTimeout,
                           maxPayload,
+                          // ! no permessage-deflate offer, as the C# client offers none: a third-party
+                          // server must not negotiate compression on this side alone (RFC 7692)
+                          perMessageDeflate: false,
                           ...(written === undefined ? {} : { headers: { authorization: written } }),
                         });
                   } catch (reason) {
@@ -327,8 +388,25 @@ export const createWSTransportClient = (options?: IWSTransportClientOptions): WS
                     );
                   };
                   socket.onopen = () => {
-                    // an error is always followed by its close, and once open the close is what reports it
-                    socket.onerror = noop;
+                    // * what this side fails the connection for of its own, `ws`'s alone: a protocol
+                    // error, or a message past `maxPayload`, told by the bound and its value; a drop
+                    // emits none, and the global `WebSocket`'s bare `error` cannot be told from one
+                    // (spec 15.1)
+                    let failure: Error | undefined;
+
+                    socket.onerror = (event) => {
+                      const error = errorOf(event);
+
+                      if (failure === undefined && isOwnFailure(error)) {
+                        failure =
+                          error.code === WS_TOO_BIG_CODE
+                            ? tooBigOf('the connection', {
+                                cause: error,
+                                maximumMessageBytes: maxPayload,
+                              })
+                            : error;
+                      }
+                    };
                     socket.onmessage = ({ data }) => {
                       if (client.isClosing()) {
                         return undefined;
@@ -340,13 +418,21 @@ export const createWSTransportClient = (options?: IWSTransportClientOptions): WS
                       );
                     };
 
+                    // * its end: its one error, then its close, told even when a listener of
+                    // `error` throws, which is Node's or the page's (spec 15.1)
                     socket.onclose = () => {
                       stopBeating();
 
                       if (!client.isReconnecting()) {
                         setReadyStateClosed(client);
 
-                        tell(CLOSE_EVENT, [false, false]);
+                        try {
+                          if (failure !== undefined) {
+                            client.emit(ERROR_EVENT, failure);
+                          }
+                        } finally {
+                          tell(CLOSE_EVENT, [false, false]);
+                        }
                       }
                     };
 
@@ -362,34 +448,85 @@ export const createWSTransportClient = (options?: IWSTransportClientOptions): WS
                   return (open(credential), undefined);
                 }
 
-                // called at each attempt, before its upgrade goes: what it hands is written once
-                // held, what it throws fails the attempt, its cause
-                Promise.resolve()
-                  .then(() => {
-                    return credentialProvider({ signal: attempt.signal });
-                  })
-                  .then(
-                    (provided) => {
-                      if (attempt.signal.aborted) {
-                        return;
+                const credentialWaiter: ICredentialWaiter = {
+                  resolve: (provided) => {
+                    if (ended || signal?.aborted === true) {
+                      return;
+                    }
+
+                    if (typeof provided !== 'string' || !isFieldValue(provided)) {
+                      reject(
+                        new ProgrammerError(
+                          'a credential holds visible ASCII, spaces and tabs alone, none first or last'
+                        )
+                      );
+
+                      return;
+                    }
+
+                    open(provided);
+                  },
+                  reject: (reason: unknown) => {
+                    reject(new ConnectError('the credential provider failed', { cause: reason }));
+                  },
+                };
+                const provide = (): void => {
+                  if (ended || signal?.aborted === true) {
+                    return;
+                  }
+
+                  // an abandoned call settles before another starts; its outcome serves nothing
+                  if (pendingCredential?.abandoned === true) {
+                    providerAttempt.waiter = {
+                      resolve: () => {
+                        provide();
+                      },
+                      reject: () => {
+                        provide();
+                      },
+                    };
+                    credentialWaiters.add(providerAttempt.waiter);
+
+                    return;
+                  }
+
+                  providerAttempt.waiter = credentialWaiter;
+                  credentialWaiters.add(credentialWaiter);
+                  if (pendingCredential !== undefined) {
+                    return;
+                  }
+
+                  const pending: IPendingCredential = {
+                    abandoned: false,
+                    outcome: Promise.resolve().then(() => {
+                      return credentialProvider({ signal: attempt.signal });
+                    }),
+                  };
+                  providerAttempt.pending = pendingCredential = pending;
+                  const finish = (outcome: { value: string } | { reason: unknown }): void => {
+                    if (pendingCredential === pending) {
+                      pendingCredential = undefined;
+                    }
+                    const waiting = [...credentialWaiters];
+                    credentialWaiters.clear();
+                    for (const waiter of waiting) {
+                      if ('value' in outcome) {
+                        waiter.resolve(outcome.value);
+                      } else {
+                        waiter.reject(outcome.reason);
                       }
-
-                      if (typeof provided !== 'string' || !isFieldValue(provided)) {
-                        reject(
-                          new ProgrammerError(
-                            'a credential holds visible ASCII, spaces and tabs alone, none first or last'
-                          )
-                        );
-
-                        return;
-                      }
-
-                      open(provided);
+                    }
+                  };
+                  void pending.outcome.then(
+                    (value) => {
+                      finish({ value });
                     },
                     (reason: unknown) => {
-                      reject(new ConnectError('the credential provider failed', { cause: reason }));
+                      finish({ reason });
                     }
                   );
+                };
+                provide();
 
                 return undefined;
               },
@@ -413,7 +550,24 @@ export const createWSTransportClient = (options?: IWSTransportClientOptions): WS
             throw reason;
           } finally {
             rejectConnect = undefined;
-            attempt.abort();
+            ended = true;
+            if (providerAttempt.waiter !== undefined) {
+              credentialWaiters.delete(providerAttempt.waiter);
+            }
+            if (providerAttempt.pending === undefined) {
+              attempt.abort();
+            } else {
+              // abandonment is visible before callbacks run, so a later attempt cannot join it
+              providerAttempt.pending.abandoned = true;
+              // oxlint-disable-next-line no-restricted-properties -- provider callbacks run after the connect settles, outside its stack
+              globalThis.setTimeout(() => {
+                try {
+                  attempt.abort();
+                } catch {
+                  /* the provider cannot replace the attempt's outcome */
+                }
+              }, 0);
+            }
           }
 
           setReadyStateOpen(client);
@@ -510,7 +664,7 @@ export const createWSTransportClient = (options?: IWSTransportClientOptions): WS
         [dispose]: () => {
           const { socket } = client;
 
-          rejectConnect?.(new ConnectError('disposed while connecting'));
+          rejectConnect?.(new ConnectError('the transport client was disposed as it connected'));
           resolveDisconnect?.(true);
           stopBeating();
 
