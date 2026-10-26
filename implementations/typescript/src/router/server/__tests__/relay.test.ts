@@ -30,6 +30,7 @@ import type {
 } from '../../shared/types';
 import { createRouterClient } from '../../client/router-client';
 import { readEnvelope, writeEnvelope } from '../../shared/envelope';
+import { toSessionToken } from '../../shared/identifiers';
 import { createPipedTransports } from '../../shared/__tests__/fixtures';
 import { createRelay } from '../relay';
 import { createRouterServer, shareLegBSession } from '../router-server';
@@ -211,6 +212,80 @@ const failuresOf = (answers: [RouterAnswer, IRequestHeader][]) => {
 };
 
 // definition
+
+test('refuses bearer credentials when a destination supplies no carriage metadata and still forwards none or OPAQUE', async () => {
+  const { answers, own, relay, reports } = createTestRelay();
+  const { asked, target } = createTarget();
+
+  relay.register({ connectionHandle: device }, { audience: 'bead-interop', destinationId: 7 });
+  relay.register(target, { audience: 'bead-interop', destinationId: 8 });
+
+  for (const destinationId of [7, 8]) {
+    for (const [callId, credential, detail] of [
+      [
+        1,
+        { scheme: CredentialScheme.JWT, token: tokenNaming('bead-interop') },
+        'its transport leaves the machine in the clear, which a bearer credential never crosses',
+      ],
+      [
+        3,
+        { scheme: CredentialScheme.ELSEWHERE },
+        'its transport does not carry the credential ELSEWHERE stands for beside an envelope: none, or another',
+      ],
+    ] as const) {
+      const header = presentingOf(callId, { credential, destinationId });
+
+      await relay.handlerOf(destinationId)?.({
+        ...propsOf(header, { isAdmitted: false }),
+        transportCredential: 'Interop sub=ada',
+      });
+
+      expect(answers.at(-1)).toEqual([
+        {
+          failure: {
+            ...SERVER_FAILURES.destinationUnreachable,
+            detail: `destination ${String(destinationId)} is unreachable: ${detail}`,
+          },
+        },
+        header,
+      ]);
+    }
+  }
+
+  expect(own).toEqual([]);
+  expect(asked).toEqual([]);
+
+  for (const destinationId of [7, 8]) {
+    for (const [callId, credential] of [
+      [5, undefined],
+      [7, { scheme: CredentialScheme.OPAQUE, token: toSessionToken(new Uint8Array(16).fill(1)) }],
+    ] as const) {
+      await relay.handlerOf(destinationId)?.(
+        propsOf(presentingOf(callId, { credential, destinationId }), { isAdmitted: false })
+      );
+    }
+  }
+
+  for (const requests of [own, asked]) {
+    expect(requests).toHaveLength(2);
+    expect(
+      requests.map(({ options }) => {
+        return options.credential;
+      })
+    ).toEqual([{ scheme: CredentialScheme.NONE }, { scheme: CredentialScheme.NONE }]);
+    expect(
+      requests.map(({ payload }) => {
+        return [...payload];
+      })
+    ).toEqual([
+      [1, 2, 3],
+      [1, 2, 3],
+    ]);
+  }
+
+  expect(failuresOf(answers).slice(4)).toEqual([[8], [8], [9], [9]]);
+  expect(reports).toEqual([]);
+});
 
 /** A token whose claims set names `aud`, as a relay reads it without verifying it. */
 const tokenNaming = (aud: unknown): string => {

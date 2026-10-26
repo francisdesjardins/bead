@@ -2833,6 +2833,73 @@ test.describe('createRouterClient', () => {
   });
 
   test.describe('metrics', () => {
+    test('keeps a notification refused by its registry unregistered and accepts the declared procedure afterward', async () => {
+      for (const [procedure, detail] of [
+        [
+          { ...service, procedureName: 'other' },
+          'the metrics registry holds 2/1 as "echo", and is given "other": another name at its address',
+        ],
+        [
+          { ...service, procedureId: 2 },
+          'the metrics registry holds "echo" at 2/1, and is given "echo" at 2/2: its name at another address',
+        ],
+        [
+          { ...service, procedureId: 2, procedureName: 'other' },
+          "the metrics registry's notification families name 1 procedures at most, and 2/2 is one more: past the ceiling",
+        ],
+      ] as const) {
+        const metricsRegistry = createMetricsRegistry({ maximumProcedures: 1 });
+        const source = createScriptedTransport();
+        using declaring = createRouterClient(source.transport, { metricsRegistry });
+        const held = notificationOf([]);
+
+        await declaring.registerNotification(held);
+
+        const { deliver, sent, transport } = createScriptedTransport();
+        using router = createRouterClient(transport, { metricsRegistry });
+        const errors = recordErrors(router);
+        const before = metricsRegistry.exposition();
+        const rejected = notificationOf([], procedure);
+        const registering = router.registerNotification(rejected);
+
+        await expect(registering).rejects.toBeInstanceOf(ProgrammerError);
+        await expect(registering).rejects.toThrow(detail);
+        expect(router.hasNotification(rejected)).toBe(false);
+        expect(declaring.hasNotification(held)).toBe(true);
+        expect(metricsRegistry.exposition()).toEqual(before);
+        expect(sent).toEqual([]);
+
+        const triggered: Uint8Array[] = [];
+        const accepted = notificationOf(triggered);
+
+        await router.registerNotification(accepted);
+
+        expect(router.hasNotification(accepted)).toBe(true);
+
+        const subscribing = router.request(new Uint8Array(0), {
+          options,
+          procedure: service,
+          subscribes: accepted,
+        });
+
+        deliver(resultOf(1));
+        await subscribing;
+        deliver(notificationEnvelopeOf(1));
+
+        expect(triggered).toEqual([new Uint8Array([5])]);
+        expect(countedOf(metricsRegistry)).toContain(
+          'bead_notifications_heard_total{service="2",procedure="echo"} 1'
+        );
+
+        await router.unregisterNotification(accepted);
+
+        expect(router.hasNotification(accepted)).toBe(false);
+        expect(declaring.hasNotification(held)).toBe(true);
+        expect(errors).toEqual([]);
+        expect(source.sent).toEqual([]);
+      }
+    });
+
     // a line of echo's series among the calls a client makes, requests, by the rest of its name, its
     // labels and its value
     const made = (rest: string): string => {
