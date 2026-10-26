@@ -9,6 +9,14 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- Generated HTTP clients on both sides: an output with `http: true` writes a typed
+  `<Service>HttpClient` beside its route table, over fetch or HttpClient, calling the default
+  routes with Bead's JSON mapping, reading problems as Bead failures and notifications as an
+  asynchronous event stream; credentials destined off the machine in the clear fail before
+  dispatch, redirects are refused, and a stream never reconnects automatically. Both clients take
+  the gateway URL first and optional options last; TypeScript calls procedures directly and reads
+  subscriptions through `subscribe<Procedure>`, matching the C# methods.
+
 - The demo answers its sign-up over HTTP and JSON: the internal demo mounts a gateway of beadc's
   route table on its public port, `POST /api/SignUp/signUp` and `/openapi.json`, and the page shows
   the same sign-up as a `curl` and the gateway's answer, a refusal as RFC 9457's problem, written
@@ -233,6 +241,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   the connect's continuation.
   A provider's own cancellation is its failure; a late HTTP connection is released. A provider's
   completion callback runs after connect settles and cannot refuse that connect.
+- Generated HTTP clients read gateway refusals and intermediary statuses as Bead failures, keep
+  status and Retry-After in their detail, distinguish body bounds from malformed payloads and lost
+  streams, and accept a base URL path. Authorization follows the transports' field check; event
+  decoding is bounded and linear. C# disposes only its own handler; fetch uses same-origin credentials.
 - HTTP clients count an exchange whose executor fails after dispatch as handed over and lose the
   connection. An executor's own failure is reported once before the close; answer reads, listens
   and disconnects reach their ending on both sides, including a cancellation the executor raises.

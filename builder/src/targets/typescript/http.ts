@@ -16,6 +16,7 @@ import type { GeneratedFile, Printable } from '@bufbuild/protoplugin';
 import type { IBinding, IBlueprint, IServiceEntry } from '../../model/blueprint.ts';
 import { messagesOf, routesOf } from '../../model/routes.ts';
 import type { IHttpInput } from '../target.ts';
+import { deprecatedOf } from './templates.ts';
 
 // types
 
@@ -39,6 +40,10 @@ export const HTTP_FILE = 'bead_http.ts';
 // a text as a single-quoted literal, the TypeScript side's own quotes
 const quotedOf = (text: string): string => {
   return `'${text.replaceAll('\\', '\\\\').replaceAll("'", "\\'")}'`;
+};
+
+const upperFirst = (name: string): string => {
+  return `${name.slice(0, 1).toUpperCase()}${name.slice(1)}`;
 };
 
 // definition
@@ -117,8 +122,111 @@ export const printHttp = (f: GeneratedFile, options: IHttpTemplateOptions): void
     }
   }
 
-  f.print(']);');
+  f.print('] as const);');
   f.print();
+  let index = 0;
+
+  for (const service of blueprint.services) {
+    const answered = service.procedures.filter((procedure) => {
+      return procedure.procedureKind !== 'command';
+    });
+    const start = index;
+
+    f.print(
+      f.jsDoc(
+        `The HTTP client of ${service.serviceName}, over fetch, on its default routes.${deprecatedOf(service.deprecation)}`
+      )
+    );
+    f.print(f.export('class', `${service.serviceName}HttpClient`), ' {');
+
+    for (const procedure of answered) {
+      f.print(
+        f.jsDoc(
+          `Calls ${procedure.procedureName} on its default route.${deprecatedOf(procedure.deprecation ?? service.deprecation)}`,
+          '  '
+        )
+      );
+      f.print(
+        '  public readonly ',
+        procedure.procedureName,
+        ': ',
+        f.import('IHTTPRequester', runtime, true),
+        '<typeof HTTP_ROUTES[',
+        String(index),
+        ']>;'
+      );
+
+      if (procedure.notification !== undefined) {
+        f.print(
+          f.jsDoc(
+            `Reads the result and notifications of ${procedure.procedureName}; it never reconnects.${deprecatedOf(procedure.deprecation ?? service.deprecation)}`,
+            '  '
+          )
+        );
+        f.print(
+          '  public readonly subscribe',
+          upperFirst(procedure.procedureName),
+          ': ',
+          f.import('IHTTPSubscriber', runtime, true),
+          '<typeof HTTP_ROUTES[',
+          String(index),
+          ']>;'
+        );
+      }
+
+      index += 1;
+    }
+
+    f.print(
+      f.jsDoc(
+        'Its gateway URL, fetch and default authorization; each call may give its own or omit it.',
+        '  '
+      )
+    );
+    f.print(
+      '  public constructor(url: string, options: ',
+      f.import('IHTTPCallerOptions', runtime, true),
+      ' = {}) {'
+    );
+    f.print(
+      '    const caller = ',
+      f.import('createHTTPCaller', runtime),
+      '(HTTP_ROUTES, url, options);'
+    );
+
+    if (answered.length === 0) {
+      f.print('    void caller;');
+    }
+
+    for (const [offset, procedure] of answered.entries()) {
+      f.print(
+        '    this.',
+        procedure.procedureName,
+        ' = ',
+        f.import('httpRequesterOf', runtime),
+        '(HTTP_ROUTES[',
+        String(start + offset),
+        '], caller);'
+      );
+
+      if (procedure.notification !== undefined) {
+        f.print(
+          '    this.subscribe',
+          upperFirst(procedure.procedureName),
+          ' = ',
+          f.import('httpSubscriberOf', runtime),
+          '(HTTP_ROUTES[',
+          String(start + offset),
+          '], caller);'
+        );
+      }
+    }
+
+    f.print('  }');
+    f.print('}');
+    f.print();
+  }
+
   f.print(
     f.jsDoc(
       'The OpenAPI document beadc wrote of the blueprint, byte for byte, which a gateway serves at /openapi.json (transcoding 11.1).'

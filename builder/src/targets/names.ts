@@ -28,6 +28,7 @@ export const CLASS_SUFFIXES: readonly string[] = Object.freeze([
   'Commands',
   'Notifiers',
   'Notifications',
+  'HttpClient',
 ]);
 
 /**

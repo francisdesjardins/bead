@@ -63,6 +63,42 @@ public static class HttpRoutes
     }
 }
 
+/// <summary>The HTTP client of Hello, over HttpClient, on its default routes.</summary>
+public sealed class HelloHttpClient : global::System.IDisposable
+{
+    private readonly global::Bead.Transcoding.HttpCaller _caller;
+
+    /// <summary>Its gateway URL, handler and default authorization.</summary>
+    public HelloHttpClient(global::System.Uri url, global::Bead.Transcoding.HttpCallerOptions? options = null)
+    {
+        _caller = new global::Bead.Transcoding.HttpCaller(HttpRoutes.All, url, options);
+    }
+
+    /// <summary>Calls sayHello on its default HTTP route.</summary>
+    public global::System.Threading.Tasks.Task<global::Hello.V1.SayHelloResponse> SayHello(global::Hello.V1.SayHelloRequest request, global::Bead.Transcoding.HttpCallOptions? options = null)
+    {
+        return _caller.Call<global::Hello.V1.SayHelloResponse>(HttpRoutes.All[0], request, options);
+    }
+
+    /// <summary>Calls countDown on its default HTTP route.</summary>
+    public global::System.Threading.Tasks.Task<global::Hello.V1.CountDownResponse> CountDown(global::Hello.V1.CountDownRequest request, global::Bead.Transcoding.HttpCallOptions? options = null)
+    {
+        return _caller.Call<global::Hello.V1.CountDownResponse>(HttpRoutes.All[1], request, options);
+    }
+
+    /// <summary>Reads the result and notifications of countDown; it never reconnects.</summary>
+    public global::System.Collections.Generic.IAsyncEnumerable<global::Bead.Transcoding.HttpEvent<global::Hello.V1.CountDownResponse, global::Hello.V1.Tick>> SubscribeCountDown(global::Hello.V1.CountDownRequest request, global::Bead.Transcoding.HttpCallOptions? options = null)
+    {
+        return _caller.Subscribe<global::Hello.V1.CountDownResponse, global::Hello.V1.Tick>(HttpRoutes.All[1], request, options);
+    }
+
+    /// <summary>Releases its HTTP client and handler.</summary>
+    public void Dispose()
+    {
+        _caller.Dispose();
+    }
+}
+
 // the contract with the runtime this file needs: an older runtime lacks the constant, and fails here
 file static class GeneratedCodeContract
 {

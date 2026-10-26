@@ -2,7 +2,8 @@
 // Do not edit: regenerate with beadc.
 // Messages: protoc-gen-es 2.16.0, for @bufbuild/protobuf 2.13.0 or later.
 
-import { GENERATED_CODE_SUPPORTS_VERSION_5, routeOf } from "../../routes";
+import type { IHTTPCallerOptions, IHTTPRequester, IHTTPSubscriber } from "../../transcoding";
+import { createHTTPCaller, GENERATED_CODE_SUPPORTS_VERSION_5, httpRequesterOf, httpSubscriberOf, routeOf } from "../../transcoding";
 import { TranscodingProcedures } from "./transcoding_bead";
 import { AskResponseSchema, BookSchema, CancelsRequestSchema, CancelsResponseSchema, EdgesSchema, EverythingSchema, FailRequestSchema, GetBookRequestSchema, GetOperationRequestSchema, ListBooksRequestSchema, ListBooksResponseSchema, ListOperationsRequestSchema, ListOperationsResponseSchema, OperationSchema, RuledSchema, TickSchema, TicksRequestSchema, TicksResponseSchema, UpdateBookRequestSchema, WhoAmIResponseSchema } from "./transcoding_pb";
 import { EmptySchema } from "@bufbuild/protobuf/wkt";
@@ -199,7 +200,124 @@ export const HTTP_ROUTES = Object.freeze([
       { method: 'GET', template: '/api/Transcoding/cancels' },
     ],
   }),
-]);
+] as const);
+
+/**
+ * The HTTP client of Transcoding, over fetch, on its default routes.
+ */
+export class TranscodingHttpClient {
+  /**
+   * Calls echo on its default route.
+   */
+  public readonly echo: IHTTPRequester<typeof HTTP_ROUTES[0]>;
+  /**
+   * Calls echoEdges on its default route.
+   */
+  public readonly echoEdges: IHTTPRequester<typeof HTTP_ROUTES[1]>;
+  /**
+   * Calls getBook on its default route.
+   */
+  public readonly getBook: IHTTPRequester<typeof HTTP_ROUTES[2]>;
+  /**
+   * Calls listBooks on its default route.
+   */
+  public readonly listBooks: IHTTPRequester<typeof HTTP_ROUTES[3]>;
+  /**
+   * Calls updateBook on its default route.
+   */
+  public readonly updateBook: IHTTPRequester<typeof HTTP_ROUTES[4]>;
+  /**
+   * Calls archiveBook on its default route.
+   */
+  public readonly archiveBook: IHTTPRequester<typeof HTTP_ROUTES[5]>;
+  /**
+   * Calls listOperations on its default route.
+   */
+  public readonly listOperations: IHTTPRequester<typeof HTTP_ROUTES[6]>;
+  /**
+   * Calls getOperation on its default route.
+   */
+  public readonly getOperation: IHTTPRequester<typeof HTTP_ROUTES[7]>;
+  /**
+   * Calls judge on its default route.
+   */
+  public readonly judge: IHTTPRequester<typeof HTTP_ROUTES[8]>;
+  /**
+   * Calls ticks on its default route.
+   */
+  public readonly ticks: IHTTPRequester<typeof HTTP_ROUTES[9]>;
+  /**
+   * Reads the result and notifications of ticks; it never reconnects.
+   */
+  public readonly subscribeTicks: IHTTPSubscriber<typeof HTTP_ROUTES[9]>;
+  /**
+   * Calls watch on its default route.
+   */
+  public readonly watch: IHTTPRequester<typeof HTTP_ROUTES[10]>;
+  /**
+   * Reads the result and notifications of watch; it never reconnects.
+   */
+  public readonly subscribeWatch: IHTTPSubscriber<typeof HTTP_ROUTES[10]>;
+  /**
+   * Calls raw on its default route.
+   */
+  public readonly raw: IHTTPRequester<typeof HTTP_ROUTES[11]>;
+  /**
+   * Calls text on its default route.
+   */
+  public readonly text: IHTTPRequester<typeof HTTP_ROUTES[12]>;
+  /**
+   * Calls json on its default route.
+   */
+  public readonly json: IHTTPRequester<typeof HTTP_ROUTES[13]>;
+  /**
+   * Calls fail on its default route.
+   */
+  public readonly fail: IHTTPRequester<typeof HTTP_ROUTES[14]>;
+  /**
+   * Calls whoAmI on its default route.
+   */
+  public readonly whoAmI: IHTTPRequester<typeof HTTP_ROUTES[15]>;
+  /**
+   * Calls ask on its default route.
+   */
+  public readonly ask: IHTTPRequester<typeof HTTP_ROUTES[16]>;
+  /**
+   * Calls hang on its default route.
+   */
+  public readonly hang: IHTTPRequester<typeof HTTP_ROUTES[17]>;
+  /**
+   * Calls cancels on its default route.
+   */
+  public readonly cancels: IHTTPRequester<typeof HTTP_ROUTES[18]>;
+  /**
+   * Its gateway URL, fetch and default authorization; each call may give its own or omit it.
+   */
+  public constructor(url: string, options: IHTTPCallerOptions = {}) {
+    const caller = createHTTPCaller(HTTP_ROUTES, url, options);
+    this.echo = httpRequesterOf(HTTP_ROUTES[0], caller);
+    this.echoEdges = httpRequesterOf(HTTP_ROUTES[1], caller);
+    this.getBook = httpRequesterOf(HTTP_ROUTES[2], caller);
+    this.listBooks = httpRequesterOf(HTTP_ROUTES[3], caller);
+    this.updateBook = httpRequesterOf(HTTP_ROUTES[4], caller);
+    this.archiveBook = httpRequesterOf(HTTP_ROUTES[5], caller);
+    this.listOperations = httpRequesterOf(HTTP_ROUTES[6], caller);
+    this.getOperation = httpRequesterOf(HTTP_ROUTES[7], caller);
+    this.judge = httpRequesterOf(HTTP_ROUTES[8], caller);
+    this.ticks = httpRequesterOf(HTTP_ROUTES[9], caller);
+    this.subscribeTicks = httpSubscriberOf(HTTP_ROUTES[9], caller);
+    this.watch = httpRequesterOf(HTTP_ROUTES[10], caller);
+    this.subscribeWatch = httpSubscriberOf(HTTP_ROUTES[10], caller);
+    this.raw = httpRequesterOf(HTTP_ROUTES[11], caller);
+    this.text = httpRequesterOf(HTTP_ROUTES[12], caller);
+    this.json = httpRequesterOf(HTTP_ROUTES[13], caller);
+    this.fail = httpRequesterOf(HTTP_ROUTES[14], caller);
+    this.whoAmI = httpRequesterOf(HTTP_ROUTES[15], caller);
+    this.ask = httpRequesterOf(HTTP_ROUTES[16], caller);
+    this.hang = httpRequesterOf(HTTP_ROUTES[17], caller);
+    this.cancels = httpRequesterOf(HTTP_ROUTES[18], caller);
+  }
+}
 
 /**
  * The OpenAPI document beadc wrote of the blueprint, byte for byte, which a gateway serves at /openapi.json (transcoding 11.1).

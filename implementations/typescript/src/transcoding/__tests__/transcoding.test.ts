@@ -181,7 +181,7 @@ const REGISTRY = typeRegistryOf([
 const ENCODER = new TextEncoder();
 
 // the Transcoding service's catalogue, as its route table holds it
-const CATALOGUE = HTTP_ROUTES[0]?.failures ?? {};
+const CATALOGUE = HTTP_ROUTES[0].failures;
 
 // helpers
 

@@ -10,6 +10,13 @@
     <ProjectReference Include="../Bead.Interop/Bead.Interop.csproj" />
     <ProjectReference Include="../../src/Bead.Transport.Http/Bead.Transport.Http.csproj" />
     <ProjectReference Include="../../src/Bead.Transport.WebSockets/Bead.Transport.WebSockets.csproj" />
+    <ProjectReference Include="../../src/Bead.Transcoding.Http/Bead.Transcoding.Http.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- the same in-process service fixture each side's gateway unit tests call -->
+    <Compile Include="../../tests/Bead.Transcoding.Tests/TranscodingService.cs" Link="TranscodingService.cs" />
+    <Compile Include="../../tests/Bead.Transcoding.Tests/Generated/**/*.cs" Link="Transcoding/%(RecursiveDir)%(Filename)%(Extension)" />
   </ItemGroup>
 
   <ItemGroup>

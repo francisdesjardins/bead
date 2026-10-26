@@ -133,6 +133,27 @@ Every body the gateway writes meets `MaximumUnsentBytes` and its send pace,
 stream events. Whole bodies go in slices of at most 64 KiB, paced one slice at a time. A drop
 reports the bound on `Error`, releases the exchange's place and socket, and cancels a stream's call.
 
+The same `BeadHttp.cs` exports `<Service>HttpClient`, built with the gateway base URL as a `Uri`
+and optional `HttpCallerOptions` from `Bead.Transcoding`: `Handler`, default `Authorization` and
+`MaximumBodyBytes` (16,778,240). Its typed `<Procedure>(request, options)` methods call only the default
+POST routes; `Subscribe<Procedure>(request, options)` returns an async sequence of `HttpEvent`
+for a notifying procedure, its `IsResult` entry carrying `Result` first, then `Notification`.
+The TypeScript client uses the same surface with lower-camel names: `client.sayHello(request)`
+and `client.subscribeCountDown(request)`, with its gateway URL first in the constructor too.
+A problem throws `FailureException` with its code, scope and detail. A stream's failure throws
+too; an incomplete stream fails and never reconnects. Ending its iteration releases its response.
+`HttpCallOptions` takes `CancellationToken`, an `Authorization` override and `WithoutAuthorization`
+to omit any default. A credential destined off the machine in the clear fails
+`DestinationUnreachable` before encoding or dispatch, by spec 13.4's URL rule. The client owns its
+`HttpClient` and is disposed with `using`; its handler follows no redirect, and one given with
+`AllowAutoRedirect` true is refused at construction. A supplied handler belongs to the application;
+the client disposes only the handler it makes, whose connect follows RFC 8305. A base URL path
+prefixes the default routes. Authorization uses the transport's field check; an empty field presents
+no credential. The body bound applies to each unary answer and each event; exceeding it raises
+`PayloadTooLarge`. A malformed body raises `PayloadUndecodable`, a truncated stream `DestinationLost`.
+A gateway problem without a code maps by `bead-refusal`, then by status. Intermediary statuses map
+by whether the procedure may have run; status and Retry-After stay in the failure's detail.
+
 ### The parts of the core, the manager and the HTTP server
 
 `RouterCore`, `ServiceManager` and `HttpTransportServer` are each built of parts: a private nested

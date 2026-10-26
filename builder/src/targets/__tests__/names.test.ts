@@ -48,6 +48,7 @@ test("a service's classes, in every official target", () => {
     'InteropCommands',
     'InteropNotifiers',
     'InteropNotifications',
+    'InteropHttpClient',
   ]);
 });
 
@@ -84,6 +85,32 @@ test('the names each target reserves', () => {
   expect(TYPESCRIPT_PROCEDURE_NAMES.has('then')).toBe(true);
   expect(C_SHARP_OBJECT_MEMBERS.has('GetHashCode')).toBe(true);
   expect(RUNTIME_TYPES.has('HttpServer')).toBe(true);
+});
+
+test('refuses a procedure named as its HTTP client or a generated subscription method', () => {
+  const blueprint = interop();
+  const changed = structuredClone(blueprint) as unknown as {
+    services: { procedures: { procedureName: string; procedureKind: string }[] }[];
+  };
+  const service = changed.services[0];
+  if (service === undefined) {
+    throw new Error('the interop holds a service');
+  }
+  const notifying = service.procedures.find((procedure) => {
+    return procedure.procedureKind === 'notifies';
+  });
+  const request = service.procedures[0];
+  if (notifying === undefined || request === undefined) {
+    throw new Error('the interop holds requests and notifications');
+  }
+  request.procedureName = `subscribe${notifying.procedureName[0]?.toUpperCase() ?? ''}${notifying.procedureName.slice(1)}`;
+  expect(findingsOf(changed as unknown as IBlueprint)).toContain(
+    'NAME_TARGET /services/0/procedures/0/procedureName'
+  );
+  request.procedureName = 'interopHttpClient';
+  expect(findingsOf(changed as unknown as IBlueprint)).toContain(
+    'NAME_TARGET /services/0/procedures/0/procedureName'
+  );
 });
 
 test('refuses a hook and a failure named as the C# class they sit in', () => {

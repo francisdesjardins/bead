@@ -14,6 +14,95 @@ const interop = (): IBlueprint => {
   return JSON.parse(readFileSync(INTEROP, 'utf8')) as IBlueprint;
 };
 
+test('writes a typed HTTP client on default routes, with a stream for each notifying procedure and no command', () => {
+  const blueprint = interop();
+  const table = csharpTarget
+    .generate(
+      { blueprint, sources: { blueprint: 'spec/interop-blueprint.json' } },
+      {
+        namespace: 'Bead.Interop',
+        messages: Messages.GENERATE,
+        http: { prefix: '/api', document: documentOf(blueprint) },
+      }
+    )
+    .find((file) => {
+      return file.name === HTTP_FILE;
+    })?.content;
+
+  expect(table).toContain('public sealed class InteropHttpClient : global::System.IDisposable');
+  expect(table).toContain(
+    'Task<global::System.Text.Json.JsonElement> Echo(global::System.Text.Json.JsonElement request, global::Bead.Transcoding.HttpCallOptions? options = null)'
+  );
+  expect(table).toContain(
+    'return _caller.Call<global::System.Text.Json.JsonElement>(HttpRoutes.All[0], request, options);'
+  );
+  expect(table).toContain('SubscribeTicks(');
+  expect(table).not.toContain(' Clock(');
+});
+
+test('marks HTTP client types and requesters deprecated with their definitions', () => {
+  const blueprint = interop();
+  const changed = {
+    ...blueprint,
+    services: blueprint.services.map((service) => {
+      return {
+        ...service,
+        deprecation: { message: 'Use Other.' },
+        procedures: service.procedures.map((procedure) => {
+          return { ...procedure, deprecation: { message: 'Call another procedure.' } };
+        }),
+      };
+    }),
+  };
+  const table = csharpTarget
+    .generate(
+      { blueprint: changed, sources: { blueprint: 'spec/interop-blueprint.json' } },
+      {
+        namespace: 'Bead.Interop',
+        messages: Messages.GENERATE,
+        http: { prefix: '/api', document: documentOf(changed) },
+      }
+    )
+    .find((file) => {
+      return file.name === HTTP_FILE;
+    })?.content;
+
+  expect(table).toContain('Obsolete("Use Other."');
+  expect(table).toContain('Obsolete("Call another procedure."');
+  expect(table).toContain('public sealed class InteropHttpClient');
+});
+
+test('writes an HTTP client for a service whose procedures are commands alone', () => {
+  const blueprint = interop();
+  const changed = {
+    ...blueprint,
+    services: blueprint.services.map((service) => {
+      return {
+        ...service,
+        procedures: service.procedures.filter((procedure) => {
+          return procedure.procedureKind === 'command';
+        }),
+      };
+    }),
+  };
+  const table = csharpTarget
+    .generate(
+      { blueprint: changed, sources: { blueprint: 'spec/interop-blueprint.json' } },
+      {
+        namespace: 'Bead.Interop',
+        messages: Messages.GENERATE,
+        http: { prefix: '/api', document: documentOf(changed) },
+      }
+    )
+    .find((file) => {
+      return file.name === HTTP_FILE;
+    })?.content;
+
+  expect(table).toContain('public sealed class InteropHttpClient');
+  expect(table).not.toContain('return _caller.Call<');
+  expect(table).not.toContain('return _caller.Subscribe<');
+});
+
 test("writes BeadHttp.cs beside the first service's file, in its namespace: each procedure a client calls by its descriptor's Procedure, a native payload by its encoding, its catalogue, its routes, the document a UTF-8 literal", () => {
   const blueprint = interop();
   const document = documentOf(blueprint);

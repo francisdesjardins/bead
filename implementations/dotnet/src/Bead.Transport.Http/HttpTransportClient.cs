@@ -150,10 +150,7 @@ public sealed class HttpTransportClient : IRouterClientTransport, IAsyncDisposab
     {
         var given = options ?? new HttpTransportClientOptions();
 
-        if (given.Handler is { } handler && IsFollowing(handler))
-        {
-            throw new ArgumentException("a handler given would follow a redirect, which the client follows none of: its AllowAutoRedirect is true (spec 15.6)", nameof(options));
-        }
+        HttpRedirects.AssertHandler(given.Handler, nameof(options));
 
         // zero is at once for a delay: a listen again at once, and a listen the server answers at
         // once, which polls
@@ -575,26 +572,6 @@ public sealed class HttpTransportClient : IRouterClientTransport, IAsyncDisposab
     private static StructuredFields.Item? ItemOf(HttpResponseMessage response, string name)
     {
         return response.Headers.TryGetValues(name, out var values) ? StructuredFields.ParseItem(string.Join(", ", values)) : null;
-    }
-
-    // whether a handler given would follow a redirect: the platform's own, innermost of the
-    // delegating handlers around it, says so by its AllowAutoRedirect; one of another kind cannot be
-    // read, and is taken, the check of each answer standing behind it
-    private static bool IsFollowing(HttpMessageHandler handler)
-    {
-        var innermost = handler;
-
-        while (innermost is DelegatingHandler { InnerHandler: { } inner })
-        {
-            innermost = inner;
-        }
-
-        return innermost switch
-        {
-            HttpClientHandler platform => platform.AllowAutoRedirect,
-            SocketsHttpHandler platform => platform.AllowAutoRedirect,
-            _ => false,
-        };
     }
 
     // a redirect, by Fetch's redirect statuses: a 300 and a 304 are none, statuses like any other

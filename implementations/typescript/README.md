@@ -1221,7 +1221,7 @@ in-memory transport that server joined beside its WebSocket or HTTP one, so it m
 router, admission, sessions and services, each offered once. It reads everything from the route
 table beadc writes in an output with `http: true`, `bead_http.ts`, whose `HTTP_ROUTES`,
 `OPENAPI_DOCUMENT` and `HTTP_PROBLEM_TYPES` it is given; `transcoding` is the layer it reads them
-with, pure, no socket.
+with, together with the generated HTTP client's caller.
 
 ```ts
 const memory = createMemoryTransportServer();
@@ -1277,6 +1277,24 @@ takes too, so two listeners never keep two lists alike; a member given in the po
 is refused. It listens on its own port, or answers as `listener` on a server the application builds;
 one origin for `/bead` and `/api/…` comes from a proxy in front. It serves the document at
 `/openapi.json`, byte for byte, with its `etag`; Swagger UI is the application's to serve.
+
+The same `bead_http.ts` exports `<Service>HttpClient`. Its constructor takes the gateway base URL
+first, `new HelloHttpClient(url, options?)`, with optional `fetch`, default `authorization` and
+`maximumBodyBytes` (16,778,240) in the options object. Each procedure has
+`client.<procedure>(request, options?)`, on its default POST route alone; a notifying one also has
+`client.subscribe<Procedure>(request, options?)`, an async iterable whose first entry is
+`{ kind: 'result', value }`, then `{ kind: 'notification', value }`. A problem throws `FailureError`
+with its code, scope and detail. A stream's failure throws too; an incomplete stream fails and
+never reconnects. Breaking its iteration releases its response. The call options take `signal`,
+an `authorization` override and `withoutAuthorization: true` to omit any default. A credential
+destined off the machine in the clear fails `DESTINATION_UNREACHABLE` before encoding or dispatch,
+by spec 13.4's URL rule. Fetch uses `redirect: 'manual'` and `credentials: 'same-origin'`; a supplied fetch
+keeps those settings. A base URL path prefixes the default routes. Authorization uses the
+transport's field check; an empty field presents no credential. The body bound applies to each
+unary answer and each event; exceeding it raises `PAYLOAD_TOO_LARGE`. A malformed body raises
+`PAYLOAD_UNDECODABLE`, a truncated stream `DESTINATION_LOST`. A gateway problem without a code
+maps by `bead-refusal`, then by status. Intermediary statuses map by whether the procedure may
+have run; status and Retry-After stay in the failure's detail.
 
 ### What a server holds
 

@@ -2,7 +2,8 @@
 // Do not edit: regenerate with beadc.
 // Messages: protoc-gen-es 2.16.0, for @bufbuild/protobuf 2.13.0 or later.
 
-import { GENERATED_CODE_SUPPORTS_VERSION_5, routeOf } from "../../../src/transcoding/transcoding";
+import type { IHTTPCallerOptions, IHTTPRequester } from "../../../src/transcoding/transcoding";
+import { createHTTPCaller, GENERATED_CODE_SUPPORTS_VERSION_5, httpRequesterOf, routeOf } from "../../../src/transcoding/transcoding";
 import { SignUpProcedures } from "./demo/v1/sign_up_bead";
 import { SignUpRequestSchema, SignUpResponseSchema } from "./demo/v1/sign_up_pb";
 
@@ -19,7 +20,24 @@ export const HTTP_ROUTES = Object.freeze([
       { method: 'POST', template: '/api/SignUp/signUp', body: '*' },
     ],
   }),
-]);
+] as const);
+
+/**
+ * The HTTP client of SignUp, over fetch, on its default routes.
+ */
+export class SignUpHttpClient {
+  /**
+   * Calls signUp on its default route.
+   */
+  public readonly signUp: IHTTPRequester<typeof HTTP_ROUTES[0]>;
+  /**
+   * Its gateway URL, fetch and default authorization; each call may give its own or omit it.
+   */
+  public constructor(url: string, options: IHTTPCallerOptions = {}) {
+    const caller = createHTTPCaller(HTTP_ROUTES, url, options);
+    this.signUp = httpRequesterOf(HTTP_ROUTES[0], caller);
+  }
+}
 
 /**
  * The OpenAPI document beadc wrote of the blueprint, byte for byte, which a gateway serves at /openapi.json (transcoding 11.1).

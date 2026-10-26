@@ -56,7 +56,7 @@ const SIDES = Object.freeze({
       '    runtime: ../../../service/service',
       '    protoRuntime: ../../../proto/proto',
       '    http: true',
-      '    httpRuntime: ../../routes',
+      '    httpRuntime: ../../transcoding',
     ],
   }),
   csharp: Object.freeze({

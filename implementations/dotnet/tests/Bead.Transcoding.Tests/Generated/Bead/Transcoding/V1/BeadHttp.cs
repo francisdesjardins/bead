@@ -337,6 +337,150 @@ public static class HttpRoutes
     }
 }
 
+/// <summary>The HTTP client of Transcoding, over HttpClient, on its default routes.</summary>
+public sealed class TranscodingHttpClient : global::System.IDisposable
+{
+    private readonly global::Bead.Transcoding.HttpCaller _caller;
+
+    /// <summary>Its gateway URL, handler and default authorization.</summary>
+    public TranscodingHttpClient(global::System.Uri url, global::Bead.Transcoding.HttpCallerOptions? options = null)
+    {
+        _caller = new global::Bead.Transcoding.HttpCaller(HttpRoutes.All, url, options);
+    }
+
+    /// <summary>Calls echo on its default HTTP route.</summary>
+    public global::System.Threading.Tasks.Task<global::Bead.Transcoding.V1.Everything> Echo(global::Bead.Transcoding.V1.Everything request, global::Bead.Transcoding.HttpCallOptions? options = null)
+    {
+        return _caller.Call<global::Bead.Transcoding.V1.Everything>(HttpRoutes.All[0], request, options);
+    }
+
+    /// <summary>Calls echoEdges on its default HTTP route.</summary>
+    public global::System.Threading.Tasks.Task<global::Bead.Transcoding.V1.Edges> EchoEdges(global::Bead.Transcoding.V1.Edges request, global::Bead.Transcoding.HttpCallOptions? options = null)
+    {
+        return _caller.Call<global::Bead.Transcoding.V1.Edges>(HttpRoutes.All[1], request, options);
+    }
+
+    /// <summary>Calls getBook on its default HTTP route.</summary>
+    public global::System.Threading.Tasks.Task<global::Bead.Transcoding.V1.Book> GetBook(global::Bead.Transcoding.V1.GetBookRequest request, global::Bead.Transcoding.HttpCallOptions? options = null)
+    {
+        return _caller.Call<global::Bead.Transcoding.V1.Book>(HttpRoutes.All[2], request, options);
+    }
+
+    /// <summary>Calls listBooks on its default HTTP route.</summary>
+    public global::System.Threading.Tasks.Task<global::Bead.Transcoding.V1.ListBooksResponse> ListBooks(global::Bead.Transcoding.V1.ListBooksRequest request, global::Bead.Transcoding.HttpCallOptions? options = null)
+    {
+        return _caller.Call<global::Bead.Transcoding.V1.ListBooksResponse>(HttpRoutes.All[3], request, options);
+    }
+
+    /// <summary>Calls updateBook on its default HTTP route.</summary>
+    public global::System.Threading.Tasks.Task<global::Bead.Transcoding.V1.UpdateBookRequest> UpdateBook(global::Bead.Transcoding.V1.UpdateBookRequest request, global::Bead.Transcoding.HttpCallOptions? options = null)
+    {
+        return _caller.Call<global::Bead.Transcoding.V1.UpdateBookRequest>(HttpRoutes.All[4], request, options);
+    }
+
+    /// <summary>Calls archiveBook on its default HTTP route.</summary>
+    public global::System.Threading.Tasks.Task<global::Google.Protobuf.WellKnownTypes.Empty> ArchiveBook(global::Bead.Transcoding.V1.GetBookRequest request, global::Bead.Transcoding.HttpCallOptions? options = null)
+    {
+        return _caller.Call<global::Google.Protobuf.WellKnownTypes.Empty>(HttpRoutes.All[5], request, options);
+    }
+
+    /// <summary>Calls listOperations on its default HTTP route.</summary>
+    public global::System.Threading.Tasks.Task<global::Bead.Transcoding.V1.ListOperationsResponse> ListOperations(global::Bead.Transcoding.V1.ListOperationsRequest request, global::Bead.Transcoding.HttpCallOptions? options = null)
+    {
+        return _caller.Call<global::Bead.Transcoding.V1.ListOperationsResponse>(HttpRoutes.All[6], request, options);
+    }
+
+    /// <summary>Calls getOperation on its default HTTP route.</summary>
+    public global::System.Threading.Tasks.Task<global::Bead.Transcoding.V1.Operation> GetOperation(global::Bead.Transcoding.V1.GetOperationRequest request, global::Bead.Transcoding.HttpCallOptions? options = null)
+    {
+        return _caller.Call<global::Bead.Transcoding.V1.Operation>(HttpRoutes.All[7], request, options);
+    }
+
+    /// <summary>Calls judge on its default HTTP route.</summary>
+    public global::System.Threading.Tasks.Task<global::Google.Protobuf.WellKnownTypes.Empty> Judge(global::Bead.Transcoding.V1.Ruled request, global::Bead.Transcoding.HttpCallOptions? options = null)
+    {
+        return _caller.Call<global::Google.Protobuf.WellKnownTypes.Empty>(HttpRoutes.All[8], request, options);
+    }
+
+    /// <summary>Calls ticks on its default HTTP route.</summary>
+    public global::System.Threading.Tasks.Task<global::Bead.Transcoding.V1.TicksResponse> Ticks(global::Bead.Transcoding.V1.TicksRequest request, global::Bead.Transcoding.HttpCallOptions? options = null)
+    {
+        return _caller.Call<global::Bead.Transcoding.V1.TicksResponse>(HttpRoutes.All[9], request, options);
+    }
+
+    /// <summary>Reads the result and notifications of ticks; it never reconnects.</summary>
+    public global::System.Collections.Generic.IAsyncEnumerable<global::Bead.Transcoding.HttpEvent<global::Bead.Transcoding.V1.TicksResponse, global::Bead.Transcoding.V1.Tick>> SubscribeTicks(global::Bead.Transcoding.V1.TicksRequest request, global::Bead.Transcoding.HttpCallOptions? options = null)
+    {
+        return _caller.Subscribe<global::Bead.Transcoding.V1.TicksResponse, global::Bead.Transcoding.V1.Tick>(HttpRoutes.All[9], request, options);
+    }
+
+    /// <summary>Calls watch on its default HTTP route.</summary>
+    public global::System.Threading.Tasks.Task<global::Google.Protobuf.WellKnownTypes.Empty> Watch(global::Google.Protobuf.WellKnownTypes.Empty request, global::Bead.Transcoding.HttpCallOptions? options = null)
+    {
+        return _caller.Call<global::Google.Protobuf.WellKnownTypes.Empty>(HttpRoutes.All[10], request, options);
+    }
+
+    /// <summary>Reads the result and notifications of watch; it never reconnects.</summary>
+    public global::System.Collections.Generic.IAsyncEnumerable<global::Bead.Transcoding.HttpEvent<global::Google.Protobuf.WellKnownTypes.Empty, global::Bead.Transcoding.V1.Tick>> SubscribeWatch(global::Google.Protobuf.WellKnownTypes.Empty request, global::Bead.Transcoding.HttpCallOptions? options = null)
+    {
+        return _caller.Subscribe<global::Google.Protobuf.WellKnownTypes.Empty, global::Bead.Transcoding.V1.Tick>(HttpRoutes.All[10], request, options);
+    }
+
+    /// <summary>Calls raw on its default HTTP route.</summary>
+    public global::System.Threading.Tasks.Task<global::System.ReadOnlyMemory<byte>> Raw(global::System.ReadOnlyMemory<byte> request, global::Bead.Transcoding.HttpCallOptions? options = null)
+    {
+        return _caller.Call<global::System.ReadOnlyMemory<byte>>(HttpRoutes.All[11], request, options);
+    }
+
+    /// <summary>Calls text on its default HTTP route.</summary>
+    public global::System.Threading.Tasks.Task<string> Text(string request, global::Bead.Transcoding.HttpCallOptions? options = null)
+    {
+        return _caller.Call<string>(HttpRoutes.All[12], request, options);
+    }
+
+    /// <summary>Calls json on its default HTTP route.</summary>
+    public global::System.Threading.Tasks.Task<global::System.Text.Json.JsonElement> Json(global::System.Text.Json.JsonElement request, global::Bead.Transcoding.HttpCallOptions? options = null)
+    {
+        return _caller.Call<global::System.Text.Json.JsonElement>(HttpRoutes.All[13], request, options);
+    }
+
+    /// <summary>Calls fail on its default HTTP route.</summary>
+    public global::System.Threading.Tasks.Task<global::Google.Protobuf.WellKnownTypes.Empty> Fail(global::Bead.Transcoding.V1.FailRequest request, global::Bead.Transcoding.HttpCallOptions? options = null)
+    {
+        return _caller.Call<global::Google.Protobuf.WellKnownTypes.Empty>(HttpRoutes.All[14], request, options);
+    }
+
+    /// <summary>Calls whoAmI on its default HTTP route.</summary>
+    public global::System.Threading.Tasks.Task<global::Bead.Transcoding.V1.WhoAmIResponse> WhoAmI(global::Google.Protobuf.WellKnownTypes.Empty request, global::Bead.Transcoding.HttpCallOptions? options = null)
+    {
+        return _caller.Call<global::Bead.Transcoding.V1.WhoAmIResponse>(HttpRoutes.All[15], request, options);
+    }
+
+    /// <summary>Calls ask on its default HTTP route.</summary>
+    public global::System.Threading.Tasks.Task<global::Bead.Transcoding.V1.AskResponse> Ask(global::Google.Protobuf.WellKnownTypes.Empty request, global::Bead.Transcoding.HttpCallOptions? options = null)
+    {
+        return _caller.Call<global::Bead.Transcoding.V1.AskResponse>(HttpRoutes.All[16], request, options);
+    }
+
+    /// <summary>Calls hang on its default HTTP route.</summary>
+    public global::System.Threading.Tasks.Task<global::Google.Protobuf.WellKnownTypes.Empty> Hang(global::Google.Protobuf.WellKnownTypes.Empty request, global::Bead.Transcoding.HttpCallOptions? options = null)
+    {
+        return _caller.Call<global::Google.Protobuf.WellKnownTypes.Empty>(HttpRoutes.All[17], request, options);
+    }
+
+    /// <summary>Calls cancels on its default HTTP route.</summary>
+    public global::System.Threading.Tasks.Task<global::Bead.Transcoding.V1.CancelsResponse> Cancels(global::Bead.Transcoding.V1.CancelsRequest request, global::Bead.Transcoding.HttpCallOptions? options = null)
+    {
+        return _caller.Call<global::Bead.Transcoding.V1.CancelsResponse>(HttpRoutes.All[18], request, options);
+    }
+
+    /// <summary>Releases its HTTP client and handler.</summary>
+    public void Dispose()
+    {
+        _caller.Dispose();
+    }
+}
+
 // the contract with the runtime this file needs: an older runtime lacks the constant, and fails here
 file static class GeneratedCodeContract
 {

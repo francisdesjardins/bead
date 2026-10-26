@@ -15,7 +15,7 @@
 import type { IBinding, IBlueprint, IServiceEntry } from '../../model/blueprint.ts';
 import { messagesOf, routesOf } from '../../model/routes.ts';
 import { DEPRECATION_ID, type IHttpInput } from '../target.ts';
-import { literalOf } from './templates.ts';
+import { literalOf, obsoleteOf } from './templates.ts';
 
 // types
 
@@ -112,6 +112,77 @@ export const printCSharpHttp = (options: ICSharpHttpOptions): string[] => {
     });
   });
 
+  const native = Object.freeze({
+    raw: 'global::System.ReadOnlyMemory<byte>',
+    text: 'string',
+    json: 'global::System.Text.Json.JsonElement',
+  });
+  const typeOf = (binding: IBinding): string => {
+    return binding.encoding === 'proto' && binding.message !== undefined
+      ? messageOf(binding.message)
+      : native[binding.encoding as keyof typeof native];
+  };
+  let index = 0;
+  const clients = blueprint.services.flatMap((service) => {
+    const name = `${service.serviceName}HttpClient`;
+    const methods = service.procedures.flatMap((procedure) => {
+      if (procedure.procedureKind === 'command') {
+        return [];
+      }
+
+      const route = `HttpRoutes.All[${String(index)}]`;
+      const request = typeOf(procedure.request);
+      const result = typeOf(procedure.result);
+      const rpc = upperFirst(procedure.procedureName);
+
+      index += 1;
+
+      return [
+        '',
+        `    /// <summary>Calls ${procedure.procedureName} on its default HTTP route.</summary>`,
+        ...obsoleteOf(procedure.deprecation ?? service.deprecation, INDENT),
+        `    public global::System.Threading.Tasks.Task<${result}> ${rpc}(${request} request, ${TRANSCODING}.HttpCallOptions? options = null)`,
+        '    {',
+        `        return _caller.Call<${result}>(${route}, request, options);`,
+        '    }',
+        ...(procedure.notification === undefined
+          ? []
+          : [
+              '',
+              `    /// <summary>Reads the result and notifications of ${procedure.procedureName}; it never reconnects.</summary>`,
+              ...obsoleteOf(procedure.deprecation ?? service.deprecation, INDENT),
+              `    public global::System.Collections.Generic.IAsyncEnumerable<${TRANSCODING}.HttpEvent<${result}, ${typeOf(procedure.notification)}>> Subscribe${rpc}(${request} request, ${TRANSCODING}.HttpCallOptions? options = null)`,
+              '    {',
+              `        return _caller.Subscribe<${result}, ${typeOf(procedure.notification)}>(${route}, request, options);`,
+              '    }',
+            ]),
+      ];
+    });
+
+    return [
+      `/// <summary>The HTTP client of ${service.serviceName}, over HttpClient, on its default routes.</summary>`,
+      ...obsoleteOf(service.deprecation, ''),
+      `public sealed class ${name} : global::System.IDisposable`,
+      '{',
+      `    private readonly ${TRANSCODING}.HttpCaller _caller;`,
+      '',
+      '    /// <summary>Its gateway URL, handler and default authorization.</summary>',
+      `    public ${name}(global::System.Uri url, ${TRANSCODING}.HttpCallerOptions? options = null)`,
+      '    {',
+      `        _caller = new ${TRANSCODING}.HttpCaller(HttpRoutes.All, url, options);`,
+      '    }',
+      ...methods,
+      '',
+      '    /// <summary>Releases its HTTP client and handler.</summary>',
+      '    public void Dispose()',
+      '    {',
+      '        _caller.Dispose();',
+      '    }',
+      '}',
+      '',
+    ];
+  });
+
   return [
     '#nullable enable',
     // ! the route table names each procedure's descriptor, a deprecated one's among them
@@ -146,6 +217,7 @@ export const printCSharpHttp = (options: ICSharpHttpOptions): string[] => {
     `${INDENT}}`,
     '}',
     '',
+    ...clients,
     '// the contract with the runtime this file needs: an older runtime lacks the constant, and fails here',
     'file static class GeneratedCodeContract',
     '{',

@@ -1,7 +1,7 @@
 // ── Transcoding ───────────────────────────────────────────────────────────────
 
-// The entry a route table imports (`bead_http.ts`, decision 0037), and the transcoding layer a
-// gateway reads it with, pure: no socket, which `./http-gateway` holds.
+// The entry a route table and its clients import (`bead_http.ts`, decision 0037): the mapping,
+// routes, problems, events and HTTP caller. The gateway's listener is in `./http-gateway`.
 
 export { GENERATED_CODE_SUPPORTS_VERSION_5, routeOf } from './routes';
 export type { HttpMethod, HttpPayload, IHttpRouteInit, IHttpRouteTemplate } from './routes';
@@ -68,3 +68,12 @@ export {
   HEARTBEAT_COMMENT,
 } from './events';
 export type { IEventSink, IEventStream, IEventStreamOptions } from './events';
+export { createHTTPCaller, httpRequesterOf, httpSubscriberOf } from './http-caller';
+export type {
+  HTTPEvent,
+  IHTTPCaller,
+  IHTTPCallerOptions,
+  IHTTPCallOptions,
+  IHTTPRequester,
+  IHTTPSubscriber,
+} from './http-caller';

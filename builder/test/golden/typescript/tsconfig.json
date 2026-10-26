@@ -16,11 +16,12 @@
         "../../../../implementations/typescript/src/proto/proto.ts"
       ],
       "@francisdesjardins/bead/transcoding": [
-        "../../../../implementations/typescript/src/transcoding/routes.ts"
+        "../../../../implementations/typescript/src/transcoding/transcoding.ts"
       ],
       // ! the runtime's source imports protobuf-es's types from its own folder, where no install is
       // in CI: its import is the builder's install, as every other here
-      "@bufbuild/protobuf": ["../../../node_modules/@bufbuild/protobuf/dist/esm/index.d.ts"]
+      "@bufbuild/protobuf": ["../../../node_modules/@bufbuild/protobuf/dist/esm/index.d.ts"],
+      "@bufbuild/protobuf/*": ["../../../node_modules/@bufbuild/protobuf/dist/esm/*/index.d.ts"]
     }
   },
   "include": ["**/*.ts"]
