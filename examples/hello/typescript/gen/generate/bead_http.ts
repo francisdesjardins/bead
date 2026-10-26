@@ -2,8 +2,8 @@
 // Do not edit: regenerate with beadc.
 // Messages: protoc-gen-es 2.16.0, for @bufbuild/protobuf 2.13.0 or later.
 
-import type { IHTTPCallerOptions, IHTTPRequester } from "@francisdesjardins/bead/transcoding";
-import { createHTTPCaller, GENERATED_CODE_SUPPORTS_VERSION_5, httpRequesterOf, routeOf } from "@francisdesjardins/bead/transcoding";
+import type { IHTTPCallerOptions, IHTTPRequester, IHTTPSubscriber } from "@francisdesjardins/bead/transcoding";
+import { createHTTPCaller, GENERATED_CODE_SUPPORTS_VERSION_5, httpRequesterOf, httpSubscriberOf, routeOf } from "@francisdesjardins/bead/transcoding";
 import { HelloProcedures } from "./hello/v1/hello_bead.ts";
 import { CountDownRequestSchema, CountDownResponseSchema, SayHelloRequestSchema, SayHelloResponseSchema, TickSchema } from "./hello/v1/hello_pb.ts";
 
@@ -37,20 +37,25 @@ export const HTTP_ROUTES = Object.freeze([
  */
 export class HelloHttpClient {
   /**
-   * Calls sayHello; subscribe reads its result and notifications where it notifies.
+   * Calls sayHello on its default route.
    */
   public readonly sayHello: IHTTPRequester<typeof HTTP_ROUTES[0]>;
   /**
-   * Calls countDown; subscribe reads its result and notifications where it notifies.
+   * Calls countDown on its default route.
    */
   public readonly countDown: IHTTPRequester<typeof HTTP_ROUTES[1]>;
   /**
+   * Reads the result and notifications of countDown; it never reconnects.
+   */
+  public readonly subscribeCountDown: IHTTPSubscriber<typeof HTTP_ROUTES[1]>;
+  /**
    * Its gateway URL, fetch and default authorization; each call may give its own or omit it.
    */
-  public constructor(options: IHTTPCallerOptions) {
-    const caller = createHTTPCaller(HTTP_ROUTES, options);
+  public constructor(url: string, options: IHTTPCallerOptions = {}) {
+    const caller = createHTTPCaller(HTTP_ROUTES, url, options);
     this.sayHello = httpRequesterOf(HTTP_ROUTES[0], caller);
     this.countDown = httpRequesterOf(HTTP_ROUTES[1], caller);
+    this.subscribeCountDown = httpSubscriberOf(HTTP_ROUTES[1], caller);
   }
 }
 

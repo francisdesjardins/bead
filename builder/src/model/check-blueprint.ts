@@ -313,7 +313,15 @@ export const checkBlueprint = (
         });
       }
 
-      if (TYPESCRIPT_PROCEDURE_NAMES.has(procedure.procedureName)) {
+      if (
+        TYPESCRIPT_PROCEDURE_NAMES.has(procedure.procedureName) ||
+        service.procedures.some((candidate) => {
+          return (
+            candidate.procedureKind === 'notifies' &&
+            procedure.procedureName === `subscribe${upperFirst(candidate.procedureName)}`
+          );
+        })
+      ) {
         report('NAME_TARGET', {
           at: `${procedurePlace}/procedureName`,
           message: `${procedure.procedureName} is a member TypeScript's generated client holds already`,

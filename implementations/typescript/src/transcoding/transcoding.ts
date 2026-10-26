@@ -68,11 +68,12 @@ export {
   HEARTBEAT_COMMENT,
 } from './events';
 export type { IEventSink, IEventStream, IEventStreamOptions } from './events';
-export { createHTTPCaller, httpRequesterOf } from './http-caller';
+export { createHTTPCaller, httpRequesterOf, httpSubscriberOf } from './http-caller';
 export type {
   HTTPEvent,
   IHTTPCaller,
   IHTTPCallerOptions,
   IHTTPCallOptions,
   IHTTPRequester,
+  IHTTPSubscriber,
 } from './http-caller';

@@ -1269,10 +1269,11 @@ is refused. It listens on its own port, or answers as `listener` on a server the
 one origin for `/bead` and `/api/…` comes from a proxy in front. It serves the document at
 `/openapi.json`, byte for byte, with its `etag`; Swagger UI is the application's to serve.
 
-The same `bead_http.ts` exports `<Service>HttpClient`. Its constructor takes `{ url }`, the
-gateway origin, with optional `fetch`, default `authorization` and `maximumBodyBytes` (16,778,240).
-Each procedure has `client.<procedure>.call(request, options)`, on its default POST route alone;
-a notifying one also has `subscribe(request, options)`, an async iterable whose first entry is
+The same `bead_http.ts` exports `<Service>HttpClient`. Its constructor takes the gateway origin
+first, `new HelloHttpClient(url, options?)`, with optional `fetch`, default `authorization` and
+`maximumBodyBytes` (16,778,240) in the options object. Each procedure has
+`client.<procedure>(request, options?)`, on its default POST route alone; a notifying one also has
+`client.subscribe<Procedure>(request, options?)`, an async iterable whose first entry is
 `{ kind: 'result', value }`, then `{ kind: 'notification', value }`. A problem throws `FailureError`
 with its code, scope and detail. A stream's failure throws too; an incomplete stream fails and
 never reconnects. Breaking its iteration releases its response. The call options take `signal`,

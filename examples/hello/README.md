@@ -152,8 +152,8 @@ fetch:
 ```ts
 import { HelloHttpClient } from '#hello/http';
 
-const hello = new HelloHttpClient({ url: 'http://127.0.0.1:8080' });
-const answer = await hello.sayHello.call({ name: 'Ada' });
+const hello = new HelloHttpClient('http://127.0.0.1:8080');
+const answer = await hello.sayHello({ name: 'Ada' });
 console.log(answer.greeting);
 ```
 
@@ -169,7 +169,7 @@ Console.WriteLine(answer.Greeting);
 
 Replace `8080` with that gateway port. Each call uses its default POST route, and a problem throws
 `FailureError` or `FailureException` with its Bead code and scope. A notifying procedure exposes
-`hello.countDown.subscribe({ from: 3 })` or `hello.SubscribeCountDown(new CountDownRequest { From = 3 })`,
+`hello.subscribeCountDown({ from: 3 })` or `hello.SubscribeCountDown(new CountDownRequest { From = 3 })`,
 an async sequence of its result then notifications. This service's `greeted` hook refuses that
 HTTP subscription: each exchange has its own Bead connection, and a greeting on another exchange
 sets no session on it. A name must be given to `sayHello`, since HTTP answers no `askName` command.

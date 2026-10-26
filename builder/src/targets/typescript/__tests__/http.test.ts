@@ -73,7 +73,13 @@ test('writes a typed HTTP client on default routes, with a stream for each notif
   expect(table).toContain('export class InteropHttpClient {');
   expect(table).toContain('public readonly echo: IHTTPRequester<typeof HTTP_ROUTES[0]>;');
   expect(table).toContain('this.echo = httpRequesterOf(HTTP_ROUTES[0], caller);');
-  expect(table).toContain('createHTTPCaller(HTTP_ROUTES, options)');
+  expect(table).toContain('public constructor(url: string, options: IHTTPCallerOptions = {})');
+  expect(table).toContain('createHTTPCaller(HTTP_ROUTES, url, options)');
+  expect(table).toContain(
+    'public readonly subscribeTicks: IHTTPSubscriber<typeof HTTP_ROUTES[8]>;'
+  );
+  expect(table).toContain('this.subscribeTicks = httpSubscriberOf(HTTP_ROUTES[8], caller);');
+  expect(table).not.toContain('public readonly subscribeEcho');
   expect(table).not.toContain('public readonly clock');
   expect(table).toContain('] as const);');
 });
@@ -115,6 +121,7 @@ test('writes an HTTP client for a service whose procedures are commands alone', 
   expect(table).toContain('export class InteropHttpClient');
   expect(table).toContain('    void caller;');
   expect(table).not.toContain('httpRequesterOf(');
+  expect(table).not.toContain('httpSubscriberOf(');
 });
 
 test("writes no bead_http.ts without http, and imports a relative runtime at the output's root", () => {

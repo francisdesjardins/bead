@@ -13,7 +13,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `<Service>HttpClient` beside its route table, over fetch or HttpClient, calling the default
   routes with Bead's JSON mapping, reading problems as Bead failures and notifications as an
   asynchronous event stream; credentials destined off the machine in the clear fail before
-  dispatch, redirects are refused, and a stream never reconnects automatically.
+  dispatch, redirects are refused, and a stream never reconnects automatically. Both clients take
+  the gateway URL first and optional options last; TypeScript calls procedures directly and reads
+  subscriptions through `subscribe<Procedure>`, matching the C# methods.
 
 - The demo answers its sign-up over HTTP and JSON: the internal demo mounts a gateway of beadc's
   route table on its public port, `POST /api/SignUp/signUp` and `/openapi.json`, and the page shows

@@ -13,9 +13,8 @@ import { isSecureUrl } from '../transport/shared/secure';
 import { base64Of, readProtoJson, typeRegistryOf, writeProtoJson } from './json-form';
 import type { HttpPayload, IHttpRouteInit } from './routes';
 
-/** Its gateway origin, fetch and default Authorization field. */
+/** Its fetch and default Authorization field. */
 export interface IHTTPCallerOptions {
-  readonly url: string;
   readonly fetch?: typeof fetch | undefined;
   readonly authorization?: string | undefined;
   /** The largest unary body or event, in bytes; the gateway's body bound by default. */
@@ -35,23 +34,18 @@ export type HTTPEvent<Result, Notification> =
   | { readonly kind: 'notification'; readonly value: Notification };
 
 /** A typed requester, inferred from the generated table's descriptor. */
-export interface IHTTPRequester<Route extends IHttpRouteInit> {
-  readonly call: (
-    value: GivenOf<Route['procedure']['request']>,
-    options?: IHTTPCallOptions
-  ) => Promise<ValueOf<Route['procedure']['result']>>;
-  readonly subscribe: Route extends { readonly notification: HttpPayload }
-    ? (
-        value: GivenOf<Route['procedure']['request']>,
-        options?: IHTTPCallOptions
-      ) => AsyncIterable<
-        HTTPEvent<
-          ValueOf<Route['procedure']['result']>,
-          ValueOf<Route['procedure']['notification']>
-        >
-      >
-    : never;
-}
+export type IHTTPRequester<Route extends IHttpRouteInit> = (
+  value: GivenOf<Route['procedure']['request']>,
+  options?: IHTTPCallOptions
+) => Promise<ValueOf<Route['procedure']['result']>>;
+
+/** A typed subscription, inferred from a notifying procedure's generated descriptor. */
+export type IHTTPSubscriber<Route extends IHttpRouteInit> = (
+  value: GivenOf<Route['procedure']['request']>,
+  options?: IHTTPCallOptions
+) => AsyncIterable<
+  HTTPEvent<ValueOf<Route['procedure']['result']>, ValueOf<Route['procedure']['notification']>>
+>;
 
 /** The shared fetch and mapping of the requesters of one generated client. */
 export interface IHTTPCaller {
@@ -117,9 +111,10 @@ const mediaTypeOf = (payload: HttpPayload): string => {
 /** A fetch caller shared by the typed requesters of a generated HTTP client. */
 export const createHTTPCaller = (
   routes: readonly IHttpRouteInit[],
-  options: IHTTPCallerOptions
+  origin: string,
+  options: IHTTPCallerOptions = {}
 ): IHTTPCaller => {
-  const url = new URL(options.url);
+  const url = new URL(origin);
 
   if (
     !['http:', 'https:'].includes(url.protocol) ||
@@ -417,21 +412,22 @@ export const createHTTPCaller = (
   return Object.freeze({ call, subscribe });
 };
 
-/** A typed requester of one route; subscribe is present only where the procedure notifies. */
+/** A typed call of one route. */
 export const httpRequesterOf = <Route extends IHttpRouteInit>(
   route: Route,
   caller: IHTTPCaller
 ): IHTTPRequester<Route> => {
-  return Object.freeze({
-    call: (value: unknown, options?: IHTTPCallOptions) => {
-      return caller.call(route, value, options);
-    },
-    ...(route.notification === undefined
-      ? {}
-      : {
-          subscribe: (value: unknown, options?: IHTTPCallOptions) => {
-            return caller.subscribe(route, value, options);
-          },
-        }),
-  }) as IHTTPRequester<Route>;
+  return (value, options) => {
+    return caller.call(route, value, options) as Promise<ValueOf<Route['procedure']['result']>>;
+  };
+};
+
+/** A typed subscription to one notifying route. */
+export const httpSubscriberOf = <Route extends IHttpRouteInit>(
+  route: Route,
+  caller: IHTTPCaller
+): IHTTPSubscriber<Route> => {
+  return (value, options) => {
+    return caller.subscribe(route, value, options) as ReturnType<IHTTPSubscriber<Route>>;
+  };
 };

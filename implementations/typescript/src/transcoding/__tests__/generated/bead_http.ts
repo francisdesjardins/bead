@@ -2,8 +2,8 @@
 // Do not edit: regenerate with beadc.
 // Messages: protoc-gen-es 2.16.0, for @bufbuild/protobuf 2.13.0 or later.
 
-import type { IHTTPCallerOptions, IHTTPRequester } from "../../transcoding";
-import { createHTTPCaller, GENERATED_CODE_SUPPORTS_VERSION_5, httpRequesterOf, routeOf } from "../../transcoding";
+import type { IHTTPCallerOptions, IHTTPRequester, IHTTPSubscriber } from "../../transcoding";
+import { createHTTPCaller, GENERATED_CODE_SUPPORTS_VERSION_5, httpRequesterOf, httpSubscriberOf, routeOf } from "../../transcoding";
 import { TranscodingProcedures } from "./transcoding_bead";
 import { AskResponseSchema, BookSchema, CancelsRequestSchema, CancelsResponseSchema, EdgesSchema, EverythingSchema, FailRequestSchema, GetBookRequestSchema, GetOperationRequestSchema, ListBooksRequestSchema, ListBooksResponseSchema, ListOperationsRequestSchema, ListOperationsResponseSchema, OperationSchema, RuledSchema, TickSchema, TicksRequestSchema, TicksResponseSchema, UpdateBookRequestSchema, WhoAmIResponseSchema } from "./transcoding_pb";
 import { EmptySchema } from "@bufbuild/protobuf/wkt";
@@ -207,86 +207,94 @@ export const HTTP_ROUTES = Object.freeze([
  */
 export class TranscodingHttpClient {
   /**
-   * Calls echo; subscribe reads its result and notifications where it notifies.
+   * Calls echo on its default route.
    */
   public readonly echo: IHTTPRequester<typeof HTTP_ROUTES[0]>;
   /**
-   * Calls echoEdges; subscribe reads its result and notifications where it notifies.
+   * Calls echoEdges on its default route.
    */
   public readonly echoEdges: IHTTPRequester<typeof HTTP_ROUTES[1]>;
   /**
-   * Calls getBook; subscribe reads its result and notifications where it notifies.
+   * Calls getBook on its default route.
    */
   public readonly getBook: IHTTPRequester<typeof HTTP_ROUTES[2]>;
   /**
-   * Calls listBooks; subscribe reads its result and notifications where it notifies.
+   * Calls listBooks on its default route.
    */
   public readonly listBooks: IHTTPRequester<typeof HTTP_ROUTES[3]>;
   /**
-   * Calls updateBook; subscribe reads its result and notifications where it notifies.
+   * Calls updateBook on its default route.
    */
   public readonly updateBook: IHTTPRequester<typeof HTTP_ROUTES[4]>;
   /**
-   * Calls archiveBook; subscribe reads its result and notifications where it notifies.
+   * Calls archiveBook on its default route.
    */
   public readonly archiveBook: IHTTPRequester<typeof HTTP_ROUTES[5]>;
   /**
-   * Calls listOperations; subscribe reads its result and notifications where it notifies.
+   * Calls listOperations on its default route.
    */
   public readonly listOperations: IHTTPRequester<typeof HTTP_ROUTES[6]>;
   /**
-   * Calls getOperation; subscribe reads its result and notifications where it notifies.
+   * Calls getOperation on its default route.
    */
   public readonly getOperation: IHTTPRequester<typeof HTTP_ROUTES[7]>;
   /**
-   * Calls judge; subscribe reads its result and notifications where it notifies.
+   * Calls judge on its default route.
    */
   public readonly judge: IHTTPRequester<typeof HTTP_ROUTES[8]>;
   /**
-   * Calls ticks; subscribe reads its result and notifications where it notifies.
+   * Calls ticks on its default route.
    */
   public readonly ticks: IHTTPRequester<typeof HTTP_ROUTES[9]>;
   /**
-   * Calls watch; subscribe reads its result and notifications where it notifies.
+   * Reads the result and notifications of ticks; it never reconnects.
+   */
+  public readonly subscribeTicks: IHTTPSubscriber<typeof HTTP_ROUTES[9]>;
+  /**
+   * Calls watch on its default route.
    */
   public readonly watch: IHTTPRequester<typeof HTTP_ROUTES[10]>;
   /**
-   * Calls raw; subscribe reads its result and notifications where it notifies.
+   * Reads the result and notifications of watch; it never reconnects.
+   */
+  public readonly subscribeWatch: IHTTPSubscriber<typeof HTTP_ROUTES[10]>;
+  /**
+   * Calls raw on its default route.
    */
   public readonly raw: IHTTPRequester<typeof HTTP_ROUTES[11]>;
   /**
-   * Calls text; subscribe reads its result and notifications where it notifies.
+   * Calls text on its default route.
    */
   public readonly text: IHTTPRequester<typeof HTTP_ROUTES[12]>;
   /**
-   * Calls json; subscribe reads its result and notifications where it notifies.
+   * Calls json on its default route.
    */
   public readonly json: IHTTPRequester<typeof HTTP_ROUTES[13]>;
   /**
-   * Calls fail; subscribe reads its result and notifications where it notifies.
+   * Calls fail on its default route.
    */
   public readonly fail: IHTTPRequester<typeof HTTP_ROUTES[14]>;
   /**
-   * Calls whoAmI; subscribe reads its result and notifications where it notifies.
+   * Calls whoAmI on its default route.
    */
   public readonly whoAmI: IHTTPRequester<typeof HTTP_ROUTES[15]>;
   /**
-   * Calls ask; subscribe reads its result and notifications where it notifies.
+   * Calls ask on its default route.
    */
   public readonly ask: IHTTPRequester<typeof HTTP_ROUTES[16]>;
   /**
-   * Calls hang; subscribe reads its result and notifications where it notifies.
+   * Calls hang on its default route.
    */
   public readonly hang: IHTTPRequester<typeof HTTP_ROUTES[17]>;
   /**
-   * Calls cancels; subscribe reads its result and notifications where it notifies.
+   * Calls cancels on its default route.
    */
   public readonly cancels: IHTTPRequester<typeof HTTP_ROUTES[18]>;
   /**
    * Its gateway URL, fetch and default authorization; each call may give its own or omit it.
    */
-  public constructor(options: IHTTPCallerOptions) {
-    const caller = createHTTPCaller(HTTP_ROUTES, options);
+  public constructor(url: string, options: IHTTPCallerOptions = {}) {
+    const caller = createHTTPCaller(HTTP_ROUTES, url, options);
     this.echo = httpRequesterOf(HTTP_ROUTES[0], caller);
     this.echoEdges = httpRequesterOf(HTTP_ROUTES[1], caller);
     this.getBook = httpRequesterOf(HTTP_ROUTES[2], caller);
@@ -297,7 +305,9 @@ export class TranscodingHttpClient {
     this.getOperation = httpRequesterOf(HTTP_ROUTES[7], caller);
     this.judge = httpRequesterOf(HTTP_ROUTES[8], caller);
     this.ticks = httpRequesterOf(HTTP_ROUTES[9], caller);
+    this.subscribeTicks = httpSubscriberOf(HTTP_ROUTES[9], caller);
     this.watch = httpRequesterOf(HTTP_ROUTES[10], caller);
+    this.subscribeWatch = httpSubscriberOf(HTTP_ROUTES[10], caller);
     this.raw = httpRequesterOf(HTTP_ROUTES[11], caller);
     this.text = httpRequesterOf(HTTP_ROUTES[12], caller);
     this.json = httpRequesterOf(HTTP_ROUTES[13], caller);

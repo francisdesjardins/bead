@@ -364,6 +364,9 @@ filters read:
 | TypeScript | A procedure named `on`, `notifications` or `then`, or one of `Object.prototype`'s seven a procedure's name can take (`constructor`, `hasOwnProperty`, `isPrototypeOf`, `propertyIsEnumerable`, `toLocaleString`, `toString`, `valueOf`): the generated client's own members, a thenable's, and the members it would shadow, or, for `constructor`, not compile                                                                                                                                                                                                                                                                    |
 | C#         | A procedure whose rpc name is a notifying procedure's `Subscribe<Procedure>` method, `All`, `On`, `Notifications`, `Is`, `Code`, one of `object`'s members (`Equals`, `GetHashCode`, `GetType`, `ToString`, `MemberwiseClone`, `ReferenceEquals`, `Finalize`) or one of its service's classes, `Code` whatever it lists, since the class of failures of a procedure that lists any holds it; a hook whose C# name is one of `object`'s members or one of its service's classes; a failure whose C# name is `Code`, one of `object`'s members, or the rpc name of a procedure that lists it, whose class of failures would hold it |
 
+The TypeScript HTTP client also reserves `subscribe<Procedure>` for each notifying procedure,
+as the C# client reserves `Subscribe<Procedure>`.
+
 **A description** is written by every official target, and C#'s documentation comments are XML:
 `DESCRIPTION_TARGET` refuses, on every blueprint, a description holding a character XML 1.0 holds in
 no document, raw or by reference, C0's controls but tab, LF and CR, and U+FFFE and U+FFFF, rather
@@ -796,6 +799,9 @@ layer answers it.
   its result then notifications. TypeScript uses `fetch`; C# uses `HttpClient`. Both use the
   runtime's transcoding layer to write requests and read answers, including RFC 9457 problems as
   Bead failures with their code and scope. Commands have no HTTP requester.
+  Both clients take the gateway URL first and optional options last. TypeScript calls
+  `client.sayHello(request, options?)` and `client.subscribeCountDown(request, options?)`;
+  C# calls `client.SayHello(request, options)` and `client.SubscribeCountDown(request, options)`.
 - **`google.api.http` leaves the messages** as protovalidate's options do: what protoc-gen-es and
   protoc are handed holds neither the option nor the import of `annotations.proto`, unless an output
   keeps them, `keepHttpOptions`. `idempotency_level` stays, protobuf's own.

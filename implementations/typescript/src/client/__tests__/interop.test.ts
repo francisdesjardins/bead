@@ -227,50 +227,44 @@ test.describe('the C# server of the interop service', () => {
   });
 
   test('calls the other gateway with protobuf JSON and every native encoding', async () => {
-    const client = new TranscodingHttpClient({
-      url: `http://${HOST}:${String(ports.gatewayPort)}`,
-    });
+    const client = new TranscodingHttpClient(`http://${HOST}:${String(ports.gatewayPort)}`);
 
-    expect(await client.getBook.call({ name: 'shelves/a/books/b', revision: 7n })).toMatchObject({
+    expect(await client.getBook({ name: 'shelves/a/books/b', revision: 7n })).toMatchObject({
       name: 'shelves/a/books/b',
       pages: 7n,
       title: 'A tale',
     });
-    expect(await client.text.call('Ada\r\nJosé')).toBe('Ada\r\nJosé');
-    expect(await client.raw.call(Uint8Array.of(0, 127, 255))).toEqual(Uint8Array.of(0, 127, 255));
-    expect(await client.json.call({ z: [true, null], a: 'José' })).toEqual({
+    expect(await client.text('Ada\r\nJosé')).toBe('Ada\r\nJosé');
+    expect(await client.raw(Uint8Array.of(0, 127, 255))).toEqual(Uint8Array.of(0, 127, 255));
+    expect(await client.json({ z: [true, null], a: 'José' })).toEqual({
       a: 'José',
       z: [true, null],
     });
   });
 
   test('reads the other gateway problems and presents its authorization', async () => {
-    const client = new TranscodingHttpClient({
-      url: `http://${HOST}:${String(ports.gatewayPort)}`,
-    });
+    const client = new TranscodingHttpClient(`http://${HOST}:${String(ports.gatewayPort)}`);
 
-    await expect(client.fail.call({ detail: 'by choice' })).rejects.toMatchObject({
+    await expect(client.fail({ detail: 'by choice' })).rejects.toMatchObject({
       code: 1,
       scope: FailureScope.APPLICATION,
       detail: 'by choice',
     });
-    await expect(client.whoAmI.call({})).rejects.toMatchObject({
+    await expect(client.whoAmI({})).rejects.toMatchObject({
       code: ProtocolCode.SESSION_REQUIRED,
       scope: FailureScope.PROTOCOL,
     });
-    expect(await client.whoAmI.call({}, { authorization: 'Bearer good' })).toMatchObject({
+    expect(await client.whoAmI({}, { authorization: 'Bearer good' })).toMatchObject({
       session: 'ada',
     });
   });
 
   test('reads the other gateway result notifications and ending failure', async () => {
-    const client = new TranscodingHttpClient({
-      url: `http://${HOST}:${String(ports.gatewayPort)}`,
-    });
+    const client = new TranscodingHttpClient(`http://${HOST}:${String(ports.gatewayPort)}`);
     const received: { kind: string; value: number }[] = [];
 
     await expect(async () => {
-      for await (const entry of client.ticks.subscribe({ from: 2 })) {
+      for await (const entry of client.subscribeTicks({ from: 2 })) {
         received.push({
           kind: entry.kind,
           value: entry.kind === 'result' ? entry.value.ticks : entry.value.remaining,

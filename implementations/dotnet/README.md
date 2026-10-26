@@ -133,6 +133,8 @@ and optional `HttpCallerOptions` from `Bead.Transcoding`: `Handler`, default `Au
 `MaximumBodyBytes` (16,778,240). Its typed `<Procedure>(request, options)` methods call only the default
 POST routes; `Subscribe<Procedure>(request, options)` returns an async sequence of `HttpEvent`
 for a notifying procedure, its `IsResult` entry carrying `Result` first, then `Notification`.
+The TypeScript client uses the same surface with lower-camel names: `client.sayHello(request)`
+and `client.subscribeCountDown(request)`, with its gateway URL first in the constructor too.
 A problem throws `FailureException` with its code, scope and detail. A stream's failure throws
 too; an incomplete stream fails and never reconnects. Ending its iteration releases its response.
 `HttpCallOptions` takes `CancellationToken`, an `Authorization` override and `WithoutAuthorization`

@@ -42,6 +42,10 @@ const quotedOf = (text: string): string => {
   return `'${text.replaceAll('\\', '\\\\').replaceAll("'", "\\'")}'`;
 };
 
+const upperFirst = (name: string): string => {
+  return `${name.slice(0, 1).toUpperCase()}${name.slice(1)}`;
+};
+
 // definition
 
 /** Prints `bead_http.ts`: the route table, the document, the problem types and the contract. */
@@ -138,7 +142,7 @@ export const printHttp = (f: GeneratedFile, options: IHttpTemplateOptions): void
     for (const procedure of answered) {
       f.print(
         f.jsDoc(
-          `Calls ${procedure.procedureName}; subscribe reads its result and notifications where it notifies.${deprecatedOf(procedure.deprecation ?? service.deprecation)}`,
+          `Calls ${procedure.procedureName} on its default route.${deprecatedOf(procedure.deprecation ?? service.deprecation)}`,
           '  '
         )
       );
@@ -151,6 +155,25 @@ export const printHttp = (f: GeneratedFile, options: IHttpTemplateOptions): void
         String(index),
         ']>;'
       );
+
+      if (procedure.notification !== undefined) {
+        f.print(
+          f.jsDoc(
+            `Reads the result and notifications of ${procedure.procedureName}; it never reconnects.${deprecatedOf(procedure.deprecation ?? service.deprecation)}`,
+            '  '
+          )
+        );
+        f.print(
+          '  public readonly subscribe',
+          upperFirst(procedure.procedureName),
+          ': ',
+          f.import('IHTTPSubscriber', runtime, true),
+          '<typeof HTTP_ROUTES[',
+          String(index),
+          ']>;'
+        );
+      }
+
       index += 1;
     }
 
@@ -160,11 +183,15 @@ export const printHttp = (f: GeneratedFile, options: IHttpTemplateOptions): void
         '  '
       )
     );
-    f.print('  public constructor(options: ', f.import('IHTTPCallerOptions', runtime, true), ') {');
+    f.print(
+      '  public constructor(url: string, options: ',
+      f.import('IHTTPCallerOptions', runtime, true),
+      ' = {}) {'
+    );
     f.print(
       '    const caller = ',
       f.import('createHTTPCaller', runtime),
-      '(HTTP_ROUTES, options);'
+      '(HTTP_ROUTES, url, options);'
     );
 
     if (answered.length === 0) {
@@ -181,6 +208,18 @@ export const printHttp = (f: GeneratedFile, options: IHttpTemplateOptions): void
         String(start + offset),
         '], caller);'
       );
+
+      if (procedure.notification !== undefined) {
+        f.print(
+          '    this.subscribe',
+          upperFirst(procedure.procedureName),
+          ' = ',
+          f.import('httpSubscriberOf', runtime),
+          '(HTTP_ROUTES[',
+          String(start + offset),
+          '], caller);'
+        );
+      }
     }
 
     f.print('  }');

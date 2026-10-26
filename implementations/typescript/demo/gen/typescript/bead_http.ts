@@ -27,14 +27,14 @@ export const HTTP_ROUTES = Object.freeze([
  */
 export class SignUpHttpClient {
   /**
-   * Calls signUp; subscribe reads its result and notifications where it notifies.
+   * Calls signUp on its default route.
    */
   public readonly signUp: IHTTPRequester<typeof HTTP_ROUTES[0]>;
   /**
    * Its gateway URL, fetch and default authorization; each call may give its own or omit it.
    */
-  public constructor(options: IHTTPCallerOptions) {
-    const caller = createHTTPCaller(HTTP_ROUTES, options);
+  public constructor(url: string, options: IHTTPCallerOptions = {}) {
+    const caller = createHTTPCaller(HTTP_ROUTES, url, options);
     this.signUp = httpRequesterOf(HTTP_ROUTES[0], caller);
   }
 }
