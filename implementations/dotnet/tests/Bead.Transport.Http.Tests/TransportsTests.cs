@@ -615,9 +615,10 @@ public sealed class TransportsTests
 
     // a batch's envelopes, each after its length on 4 bytes, big-endian, as OutOf writes each; a
     // batch cut short, as its bytes left
-    private static List<string> BatchOf(byte[] batch)
+    private static List<string> BatchOf(byte[] batch, List<JsonElement> expected)
     {
         var envelopes = new List<string>();
+        var index = 0;
 
         for (var at = 0; at < batch.Length;)
         {
@@ -630,7 +631,16 @@ public sealed class TransportsTests
                 return envelopes;
             }
 
-            envelopes.Add(OutOf(batch.AsMemory(at + 4, (int)length)));
+            var bytes = batch.AsMemory(at + 4, (int)length);
+
+            envelopes.Add(OutOf(bytes));
+
+            if (index < expected.Count && ExpectedDetailOf(expected[index]) is not null)
+            {
+                envelopes.Add($"detail {index + 1} {DetailOf(bytes)}");
+            }
+
+            index += 1;
             at += 4 + (int)length;
         }
 
@@ -747,6 +757,41 @@ public sealed class TransportsTests
                 return $"{field.Name}: {head.Fields.GetValueOrDefault(field.Name) ?? "absent"}";
             }));
         Assert.Equal(BodyOf(BytesOf(response.GetProperty("body").GetString()!)), BodyOf(body));
+    }
+
+    [Fact]
+    public void Reads_each_batch_failure_detail_only_where_the_case_gives_one()
+    {
+        using var expected = JsonDocument.Parse("""
+            [{"kind":18,"callId":3,"failure":{"code":1,"scope":0,"relays":0}},
+             {"kind":18,"callId":5,"failure":{"code":1,"scope":0,"relays":0,"detail":"second"}}]
+            """);
+        var items = expected.RootElement.EnumerateArray().ToList();
+        var batch = new List<byte>();
+
+        foreach (var (callId, detail) in new[] { (3u, "first"), (5u, "second") })
+        {
+            var bytes = EnvelopeCodec.WriteEnvelope(new Envelope
+            {
+                Header = new FailureHeader { CallId = callId },
+                Failure = new Failure { Code = 1, Scope = FailureScope.Protocol, Detail = detail },
+            });
+            var length = new byte[4];
+
+            BinaryPrimitives.WriteUInt32BigEndian(length, (uint)bytes.Length);
+            batch.AddRange(length);
+            batch.AddRange(bytes);
+        }
+
+        Assert.Equal(
+            ["18 3 failure 1 0 through 0", "18 5 failure 1 0 through 0", "detail 2 second"],
+            BatchOf([.. batch], items));
+
+        // ! the second item's detail comes from its own bytes, not its expectation or its neighbour
+        batch[^1] = (byte)'!';
+        Assert.Equal(
+            ["18 3 failure 1 0 through 0", "18 5 failure 1 0 through 0", "detail 2 secon!"],
+            BatchOf([.. batch], items));
     }
 
     [Fact]
@@ -1120,8 +1165,19 @@ public sealed class TransportsTests
 
             if (response.TryGetProperty("batch", out var batch))
             {
-                expected.AddRange(batch.EnumerateArray().Select(ExpectedOf));
-                came.AddRange(await exchange.BodyWithin(timing.Left) is { } bytes ? BatchOf(bytes) : ["body: cut"]);
+                var items = batch.EnumerateArray().ToList();
+
+                for (var index = 0; index < items.Count; index += 1)
+                {
+                    expected.Add(ExpectedOf(items[index]));
+
+                    if (ExpectedDetailOf(items[index]) is { } detail)
+                    {
+                        expected.Add($"detail {index + 1} {detail}");
+                    }
+                }
+
+                came.AddRange(await exchange.BodyWithin(timing.Left) is { } bytes ? BatchOf(bytes, items) : ["body: cut"]);
             }
 
             var (wanted, got) = (string.Join("; ", expected), string.Join("; ", came));
