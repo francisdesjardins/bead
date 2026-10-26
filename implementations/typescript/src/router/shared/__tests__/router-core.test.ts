@@ -4202,7 +4202,7 @@ test.describe('createRouterCore', () => {
       ]);
     });
 
-    // debugging 3.3 and 3.4
+    // debugging 3.3, 3.4 and 3.5
     test('read the monotonic clock twice more for a counted call than for one counted nothing, once at each of its gates, and the wall clock never', async () => {
       // the readings of each kind a call answered, then a call made, take
       const readingsOf = async (isCounted: boolean): Promise<number[][]> => {

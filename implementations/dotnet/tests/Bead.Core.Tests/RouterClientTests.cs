@@ -1600,7 +1600,7 @@ public sealed partial class RouterClientTests
         Assert.Contains("not a string", Assert.IsType<FailureException>(scripted.Errors[0]).Detail, StringComparison.Ordinal);
     }
 
-    // debugging 5.1
+    // debugging 1.1 and 5.1
     [Fact]
     public async Task Tells_each_envelope_out_and_in_with_its_connection_server_its_header_and_never_its_session_token()
     {
