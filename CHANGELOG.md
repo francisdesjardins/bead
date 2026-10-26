@@ -226,6 +226,11 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- Connect cancellation, timeout and disposal bound each supplied provider or HTTP executor even
+  when it ignores cancellation. WebSocket clients join one pending credential-provider call per
+  client, observe late failures and notify provider completion outside the connect's continuation.
+  A provider's own cancellation is its failure; a late HTTP connection is released.
+
 - beadc retries temporary work area creation when a concurrent invocation removes its empty
   `.beadc` parent, with at most three attempts.
 - The TypeScript WebSocket client refuses a connection disposed by its credential provider's

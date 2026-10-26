@@ -349,12 +349,15 @@ export interface IWSTransportClientConnectOptions extends ITransportClientAddres
    */
   credential?: string | undefined;
   /**
-   * What hands the credential its upgrade carries, called at each attempt, the first connect's and
+   * What hands the credential its upgrade awaits at each attempt, the first connect's and
    * every reconnection's, before its upgrade goes, with the attempt's `signal`: where a credential
    * past its end is renewed, as SignalR's `accessTokenFactory` is. Refused as `credential` is, and
    * beside it. What it throws fails that attempt, its cause, which a reconnection counts as a refused
    * connect; a value it hands that is no field value fails it with a {@link ProgrammerError}, which
    * a reconnection does not try again.
+   * Only one call is pending per client; an attempt joins its late outcome while it still waits.
+   * Cancellation, timeout and disposal bound the wait. The provider hears the attempt end in a
+   * later turn, and its own cancellation is its failure while the attempt's signal stays live.
    */
   credentialProvider?: ((options: { signal: AbortSignal }) => string | Promise<string>) | undefined;
   /** Prefixed with a single leading slash. */

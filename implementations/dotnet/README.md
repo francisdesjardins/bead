@@ -279,9 +279,14 @@ the listens, the outboxes and the server's life, under one lock on the C# side.
   stands for: over HTTP, each `POST`'s `Authorization`; over a WebSocket, its upgrade's, for every
   envelope of the connection, toward its server alone (spec 15.2, [decision
   0032](../../docs/decisions/0032-a-websocket-upgrade-from-no-page-carries-its-credential-beside-every-envelope.md)).
-  `WebSocketConnectOptions` takes it as `Credential`, a string, or as `CredentialProvider`, called
-  at each attempt, a reconnection's included, with the attempt's token, as SignalR's
-  `AccessTokenProvider` is: where a credential past its end is renewed. A connect refuses, an
+  `WebSocketConnectOptions` takes it as `Credential`, a string, or as `CredentialProvider`, whose
+  value each attempt awaits, a reconnection's included, with the attempt's token, as SignalR's
+  `AccessTokenProvider` is: where a credential past its end is renewed. One provider call is pending
+  per client; another attempt joins its outcome within its own cancellation, timeout or disposal
+  bound. Late values reach only an attempt that still waits, and late failures are observed.
+  Provider callbacks run outside the connect's ending; a provider's own cancellation is its
+  failure while that attempt's token stays live. The Handler and Invoker obey the same connect
+  bounds even when they ignore their token. A connect refuses, an
   `ArgumentException`, nothing moved: both given; one that is no field value — anything but visible
   ASCII, spaces and tabs, or a space or a tab first or last (RFC 9110 §5.5), which the HTTP client
   refuses alike before a send goes; one over `ws://` off the loopback. A value the provider hands

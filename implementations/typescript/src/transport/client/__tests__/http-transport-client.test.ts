@@ -143,6 +143,99 @@ const connectFake = async (respond?: Parameters<typeof createFakeFetch>[0]) => {
 
 // definition
 
+test('releases a late reconnection answer without opening after cancellation', async () => {
+  const fake = createFakeFetch();
+  const entered = Promise.withResolvers<void>();
+  const released = Promise.withResolvers<void>();
+  const cancelling = new AbortController();
+  await using client = createHTTPTransportClient({
+    isListening: false,
+    fetch: (url, init) => {
+      const pending = fake.fetch(url, { ...init, signal: undefined });
+      if (fake.calls.length === 3) {
+        entered.resolve();
+      }
+      if (fake.calls.length === 4) {
+        released.resolve();
+      }
+      return pending;
+    },
+  });
+  const first = client.connect({ host, port: 8080 });
+  fake.calls[0]?.answer({ status: 201, headers: { [CONNECTION_TOKEN_HEADER]: 'T'.repeat(22) } });
+  await first;
+  const closes: boolean[][] = [];
+  client.on('close', (...flags) => {
+    closes.push(flags);
+  });
+  const outcome = client
+    .reconnect({ signal: cancelling.signal, delay: 0 })
+    .catch((reason: unknown) => {
+      return reason;
+    });
+  await entered.promise;
+  cancelling.abort();
+  expect(await outcome).toBeInstanceOf(CancelError);
+  expect(client.isClosed()).toBe(true);
+  fake.calls[2]?.answer({ status: 201, headers: { [CONNECTION_TOKEN_HEADER]: 'T'.repeat(22) } });
+  await released.promise;
+  expect(closes).toEqual([]);
+  expect(
+    fake.calls.map((call) => {
+      return call.init.method;
+    })
+  ).toEqual(['POST', 'DELETE', 'POST', 'DELETE']);
+});
+
+test('bounds an unresponsive HTTP connect by cancellation timeout and disposal', async () => {
+  for (const ending of ['cancel', 'timeout', 'dispose']) {
+    const clock = createTestClock();
+    const answer = Promise.withResolvers<ReturnType<typeof responseOf>>();
+    const entered = Promise.withResolvers<void>();
+    const released = Promise.withResolvers<void>();
+    const methods: string[] = [];
+    const cancelling = new AbortController();
+    await using client = createHTTPTransportClient({
+      clock,
+      isListening: false,
+      fetch: (_url, init) => {
+        methods.push(init.method);
+        if (init.method === 'DELETE') {
+          released.resolve();
+          return Promise.resolve(responseOf({ status: 204 }));
+        }
+        entered.resolve();
+        return answer.promise;
+      },
+    });
+    const outcome = client
+      .connect({ host, port: 8080, timeout: 100, signal: cancelling.signal })
+      .catch((reason: unknown) => {
+        return reason;
+      });
+    await entered.promise;
+    if (ending === 'cancel') {
+      cancelling.abort();
+    } else if (ending === 'timeout') {
+      await clock.tickAsync(100);
+    } else {
+      (client as ITransportClientInternal<object, never>)[dispose]();
+    }
+    const failure = await outcome;
+    expect(failure).toBeInstanceOf(
+      ending === 'cancel' ? CancelError : ending === 'timeout' ? TimeoutError : ConnectError
+    );
+    expect(client.isClosed()).toBe(true);
+    expect(client.socket).toBeNull();
+    answer.resolve(
+      responseOf({ status: 201, headers: { [CONNECTION_TOKEN_HEADER]: 'T'.repeat(22) } })
+    );
+    await released.promise;
+    expect(methods).toEqual(['POST', 'DELETE']);
+    expect(client.isClosed()).toBe(true);
+  }
+});
+
 test('cancels a reconnection whose last attempt closes before cancellation is checked', async () => {
   const { client: transport, fake } = await connectFake((init) => {
     return responseOf(

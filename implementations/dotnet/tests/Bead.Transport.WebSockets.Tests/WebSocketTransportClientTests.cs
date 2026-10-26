@@ -19,6 +19,43 @@ namespace Bead.Transport.WebSockets.Tests;
 /// </summary>
 public sealed class WebSocketTransportClientTests : IAsyncLifetime
 {
+    [Fact]
+    public async Task Bounds_an_unresponsive_WebSocket_handshake_by_cancellation_timeout_and_disposal()
+    {
+        foreach (var ending in new[] { "cancel", "timeout", "dispose" })
+        {
+            var time = new FakeTimeProvider();
+            using var handler = new PendingUpgrade();
+            using var invoker = new HttpMessageInvoker(handler);
+            using var cancelling = new CancellationTokenSource();
+            await using var client = new WebSocketTransportClient(new WebSocketTransportClientOptions { Clock = time, Invoker = invoker });
+            var connecting = client.Connect(Target with { Timeout = TimeSpan.FromMilliseconds(100) }, cancelling.Token);
+            var outcome = Record.ExceptionAsync(() => { return connecting; });
+            await handler.Entered.Task.WaitAsync(Patience, Cancelled);
+            if (ending == "cancel") { await cancelling.CancelAsync(); }
+            else if (ending == "timeout") { time.Advance(TimeSpan.FromMilliseconds(100)); }
+            else { await client.DisposeAsync(); }
+            var failure = await outcome.AsTask().WaitAsync(Patience, Cancelled);
+            if (ending == "cancel") { Assert.IsAssignableFrom<OperationCanceledException>(failure); }
+            else if (ending == "timeout") { Assert.IsType<TimeoutException>(failure); }
+            else { Assert.Equal("the transport client was disposed as it connected", Assert.IsType<WebSocketException>(failure).Message); }
+            Assert.Equal(ReadyState.Closed, client.ReadyState);
+            handler.Answer.TrySetException(new InvalidOperationException("late upgrade failure"));
+            Assert.Empty(_server.ConnectionHandles);
+        }
+    }
+
+    private sealed class PendingUpgrade : HttpMessageHandler
+    {
+        public TaskCompletionSource Entered { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public TaskCompletionSource<HttpResponseMessage> Answer { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            Entered.TrySetResult();
+            return Answer.Task;
+        }
+    }
+
     // constants
 
     private const string Host = "127.0.0.1";
@@ -626,57 +663,160 @@ public sealed class WebSocketTransportClientTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task Drops_an_upgrade_disposed_by_its_provider_completion_callback_before_it_keeps_a_connection()
+    public async Task Finishes_a_connect_whose_provider_completion_callback_throws()
     {
+        var callback = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var reason = new InvalidOperationException("provider callback failed");
         await using var client = new WebSocketTransportClient();
-        var closes = ClosesOf(client);
         var errors = new List<Exception>();
-        Task? disposing = null;
-        ReadyState? stateAtCompletion = null;
-        CancellationTokenRegistration completing = default;
-
         client.Error += errors.Add;
+        await client.Connect(Target with
+        {
+            CredentialProvider = (token) =>
+            {
+                token.Register(() => { callback.TrySetResult(); throw reason; });
+                return ValueTask.FromResult(Bearer);
+            }
+        }, Cancelled).WaitAsync(Patience, Cancelled);
+        await callback.Task.WaitAsync(Patience, Cancelled);
+        Assert.Equal(ReadyState.Open, client.ReadyState);
+        Assert.Empty(errors);
+        await client.CloseConnection(new TransportDisconnectOptions { IsQuick = true });
+    }
 
+    [Fact]
+    public async Task Bounds_a_pending_credential_provider_by_cancellation_timeout_and_disposal()
+    {
+        foreach (var ending in new[] { "cancel", "timeout", "dispose" })
+        {
+            foreach (var late in new[] { "value", "failure" })
+            {
+                var time = new FakeTimeProvider();
+                var entered = new TaskCompletionSource<CancellationToken>(TaskCreationOptions.RunContinuationsAsynchronously);
+                var answer = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
+                using var cancelling = new CancellationTokenSource();
+                await using var client = new WebSocketTransportClient(new WebSocketTransportClientOptions { Clock = time });
+                var connecting = client.Connect(Target with { Timeout = TimeSpan.FromMilliseconds(100), CredentialProvider = (token) => { entered.TrySetResult(token); return new ValueTask<string>(answer.Task); } }, cancelling.Token);
+                var outcome = Record.ExceptionAsync(() => { return connecting; });
+                var providerToken = await entered.Task.WaitAsync(Patience, Cancelled);
+                if (ending == "cancel") { await cancelling.CancelAsync(); }
+                else if (ending == "timeout") { time.Advance(TimeSpan.FromMilliseconds(100)); }
+                else { await client.DisposeAsync(); }
+                var failure = await outcome.AsTask().WaitAsync(Patience, Cancelled);
+                if (ending == "cancel") { Assert.IsAssignableFrom<OperationCanceledException>(failure); }
+                else if (ending == "timeout") { Assert.IsType<TimeoutException>(failure); }
+                else { Assert.Equal("the transport client was disposed as it connected", Assert.IsType<WebSocketException>(failure).Message); }
+                Assert.Equal(ReadyState.Closed, client.ReadyState);
+                Assert.False(client.Carries(Bearer));
+                Assert.True(providerToken.IsCancellationRequested);
+                if (late == "value") { answer.TrySetResult(Bearer); }
+                else { answer.TrySetException(new InvalidOperationException("late provider failure")); }
+                Assert.Empty(_server.ConnectionHandles);
+            }
+        }
+    }
+
+    [Fact]
+    public async Task Joins_a_pending_provider_call_and_uses_its_late_outcome_for_the_waiting_attempt()
+    {
+        foreach (var late in new[] { "value", "failure" })
+        {
+            var answer = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
+            var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            using var cancelling = new CancellationTokenSource();
+            await using var client = new WebSocketTransportClient();
+            var calls = 0;
+            var options = Target with { CredentialProvider = (_) => { calls++; entered.TrySetResult(); return new ValueTask<string>(answer.Task); } };
+            var first = client.Connect(options, cancelling.Token);
+            var failed = Record.ExceptionAsync(() => { return first; });
+            await entered.Task.WaitAsync(Patience, Cancelled);
+            await cancelling.CancelAsync();
+            Assert.IsAssignableFrom<OperationCanceledException>(await failed.AsTask().WaitAsync(Patience, Cancelled));
+            var second = client.Connect(options, Cancelled);
+            var outcome = Record.ExceptionAsync(() => { return second; });
+            Assert.Equal(1, calls);
+            var failure = new InvalidOperationException("late provider failure");
+            if (late == "failure")
+            {
+                answer.TrySetException(failure);
+                var refused = Assert.IsType<WebSocketException>(await outcome.AsTask().WaitAsync(Patience, Cancelled));
+                Assert.Equal("the credential provider failed", refused.Message);
+                Assert.Same(failure, refused.InnerException);
+            }
+            else
+            {
+                answer.TrySetResult(Bearer);
+                await second.WaitAsync(Patience, Cancelled);
+                Assert.Equal(ReadyState.Open, client.ReadyState);
+                Assert.True(client.Carries(Bearer));
+                await client.CloseConnection(new TransportDisconnectOptions { IsQuick = true });
+            }
+            Assert.Equal(1, calls);
+        }
+    }
+
+    [Fact]
+    public async Task Treats_a_provider_own_cancellation_as_its_failure_while_the_attempt_stays_live()
+    {
+        var reason = new OperationCanceledException("provider cancelled");
+        await using var client = new WebSocketTransportClient();
+        var refused = await Assert.ThrowsAsync<WebSocketException>(() => { return client.Connect(Target with { CredentialProvider = (_) => { throw reason; } }, Cancelled); });
+        Assert.Equal("the credential provider failed", refused.Message);
+        Assert.Same(reason, refused.InnerException);
+        Assert.Equal(ReadyState.Closed, client.ReadyState);
+    }
+
+    [Fact]
+    public async Task Keeps_its_timeout_when_the_provider_completion_callback_throws()
+    {
+        var time = new FakeTimeProvider();
+        var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var callback = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var answer = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var reason = new InvalidOperationException("provider callback failed");
+        await using var client = new WebSocketTransportClient(new WebSocketTransportClientOptions { Clock = time });
+        var connecting = client.Connect(Target with
+        {
+            Timeout = TimeSpan.FromMilliseconds(100),
+            CredentialProvider = (token) =>
+            {
+                token.Register(() => { callback.TrySetResult(); throw reason; });
+                entered.TrySetResult(); return new ValueTask<string>(answer.Task);
+            }
+        }, Cancelled);
+        var outcome = Record.ExceptionAsync(() => { return connecting; });
+        await entered.Task.WaitAsync(Patience, Cancelled);
+        time.Advance(TimeSpan.FromMilliseconds(100));
+        var failure = Assert.IsType<TimeoutException>(await outcome.AsTask().WaitAsync(Patience, Cancelled));
+        Assert.Equal("timed out after 100ms", failure.Message);
+        await callback.Task.WaitAsync(Patience, Cancelled);
+        Assert.Equal(ReadyState.Closed, client.ReadyState);
+        answer.TrySetException(new InvalidOperationException("late provider failure"));
+    }
+
+    [Fact]
+    public async Task Finishes_a_connect_while_its_provider_callback_blocks()
+    {
+        using var release = new ManualResetEventSlim();
+        var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var left = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        await using var client = new WebSocketTransportClient();
         try
         {
-            var failure = await Assert.ThrowsAsync<WebSocketException>(() =>
+            var connecting = client.Connect(Target with
             {
-                return client.Connect(Target with
+                CredentialProvider = (token) =>
                 {
-                    CredentialProvider = (token) =>
-                    {
-                        completing = token.Register(() =>
-                        {
-                            stateAtCompletion = client.ReadyState;
-                            disposing = client.DisposeAsync().AsTask();
-                        });
-
-                        return ValueTask.FromResult(Bearer);
-                    },
-                }, Cancelled).WaitAsync(Patience, Cancelled);
-            });
-
-            Assert.Equal("the transport client was disposed as it connected", failure.Message);
-            Assert.Equal(WebSocketError.InvalidState, failure.WebSocketErrorCode);
-            Assert.Equal(ReadyState.Connecting, stateAtCompletion);
-            Assert.NotNull(disposing);
-            await disposing.WaitAsync(Patience, Cancelled);
-            Assert.Equal(ReadyState.Closed, client.ReadyState);
-            var handle = await Next(_connections);
-            Assert.Equal((false, handle), await Next(_closes));
-            Assert.Empty(_server.Clients);
-            Assert.False(closes.Reader.TryRead(out _));
-            Assert.Empty(errors);
-
-            await client.Connect(Target, Cancelled);
+                    token.Register(() => { entered.TrySetResult(); release.Wait(Cancelled); left.TrySetResult(); });
+                    return ValueTask.FromResult(Bearer);
+                }
+            }, Cancelled);
+            await entered.Task.WaitAsync(Patience, Cancelled);
+            await connecting.WaitAsync(Patience, Cancelled);
+            Assert.Equal(ReadyState.Open, client.ReadyState);
             await client.CloseConnection(new TransportDisconnectOptions { IsQuick = true });
-            Assert.Equal((true, true), await Next(closes));
-            Assert.Equal(ReadyState.Closed, client.ReadyState);
         }
-        finally
-        {
-            await completing.DisposeAsync();
-        }
+        finally { release.Set(); await left.Task.WaitAsync(Patience, Cancelled); }
     }
 
     [Fact]
@@ -1278,18 +1418,13 @@ public sealed class WebSocketTransportClientTests : IAsyncLifetime
         try
         {
             await cancelling.CancelAsync();
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(() => { return connecting.WaitAsync(Patience, Cancelled); });
             Assert.True(providerToken.IsCancellationRequested);
         }
         finally
         {
-            // .NET awaits the provider itself; its cancelled handshake follows that answer.
             answer.TrySetResult(Bearer);
         }
-
-        await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
-        {
-            return connecting.WaitAsync(Patience, Cancelled);
-        });
         Assert.Equal(ReadyState.Closed, _client.ReadyState);
         Assert.False(_client.Carries(Bearer));
         Assert.Equal(0, opened);

@@ -62,6 +62,11 @@ export type {
   WSTransportClient,
 } from './types';
 
+interface ICredentialWaiter {
+  resolve: (value: string) => void;
+  reject: (reason: unknown) => void;
+}
+
 // constants
 
 /** The largest message by default: a router's largest envelope by default (spec 15.3). */
@@ -210,6 +215,8 @@ export const createWSTransportClient = (options?: IWSTransportClientOptions): WS
       let isSecure = false;
       // the credential the upgrade of the current connection carried; none before it opens
       let carried: string | undefined;
+      let pendingCredential: Promise<string> | undefined;
+      const credentialWaiters = new Set<ICredentialWaiter>();
 
       // a drop closes as a network does, and the open socket's `onclose` reports it
       const beatOf = (socket: IWebSocketLike): IHeartbeat | undefined => {
@@ -300,6 +307,8 @@ export const createWSTransportClient = (options?: IWSTransportClientOptions): WS
           const url = urlOf({ ...CONNECT_DEFAULTS, ...connectOptions });
           // what the attempt's credential provider is told to give up by: the attempt settled
           const attempt = new AbortController();
+          let ended = false;
+          const providerAttempt: { owns: boolean; waiter?: ICredentialWaiter } = { owns: false };
           let opened: IWebSocketLike | undefined;
 
           isSecure = isSecureUrl(url);
@@ -432,42 +441,65 @@ export const createWSTransportClient = (options?: IWSTransportClientOptions): WS
                   return (open(credential), undefined);
                 }
 
-                // called at each attempt, before its upgrade goes: what it hands is written once
-                // held, what it throws fails the attempt, its cause
-                Promise.resolve()
-                  .then(() => {
+                // One provider call per client is pending; another attempt joins its outcome.
+                providerAttempt.owns = pendingCredential === undefined;
+                const credentialWaiter: ICredentialWaiter = {
+                  resolve: (provided) => {
+                    if (ended || signal?.aborted === true) {
+                      return;
+                    }
+
+                    if (typeof provided !== 'string' || !isFieldValue(provided)) {
+                      reject(
+                        new ProgrammerError(
+                          'a credential holds visible ASCII, spaces and tabs alone, none first or last'
+                        )
+                      );
+
+                      return;
+                    }
+
+                    open(provided);
+                  },
+                  reject: (reason: unknown) => {
+                    reject(new ConnectError('the credential provider failed', { cause: reason }));
+                  },
+                };
+                providerAttempt.waiter = credentialWaiter;
+                credentialWaiters.add(credentialWaiter);
+                if (pendingCredential === undefined) {
+                  const pending = Promise.resolve().then(() => {
                     return credentialProvider({ signal: attempt.signal });
-                  })
-                  .then(
-                    (provided) => {
-                      if (attempt.signal.aborted) {
-                        return;
+                  });
+                  pendingCredential = pending;
+                  const finish = (outcome: { value: string } | { reason: unknown }): void => {
+                    if (pendingCredential === pending) {
+                      pendingCredential = undefined;
+                    }
+                    const waiting = [...credentialWaiters];
+                    credentialWaiters.clear();
+                    for (const waiter of waiting) {
+                      if ('value' in outcome) {
+                        waiter.resolve(outcome.value);
+                      } else {
+                        waiter.reject(outcome.reason);
                       }
-
-                      if (typeof provided !== 'string' || !isFieldValue(provided)) {
-                        reject(
-                          new ProgrammerError(
-                            'a credential holds visible ASCII, spaces and tabs alone, none first or last'
-                          )
-                        );
-
-                        return;
-                      }
-
-                      open(provided);
+                    }
+                  };
+                  void pending.then(
+                    (value) => {
+                      finish({ value });
                     },
                     (reason: unknown) => {
-                      reject(new ConnectError('the credential provider failed', { cause: reason }));
+                      finish({ reason });
                     }
                   );
+                }
 
                 return undefined;
               },
               { clock: client.clock, signal, timeout }
             );
-
-            // the provider hears its attempt end before the kept socket is judged
-            attempt.abort();
 
             // a close or a dispose between the open and here comes after it: what it left is kept
             if (client.socket !== opened || opened.readyState !== WebSocket.OPEN) {
@@ -486,7 +518,22 @@ export const createWSTransportClient = (options?: IWSTransportClientOptions): WS
             throw reason;
           } finally {
             rejectConnect = undefined;
-            attempt.abort();
+            ended = true;
+            if (providerAttempt.waiter !== undefined) {
+              credentialWaiters.delete(providerAttempt.waiter);
+            }
+            if (!providerAttempt.owns) {
+              attempt.abort();
+            } else {
+              // oxlint-disable-next-line no-restricted-properties -- provider callbacks run after the connect settles, outside its stack
+              globalThis.setTimeout(() => {
+                try {
+                  attempt.abort();
+                } catch {
+                  /* the provider cannot replace the attempt's outcome */
+                }
+              }, 0);
+            }
           }
 
           setReadyStateOpen(client);

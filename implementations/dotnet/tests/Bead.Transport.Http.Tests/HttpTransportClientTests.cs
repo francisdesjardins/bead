@@ -18,6 +18,33 @@ namespace Bead.Transport.Http.Tests;
 /// </summary>
 public sealed class HttpTransportClientTests
 {
+    [Fact]
+    public async Task Bounds_an_unresponsive_HTTP_connect_by_cancellation_timeout_and_disposal()
+    {
+        foreach (var ending in new[] { "cancel", "timeout", "dispose" })
+        {
+            var time = new FakeTimeProvider();
+            using var fetch = new Fetch { IsDeaf = true };
+            using var cancelling = new CancellationTokenSource();
+            await using var client = new HttpTransportClient(new HttpTransportClientOptions { Handler = fetch, Clock = time, IsListening = false });
+            var connecting = client.Connect(new HttpConnectOptions { Host = Host, Port = 8080, Timeout = TimeSpan.FromMilliseconds(100) }, cancelling.Token);
+            var outcome = Record.ExceptionAsync(() => { return connecting; });
+            var call = await fetch.CallOf(0);
+            if (ending == "cancel") { await cancelling.CancelAsync(); }
+            else if (ending == "timeout") { time.Advance(TimeSpan.FromMilliseconds(100)); }
+            else { await client.DisposeAsync(); }
+            var failure = await outcome.AsTask().WaitAsync(Patience, Cancelled);
+            if (ending == "cancel") { Assert.IsAssignableFrom<OperationCanceledException>(failure); }
+            else if (ending == "timeout") { Assert.IsType<TimeoutException>(failure); }
+            else { Assert.Equal("the transport client was disposed as it connected", Assert.IsType<HttpRequestException>(failure).Message); }
+            Assert.Equal(ReadyState.Closed, client.ReadyState);
+            call.Answer(DrawnOf(false));
+            await fetch.CallOf(1);
+            Assert.Equal(new[] { HttpMethod.Post, HttpMethod.Delete }, fetch.Calls.Select((entry) => { return entry.Method; }));
+            Assert.Equal(ReadyState.Closed, client.ReadyState);
+        }
+    }
+
     // constants
 
     private const string Host = "127.0.0.1";
@@ -3631,7 +3658,7 @@ public sealed class HttpTransportClientTests
     }
 
     [Fact]
-    public async Task Disconnects_and_throws_an_OperationCanceledException_when_cancelled_once_its_attempt_opened()
+    public async Task Releases_a_late_reconnection_answer_without_opening_after_cancellation()
     {
         using var source = new CancellationTokenSource();
         await using var faked = await ConnectFake(NotListening, new Fetch { IsDeaf = true });
@@ -3640,7 +3667,6 @@ public sealed class HttpTransportClientTests
         // the DELETE of the connection replaced, then the attempt
         await faked.Fetch.CallOf(2);
         await source.CancelAsync();
-        faked.Fetch.Calls[2].Answer(DrawnOf(false));
 
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
         {
@@ -3648,8 +3674,8 @@ public sealed class HttpTransportClientTests
         });
 
         Assert.Equal(ReadyState.Closed, faked.Client.ReadyState);
-        // the close of the disconnect, and none for the connection replaced
-        Assert.Equal((true, false), await faked.Closed());
+        faked.Fetch.Calls[2].Answer(DrawnOf(false));
+        await faked.Fetch.CallOf(3);
         Assert.True(faked.Closes.Reader.Count == 0);
         Assert.Equal(
             [HttpMethod.Post, HttpMethod.Delete, HttpMethod.Post, HttpMethod.Delete],
