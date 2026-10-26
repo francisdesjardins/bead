@@ -166,13 +166,14 @@ machine.
 A WebSocket client writes the credential its connect is given in its upgrade's `Authorization`: a
 string, `credential`, or `credentialProvider`, whose value each attempt awaits, a reconnection's
 included, with the attempt's `signal` — where a credential past its end is renewed, as SignalR's
-`accessTokenFactory` is (spec 15.2, decision 0032). A client has one call of its provider under way
-at a time: an attempt that comes while one is waits for its outcome, and one that meets a call no
-attempt waits on any more lets it settle before it calls again, each within its own bounds, its
-cancellation, its timeout and the client's dispose, which end it at once whatever the provider does.
-A value that comes late is handed only to an attempt still waiting for it, and a failure that comes
-late is observed, never left unhandled. The attempt's `signal` is aborted once the attempt ends, in
-a later turn than its connect settles, so what a listener of it throws never takes the place of the
+`accessTokenFactory` is (spec 15.2, decision 0032). A client asks one credential at a time of each
+provider, identified by its function's identity. Its attempts are sequential: an attempt using the same provider waits for its earlier
+call to settle, then asks anew; a different provider asks at once. An answer from an earlier
+attempt serves none after it, and a late failure is observed, never left unhandled. A provider
+that ignores its signal and never settles holds every later attempt that would ask it; those
+attempts end within their own cancellation, timeout and dispose bounds (spec 15.15). A provider
+honours its signal so that later attempts can ask it again. The attempt's `signal` is aborted once
+the attempt ends, in a later turn than its connect settles, so what a listener of it throws never takes the place of the
 connect's outcome; a provider that cancels itself while that `signal` is still live fails its
 attempt as any failure of its does. The server hands it beside every envelope of that connection, as
 it came, trimmed, so a request presenting `ELSEWHERE` stands for it, resolved per request by the

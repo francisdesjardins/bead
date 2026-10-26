@@ -137,6 +137,7 @@ const createHeldServer = () => {
 
 test.describe('createMemoryTransportClient', () => {
   // spec 15.13
+  // spec 15.15
   test('hands each envelope on whole, once and in order, in a later turn than its send', async () => {
     await using pair = await connected();
     const { atClient, atServer, client, connectionHandle, server } = pair;
@@ -378,6 +379,7 @@ test.describe('createMemoryTransportClient', () => {
   });
 
   // spec 15.13
+  // spec 15.15
   test('fails a connect its server closed as it opened, what it sent before unheard', async () => {
     {
       const held = createHeldServer();
@@ -432,6 +434,7 @@ test.describe('createMemoryTransportClient', () => {
   });
 
   // spec 15.13
+  // spec 15.15
   test('closes at once, unclean, a connection its server draws once a dispose gave up on its connect', async () => {
     {
       const held = createHeldServer();
@@ -869,6 +872,7 @@ test.describe('createMemoryTransportClient', () => {
   });
 
   // spec 15.13
+  // spec 15.15
   test('gives up a connect its dispose, its token or its clock ends before its server drew it', async () => {
     // * a server that holds each connect, as a peer that never answers; its token, on this side,
     // the connect's signal

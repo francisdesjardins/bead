@@ -96,8 +96,9 @@ public sealed record WebSocketConnectOptions
     /// the next connection. What it throws fails that attempt, its cause; a value that is no field
     /// value fails it with an <see cref="ArgumentException"/>, which a reconnection does not try
     /// again. Held to the rules of <see cref="Credential"/> as the connect is asked.
-    /// One call is pending per client; another attempt joins a live call. A call abandoned by its
-    /// last waiter is cancelled; another attempt waits for it to settle, then calls anew.
+    /// One call is pending per provider identity. Attempts are sequential: another attempt using the
+    /// same provider waits for its earlier call to settle, then calls anew; another provider asks at once.
+    /// Its token is cancelled once the attempt ends, opened or not.
     /// Cancellation, timeout and disposal bound each wait; provider callbacks run outside its ending.
     /// The provider's own cancellation is its failure while the attempt's token stays live.
     /// </summary>
@@ -141,10 +142,8 @@ public sealed class WebSocketTransportClient : IRouterClientTransport, IAsyncDis
     private ClientWebSocket? _connecting;
     // what ends a connect when its client is disposed
     private CancellationTokenSource? _connectDisposed;
-    // the provider's one pending call; an abandoned outcome serves no attempt
-    private Task<string>? _credentialPending;
-    // set before the attempt ends, while its provider's cancellation callbacks run apart
-    private bool _credentialAbandoned;
+    // one call per provider identity; an earlier attempt's outcome serves none after it
+    private readonly Dictionary<Func<CancellationToken, ValueTask<string>>, Task<string>> _credentialPending = new(ReferenceEqualityComparer.Instance);
     // the open connection; a connection this side dropped is none, and its end tells nothing
     private volatile WebSocketConnection? _connection;
     // the credential the upgrade of a connection carried, which it carries alone; none for one whose
@@ -629,33 +628,34 @@ public sealed class WebSocketTransportClient : IRouterClientTransport, IAsyncDis
             {
                 tokens.Wait.ThrowIfCancellationRequested();
                 Task<string> pending;
-                bool abandoned;
                 TaskCompletionSource<string>? source = null;
                 lock (_gate)
                 {
-                    abandoned = _credentialAbandoned;
-                    if (_credentialPending is { IsCompleted: false } waiting)
+                    if (_credentialPending.TryGetValue(provider, out var waiting) && !waiting.IsCompleted)
                     {
                         pending = waiting;
                     }
                     else
                     {
-                        abandoned = _credentialAbandoned = false;
                         source = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
-                        pending = _credentialPending = source.Task;
+                        pending = source.Task;
+                        _credentialPending[provider] = pending;
                         _ = pending.ContinueWith((completed) =>
                         {
                             _ = completed.Exception;
                             lock (_gate)
                             {
-                                if (_credentialPending == completed) { _credentialPending = null; }
+                                if (_credentialPending.TryGetValue(provider, out var held) && held == completed)
+                                {
+                                    _credentialPending.Remove(provider);
+                                }
                             }
                         }, CancellationToken.None, TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
                     }
                 }
 
                 // an abandoned call settles before another starts; its outcome serves nothing
-                if (abandoned)
+                if (source is null)
                 {
                     try
                     {
@@ -669,10 +669,7 @@ public sealed class WebSocketTransportClient : IRouterClientTransport, IAsyncDis
                 }
 
                 // the pending call is published before user code runs, outside the client's lock
-                if (source is not null)
-                {
-                    _ = Providing(source);
-                }
+                _ = Providing(source);
 
                 async Task Providing(TaskCompletionSource<string> answer)
                 {
@@ -690,14 +687,6 @@ public sealed class WebSocketTransportClient : IRouterClientTransport, IAsyncDis
                 {
                     credential = await pending.WaitAsync(tokens.Wait).ConfigureAwait(false);
                     tokens.Wait.ThrowIfCancellationRequested();
-                }
-                catch (Exception) when (tokens.Wait.IsCancellationRequested)
-                {
-                    lock (_gate)
-                    {
-                        if (_credentialPending == pending) { _credentialAbandoned = true; }
-                    }
-                    throw;
                 }
                 catch (Exception reason) when (!tokens.Wait.IsCancellationRequested)
                 {
@@ -786,7 +775,7 @@ public sealed class WebSocketTransportClient : IRouterClientTransport, IAsyncDis
 
             try
             {
-                // * an attempt joins the pending provider within its own cancellation bound
+                // * the source is asked once at a time, within this attempt's own cancellation bound
                 credential = await CredentialOf(options, (linked.Token, attempt.Token));
 
                 if (credential is not null)
@@ -803,8 +792,15 @@ public sealed class WebSocketTransportClient : IRouterClientTransport, IAsyncDis
             {
                 throw new TimeoutException(string.Create(CultureInfo.InvariantCulture, $"timed out after {options.Timeout.TotalMilliseconds}ms"), reason);
             }
-            catch (OperationCanceledException reason) when (disposed.IsCancellationRequested && !token.IsCancellationRequested)
+            catch (Exception reason) when (disposed.IsCancellationRequested)
             {
+                // ! CancelAsync runs linked callbacks apart: an aborted socket can fail first
+                token.ThrowIfCancellationRequested();
+                if (timeout is { IsCancellationRequested: true })
+                {
+                    throw new TimeoutException(string.Create(CultureInfo.InvariantCulture, $"timed out after {options.Timeout.TotalMilliseconds}ms"), reason);
+                }
+
                 throw new WebSocketException(WebSocketError.InvalidState, "the transport client was disposed as it connected", reason);
             }
             catch (WebSocketException reason) when (socket.HttpStatusCode is not (0 or HttpStatusCode.SwitchingProtocols))

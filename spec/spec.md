@@ -1224,7 +1224,11 @@ HTTP connection carries a credential per `POST`, so its connect's is read by no 
 a WebSocket carries one per connection, so its upgrade's is the one read. Nothing is carried toward
 a client: a server's command that presents `ELSEWHERE` over a WebSocket fails before it goes,
 `DESTINATION_UNREACHABLE`. A client writes on each upgrade the credential it is given for it, as
-given, and none otherwise; it fails that upgrade before it goes for one that is no field value, as
+given, and none otherwise. It asks for one credential at a time of each source, a provider known
+by its reference: an attempt whose source's earlier ask is unsettled waits for it, within its own
+time (section 15.15), then asks anew, that earlier answer serving no later attempt; another source
+is asked at once; an ask that never settles holds every later attempt that would ask its source,
+so a provider honours the signal it is asked with; it fails that upgrade before it goes for one that is no field value, as
 section 15.5 says, and for one over a WebSocket that leaves the machine in the clear (section
 13.4), its upgrade being where it would cross. No server reads a credential from its target's
 query, which logs keep ([RFC 6750 §2.3](https://www.rfc-editor.org/rfc/rfc6750#section-2.3)), from
@@ -1724,6 +1728,21 @@ connection's sending, closing, credential and security are its own transport's. 
 join two transports whose handles might be one. Its stop stops each, and its bounds and its gauges
 reach each, as section 15.1 has a transport's. It serves no port of its own: one port for two
 transports comes from a proxy in front of them.
+
+15.15. A client's connect ends in one of four ways: its connection opens; it is cancelled; its
+time, `transportClient.connectTimeout`, runs out; or its application disposes of its client,
+ending the attempt under way. Each of the last three ends what it awaits at once: its credential,
+its server's answer, what sends its requests or its upgrade, its own or one its application
+supplies. The connect fails, told apart as cancelled, timed out or disposed, and its client is
+closed; a reconnection's attempt so ended leaves the reconnection to go on, unless the
+reconnection's own signal ends it. The attempt's end is told to what it awaits: its credential's
+ask hears it by the signal it is asked with, whether the attempt opened or not, and what that
+telling throws or holds reaches neither the connect nor its refusal. What the connect draws as it
+ends, or after it ends, is let go, and its server told where the transport can tell it: over HTTP a
+`DELETE` of the connection drawn (section 15.4), over a WebSocket a close of the socket, in memory
+the close of its connection, over a Web Worker its `bead-close`. A credential that settles after
+the attempt ends is never written, and a late failure is dropped. These bounds hold what the
+connect awaits; work its application's code does before it returns is its platform's.
 
 ## 16. Services and procedures
 

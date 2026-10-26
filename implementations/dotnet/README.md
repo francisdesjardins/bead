@@ -314,13 +314,15 @@ the listens, the outboxes and the server's life, under one lock on the C# side.
   0032](../../docs/decisions/0032-a-websocket-upgrade-from-no-page-carries-its-credential-beside-every-envelope.md)).
   `WebSocketConnectOptions` takes it as `Credential`, a string, or as `CredentialProvider`, whose
   value each attempt awaits, a reconnection's included, with the attempt's token, as SignalR's
-  `AccessTokenProvider` is: where a credential past its end is renewed. A client has one call of its
-  provider under way at a time, published under the client's lock and made once it is released: an
-  attempt that comes while one is waits for its outcome, and one that meets a call no attempt waits
-  on any more lets it settle before it calls again, each within its own bounds, its token, its
-  timeout and the client's dispose, which end it at once whatever the provider does. A value that
-  comes late is handed only to an attempt still waiting for it, and a failure that comes late is
-  observed, never left unobserved. The provider's token is cancelled once its attempt is over, its
+  `AccessTokenProvider` is: where a credential past its end is renewed. A client asks one credential
+  at a time of each provider, identified by its delegate's reference identity. Its attempts are
+  sequential: an attempt using the same provider waits for its earlier
+  call to settle, then asks anew; a different provider asks at once. An answer from an earlier
+  attempt serves none after it, and a late failure is observed, never left unobserved. A provider
+  that ignores its token and never settles holds every later attempt that would ask it; those
+  attempts end within their own cancellation, timeout and dispose bounds (spec 15.15). A provider
+  honours its token so that later attempts can ask it again. The provider's token is cancelled once
+  its attempt is over, its
   callbacks run apart from the connect's ending, so none takes the place of its outcome; a provider
   that cancels itself while that attempt's token is still live fails it as any failure of its does.
   What else a connect awaits, the WebSocket's invoker and an HTTP client's `Handler`, is bounded
