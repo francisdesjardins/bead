@@ -142,6 +142,61 @@ public sealed class RelayTests
     // definition
 
     [Fact]
+    public async Task Refuses_bearer_credentials_when_a_destination_supplies_no_carriage_metadata_and_still_forwards_none_or_OPAQUE()
+    {
+        var test = new TestRelay();
+        var target = new RecordingTarget();
+
+        test.Relay.Register(new ConnectionTarget(Device), Seven with { Audience = "bead-interop" });
+        test.Relay.Register(new DefaultCarriageTarget(target), new DestinationOptions { Audience = "bead-interop", DestinationId = 8 });
+
+        foreach (var destinationId in new uint[] { 7, 8 })
+        {
+            foreach (var (callId, credential, detail) in new (uint, Credential, string)[]
+            {
+                (1, JwtFor("bead-interop"), "its transport leaves the machine in the clear, which a bearer credential never crosses"),
+                (3, Credential.Elsewhere(), "its transport does not carry the credential ELSEWHERE stands for beside an envelope: none, or another"),
+            })
+            {
+                var header = HeaderOf(callId, destinationId) with { Credential = credential };
+
+                await Handled(test.Relay.HandlerOf(header), PropsOf(header) with { IsAdmitted = false, TransportCredential = "Interop sub=ada" });
+
+                var (answer, answered) = test.Answers[^1];
+
+                Assert.Equal(Failure.OfProtocol(ProtocolCode.DestinationUnreachable, $"destination {destinationId} is unreachable: {detail}"), answer.Failure);
+                Assert.Same(header, answered.Header);
+            }
+        }
+
+        Assert.Empty(test.Own);
+        Assert.Empty(target.Asked);
+
+        foreach (var destinationId in new uint[] { 7, 8 })
+        {
+            foreach (var (callId, credential) in new (uint, Credential?)[] { (5, null), (7, Opaque()) })
+            {
+                var header = HeaderOf(callId, destinationId) with { Credential = credential };
+
+                await Handled(test.Relay.HandlerOf(header), PropsOf(header) with { IsAdmitted = false });
+            }
+        }
+
+        foreach (var requests in new[] { test.Own, target.Asked })
+        {
+            Assert.Equal(2, requests.Count);
+            Assert.All(requests, (asked) =>
+            {
+                Assert.Equal(Credential.None, asked.Options.Credential);
+                Assert.Equal(new byte[] { 1, 2, 3 }, asked.Payload.ToArray());
+            });
+        }
+
+        Assert.Equal<object>([new byte[] { 8 }, new byte[] { 8 }, new byte[] { 9 }, new byte[] { 9 }], FailuresOf(test.Answers).Skip(4));
+        Assert.Empty(test.Reports);
+    }
+
+    [Fact]
     public void Takes_the_audience_each_destination_verifies_gives_the_set_of_them_and_refuses_one_not_of_well_formed_Unicode()
     {
         var relay = new TestRelay().Relay;
@@ -1054,6 +1109,23 @@ public sealed class RelayTests
     private sealed record Asked(ResolvedRequestOptions Options, ReadOnlyMemory<byte> Payload, Procedure Procedure);
 
     // a client's router a destination names, which records what it is asked and settles as told
+    // a target whose carriage and security take the interface defaults
+    private sealed class DefaultCarriageTarget(RecordingTarget target) : IRouterTarget
+    {
+        public RouterLimits Limits
+        {
+            get
+            {
+                return target.Limits;
+            }
+        }
+
+        public Task<RouterResult> Request(ReadOnlyMemory<byte> payload, RouterRequest request)
+        {
+            return target.Request(payload, request);
+        }
+    }
+
     private sealed class RecordingTarget(RouterLimits? limits = null) : IRouterTarget
     {
         public RouterLimits Limits { get; } = limits ?? RouterLimits.Default;

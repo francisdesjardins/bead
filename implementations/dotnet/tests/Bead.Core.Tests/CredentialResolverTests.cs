@@ -174,6 +174,56 @@ public sealed class CredentialResolverTests
     // definition
 
     [Fact]
+    public async Task Fails_every_waiter_on_a_malformed_key_set_answer_and_accepts_a_valid_answer_at_the_next_deadline()
+    {
+        IReadOnlyList<JwtSetKey>[] answers =
+        [
+            null!,
+            [null!],
+            [new JwtSetKey { Algorithm = JwtAlgorithm.Hs256, Jwk = JwkOf(([.. Enumerable.Repeat((byte)2, 31)], "set-1")) }],
+        ];
+
+        foreach (var answer in answers)
+        {
+            var clock = new FakeTimeProvider(Start);
+            var keySet = new RecordingKeySet(SetIssuer);
+            var resolver = ResolverOf(new Credentials { Audience = Audience, KeySet = keySet.KeySet }, clock);
+            var token = Credential.Jwt(TokenOf((Second, "set-1"), SetIssuer));
+            var first = ResolvedOf((resolver, token));
+            var second = ResolvedOf((resolver, token));
+
+            Assert.Single(keySet.Asks);
+            keySet.Asks[0].Settle.SetResult(answer);
+
+            foreach (var waiting in new[] { first, second })
+            {
+                var failure = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+                {
+                    return waiting;
+                });
+
+                Assert.Equal($"the key set's ask for {SetIssuer} failed", failure.Message);
+                Assert.NotNull(failure.InnerException);
+            }
+
+            var next = ResolvedOf((resolver, token));
+
+            clock.Advance(TimeSpan.FromMilliseconds(59_999));
+
+            Assert.False(next.IsCompleted);
+            Assert.Single(keySet.Asks);
+            clock.Advance(TimeSpan.FromMilliseconds(1));
+
+            Assert.Equal(2, keySet.Asks.Count);
+            keySet.Asks[1].Settle.SetResult([SetKeyOf((Second, "set-1"))]);
+
+            Assert.Equal("grace", (await next)!.Identifier!.Sub);
+            Assert.Equal("grace", (await ResolvedOf((resolver, token)))!.Identifier!.Sub);
+            Assert.Equal(2, keySet.Asks.Count);
+        }
+    }
+
+    [Fact]
     public async Task Resolves_a_JWT_that_verifies_to_its_credential_s_session_its_claims_its_identifier_with_its_scheme_its_end_exp_plus_60_s_and_one_that_does_not_to_none()
     {
         var clock = new FakeTimeProvider(Start);

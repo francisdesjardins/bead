@@ -255,6 +255,60 @@ public sealed partial class RouterServerTests
     // definition
 
     [Fact]
+    public async Task Keeps_the_latest_credential_end_across_subscriptions_and_clears_its_timers_when_the_connection_closes()
+    {
+        StartVerifying((carried, _) =>
+        {
+            return ValueTask.FromResult<ElsewhereSession?>(new ElsewhereSession
+            {
+                Id = "ada",
+                End = carried == "none" ? null : _time.GetUtcNow().ToUnixTimeMilliseconds() + long.Parse(carried, System.Globalization.CultureInfo.InvariantCulture),
+            });
+        });
+        _transport.Open(Second);
+
+        NotificationResolverCallback<string, string> subscribe = async (_, response) =>
+        {
+            await response.RegisterNotification();
+            await response.Answer("ok");
+        };
+
+        NotifierOf(subscribe);
+        NotifierOf(subscribe, Other);
+
+        SubscribeElsewhere(First, (1, "1000"));
+        await Settle();
+        _transport.Carrying(First, (EnvelopeCodec.WriteEnvelope(Presenting(SubscribingOf(3, "in", Other), Credential.Elsewhere())), "2000"));
+        await Settle();
+        SubscribeElsewhere(Second, (1, "3000"));
+        await Settle();
+
+        Assert.Equal(["first result 1 ok", "first result 3 ok", "second result 1 ok"], SentSince());
+        await AdvanceBy(1_000);
+        Assert.Empty(SentSince());
+        Deliver(First, CancelOf(1));
+        await Settle();
+        SubscribeElsewhere(First, (5, "none"));
+        await Settle();
+
+        Assert.Equal(["first result 5 ok"], SentSince());
+        Assert.Equal(KeptOf((2, 1)), await KeptCounts());
+        DeliverElsewhere(First, (7, "500"));
+        await Settle();
+        Assert.Equal(["first result 7 ada"], SentSince());
+
+        _transport.Closed(First);
+        await Settle();
+
+        Assert.Equal(KeptOf((1, 1)), await KeptCounts());
+        await AdvanceBy(2_000);
+
+        Assert.Equal(["second failure 1 SessionRequired"], SentSince());
+        Assert.Equal(KeptOf((0, 0)), await KeptCounts());
+        Assert.Empty(Reported());
+    }
+
+    [Fact]
     public async Task Keeps_a_credential_s_session_from_its_first_subscription_on_a_connection_to_its_last_timing_its_end_meanwhile_its_connection_s_session_it_never_keeps()
     {
         StartKeeping();
