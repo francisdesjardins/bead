@@ -20,6 +20,38 @@ public sealed class MetricsRegistryTests
 
     // definition
 
+    [Fact]
+    public void Shares_notification_counts_across_repeated_declarations_and_keeps_another_procedure_separate()
+    {
+        var registry = new MetricsRegistry();
+        var first = registry.Give(RouterSide.Server).DeclareResolver(Echo, true).Notifying;
+        var second = registry.Give(RouterSide.Server).DeclareResolver(Echo with { ServiceRevision = 2 }, true).Notifying;
+        var other = registry.Give(RouterSide.Server).DeclareResolver(Echo with { ProcedureId = 2, ProcedureName = "other" }, true).Notifying;
+
+        Assert.NotNull(first);
+        Assert.NotNull(second);
+        Assert.Same(first, second);
+        Assert.NotNull(other);
+        Assert.NotSame(first, other);
+
+        first.Sent();
+        second.Sent();
+        second.Failed();
+        other.Failed();
+
+        Assert.Equal(
+            [
+                "bead_notifications_sent_total{service=\"1\",procedure=\"echo\",outcome=\"sent\"} 2",
+                "bead_notifications_sent_total{service=\"1\",procedure=\"echo\",outcome=\"failed\"} 1",
+                "bead_notifications_sent_total{service=\"1\",procedure=\"other\",outcome=\"sent\"} 0",
+                "bead_notifications_sent_total{service=\"1\",procedure=\"other\",outcome=\"failed\"} 1",
+            ],
+            registry.Exposition().Text.Split('\n').Where((line) =>
+            {
+                return line.StartsWith("bead_notifications_sent_total{", StringComparison.Ordinal);
+            }));
+    }
+
     // spec 16.7
     [Fact]
     public void Refuses_a_declaration_as_it_is_made_in_sentences_that_name_its_address_its_names_and_its_reason_declaring_nothing()
