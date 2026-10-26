@@ -154,6 +154,38 @@ public sealed class JwtVerifierTests
     }
 
     [Fact]
+    public async Task Throws_for_a_key_without_a_string_issuer_before_reading_the_clock()
+    {
+        var vector = Vectors.Of("jwtVerdicts", Holding);
+        var token = vector.GetProperty("token").GetString()!;
+        var keys = KeysOf(vector);
+        var key = keys[0] with { Issuer = null! };
+        var reads = 0;
+        var props = PropsOf(vector) with
+        {
+            Keys = [.. keys, key],
+            Now = () =>
+            {
+                reads += 1;
+
+                return MillisecondsOf(vector);
+            },
+        };
+
+        foreach (var presented in new[] { "", token })
+        {
+            await Assert.ThrowsAsync<ArgumentException>(async () =>
+            {
+                await JwtVerifier.VerifyJwt(presented, props);
+            });
+            Assert.Equal(0, reads);
+        }
+
+        Assert.True((await JwtVerifier.VerifyJwt(token, props with { Keys = keys })).Holds);
+        Assert.Equal(1, reads);
+    }
+
+    [Fact]
     public async Task Refuses_an_HS256_signature_of_the_wrong_byte_length_before_reading_the_clock()
     {
         var vector = Vectors.Of("jwtVerdicts", Holding);

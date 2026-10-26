@@ -10,6 +10,7 @@ import { readFileSync } from 'node:fs';
 import { expect, test } from '@playwright/test';
 import { FailureScope, ProtocolCode } from '../constants';
 import {
+  createViolationHolder,
   detailBoundOf,
   type IViolation,
   isRefused,
@@ -81,6 +82,24 @@ const readOf = (detail: string) => {
 };
 
 // definition
+
+test('keeps a full violation detail closed to smaller violations after the first refusal', () => {
+  const small: IViolation = { bounds: {}, fieldPath: 'a', message: '', ruleId: 'required' };
+  const large = { ...small, fieldPath: 'a'.repeat(200) };
+  const holder = createViolationHolder(80);
+  const first = '{"fieldPath":"a","ruleId":"required"}';
+
+  expect(holder.hold(small)).toBe(true);
+  expect(holder.lines).toEqual([first]);
+  expect(holder.hold(large)).toBe(false);
+  expect(holder.hold(small)).toBe(false);
+  expect(holder.lines).toEqual([first]);
+  for (const violations of [[small], [small, large], [small, large, small]]) {
+    expect(violationsDetailOf({ more: 0, stopped: false, violations }, { maximumBytes: 80 })).toBe(
+      `${first}\n{"more":${String(violations.length - 1)}}`
+    );
+  }
+});
 
 test.describe('the details', () => {
   test.describe.configure({ retries: 0 });

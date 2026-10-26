@@ -13,6 +13,30 @@ namespace Bead.Protobuf.Tests;
 public sealed class ValidatorsTests
 {
     [Fact]
+    public void Orders_string_map_keys_by_code_points_with_each_prefix_before_its_extensions()
+    {
+        KeyValuePair<string, string>[] expected =
+        [
+            new("", "empty"),
+            new("a", "prefix"),
+            new("ab", "ascii extension"),
+            new("a\uE000", "BMP extension"),
+            new("a😀", "astral extension"),
+            new("\uE000", "BMP"),
+            new("😀", "astral"),
+            new("😀a", "astral prefix"),
+        ];
+
+        foreach (var reversed in new[] { false, true })
+        {
+            var entries = reversed ? expected.Reverse() : expected;
+            var map = new Dictionary<string, string>(entries, StringComparer.Ordinal);
+
+            Assert.Equal(expected, Validators.ByKey(map));
+        }
+    }
+
+    [Fact]
     public void Orders_both_boolean_map_keys_with_their_values_in_either_insertion_order()
     {
         foreach (var entries in new[]

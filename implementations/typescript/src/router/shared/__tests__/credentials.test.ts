@@ -169,6 +169,102 @@ const outcomeOf = (resolution: Promise<unknown>): { current: unknown } => {
 // definition
 
 test.describe('createCredentialResolver', () => {
+  test('fails every waiter when a key set rejects without a reason and accepts its next answer at the deadline', async () => {
+    for (const reason of [undefined, null]) {
+      const clock = createTestClock(NOW);
+      const { asks, keySet } = createKeySet();
+      const resolver = createCredentialResolver({ audience: AUDIENCE, keySet }, { clock });
+      const signal = new AbortController().signal;
+      const named = jwtOf(tokenOf(claimsOf(SET_ISSUER), { key: SET_KEY_BYTES, kid: 'set-1' }));
+      const failures = Promise.allSettled([
+        resolver.resolve(named, signal),
+        resolver.resolve(named, signal),
+      ]);
+
+      await expect
+        .poll(() => {
+          return asks.length;
+        })
+        .toBe(1);
+      asks[0]?.settle.reject(reason);
+
+      const settled = await failures;
+
+      for (const result of settled) {
+        expect(result.status).toBe('rejected');
+
+        if (result.status === 'rejected') {
+          expect(result.reason).toMatchObject({
+            cause: new Error('the key set failed'),
+            message: `the key set's ask for ${SET_ISSUER} failed`,
+          });
+        }
+      }
+
+      expect(duesOn(clock)).toEqual([]);
+
+      const next = outcomeOf(resolver.resolve(named, signal));
+
+      await expect
+        .poll(() => {
+          return duesOn(clock);
+        })
+        .toEqual([60_000]);
+      await clock.tickAsync(59_999);
+
+      expect([next.current, asks.length]).toEqual(['waiting', 1]);
+      await clock.tickAsync(1);
+
+      expect(asks).toHaveLength(2);
+      asks[1]?.settle.resolve([SET_KEY]);
+      await expect
+        .poll(() => {
+          return next.current;
+        })
+        .toMatchObject({ identifier: { sub: 'grace' } });
+      expect(await resolver.resolve(named, signal)).toMatchObject({ identifier: { sub: 'grace' } });
+      expect(asks).toHaveLength(2);
+      expect(duesOn(clock)).toEqual([]);
+      clock.uninstall();
+    }
+  });
+
+  test('refuses a token without a string issuer without asking for keys and accepts a named issuer afterward', async () => {
+    const clock = createTestClock(NOW);
+    const { asks, keySet } = createKeySet();
+    const resolver = createCredentialResolver({ audience: AUDIENCE, keySet }, { clock });
+    const signal = new AbortController().signal;
+
+    for (const issuer of [undefined, null, 7, [], {}]) {
+      const refused: string[] = [];
+      const token = tokenOf(
+        { ...claimsOf(SET_ISSUER), iss: issuer },
+        { key: SET_KEY_BYTES, kid: 'set-1' }
+      );
+
+      expect(
+        await resolver.resolve(
+          {
+            ...jwtOf(token),
+            onRefused: (reason) => {
+              refused.push(reason);
+            },
+          },
+          signal
+        )
+      ).toBeUndefined();
+      expect(refused).toEqual(['kid']);
+      expect(asks).toEqual([]);
+      expect(duesOn(clock)).toEqual([]);
+    }
+
+    await heldOn(resolver, asks);
+    expect(asks).toHaveLength(1);
+    expect(asks[0]?.issuer).toBe(SET_ISSUER);
+    expect(duesOn(clock)).toEqual([]);
+    clock.uninstall();
+  });
+
   test('fails every waiter on a malformed key set answer and accepts a valid answer at the next deadline', async () => {
     for (const answer of [
       null,
