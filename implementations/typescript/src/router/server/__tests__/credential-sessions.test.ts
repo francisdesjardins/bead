@@ -4,6 +4,7 @@ import type { TransportServerConnectionHandle } from '../../../transport/server/
 import { createTestClock, delaysOn } from '../../../transport/shared/__tests__/fixtures';
 import { LONGEST_TIMER } from '../../../transport/shared/clock';
 import { CredentialScheme } from '../../shared/constants';
+import { createMetricsRegistry } from '../../shared/metrics-registry';
 import type { ICallSession, SessionIdentifier } from '../../shared/types';
 import { createCredentialSessions } from '../credential-sessions';
 import { createNotificationManager } from '../notification-manager';
@@ -50,6 +51,32 @@ const sessionOf = (end: number | undefined): ICallSession => {
 // definition
 
 test.describe('createCredentialSessions', () => {
+  test('forwards a subscription’s metrics series until it is removed', () => {
+    const { sessions: created } = createSessions();
+    using sessions = created;
+    const { notifications } = sessions;
+    const registry = createMetricsRegistry();
+    const series = registry
+      .attach('server')
+      .declareResolver(
+        { ...news, procedureName: 'news', serviceRevision: 1 },
+        { notifies: true }
+      ).notifying;
+
+    expect(series).toBeDefined();
+    notifications.register(news, { callId: 1, connectionHandle: first, series });
+    expect(
+      notifications.notifications.get(news.serviceId)?.get(news.procedureId)?.get(first)?.get('')
+    ).toBe(1);
+    expect(notifications.seriesOf(1, first)).toBe(series);
+    expect(notifications.seriesOf(3, first)).toBeUndefined();
+    expect(notifications.seriesOf(1, second)).toBeUndefined();
+    expect(notifications.unregister(1, first)).toBe(1);
+    expect(notifications.seriesOf(1, first)).toBeUndefined();
+    expect(notifications.subscriptions()).toEqual([]);
+    expect(notifications.notifications.size).toBe(0);
+  });
+
   test('keeps the latest credential end across subscriptions and clears its timers when the connection closes', async () => {
     const { clock, ended, sessions: created } = createSessions();
     using sessions = created;

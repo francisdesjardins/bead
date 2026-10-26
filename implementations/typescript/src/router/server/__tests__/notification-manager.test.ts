@@ -1,6 +1,7 @@
 import { expect, test } from '@playwright/test';
 import type { TransportServerConnectionHandle } from '../../../transport/server/types';
 import { CredentialScheme } from '../../shared/constants';
+import { createMetricsRegistry } from '../../shared/metrics-registry';
 import {
   createNotificationManager,
   PACING_DEFAULTS,
@@ -15,6 +16,46 @@ const second: TransportServerConnectionHandle = 'type=WS;ip=127.0.0.1;port=50002
 // definition
 
 test.describe('createNotificationManager', () => {
+  test('forgets a removed subscription’s metrics series and keeps another connection’s series', () => {
+    const registry = createMetricsRegistry();
+    const metrics = registry.attach('server');
+    const procedure = { procedureId: 1, procedureName: 'news', serviceId: 10, serviceRevision: 1 };
+    const one = metrics.declareResolver(procedure, { notifies: true }).notifying;
+    const other = metrics.declareResolver(
+      { ...procedure, procedureId: 2, procedureName: 'other' },
+      { notifies: true }
+    ).notifying;
+    const notifications = createNotificationManager();
+    const before = registry.exposition();
+
+    notifications.register(procedure, { callId: 13, connectionHandle: first, series: one });
+    notifications.register(
+      { ...procedure, procedureId: 2 },
+      { callId: 13, connectionHandle: second, series: other }
+    );
+
+    expect(one).toBeDefined();
+    expect(other).toBeDefined();
+    expect(notifications.seriesOf(13, first)).toBe(one);
+    expect(notifications.seriesOf(13, second)).toBe(other);
+    expect(notifications.seriesOf(99, first)).toBeUndefined();
+    expect(notifications.seriesOf(13, 'type=WS;ip=127.0.0.1;port=1;ordinal=1')).toBeUndefined();
+
+    expect(notifications.unregister(13, first)).toBe(13);
+    expect(notifications.seriesOf(13, first)).toBeUndefined();
+    expect(notifications.seriesOf(13, second)).toBe(other);
+    notifications.clean(second);
+    expect(notifications.seriesOf(13, second)).toBeUndefined();
+
+    // * the same place may subscribe without counting; a removed series never comes back.
+    notifications.register(procedure, { callId: 13, connectionHandle: first });
+    expect(notifications.has(13, first)).toBe(true);
+    expect(notifications.seriesOf(13, first)).toBeUndefined();
+    expect(notifications.unregister(13, first)).toBe(13);
+    expect(notifications.subscriptions()).toEqual([]);
+    expect(registry.exposition()).toEqual(before);
+  });
+
   test('registers each subscription under the call id of the request that made it', () => {
     const notifications = createNotificationManager();
 
