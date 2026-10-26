@@ -11,6 +11,7 @@ import {
   encodeParcel,
   type IParcel,
   isToken,
+  kindNamed,
   ParcelFlag,
   ParcelKind,
   readParcel,
@@ -159,6 +160,89 @@ test.describe('broker parcel', () => {
 
     for (const id of ['', 'x'.repeat(65), 'peer.1', 'a/b', 'a b', 'é', '$share', 'a+b', 'a#']) {
       expect(isToken(id), id).toBe(false);
+    }
+  });
+
+  test('writes no character past U+00FF in an id or a credential, nor an id that is no token where a token is due', () => {
+    const half = fromHexadecimal('11 12 13 14 15 16 17 18');
+    const none = new Uint8Array(8);
+    const gone = {
+      acceptor: none,
+      incarnation: new Uint8Array(16),
+      kind: ParcelKind.GONE,
+      opener: none,
+      sequence: 0,
+    };
+
+    for (const [fields, refusal] of [
+      [{ ...gone, id: 'a€' }, 'an id is written a character a byte, not "a€"'],
+      [
+        {
+          acceptor: half,
+          carried: Uint8Array.of(1),
+          credential: 'Bearer €',
+          kind: ParcelKind.DATA,
+          opener: half,
+          sequence: 3,
+        },
+        'a credential is written a character a byte, not "Bearer €"',
+      ],
+      [
+        { ...gone, id: 'a.b' },
+        'a parcel this side refuses is never written: an id that is no token',
+      ],
+      [
+        {
+          ...gone,
+          acceptor: none,
+          bound: 1_024,
+          id: 'é',
+          kind: ParcelKind.OPEN,
+          opener: half,
+          sequence: 1,
+        },
+        'an OPEN names a token and a receive bound of 1,024 bytes at least',
+      ],
+    ] as const) {
+      expect(() => {
+        return writeParcel(fields);
+      }, refusal).toThrow(new ProgrammerError(refusal));
+    }
+  });
+
+  test('names a kind as a report does, its article before it, and reads an advisory parcel to its prefix, but one with no sequence', () => {
+    const half = fromHexadecimal('11 12 13 14 15 16 17 18');
+
+    expect(
+      [0x00, ...Object.values(ParcelKind), 0x0a].map((kind) => {
+        return kindNamed(kind);
+      })
+    ).toEqual([
+      'a parcel',
+      'an OPEN',
+      'an ACCEPT',
+      'a REFUSE',
+      'a DATA',
+      'a PING',
+      'a PONG',
+      'a CLOSE',
+      'a RESET',
+      'a GONE',
+      'a parcel',
+    ]);
+
+    // * an advisory kind, whatever its flags and its body, taken in its order: a sequence it needs
+    expect(
+      readParcel(
+        encodeParcel({ acceptor: half, flags: 0x08, kind: 0x80, opener: half, sequence: 3 })
+      )
+    ).toMatchObject({ parcel: { kind: 0x80, sequence: 3 } });
+
+    for (const sequence of [0, 2 ** 53]) {
+      expect(
+        readParcel(encodeParcel({ acceptor: half, kind: 0x80, opener: half, sequence })),
+        String(sequence)
+      ).toMatchObject({ reason: 'an advisory parcel with no sequence', refused: 'does-not-read' });
     }
   });
 });

@@ -592,7 +592,7 @@ internal static class BrokerParcels
             case BrokerParcelKinds.Open:
             case BrokerParcelKinds.Accept:
                 {
-                    var id = Encoding.Latin1.GetBytes(parcel.Id ?? "");
+                    var id = Latin1Of((parcel.Id ?? "", "an id"));
 
                     if (id.Length > byte.MaxValue || parcel.Bound is < 0 or > LargestBound)
                     {
@@ -626,7 +626,7 @@ internal static class BrokerParcels
 
             case BrokerParcelKinds.Data:
                 {
-                    var credential = parcel.Credential is null ? [] : Encoding.Latin1.GetBytes(parcel.Credential);
+                    var credential = parcel.Credential is null ? [] : Latin1Of((parcel.Credential, "a credential"));
                     var at = parcel.Credential is null ? 0 : 2 + credential.Length;
                     var body = new byte[at + parcel.Carried.Length];
 
@@ -661,7 +661,7 @@ internal static class BrokerParcels
 
             case BrokerParcelKinds.Gone:
                 {
-                    var id = Encoding.Latin1.GetBytes(parcel.Id ?? "");
+                    var id = Latin1Of((parcel.Id ?? "", "an id"));
                     var body = new byte[17 + id.Length];
 
                     BinaryPrimitives.WriteUInt128BigEndian(body, parcel.Incarnation ?? 0);
@@ -674,5 +674,22 @@ internal static class BrokerParcels
             default:
                 return [];
         }
+    }
+
+    // ! a string a character a byte, as an id and a credential are written: one past U+00FF is
+    // refused, never written as Latin-1's stand-in
+    private static byte[] Latin1Of((string Text, string What) written)
+    {
+        var (text, what) = written;
+
+        if (text.Any((character) =>
+        {
+            return character > '\u00FF';
+        }))
+        {
+            throw new ArgumentException($"{what} is written a character a byte, not \"{text}\"");
+        }
+
+        return Encoding.Latin1.GetBytes(text);
     }
 }

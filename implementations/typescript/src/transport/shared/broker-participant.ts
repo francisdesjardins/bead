@@ -110,7 +110,8 @@ export interface IBrokerParticipantOptions {
   maximumEnvelopePartsBytes?: number | undefined;
   /**
    * The slowest, in bytes a second, an envelope's parts may come once `bodyGracePeriod` passed, on
-   * its clock (spec 15.20): a whole number above 0. Defaults to {@link MINIMUM_BODY_BYTES_PER_SECOND}.
+   * its clock (spec 15.20): a whole number, 0 holding none. Defaults to
+   * {@link MINIMUM_BODY_BYTES_PER_SECOND}.
    */
   minimumBodyBytesPerSecond?: number | undefined;
   /**
@@ -144,7 +145,11 @@ export interface IBrokerParticipant {
   /** Whether its link is up, its inbox subscribed. */
   readonly isLinked: boolean;
   readonly root: string;
-  /** What it holds: its connections, what it holds in parts, and the departures it subscribes. */
+  /**
+   * What it holds: `connections`, those open, and `halfOpen`, those whose third leg has not come;
+   * `partsBytes`, what it holds in parts, and `unsentBytes`, what waits for its broker, with the
+   * largest of each one connection holds; and `departures`, the peers' departures it subscribes.
+   */
   gauges(): IGauges;
   off(event: 'error', listener: (error: Error) => void): this;
   /** What it reports of its own: a message that is no parcel, or its link given up on. */
@@ -180,6 +185,8 @@ export interface IBrokerConnection {
   /** Whether it waits for its third leg, at its acceptor. */
   readonly isHalfOpen: boolean;
   readonly opener: Uint8Array;
+  /** What it holds in parts of an envelope coming. */
+  readonly partsBytes: number;
   readonly peer: IBrokerPeer;
   /** What its broker has not taken yet of what it published. */
   readonly unsentBytes: number;
@@ -218,12 +225,17 @@ export interface IBrokerParticipantPort {
   /** Waits for answers naming `opener`'s half, until the returned function lets it go. */
   awaitAnswers(opener: Uint8Array, answers: IBrokerAnswers): () => void;
   /**
-   * A connection, by both halves: at its acceptor half-open, its ACCEPT sent; at its opener open,
-   * its third leg sent.
+   * A connection, by both halves: at its acceptor half-open, its ACCEPT sent, marked secure as
+   * `isSecure` says of its own leg, its adapter's unless told; at its opener open, its third leg
+   * sent.
    */
   connect(
     pair: { acceptor: Uint8Array; isOpener: boolean; opener: Uint8Array; peer: IBrokerPeer },
-    options: { maximumUnsentBytes: number; owner: IBrokerConnectionOwner }
+    options: {
+      isSecure?: boolean | undefined;
+      maximumUnsentBytes: number;
+      owner: IBrokerConnectionOwner;
+    }
   ): IBrokerConnection;
   /** A half, 8 bytes from a cryptographic source, never all zero, none it holds. */
   drawHalf(): Uint8Array;
@@ -361,7 +373,7 @@ export const createBrokerParticipant = (options: IBrokerParticipantOptions): IBr
 
   assertCount('heldBytesBudget', { value: heldBytesBudget });
   assertCount('maximumEnvelopePartsBytes', { value: maximumEnvelopePartsBytes });
-  assertCount('minimumBodyBytesPerSecond', { value: minimumBodyBytesPerSecond });
+  assertCount('minimumBodyBytesPerSecond', { mayBeNone: true, value: minimumBodyBytesPerSecond });
 
   const receiveBound = Math.min(adapter.receiveBound, LARGEST_RECEIVE_BOUND);
 
@@ -499,7 +511,7 @@ export const createBrokerParticipant = (options: IBrokerParticipantOptions): IBr
 
   const connect: IBrokerParticipantPort['connect'] = (
     { acceptor, isOpener, opener, peer },
-    { maximumUnsentBytes, owner }
+    { isSecure = adapter.isSecure, maximumUnsentBytes, owner }
   ) => {
     const key = pairOf({ acceptor, opener });
     const peerInbox = topicOf('i', peer.id);
@@ -643,6 +655,9 @@ export const createBrokerParticipant = (options: IBrokerParticipantOptions): IBr
           return isHalfOpen;
         },
         opener,
+        get partsBytes() {
+          return parts.bytes;
+        },
         peer,
         get unsentBytes() {
           return unsentBytes;
@@ -796,7 +811,7 @@ export const createBrokerParticipant = (options: IBrokerParticipantOptions): IBr
     } else {
       sendParcel({
         bound: receiveBound,
-        flags: adapter.isSecure ? ParcelFlag.SECURE : 0,
+        flags: isSecure ? ParcelFlag.SECURE : 0,
         id,
         incarnation,
         kind: ParcelKind.ACCEPT,
@@ -1198,21 +1213,26 @@ export const createBrokerParticipant = (options: IBrokerParticipantOptions): IBr
     gauges: () => {
       let halfOpen = 0;
       let unsentBytes = 0;
+      let largestPartsBytes = 0;
+      let largestUnsentBytes = 0;
 
       for (const { connection } of connections.values()) {
         halfOpen += connection.isHalfOpen ? 1 : 0;
         unsentBytes += connection.unsentBytes;
+        largestPartsBytes = Math.max(largestPartsBytes, connection.partsBytes);
+        largestUnsentBytes = Math.max(largestUnsentBytes, connection.unsentBytes);
       }
 
       return gaugesOf({
-        ceilings: { largestPartsBytes: held.budget },
+        ceilings: { largestPartsBytes: maximumEnvelopePartsBytes, partsBytes: held.budget },
         counts: {
           connections: connections.size - halfOpen,
           departures: [...departures.values()].filter(({ isHeld }) => {
             return isHeld;
           }).length,
           halfOpen,
-          largestPartsBytes: held.largest,
+          largestPartsBytes,
+          largestUnsentBytes,
           partsBytes: held.held,
           unsentBytes,
         },

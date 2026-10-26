@@ -20,8 +20,6 @@ export interface IBrokerSequence {
 export interface IHeldBytes {
   readonly budget: number;
   readonly held: number;
-  /** The most it held at once. */
-  readonly largest: number;
   give(bytes: number): void;
   /** Charges `bytes`, or refuses them when they would take what it holds past its budget. */
   take(bytes: number): boolean;
@@ -128,15 +126,11 @@ export const partsOf = (
 /** What a participant holds in parts, charged by each part and given back once it is done. */
 export const createHeldBytes = (budget: number): IHeldBytes => {
   let held = 0;
-  let largest = 0;
 
   return {
     budget,
     get held() {
       return held;
-    },
-    get largest() {
-      return largest;
     },
     give: (bytes) => {
       held -= bytes;
@@ -147,7 +141,6 @@ export const createHeldBytes = (budget: number): IHeldBytes => {
       }
 
       held += bytes;
-      largest = Math.max(largest, held);
 
       return true;
     },
@@ -210,8 +203,12 @@ export const createBrokerParts = (
     credential = undefined;
   };
   // * due once the parts have not brought what the longer of the grace and their rate asks of them,
-  // as section 15.12 holds a body
+  // as section 15.12 holds a body; a rate of 0 holds none
   const pace = (): void => {
+    if (minimumBodyBytesPerSecond === 0) {
+      return;
+    }
+
     const due =
       firstAt + Math.max(bodyGracePeriod, Math.ceil((bytes * 1_000) / minimumBodyBytesPerSecond));
 

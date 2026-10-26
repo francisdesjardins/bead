@@ -523,7 +523,8 @@ public sealed class MemoryBrokerAdapter : IBrokerAdapter
     /// Publishes, routed in a turn of the broker's, copied as it is published; settles once routed:
     /// <see cref="BrokerPublished.Taken"/>, or <see cref="BrokerPublished.NoSubscriber"/> when no
     /// subscription takes it and it offers that refusal. A payload past its broker's bound is an
-    /// <see cref="ArgumentException"/>, and a link down an <see cref="InvalidOperationException"/>.
+    /// <see cref="ArgumentException"/>, a link down an <see cref="InvalidOperationException"/>, and
+    /// one given up on before it goes an <see cref="OperationCanceledException"/>.
     /// </summary>
     public Task<BrokerPublished> Publish(BrokerPublication publication)
     {
@@ -610,6 +611,11 @@ public sealed class MemoryBrokerAdapter : IBrokerAdapter
             if (_broker.MaximumMessageBytes is { } bound && published.Publication.Payload.Length > bound)
             {
                 throw new ArgumentException(string.Create(CultureInfo.InvariantCulture, $"a payload of {published.Publication.Payload.Length} bytes, past the broker's maximumMessageBytes, {bound} bytes"), nameof(published));
+            }
+
+            if (published.Publication.CancellationToken.IsCancellationRequested)
+            {
+                throw new OperationCanceledException("the publication was given up on", published.Publication.CancellationToken);
             }
 
             // * copied as it is published: the publisher's buffer stays its own

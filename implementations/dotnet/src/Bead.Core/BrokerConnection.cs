@@ -15,10 +15,10 @@ internal interface IBrokerConnectionOwner
     void Delivered(BrokerConnection connection, TransportMessage message);
 
     /// <summary>
-    /// The connection ended: clean or not, what it is reported for of its own, none when nothing,
-    /// and whether it was dropped without a close; a half-open one ends telling nothing.
+    /// The connection ended: clean or not, and what it is reported for of its own, none when
+    /// nothing; a half-open one ends telling nothing.
     /// </summary>
-    void Ended(BrokerConnection connection, (bool IsClean, Exception? Reported, bool IsQuick) end);
+    void Ended(BrokerConnection connection, (bool IsClean, Exception? Reported) end);
 }
 
 /// <summary>Where a broker connection stands.</summary>
@@ -225,7 +225,7 @@ internal sealed class BrokerConnection
 
         if (parcel.Kind == BrokerParcelKinds.Reset)
         {
-            Ended((false, null, true));
+            Ended((false, null));
 
             return;
         }
@@ -282,7 +282,7 @@ internal sealed class BrokerConnection
                 break;
 
             case BrokerParcelKinds.Close:
-                Ended((parcel.Code == 1000, null, false));
+                Ended((parcel.Code == 1000, null));
 
                 break;
 
@@ -413,13 +413,13 @@ internal sealed class BrokerConnection
         }
 
         Publish(new BrokerParcel { Kind = BrokerParcelKinds.Close, Code = close.Code });
-        Ended((close.IsClean, null, false));
+        Ended((close.IsClean, null));
     }
 
     /// <summary>Lets go of it at once, sending nothing, unclean: its link lost, its peer gone, or a half-open one forgotten.</summary>
     public void Drop()
     {
-        Ended((false, null, true));
+        Ended((false, null));
     }
 
     /// <summary>Sends a RESET of its pair to its peer, unsequenced, and lets go of it, unclean.</summary>
@@ -431,7 +431,7 @@ internal sealed class BrokerConnection
         }
 
         Publish(new BrokerParcel { Kind = BrokerParcelKinds.Reset });
-        Ended((false, null, true));
+        Ended((false, null));
     }
 
     // its parts' timer, on the clock's thread: judged in its participant's turn, lost when late
@@ -515,18 +515,18 @@ internal sealed class BrokerConnection
 
         var subject = ConnectionHandle ?? (_setup.Owner.IsOpener ? $"the connection to {_setup.PeerId}" : $"a half-open connection of {_setup.PeerId}");
 
-        Ended((false, new IOException(string.Create(CultureInfo.InvariantCulture, $"{subject} is closed with {lost.Code}: {lost.Why}")), false));
+        Ended((false, new IOException(string.Create(CultureInfo.InvariantCulture, $"{subject} is closed with {lost.Code}: {lost.Why}"))));
     }
 
     // a CLOSE of a code sent, unclean, unreported: the heartbeat's own drop
     private void End((int Code, bool IsClean, Exception? Reported) end)
     {
         Publish(new BrokerParcel { Kind = BrokerParcelKinds.Close, Code = end.Code });
-        Ended((end.IsClean, end.Reported, false));
+        Ended((end.IsClean, end.Reported));
     }
 
     // its end, once: its heartbeat and its parts let go of, its participant and its owner told
-    private void Ended((bool IsClean, Exception? Reported, bool IsQuick) end)
+    private void Ended((bool IsClean, Exception? Reported) end)
     {
         if (State == BrokerConnectionState.Closed)
         {

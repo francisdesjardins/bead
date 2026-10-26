@@ -81,8 +81,8 @@ const hexOf = (bytes: Uint8Array): string => {
  * `type=BROKER;participant=<id>;ordinal=n`, and tells its router; one whose third leg does not come
  * within `acceptTimeout` is forgotten, telling nothing. In a group, it lets its names go while it
  * holds `maximumConnections`. It carries no credential toward its client, and a connection is secure
- * while its own leg and its peer's are. Its stop takes no OPEN and closes each connection with 1001;
- * its participant's link is kept.
+ * while its own leg and its peer's are, its own as `secure` says where given, its ACCEPT marked so.
+ * Its stop takes no OPEN and closes each connection with 1001; its participant's link is kept.
  *
  * @example
  * const transport = createBrokerTransportServer(participant, { names: ['interop'] });
@@ -129,6 +129,8 @@ export const createBrokerTransportServer = (
   port.reserve(names);
 
   const served: ReadonlySet<string> = new Set(names);
+  // * its own leg, as its application says of its own, or its participant's (spec 15.22)
+  const isOwnLegSecure = secure ?? port.isSecure;
   // the peer of a connection the transport holds, which only `define` reaches: replaced by it, which
   // `createTransportServer` calls before it returns
   let peerOf = (_handle: TransportServerConnectionHandle): IBrokerPeer | undefined => {
@@ -201,6 +203,7 @@ export const createBrokerTransportServer = (
         entry.connection = port.connect(
           { acceptor: port.drawHalf(), isOpener: false, opener: open.opener, peer },
           {
+            isSecure: isOwnLegSecure,
             maximumUnsentBytes,
             owner: {
               // * its third leg: the opener proved it reads the inbox it named; its handle drawn now
@@ -324,25 +327,31 @@ export const createBrokerTransportServer = (
         gauges: () => {
           let halfOpen = 0;
           let unsentBytes = 0;
+          let largestPartsBytes = 0;
           let largestUnsentBytes = 0;
 
           for (const { connection } of held.values()) {
             halfOpen += connection?.isHalfOpen === true ? 1 : 0;
             unsentBytes += connection?.unsentBytes ?? 0;
+            largestPartsBytes = Math.max(largestPartsBytes, connection?.partsBytes ?? 0);
             largestUnsentBytes = Math.max(largestUnsentBytes, connection?.unsentBytes ?? 0);
           }
 
-          const { counts } = participant.gauges();
+          // what its participant holds across its connections: its parts, and the departures
+          const { ceilings, counts } = participant.gauges();
 
           return gaugesOf({
             ceilings: {
+              connections: maximumConnections,
               halfOpen: maximumConnections,
+              largestPartsBytes: ceilings['largestPartsBytes'] ?? 0,
               largestUnsentBytes: maximumUnsentBytes,
+              partsBytes: ceilings['partsBytes'] ?? 0,
             },
             counts: {
               departures: counts['departures'] ?? 0,
               halfOpen,
-              largestPartsBytes: counts['largestPartsBytes'] ?? 0,
+              largestPartsBytes,
               largestUnsentBytes,
               names: [...port.names].filter((name) => {
                 return served.has(name);
@@ -392,10 +401,10 @@ export const createBrokerTransportServer = (
   );
 
   return Object.assign(transport, {
-    // a connection secure while its own leg and its peer's are, unless its application says
-    // otherwise of its own (spec 15.22)
+    // a connection secure while its own leg and its peer's are, its application saying otherwise
+    // of its own leg alone (spec 15.22)
     isSecure: (connectionHandle: TransportServerConnectionHandle): boolean => {
-      return secure ?? (port.isSecure && peerOf(connectionHandle)?.isSecure === true);
+      return isOwnLegSecure && peerOf(connectionHandle)?.isSecure === true;
     },
   });
 };

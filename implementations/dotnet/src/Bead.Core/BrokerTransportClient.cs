@@ -128,8 +128,9 @@ public sealed class BrokerTransportClient : IRouterClientTransport, IAsyncDispos
 
     /// <summary>
     /// The connection closed: clean when its server closed it with 1000, or this side's close was
-    /// told so; quick when it was dropped without a close — a RESET, its server gone, its link lost.
-    /// A connection a dispose lets go of, or a reconnection replaces, tells none.
+    /// told so; quick only as this side's close was told, a connection dropped — a RESET, its server
+    /// gone, its link lost — telling it unclean and not quick, as a dropped socket. A connection its
+    /// connect never returned, a dispose lets go of, or a reconnection replaces, tells none.
     /// </summary>
     public event Action<bool, bool>? Close;
 
@@ -485,7 +486,7 @@ public sealed class BrokerTransportClient : IRouterClientTransport, IAsyncDispos
         _listeners.Tell(Message, message);
     }
 
-    void IBrokerConnectionOwner.Ended(BrokerConnection connection, (bool IsClean, Exception? Reported, bool IsQuick) end)
+    void IBrokerConnectionOwner.Ended(BrokerConnection connection, (bool IsClean, Exception? Reported) end)
     {
         lock (_gate)
         {
@@ -495,6 +496,13 @@ public sealed class BrokerTransportClient : IRouterClientTransport, IAsyncDispos
             }
 
             _connection = null;
+
+            // * one its connect has not returned yet tells nothing: the connect fails instead
+            if (_readyState != ReadyState.Open)
+            {
+                return;
+            }
+
             _readyState = ReadyState.Closed;
         }
 
@@ -505,7 +513,7 @@ public sealed class BrokerTransportClient : IRouterClientTransport, IAsyncDispos
             Error?.Invoke(reported);
         }
 
-        _listeners.Tell(Close, (end.IsClean, end.IsQuick));
+        _listeners.Tell(Close, (end.IsClean, false));
     }
 
     // a state as a message words it: "open", "closing"…
@@ -653,6 +661,9 @@ public sealed class BrokerTransportClient : IRouterClientTransport, IAsyncDispos
 
         await _participant.Scheduler.Run(() =>
         {
+            // ! given up as its link came up: no OPEN goes
+            cancellationToken.ThrowIfCancellationRequested();
+
             pending = new BrokerPendingConnect
             {
                 Opener = _participant.DrawHalf(),

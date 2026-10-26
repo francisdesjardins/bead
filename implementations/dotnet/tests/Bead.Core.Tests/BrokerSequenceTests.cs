@@ -105,6 +105,27 @@ public sealed class BrokerSequenceTests
     }
 
     [Fact]
+    public async Task Holds_no_rate_where_minimumBodyBytesPerSecond_is_0_however_slowly_its_parts_come()
+    {
+        var clock = new SteppingClock(Epoch);
+        var lates = 0;
+        var parts = new BrokerParts(BoundsOf((clock, 100)) with { MinimumBodyBytesPerSecond = 0 }, () =>
+        {
+            Interlocked.Increment(ref lates);
+        });
+
+        // * no timer armed, none late however long it waits
+        Assert.Equal(new BrokerPartTaking(null, null, null), parts.Take((new byte[10], true, null)));
+        Assert.Empty(clock.Dues());
+        await clock.Advance(TimeSpan.FromSeconds(60));
+        Assert.Equal((0, false), (lates, parts.IsLate()));
+        Assert.Equal(11, parts.Take(((byte[])[1], false, null)).Envelope!.Length);
+
+        // a participant takes it so
+        Assert.Equal("ada", new BrokerParticipant(new MemoryBroker().Adapter(new MemoryBrokerAdapterOptions { Id = "ada" }), new BrokerParticipantOptions { MinimumBodyBytesPerSecond = 0 }).Id);
+    }
+
+    [Fact]
     public void Cuts_an_envelope_in_parts_each_as_large_as_the_peer_s_bound_lets_it_the_credential_on_the_first_alone()
     {
         var envelope = Enumerable.Range(0, 100).Select((index) =>

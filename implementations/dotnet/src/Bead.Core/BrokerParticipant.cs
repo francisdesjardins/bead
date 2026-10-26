@@ -77,8 +77,6 @@ public sealed class BrokerParticipant : IAsyncDisposable
     // the peers' departures it holds a subscription to, by the peer's id, and the connections each counts
     private readonly Dictionary<string, int> _departures = new(StringComparer.Ordinal);
     private readonly BrokerBudget _budget;
-    // how many connections it holds, read from any thread
-    private int _held;
     private Task? _starting;
     private TaskCompletionSource _live = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private bool _isStopped;
@@ -250,23 +248,52 @@ public sealed class BrokerParticipant : IAsyncDisposable
     }
 
     /// <summary>
-    /// What it holds: <c>connections</c>, those of its transports, half-open among them;
-    /// <c>partsBytes</c>, what it holds in parts; <c>departures</c>, the peers' departures it
-    /// subscribes.
+    /// What it holds: <c>connections</c>, those of its transports open, and <c>halfOpen</c>, those
+    /// whose third leg has not come; <c>partsBytes</c>, what it holds in parts, and
+    /// <c>unsentBytes</c>, what waits for its broker, with the largest of each one connection holds;
+    /// <c>departures</c>, the peers' departures it subscribes.
     /// </summary>
     public Gauges Gauges()
     {
         // * counts read as they stand, from any thread: each one its turn's last word
-        return new Gauges
+        lock (_gate)
         {
-            Counts = new Dictionary<string, long>
+            var held = _connections.Values.ToList();
+
+            return new Gauges
             {
-                ["connections"] = Volatile.Read(ref _held),
-                ["departures"] = Departures,
-                ["partsBytes"] = PartsBytes,
-            },
-            Ceilings = new Dictionary<string, long> { ["partsBytes"] = _budget.Budget },
-        };
+                Counts = new Dictionary<string, long>
+                {
+                    ["connections"] = held.Count((connection) =>
+                    {
+                        return connection.State == BrokerConnectionState.Open;
+                    }),
+                    ["departures"] = Departures,
+                    ["halfOpen"] = held.Count((connection) =>
+                    {
+                        return connection.State == BrokerConnectionState.HalfOpen;
+                    }),
+                    ["largestPartsBytes"] = held.Select((connection) =>
+                    {
+                        return connection.PartsBytes;
+                    }).DefaultIfEmpty().Max(),
+                    ["largestUnsentBytes"] = held.Select((connection) =>
+                    {
+                        return connection.UnsentBytes;
+                    }).DefaultIfEmpty().Max(),
+                    ["partsBytes"] = PartsBytes,
+                    ["unsentBytes"] = held.Sum((connection) =>
+                    {
+                        return connection.UnsentBytes;
+                    }),
+                },
+                Ceilings = new Dictionary<string, long>
+                {
+                    ["largestPartsBytes"] = PartsBounds.MaximumEnvelopePartsBytes,
+                    ["partsBytes"] = _budget.Budget,
+                },
+            };
+        }
     }
 
     /// <summary>
@@ -307,7 +334,7 @@ public sealed class BrokerParticipant : IAsyncDisposable
     /// <summary>
     /// Starts its link: its incarnation drawn, its adapter started, its will set where it offers
     /// one, its inbox subscribed and the names of its server transports that serve; settles once all
-    /// of it is held. A second start shares the first.
+    /// of it is held. A second start shares the first, or starts anew once the first failed.
     /// </summary>
     public Task Start()
     {
@@ -318,7 +345,11 @@ public sealed class BrokerParticipant : IAsyncDisposable
                 return Task.FromException(new InvalidOperationException($"the participant {Id} is stopped"));
             }
 
-            _starting ??= _scheduler.Run(Link);
+            // * one attempt shared; one that failed is let go, so the next starts another
+            if (_starting is null || _starting.IsFaulted || _starting.IsCanceled)
+            {
+                _starting = _scheduler.Run(Link);
+            }
 
             return _starting;
         }
@@ -445,8 +476,11 @@ public sealed class BrokerParticipant : IAsyncDisposable
     /// <summary>In its turn: a connection held by its pair.</summary>
     internal void Hold(BrokerConnection connection)
     {
-        _connections[connection.Pair] = connection;
-        Volatile.Write(ref _held, _connections.Count);
+        // ! under its gate, as its gauges read them from any thread
+        lock (_gate)
+        {
+            _connections[connection.Pair] = connection;
+        }
     }
 
     /// <summary>In its turn: a connection that ended, held no more.</summary>
@@ -454,8 +488,10 @@ public sealed class BrokerParticipant : IAsyncDisposable
     {
         if (_connections.TryGetValue(connection.Pair, out var held) && held == connection)
         {
-            _connections.Remove(connection.Pair);
-            Volatile.Write(ref _held, _connections.Count);
+            lock (_gate)
+            {
+                _connections.Remove(connection.Pair);
+            }
         }
     }
 

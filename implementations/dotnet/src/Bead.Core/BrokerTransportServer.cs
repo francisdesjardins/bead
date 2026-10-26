@@ -242,6 +242,7 @@ public sealed class BrokerTransportServer : IServerTransport, IAsyncDisposable, 
                 Ceilings = new Dictionary<string, long>
                 {
                     ["connections"] = _options.MaximumConnections,
+                    ["halfOpen"] = _options.MaximumConnections,
                     ["largestPartsBytes"] = _participant.PartsBounds.MaximumEnvelopePartsBytes,
                     ["largestUnsentBytes"] = _maximumUnsentBytes,
                     ["partsBytes"] = _participant.PartsBounds.Budget.Budget,
@@ -413,7 +414,7 @@ public sealed class BrokerTransportServer : IServerTransport, IAsyncDisposable, 
         _listeners.Tell(Message, (message, connection.ConnectionHandle!));
     }
 
-    void IBrokerConnectionOwner.Ended(BrokerConnection connection, (bool IsClean, Exception? Reported, bool IsQuick) end)
+    void IBrokerConnectionOwner.Ended(BrokerConnection connection, (bool IsClean, Exception? Reported) end)
     {
         if (_accepting.Remove(connection, out var timer))
         {
@@ -594,8 +595,8 @@ public sealed class BrokerTransportServer : IServerTransport, IAsyncDisposable, 
     {
         var (open, status, reason) = refusal;
 
-        // what names no inbox, nor a half, is answered nowhere
-        if (open.Id is not { Length: > 0 } id || open.Opener == 0)
+        // what names no inbox, nor a half, is answered nowhere; an empty id names one, as its id
+        if (open.Id is not { } id || open.Opener == 0)
         {
             return;
         }

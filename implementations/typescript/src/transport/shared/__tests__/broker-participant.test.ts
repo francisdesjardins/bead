@@ -19,6 +19,7 @@ import {
   MEMORY_BROKER_FAULTS,
 } from '../memory-broker';
 import type { BrokerTopic, IBrokerAdapter } from '../types';
+import { createTestClock } from './fixtures';
 
 // interfaces
 
@@ -193,13 +194,17 @@ test.describe('broker participant', () => {
   test('closes each connection as its link goes down, and connects anew as another incarnation, resetting its peers', async () => {
     const broker = createMemoryBroker();
     const peer = await peerOf(broker, { id: 'acceptor', isServing: true });
-    const adapter = broker.adapter({ id: 'ada' });
+    // ! no will: what its peer hears is the RESET it sends once linked again
+    const adapter = broker.adapter({
+      capabilities: { groups: true, noSubscriber: true },
+      id: 'ada',
+    });
     const participant = createBrokerParticipant({ adapter, reconnect: { delay: 0 } });
     const client = participant.transportClient();
-    const closes: boolean[] = [];
+    const closes: [boolean, boolean][] = [];
 
-    client.on('close', (wasClean) => {
-      closes.push(wasClean);
+    client.on('close', (wasClean, wasQuick) => {
+      closes.push([wasClean, wasQuick]);
     });
 
     const connecting = client.connect({ server: 'interop' });
@@ -238,8 +243,9 @@ test.describe('broker participant', () => {
       name: 'ConnectError',
     });
 
-    // * its connection told closed, unclean, as a dropped socket's; its link connected anew
-    expect(closes).toEqual([false]);
+    // * its connection told closed, unclean and not quick, as a dropped socket's; its link connected
+    // anew
+    expect(closes).toEqual([[false, false]]);
     expect(client.isClosed()).toBe(true);
     expect(participant.isLinked).toBe(true);
     expect(participant.incarnation).toHaveLength(16);
@@ -247,7 +253,7 @@ test.describe('broker participant', () => {
       hexadecimalOf(former ?? new Uint8Array())
     );
 
-    // its will went as its link was lost, then a RESET of the pair it held, once its inbox is held
+    // a RESET of the pair it held, once its inbox is held again
     expect(
       peer.heard.map(({ parcel, topic }) => {
         return [topic, parcel?.kind, parcel?.sequence];
@@ -595,5 +601,617 @@ test.describe('broker participant', () => {
 
     await connecting.stop();
     await serving.stop();
+  });
+
+  test('holds a connection secure only while both its legs are', async () => {
+    for (const insecure of ['ada', 'server']) {
+      const broker = createMemoryBroker();
+      const adapterOf = (id: string): IBrokerAdapter => {
+        const adapter = broker.adapter({ id });
+
+        return id === insecure
+          ? Object.assign(Object.create(adapter) as IBrokerAdapter, { isSecure: false })
+          : adapter;
+      };
+      const serving = createBrokerParticipant({ adapter: adapterOf('server') });
+      // its application saying its own leg secure changes nothing of its peer's
+      const server = serving.transportServer({
+        names: ['interop'],
+        ...(insecure === 'ada' ? { secure: true } : {}),
+      });
+      const connecting = createBrokerParticipant({ adapter: adapterOf('ada') });
+      const client = connecting.transportClient();
+
+      await server.start();
+      await client.connect({ server: 'interop' });
+      await settled();
+
+      const handle = server.clients[0]?.connectionHandle ?? 'type=BROKER;participant=ada;ordinal=1';
+
+      // * one leg not secure, as its OPEN or its ACCEPT says: neither end holds it secure
+      expect([client.isOpen(), client.isSecure, server.isSecure(handle)], insecure).toEqual([
+        true,
+        false,
+        false,
+      ]);
+
+      await connecting.stop();
+      await serving.stop();
+    }
+  });
+
+  test('starts anew once a start failed', async () => {
+    const broker = createMemoryBroker();
+    const adapter = broker.adapter({ id: 'ada' });
+    const participant = createBrokerParticipant({ adapter });
+
+    // its broker holds a link of its id already: its first start is refused
+    await adapter.start();
+    await expect(participant.start()).rejects.toThrow('the link of ada is up already');
+    await adapter.stop();
+
+    // * the next starts another
+    await participant.start();
+
+    expect(participant.isLinked).toBe(true);
+
+    await participant.stop();
+  });
+
+  test('counts its connections, half-open among them, what they hold in parts and what waits for its broker, by the same keys on its own face and its server transport’s', async () => {
+    const broker = createMemoryBroker();
+    const participant = createBrokerParticipant({
+      adapter: broker.adapter({ id: 'server' }),
+      heldBytesBudget: 4_096,
+      maximumEnvelopePartsBytes: 2_048,
+    });
+    const server = participant.transportServer({
+      maximumConnections: 8,
+      maximumUnsentBytes: 65_536,
+      names: ['interop'],
+    });
+    const peer = await peerOf(broker, { id: 'peer' });
+    const inbox: BrokerTopic = ['bead', 'i', 'server'];
+
+    await server.start();
+    await peer.adapter.publish({
+      payload: writeParcel({
+        acceptor: new Uint8Array(8),
+        bound: 65_536,
+        id: 'peer',
+        incarnation: INCARNATION,
+        kind: ParcelKind.OPEN,
+        opener: HALF,
+        sequence: 1,
+      }),
+      topic: NAME,
+    });
+    await settled();
+
+    const acceptor = peer.heard[0]?.parcel?.acceptor ?? new Uint8Array(8);
+    const none = {
+      departures: 0,
+      largestPartsBytes: 0,
+      largestUnsentBytes: 0,
+      partsBytes: 0,
+      unsentBytes: 0,
+    };
+
+    // half-open, its third leg awaited
+    expect(participant.gauges().counts).toEqual({ ...none, connections: 0, halfOpen: 1 });
+
+    // * open, and 100 bytes of an envelope held in parts
+    await peer.adapter.publish({
+      payload: writeParcel({ acceptor, kind: ParcelKind.PING, opener: HALF, sequence: 2 }),
+      topic: inbox,
+    });
+    await peer.adapter.publish({
+      payload: writeParcel({
+        acceptor,
+        carried: new Uint8Array(100),
+        flags: ParcelFlag.MORE,
+        kind: ParcelKind.DATA,
+        opener: HALF,
+        sequence: 3,
+      }),
+      topic: inbox,
+    });
+    await settled();
+
+    const held = {
+      ...none,
+      connections: 1,
+      departures: 1,
+      halfOpen: 0,
+      largestPartsBytes: 100,
+      partsBytes: 100,
+    };
+
+    expect(participant.gauges().counts).toEqual(held);
+    expect(server.gauges().counts).toEqual({ ...held, names: 1 });
+    expect(participant.gauges().ceilings).toEqual({ largestPartsBytes: 2_048, partsBytes: 4_096 });
+    expect(server.gauges().ceilings).toEqual({
+      connections: 8,
+      halfOpen: 8,
+      largestPartsBytes: 2_048,
+      largestUnsentBytes: 65_536,
+      partsBytes: 4_096,
+    });
+
+    await participant.stop();
+  });
+
+  test('is refused as built with a root that is no token, and names each topic by the root it is given', async () => {
+    const broker = createMemoryBroker();
+    const log: string[] = [];
+
+    expect(() => {
+      return createBrokerParticipant({ adapter: broker.adapter({ id: 'ada' }), root: 'a.b' });
+    }).toThrow(
+      new ProgrammerError(
+        `a participant's root is a token of base64url's alphabet, 1 to 64 characters, not "a.b"`
+      )
+    );
+
+    const participant = createBrokerParticipant({
+      adapter: loggedOf(broker.adapter({ id: 'bob' }), log),
+      root: 'deploy',
+    });
+
+    await participant.start();
+
+    expect([participant.root, log]).toEqual([
+      'deploy',
+      ['start, its will to deploy/d/bob', 'subscribe deploy/i/bob'],
+    ]);
+
+    await participant.stop();
+  });
+
+  test('lets a listener go, fails a connect awaiting its answer as it stops, refuses a start once stopped, and stops once', async () => {
+    const broker = createMemoryBroker();
+    const silent = await peerOf(broker, { id: 'silent', isServing: true });
+    const participant = createBrokerParticipant({ adapter: broker.adapter({ id: 'ada' }) });
+    const reported: string[] = [];
+    const listener = ({ message }: Error): void => {
+      reported.push(message);
+    };
+
+    participant.on('error', listener);
+
+    // a connect whose OPEN reached a name nobody answers
+    const pending = participant
+      .transportClient()
+      .connect({ server: 'interop' })
+      .catch((reason: unknown) => {
+        return reason;
+      });
+
+    await settled();
+
+    // a listener let go of hears no more
+    await silent.adapter.publish({ payload: Uint8Array.of(0xb1), topic: ['bead', 'i', 'ada'] });
+    await settled();
+    participant.off('error', listener);
+    await silent.adapter.publish({ payload: Uint8Array.of(0xb1), topic: ['bead', 'i', 'ada'] });
+    await settled();
+
+    expect(
+      silent.heard.map(({ parcel }) => {
+        return parcel?.kind;
+      })
+    ).toEqual([ParcelKind.OPEN]);
+    expect(participant.gauges().counts).toMatchObject({ connections: 0, departures: 0 });
+
+    await participant.stop();
+
+    // * the connect fails as its participant stops; a start since is refused, a second stop does nothing
+    expect(await pending).toMatchObject({
+      message: 'the participant ada stopped as it connected',
+      name: 'ConnectError',
+    });
+    await expect(participant.start()).rejects.toThrow('the participant ada is stopped');
+    await expect(participant.transportClient().connect({ server: 'interop' })).rejects.toThrow(
+      'the participant ada is stopped'
+    );
+    await participant[Symbol.asyncDispose]();
+
+    expect([participant.isLinked, reported]).toEqual([
+      false,
+      ["a message to the inbox of ada is no parcel: 1 bytes, under a parcel's 28"],
+    ]);
+  });
+
+  test('closes a connection with 1002 for a parcel of a layout to come, an ACCEPT on it open, or another kind between an envelope’s parts, and with 4000 at a gap a kind to come leaves', async () => {
+    const opened = { acceptor: HALF, sequence: 2 };
+    const part = {
+      ...opened,
+      carried: Uint8Array.of(0xa1),
+      flags: ParcelFlag.MORE,
+      kind: ParcelKind.DATA,
+    };
+    const cases: {
+      code: number;
+      parcels: (opener: Uint8Array) => Uint8Array[];
+      reason: string;
+    }[] = [
+      {
+        code: 1002,
+        parcels: (opener) => {
+          return [encodeParcel({ ...opened, kind: ParcelKind.PING, layout: 0xb2, opener })];
+        },
+        reason: 'a parcel of a layout to come, 0xB2',
+      },
+      {
+        code: 1002,
+        parcels: (opener) => {
+          return [
+            writeParcel({
+              ...opened,
+              bound: 65_536,
+              id: 'acceptor',
+              incarnation: INCARNATION,
+              kind: ParcelKind.ACCEPT,
+              opener,
+            }),
+          ];
+        },
+        reason: 'an ACCEPT on a connection open',
+      },
+      {
+        code: 1002,
+        parcels: (opener) => {
+          return [
+            writeParcel({ ...part, opener }),
+            writeParcel({ acceptor: HALF, answers: 2, kind: ParcelKind.PONG, opener, sequence: 3 }),
+          ];
+        },
+        reason: "a PONG between an envelope's parts",
+      },
+      {
+        code: 1002,
+        parcels: (opener) => {
+          return [
+            writeParcel({ ...part, opener }),
+            writeParcel({
+              acceptor: HALF,
+              code: 1000,
+              kind: ParcelKind.CLOSE,
+              opener,
+              sequence: 3,
+            }),
+          ];
+        },
+        reason: "a CLOSE between an envelope's parts",
+      },
+      {
+        code: 4000,
+        parcels: (opener) => {
+          return [encodeParcel({ acceptor: HALF, kind: 0x0a, opener, sequence: 5 })];
+        },
+        reason: 'a parcel lost: 2 was awaited, and 5 came',
+      },
+    ];
+
+    for (const { code, parcels, reason } of cases) {
+      const broker = createMemoryBroker();
+      const peer = await peerOf(broker, { id: 'acceptor', isServing: true });
+      const participant = createBrokerParticipant({ adapter: broker.adapter({ id: 'ada' }) });
+      const client = participant.transportClient();
+      const reported: string[] = [];
+      const closes: boolean[] = [];
+
+      client.on('error', ({ message }) => {
+        reported.push(message);
+      });
+      client.on('close', (wasClean) => {
+        closes.push(wasClean);
+      });
+
+      const connecting = client.connect({ server: 'interop' });
+
+      await settled();
+
+      const opener = peer.heard[0]?.parcel?.opener ?? new Uint8Array(8);
+
+      await peer.adapter.publish({
+        payload: acceptOf({ opener } as IParcel, { acceptor: HALF, id: 'acceptor' }),
+        topic: ['bead', 'i', 'ada'],
+      });
+      await connecting;
+      await settled();
+      peer.heard.length = 0;
+
+      for (const payload of parcels(opener)) {
+        await peer.adapter.publish({ payload, topic: ['bead', 'i', 'ada'] });
+      }
+
+      await settled();
+
+      // * its CLOSE the next of its sequence, after its OPEN and its third leg; reported, unclean
+      expect(
+        peer.heard.map(({ parcel }) => {
+          return [parcel?.kind, parcel?.sequence, parcel?.code];
+        }),
+        reason
+      ).toEqual([[ParcelKind.CLOSE, 3, code]]);
+      expect([reported, closes], reason).toEqual([
+        [`the connection to acceptor is closed with ${String(code)}: ${reason}`],
+        [false],
+      ]);
+
+      await participant.stop();
+    }
+  });
+
+  test('ends a connection unclean, reporting nothing, once its broker refuses a parcel to its peer’s inbox or says no subscriber takes it', async () => {
+    for (const isRefused of [false, true]) {
+      const broker = createMemoryBroker();
+      const peer = await peerOf(broker, { id: 'acceptor', isServing: true });
+      const adapter = broker.adapter({ id: 'ada' });
+      const participant = createBrokerParticipant({ adapter });
+      const client = participant.transportClient();
+      const reported: string[] = [];
+      const closes: boolean[] = [];
+
+      client.on('error', ({ message }) => {
+        reported.push(message);
+      });
+      client.on('close', (wasClean) => {
+        closes.push(wasClean);
+      });
+
+      const connecting = client.connect({ server: 'interop' });
+
+      await settled();
+      await peer.adapter.publish({
+        payload: acceptOf(peer.heard[0]?.parcel ?? ({ opener: new Uint8Array(8) } as IParcel), {
+          acceptor: HALF,
+          id: 'acceptor',
+        }),
+        topic: ['bead', 'i', 'ada'],
+      });
+      await connecting;
+      await settled();
+
+      // * its own link refused by its broker under it, or its peer's inbox gone, as a dropped
+      // socket's peer
+      await (isRefused ? adapter.stop() : peer.adapter.stop());
+      await client.send({ data: Uint8Array.of(0xa1, 0x16, 0x00, 0x02, 0, 0, 0, 1) });
+      await settled();
+
+      expect([client.isClosed(), closes, reported], String(isRefused)).toEqual([true, [false], []]);
+
+      await participant.stop();
+    }
+  });
+
+  test('keeps a connection whose parts come at their rate past the grace, and hands their envelope on whole', async () => {
+    const clock = createTestClock();
+    const broker = createMemoryBroker({ clock });
+    const peer = await peerOf(broker, { id: 'acceptor', isServing: true });
+    const participant = createBrokerParticipant({ adapter: broker.adapter({ id: 'ada' }), clock });
+    const client = participant.transportClient();
+    const told: number[] = [];
+    const closes: boolean[] = [];
+
+    client.on('message', ({ data }) => {
+      told.push((data as Uint8Array).length);
+    });
+    client.on('close', (wasClean) => {
+      closes.push(wasClean);
+    });
+
+    const connecting = client.connect({ server: 'interop' });
+
+    await settled();
+
+    const opener = peer.heard[0]?.parcel?.opener ?? new Uint8Array(8);
+    const partOf = (
+      sequence: number,
+      { isLast = false, length }: { isLast?: boolean; length: number }
+    ): Uint8Array => {
+      return writeParcel({
+        acceptor: HALF,
+        carried: new Uint8Array(length),
+        flags: isLast ? 0 : ParcelFlag.MORE,
+        kind: ParcelKind.DATA,
+        opener,
+        sequence,
+      });
+    };
+
+    await peer.adapter.publish({
+      payload: acceptOf({ opener } as IParcel, { acceptor: HALF, id: 'acceptor' }),
+      topic: ['bead', 'i', 'ada'],
+    });
+    await connecting;
+    await settled();
+
+    // * 2,600 bytes by the grace's end, owed by 10,833 ms at 240 bytes a second: not late, held on
+    await peer.adapter.publish({
+      payload: partOf(2, { length: 1_300 }),
+      topic: ['bead', 'i', 'ada'],
+    });
+    await settled();
+    await clock.tickAsync(4_000);
+    await peer.adapter.publish({
+      payload: partOf(3, { length: 1_300 }),
+      topic: ['bead', 'i', 'ada'],
+    });
+    await settled();
+    await clock.tickAsync(1_000);
+    await peer.adapter.publish({
+      payload: partOf(4, { isLast: true, length: 1 }),
+      topic: ['bead', 'i', 'ada'],
+    });
+    await settled();
+
+    expect([told, closes, client.isOpen()]).toEqual([[2_601], [], true]);
+
+    await participant.stop();
+  });
+
+  test('reports its link given up on once its reconnection’s attempts run out', async () => {
+    const broker = createMemoryBroker();
+    const adapter = broker.adapter({ id: 'ada' });
+    const participant = createBrokerParticipant({
+      adapter,
+      reconnect: { delay: 0, maxAttempts: 2 },
+    });
+    const reported = new Promise<Error>((resolve) => {
+      participant.on('error', resolve);
+    });
+
+    await participant.start();
+    adapter.lose();
+
+    // * its broker holds its id's link of another start already: each attempt is refused
+    await adapter.start();
+
+    expect(await reported).toMatchObject({
+      message: 'the link of ada went down, and 2 attempts did not bring it back',
+    });
+    expect(participant.isLinked).toBe(false);
+
+    await participant.stop();
+  });
+
+  test('serves its names again once its link connects anew, its former peers reset', async () => {
+    const broker = createMemoryBroker();
+    const adapter = broker.adapter({ id: 'server' });
+    const participant = createBrokerParticipant({ adapter, reconnect: { delay: 0 } });
+    const transport = participant.transportServer({ names: ['interop'] });
+    const ada = createBrokerParticipant({ adapter: broker.adapter({ id: 'ada' }) });
+    const first = ada.transportClient();
+    const closes: boolean[] = [];
+
+    first.on('close', (wasClean) => {
+      closes.push(wasClean);
+    });
+    await transport.start();
+    await first.connect({ server: 'interop' });
+    await settled();
+
+    const former = participant.incarnation;
+
+    adapter.lose();
+
+    for (let turn = 0; turn < 20 && !(participant.isLinked && closes.length > 0); turn += 1) {
+      await settled();
+    }
+
+    // * its connection closed, unclean; its name held again, by another incarnation
+    expect([closes, participant.isLinked, transport.gauges().counts['names']]).toEqual([
+      [false],
+      true,
+      1,
+    ]);
+    expect(hexadecimalOf(participant.incarnation ?? new Uint8Array())).not.toBe(
+      hexadecimalOf(former ?? new Uint8Array())
+    );
+
+    const second = ada.transportClient();
+
+    await second.connect({ server: 'interop' });
+    await settled();
+
+    expect(
+      transport.clients.map(({ connectionHandle }) => {
+        return connectionHandle;
+      })
+    ).toEqual(['type=BROKER;participant=ada;ordinal=2']);
+
+    await second.disconnect();
+    await Promise.all([participant.stop(), ada.stop()]);
+  });
+
+  test('reports what reaches a name but a parcel and an OPEN that does not read, and drops in silence any other parcel there, a parcel at its inbox that names no connection, and anything but a GONE at a departure', async () => {
+    const broker = createMemoryBroker();
+    const participant = createBrokerParticipant({ adapter: broker.adapter({ id: 'server' }) });
+    const transport = participant.transportServer({ names: ['interop'] });
+    const ada = createBrokerParticipant({ adapter: broker.adapter({ id: 'ada' }) });
+    const client = ada.transportClient();
+    const tester = await peerOf(broker, { id: 'tester' });
+    const reported: string[] = [];
+    const told: [string, string][] = [];
+
+    participant.on('error', ({ message }) => {
+      reported.push(message);
+    });
+    transport.on('error', ({ message }, connectionHandle) => {
+      told.push([message, connectionHandle]);
+    });
+    await transport.start();
+    await client.connect({ server: 'interop' });
+    await settled();
+
+    const open = writeParcel({
+      acceptor: new Uint8Array(8),
+      bound: 65_536,
+      id: 'tester',
+      incarnation: INCARNATION,
+      kind: ParcelKind.OPEN,
+      opener: HALF,
+      sequence: 1,
+    });
+    // an OPEN of a layout to come whose id runs past its bytes, and one whose kept byte is not 0
+    const cut = encodeParcel({
+      acceptor: new Uint8Array(8),
+      id: 'tester',
+      kind: ParcelKind.OPEN,
+      layout: 0xb2,
+      opener: HALF,
+      sequence: 1,
+    }).slice(0, 31);
+    const kept = open.slice();
+    const ping = writeParcel({ acceptor: HALF, kind: ParcelKind.PING, opener: HALF, sequence: 2 });
+    const unread = ping.slice();
+
+    kept[3] = 1;
+    unread[3] = 1;
+
+    for (const payload of [Uint8Array.of(0xb1), cut, kept, ping, unread]) {
+      await tester.adapter.publish({ payload, topic: NAME });
+    }
+
+    // at its inbox, an ACCEPT of a layout to come and a parcel that does not read, naming no pair
+    for (const payload of [
+      encodeParcel({
+        acceptor: HALF,
+        kind: ParcelKind.ACCEPT,
+        layout: 0xb2,
+        opener: HALF,
+        sequence: 1,
+      }),
+      unread,
+    ]) {
+      await tester.adapter.publish({ payload, topic: ['bead', 'i', 'server'] });
+    }
+
+    // at a departure it subscribes, no parcel and a parcel but a GONE
+    for (const payload of [Uint8Array.of(0xb1), ping]) {
+      await tester.adapter.publish({ payload, topic: ['bead', 'd', 'ada'] });
+    }
+
+    await settled();
+
+    const reports = [
+      "a message to the name interop is no parcel: 1 bytes, under a parcel's 28",
+      'an OPEN to the name interop does not read, dropped: an OPEN whose id runs past its bytes',
+      'an OPEN to the name interop does not read, dropped: a kept byte that is not 0',
+    ];
+
+    // * each reported by its participant, and by its server transport with no handle
+    expect(reported).toEqual(reports);
+    expect(told).toEqual(
+      reports.map((message) => {
+        return [message, ''];
+      })
+    );
+    expect([tester.heard, client.isOpen(), transport.clients.length]).toEqual([[], true, 1]);
+
+    await client.disconnect();
+    await Promise.all([participant.stop(), ada.stop()]);
   });
 });

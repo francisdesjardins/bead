@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Globalization;
 
 namespace Bead.Tests;
 
@@ -102,14 +103,14 @@ public sealed class BrokerParticipantTests
 
         Assert.Equal("the link of client went down as it connected", failed.Message);
 
-        // each told dropped, unclean
+        // each told dropped, unclean and not quick, as a dropped socket's
         await BrokerPair.Until(
             () =>
             {
                 return closes.Count == 2;
             },
             "each connection closes as its link goes down");
-        Assert.Equal([(false, true), (false, true)], closes);
+        Assert.Equal([(false, false), (false, false)], closes);
         Assert.Equal((ReadyState.Closed, ReadyState.Closed), (first.ReadyState, second.ReadyState));
 
         // linked again as another incarnation, its peer reset of each connection it held
@@ -391,6 +392,506 @@ public sealed class BrokerParticipantTests
         _ = new BrokerParticipant(broker.Adapter(new MemoryBrokerAdapterOptions { Id = "bob" }), new BrokerParticipantOptions { RequireDelivery = BrokerDelivery.AtLeastOnce });
     }
 
+    [Fact]
+    public async Task Holds_a_connection_secure_only_while_both_its_legs_are()
+    {
+        foreach (var insecure in new[] { "ada", "server" })
+        {
+            var broker = new MemoryBroker();
+
+            RecordingAdapter AdapterOf(string id)
+            {
+                return new RecordingAdapter(broker.Adapter(new MemoryBrokerAdapterOptions { Id = id })) { Secure = id == insecure ? false : null };
+            }
+
+            await using var serving = new BrokerParticipant(AdapterOf("server"));
+            // its application saying its own leg secure changes nothing of its peer's
+            await using var server = serving.Server(new BrokerTransportServerOptions { Names = ["interop"], Secure = insecure == "ada" ? true : null });
+            await using var connecting = new BrokerParticipant(AdapterOf("ada"));
+            await using var client = connecting.Client();
+            var handles = new ConcurrentQueue<string>();
+
+            server.Connection += handles.Enqueue;
+            await server.Start();
+            await client.Connect(new BrokerConnectOptions { Server = "interop" }, Cancelled);
+            await BrokerPair.Until(
+                () =>
+                {
+                    return handles.Count == 1;
+                },
+                "the server tells the connection open");
+
+            // * one leg not secure, as its OPEN or its ACCEPT says: neither end holds it secure
+            Assert.Equal((ReadyState.Open, false, false), (client.ReadyState, client.IsSecure, server.IsSecure(handles.Single())));
+        }
+    }
+
+    [Fact]
+    public async Task Starts_anew_once_a_start_failed()
+    {
+        var broker = new MemoryBroker();
+        var adapter = broker.Adapter(new MemoryBrokerAdapterOptions { Id = "ada" });
+        await using var participant = new BrokerParticipant(adapter);
+
+        // its broker holds a link of its id already: its first start is refused
+        await adapter.Start();
+        Assert.Equal("the link of ada is up already", (await Assert.ThrowsAsync<InvalidOperationException>(() =>
+        {
+            return participant.Start();
+        })).Message);
+        await adapter.Stop();
+
+        // * the next starts another
+        await participant.Start();
+        Assert.True(participant.IsLinked);
+    }
+
+    [Fact]
+    public async Task Counts_its_connections_half_open_among_them_what_they_hold_in_parts_and_what_waits_for_its_broker_by_the_same_keys_on_its_own_face_and_its_server_transport_s()
+    {
+        var scheduler = new SerialScheduler();
+        var broker = new MemoryBroker(new MemoryBrokerOptions { Scheduler = scheduler });
+        await using var participant = new BrokerParticipant(broker.Adapter(new MemoryBrokerAdapterOptions { Id = "server" }), new BrokerParticipantOptions
+        {
+            HeldBytesBudget = 4_096,
+            MaximumEnvelopePartsBytes = 2_048,
+            Scheduler = scheduler,
+        });
+        await using var server = participant.Server(new BrokerTransportServerOptions { Names = ["interop"], MaximumConnections = 8, MaximumUnsentBytes = 65_536 });
+        var peer = broker.Adapter(new MemoryBrokerAdapterOptions { Id = "peer" });
+        var heard = new ConcurrentQueue<BrokerParcel>();
+        IReadOnlyList<string> inbox = ["bead", "i", "server"];
+
+        peer.Message += (message) =>
+        {
+            heard.Enqueue(BrokerParcels.Read(message.Payload).Parcel!);
+            message.Settle();
+        };
+        await peer.Start();
+        await peer.Subscribe(["bead", "i", "peer"]);
+        await server.Start();
+        await peer.Publish(new BrokerPublication
+        {
+            Topic = ["bead", "s", "interop"],
+            Payload = BrokerParcels.Write(new BrokerParcel { Kind = BrokerParcelKinds.Open, Opener = AcceptorHalf, Sequence = 1, Id = "peer", Incarnation = 0xC0, Bound = 65_536 }),
+        });
+        await scheduler.WhenIdle();
+
+        var acceptor = heard.Single().Acceptor;
+        var none = new Dictionary<string, long>
+        {
+            ["connections"] = 0,
+            ["departures"] = 0,
+            ["halfOpen"] = 0,
+            ["largestPartsBytes"] = 0,
+            ["largestUnsentBytes"] = 0,
+            ["partsBytes"] = 0,
+            ["unsentBytes"] = 0,
+        };
+
+        // half-open, its third leg awaited
+        Assert.Equal(new Dictionary<string, long>(none) { ["halfOpen"] = 1 }, participant.Gauges().Counts);
+
+        // * open, and 100 bytes of an envelope held in parts
+        await peer.Publish(new BrokerPublication { Topic = inbox, Payload = BrokerParcels.Write(new BrokerParcel { Kind = BrokerParcelKinds.Ping, Opener = AcceptorHalf, Acceptor = acceptor, Sequence = 2 }) });
+        await peer.Publish(new BrokerPublication
+        {
+            Topic = inbox,
+            Payload = BrokerParcels.Write(new BrokerParcel { Kind = BrokerParcelKinds.Data, Flags = BrokerParcelFlags.More, Opener = AcceptorHalf, Acceptor = acceptor, Sequence = 3, Carried = new byte[100] }),
+        });
+        await scheduler.WhenIdle();
+
+        var held = new Dictionary<string, long>(none)
+        {
+            ["connections"] = 1,
+            ["departures"] = 1,
+            ["largestPartsBytes"] = 100,
+            ["partsBytes"] = 100,
+        };
+
+        Assert.Equal(held, participant.Gauges().Counts);
+        Assert.Equal(new Dictionary<string, long>(held) { ["names"] = 1 }, server.Gauges().Counts);
+        Assert.Equal(new Dictionary<string, long> { ["largestPartsBytes"] = 2_048, ["partsBytes"] = 4_096 }, participant.Gauges().Ceilings);
+        Assert.Equal(new Dictionary<string, long> { ["connections"] = 8, ["halfOpen"] = 8, ["largestPartsBytes"] = 2_048, ["largestUnsentBytes"] = 65_536, ["partsBytes"] = 4_096 }, server.Gauges().Ceilings);
+    }
+
+    [Fact]
+    public async Task Is_refused_as_built_with_a_root_that_is_no_token_and_names_each_topic_by_the_root_it_is_given()
+    {
+        var broker = new MemoryBroker();
+
+        Assert.Equal("a participant's root is a token of base64url's alphabet, 1 to 64 characters, not \"a.b\" (Parameter 'options')", Assert.Throws<ArgumentException>(() =>
+        {
+            return new BrokerParticipant(broker.Adapter(new MemoryBrokerAdapterOptions { Id = "ada" }), new BrokerParticipantOptions { Root = "a.b" });
+        }).Message);
+
+        var recording = new RecordingAdapter(broker.Adapter(new MemoryBrokerAdapterOptions { Id = "bob" }));
+        await using var participant = new BrokerParticipant(recording, new BrokerParticipantOptions { Root = "deploy" });
+
+        await participant.Start();
+        Assert.Equal("deploy", participant.Root);
+        Assert.Equal(["start", "subscribe deploy/i/bob"], recording.Calls);
+    }
+
+    [Fact]
+    public async Task Lets_a_listener_go_fails_a_connect_awaiting_its_answer_as_it_stops_refuses_a_start_once_stopped_and_stops_once()
+    {
+        var scheduler = new SerialScheduler();
+        var broker = new MemoryBroker(new MemoryBrokerOptions { Scheduler = scheduler });
+        var participant = new BrokerParticipant(broker.Adapter(new MemoryBrokerAdapterOptions { Id = "ada" }), new BrokerParticipantOptions { Scheduler = scheduler });
+        var silent = broker.Adapter(new MemoryBrokerAdapterOptions { Id = "silent" });
+        var heard = new ConcurrentQueue<byte>();
+        var reported = new ConcurrentQueue<string>();
+        IReadOnlyList<string> inbox = ["bead", "i", "ada"];
+
+        void Listener(Exception reason)
+        {
+            reported.Enqueue(reason.Message);
+        }
+
+        silent.Message += (message) =>
+        {
+            heard.Enqueue(BrokerParcels.Read(message.Payload).Parcel!.Kind);
+            message.Settle();
+        };
+        await silent.Start();
+        await silent.Subscribe(["bead", "s", "interop"]);
+        participant.Error += Listener;
+
+        // a connect whose OPEN reached a name nobody answers
+        var pending = participant.Client().Connect(new BrokerConnectOptions { Server = "interop" }, Cancelled);
+
+        await BrokerPair.Until(
+            () =>
+            {
+                return heard.Count == 1;
+            },
+            "its OPEN reaches the name");
+
+        // a listener let go of hears no more
+        await silent.Publish(new BrokerPublication { Topic = inbox, Payload = (byte[])[0xB1] });
+        await scheduler.WhenIdle();
+        participant.Error -= Listener;
+        await silent.Publish(new BrokerPublication { Topic = inbox, Payload = (byte[])[0xB1] });
+        await scheduler.WhenIdle();
+        Assert.Equal([BrokerParcelKinds.Open], heard);
+        Assert.Equal((0L, 0L), (participant.Gauges().Counts["connections"], participant.Gauges().Counts["departures"]));
+
+        await participant.Stop();
+
+        // * the connect fails as its participant stops; a start since is refused, a second stop does nothing
+        Assert.Equal("the participant ada stopped as it connected", (await Assert.ThrowsAsync<ConnectException>(() =>
+        {
+            return pending.WaitAsync(BrokerPair.Patience, Cancelled);
+        })).Message);
+        Assert.Equal("the participant ada is stopped", (await Assert.ThrowsAsync<InvalidOperationException>(() =>
+        {
+            return participant.Start();
+        })).Message);
+        Assert.Equal("the participant ada is stopped", (await Assert.ThrowsAsync<InvalidOperationException>(() =>
+        {
+            return participant.Client().Connect(new BrokerConnectOptions { Server = "interop" }, Cancelled);
+        })).Message);
+        await participant.DisposeAsync();
+        Assert.False(participant.IsLinked);
+        Assert.Equal(["a message to the inbox of ada is no parcel: 1 bytes, under a parcel's 28"], reported);
+    }
+
+    [Fact]
+    public async Task Closes_a_connection_with_1002_for_a_parcel_of_a_layout_to_come_an_ACCEPT_on_it_open_or_another_kind_between_an_envelope_s_parts_and_with_4000_at_a_gap_a_kind_to_come_leaves()
+    {
+        var part = new BrokerParcel { Kind = BrokerParcelKinds.Data, Flags = BrokerParcelFlags.More, Acceptor = AcceptorHalf, Sequence = 2, Carried = (byte[])[0xA1] };
+        var cases = new (int Code, Func<ulong, byte[][]> Parcels, string Why)[]
+        {
+            (1002, (opener) =>
+            {
+                return [BrokerParcels.Encode(new BrokerParcel { Layout = 0xB2, Kind = BrokerParcelKinds.Ping, Opener = opener, Acceptor = AcceptorHalf, Sequence = 2 })];
+            }, "a parcel of a layout to come, 0xB2"),
+            (1002, (opener) =>
+            {
+                return [BrokerParcels.Write(new BrokerParcel { Kind = BrokerParcelKinds.Accept, Opener = opener, Acceptor = AcceptorHalf, Sequence = 2, Id = "acceptor", Incarnation = 0xC0, Bound = 65_536 })];
+            }, "an ACCEPT on a connection open"),
+            (1002, (opener) =>
+            {
+                return [BrokerParcels.Write(part with { Opener = opener }), BrokerParcels.Write(new BrokerParcel { Kind = BrokerParcelKinds.Pong, Opener = opener, Acceptor = AcceptorHalf, Sequence = 3, Answers = 2 })];
+            }, "a PONG between an envelope's parts"),
+            (1002, (opener) =>
+            {
+                return [BrokerParcels.Write(part with { Opener = opener }), BrokerParcels.Write(new BrokerParcel { Kind = BrokerParcelKinds.Close, Opener = opener, Acceptor = AcceptorHalf, Sequence = 3, Code = 1000 })];
+            }, "a CLOSE between an envelope's parts"),
+            (4000, (opener) =>
+            {
+                return [BrokerParcels.Encode(new BrokerParcel { Kind = 0x0A, Opener = opener, Acceptor = AcceptorHalf, Sequence = 5 })];
+            }, "a parcel lost: 2 was awaited, and 5 came"),
+        };
+
+        foreach (var (code, parcels, why) in cases)
+        {
+            var broker = new MemoryBroker();
+            await using var participant = new BrokerParticipant(broker.Adapter(new MemoryBrokerAdapterOptions { Id = "ada" }));
+            await using var client = participant.Client();
+            var reported = new ConcurrentQueue<string>();
+            var closes = new ConcurrentQueue<bool>();
+
+            client.Error += (reason) =>
+            {
+                reported.Enqueue(reason.Message);
+            };
+            client.Close += (isClean, _) =>
+            {
+                closes.Enqueue(isClean);
+            };
+
+            var (acceptor, heard, opener) = await AcceptedOf((broker, client), 65_536);
+
+            foreach (var payload in parcels(opener))
+            {
+                await acceptor.Publish(new BrokerPublication { Topic = ["bead", "i", "ada"], Payload = payload });
+            }
+
+            // * its CLOSE the next of its sequence, after its OPEN and its third leg; reported, unclean
+            await BrokerPair.Until(
+                () =>
+                {
+                    return heard.Count == 1 && reported.Count == 1 && closes.Count == 1;
+                },
+                $"its CLOSE, reported: {why}");
+            Assert.Equal([(BrokerParcelKinds.Close, 3UL, (int?)code)], heard.Select((parcel) =>
+            {
+                return (parcel.Kind, parcel.Sequence, parcel.Code);
+            }));
+            Assert.Equal([string.Create(CultureInfo.InvariantCulture, $"the connection to acceptor is closed with {code}: {why}")], reported);
+            Assert.Equal([false], closes);
+        }
+    }
+
+    [Fact]
+    public async Task Ends_a_connection_unclean_reporting_nothing_once_its_broker_refuses_a_parcel_to_its_peer_s_inbox_or_says_no_subscriber_takes_it()
+    {
+        foreach (var isRefused in new[] { false, true })
+        {
+            var broker = new MemoryBroker();
+            var adapter = broker.Adapter(new MemoryBrokerAdapterOptions { Id = "ada" });
+            await using var participant = new BrokerParticipant(adapter);
+            await using var client = participant.Client();
+            var reported = new ConcurrentQueue<string>();
+            var closes = new ConcurrentQueue<bool>();
+
+            client.Error += (reason) =>
+            {
+                reported.Enqueue(reason.Message);
+            };
+            client.Close += (isClean, _) =>
+            {
+                closes.Enqueue(isClean);
+            };
+
+            var (acceptor, _, _) = await AcceptedOf((broker, client), 65_536);
+
+            // * its own link refused by its broker under it, or its peer's inbox gone, as a dropped
+            // socket's peer
+            await (isRefused ? adapter.Stop() : acceptor.Stop());
+            await client.Send(new TransportMessage((byte[])[0xA1, 0x16, 0x00, 0x02, 0x00, 0x00, 0x00, 0x01], false));
+            await BrokerPair.Until(
+                () =>
+                {
+                    return client.ReadyState == ReadyState.Closed;
+                },
+                $"its connection ends: {isRefused}");
+            Assert.Equal([false], closes);
+            Assert.Empty(reported);
+        }
+    }
+
+    [Fact]
+    public async Task Keeps_a_connection_whose_parts_come_at_their_rate_past_the_grace_and_hands_their_envelope_on_whole()
+    {
+        var clock = new SteppingClock(DateTimeOffset.UnixEpoch);
+        var broker = new MemoryBroker(new MemoryBrokerOptions { Clock = clock });
+        await using var participant = new BrokerParticipant(broker.Adapter(new MemoryBrokerAdapterOptions { Id = "ada" }), new BrokerParticipantOptions { Clock = clock });
+        await using var client = participant.Client();
+        var told = new ConcurrentQueue<int>();
+        var closes = new ConcurrentQueue<bool>();
+
+        client.Message += (message) =>
+        {
+            told.Enqueue(message.Bytes.Length);
+        };
+        client.Close += (isClean, _) =>
+        {
+            closes.Enqueue(isClean);
+        };
+
+        var (acceptor, _, opener) = await AcceptedOf((broker, client), 65_536);
+
+        Task<BrokerPublished> PartOf((ulong Sequence, int Length, bool IsLast) part)
+        {
+            return acceptor.Publish(new BrokerPublication
+            {
+                Topic = ["bead", "i", "ada"],
+                Payload = BrokerParcels.Write(new BrokerParcel
+                {
+                    Kind = BrokerParcelKinds.Data,
+                    Flags = part.IsLast ? (byte)0 : BrokerParcelFlags.More,
+                    Opener = opener,
+                    Acceptor = AcceptorHalf,
+                    Sequence = part.Sequence,
+                    Carried = new byte[part.Length],
+                }),
+            });
+        }
+
+        // * 2,600 bytes by the grace's end, owed by 10,833 ms at 240 bytes a second: not late, held on
+        await PartOf((2, 1_300, false));
+        await clock.UntilArmed(TimeSpan.FromSeconds(5), BrokerPair.Patience);
+        await clock.Advance(TimeSpan.FromSeconds(4));
+        await PartOf((3, 1_300, false));
+        await BrokerPair.Until(
+            () =>
+            {
+                return participant.Gauges().Counts["partsBytes"] == 2_600;
+            },
+            "its second part held");
+        await clock.Advance(TimeSpan.FromSeconds(1));
+        await clock.UntilArmed(TimeSpan.FromMilliseconds(5_833), BrokerPair.Patience);
+        await PartOf((4, 1, true));
+        await BrokerPair.Until(
+            () =>
+            {
+                return !told.IsEmpty;
+            },
+            "its envelope told");
+        Assert.Equal([2_601], told);
+        Assert.Empty(closes);
+        Assert.Equal(ReadyState.Open, client.ReadyState);
+    }
+
+    [Fact]
+    public async Task Reports_its_link_given_up_on_once_its_reconnection_s_attempts_run_out()
+    {
+        var broker = new MemoryBroker();
+        var adapter = broker.Adapter(new MemoryBrokerAdapterOptions { Id = "ada" });
+        await using var participant = new BrokerParticipant(adapter, new BrokerParticipantOptions
+        {
+            Reconnect = new TransportReconnectOptions { Delay = Immediately, MaximumAttempts = 2 },
+        });
+        var reported = new TaskCompletionSource<Exception>(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        participant.Error += (reason) =>
+        {
+            reported.TrySetResult(reason);
+        };
+        await participant.Start();
+        adapter.Lose();
+
+        // * its broker holds its id's link of another start already: each attempt is refused
+        await adapter.Start();
+        Assert.Equal("the link of ada went down, and 2 attempts did not bring it back", (await reported.Task.WaitAsync(BrokerPair.Patience, Cancelled)).Message);
+        Assert.False(participant.IsLinked);
+    }
+
+    [Fact]
+    public async Task Serves_its_names_again_once_its_link_connects_anew_its_former_peers_reset()
+    {
+        await using var pair = await BrokerPair.Of();
+        await using var first = await pair.Connect();
+        var former = pair.ServerParticipant.Incarnation;
+
+        pair.ServerAdapter.Lose();
+
+        // * its connection closed, unclean; its name held again, by another incarnation
+        await BrokerPair.Until(
+            () =>
+            {
+                return first.ReadyState == ReadyState.Closed && pair.ServerParticipant.IsLinked && pair.Server.Gauges().Counts["names"] == 1;
+            },
+            "its connection closed, and its name held again");
+        Assert.NotEqual(former, pair.ServerParticipant.Incarnation);
+
+        await using var second = await pair.Connect();
+
+        Assert.Equal(["type=BROKER;participant=client;ordinal=2"], pair.Server.Clients.Select((client) =>
+        {
+            return client.ConnectionHandle;
+        }));
+    }
+
+    [Fact]
+    public async Task Reports_what_reaches_a_name_but_a_parcel_and_an_OPEN_that_does_not_read_and_drops_in_silence_any_other_parcel_there_a_parcel_at_its_inbox_that_names_no_connection_and_anything_but_a_GONE_at_a_departure()
+    {
+        await using var pair = await BrokerPair.Of();
+        await using var client = await pair.Connect();
+        var tester = pair.Broker.Adapter(new MemoryBrokerAdapterOptions { Id = "tester" });
+        var heard = new ConcurrentQueue<byte[]>();
+        var reported = new ConcurrentQueue<string>();
+        var told = new ConcurrentQueue<(string Message, string ConnectionHandle)>();
+        const ulong Half = 0xA1_00_00_00_00_00_00_01;
+
+        tester.Message += (message) =>
+        {
+            heard.Enqueue(message.Payload.ToArray());
+            message.Settle();
+        };
+        pair.ServerParticipant.Error += (reason) =>
+        {
+            reported.Enqueue(reason.Message);
+        };
+        pair.Server.Error += (reason, connectionHandle) =>
+        {
+            told.Enqueue((reason.Message, connectionHandle));
+        };
+        await tester.Start();
+        await tester.Subscribe(["bead", "i", "tester"]);
+
+        // an OPEN of a layout to come whose id runs past its bytes, and one whose kept byte is not 0
+        var cut = BrokerParcels.Encode(new BrokerParcel { Layout = 0xB2, Kind = BrokerParcelKinds.Open, Opener = Half, Sequence = 1, Id = "tester", Bound = 65_536 })[..31];
+        var kept = BrokerParcels.Write(new BrokerParcel { Kind = BrokerParcelKinds.Open, Opener = Half, Sequence = 1, Id = "tester", Incarnation = 0xC0, Bound = 65_536 });
+        var ping = BrokerParcels.Write(new BrokerParcel { Kind = BrokerParcelKinds.Ping, Opener = Half, Acceptor = Half, Sequence = 2 });
+        var unread = ping.ToArray();
+
+        kept[3] = 1;
+        unread[3] = 1;
+
+        foreach (var payload in new[] { (byte[])[0xB1], cut, kept, ping, unread })
+        {
+            await tester.Publish(new BrokerPublication { Topic = ["bead", "s", "interop"], Payload = payload });
+        }
+
+        // at its inbox, an ACCEPT of a layout to come and a parcel that does not read, naming no pair
+        foreach (var payload in new[] { BrokerParcels.Encode(new BrokerParcel { Layout = 0xB2, Kind = BrokerParcelKinds.Accept, Opener = Half, Acceptor = Half, Sequence = 1 }), unread })
+        {
+            await tester.Publish(new BrokerPublication { Topic = ["bead", "i", "server"], Payload = payload });
+        }
+
+        // at a departure it subscribes, no parcel and a parcel but a GONE
+        foreach (var payload in new[] { (byte[])[0xB1], ping })
+        {
+            await tester.Publish(new BrokerPublication { Topic = ["bead", "d", "client"], Payload = payload });
+        }
+
+        await pair.Scheduler.WhenIdle();
+
+        string[] reports =
+        [
+            "a message to the name interop is no parcel: 1 bytes, under a parcel's 28",
+            "an OPEN to the name interop does not read, dropped: an OPEN whose id runs past its bytes",
+            "an OPEN to the name interop does not read, dropped: a kept byte that is not 0",
+        ];
+
+        // * each reported by its participant, and by its server transport with no handle
+        Assert.Equal(reports, reported);
+        Assert.Equal(reports.Select((message) =>
+        {
+            return (message, "");
+        }), told);
+        Assert.Equal((0, ReadyState.Open, 1), (heard.Count, client.ReadyState, pair.Server.Clients.Count));
+    }
+
+    private static TimeSpan Immediately(TimeSpan? previousDelay, int attempt)
+    {
+        return TimeSpan.Zero;
+    }
+
     // the acceptor's half, a test's own peer's
     private const ulong AcceptorHalf = 0xA1_00_00_00_00_00_00_01;
 
@@ -452,10 +953,12 @@ public sealed class BrokerParticipantTests
     }
 
     // an adapter that writes down each call its participant makes of it, in order, and passes it on,
-    // what it publishes to a topic bounded by Room when given
+    // what it publishes to a topic bounded by Room when given, its leg secure as Secure says when given
     private sealed class RecordingAdapter(MemoryBrokerAdapter inner) : IBrokerAdapter
     {
         public long? Room { get; init; }
+
+        public bool? Secure { get; init; }
 
         public event Action<BrokerMessage>? Message
         {
@@ -521,7 +1024,7 @@ public sealed class BrokerParticipantTests
         {
             get
             {
-                return inner.IsSecure;
+                return Secure ?? inner.IsSecure;
             }
         }
 

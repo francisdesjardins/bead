@@ -196,4 +196,49 @@ public sealed class BrokerParcelTests
             Assert.False(BrokerParcels.IsToken(text), text);
         });
     }
+
+    [Fact]
+    public void Writes_no_character_past_U_00FF_in_an_id_or_a_credential_nor_an_id_that_is_no_token_where_a_token_is_due()
+    {
+        const ulong Half = 0x11_12_13_14_15_16_17_18;
+        var gone = new BrokerParcel { Kind = BrokerParcelKinds.Gone, Incarnation = 0 };
+        var refused = new (BrokerParcel Parcel, string Refusal)[]
+        {
+            (gone with { Id = "a€" }, "an id is written a character a byte, not \"a€\""),
+            (new BrokerParcel { Kind = BrokerParcelKinds.Data, Flags = BrokerParcelFlags.Credential, Opener = Half, Acceptor = Half, Sequence = 3, Credential = "Bearer €", Carried = (byte[])[1] }, "a credential is written a character a byte, not \"Bearer €\""),
+            (gone with { Id = "a.b" }, "a parcel this side refuses is never written: an id that is no token"),
+            (new BrokerParcel { Kind = BrokerParcelKinds.Open, Opener = Half, Sequence = 1, Id = "é", Incarnation = 0, Bound = 1_024 }, "an OPEN names a token and a receive bound of 1,024 bytes at least"),
+        };
+
+        Assert.All(refused, (each) =>
+        {
+            // * refused, never written as Latin-1's stand-in
+            Assert.StartsWith(each.Refusal, Assert.Throws<ArgumentException>(() =>
+            {
+                return BrokerParcels.Write(each.Parcel);
+            }).Message, StringComparison.Ordinal);
+        });
+    }
+
+    [Fact]
+    public void Names_a_kind_as_a_report_does_its_article_before_it_and_reads_an_advisory_parcel_to_its_prefix_but_one_with_no_sequence()
+    {
+        const ulong Half = 0x11_12_13_14_15_16_17_18;
+
+        Assert.Equal(
+            ["a parcel", "an OPEN", "an ACCEPT", "a REFUSE", "a DATA", "a PING", "a PONG", "a CLOSE", "a RESET", "a GONE", "a parcel"],
+            new byte[] { 0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0A }.Select(BrokerParcels.KindNamed));
+
+        // * an advisory kind, whatever its flags and its body, taken in its order: a sequence it needs
+        var advisory = BrokerParcels.Read(BrokerParcels.Encode(new BrokerParcel { Kind = 0x80, Flags = 0x08, Opener = Half, Acceptor = Half, Sequence = 3 }));
+
+        Assert.Equal((BrokerParcelVerdict.Parcel, (byte)0x80, 3UL), (advisory.Verdict, advisory.Parcel!.Kind, advisory.Parcel.Sequence));
+
+        foreach (var sequence in new[] { 0UL, 1UL << 53 })
+        {
+            var refused = BrokerParcels.Read(BrokerParcels.Encode(new BrokerParcel { Kind = 0x80, Opener = Half, Acceptor = Half, Sequence = sequence }));
+
+            Assert.Equal((BrokerParcelVerdict.DoesNotRead, "an advisory parcel with no sequence"), (refused.Verdict, refused.Why));
+        }
+    }
 }

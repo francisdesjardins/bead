@@ -103,6 +103,15 @@ public sealed class MemoryBrokerTests
         Assert.Equal(["01", "03", "05"], firstHeard);
         Assert.Equal(["02", "04", "05"], secondHeard);
         Assert.Equal(["01", "02", "03", "04", "05"], aloneHeard);
+
+        // a group needs its adapter to offer one
+        var plain = broker.Adapter(new MemoryBrokerAdapterOptions { Id = "plain", Capabilities = BrokerCapabilities.None });
+
+        await plain.Start();
+        await Assert.ThrowsAsync<ArgumentException>(() =>
+        {
+            return plain.Subscribe(Topic, group);
+        });
     }
 
     [Fact]
@@ -123,7 +132,7 @@ public sealed class MemoryBrokerTests
 
         foreach (var payload in new byte[] { 1, 2, 3, 4, 5 })
         {
-            await publisher.Publish(PublicationOf(payload));
+            await publisher.Publish(PublicationOf(payload) with { ExpiresAfter = TimeSpan.FromMinutes(1) });
             await scheduler.WhenIdle();
         }
 
@@ -192,5 +201,84 @@ public sealed class MemoryBrokerTests
             return plain.Start(new BrokerStart { Will = new BrokerPublication { Topic = ["bead", "d", "ada"], Payload = "gone"u8.ToArray() } });
         })).Message);
         Assert.False(plain.IsLinked);
+    }
+
+    [Fact]
+    public async Task Refuses_a_publication_given_up_on_before_it_goes()
+    {
+        var scheduler = new SerialScheduler();
+        var broker = new MemoryBroker(new MemoryBrokerOptions { Scheduler = scheduler });
+        var (publisher, _) = await LinkedOf((broker, "ada"));
+        var (subscriber, heard) = await LinkedOf((broker, "bob"));
+
+        await subscriber.Subscribe(Topic);
+        Assert.Equal("the publication was given up on", (await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+        {
+            return publisher.Publish(PublicationOf(1) with { CancellationToken = new CancellationToken(true) });
+        })).Message);
+        await scheduler.WhenIdle();
+        Assert.Empty(heard);
+    }
+
+    [Fact]
+    public async Task Refuses_a_start_of_a_link_up_already_and_a_publication_past_maximumMessageBytes_or_of_a_link_not_up_drops_what_a_link_lost_held_and_a_loss_of_a_link_not_up_does_nothing()
+    {
+        var scheduler = new SerialScheduler();
+        var broker = new MemoryBroker(new MemoryBrokerOptions { MaximumMessageBytes = 4, Scheduler = scheduler });
+        var ada = broker.Adapter(new MemoryBrokerAdapterOptions { Id = "ada" });
+        var heard = new ConcurrentQueue<string>();
+        var downs = 0;
+        IReadOnlyList<string> inbox = ["bead", "i", "ada"];
+
+        ada.Down += () =>
+        {
+            Interlocked.Increment(ref downs);
+        };
+        ada.Message += (message) =>
+        {
+            heard.Enqueue(Convert.ToHexString(message.Payload.Span));
+            message.Settle();
+        };
+
+        // a link never up is lost of nothing: no down told
+        ada.Lose();
+        await scheduler.WhenIdle();
+        Assert.Equal(0, downs);
+
+        await ada.Start();
+        await ada.Subscribe(inbox);
+
+        var (bob, _) = await LinkedOf((broker, "bob"));
+
+        Assert.Equal("the link of ada is up already", (await Assert.ThrowsAsync<InvalidOperationException>(() =>
+        {
+            return ada.Start();
+        })).Message);
+        Assert.Equal("a payload of 5 bytes, past the broker's maximumMessageBytes, 4 bytes (Parameter 'published')", (await Assert.ThrowsAsync<ArgumentException>(() =>
+        {
+            return bob.Publish(new BrokerPublication { Topic = inbox, Payload = "fives"u8.ToArray() });
+        })).Message);
+
+        // * published, then its subscriber's link lost in the same turn: what it held goes with it
+        var published = bob.Publish(new BrokerPublication { Topic = inbox, Payload = "lost"u8.ToArray() });
+
+        ada.Lose();
+        await scheduler.WhenIdle();
+        Assert.Equal((BrokerPublished.Taken, 0, 1), (await published, heard.Count, downs));
+        Assert.Equal("the link of ada is not up", (await Assert.ThrowsAsync<InvalidOperationException>(() =>
+        {
+            return ada.Publish(PublicationOf(1));
+        })).Message);
+
+        // an adapter no listener hears: handed a message, then lost, telling no one
+        var cid = broker.Adapter(new MemoryBrokerAdapterOptions { Id = "cid" });
+
+        await cid.Start();
+        await cid.Subscribe(["bead", "i", "cid"]);
+        await bob.Publish(new BrokerPublication { Topic = ["bead", "i", "cid"], Payload = (byte[])[1] });
+        await scheduler.WhenIdle();
+        cid.Lose();
+        await scheduler.WhenIdle();
+        Assert.False(cid.IsLinked);
     }
 }

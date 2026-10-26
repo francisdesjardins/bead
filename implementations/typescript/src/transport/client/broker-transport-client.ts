@@ -249,14 +249,18 @@ export const createBrokerTransportClient = (
           try {
             await createPromise(
               (resolve, reject) => {
-                giveUp = reject;
+                // ! ended at once: a link that comes up after it sends no OPEN
+                giveUp = (reason) => {
+                  attempt.isEnded = true;
+                  reject(reason);
+                };
 
                 // * its link up first, within its time (spec 15.15); then its OPEN, its half drawn
                 // anew, and the first answer naming that half
                 const opening = async (): Promise<void> => {
                   await port.linked({ signal });
 
-                  if (attempt.isEnded) {
+                  if (attempt.isEnded || signal?.aborted === true) {
                     return;
                   }
 

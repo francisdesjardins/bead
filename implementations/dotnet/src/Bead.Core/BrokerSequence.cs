@@ -251,10 +251,18 @@ internal sealed class BrokerParts(BrokerPartsBounds bounds, Action late)
         return new BrokerPartTaking(whole, carriedCredential, null);
     }
 
-    /// <summary>Whether its parts are owed more than came, now: they came too slowly.</summary>
+    /// <summary>Whether its parts are owed more than came, now: they came too slowly; never where no rate holds.</summary>
     public bool IsLate()
     {
-        return _firstAt is { } first && bounds.Clock.GetElapsedTime(first) >= DeadlineOf();
+        if (_firstAt is not { } first)
+        {
+            return false;
+        }
+
+        var deadline = DeadlineOf();
+
+        // ! no deadline is the infinite span, which is negative: no elapsed time is held to it
+        return deadline != Timeout.InfiniteTimeSpan && bounds.Clock.GetElapsedTime(first) >= deadline;
     }
 
     /// <summary>Lets go of what it holds, its budget freed and its timer disarmed.</summary>

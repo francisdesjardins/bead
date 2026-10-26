@@ -194,7 +194,7 @@ test.describe('memory broker', () => {
     await bob.publish({ payload: bytesOf('copied'), topic: INBOX });
     await settled();
     broker.fault(MEMORY_BROKER_FAULTS.HOLD, { topic: INBOX });
-    await bob.publish({ payload: bytesOf('held'), topic: INBOX });
+    await bob.publish({ expiresAfter: 60_000, payload: bytesOf('held'), topic: INBOX });
     await bob.publish({ payload: bytesOf('ahead'), topic: INBOX });
     await settled();
     broker.fault(MEMORY_BROKER_FAULTS.DROP);
@@ -255,5 +255,75 @@ test.describe('memory broker', () => {
       plain.start({ will: { payload: bytesOf('gone'), topic: ['bead', 'd', 'ada'] } })
     ).rejects.toThrow(new ProgrammerError('the adapter of ada takes no will'));
     expect(plain.isLinked).toBe(false);
+  });
+
+  test('refuses a publication given up on before it goes', async () => {
+    const broker = createMemoryBroker();
+    const ada = broker.adapter({ id: 'ada' });
+    const bob = broker.adapter({ id: 'bob' });
+
+    await ada.start();
+    await bob.start();
+    await ada.subscribe(INBOX);
+
+    const heard = heardBy(ada);
+
+    await expect(
+      bob.publish({ payload: bytesOf('x'), signal: AbortSignal.abort(), topic: INBOX })
+    ).rejects.toThrow('the publication was given up on');
+    await settled();
+
+    expect(heard).toEqual([]);
+  });
+
+  test('refuses a start of a link up already, and a publication past maximumMessageBytes or of a link not up; drops what a link lost held, and a loss of a link not up does nothing', async () => {
+    const broker = createMemoryBroker({ maximumMessageBytes: 4 });
+    const ada = broker.adapter({ id: 'ada' });
+    const bob = broker.adapter({ id: 'bob' });
+    let downs = 0;
+
+    ada.on('down', () => {
+      downs += 1;
+    });
+
+    // a link never up is lost of nothing: no down told
+    ada.lose();
+    await settled();
+
+    expect(downs).toBe(0);
+
+    await ada.start();
+    await bob.start();
+    await ada.subscribe(INBOX);
+
+    const heard = heardBy(ada);
+
+    await expect(ada.start()).rejects.toThrow(new ProgrammerError('the link of ada is up already'));
+    await expect(bob.publish({ payload: bytesOf('fives'), topic: INBOX })).rejects.toThrow(
+      "a payload of 5 bytes, past the broker's maximumMessageBytes, 4 bytes"
+    );
+
+    // * published, then its subscriber's link lost in the same turn: what it held goes with it
+    const published = bob.publish({ payload: bytesOf('lost'), topic: INBOX });
+
+    ada.lose();
+    await settled();
+
+    expect([await published, heard, downs]).toEqual([BROKER_PUBLISHED.TAKEN, [], 1]);
+    await expect(ada.publish({ payload: bytesOf('x'), topic: INBOX })).rejects.toThrow(
+      'the link of ada is not up'
+    );
+
+    // an adapter no listener hears: handed a message, then lost, telling no one
+    const cid = broker.adapter({ id: 'cid' });
+
+    await cid.start();
+    await cid.subscribe(['bead', 'i', 'cid']);
+    await bob.publish({ payload: bytesOf('x'), topic: ['bead', 'i', 'cid'] });
+    await settled();
+    cid.lose();
+    await settled();
+
+    expect(cid.isLinked).toBe(false);
   });
 });
