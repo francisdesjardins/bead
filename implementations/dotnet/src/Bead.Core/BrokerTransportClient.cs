@@ -574,36 +574,43 @@ public sealed class BrokerTransportClient : IRouterClientTransport, IAsyncDispos
             try
             {
                 var connection = await Opening(options, linked.Token);
+                var isOpen = false;
 
-                lock (_gate)
+                // ! settled in a turn of its participant's, after every parcel taken before it: a
+                // CLOSE that came with its ACCEPT is the connection's end as it opened, on every
+                // thread's timing
+                await _participant.Scheduler.Run(() =>
                 {
-                    if (_connecting == connecting && connection.State == BrokerConnectionState.Open)
+                    lock (_gate)
                     {
-                        _connecting = null;
-                        _connection = connection;
-                        _readyState = ReadyState.Open;
+                        if (_connecting == connecting && connection.State == BrokerConnectionState.Open)
+                        {
+                            _connecting = null;
+                            _connection = connection;
+                            _readyState = ReadyState.Open;
+                            isOpen = true;
+                        }
                     }
-                }
 
-                // * after what came before its connect returned, in order, then each as it comes
-                _participant.Scheduler.Post(() =>
-                {
-                    var early = _early ?? [];
-
-                    _early = null;
-
-                    foreach (var message in early)
+                    // * after what came before its connect returned, in order, then each as it comes
+                    _participant.Scheduler.Post(() =>
                     {
-                        ((IBrokerConnectionOwner)this).Delivered(connection, message);
-                    }
+                        var early = _early ?? [];
+
+                        _early = null;
+
+                        foreach (var message in early)
+                        {
+                            ((IBrokerConnectionOwner)this).Delivered(connection, message);
+                        }
+                    });
+
+                    return Task.CompletedTask;
                 });
 
-                lock (_gate)
+                if (isOpen)
                 {
-                    if (_connection == connection)
-                    {
-                        return;
-                    }
+                    return;
                 }
 
                 if (connection.State != BrokerConnectionState.Open)

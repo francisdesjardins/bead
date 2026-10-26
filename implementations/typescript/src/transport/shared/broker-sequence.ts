@@ -203,12 +203,8 @@ export const createBrokerParts = (
     credential = undefined;
   };
   // * due once the parts have not brought what the longer of the grace and their rate asks of them,
-  // as section 15.12 holds a body; a rate of 0 holds none
+  // as section 15.12 holds a body
   const pace = (): void => {
-    if (minimumBodyBytesPerSecond === 0) {
-      return;
-    }
-
     const due =
       firstAt + Math.max(bodyGracePeriod, Math.ceil((bytes * 1_000) / minimumBodyBytesPerSecond));
 

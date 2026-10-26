@@ -11,9 +11,7 @@ import {
   partsOf,
   SEQUENCE_VERDICTS,
 } from '../broker-sequence';
-import { createBrokerParticipant } from '../broker-participant';
 import { GenericError } from '../errors';
-import { createMemoryBroker } from '../memory-broker';
 import { createTestClock, duesOn } from './fixtures';
 
 // helpers
@@ -139,39 +137,6 @@ test.describe('broker sequence', () => {
       },
     ]);
     expect(held.held).toBe(0);
-  });
-
-  test('holds no rate where minimumBodyBytesPerSecond is 0, however slowly its parts come', async () => {
-    const clock = createTestClock();
-    const slowed: IBrokerLoss[] = [];
-    const parts = createBrokerParts(
-      {
-        held: createHeldBytes(100),
-        slow: (loss) => {
-          slowed.push(loss);
-        },
-      },
-      { bodyGracePeriod: 5_000, clock, maximumEnvelopePartsBytes: 64, minimumBodyBytesPerSecond: 0 }
-    );
-
-    // * no timer armed, none late however long it waits
-    expect(parts.add(bytesOf(10), { isLast: false })).toEqual({ held: true });
-    expect(duesOn(clock)).toEqual([]);
-    await clock.tickAsync(60_000);
-
-    expect(slowed).toEqual([]);
-    expect(parts.add(bytesOf(1), { isLast: true })).toEqual({
-      credential: undefined,
-      envelope: bytesOf(11),
-    });
-
-    // a participant takes it so
-    expect(
-      createBrokerParticipant({
-        adapter: createMemoryBroker().adapter({ id: 'ada' }),
-        minimumBodyBytesPerSecond: 0,
-      }).id
-    ).toBe('ada');
   });
 
   test('cuts an envelope in parts each as large as the peer’s bound lets it, the credential on the first alone', () => {
