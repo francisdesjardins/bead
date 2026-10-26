@@ -324,7 +324,8 @@ an HTTP one is; and a server counts the proxies its list does not name
 clients' redirects met it in a round of their own, at xhigh: eight objections, each claim checked
 against the code and against probes of Node 26.5's fetch and .NET 10's handlers, seven accepted, one
 in part, none refused; the user decided whether the C# side refuses a given handler that would
-follow. Each objection, with the answer that holds:
+follow. What a connect awaits met it in a round of its own, its rows below. Each objection, with
+the answer that holds:
 
 ### On the upgrade's credential
 
@@ -357,3 +358,20 @@ the handler will do before the token crosses, and refusing there costs an applic
 would keep; a handler of another kind is taken, the catch behind it. The TypeScript side cannot
 read a `fetch`'s following before it answers, and catches it there: a platform row of
 `docs/support.md`.
+
+### On what a connect awaits
+
+What a connect waits on when it is cancelled, times out or is disposed met the Tenth Man at xhigh
+effort in a round of its own, with three other rules a coverage pass on both sides found: five
+objections, all accepted, and one more from the review of the change, decided by the same rule. The
+proposal had the C# side come to the TypeScript one, the provider's wait bounded by the connect's
+cancellation and its timeout; the round widened it.
+
+| Objection                                                                                                                                                                                                                                                     | Answer                                                                                                                                                                                                                                                                                 |
+| ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| A dispose is a third way a connect ends, which the rule left out: the TypeScript side rejects the connect at once, where the C# side's `Drop` cancels no token and the connect waits on its provider.                                                         | Accepted. Cancellation, timeout and dispose each end a connect at once, its state and refusal as each side gives them; the C# side links its dispose into the attempt's token.                                                                                                         |
+| No HTTP client has a provider, and the C# side waits as long on its WebSocket `Invoker` and its HTTP `Handler`, past the connect's timeout.                                                                                                                   | Accepted. The three ends bound everything a connect awaits: the provider, the `Invoker`, the `Handler`, and the TypeScript side's `fetch`, already bounded. What is still awaited is observed and dropped: a late credential is never presented, a late failure never left unobserved. |
+| An attempt that gives up on its provider lets the next attempt call it again while the first call runs; under a refresh token's rotation, two refreshes at once revoke the grant ([RFC 9700 §4.14.2](https://www.rfc-editor.org/rfc/rfc9700#section-4.14.2)). | Accepted. One provider call in flight at a time, per client: a call is cancelled when no attempt waits on it, and an attempt that meets a call already cancelled waits for it to settle, within its own bound, before it calls the provider again; only a live call is joined.         |
+| A provider's own `OperationCanceledException`, a timeout of its own `HttpClient`, fails a C# connect as cancelled, where the TypeScript side calls it the provider's failure.                                                                                 | Accepted. The attempt's own token decides: a cancellation it did not make is the provider's failure, `the credential provider failed`, on both sides.                                                                                                                                  |
+| The C# side tells its provider the attempt ended by `await attempt.CancelAsync()`, which runs the provider's callbacks inline: one that throws replaces the connect's refusal, one that blocks holds the connect.                                             | Accepted. The end is told guarded, never inline: a callback's throw or block reaches neither the refusal nor the connect.                                                                                                                                                              |
+| The C# side calls its provider under its `_gate`, so a provider that works before it returns holds `Drop`, a dispose, a send and a close.                                                                                                                     | Accepted, from the review: the pending call is published under the lock, the provider called once it is released.                                                                                                                                                                      |
