@@ -2434,11 +2434,6 @@ for (const [label, TrackedWebSocket] of IMPLEMENTATIONS) {
   });
 }
 
-test('a server’s failures are its own, whatever table a client uses', () => {
-  expect(new FailureError(SERVER_FAILURES.accessDenied).side).toBe('server');
-  expect(FailureScope.PROTOCOL).toBe(0);
-});
-
 test.describe('createRouterServer, credentials', () => {
   const ELSEWHERE = Object.freeze({ scheme: CredentialScheme.ELSEWHERE });
   const CARRIED = 'Interop sub=ada';

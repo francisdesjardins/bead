@@ -16,6 +16,15 @@ public sealed class CallSessionTests
     // definition
 
     [Fact]
+    public void Names_a_scheme_to_come_by_the_word_scheme_and_its_number_in_the_order_of_the_numbers()
+    {
+        Assert.Equal(
+            "OPAQUE, ELSEWHERE, scheme 4, scheme 65535",
+            CallSession.CredentialSchemesDetailOf([(CredentialScheme)65_535, CredentialScheme.Elsewhere, (CredentialScheme)4, CredentialScheme.Opaque, (CredentialScheme)4]));
+        Assert.Equal("", CallSession.CredentialSchemesDetailOf([]));
+    }
+
+    [Fact]
     public void CredentialSchemesDetailOf_names_the_schemes_a_side_takes_in_the_order_of_their_numbers_a_comma_and_a_space_between()
     {
         Assert.Equal("OPAQUE", CallSession.CredentialSchemesDetailOf([CredentialScheme.Opaque]));

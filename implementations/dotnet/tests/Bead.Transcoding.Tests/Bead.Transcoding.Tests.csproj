@@ -24,6 +24,11 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!-- the map-key fixtures, compiled from the protobuf tests' generated message without a second copy -->
+    <Compile Include="../Bead.Protobuf.Tests/Generated/Bead/Validations/V1/Validations.cs" Link="Generated/Validations.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
     <!-- what a gateway answers of spec/transcoding.proto, which Generated/ holds as beadc writes it,
          its route table and its document among it, an output with http: true -->
     <Content Include="../../../../spec/transcoding.json" Link="transcoding.json" CopyToOutputDirectory="PreserveNewest" />

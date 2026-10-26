@@ -516,13 +516,13 @@ public sealed class WebSocketTransportClient : IRouterClientTransport, IAsyncDis
     /// </summary>
     public async ValueTask DisposeAsync()
     {
-        if (_readyState == ReadyState.Open)
+        var wasOpen = _readyState == ReadyState.Open;
+
+        if (wasOpen)
         {
             try
             {
                 await CloseConnection();
-
-                return;
             }
             catch (DisconnectException)
             {
@@ -531,6 +531,14 @@ public sealed class WebSocketTransportClient : IRouterClientTransport, IAsyncDis
         }
 
         Drop();
+
+        if (wasOpen)
+        {
+            lock (_gate)
+            {
+                _readyState = ReadyState.Closed;
+            }
+        }
     }
 
     // ws://host:port/pathname, or wss://; an IPv6 literal bracketed, or its colons would read as the

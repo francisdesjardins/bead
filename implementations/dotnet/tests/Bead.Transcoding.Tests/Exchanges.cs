@@ -309,7 +309,7 @@ internal static partial class Exchanges
     }
 
     // a response read off a socket: its head, then its body by its length, de-chunked, or to its end
-    private sealed class Reader(Socket socket)
+    internal sealed class Reader(Socket socket)
     {
         private readonly List<byte> _came = [];
 
@@ -345,6 +345,12 @@ internal static partial class Exchanges
                 {
                     body.AddRange(await ReadExactly(size));
                     await ReadLine();
+                }
+
+                // ! the last chunk's trailers and empty line belong to this response
+                while ((await ReadLine()).Length > 0)
+                {
+                    // trailers
                 }
 
                 return [.. body];

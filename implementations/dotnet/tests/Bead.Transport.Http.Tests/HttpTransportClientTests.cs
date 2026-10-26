@@ -419,8 +419,14 @@ public sealed class HttpTransportClientTests
 
         public Exception? Cut { get; init; }
 
+        // a supplied answer can fail while its content headers compute their length
+        public Exception? LengthFailure { get; init; }
+
         // settled once its body is read at all
         public TaskCompletionSource? Read { get; init; }
+
+        // a response disposed just before Connecting keeps its drawn connection
+        public Action? OnDisposed { get; init; }
 
         public HttpResponseMessage ResponseOf()
         {
@@ -450,6 +456,18 @@ public sealed class HttpTransportClientTests
     /// <summary>A scripted body, of no length unless its headers declare one.</summary>
     private sealed class ScriptedBody(Answer answer) : HttpContent
     {
+        private Action? _onDisposed = answer.OnDisposed;
+
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing)
+            {
+                Interlocked.Exchange(ref _onDisposed, null)?.Invoke();
+            }
+
+            base.Dispose(disposing);
+        }
+
         protected override async Task SerializeToStreamAsync(Stream stream, TransportContext? context)
         {
             await using var pieces = await CreateContentReadStreamAsync();
@@ -466,6 +484,10 @@ public sealed class HttpTransportClientTests
 
         protected override bool TryComputeLength(out long length)
         {
+            if (answer.LengthFailure is { } failure)
+            {
+                throw failure;
+            }
             length = 0;
 
             return false;
@@ -1865,6 +1887,49 @@ public sealed class HttpTransportClientTests
         {
             Assert.True(connect.Took < TimeSpan.FromSeconds(1.5), $"{connect.Address}: {connect.Took}");
         });
+    }
+
+    [Fact]
+    public async Task Refuses_a_connection_disposed_between_its_answer_and_the_end_of_connect()
+    {
+        using var fetch = new Fetch();
+        await using var client = new HttpTransportClient(NotListening with { Handler = fetch });
+        var told = EndOf(client);
+        var target = new HttpConnectOptions { Host = Host, Port = 8_080 };
+        var connecting = client.Connect(target, Cancelled);
+        Task? disposing = null;
+        var completions = 0;
+
+        (await fetch.CallOf(0)).Answer(DrawnOf(false) with
+        {
+            OnDisposed = () =>
+            {
+                completions += 1;
+                disposing = client.DisposeAsync().AsTask();
+            },
+        });
+
+        var failure = await Assert.ThrowsAsync<HttpRequestException>(() =>
+        {
+            return connecting.WaitAsync(Patience, Cancelled);
+        });
+
+        Assert.Equal("the transport client was disposed as it connected", failure.Message);
+        Assert.NotNull(disposing);
+        await disposing.WaitAsync(Patience, Cancelled);
+        Assert.Equal((1, ReadyState.Closed), (completions, client.ReadyState));
+        Assert.Empty(told);
+        Assert.Equal((HttpMethod.Delete, Token), ((await fetch.CallOf(1)).Method, fetch.Calls[1].ConnectionToken));
+
+        var again = client.Connect(target, Cancelled);
+
+        (await fetch.CallOf(2)).Answer(DrawnOf(false));
+        await again.WaitAsync(Patience, Cancelled);
+        Assert.Equal(ReadyState.Open, client.ReadyState);
+        await client.CloseConnection(new TransportDisconnectOptions { IsQuick = true });
+        Assert.Equal(ReadyState.Closed, client.ReadyState);
+        Assert.Equal(["close True True"], told);
+        Assert.Equal((HttpMethod.Delete, Token), ((await fetch.CallOf(3)).Method, fetch.Calls[3].ConnectionToken));
     }
 
     [Fact]
@@ -3431,8 +3496,214 @@ public sealed class HttpTransportClientTests
         Assert.Equal(2, failing.Fetch.Count);
     }
 
+    // a connect's timeout disposal runs after its state becomes Open and before its task settles.
+    private sealed class DisposingClock : TimeProvider
+    {
+        public Action? OnDisposed { get; set; }
+
+        public override ITimer CreateTimer(TimerCallback callback, object? state, TimeSpan dueTime, TimeSpan period)
+        {
+            return new DisposingTimer(TimeProvider.System.CreateTimer(callback, state, dueTime, period), () =>
+            {
+                var action = OnDisposed;
+
+                OnDisposed = null;
+                action?.Invoke();
+            });
+        }
+    }
+
+    private sealed class DisposingTimer(ITimer inner, Action disposed) : ITimer
+    {
+        public bool Change(TimeSpan dueTime, TimeSpan period)
+        {
+            return inner.Change(dueTime, period);
+        }
+
+        public void Dispose()
+        {
+            inner.Dispose();
+            disposed();
+        }
+
+        public ValueTask DisposeAsync()
+        {
+            Dispose();
+
+            return ValueTask.CompletedTask;
+        }
+    }
+
+    [Fact]
+    public async Task Cancels_a_reconnection_whose_last_attempt_closes_before_cancellation_is_checked()
+    {
+        using var source = CancellationTokenSource.CreateLinkedTokenSource(Cancelled);
+        var clock = new DisposingClock();
+        await using var faked = await ConnectFake(NotListening with { Clock = clock });
+        var told = EndOf(faked.Client);
+        Task? closing = null;
+        var attempts = 0;
+
+        clock.OnDisposed = () =>
+        {
+            attempts += 1;
+            Assert.Equal(ReadyState.Open, faked.Client.ReadyState);
+            closing = faked.Client.CloseConnection(new TransportDisconnectOptions { IsQuick = true });
+            Assert.True(closing.IsCompletedSuccessfully);
+            source.Cancel();
+        };
+
+        var reconnecting = faked.Client.Reconnect(new TransportReconnectOptions { MaximumAttempts = 1, CancellationToken = source.Token });
+
+        (await faked.Fetch.CallOf(2)).Answer(DrawnOf(false));
+
+        var cancelled = await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+        {
+            return reconnecting.WaitAsync(Patience, Cancelled);
+        });
+
+        Assert.NotNull(closing);
+        await closing;
+        Assert.Equal("the reconnection was cancelled", cancelled.Message);
+        Assert.Equal(source.Token, cancelled.CancellationToken);
+        Assert.Equal(1, attempts);
+        Assert.Equal(ReadyState.Closed, faked.Client.ReadyState);
+        Assert.Equal((true, true), await faked.Closed());
+        Assert.Equal(0, faked.Closes.Reader.Count);
+        Assert.Equal(["close True True"], told);
+        Assert.Empty(faked.Heard);
+        Assert.Equal([HttpMethod.Post, HttpMethod.Delete, HttpMethod.Post, HttpMethod.Delete], faked.Fetch.Calls.Select((call) =>
+        {
+            return call.Method;
+        }));
+    }
+
     // the WebSocket transport client's test cancels from a hook as its attempt opens; here the
     // attempt's answer comes after its token was cancelled, a handler deaf to it handing it on
+    [Fact]
+    public async Task Releases_a_replacement_opened_by_its_close_listener_before_dispose_completes()
+    {
+        var fetch = new Fetch((call) =>
+        {
+            return call.Method == HttpMethod.Post ? DrawnOf(false) : new Answer { Status = 204 };
+        });
+        await using var faked = await ConnectFake(NotListening, fetch);
+        var told = EndOf(faked.Client);
+        Task? replacement = null;
+
+        faked.Client.Close += (_, _) =>
+        {
+            replacement = faked.Client.Connect(new HttpConnectOptions { Host = Host, Port = 8_080 }, Cancelled);
+        };
+
+        await faked.Client.DisposeAsync().AsTask().WaitAsync(Patience, Cancelled);
+
+        Assert.NotNull(replacement);
+        await replacement.WaitAsync(Patience, Cancelled);
+        Assert.Equal(ReadyState.Closed, faked.Client.ReadyState);
+        Assert.Equal(["close True False"], told);
+        Assert.Empty(faked.Heard);
+        Assert.Equal([HttpMethod.Post, HttpMethod.Delete, HttpMethod.Post, HttpMethod.Delete], fetch.Calls.Select((call) =>
+        {
+            return call.Method;
+        }));
+    }
+
+    [Fact]
+    public async Task Settles_a_send_and_loses_its_connection_when_a_supplied_answer_throws_as_it_is_read()
+    {
+        var reason = new InvalidOperationException("answer read failed");
+        await using var faked = await ConnectFake(NotListening);
+        var told = new List<string>();
+        var errors = new List<Exception>();
+        faked.Client.Error += (error) => { errors.Add(error); told.Add("error"); };
+        faked.Client.Close += (_, _) => { told.Add("close"); };
+        var sending = faked.Client.Send(new TransportMessage(EnvelopeOf(EnvelopeKind.Request, (1, 0)), false));
+        (await faked.Fetch.CallOf(1)).Answer(new Answer
+        {
+            Status = 200,
+            Headers = Bead,
+            LengthFailure = reason,
+        });
+        await sending.WaitAsync(Patience, Cancelled);
+        Assert.Equal((false, false), await faked.Closed().WaitAsync(Patience, Cancelled));
+        Assert.Equal(ReadyState.Closed, faked.Client.ReadyState);
+        Assert.Equal(["error", "close"], told);
+        var failure = Assert.Single(errors);
+        Assert.Equal("the HTTP executor failed: answer read failed", failure.Message);
+        Assert.Same(reason, failure.InnerException);
+        Assert.Equal(3, faked.Fetch.Count);
+    }
+
+    [Fact]
+    public async Task Loses_an_exchange_whose_executor_fails_and_reports_it_once_before_closing()
+    {
+        foreach (var path in new[] { "send", "answer", "listen", "listen-body", "close" })
+        {
+            foreach (var reason in new Exception[] { new InvalidOperationException("executor refused"), new OperationCanceledException("executor refused") })
+            {
+                var listening = path.StartsWith("listen", StringComparison.Ordinal);
+                await using var faked = await ConnectFake(new HttpTransportClientOptions { IsListening = listening }, new Fetch { IsDeleteHeld = path == "close" });
+                var client = faked.Client;
+                var told = new List<string>();
+                var errors = new List<Exception>();
+                client.Error += (error) => { errors.Add(error); told.Add("error"); };
+                client.Close += (_, _) => { told.Add("close"); };
+                var call = path is "listen" or "listen-body" ? await faked.Fetch.CallOf(1) : null;
+                if (path == "close")
+                {
+                    var closing = client.CloseConnection();
+                    (await faked.Fetch.CallOf(1)).Fail(reason);
+                    await closing.WaitAsync(Patience, Cancelled);
+                }
+                else if (path == "listen") { call!.Fail(reason); }
+                else if (path == "listen-body")
+                {
+                    call!.Answer(new Answer { Status = 200, Headers = new Dictionary<string, string> { ["content-type"] = HttpTransport.BatchMediaType, [HttpTransport.SequenceHeader] = "1" }, Pieces = [], Cut = reason });
+                }
+                else
+                {
+                    var sending = client.Send(new TransportMessage(EnvelopeOf(EnvelopeKind.Request, (1, 0)), false));
+                    call = await faked.Fetch.CallOf(1);
+                    if (path == "send") { call.Fail(reason); }
+                    else { call.Answer(new Answer { Status = 200, Headers = new Dictionary<string, string> { ["content-type"] = HttpTransport.MediaType }, Pieces = [], Cut = reason }); }
+                    await sending.WaitAsync(Patience, Cancelled);
+                }
+                Assert.Equal((path == "close", false), await faked.Closed().WaitAsync(Patience, Cancelled));
+                Assert.Equal(ReadyState.Closed, client.ReadyState);
+                Assert.Equal(["error", "close"], told);
+                var failure = Assert.Single(errors);
+                Assert.Equal("the HTTP executor failed: executor refused", failure.Message);
+                Assert.Same(reason, failure.InnerException);
+                Assert.Equal(path == "close" ? new[] { HttpMethod.Post, HttpMethod.Delete } : new[] { HttpMethod.Post, listening ? HttpMethod.Get : HttpMethod.Post, HttpMethod.Delete }, faked.Fetch.Calls.Select((entry) => { return entry.Method; }));
+            }
+        }
+    }
+
+    [Fact]
+    public async Task Counts_a_synchronous_executor_throw_as_handed_over_and_observes_a_failed_release()
+    {
+        var reason = new InvalidOperationException("executor refused");
+        var calls = 0;
+        using var fetch = new Fetch((_) =>
+        {
+            calls++;
+            if (calls == 1) { return DrawnOf(false); }
+            throw reason;
+        })
+        { IsDeleteHeld = true };
+        await using var faked = await ConnectFake(NotListening, fetch);
+        var errors = new List<Exception>();
+        faked.Client.Error += errors.Add;
+        await faked.Client.Send(new TransportMessage(EnvelopeOf(EnvelopeKind.Request, (1, 0)), false)).WaitAsync(Patience, Cancelled);
+        Assert.Equal((false, false), await faked.Closed().WaitAsync(Patience, Cancelled));
+        Assert.Equal(ReadyState.Closed, faked.Client.ReadyState);
+        Assert.Equal(3, calls);
+        var failure = Assert.Single(errors);
+        Assert.Equal("the HTTP executor failed: executor refused", failure.Message);
+        Assert.Same(reason, failure.InnerException);
+    }
+
     [Fact]
     public async Task Disconnects_and_throws_an_OperationCanceledException_when_cancelled_once_its_attempt_opened()
     {

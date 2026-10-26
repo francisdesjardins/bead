@@ -105,6 +105,51 @@ public sealed partial class RouterCoreTests
     }
 
     [Fact]
+    public async Task Counts_an_unreadable_request_once_when_its_refusal_transport_throws_or_rejects()
+    {
+        foreach (var isThrown in new[] { true, false })
+        {
+            var registry = new MetricsRegistry();
+            var port = new CountedPort((RouterSide.Server, registry));
+            var failure = new IOException("the refusal transport failed");
+            using var core = port.Core;
+            var unreadable = Vectors.FromHexadecimal("A1 10 00 02 00 00 00 01");
+
+            port.Thrown = isThrown ? failure : null;
+            port.Refusal = isThrown ? null : failure;
+            core.Receive(unreadable, Handle);
+            for (var round = 0; round < 3; round += 1)
+            {
+                await port.Loop.WhenIdle().WaitAsync(Patience, TestContext.Current.CancellationToken);
+            }
+
+            Assert.Equal(isThrown ? 0 : 1, port.Sent.Count);
+            Assert.Same(failure, Assert.Single(port.Reports, (reason) => { return ReferenceEquals(reason, failure); }));
+            Assert.Equal(0, core.Gauges().Counts["answeringCalls"]);
+
+            port.Thrown = null;
+            port.Refusal = null;
+            core.Receive(unreadable, Handle);
+            await port.Loop.WhenIdle().WaitAsync(Patience, TestContext.Current.CancellationToken);
+
+            Assert.Equal(isThrown ? 1 : 2, port.Sent.Count);
+            var answer = EnvelopeCodec.ReadEnvelope(port.Sent[^1].Span, new EnvelopeReadOptions { Side = RouterSide.Client });
+
+            Assert.Equal(new FailureHeader { CallId = 1 }, answer!.Header);
+            Assert.Equal(Failure.OfProtocol(ProtocolCode.EnvelopeMalformed, "a 0x10 header of flags 0x00 is 12 bytes, not 8 of 8"), answer.Failure);
+            Assert.Equal(0, core.Gauges().Counts["answeringCalls"]);
+            Assert.Equal(
+                new[]
+                {
+                    "bead_server_call_started_total{service=\"_OTHER\",procedure=\"_OTHER\",type=\"request\"} 2",
+                    $"bead_server_call_handled_total{{service=\"_OTHER\",procedure=\"_OTHER\",type=\"request\",outcome=\"failure\",code=\"ENVELOPE_MALFORMED\"}} {(isThrown ? 1 : 2)}",
+                }.Concat(isThrown ? ["bead_server_call_handled_total{service=\"_OTHER\",procedure=\"_OTHER\",type=\"request\",outcome=\"error\"} 1"] : []).Append(
+                    "bead_server_call_duration_seconds_count{service=\"_OTHER\",procedure=\"_OTHER\",type=\"request\"} 2").Order(StringComparer.Ordinal),
+                MetricsTests.CountsOf(registry).Where((line) => { return !line.Contains("_bucket{", StringComparison.Ordinal) && !line.Contains("_sum{", StringComparison.Ordinal); }).Order(StringComparer.Ordinal));
+        }
+    }
+
+    [Fact]
     public async Task Counts_a_call_that_carries_no_series_under_OTHER_and_a_router_given_no_registry_counts_nothing()
     {
         var registry = new MetricsRegistry();

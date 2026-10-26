@@ -1081,6 +1081,17 @@
                 The client judges the request by the same rules: a refusal fails at once, and
                 nothing goes on the wire.
               </p>
+              <label class="check">
+                <input id="sign-up-fail-fast" type="checkbox" disabled />
+                Stop at the first violation
+              </label>
+              <p class="note">
+                A list longer than its detail holds ends <code>and N more</code>: validate before
+                sending under <a href="?detail=short#rules">a 256-byte detail</a> to see it (<a
+                  href="?#rules"
+                  >the default one</a
+                >).
+              </p>
               <div class="buttons">
                 <button type="submit">Sign up</button>
                 <button type="button" id="sign-up-broken">Break several fields</button>

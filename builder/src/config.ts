@@ -134,6 +134,8 @@ export const CONFIG_FILE = 'beadc.yaml';
 /** The folder beadc keeps its own files in, beside `beadc.yaml`, which `init`'s `.gitignore` ignores. */
 export const BEADC_FOLDER = '.beadc';
 
+const WORKSPACE_ATTEMPTS = 3;
+
 const KEYS = new Set(['version', 'source', 'blueprint', 'outputs', 'clean', 'http', 'openapi']);
 const HTTP_KEYS = new Set(['prefix']);
 const OPENAPI_KEYS = new Set(['out', 'title', 'security', 'problemTypes']);
@@ -680,9 +682,18 @@ export const temporaryFolderOf = (
 
   const own = nodePath.join(options.folder, BEADC_FOLDER);
 
-  mkdirSync(own, { recursive: true });
+  // * an empty-parent cleanup can land between mkdir and mkdtemp; retry just that race.
+  for (let attempt = 1; ; attempt += 1) {
+    mkdirSync(own, { recursive: true });
 
-  return mkdtempSync(nodePath.join(own, prefix));
+    try {
+      return mkdtempSync(nodePath.join(own, prefix));
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT' || attempt === WORKSPACE_ATTEMPTS) {
+        throw error;
+      }
+    }
+  }
 };
 
 /** The `beadc.yaml` nearest `from`, upward, or none. */

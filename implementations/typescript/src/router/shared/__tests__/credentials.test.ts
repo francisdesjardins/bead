@@ -169,6 +169,71 @@ const outcomeOf = (resolution: Promise<unknown>): { current: unknown } => {
 // definition
 
 test.describe('createCredentialResolver', () => {
+  test('fails every waiter on a malformed key set answer and accepts a valid answer at the next deadline', async () => {
+    for (const answer of [
+      null,
+      [null],
+      [
+        {
+          ...SET_KEY,
+          jwk: { k: Buffer.alloc(31, 2).toString('base64url'), kid: 'set-1', kty: 'oct' },
+        },
+      ],
+    ]) {
+      const clock = createTestClock(NOW);
+      const { asks, keySet } = createKeySet();
+      const resolver = createCredentialResolver({ audience: AUDIENCE, keySet }, { clock });
+      const signal = new AbortController().signal;
+      const named = jwtOf(tokenOf(claimsOf(SET_ISSUER), { key: SET_KEY_BYTES, kid: 'set-1' }));
+      const waiting = [resolver.resolve(named, signal), resolver.resolve(named, signal)];
+      const failures = Promise.allSettled(waiting);
+
+      await expect
+        .poll(() => {
+          return asks.length;
+        })
+        .toBe(1);
+      asks[0]?.settle.resolve(answer as unknown as readonly IJwtSetKey[]);
+
+      const settled = await failures;
+
+      for (const result of settled) {
+        expect(result.status).toBe('rejected');
+
+        if (result.status === 'rejected') {
+          expect(result.reason).toMatchObject({
+            cause: expect.any(Error),
+            message: `the key set's ask for ${SET_ISSUER} failed`,
+          });
+        }
+      }
+
+      const next = outcomeOf(resolver.resolve(named, signal));
+
+      await expect
+        .poll(() => {
+          return duesOn(clock);
+        })
+        .toEqual([60_000]);
+      await clock.tickAsync(59_999);
+
+      expect(next.current).toBe('waiting');
+      expect(asks).toHaveLength(1);
+      await clock.tickAsync(1);
+
+      expect(asks).toHaveLength(2);
+      asks[1]?.settle.resolve([SET_KEY]);
+      await expect
+        .poll(() => {
+          return next.current;
+        })
+        .toMatchObject({ identifier: { sub: 'grace' } });
+      expect(await resolver.resolve(named, signal)).toMatchObject({ identifier: { sub: 'grace' } });
+      expect(asks).toHaveLength(2);
+      expect(duesOn(clock)).toEqual([]);
+    }
+  });
+
   test('takes a JWT once given keys or a key set, an ELSEWHERE once given its verifier, and nothing else', () => {
     const clock = createTestClock(NOW);
     const schemesOf = (credentials: Parameters<typeof createCredentialResolver>[0]) => {
@@ -289,6 +354,41 @@ test.describe('createCredentialResolver', () => {
         return unknown.current;
       })
       .toBeUndefined();
+  });
+
+  test('starts no key set ask for a call whose signal is cancelled already', async () => {
+    const clock = createTestClock(NOW);
+    const { asks, keySet } = createKeySet();
+    const resolver = createCredentialResolver({ audience: AUDIENCE, keySet }, { clock });
+    const cancelling = new AbortController();
+    const reason = new Error('the caller leaves before resolution');
+    const named = jwtOf(tokenOf(claimsOf(SET_ISSUER), { key: SET_KEY_BYTES, kid: 'set-1' }));
+
+    cancelling.abort(reason);
+
+    const cancelled: unknown = await resolver
+      .resolve(named, cancelling.signal)
+      .catch((error: unknown) => {
+        return error;
+      });
+
+    expect(cancelled).toBeInstanceOf(CancelError);
+    expect(cancelled).toHaveProperty('cause', reason);
+    expect([asks, duesOn(clock)]).toEqual([[], []]);
+
+    const next = resolver.resolve(named, new AbortController().signal);
+
+    await expect
+      .poll(() => {
+        return asks.length;
+      })
+      .toBe(1);
+    expect(asks[0]?.issuer).toBe(SET_ISSUER);
+    expect(asks[0]?.signal.aborted).toBe(false);
+    asks[0]?.settle.resolve([SET_KEY]);
+
+    expect(await next).toMatchObject({ identifier: { issuer: SET_ISSUER, sub: 'grace' } });
+    expect(asks).toHaveLength(1);
   });
 
   test('lets a call’s cancel end its own wait, never the ask the others wait on', async () => {

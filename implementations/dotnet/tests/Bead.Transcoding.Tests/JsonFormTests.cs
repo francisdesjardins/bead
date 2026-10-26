@@ -1,6 +1,7 @@
 using System.Text;
 using Bead.Transcoding.V1;
 using Google.Protobuf;
+using Google.Protobuf.Reflection;
 using Google.Protobuf.WellKnownTypes;
 using static Bead.Transcoding.Tests.TranscodingFile;
 
@@ -31,6 +32,133 @@ public sealed class JsonFormTests
         {
             Read<TMessage>(body);
         }).Message);
+    }
+
+    [Fact]
+    public void Reads_enum_lists_by_name_or_number_and_refuses_an_invalid_member_at_its_index()
+    {
+        var expected = new FieldOptions
+        {
+            Targets = { (FieldOptions.Types.OptionTargetType)1, (FieldOptions.Types.OptionTargetType)4 },
+        };
+
+        foreach (var body in new[] { "{\"targets\":[1,4]}", "{\"targets\":[\"TARGET_TYPE_FILE\",\"TARGET_TYPE_FIELD\"]}" })
+        {
+            var message = Assert.IsType<FieldOptions>(Read<FieldOptions>(body));
+
+            Assert.Equal(expected, message);
+            Assert.Equal(expected, FieldOptions.Parser.ParseFrom(message.ToByteArray()));
+            Assert.Equal("{\"targets\":[\"TARGET_TYPE_FILE\",\"TARGET_TYPE_FIELD\"]}", Written(message));
+        }
+
+        foreach (var (member, reason) in new[]
+        {
+            ("999", "no value of OptionTargetType of that number"),
+            ("\"NOPE\"", "no value of OptionTargetType of that name"),
+            ("true", "no OptionTargetType"),
+        })
+        {
+            var refused = Assert.Throws<JsonFormException>(() =>
+            {
+                Read<FieldOptions>($"{{\"targets\":[1,{member}]}}");
+            });
+
+            Assert.Equal(reason, refused.Message);
+            Assert.Equal("#/targets/1", refused.Pointer);
+        }
+    }
+
+    [Fact]
+    public void Refuses_unknown_numbers_of_a_closed_enum_and_keeps_open_enum_numbers()
+    {
+        foreach (var body in new[] { "{\"type\":1}", "{\"type\":\"TYPE_DOUBLE\"}" })
+        {
+            var message = Read<FieldDescriptorProto>(body);
+
+            Assert.Equal(new FieldDescriptorProto { Type = FieldDescriptorProto.Types.Type.Double }, message);
+            Assert.Equal("{\"type\":\"TYPE_DOUBLE\"}", Written(message));
+        }
+
+        foreach (var body in new[] { "{\"type\":0}", "{\"type\":999}" })
+        {
+            var refused = Assert.Throws<JsonFormException>(() =>
+            {
+                Read<FieldDescriptorProto>(body);
+            });
+
+            Assert.Equal("no value of Type of that number", refused.Message);
+            Assert.Equal("#/type", refused.Pointer);
+        }
+
+        Assert.Equal((Aliased)7, Assert.IsType<Edges>(Read<Edges>("{\"aliased\":7}")).Aliased);
+        Assert.Equal("{\"aliased\":7}", Written(new Edges { Aliased = (Aliased)7 }));
+    }
+
+    [Fact]
+    public void Refuses_an_Empty_value_that_is_not_an_object()
+    {
+        foreach (var body in new[] { "1", "[]" })
+        {
+            var refused = Assert.Throws<JsonFormException>(() =>
+            {
+                Read<Empty>(body);
+            });
+
+            Assert.Equal("an Empty that is no object", refused.Message);
+            Assert.Equal("#", refused.Pointer);
+        }
+    }
+
+    [Fact]
+    public void Reads_the_limits_of_unsigned_64_bit_numbers_without_rounding()
+    {
+        foreach (var digits in new[] { "0", "9007199254740993", "18446744073709551615" })
+        {
+            foreach (var value in new[] { digits, $"\"{digits}\"" })
+            {
+                Assert.Equal(ulong.Parse(digits, System.Globalization.CultureInfo.InvariantCulture), Assert.IsType<Everything>(Read<Everything>($"{{\"aUint64\":{value}}}")).AUint64);
+            }
+        }
+
+        foreach (var value in new[] { "-1", "18446744073709551616" })
+        {
+            Refused<Everything>($"{{\"aUint64\":{value}}}", "a uint64 past its range");
+        }
+    }
+
+    [Fact]
+    public void Reads_unsigned_64_bit_map_keys_exactly_and_refuses_keys_outside_their_bounds()
+    {
+        foreach (var (field, kind) in new[] { ("byUint64", "uint64"), ("byFixed64", "fixed64") })
+        {
+            var message = Assert.IsType<Bead.Validations.V1.Maps>(Read<Bead.Validations.V1.Maps>($"{{\"{field}\":{{\"9007199254740993\":\"large\",\"18446744073709551615\":\"max\",\"0\":\"zero\"}}}}"));
+            var expected = new Bead.Validations.V1.Maps();
+            var entries = field == "byUint64" ? expected.ByUint64 : expected.ByFixed64;
+
+            entries.Add(0, "zero");
+            entries.Add(9_007_199_254_740_993, "large");
+            entries.Add(ulong.MaxValue, "max");
+            Assert.Equal(expected, message);
+            Assert.Equal(expected, Bead.Validations.V1.Maps.Parser.ParseFrom(message.ToByteArray()));
+            Assert.Equal($"{{\"{field}\":{{\"0\":\"zero\",\"18446744073709551615\":\"max\",\"9007199254740993\":\"large\"}}}}", Written(message));
+
+            foreach (var (key, reason) in new[]
+            {
+                ("-1", $"a {kind} key past its range"),
+                ("18446744073709551616", $"a {kind} key past its range"),
+                ("01", $"a {kind} key off -?(0|[1-9][0-9]*)"),
+                ("1e3", $"a {kind} key off -?(0|[1-9][0-9]*)"),
+            })
+            {
+                var refused = Assert.Throws<JsonFormException>(() =>
+                {
+                    Read<Bead.Validations.V1.Maps>($"{{\"{field}\":{{\"{key}\":\"x\"}}}}");
+                });
+
+                Assert.Equal(reason, refused.Message);
+                Assert.Equal($"#/{field}/{key}", refused.Pointer);
+            }
+        }
     }
 
     [Fact]

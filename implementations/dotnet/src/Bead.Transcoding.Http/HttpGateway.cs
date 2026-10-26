@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Net;
+using System.Runtime.CompilerServices;
 using System.Security.Cryptography;
 using System.Text;
 using Bead.Protobuf;
@@ -59,6 +60,7 @@ public sealed class HttpGateway : IAsyncDisposable
     private readonly HttpBinding _binding;
     private readonly byte[]? _document;
     private readonly string? _etag;
+    private readonly ConditionalWeakTable<HttpContext, DropState> _drops = new();
 
     // what it holds at once, under its lock: its calls and its streams, in all and by address, and
     // the bytes of body being read
@@ -230,6 +232,10 @@ public sealed class HttpGateway : IAsyncDisposable
     public async Task Answer(HttpContext context)
     {
         ArgumentNullException.ThrowIfNull(context);
+
+        // a host may recycle its HttpContext; each exchange owns its drop guard
+        _drops.Remove(context);
+        _drops.Add(context, new DropState());
 
         try
         {
@@ -1114,6 +1120,7 @@ public sealed class HttpGateway : IAsyncDisposable
 
     private async Task Stream(HttpContext context, (HttpRoute Route, RouterClient Router, ReadOnlyMemory<byte> Payload, ResolvedRequestOptions Options, ProblemContext Problems, SerialScheduler Callbacks) call)
     {
+        var drop = _drops.GetValue(context, (_) => { return new DropState(); });
         var (route, router, payload, options, problems, callbacks) = call;
         var response = context.Response;
         var ended = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -1122,7 +1129,6 @@ public sealed class HttpGateway : IAsyncDisposable
         // ends its subscription waits on it, since the router tells a drop right behind the result
         // before this exchange has written that result
         var settled = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        long unsent = 0;
 
         // ! one shot, armed again by every write: a comment goes a heartbeat after the last write,
         // and none while writes go (transcoding 8.7)
@@ -1145,16 +1151,7 @@ public sealed class HttpGateway : IAsyncDisposable
                 response.ContentType = EventStreamType;
             }
 
-            if (Interlocked.Add(ref unsent, bytes.Length) > _options.MaximumUnsentBytes)
-            {
-                context.Abort();
-
-                throw new IOException($"a stream past maximumUnsentBytes {_options.MaximumUnsentBytes}");
-            }
-
-            await response.Body.WriteAsync(bytes, context.RequestAborted);
-            await response.Body.FlushAsync(context.RequestAborted);
-            Interlocked.Add(ref unsent, -bytes.Length);
+            await WritePaced(context, (bytes, drop));
         }
 
         var events = new HttpEvents(Write);
@@ -1340,7 +1337,7 @@ public sealed class HttpGateway : IAsyncDisposable
 
         if (!HttpMethods.IsHead(context.Request.Method))
         {
-            await WritePaced(context, _document);
+            await WriteSlices(context, _document);
         }
 
         await response.CompleteAsync();
@@ -1364,22 +1361,69 @@ public sealed class HttpGateway : IAsyncDisposable
 
         if (!HttpMethods.IsHead(context.Request.Method) && answer.Body.Length > 0)
         {
-            await WritePaced(context, answer.Body);
+            await WriteSlices(context, answer.Body);
         }
 
         await response.CompleteAsync();
     }
 
+    // a whole body handed to the pace in slices of at most 64 KiB
+    private async Task WriteSlices(HttpContext context, ReadOnlyMemory<byte> bytes)
+    {
+        var drop = _drops.GetValue(context, (_) => { return new DropState(); });
+        const int Slice = 64 * 1024;
+        for (var offset = 0; offset < bytes.Length; offset += Slice)
+        {
+            await WritePaced(context, (bytes.Slice(offset, Math.Min(Slice, bytes.Length - offset)), drop));
+        }
+    }
+
+    // whether this exchange has told its one drop, even when a host recycles its context
+    private sealed class DropState
+    {
+        // one report shared by every write of the exchange
+        private int _told;
+        public bool Take()
+        {
+            return Interlocked.Exchange(ref _told, 1) == 0;
+        }
+    }
+
+    // a drop belongs to the exchange that still owns the context, reported once before its abort
+    private void DropWriter(HttpContext context, (DropState State, string Detail) drop)
+    {
+        if (_drops.TryGetValue(context, out var current) && current == drop.State && drop.State.Take())
+        {
+            Report(new IOException(drop.Detail));
+            context.Abort();
+        }
+    }
+
     // ! an answer written at its pace (spec 15.12), on the real clock, since what it bounds is the
     // platform's socket: its socket still holding it past the longer of its grace and its bytes at
     // the rate, its exchange is aborted
-    private async Task WritePaced(HttpContext context, ReadOnlyMemory<byte> bytes)
+    private async Task WritePaced(HttpContext context, (ReadOnlyMemory<byte> Bytes, DropState State) write)
     {
+        var (bytes, drop) = write;
+        if (!_drops.TryGetValue(context, out var current) || current != drop) { return; }
+        context.RequestAborted.ThrowIfCancellationRequested();
+        var writer = context.Response.BodyWriter;
+        // a host exposes its queued bytes here; Kestrel exposes only those not yet flushed
+        var pending = writer.CanGetUnflushedBytes ? writer.UnflushedBytes : 0;
+        if (bytes.Length > _options.MaximumUnsentBytes - pending)
+        {
+            var detail = string.Create(CultureInfo.InvariantCulture, $"the response is dropped: maximumUnsentBytes {_options.MaximumUnsentBytes} bytes");
+            DropWriter(context, (drop, detail));
+            throw new IOException(detail);
+        }
         long unsent = bytes.Length;
 
         void Late()
         {
-            context.Abort();
+            if (Interlocked.Read(ref unsent) > 0)
+            {
+                DropWriter(context, (drop, string.Create(CultureInfo.InvariantCulture, $"the response is dropped: minimumSendBytesPerSecond {_policy.MinimumSendBytesPerSecond} after sendGracePeriod {_policy.SendGracePeriod.TotalMilliseconds}ms")));
+            }
         }
 
         long Unsent()
@@ -1390,11 +1434,13 @@ public sealed class HttpGateway : IAsyncDisposable
         var pace = new SendPace((Late, Unsent), new SendPaceOptions { MinimumSendBytesPerSecond = _policy.MinimumSendBytesPerSecond, SendGracePeriod = _policy.SendGracePeriod });
 
         pace.Hand(bytes.Length);
+        var body = context.Response.Body;
+        var aborted = context.RequestAborted;
 
         try
         {
-            await context.Response.Body.WriteAsync(bytes, context.RequestAborted);
-            await context.Response.Body.FlushAsync(context.RequestAborted);
+            await body.WriteAsync(bytes, aborted);
+            await body.FlushAsync(aborted);
         }
         finally
         {

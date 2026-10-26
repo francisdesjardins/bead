@@ -113,6 +113,12 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- The TypeScript side names a credential scheme to come `scheme 4` in `CREDENTIAL_UNSUPPORTED`'s
+  detail, as the C# side and its own header refusals do, where it wrote the bare number.
+- The builder, the TypeScript side and the example use Buf 1.75 and the current Oxlint and Oxfmt
+  pins, their indirect dependencies refreshed, `fast-uri` past its four advisories among them; the
+  C# side and the example use .NET SDK 10.0.403; CI uses Python 3.14.9 and Semgrep 1.182.1, and the
+  builder's image Node 26.12.1.
 - The demo shows its parts in scenes, one a tab: its calls, its payload rules beside the same
   sign-up over HTTP, the sign-up's OpenAPI document, its server and its metrics, and its code, both
   sides side by side; the address's fragment names the scene shown, the logs stay in a rail beside
@@ -232,7 +238,24 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   status and Retry-After in their detail, distinguish body bounds from malformed payloads and lost
   streams, and accept a base URL path. Authorization follows the transports' field check; event
   decoding is bounded and linear. C# disposes only its own handler; fetch uses same-origin credentials.
+- HTTP clients count an exchange whose executor fails after dispatch as handed over and lose the
+  connection. An executor's own failure is reported once before the close; answer reads, listens
+  and disconnects reach their ending on both sides, including a cancellation the executor raises.
+- Every gateway response body obeys its send pace and maximumUnsentBytes bound: whole answers,
+  problems, the OpenAPI document and events. Whole bodies go in slices of at most 64 KiB; a drop
+  reports its bound once and releases the exchange and socket, cancelling a stream's call.
+  Stream writes settle in order and return each notification's credit. The byte bound includes
+  the host's exposed pending bytes and the write handed to it.
 
+- beadc retries temporary work area creation when a concurrent invocation removes its empty
+  `.beadc` parent, with at most three attempts.
+- The TypeScript WebSocket client refuses a connection disposed by its credential provider's
+  completion callback, ending Closed with no socket as the C# client does.
+- The TypeScript HTTP client releases a connection disposed between its 201 response and the end
+  of connect, refusing the connect and ending Closed as the C# client does.
+- A client's disposal releases a replacement its close listener opens before disposal settles.
+  TypeScript's transport clients and the C# WebSocket client end Closed with no kept connection,
+  as the C# HTTP client does.
 - The C# gateway writes its heartbeat comment a heartbeat after its stream's last write, armed again
   by each write, as the TypeScript side does, where it wrote one each heartbeat whatever went; and
   it refuses a JSON text nested past 202 levels as `nested past 100` before its message is read,

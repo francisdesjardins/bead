@@ -140,6 +140,93 @@ for (const [label, TrackedWebSocket] of IMPLEMENTATIONS satisfies readonly (read
       await allClosed();
     });
 
+    test('releases a replacement opened by its close listener before dispose completes', async () => {
+      const closes: boolean[][] = [];
+      const errors: Error[] = [];
+      let replacement: Promise<unknown> | undefined;
+
+      client.on('close', (...flags) => {
+        closes.push(flags);
+        replacement = client.connect({ host, port }).catch((reason: unknown) => {
+          return reason;
+        });
+      });
+      client.on('error', (error) => {
+        errors.push(error);
+      });
+      await client.connect({ host, port });
+
+      try {
+        await client[Symbol.asyncDispose]();
+        expect(client.isClosed()).toBe(true);
+        expect(replacement).toBeDefined();
+        const outcome = await replacement;
+
+        expect(outcome === undefined || outcome instanceof ConnectError).toBe(true);
+        expect([client.isClosed(), client.socket, closes, errors]).toEqual([
+          true,
+          null,
+          [[true, false]],
+          [],
+        ]);
+        await expect
+          .poll(() => {
+            return server.clients.size;
+          })
+          .toBe(0);
+      } finally {
+        drop(client);
+      }
+    });
+
+    test('cancels a reconnection whose last attempt closes before cancellation is checked', async () => {
+      const cancelling = new AbortController();
+      const reason = new Error('the attempt closes before the cancellation check');
+      const closes: boolean[][] = [];
+      const errors: Error[] = [];
+      const closedAtServer: Promise<unknown>[] = [];
+
+      server.on('connection', (socket) => {
+        closedAtServer.push(once(socket, 'close'));
+      });
+      client.on('close', (...flags) => {
+        closes.push(flags);
+      });
+      client.on('error', (error) => {
+        errors.push(error);
+      });
+      await client.connect({ host, port });
+
+      const connect = client.connect;
+      let attempts = 0;
+
+      client.connect = async (options) => {
+        await connect(options);
+        attempts += 1;
+        expect(client.isOpen()).toBe(true);
+        await client.disconnect({ isQuick: true });
+        cancelling.abort(reason);
+      };
+
+      const cancelled: unknown = await client
+        .reconnect({ maxAttempts: 1, signal: cancelling.signal })
+        .catch((error: unknown) => {
+          return error;
+        });
+
+      await Promise.all(closedAtServer);
+      expect(cancelled).toBeInstanceOf(CancelError);
+      expect(cancelled).toMatchObject({ cause: reason, message: 'the reconnection was cancelled' });
+      expect([attempts, client.isClosed(), closes, errors, server.clients.size]).toEqual([
+        1,
+        true,
+        [[true, true]],
+        [],
+        0,
+      ]);
+      expect(closedAtServer).toHaveLength(2);
+    });
+
     test.describe('WSTransportClient #connect', () => {
       test('resolves when connecting to a valid endpoint', async () => {
         await client.connect({ host, port });
@@ -535,6 +622,29 @@ for (const [label, TrackedWebSocket] of IMPLEMENTATIONS satisfies readonly (read
         await client.connect({ host, port });
         await client.disconnect();
         await expect(client.send({ data: 'HelloWorld' })).rejects.toBeInstanceOf(ReadyStateError);
+      });
+
+      test('delivers a fragmented message whole then the next message separately', async () => {
+        server.once('connection', (socket) => {
+          socket.send(Uint8Array.of(1, 2), { fin: false });
+          socket.send(Uint8Array.of(3), { fin: true });
+          socket.send(Uint8Array.of(4));
+        });
+        const messages: number[][] = [];
+        const both = new Promise<void>((resolve) => {
+          client.on('message', ({ data }) => {
+            expect(data).toBeInstanceOf(ArrayBuffer);
+            messages.push([...new Uint8Array(data as ArrayBuffer)]);
+            if (messages.length === 2) {
+              resolve();
+            }
+          });
+        });
+
+        await client.connect({ host, port });
+        await both;
+
+        expect(messages).toEqual([[1, 2, 3], [4]]);
       });
     });
 
@@ -1130,6 +1240,76 @@ test.describe('WSTransportClient, what it carries', () => {
   const [[, TrackedGlobal], [, TrackedWs]] = IMPLEMENTATIONS;
   const Ws = TrackedWs as unknown as IWebSocketConstructor;
 
+  test('drops an upgrade disposed by its provider completion callback before it keeps a connection', async () => {
+    const server = await startServer();
+    const client = createWSTransportClient({ WebSocket: Ws });
+    const closes: boolean[][] = [];
+    const errors: Error[] = [];
+    const serverCloses: Promise<unknown[]>[] = [];
+    const completionStates: boolean[] = [];
+
+    server.on('connection', (socket) => {
+      serverCloses.push(once(socket, 'close'));
+    });
+    client.on('close', (...flags) => {
+      closes.push(flags);
+    });
+    client.on('error', (error) => {
+      errors.push(error);
+    });
+
+    try {
+      const failure: unknown = await client
+        .connect({
+          host,
+          port: portOf(server),
+          credentialProvider: ({ signal }) => {
+            signal.addEventListener(
+              'abort',
+              () => {
+                completionStates.push(client.isConnecting());
+                drop(client);
+              },
+              { once: true }
+            );
+
+            return BEARER;
+          },
+        })
+        .catch((reason: unknown) => {
+          return reason;
+        });
+
+      expect(failure).toBeInstanceOf(ConnectError);
+      expect(failure).toMatchObject({ message: 'closed as it opened' });
+      expect([completionStates, client.isClosed(), client.socket, closes, errors]).toEqual([
+        [true],
+        true,
+        null,
+        [],
+        [],
+      ]);
+      await Promise.all(serverCloses);
+      expect([serverCloses.length, server.clients.size]).toEqual([1, 0]);
+
+      await client.connect({ host, port: portOf(server) });
+      expect(client.isOpen()).toBe(true);
+      await client.disconnect({ isQuick: true });
+      await Promise.all(serverCloses);
+
+      expect([client.isClosed(), closes, errors, server.clients.size]).toEqual([
+        true,
+        [[true, true]],
+        [],
+        0,
+      ]);
+    } finally {
+      drop(client);
+      await stopServer(server);
+      await allClosed();
+    }
+  });
+
   // the Authorization lines of each upgrade `hearing` took, as they came
   const upgradesOf = (hearing: Awaited<ReturnType<typeof startRefusing>>) => {
     const heard: string[][] = [];
@@ -1379,6 +1559,58 @@ test.describe('WSTransportClient, what it carries', () => {
       )
     );
     expect([called, provided.isClosed(), heard]).toEqual([2, true, [[BEARER]]]);
+  });
+
+  test('opens no connection when its credential provider settles after cancellation', async () => {
+    await using hearing = await startRefusing();
+    const heard = upgradesOf(hearing);
+    const entered = Promise.withResolvers<AbortSignal>();
+    const answer = Promise.withResolvers<string>();
+    const cancelling = new AbortController();
+    const errors: Error[] = [];
+    const closes: boolean[][] = [];
+    const before = sockets.size;
+    await using client = createWSTransportClient({ WebSocket: Ws });
+
+    client.on('error', (error) => {
+      errors.push(error);
+    });
+    client.on('close', (...flags) => {
+      closes.push(flags);
+    });
+
+    const connecting = client.connect({
+      credentialProvider: ({ signal }) => {
+        entered.resolve(signal);
+
+        return answer.promise;
+      },
+      host,
+      port: hearing.port,
+      signal: cancelling.signal,
+    });
+    const cancelled = expect(connecting).rejects.toBeInstanceOf(CancelError);
+    const providerSignal = await entered.promise;
+
+    try {
+      cancelling.abort();
+      await cancelled;
+      expect(providerSignal.aborted).toBe(true);
+    } finally {
+      answer.resolve(BEARER);
+    }
+
+    // * past the provider's continuation: a cancelled attempt never constructs its socket.
+    await new Promise(setImmediate);
+
+    expect([client.isClosed(), client.carries(BEARER), heard, errors, closes]).toEqual([
+      true,
+      false,
+      [],
+      [],
+      [],
+    ]);
+    expect(sockets.size).toBe(before);
   });
 
   test('refuses a credential and a credential provider given together', async () => {

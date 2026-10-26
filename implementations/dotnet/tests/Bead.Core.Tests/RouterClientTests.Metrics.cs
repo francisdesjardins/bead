@@ -32,6 +32,64 @@ public sealed partial class RouterClientTests
     // definition
 
     [Fact]
+    public async Task Keeps_a_notification_refused_by_its_registry_unregistered_and_accepts_the_declared_procedure_afterward()
+    {
+        (Procedure Procedure, string Detail)[] refusals =
+        [
+            (Service with { ProcedureName = "other" }, "the metrics registry holds 2/1 as \"echo\", and is given \"other\": another name at its address"),
+            (Service with { ProcedureId = 2 }, "the metrics registry holds \"echo\" at 2/1, and is given \"echo\" at 2/2: its name at another address"),
+            (Service with { ProcedureId = 2, ProcedureName = "other" }, "the metrics registry's notification families name 1 procedures at most, and 2/2 is one more: past the ceiling"),
+        ];
+
+        foreach (var (procedure, detail) in refusals)
+        {
+            var registry = new MetricsRegistry(new MetricsRegistryOptions { MaximumProcedures = 1 });
+
+            using var declaring = new ScriptedRouter(new RouterClientOptions { MetricsRegistry = registry });
+
+            var held = new ScriptedNotification(Service);
+
+            await declaring.Router.RegisterNotification(held).WaitAsync(Patience, Cancelled);
+
+            using var scripted = new ScriptedRouter(new RouterClientOptions { MetricsRegistry = registry });
+
+            var (router, transport) = (scripted.Router, scripted.Transport);
+            var before = registry.Exposition();
+            var rejected = new ScriptedNotification(procedure);
+            var refusal = await Assert.ThrowsAsync<ArgumentException>(() =>
+            {
+                return router.RegisterNotification(rejected).WaitAsync(Patience, Cancelled);
+            });
+
+            Assert.StartsWith(detail, refusal.Message, StringComparison.Ordinal);
+            Assert.False(router.HasNotification(rejected));
+            Assert.True(declaring.Router.HasNotification(held));
+            Assert.Equal(before, registry.Exposition());
+            Assert.Empty(transport.Sent);
+
+            var accepted = new ScriptedNotification(Service);
+            var subscribing = await scripted.Subscribe(accepted);
+
+            Assert.True(router.HasNotification(accepted));
+            transport.Deliver(ResultOf(1));
+            await subscribing.WaitAsync(Patience, Cancelled);
+            transport.Deliver(NotificationOf(1));
+            await scripted.Settle();
+
+            Assert.Equal([5], accepted.Triggered);
+            Assert.Contains("bead_notifications_heard_total{service=\"2\",procedure=\"echo\"} 1", MetricsTests.CountsOf(registry));
+
+            await router.UnregisterNotification(accepted).WaitAsync(Patience, Cancelled);
+
+            Assert.False(router.HasNotification(accepted));
+            Assert.True(declaring.Router.HasNotification(held));
+            Assert.Empty(scripted.Errors);
+            Assert.Empty(declaring.Errors);
+            Assert.Empty(declaring.Transport.Sent);
+        }
+    }
+
+    [Fact]
     public async Task One_registry_given_to_a_client_s_router_and_a_server_s_counts_a_call_at_each_of_its_ends_a_command_among_them()
     {
         var registry = new MetricsRegistry();

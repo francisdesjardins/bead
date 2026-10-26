@@ -13,6 +13,8 @@ import { connect, type Socket } from 'node:net';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { create, toBinary } from '@bufbuild/protobuf';
 import { expect, test } from '@playwright/test';
+import { EnvelopeKind, LIMIT_DEFAULTS, SERVER_FAILURES } from '../../router/shared/constants';
+import { bytesOf, readEnvelope, writeEnvelope } from '../../router/shared/envelope';
 import { httpPolicyOf } from '../../transport/server/http-policy';
 import { createMemoryTransportServer } from '../../transport/server/memory-transport-server';
 import type { IHTTPRequestLike, IHTTPResponseLike } from '../../transport/server/types';
@@ -392,6 +394,96 @@ test('refuses a request with no Origin from a page of another site, and a naviga
       })
     ).status
   ).toBe(200);
+});
+
+test('answers a call whose peer closes before its result with 502 and releases its place', async () => {
+  await using memory = createMemoryTransportServer();
+  await memory.start();
+  await using gateway = createHTTPGateway({
+    createServer: createNodeServer,
+    maximumExchanges: 1,
+    routes: HTTP_ROUTES,
+    transport: memory,
+  });
+  const reported = reportedBy(gateway);
+  let requests = 0;
+
+  memory.on('message', ({ data }, connectionHandle) => {
+    const envelope = readEnvelope(bytesOf(data), {
+      failures: SERVER_FAILURES,
+      maximumEnvelopeBytes: LIMIT_DEFAULTS.maximumEnvelopeBytes,
+    });
+
+    if (envelope?.kind === EnvelopeKind.REQUEST) {
+      requests += 1;
+      void memory.close(connectionHandle);
+    }
+  });
+  const { port } = await gateway.start({ address: '127.0.0.1' });
+
+  for (let index = 0; index < 2; index += 1) {
+    const answered = await send(port, { body: '{}', path: '/api/Transcoding/echo' });
+
+    expect(answered).toMatchObject({
+      body: '{"detail":"the connection closed","status":502,"title":"Bad Gateway","type":"about:blank"}',
+      headers: { 'content-type': 'application/problem+json' },
+      status: 502,
+    });
+    expect(answered.headers['bead-refusal']).toBeUndefined();
+    await until(() => {
+      return memory.clients.length === 0;
+    });
+  }
+  expect(requests).toBe(2);
+  expect(reported).toHaveLength(2);
+});
+
+test('answers a failed stream request as a problem before writing any event', async () => {
+  await using fixture = await startTranscoding({
+    maximumConnections: 1,
+    routes: HTTP_ROUTES.map((init) => {
+      return init.procedure === TranscodingProcedures.watch
+        ? {
+            ...init,
+            procedure: {
+              ...init.procedure,
+              procedure: { ...init.procedure.procedure, procedureId: 99 },
+            },
+          }
+        : init;
+    }),
+  });
+  const reported = reportedBy(fixture.gateway);
+  const drawn: string[] = [];
+  const closed: string[] = [];
+
+  fixture.memory.on('connection', (...[, , handle]) => {
+    drawn.push(handle);
+  });
+  fixture.memory.on('close', (_wasClean, handle) => {
+    closed.push(handle);
+  });
+
+  for (let count = 1; count <= 2; count += 1) {
+    const answered = await send(fixture.port, {
+      body: '{}',
+      headers: { accept: 'text/event-stream' },
+      path: '/api/Transcoding/watch',
+    });
+
+    expect(answered).toMatchObject({
+      body: '{"code":19,"detail":"no procedure 99 in service 1","scope":"protocol","status":501,"title":"PROCEDURE_UNKNOWN","type":"tag:francisdesjardins.ca,2026:bead/PROCEDURE_UNKNOWN"}',
+      status: 501,
+    });
+    expect(answered.headers['content-type']).toBe('application/problem+json');
+    expect(answered.headers['bead-refusal']).toBeUndefined();
+    await until(() => {
+      return closed.length === count;
+    });
+    expect(drawn).toHaveLength(count);
+    expect(closed.toSorted()).toEqual(drawn.toSorted());
+    expect(reported).toHaveLength(count);
+  }
 });
 
 test('answers a stream’s request that carries Last-Event-ID with 204 and no call', async () => {
@@ -1281,19 +1373,24 @@ test('resets over HTTP/2 the stream of a request whose target or a field holds a
 
   session.on('error', () => {});
 
-  // its status, or the code its stream was reset with when none came
+  // its status and body, or the code its stream was reset with when none came
   const answerOf = (headers: Record<string, string>) => {
-    return new Promise<number | undefined>((resolve) => {
+    return new Promise<[number, string] | number>((resolve) => {
       const stream = session.request({ ':method': 'GET', ...headers });
       let status: number | undefined;
+      const body: Buffer[] = [];
 
       stream.once('response', (response) => {
         status = response[':status'];
       });
-      stream.on('data', () => {});
+      stream.on('data', (bytes: Buffer) => {
+        body.push(bytes);
+      });
       stream.on('error', () => {});
       stream.once('close', () => {
-        resolve(status ?? stream.rstCode);
+        resolve(
+          status === undefined ? stream.rstCode : [status, Buffer.concat(body).toString('utf8')]
+        );
       });
       stream.end();
     });
@@ -1319,7 +1416,10 @@ test('resets over HTTP/2 the stream of a request whose target or a field holds a
       })
     );
     // what its target percent-encodes is no octet of it
-    expect(await answerOf({ ':path': '/v1/books/a%01b' })).toBe(200);
+    expect(await answerOf({ ':path': '/v1/books/a%01b' })).toEqual([
+      200,
+      '{"name":"a\\u0001b","title":"A tale"}',
+    ]);
   } finally {
     session.close();
   }
@@ -1562,6 +1662,10 @@ test('answers each request at the edges of its gates', async () => {
     '{"anInt32":2}'
   );
   abort.abort();
+  await expect(hanging).rejects.toThrow();
+  await until(() => {
+    return fixture.counts.cancelled === 1;
+  });
 });
 
 test('serves its document to a HEAD and to a preflight that asks for no field', async () => {
@@ -1616,6 +1720,458 @@ test('ends a stream whose notification its stock library refuses with 502 as its
   expect(reported).toHaveLength(1);
 });
 
+test('reads a held body past its grace when its minimum rate is zero', async () => {
+  const reading = Promise.withResolvers<void>();
+  const clock = createTestClock();
+  await using fixture = await startTranscoding({
+    bodyGracePeriod: 1_000,
+    clock,
+    minimumBodyBytesPerSecond: 0,
+    createServer: (listener) => {
+      return createNodeServer((request, response) => {
+        request.on('data', () => {
+          reading.resolve();
+        });
+        listener(request, response);
+      });
+    },
+  });
+  const reported = reportedBy(fixture.gateway);
+  const socket = opened(
+    fixture.port,
+    octetsOf(fixture.port, {
+      lines: [
+        'POST /api/Transcoding/echo HTTP/1.1',
+        'content-type: application/json',
+        'content-length: 2',
+      ],
+    }) + '{'
+  );
+
+  try {
+    await reading.promise;
+    await clock.tickAsync(2_000);
+
+    expect(fixture.memory.clients).toHaveLength(0);
+    socket.write('}');
+    const answered = await readUntil(socket, '\r\n\r\n{}');
+
+    expect(answered).toMatch(/^HTTP\/1\.1 200 /u);
+    expect(answered).toContain('content-type: application/json\r\n');
+    expect(answered.endsWith('\r\n\r\n{}')).toBe(true);
+    expect(reported).toEqual([]);
+    await until(() => {
+      return fixture.memory.clients.length === 0;
+    });
+  } finally {
+    socket.destroy();
+  }
+});
+
+test('ignores request callbacks after its body settles', async () => {
+  let late = 0;
+  await using fixture = await startTranscoding({
+    bodyBytesBudget: 2,
+    createServer: (listener) => {
+      return createNodeServer((request, response) => {
+        request.on('end', () => {
+          // * a mounted request can deliver callbacks after the body end.
+          queueMicrotask(() => {
+            if (late < 2) {
+              late += 1;
+              request.emit('data', Buffer.from('extra'));
+              request.emit('error', new Error('a body callback after settlement'));
+            }
+          });
+        });
+        listener(request, response);
+      });
+    },
+  });
+  const reported = reportedBy(fixture.gateway);
+
+  for (let request = 0; request < 2; request += 1) {
+    const answered = await send(fixture.port, { body: '{}', path: '/api/Transcoding/echo' });
+
+    expect(answered.status).toBe(200);
+    expect(answered.body).toBe('{}');
+    expect(answered.headers['bead-refusal']).toBeUndefined();
+  }
+
+  const refused = await send(fixture.port, { body: ' {}', path: '/api/Transcoding/echo' });
+
+  expect(refused.status).toBe(503);
+  expect(refused.headers['bead-refusal']).toBe('busy');
+  expect(JSON.parse(refused.body)).toEqual({
+    detail: 'the bodies under way hold bodyBytesBudget',
+    status: 503,
+    title: 'Service Unavailable',
+    type: 'about:blank',
+  });
+  expect(late).toBe(2);
+  expect(reported).toEqual([]);
+  await until(() => {
+    return fixture.memory.clients.length === 0;
+  });
+});
+
+test('leaves a response whose application sends its headers before the gateway answers', async () => {
+  await using fixture = await startTranscoding({
+    createServer: (listener) => {
+      return createNodeServer((request, response) => {
+        response.writeHead(202, { 'x-mounted': 'yes' });
+        listener(request, response);
+      });
+    },
+  });
+  const reported = reportedBy(fixture.gateway);
+  let drawn = 0;
+
+  fixture.memory.on('connection', () => {
+    drawn += 1;
+  });
+  const answered = await send(fixture.port, { method: 'GET', path: '/v1/books/2' });
+
+  expect(answered.status).toBe(202);
+  expect(answered.headers['x-mounted']).toBe('yes');
+  expect(answered.headers['content-type']).toBeUndefined();
+  expect(answered.body).toBe('');
+  expect(drawn).toBe(1);
+  expect(reported).toEqual([]);
+  await until(() => {
+    return fixture.memory.clients.length === 0;
+  });
+});
+
+test('drops a notification while an unreadable notification holds its stream’s end before the result', async () => {
+  await using memory = createMemoryTransportServer();
+  await memory.start();
+  await using gateway = createHTTPGateway({
+    createServer: createNodeServer,
+    routes: HTTP_ROUTES.map((init) => {
+      return init.procedure === TranscodingProcedures.watch
+        ? {
+            ...init,
+            notification: EdgesSchema,
+            procedure: { ...init.procedure, notification: TranscodingProcedures.echoEdges.result },
+          }
+        : init;
+    }),
+    transport: memory,
+    window: 2,
+  });
+  const reported = reportedBy(gateway);
+  let requests = 0;
+
+  memory.on('message', ({ data }, connectionHandle) => {
+    const envelope = readEnvelope(bytesOf(data), {
+      failures: SERVER_FAILURES,
+      maximumEnvelopeBytes: LIMIT_DEFAULTS.maximumEnvelopeBytes,
+    });
+
+    if (envelope?.kind !== EnvelopeKind.REQUEST) {
+      return;
+    }
+
+    requests += 1;
+    const { callId } = envelope.header;
+
+    // * both callbacks precede the result: the first holds the end, the second must drop.
+    for (const payload of [new Uint8Array([8, 1]), new Uint8Array()]) {
+      void memory.send(
+        {
+          data: writeEnvelope({
+            header: { callId, kind: EnvelopeKind.NOTIFICATION },
+            kind: EnvelopeKind.NOTIFICATION,
+            payload,
+          }),
+        },
+        connectionHandle
+      );
+    }
+    void memory.send(
+      {
+        data: writeEnvelope({
+          header: { callId, kind: EnvelopeKind.RESULT },
+          kind: EnvelopeKind.RESULT,
+          payload: new Uint8Array(),
+        }),
+      },
+      connectionHandle
+    );
+  });
+  const { port } = await gateway.start({ address: '127.0.0.1' });
+  const answered = await send(port, {
+    body: '{}',
+    headers: { accept: 'text/event-stream' },
+    path: '/api/Transcoding/watch',
+  });
+
+  expect(answered.status).toBe(200);
+  expect(answered.headers['content-type']).toBe('text/event-stream');
+  expect(answered.body).toBe(
+    'event: result\nid: 1\ndata: {}\n\nevent: failure\nid: 2\ndata: {"code":50,"scope":"protocol","status":502,"title":"PAYLOAD_UNDECODABLE","type":"tag:francisdesjardins.ca,2026:bead/PAYLOAD_UNDECODABLE"}\n\n'
+  );
+  expect(requests).toBe(1);
+  expect(reported).toHaveLength(1);
+  await until(() => {
+    return memory.clients.length === 0;
+  });
+});
+
+test('drops a late notification after an unreadable notification starts ending its stream', async () => {
+  const firstWritten = Promise.withResolvers<void>();
+  const chunks: string[] = [];
+  await using fixture = await startTranscoding({
+    window: 1,
+    routes: HTTP_ROUTES.map((init) => {
+      return init.procedure === TranscodingProcedures.watch
+        ? {
+            ...init,
+            notification: EdgesSchema,
+            procedure: { ...init.procedure, notification: TranscodingProcedures.echoEdges.result },
+          }
+        : init;
+    }),
+    createServer: (listener) => {
+      return createNodeServer((request, response) => {
+        const write = response.write.bind(response);
+
+        response.write = (
+          chunk: Uint8Array,
+          done?: BufferEncoding | ((error?: Error | null) => void)
+        ): boolean => {
+          chunks.push(new TextDecoder().decode(chunk));
+          firstWritten.resolve();
+
+          return write(chunk, typeof done === 'function' ? done : undefined);
+        };
+        listener(request, response);
+      });
+    },
+  });
+  const reported = reportedBy(fixture.gateway);
+  const answering = send(fixture.port, {
+    body: '{}',
+    headers: { accept: 'text/event-stream' },
+    path: '/api/Transcoding/watch',
+  });
+
+  await firstWritten.promise;
+  await fixture.watched(1);
+  const answered = await answering;
+
+  await fixture.watched(0);
+  expect(answered.status).toBe(200);
+  expect(answered.body).toBe(
+    'event: result\nid: 1\ndata: {}\n\nevent: failure\nid: 2\ndata: {"code":50,"scope":"protocol","status":502,"title":"PAYLOAD_UNDECODABLE","type":"tag:francisdesjardins.ca,2026:bead/PAYLOAD_UNDECODABLE"}\n\n'
+  );
+  expect(chunks).toHaveLength(2);
+  expect(reported).toHaveLength(1);
+  await until(() => {
+    return fixture.memory.clients.length === 0;
+  });
+});
+
+test('waits for a stream response to drain before writing its next event', async () => {
+  const waiting = Promise.withResolvers<void>();
+  const chunks: string[] = [];
+  let drain: (() => void) | undefined;
+  await using fixture = await startTranscoding({
+    createServer: (listener) => {
+      return createNodeServer((request, response) => {
+        const write = response.write.bind(response);
+
+        response.write = (
+          chunk: Uint8Array,
+          done?: BufferEncoding | ((error?: Error | null) => void)
+        ): boolean => {
+          chunks.push(new TextDecoder().decode(chunk));
+          const isTaken =
+            chunks.length === 1
+              ? write(chunk, () => {
+                  waiting.resolve();
+                })
+              : write(chunk, typeof done === 'function' ? done : undefined);
+
+          if (chunks.length === 1) {
+            drain = () => {
+              response.emit('drain');
+            };
+            return false;
+          }
+
+          return isTaken;
+        };
+        listener(request, response);
+      });
+    },
+  });
+  const reported = reportedBy(fixture.gateway);
+  const socket = opened(
+    fixture.port,
+    octetsOf(fixture.port, {
+      body: '{}',
+      lines: [
+        'POST /api/Transcoding/watch HTTP/1.1',
+        'content-type: application/json',
+        'accept: text/event-stream',
+      ],
+    })
+  );
+
+  try {
+    await waiting.promise;
+    const notifying = fixture.watched(2);
+
+    expect(chunks).toEqual(['event: result\nid: 1\ndata: {}\n\n']);
+    expect(drain).toBeDefined();
+    drain?.();
+    await notifying;
+    await until(() => {
+      return chunks.length === 2;
+    });
+    expect(chunks).toEqual([
+      'event: result\nid: 1\ndata: {}\n\n',
+      'id: 2\ndata: {"remaining":2}\n\n',
+    ]);
+    expect(reported).toEqual([]);
+  } finally {
+    socket.destroy();
+  }
+});
+
+test('settles every held write once its response drains', async () => {
+  const waiting = Promise.withResolvers<void>();
+  const chunks: string[] = [];
+  let drain: (() => void) | undefined;
+  await using fixture = await startTranscoding({
+    window: 2,
+    heartbeat: Infinity,
+    createServer: (listener) => {
+      return createNodeServer((request, response) => {
+        const write = response.write.bind(response);
+
+        response.write = (
+          chunk: Uint8Array,
+          done?: BufferEncoding | ((error?: Error | null) => void)
+        ): boolean => {
+          chunks.push(new TextDecoder().decode(chunk));
+          const isTaken =
+            chunks.length === 1
+              ? write(chunk, () => {
+                  waiting.resolve();
+                })
+              : write(chunk, typeof done === 'function' ? done : undefined);
+
+          if (chunks.length === 1) {
+            drain = () => {
+              response.emit('drain');
+            };
+            return false;
+          }
+
+          return isTaken;
+        };
+        listener(request, response);
+      });
+    },
+  });
+  const credited = Promise.withResolvers<void>();
+  fixture.server.router.on('debug', ({ header }) => {
+    if (header.kind === EnvelopeKind.CREDIT && header.creditEnd >= 4) {
+      credited.resolve();
+    }
+  });
+  const reported = reportedBy(fixture.gateway);
+  const socket = opened(
+    fixture.port,
+    octetsOf(fixture.port, {
+      body: '{}',
+      lines: [
+        'POST /api/Transcoding/watch HTTP/1.1',
+        'content-type: application/json',
+        'accept: text/event-stream',
+      ],
+    })
+  );
+
+  try {
+    await waiting.promise;
+    const notifying = Promise.all([fixture.watched(2), fixture.watched(1)]);
+    await notifying;
+    await new Promise(setImmediate);
+
+    expect(chunks).toEqual(['event: result\nid: 1\ndata: {}\n\n']);
+    expect(drain).toBeDefined();
+    drain?.();
+    await credited.promise;
+    expect(chunks).toEqual([
+      'event: result\nid: 1\ndata: {}\n\n',
+      'id: 2\ndata: {"remaining":2}\n\n',
+      'id: 3\ndata: {"remaining":1}\n\n',
+    ]);
+    expect(reported).toEqual([]);
+  } finally {
+    socket.destroy();
+  }
+});
+
+test('releases a stream closed while its response waits for drainage', async () => {
+  const waiting = Promise.withResolvers<void>();
+  const released = Promise.withResolvers<void>();
+  const chunks: string[] = [];
+  const clock = createTestClock();
+  await using fixture = await startTranscoding({
+    clock,
+    heartbeat: 1_000,
+    createServer: (listener) => {
+      return createNodeServer((request, response) => {
+        const write = response.write.bind(response);
+        response.once('close', () => {
+          released.resolve();
+        });
+        response.write = (chunk: Uint8Array): boolean => {
+          chunks.push(new TextDecoder().decode(chunk));
+          write(chunk);
+          waiting.resolve();
+
+          return false;
+        };
+        listener(request, response);
+      });
+    },
+  });
+  const reported = reportedBy(fixture.gateway);
+  const socket = opened(
+    fixture.port,
+    octetsOf(fixture.port, {
+      body: '{}',
+      lines: [
+        'POST /api/Transcoding/watch HTTP/1.1',
+        'content-type: application/json',
+        'accept: text/event-stream',
+      ],
+    })
+  );
+
+  try {
+    await waiting.promise;
+    socket.destroy();
+    await released.promise;
+    await until(() => {
+      return fixture.memory.clients.length === 0;
+    });
+    await fixture.watched(2);
+    await clock.tickAsync(1_000);
+
+    expect(chunks).toEqual(['event: result\nid: 1\ndata: {}\n\n']);
+    expect(reported).toEqual([]);
+  } finally {
+    socket.destroy();
+  }
+});
+
 test('writes a comment on a quiet stream each heartbeat on its clock, and drops one past maximumUnsentBytes', async () => {
   const watch = {
     body: '{}',
@@ -1643,8 +2199,327 @@ test('writes a comment on a quiet stream each heartbeat on its clock, and drops 
 
   // a stream's write past what its response may hold unsent: dropped, its socket aborted, nothing written
   await using bounded = await startTranscoding({ maximumUnsentBytes: 1 });
-
+  const reported = reportedBy(bounded.gateway);
   expect(await receivedOn(bounded.port, octetsOf(bounded.port, watch))).toBe(0);
+  expect(reported).toEqual(['the response is dropped: maximumUnsentBytes 1 bytes']);
+});
+
+test('paces every response body and reports its send bound', async () => {
+  for (const kind of ['answer', 'problem', 'document', 'event']) {
+    const closed = Promise.withResolvers<void>();
+    const chunks: Uint8Array[] = [];
+    const statuses: number[] = [];
+    let requests = 0;
+    await using fixture = await startTranscoding({
+      heartbeat: Infinity,
+      maximumExchanges: 1,
+      maximumConnections: 1,
+      minimumSendBytesPerSecond: 1_000_000,
+      sendGracePeriod: 1,
+      createServer: (listener) => {
+        return createNodeServer((request, response) => {
+          requests += 1;
+          if (requests > 1) {
+            listener(request, response);
+            return;
+          }
+          Object.defineProperty(response, 'writableLength', {
+            get: () => {
+              return chunks.length === 0 ? 0 : 1;
+            },
+          });
+          response.write = (chunk: Uint8Array): boolean => {
+            statuses.push(response.statusCode);
+            chunks.push(chunk);
+            return false;
+          };
+          response.once('close', () => {
+            closed.resolve();
+          });
+          listener(request, response);
+        });
+      },
+    });
+    const reported = reportedBy(fixture.gateway);
+    const path =
+      kind === 'problem'
+        ? '/missing'
+        : kind === 'document'
+          ? '/openapi.json'
+          : kind === 'event'
+            ? '/api/Transcoding/watch'
+            : '/api/Transcoding/echo';
+    const hasBody = kind === 'answer' || kind === 'event';
+    // * no release competes with the deadline: the write stays held until its socket is aborted.
+    const received = receivedOn(
+      fixture.port,
+      octetsOf(fixture.port, {
+        ...(hasBody ? { body: '{}' } : {}),
+        lines: [
+          (hasBody ? 'POST ' : 'GET ') + path + ' HTTP/1.1',
+          ...(hasBody ? ['content-type: application/json'] : []),
+          ...(kind === 'event' ? ['accept: text/event-stream'] : []),
+        ],
+      })
+    );
+    await closed.promise;
+    expect(await received).toBe(0);
+    await until(() => {
+      return fixture.memory.clients.length === 0;
+    });
+    await fixture.watched(2);
+    expect(chunks).toHaveLength(1);
+    expect(statuses).toEqual([kind === 'problem' ? 404 : 200]);
+    expect(chunks[0]?.length).toBeGreaterThan(0);
+    if (kind === 'event') {
+      const probe = opened(
+        fixture.port,
+        octetsOf(fixture.port, {
+          body: '{}',
+          lines: [
+            'POST /api/Transcoding/watch HTTP/1.1',
+            'content-type: application/json',
+            'accept: text/event-stream',
+          ],
+        })
+      );
+      try {
+        await readUntil(probe, 'data: {}\n\n');
+      } finally {
+        probe.destroy();
+      }
+    } else {
+      expect((await send(fixture.port, { path: '/api/Transcoding/echo', body: '{}' })).status).toBe(
+        200
+      );
+    }
+    await until(() => {
+      return fixture.memory.clients.length === 0;
+    });
+    expect(reported).toEqual([
+      'the response is dropped: minimumSendBytesPerSecond 1000000 after sendGracePeriod 1ms',
+    ]);
+  }
+});
+
+test('counts pending bytes with the write at the maximumUnsentBytes edge', async () => {
+  for (const bound of [5, 6]) {
+    const chunks: string[] = [];
+    await using fixture = await startTranscoding({
+      document: '{}',
+      maximumUnsentBytes: bound,
+      createServer: (listener) => {
+        return createNodeServer((request, response) => {
+          const write = response.write.bind(response);
+          Object.defineProperty(response, 'writableLength', {
+            get: () => {
+              return 4;
+            },
+          });
+          response.write = (
+            chunk: Uint8Array,
+            done?: BufferEncoding | ((error?: Error | null) => void)
+          ): boolean => {
+            chunks.push(new TextDecoder().decode(chunk));
+            return write(chunk, typeof done === 'function' ? done : undefined);
+          };
+          listener(request, response);
+        });
+      },
+    });
+    const reported = reportedBy(fixture.gateway);
+    const received = await receivedOn(
+      fixture.port,
+      octetsOf(fixture.port, { lines: ['GET /openapi.json HTTP/1.1'] })
+    );
+    if (bound === 5) {
+      expect(received).toBe(0);
+      expect(chunks).toEqual([]);
+      expect(reported).toEqual(['the response is dropped: maximumUnsentBytes 5 bytes']);
+    } else {
+      expect(received).toBeGreaterThan(0);
+      expect(chunks).toEqual(['{}']);
+      expect(reported).toEqual([]);
+    }
+  }
+});
+
+test('bounds every response body by maximumUnsentBytes before writing', async () => {
+  for (const kind of ['answer', 'problem', 'document', 'event']) {
+    await using fixture = await startTranscoding({ maximumUnsentBytes: 1, heartbeat: Infinity });
+    const reported = reportedBy(fixture.gateway);
+    const path =
+      kind === 'problem'
+        ? '/missing'
+        : kind === 'document'
+          ? '/openapi.json'
+          : kind === 'event'
+            ? '/api/Transcoding/watch'
+            : '/api/Transcoding/echo';
+    const hasBody = kind === 'answer' || kind === 'event';
+    const received = await receivedOn(
+      fixture.port,
+      octetsOf(fixture.port, {
+        ...(hasBody ? { body: '{}' } : {}),
+        lines: [
+          (hasBody ? 'POST ' : 'GET ') + path + ' HTTP/1.1',
+          ...(hasBody ? ['content-type: application/json'] : []),
+          ...(kind === 'event' ? ['accept: text/event-stream'] : []),
+        ],
+      })
+    );
+    expect(received).toBe(0);
+    await until(() => {
+      return fixture.memory.clients.length === 0;
+    });
+    await fixture.watched(2);
+    expect(reported).toEqual(['the response is dropped: maximumUnsentBytes 1 bytes']);
+  }
+});
+
+test('bounds an accepted slice until its pending bytes are flushed', async () => {
+  const closed = Promise.withResolvers<void>();
+  const sizes: number[] = [];
+  await using fixture = await startTranscoding({
+    minimumSendBytesPerSecond: 1_000_000,
+    sendGracePeriod: 1,
+    createServer: (listener) => {
+      return createNodeServer((request, response) => {
+        Object.defineProperty(response, 'writableLength', {
+          get: () => {
+            return sizes.length === 0 ? 0 : 65536;
+          },
+        });
+        response.write = (bytes: Uint8Array): boolean => {
+          sizes.push(bytes.length);
+          return true;
+        };
+        response.once('close', () => {
+          closed.resolve();
+        });
+        listener(request, response);
+      });
+    },
+  });
+  const reported = reportedBy(fixture.gateway);
+  const received = receivedOn(
+    fixture.port,
+    octetsOf(fixture.port, {
+      body: 'a'.repeat(3 * 65536 + 7),
+      lines: ['POST /api/Transcoding/raw HTTP/1.1', 'content-type: application/octet-stream'],
+    })
+  );
+  await closed.promise;
+  expect(await received).toBe(0);
+  await until(() => {
+    return fixture.memory.clients.length === 0;
+  });
+  expect(sizes).toEqual([65536]);
+  expect(reported).toEqual([
+    'the response is dropped: minimumSendBytesPerSecond 1000000 after sendGracePeriod 1ms',
+  ]);
+});
+
+test('writes whole answers and documents in slices of at most 64 KiB', async () => {
+  const body = 'a'.repeat(3 * 64 * 1024 + 7);
+  for (const kind of ['answer', 'document']) {
+    const sizes: number[] = [];
+    await using fixture = await startTranscoding({
+      document: body,
+      createServer: (listener) => {
+        return createNodeServer((request, response) => {
+          const write = response.write.bind(response);
+          response.write = (
+            chunk: Uint8Array,
+            done?: BufferEncoding | ((error?: Error | null) => void)
+          ): boolean => {
+            sizes.push(chunk.length);
+            return write(chunk, typeof done === 'function' ? done : undefined);
+          };
+          listener(request, response);
+        });
+      },
+    });
+    const reported = reportedBy(fixture.gateway);
+    const received = await send(
+      fixture.port,
+      kind === 'document'
+        ? { method: 'GET', path: '/openapi.json' }
+        : {
+            path: '/api/Transcoding/raw',
+            headers: { 'content-type': 'application/octet-stream' },
+            body,
+          }
+    );
+    expect(received.status).toBe(200);
+    expect(received.body).toBe(body);
+    expect(sizes).toEqual([65536, 65536, 65536, 7]);
+    expect(reported).toEqual([]);
+  }
+});
+
+test('stops heartbeats after their write loses its response', async () => {
+  const written = Promise.withResolvers<void>();
+  const chunks: string[] = [];
+  const clock = createTestClock();
+  await using fixture = await startTranscoding({
+    clock,
+    heartbeat: 1_000,
+    createServer: (listener) => {
+      return createNodeServer((request, response) => {
+        const write = response.write.bind(response);
+
+        response.write = (
+          chunk: Uint8Array,
+          done?: BufferEncoding | ((error?: Error | null) => void)
+        ): boolean => {
+          const text = new TextDecoder().decode(chunk);
+
+          chunks.push(text);
+
+          if (text === ':\n') {
+            response.destroy();
+
+            return false;
+          }
+
+          const taken = write(chunk, typeof done === 'function' ? done : undefined);
+
+          written.resolve();
+
+          return taken;
+        };
+        listener(request, response);
+      });
+    },
+  });
+  const reported = reportedBy(fixture.gateway);
+  const socket = opened(
+    fixture.port,
+    octetsOf(fixture.port, {
+      body: '{}',
+      lines: [
+        'POST /api/Transcoding/watch HTTP/1.1',
+        'content-type: application/json',
+        'accept: text/event-stream',
+      ],
+    })
+  );
+
+  try {
+    await written.promise;
+    await clock.tickAsync(1_000);
+    await until(() => {
+      return fixture.memory.clients.length === 0;
+    });
+    await clock.tickAsync(1_000);
+    await fixture.watched(2);
+
+    expect(chunks).toEqual(['event: result\nid: 1\ndata: {}\n\n', ':\n']);
+    expect(reported).toEqual([]);
+  } finally {
+    socket.destroy();
+  }
 });
 
 test('writes its comment a heartbeat after its last write, and none while writes go', async () => {

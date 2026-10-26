@@ -626,6 +626,60 @@ public sealed class WebSocketTransportClientTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Drops_an_upgrade_disposed_by_its_provider_completion_callback_before_it_keeps_a_connection()
+    {
+        await using var client = new WebSocketTransportClient();
+        var closes = ClosesOf(client);
+        var errors = new List<Exception>();
+        Task? disposing = null;
+        ReadyState? stateAtCompletion = null;
+        CancellationTokenRegistration completing = default;
+
+        client.Error += errors.Add;
+
+        try
+        {
+            var failure = await Assert.ThrowsAsync<WebSocketException>(() =>
+            {
+                return client.Connect(Target with
+                {
+                    CredentialProvider = (token) =>
+                    {
+                        completing = token.Register(() =>
+                        {
+                            stateAtCompletion = client.ReadyState;
+                            disposing = client.DisposeAsync().AsTask();
+                        });
+
+                        return ValueTask.FromResult(Bearer);
+                    },
+                }, Cancelled).WaitAsync(Patience, Cancelled);
+            });
+
+            Assert.Equal("the transport client was disposed as it connected", failure.Message);
+            Assert.Equal(WebSocketError.InvalidState, failure.WebSocketErrorCode);
+            Assert.Equal(ReadyState.Connecting, stateAtCompletion);
+            Assert.NotNull(disposing);
+            await disposing.WaitAsync(Patience, Cancelled);
+            Assert.Equal(ReadyState.Closed, client.ReadyState);
+            var handle = await Next(_connections);
+            Assert.Equal((false, handle), await Next(_closes));
+            Assert.Empty(_server.Clients);
+            Assert.False(closes.Reader.TryRead(out _));
+            Assert.Empty(errors);
+
+            await client.Connect(Target, Cancelled);
+            await client.CloseConnection(new TransportDisconnectOptions { IsQuick = true });
+            Assert.Equal((true, true), await Next(closes));
+            Assert.Equal(ReadyState.Closed, client.ReadyState);
+        }
+        finally
+        {
+            await completing.DisposeAsync();
+        }
+    }
+
+    [Fact]
     public async Task DisposeAsync_while_connecting_fails_the_connect_ending_closed_and_closes_its_socket()
     {
         using var listener = new Listener(IPAddress.Loopback);
@@ -922,6 +976,32 @@ public sealed class WebSocketTransportClientTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Releases_a_replacement_opened_by_its_close_listener_before_dispose_completes()
+    {
+        var closes = new List<(bool WasClean, bool WasQuick)>();
+        var errors = new List<Exception>();
+        Task<Exception?>? replacement = null;
+
+        _client.Close += (clean, quick) =>
+        {
+            closes.Add((clean, quick));
+            replacement = Record.ExceptionAsync(() => { return _client.Connect(Target, Cancelled); }).AsTask();
+        };
+        _client.Error += errors.Add;
+        await _client.Connect(Target, Cancelled);
+        await _client.DisposeAsync().AsTask().WaitAsync(Patience, Cancelled);
+
+        Assert.Equal(ReadyState.Closed, _client.ReadyState);
+        Assert.NotNull(replacement);
+        var failure = await replacement.WaitAsync(Patience, Cancelled);
+
+        Assert.True(failure is null or WebSocketException or OperationCanceledException);
+        Assert.Equal(ReadyState.Closed, _client.ReadyState);
+        Assert.Equal([(true, false)], closes);
+        Assert.Empty(errors);
+    }
+
+    [Fact]
     public async Task A_dispose_on_a_client_never_connected_does_nothing()
     {
         await _client.DisposeAsync();
@@ -1166,6 +1246,57 @@ public sealed class WebSocketTransportClientTests : IAsyncLifetime
         }
 
         Assert.False(listener.IsPending);
+    }
+
+    [Fact]
+    public async Task Opens_no_connection_when_its_credential_provider_settles_after_cancellation()
+    {
+        var entered = new TaskCompletionSource<CancellationToken>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var answer = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
+        using var cancelling = CancellationTokenSource.CreateLinkedTokenSource(Cancelled);
+        var errors = new List<Exception>();
+        var closes = ClosesOf(_client);
+        var opened = 0;
+
+        _client.Error += errors.Add;
+        _client.Opened += () =>
+        {
+            opened += 1;
+        };
+
+        var connecting = _client.Connect(Target with
+        {
+            CredentialProvider = (token) =>
+            {
+                entered.TrySetResult(token);
+
+                return new ValueTask<string>(answer.Task);
+            },
+        }, cancelling.Token);
+        var providerToken = await entered.Task.WaitAsync(Patience, Cancelled);
+
+        try
+        {
+            await cancelling.CancelAsync();
+            Assert.True(providerToken.IsCancellationRequested);
+        }
+        finally
+        {
+            // .NET awaits the provider itself; its cancelled handshake follows that answer.
+            answer.TrySetResult(Bearer);
+        }
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+        {
+            return connecting.WaitAsync(Patience, Cancelled);
+        });
+        Assert.Equal(ReadyState.Closed, _client.ReadyState);
+        Assert.False(_client.Carries(Bearer));
+        Assert.Equal(0, opened);
+        Assert.Empty(_server.ConnectionHandles);
+        Assert.Equal(0, _connections.Reader.Count);
+        Assert.Equal(0, closes.Reader.Count);
+        Assert.Empty(errors);
     }
 
     [Fact]
@@ -2416,6 +2547,51 @@ public sealed class WebSocketTransportClientTests : IAsyncLifetime
             Assert.True(await IsClosed(peer));
             Assert.False(listener.IsPending);
         }
+    }
+
+    [Fact]
+    public async Task Cancels_a_reconnection_whose_last_attempt_closes_before_cancellation_is_checked()
+    {
+        using var source = CancellationTokenSource.CreateLinkedTokenSource(Cancelled);
+        var closes = ClosesOf(_client);
+        var errors = new List<Exception>();
+
+        _client.Error += errors.Add;
+        await _client.Connect(Target, Cancelled);
+
+        var replaced = await Next(_connections);
+        Task? closing = null;
+        var attempts = 0;
+
+        _client.Opened += () =>
+        {
+            attempts += 1;
+            Assert.Equal(ReadyState.Open, _client.ReadyState);
+            closing = _client.CloseConnection(new TransportDisconnectOptions { IsQuick = true });
+            Assert.True(closing.IsCompletedSuccessfully);
+            source.Cancel();
+        };
+
+        var cancelled = await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+        {
+            return _client.Reconnect(new TransportReconnectOptions { MaximumAttempts = 1, CancellationToken = source.Token }).WaitAsync(Patience, Cancelled);
+        });
+
+        Assert.NotNull(closing);
+        await closing;
+
+        var opened = await Next(_connections);
+        var ended = new HashSet<string> { (await Next(_closes)).ConnectionHandle, (await Next(_closes)).ConnectionHandle };
+
+        Assert.Equal("the reconnection was cancelled", cancelled.Message);
+        Assert.Equal(source.Token, cancelled.CancellationToken);
+        Assert.Equal(1, attempts);
+        Assert.Equal(ReadyState.Closed, _client.ReadyState);
+        Assert.Equal((true, true), await Next(closes));
+        Assert.Equal(0, closes.Reader.Count);
+        Assert.Equal(new HashSet<string> { replaced, opened }, ended);
+        Assert.Empty(_server.ConnectionHandles);
+        Assert.Empty(errors);
     }
 
     [Fact]

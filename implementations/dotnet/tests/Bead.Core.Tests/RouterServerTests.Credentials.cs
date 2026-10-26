@@ -197,7 +197,116 @@ public sealed partial class RouterServerTests
         });
     }
 
+    // the reached-at-keep window, without a verifier rejecting a credential already at its end
+    private async Task ReachedAtKeep()
+    {
+        var now = _time.GetUtcNow().ToUnixTimeMilliseconds();
+        var identifier = new SessionIdentifier { Scheme = CredentialScheme.Elsewhere, Id = "ada" };
+
+        Start(new RouterServerOptions
+        {
+            SessionOf = (request, _) =>
+            {
+                return ValueTask.FromResult<CallSession?>(new CallSession
+                {
+                    Identifier = identifier,
+                    End = now + (request.Header.CallId == 5 ? 5_000 : 0),
+                });
+            },
+        });
+        _transport.Open(First);
+        EchoOf((_, response) =>
+        {
+            return response.Answer("renewed");
+        });
+        NotifierOf(async (request, response) =>
+        {
+            if (request.Payload == "forget")
+            {
+                await response.RegisterNotification();
+                Assert.True(await Router.Unsubscribe(new CallAddress(1, First)));
+                await response.Fail(Failure.OfApplication(1));
+
+                return;
+            }
+
+            // ! the renewal's arrival precedes the end's post, in this same scheduler turn
+            Deliver(First, RequestOf(5));
+            await response.RegisterNotification();
+            await response.Answer("ok");
+        });
+
+        Deliver(First, SubscribingOf(1, "forget"));
+        await Settle();
+        Assert.Equal(["first failure 1 1"], SentSince());
+        Assert.Equal(KeptOf((0, 0)), await KeptCounts());
+
+        Deliver(First, SubscribingOf(3, "renew"));
+        await Settle();
+        Assert.Equal(["first result 3 ok", "first result 5 renewed"], SentSince());
+        Assert.Equal(KeptOf((1, 1)), await KeptCounts());
+        await AdvanceBy(4_999);
+        Assert.Empty(SentSince());
+        await AdvanceBy(1);
+        Assert.Equal(["first failure 3 SessionRequired"], SentSince());
+        Assert.Empty(Reported());
+    }
+
     // definition
+
+    [Fact]
+    public async Task Keeps_the_latest_credential_end_across_subscriptions_and_clears_its_timers_when_the_connection_closes()
+    {
+        StartVerifying((carried, _) =>
+        {
+            return ValueTask.FromResult<ElsewhereSession?>(new ElsewhereSession
+            {
+                Id = "ada",
+                End = carried == "none" ? null : _time.GetUtcNow().ToUnixTimeMilliseconds() + long.Parse(carried, System.Globalization.CultureInfo.InvariantCulture),
+            });
+        });
+        _transport.Open(Second);
+
+        NotificationResolverCallback<string, string> subscribe = async (_, response) =>
+        {
+            await response.RegisterNotification();
+            await response.Answer("ok");
+        };
+
+        NotifierOf(subscribe);
+        NotifierOf(subscribe, Other);
+
+        SubscribeElsewhere(First, (1, "1000"));
+        await Settle();
+        _transport.Carrying(First, (EnvelopeCodec.WriteEnvelope(Presenting(SubscribingOf(3, "in", Other), Credential.Elsewhere())), "2000"));
+        await Settle();
+        SubscribeElsewhere(Second, (1, "3000"));
+        await Settle();
+
+        Assert.Equal(["first result 1 ok", "first result 3 ok", "second result 1 ok"], SentSince());
+        await AdvanceBy(1_000);
+        Assert.Empty(SentSince());
+        Deliver(First, CancelOf(1));
+        await Settle();
+        SubscribeElsewhere(First, (5, "none"));
+        await Settle();
+
+        Assert.Equal(["first result 5 ok"], SentSince());
+        Assert.Equal(KeptOf((2, 1)), await KeptCounts());
+        DeliverElsewhere(First, (7, "500"));
+        await Settle();
+        Assert.Equal(["first result 7 ada"], SentSince());
+
+        _transport.Closed(First);
+        await Settle();
+
+        Assert.Equal(KeptOf((1, 1)), await KeptCounts());
+        await AdvanceBy(2_000);
+
+        Assert.Equal(["second failure 1 SessionRequired"], SentSince());
+        Assert.Equal(KeptOf((0, 0)), await KeptCounts());
+        Assert.Empty(Reported());
+    }
 
     [Fact]
     public async Task Keeps_a_credential_s_session_from_its_first_subscription_on_a_connection_to_its_last_timing_its_end_meanwhile_its_connection_s_session_it_never_keeps()
@@ -397,6 +506,9 @@ public sealed partial class RouterServerTests
         await AdvanceBy(1);
         Assert.Equal(["first failure 5 SessionRequired"], SentSince());
         Assert.Empty(Reported());
+
+        using var reached = new RouterServerTests();
+        await reached.ReachedAtKeep();
     }
 
     [Fact]
