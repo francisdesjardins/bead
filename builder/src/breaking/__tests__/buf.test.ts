@@ -108,8 +108,16 @@ test("BUF_RULES is buf's list at its pin", () => {
 test('bead/options.proto and an import dropped are never compared', () => {
   test.setTimeout(60_000);
 
-  const earlier = compile([EARLIER], { image: true });
-  const current = fromBinary(FileDescriptorSetSchema, compile([CURRENT], { image: true }));
+  // ! each parallel case owns its fixture copies and the .beadc parent a compile removes
+  const pair = test.info().outputPath('pair');
+  const earlierRoot = join(pair, 'earlier');
+  const currentRoot = join(pair, 'current');
+
+  cpSync(EARLIER, earlierRoot, { recursive: true });
+  cpSync(CURRENT, currentRoot, { recursive: true });
+
+  const earlier = compile([earlierRoot], { image: true });
+  const current = fromBinary(FileDescriptorSetSchema, compile([currentRoot], { image: true }));
   const options = current.file.find((file) => {
     return file.name === OPTIONS_FILE;
   });
@@ -129,14 +137,14 @@ test('bead/options.proto and an import dropped are never compared', () => {
     const found = bufFindings(toBinary(FileDescriptorSetSchema, current), {
       earlier,
       category,
-      roots: [CURRENT],
+      roots: [currentRoot],
     });
 
     expect(found.length, category).toBeGreaterThan(0);
     expect(
       found.filter((diagnostic) => {
-        return /options|timestamp/u.test(
-          `${diagnostic.diagnostic.file} ${diagnostic.diagnostic.message}`
+        return (
+          diagnostic.path === OPTIONS_FILE || diagnostic.path === 'google/protobuf/timestamp.proto'
         );
       }),
       category
