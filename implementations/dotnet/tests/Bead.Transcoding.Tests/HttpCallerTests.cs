@@ -81,6 +81,7 @@ public sealed class HttpCallerTests
         Assert.Equal(1, disposed);
     }
 
+    // transcoding 12.1
     [Fact]
     public async Task Calls_default_routes_with_protobuf_JSON_and_every_native_encoding_through_its_gateway()
     {
@@ -94,6 +95,7 @@ public sealed class HttpCallerTests
         Assert.Equal("{\"a\":\"José\",\"z\":[true,null]}", (await client.Json(Json("{\"z\":[true,null],\"a\":\"José\"}"))).GetRawText());
     }
 
+    // transcoding 12.4 and 12.4.1
     [Fact]
     public async Task Reads_application_and_protocol_problems_with_their_code_scope_and_detail()
     {
@@ -133,6 +135,7 @@ public sealed class HttpCallerTests
         Assert.Equal(JsonValueKind.Null, (await client.Json(Json("null"), new HttpCallOptions { WithoutAuthorization = true })).ValueKind);
     }
 
+    // transcoding 12.3
     [Fact]
     public async Task Refuses_a_credential_in_the_clear_before_encoding_or_HTTP_dispatch()
     {
@@ -176,6 +179,7 @@ public sealed class HttpCallerTests
         }
     }
 
+    // transcoding 12.5
     [Fact]
     public async Task Reads_the_result_then_notifications_and_the_failure_ending_its_gateway_stream()
     {
@@ -239,6 +243,7 @@ public sealed class HttpCallerTests
         }
     }
 
+    // transcoding 12.6
     [Fact]
     public async Task Bounds_unary_bodies_and_events_and_refuses_redirects_without_following_them()
     {
@@ -376,6 +381,7 @@ public sealed class HttpCallerTests
     }
 
 
+    // transcoding 12.4.3
     [Fact]
     public async Task Maps_an_unmarked_HTTP_401_and_keeps_its_status_and_Retry_After()
     {
@@ -526,6 +532,7 @@ public sealed class HttpCallerTests
     }
 
 
+    // transcoding 12.4.2
     [Fact]
     public async Task Reads_gateway_problems_by_their_refusal_before_their_status()
     {
@@ -550,6 +557,7 @@ public sealed class HttpCallerTests
         }
     }
 
+    // transcoding 12.2
     [Fact]
     public async Task Joins_a_base_URL_path_to_its_default_routes_and_treats_an_empty_authorization_as_none()
     {

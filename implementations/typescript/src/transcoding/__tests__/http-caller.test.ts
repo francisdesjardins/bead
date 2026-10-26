@@ -63,6 +63,7 @@ test('refuses an answer from a supplied executor that follows a redirect', async
   expect(disposed).toBe(1);
 });
 
+// transcoding 12.1
 test('calls default routes with protobuf JSON and every native encoding through its gateway', async () => {
   await using fixture = await startTranscoding();
   const client = new TranscodingHttpClient(urlOf(fixture.port));
@@ -80,6 +81,7 @@ test('calls default routes with protobuf JSON and every native encoding through 
   });
 });
 
+// transcoding 12.4 and 12.4.1
 test('reads application and protocol problems with their code scope and detail', async () => {
   await using fixture = await startTranscoding();
   const client = new TranscodingHttpClient(urlOf(fixture.port));
@@ -115,6 +117,7 @@ test('presents a default authorization or its override and omits it on request',
   expect(await client.json(null, { withoutAuthorization: true })).toBeNull();
 });
 
+// transcoding 12.3
 test('refuses a credential in the clear before encoding or HTTP dispatch', async () => {
   for (const host of ['example.com', 'localhost.', '128.0.0.1']) {
     let sent = 0;
@@ -165,6 +168,7 @@ test('takes TLS and URL loopback forms for an authorized call', async () => {
   }
 });
 
+// transcoding 12.5
 test('reads the result then notifications and the failure ending its gateway stream', async () => {
   await using fixture = await startTranscoding();
   const client = new TranscodingHttpClient(urlOf(fixture.port));
@@ -241,6 +245,7 @@ test('refuses notifications before the result and a second result and releases t
   }
 });
 
+// transcoding 12.6
 test('bounds unary bodies and events and refuses redirects without following them', async () => {
   const unary = new TranscodingHttpClient('http://localhost', {
     maximumBodyBytes: 2,
@@ -437,6 +442,7 @@ test('reads numeric problem codes by their integer value and refuses another JSO
   }
 });
 
+// transcoding 12.4.3
 test('maps an unmarked HTTP 401 and keeps its status and Retry-After', async () => {
   const client = new TranscodingHttpClient('http://localhost', {
     fetch: () => {
@@ -597,6 +603,7 @@ test('maps an unmarked HTTP 418 and keeps its status and Retry-After', async () 
   });
 });
 
+// transcoding 12.4.2
 test('reads gateway problems by their refusal before their status', async () => {
   for (const [status, refusal, code] of [
     [503, 'busy', ProtocolCode.CAPACITY_EXCEEDED],
@@ -634,6 +641,7 @@ test('reads gateway problems by their refusal before their status', async () => 
   }
 });
 
+// transcoding 12.2
 test('joins a base URL path to its default routes and treats an empty authorization as none', async () => {
   for (const path of ['/proxy', '/proxy/']) {
     let sent = 0;
