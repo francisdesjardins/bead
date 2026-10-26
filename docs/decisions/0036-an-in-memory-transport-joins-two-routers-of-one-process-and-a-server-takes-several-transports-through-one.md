@@ -162,10 +162,16 @@ each side's harness.
 before it has a socket; the join comes with a gateway, if ever.
 
 **A broker in memory is a broker**, which repeats, reorders and delays on purpose
-([0021](0021-a-broker-is-a-transport-and-bead-is-never-a-network.md)): it may share this
-transport's delivery, never its guarantees.
+([0021](0021-a-broker-is-a-transport-and-bead-is-never-a-network.md)): it shares this transport's
+delivery, a message copied and handed on in a later turn than its publish, never its guarantees,
+copying, holding back, dropping and handing again to another member of a group as a test asks, and
+past a subscriber's queue bound dropping as a broker whose queue is full does (spec 15.24;
+[0040](0040-a-brokers-adapter-offers-bytes-at-topics-and-bead-keeps-its-own-credit-credential-and-heartbeat.md)).
 
 ## The Tenth Man
+
+The in-memory broker met the round of the broker's core, which
+[0038](0038-over-a-broker-a-connection-is-placed-once-at-its-open-named-by-both-its-ends.md) keeps.
 
 The decision met the Tenth Man ([0009](0009-conventional-commits-git-flow-and-the-tenth-man.md)) at
 xhigh effort, in the round of HTTP/JSON transcoding, whose draft held the in-memory transport and

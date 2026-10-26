@@ -2,8 +2,13 @@
 
 - **Status**: accepted
 - **Scope**: every implementation, and the spec's section 15. What a broker's transport owes is
-  decided by records of its own, under this one; a relay is
-  [0019](0019-a-relay-terminates-each-leg-and-routes-nothing-past-it.md)'s.
+  decided by records of its own, under this one: what stands for a connection, its placement, its
+  open and its end, [0038](0038-over-a-broker-a-connection-is-placed-once-at-its-open-named-by-both-its-ends.md)'s;
+  its parcels, their order, copies and parts,
+  [0039](0039-a-brokers-transport-numbers-its-parcels-and-sends-an-envelope-in-parts-under-its-peers-bound.md)'s;
+  its adapter, its pace, its credential and its heartbeat,
+  [0040](0040-a-brokers-adapter-offers-bytes-at-topics-and-bead-keeps-its-own-credit-credential-and-heartbeat.md)'s;
+  a relay is [0019](0019-a-relay-terminates-each-leg-and-routes-nothing-past-it.md)'s.
 
 ## Context
 
@@ -25,13 +30,14 @@ Two ways reach many participants.
   topology, which no exchange of two sides plays. A federated network, in this record's one sense:
   nodes of Bead that take each other's routes and sessions as their own.
 - **A broker as a transport**: the broker carries envelopes as a WebSocket does, and what makes Bead
-  stays at each end. A request goes to a topic its procedure names, and what answers it comes back
-  on the client's own channel, as AMQP 0-9-1's `reply-to` and `correlation-id` properties carry a
-  reply. JSON-RPC 2.0 is transport agnostic in the same way, used "within the same process, over
-  sockets, over http, or in many various message passing environments". It costs what a broker does
-  not give a socket: no connection, a fan-out with no credit per client, a delivery that may repeat
-  and a message it bounds, no order across topics, and a client the server never sees, which the
-  broker vouches for.
+  stays at each end. A connection is placed once, as it opens, through a server's name its
+  participants share, and then runs from one participant's inbox to the other's, as a listening
+  socket's accept takes one connection ([0038](0038-over-a-broker-a-connection-is-placed-once-at-its-open-named-by-both-its-ends.md)).
+  JSON-RPC 2.0 is transport agnostic in the same way, used "within the same process, over sockets,
+  over http, or in many various message passing environments". It costs what a broker does not give
+  a socket: no connection, a fan-out with no credit per client, a delivery that may repeat and a
+  message it bounds, no order across topics, and a client the server never sees, whose broker
+  authenticates it to itself alone.
 
 The end-to-end argument (Saltzer, Reed and Clark, 1984) weighs between them: what the ends must hold
 anyway — Bead's router, at each end of a call — gains nothing from being done again between them.
@@ -59,15 +65,18 @@ reaches a participant behind a broker through one.
 one core in each implementation; an adapter brings one broker's client, and names the capabilities
 it has, some of them optional. What the core holds, point by point, is decided with the transport.
 
-**What a broker's transport owes is decided with it**, each point by a record of its own: what
-stands for a connection, its session and its end; several participants that offer one procedure, and
-where a call's cancel, chunks and credits then go; pacing, where a broker's fan-out has no credit per
-client, and whether a notification goes to each subscriber's channel, or once to a topic many read;
-delivery, how its transport hands the router each request once when the broker repeats one, and the
-bound a broker sets on a message; the topics, their tree and their names; and the contract an
-adapter meets. Its credential is [0010](0010-a-request-presents-a-credential-of-a-scheme.md)'s:
-`ELSEWHERE` is the case it is made for, and what carries it over a broker is decided with the
-transport.
+**What a broker's transport owes is decided by records of its own**: what stands for a connection,
+placed once at its open through a server's name, its session one connection's, and its end, and
+several participants that serve one name in a group, a call's cancel, chunks and credits reaching
+the one that took its connection ([0038](0038-over-a-broker-a-connection-is-placed-once-at-its-open-named-by-both-its-ends.md));
+delivery, a parcel numbered so that the transport hands the router each request once when the
+broker repeats one, and an envelope in parts under the bound a broker sets on a message
+([0039](0039-a-brokers-transport-numbers-its-parcels-and-sends-an-envelope-in-parts-under-its-peers-bound.md));
+pacing, a notification to each subscriber's inbox at its own credit, never once to a topic many
+read, the topics and their names, and the contract an adapter meets
+([0040](0040-a-brokers-adapter-offers-bytes-at-topics-and-bead-keeps-its-own-credit-credential-and-heartbeat.md)).
+Its credential is [0010](0010-a-request-presents-a-credential-of-a-scheme.md)'s: over a broker,
+`ELSEWHERE` stands for what the DATA that carries a request carries beside it.
 
 ## Consequences
 
@@ -86,26 +95,31 @@ nothing while a relay carries no subscription, which is open
 ([0019](0019-a-relay-terminates-each-leg-and-routes-nothing-past-it.md)); and a participant behind a
 second relay, past the broker, is out of its reach, since leg B names no destination.
 
-**A broker's transport states what may overtake, and keeps a request's copy from the router.** A
-broker keeps no order across topics: a request goes to its procedure's topic and what follows it to
-the participant's own, so a cancel can overtake its request, as over HTTP (section 15.5), and its
-section says what may overtake and what the side that answers does of it. A broker that delivers at
-least once repeats a message, and a request's copy is what the router cannot tell from a new
-request: one that comes while its call is open, or held as a subscription, is reported (section 9.2,
-step 2); one that comes once its call ended runs again; one that comes once its requester drew that
-call id again is answered on the new call, which takes another procedure's result as its own
-(sections 9.1, 9.7). So the transport hands its router each request once, and how is its delivery
-record's.
+**A broker's transport keeps its order, and keeps a request's copy from the router.** A broker keeps
+no order across topics, yet every parcel of a connection goes from one inbox to the other, numbered,
+so nothing overtakes on a connection, a cancel never before its request, and one past the next
+awaited loses its connection (section 15.19). A broker that delivers at least once repeats a
+message, and a request's copy is what the router cannot tell from a new request: one that comes
+while its call is open, or held as a subscription, is reported (section 9.2, step 2); one that comes
+once its call ended runs again; one that comes once its requester drew that call id again is
+answered on the new call, which takes another procedure's result as its own (sections 9.1, 9.7). So
+the transport drops a parcel below the next one awaited, and hands its router each request once
+([0039](0039-a-brokers-transport-numbers-its-parcels-and-sends-an-envelope-in-parts-under-its-peers-bound.md)).
 
 **The broker's transport plays the conformance files and the interop**, as HTTP's and the
-WebSocket's do ([0004](0004-one-behaviour-in-every-language.md)): named connections and a clock
-advanced are there to start from, and its own part of the files is decided with it.
+WebSocket's do ([0004](0004-one-behaviour-in-every-language.md)): its parcels in `spec/vectors.json`,
+its cases of both roles in `spec/transports.json` over each side's in-memory broker, and the interop
+over a broker of the binding that brings one ([0040](0040-a-brokers-adapter-offers-bytes-at-topics-and-bead-keeps-its-own-credit-credential-and-heartbeat.md)).
 
 **One word keeps one meaning** ([0003](0003-one-word-one-meaning.md)): "federation" names the network
 this record refuses, and nothing else; services that trust one issuer are named so
 ([0010](0010-a-request-presents-a-credential-of-a-scheme.md)).
 
 ## The Tenth Man
+
+Placement at a connection's open, which revises the picture of a request published to its
+procedure's topic, met the round of the broker's core, which
+[0038](0038-over-a-broker-a-connection-is-placed-once-at-its-open-named-by-both-its-ends.md) keeps.
 
 The course met the Tenth Man ([0009](0009-conventional-commits-git-flow-and-the-tenth-man.md)) in
 two rounds, the second on this record. Its objections, each with the answer that holds:

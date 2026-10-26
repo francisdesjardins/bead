@@ -41,8 +41,13 @@ it — the bounds of section 15.12, a body's rate among them, but not those it h
 socket and parser to, and a client's connect and its waits. The real clock times, alike on both
 sides, what bounds a platform's close or stop against a peer that does not answer — a close
 handshake, a stop's grace, a disconnect's `DELETE`, a lingering close's 2 seconds — and a
-WebSocket's ping, which the C# side's platform times
-([0004](0004-one-behaviour-in-every-language.md) plays it in real time). It times as well what 15.12
+heartbeat: a WebSocket's ping, which the C# side's platform times, and a broker's, which each side
+times on its platform's timer, `heartbeat.ts` and `Heartbeat.cs` on `TimeProvider.System`, a ping
+on a connection silent for its `heartbeat` (spec 15.21;
+[0040](0040-a-brokers-adapter-offers-bytes-at-topics-and-bead-keeps-its-own-credit-credential-and-heartbeat.md)),
+each played in real time ([0004](0004-one-behaviour-in-every-language.md)). What the spec times
+over a broker beside it takes the clock: a half-open connection's `acceptTimeout`, and the rate of
+an envelope's parts (spec 15.18, 15.20). It times as well what 15.12
 holds a platform's socket and parser to: what waits for a socket, its pace and its bound, since each
 bounds what the platform's socket does; and a head's `headersTimeout`, since the platform's parser
 alone sees a head before it is whole, and its check, Kestrel's heartbeat or Node's
@@ -150,6 +155,10 @@ global `WebSocket` leaves its close to its platform, a platform row of the suppo
 WebSocket client's message limit, its ping and its close timeout").
 
 ## The Tenth Man
+
+A broker's heartbeat on the platform's timer, and what the spec times over a broker on the clock met
+the round of the broker's core, which
+[0038](0038-over-a-broker-a-connection-is-placed-once-at-its-open-named-by-both-its-ends.md) keeps.
 
 The decision met the Tenth Man ([0009](0009-conventional-commits-git-flow-and-the-tenth-man.md)) in
 three rounds here, and in two more on durations, which
