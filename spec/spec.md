@@ -1224,7 +1224,9 @@ HTTP connection carries a credential per `POST`, so its connect's is read by no 
 a WebSocket carries one per connection, so its upgrade's is the one read. Nothing is carried toward
 a client: a server's command that presents `ELSEWHERE` over a WebSocket fails before it goes,
 `DESTINATION_UNREACHABLE`. A client writes on each upgrade the credential it is given for it, as
-given, and none otherwise; it fails that upgrade before it goes for one that is no field value, as
+given, and none otherwise; it asks each source of it for one at a time, so that an attempt that
+comes while an earlier attempt's ask, given up, is unsettled waits for it, within its own time,
+before it asks again; it fails that upgrade before it goes for one that is no field value, as
 section 15.5 says, and for one over a WebSocket that leaves the machine in the clear (section
 13.4), its upgrade being where it would cross. No server reads a credential from its target's
 query, which logs keep ([RFC 6750 §2.3](https://www.rfc-editor.org/rfc/rfc6750#section-2.3)), from
@@ -1724,6 +1726,17 @@ connection's sending, closing, credential and security are its own transport's. 
 join two transports whose handles might be one. Its stop stops each, and its bounds and its gauges
 reach each, as section 15.1 has a transport's. It serves no port of its own: one port for two
 transports comes from a proxy in front of them.
+
+15.15. A client's connect ends in one of four ways: its connection opens; it is cancelled; its
+time, `transportClient.connectTimeout`, runs out; or its client is disposed. Each of the last three
+ends it at once, whatever it waits on then — the credential of an upgrade (section 15.2), an
+exchange of the client's executor, which its application may supply — and its client is closed,
+failing that connect as its implementation fails it. Its attempt's end is told to what it waits on,
+which then has nothing to give it: what the connect drew meanwhile is let go, and its server told
+where the transport can tell it — over HTTP a `DELETE` of a connection drawn late (section 15.4),
+over a WebSocket a close of the socket, in memory the close of its connection, over a Web Worker its
+`bead-close` — and what settles after that end is observed and dropped, a late credential never
+written.
 
 ## 16. Services and procedures
 
