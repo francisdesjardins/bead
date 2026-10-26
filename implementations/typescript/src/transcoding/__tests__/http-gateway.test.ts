@@ -2546,6 +2546,69 @@ test('finishes a document whose write callback completes inline despite its fals
   }
 });
 
+test('stops a document at its failed write callback without ending a partial response', async () => {
+  for (const inline of [true, false]) {
+    const waiting = Promise.withResolvers<void>();
+    const sizes: number[] = [];
+    let complete: ((error?: Error | null) => void) | undefined;
+    let destroy: (() => void) | undefined;
+    let ends = 0;
+    await using fixture = await startTranscoding({
+      document: 'a'.repeat(2 * 64 * 1024 + 7),
+      createServer: (listener) => {
+        return createNodeServer((request, response) => {
+          const end = response.end.bind(response);
+
+          destroy = () => {
+            response.destroy();
+          };
+          response.end = () => {
+            ends += 1;
+            return end();
+          };
+          response.write = (
+            chunk: Uint8Array,
+            done?: BufferEncoding | ((error?: Error | null) => void)
+          ): boolean => {
+            sizes.push(chunk.length);
+            if (typeof done === 'function') {
+              complete = done;
+              if (inline) {
+                done(new Error('the document write failed'));
+              }
+            }
+            waiting.resolve();
+
+            return false;
+          };
+          listener(request, response);
+        });
+      },
+    });
+    const reported = reportedBy(fixture.gateway);
+    const received = receivedOn(
+      fixture.port,
+      octetsOf(fixture.port, { lines: ['GET /openapi.json HTTP/1.1'] })
+    );
+
+    try {
+      await waiting.promise;
+      expect(complete).toBeDefined();
+      if (!inline) {
+        complete?.(new Error('the document write failed'));
+      }
+      await new Promise(setImmediate);
+
+      expect(sizes).toEqual([65536]);
+      expect(ends).toBe(0);
+      expect(reported).toEqual([]);
+    } finally {
+      destroy?.();
+    }
+    expect(await received).toBe(0);
+  }
+});
+
 test('writes whole answers and documents in slices of at most 64 KiB', async () => {
   const body = 'a'.repeat(3 * 64 * 1024 + 7);
   for (const kind of ['answer', 'document']) {
