@@ -189,6 +189,13 @@ are never kept alike in silence; one origin for `/bead` and `/api/…` comes fro
   a subscription `PACED` within a window of 16, so a reader that falls behind holds its server's
   queue, where [0002](0002-a-subscription-goes-at-its-clients-pace.md)'s keys and bound tell it, never
   the gateway's memory.
+- **Every body a gateway writes is paced** (10.2): a whole answer, a problem, the document and each
+  event, by 15.12's `minimumSendBytesPerSecond` after `sendGracePeriod` and by `maximumUnsentBytes`,
+  what waits for the socket and the write that would add to it; a whole answer goes in slices of at
+  most 64 KiB, each its own deadline, so a reader that stops reading is dropped within minutes,
+  never the hours one deadline for its whole would give. A drop is reported, naming its bound, as
+  15.12 has a server report each; it frees its exchange's place and its socket, and cancels a
+  stream's call.
 - **The gates** (10) are the HTTP transport's, in 15.6's order, with Fetch Metadata's step: a
   request with no `origin` from another site refused but a navigation to `/openapi.json`, a default
   route's `GET`, or a `get` rule on a marked method. Calls and streams are bounded apart, calls by
@@ -201,6 +208,14 @@ are never kept alike in silence; one origin for `/bead` and `/api/…` comes fro
   routes and messages' shapes are members under no feature, `requires` kept for what a target must
   play
   ([0022](0022-a-proto-becomes-one-checked-blueprint-and-each-language-is-generated-from-it.md)).
+- **A typed client of the default routes** (12), written by each output with `http: true` beside
+  its table, `<Service>HttpClient` over `fetch` or `HttpClient`, its surface name for name on both
+  sides. It reads every answer its gateway gives as a Bead failure: a problem of a code and a scope
+  as that failure, the gateway's own `about:blank` by its `bead-refusal` then its status, a status
+  with no problem by section 9's line between a call never tried, `DESTINATION_UNREACHABLE`, and one
+  that may have run, `DESTINATION_LOST`; a passed bound `PAYLOAD_TOO_LARGE`, a cut stream
+  `DESTINATION_LOST`, a body it cannot read `PAYLOAD_UNDECODABLE`. It reconnects no stream and
+  sends no `Last-Event-ID`; each side's client calls the other side's gateway in the interop.
 - **Where it is stated**: a companion, `spec/transcoding.md`, on the spec's axis under a version of
   its own, its file repeating `transcodingVersion`, tagged `transcoding-v`
   ([0008](0008-three-version-axes-and-names-qualified-by-their-owner.md)): a gateway is beside the
@@ -258,7 +273,8 @@ with, met five more: three accepted, one in part, one refused. A second round, o
 problems carry and what it reports, met ten more: seven accepted, one settled on the transport's
 rule, one held ahead, one refused; the coverage work on both sides found nine more, each settled;
 and a round on what the twin tests and `transcoding.json` pin met eleven more: ten accepted, one
-refused. Each other objection, with the answer that holds:
+refused. A round on the generated client and a gateway's pace met sixteen more, two of them
+blocking: fifteen accepted, one refused. Each other objection, with the answer that holds:
 
 ### On routes
 
@@ -344,3 +360,38 @@ refused. Each other objection, with the answer that holds:
 | The file lacks a nested field named twice, the query's empty sequences and a value that holds `=`, a body under a field that is no object beside a variable within it, a member of such a body that names no field, an encoded spelling of a literal, and dots beside a segment's other characters. | Accepted. A binding or a templates entry pins each, a single-segment variable's entry a path of two segments that matches none.                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
 | What a policy gives a listener, and what it refuses, is no exchange the file holds.                                                                                                                                                                                                                 | Accepted: the twins hold it, each side a listener's own member beside a policy and with none.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
 | An entry pins a template's parsed shape, a default variable's one segment and its span.                                                                                                                                                                                                             | Refused: a parser's shape is no gateway's answer, which the unit tests hold; an entry pins what a default variable matches.                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+
+### On a gateway's pace
+
+The coverage pass found the two gateways pacing different bodies: the TypeScript side a stream's,
+the C# side a whole answer's and the document's. A round at xhigh, with the client's rules, met
+four objections, all accepted, and the review of the change one more, decided by spec 15.12's
+words.
+
+| Objection                                                                                                                          | Answer                                                                                                                                                                                  |
+| ---------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| "The drop is reported" contradicts both gateways, which report none, and the twins that assert none.                               | 15.12 settles it: "The server reports each drop, naming the bound", and 10.2 has a stream's response dropped as a WebSocket's connection is. Both report it; the twins hold the report. |
+| A whole answer's call has settled before its body goes, so the drop cancels nothing of it.                                         | Accepted: a drop frees its exchange's place and its socket, and cancels a stream's call alone.                                                                                          |
+| A whole answer handed to the pace at once has one deadline of max(5 s, its size at 240 bytes a second): about 19 hours for 16 MiB. | Accepted: slices of at most 64 KiB, each its own deadline.                                                                                                                              |
+| 10.2 bounds an answer by `maximumUnsentBytes` too, which neither whole answer's writer held.                                       | Accepted: every body, both bounds; the rule brings both sides to 10.2, no rule of its own.                                                                                              |
+| The sides count different bytes against `maximumUnsentBytes`: what waits with the write, or the write alone.                       | What waits for the socket and the write that would add to it, 15.12's words; the C# side comes to the TypeScript one.                                                                   |
+
+### On the generated client
+
+The typed client of section 12 met the Tenth Man at xhigh effort, its choices where the design
+was silent among them: twelve objections, two of them blocking, eleven accepted, one refused.
+
+| Objection                                                                                                                                                                                                                 | Answer                                                                                                                                                                                                                                                      |
+| ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| The client cannot read its own gateway's problems: each refusal or failure of the gateway's, `about:blank`, no `code` and no `scope` (7.1, 7.7), and each stream a restarted server cuts, would be `PAYLOAD_UNDECODABLE`. | Accepted: by `bead-refusal`, then by the status read back from 7.6's table (12.4, item 2).                                                                                                                                                                  |
+| A passed bound is `PAYLOAD_TOO_LARGE` (spec 12.3), and a cut stream is a call lost, not an answer undecodable.                                                                                                            | Accepted: `PAYLOAD_TOO_LARGE`; a cut stream `DESTINATION_LOST`, since its procedure may have run.                                                                                                                                                           |
+| A status with no Bead problem, a load balancer's 502 or a redirect, loses its status and its `retry-after`.                                                                                                               | Accepted: read by section 9's line between a call never tried and one that may have run (12.4, item 3), its status and `retry-after` in its detail.                                                                                                         |
+| The default bound is the binary envelope's while the client reads JSON, which base64 and escapes make longer.                                                                                                             | Refused: the client bounds an answer as its gateway bounds a request, by `maximumBodyBytes`, `maximumEnvelopeBytes` by default, and the message it reads by the envelope's bound; a payload that its JSON form takes past it is refused at both ends alike. |
+| A malformed body throws each platform's own exception, a different one on each side.                                                                                                                                      | Accepted: `PAYLOAD_UNDECODABLE` on both, whatever the platform throws.                                                                                                                                                                                      |
+| The C# client disposes a handler it is given, which the transport never does, and its own handler lacks the transport's RFC 8305 connect.                                                                                 | Accepted: a given handler is the application's; the one it makes is the transport's.                                                                                                                                                                        |
+| A URL that must be a bare origin cannot reach a gateway behind a proxy's path.                                                                                                                                            | Accepted: a path is a prefix, routes resolved under it as RFC 3986 §5.2 has them.                                                                                                                                                                           |
+| Section 13.4 withdraws a default credential on `SESSION_REQUIRED`, which the client neither applies nor waives.                                                                                                           | Accepted: it does not apply, since an HTTP call holds no session to end, and 12.3 says so.                                                                                                                                                                  |
+| The client judges `Authorization` by a check of its own, unlike the transports'.                                                                                                                                          | Accepted: the transports' own check.                                                                                                                                                                                                                        |
+| The C# side keeps a stream's leading byte order mark and compares media types by case.                                                                                                                                    | Accepted: the mark is taken away, as the HTML standard decodes a stream, and media types compare as RFC 9110 §8.3.1 has them.                                                                                                                               |
+| The TypeScript event bound encodes its whole pending text again at each chunk.                                                                                                                                            | Accepted: it counts a stream's bytes as they come.                                                                                                                                                                                                          |
+| `credentials: 'omit'` drops a page's client certificates and differs from the transport's `same-origin`.                                                                                                                  | Accepted: `same-origin`.                                                                                                                                                                                                                                    |
