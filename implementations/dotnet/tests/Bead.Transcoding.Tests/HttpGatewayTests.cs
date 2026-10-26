@@ -1324,7 +1324,8 @@ public sealed class HttpGatewayTests
             }
 
             // a call that hangs and one beside it of the same address: each held, then each let go
-            var hanging = started.Client.SendAsync(Json("/api/Transcoding/hang", "{}"), Cancelled);
+            using var aborting = CancellationTokenSource.CreateLinkedTokenSource(Cancelled);
+            var hanging = started.Client.SendAsync(Json("/api/Transcoding/hang", "{}"), aborting.Token);
 
             await Until(() =>
             {
@@ -1334,7 +1335,15 @@ public sealed class HttpGatewayTests
             using var echoed = await started.Client.SendAsync(Json("/api/Transcoding/echo", "{\"anInt32\":2}"), Cancelled);
 
             Assert.Equal("{\"anInt32\":2}", await echoed.Content.ReadAsStringAsync(Cancelled));
-            _ = hanging;
+            await aborting.CancelAsync();
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+            {
+                return hanging;
+            });
+            await Until(() =>
+            {
+                return started.Service.Cancelled == 1;
+            });
         }
         finally
         {
