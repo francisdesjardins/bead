@@ -44,9 +44,9 @@ jobs:
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
-          python-version: '3.14'
+          python-version: '3.14.9'
       # ! before the generators: make_validations.py matches its patterns by google-re2
       - run: >-
           python -m pip install --disable-pip-version-check -q --require-hashes --only-binary=:all:
@@ -674,7 +674,7 @@ jobs:
       - name: The code, under Semgrep's community rules
         run: >-
           docker run --rm -v "$PWD:/src:ro" -w /src
-          semgrep/semgrep:1.181.0@sha256:81474464c1f07483ba0682a44787fd93c91397419762a04abe2bafaae396304b
+          semgrep/semgrep:1.182.1@sha256:451b3d875c00dac7ed5db5293e584a07de11449a409c10b3c2d2652f429630b6
           semgrep scan --config p/typescript --config p/csharp --config p/github-actions --config p/secrets
           --metrics=off --error --exclude node_modules --exclude builder/test/golden
           --exclude '**/Generated' --exclude '**/generated' --exclude '**/dist' --exclude .claude
