@@ -1,5 +1,8 @@
+using System.Net;
+using System.Net.Sockets;
 using System.Text;
 using System.Text.Json;
+using Bead.Transcoding.V1;
 using Google.Protobuf;
 using static Bead.Transcoding.Tests.TranscodingFile;
 
@@ -14,6 +17,62 @@ namespace Bead.Transcoding.Tests;
 /// </summary>
 public sealed class TranscodingTests
 {
+    [Fact]
+    public void Compares_payload_signed_zeros_NaNs_and_unknown_fields()
+    {
+        (string One, string Other, bool Expected)[] cases =
+        [
+            ("C1010000000000000080", "C1010000000000000000", false),
+            ("3A050D00000080", "3A050D00000000", false),
+            ("BA010AC1010000000000000080", "BA010AC1010000000000000000", false),
+            ("C101000000000000F87F", "C101000000000000F87F", true),
+            ("C101000000000000F87F", "C101010000000000F87F", false),
+            ("5A0508011201615A050802120162", "5A0508021201625A050801120161", true),
+            ("", "A00601", false),
+            ("A00601", "A00601", true),
+            ("A00601", "A00602", false),
+        ];
+
+        foreach (var (one, other, expected) in cases)
+        {
+            var equal = Edges.Parser.ParseFrom(Convert.FromHexString(one)).Equals(
+                Edges.Parser.ParseFrom(Convert.FromHexString(other)));
+
+            Assert.True(equal == expected, $"{one} / {other}: expected {expected}, came {equal}");
+        }
+    }
+
+    [Fact]
+    public async Task Reads_consecutive_responses_from_their_own_bytes()
+    {
+        using var listener = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
+        listener.Bind(new IPEndPoint(IPAddress.Loopback, 0));
+        listener.Listen(1);
+        var accepting = listener.AcceptAsync(TestContext.Current.CancellationToken);
+        using var socket = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
+        await socket.ConnectAsync(listener.LocalEndPoint!, TestContext.Current.CancellationToken);
+        using var sender = await accepting;
+        var bytes = Encoding.Latin1.GetBytes(
+            "HTTP/1.1 200 OK\r\ncontent-length: 3\r\n\r\none"
+            + "HTTP/1.1 201 Created\r\ntransfer-encoding: chunked\r\n\r\n3\r\ntwo\r\n0\r\nx-end: yes\r\n\r\n"
+            + "HTTP/1.1 204 No Content\r\n\r\n");
+
+        // ! every response and the next head arrive together; none belongs to its neighbour
+        using var output = new NetworkStream(sender, ownsSocket: false);
+        await output.WriteAsync(bytes, TestContext.Current.CancellationToken);
+        sender.Shutdown(SocketShutdown.Send);
+        var reader = new Exchanges.Reader(socket);
+
+        foreach (var (status, body) in new[] { (200, "one"), (201, "two"), (204, "") })
+        {
+            var head = await reader.ReadHead().WaitAsync(TimeSpan.FromSeconds(10), TestContext.Current.CancellationToken);
+            var read = await reader.ReadBody(head).WaitAsync(TimeSpan.FromSeconds(10), TestContext.Current.CancellationToken);
+
+            Assert.Equal(status, head.Status);
+            Assert.Equal(body, Encoding.UTF8.GetString(read));
+        }
+    }
+
     [Fact]
     public async Task Plays_transcoding_json()
     {
