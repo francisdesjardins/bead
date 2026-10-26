@@ -9,7 +9,8 @@
         "../../../implementations/typescript/src/service/service.ts"
       ],
       "@francisdesjardins/bead/proto": ["../../../implementations/typescript/src/proto/proto.ts"],
-      "@bufbuild/protobuf": ["../../node_modules/@bufbuild/protobuf/dist/esm/index.d.ts"]
+      "@bufbuild/protobuf": ["../../node_modules/@bufbuild/protobuf/dist/esm/index.d.ts"],
+      "@bufbuild/protobuf/*": ["../../node_modules/@bufbuild/protobuf/dist/esm/*/index.d.ts"]
     }
   },
   "include": ["*.ts"]
