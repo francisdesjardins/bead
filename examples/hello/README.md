@@ -106,9 +106,11 @@ Given no `BEADC_IMAGE`, the wrappers run the image they name, as the engine find
 ./beadc.sh generate --check    # nothing to change
 ```
 
-`generate` also writes `.beadc/include/bead/options.proto`, Bead's options, and
-`.beadc/include/buf/validate/validate.proto`, protovalidate's, which git ignores: the copies an
-editor reads, and the ones each half's own generator reads where its messages are external.
+`generate` also writes `.beadc/include/bead/options.proto`, Bead's options,
+`.beadc/include/buf/validate/validate.proto`, protovalidate's, and
+`.beadc/include/google/api/http.proto` and `annotations.proto`, googleapis', which git ignores: the
+copies an editor reads, and the ones each half's own generator reads where its messages are
+external.
 Run `generate` once in a fresh clone before an external build.
 
 ## Building and running
@@ -139,9 +141,9 @@ Each half takes `serve`, `serve <port>` or `call <port>`, a port its digits alon
 and refuses any other arguments with its usage, exit 2. Each half in both modes built,
 `node pairs.mjs` plays each client against each server, sixteen pairs, then asks that server's
 gateway: a pair passes when its client exits 0 and what it writes, then the gateway's answers, are
-`transcript.txt` byte for byte, its server exits 0 once its input ends, the client writes nothing
-to its standard error, and the server only the line of its nameless gateway call. CI's `examples` job runs all of it, on Node 26 and on
-24.9, the floor the TypeScript half declares.
+`transcript.txt` byte for byte, its server exits 0 once its input ends, the client writes nothing to
+its standard error, and the server only the line of its nameless gateway call. CI's `examples` job
+runs all of it, on Node 26 and on 24.9, the floor the TypeScript half declares.
 
 ## Calling with the generated HTTP client
 
@@ -169,19 +171,21 @@ Console.WriteLine(answer.Greeting);
 
 Replace `8080` with that gateway port. Each call uses its default POST route, and a problem throws
 `FailureError` or `FailureException` with its Bead code and scope. A notifying procedure exposes
-`hello.subscribeCountDown({ from: 3 })` or `hello.SubscribeCountDown(new CountDownRequest { From = 3 })`,
-an async sequence of its result then notifications. This service's `greeted` hook refuses that
-HTTP subscription: each exchange has its own Bead connection, and a greeting on another exchange
-sets no session on it. A name must be given to `sayHello`, since HTTP answers no `askName` command.
+`hello.subscribeCountDown({ from: 3 })` or
+`hello.SubscribeCountDown(new CountDownRequest { From = 3 })`, an async sequence of its result then
+notifications. This service's `greeted` hook refuses that HTTP subscription: each exchange has its
+own Bead connection, and a greeting on another exchange greets another connection. A name must be
+given to `sayHello`, since HTTP answers no `askName` command.
 
 ## What a project outside this repository writes instead
 
-The example reaches each runtime from its source, as no runtime is published: the TypeScript half
-by Yarn's `portal:` protocol, the C# half by a `ProjectReference` of each assembly it uses,
-`Bead.Protobuf` among them, whose check its generated `proto` codecs call. A project of its own
-names each runtime as a package, by its name and a version:
-`"@francisdesjardins/bead": "<version>"`,
-`<PackageReference Include="FrancisDesjardins.Bead.Transport.WebSockets" Version="<version>" />` and
+The example reaches each runtime from its source, as no runtime is published: the TypeScript half by
+Yarn's `portal:` protocol, the C# half by a `ProjectReference` of each assembly it uses,
+`Bead.Transcoding.Http`, its gateway's, and `Bead.Protobuf`, whose check its generated `proto`
+codecs call, among them. A project of its own names each runtime as a package, by its name and a
+version: `"@francisdesjardins/bead": "<version>"`,
+`<PackageReference Include="FrancisDesjardins.Bead.Transport.WebSockets" Version="<version>" />`,
+`<PackageReference Include="FrancisDesjardins.Bead.Transcoding.Http" Version="<version>" />` and
 `<PackageReference Include="FrancisDesjardins.Bead.Protobuf" Version="<version>" />`.
 
 From source, the TypeScript runtime is its `.ts` files, which a consumer's compiler compiles under

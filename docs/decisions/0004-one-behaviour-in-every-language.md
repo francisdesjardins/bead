@@ -43,14 +43,21 @@ differential against protovalidate-es holds besides
 Beside the wire, its companion [`spec/debugging.md`](../../spec/debugging.md) has two files of its
 own ([0013](0013-every-language-debugs-alike-at-no-cost-when-off.md)): `spec/debug-filters.json`
 holds what a debug filter reads as and keeps, and `spec/metrics.json` what a registry writes and
-what each exit of a call counts.
+what each exit of a call counts. The transcoding's companion,
+[`spec/transcoding.md`](../../spec/transcoding.md), has its own, `spec/transcoding.json`, of
+`spec/transcoding.proto`'s service: what a gateway answers over HTTP of a service's procedures, its
+templates and bindings, its mapping of protobuf's JSON read and written, its problems, its streams
+and its exchanges
+([0037](0037-a-procedure-is-also-an-http-route-which-a-gateway-answers-as-one-more-client-of-its-server.md)).
 
 **The interop runs both ways, and is required.** Each implementation's interop server offers the
 interop service over WebSocket and over HTTP, and each implementation's client calls every other's
-server over both: the C# client against the TypeScript server, and the TypeScript client against
-the C# server. Each side finds the other from the directory that holds `spec/spec.md`, and
-starts its server. Where the other runtime is missing, the interop is skipped, saying so;
-`BEAD_INTEROP_REQUIRED=1` turns the skip into a failure, and CI sets it.
+server over both: the C# client against the TypeScript server, and the TypeScript client against the
+C# server; and each side's generated HTTP client calls the other side's gateway, the two served
+OpenAPI documents compared byte for byte (`HttpInteropTests.cs`, `interop.test.ts`). Each side finds
+the other from the directory that holds `spec/spec.md`, and starts its server. Where the other
+runtime is missing, the interop is skipped, saying so; `BEAD_INTEROP_REQUIRED=1` turns the skip into
+a failure, and CI sets it.
 
 **One vocabulary, its steps named by who acts.** A step is what the test does — `send` an envelope,
 an HTTP request or a WebSocket message; `open` a connection, again once it closed; `close` it;

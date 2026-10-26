@@ -231,10 +231,10 @@ one round, which
 [0024](0024-a-server-takes-the-loopbacks-names-ip-literals-and-the-hosts-it-is-told.md) shares for
 the address a server listens on; a field value's ends met it in
 [0029](0029-a-listen-names-its-cursor-and-its-wait-in-fields-of-its-own.md)'s round, which keeps its
-objections and answers; a request's target met it in a round of its own, at xhigh effort, after
+objections and answers; a request's target met it in a round of its own, at xhigh effort, beside
 [0037](0037-a-procedure-is-also-an-http-route-which-a-gateway-answers-as-one-more-client-of-its-server.md)'s
-round stated a target past US-ASCII at a gateway, its ten objections each accepted. Its
-objections, each with the answer that holds:
+rule on a target past US-ASCII at a gateway: ten objections, each accepted. Its objections, each
+with the answer that holds:
 
 ### On a refusal told and the default listening address
 

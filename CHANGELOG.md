@@ -7,6 +7,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-10-26
+
 ### Added
 
 - Generated HTTP clients on both sides: an output with `http: true` writes a typed
@@ -113,6 +115,12 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- The spec moves to 0.8.0 (`spec-v0.8.0`), its companion, `spec/debugging.md`, to 0.4.0
+  (`debugging-v0.4.0`), and the transcoding's companion, `spec/transcoding.md`, is first released,
+  at 0.1.0 (`transcoding-v0.1.0`).
+- The documents are brought to 0.7.0: the records, the spec and its companions in form alone, the
+  READMEs and the matrix; no record moves, and the broker, a third language's core, the close code
+  carried on `close` and the CEL step of payload rules stay ahead.
 - The TypeScript side names a credential scheme to come `scheme 4` in `CREDENTIAL_UNSUPPORTED`'s
   detail, as the C# side and its own header refusals do, where it wrote the bare number.
 - The builder, the TypeScript side and the example use Buf 1.75 and the current Oxlint and Oxfmt
@@ -1909,7 +1917,8 @@ duration }`: on the C# side `StartedAt`, a `DateTimeOffset`, and `Duration`, a `
   workflows.
 - The licence, Apache-2.0.
 
-[Unreleased]: https://github.com/francisdesjardins/bead/compare/v0.6.0...develop
+[Unreleased]: https://github.com/francisdesjardins/bead/compare/v0.7.0...develop
+[0.7.0]: https://github.com/francisdesjardins/bead/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/francisdesjardins/bead/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/francisdesjardins/bead/compare/v0.4.1...v0.5.0
 [0.4.1]: https://github.com/francisdesjardins/bead/compare/v0.4.0...v0.4.1

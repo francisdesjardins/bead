@@ -12,15 +12,19 @@ goes on the wire. Sections 6 to 12 each name the conformance file that checks th
 name none: the support matrix, [`docs/support.md`](../docs/support.md), names the twin tests that
 hold what of them a test can. The why of each rule is in the decisions:
 
+- [0001](../docs/decisions/0001-the-envelope-sits-at-fixed-offsets.md): a call to a connection that
+  is not open, as a closing connection's teardown fails it (9.7);
 - [0013](../docs/decisions/0013-every-language-debugs-alike-at-no-cost-when-off.md): the whole of it;
 - [0016](../docs/decisions/0016-a-json-payload-has-one-form-whichever-side-writes-it.md): the
   payloads it writes (4.3, 10.1);
 - [0017](../docs/decisions/0017-ids-are-for-life-and-a-procedures-name-takes-one-ascii-form.md): the
   names it reads (1.2, 6.10, 7.3, 8.3);
+- [0033](../docs/decisions/0033-a-side-bounds-what-a-peer-holds-of-it.md): a call past those its
+  connection has it answer, and a requester's call past its bounds (9.4, 9.6);
 - [0035](../docs/decisions/0035-a-payload-that-reads-is-held-to-its-messages-rules-before-its-resolver-sees-it.md):
   a request its rules refuse, traced and counted (4.3, 4.4, 9.4, 9.6).
 
-**Version: 0.3.0**. Each of its conformance files repeats it as its `debuggingVersion`, and follows
+**Version: 0.4.0**. Each of its conformance files repeats it as its `debuggingVersion`, and follows
 its schema in [`schemas/`](schemas/). It moves by `spec.md`'s rule, under a version of its own
 ([0008](../docs/decisions/0008-three-version-axes-and-names-qualified-by-their-owner.md)): the minor
 when an implementation that conforms to its last version must change to conform to this one, the

@@ -15,7 +15,7 @@ The .NET 10 SDK, as `global.json` pins it, with the test runner, Microsoft.Testi
 this folder:
 
 ```sh
-dotnet format Bead.slnx --verify-no-changes --exclude ../../builder/test/golden/csharp interop/Bead.Interop/Generated
+dotnet format Bead.slnx --verify-no-changes --exclude ../../builder/test/golden/csharp interop/Bead.Interop/Generated tests/Bead.Protobuf.Tests/Generated
 dotnet build Bead.slnx
 dotnet test --solution Bead.slnx
 ```
@@ -133,26 +133,33 @@ Every body the gateway writes meets `MaximumUnsentBytes` and its send pace,
 stream events. Whole bodies go in slices of at most 64 KiB, paced one slice at a time. A drop
 reports the bound on `Error`, releases the exchange's place and socket, and cancels a stream's call.
 
-The same `BeadHttp.cs` exports `<Service>HttpClient`, built with the gateway base URL as a `Uri`
-and optional `HttpCallerOptions` from `Bead.Transcoding`: `Handler`, default `Authorization` and
-`MaximumBodyBytes` (16,778,240). Its typed `<Procedure>(request, options)` methods call only the default
-POST routes; `Subscribe<Procedure>(request, options)` returns an async sequence of `HttpEvent`
-for a notifying procedure, its `IsResult` entry carrying `Result` first, then `Notification`.
-The TypeScript client uses the same surface with lower-camel names: `client.sayHello(request)`
-and `client.subscribeCountDown(request)`, with its gateway URL first in the constructor too.
-A problem throws `FailureException` with its code, scope and detail. A stream's failure throws
-too; an incomplete stream fails and never reconnects. Ending its iteration releases its response.
-`HttpCallOptions` takes `CancellationToken`, an `Authorization` override and `WithoutAuthorization`
-to omit any default. A credential destined off the machine in the clear fails
-`DestinationUnreachable` before encoding or dispatch, by spec 13.4's URL rule. The client owns its
-`HttpClient` and is disposed with `using`; its handler follows no redirect, and one given with
-`AllowAutoRedirect` true is refused at construction. A supplied handler belongs to the application;
-the client disposes only the handler it makes, whose connect follows RFC 8305. A base URL path
-prefixes the default routes. Authorization uses the transport's field check; an empty field presents
-no credential. The body bound applies to each unary answer and each event; exceeding it raises
-`PayloadTooLarge`. A malformed body raises `PayloadUndecodable`, a truncated stream `DestinationLost`.
-A gateway problem without a code maps by `bead-refusal`, then by status. Intermediary statuses map
-by whether the procedure may have run; status and Retry-After stay in the failure's detail.
+The same `BeadHttp.cs` exports a client of each service, `<Service>HttpClient`, which calls its
+gateway through an `HttpClient` (`transcoding.md` 12) and is disposed with `using`:
+`new HelloHttpClient(uri, options)` takes the gateway's base URL, `http` or `https` with no
+userinfo, query or fragment, whose path prefixes each route, and its options an `HttpCallerOptions`
+of `Bead.Transcoding`, a `Handler`, a default `Authorization` and `MaximumBodyBytes`, 16,778,240 by
+default. Each procedure a client calls is a method, `hello.SayHello(request, options)`, the
+TypeScript side's `hello.sayHello` in .NET's case, on its default `POST` route alone, whatever rules
+map it, and one that notifies is also `hello.SubscribeCountDown(request, options)`, an async
+sequence of `HttpEvent`, its result first, `IsResult` and `Result`, then each `Notification`; ending
+its enumeration releases its response. `HttpCallOptions` takes a `CancellationToken`, an
+`Authorization` of its own and `WithoutAuthorization`, which presents none, its client's default
+either. An authorization is held to the transport's check of a field value, an `ArgumentException`
+otherwise, an empty one presenting none; one that would leave the machine in the clear fails
+`DestinationUnreachable` before anything is encoded or sent, by spec 13.4's rule on a URL. The
+handler the client makes follows no redirect, keeps no cookie and connects as RFC 8305 asks, through
+`HappyEyeballs`, and is disposed with it; a `Handler` given is the application's, never disposed,
+and one that would follow a redirect, an `HttpClientHandler` or a `SocketsHttpHandler` innermost of
+the `DelegatingHandler`s given whose `AllowAutoRedirect` is true, is an `ArgumentException` as the
+client is built, as the HTTP transport's client refuses one; a handler of another kind that
+follows all the same is caught by its answer's `RequestMessage`, gone to another URL, and fails the
+call, `DestinationLost`. A problem throws a `FailureException` of its code, its scope and its
+detail, and so does the failure that ends a stream; a problem of the gateway's own, which carries
+no code, is read by its `bead-refusal`, then by its status, and a status an intermediary answers by
+whether the procedure may have run, the status and its `Retry-After` kept in the failure's detail.
+Each whole answer and each event is held to `MaximumBodyBytes`, `PayloadTooLarge` past it; a body
+that does not read is `PayloadUndecodable`, and a stream cut before its failure `DestinationLost`,
+never reconnected.
 
 ### The parts of the core, the manager and the HTTP server
 
@@ -192,13 +199,14 @@ the listens, the outboxes and the server's life, under one lock on the C# side.
   `IRouterTarget`, which a client's router meets. Each `Destination` it lists says whether its
   connection closed; one registered on a connection the router no longer holds is closed at once,
   and `DestinationOptions.Replaces`, the registration the application holds, takes its id in its
-  place under that lock, so no request meanwhile finds it unknown (spec 14.1, 14.4). A server's relay admits by default only a
-  credential it forwards, `RequireCredential`: a call presenting a `JWT` or an `ELSEWHERE`, by its
-  scheme alone unless the relay verifies, for its destination to verify; any other, one that
-  presents none or `OPAQUE`, in leg A's connection's session or in none, is refused
-  `ACCESS_DENIED`, its detail `a relay admits by default only a credential it forwards`, since leg
-  A's session opens nothing at the destination (spec 14.3, 14.7). A relay whose requesters log in at
-  it gives a `BeforeRoute` of its own, which checks the destination against the requester's session:
+  place under that lock, so no request meanwhile finds it unknown (spec 14.1, 14.4). A server's
+  relay admits by default only a credential it forwards, `RequireCredential`: a call presenting a
+  `JWT` or an `ELSEWHERE`, by its scheme alone unless the relay verifies, for its destination to
+  verify; any other, one that presents none or `OPAQUE`, in leg A's connection's session or in none,
+  is refused `ACCESS_DENIED`, its detail `a relay admits by default only a credential it forwards`,
+  since leg A's session opens nothing at the destination (spec 14.3, 14.7). A relay whose requesters
+  log in at it gives a `BeforeRoute` of its own, which checks the destination against the
+  requester's session:
 
   ```csharp
   // a requester reaches a destination its session names, or forwards a credential its
@@ -252,11 +260,10 @@ the listens, the outboxes and the server's life, under one lock on the C# side.
   an answer, or a listen's batch, its socket still holds past the longer of `SendGracePeriod` and
   its bytes at `MinimumSendBytesPerSecond` is lost, its connection dropped at both ends and
   reported through `Error` as its connection ends, naming the bound and its value, as an outbox past
-  `MaximumOutboxBytes` is. A head is Kestrel's
-  `RequestHeadersTimeout`, the transport's `HeadersTimeout`, 30 s, on both transports, answered 408
-  as HTTP answers it. Every answer written before its body is whole closes its socket in stages
-  (RFC 9112 §9.6): its end flushed, what still comes read and dropped until its client closes or 2
-  seconds pass, so a reset never erases it.
+  `MaximumOutboxBytes` is. A head is Kestrel's `RequestHeadersTimeout`, the transport's
+  `HeadersTimeout`, 30 s, on both transports, answered 408 as HTTP answers it. Every answer written
+  before its body is whole closes its socket in stages (RFC 9112 §9.6): its end flushed, what still
+  comes read and dropped until its client closes or 2 seconds pass, so a reset never erases it.
 - **A WebSocket server** bounds its connections as an HTTP server does, `MaximumConnections`,
   10,000, and `MaximumConnectionsPerAddress`, 64, an upgrade past them refused 503 `busy` before its
   101, its place taken as it is judged (spec 15.2, step 8), so behind a proxy it needs
@@ -307,25 +314,30 @@ the listens, the outboxes and the server's life, under one lock on the C# side.
   0032](../../docs/decisions/0032-a-websocket-upgrade-from-no-page-carries-its-credential-beside-every-envelope.md)).
   `WebSocketConnectOptions` takes it as `Credential`, a string, or as `CredentialProvider`, whose
   value each attempt awaits, a reconnection's included, with the attempt's token, as SignalR's
-  `AccessTokenProvider` is: where a credential past its end is renewed. One provider call is pending
-  per client; another attempt joins its outcome within its own cancellation, timeout or disposal
-  bound. Late values reach only an attempt that still waits, and late failures are observed.
-  Provider callbacks run outside the connect's ending; a provider's own cancellation is its
-  failure while that attempt's token stays live. The Handler and Invoker obey the same connect
-  bounds even when they ignore their token. A connect refuses, an
-  `ArgumentException`, nothing moved: both given; one that is no field value — anything but visible
-  ASCII, spaces and tabs, or a space or a tab first or last (RFC 9110 §5.5), which the HTTP client
-  refuses alike before a send goes; one over `ws://` off the loopback. A value the provider hands
-  that is no field value fails its attempt alike, which a reconnection does not try again; what it
-  throws fails the attempt, a `WebSocketException` whose inner exception it is. `Carries` says what
-  a call may present: over HTTP any field value, over a WebSocket the bytes its upgrade carried
-  alone, compared by `CryptographicOperations.FixedTimeEquals`. An upgrade that carries an `Origin`
-  carries none, whatever its `Authorization`: a page's browser writes its own authentication on it.
-  One connection carries one credential: a client presents another by connecting again, and gives
-  its router's default the same bytes, from one source; between the two, a call fails before it
-  goes, `DESTINATION_UNREACHABLE`. A call's options present `Credential.Elsewhere(carried)`: the
-  header's `Credential.Elsewhere()`, nothing to carry, a JWT with no token and a scheme to come are
-  an `ArgumentException`, before the call starts (spec 13.4).
+  `AccessTokenProvider` is: where a credential past its end is renewed. A client has one call of its
+  provider under way at a time, published under the client's lock and made once it is released: an
+  attempt that comes while one is waits for its outcome, and one that meets a call no attempt waits
+  on any more lets it settle before it calls again, each within its own bounds, its token, its
+  timeout and the client's dispose, which end it at once whatever the provider does. A value that
+  comes late is handed only to an attempt still waiting for it, and a failure that comes late is
+  observed, never left unobserved. The provider's token is cancelled once its attempt is over, its
+  callbacks run apart from the connect's ending, so none takes the place of its outcome; a provider
+  that cancels itself while that attempt's token is still live fails it as any failure of its does.
+  What else a connect awaits, the WebSocket's invoker and an HTTP client's `Handler`, is bounded
+  alike, one that ignores its token among them. A connect refuses, an `ArgumentException`, nothing
+  moved: both given; one that is no field value — anything but visible ASCII, spaces and tabs, or a
+  space or a tab first or last (RFC 9110 §5.5), which the HTTP client refuses alike before a send
+  goes; one over `ws://` off the loopback. A value the provider hands that is no field value fails
+  its attempt alike, which a reconnection does not try again; what it throws fails the attempt, a
+  `WebSocketException` whose inner exception it is. `Carries` says what a call may present: over
+  HTTP any field value, over a WebSocket the bytes its upgrade carried alone, compared by
+  `CryptographicOperations.FixedTimeEquals`. An upgrade that carries an `Origin` carries none,
+  whatever its `Authorization`: a page's browser writes its own authentication on it. One connection
+  carries one credential: a client presents another by connecting again, and gives its router's
+  default the same bytes, from one source; between the two, a call fails before it goes,
+  `DESTINATION_UNREACHABLE`. A call's options present `Credential.Elsewhere(carried)`: the header's
+  `Credential.Elsewhere()`, nothing to carry, a JWT with no token and a scheme to come are an
+  `ArgumentException`, before the call starts (spec 13.4).
 
   ```csharp
   // one source for the upgrade's credential and the router's default, renewed together

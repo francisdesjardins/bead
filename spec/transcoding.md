@@ -11,8 +11,8 @@ This document is a companion of [`spec.md`](spec.md), which states the wire, as
 [`debugging.md`](debugging.md) is: a gateway is beside the wire, never in place of it, one more
 client of a server, and a side may offer none. Sections 2 to 10 each name the conformance file that
 checks them, [`transcoding.json`](transcoding.json), whose entries play the messages and the
-service of `spec/transcoding.proto`; section 11 names none: the builder's tests hold the document
-it writes. Each entry cites the units it checks, which
+service of `spec/transcoding.proto`; sections 11 and 12 name none: the builder's tests hold the
+document it writes, and each side's twin tests its client. Each entry cites the units it checks, which
 [`transcoding-units.txt`](transcoding-units.txt) lists, each cited or why no entry cites it, with the
 hash of its text. The why of each rule is in the decisions:
 
@@ -130,10 +130,11 @@ answer each route its definition's `google.api.http` rules give, as `http.proto`
 
 3.3. A default route's prefix is `/api` unless its definitions give another: `/` and one or more
 segments of letters, digits, `-`, `.`, `_` and `~`, none empty, `.` or `..`, with no `/` at its end.
-A path is case-sensitive ([RFC 3986 §6.2.2.1](https://www.rfc-editor.org/rfc/rfc3986#section-6.2.2.1)),
-and since section 16.6 of `spec.md` makes two names one by their ASCII case, no two default routes
-part by case alone. A default route's body is its request whole, as `body: "*"` has it, and its
-`GET`'s query every field of its request.
+A path is case-sensitive
+([RFC 3986 §6.2.2.1](https://www.rfc-editor.org/rfc/rfc3986#section-6.2.2.1)), and since
+section 16.6 of `spec.md` makes two names one by their ASCII case, no two default routes part by
+case alone. A default route's body is its request whole, as `body: "*"` has it, and its `GET`'s
+query every field of its request.
 
 3.4. A rule's pattern is `get`, `put`, `post`, `delete` or `patch`, its method that name in upper
 case, and each of its `additional_bindings` is a rule of its own, in their order. A rule is served
@@ -261,9 +262,9 @@ A gateway MUST refuse, 415 `type-refused`, a request to a route that takes a bod
 comes or none, whose `content-type` is absent or in two fields, or whose type, compared
 case-insensitively, is not its route's, or which carries a parameter but `charset`, or a `charset`
 but `utf-8` in any case, a token or a quoted string, or whose `content-encoding` is not `identity`,
-as section 15.6 of `spec.md` refuses a `POST` of no type. A `json`, `text` or `raw` request has no field: its route's body is `*`, and no variable or
-query binds it. `bead.Json`, `bead.Text` and `bead.Raw` are those encodings, never messages that
-section 5.6 writes.
+as section 15.6 of `spec.md` refuses a `POST` of no type. A `json`, `text` or `raw` request has no
+field: its route's body is `*`, and no variable or query binds it. `bead.Json`, `bead.Text` and
+`bead.Raw` are those encodings, never messages that section 5.6 writes.
 
 5.2. A gateway MUST read a `proto` request's body in this order, and refuse it, 400
 `PAYLOAD_UNDECODABLE`, at the first step that refuses:
@@ -395,9 +396,9 @@ names, `access-control-allow-origin`, that `origin` as it came, and
 
 _Transcoding: `spec/transcoding.json`._
 
-7.1. A gateway answers every failure with a problem of [RFC 9457](https://www.rfc-editor.org/rfc/rfc9457),
-`application/problem+json`, its status the response's
-([§3.1.2](https://www.rfc-editor.org/rfc/rfc9457#section-3.1.2)), of these members:
+7.1. A gateway answers every failure with a problem of
+[RFC 9457](https://www.rfc-editor.org/rfc/rfc9457), `application/problem+json`, its status the
+response's ([§3.1.2](https://www.rfc-editor.org/rfc/rfc9457#section-3.1.2)), of these members:
 
 | Member      | What it holds                                                                                                                                                                                                                                                                                                          |
 | ----------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -443,20 +444,20 @@ words section 18.8.6 gives its rule where it went without one; `ruleId`; `fieldP
    field path that names no field of the request.
 
 A `PAYLOAD_UNDECODABLE` of the gateway's reading (section 7.6) holds, so placed, where its reading
-met what it refuses: `parameter`, a variable's field path, or a query's by JSON names, or the name of
-a parameter that names no field; `pointer`, the value of its body it met, by the JSON name of each
-field, and each member that names none, each map's key and each `Struct`'s member as its body wrote
-it, `#` the body itself; neither for its text, its query whole, or a query whose bytes are not UTF-8.
-Its `detail` is its mapping's own words, which name no member or key of the request: a problem's
-`detail` never repeats what its request carried, and where its place helps, it goes in its
+met what it refuses: `parameter`, a variable's field path, or a query's by JSON names, or the name
+of a parameter that names no field; `pointer`, the value of its body it met, by the JSON name of
+each field, and each member that names none, each map's key and each `Struct`'s member as its body
+wrote it, `#` the body itself; neither for its text, its query whole, or a query whose bytes are not
+UTF-8. Its `detail` is its mapping's own words, which name no member or key of the request: a
+problem's `detail` never repeats what its request carried, and where its place helps, it goes in its
 `parameter` or its `pointer`.
 
 A `pointer`, of a violation or of a reading, is always a JSON Pointer into the body as its request
 wrote it, which resolves there ([RFC 6901 §4](https://www.rfc-editor.org/rfc/rfc6901#section-4)):
 a name or a key past 64 bytes of UTF-8 is never written into it, and it points at the value that
-holds that name or key, a violation's key cut short (section 18.4 of `spec.md`) alike. A `parameter`, which is no pointer, writes such a name as section
-18.4 cuts a key, its first 64 bytes, back to the start of the character the cut fell in, then
-`...`.
+holds that name or key, a violation's key cut short (section 18.4 of `spec.md`) alike. A
+`parameter`, which is no pointer, writes such a name as section 18.4 cuts a key, its first 64 bytes,
+back to the start of the character the cut fell in, then `...`.
 
 7.5. A gateway answers each failure by where it arose, since it is a requester, and raises some
 codes of its server's answer, which its HTTP client cannot mend:
@@ -510,10 +511,10 @@ refuses, what no gate foresaw. What it reports no problem's member carries, and 
 error of its own carries its code alone, as section 9.0 has one: `DESTINATION_UNREACHABLE` and what
 no gate foresaw, with no detail.
 
-7.7. A refusal of the gateway's own is marked in `bead-refusal`, as section 15.6 of `spec.md` marks a
-transport's, so that a client tells it from a call's answer, and a gateway MUST write its body as a
-problem of its own, `about:blank`, its `detail` the words this table gives it, byte for byte on every
-side, so that a person reading it reads why:
+7.7. A refusal of the gateway's own is marked in `bead-refusal`, as section 15.6 of `spec.md` marks
+a transport's, so that a client tells it from a call's answer, and a gateway MUST write its body as
+a problem of its own, `about:blank`, its `detail` the words this table gives it, byte for byte on
+every side, so that a person reading it reads why:
 
 | `bead-refusal`   | Status | Its words                                                                                                                                                                                                                                                                            |
 | ---------------- | -----: | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
@@ -535,15 +536,17 @@ bodies.
 
 _Transcoding: `spec/transcoding.json`._
 
-Notifications go as Server-Sent Events, [WHATWG HTML §9.2](https://html.spec.whatwg.org/multipage/server-sent-events.html).
+Notifications go as Server-Sent Events,
+[WHATWG HTML §9.2](https://html.spec.whatwg.org/multipage/server-sent-events.html).
 
 8.1. A request to a procedure that notifies, on any of its routes, opens a subscription (section
 11.1 of `spec.md`) where its `accept` names `text/event-stream` itself, of a weight above 0 and at
 least the weight it gives `application/json`
 ([RFC 9110 §12.5.1](https://www.rfc-editor.org/rfc/rfc9110#section-12.5.1)), each by the first range
-that names it most specifically, a weight off RFC 9110's `qvalue` grammar (§12.4.2) as none given, 1:
-never through `*/*` or `text/*`, which a `fetch` sends by default. Any other request to it is a call as any other, which
-subscribes nothing (section 11.2), its result 200 and of section 5's form.
+that names it most specifically, a weight off RFC 9110's `qvalue` grammar (§12.4.2) as none
+given, 1: never through `*/*` or `text/*`, which a `fetch` sends by default. Any other request to it
+is a call as any other, which subscribes nothing (section 11.2), its result 200 and of section 5's
+form.
 
 8.2. A gateway MUST write nothing of a stream before its call is answered: a failure is a problem
 of its status, as any call's (section 7); a result opens the stream, 200 `text/event-stream`, and
@@ -552,8 +555,8 @@ lets a server send one, is held until then: written after the result, in its ord
 the subscription a failure takes away (section 11.2).
 
 8.3. A gateway MUST write an `id` on each event, its count in the stream from 1, and MUST answer a
-request that carries `Last-Event-ID` with 204 and no call, so that an `EventSource` stops rather than
-calls again.
+request that carries `Last-Event-ID` with 204 and no call, so that an `EventSource` stops rather
+than calls again.
 
 8.4. An event's data is one JSON text in the tokens of section 17.7 of `spec.md`, which hold no
 line feed, so one `data` line carries it whole: a `proto` result or notification as section 5.6
@@ -740,7 +743,8 @@ the browser would add beyond its own origin's (`credentials: 'same-origin'`).
 side and `FailureException` on the C# side, its detail its problem's:
 
 1. one that holds a `code` and a `scope` (section 7.1) is that failure, the peer's: its code an
-   integer of 1 to 65,535, `1.0` and `1e0` code 1, a member of another JSON kind a malformed problem;
+   integer of 1 to 65,535, `1.0` and `1e0` code 1, a member of another JSON kind a malformed
+   problem;
 2. one that holds neither, `about:blank`, is the gateway's own: by its `bead-refusal` (section 7.7),
    `busy` `CAPACITY_EXCEEDED`, `host-refused` and `origin-refused` `ACCESS_DENIED`, `path-unknown`
    and `method-refused` `DESTINATION_UNREACHABLE`, `too-large` `PAYLOAD_TOO_LARGE`, `malformed` and
@@ -762,10 +766,11 @@ whatever the platform throws for it, are `PAYLOAD_UNDECODABLE`.
 12.5. A subscription reads its stream (section 8) through `fetch` or `HttpClient`, so that a page
 presents its credential, which `EventSource` cannot: an async sequence of its result, then its
 notifications, then its end, a failure raised as section 12.4 raises one; a leading byte order
-mark is taken away, as [the HTML standard](https://html.spec.whatwg.org/multipage/server-sent-events.html)
-decodes a stream. A stream cut before its end is `DESTINATION_LOST`, since its procedure may have
-run. Ending the sequence, or cancelling it, releases its exchange. A client MUST NOT reconnect or
-send `Last-Event-ID` of its own; a replacement subscription is its application's.
+mark is taken away, as
+[the HTML standard](https://html.spec.whatwg.org/multipage/server-sent-events.html) decodes a
+stream. A stream cut before its end is `DESTINATION_LOST`, since its procedure may have run. Ending
+the sequence, or cancelling it, releases its exchange. A client MUST NOT reconnect or send
+`Last-Event-ID` of its own; a replacement subscription is its application's.
 
 12.6. It bounds the body of each answer and each event of a stream by `maximumBodyBytes`, by
 default `maximumEnvelopeBytes`, as its gateway bounds a request's (section 10.2), and the message it

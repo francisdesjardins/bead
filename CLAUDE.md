@@ -7,7 +7,7 @@ and the DevTools extension. `README.md` says how each part builds and tests.
 
 What a session needs beyond this file lives in `.claude/`:
 
-- `.claude/workflows/`: the workflow scripts, launched by name. Committed.
+- `.claude/workflows/`: the workflow scripts, launched by their script's path. Committed.
 - `.claude/local/`: what this clone keeps for itself and git ignores, never to be committed: the
   plan (`plan.md`), the rules on names and their check (`rules.md`, `check.mjs`), the inputs of the
   builder's design (`builder/`), the generator of the Bead page made for the user's colleague

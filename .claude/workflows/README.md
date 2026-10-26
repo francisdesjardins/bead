@@ -1,7 +1,7 @@
 # Workflows
 
-The workflows of Claude sessions on Bead, each launched by its name with its arguments
-(`Workflow({ name, args })`). A workflow writes its drafts and reports under `<scratch>/<slug>/`,
+The workflows of Claude sessions on Bead, each launched by its script's path with its arguments
+(`Workflow({ scriptPath, args })`), which runs the script as the clone holds it. A workflow writes its drafts and reports under `<scratch>/<slug>/`,
 outside the clone; one that implements or integrates, `bead-implement-both-sides` and
 `bead-release-documents`, leaves its end state in the clone's working tree, unstaged, and
 `bead-builder-design` writes its design to `out`, under the clone's `.claude/local/` by default.
@@ -24,7 +24,7 @@ The first three and `bead-release-documents` also take `repo` (the clone), `scra
 
 ```js
 Workflow({
-  name: 'bead-tenth-man-round',
+  scriptPath: 'D:/workspace/francisdesjardins/2025/bead/.claude/workflows/bead-tenth-man-round.js',
   args: {
     repo: 'D:/workspace/francisdesjardins/2025/bead',
     scratch: 'D:/workspace/francisdesjardins/2025/_scratch/session',

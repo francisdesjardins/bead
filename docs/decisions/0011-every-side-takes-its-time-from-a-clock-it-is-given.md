@@ -142,9 +142,12 @@ platform's timer, and a bound on the platform's clock, still run on the real clo
 waits on one is marked, played in real time, and bounded generously: a head's 408, its `after` and
 its `within` around its time ([0033](0033-a-side-bounds-what-a-peer-holds-of-it.md)).
 
-**The WebSocket's close stays where it is.** The TypeScript side's client waits the 30 seconds of
-`ws`, the C# side's 5, each on the real clock: a row of the support matrix, which the client part's
-decision closes.
+**Every WebSocket end bounds its close on the real clock.** Each closing handshake it begins waits
+its close timeout at most, 5 seconds by default (spec 15.3,
+[0014](0014-every-place-that-takes-a-duration-is-a-row-of-one-file.md)'s place
+`webSocketTransport.closeTimeout`), the TypeScript client handing it to `ws`; a client over the
+global `WebSocket` leaves its close to its platform, a platform row of the support matrix ("A
+WebSocket client's message limit, its ping and its close timeout").
 
 ## The Tenth Man
 
@@ -155,22 +158,22 @@ with the answer that holds:
 
 ### The clock
 
-| Objection                                                                                                                | Answer                                                                                                                                                               |
-| ------------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `advance` has no semantics, and the two test clocks already disagree on every timer armed or repeated within one advance | Accepted: `advance` steps from due to due on both sides, and both test clocks pass one shared table of clock cases.                                                  |
-| Across a socket, an `advance` can run before the server arms the timer it means to fire                                  | Accepted: each test clock counts its timers armed, `until` waits for one, and the check refuses an `advance` that none precedes.                                     |
-| The TypeScript ping on the clock creates a difference, and drops its connections on any advance of two heartbeats        | Accepted: both pings stay on the real clock and play in real time; no row is added.                                                                                  |
-| The wall clock is not read "for what is reported alone": 0010 compares `exp` and `nbf`, and no start is stated           | Accepted: three uses of time, the wall clock's start in each file, a step that moves it alone, and 15.10's word.                                                     |
-| The ceiling rests on a false premise about .NET, and the same long timeout meets three behaviours                        | Accepted: the ceiling is JavaScript's, kept for parity, refused everywhere, and _never_ is `Infinity` or `InfiniteTimeSpan`.                                         |
-| `time`, `ITime` and `timestamp()` break one word, one meaning                                                            | Accepted: the word is _clock_, a timestamp is the monotonic reading, and the reported instants are `lastActivity`.                                                   |
-| The TypeScript clock copies a .NET type no JavaScript tool implements                                                    | Accepted: it is the globals' own shape, `globalThis` by default, and the test clock is `fake-timers`' `createClock()`, never installed.                              |
-| A façade's one clock cannot reach layers given already built, and the draft decides the builder's surface                | Accepted: one clock a stack, read upward, a differing one refused, and the generated code adds none.                                                                 |
-| Bounding the WebSocket close at 5 seconds alike is a shared behaviour no clause states                                   | Accepted: the close stays where it is, on the real clock, and its alignment is the client part's decision.                                                           |
-| What the clock reaches is drawn by an inventory, which misses a timer, with no gate                                      | Accepted: one rule, what the spec times against what bounds a platform's close, and the analyzers' gate.                                                             |
-| The record lands with no shared case of `advance`, and 0010 says the clock lands with it                                 | Accepted: `advance` has its step, its rule, both test clocks and a case in each file.                                                                                |
-| A timer-callback contract cannot be mirrored by a C side polling deadlines on a 1 kHz loop                               | Accepted: the shapes are the TypeScript and C# sides'; the contract every language plays is in readings and deadlines.                                               |
-| Randomness is left on the platform, yet a TypeScript test swaps `Math.random`                                            | Accepted: both sides check a drawn wait by its bounds, and the swaps go.                                                                                             |
-| The first cases close connections under exchanges cut after their head, which the clock does not order                   | Accepted in part: the clock does not order sockets, and such a case expects `orLost`, which the transports' file has; a lingering close is the transports' to weigh. |
+| Objection                                                                                                                | Answer                                                                                                                                                                            |
+| ------------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `advance` has no semantics, and the two test clocks already disagree on every timer armed or repeated within one advance | Accepted: `advance` steps from due to due on both sides, and both test clocks pass one shared table of clock cases.                                                               |
+| Across a socket, an `advance` can run before the server arms the timer it means to fire                                  | Accepted: each test clock counts its timers armed, `until` waits for one, and the check refuses an `advance` that none precedes.                                                  |
+| The TypeScript ping on the clock creates a difference, and drops its connections on any advance of two heartbeats        | Accepted: both pings stay on the real clock and play in real time; no row is added.                                                                                               |
+| The wall clock is not read "for what is reported alone": 0010 compares `exp` and `nbf`, and no start is stated           | Accepted: three uses of time, the wall clock's start in each file, a step that moves it alone, and 15.10's word.                                                                  |
+| The ceiling rests on a false premise about .NET, and the same long timeout meets three behaviours                        | Accepted: the ceiling is JavaScript's, kept for parity, refused everywhere, and _never_ is `Infinity` or `InfiniteTimeSpan`.                                                      |
+| `time`, `ITime` and `timestamp()` break one word, one meaning                                                            | Accepted: the word is _clock_, a timestamp is the monotonic reading, and the reported instants are `lastActivity`.                                                                |
+| The TypeScript clock copies a .NET type no JavaScript tool implements                                                    | Accepted: it is the globals' own shape, `globalThis` by default, and the test clock is `fake-timers`' `createClock()`, never installed.                                           |
+| A façade's one clock cannot reach layers given already built, and the draft decides the builder's surface                | Accepted: one clock a stack, read upward, a differing one refused, and the generated code adds none.                                                                              |
+| Bounding the WebSocket close at 5 seconds alike is a shared behaviour no clause states                                   | Accepted: 15.3 states the close timeout, 5 seconds by default, which both clients and both servers hold on the real clock ([0033](0033-a-side-bounds-what-a-peer-holds-of-it.md)) |
+| What the clock reaches is drawn by an inventory, which misses a timer, with no gate                                      | Accepted: one rule, what the spec times against what bounds a platform's close, and the analyzers' gate.                                                                          |
+| The record lands with no shared case of `advance`, and 0010 says the clock lands with it                                 | Accepted: `advance` has its step, its rule, both test clocks and a case in each file.                                                                                             |
+| A timer-callback contract cannot be mirrored by a C side polling deadlines on a 1 kHz loop                               | Accepted: the shapes are the TypeScript and C# sides'; the contract every language plays is in readings and deadlines.                                                            |
+| Randomness is left on the platform, yet a TypeScript test swaps `Math.random`                                            | Accepted: both sides check a drawn wait by its bounds, and the swaps go.                                                                                                          |
+| The first cases close connections under exchanges cut after their head, which the clock does not order                   | Accepted in part: the clock does not order sockets, and such a case expects `orLost`, which the transports' file has; a lingering close is the transports' to weigh.              |
 
 ### The test clocks
 
