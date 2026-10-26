@@ -213,6 +213,24 @@ describe('texts', () => {
     assert.match(without, /check --except SPEC_VERSION_NEWER/);
     assert.equal(withoutWaivers(CI_STEP, ['buf:FIELD_SAME_TYPE@hello']), CI_STEP);
   });
+
+  test('a waiver alone on its line goes with its line, and the command ends where its arguments do', () => {
+    const step = [
+      '          git archive --format=tar "$tag" | node ../../builder/src/cli.ts breaking --against - --fail-on-warning \\',
+      '            --except PROCEDURE_RULES_TIGHTENED@service:1/procedure:2 \\',
+      '            --except buf:ENUM_VALUE_NO_DELETE@hello/v1/hello.proto',
+      '',
+      '  # the next job',
+    ].join('\n');
+    assert.equal(
+      withoutWaivers(step, breakingWaivers(step)),
+      [
+        '          git archive --format=tar "$tag" | node ../../builder/src/cli.ts breaking --against - --fail-on-warning',
+        '',
+        '  # the next job',
+      ].join('\n')
+    );
+  });
 });
 
 // ── Moves ─────────────────────────────────────────────────────────────────────

@@ -313,22 +313,25 @@ export const withoutWaivers = (text, waivers) => {
     }
     const command = lines.slice(first, last + 1);
     const runs = !command[0].trimStart().startsWith('#') && BREAKING.test(command.join(' '));
-    for (const line of command) {
-      out.push(
-        runs
-          ? waivers.reduce((kept, waiver) => {
-              const escaped = waiver.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-              return kept.replace(
-                new RegExp(
-                  `[ \\t]+--except[= ](?:'${escaped}'|"${escaped}"|${escaped})(?=\\s|$)`,
-                  'g'
-                ),
-                ''
-              );
-            }, line)
-          : line
-      );
+    const kept = command.flatMap((line) => {
+      if (!runs) {
+        return [line];
+      }
+      const left = waivers.reduce((rest, waiver) => {
+        const escaped = waiver.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        return rest.replace(
+          new RegExp(`[ \\t]+--except[= ](?:'${escaped}'|"${escaped}"|${escaped})(?=\\s|$)`, 'g'),
+          ''
+        );
+      }, line);
+      // ! a line of waivers alone leaves its backslash, or nothing: it goes with them
+      return left !== line && /^\s*\\?\s*$/.test(left) ? [] : [left];
+    });
+    // a command whose last line went ends on a backslash that continues it into nothing
+    if (runs && kept.length > 0 && !command.at(-1).endsWith('\\')) {
+      kept[kept.length - 1] = kept.at(-1).replace(/[ \t]*\\$/, '');
     }
+    out.push(...kept);
     first = last + 1;
   }
   return out.join('\n');
