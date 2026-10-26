@@ -1,3 +1,5 @@
+using System.Globalization;
+
 namespace Bead;
 
 /// <summary>How an in-memory broker is built.</summary>
@@ -129,9 +131,8 @@ public sealed class MemoryBroker
     }
 
     /// <summary>
-    /// An adapter of the broker, whose link is taken by its id: a second adapter of one id takes
-    /// the first one's link over as it starts, as a second MQTT link under one Client Identifier does
-    /// ([MQTT-3.1.4-3]).
+    /// An adapter of the broker, its link known by its id: a second adapter of one id is an
+    /// <see cref="ArgumentException"/>.
     /// </summary>
     public MemoryBrokerAdapter Adapter(MemoryBrokerAdapterOptions options)
     {
@@ -142,6 +143,14 @@ public sealed class MemoryBroker
 
         lock (_adapters)
         {
+            if (_adapters.Any((other) =>
+            {
+                return other.Id == options.Id;
+            }))
+            {
+                throw new ArgumentException($"an adapter of this broker is {options.Id} already", nameof(options));
+            }
+
             _adapters.Add(adapter);
         }
 
@@ -280,25 +289,6 @@ public sealed class MemoryBroker
     internal bool IsAlive(DateTimeOffset? expires)
     {
         return expires is not { } end || _clock.GetUtcNow() < end;
-    }
-
-    /// <summary>In a turn of the broker's: each other link of <paramref name="adapter"/>'s id taken over, as it starts.</summary>
-    internal void TakeOver(MemoryBrokerAdapter adapter)
-    {
-        List<MemoryBrokerAdapter> others;
-
-        lock (_adapters)
-        {
-            others = [.. _adapters.Where((other) =>
-            {
-                return other != adapter && other.Id == adapter.Id && other.IsLinked;
-            })];
-        }
-
-        foreach (var other in others)
-        {
-            other.Lost();
-        }
     }
 
     // a message held behind the next one, handed on after it to each subscription of its topic
@@ -477,7 +467,7 @@ public sealed class MemoryBrokerAdapter : IBrokerAdapter
 
     /// <summary>
     /// Links, its will kept for a loss, no subscription held from a link before: a link keeps no
-    /// session. A link of the same id held already is taken over. Refused while linked.
+    /// session. Refused while linked, and given a will where it offers none.
     /// </summary>
     public Task Start(BrokerStart? start = null)
     {
@@ -485,13 +475,17 @@ public sealed class MemoryBrokerAdapter : IBrokerAdapter
         {
             if (_isLinked)
             {
-                throw new InvalidOperationException($"the in-memory adapter {Id} is linked already");
+                throw new InvalidOperationException($"the link of {Id} is up already");
             }
 
-            _broker.TakeOver(this);
+            if (start?.Will is not null && (_capabilities & BrokerCapabilities.Will) == 0)
+            {
+                throw new ArgumentException($"the adapter of {Id} takes no will", nameof(start));
+            }
+
             _subscriptions.Clear();
             _queue.Clear();
-            _will = (_capabilities & BrokerCapabilities.Will) == 0 ? null : start?.Will;
+            _will = start?.Will;
             _isLinked = true;
         });
     }
@@ -507,7 +501,7 @@ public sealed class MemoryBrokerAdapter : IBrokerAdapter
 
             if (subscription?.Group is not null && (_capabilities & BrokerCapabilities.Groups) == 0)
             {
-                throw new ArgumentException($"the in-memory adapter {Id} offers no groups", nameof(subscription));
+                throw new ArgumentException($"the adapter of {Id} offers no groups", nameof(subscription));
             }
 
             _subscriptions[key] = subscription ?? new BrokerSubscription();
@@ -615,7 +609,7 @@ public sealed class MemoryBrokerAdapter : IBrokerAdapter
 
             if (_broker.MaximumMessageBytes is { } bound && published.Publication.Payload.Length > bound)
             {
-                throw new ArgumentException($"a payload past the broker's MaximumMessageBytes {bound} is never published", nameof(published));
+                throw new ArgumentException(string.Create(CultureInfo.InvariantCulture, $"a payload of {published.Publication.Payload.Length} bytes, past the broker's maximumMessageBytes, {bound} bytes"), nameof(published));
             }
 
             // * copied as it is published: the publisher's buffer stays its own
@@ -634,7 +628,7 @@ public sealed class MemoryBrokerAdapter : IBrokerAdapter
     {
         if (!_isLinked)
         {
-            throw new InvalidOperationException($"the in-memory adapter {Id} is not linked");
+            throw new InvalidOperationException($"the link of {Id} is not up");
         }
     }
 

@@ -2,7 +2,14 @@
 
 import { expect, test } from '@playwright/test';
 import { hexadecimalOf } from '../../../router/server/__tests__/expected-envelope';
-import { type IParcel, ParcelFlag, ParcelKind, readParcel, writeParcel } from '../broker-parcel';
+import {
+  encodeParcel,
+  type IParcel,
+  ParcelFlag,
+  ParcelKind,
+  readParcel,
+  writeParcel,
+} from '../broker-parcel';
 import { BROKER_DELIVERIES, createBrokerParticipant } from '../broker-participant';
 import { ProgrammerError } from '../errors';
 import {
@@ -85,11 +92,14 @@ const loggedOf = (adapter: IBrokerAdapter, log: string[]): IBrokerAdapter => {
   });
 };
 
-/** The ACCEPT a peer answers an OPEN with, its own half `acceptor`. */
-const acceptOf = (open: IParcel, { acceptor, id }: { acceptor: Uint8Array; id: string }) => {
+/** The ACCEPT a peer answers an OPEN with, its own half `acceptor`, its bound 65,536 unless told. */
+const acceptOf = (
+  open: IParcel,
+  { acceptor, bound = 65_536, id }: { acceptor: Uint8Array; bound?: number; id: string }
+) => {
   return writeParcel({
     acceptor,
-    bound: 65_536,
+    bound,
     flags: ParcelFlag.SECURE,
     id,
     incarnation: INCARNATION,
@@ -262,6 +272,59 @@ test.describe('broker participant', () => {
     expect([alone.isLinked, reported]).toEqual([false, ['the link of bob went down']]);
   });
 
+  test('a parcel that would pass maximumUnsentBytes loses its connection with a CLOSE of 4000 whose sequence is the next, reported naming the bound', async () => {
+    const broker = createMemoryBroker();
+    const peer = await peerOf(broker, { id: 'acceptor', isServing: true });
+    const participant = createBrokerParticipant({ adapter: broker.adapter({ id: 'ada' }) });
+    const client = participant.transportClient({ maximumUnsentBytes: 2_048 });
+    const reported: string[] = [];
+
+    client.on('error', ({ message }) => {
+      reported.push(message);
+    });
+
+    const connecting = client.connect({ server: 'interop' });
+
+    await settled();
+
+    const open = peer.heard[0]?.parcel;
+
+    if (open !== undefined) {
+      await peer.adapter.publish({
+        payload: acceptOf(open, { acceptor: HALF, bound: 1_024, id: 'acceptor' }),
+        topic: ['bead', 'i', 'ada'],
+      });
+    }
+
+    await connecting;
+    await settled();
+
+    // its third leg's PING, the second of its sequence
+    expect(peer.heard.at(-1)?.parcel).toMatchObject({ kind: ParcelKind.PING, sequence: 2 });
+    peer.heard.length = 0;
+
+    // * an envelope in three parts of 1,024, 1,024 and 536 bytes, sent at once: each part held to
+    // the bound, the third would pass it and goes not, and the CLOSE that loses the connection
+    // takes its sequence, the next
+    await client.send({ data: new Uint8Array(2_500) });
+    await settled();
+
+    expect(
+      peer.heard.map(({ parcel }) => {
+        return [parcel?.kind, parcel?.sequence, parcel?.code];
+      })
+    ).toEqual([
+      [ParcelKind.DATA, 3, undefined],
+      [ParcelKind.DATA, 4, undefined],
+      [ParcelKind.CLOSE, 5, 4000],
+    ]);
+    expect(reported).toEqual([
+      'the connection to acceptor is closed with 4000: what waits for its broker would pass maximumUnsentBytes, 2048 bytes',
+    ]);
+
+    await participant.stop();
+  });
+
   test('closes each connection bound to the incarnation a GONE names, and none bound to another', async () => {
     const broker = createMemoryBroker();
     const participant = createBrokerParticipant({ adapter: broker.adapter({ id: 'server' }) });
@@ -408,5 +471,129 @@ test.describe('broker participant', () => {
         requireDelivery: BROKER_DELIVERIES.AT_LEAST_ONCE,
       }).adapter.delivery
     ).toBe(BROKER_DELIVERIES.AT_LEAST_ONCE);
+  });
+
+  test('is refused as built over an adapter whose inbox takes a parcel under 1,024 bytes', () => {
+    const narrow = createMemoryBroker({ maximumMessageBytes: 1_023 }).adapter({ id: 'ada' });
+
+    expect(() => {
+      return createBrokerParticipant({ adapter: narrow });
+    }).toThrow(
+      new ProgrammerError(
+        "a participant's inbox takes a parcel of 1,024 bytes at least, and the adapter of ada takes 1023"
+      )
+    );
+    expect(
+      createBrokerParticipant({
+        adapter: createMemoryBroker({ maximumMessageBytes: 1_024 }).adapter({ id: 'ada' }),
+      }).id
+    ).toBe('ada');
+  });
+
+  test('refuses a server transport a name another of its server transports serves', () => {
+    const participant = createBrokerParticipant({
+      adapter: createMemoryBroker().adapter({ id: 'server' }),
+    });
+
+    participant.transportServer({ names: ['interop', 'echo'] });
+    expect(() => {
+      return participant.transportServer({ names: ['other', 'echo'] });
+    }).toThrow(
+      new ProgrammerError(
+        'the name echo is served already by a server transport of this participant'
+      )
+    );
+
+    // the one refused holds none of its names
+    expect(participant.transportServer({ names: ['other'] })).toBeDefined();
+  });
+
+  test('a parcel that does not read closes its connection with 1002 at once, but a kind to come, which is taken in its order', async () => {
+    const broker = createMemoryBroker();
+    const peer = await peerOf(broker, { id: 'acceptor', isServing: true });
+    const participant = createBrokerParticipant({ adapter: broker.adapter({ id: 'ada' }) });
+    const client = participant.transportClient();
+    const reported: string[] = [];
+
+    client.on('error', ({ message }) => {
+      reported.push(message);
+    });
+
+    const connecting = client.connect({ server: 'interop' });
+
+    await settled();
+
+    const opener = peer.heard[0]?.parcel?.opener ?? new Uint8Array(8);
+
+    await peer.adapter.publish({
+      payload: acceptOf({ opener } as IParcel, { acceptor: HALF, id: 'acceptor' }),
+      topic: ['bead', 'i', 'ada'],
+    });
+    await connecting;
+    await settled();
+    peer.heard.length = 0;
+
+    // * a kind to come below the next awaited is a copy, dropped in silence
+    await peer.adapter.publish({
+      payload: encodeParcel({ acceptor: HALF, kind: 0x0a, opener, sequence: 1 }),
+      topic: ['bead', 'i', 'ada'],
+    });
+    await settled();
+    expect([client.isOpen(), peer.heard, reported]).toEqual([true, [], []]);
+
+    // any other that does not read closes at once, whatever its sequence, a copy's among them
+    const kept = encodeParcel({ acceptor: HALF, kind: ParcelKind.PING, opener, sequence: 1 });
+
+    kept[3] = 1;
+    await peer.adapter.publish({ payload: kept, topic: ['bead', 'i', 'ada'] });
+    await settled();
+
+    expect(
+      peer.heard.map(({ parcel }) => {
+        return [parcel?.kind, parcel?.sequence, parcel?.code];
+      })
+    ).toEqual([[ParcelKind.CLOSE, 3, 1002]]);
+    expect(reported).toEqual([
+      'the connection to acceptor is closed with 1002: a parcel that does not read: a kept byte that is not 0',
+    ]);
+
+    await participant.stop();
+  });
+
+  test('refuses a send whose room fits no part and keeps the connection, on the client and the server alike', async () => {
+    const broker = createMemoryBroker();
+    // an adapter whose broker publishes 28 bytes at most to a peer's inbox: a prefix, and no more
+    const narrowOf = (id: string): IBrokerAdapter => {
+      return Object.assign(Object.create(broker.adapter({ id })) as IBrokerAdapter, {
+        maximumPayloadBytes: () => {
+          return 28;
+        },
+      });
+    };
+    const serving = createBrokerParticipant({ adapter: narrowOf('server') });
+    const server = serving.transportServer({ names: ['interop'] });
+    const connecting = createBrokerParticipant({ adapter: narrowOf('ada') });
+    const client = connecting.transportClient();
+    const refusal = 'a parcel of 28 bytes leaves no byte of an envelope beside its credential';
+
+    await server.start();
+    await client.connect({ server: 'interop' });
+    await settled();
+
+    const [{ connectionHandle } = { connectionHandle: undefined }] = server.clients;
+
+    await expect(client.send({ data: new Uint8Array(1) })).rejects.toThrow(refusal);
+    await expect(
+      server.send(
+        { data: new Uint8Array(1) },
+        connectionHandle ?? 'type=BROKER;participant=ada;ordinal=1'
+      )
+    ).rejects.toThrow(refusal);
+    await settled();
+
+    expect([client.isOpen(), server.gauges().counts['connections']]).toEqual([true, 1]);
+
+    await connecting.stop();
+    await serving.stop();
   });
 });

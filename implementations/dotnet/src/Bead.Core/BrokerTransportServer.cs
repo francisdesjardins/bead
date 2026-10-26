@@ -90,7 +90,7 @@ public sealed class BrokerTransportServer : IServerTransport, IAsyncDisposable, 
 
         if (options.IsInGroup && (participant.Adapter.Capabilities & BrokerCapabilities.Groups) == 0)
         {
-            throw new ArgumentException("a name served in a group needs an adapter that offers groups", nameof(options));
+            throw new ArgumentException($"a name served in a group needs an adapter that offers groups, and the adapter of {participant.Id} does not", nameof(options));
         }
 
         ServerBounds.AssertCount((nameof(BrokerTransportServerOptions.MaximumConnections), options.MaximumConnections));
@@ -330,13 +330,26 @@ public sealed class BrokerTransportServer : IServerTransport, IAsyncDisposable, 
     /// <summary>
     /// Sends an envelope on a connection, in DATA parcels, at once, after what went before; what
     /// goes to a connection not open goes nowhere. A text message, which is no envelope, is an
-    /// <see cref="ArgumentException"/>.
+    /// <see cref="ArgumentException"/>, and so is a parcel toward its client that leaves no byte of
+    /// the envelope, refused before it goes, the connection kept.
     /// </summary>
     public Task Send(TransportMessage message, string connectionHandle)
     {
         if (message.IsText)
         {
-            return Task.FromException(new ArgumentException("a broker's connection carries envelopes, as bytes", nameof(message)));
+            return Task.FromException(new ArgumentException("a broker connection carries envelopes, as bytes", nameof(message)));
+        }
+
+        BrokerConnection? held;
+
+        lock (_gate)
+        {
+            held = _connections.GetValueOrDefault(connectionHandle);
+        }
+
+        if (held is not null && !BrokerParts.Fits((held.Room, null)))
+        {
+            return Task.FromException(new ArgumentException(string.Create(CultureInfo.InvariantCulture, $"a parcel of {held.Room} bytes leaves no byte of an envelope beside its credential"), nameof(message)));
         }
 
         // * copied as it is sent: the sender's buffer stays its own
@@ -433,12 +446,23 @@ public sealed class BrokerTransportServer : IServerTransport, IAsyncDisposable, 
         Rejoin();
     }
 
-    /// <summary>In its participant's turn: an OPEN, or what came to one of its names, judged in the order spec 15.18 states.</summary>
-    internal void TakeOpen(BrokerParcelReading reading)
+    /// <summary>
+    /// In its participant's turn: an OPEN, or what came to <paramref name="name"/>, one of its names,
+    /// judged in the order spec 15.18 states; no parcel, or an OPEN that does not read, dropped and
+    /// reported.
+    /// </summary>
+    internal void TakeOpen(string name, BrokerParcelReading reading)
     {
-        if (reading.Verdict == BrokerParcelVerdict.NoParcel || reading is { Verdict: BrokerParcelVerdict.DoesNotRead, Parcel.Kind: BrokerParcelKinds.Open })
+        if (reading.Verdict == BrokerParcelVerdict.NoParcel)
         {
-            _participant.Report(new InvalidDataException($"a message to a name served by {_participant.Id} is dropped: {reading.Why}"));
+            _participant.Report(new InvalidDataException($"a message to the name {name} is no parcel: {reading.Why}"));
+
+            return;
+        }
+
+        if (reading is { Verdict: BrokerParcelVerdict.DoesNotRead, Parcel.Kind: BrokerParcelKinds.Open })
+        {
+            _participant.Report(new InvalidDataException($"an OPEN to the name {name} does not read, dropped: {reading.Why}"));
 
             return;
         }
@@ -525,7 +549,7 @@ public sealed class BrokerTransportServer : IServerTransport, IAsyncDisposable, 
             PeerIncarnation = open.Incarnation!.Value,
             PeerBound = open.Bound!.Value,
             IsPeerSecure = open.Has(BrokerParcelFlags.Secure),
-            Sent = 1,
+            Sent = 0,
             Awaited = 2,
             MaximumUnsentBytes = _maximumUnsentBytes,
             IsHalfOpen = true,
@@ -553,20 +577,14 @@ public sealed class BrokerTransportServer : IServerTransport, IAsyncDisposable, 
             _options.AcceptTimeout,
             Timeout.InfiniteTimeSpan);
 
-        _ = _participant.Publish(new BrokerPublication
+        // * its first parcel, as each of its connection's: held to what may wait for its broker
+        connection.Publish(new BrokerParcel
         {
-            Topic = _participant.InboxOf(open.Id!),
-            Payload = BrokerParcels.Write(new BrokerParcel
-            {
-                Kind = BrokerParcelKinds.Accept,
-                Flags = _isSecure ? BrokerParcelFlags.Secure : (byte)0,
-                Opener = open.Opener,
-                Acceptor = connection.Pair.Acceptor,
-                Sequence = 1,
-                Id = _participant.Id,
-                Incarnation = _participant.Incarnation,
-                Bound = _participant.ReceiveBound,
-            }),
+            Kind = BrokerParcelKinds.Accept,
+            Flags = _isSecure ? BrokerParcelFlags.Secure : (byte)0,
+            Id = _participant.Id,
+            Incarnation = _participant.Incarnation,
+            Bound = _participant.ReceiveBound,
         });
         Leave();
     }

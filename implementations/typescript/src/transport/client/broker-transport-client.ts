@@ -227,7 +227,7 @@ export const createBrokerTransportClient = (
         assertConnect: ({ server }) => {
           if (typeof server !== 'string' || !isToken(server)) {
             throw new ProgrammerError(
-              "a broker connect's server is a name, a token of 1 to 64 characters of base64url's alphabet"
+              `a server's name is a token of base64url's alphabet, 1 to 64 characters, not ${JSON.stringify(server)}`
             );
           }
         },
@@ -304,7 +304,7 @@ export const createBrokerTransportClient = (
             );
 
             if (attempt.isEndedEarly || attempt.connection === undefined) {
-              throw new ConnectError('the broker connection closed as it opened');
+              throw new ConnectError('the server closed the connection as it opened');
             }
           } catch (reason) {
             // ! what the connect drew as it ended is let go: a later ACCEPT is reset, one taken is

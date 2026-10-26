@@ -262,7 +262,7 @@ public sealed class BrokerTransportClient : IRouterClientTransport, IAsyncDispos
 
         if (message.IsText)
         {
-            return Task.FromException(new ArgumentException("a broker's connection carries envelopes, as bytes", nameof(message)));
+            return Task.FromException(new ArgumentException("a broker connection carries envelopes, as bytes", nameof(message)));
         }
 
         if (message.Credential is { } credential && !HostsAndOrigins.IsVisibleField(credential))
@@ -270,9 +270,9 @@ public sealed class BrokerTransportClient : IRouterClientTransport, IAsyncDispos
             return Task.FromException(new ArgumentException("a credential holds visible ASCII, spaces and tabs alone, none first or last", nameof(message)));
         }
 
-        // refused before it goes, the connection kept: a credential that leaves a parcel toward its
-        // server no byte of the envelope (spec 15.20)
-        if (message.Credential is { Length: > 0 } carried && BrokerParcels.PrefixBytes + 2 + carried.Length + 1 > connection.Room)
+        // refused before it goes, the connection kept: a parcel toward its server that leaves no
+        // byte of the envelope beside its credential (spec 15.20)
+        if (!BrokerParts.Fits((connection.Room, string.IsNullOrEmpty(message.Credential) ? null : message.Credential)))
         {
             return Task.FromException(new ArgumentException(string.Create(CultureInfo.InvariantCulture, $"a parcel of {connection.Room} bytes leaves no byte of an envelope beside its credential"), nameof(message)));
         }
@@ -612,7 +612,7 @@ public sealed class BrokerTransportClient : IRouterClientTransport, IAsyncDispos
             }
             catch (OperationCanceledException reason) when (connecting.IsCancellationRequested)
             {
-                throw new ConnectException($"the transport client was disposed as it connected: {reason.Message}");
+                throw new ConnectException("the transport client was disposed as it connected", reason);
             }
             catch (OperationCanceledException reason) when (timeout is { IsCancellationRequested: true } && !token.IsCancellationRequested)
             {

@@ -145,8 +145,10 @@ public sealed class BrokerParcelTests
         const ulong Acceptor = 0x2122232425262728;
         var open = new BrokerParcel { Kind = BrokerParcelKinds.Open, Opener = Opener, Sequence = 1, Id = "peer", Incarnation = 1, Bound = 1_024 };
         var ping = new BrokerParcel { Kind = BrokerParcelKinds.Ping, Opener = Opener, Acceptor = Acceptor, Sequence = 2 };
+        var unfielded = ping with { Kind = BrokerParcelKinds.Data, Flags = BrokerParcelFlags.Credential, Credential = " Bearer x", Carried = new byte[] { 1 } };
         var refused = new (string What, BrokerParcel Parcel)[]
         {
+            ("a DATA whose credential is no field value", unfielded),
             ("an advisory kind", ping with { Kind = 0x80 }),
             ("a kind to come", ping with { Kind = 0x0A }),
             ("a kind of 0x00", ping with { Kind = 0 }),
@@ -171,6 +173,11 @@ public sealed class BrokerParcelTests
                 return BrokerParcels.Write(each.Parcel);
             });
         });
+
+        // a credential that is no field value does not read (spec 15.5)
+        var reading = BrokerParcels.Read(BrokerParcels.Encode(unfielded));
+
+        Assert.Equal((BrokerParcelVerdict.DoesNotRead, "a credential that is no field value"), (reading.Verdict, reading.Why));
 
         // what a side sends reads back as it was written
         Assert.Equal(BrokerParcelVerdict.Parcel, BrokerParcels.Read(BrokerParcels.Write(open)).Verdict);

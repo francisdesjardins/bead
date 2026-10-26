@@ -222,7 +222,7 @@ export const createBrokerParts = (
         stop();
         slow({
           code: CloseCode.LOST,
-          reason: `parts came slower than minimumBodyBytesPerSecond, ${String(minimumBodyBytesPerSecond)} bytes a second, past bodyGracePeriod, ${String(bodyGracePeriod)} ms`,
+          reason: `an envelope's parts came slower than minimumBodyBytesPerSecond, ${String(minimumBodyBytesPerSecond)} bytes a second, past bodyGracePeriod, ${String(bodyGracePeriod)} ms`,
         });
       },
       // ! a millisecond at least, counted whole: no timer is armed for less (decision 0011)
@@ -241,13 +241,25 @@ export const createBrokerParts = (
         return { credential: carried, envelope: part };
       }
 
+      // ! a credential on the first part alone (spec 15.20)
+      if (parts.length > 0 && carried !== undefined) {
+        stop();
+
+        return {
+          lost: {
+            code: CloseCode.PROTOCOL_ERROR,
+            reason: 'a part past the first of an envelope carries a credential',
+          },
+        };
+      }
+
       if (bytes + part.length > maximumEnvelopePartsBytes) {
         stop();
 
         return {
           lost: {
             code: CloseCode.TOO_BIG,
-            reason: `an envelope's parts past its maximumEnvelopePartsBytes, ${String(maximumEnvelopePartsBytes)} bytes`,
+            reason: `an envelope's parts would pass maximumEnvelopePartsBytes, ${String(maximumEnvelopePartsBytes)} bytes`,
           },
         };
       }
@@ -258,7 +270,7 @@ export const createBrokerParts = (
         return {
           lost: {
             code: CloseCode.LOST,
-            reason: `parts past its participant's heldBytesBudget, ${String(held.budget)} bytes`,
+            reason: `a part would pass its participant's heldBytesBudget, ${String(held.budget)} bytes`,
           },
         };
       }

@@ -5,11 +5,12 @@
 import {
   CloseCode,
   HALF_BYTES,
+  hexOfByte,
   INCARNATION_BYTES,
   type IParcel,
   isKindToCome,
   isToken,
-  KIND_NAMES,
+  kindNamed,
   LARGEST_RECEIVE_BOUND,
   LEAST_RECEIVE_BOUND,
   type ParcelFields,
@@ -233,6 +234,8 @@ export interface IBrokerParticipantPort {
   /** Refuses an OPEN with `status`, to the inbox it names. */
   refuse(open: IParcel, status: number): void;
   report(error: Error): void;
+  /** Holds `names` for one server's transport of it; one another holds already is a {@link ProgrammerError}. */
+  reserve(names: readonly string[]): void;
   serve(name: string, serving: IBrokerServing): void;
   /** Subscribes `name`, in its group when given, while wanted; lets it go once not. */
   want(name: string, { group, isWanted }: { group?: string | undefined; isWanted: boolean }): void;
@@ -324,12 +327,14 @@ export const createBrokerParticipant = (options: IBrokerParticipantOptions): IBr
 
   if (!isToken(id)) {
     throw new ProgrammerError(
-      `a participant's id is a token, 1 to 64 characters of base64url's alphabet, not ${JSON.stringify(id)}`
+      `a participant's id is a token of base64url's alphabet, 1 to 64 characters, not ${JSON.stringify(id)}`
     );
   }
 
   if (!isToken(root)) {
-    throw new ProgrammerError(`a participant's root is a token, not ${JSON.stringify(root)}`);
+    throw new ProgrammerError(
+      `a participant's root is a token of base64url's alphabet, 1 to 64 characters, not ${JSON.stringify(root)}`
+    );
   }
 
   if (
@@ -362,7 +367,7 @@ export const createBrokerParticipant = (options: IBrokerParticipantOptions): IBr
 
   if (receiveBound < LEAST_RECEIVE_BOUND) {
     throw new ProgrammerError(
-      `a participant's inbox takes a parcel of 1024 bytes at least, and the adapter of ${id} takes ${String(receiveBound)}`
+      `a participant's inbox takes a parcel of 1,024 bytes at least, and the adapter of ${id} takes ${String(receiveBound)}`
     );
   }
 
@@ -385,6 +390,8 @@ export const createBrokerParticipant = (options: IBrokerParticipantOptions): IBr
   const awaiting = new Map<string, IBrokerAnswers>();
   // the servers' transports, by the names they serve
   const serving = new Map<string, IBrokerServing>();
+  // the names its servers' transports hold, each one's alone, from the time each is built
+  const reserved = new Set<string>();
   // the names wanted, their group, and whether the broker holds them now
   const names = new Map<
     string,
@@ -535,17 +542,19 @@ export const createBrokerParticipant = (options: IBrokerParticipantOptions): IBr
         sequence: isReset ? 0 : nextSend,
       });
 
-      if (!isReset) {
-        nextSend += 1;
-      }
-
+      // ! held before its sequence is taken: the CLOSE that loses the connection is the next, with
+      // no gap before it
       if (unsentBytes + bytes.length > maximumUnsentBytes && fields.kind !== ParcelKind.CLOSE) {
         lose({
           code: CloseCode.LOST,
-          reason: `what waits for its broker past its maximumUnsentBytes, ${String(maximumUnsentBytes)} bytes`,
+          reason: `what waits for its broker would pass maximumUnsentBytes, ${String(maximumUnsentBytes)} bytes`,
         });
 
         return;
+      }
+
+      if (!isReset) {
+        nextSend += 1;
       }
 
       unsentBytes += bytes.length;
@@ -608,7 +617,7 @@ export const createBrokerParticipant = (options: IBrokerParticipantOptions): IBr
       if (isOpener && credential !== undefined) {
         lose({
           code: CloseCode.PROTOCOL_ERROR,
-          reason: 'a DATA of its server carries a credential',
+          reason: "a DATA toward its client carries a credential, which no server's does",
         });
 
         return;
@@ -694,7 +703,7 @@ export const createBrokerParticipant = (options: IBrokerParticipantOptions): IBr
         if (parcel.layout !== PARCEL_LAYOUT) {
           lose({
             code: CloseCode.PROTOCOL_ERROR,
-            reason: `a parcel of a layout to come, 0x${parcel.layout.toString(16)}`,
+            reason: `a parcel of a layout to come, ${hexOfByte(parcel.layout)}`,
           });
 
           return;
@@ -725,7 +734,7 @@ export const createBrokerParticipant = (options: IBrokerParticipantOptions): IBr
         if (parts.bytes > 0 && parcel.kind !== ParcelKind.DATA) {
           lose({
             code: CloseCode.PROTOCOL_ERROR,
-            reason: `a ${KIND_NAMES[parcel.kind] ?? 'parcel'} between an envelope's parts`,
+            reason: `${kindNamed(parcel.kind)} between an envelope's parts`,
           });
 
           return;
@@ -749,7 +758,7 @@ export const createBrokerParticipant = (options: IBrokerParticipantOptions): IBr
           default:
             lose({
               code: CloseCode.PROTOCOL_ERROR,
-              reason: `a ${KIND_NAMES[parcel.kind] ?? 'parcel'} on a connection open`,
+              reason: `${kindNamed(parcel.kind)} on a connection open`,
             });
 
             return;
@@ -1156,6 +1165,19 @@ export const createBrokerParticipant = (options: IBrokerParticipantOptions): IBr
     },
     refuse,
     report,
+    reserve: (given) => {
+      for (const name of given) {
+        if (reserved.has(name)) {
+          throw new ProgrammerError(
+            `the name ${name} is served already by a server transport of this participant`
+          );
+        }
+      }
+
+      for (const name of given) {
+        reserved.add(name);
+      }
+    },
     serve: (name, server) => {
       serving.set(name, server);
     },

@@ -91,12 +91,22 @@ test.describe('broker sequence', () => {
     });
     expect(duesOn(clock)).toEqual([]);
 
+    // a credential on a part past the first does not read: 1002, naming it
+    parts.add(bytesOf(1), { isLast: false });
+    expect(parts.add(bytesOf(1), { credential: 'Bearer z', isLast: true })).toEqual({
+      lost: {
+        code: CloseCode.PROTOCOL_ERROR,
+        reason: 'a part past the first of an envelope carries a credential',
+      },
+    });
+    expect(held.held).toBe(0);
+
     // past its bound: 1009, naming it
     parts.add(bytesOf(60), { isLast: false });
     expect(parts.add(bytesOf(5), { isLast: false })).toEqual({
       lost: {
         code: CloseCode.TOO_BIG,
-        reason: "an envelope's parts past its maximumEnvelopePartsBytes, 64 bytes",
+        reason: "an envelope's parts would pass maximumEnvelopePartsBytes, 64 bytes",
       },
     });
     expect(held.held).toBe(0);
@@ -105,10 +115,13 @@ test.describe('broker sequence', () => {
     const other = createBrokerParts({ held, slow }, bounds);
 
     other.add(bytesOf(60), { isLast: false });
-    expect(parts.add(bytesOf(50), { isLast: false })).toEqual({
+    parts.add(bytesOf(10), { isLast: false });
+
+    // * its last part charged as each before it
+    expect(parts.add(bytesOf(35), { isLast: true })).toEqual({
       lost: {
         code: CloseCode.LOST,
-        reason: "parts past its participant's heldBytesBudget, 100 bytes",
+        reason: "a part would pass its participant's heldBytesBudget, 100 bytes",
       },
     });
     expect(held.held).toBe(60);
@@ -124,7 +137,7 @@ test.describe('broker sequence', () => {
       {
         code: CloseCode.LOST,
         reason:
-          'parts came slower than minimumBodyBytesPerSecond, 240 bytes a second, past bodyGracePeriod, 5000 ms',
+          "an envelope's parts came slower than minimumBodyBytesPerSecond, 240 bytes a second, past bodyGracePeriod, 5000 ms",
       },
     ]);
     expect(held.held).toBe(0);

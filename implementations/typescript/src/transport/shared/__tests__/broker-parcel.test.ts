@@ -8,6 +8,7 @@ import {
   VECTORS,
 } from '../../../router/shared/__tests__/vectors';
 import {
+  encodeParcel,
   type IParcel,
   isToken,
   ParcelFlag,
@@ -107,6 +108,14 @@ test.describe('broker parcel', () => {
       opener,
       sequence: 1,
     };
+    const unfielded = {
+      acceptor,
+      carried: Uint8Array.of(1),
+      credential: ' Bearer x',
+      kind: ParcelKind.DATA,
+      opener,
+      sequence: 3,
+    };
 
     for (const fields of [
       { ...open, kind: 0 },
@@ -123,6 +132,7 @@ test.describe('broker parcel', () => {
       { acceptor, kind: 0x80, opener, sequence: 3 },
       { acceptor, kind: 0x0a, opener, sequence: 3 },
       { acceptor, kind: ParcelKind.PING, layout: 0xb2, opener, sequence: 2 },
+      { ...unfielded },
     ]) {
       expect(
         () => {
@@ -131,6 +141,12 @@ test.describe('broker parcel', () => {
         JSON.stringify({ ...fields, acceptor: undefined, opener: undefined })
       ).toThrow(ProgrammerError);
     }
+
+    // a credential that is no field value does not read (spec 15.5)
+    expect(readParcel(encodeParcel(unfielded))).toMatchObject({
+      reason: 'a credential that is no field value',
+      refused: 'does-not-read',
+    });
 
     // what a side sends reads back as it was written
     expect('parcel' in readParcel(writeParcel(open))).toBe(true);

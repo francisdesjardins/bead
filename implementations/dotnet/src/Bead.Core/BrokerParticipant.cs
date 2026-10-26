@@ -1,4 +1,5 @@
 using System.Buffers.Binary;
+using System.Globalization;
 using System.Security.Cryptography;
 
 namespace Bead;
@@ -37,6 +38,12 @@ public sealed record BrokerParticipantOptions
 
     /// <summary>How its link connects again once lost, each time a new incarnation (spec 15.21): a second between attempts, without end, unless told.</summary>
     public TransportReconnectOptions? Reconnect { get; init; }
+
+    /// <summary>
+    /// Whether its link connects again once lost, as <see cref="Reconnect"/> says: true unless told;
+    /// false leaves it down, reported, until a start or a connect links it anew.
+    /// </summary>
+    public bool IsReconnecting { get; init; } = true;
 
     /// <summary>Where its state is touched, one turn at a time: one of its own when none; the tests' way to share one with a broker in memory.</summary>
     internal SerialScheduler? Scheduler { get; init; }
@@ -90,7 +97,7 @@ public sealed class BrokerParticipant : IAsyncDisposable
 
         if (!BrokerParcels.IsToken(adapter.Id))
         {
-            throw new ArgumentException($"a participant's id is the identity its broker authenticates it by, a token of base64url's alphabet, 1 to 64 characters, not \"{adapter.Id}\"", nameof(adapter));
+            throw new ArgumentException($"a participant's id is a token of base64url's alphabet, 1 to 64 characters, not \"{adapter.Id}\"", nameof(adapter));
         }
 
         if (!BrokerParcels.IsToken(given.Root))
@@ -100,12 +107,19 @@ public sealed class BrokerParticipant : IAsyncDisposable
 
         if (given.RequireDelivery == BrokerDelivery.AtLeastOnce && adapter.Delivery == BrokerDelivery.AtMostOnce)
         {
-            throw new ArgumentException("its application requires delivery at least once, and its adapter gives it at most once", nameof(options));
+            throw new ArgumentException($"its application requires delivery at least once, and the adapter of {adapter.Id} gives it at most once", nameof(options));
         }
 
         ServerBounds.AssertCount((nameof(BrokerParticipantOptions.HeldBytesBudget), given.HeldBytesBudget));
         ServerBounds.AssertCount((nameof(BrokerParticipantOptions.MaximumEnvelopePartsBytes), given.MaximumEnvelopePartsBytes));
         ServerBounds.AssertCountOrNone((nameof(BrokerParticipantOptions.MinimumBodyBytesPerSecond), given.MinimumBodyBytesPerSecond));
+
+        var receiveBound = Math.Min(adapter.ReceiveBound, BrokerParcels.LargestBound);
+
+        if (receiveBound < BrokerParcels.LeastBound)
+        {
+            throw new ArgumentException(string.Create(CultureInfo.InvariantCulture, $"a participant's inbox takes a parcel of 1,024 bytes at least, and the adapter of {adapter.Id} takes {receiveBound}"), nameof(adapter));
+        }
 
         _options = given with
         {
@@ -301,7 +315,7 @@ public sealed class BrokerParticipant : IAsyncDisposable
         {
             if (_isStopped)
             {
-                return Task.FromException(new InvalidOperationException("the participant is stopped"));
+                return Task.FromException(new InvalidOperationException($"the participant {Id} is stopped"));
             }
 
             _starting ??= _scheduler.Run(Link);
@@ -632,6 +646,19 @@ public sealed class BrokerParticipant : IAsyncDisposable
             server.Unlinked();
         }
 
+        // * no reconnection: it stays down, said so, and the next start or connect links it anew
+        if (!_options.IsReconnecting)
+        {
+            lock (_gate)
+            {
+                _starting = null;
+            }
+
+            Report(new IOException($"the link of {Id} went down"));
+
+            return;
+        }
+
         _scheduler.Cover(Relinking(peers));
     }
 
@@ -646,9 +673,17 @@ public sealed class BrokerParticipant : IAsyncDisposable
                 },
                 (_options.Reconnect ?? new TransportReconnectOptions { MaximumAttempts = int.MaxValue }, _clock));
         }
-        catch (Exception reason) when (reason is ReconnectException or OperationCanceledException or InvalidOperationException)
+        catch (ReconnectException reason)
         {
-            Report(new IOException($"the participant {Id} lost its link to its broker for good: {reason.Message}", reason));
+            var attempts = (_options.Reconnect ?? new TransportReconnectOptions { MaximumAttempts = int.MaxValue }).MaximumAttempts;
+
+            Report(new IOException(string.Create(CultureInfo.InvariantCulture, $"the link of {Id} went down, and {attempts} attempts did not bring it back"), reason));
+
+            return;
+        }
+        catch (Exception reason) when (reason is OperationCanceledException or InvalidOperationException)
+        {
+            Report(new IOException($"the link of {Id} went down, and its reconnection ended: {reason.Message}", reason));
 
             return;
         }
@@ -695,7 +730,7 @@ public sealed class BrokerParticipant : IAsyncDisposable
                     server = _names.GetValueOrDefault(name);
                 }
 
-                server?.TakeOpen(BrokerParcels.Read(message.Payload));
+                server?.TakeOpen(name, BrokerParcels.Read(message.Payload));
             }
             else if (place == "d")
             {
@@ -715,7 +750,7 @@ public sealed class BrokerParticipant : IAsyncDisposable
 
         if (reading.Verdict == BrokerParcelVerdict.NoParcel)
         {
-            Report(new InvalidDataException($"a message to the inbox of {Id} is dropped: {reading.Why}"));
+            Report(new InvalidDataException($"a message to the inbox of {Id} is no parcel: {reading.Why}"));
 
             return;
         }
@@ -739,7 +774,7 @@ public sealed class BrokerParticipant : IAsyncDisposable
 
         switch (parcel.Kind)
         {
-            case BrokerParcelKinds.Accept:
+            case BrokerParcelKinds.Accept when parcel.Layout == BrokerParcels.Layout:
                 if (_connects.TryGetValue(parcel.Opener, out var pending))
                 {
                     _connects.Remove(parcel.Opener);

@@ -115,7 +115,9 @@ export const createBrokerTransportServer = (
       return typeof name === 'string' && isToken(name);
     })
   ) {
-    throw new ProgrammerError("a broker server's names are tokens, one at least");
+    throw new ProgrammerError(
+      "a broker's server transport serves one name at least, each a token of base64url's alphabet, 1 to 64 characters"
+    );
   }
 
   if (group && port.adapter.capabilities.groups !== true) {
@@ -123,6 +125,8 @@ export const createBrokerTransportServer = (
       `a name served in a group needs an adapter that offers groups, and the adapter of ${port.id} does not`
     );
   }
+
+  port.reserve(names);
 
   const served: ReadonlySet<string> = new Set(names);
   // the peer of a connection the transport holds, which only `define` reaches: replaced by it, which

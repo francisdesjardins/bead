@@ -243,4 +243,17 @@ test.describe('memory broker', () => {
       'the link of bob is not up'
     );
   });
+
+  test('refuses a second adapter of one id, and a will asked of an adapter that takes none', async () => {
+    const broker = createMemoryBroker();
+    const plain = broker.adapter({ capabilities: {}, id: 'ada' });
+
+    expect(() => {
+      return broker.adapter({ id: 'ada' });
+    }).toThrow(new ProgrammerError('an adapter of this broker is ada already'));
+    await expect(
+      plain.start({ will: { payload: bytesOf('gone'), topic: ['bead', 'd', 'ada'] } })
+    ).rejects.toThrow(new ProgrammerError('the adapter of ada takes no will'));
+    expect(plain.isLinked).toBe(false);
+  });
 });

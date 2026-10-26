@@ -373,7 +373,7 @@ export const createMemoryBroker = (options?: IMemoryBrokerOptions): IMemoryBroke
 
             if (publication.payload.length > maximumMessageBytes) {
               throw new GenericError(
-                `a payload of ${String(publication.payload.length)} bytes, past ${String(maximumMessageBytes)}`
+                `a payload of ${String(publication.payload.length)} bytes, past the broker's maximumMessageBytes, ${String(maximumMessageBytes)} bytes`
               );
             }
 
@@ -443,7 +443,7 @@ export const createMemoryBroker = (options?: IMemoryBrokerOptions): IMemoryBroke
             const group = subscription?.group;
 
             if (group !== undefined && offered.groups !== true) {
-              throw new ProgrammerError(`the adapter of ${id} subscribes in no group`);
+              throw new ProgrammerError(`the adapter of ${id} offers no groups`);
             }
 
             linkOf().subscriptions.set(keyOf(topic), group);

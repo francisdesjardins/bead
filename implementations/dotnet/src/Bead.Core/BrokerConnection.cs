@@ -55,7 +55,7 @@ internal sealed record BrokerConnectionSetup
     /// <summary>Whether the peer's own leg is secure, as its OPEN or its ACCEPT said.</summary>
     public required bool IsPeerSecure { get; init; }
 
-    /// <summary>The last sequence this end sent: its OPEN's or its ACCEPT's, 1.</summary>
+    /// <summary>The last sequence this end sent: a client's OPEN, 1; none yet, 0, for a server's, whose ACCEPT it publishes.</summary>
     public required ulong Sent { get; init; }
 
     /// <summary>The next sequence this end awaits.</summary>
@@ -185,7 +185,7 @@ internal sealed class BrokerConnection
                 {
                     if (State == BrokerConnectionState.Open)
                     {
-                        Publish(Sequenced(new BrokerParcel { Kind = BrokerParcelKinds.Ping }));
+                        Publish(new BrokerParcel { Kind = BrokerParcelKinds.Ping });
                     }
                 });
             },
@@ -205,7 +205,7 @@ internal sealed class BrokerConnection
     /// <summary>Sends a PING, the next of its sequence: the client's third leg (spec 15.18).</summary>
     public void Ping()
     {
-        Publish(Sequenced(new BrokerParcel { Kind = BrokerParcelKinds.Ping }));
+        Publish(new BrokerParcel { Kind = BrokerParcelKinds.Ping });
     }
 
     /// <summary>
@@ -232,7 +232,7 @@ internal sealed class BrokerConnection
 
         if (parcel.Layout != BrokerParcels.Layout)
         {
-            Lose((1002, string.Create(CultureInfo.InvariantCulture, $"a parcel of a layout to come, 0x{parcel.Layout:X2}")));
+            Lose((1002, $"a parcel of a layout to come, {BrokerParcels.HexOf(parcel.Layout)}"));
 
             return;
         }
@@ -260,7 +260,7 @@ internal sealed class BrokerConnection
 
         if (_parts.HeldBytes > 0 && parcel.Kind != BrokerParcelKinds.Data)
         {
-            Lose((1002, $"a {BrokerParcels.NameOf(parcel.Kind)} between an envelope's parts"));
+            Lose((1002, $"{BrokerParcels.KindNamed(parcel.Kind)} between an envelope's parts"));
 
             return;
         }
@@ -273,7 +273,7 @@ internal sealed class BrokerConnection
                 break;
 
             case BrokerParcelKinds.Ping:
-                Publish(Sequenced(new BrokerParcel { Kind = BrokerParcelKinds.Pong, Answers = parcel.Sequence }));
+                Publish(new BrokerParcel { Kind = BrokerParcelKinds.Pong, Answers = parcel.Sequence });
 
                 break;
 
@@ -287,15 +287,15 @@ internal sealed class BrokerConnection
                 break;
 
             default:
-                Lose((1002, $"a {BrokerParcels.NameOf(parcel.Kind)} on a connection open"));
+                Lose((1002, $"{BrokerParcels.KindNamed(parcel.Kind)} on a connection open"));
 
                 break;
         }
     }
 
     /// <summary>
-    /// A parcel naming its pair that does not read: taken in its order where its sequence reads, a
-    /// copy dropped and a gap a loss, then the connection closed with 1002, reported naming it.
+    /// A parcel naming its pair that does not read: a kind to come taken in its order, a copy dropped
+    /// and a gap a loss (spec 15.17); then the connection closed with 1002, reported naming it.
     /// </summary>
     public void TakeUnread((BrokerParcel Prefix, string Why) unread)
     {
@@ -308,18 +308,20 @@ internal sealed class BrokerConnection
 
         var sequence = unread.Prefix.Sequence;
 
-        if (sequence is >= 1 and <= BrokerParcels.LargestSequence && !IsNext(sequence))
+        // * a kind to come is taken in its order, a copy dropped and a gap a loss; any other closes at once
+        if (BrokerParcelKinds.IsToCome(unread.Prefix.Kind) && sequence <= BrokerParcels.LargestSequence && !IsNext(sequence))
         {
             return;
         }
 
-        Lose((1002, unread.Why));
+        Lose((1002, $"a parcel that does not read: {unread.Why}"));
     }
 
     /// <summary>
     /// Sends an envelope in DATA parcels: whole where it fits the smaller of its peer's bound and
     /// what its adapter publishes to its peer's inbox, in parts otherwise, each as large as that bound
-    /// lets it but the last, the credential on the first (spec 15.20).
+    /// lets it but the last, the credential on the first (spec 15.20); each held to what may wait for
+    /// its broker.
     /// </summary>
     public void Send(TransportMessage message)
     {
@@ -332,24 +334,70 @@ internal sealed class BrokerConnection
         var limit = Room;
         var parts = BrokerParts.Cut(message.Bytes, (limit, credential));
 
+        // ! none where its sender sends what no parcel fits: refused before it came, as Fits says
         if (parts.Count == 0)
         {
-            Lose((4000, string.Create(CultureInfo.InvariantCulture, $"a parcel toward its peer is {limit} bytes at most, too few for its credential")));
-
-            return;
-        }
-
-        if (_unsent + message.Bytes.Length + (parts.Count * BrokerParcels.PrefixBytes) > _setup.MaximumUnsentBytes)
-        {
-            Lose((4000, string.Create(CultureInfo.InvariantCulture, $"what waits for its broker would pass maximumUnsentBytes {_setup.MaximumUnsentBytes}")));
-
             return;
         }
 
         foreach (var part in parts)
         {
-            Publish(Sequenced(part));
+            Publish(part);
         }
+    }
+
+    /// <summary>
+    /// Publishes a parcel of its pair to its peer's inbox, the one way each of its parcels goes: the
+    /// next of its sequence, a RESET unnumbered, what waits for its broker counted until it is taken.
+    /// A parcel but a CLOSE that would take that past <c>maximumUnsentBytes</c> loses the connection
+    /// instead, a CLOSE of 4000, reported naming the bound (spec 15.23); once it ended, none goes.
+    /// </summary>
+    public void Publish(BrokerParcel parcel)
+    {
+        if (State == BrokerConnectionState.Closed)
+        {
+            return;
+        }
+
+        var isReset = parcel.Kind == BrokerParcelKinds.Reset;
+        var bytes = BrokerParcels.Write(parcel with { Opener = _setup.Opener, Acceptor = _setup.Acceptor, Sequence = isReset ? 0 : _sent + 1 });
+
+        // ! held before its sequence is taken: the CLOSE that loses the connection is the next, with
+        // no gap before it
+        if (parcel.Kind != BrokerParcelKinds.Close && _unsent + bytes.Length > _setup.MaximumUnsentBytes)
+        {
+            Lose((4000, string.Create(CultureInfo.InvariantCulture, $"what waits for its broker would pass maximumUnsentBytes, {_setup.MaximumUnsentBytes} bytes")));
+
+            return;
+        }
+
+        if (!isReset)
+        {
+            _sent += 1;
+        }
+
+        _unsent += bytes.Length;
+
+        var published = _participant.Publish(new BrokerPublication { Topic = PeerInbox, Payload = bytes });
+
+        _ = published.ContinueWith(
+            (done) =>
+            {
+                _participant.Scheduler.Post(() =>
+                {
+                    _unsent -= bytes.Length;
+
+                    // a parcel its broker refused, or no subscriber took: its peer's inbox is gone,
+                    // as a dropped socket
+                    if ((!done.IsCompletedSuccessfully || done.Result == BrokerPublished.NoSubscriber) && State != BrokerConnectionState.Closed)
+                    {
+                        Drop();
+                    }
+                });
+            },
+            CancellationToken.None,
+            TaskContinuationOptions.ExecuteSynchronously,
+            TaskScheduler.Default);
     }
 
     /// <summary>
@@ -364,7 +412,7 @@ internal sealed class BrokerConnection
             return;
         }
 
-        Publish(Sequenced(new BrokerParcel { Kind = BrokerParcelKinds.Close, Code = close.Code }));
+        Publish(new BrokerParcel { Kind = BrokerParcelKinds.Close, Code = close.Code });
         Ended((close.IsClean, null, false));
     }
 
@@ -382,7 +430,7 @@ internal sealed class BrokerConnection
             return;
         }
 
-        _participant.Reset((_setup.PeerId, Pair));
+        Publish(new BrokerParcel { Kind = BrokerParcelKinds.Reset });
         Ended((false, null, true));
     }
 
@@ -455,43 +503,6 @@ internal sealed class BrokerConnection
         }
     }
 
-    // the next sequence of this end's, written into a parcel of its pair
-    private BrokerParcel Sequenced(BrokerParcel parcel)
-    {
-        _sent += 1;
-
-        return parcel with { Opener = _setup.Opener, Acceptor = _setup.Acceptor, Sequence = _sent };
-    }
-
-    // a parcel published to its peer's inbox, what waits for its broker counted until it is taken
-    private void Publish(BrokerParcel parcel)
-    {
-        var bytes = BrokerParcels.Write(parcel);
-
-        _unsent += bytes.Length;
-
-        var published = _participant.Publish(new BrokerPublication { Topic = PeerInbox, Payload = bytes });
-
-        _ = published.ContinueWith(
-            (done) =>
-            {
-                _participant.Scheduler.Post(() =>
-                {
-                    _unsent -= bytes.Length;
-
-                    // a parcel its broker refused, or no subscriber took: its peer's inbox is gone,
-                    // as a dropped socket
-                    if ((!done.IsCompletedSuccessfully || done.Result == BrokerPublished.NoSubscriber) && State != BrokerConnectionState.Closed)
-                    {
-                        Drop();
-                    }
-                });
-            },
-            CancellationToken.None,
-            TaskContinuationOptions.ExecuteSynchronously,
-            TaskScheduler.Default);
-    }
-
     // lost of its own: a CLOSE of its code, its end unclean, reported naming why (spec 15.1)
     private void Lose((int Code, string Why) lost)
     {
@@ -500,17 +511,17 @@ internal sealed class BrokerConnection
             return;
         }
 
-        Publish(Sequenced(new BrokerParcel { Kind = BrokerParcelKinds.Close, Code = lost.Code }));
+        Publish(new BrokerParcel { Kind = BrokerParcelKinds.Close, Code = lost.Code });
 
-        var name = ConnectionHandle ?? $"the connection to {_setup.PeerId}";
+        var subject = ConnectionHandle ?? (_setup.Owner.IsOpener ? $"the connection to {_setup.PeerId}" : $"a half-open connection of {_setup.PeerId}");
 
-        Ended((false, new IOException(string.Create(CultureInfo.InvariantCulture, $"{name} is lost, a CLOSE of {lost.Code}: {lost.Why}")), false));
+        Ended((false, new IOException(string.Create(CultureInfo.InvariantCulture, $"{subject} is closed with {lost.Code}: {lost.Why}")), false));
     }
 
     // a CLOSE of a code sent, unclean, unreported: the heartbeat's own drop
     private void End((int Code, bool IsClean, Exception? Reported) end)
     {
-        Publish(Sequenced(new BrokerParcel { Kind = BrokerParcelKinds.Close, Code = end.Code }));
+        Publish(new BrokerParcel { Kind = BrokerParcelKinds.Close, Code = end.Code });
         Ended((end.IsClean, end.Reported, false));
     }
 

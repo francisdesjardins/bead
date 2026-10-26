@@ -35,7 +35,7 @@ public sealed class BrokerSequenceTests
         // * past the next one awaited: a loss, the window kept where it stood
         Assert.Equal(BrokerTaking.Gap, sequence.Take(7));
         Assert.Equal(5UL, sequence.Awaited);
-        Assert.Equal("a parcel of the sequence 7 came where 5 was awaited: one between was lost", sequence.GapOf(7));
+        Assert.Equal("a parcel lost: 5 was awaited, and 7 came", sequence.GapOf(7));
     }
 
     [Fact]
@@ -66,17 +66,17 @@ public sealed class BrokerSequenceTests
         Assert.Equal("Bearer b", reassembled.Credential);
         Assert.Equal((0L, 0L), (parts.HeldBytes, bounds.Budget.Held));
 
-        // a credential on a part past the first does not read: 1002
+        // a credential on a part past the first does not read: 1002, naming it
         parts.Take(((byte[])[1], true, null));
-        Assert.Equal(1002, parts.Take(((byte[])[2], false, "Bearer c")).Lost!.Value.Code);
-        parts.Stop();
+        Assert.Equal((1002, "a part past the first of an envelope carries a credential"), parts.Take(((byte[])[2], false, "Bearer c")).Lost!.Value);
+        Assert.Equal(0L, bounds.Budget.Held);
 
         // past maximumEnvelopePartsBytes: 1009, naming the bound
         parts.Take((new byte[40], true, null));
 
         var past = parts.Take((new byte[40], true, null)).Lost!.Value;
 
-        Assert.Equal((1009, "an envelope's parts pass maximumEnvelopePartsBytes 64"), past);
+        Assert.Equal((1009, "an envelope's parts would pass maximumEnvelopePartsBytes, 64 bytes"), past);
         parts.Stop();
 
         // past the participant's budget, held across its connections: 4000, naming it
@@ -85,7 +85,11 @@ public sealed class BrokerSequenceTests
         });
 
         other.Take((new byte[60], true, null));
-        Assert.Equal((4000, "a part would pass heldBytesBudget 100"), parts.Take((new byte[60], true, null)).Lost!.Value);
+        parts.Take((new byte[10], true, null));
+
+        // * its last part charged as each before it
+        Assert.Equal((4000, "a part would pass its participant's heldBytesBudget, 100 bytes"), parts.Take((new byte[35], false, null)).Lost!.Value);
+        Assert.Equal(60L, bounds.Budget.Held);
         other.Stop();
 
         // too slow once its grace passed, on the clock given: late at its deadline, not before
@@ -95,7 +99,7 @@ public sealed class BrokerSequenceTests
         Assert.Equal((0, false), (lates, parts.IsLate()));
         await clock.Advance(TimeSpan.FromMilliseconds(1));
         Assert.Equal((1, true), (lates, parts.IsLate()));
-        Assert.Equal("its parts came slower than minimumBodyBytesPerSecond 240 past bodyGracePeriod 5000 ms", parts.LateOf());
+        Assert.Equal("an envelope's parts came slower than minimumBodyBytesPerSecond, 240 bytes a second, past bodyGracePeriod, 5000 ms", parts.LateOf());
         parts.Stop();
         Assert.Empty(clock.Dues());
     }

@@ -47,7 +47,7 @@ internal sealed class BrokerSequence(ulong awaited)
     /// <summary>A gap, as its side reports it: the sequence awaited and the one that came (spec 15.19).</summary>
     public string GapOf(ulong came)
     {
-        return string.Create(CultureInfo.InvariantCulture, $"a parcel of the sequence {came} came where {Awaited} was awaited: one between was lost");
+        return string.Create(CultureInfo.InvariantCulture, $"a parcel lost: {Awaited} was awaited, and {came} came");
     }
 }
 
@@ -161,6 +161,17 @@ internal sealed class BrokerParts(BrokerPartsBounds bounds, Action late)
         return parts;
     }
 
+    /// <summary>
+    /// Whether a parcel of <c>Limit</c> bytes leaves an envelope one byte at least beside
+    /// <c>Credential</c>: a send it does not is refused before it goes, its connection kept.
+    /// </summary>
+    public static bool Fits((long Limit, string? Credential) toward)
+    {
+        var (limit, credential) = toward;
+
+        return limit - BrokerParcels.PrefixBytes - (credential is null ? 0 : 2 + credential.Length) >= 1;
+    }
+
     /// <summary>What it holds in parts right now.</summary>
     public long HeldBytes
     {
@@ -173,7 +184,7 @@ internal sealed class BrokerParts(BrokerPartsBounds bounds, Action late)
     /// <summary>Why parts that came too slowly lost their connection.</summary>
     public string LateOf()
     {
-        return string.Create(CultureInfo.InvariantCulture, $"its parts came slower than minimumBodyBytesPerSecond {bounds.MinimumBodyBytesPerSecond} past bodyGracePeriod {(long)bounds.BodyGracePeriod.TotalMilliseconds} ms");
+        return string.Create(CultureInfo.InvariantCulture, $"an envelope's parts came slower than minimumBodyBytesPerSecond, {bounds.MinimumBodyBytesPerSecond} bytes a second, past bodyGracePeriod, {(long)bounds.BodyGracePeriod.TotalMilliseconds} ms");
     }
 
     /// <summary>
@@ -184,30 +195,33 @@ internal sealed class BrokerParts(BrokerPartsBounds bounds, Action late)
     {
         var (carried, isMore, credential) = part;
 
+        // a DATA that is no part is handed on as it came, held nowhere
+        if (_firstAt is null && !isMore)
+        {
+            return new BrokerPartTaking(carried.ToArray(), credential, null);
+        }
+
         // ! a credential on the first part alone (spec 15.20)
         if (_firstAt is not null && credential is not null)
         {
+            Stop();
+
             return new BrokerPartTaking(null, null, (1002, "a part past the first of an envelope carries a credential"));
         }
 
         if (_held.Count + carried.Length > bounds.MaximumEnvelopePartsBytes)
         {
-            return new BrokerPartTaking(null, null, (1009, string.Create(CultureInfo.InvariantCulture, $"an envelope's parts pass maximumEnvelopePartsBytes {bounds.MaximumEnvelopePartsBytes}")));
-        }
-
-        if (!isMore)
-        {
-            var whole = _firstAt is null ? carried.ToArray() : [.. _held, .. carried.Span];
-            var carriedCredential = _firstAt is null ? credential : _credential;
-
             Stop();
 
-            return new BrokerPartTaking(whole, carriedCredential, null);
+            return new BrokerPartTaking(null, null, (1009, string.Create(CultureInfo.InvariantCulture, $"an envelope's parts would pass maximumEnvelopePartsBytes, {bounds.MaximumEnvelopePartsBytes} bytes")));
         }
 
+        // * each part charged, the last among them, until its envelope is whole
         if (!bounds.Budget.TryCharge(carried.Length))
         {
-            return new BrokerPartTaking(null, null, (4000, string.Create(CultureInfo.InvariantCulture, $"a part would pass heldBytesBudget {bounds.Budget.Budget}")));
+            Stop();
+
+            return new BrokerPartTaking(null, null, (4000, string.Create(CultureInfo.InvariantCulture, $"a part would pass its participant's heldBytesBudget, {bounds.Budget.Budget} bytes")));
         }
 
         if (_firstAt is null)
@@ -218,13 +232,23 @@ internal sealed class BrokerParts(BrokerPartsBounds bounds, Action late)
 
         _held.AddRange(carried.Span);
 
-        // * armed at the grace by the first part; judged then, and armed again while on time
-        if (_timer is null)
+        if (isMore)
         {
-            Rearm();
+            // * armed at the grace by the first part; judged then, and armed again while on time
+            if (_timer is null)
+            {
+                Rearm();
+            }
+
+            return new BrokerPartTaking(null, null, null);
         }
 
-        return new BrokerPartTaking(null, null, null);
+        var whole = _held.ToArray();
+        var carriedCredential = _credential;
+
+        Stop();
+
+        return new BrokerPartTaking(whole, carriedCredential, null);
     }
 
     /// <summary>Whether its parts are owed more than came, now: they came too slowly.</summary>

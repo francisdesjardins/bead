@@ -3,6 +3,7 @@
 // dependencies
 
 import { ProgrammerError } from './errors';
+import { isFieldValue } from '../client/transport-client';
 
 // interfaces
 
@@ -170,6 +171,22 @@ export const isKindToCome = (kind: number): boolean => {
   return kind > ParcelKind.GONE && kind < FIRST_ADVISORY_KIND;
 };
 
+/** A byte as a report writes it, as the spec does: `0xB1`, two digits in capitals. */
+export const hexOfByte = (byte: number): string => {
+  return `0x${byte.toString(16).toUpperCase().padStart(2, '0')}`;
+};
+
+/** A kind as a report names it, its article before it: `an OPEN`, `a DATA`; `a parcel` for none. */
+export const kindNamed = (kind: number): string => {
+  const name = KIND_NAMES[kind];
+
+  if (name === undefined) {
+    return 'a parcel';
+  }
+
+  return `${/^[AEIOU]/u.test(name) ? 'an' : 'a'} ${name}`;
+};
+
 /** A string a character a byte, as an id and a credential are written. */
 const latin1Of = (bytes: Uint8Array): string => {
   return String.fromCharCode(...bytes);
@@ -259,7 +276,7 @@ const bodyOf = (
 ): Partial<IParcel> | string => {
   const reader = createBodyReader(body);
   const exact = (fields: Partial<IParcel>): Partial<IParcel> | string => {
-    return reader.isDone ? fields : 'a body longer than its kind’s';
+    return reader.isDone ? fields : "a body longer than its kind's";
   };
 
   switch (kind) {
@@ -270,7 +287,7 @@ const bodyOf = (
       const bound = reader.u32();
 
       if (id === undefined || incarnation === undefined || bound === undefined) {
-        return 'a body shorter than its kind’s';
+        return "a body shorter than its kind's";
       }
 
       // an OPEN's id that is no token, or its bound under 1,024, is its acceptor's to refuse, 400
@@ -317,6 +334,11 @@ const bodyOf = (
         }
 
         credential = latin1Of(bytes);
+
+        // a credential is any field value (spec 15.5)
+        if (!isFieldValue(credential)) {
+          return 'a credential that is no field value';
+        }
       }
 
       if (reader.left === 0) {
@@ -346,7 +368,7 @@ const bodyOf = (
       const id = idOf(reader);
 
       if (incarnation === undefined || id === undefined) {
-        return 'a body shorter than its kind’s';
+        return "a body shorter than its kind's";
       }
 
       return isToken(id) ? exact({ id, incarnation }) : 'an id that is no token';
@@ -366,7 +388,7 @@ const prefixFaultOf = ({ kind, opener, acceptor, sequence }: IParcelPrefix): str
   const isUnsequenced = kind === ParcelKind.RESET || kind === ParcelKind.GONE;
 
   if (isUnsequenced !== (sequence === 0)) {
-    return isUnsequenced ? `a ${KIND_NAMES[kind]} with a sequence` : 'a sequence of 0';
+    return isUnsequenced ? `${kindNamed(kind)} with a sequence` : 'a sequence of 0';
   }
 
   if (kind === ParcelKind.GONE) {
@@ -431,13 +453,11 @@ const readOfLayout = (
   }
 
   if (kind === 0 || isKindToCome(kind)) {
-    return refused(
-      kind === 0 ? 'a kind of 0x00, never one' : `a kind to come, 0x${kind.toString(16)}`
-    );
+    return refused(kind === 0 ? 'a kind of 0x00, never one' : `a kind to come, ${hexOfByte(kind)}`);
   }
 
   if ((flags & ~(FLAGS_TAKEN[kind] ?? 0)) !== 0) {
-    return refused(`a flag a ${KIND_NAMES[kind] ?? 'parcel'} does not take`);
+    return refused(`a flag ${kindNamed(kind)} does not take`);
   }
 
   if (kept !== 0) {
@@ -469,7 +489,7 @@ export const readParcel = (bytes: Uint8Array): ParcelRead => {
 
   if (layout === undefined || layout < PARCEL_LAYOUT || layout > LAST_PARCEL_LAYOUT) {
     return {
-      reason: `a first byte of 0x${(layout ?? 0).toString(16)}, outside 0xb1 to 0xbf`,
+      reason: `a first byte of ${hexOfByte(layout ?? 0)}, outside 0xB1 to 0xBF`,
       refused: 'no-parcel',
     };
   }
@@ -599,7 +619,7 @@ export const writeParcel = (fields: ParcelFields): Uint8Array => {
 
   if (layout !== PARCEL_LAYOUT || KIND_NAMES[kind] === undefined) {
     throw new ProgrammerError(
-      `a parcel written is of layout 0xb1 and of a kind from 1 to 9, not ${String(layout)} and ${String(kind)}`
+      `a parcel of the layout ${hexOfByte(layout)} and the kind ${hexOfByte(kind)} is read, never written`
     );
   }
 
@@ -608,7 +628,7 @@ export const writeParcel = (fields: ParcelFields): Uint8Array => {
     (!isToken(id) || bound < LEAST_RECEIVE_BOUND)
   ) {
     throw new ProgrammerError(
-      `an ${KIND_NAMES[kind]} names a token and a receive bound of 1,024 bytes at least`
+      `${kindNamed(kind)} names a token and a receive bound of 1,024 bytes at least`
     );
   }
 
@@ -616,7 +636,7 @@ export const writeParcel = (fields: ParcelFields): Uint8Array => {
   const read = readParcel(bytes);
 
   if (!('parcel' in read)) {
-    throw new ProgrammerError(`a parcel that would not read: ${read.reason}`);
+    throw new ProgrammerError(`a parcel this side refuses is never written: ${read.reason}`);
   }
 
   return bytes;

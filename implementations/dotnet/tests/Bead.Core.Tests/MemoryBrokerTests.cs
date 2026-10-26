@@ -176,4 +176,21 @@ public sealed class MemoryBrokerTests
         Assert.Equal((1, false), (downs, leaving.IsLinked));
         Assert.True(lost.IsLinked);
     }
+
+    [Fact]
+    public async Task Refuses_a_second_adapter_of_one_id_and_a_will_asked_of_an_adapter_that_takes_none()
+    {
+        var broker = new MemoryBroker();
+        var plain = broker.Adapter(new MemoryBrokerAdapterOptions { Id = "ada", Capabilities = BrokerCapabilities.None });
+
+        Assert.Equal("an adapter of this broker is ada already (Parameter 'options')", Assert.Throws<ArgumentException>(() =>
+        {
+            return broker.Adapter(new MemoryBrokerAdapterOptions { Id = "ada" });
+        }).Message);
+        Assert.Equal("the adapter of ada takes no will (Parameter 'start')", (await Assert.ThrowsAsync<ArgumentException>(() =>
+        {
+            return plain.Start(new BrokerStart { Will = new BrokerPublication { Topic = ["bead", "d", "ada"], Payload = "gone"u8.ToArray() } });
+        })).Message);
+        Assert.False(plain.IsLinked);
+    }
 }
