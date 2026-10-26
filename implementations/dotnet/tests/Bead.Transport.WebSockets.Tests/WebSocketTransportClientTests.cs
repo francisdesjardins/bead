@@ -22,27 +22,65 @@ public sealed class WebSocketTransportClientTests : IAsyncLifetime
     [Fact]
     public async Task Bounds_an_unresponsive_WebSocket_handshake_by_cancellation_timeout_and_disposal()
     {
-        foreach (var ending in new[] { "cancel", "timeout", "dispose" })
+        var unobserved = new ConcurrentQueue<Exception>();
+        void Observe(object? sender, UnobservedTaskExceptionEventArgs args)
         {
-            var time = new FakeTimeProvider();
-            using var handler = new PendingUpgrade();
-            using var invoker = new HttpMessageInvoker(handler);
-            using var cancelling = new CancellationTokenSource();
-            await using var client = new WebSocketTransportClient(new WebSocketTransportClientOptions { Clock = time, Invoker = invoker });
-            var connecting = client.Connect(Target with { Timeout = TimeSpan.FromMilliseconds(100) }, cancelling.Token);
-            var outcome = Record.ExceptionAsync(() => { return connecting; });
-            await handler.Entered.Task.WaitAsync(Patience, Cancelled);
-            if (ending == "cancel") { await cancelling.CancelAsync(); }
-            else if (ending == "timeout") { time.Advance(TimeSpan.FromMilliseconds(100)); }
-            else { await client.DisposeAsync(); }
-            var failure = await outcome.AsTask().WaitAsync(Patience, Cancelled);
-            if (ending == "cancel") { Assert.IsAssignableFrom<OperationCanceledException>(failure); }
-            else if (ending == "timeout") { Assert.IsType<TimeoutException>(failure); }
-            else { Assert.Equal("the transport client was disposed as it connected", Assert.IsType<WebSocketException>(failure).Message); }
-            Assert.Equal(ReadyState.Closed, client.ReadyState);
-            handler.Answer.TrySetException(new InvalidOperationException("late upgrade failure"));
-            Assert.Empty(_server.ConnectionHandles);
+            foreach (var reason in args.Exception.Flatten().InnerExceptions)
+            {
+                if (reason.Message.Contains("late upgrade failure", StringComparison.Ordinal))
+                {
+                    unobserved.Enqueue(reason);
+                    args.SetObserved();
+                }
+            }
         }
+        TaskScheduler.UnobservedTaskException += Observe;
+        try
+        {
+            foreach (var ending in new[] { "cancel", "timeout", "dispose" })
+            {
+                var released = await LateUpgrade(ending);
+                for (var tries = 0; tries < 10 && released.IsAlive; tries++)
+                {
+                    GC.Collect();
+                    GC.WaitForPendingFinalizers();
+                    await Task.Yield();
+                }
+                Assert.False(released.IsAlive);
+                GC.Collect();
+                GC.WaitForPendingFinalizers();
+            }
+            Assert.Empty(unobserved);
+        }
+        finally
+        {
+            TaskScheduler.UnobservedTaskException -= Observe;
+        }
+    }
+
+    // the scope releases every task before its caller forces collection of the late failure
+    private async Task<WeakReference> LateUpgrade(string ending)
+    {
+        var time = new FakeTimeProvider();
+        using var handler = new PendingUpgrade();
+        using var invoker = new HttpMessageInvoker(handler);
+        using var cancelling = new CancellationTokenSource();
+        await using var client = new WebSocketTransportClient(new WebSocketTransportClientOptions { Clock = time, Invoker = invoker });
+        var connecting = client.Connect(Target with { Timeout = TimeSpan.FromMilliseconds(100) }, cancelling.Token);
+        var outcome = Record.ExceptionAsync(() => { return connecting; });
+        await handler.Entered.Task.WaitAsync(Patience, Cancelled);
+        if (ending == "cancel") { await cancelling.CancelAsync(); }
+        else if (ending == "timeout") { time.Advance(TimeSpan.FromMilliseconds(100)); }
+        else { await client.DisposeAsync(); }
+        var failure = await outcome.AsTask().WaitAsync(Patience, Cancelled);
+        if (ending == "cancel") { Assert.IsAssignableFrom<OperationCanceledException>(failure); }
+        else if (ending == "timeout") { Assert.IsType<TimeoutException>(failure); }
+        else { Assert.Equal("the transport client was disposed as it connected", Assert.IsType<WebSocketException>(failure).Message); }
+        Assert.Equal(ReadyState.Closed, client.ReadyState);
+        handler.Answer.TrySetException(new InvalidOperationException("late upgrade failure"));
+        // this continuation waits for delivery without reading the failure it must leave to the client
+        await handler.Answer.Task.ContinueWith((_) => { }, CancellationToken.None, TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
+        return new WeakReference(handler.Answer.Task);
     }
 
     private sealed class PendingUpgrade : HttpMessageHandler
@@ -711,7 +749,15 @@ public sealed class WebSocketTransportClientTests : IAsyncLifetime
                 Assert.True(providerToken.IsCancellationRequested);
                 if (late == "value") { answer.TrySetResult(Bearer); }
                 else { answer.TrySetException(new InvalidOperationException("late provider failure")); }
+                // a round trip through the server lets a late continuation reach it before the count
+                await using var probe = new WebSocketTransportClient();
+                await probe.Connect(Target, Cancelled).WaitAsync(Patience, Cancelled);
+                var probeHandle = await Next(_connections);
+                Assert.Single(_server.ConnectionHandles);
+                await probe.CloseConnection(new TransportDisconnectOptions { IsQuick = true });
+                Assert.Equal(probeHandle, (await Next(_closes)).ConnectionHandle);
                 Assert.Empty(_server.ConnectionHandles);
+                Assert.Equal(0, _connections.Reader.Count);
             }
         }
     }
