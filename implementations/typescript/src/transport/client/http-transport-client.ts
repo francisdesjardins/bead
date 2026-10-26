@@ -347,7 +347,7 @@ export const createHTTPTransportClient = (
         }).then(drain, noop);
       };
 
-      // The platform's network failure retries a listen; an executor's own failure ends it.
+      // the platform's network failure retries a listen; an executor's own failure ends it
       const executorFailureOf = (
         reason: unknown,
         signal: AbortSignal

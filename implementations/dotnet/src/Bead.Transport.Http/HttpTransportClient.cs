@@ -1269,7 +1269,7 @@ public sealed class HttpTransportClient : IRouterClientTransport, IAsyncDisposab
         }
     }
 
-    // The platform's network failure retries a listen; an executor's own failure ends it.
+    // the platform's network failure retries a listen; an executor's own failure ends it
     private static InvalidOperationException? ExecutorFailureOf(Exception reason, CancellationToken cancellationToken)
     {
         if (cancellationToken.IsCancellationRequested || reason is HttpRequestException or IOException)
