@@ -11,7 +11,8 @@ import { fileURLToPath } from 'node:url';
 // constants
 
 const INTEROP = new URL('./', import.meta.url);
-const SERVER = new URL('dist/interop-server.mjs', INTEROP);
+// Each fixture process imports its own bundle while other fixtures build theirs.
+const SERVER = new URL(`dist/interop-server-${process.pid}.mjs`, INTEROP);
 
 // definition
 
