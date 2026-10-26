@@ -1,9 +1,8 @@
 // ── Transports ────────────────────────────────────────────────────────────────
 
-// Bead's transports' cases, `spec/transports.json`, played against Bead's TypeScript server of the
-// interop service over HTTP and WebSocket: a peer of the test's own writes octets, then frames, on a
-// socket per exchange, and reads what the server sends and reports. The C# server plays the same
-// file.
+// Bead's transports' cases, `spec/transports.json`, played against this side's server of the
+// interop service, or a broker client's transport: by a peer writing octets, then frames, on a socket
+// per exchange, or by participants of the in-memory broker. The C# side plays the same file.
 
 // dependencies
 
@@ -30,6 +29,15 @@ import { CONNECTION_INACTIVITY_TIMEOUT } from '../../../server/http-server';
 import { createServer } from '../../../server/server';
 import type { IServer, IServerTransportLike } from '../../../server/types';
 import { createWSServer } from '../../../server/ws-server';
+import { BrokerRefusedError } from '../../client/broker-transport-client';
+import type { BrokerTransportClient } from '../../client/types';
+import {
+  createBrokerParticipant,
+  MAXIMUM_ENVELOPE_PARTS_BYTES,
+} from '../../shared/broker-participant';
+import { HELD_BYTES_BUDGET } from '../../shared/broker-sequence';
+import { ConnectError } from '../../shared/errors';
+import { BROKER_PUBLISHED, createMemoryBroker } from '../../shared/memory-broker';
 import { createTestClock, duesOn, type TestClock } from '../../shared/__tests__/fixtures';
 import {
   BODY_BYTES_BUDGET,
@@ -51,11 +59,22 @@ import {
   type IHTTPTransportServerOptions,
 } from '../http-transport-server';
 import type {
+  BrokerTransportServer,
   ITransportServer,
   ITransportServerRefusal,
   TransportServerConnectionHandle,
 } from '../types';
+import { ACCEPT_TIMEOUT } from '../broker-transport-server';
 import { createWSTransportServer, HEARTBEAT, MAXIMUM_UNSENT_BYTES } from '../ws-transport-server';
+import {
+  createBrokerPeers,
+  expectedSeenOf,
+  filledOf as parcelFilledOf,
+  type IBrokerPeers,
+  type IParcelFields,
+  type IPublication,
+  seenOf as parcelSeenOf,
+} from './broker-peer';
 import { createFakeWebSocketServer } from './fake-websocket-server';
 import {
   closeFrameOf,
@@ -157,14 +176,47 @@ interface ICase {
   limits?: RouterLimitsOptions;
   name: string;
   options?: Omit<IHTTPTransportServerOptions, 'createServer'> & {
+    acceptTimeout?: number;
     connectionInactivityTimeout?: number;
+    group?: true;
     heartbeat?: number;
+    heldBytesBudget?: number;
+    maximumEnvelopePartsBytes?: number;
     maximumMessageBytes?: number;
+    maximumQueuedMessages?: number;
     maximumUnsentBytes?: number;
+    names?: string[];
   };
+  peers?: string[];
   realTime?: true;
+  role?: 'client';
   steps: IStep[];
   transport: string;
+}
+
+/** What a broker case expects next: a parcel a peer reads, or what the transport under test does. */
+interface IBrokerExpectation {
+  closed?: { clean: boolean };
+  failed?: { layouts?: number[]; reason: string; status?: number };
+  opened?: true;
+  parcel?: IParcelFields;
+  received?: IExpected;
+  secure?: boolean;
+  told?: { address: string; reason: string; status: number };
+}
+
+/** One step of a broker case. */
+interface IBrokerStep extends Partial<IPublication> {
+  advance?: number;
+  connect?: string;
+  expect?: IBrokerExpectation;
+  on?: string;
+  reported?: string[];
+  stop?: true | { crossing: IPublication };
+  transportSend?: { credential?: string; envelope: string };
+  until?: { gauge: string; is: number } | { timer: number };
+  wait?: number;
+  within?: number;
 }
 
 /** A response cut across reads, as every side's reader reads it. */
@@ -204,7 +256,7 @@ const TRANSPORTS = JSON.parse(
 const HOST = '127.0.0.1';
 
 // the transports this harness plays a case over
-const PLAYED_TRANSPORTS: ReadonlySet<string> = new Set(['http', 'websocket']);
+const PLAYED_TRANSPORTS: ReadonlySet<string> = new Set(['broker', 'http', 'websocket']);
 
 // ! every key of a step this harness reads: one it does not know fails the step, rather than pass it
 // unplayed
@@ -216,9 +268,37 @@ const CASE_KEYS: ReadonlySet<string> = new Set([
   'limits',
   'name',
   'options',
+  'peers',
   'realTime',
+  'role',
   'steps',
   'transport',
+]);
+// a broker step's keys, and those that modify its act rather than make one
+const BROKER_STEP_KEYS: ReadonlySet<string> = new Set([
+  'advance',
+  'connect',
+  'expect',
+  'from',
+  'on',
+  'publish',
+  'refused',
+  'reported',
+  'retained',
+  'stop',
+  'to',
+  'transportSend',
+  'until',
+  'wait',
+  'within',
+]);
+const BROKER_MODIFIERS: ReadonlySet<string> = new Set([
+  'from',
+  'on',
+  'refused',
+  'retained',
+  'to',
+  'within',
 ]);
 const STEP_KEYS: ReadonlySet<string> = new Set([
   'advance',
@@ -239,43 +319,58 @@ const PATIENCE = 10_000;
 
 // ! every option and limit this harness reads, by transport, as the C# side's: one it does not read
 // fails its case, where it would play on the default unseen
-const OPTION_KEYS: Readonly<Record<'http' | 'websocket', ReadonlySet<string>>> = Object.freeze({
-  http: new Set([
-    'maximumConnections',
-    'maximumConnectionsPerAddress',
-    'maximumWaitingExchanges',
-    'bodyBytesBudget',
-    'maximumBodyBytes',
-    'maximumOutboxBytes',
-    'maximumWait',
-    'exchangeTimeout',
-    'inactivityTimeout',
-    'hosts',
-    'origins',
-    'trustedProxies',
-    'unnamedProxies',
-    'minimumSendBytesPerSecond',
-    'sendGracePeriod',
-    'headersTimeout',
-    'minimumBodyBytesPerSecond',
-    'bodyGracePeriod',
-    'connectionInactivityTimeout',
-  ]),
-  websocket: new Set([
-    'maximumMessageBytes',
-    'heartbeat',
-    'hosts',
-    'origins',
-    'trustedProxies',
-    'unnamedProxies',
-    'maximumConnections',
-    'maximumConnectionsPerAddress',
-    'minimumSendBytesPerSecond',
-    'sendGracePeriod',
-    'maximumUnsentBytes',
-    'headersTimeout',
-  ]),
-});
+const OPTION_KEYS: Readonly<Record<'broker' | 'http' | 'websocket', ReadonlySet<string>>> =
+  Object.freeze({
+    broker: new Set([
+      'maximumConnections',
+      'maximumConnectionsPerAddress',
+      'maximumUnsentBytes',
+      'minimumBodyBytesPerSecond',
+      'bodyGracePeriod',
+      'heartbeat',
+      'acceptTimeout',
+      'maximumEnvelopePartsBytes',
+      'heldBytesBudget',
+      'names',
+      'group',
+      'maximumQueuedMessages',
+    ]),
+    http: new Set([
+      'maximumConnections',
+      'maximumConnectionsPerAddress',
+      'maximumWaitingExchanges',
+      'bodyBytesBudget',
+      'maximumBodyBytes',
+      'maximumOutboxBytes',
+      'maximumWait',
+      'exchangeTimeout',
+      'inactivityTimeout',
+      'hosts',
+      'origins',
+      'trustedProxies',
+      'unnamedProxies',
+      'minimumSendBytesPerSecond',
+      'sendGracePeriod',
+      'headersTimeout',
+      'minimumBodyBytesPerSecond',
+      'bodyGracePeriod',
+      'connectionInactivityTimeout',
+    ]),
+    websocket: new Set([
+      'maximumMessageBytes',
+      'heartbeat',
+      'hosts',
+      'origins',
+      'trustedProxies',
+      'unnamedProxies',
+      'maximumConnections',
+      'maximumConnectionsPerAddress',
+      'minimumSendBytesPerSecond',
+      'sendGracePeriod',
+      'maximumUnsentBytes',
+      'headersTimeout',
+    ]),
+  });
 const LIMIT_KEYS: ReadonlySet<string> = new Set([
   'maximumEnvelopeBytes',
   'chunkBytes',
@@ -774,6 +869,353 @@ const expectHeard = async (
   });
 };
 
+/** What a promise came to, once it settles: its value, or what it rejected with. */
+const settlingOf = <T>(promise: Promise<T>): Promise<{ error: unknown } | { value: T }> => {
+  return promise.then(
+    (value) => {
+      return { value };
+    },
+    (error: unknown) => {
+      return { error };
+    }
+  );
+};
+
+/** The next of `queue` within `within` milliseconds on the real clock, taken from it, or none. */
+const nextOf = async <T>(queue: T[], within: number): Promise<T | undefined> => {
+  const deadline = Date.now() + within;
+
+  while (queue.length === 0 && Date.now() < deadline) {
+    await sleep(POLL);
+  }
+
+  return queue.shift();
+};
+
+/**
+ * Plays a broker case (spec 15.16 to 15.24) on the in-memory broker: in the server role, the interop
+ * service's server on a broker server transport over the participant `server`, serving its names; in
+ * the client role, a broker client transport alone over the participant `client`; the test's peers,
+ * each an adapter of the same broker, publishing parcels and reading their inboxes. The participant's
+ * `maximumEnvelopePartsBytes` is its router's `maximumEnvelopeBytes` unless the case sets it, as an
+ * application builds both alike.
+ */
+const playBrokerCase = async (testCase: ICase): Promise<void> => {
+  const { limits, options = {}, peers: ids = ['peer'], role, steps } = testCase;
+  const isClient = role === 'client';
+
+  expect(
+    Object.keys(testCase).filter((key) => {
+      return !CASE_KEYS.has(key);
+    }),
+    'the keys of the case this harness does not read'
+  ).toEqual([]);
+
+  for (const name of Object.keys(options)) {
+    if (!OPTION_KEYS.broker.has(name)) {
+      throw new Error(`a case sets an option no test reads: ${name}`);
+    }
+  }
+
+  for (const name of Object.keys(limits ?? {})) {
+    if (!LIMIT_KEYS.has(name)) {
+      throw new Error(`a case sets a limit no test reads: ${name}`);
+    }
+  }
+
+  const clock = createTestClock(Date.parse(TRANSPORTS.wallClock));
+  const broker = createMemoryBroker({
+    clock,
+    maximumQueuedMessages: options.maximumQueuedMessages,
+  });
+  const adapter = broker.adapter({ id: isClient ? 'client' : 'server' });
+  const participant = createBrokerParticipant({
+    adapter,
+    bodyGracePeriod: options.bodyGracePeriod,
+    clock,
+    heartbeat: options.heartbeat,
+    heldBytesBudget: options.heldBytesBudget,
+    maximumEnvelopePartsBytes: options.maximumEnvelopePartsBytes ?? limits?.maximumEnvelopeBytes,
+    minimumBodyBytesPerSecond: options.minimumBodyBytesPerSecond,
+    reconnect: false,
+  });
+  const values = new Map<string, string>();
+  const reports: IReport[] = [];
+  const refusals: ITransportServerRefusal[] = [];
+  const errors: { connectionHandle: string; error: Error }[] = [];
+  const closes: { address: string | undefined; wasClean: boolean }[] = [];
+  const received: Uint8Array[] = [];
+  // the peer each connection the server told was opened by, by its handle
+  const addresses = new Map<string, string>();
+  let server: (AsyncDisposable & IServer<BrokerTransportServer, string>) | undefined;
+  let client: BrokerTransportClient | undefined;
+  let connecting: Promise<{ error: unknown } | { value: void }> | undefined;
+  let peers: (IBrokerPeers & AsyncDisposable) | undefined;
+
+  if (isClient) {
+    client = participant.transportClient();
+    client.on('message', ({ data }) => {
+      received.push(new Uint8Array(data as ArrayBuffer | Uint8Array));
+    });
+    client.on('close', (wasClean) => {
+      closes.push({ address: undefined, wasClean });
+    });
+    client.on('error', (error) => {
+      errors.push({ connectionHandle: '', error });
+    });
+  } else {
+    const transport = participant.transportServer({
+      acceptTimeout: options.acceptTimeout,
+      group: options.group,
+      maximumConnections: options.maximumConnections,
+      maximumConnectionsPerAddress: options.maximumConnectionsPerAddress,
+      maximumUnsentBytes: options.maximumUnsentBytes,
+      names: options.names ?? ['interop'],
+    });
+
+    server = createServer<BrokerTransportServer, string>(
+      { transport },
+      { credentials: interopCredentialsOf(clock, limits), limits }
+    );
+    server.router.on('error', (error, connectionHandle) => {
+      reports.push({
+        code: error instanceof FailureError ? error.code : 'exception',
+        connectionHandle,
+      });
+    });
+    transport.on('refusal', (refusal) => {
+      refusals.push(refusal);
+    });
+    transport.on('error', (error, connectionHandle) => {
+      errors.push({ connectionHandle, error });
+    });
+    transport.on('connection', (...[peer, , connectionHandle]) => {
+      addresses.set(connectionHandle, peer.id);
+    });
+    transport.on('close', (wasClean, connectionHandle) => {
+      closes.push({ address: addresses.get(connectionHandle), wasClean });
+    });
+    offerInterop(server);
+    await transport.start();
+  }
+
+  const expectNothingReported = (when: string): void => {
+    expect(reports, when).toEqual([]);
+    expect(refusals, `${when}: the refusals told`).toEqual([]);
+    expect(
+      errors.map(({ error }) => {
+        return error.message;
+      }),
+      `${when}: what the transport reported`
+    ).toEqual([]);
+  };
+
+  try {
+    peers = await createBrokerPeers(broker, { ids, isClient, under: adapter.id });
+
+    for (const [index, step] of (steps as IBrokerStep[]).entries()) {
+      const at = `step ${String(index + 1)}`;
+      const within = step.within ?? PATIENCE;
+
+      expect(
+        Object.keys(step).filter((key) => {
+          return !BROKER_STEP_KEYS.has(key);
+        }),
+        `${at}: the keys this harness does not read`
+      ).toEqual([]);
+      expect(
+        Object.keys(step).filter((key) => {
+          return !BROKER_MODIFIERS.has(key);
+        }),
+        `${at}: the acts it holds`
+      ).toHaveLength(1);
+
+      if (step.publish !== undefined || step.stop !== undefined) {
+        expectNothingReported(`before ${at}`);
+      }
+
+      if (step.publish !== undefined) {
+        const published = await peers.publish(step as IPublication, values);
+
+        expect(published, `${at}: what the broker said of it`).toEqual(
+          published.map(() => {
+            return step.refused ?? BROKER_PUBLISHED.TAKEN;
+          })
+        );
+      }
+
+      if (step.stop !== undefined) {
+        // * what crosses the stop is published in the turn it begins, before it
+        const crossing =
+          step.stop === true ? Promise.resolve([]) : peers.publish(step.stop.crossing, values);
+
+        await Promise.all([crossing, server?.transport.stop()]);
+      }
+
+      if (step.wait !== undefined) {
+        await sleep(step.wait);
+      }
+
+      if (step.connect !== undefined && client !== undefined) {
+        connecting = settlingOf(client.connect({ server: step.connect }));
+      }
+
+      if (step.transportSend !== undefined) {
+        const { credential, envelope } = step.transportSend;
+
+        await client?.send({ credential, data: fromHexadecimal(envelope) });
+      }
+
+      const expectation = step.expect;
+
+      if (expectation?.parcel !== undefined) {
+        const message = await peers.next(step.on ?? 'peer', within);
+
+        expect(
+          message === undefined
+            ? `nothing within ${String(within)} ms`
+            : parcelSeenOf(message.payload, { expected: expectation.parcel, values }),
+          `${at}: the parcel ${step.on ?? 'peer'} reads`
+        ).toEqual(expectedSeenOf(expectation.parcel));
+
+        if (expectation.told !== undefined) {
+          const refusal = await nextOf(refusals, PATIENCE);
+
+          expect(
+            refusal === undefined
+              ? 'none told'
+              : { address: refusal.address, reason: refusal.reason, status: refusal.status },
+            `${at}: the refusal told`
+          ).toEqual({
+            ...expectation.told,
+            address: parcelFilledOf(expectation.told.address, values),
+          });
+          expect(
+            { authority: refusal?.authority, origin: refusal?.origin },
+            `${at}: what the refusal tells besides`
+          ).toEqual({ authority: undefined, origin: undefined });
+        }
+      }
+
+      if (expectation?.closed !== undefined) {
+        const deadline = Date.now() + within;
+        const isTheirs = ({ address }: { address: string | undefined }): boolean => {
+          return isClient || address === step.on;
+        };
+
+        while (!closes.some(isTheirs) && Date.now() < deadline) {
+          await sleep(POLL);
+        }
+
+        const found = closes.findIndex(isTheirs);
+        const [close] = found === -1 ? [] : closes.splice(found, 1);
+
+        expect(
+          close === undefined ? 'no close told' : { clean: close.wasClean },
+          `${at}: the close told`
+        ).toEqual(expectation.closed);
+      }
+
+      if (expectation?.opened !== undefined || expectation?.failed !== undefined) {
+        const settled =
+          connecting === undefined ? undefined : await settledWithin(connecting, within);
+        const outcome = settled?.value;
+        let seen: unknown = 'the connect did not settle';
+
+        if (outcome !== undefined && 'value' in outcome) {
+          seen = { opened: true };
+        } else if (
+          outcome !== undefined &&
+          outcome.error instanceof ConnectError &&
+          outcome.error.cause instanceof BrokerRefusedError
+        ) {
+          const { layouts, reason, status } = outcome.error.cause;
+
+          seen = {
+            failed: {
+              ...(layouts === undefined ? {} : { layouts: [...layouts] }),
+              reason,
+              ...(status === undefined ? {} : { status }),
+            },
+          };
+        } else if (outcome !== undefined) {
+          seen = { error: String(outcome.error) };
+        }
+
+        expect(seen, `${at}: the connect`).toEqual(
+          expectation.opened === undefined ? { failed: expectation.failed } : { opened: true }
+        );
+      }
+
+      if (expectation?.received !== undefined) {
+        const bytes = await nextOf(received, within);
+
+        expect(
+          bytes === undefined ? 'nothing received' : envelopeOf(bytes, expectation.received),
+          `${at}: the envelope received`
+        ).toEqual(expectation.received);
+      }
+
+      if (expectation?.secure !== undefined) {
+        expect(client?.isSecure, `${at}: whether it is secure`).toBe(expectation.secure);
+      }
+
+      if (step.reported !== undefined) {
+        const reported = await nextOf(errors, PATIENCE);
+        const handle = reported?.connectionHandle ?? '';
+        const isNamed = !isClient && step.on !== undefined;
+
+        expect(reported, `${at}: a report`).toBeDefined();
+        expect(isNamed ? addresses.get(handle) : handle, `${at}: the connection reported`).toBe(
+          isNamed ? step.on : ''
+        );
+
+        for (const word of step.reported) {
+          expect(reported?.error.message, `${at}: the report`).toContain(word);
+        }
+      }
+
+      if (step.until !== undefined && 'timer' in step.until) {
+        const { timer } = step.until;
+        const isEarliest = (): boolean => {
+          const [first, second] = duesOn(clock);
+
+          return first === timer && second !== timer;
+        };
+
+        await pollWithinPatience(isEarliest);
+        expect(
+          isEarliest(),
+          `${at}: the earliest timer armed, alone so due, among ${String(duesOn(clock))}`
+        ).toBe(true);
+      } else if (step.until !== undefined) {
+        const { gauge, is } = step.until;
+        const valueOf = (): number | undefined => {
+          return gauge === 'unsettled'
+            ? adapter.unsettled
+            : server?.transport.gauges().counts[gauge];
+        };
+
+        await pollWithinPatience(() => {
+          return valueOf() === is;
+        });
+        expect(valueOf(), `${at}: ${gauge}`).toBe(is);
+      }
+
+      if (step.advance !== undefined) {
+        await clock.tickAsync(step.advance);
+      }
+    }
+
+    expectNothingReported('at the end');
+  } finally {
+    await peers?.[Symbol.asyncDispose]();
+    await server?.[Symbol.asyncDispose]();
+    await client?.[Symbol.asyncDispose]();
+    await participant.stop();
+  }
+};
+
 // a case a row of the support matrix excuses this side from, which it does not play
 const isExcused = ({ differs }: ICase): boolean => {
   return (
@@ -859,6 +1301,9 @@ test.describe('the transports', () => {
       minimumBodyBytesPerSecond: MINIMUM_BODY_BYTES_PER_SECOND,
       minimumSendBytesPerSecond: MINIMUM_SEND_BYTES_PER_SECOND,
       sendGracePeriod: SEND_GRACE_PERIOD,
+      acceptTimeout: ACCEPT_TIMEOUT,
+      maximumEnvelopePartsBytes: MAXIMUM_ENVELOPE_PARTS_BYTES,
+      heldBytesBudget: HELD_BYTES_BUDGET,
     }).toEqual(TRANSPORTS.defaults);
     expect(MAXIMUM_UNSENT_BYTES).toBe(TRANSPORTS.defaults['maximumUnsentBytes']);
   });
@@ -896,6 +1341,14 @@ test.describe('the transports', () => {
     }
 
     played.push(name);
+
+    if (transport === 'broker') {
+      test(name, async () => {
+        await playBrokerCase(testCase);
+      });
+
+      continue;
+    }
 
     test(name, async () => {
       expect(

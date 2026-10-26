@@ -8,6 +8,7 @@ export const MESSAGE_EVENT = 'message';
 export const RECONNECT_EVENT = 'reconnect';
 export const REFUSAL_EVENT = 'refusal';
 
+export const TRANSPORT_BROKER = 'BROKER';
 export const TRANSPORT_HTTP = 'HTTP';
 export const TRANSPORT_MEMORY = 'MEMORY';
 export const TRANSPORT_WORKER = 'WORKER';
@@ -73,6 +74,18 @@ export const WORKER_MESSAGES = Object.freeze({
   OPEN: 'bead-open',
 });
 
+/** The deliveries a broker's adapter gives (spec 15.19). */
+export const BROKER_DELIVERIES = Object.freeze({
+  AT_LEAST_ONCE: 'at-least-once',
+  AT_MOST_ONCE: 'at-most-once',
+});
+
+/** What a broker says of a publication: taken, or refused for want of a subscriber. */
+export const BROKER_PUBLISHED = Object.freeze({
+  NO_SUBSCRIBER: 'no-subscriber',
+  TAKEN: 'taken',
+});
+
 /**
  * How long a WebSocket's close handshake may take by default, a client's or a server's: a peer that
  * never answers is dropped after it (spec 15.3).
@@ -101,8 +114,14 @@ export type MESSAGE_EVENT = typeof MESSAGE_EVENT;
 export type RECONNECT_EVENT = typeof RECONNECT_EVENT;
 export type REFUSAL_EVENT = typeof REFUSAL_EVENT;
 
+export type TRANSPORT_BROKER = typeof TRANSPORT_BROKER;
 export type TRANSPORT_HTTP = typeof TRANSPORT_HTTP;
 export type TRANSPORT_MEMORY = typeof TRANSPORT_MEMORY;
 export type TRANSPORT_WORKER = typeof TRANSPORT_WORKER;
 export type TRANSPORT_WS = typeof TRANSPORT_WS;
-export type TRANSPORTS = TRANSPORT_HTTP | TRANSPORT_MEMORY | TRANSPORT_WORKER | TRANSPORT_WS;
+export type TRANSPORTS =
+  | TRANSPORT_BROKER
+  | TRANSPORT_HTTP
+  | TRANSPORT_MEMORY
+  | TRANSPORT_WORKER
+  | TRANSPORT_WS;

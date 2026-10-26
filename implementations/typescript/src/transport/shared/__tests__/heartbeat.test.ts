@@ -1,6 +1,7 @@
+import { setTimeout as sleep } from 'node:timers/promises';
 import { expect, test } from '@playwright/test';
 import { ProgrammerError } from '../errors';
-import { assertHeartbeat, createHeartbeat, HEARTBEAT } from '../heartbeat';
+import { assertHeartbeat, createHeartbeat, createSilenceHeartbeat, HEARTBEAT } from '../heartbeat';
 import { spyIntervals } from './fixtures';
 
 // definition
@@ -71,5 +72,61 @@ test.describe('heartbeat', () => {
     }).stop();
 
     expect(timers.cleared.at(-1)).toBe(timers.armed[0]);
+  });
+  test('pings a connection silent for its heartbeat on the platform’s timer, and drops one that answered nothing by the next', async () => {
+    const heard: string[] = [];
+    const heartbeatOf = () => {
+      return createSilenceHeartbeat(200, {
+        drop: () => {
+          heard.push('drop');
+        },
+        ping: () => {
+          heard.push('ping');
+        },
+      });
+    };
+    // * a connection that hears something more often than its heartbeat is never pinged
+    const busy = heartbeatOf();
+
+    for (let beat = 0; beat < 6; beat += 1) {
+      await sleep(50);
+      busy.heard();
+    }
+
+    expect(heard).toEqual([]);
+    busy.stop();
+
+    // one silent is pinged, and dropped once nothing answered by its heartbeat after
+    const quiet = heartbeatOf();
+
+    await sleep(300);
+    expect(heard).toEqual(['ping']);
+    await sleep(200);
+    expect(heard).toEqual(['ping', 'drop']);
+    quiet.stop();
+
+    // anything heard answers the ping, and none beats once stopped, nor for Infinity
+    heard.length = 0;
+
+    const answered = heartbeatOf();
+
+    await sleep(300);
+    answered.heard();
+    await sleep(100);
+    expect(heard).toEqual(['ping']);
+    answered.stop();
+    await sleep(300);
+    expect(heard).toEqual(['ping']);
+
+    createSilenceHeartbeat(Infinity, {
+      drop: () => {
+        heard.push('drop');
+      },
+      ping: () => {
+        heard.push('ping');
+      },
+    });
+    await sleep(40);
+    expect(heard).toEqual(['ping']);
   });
 });

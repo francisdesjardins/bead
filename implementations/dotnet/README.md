@@ -35,7 +35,8 @@ src/
   Bead.Core/                    the codec, the router's core, both sides' routers, the service,
                                 session and notification managers, the relay, the server over
                                 them, the service layer a service is served and called through,
-                                the in-memory transport and the joined server transport
+                                the in-memory transport, the joined server transport, and a
+                                broker's core over an in-memory broker
   Bead.Protobuf/                the check of a proto payload's records against its message's
                                 descriptor, which a generated proto codec calls before
                                 Google.Protobuf reads them, and what the validators beadc generates
@@ -86,6 +87,43 @@ turn, a credential and the client's address beside each request (spec 15.13). On
 its connections from several transports through `JoinedServerTransport`, each handle its own
 transport's, two of one type refused (spec 15.14): an in-memory transport beside a WebSocket one,
 say, its service offered once.
+
+A broker's core lives in `Bead.Core` too, needing no framework (spec 15.16 to 15.24, decisions 0038
+to 0040): a broker is a transport, and Bead is never a network of its own. A `BrokerParticipant` is
+one link of a side to its broker, through an `IBrokerAdapter` of that broker's client, its id the
+identity the broker authenticates the link by and its inbox, `bead/i/<id>`, every parcel of its
+connections' topic. `participant.Server(new BrokerTransportServerOptions { Names = ["interop"] })`
+serves names, alone or, with `IsInGroup`, in a group its broker places each OPEN with;
+`participant.Client()` holds one connection at a time, `Connect(new BrokerConnectOptions { Server =
+"interop" })` opening it through a name.
+
+```csharp
+var broker = new MemoryBroker();
+await using var serving = new BrokerParticipant(broker.Adapter(new MemoryBrokerAdapterOptions { Id = "server" }));
+await using var calling = new BrokerParticipant(broker.Adapter(new MemoryBrokerAdapterOptions { Id = "client" }));
+await using var transport = serving.Server(new BrokerTransportServerOptions { Names = ["interop"] });
+var client = calling.Client();
+
+await transport.Start();
+await client.Connect(new BrokerConnectOptions { Server = "interop" });
+```
+
+A connection is placed once, at its open, and named by both its ends: the client's OPEN to the name,
+the ACCEPT its server answers to the client's inbox, and the client's PING naming both halves, the
+third leg, which draws the server's handle, `type=BROKER;participant=<id>;ordinal=n`. A REFUSE, or a
+broker that says nothing serves the name, fails the connect with a `ConnectException` whose
+`InnerException` is a `BrokerRefusedException`, its `Refusal` naming the status and the reason.
+Each parcel is numbered, a copy dropped before the router and a gap the connection's loss; an
+envelope past the peer's receive bound goes in parts under `MaximumEnvelopePartsBytes`,
+`HeldBytesBudget` and the body's rate; `Heartbeat.cs` pings a silent connection on
+`TimeProvider.System`'s timer, as the TypeScript side's heartbeat does on its platform's; a
+request's credential crosses in its DATA, toward the server alone. Every link is a new incarnation
+that keeps no broker session, its connections lost with it and its peers reset once it is back.
+`MemoryBroker` offers every capability an adapter may, and copies, holds, drops and redelivers a
+message as a test asks (`Fault`), bounds each subscriber's queue, and loses a link with its will
+(`Lose`): the broker cases of [`spec/transports.json`](../../spec/transports.json), in both roles,
+play over it in `BrokerTransportsTests`, and the conversations through a broker pair. A binding to
+a real broker, MQTT 5's first, is a project of its own, beside its adapter.
 
 ### HTTP/JSON transcoding, a gateway
 

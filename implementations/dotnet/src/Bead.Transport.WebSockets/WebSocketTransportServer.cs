@@ -686,7 +686,7 @@ public sealed class WebSocketTransportServer : IServerTransport, IAsyncDisposabl
     /// </summary>
     internal static long UnsentBytesOf(RouterLimits limits)
     {
-        return (2L * limits.MaximumAnsweringCalls * limits.ChunkBytes) + ((long)limits.MaximumTransfers * limits.WindowBytes) + (2L * limits.MaximumEnvelopeBytes);
+        return ServerBounds.UnsentBytesOf(limits);
     }
 
 

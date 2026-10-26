@@ -17,6 +17,13 @@ public static class TransportTypes
     /// client gave, or <c>local</c>, and its rank (spec 15.13).
     /// </summary>
     public const string Memory = "MEMORY";
+
+    /// <summary>
+    /// Over the in-memory broker (spec 15.24): <c>type=BROKER;participant=…;ordinal=…</c>, a
+    /// connection its third leg proved, by its peer participant's id and its rank; a broker's
+    /// adapter of another names its own type, which its handles begin with.
+    /// </summary>
+    public const string Broker = "BROKER";
 }
 
 /// <summary>
