@@ -965,7 +965,7 @@ public sealed class HttpTransportClient : IRouterClientTransport, IAsyncDisposab
         if (response.IsSuccessStatusCode)
         {
             settled.SetResult();
-            _ = Answering((connection, response));
+            await Answering((connection, response));
 
             return;
         }

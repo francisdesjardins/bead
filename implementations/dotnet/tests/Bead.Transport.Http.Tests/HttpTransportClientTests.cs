@@ -419,6 +419,9 @@ public sealed class HttpTransportClientTests
 
         public Exception? Cut { get; init; }
 
+        // a supplied answer can fail while its content headers compute their length
+        public Exception? LengthFailure { get; init; }
+
         // settled once its body is read at all
         public TaskCompletionSource? Read { get; init; }
 
@@ -481,6 +484,10 @@ public sealed class HttpTransportClientTests
 
         protected override bool TryComputeLength(out long length)
         {
+            if (answer.LengthFailure is { } failure)
+            {
+                throw failure;
+            }
             length = 0;
 
             return false;
@@ -3600,6 +3607,32 @@ public sealed class HttpTransportClientTests
         {
             return call.Method;
         }));
+    }
+
+    [Fact]
+    public async Task Settles_a_send_and_loses_its_connection_when_a_supplied_answer_throws_as_it_is_read()
+    {
+        var reason = new InvalidOperationException("answer read failed");
+        await using var faked = await ConnectFake(NotListening);
+        var told = new List<string>();
+        var errors = new List<Exception>();
+        faked.Client.Error += (error) => { errors.Add(error); told.Add("error"); };
+        faked.Client.Close += (_, _) => { told.Add("close"); };
+        var sending = faked.Client.Send(new TransportMessage(EnvelopeOf(EnvelopeKind.Request, (1, 0)), false));
+        (await faked.Fetch.CallOf(1)).Answer(new Answer
+        {
+            Status = 200,
+            Headers = Bead,
+            LengthFailure = reason,
+        });
+        await sending.WaitAsync(Patience, Cancelled);
+        Assert.Equal((false, false), await faked.Closed().WaitAsync(Patience, Cancelled));
+        Assert.Equal(ReadyState.Closed, faked.Client.ReadyState);
+        Assert.Equal(["error", "close"], told);
+        var failure = Assert.Single(errors);
+        Assert.Equal("the HTTP executor failed: answer read failed", failure.Message);
+        Assert.Same(reason, failure.InnerException);
+        Assert.Equal(3, faked.Fetch.Count);
     }
 
     [Fact]

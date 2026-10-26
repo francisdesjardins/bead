@@ -855,68 +855,78 @@ export const createHTTPTransportClient = (
               method: 'POST',
               redirect: 'manual',
               signal: connection.controller.signal,
-            }).then(
-              (response) => {
-                // followed all the same: whatever the other place answered goes unheard, and the
-                // connection whose token crossed is lost
-                if (isFollowed(response)) {
+            })
+              .then(
+                (response) => {
+                  // followed all the same: whatever the other place answered goes unheard, and the
+                  // connection whose token crossed is lost
+                  if (isFollowed(response)) {
+                    drain(response);
+                    resolve();
+
+                    return (lose(connection, { isReleased: true }), undefined);
+                  }
+
+                  if (response.ok) {
+                    resolve();
+
+                    return readAnswer(connection, response);
+                  }
+
+                  // a redirect's mark is left unread: no refusal of the transport's own is one
+                  const refusal = isRedirect(response.status)
+                    ? null
+                    : response.headers.get(REFUSAL_HEADER);
+
                   drain(response);
+
+                  // a status nothing marked — a gateway's — or a redirect says nothing of whether the
+                  // server had it: lost
+                  if (refusal === null) {
+                    resolve();
+
+                    return (lose(connection, { isReleased: true }), undefined);
+                  }
+
+                  // refused by the transport before the router saw it: nothing of it was tried
+                  reject(
+                    new GenericError(
+                      `the server refused the exchange: ${String(response.status)} ${refusal}`
+                    )
+                  );
+
+                  // its connection gone: told after the refusal is heard, so its caller learns first
+                  // that it was never tried
+                  if (refusal === CONNECTION_UNKNOWN) {
+                    const loseIt = (): void => {
+                      lose(connection, { isReleased: false });
+                    };
+
+                    // oxlint-disable-next-line no-restricted-properties -- a deferral to the next turn, which no clock times
+                    globalThis.setTimeout(loseIt, 0);
+                  }
+
+                  return undefined;
+                },
+                (reason: unknown) => {
+                  // lost before its head: whether the server had it is not known, so it counts as
+                  // handed over, and the connection closes, as a dropped socket's
                   resolve();
-
-                  return (lose(connection, { isReleased: true }), undefined);
+                  lose(connection, {
+                    failure: executorFailureOf(reason, connection.controller.signal),
+                    isReleased: true,
+                  });
                 }
-
-                if (response.ok) {
-                  resolve();
-
-                  return readAnswer(connection, response);
-                }
-
-                // a redirect's mark is left unread: no refusal of the transport's own is one
-                const refusal = isRedirect(response.status)
-                  ? null
-                  : response.headers.get(REFUSAL_HEADER);
-
-                drain(response);
-
-                // a status nothing marked — a gateway's — or a redirect says nothing of whether the
-                // server had it: lost
-                if (refusal === null) {
-                  resolve();
-
-                  return (lose(connection, { isReleased: true }), undefined);
-                }
-
-                // refused by the transport before the router saw it: nothing of it was tried
-                reject(
-                  new GenericError(
-                    `the server refused the exchange: ${String(response.status)} ${refusal}`
-                  )
-                );
-
-                // its connection gone: told after the refusal is heard, so its caller learns first
-                // that it was never tried
-                if (refusal === CONNECTION_UNKNOWN) {
-                  const loseIt = (): void => {
-                    lose(connection, { isReleased: false });
-                  };
-
-                  // oxlint-disable-next-line no-restricted-properties -- a deferral to the next turn, which no clock times
-                  globalThis.setTimeout(loseIt, 0);
-                }
-
-                return undefined;
-              },
-              (reason: unknown) => {
-                // lost before its head: whether the server had it is not known, so it counts as
-                // handed over, and the connection closes, as a dropped socket's
+              )
+              .catch((reason: unknown) => {
+                // a supplied answer can fail as its fields or its body are read, after its head
                 resolve();
                 lose(connection, {
-                  failure: executorFailureOf(reason, connection.controller.signal),
+                  failure:
+                    executorFailureOf(reason, connection.controller.signal) ?? toError(reason),
                   isReleased: true,
                 });
-              }
-            );
+              });
           });
         },
 
