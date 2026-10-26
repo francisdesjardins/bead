@@ -6,12 +6,13 @@
 // dependencies
 
 import { build } from 'esbuild';
+import { rmSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
 // constants
 
 const INTEROP = new URL('./', import.meta.url);
-// Each fixture process imports its own bundle while other fixtures build theirs.
+// each launcher bundles to a file of its own, which other launchers never write while it imports it
 const SERVER = new URL(`dist/interop-server-${process.pid}.mjs`, INTEROP);
 
 // definition
@@ -26,6 +27,11 @@ await build({
   outfile: fileURLToPath(SERVER),
   platform: 'node',
   target: 'node24',
+});
+
+// its bundle goes with its process
+process.on('exit', () => {
+  rmSync(SERVER, { force: true });
 });
 
 await import(SERVER.href);
