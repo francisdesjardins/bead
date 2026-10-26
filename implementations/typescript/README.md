@@ -163,9 +163,13 @@ network in the clear, which leaves each in the clear; a worker always, since it 
 machine.
 
 A WebSocket client writes the credential its connect is given in its upgrade's `Authorization`: a
-string, `credential`, or `credentialProvider`, a function called at each attempt, a reconnection's
+string, `credential`, or `credentialProvider`, whose value each attempt awaits, a reconnection's
 included, with the attempt's `signal` — where a credential past its end is renewed, as SignalR's
-`accessTokenFactory` is (spec 15.2, decision 0032). The server hands it beside every envelope of
+`accessTokenFactory` is (spec 15.2, decision 0032). One provider call is pending per client: another
+attempt joins its outcome within its own cancellation, timeout or disposal bound. Late values
+reach only an attempt that still waits, and late failures are observed. Provider completion is
+told in a later turn; its callbacks cannot replace the connect's result. A provider's own
+cancellation fails its attempt while that attempt's signal stays live. The server hands it beside every envelope of
 that connection, as it came, trimmed, so a request presenting `ELSEWHERE` stands for it, resolved
 per request by the verifier, as over HTTP: one that no longer holds, or whose end has come, is
 refused on the request that presents it, and the connection stays. One connection carries one

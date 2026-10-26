@@ -62,6 +62,16 @@ export type {
   WSTransportClient,
 } from './types';
 
+interface ICredentialWaiter {
+  resolve: (value: string) => void;
+  reject: (reason: unknown) => void;
+}
+
+interface IPendingCredential {
+  outcome: Promise<string>;
+  abandoned: boolean;
+}
+
 // constants
 
 /** The largest message by default: a router's largest envelope by default (spec 15.3). */
@@ -210,6 +220,10 @@ export const createWSTransportClient = (options?: IWSTransportClientOptions): WS
       let isSecure = false;
       // the credential the upgrade of the current connection carried; none before it opens
       let carried: string | undefined;
+      // the provider's one pending call; an abandoned outcome serves no attempt
+      let pendingCredential: IPendingCredential | undefined;
+      // each attempt still waiting for that call's outcome
+      const credentialWaiters = new Set<ICredentialWaiter>();
 
       // a drop closes as a network does, and the open socket's `onclose` reports it
       const beatOf = (socket: IWebSocketLike): IHeartbeat | undefined => {
@@ -300,6 +314,8 @@ export const createWSTransportClient = (options?: IWSTransportClientOptions): WS
           const url = urlOf({ ...CONNECT_DEFAULTS, ...connectOptions });
           // what the attempt's credential provider is told to give up by: the attempt settled
           const attempt = new AbortController();
+          let ended = false;
+          const providerAttempt: { pending?: IPendingCredential; waiter?: ICredentialWaiter } = {};
           let opened: IWebSocketLike | undefined;
 
           isSecure = isSecureUrl(url);
@@ -432,42 +448,90 @@ export const createWSTransportClient = (options?: IWSTransportClientOptions): WS
                   return (open(credential), undefined);
                 }
 
-                // called at each attempt, before its upgrade goes: what it hands is written once
-                // held, what it throws fails the attempt, its cause
-                Promise.resolve()
-                  .then(() => {
-                    return credentialProvider({ signal: attempt.signal });
-                  })
-                  .then(
-                    (provided) => {
-                      if (attempt.signal.aborted) {
-                        return;
+                const credentialWaiter: ICredentialWaiter = {
+                  resolve: (provided) => {
+                    if (ended || signal?.aborted === true) {
+                      return;
+                    }
+
+                    if (typeof provided !== 'string' || !isFieldValue(provided)) {
+                      reject(
+                        new ProgrammerError(
+                          'a credential holds visible ASCII, spaces and tabs alone, none first or last'
+                        )
+                      );
+
+                      return;
+                    }
+
+                    open(provided);
+                  },
+                  reject: (reason: unknown) => {
+                    reject(new ConnectError('the credential provider failed', { cause: reason }));
+                  },
+                };
+                const provide = (): void => {
+                  if (ended || signal?.aborted === true) {
+                    return;
+                  }
+
+                  // an abandoned call settles before another starts; its outcome serves nothing
+                  if (pendingCredential?.abandoned === true) {
+                    providerAttempt.waiter = {
+                      resolve: () => {
+                        provide();
+                      },
+                      reject: () => {
+                        provide();
+                      },
+                    };
+                    credentialWaiters.add(providerAttempt.waiter);
+
+                    return;
+                  }
+
+                  providerAttempt.waiter = credentialWaiter;
+                  credentialWaiters.add(credentialWaiter);
+                  if (pendingCredential !== undefined) {
+                    return;
+                  }
+
+                  const pending: IPendingCredential = {
+                    abandoned: false,
+                    outcome: Promise.resolve().then(() => {
+                      return credentialProvider({ signal: attempt.signal });
+                    }),
+                  };
+                  providerAttempt.pending = pendingCredential = pending;
+                  const finish = (outcome: { value: string } | { reason: unknown }): void => {
+                    if (pendingCredential === pending) {
+                      pendingCredential = undefined;
+                    }
+                    const waiting = [...credentialWaiters];
+                    credentialWaiters.clear();
+                    for (const waiter of waiting) {
+                      if ('value' in outcome) {
+                        waiter.resolve(outcome.value);
+                      } else {
+                        waiter.reject(outcome.reason);
                       }
-
-                      if (typeof provided !== 'string' || !isFieldValue(provided)) {
-                        reject(
-                          new ProgrammerError(
-                            'a credential holds visible ASCII, spaces and tabs alone, none first or last'
-                          )
-                        );
-
-                        return;
-                      }
-
-                      open(provided);
+                    }
+                  };
+                  void pending.outcome.then(
+                    (value) => {
+                      finish({ value });
                     },
                     (reason: unknown) => {
-                      reject(new ConnectError('the credential provider failed', { cause: reason }));
+                      finish({ reason });
                     }
                   );
+                };
+                provide();
 
                 return undefined;
               },
               { clock: client.clock, signal, timeout }
             );
-
-            // the provider hears its attempt end before the kept socket is judged
-            attempt.abort();
 
             // a close or a dispose between the open and here comes after it: what it left is kept
             if (client.socket !== opened || opened.readyState !== WebSocket.OPEN) {
@@ -486,7 +550,24 @@ export const createWSTransportClient = (options?: IWSTransportClientOptions): WS
             throw reason;
           } finally {
             rejectConnect = undefined;
-            attempt.abort();
+            ended = true;
+            if (providerAttempt.waiter !== undefined) {
+              credentialWaiters.delete(providerAttempt.waiter);
+            }
+            if (providerAttempt.pending === undefined) {
+              attempt.abort();
+            } else {
+              // abandonment is visible before callbacks run, so a later attempt cannot join it
+              providerAttempt.pending.abandoned = true;
+              // oxlint-disable-next-line no-restricted-properties -- provider callbacks run after the connect settles, outside its stack
+              globalThis.setTimeout(() => {
+                try {
+                  attempt.abort();
+                } catch {
+                  /* the provider cannot replace the attempt's outcome */
+                }
+              }, 0);
+            }
           }
 
           setReadyStateOpen(client);

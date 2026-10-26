@@ -737,6 +737,12 @@ export const createHTTPTransportClient = (
                       url,
                     };
 
+                    if (attempt.controller.signal.aborted || attempt.isDisposed) {
+                      release(connection);
+                      connection = undefined;
+                      return undefined;
+                    }
+
                     return (resolve(connection), undefined);
                   },
                   (reason: unknown) => {

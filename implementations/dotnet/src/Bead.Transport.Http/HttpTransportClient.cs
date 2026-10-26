@@ -809,7 +809,27 @@ public sealed class HttpTransportClient : IRouterClientTransport, IAsyncDisposab
 
             try
             {
-                response = await HttpOf().SendAsync(request, HttpCompletionOption.ResponseHeadersRead, linked.Token);
+                var opening = HttpOf().SendAsync(request, HttpCompletionOption.ResponseHeadersRead, linked.Token);
+                try
+                {
+                    response = await opening.WaitAsync(linked.Token);
+                }
+                catch
+                {
+                    _ = opening.ContinueWith((completed) =>
+                    {
+                        if (completed.IsCompletedSuccessfully)
+                        {
+                            using var late = completed.Result;
+                            if (!IsFollowed((late, uri)) && late.StatusCode == HttpStatusCode.Created && HeaderOf(late, HttpTransport.ConnectionTokenHeader) is { } lateToken)
+                            {
+                                Release(new Drawn((lateToken, uri), false));
+                            }
+                        }
+                        else { _ = completed.Exception; }
+                    }, CancellationToken.None, TaskContinuationOptions.NotOnCanceled, TaskScheduler.Default);
+                    throw;
+                }
             }
             catch (OperationCanceledException reason) when (timeout is { IsCancellationRequested: true } && !token.IsCancellationRequested)
             {
