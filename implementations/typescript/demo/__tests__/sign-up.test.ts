@@ -144,7 +144,7 @@ test.describe('mountSignUp', () => {
   test('counts the violations its short detail leaves out when the client judges the sign-up', async ({
     page,
   }) => {
-    await page.getByRole('link', { name: 'Use a 256-byte client detail' }).click();
+    await page.getByRole('link', { name: 'a 256-byte detail' }).click();
     await expect(page.locator('#connection')).toHaveAttribute('data-state', 'open');
     await page.getByLabel('Validate before sending').check();
     await page.getByRole('button', { name: 'Break several fields' }).click();
@@ -173,7 +173,7 @@ test.describe('mountSignUp', () => {
     await expect(page.locator('#sign-up-unbound')).toBeHidden();
 
     // * the default detail holds all five, through the same form and judging
-    await page.getByRole('link', { name: 'Use the default detail' }).click();
+    await page.getByRole('link', { name: 'the default one' }).click();
     await expect(page.locator('#connection')).toHaveAttribute('data-state', 'open');
     await page.getByLabel('Validate before sending').check();
     await page.getByRole('button', { name: 'Break several fields' }).click();
