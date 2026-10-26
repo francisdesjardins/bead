@@ -187,6 +187,8 @@ public sealed class HttpTransportClient : IRouterClientTransport, IAsyncDisposab
     /// <see cref="HttpTransportClientOptions.MaximumBodyBytes"/>, an answer's or a batch's, "the
     /// connection is closed: an envelope past its maximumBodyBytes, N bytes"; a batch that does not
     /// read, "the connection is closed: a batch that does not read, …", saying what of it does not;
+    /// an executor's own failure is an InvalidOperationException, "the HTTP executor failed: …",
+    /// with its cause as InnerException;
     /// a listener that throws keeps the close told. A server gone, a refusal of its own, a redirect,
     /// a timeout, an answer of another type and a network that failed tell their close alone. And
     /// what a listener of its messages, its close or its reconnection threw: the client went on as
@@ -332,6 +334,7 @@ public sealed class HttpTransportClient : IRouterClientTransport, IAsyncDisposab
         var isClean = options?.IsClean ?? true;
         var isQuick = options?.IsQuick ?? false;
         Drawn connection;
+        Exception? failure = null;
 
         lock (_gate)
         {
@@ -352,14 +355,14 @@ public sealed class HttpTransportClient : IRouterClientTransport, IAsyncDisposab
         }
         else
         {
+            using var deleting = new CancellationTokenSource(DisconnectTimeout, TimeProvider.System);
             try
             {
-                using var deleting = new CancellationTokenSource(DisconnectTimeout, TimeProvider.System);
                 using var deleted = await Deleting(connection, deleting.Token);
             }
-            catch (Exception reason) when (reason is HttpRequestException or OperationCanceledException or IOException)
+            catch (Exception reason)
             {
-                // gone already, or unreachable: the connection ends here all the same
+                failure = ExecutorFailureOf(reason, deleting.Token);
             }
 
             await connection.Exchanges.CancelAsync();
@@ -370,7 +373,14 @@ public sealed class HttpTransportClient : IRouterClientTransport, IAsyncDisposab
             _readyState = ReadyState.Closed;
         }
 
-        _listeners.Tell(Close, (isClean, isQuick));
+        try
+        {
+            if (failure is not null) { Error?.Invoke(failure); }
+        }
+        finally
+        {
+            _listeners.Tell(Close, (isClean, isQuick));
+        }
     }
 
     /// <summary>
@@ -675,7 +685,7 @@ public sealed class HttpTransportClient : IRouterClientTransport, IAsyncDisposab
                 using var request = RequestOf(connection, (HttpMethod.Delete, connection.Uri));
                 using var deleted = await http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, deleting.Token);
             }
-            catch (Exception reason) when (reason is HttpRequestException or OperationCanceledException or IOException or ObjectDisposedException)
+            catch (Exception)
             {
                 // gone already, or unreachable: nothing more is owed
             }
@@ -693,7 +703,7 @@ public sealed class HttpTransportClient : IRouterClientTransport, IAsyncDisposab
     }
 
     // the connection this side closes of its own, released: why goes to Error before its close
-    private void Fail(Drawn connection, InvalidDataException failure)
+    private void Fail(Drawn connection, Exception failure)
     {
         Ended(connection, (true, failure));
     }
@@ -701,7 +711,7 @@ public sealed class HttpTransportClient : IRouterClientTransport, IAsyncDisposab
     // * its end: its exchanges cut, the server told when it is released, then its one error, then
     // its close, told even when a listener of Error throws, which goes on to the task no one awaits,
     // the platform's (spec 15.1)
-    private void Ended(Drawn connection, (bool IsReleased, InvalidDataException? Failure) end)
+    private void Ended(Drawn connection, (bool IsReleased, Exception? Failure) end)
     {
         var (isReleased, failure) = end;
         bool isClosing;
@@ -894,7 +904,8 @@ public sealed class HttpTransportClient : IRouterClientTransport, IAsyncDisposab
         _ = Exchanging(sent, settled).ContinueWith(
             (exchanging) =>
             {
-                settled.TrySetException(exchanging.Exception!.InnerExceptions);
+                settled.TrySetResult();
+                Fail(sent.Connection, ExecutorFailureOf(exchanging.Exception!.GetBaseException(), sent.Connection.Exchanges.Token) ?? exchanging.Exception.GetBaseException());
             },
             CancellationToken.None,
             TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously,
@@ -907,6 +918,7 @@ public sealed class HttpTransportClient : IRouterClientTransport, IAsyncDisposab
     {
         var (connection, message) = sent;
         HttpResponseMessage response;
+        var attempted = false;
 
         try
         {
@@ -920,14 +932,21 @@ public sealed class HttpTransportClient : IRouterClientTransport, IAsyncDisposab
 
             request.Content = new ReadOnlyMemoryContent(message.Bytes);
             request.Content.Headers.ContentType = new MediaTypeHeaderValue(HttpTransport.MediaType);
-            response = await HttpOf().SendAsync(request, HttpCompletionOption.ResponseHeadersRead, connection.Exchanges.Token);
+            var http = HttpOf();
+            attempted = true;
+            response = await http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, connection.Exchanges.Token);
         }
-        catch (Exception reason) when (reason is HttpRequestException or OperationCanceledException or IOException or ObjectDisposedException)
+        catch (Exception reason)
         {
+            if (!attempted)
+            {
+                settled.SetException(reason);
+                return;
+            }
             // lost before its head: whether the server had it is not known, so it counts as handed
             // over, and the connection closes, as a dropped socket's
-            Lose(connection, true);
             settled.SetResult();
+            Ended(connection, (true, ExecutorFailureOf(reason, connection.Exchanges.Token)));
 
             return;
         }
@@ -945,8 +964,8 @@ public sealed class HttpTransportClient : IRouterClientTransport, IAsyncDisposab
 
         if (response.IsSuccessStatusCode)
         {
-            _ = Answering((connection, response));
             settled.SetResult();
+            _ = Answering((connection, response));
 
             return;
         }
@@ -1007,9 +1026,9 @@ public sealed class HttpTransportClient : IRouterClientTransport, IAsyncDisposab
             {
                 body = await response.Content.ReadAsByteArrayAsync(connection.Exchanges.Token);
             }
-            catch (Exception reason) when (reason is HttpRequestException or OperationCanceledException or IOException or ObjectDisposedException)
+            catch (Exception reason)
             {
-                Lose(connection, true);
+                Ended(connection, (true, ExecutorFailureOf(reason, connection.Exchanges.Token)));
 
                 return;
             }
@@ -1133,7 +1152,7 @@ public sealed class HttpTransportClient : IRouterClientTransport, IAsyncDisposab
 
     // one listen: each envelope heard as it comes whole, the cursor advanced before — or what came
     // instead, the error that fails the connection among it
-    private async Task<(Listened Outcome, InvalidDataException? Failure)> ListenOnce((Drawn Connection, Cursor Cursor) listen)
+    private async Task<(Listened Outcome, Exception? Failure)> ListenOnce((Drawn Connection, Cursor Cursor) listen)
     {
         var (connection, cursor) = listen;
         HttpResponseMessage response;
@@ -1147,9 +1166,10 @@ public sealed class HttpTransportClient : IRouterClientTransport, IAsyncDisposab
             request.Headers.Add(HttpTransport.WaitHeader, ((long)_options.Wait.TotalMilliseconds).ToString(CultureInfo.InvariantCulture));
             response = await HttpOf().SendAsync(request, HttpCompletionOption.ResponseHeadersRead, connection.Exchanges.Token);
         }
-        catch (Exception reason) when (reason is HttpRequestException or OperationCanceledException or IOException or ObjectDisposedException)
+        catch (Exception reason)
         {
-            return (Listened.Lost, null);
+            var failure = ExecutorFailureOf(reason, connection.Exchanges.Token);
+            return failure is null ? (Listened.Lost, null) : (Listened.Broken, failure);
         }
 
         using (response)
@@ -1237,14 +1257,27 @@ public sealed class HttpTransportClient : IRouterClientTransport, IAsyncDisposab
                     Hear(envelope, true);
                 }
             }
-            catch (Exception reason) when (reason is HttpRequestException or OperationCanceledException or IOException or ObjectDisposedException)
+            catch (Exception reason)
             {
+                var failure = ExecutorFailureOf(reason, connection.Exchanges.Token);
+                if (failure is not null) { return (Listened.Broken, failure); }
                 // cut on its way: what came whole was heard, and the rest comes again
                 return (heard > 0 ? Listened.Heard : Listened.Lost, null);
             }
 
             return heard > 0 ? (Listened.Heard, null) : UnreadOf("it holds no envelope");
         }
+    }
+
+    // The platform's network failure retries a listen; an executor's own failure ends it.
+    private static InvalidOperationException? ExecutorFailureOf(Exception reason, CancellationToken cancellationToken)
+    {
+        if (cancellationToken.IsCancellationRequested || reason is HttpRequestException or IOException)
+        {
+            return null;
+        }
+
+        return new InvalidOperationException($"the HTTP executor failed: {reason.Message}", reason);
     }
 
     // what came of one listen
