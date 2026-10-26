@@ -67,6 +67,11 @@ interface ICredentialWaiter {
   reject: (reason: unknown) => void;
 }
 
+interface IPendingCredential {
+  outcome: Promise<string>;
+  abandoned: boolean;
+}
+
 // constants
 
 /** The largest message by default: a router's largest envelope by default (spec 15.3). */
@@ -215,8 +220,8 @@ export const createWSTransportClient = (options?: IWSTransportClientOptions): WS
       let isSecure = false;
       // the credential the upgrade of the current connection carried; none before it opens
       let carried: string | undefined;
-      // the provider's one pending call, shared by attempts within their own bounds
-      let pendingCredential: Promise<string> | undefined;
+      // the provider's one pending call; an abandoned outcome serves no attempt
+      let pendingCredential: IPendingCredential | undefined;
       // each attempt still waiting for that call's outcome
       const credentialWaiters = new Set<ICredentialWaiter>();
 
@@ -310,7 +315,7 @@ export const createWSTransportClient = (options?: IWSTransportClientOptions): WS
           // what the attempt's credential provider is told to give up by: the attempt settled
           const attempt = new AbortController();
           let ended = false;
-          const providerAttempt: { owns: boolean; waiter?: ICredentialWaiter } = { owns: false };
+          const providerAttempt: { pending?: IPendingCredential; waiter?: ICredentialWaiter } = {};
           let opened: IWebSocketLike | undefined;
 
           isSecure = isSecureUrl(url);
@@ -443,8 +448,6 @@ export const createWSTransportClient = (options?: IWSTransportClientOptions): WS
                   return (open(credential), undefined);
                 }
 
-                // one provider call per client is pending; another attempt joins its outcome
-                providerAttempt.owns = pendingCredential === undefined;
                 const credentialWaiter: ICredentialWaiter = {
                   resolve: (provided) => {
                     if (ended || signal?.aborted === true) {
@@ -467,13 +470,39 @@ export const createWSTransportClient = (options?: IWSTransportClientOptions): WS
                     reject(new ConnectError('the credential provider failed', { cause: reason }));
                   },
                 };
-                providerAttempt.waiter = credentialWaiter;
-                credentialWaiters.add(credentialWaiter);
-                if (pendingCredential === undefined) {
-                  const pending = Promise.resolve().then(() => {
-                    return credentialProvider({ signal: attempt.signal });
-                  });
-                  pendingCredential = pending;
+                const provide = (): void => {
+                  if (ended || signal?.aborted === true) {
+                    return;
+                  }
+
+                  // an abandoned call settles before another starts; its outcome serves nothing
+                  if (pendingCredential?.abandoned === true) {
+                    providerAttempt.waiter = {
+                      resolve: () => {
+                        provide();
+                      },
+                      reject: () => {
+                        provide();
+                      },
+                    };
+                    credentialWaiters.add(providerAttempt.waiter);
+
+                    return;
+                  }
+
+                  providerAttempt.waiter = credentialWaiter;
+                  credentialWaiters.add(credentialWaiter);
+                  if (pendingCredential !== undefined) {
+                    return;
+                  }
+
+                  const pending: IPendingCredential = {
+                    abandoned: false,
+                    outcome: Promise.resolve().then(() => {
+                      return credentialProvider({ signal: attempt.signal });
+                    }),
+                  };
+                  providerAttempt.pending = pendingCredential = pending;
                   const finish = (outcome: { value: string } | { reason: unknown }): void => {
                     if (pendingCredential === pending) {
                       pendingCredential = undefined;
@@ -488,7 +517,7 @@ export const createWSTransportClient = (options?: IWSTransportClientOptions): WS
                       }
                     }
                   };
-                  void pending.then(
+                  void pending.outcome.then(
                     (value) => {
                       finish({ value });
                     },
@@ -496,7 +525,8 @@ export const createWSTransportClient = (options?: IWSTransportClientOptions): WS
                       finish({ reason });
                     }
                   );
-                }
+                };
+                provide();
 
                 return undefined;
               },
@@ -524,9 +554,11 @@ export const createWSTransportClient = (options?: IWSTransportClientOptions): WS
             if (providerAttempt.waiter !== undefined) {
               credentialWaiters.delete(providerAttempt.waiter);
             }
-            if (!providerAttempt.owns) {
+            if (providerAttempt.pending === undefined) {
               attempt.abort();
             } else {
+              // abandonment is visible before callbacks run, so a later attempt cannot join it
+              providerAttempt.pending.abandoned = true;
               // oxlint-disable-next-line no-restricted-properties -- provider callbacks run after the connect settles, outside its stack
               globalThis.setTimeout(() => {
                 try {

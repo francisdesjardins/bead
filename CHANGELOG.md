@@ -227,8 +227,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ### Fixed
 
 - Connect cancellation, timeout and disposal bound each supplied provider or HTTP executor even
-  when it ignores cancellation. WebSocket clients join one pending credential-provider call per
-  client, observe late failures and notify provider completion outside the connect's continuation.
+  when it ignores cancellation. WebSocket clients join one live credential-provider call per
+  client. An abandoned call is cancelled and waited out within the next attempt's own bound, then
+  the provider is called anew. Clients observe late failures and notify provider completion outside
+  the connect's continuation.
   A provider's own cancellation is its failure; a late HTTP connection is released. A provider's
   completion callback runs after connect settles and cannot refuse that connect.
 

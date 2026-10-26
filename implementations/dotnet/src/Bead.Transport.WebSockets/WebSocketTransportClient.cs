@@ -92,12 +92,13 @@ public sealed record WebSocketConnectOptions
     /// <summary>
     /// What hands the credential its upgrade carries, as <see cref="Credential"/> is written, called
     /// at each attempt — the connect's, and each of a reconnection's — before its upgrade goes, with
-    /// the attempt's token, as SignalR's <c>AccessTokenProvider</c> is: a renewed credential reaches
+    /// the call's token, as SignalR's <c>AccessTokenProvider</c> is: a renewed credential reaches
     /// the next connection. What it throws fails that attempt, its cause; a value that is no field
     /// value fails it with an <see cref="ArgumentException"/>, which a reconnection does not try
     /// again. Held to the rules of <see cref="Credential"/> as the connect is asked.
-    /// One call is pending per client; another attempt joins its outcome within its own bound.
-    /// Cancellation, timeout and disposal end the wait; provider callbacks run outside that ending.
+    /// One call is pending per client; another attempt joins a live call. A call abandoned by its
+    /// last waiter is cancelled; another attempt waits for it to settle, then calls anew.
+    /// Cancellation, timeout and disposal bound each wait; provider callbacks run outside its ending.
     /// The provider's own cancellation is its failure while the attempt's token stays live.
     /// </summary>
     public Func<CancellationToken, ValueTask<string>>? CredentialProvider { get; init; }
@@ -140,8 +141,10 @@ public sealed class WebSocketTransportClient : IRouterClientTransport, IAsyncDis
     private ClientWebSocket? _connecting;
     // what ends a connect when its client is disposed
     private CancellationTokenSource? _connectDisposed;
-    // the provider's one pending call, which another attempt joins within its own bound
+    // the provider's one pending call; an abandoned outcome serves no attempt
     private Task<string>? _credentialPending;
+    // set before the attempt ends, while its provider's cancellation callbacks run apart
+    private bool _credentialAbandoned;
     // the open connection; a connection this side dropped is none, and its end tells nothing
     private volatile WebSocketConnection? _connection;
     // the credential the upgrade of a connection carried, which it carries alone; none for one whose
@@ -622,55 +625,85 @@ public sealed class WebSocketTransportClient : IRouterClientTransport, IAsyncDis
 
         if (options.CredentialProvider is { } provider)
         {
-            Task<string> pending;
-            TaskCompletionSource<string>? source = null;
-            lock (_gate)
+            while (true)
             {
-                if (_credentialPending is { IsCompleted: false } waiting)
+                tokens.Wait.ThrowIfCancellationRequested();
+                Task<string> pending;
+                bool abandoned;
+                TaskCompletionSource<string>? source = null;
+                lock (_gate)
                 {
-                    pending = waiting;
-                }
-                else
-                {
-                    source = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
-                    pending = _credentialPending = source.Task;
-                    _ = pending.ContinueWith((completed) =>
+                    abandoned = _credentialAbandoned;
+                    if (_credentialPending is { IsCompleted: false } waiting)
                     {
-                        _ = completed.Exception;
-                        lock (_gate)
+                        pending = waiting;
+                    }
+                    else
+                    {
+                        abandoned = _credentialAbandoned = false;
+                        source = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
+                        pending = _credentialPending = source.Task;
+                        _ = pending.ContinueWith((completed) =>
                         {
-                            if (_credentialPending == completed) { _credentialPending = null; }
-                        }
-                    }, CancellationToken.None, TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
+                            _ = completed.Exception;
+                            lock (_gate)
+                            {
+                                if (_credentialPending == completed) { _credentialPending = null; }
+                            }
+                        }, CancellationToken.None, TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
+                    }
                 }
-            }
 
-            // the pending call is published before user code runs, outside the client's lock
-            if (source is not null)
-            {
-                _ = Providing(source);
-            }
+                // an abandoned call settles before another starts; its outcome serves nothing
+                if (abandoned)
+                {
+                    try
+                    {
+                        await pending.WaitAsync(tokens.Wait).ConfigureAwait(false);
+                    }
+                    catch (Exception) when (!tokens.Wait.IsCancellationRequested)
+                    {
+                        // its failure belongs to the attempt that gave it up
+                    }
+                    continue;
+                }
 
-            async Task Providing(TaskCompletionSource<string> answer)
-            {
+                // the pending call is published before user code runs, outside the client's lock
+                if (source is not null)
+                {
+                    _ = Providing(source);
+                }
+
+                async Task Providing(TaskCompletionSource<string> answer)
+                {
+                    try
+                    {
+                        answer.TrySetResult(await provider(tokens.Provider).ConfigureAwait(false));
+                    }
+                    catch (Exception reason)
+                    {
+                        answer.TrySetException(reason);
+                    }
+                }
+
                 try
                 {
-                    answer.TrySetResult(await provider(tokens.Provider).ConfigureAwait(false));
+                    credential = await pending.WaitAsync(tokens.Wait).ConfigureAwait(false);
+                    tokens.Wait.ThrowIfCancellationRequested();
                 }
-                catch (Exception reason)
+                catch (Exception) when (tokens.Wait.IsCancellationRequested)
                 {
-                    answer.TrySetException(reason);
+                    lock (_gate)
+                    {
+                        if (_credentialPending == pending) { _credentialAbandoned = true; }
+                    }
+                    throw;
                 }
-            }
-
-            try
-            {
-                credential = await pending.WaitAsync(tokens.Wait).ConfigureAwait(false);
-                tokens.Wait.ThrowIfCancellationRequested();
-            }
-            catch (Exception reason) when (!tokens.Wait.IsCancellationRequested)
-            {
-                throw new WebSocketException(WebSocketError.Faulted, "the credential provider failed", reason);
+                catch (Exception reason) when (!tokens.Wait.IsCancellationRequested)
+                {
+                    throw new WebSocketException(WebSocketError.Faulted, "the credential provider failed", reason);
+                }
+                break;
             }
         }
 

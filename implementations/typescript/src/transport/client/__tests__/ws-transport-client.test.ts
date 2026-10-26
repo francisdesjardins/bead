@@ -1395,58 +1395,201 @@ test.describe('WSTransportClient, what it carries', () => {
     }
   });
 
-  test('joins a pending provider call and uses its late outcome for the waiting attempt', async () => {
+  test('waits for an abandoned provider call to settle before invoking the provider anew', async () => {
     for (const late of ['value', 'failure']) {
-      const server = await startServer();
-      await using client = createWSTransportClient({ WebSocket: Ws });
-      const answer = Promise.withResolvers<string>();
-      const entered = Promise.withResolvers<void>();
-      const cancelling = new AbortController();
-      let calls = 0;
-      const provider = () => {
-        calls += 1;
-        entered.resolve();
-        return answer.promise;
-      };
-      try {
-        const first = client
-          .connect({
+      for (const next of ['value', 'failure']) {
+        const server = await startServer();
+        await using client = createWSTransportClient({ WebSocket: Ws });
+        const answer = Promise.withResolvers<string>();
+        const renewed = Promise.withResolvers<string>();
+        const entered = Promise.withResolvers<AbortSignal>();
+        const enteredAgain = Promise.withResolvers<AbortSignal>();
+        const aborted = Promise.withResolvers<void>();
+        const cancelling = new AbortController();
+        let calls = 0;
+        let settled = false;
+        const provider = async ({ signal }: { signal: AbortSignal }) => {
+          calls += 1;
+          if (calls === 1) {
+            signal.addEventListener(
+              'abort',
+              () => {
+                aborted.resolve();
+              },
+              { once: true }
+            );
+            entered.resolve(signal);
+            try {
+              const value = await answer.promise;
+              signal.throwIfAborted();
+              return value;
+            } finally {
+              settled = true;
+            }
+          }
+          expect(settled).toBe(true);
+          expect(signal.aborted).toBe(false);
+          enteredAgain.resolve(signal);
+          const value = await renewed.promise;
+          signal.throwIfAborted();
+          return value;
+        };
+        try {
+          const first = client
+            .connect({
+              host,
+              port: portOf(server),
+              credentialProvider: provider,
+              signal: cancelling.signal,
+            })
+            .catch((reason: unknown) => {
+              return reason;
+            });
+          const firstSignal = await entered.promise;
+          cancelling.abort();
+          expect(await first).toBeInstanceOf(CancelError);
+          const second = client.connect({
             host,
             port: portOf(server),
             credentialProvider: provider,
-            signal: cancelling.signal,
-          })
-          .catch((reason: unknown) => {
+          });
+          const outcome = second.catch((reason: unknown) => {
             return reason;
           });
-        await entered.promise;
-        cancelling.abort();
-        expect(await first).toBeInstanceOf(CancelError);
-        const second = client.connect({ host, port: portOf(server), credentialProvider: provider });
-        const outcome = second.catch((reason: unknown) => {
-          return reason;
-        });
-        await Promise.resolve();
-        expect(calls).toBe(1);
-        const failure = new Error('late provider failure');
-        if (late === 'failure') {
-          answer.reject(failure);
-          expect(await outcome).toMatchObject({
-            message: 'the credential provider failed',
-            cause: failure,
-          });
-        } else {
-          answer.resolve(BEARER);
-          await second;
-          expect(client.isOpen()).toBe(true);
-          expect(client.carries(BEARER)).toBe(true);
-          await client.disconnect({ isQuick: true });
+          expect(calls).toBe(1);
+          expect(settled).toBe(false);
+          expect(client.isConnecting()).toBe(true);
+          await aborted.promise;
+          expect(firstSignal.aborted).toBe(true);
+          if (late === 'failure') {
+            answer.reject(new Error('abandoned provider failure'));
+          } else {
+            answer.resolve('Bearer abandoned');
+          }
+          const secondSignal = await enteredAgain.promise;
+          expect(calls).toBe(2);
+          expect(secondSignal).not.toBe(firstSignal);
+          expect(client.isConnecting()).toBe(true);
+          if (next === 'failure') {
+            const failure = new Error('renewed provider failure');
+            renewed.reject(failure);
+            expect(await outcome).toMatchObject({
+              message: 'the credential provider failed',
+              cause: failure,
+            });
+            expect(client.isClosed()).toBe(true);
+          } else {
+            renewed.resolve(BEARER);
+            await second;
+            expect(client.isOpen()).toBe(true);
+            expect(client.carries(BEARER)).toBe(true);
+            expect(client.carries('Bearer abandoned')).toBe(false);
+            await client.disconnect({ isQuick: true });
+          }
+          expect(calls).toBe(2);
+        } finally {
+          answer.resolve('');
+          renewed.resolve('');
+          drop(client);
+          await allClosed();
+          await stopServer(server);
         }
-        expect(calls).toBe(1);
-      } finally {
-        drop(client);
-        await allClosed();
-        await stopServer(server);
+      }
+    }
+  });
+
+  test('bounds the wait for an abandoned provider call by cancellation, timeout and disposal', async () => {
+    for (const ending of ['cancel', 'timeout', 'dispose']) {
+      for (const late of ['value', 'failure']) {
+        const server = await startServer();
+        const clock = createTestClock();
+        await using client = createWSTransportClient({ clock, WebSocket: Ws });
+        const answer = Promise.withResolvers<string>();
+        const entered = Promise.withResolvers<void>();
+        const aborted = Promise.withResolvers<void>();
+        const cancelling = new AbortController();
+        const waiting = new AbortController();
+        let calls = 0;
+        const provider = async ({ signal }: { signal: AbortSignal }) => {
+          calls += 1;
+          signal.addEventListener(
+            'abort',
+            () => {
+              aborted.resolve();
+            },
+            { once: true }
+          );
+          entered.resolve();
+          const value = await answer.promise;
+          signal.throwIfAborted();
+          return value;
+        };
+        try {
+          const first = client
+            .connect({
+              host,
+              port: portOf(server),
+              credentialProvider: provider,
+              signal: cancelling.signal,
+            })
+            .catch((reason: unknown) => {
+              return reason;
+            });
+          await entered.promise;
+          cancelling.abort();
+          expect(await first).toBeInstanceOf(CancelError);
+          await aborted.promise;
+          const second = client
+            .connect({
+              host,
+              port: portOf(server),
+              credentialProvider: provider,
+              signal: waiting.signal,
+              timeout: 100,
+            })
+            .catch((reason: unknown) => {
+              return reason;
+            });
+          expect(client.isConnecting()).toBe(true);
+          expect(calls).toBe(1);
+          if (ending === 'cancel') {
+            waiting.abort();
+          } else if (ending === 'timeout') {
+            await clock.tickAsync(100);
+          } else {
+            drop(client);
+          }
+          const failure: unknown = await second;
+          if (ending === 'cancel') {
+            expect(failure).toBeInstanceOf(CancelError);
+          } else if (ending === 'timeout') {
+            expect(failure).toMatchObject({
+              name: 'TimeoutError',
+              message: 'timed out after 100ms',
+            });
+          } else {
+            expect(failure).toMatchObject({
+              name: 'ConnectError',
+              message: 'the transport client was disposed as it connected',
+            });
+          }
+          expect(client.isClosed()).toBe(true);
+          if (late === 'failure') {
+            answer.reject(new Error('abandoned provider failure'));
+          } else {
+            answer.resolve(BEARER);
+          }
+          await client.connect({ host, port: portOf(server) });
+          expect(client.isOpen()).toBe(true);
+          expect(client.carries(BEARER)).toBe(false);
+          expect(calls).toBe(1);
+          await client.disconnect({ isQuick: true });
+        } finally {
+          answer.resolve('');
+          drop(client);
+          await allClosed();
+          await stopServer(server);
+        }
       }
     }
   });
