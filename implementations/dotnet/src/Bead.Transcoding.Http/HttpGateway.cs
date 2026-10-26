@@ -1367,6 +1367,7 @@ public sealed class HttpGateway : IAsyncDisposable
         await response.CompleteAsync();
     }
 
+    // a whole body handed to the pace in slices of at most 64 KiB
     private async Task WriteSlices(HttpContext context, ReadOnlyMemory<byte> bytes)
     {
         var drop = _drops.GetValue(context, (_) => { return new DropState(); });
@@ -1377,8 +1378,10 @@ public sealed class HttpGateway : IAsyncDisposable
         }
     }
 
+    // whether this exchange has told its one drop, even when a host recycles its context
     private sealed class DropState
     {
+        // one report shared by every write of the exchange
         private int _told;
         public bool Take()
         {
@@ -1386,6 +1389,7 @@ public sealed class HttpGateway : IAsyncDisposable
         }
     }
 
+    // a drop belongs to the exchange that still owns the context, reported once before its abort
     private void DropWriter(HttpContext context, (DropState State, string Detail) drop)
     {
         if (_drops.TryGetValue(context, out var current) && current == drop.State && drop.State.Take())
