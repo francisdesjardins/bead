@@ -466,6 +466,9 @@ export const createWSTransportClient = (options?: IWSTransportClientOptions): WS
               { clock: client.clock, signal, timeout }
             );
 
+            // the provider hears its attempt end before the kept socket is judged
+            attempt.abort();
+
             // a close or a dispose between the open and here comes after it: what it left is kept
             if (client.socket !== opened || opened.readyState !== WebSocket.OPEN) {
               throw new ConnectError('closed as it opened');

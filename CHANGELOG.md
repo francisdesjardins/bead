@@ -226,6 +226,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 - beadc retries temporary work area creation when a concurrent invocation removes its empty
   `.beadc` parent, with at most three attempts.
+- The TypeScript WebSocket client refuses a connection disposed by its credential provider's
+  completion callback, ending Closed with no socket as the C# client does.
+- The TypeScript HTTP client releases a connection disposed between its 201 response and the end
+  of connect, refusing the connect and ending Closed as the C# client does.
 - The C# gateway writes its heartbeat comment a heartbeat after its stream's last write, armed again
   by each write, as the TypeScript side does, where it wrote one each heartbeat whatever went; and
   it refuses a JSON text nested past 202 levels as `nested past 100` before its message is read,

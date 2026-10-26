@@ -422,6 +422,9 @@ public sealed class HttpTransportClientTests
         // settled once its body is read at all
         public TaskCompletionSource? Read { get; init; }
 
+        // a response disposed just before Connecting keeps its drawn connection
+        public Action? OnDisposed { get; init; }
+
         public HttpResponseMessage ResponseOf()
         {
             var response = new HttpResponseMessage((HttpStatusCode)Status);
@@ -450,6 +453,18 @@ public sealed class HttpTransportClientTests
     /// <summary>A scripted body, of no length unless its headers declare one.</summary>
     private sealed class ScriptedBody(Answer answer) : HttpContent
     {
+        private Action? _onDisposed = answer.OnDisposed;
+
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing)
+            {
+                Interlocked.Exchange(ref _onDisposed, null)?.Invoke();
+            }
+
+            base.Dispose(disposing);
+        }
+
         protected override async Task SerializeToStreamAsync(Stream stream, TransportContext? context)
         {
             await using var pieces = await CreateContentReadStreamAsync();
@@ -1865,6 +1880,49 @@ public sealed class HttpTransportClientTests
         {
             Assert.True(connect.Took < TimeSpan.FromSeconds(1.5), $"{connect.Address}: {connect.Took}");
         });
+    }
+
+    [Fact]
+    public async Task Refuses_a_connection_disposed_between_its_answer_and_the_end_of_connect()
+    {
+        using var fetch = new Fetch();
+        await using var client = new HttpTransportClient(NotListening with { Handler = fetch });
+        var told = EndOf(client);
+        var target = new HttpConnectOptions { Host = Host, Port = 8_080 };
+        var connecting = client.Connect(target, Cancelled);
+        Task? disposing = null;
+        var completions = 0;
+
+        (await fetch.CallOf(0)).Answer(DrawnOf(false) with
+        {
+            OnDisposed = () =>
+            {
+                completions += 1;
+                disposing = client.DisposeAsync().AsTask();
+            },
+        });
+
+        var failure = await Assert.ThrowsAsync<HttpRequestException>(() =>
+        {
+            return connecting.WaitAsync(Patience, Cancelled);
+        });
+
+        Assert.Equal("the transport client was disposed as it connected", failure.Message);
+        Assert.NotNull(disposing);
+        await disposing.WaitAsync(Patience, Cancelled);
+        Assert.Equal((1, ReadyState.Closed), (completions, client.ReadyState));
+        Assert.Empty(told);
+        Assert.Equal((HttpMethod.Delete, Token), ((await fetch.CallOf(1)).Method, fetch.Calls[1].ConnectionToken));
+
+        var again = client.Connect(target, Cancelled);
+
+        (await fetch.CallOf(2)).Answer(DrawnOf(false));
+        await again.WaitAsync(Patience, Cancelled);
+        Assert.Equal(ReadyState.Open, client.ReadyState);
+        await client.CloseConnection(new TransportDisconnectOptions { IsQuick = true });
+        Assert.Equal(ReadyState.Closed, client.ReadyState);
+        Assert.Equal(["close True True"], told);
+        Assert.Equal((HttpMethod.Delete, Token), ((await fetch.CallOf(3)).Method, fetch.Calls[3].ConnectionToken));
     }
 
     [Fact]

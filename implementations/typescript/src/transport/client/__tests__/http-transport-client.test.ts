@@ -142,6 +142,51 @@ const connectFake = async (respond?: Parameters<typeof createFakeFetch>[0]) => {
 
 // definition
 
+test('refuses a connection disposed between its answer and the end of connect', async () => {
+  const fake = createFakeFetch();
+  const client = createHTTPTransportClient({ isListening: false, fetch: fake.fetch });
+  const closes: boolean[][] = [];
+  const errors: Error[] = [];
+
+  client.on('close', (...flags) => {
+    closes.push(flags);
+  });
+  client.on('error', (error) => {
+    errors.push(error);
+  });
+
+  try {
+    const connecting = client.connect({ host, port: 8_080 });
+    const outcome = connecting.catch((reason: unknown) => {
+      return reason;
+    });
+
+    fake.calls[0]?.answer({ headers: { [CONNECTION_TOKEN_HEADER]: 'T'.repeat(22) }, status: 201 });
+    queueMicrotask(() => {
+      (client as ITransportClientInternal<object, never>)[dispose]();
+    });
+
+    expect(await outcome).toMatchObject({
+      message: 'the transport client was disposed as it connected',
+      name: 'ConnectError',
+    });
+    expect([client.isClosed(), client.socket, closes, errors]).toEqual([true, null, [], []]);
+    expect(fake.calls[0]?.init.signal?.aborted).toBe(true);
+    expect(fake.calls[1]?.init).toMatchObject({ keepalive: true, method: 'DELETE' });
+
+    const again = client.connect({ host, port: 8_080 });
+
+    fake.calls[2]?.answer({ headers: { [CONNECTION_TOKEN_HEADER]: 'T'.repeat(22) }, status: 201 });
+    await again;
+    expect(client.isOpen()).toBe(true);
+    await client.disconnect({ isQuick: true });
+    expect([client.isClosed(), closes, errors]).toEqual([true, [[true, true]], []]);
+    expect(fake.calls[3]?.init).toMatchObject({ keepalive: true, method: 'DELETE' });
+  } finally {
+    (client as ITransportClientInternal<object, never>)[dispose]();
+  }
+});
+
 test.describe('createHTTPTransportClient, what it carries', () => {
   test('carries a credential beside an envelope, in its POST’s Authorization, and is secure under https or to a loopback host, judged by the URL it was given', async () => {
     expect(createHTTPTransportClient().isSecure).toBe(false);
