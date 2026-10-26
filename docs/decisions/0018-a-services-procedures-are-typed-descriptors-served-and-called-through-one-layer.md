@@ -356,7 +356,11 @@ _Conformance:_ none. _Matrix:_ none; `Connect` outside `IClient` is a type's sha
   check of a `proto` payload's records
   ([0028](0028-a-proto-payloads-records-are-read-against-its-message-before-its-library-reads-them.md)),
   and 4 since it generates the validators of a request's rules
-  ([0035](0035-a-payload-that-reads-is-held-to-its-messages-rules-before-its-resolver-sees-it.md)).
+  ([0035](0035-a-payload-that-reads-is-held-to-its-messages-rules-before-its-resolver-sees-it.md));
+  and 5 beside it, `GENERATED_CODE_SUPPORTS_VERSION_5` of `./transcoding` and
+  `GeneratedCode.SupportsVersion5`, for an output that writes a route table, which names the
+  transcoding layer's types
+  ([0037](0037-a-procedure-is-also-an-http-route-which-a-gateway-answers-as-one-more-client-of-its-server.md)).
   A runtime too old for a file lacks the constant, and the file fails its type-check (TS2724) and
   its load (a `SyntaxError` at link time), or its build (CS0117). It names no release, so nothing is
   renamed in a release branch, and the product's version, 0008's third axis, stays out of the
@@ -633,13 +637,13 @@ export interface IDescriptorInit {
   readonly request: IPayloadCodec<unknown, never>;
   readonly result: IPayloadCodec<unknown, never>;
   /** Judges a request by its rules, giving its violations, the count of the rest and whether it stopped; none judges nothing. */
-  readonly validate?: ((request: unknown, options: IValidateOptions) => IJudged) | undefined;
+  readonly validate?: ((request: unknown, options?: IValidateOptions) => IJudged) | undefined;
 }
 
-/** What a judging is given: whether it stops at the first violation, and the bound of what it holds. */
+/** What a validator is given: whether it stops at its first violation, and its detail's bound. */
 export interface IValidateOptions {
-  readonly failFast: boolean;
-  readonly maximumBytes: number;
+  readonly failFast?: boolean | undefined;
+  readonly maximumBytes?: number | undefined;
 }
 
 /** A request's descriptor, `notification` given for a procedure that notifies: its procedure's kind set. */
@@ -1044,26 +1048,35 @@ implementation; `WebSocketClient` and `BeadHttpClient` the second. Both live in 
 `package.json`'s `exports`: `createServiceServer`, `createServiceClient`, `requestOf`, `commandOf`,
 `failuresOf`, `payloadCodecOf`, `PAYLOAD_CODECS`, `ProcedureKind`,
 `GENERATED_CODE_SUPPORTS_VERSION_4`, `FailureError`, `ProgrammerError`, and their types. A generated
-file imports nothing else of Bead's but `./proto`'s check and validators, where it binds `proto`
-([0028](0028-a-proto-payloads-records-are-read-against-its-message-before-its-library-reads-them.md)).
+service's file imports nothing else of Bead's but `./proto`'s check and validators, where it binds
+`proto`
+([0028](0028-a-proto-payloads-records-are-read-against-its-message-before-its-library-reads-them.md));
+a route table, `bead_http.ts`, imports `./transcoding`
+([0037](0037-a-procedure-is-also-an-http-route-which-a-gateway-answers-as-one-more-client-of-its-server.md)).
 
 **Generated code names the contract it needs.** `GENERATED_CODE_SUPPORTS_VERSION_4` in `./service`,
-`true`; `GeneratedCode.SupportsVersion4`, a `const bool` on a static class in `Bead.Core`. A
-generated file names the highest it needs: `void GENERATED_CODE_SUPPORTS_VERSION_4;`, and in C# a
-private constant of it. The counter moves only when generated code needs something the runtime did
-not have: 2 for the layer's options typed by the service, `IServiceClientOptions` and the client
-side's Bead client apart on the TypeScript side, `IServiceAdmissions<TService>`,
-`IServiceWindows<TService>`, `ServiceServerOptions<TService>`, `ServiceClientOptions<TService>` and
-the client side's three parameters on the C# side; 3 for the check of a `proto` payload's records,
-`checkProtoRecords` and `ProtoRecords.Check`
+`true`; `GeneratedCode.SupportsVersion4`, a `const bool` on a static class in `Bead.Core`; and, for
+a route table, `GENERATED_CODE_SUPPORTS_VERSION_5` in `./transcoding` (`src/transcoding/routes.ts`)
+and `GeneratedCode.SupportsVersion5` beside it. A generated file names the highest it needs:
+`void GENERATED_CODE_SUPPORTS_VERSION_4;`, and in C# a private constant of it. The counter moves
+only when generated code needs something the runtime did not have: 2 for the layer's options typed
+by the service, `IServiceClientOptions` and the client side's Bead client apart on the TypeScript
+side, `IServiceAdmissions<TService>`, `IServiceWindows<TService>`, `ServiceServerOptions<TService>`,
+`ServiceClientOptions<TService>` and the client side's three parameters on the C# side; 3 for the
+check of a `proto` payload's records, `checkProtoRecords` and `ProtoRecords.Check`
 ([0028](0028-a-proto-payloads-records-are-read-against-its-message-before-its-library-reads-them.md));
 4 for the validators of a request's rules, `validatorOf` and `Validators.Of`
-([0035](0035-a-payload-that-reads-is-held-to-its-messages-rules-before-its-resolver-sees-it.md)).
+([0035](0035-a-payload-that-reads-is-held-to-its-messages-rules-before-its-resolver-sees-it.md)); 5
+for what a route table names, `routeOf` and the transcoding layer that reads it on the TypeScript
+side, `HttpRoute`, `HttpRouteTemplate` and `HttpPayload` on the C# side
+([0037](0037-a-procedure-is-also-an-http-route-which-a-gateway-answers-as-one-more-client-of-its-server.md)).
 An older constant stays while the runtime still serves the code that names it: before 1.0.0, it goes
 once the code that names it no longer conforms through the runtime, and from 1.0.0 it stays for the
-whole major. The runtime holds 4 alone: code that names 3 judges no request by its rules, and code
-that names 2 reads a `proto` payload unchecked, neither of which conforms. A file of a later beadc, built against a runtime that lacks its constant, fails
-on the counter (TS2724, CS0117), not on a signature.
+whole major. The runtime holds 4 and 5, 5 for a route table, and none older, so a project that
+writes no route table regenerates nothing: code that names 3 judges no request by its rules, and
+code that names 2 reads a `proto` payload unchecked, neither of which conforms through any runtime.
+A file of a later beadc, built against a runtime that lacks its constant, fails on the counter
+(TS2724, CS0117), not on a signature.
 
 **Where it lives.** The TypeScript side: `src/service/` — `service.ts` the entry,
 `service-server.ts`, `service-client.ts`, `descriptors.ts`, `failures.ts`, `generated-code.ts`, a

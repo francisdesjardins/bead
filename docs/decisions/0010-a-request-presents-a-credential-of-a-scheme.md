@@ -175,12 +175,14 @@ presented. The client's side keeps that from refusing the calls that renew a cre
 - a client fails a call before it goes, and a server a command alike, with
   `DESTINATION_UNREACHABLE`, as a relay refuses a call its leg B cannot carry, when it presents
   `ELSEWHERE` over a transport that cannot carry the credential it presents — a WebSocket whose
-  upgrade carried other bytes, or none, a Web Worker, a server's over HTTP or over a WebSocket
-  ([0032](0032-a-websocket-upgrade-from-no-page-carries-its-credential-beside-every-envelope.md)) —
+  upgrade carried other bytes, or none, a Web Worker, a server's over HTTP, over a WebSocket
+  ([0032](0032-a-websocket-upgrade-from-no-page-carries-its-credential-beside-every-envelope.md)) or
+  in memory
+  ([0036](0036-an-in-memory-transport-joins-two-routers-of-one-process-and-a-server-takes-several-transports-through-one.md)) —
   or `JWT` or `ELSEWHERE` in the clear off the machine, judged by its transport's scheme (`wss`,
   `https`), a loopback host, as the WHATWG URL Standard's host parser reads it on every side, or a
-  transport that never leaves the machine, a Web Worker or a router called in process: nothing was
-  tried, and the credential stays.
+  transport that never leaves the machine, a Web Worker, an in-memory transport or a router called
+  in process: nothing was tried, and the credential stays.
 
 A client that receives a command resolves the command's credential the same way, the session it
 learned standing for its connection's.
@@ -303,7 +305,11 @@ envelope of the connection, toward its server alone, resolved per request as ove
 ([0032](0032-a-websocket-upgrade-from-no-page-carries-its-credential-beside-every-envelope.md)). A
 Web Worker carries none, nor does what a listen brings back over HTTP, a server's command among it,
 nor a WebSocket toward its client, and a request that presents `ELSEWHERE` on them is refused
-`SESSION_REQUIRED`. On a broker
+`SESSION_REQUIRED`. An in-memory transport carries the credential its client hands beside a request,
+any field value, and none toward its client, so a server's command that presents `ELSEWHERE` over it
+fails before it goes (spec 13.4, 15.13;
+[0036](0036-an-in-memory-transport-joins-two-routers-of-one-process-and-a-server-takes-several-transports-through-one.md)).
+On a broker
 ([0021](0021-a-broker-is-a-transport-and-bead-is-never-a-network.md)), `ELSEWHERE` is the case it is
 made for: a client authenticates to the broker, the server never sees that client's
 connection, and each message reaches it on the broker's word. What carries that word, the
@@ -314,14 +320,14 @@ is the relay's, as a relay's leg B over a WebSocket never presents its own upgra
 a requester's.
 
 **A bearer credential crosses only TLS off the machine.** A side presents a `JWT`, and carries an
-`ELSEWHERE`, only over TLS — `wss`, `https` — or within the machine: the loopback, a Web Worker, a
-router called in process, as RFC 6750 §5.3 requires of every bearer token. The sender holds it, the
-client and a relay's leg B alike, since a server behind a terminator of TLS cannot tell. A server's
-transport judges a connection by what it listens on, unless its application says what stands in
-front of it, `secure`, `Secure`: TLS terminated before it, or a proxy that serves the network in the
-clear, believed whatever it listens on. A host is on the loopback as the WHATWG URL Standard's host
-parser reads it, the one by which Secure Contexts judges an origin, on every side alike:
-`127.0.0.1.` is on it, and a host the parser fails on is not.
+`ELSEWHERE`, only over TLS — `wss`, `https` — or within the machine: the loopback, a Web Worker, an
+in-memory transport, a router called in process, as RFC 6750 §5.3 requires of every bearer token.
+The sender holds it, the client and a relay's leg B alike, since a server behind a terminator of TLS
+cannot tell. A server's transport judges a connection by what it listens on, unless its application
+says what stands in front of it, `secure`, `Secure`: TLS terminated before it, or a proxy that
+serves the network in the clear, believed whatever it listens on. A host is on the loopback as the
+WHATWG URL Standard's host parser reads it, the one by which Secure Contexts judges an origin, on
+every side alike: `127.0.0.1.` is on it, and a host the parser fails on is not.
 
 ### Through a relay
 
@@ -441,12 +447,13 @@ bytes, one that announces its end 12.
 **A provider's token enters by exchange, or `ELSEWHERE`.** The block takes ES256 and HS256 alone. A
 provider's access token, signed with RS256, is exchanged at the edge for an ES256 one the services
 that trust one issuer take (RFC 8693), whose 992 bytes leave some 595 of claims under RFC 9068's
-header, or it goes `ELSEWHERE`, whatever its size. HTTP/JSON transcoding turns
-`Authorization: Bearer` into a `JWT` in the block when its services trust the token, and exchanges a
-provider's, or keeps it `ELSEWHERE`. A side is no conforming RFC 9068 resource server: §2.1 asks
-RS256 of every one, and the block takes none. RS256 can come back by a decision of its own, which
-revises `0xA1` in place while nothing is published
-([0008](0008-three-version-axes-and-names-qualified-by-their-owner.md)).
+header, or it goes `ELSEWHERE`, whatever its size. A gateway of HTTP/JSON transcoding presents a
+`Bearer` field's token as a `JWT` in the block when its services trust the token, its option
+`authorization` at `bearer-jwt`, and otherwise carries the field `ELSEWHERE`, by default
+(transcoding 2.4): a provider's token is exchanged at the edge before it, or goes `ELSEWHERE`. A
+side is no conforming RFC 9068 resource server: §2.1 asks RS256 of every one, and the block takes
+none. RS256 can come back by a decision of its own, which revises `0xA1` in place while nothing is
+published ([0008](0008-three-version-axes-and-names-qualified-by-their-owner.md)).
 
 **One block of variable length, and only one.** It takes the last bit; a second would need a layout
 of its own ([0008](0008-three-version-axes-and-names-qualified-by-their-owner.md)). A credential

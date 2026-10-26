@@ -68,8 +68,11 @@ to one meaning of `advance`. The why of each rule is in the decisions:
   payload rules, section 18;
 - [0036](../docs/decisions/0036-an-in-memory-transport-joins-two-routers-of-one-process-and-a-server-takes-several-transports-through-one.md):
   the in-memory transport and the joined transport, section 15.
+- [0037](../docs/decisions/0037-a-procedure-is-also-an-http-route-which-a-gateway-answers-as-one-more-client-of-its-server.md):
+  a procedure also an HTTP route, its gateway one more client of its server, stated in the
+  companion `transcoding.md`.
 
-**Version: 0.7.0**, of layout `0xA1`. Each of its conformance files repeats it as its
+**Version: 0.8.0**, of layout `0xA1`. Each of its conformance files repeats it as its
 `specVersion`, and follows its schema in [`schemas/`](schemas/). The interop's blueprint,
 [`interop-blueprint.json`](interop-blueprint.json), and what its service does,
 [`interop-service.json`](interop-service.json), are files of this version, which the conversations
@@ -1171,12 +1174,12 @@ past its inactivity timeout: each one's close tells it, unclean, but for a clien
 A server's transport tells each refusal it judges of its own: a request it refuses as it arrives,
 in section 15.6's order, or whose body it refuses as it comes, marked in `bead-refusal`. It never
 tells the 404 that ends an exchange or a listen it had taken as their connection closes (section
-15.7), which its close tells, nor what HTTP refuses of its own, unmarked. A refusal told carries its status, its reason, the request's authority and its `Origin`,
-each as it came, the field's lines joined by ", "
-([RFC 9110 §5.3](https://www.rfc-editor.org/rfc/rfc9110#section-5.3)), or none, and the client's
-address and port (section 15.12); nothing else of the request, so neither its target, nor its
-connection's token, nor a credential. It names no connection: a refusal is a request's, and a
-listener's throw is reported with none. A connection that closes ends what was under way on it
+15.7), which its close tells, nor what HTTP refuses of its own, unmarked. A refusal told carries its
+status, its reason, the request's authority and its `Origin`, each as it came, the field's lines
+joined by ", " ([RFC 9110 §5.3](https://www.rfc-editor.org/rfc/rfc9110#section-5.3)), or none, and
+the client's address and port (section 15.12); nothing else of the request, so neither its target,
+nor its connection's token, nor a credential. It names no connection: a refusal is a request's, and
+a listener's throw is reported with none. A connection that closes ends what was under way on it
 (sections 9.4, 9.10, 12.10, 13.7). A server's transport hands the router each envelope it took with
 the address and port of what brought it — over HTTP its exchange's, read as section 15.12 reads it,
 whichever socket or proxy brought its connect; over a WebSocket its connection's; over an in-memory
@@ -1564,7 +1567,8 @@ that holds an octet other than visible ASCII — a control character, HTAB among
 or an octet past US-ASCII — in its path or its query, in origin-form or absolute-form, is answered
 alike, 400 unmarked over HTTP/1.1, with none of the fields every response on the path carries, and
 its stream reset `PROTOCOL_ERROR` over HTTP/2, before anything else of the request is judged: a
-target holds a URI's characters ([RFC 9112 §3.2](https://www.rfc-editor.org/rfc/rfc9112#section-3.2),
+target holds a URI's characters
+([RFC 9112 §3.2](https://www.rfc-editor.org/rfc/rfc9112#section-3.2),
 [RFC 9113 §8.3.1](https://www.rfc-editor.org/rfc/rfc9113#section-8.3.1)), which are visible ASCII
 ([RFC 3986 §2](https://www.rfc-editor.org/rfc/rfc3986#section-2)), and a request-line that holds
 another is invalid, answered 400 rather than read on
@@ -1575,9 +1579,9 @@ is taken, `%01` and `%7F` among them, and `%00` in a query. The visible characte
 `"`, `#`, `<`, `>`, `\`, `^`, `` ` ``, `{`, `|` and `}`, are taken as they came, as a page's browser
 sends some of them unencoded in a query
 ([URL Standard](https://url.spec.whatwg.org/#query-percent-encode-set)); a `#` opens no fragment.
-An empty `Host` is a host, and so is a name of invalid punycode. It takes the hosts a request may name
-besides those every server takes, `hosts`, and the origins an exchange may come from besides its
-own, `origins`, none when not given. Its own is its request's authority under `http` or `https`,
+An empty `Host` is a host, and so is a name of invalid punycode. It takes the hosts a request may
+name besides those every server takes, `hosts`, and the origins an exchange may come from besides
+its own, `origins`, none when not given. Its own is its request's authority under `http` or `https`,
 when its host is one the server takes by name — one every server takes, or one `hosts` lists —
 never by `*`: an `Origin` that is `http://` or `https://` followed by that authority, compared ASCII
 case-insensitively, the field read as the serialized origin it carries
@@ -2073,9 +2077,10 @@ another text — gives none, and the failure stands by its code.
      `must be %s characters`, `must be at least %s characters`, `must be at most %s characters`;
      `string.len_bytes`, `string.min_bytes`, `string.max_bytes`: `must be %s bytes`,
      `must be at least %s bytes`, `must be at most %s bytes`; `string.pattern`, `string.prefix`,
-     `string.suffix`, `string.contains`, `string.not_contains`: ``does not match regex pattern `%s` ``,
-     ``does not have prefix `%s` ``, ``does not have suffix `%s` ``,
-     ``does not contain substring `%s` ``, ``contains substring `%s` ``; of their member;
+     `string.suffix`, `string.contains`, `string.not_contains`:
+     ``does not match regex pattern `%s` ``, ``does not have prefix `%s` ``,
+     ``does not have suffix `%s` ``, ``does not contain substring `%s` ``,
+     ``contains substring `%s` ``; of their member;
    - `bytes.const`: `must be %x`; `bytes.len`, `bytes.min_len`, `bytes.max_len`: `must be %s bytes`,
      `must be at least %s bytes`, `must be at most %s bytes`; `bytes.prefix`, `bytes.suffix`,
      `bytes.contains`: `does not have prefix %x`, `does not have suffix %x`, `does not contain %x`;

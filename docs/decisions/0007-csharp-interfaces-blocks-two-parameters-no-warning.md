@@ -63,7 +63,9 @@ exempt, and so are underscores in a test's name (CA1707): a test says what it sh
 An analyzer is
 overruled only on the member it would wrongly refuse, with its reason where it stands: CA1711, on
 `EnvelopeFlags`, the flags as the spec names them, and CA1716, on `IServerTransport.Error`, the
-error as every side names it ([0003](0003-one-word-one-meaning.md)); in the tests, CA5350, on the
+error as every side names it ([0003](0003-one-word-one-meaning.md)), and CA1720, on
+`JsonFormException.Pointer` and `RequestPlace.Pointer`, a problem's pointer as RFC 9457 names it;
+in the tests, CA5350, on the
 SHA-1 of a WebSocket's handshake, which RFC 6455 names and on which nothing secret rests, and
 VSTHRD103, on one relay test whose `Cancel` must run its callbacks before the call settles, which
 `CancelAsync` would run later. **No `async void`**: the threading analyzers'
@@ -135,12 +137,13 @@ held to the side's floor, then the interop ([0006](0006-a-rule-has-its-gate.md))
   core and four types of its own stay out of it, the transport's credential out of what an
   admission, a resolver and a session's resolution are handed, and a credential's forwarding out of
   a handler's and a resolver's interfaces; the whole surface's gate, its parameters among it, is
-  still owed. Past the rule, each work to do: four functions of `src/` take three — a private
-  method, a private class's constructor, an internal class's constructor (`Notification`'s), and
-  `FailureException.OfProtocol`, whose third, its detail, is a positional optional; the transports'
-  `Connect` and `Start` take their `CancellationToken` after their options; the session manager's
-  four events of a change carry three values; and nineteen positional records take more than two
-  members, `TransportServerRefusal` six.
+  still owed. Past the rule, each work to do: seven functions of `src/` take three — two private
+  static methods, a private class's constructor, an internal class's constructor (`Notification`'s),
+  `FailureException.OfProtocol`, whose third, its detail, is a positional optional, and the
+  gateway's two `Refuse`, whose third, its fields, is one too; the transports' `Connect` and
+  `Start`, and the gateway's `Start`, take their `CancellationToken` after their options; the
+  session manager's four events of a change carry three values; and twenty-three positional
+  records take more than two members, `TransportServerRefusal` six.
 - Nothing in the build forbids a base class either; review holds that too, and every class and
   record of `src/` and `interop/` is sealed or static.
 - An event a router raises, an error or a trace, runs on its scheduler, as a listener runs in
@@ -149,7 +152,7 @@ held to the side's floor, then the interop ([0006](0006-a-rule-has-its-gate.md))
   touched on, where progress may have set it going again: each timer carries a generation, and a
   stale one ends nothing.
 - A test only one side has is a row of the support matrix, which says why: a resolver that blocks
-  its thread, a close bounded in time.
+  its thread.
 
 **Each difference the platform makes is a platform row of the support matrix**, with its test, and
 each difference still open an open row, closing which is work to do

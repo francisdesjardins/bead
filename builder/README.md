@@ -311,12 +311,13 @@ number of protobuf's global registry
 | `bead.Raw`, `bead.Text`, `bead.Json`                      | The payload types whose bytes are the payload itself: `raw`, `text` and `json` (spec 17); any other message is `proto`                                     |
 
 beadc compiles a copy of the options of its own, under the project's `.beadc/`, first among the
-roots; a project imports it as `import "bead/options.proto";` and keeps no copy of its own. So it does protovalidate's,
-[`proto/buf/validate/validate.proto`](proto/buf/validate/validate.proto), vendored at
-[v1.2.2](https://github.com/bufbuild/protovalidate/blob/v1.2.2/proto/protovalidate/buf/validate/validate.proto)
-as Buf publishes it, Apache-2.0, its licence in [`licenses/protovalidate.txt`](licenses/protovalidate.txt):
-a project imports it as `import "buf/validate/validate.proto";`, and a copy among its roots is
-`VALIDATE_COPY`. `buf.yaml` leaves its lint to Buf.
+roots; a project imports it as `import "bead/options.proto";` and keeps no copy of its own. So it
+does protovalidate's, [`proto/buf/validate/validate.proto`](proto/buf/validate/validate.proto),
+vendored at [v1.2.2](https://github.com/bufbuild/protovalidate/blob/v1.2.2/proto/protovalidate/buf/validate/validate.proto)
+as Buf publishes it, Apache-2.0, its licence in
+[`licenses/protovalidate.txt`](licenses/protovalidate.txt): a project imports it as
+`import "buf/validate/validate.proto";`, and a copy among its roots is `VALIDATE_COPY`.
+`buf.yaml` leaves its lint to Buf.
 
 ## From a `.proto` to a blueprint
 
@@ -387,11 +388,12 @@ from buf's set, or empty for a blueprint alone. A file holds, for each of its se
 
 - **`<Name>Procedures`**, frozen: a descriptor each, `requestOf` or `commandOf`, its admission, its
   failures by name and code, its procedure as the runtime takes it, its deprecation and its payload
-  limit among them, its `validate` where its request's message holds rules, `validatorOf(Schema,
-  rulesOfX)` of the `proto` module, and its codecs, `PAYLOAD_CODECS.raw`, `.text` or `.json`, or `payloadCodecOf`
-  over protobuf-es's `fromBinary` and `toBinary`, at a nesting limit of 101, for a `proto` binding,
-  its decoder calling `checkProtoRecords(bytes, FooSchema)` first, which refuses, by the message's
-  own descriptor, what protobuf refuses where protobuf-es reads on
+  limit among them, its `validate` where its request's message holds rules,
+  `validatorOf(Schema, rulesOfX)` of the `proto` module, and its codecs, `PAYLOAD_CODECS.raw`,
+  `.text` or `.json`, or `payloadCodecOf` over protobuf-es's `fromBinary` and `toBinary`, at a
+  nesting limit of 101, for a `proto` binding, its decoder calling
+  `checkProtoRecords(bytes, FooSchema)` first, which refuses, by the message's own descriptor, what
+  protobuf refuses where protobuf-es reads on
   ([decision 0028](../docs/decisions/0028-a-proto-payloads-records-are-read-against-its-message-before-its-library-reads-them.md));
 - **`<Name>Failures`**, its catalogue; **`<Name>Resolvers`**, for resolvers written in a module of
   their own; **`<Name>ServerOptions`** and **`<Name>ClientOptions`**, the service layer's options,
@@ -405,11 +407,12 @@ from buf's set, or empty for a blueprint alone. A file holds, for each of its se
 then, above the services, a function of rules for each message its requests' rules reach,
 `rulesOf<Message>(message, sink)`, which judges each rule in spec 18.5's order into the runtime's
 sink and returns true where the sink stops it, each rule's site, its id, its words and its bounds, a
-frozen constant, and each pattern's table a frozen constant of its classes and a `Uint16Array` of its
-cells; and, once, the contract with the runtime, `GENERATED_CODE_SUPPORTS_VERSION_4`
+frozen constant, and each pattern's table a frozen constant of its classes and a `Uint16Array` of
+its cells; and, once, the contract with the runtime, `GENERATED_CODE_SUPPORTS_VERSION_4`
 ([decision 0018](../docs/decisions/0018-a-services-procedures-are-typed-descriptors-served-and-called-through-one-layer.md),
-[decision 0035](../docs/decisions/0035-a-payload-that-reads-is-held-to-its-messages-rules-before-its-resolver-sees-it.md)). Every doc comment is the description, then what
-the procedure admits, through protoplugin's `jsDoc`, which writes `*/` as `*\/`.
+[decision 0035](../docs/decisions/0035-a-payload-that-reads-is-held-to-its-messages-rules-before-its-resolver-sees-it.md)).
+Every doc comment is the description, then what the procedure admits, through protoplugin's `jsDoc`,
+which writes `*/` as `*\/`.
 
 **A deprecation is marked** `@deprecated`, the blueprint's message or `No replacement is named.`,
 on each declaration the file writes for it, as protoc-gen-es marks a deprecated rpc: a procedure's,
@@ -452,19 +455,19 @@ is aliased, as a service whose `<Name>Resolvers` is the runtime's `ServiceResolv
 `ServiceResolvers as ServiceResolvers$1`. `runtime` is the module the runtime comes from: a
 package's name, kept as given, or a path relative to the output's folder, without its extension,
 which each file imports at its depth. `protoRuntime` is the module of the check of a `proto`
-payload's records and of the validators, `@francisdesjardins/bead/proto` by default, named alike, and
-imported only by a file that binds `proto`, which takes `@bufbuild/protobuf` as its peer, already the
-messages'.
-`importExtension` is what every relative import ends with, the messages' and the runtime's alike.
+payload's records and of the validators, `@francisdesjardins/bead/proto` by default, named alike,
+and imported only by a file that binds `proto`, which takes `@bufbuild/protobuf` as its peer,
+already the messages'. `importExtension` is what every relative import ends with, the messages' and
+the runtime's alike.
 
 **Its messages.** Where a binding is `proto`, protoc-gen-es writes the messages in beadc's process
 (`target=ts,erasable_syntax=true`), as `buf generate` writes them: the files that declare them and
 every file of the project they import, `bead/options_pb.ts` among them where a file imports Bead's
 options, since a `_pb.ts` imports the `_pb.ts` of each file its descriptor depends on; protobuf's
-well-known types are `@bufbuild/protobuf/wkt`'s. protovalidate's options and its import are taken out
-of what protoc-gen-es is handed, so no `_pb.ts` imports `buf/validate/validate_pb.ts`, unless the
-output keeps them, `keepValidateOptions`. With `messages: external`, beadc writes none, and
-the target imports them from `messagesOut`.
+well-known types are `@bufbuild/protobuf/wkt`'s. protovalidate's options and its import are taken
+out of what protoc-gen-es is handed, so no `_pb.ts` imports `buf/validate/validate_pb.ts`, unless
+the output keeps them, `keepValidateOptions`. With `messages: external`, beadc writes none, and the
+target imports them from `messagesOut`.
 
 **Its goldens**, under [`test/golden/typescript/`](test/golden/typescript/): the comments fixture's
 `bead/comments/v1/comments_bead.ts`, whose descriptions hold `*/`, markup, a backslash, an astral
@@ -501,16 +504,17 @@ where the output names the file's namespace. The target is a
 printer of its own: every type it names is qualified from `global::`, so it manages no `using`, and
 no type of the namespace takes a runtime type's place. A file holds, for each of its services:
 
-- **`<Name>Procedures`**: a descriptor each, `RequestProcedure` or `CommandProcedure`, its
-  procedure as the runtime takes it, its deprecation and its payload limit among them, its
-  admission, its `Validate` where its request's message holds rules,
-  `global::Bead.Protobuf.Validators.Of<Message>(MessageRules.Check)`, and its codecs, `PayloadCodecs.Raw`, `.Text` or `.Json`, or `PayloadCodecs.Of` over
-  Google.Protobuf, at a nesting limit of 101, for a `proto` binding, its decoder calling
+- **`<Name>Procedures`**: a descriptor each, `RequestProcedure` or `CommandProcedure`, its procedure
+  as the runtime takes it, its deprecation and its payload limit among them, its admission, its
+  `Validate` where its request's message holds rules,
+  `global::Bead.Protobuf.Validators.Of<Message>(MessageRules.Check)`, and its codecs,
+  `PayloadCodecs.Raw`, `.Text` or `.Json`, or `PayloadCodecs.Of` over Google.Protobuf, at a nesting
+  limit of 101, for a `proto` binding, its decoder calling
   `global::Bead.Protobuf.ProtoRecords.Check(bytes.Span, global::Foo.Descriptor)` first, which
   refuses, by the message's own descriptor, what protobuf refuses where Google.Protobuf reads on
-  ([decision 0028](../docs/decisions/0028-a-proto-payloads-records-are-read-against-its-message-before-its-library-reads-them.md)), so a project whose code binds `proto`
-  references the `Bead.Protobuf` assembly, which carries Google.Protobuf; then `All`, every one in
-  their ids' order;
+  ([decision 0028](../docs/decisions/0028-a-proto-payloads-records-are-read-against-its-message-before-its-library-reads-them.md)),
+  so a project whose code binds `proto` references the `Bead.Protobuf` assembly, which carries
+  Google.Protobuf; then `All`, every one in their ids' order;
 - **`<Name>Failures`**, a class of failures for each procedure that lists any, its values its own,
   and `Is`, which tells a failure received by the service's catalogue;
 - **`<Name>Admissions`** and **`<Name>Windows`**, the records of its hooks, each required, and of
@@ -529,11 +533,10 @@ rules reach, its `Check(message, sink)` judging each rule in spec 18.5's order i
 `IViolationSink` and returning true where the sink stops it, each rule's site a static readonly
 `ViolationRule`, each pattern's table a `PatternTable` of its classes and a `ushort[]` of its
 cells, `file` keeping each class to its file; and, once, the contract with the runtime,
-`GeneratedCode.SupportsVersion4`. Every doc comment is the
-description, then what the procedure admits, through one writer: one `///` a line, the text
-XML-escaped, a `<para>` a paragraph where there are two, and each character C# reads as a line's
-end besides LF, CR, NEL, LS and PS, written as its reference, `&#xD;`; a string literal writes them
-as escapes.
+`GeneratedCode.SupportsVersion4`. Every doc comment is the description, then what the procedure
+admits, through one writer: one `///` a line, the text XML-escaped, a `<para>` a paragraph where
+there are two, and each character C# reads as a line's end besides LF, CR, NEL, LS and PS, written
+as its reference, `&#xD;`; a string literal writes them as escapes.
 
 **A deprecation is marked**
 `[global::System.Obsolete("<its text>", DiagnosticId = "BEAD0001")]`, the blueprint's message or
@@ -588,17 +591,17 @@ and protoc's own leaves out. protoc is the [pinned](#building-and-testing) one. 
 build compiles them, Grpc.Tools among them.
 
 **Its goldens**, under [`test/golden/csharp/`](test/golden/csharp/): the comments fixture's
-`Bead/Comments/V1/CommentsBead.cs` and the messages fixture's `Bead/Messages/V1/MessagesBead.cs`
-and `Bead/Messages/V1/RulesBead.cs`, with protoc's `Bead/Messages/V1/Messages.cs`,
+`Bead/Comments/V1/CommentsBead.cs` and the messages fixture's `Bead/Messages/V1/MessagesBead.cs` and
+`Bead/Messages/V1/RulesBead.cs`, with protoc's `Bead/Messages/V1/Messages.cs`,
 `Bead/Messages/V1/Rules.cs` and `Bead/Protobuf/Options.cs`; the messages fixture holds a nested
-message, a `oneof`, a `map`, an `optional` field and a request held to rules. A test writes them again and
-compares them byte for byte, their header's versions written as the current ones first; beadc's
-own files need no protoc, their messages' line being the pin's, and protoc's are compared where the
-pinned protoc runs. The C# side's solution builds them as a consumer does, in
+message, a `oneof`, a `map`, an `optional` field and a request held to rules. A test writes them
+again and compares them byte for byte, their header's versions written as the current ones first;
+beadc's own files need no protoc, their messages' line being the pin's, and protoc's are compared
+where the pinned protoc runs. The C# side's solution builds them as a consumer does, in
 [`implementations/dotnet/tests/Bead.Goldens`](../implementations/dotnet/tests/Bead.Goldens/Bead.Goldens.csproj),
 under that side's analyzers and every warning an error; their code style is that side's
-`.editorconfig`, of which the goldens' own is a copy, since an `.editorconfig` reaches only the files
-under its folder, and a test holds the two equal, byte for byte. A consumer of what they mark,
+`.editorconfig`, of which the goldens' own is a copy, since an `.editorconfig` reaches only the
+files under its folder, and a test holds the two equal, byte for byte. A consumer of what they mark,
 [`test/consumer/UseDeprecated.cs`](test/consumer/UseDeprecated.cs), the TypeScript consumer's twin,
 is compiled with them by Roslyn in
 [`Bead.Goldens.Tests`](../implementations/dotnet/tests/Bead.Goldens.Tests/Bead.Goldens.Tests.csproj),
@@ -608,14 +611,14 @@ reported, protobuf's `CS0612` and `CS0618` none either.
 ## The rules
 
 A rule's **level** says where it applies: `proto`, on a `.proto` input, each with its fixture under
-[`test/proto/`](test/proto/), buf's `PROTOVALIDATE` under [`test/protovalidate/`](test/protovalidate/);
-`generate`, between a blueprint and the targets `generate` writes it with, its case a test of
-`generate`'s; `blueprint`, on any blueprint, one written by hand included, each with
-its cases under [`test/blueprints/`](test/blueprints/), a JSON Patch (RFC 6902) of the interop's
-blueprint and the findings it gives by rule name at their JSON Pointers, or, for what a patch cannot
-state, a raw text under [`test/form/`](test/form/); or `breaking`, between two blueprints, the
-earlier and the current, as [breaking](#breaking) says, each with its cases under
-[`test/breaking/`](test/breaking/).
+[`test/proto/`](test/proto/), buf's `PROTOVALIDATE` under
+[`test/protovalidate/`](test/protovalidate/); `generate`, between a blueprint and the targets
+`generate` writes it with, its case a test of `generate`'s; `blueprint`, on any blueprint, one
+written by hand included, each with its cases under [`test/blueprints/`](test/blueprints/), a JSON
+Patch (RFC 6902) of the interop's blueprint and the findings it gives by rule name at their JSON
+Pointers, or, for what a patch cannot state, a raw text under [`test/form/`](test/form/); or
+`breaking`, between two blueprints, the earlier and the current, as [breaking](#breaking) says, each
+with its cases under [`test/breaking/`](test/breaking/).
 
 On a blueprint, the rules run in one order, and a stage that finds an error ends the reading: its
 JSON and I-JSON, its format, its features, the format's schema, then the rules that span entries and
@@ -715,9 +718,9 @@ engine of its platform's.
   fields that hold a rule, lead to one or a message's oneof names, by number, each its name, its
   type (`{"scalar"}`, `{"enum"}`, `{"message"}` or `{"wrapper"}`, by the scalar wrapped), its
   `label` and its map's `key`, its presence, its `oneof`, and its `(buf.validate.field)` in
-  protobuf's JSON mapping by proto names, a float's or a double's value as the string of the double it
-  is; its own `(buf.validate.message)`; its oneofs' `(buf.validate.oneof)`, by index. The blueprint
-  then requires `validate`, which each target declares it generates.
+  protobuf's JSON mapping by proto names, a float's or a double's value as the string of the double
+  it is; its own `(buf.validate.message)`; its oneofs' `(buf.validate.oneof)`, by index. The
+  blueprint then requires `validate`, which each target declares it generates.
 - **The order** is spec 18.5's, Bead's own: the fields by number, each's `required`, then its type's
   rules by their members' numbers, a range at its lower member, then its items by index or its
   entries by key, each key then its value, then the message it holds; then the message's oneof
@@ -751,10 +754,11 @@ beadc reads what a `.proto` says of it and writes what a gateway serves; a runti
 layer answers it.
 
 - **The `.proto`'s words, read as they are**: each method's `option (google.api.http)`, googleapis'
-  [`http.proto`](proto/google/api/http.proto) and [`annotations.proto`](proto/google/api/annotations.proto),
-  vendored at googleapis 14a161a and pinned by their sha256 in [`proto/pins.json`](proto/pins.json),
-  as protovalidate's `validate.proto` is; and its `option idempotency_level`, `descriptor.proto`'s
-  own. Each procedure's `http` member holds them, resolved: its `idempotencyLevel`, left out for
+  [`http.proto`](proto/google/api/http.proto) and
+  [`annotations.proto`](proto/google/api/annotations.proto), vendored at googleapis 14a161a and
+  pinned by their sha256 in [`proto/pins.json`](proto/pins.json), as protovalidate's
+  `validate.proto` is; and its `option idempotency_level`, `descriptor.proto`'s own. Each
+  procedure's `http` member holds them, resolved: its `idempotencyLevel`, left out for
   `IDEMPOTENCY_UNKNOWN`, and its `rules`, each a method, a template, a `body` and a `responseBody`,
   each of a rule's `additional_bindings` a rule of its own in their order.
 - **The messages' shapes**: every message a binding reaches, through its fields, is listed in
@@ -762,10 +766,10 @@ layer answers it.
   its label and a map's key, its presence, its `oneof`, its description and its deprecation; the
   enums they name in `proto.enums`, each value by its name and its number in their declaration's
   order, an alias among them. A well-known type of `google/protobuf/` is named by its full name
-  alone, its JSON its own form; `google.protobuf.NullValue` too. These members are under no
-  feature: a target that serves no HTTP leaves a route unserved, which refuses what no client was
-  promised. A member added is a minor of `bead-blueprint/1`, which an older reader's schema
-  refuses, fail-closed; a blueprint an earlier beadc wrote holds no `fields`, which this beadc reads.
+  alone, its JSON its own form; `google.protobuf.NullValue` too. These members are under no feature:
+  a target that serves no HTTP leaves a route unserved, which refuses what no client was promised. A
+  member added is a minor of `bead-blueprint/1`, which an older reader's schema refuses,
+  fail-closed; a blueprint an earlier beadc wrote holds no `fields`, which this beadc reads.
 - **The routes**: each procedure a client calls, never a command, is answered at its default route,
   `POST <prefix>/<Service>/<procedure>`, `/api` the prefix unless `beadc.yaml`'s `http.prefix` gives
   another; `GET` there where it is marked `NO_SIDE_EFFECTS` and the query carries its request whole;
@@ -794,14 +798,15 @@ layer answers it.
   the C# target writes `BeadHttp.cs` beside its first service's file, in its namespace, the static
   class `HttpRoutes`: `All`, `OpenApiDocument`, a UTF-8 literal, and `ProblemTypes`. An output
   without it writes neither and embeds nothing, so no assembly carries a document it never serves.
-  The same file writes a typed `<Service>HttpClient` for every service: each procedure a client
-  calls has a requester on its default POST route, and each notifying procedure has a stream of
-  its result then notifications. TypeScript uses `fetch`; C# uses `HttpClient`. Both use the
-  runtime's transcoding layer to write requests and read answers, including RFC 9457 problems as
-  Bead failures with their code and scope. Commands have no HTTP requester.
-  Both clients take the gateway URL first and optional options last. TypeScript calls
-  `client.sayHello(request, options?)` and `client.subscribeCountDown(request, options?)`;
-  C# calls `client.SayHello(request, options)` and `client.SubscribeCountDown(request, options)`.
+  The same file writes a client of each service, `<Service>HttpClient` (transcoding 12), over the
+  runtime's caller, which writes each request and reads each answer by its gateway's mapping, an
+  RFC 9457 problem read as a Bead failure of its code and its scope: a requester of each procedure
+  a client calls, on its default `POST` route alone, and, for one that notifies, a stream of its
+  result then its notifications, through `fetch` in TypeScript and `HttpClient` in C#; a command
+  has none. Each takes its gateway's URL first and its options last:
+  `new HelloHttpClient(url, options?)`, `hello.sayHello(request, options?)` and
+  `hello.subscribeCountDown(request, options?)` in TypeScript, `new HelloHttpClient(uri, options)`,
+  `hello.SayHello(request, options)` and `hello.SubscribeCountDown(request, options)` in C#.
 - **`google.api.http` leaves the messages** as protovalidate's options do: what protoc-gen-es and
   protoc are handed holds neither the option nor the import of `annotations.proto`, unless an output
   keeps them, `keepHttpOptions`. `idempotency_level` stays, protobuf's own.
@@ -811,9 +816,10 @@ layer answers it.
 [`test/golden/csharp/transcoding/`](test/golden/csharp/transcoding/), its document
 [`test/golden/transcoding.openapi.json`](test/golden/transcoding.openapi.json); beadc's tests hold
 the document to OpenAPI 3.1's own schema, vendored under [`test/openapi/`](test/openapi/) and pinned
-by its sha256, every body [`spec/transcoding.json`](../spec/transcoding.json)'s `writings` hold valid
-against its schemas, and every reading taken in the form a schema states valid too, those beside it
-named one by one; its `templates` play through the parser and the precedence beadc refuses ties by.
+by its sha256, every body [`spec/transcoding.json`](../spec/transcoding.json)'s `writings` hold
+valid against its schemas, and every reading taken in the form a schema states valid too, those
+beside it named one by one; its `templates` play through the parser and the precedence beadc refuses
+ties by.
 
 ## The form
 
@@ -848,17 +854,18 @@ Through a wrapper, `--against` names what the container sees: a folder under the
 **Two categories, `WIRE` within `API`**, as Google's AIP-180 parts compatibility: `WIRE`, a peer
 built from the earlier still talks with one built from the current, its wire compatibility widened
 from the bytes to the peer, since a call answered `PROCEDURE_UNKNOWN` breaks a peer whose bytes
-still parse; `API`, the default, besides, code written against the earlier's generated API still compiles
-and means the same, and so do the metrics and filters that name a procedure. `API` holds every
-`WIRE` rule. **The category `HTTP`** is held under either, wherever the earlier blueprint states an
-HTTP member, a rule or an idempotency level, or the current `beadc.yaml` writes the document or an
-output with `http: true` ([decision 0037](../docs/decisions/0037-a-procedure-is-also-an-http-route-which-a-gateway-answers-as-one-more-client-of-its-server.md)):
+still parse; `API`, the default, besides, code written against the earlier's generated API still
+compiles and means the same, and so do the metrics and filters that name a procedure. `API` holds
+every `WIRE` rule. **The category `HTTP`** is held under either, wherever the earlier blueprint
+states an HTTP member, a rule or an idempotency level, or the current `beadc.yaml` writes the
+document or an output with `http: true` ([decision
+0037](../docs/decisions/0037-a-procedure-is-also-an-http-route-which-a-gateway-answers-as-one-more-client-of-its-server.md)):
 a client of the earlier's routes still reaches each, and its JSON reads the same, every route under
-the current's prefix; there buf's `WIRE_JSON` stands for `WIRE` under `WIRE`, `FIELD_SAME_JSON_NAME`,
-`FIELD_SAME_NAME` and `ENUM_VALUE_SAME_NAME` among what it adds, since the mapping names what the
-binary wire numbers; `API`'s `FILE` holds them already. A service or a procedure renamed moves its
-default route, which `SERVICE_SAME_NAME` and `PROCEDURE_SAME_NAME` hold under `API`. A finding of
-`HTTP` is beside the wire, and moves no revision.
+the current's prefix; there buf's `WIRE_JSON` stands for `WIRE` under `WIRE`,
+`FIELD_SAME_JSON_NAME`, `FIELD_SAME_NAME` and `ENUM_VALUE_SAME_NAME` among what it adds, since the
+mapping names what the binary wire numbers; `API`'s `FILE` holds them already. A service or a
+procedure renamed moves its default route, which `SERVICE_SAME_NAME` and `PROCEDURE_SAME_NAME` hold
+under `API`. A finding of `HTTP` is beside the wire, and moves no revision.
 
 **By id.** A service is compared by its `serviceId`, a procedure by its `procedureId` within its
 service, a failure by its `code`. A name is compared exactly, as a generated member is named, but
@@ -913,22 +920,21 @@ A service or a procedure the current adds, a failure added to a catalogue or to 
 that comes to notify, a window, a deprecation, a description and a reservation added break nothing.
 
 **What moves a revision.** A service both sides hold, by id, has changed where any of Bead's rules
-finds on it, before any waiver; where it loses a procedure, or gains one, a failure in its
-catalogue or in a procedure's list, a reservation, a request that comes to notify, or an admission
-loosened; where a request's rules changed, either way; where a
-deprecation, a procedure's, the service's or a failure's, is added, changed or withdrawn; and,
-where both sides are buf images, where a message one of its `proto` bindings reaches, by its
-fields' types, changed, compared as its `DescriptorProto` with what of its file reaches the wire
-or a Bead target's API, its `syntax`, its `edition` and its own `features`, which with the edition
-give its resolved features, and its `csharp_namespace`, which the C# target's namespace reads; so a
-field added, or an edition's `DELIMITED`, moves the revision though no blueprint shows it. Another
-language's file option, `go_package` and its kind, moves none: buf's `FILE` holds it under `API`;
-nor does `(bead.file)`, whose admission and reservations the blueprints' compare holds. Its revision is
-then the earlier's plus one at least, and otherwise the earlier's at least. A jump, and a move where
-nothing changed, are no finding: `--against` may name any release, so beadc cannot know the one it
-names came just before. A service the current adds is held to nothing. Each is read through the
-model, never as bytes: an earlier in another member or array order changes nothing, nor does a
-description.
+finds on it, before any waiver; where it loses a procedure, or gains one, a failure in its catalogue
+or in a procedure's list, a reservation, a request that comes to notify, or an admission loosened;
+where a request's rules changed, either way; where a deprecation, a procedure's, the service's or a
+failure's, is added, changed or withdrawn; and, where both sides are buf images, where a message one
+of its `proto` bindings reaches, by its fields' types, changed, compared as its `DescriptorProto`
+with what of its file reaches the wire or a Bead target's API, its `syntax`, its `edition` and its
+own `features`, which with the edition give its resolved features, and its `csharp_namespace`, which
+the C# target's namespace reads; so a field added, or an edition's `DELIMITED`, moves the revision
+though no blueprint shows it. Another language's file option, `go_package` and its kind, moves none:
+buf's `FILE` holds it under `API`; nor does `(bead.file)`, whose admission and reservations the
+blueprints' compare holds. Its revision is then the earlier's plus one at least, and otherwise the
+earlier's at least. A jump, and a move where nothing changed, are no finding: `--against` may name
+any release, so beadc cannot know the one it names came just before. A service the current adds is
+held to nothing. Each is read through the model, never as bytes: an earlier in another member or
+array order changes nothing, nor does a description.
 
 **A waiver.** A finding is waived by `--except`, in the call a reviewer reads:
 
@@ -984,19 +990,18 @@ and what `export-ignore` names out.
 **buf's rules** run over two buf images, each side's `.proto` roots compiled into buf's image, whose
 files mark their imports, then `buf breaking --exclude-imports` under a configuration of beadc's:
 `use` is buf's `WIRE` under `WIRE`, and its `FILE` under `API`, since a generated import path
-follows a file and `FILE_SAME_PACKAGE` and `FILE_SAME_CSHARP_NAMESPACE` hold what a blueprint does not,
-`API` holding buf's whole `FILE`, every language's file options among them;
+follows a file and `FILE_SAME_PACKAGE` and `FILE_SAME_CSHARP_NAMESPACE` hold what a blueprint does
+not, `API` holding buf's whole `FILE`, every language's file options among them;
 `bead/options.proto` and protovalidate's `buf/validate/validate.proto`, beadc's own files and never
-a project's, are ignored; buf's
-`SERVICE_NO_DELETE` and every `RPC_*` rule are excepted, since buf keys a service and an rpc by
-name, and Bead keys them by id and holds them by its own rules. A failure's enum stays buf's too:
-`ENUM_VALUE_NO_DELETE_UNLESS_NUMBER_RESERVED` under `WIRE`, `ENUM_VALUE_NO_DELETE` and
-`ENUM_VALUE_SAME_NAME` under `API`. Each finding is an error, its rule `buf:` and buf's,
-`buf:FIELD_SAME_TYPE`, its message buf's, at buf's line and column in the current roots, or, for a
-file the current lost, at the earlier's path, on disk where the earlier is a folder, else by the
-path its import names. buf's exit 100 is its findings, 0 none, any other its refusal,
-exit 2. `WIRE_JSON` is not run: a `json` binding's bytes are the payload itself (spec 17), never
-protobuf's JSON mapping.
+a project's, are ignored; buf's `SERVICE_NO_DELETE` and every `RPC_*` rule are excepted, since buf
+keys a service and an rpc by name, and Bead keys them by id and holds them by its own rules. A
+failure's enum stays buf's too: `ENUM_VALUE_NO_DELETE_UNLESS_NUMBER_RESERVED` under `WIRE`,
+`ENUM_VALUE_NO_DELETE` and `ENUM_VALUE_SAME_NAME` under `API`. Each finding is an error, its rule
+`buf:` and buf's, `buf:FIELD_SAME_TYPE`, its message buf's, at buf's line and column in the current
+roots, or, for a file the current lost, at the earlier's path, on disk where the earlier is a
+folder, else by the path its import names. buf's exit 100 is its findings, 0 none, any other its
+refusal, exit 2. `WIRE_JSON` is not run: a `json` binding's bytes are the payload itself (spec 17),
+never protobuf's JSON mapping.
 
 | `--against`                           | Bead's rules read                                                                                                                                                                                                            | buf's rules read                                                          |
 | ------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------- |
@@ -1031,28 +1036,31 @@ CI's `builder` job installs, fetches protoc by its pin and checks its sha256, th
 `BEADC_PROTOC_REQUIRED=1` turning a test that would skip without protoc into one that fails, then
 `beadc check` and `beadc blueprint --check` over the interop's blueprint, and from the repository's
 root `node builder/src/cli.ts generate --check` over the root's [`beadc.yaml`](../beadc.yaml), which
-holds each side's interop to what beadc generates from its blueprint, on Linux and on Windows, on
-Node 26, and on Linux on Node 24.9 besides; and `yarn check` on Linux, whose types, the goldens'
-types, lint, format and generated code no platform moves. On every leg, the wrappers' tests hold
-`beadc.sh` and `beadc.ps1` to one contract against a stand-in engine, a native `docker.exe` on
-Windows, `BEADC_WRAPPERS_REQUIRED=1` turning a test that would skip without bash, pwsh 7.6 or, on
-Windows, the right to make a symbolic link into one that fails. On Linux, last, `beadc breaking`
-holds the interop's blueprint and `examples/hello` to the last release, `git archive` piped into
-`--against -`: the last release carries both; one without a blueprint, or none found, fails the
-step, so it never passes by comparing nothing. The last release is the newest `vX.Y.Z`, as
-`tools/release.mjs` reads one, whose commit is not HEAD's, read by the tag's commit, never by
-ancestry, which the shallow fetch does not hold: on a release's own commit, `main`'s, the release
-before it, so a waiver the release carried still waives its change there. The step runs under `--fail-on-warning`, so a waiver that waived nothing fails it. A waiver
-stands on its line, scoped to its subject, for the cycle of the change it was written for:
-`tools/release.mjs tag`, which ends on `develop` at its back-merge, writes the CI file without the
-waivers the tagged commit carries, and prints the commit before the one push, which carries
-`develop`'s tip without them; `prepare`, on a hotfix, which starts from `main`, writes it without
-every waiver, each moot since the release `main` holds. A branch behind a release's merge-back
-merges `develop` first, or meets the release's moot waivers. On the image's legs, Linux on
-Node 26, amd64 on `ubuntu-26.04` and arm64 on `ubuntu-26.04-arm`, each natively: the image's test
-stage, beadc's tests on the image's own Node, protoc and environment; then the image, which
-`yarn test` runs through each wrapper under `BEADC_IMAGE_REQUIRED=1`: `beadc version`,
-`generate --check` over the root's `beadc.yaml` and over
+holds each side's interop to what beadc generates from its blueprint, and from the demo's folder
+over its own, the sign-up service, then the root's `tools/check-validations.mjs` and
+`tools/check-transcoding.mjs`, which hold each side's validators of `spec/validations.proto`, and
+its route table and document of `spec/transcoding.proto`, to what beadc writes for them, on Linux
+and on Windows, on Node 26, and on Linux on Node 24.9 besides; and `yarn check` on Linux, whose
+types, the goldens' types, lint, format and generated code no platform moves. On every leg, the
+wrappers' tests hold `beadc.sh` and `beadc.ps1` to one contract against a stand-in engine, a native
+`docker.exe` on Windows, `BEADC_WRAPPERS_REQUIRED=1` turning a test that would skip without bash,
+pwsh 7.6 or, on Windows, the right to make a symbolic link into one that fails. On Linux, last,
+`beadc breaking` holds the interop's blueprint and `examples/hello` to the last release,
+`git archive` piped into `--against -`: the last release carries both; one without a blueprint, or
+none found, fails the step, so it never passes by comparing nothing. The last release is the newest
+`vX.Y.Z`, as `tools/release.mjs` reads one, whose commit is not HEAD's, read by the tag's commit,
+never by ancestry, which the shallow fetch does not hold: on a release's own commit, `main`'s, the
+release before it, so a waiver the release carried still waives its change there. The step runs
+under `--fail-on-warning`, so a waiver that waived nothing fails it. A waiver stands on its line,
+scoped to its subject, for the cycle of the change it was written for: `tools/release.mjs tag`,
+which ends on `develop` at its back-merge, writes the CI file without the waivers the tagged commit
+carries, and prints the commit before the one push, which carries `develop`'s tip without them;
+`prepare`, on a hotfix, which starts from `main`, writes it without every waiver, each moot since
+the release `main` holds. A branch behind a release's merge-back merges `develop` first, or meets
+the release's moot waivers. On the image's legs, Linux on Node 26, amd64 on `ubuntu-26.04` and arm64
+on `ubuntu-26.04-arm`, each natively: the image's test stage, beadc's tests on the image's own Node,
+protoc and environment; then the image, which `yarn test` runs through each wrapper under
+`BEADC_IMAGE_REQUIRED=1`: `beadc version`, `generate --check` over the root's `beadc.yaml` and over
 [`examples/hello`](../examples/hello/README.md)'s, the messages fixture in both languages, a
 project's files written as the caller and an interrupt's 130; and shellcheck 0.11.0, from its image
 by its digest, and PSScriptAnalyzer 1.25.0 over the wrappers. The C# side's `dotnet` job builds the

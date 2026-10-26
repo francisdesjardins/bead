@@ -18,11 +18,12 @@ This repository holds the protocol and its implementations, side by side:
 - **the specification**, and the conformance files every implementation plays;
 - **a TypeScript implementation**: WebSocket, HTTP, Web Worker and in-memory transports, each a
   client and a server, a server's transports joined into one, the client and server routers, the
-  service, session and notification managers, and a demo;
+  service, session and notification managers, a gateway that answers a service's procedures over
+  HTTP and JSON, and a demo;
 - **a C# implementation** at behavioural parity with it: the same envelope, the same routers, the
-  WebSocket, HTTP and in-memory transports, and the joined one;
+  WebSocket, HTTP and in-memory transports, the joined one, and the same gateway;
 - **an interop service** each side offers, which the other side's client calls over both
-  transports.
+  transports, beside a gateway whose routes the other side's generated HTTP client calls.
 
 **Nothing is published before 1.0.0.** No package goes to npm or NuGet, and no image to a
 registry, so that the wire, the names and the API can change freely until then, with no deprecation
@@ -94,7 +95,8 @@ between two routers of one process, and, ahead, a topic-based publish/subscribe 
   what its transport carries — relays that forward it to the destination that verifies it, and
   commands, the server's own calls to the client.
 - **One behaviour in every language.** The spec and its conformance files are the contract. The
-  TypeScript and C# implementations both play them, and call each other in CI over both transports.
+  TypeScript and C# implementations both play them, and call each other in CI over both transports
+  and through each other's gateway.
 - **No dependency.** The TypeScript side runs in browsers and in Node with nothing else installed;
   a project that binds `proto` brings protobuf-es, an optional peer.
 
@@ -110,28 +112,30 @@ envelopes.
 
 ## Where Bead goes
 
-A version here is the product's, its `v*` tag; the spec and its companion move on an axis of their
-own ([0008](docs/decisions/0008-three-version-axes-and-names-qualified-by-their-owner.md)).
+A version here is the product's, its `v*` tag; the spec and its two companions move on an axis of
+their own ([0008](docs/decisions/0008-three-version-axes-and-names-qualified-by-their-owner.md)).
 
-- **Next**: a payload's rules written in CEL, a total subset beadc compiles into each side beside
-  the rules it compiles already
-  ([0035](docs/decisions/0035-a-payload-that-reads-is-held-to-its-messages-rules-before-its-resolver-sees-it.md));
-  one corpus read alike by both sides' parsers, held as a gate as
-  `tools/protobuf-conformance.mjs differential` holds a `proto` payload, a target for a
-  WebSocket's handshake beside the four of [Fuzzing](#fuzzing), and a short run of them in CI; and a
-  guard in CI against a gross regression of the benches, where their spread on CI's runners lets
-  one hold ([Measurement](#measurement)).
-- **Then**: a topic-based publish/subscribe broker as one more transport, one core and one adapter
-  a broker, Bead's envelope, routers and sessions the same at each end
+- **Next**: a topic-based publish/subscribe broker as one more transport, one core and one adapter
+  a broker, the first MQTT 5's, Bead's envelope, routers and sessions the same at each end
   ([0021](docs/decisions/0021-a-broker-is-a-transport-and-bead-is-never-a-network.md)).
-- **Further**: HTTP/JSON transcoding's generated HTTP client and the interop's gateways, the
-  transports' client part of the conformance, a relay across languages in the interop, the
-  DevTools extension on Firefox, a counted call's cost measured against an uncounted one, and a
-  constrained C side, each bound by the records
-  that [the index](docs/decisions/README.md#where-bead-goes) names, with what else is ahead.
+- **Then**: a third language's core, its router, its service layer and its sessions, playing the
+  conformance files over the in-memory transport before it has a socket
+  ([0036](docs/decisions/0036-an-in-memory-transport-joins-two-routers-of-one-process-and-a-server-takes-several-transports-through-one.md)).
+- **Further**: a payload's rules written in CEL, a total subset beadc compiles into each side
+  beside the rules it compiles already
+  ([0035](docs/decisions/0035-a-payload-that-reads-is-held-to-its-messages-rules-before-its-resolver-sees-it.md));
+  a connection's close code carried on `close`
+  ([0033](docs/decisions/0033-a-side-bounds-what-a-peer-holds-of-it.md)); one corpus read alike by
+  both sides' parsers, held as a gate as `tools/protobuf-conformance.mjs differential` holds a
+  `proto` payload, and a short run of the targets of [Fuzzing](#fuzzing) in CI; a guard in CI
+  against a gross regression of the benches, where their spread on CI's runners lets one hold
+  ([Measurement](#measurement)); the transports' client part of the conformance, a relay across
+  languages in the interop, the DevTools extension on Firefox, a counted call's cost measured
+  against an uncounted one, and a constrained C side, each bound by the records that
+  [the index](docs/decisions/README.md#where-bead-goes) names, with what else is ahead.
 - **An idea, with no version**: HTTP and WebSocket on one port, mounted in an application's own
   web server, which would take the place of the small local proxy that couples the two transports
-  ([0004](docs/decisions/0004-one-behaviour-in-every-language.md)); one server takes its
+  ([0004](docs/decisions/0004-one-behaviour-in-every-language.md)), one server taking its
   connections from both through a joined transport
   ([0036](docs/decisions/0036-an-in-memory-transport-joins-two-routers-of-one-process-and-a-server-takes-several-transports-through-one.md)).
 
@@ -156,6 +160,8 @@ docs/
   support.md                  the support matrix: each feature in each language, and its test
 tools/                        repository checks, the release, the coverage report, bench-compare.mjs and fuzz.mjs, Node without dependencies
   fuzz/                       fuzzer.json, the pin of the C# side's fuzzer and of its instrumenter
+  protobuf-conformance/       runner.json, the pin of protobuf's conformance runner and its floor, and the testees' service.proto
+  protovalidate-differential/ pin.json, the pin of protovalidate-es and the packages it needs
 .githooks/                    the repository checks before each commit, opt-in
 .github/workflows/ci.yml      the CI
 CLAUDE.md, .claude/workflows/ the standing instructions for Claude sessions, and their workflows
@@ -214,19 +220,19 @@ git diff --exit-code -- spec
 
 Each file follows its JSON Schema in [`spec/schemas/`](spec/schemas/), and repeats the version
 `spec.md` states as its `specVersion`, or, for `debug-filters.json` and `metrics.json`, the version
-`debugging.md` states as its `debuggingVersion`, and, for `transcoding.json`, the one `transcoding.md`
-states as its `transcodingVersion`. `spec/check.py` holds each, that the spec's sections
-and the groups of vectors name each other, that every unit an entry cites is its document's, that
-each ledger gives every unit of its document its status, each reason held by its rule, and the
-hash of its text, which moves only where `python spec/check.py --write-units 15.7` names the unit,
-and that every exposition reads as the Prometheus text format 0.0.4, that the interop's blueprint
-is in its form and `interop-service.json` states its procedures, and that each count the table
-above and the matrix's, in [`docs/support.md`](docs/support.md), state is what the files hold;
-then it reports which groups and files each side's tests read, and fails on one a side does not.
-It runs on Python 3.14, with `jsonschema`, `make_validations.py` with `google-re2` and
-`make_transcoding.py` with `protobuf`, protobuf's own Python library, which
-`spec/requirements.txt` locks with every hash; `make_validations.py` reads Unicode 17.0.0's files
-where `spec/generators/ucd.json` pins them, fetched once into the temporary folder:
+`debugging.md` states as its `debuggingVersion`, and, for `transcoding.json`, the one
+`transcoding.md` states as its `transcodingVersion`. `spec/check.py` holds each, that the spec's
+sections and the groups of vectors name each other, that every unit an entry cites is its
+document's, that each ledger gives every unit of its document its status, each reason held by its
+rule, and the hash of its text, which moves only where `python spec/check.py --write-units 15.7`
+names the unit, and that every exposition reads as the Prometheus text format 0.0.4, that the
+interop's blueprint is in its form and `interop-service.json` states its procedures, and that each
+count the table above and the matrix's, in [`docs/support.md`](docs/support.md), state is what the
+files hold; then it reports which groups and files each side's tests read, and fails on one a side
+does not. It runs on Python 3.14, with `jsonschema`, `make_validations.py` with `google-re2` and
+`make_transcoding.py` with `protobuf`, protobuf's own Python library, which `spec/requirements.txt`
+locks with every hash; `make_validations.py` reads Unicode 17.0.0's files where
+`spec/generators/ucd.json` pins them, fetched once into the temporary folder:
 
 ```sh
 python -m venv .venv    # then activate it: .venv/bin/activate, or .venv\Scripts\Activate.ps1
@@ -263,7 +269,7 @@ layout and its modules.
 
 ```sh
 cd implementations/dotnet
-dotnet format Bead.slnx --verify-no-changes --exclude ../../builder/test/golden/csharp interop/Bead.Interop/Generated
+dotnet format Bead.slnx --verify-no-changes --exclude ../../builder/test/golden/csharp interop/Bead.Interop/Generated tests/Bead.Protobuf.Tests/Generated
 dotnet build Bead.slnx
 dotnet test --solution Bead.slnx
 ```
@@ -309,17 +315,18 @@ C# targets, the image and its wrappers, and what each option of `bead/options.pr
 ## An example
 
 [`examples/hello`](examples/hello/README.md) is a project written as a consumer writes one: a
-`.proto` of `proto` messages, a procedure that notifies at a window of 1, a command, a catalogue and
-a hook, generated by beadc into a TypeScript half and a C# half
+`.proto` of `proto` messages, a procedure that notifies at a window of 1, its request held to a
+rule, a command, a catalogue and a hook, generated by beadc into a TypeScript half and a C# half,
+each of whose servers answers its routes over HTTP and JSON by a gateway beside it
 ([0022](docs/decisions/0022-a-proto-becomes-one-checked-blueprint-and-each-language-is-generated-from-it.md)).
 Each half reaches its runtime from its source, the TypeScript half by a Yarn `portal:` and the C#
 half by a `ProjectReference`, takes the house's rules by reference where its platform can, a copy
 held to them where it cannot, and builds twice: its messages generated by beadc, and by its
 platform's own generator, protoc-gen-es under `buf generate` and Grpc.Tools.
 [`pairs.mjs`](examples/hello/pairs.mjs) plays each client against each server, both modes of each
-half, sixteen pairs, and holds what each client writes to
-[`transcript.txt`](examples/hello/transcript.txt), byte for byte. Its README says how to generate,
-build and run it, and what a project outside this repository writes instead.
+half, sixteen pairs, then asks that server's gateway, and holds what each client writes and the
+gateway answers to [`transcript.txt`](examples/hello/transcript.txt), byte for byte. Its README says
+how to generate, build and run it, and what a project outside this repository writes instead.
 
 ## Interop, both ways
 
@@ -330,6 +337,13 @@ over HTTP:
   it with Node from `implementations/typescript`, which must be installed;
 - the TypeScript client against the C# server: `yarn test:interop` builds and starts
   `Bead.Interop.Server` with `dotnet run`.
+
+In the same runs, each side's generated HTTP client calls the gateway the other side's interop
+server serves beside it, of `spec/transcoding.proto`'s service: protobuf's JSON and every native
+encoding, its problems and the authorization it presents, a stream's result, notifications and
+ending failure, and the gateway's own refusals of a route, a size and a busy stream; and both
+served OpenAPI documents are compared byte for byte (`interop.test.ts`'s gateway tests under
+`the C# server of the interop service`; `HttpInteropTests.cs`).
 
 Where the other runtime is missing, each skips its interop, saying so. `BEAD_INTEROP_REQUIRED=1`
 turns that skip into a failure, as the CI sets it: there, a skip could only be a path to the other
@@ -410,12 +424,12 @@ node ../../tools/coverage-report.mjs TestResults/coverage/*.cobertura.xml --unde
 
 ## Measurement
 
-Both sides measure the same five layers on the loopback. Run each bench separately on a quiet
+Both sides measure the same seven layers on the loopback. Run each bench separately on a quiet
 machine, with Node, the TypeScript dependencies and .NET installed. Both benches start the other
 side's interop server as the interop tests do: `interop/serve.ts` for TypeScript, and
 `dotnet run -c Release --project interop/Bead.Interop.Server` for C#. The server reports its
-WebSocket and HTTP ports and serves until its standard input closes. A launch failure fails the
-bench; every reported measure has every requested run.
+WebSocket, HTTP and gateway ports and serves until its standard input closes. A launch failure
+fails the bench; every reported measure has every requested run.
 
 From the root:
 
@@ -451,15 +465,15 @@ transcoding's measures alone, and starts no interop server.
 Every call measure runs with client and server in the same process (`local`) and with the other
 language's interop server in a child process (`interop`), on each transport; in memory, locally
 alone, where each exchange draws a connection as a gateway draws one per HTTP exchange, against
-calls on one connection kept. The report's `side`
-names its client: `typescript` calls C# in `interop`, and `csharp` calls TypeScript. Codecs,
-notifications and large echoes run locally. The notification producer targets a 1 ms cadence,
-uses a credit window of 32 and gives every value its own place, with no replacement key. At each
-wake-up it sends every value whose deadline passes, catching up after a late timer; at most 32
-values await their handlers. It sleeps until the next deadline when caught up. Each value's
-monotonic timestamp is taken immediately before its own notify; latency includes serialization,
-scheduling, transport and decoding. Every due notification reaches the handler within the timed
-phase plus a 30 s drain allowance. Throughput records the achieved rate, including drain time.
+calls on one connection kept. The report's `side` names its client: `typescript` calls C# in
+`interop`, and `csharp` calls TypeScript. Codecs, notifications and large echoes run locally. The
+notification producer targets a 1 ms cadence, uses a credit window of 32 and gives every value its
+own place, with no replacement key. At each wake-up it sends every value whose deadline passes,
+catching up after a late timer; at most 32 values await their handlers. It sleeps until the next
+deadline when caught up. Each value's monotonic timestamp is taken immediately before its own
+notify; latency includes serialization, scheduling, transport and decoding. Every due notification
+reaches the handler within the timed phase plus a 30 s drain allowance. Throughput records the
+achieved rate, including drain time.
 
 A WebSocket carries the 20 MiB echo as protocol transfer chunks. HTTP carries each payload in one
 whole envelope, with a 32 MiB envelope and payload limit on both endpoints; HTTP supports no
@@ -490,8 +504,9 @@ Both JSON reports use `bead-bench/1`:
   central samples. The ID is `<scenario>.<transport>.<sizeBytes>.<name>`; codecs use transport
   `none`. Latency, codec time and memory use direction `lower`; throughputs use `higher`.
 
-The comparison matches IDs, checks units, directions, samples and statistics, and requires the
-same measurement set. It prints the candidate median's change relative to the baseline median's
+The comparison matches IDs and checks units, directions, samples and statistics. Each baseline
+measure must be in the candidate; a measure the candidate adds is listed `new`, with no baseline to
+judge it by. It prints the candidate median's change relative to the baseline median's
 absolute value: positive means a larger value. A zero baseline gives an unbounded change unless
 both values are zero. It also identifies different memory methods. Every number belongs to its
 machine, runtime, method and run; compare on the same machine and inspect the spread.
@@ -504,8 +519,8 @@ node tools/bench-compare.mjs baseline.json candidate.json --threshold 25% --thre
 A threshold tests regression: an increase for `lower`, a decrease for `higher`. An exact ID takes
 precedence over a measure name, which takes precedence over the default percentage. Repeat
 `--threshold` for distinct selectors. Equality passes; a regression strictly past its threshold
-exits 1. Without thresholds the tool prints a comparison and exits 0; invalid reports, incompatible
-measurement sets and selectors that match nothing exit 2. These commands run by hand; CI has no
+exits 1. Without thresholds the tool prints a comparison and exits 0; invalid reports, a baseline
+measure missing or incompatible and selectors that match nothing exit 2. These commands run by hand; CI has no
 performance guard.
 
 Each release keeps both reports, `.bench/v<version>-typescript.json` and
@@ -513,8 +528,8 @@ Each release keeps both reports, `.bench/v<version>-typescript.json` and
 the machine that made them:
 
 ```sh
-node tools/bench-compare.mjs .bench/v0.5.0-typescript.json .bench/v0.6.0-typescript.json --threshold 25%
-node tools/bench-compare.mjs .bench/v0.5.0-csharp.json .bench/v0.6.0-csharp.json --threshold 25%
+node tools/bench-compare.mjs .bench/v0.6.0-typescript.json .bench/v0.7.0-typescript.json --threshold 25%
+node tools/bench-compare.mjs .bench/v0.6.0-csharp.json .bench/v0.7.0-csharp.json --threshold 25%
 ```
 
 A regression past its threshold is read before the finish: explained in the release's notes, or
@@ -583,10 +598,12 @@ node tools/fuzz.mjs run csharp http-fields <finding> -- -minimize_crash=1 -runs=
 ```
 
 On the C# side, libFuzzer's `cov` counts its own driver's edges; the instrumented assemblies'
-coverage is its `ft`.
-Node and Jazzer.js hold about 220 MiB before the first input, so the TypeScript side's process limit
-is 512 MiB; the C# side's runtime holds its managed heap to 256 MiB. A finding becomes a case of the
-side's envelope fuzz test, or of its parser's own test file, its input in hexadecimal.
+coverage is its `ft`. Node and Jazzer.js hold about 220 MiB before the first input, so the
+TypeScript side's process limit is 512 MiB, and `blueprint`'s 768 MiB, since it loads beadc's
+descriptors and schemas before it, about 170 MiB more; Node holds its heap to 256 MiB, as the C#
+side's runtime holds its managed heap, so what a run keeps past it fails as a finding, never as a
+slow climb to the limit. A finding becomes a case of the side's envelope fuzz test, or of its
+parser's own test file, its input in hexadecimal.
 
 ## Support
 
@@ -671,7 +688,7 @@ node tools/release.mjs prepare --python .venv/bin/python   # re-dates, regenerat
 git commit -am "chore(release): 0.2.0, dated"   # only if it changed something
 # wait for ci-ok on release/0.2.0
 git flow release finish --keepremote 0.2.0     # without -p: origin's branch goes with the push
-node tools/release.mjs tag                     # spec-v… and debugging-v… at v0.2.0, then the gate on develop
+node tools/release.mjs tag                     # spec-v…, debugging-v… and transcoding-v… at v0.2.0, then the gate on develop
 git commit -m "ci: take out the waivers v0.2.0 makes moot" -- .github/workflows/ci.yml   # only if tag took one out
 git push --atomic origin main develop v0.2.0 spec-v0.2.0 debugging-v0.1.0 :release/0.2.0
 ```
@@ -680,7 +697,7 @@ Before `prepare`, the release moves by hand the three digests beadc's image and 
 Dockerfile frontend's and the Node base's (`NODE_DIGEST`) in `builder/Dockerfile`, and shellcheck's
 image in `ci.yml`, each to its tag's current digest; CI then builds and tests the image on them.
 `prepare` lists what else the release owes by hand: the CHANGELOG's line, under the release, that
-tells a document's new version and its tag, the spec's or its companion's; each of
+tells a document's new version and its tag, the spec's or a companion's; each of
 [0006](docs/decisions/0006-a-rule-has-its-gate.md)'s gates owed that names the release, whose rule
 moves to that record's table; the documents brought to the release by the
 `bead-release-documents` workflow ([`.claude/workflows/`](.claude/workflows/README.md)); and both
@@ -697,9 +714,9 @@ before the push.
 While the product's major is 0, a release that breaks what a consumer calls, reads or builds moves
 its minor, and a release of fixes alone its patch
 ([0008](docs/decisions/0008-three-version-axes-and-names-qualified-by-their-owner.md)). A document
-whose files changed takes `--spec` or `--debugging`: `minor` when an implementation must
-change to keep passing, `patch` when a conforming one passes unchanged, and `minor` at least when a
-file, a key or a property was added
+whose files changed takes `--spec`, `--debugging` or `--transcoding`: `minor` when an
+implementation must change to keep passing, `patch` when a conforming one passes unchanged, and
+`minor` at least when a file, a key or a property was added
 ([0008](docs/decisions/0008-three-version-axes-and-names-qualified-by-their-owner.md)). Nothing is
 staged, committed, tagged or pushed except by these commands. If `tag` reports an entry the
 back-merge filed under the released version, it goes back under `[Unreleased]` in a commit on
@@ -709,31 +726,40 @@ back-merge filed under the released version, it goes back under `[Unreleased]` i
 
 [`ci.yml`](.github/workflows/ci.yml) runs every job on every push and pull request, on pinned
 runner images, `ubuntu-26.04`, and `windows-2025` and `ubuntu-26.04-arm` for the builder's: `spec`
-(regenerate, then diff, then `spec/check.py`), `typescript` on Node 26 and on the floor, 24.9
-(install, check, test, under coverage on Node 26, held to the side's floor, the demo's static
-build, the DevTools extension built and, on Node 26, tested in Chromium, the demo's tests on Node
-26, and the root's files under the same formatter), `dotnet` (every C# package audited by NuGetAudit as it restores, format,
-build, the builder's C# goldens among its projects, test under coverage, held to the side's floor,
-the interop both ways with `BEAD_INTEROP_REQUIRED=1`, and a page of another origin in Chromium
-against both HTTP servers),
-`builder` (install, protoc by its pin's sha256, test with `BEADC_PROTOC_REQUIRED=1` and
-`BEADC_WRAPPERS_REQUIRED=1`, the wrappers held to one contract against
-a stand-in engine, then beadc over the interop's blueprint, its rules and its form, and
-`beadc generate --check` over the root's `beadc.yaml`, each side's interop, and over the demo's,
-on Node 26 on Linux and Windows and on 24.9 on Linux; then `beadc breaking` over the interop's blueprint and
-`examples/hello`, against the last release, which carries both, on Linux; its types, the
-goldens' among them, lint and format, buf's among them, on Linux; and on the image's legs, Linux on
-Node 26, amd64 and arm64, each natively: beadc's image built, its test stage run on the image
-itself, each wrapper run against it with `BEADC_IMAGE_REQUIRED=1`, over the repository and
-`examples/hello`, and the wrappers' lint, each linter at its pin), `examples` on Node 26 and on
+(regenerate, then diff, then `spec/check.py`); `playwright` (the exact version of
+`@playwright/test` the TypeScript side pins, which names Microsoft's image of it, the one the
+`typescript` and `dotnet` jobs run in, its Chromium already there); `typescript` on Node 26 and on
+the floor, 24.9 (install, check, test, under coverage on Node 26, held to the side's floor, the
+demo's static build, the DevTools extension built and, on Node 26, tested in Chromium, the demo's
+tests on Node 26, and the root's files under the same formatter); `dotnet` (every C# package
+audited by NuGetAudit as it restores, format, build, the builder's C# goldens among its projects,
+test under coverage, held to the side's floor, the interop both ways with
+`BEAD_INTEROP_REQUIRED=1`, each side's generated HTTP client against the other's gateway among
+it, and a page of another origin in Chromium against both HTTP servers); `builder` (install,
+protoc by its pin's sha256, test with `BEADC_PROTOC_REQUIRED=1` and `BEADC_WRAPPERS_REQUIRED=1`,
+the wrappers held to one contract against a stand-in engine, then beadc over the interop's
+blueprint, its rules and its form, `beadc generate --check` over the root's `beadc.yaml`, each
+side's interop, and over the demo's, and `tools/check-validations.mjs` and
+`tools/check-transcoding.mjs`, each side's validators of `spec/validations.proto` and its route
+table and document of `spec/transcoding.proto` held to what beadc writes, on Node 26 on Linux and
+Windows and on 24.9 on Linux; then `beadc breaking` over the interop's blueprint and
+`examples/hello`, against the last release, which carries both, on Linux; its types, the goldens'
+among them, lint and format, buf's among them, on Linux; and on the image's legs, Linux on Node
+26, amd64 and arm64, each natively: beadc's image built, its test stage run on the image itself,
+each wrapper run against it with `BEADC_IMAGE_REQUIRED=1`, over the repository and
+`examples/hello`, and the wrappers' lint, each linter at its pin); `examples` on Node 26 and on
 24.9, the floor the TypeScript half declares (what each example copies, or takes from beadc's
 wrapper and init, held to its source; beadc on Node holding `examples/hello`'s generated files;
 buf's lint and layout over its `.proto`; each half's gates and both its builds; then each client
-against each server, both modes of each half, sixteen pairs), `protobuf-conformance` (protobuf's
-conformance suite, its runner by its pin's sha512, through each side's generated `proto` codec, each
-held to its failure list and the floor, the C# testee's format, then one corpus of `Probe` through
-both sides), and `commits` (the subjects, the links, the versions, the root's tools' own tests,
-then the supply chain: every action pinned by its commit's full sha, OSV-Scanner over every
+against each server, both modes of each half, sixteen pairs, each server's gateway asked after its
+client); `protobuf-conformance` (protobuf's conformance suite, its runner by its pin's sha512,
+through each side's generated `proto` codec and its mapping of protobuf's JSON, each held to its
+failure list and the floor, the C# testee's format, then one corpus of `Probe` through both
+sides); `protovalidate-differential` (protovalidate-es, by its pin's sha512, over the verdicts of
+`spec/validations.json`, then those verdicts and a corpus mutated from them through each side's
+generated validators and through protovalidate-es, the violations compared, and the C# testee's
+format); and `commits` (the subjects, the links, the details, the versions, the root's tools' own
+tests, then the supply chain: every action pinned by its commit's full sha, OSV-Scanner over every
 lockfile, and Semgrep's community rules for TypeScript, C#, GitHub Actions and secrets, each
 scanner at its digest).
 `ci-ok` needs them all, so one check stands for every job; branch protection, which would make it

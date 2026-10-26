@@ -45,14 +45,21 @@ not hold:
   `ELSEWHERE` ([0010](0010-a-request-presents-a-credential-of-a-scheme.md)), what silence is
   ([0012](0012-a-listen-held-is-not-silence.md)), a relay as its bridge to another transport, and a
   relay that carries a subscription, which a page across a broker needs
-  ([0019](0019-a-relay-terminates-each-leg-and-routes-nothing-past-it.md));
-- **HTTP/JSON transcoding's generated HTTP client**, over `fetch` and `HttpClient`, calling the
-  default routes and reading a stream from `fetch`, and the interop's gateways, each side's document
-  fetched by the other's client and compared byte for byte ([0037](0037-a-procedure-is-also-an-http-route-which-a-gateway-answers-as-one-more-client-of-its-server.md));
+  ([0019](0019-a-relay-terminates-each-leg-and-routes-nothing-past-it.md)); and a broker in memory,
+  which repeats, reorders and delays on purpose, sharing the in-memory transport's delivery and
+  never its guarantees
+  ([0036](0036-an-in-memory-transport-joins-two-routers-of-one-process-and-a-server-takes-several-transports-through-one.md));
+- **a third language's core**, its router, its service layer and its sessions before it has a
+  socket, playing its conformance over the in-memory transport it carries first
+  ([0036](0036-an-in-memory-transport-joins-two-routers-of-one-process-and-a-server-takes-several-transports-through-one.md)),
+  under a toolchain and a CI job of its own ([0005](0005-a-toolchain-per-language.md)), the
+  validators of a blueprint's rules generated for it by beadc, or beadc refusing to generate it
+  ([0035](0035-a-payload-that-reads-is-held-to-its-messages-rules-before-its-resolver-sees-it.md)),
+  and each part it lacks, its transports among them, a row of the support matrix
+  ([0004](0004-one-behaviour-in-every-language.md));
 - **the transports' client part** of the conformance, with the outcomes the spec names for a
-  client's call ([0004](0004-one-behaviour-in-every-language.md)), the bound on a WebSocket client's
-  close ([0011](0011-every-side-takes-its-time-from-a-clock-it-is-given.md)) and the defaults of a
-  client's durations ([0014](0014-every-place-that-takes-a-duration-is-a-row-of-one-file.md));
+  client's call ([0004](0004-one-behaviour-in-every-language.md)) and the defaults of a client's
+  durations ([0014](0014-every-place-that-takes-a-duration-is-a-row-of-one-file.md));
 - **a relay across languages in the interop**, one side's relay in front of the other's
   destination, in the twin tests' place for a relay's two legs' limits and the session its
   requesters share ([0004](0004-one-behaviour-in-every-language.md),
@@ -75,6 +82,10 @@ Ahead besides, each by a decision of its own that meets the Tenth Man:
   [0035](0035-a-payload-that-reads-is-held-to-its-messages-rules-before-its-resolver-sees-it.md)
   refuses until they land: the well-known string formats, `bytes.pattern`, `bytes.in`, `any`,
   `duration`, `timestamp`, `field_mask` and `predefined` rules;
+- **a connection's close code carried on `close`**, what its peer said — 1000, 1001 or a 4xxx —
+  on every transport ([RFC 6455 §7.1.5](https://www.rfc-editor.org/rfc/rfc6455#section-7.1.5),
+  [§7.4.1](https://www.rfc-editor.org/rfc/rfc6455#section-7.4.1)), `error` keeping what a side
+  ends a connection for of its own ([0033](0033-a-side-bounds-what-a-peer-holds-of-it.md));
 - what [0033](0033-a-side-bounds-what-a-peer-holds-of-it.md) keeps ahead of the bounds a side
   keeps against a peer that holds it: a bound on the payload bytes of the calls a connection has
   answered, as HTTP/2's connection window; a raise of `maximumAnsweringCalls` for one trusted
@@ -83,9 +94,8 @@ Ahead besides, each by a decision of its own that meets the Tenth Man:
 - **one corpus read alike by both sides' parsers**, held as a gate, as
   `tools/protobuf-conformance.mjs differential` holds a `proto` payload
   ([0028](0028-a-proto-payloads-records-are-read-against-its-message-before-its-library-reads-them.md)),
-  beside the four targets each side fuzzes by hand, guided by coverage
-  ([the root README](../../README.md#fuzzing)), with a target for a WebSocket's handshake and a
-  short run in CI;
+  beside the six targets both sides fuzz by hand, guided by coverage
+  ([the root README](../../README.md#fuzzing)), and a short run of them in CI;
 - what [0030](0030-a-server-believes-x-forwarded-for-from-the-proxies-it-names-and-counts.md)
   names: `Forwarded`, once a proxy that writes it alone is met, an IPv6 client keyed by its prefix,
   and a per-address value fit for a NAT, for an HTTP server and a WebSocket server at once;
@@ -96,12 +106,15 @@ Ahead besides, each by a decision of its own that meets the Tenth Man:
   transport carried beside an `ELSEWHERE`, both schemes at once, to the procedure that asks alone,
   as RFC 8693's token exchange or a call on its user's behalf needs
   ([0010](0010-a-request-presents-a-credential-of-a-scheme.md));
-- what [0037](0037-a-procedure-is-also-an-http-route-which-a-gateway-answers-as-one-more-client-of-its-server.md) keeps ahead of HTTP/JSON transcoding: a gateway apart from its server, over a real
-  transport, which a pool of connections would spare a handshake an exchange; a `raw` body streamed
-  as a transfer as it comes; OpenAPI 3.2.0, whose `itemSchema` describes a stream's events;
+- what
+  [0037](0037-a-procedure-is-also-an-http-route-which-a-gateway-answers-as-one-more-client-of-its-server.md)
+  keeps ahead of HTTP/JSON transcoding: a gateway apart from its server, over a real transport,
+  which a pool of connections would spare a handshake an exchange; a `raw` body streamed as a
+  transfer as it comes; OpenAPI 3.2.0, whose `itemSchema` describes a stream's events;
   `google.api.field_behavior` read into `readOnly`, `writeOnly` and `required`; and an application
   failure's own status, an option of its enum value's, at the options' v1 freeze;
-- what [0037](0037-a-procedure-is-also-an-http-route-which-a-gateway-answers-as-one-more-client-of-its-server.md)
+- what
+  [0037](0037-a-procedure-is-also-an-http-route-which-a-gateway-answers-as-one-more-client-of-its-server.md)
   keeps ahead of a gateway's problems, each a round of its own: a report's context, the exchange and
   the route it came of; an event for each refusal of the gateway's own; and an occurrence's id in a
   problem, [RFC 9457 §3.1.5](https://www.rfc-editor.org/rfc/rfc9457#section-3.1.5)'s `instance`.
@@ -139,17 +152,17 @@ table.
 
 ### Transports and relays
 
-| #                                                                                                                         | Decision                                                                                                                          | Status   |
-| ------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- | -------- |
-| [0012](0012-a-listen-held-is-not-silence.md)                                                                              | A listen held is not silence, and a connection without a session is its server's                                                  | accepted |
-| [0019](0019-a-relay-terminates-each-leg-and-routes-nothing-past-it.md)                                                    | A relay terminates each leg between two transports, and routes nothing past it                                                    | accepted |
-| [0020](0020-http-draws-a-connection-by-a-token-and-a-listen-holds-it.md)                                                  | HTTP draws a connection by a token, and a listen holds it                                                                         | accepted |
-| [0021](0021-a-broker-is-a-transport-and-bead-is-never-a-network.md)                                                       | A topic-based publish/subscribe broker is one more transport, and Bead is never a network of its own                              | accepted |
-| [0023](0023-a-transport-goes-on-through-its-listeners-throw-and-takes-nothing-new-as-it-stops.md)                         | A transport goes on through its listener's throw, and takes nothing new once its stop began                                       | accepted |
-| [0025](0025-a-transport-draws-each-connections-handle-and-gives-none-twice.md)                                            | A transport draws each connection's handle, and gives none twice                                                                  | accepted |
-| [0029](0029-a-listen-names-its-cursor-and-its-wait-in-fields-of-its-own.md)                                               | A listen names its cursor and its wait in fields of its own, at the connection's one URL                                          | accepted |
-| [0032](0032-a-websocket-upgrade-from-no-page-carries-its-credential-beside-every-envelope.md)                             | A WebSocket upgrade from no page carries its credential beside every envelope of its connection, and a client follows no redirect | accepted |
-| [0036](0036-an-in-memory-transport-joins-two-routers-of-one-process-and-a-server-takes-several-transports-through-one.md) | An in-memory transport joins two routers of one process, and a server takes several transports through one                        | accepted |
+| #                                                                                                                         | Decision                                                                                                                                                           | Status   |
+| ------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ | -------- |
+| [0012](0012-a-listen-held-is-not-silence.md)                                                                              | A listen held is not silence, and a connection without a session is its server's                                                                                   | accepted |
+| [0019](0019-a-relay-terminates-each-leg-and-routes-nothing-past-it.md)                                                    | A relay terminates each leg between two transports, and routes nothing past it                                                                                     | accepted |
+| [0020](0020-http-draws-a-connection-by-a-token-and-a-listen-holds-it.md)                                                  | HTTP draws a connection by a token, and a listen holds it                                                                                                          | accepted |
+| [0021](0021-a-broker-is-a-transport-and-bead-is-never-a-network.md)                                                       | A topic-based publish/subscribe broker is one more transport, and Bead is never a network of its own                                                               | accepted |
+| [0023](0023-a-transport-goes-on-through-its-listeners-throw-and-takes-nothing-new-as-it-stops.md)                         | A transport goes on through its listener's throw, and takes nothing new once its stop began                                                                        | accepted |
+| [0025](0025-a-transport-draws-each-connections-handle-and-gives-none-twice.md)                                            | A transport draws each connection's handle, and gives none twice                                                                                                   | accepted |
+| [0029](0029-a-listen-names-its-cursor-and-its-wait-in-fields-of-its-own.md)                                               | A listen names its cursor and its wait in fields of its own, at the connection's one URL                                                                           | accepted |
+| [0032](0032-a-websocket-upgrade-from-no-page-carries-its-credential-beside-every-envelope.md)                             | A WebSocket upgrade from no page carries its credential beside every envelope of its connection, a client follows no redirect, and a connect bounds what it awaits | accepted |
+| [0036](0036-an-in-memory-transport-joins-two-routers-of-one-process-and-a-server-takes-several-transports-through-one.md) | An in-memory transport joins two routers of one process, and a server takes several transports through one                                                         | accepted |
 
 ### A server's edge
 

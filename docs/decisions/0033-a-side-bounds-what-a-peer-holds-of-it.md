@@ -1,21 +1,26 @@
 # 0033 — A side bounds what a peer holds of it: the calls it answers on a connection, a request's bytes, a WebSocket server's connections, what waits for a socket, and a request that trickles
 
 - **Status**: accepted
-- **Scope**: the protocol, every implementation's routers and server transports: in
+- **Scope**: the protocol, every implementation's routers and transports, server and client: in
   [`spec/spec.md`](../../spec/spec.md), 9.1's requester held to the calls its peer answers, 9.2's
-  step 3, 12.2's request held to `chunkBytes` and its `maximumAnsweringCalls`, 15.2's step 8, the
-  pace and the bound beside 15.3's heartbeat, 15.6's 408 and 503, 15.7's answer that could not be
-  written, 15.9's outbox reported, and 15.12's bounds, the transports each holds on, its pace and
-  its head and body; in [`spec/debugging.md`](../../spec/debugging.md), 9.4's call past those its
-  connection has it answer and 9.6's requester; the conversations of 9.2's step 3, the transports'
-  cases of a WebSocket server's connections, a body's rate and a head's time, and the durations of
-  the bounds it adds. The heartbeat is 15.3's own; the client's address a bound per address reads,
+  step 3, 12.2's request held to `chunkBytes` and its `maximumAnsweringCalls`, 15.1's report on a
+  transport's `error`, a client's as a server's, 15.2's step 8, 15.3's 1009 and a side's close
+  timeout, the pace and the bound beside 15.3's heartbeat, 15.6's 408 and 503, 15.7's answer that
+  could not be written, an HTTP exchange whose outcome is unknown, lost as 15.7 has an exchange
+  lost, 15.9's outbox reported, and 15.12's bounds, the transports each holds on, its pace and its
+  head and body, and what a client reads, by `maximumBodyBytes`; in
+  [`spec/debugging.md`](../../spec/debugging.md), 9.4's call past those its connection has it answer
+  and 9.6's requester; the conversations of 9.2's step 3, the transports' cases of a WebSocket
+  server's connections, a body's rate and a head's time, and the durations of the bounds it adds.
+  The heartbeat is 15.3's own; the client's address a bound per address reads,
   [0030](0030-a-server-believes-x-forwarded-for-from-the-proxies-it-names-and-counts.md)'s; the 503
   a stop answers,
   [0023](0023-a-transport-goes-on-through-its-listeners-throw-and-takes-nothing-new-as-it-stops.md)'s;
   HTTP's draw of a connection and its outbox,
   [0020](0020-http-draws-a-connection-by-a-token-and-a-listen-holds-it.md)'s; an access refused,
-  told, [0034](0034-a-server-tells-each-access-it-refuses-never-the-credential.md)'s.
+  told, [0034](0034-a-server-tells-each-access-it-refuses-never-the-credential.md)'s; the Web Worker
+  client's error,
+  [0036](0036-an-in-memory-transport-joins-two-routers-of-one-process-and-a-server-takes-several-transports-through-one.md)'s.
 
 ## Context
 
@@ -182,6 +187,40 @@ place. **Every answer written before its body is whole closes its socket in stag
 reading on and dropping what comes until the client closes or 2 seconds pass, never by a reset, so
 its client reads the answer and its Bead connection stands.
 
+**A side fails a connection with 1009 past its `maximumMessageBytes`** (spec 15.3,
+[RFC 6455 §7.1.7](https://www.rfc-editor.org/rfc/rfc6455#section-7.1.7)): it sends its close,
+drains what still comes until the peer's close or its close timeout, then ends the connection, its
+close unclean whatever code the peer answers with, and reports it, naming the bound and its value,
+`… is closed with 1009: a message past its maximumMessageBytes, N bytes`. **A side's close timeout,
+5 s by default, bounds each closing handshake it begins**, its 1009 among them, both clients' over
+`ws` and .NET included, the TypeScript client giving `ws` its `closeTimeout`: a peer that has not
+answered by then is dropped; a client over the global `WebSocket` leaves its close to its platform.
+
+**A transport tells on its `error` what it ends a connection for of its own** (spec 15.1), a
+client's as a server's: a protocol error on it; a message it fails with 1009, or over HTTP an
+envelope past its `maximumBodyBytes`, an answer's or a batch's, and a connection a server drops
+behind a bound, each naming the bound in the spec's spelling and its value, the same words on both
+sides; and a batch that does not read, saying what of it does not. It tells it once, as the
+connection ends, its close or its drop begun, and before its close, which is then unclean; its close
+is told in a `finally`, so a listener's throw keeps nothing open. It never tells a peer that drops
+without its closing handshake, its TCP connection ended or reset, nor one its heartbeat drops, nor
+its own drop of a peer that never answered a close within its close timeout, nor, over HTTP, a
+server gone, a refusal of its own, an answer of another type, an exchange lost or a listen given up
+past its inactivity timeout: each one's close tells it. A client over the global `WebSocket`, whose
+bare `error` cannot be told from a drop, tells none, a platform row of `docs/support.md`, "A
+WebSocket client's error once open". `close` stays its pair of booleans, and **a connection's close
+code carried on `close`**, what its peer said, is ahead, by a round of its own.
+
+**An HTTP exchange whose executor was called and failed is of unknown outcome**: its envelopes count
+as handed over, its send resolves as a lost exchange's does (spec 15.7), and its connection is lost;
+only a failure before the executor is called refuses a send as not handed over. No line is drawn by
+the failure's type. The executor's own failure is told on `error`, once,
+`the HTTP executor failed: <its words>`, its cause beside it. Every exchange ends its connection on
+a failure it cannot place, the listen, an answer's read and a close among them, and a listen lost to
+the network resumes from its cursor within its inactivity timeout, as 15.9 has it. **A client bounds
+what it reads**, an answer or an envelope a batch brings, by `maximumBodyBytes`, its default a
+server's (spec 15.12).
+
 ## Consequences
 
 **What a dispatched call holds is the application's**: 64 × `maximumPayloadBytes`, 1 GiB at the
@@ -288,7 +327,7 @@ answer that holds:
 
 What a side does with a message past its `maximumMessageBytes` (15.3), and what a transport's
 `error` reports (15.1), met the Tenth Man at xhigh effort in two rounds of their own. The servers'
-came first: eight objections, all accepted, one of them by what it keeps ahead.
+round: eight objections, all accepted, one by what it keeps ahead.
 
 | Objection                                                                                                                                                                                                                                                                         | Answer                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
 | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -301,9 +340,9 @@ came first: eight objections, all accepted, one of them by what it keeps ahead.
 | The spec never says what a server transport's `error` reports, so no side's tests can hold to it.                                                                                                                                                                                 | Accepted. 15.1 states it: a protocol error on a connection, a drop or a 1009, each naming its bound and its value, and what a listener throws; a connection's own once, as it ends, its close or its drop begun, before its unclean close; never a peer that drops without its closing handshake, nor one its heartbeat drops, nor the server's own drop of a peer that never answered a close. Both sides' `error` doc comments say the same.                                                                                                                                                                                                                      |
 | The clients diverge too: what a WebSocket client tells of a 1009 differs between the sides.                                                                                                                                                                                       | Accepted. The clients follow the servers' rule, one sentence of 15.1 for a side's transport, by the round below.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
 
-The clients' round met a proposal to keep the C# WebSocket client to the TypeScript one's `close`
-alone. Twelve objections, probed over `ws`, Node's global `WebSocket`, Chromium, Firefox, WebKit and
-the C# client, refused it, and their verdict is taken: a client's transport `error` follows the
+The clients' round weighed keeping the C# WebSocket client to the TypeScript one's `close` alone,
+a refused alternative: twelve objections, probed over `ws`, Node's global `WebSocket`, Chromium,
+Firefox, WebKit and the C# client, all accepted, a client's transport `error` following the
 servers' rule.
 
 | Objection                                                                                                                                                                                                                                                                                                     | Answer                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
@@ -324,13 +363,13 @@ servers' rule.
 ### On an HTTP exchange whose outcome is unknown
 
 What an HTTP client does when an exchange fails in a way it cannot place met the Tenth Man at xhigh
-effort, in the round on a connect's waits. The proposal drew a line by the failure's type: a
-network failure lost the connection, any other failed its send alone, the C# side's way. Four
-objections, all accepted, reversed it: the C# side comes to the TypeScript one.
+effort, in the round on a connect's waits. A line drawn by the failure's type, a network failure
+losing the connection and any other failing its send alone, was weighed and refused: four
+objections, all accepted.
 
 | Objection                                                                                                                                                                                                                                                                                                      | Answer                                                                                                                                                                                                                                                                              |
 | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | A send failed as "nothing of it went out" lets its requester, then a relay ([0019](0019-a-relay-terminates-each-leg-and-routes-nothing-past-it.md)), answer `DESTINATION_UNREACHABLE`, "nothing was tried", for a call whose request a handler may have sent before it threw: a procedure that ran runs again. | Accepted. An exchange whose executor was called and failed has an unknown outcome: its envelopes count as handed over, the send resolves as 15.7 has a lost exchange's, and the connection is lost. Only a failure before the executor is called refuses a send as not handed over. |
 | A `TypeError` is what Fetch rejects with for a network error, and what JavaScript throws for a wrapper's commonest bug: no type tells the network from the application.                                                                                                                                        | Accepted. No line is drawn by type: whatever fails once the executor was called is of unknown outcome. The executor's own failure is told on `error`, once, `the HTTP executor failed: <its words>`, its cause beside it.                                                           |
-| The C# side's filter is four sibling types, `OperationCanceledException` and `ObjectDisposedException` among them, and the TypeScript side cannot tell an abort it did not make.                                                                                                                               | Accepted, and moot under the reversed rule: a cancellation the client made is its own, decided by its attempt's token.                                                                                                                                                              |
+| The C# side's filter is four sibling types, `OperationCanceledException` and `ObjectDisposedException` among them, and the TypeScript side cannot tell an abort it did not make.                                                                                                                               | Accepted, and moot, since no line is drawn by type: a cancellation the client made is its own, decided by its attempt's token.                                                                                                                                                      |
 | The rule covered the send alone: on the C# side a failure outside its filter ends the listen loop in silence, the client Open and hearing nothing, loses an answer's read, and leaves `CloseConnection` in Closing.                                                                                            | Accepted. Every exchange ends its connection on a failure it cannot place, the listen, an answer's read and a close among them, as the TypeScript side does; a listen lost to the network resumes from its cursor within its inactivity timeout, as 15.9 has it, on both sides.     |

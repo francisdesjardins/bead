@@ -1,6 +1,6 @@
 {
   "name": "@francisdesjardins/bead",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "private": true,
   "description": "Bead, the binary wire protocol, on the TypeScript side: a WebSocket, an HTTP, a Web Worker and an in-memory transport, each a client and a server, a server's transports joined into one, a client and a server router with the service, session and notification managers, the client and server over them, and a gateway that answers a service's procedures over HTTP and JSON.",
   "license": "Apache-2.0",

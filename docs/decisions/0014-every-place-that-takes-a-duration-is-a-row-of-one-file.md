@@ -13,9 +13,10 @@ less than a millisecond nor past 2³¹ − 1, and none for a fraction
 ([0011](0011-every-side-takes-its-time-from-a-clock-it-is-given.md)). The values users write do not
 reach a timer alike: 0.41 s is 410 ms in JavaScript and 409.9999 ms in .NET.
 
-Twenty-five places take such a duration, from a call's timeout to a WebSocket's close timeout.
-Some are reached more than one way: a reserve and a cancel, a relay's own timeout and a
-destination's, every transport's connect, a client and its server over HTTP and over WebSocket. Few
+Twenty-seven places take such a duration, by 43 ways, from a call's timeout to a gateway's
+heartbeat. Some are reached more than one way: a reserve and a cancel, a relay's own timeout and a
+destination's, every transport's connect, the in-memory client's among them, a client and its server
+over HTTP and over WebSocket, and an HTTP server and a gateway at three of 15.12's places. Few
 inputs tell two readings of 1.4 apart — a half up from a half to the even, a value as given from as
 rounded at the ceiling, −1 ms, NaN — and a table of inputs that misses them proves neither reading.
 
@@ -81,9 +82,9 @@ and the key stays. A place carries besides:
 - `observed`: `held`, what the place holds is read, at every place on the clock a side is given;
   `refusal`, whether it refuses alone, at those on the real clock (0011), whose timers no test clock
   reaches: a WebSocket's heartbeat and its close timeout, its client's and its server's, and each
-  server's `sendGracePeriod` and `headersTimeout`
-  ([0033](0033-a-side-bounds-what-a-peer-holds-of-it.md)). A place observed by its refusal has no
-  default in the file, since nothing would read it;
+  server's `sendGracePeriod` and `headersTimeout`, a gateway's among them
+  ([0033](0033-a-side-bounds-what-a-peer-holds-of-it.md)); and at a gateway's heartbeat. A place
+  observed by its refusal has no default in the file, since nothing would read it;
 - `clauses`, the units of the spec it checks, each for what it observes of it, and nothing else:
   1.4, which holds and refuses its durations; its `neverClause`; and its default's clause.
 
@@ -100,12 +101,12 @@ owner keeps a place of its own.
 when not given; an HTTP server gives its own 30 s (15.12.10), which `spec/transports.json`'s
 `defaults` holds and both sides check, and the place's `state` says so.
 `httpTransport.inactivityTimeout` is an HTTP connection's inactivity timeout, which 15.12 names for
-both sides: 5 minutes by default, and without end if given so, its client's and its server's alike. `httpTransportClient.pause`'s at
-once is 15.10's "listen again at once", stated with a schedule no file checks: the file leaves it
-out, as it leaves out the defaults no clause states. `webSocketTransport.closeTimeout` is a
-WebSocket's close timeout by two ways, its client's and its server's, as
-`webSocketTransport.heartbeat` is: each harness plays both, and each WebSocket client's tests play
-its client's way besides.
+both sides: 5 minutes by default, and without end if given so, its client's and its server's alike.
+`httpTransportClient.pause`'s at once is 15.10's "listen again at once", stated with a schedule no
+file checks: the file leaves it out, as it leaves out the defaults no clause states.
+`webSocketTransport.closeTimeout` is a WebSocket's close timeout by two ways, its client's and its
+server's, as `webSocketTransport.heartbeat` is: each harness plays both, and each WebSocket client's
+tests play its client's way besides.
 
 **One table of inputs serves every place.** An input is given in one of five forms, each a value a
 user writes on every platform:
@@ -188,7 +189,8 @@ platform's word for never, `Infinity` and `infinite`, is its side's: this record
 and says what a delay is; 15.12 says how a client times its own inactivity; 15.9 parts a peer's
 `wait` from an application's. The defaults no clause states — a client's connect, its `wait`, its
 reconnection's delay — stay out of the file, and so do those 15.3 states for the places observed by
-their refusal alone, a WebSocket's heartbeat and its close timeout: each side's tests hold them.
+their refusal alone, a WebSocket's heartbeat and its close timeout, and the 30 s transcoding 8.7
+states for a gateway's heartbeat: each side's tests hold them.
 
 **The defaults two files state come from one table.** 15.12's defaults are `spec/transports.json`'s
 `defaults` too: `make_durations.py` and `make_transports.py` read them from one module of the

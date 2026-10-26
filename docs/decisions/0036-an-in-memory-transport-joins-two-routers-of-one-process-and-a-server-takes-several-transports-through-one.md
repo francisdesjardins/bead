@@ -16,11 +16,12 @@
 
 ## Context
 
-**Three parts call a router of the same process, and a test is a fourth.** HTTP/JSON transcoding's gateway calls each
-procedure as one more client of the application's own server, its admission, sessions, service
-manager, metrics and trace the server's, one Bead connection per HTTP exchange, each with its
-caller's credential and address. A third language's core plays its conformance before it has a
-socket. A side's tests link a server and a client in memory, a service's and a conversation's.
+**Three parts call a router of the same process, and a test is a fourth.** HTTP/JSON
+transcoding's gateway calls each procedure as one more client of the application's own server, its
+admission, sessions, service manager, metrics and trace the server's, one Bead connection per HTTP
+exchange, each with its caller's credential and address. A third language's core plays its
+conformance before it has a socket. A side's tests link a server and a client in memory, a
+service's and a conversation's.
 
 **What carries an envelope in a process is a Web Worker's port alone**, on the TypeScript side: a
 `MessagePort` carries an envelope and nothing beside it, so no credential and no address
@@ -54,8 +55,8 @@ The options weighed:
   nothing a gateway or a third language's core can run on.
 - **A server of its own for the gateway**: two offers of each service, two session managers, two
   sets of gauges, which the application keeps in step by hand.
-- **The gateway mounted on the HTTP transport's listener**: a transport coupled to a gateway, against
-  one port for two coming from a proxy in front
+- **The gateway mounted on the HTTP transport's listener**: a transport coupled to a gateway,
+  against one port for two coming from a proxy in front
   ([0004](0004-one-behaviour-in-every-language.md)), and no router gained, since the transport's
   router is still one server's.
 - **One server transport over several**, each handle its own transport's: one router, one admission,
@@ -67,14 +68,14 @@ The options weighed:
 **One in-memory transport in each core** (spec 15.13), beside WebSocket, HTTP and the Web Worker: on
 the TypeScript side `memory-transport-client.ts` and `memory-transport-server.ts` over the
 transports' own bases, on the C# side `MemoryTransportClient` and `MemoryTransportServer`, each end
-telling what comes to it on a serial scheduler, one turn at a time. It is the same transport in both cores, and a cleaner split than a
-Worker's port made to carry what it does not; the Web Worker transport keeps its messages, an
-envelope alone across a thread.
+telling what comes to it on a serial scheduler, one turn at a time. It is the same transport in both
+cores, and a cleaner split than a Worker's port made to carry what it does not; the Web Worker
+transport keeps its messages, an envelope alone across a thread.
 
 - **A connect draws a connection** on the server's side, its handle
   `type=MEMORY;ip=<address>;ordinal=n`, drawn as 0025 has every handle drawn, the address the
-  client gave as it connected, or `local`: visible ASCII but `;`, which ends a handle's part, as each
-  side refuses any other before anything moves.
+  client gave as it connected, or `local`: visible ASCII but `;`, which ends a handle's part, as
+  each side refuses any other before anything moves.
 - **Each envelope is copied as it is sent**, and handed on whole, once, in the order sent, **in a
   later turn than its send, never within it**, so no router is entered again from its own call, as a
   socket's delivery never is; the copy keeps a sender's buffer its own, as a socket's does.
@@ -107,9 +108,10 @@ connect with a `ConnectError` at once.
 the C# side, one `IServerTransport` over several. Nothing changes in the router, the server or
 `offer`:
 
-- **each handle is its own transport's**: the join keeps the handle each transport drew, and refuses,
-  as it is built, two transports of one type, whose handles might be one; a server that serves two
-  WebSocket listeners binds them in one transport, as each binds several addresses already;
+- **each handle is its own transport's**: the join keeps the handle each transport drew, and
+  refuses, as it is built, two transports of one type, whose handles might be one; a server that
+  serves two WebSocket listeners binds them in one transport, as each binds several addresses
+  already;
 - **each connection's flags are its owner's**: whether it carries a credential and whether it is
   secure are asked of the transport that drew its handle, and its `send` and `close` go to it;
 - **its events are each transport's, forwarded**: a connection, a message, a listen, a close, a
@@ -176,9 +178,9 @@ same close. The objections, with the answers that hold:
 
 ### On the in-memory connection
 
-| Objection                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                | Answer                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
-| ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| The in-process gateway reaches no "same router": a server is built on one transport, its router on it, and a service is offered on one server, once (`IServer.transport`, `Server(IServerTransport …)`, "a service is offered on one server, once", "this service's server side is offered already"), so the in-memory transport is a second server's, with its own router, sessions, gauges and service manager, every service offered twice, a notification reaching one, a session ended by its identifier on one. The draft treats the joining as done and names no piece that does it, though its flags are per connection already. | Accepted, by its first way. Each core gains a joined server transport, `joinTransports` and `JoinedServerTransport`: each handle its own transport's, each connection's flags, sending and closing asked of the transport that drew it, the events forwarded within 15.1's guard, stop and gauges over all, two transports of one type refused as the join is built, since 0025's handle tells two types apart and may not tell two of one type; nothing changes in the router, the server or `offer`. Spec 15.14 states it, and this record keeps it beside the in-memory transport, with its twins and its rows of the matrix. A server of its own for the gateway was weighed and refused: two offers, two session managers, the application keeping them in step. The draft's mount on the HTTP transport buys the router nothing once the join exists and couples a transport to the gateway against the README's rule: withdrawn, a gateway answers on its own listener or as a handler an application mounts. |
+| Objection                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                | Answer                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| The in-process gateway reaches no "same router": a server is built on one transport, its router on it, and a service is offered on one server, once (`IServer.transport`, `Server(IServerTransport …)`, "a service is offered on one server, once", "this service's server side is offered already"), so the in-memory transport is a second server's, with its own router, sessions, gauges and service manager, every service offered twice, a notification reaching one, a session ended by its identifier on one. The draft treats the joining as done and names no piece that does it, though its flags are per connection already. | Accepted, by its first way. Each core gains a joined server transport, `joinTransports` and `JoinedServerTransport`: each handle its own transport's, each connection's flags, sending and closing asked of the transport that drew it, the events forwarded within 15.1's guard, stop and gauges over all, two transports of one type refused as the join is built, since 0025's handle tells two types apart and may not tell two of one type; nothing changes in the router, the server or `offer`. Spec 15.14 states it, and this record keeps it beside the in-memory transport, with its twins and its rows of the matrix. A server of its own for the gateway was weighed and refused: two offers, two session managers, the application keeping them in step. A mount on the HTTP transport buys the router nothing once the join exists, and couples a transport to a gateway against the README's rule: a gateway answers on its own listener or as a handler an application mounts. |
 
 ### On the Web Worker client's error
 

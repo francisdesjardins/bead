@@ -61,10 +61,20 @@ export const validate = (report) => {
     if (
       !text(row?.name) ||
       !['local', 'interop'].includes(row.scenario) ||
-      !['none', 'http', 'websocket'].includes(row.transport) ||
+      !['none', 'http', 'websocket', 'memory'].includes(row.transport) ||
       !Number.isSafeInteger(row.sizeBytes) ||
       row.sizeBytes < 0 ||
-      !['ns', 'us', 'ms', 'calls/s', 'notifications/s', 'MiB/s', 'B/call'].includes(row.unit) ||
+      ![
+        'ns',
+        'us',
+        'ms',
+        'calls/s',
+        'exchanges/s',
+        'notifications/s',
+        'MiB/s',
+        'B/call',
+        'B/exchange',
+      ].includes(row.unit) ||
       row.direction !== (row.unit.endsWith('/s') ? 'higher' : 'lower') ||
       row.id !== `${row.scenario}.${row.transport}.${row.sizeBytes}.${row.name}`
     ) {
@@ -152,8 +162,11 @@ export const compare = (baseline, candidate, thresholds = new Map()) => {
       failed: threshold !== undefined && regression > threshold,
     });
   }
-  if (before.size !== after.size) {
-    fail('reports have different measurement sets');
+  // a measure the candidate adds has no baseline yet: listed, never judged; one it drops is an error
+  for (const [id, next] of after) {
+    if (!before.has(id)) {
+      rows.push({ id, unit: next.unit, after: next.median, added: true, failed: false });
+    }
   }
   for (const selector of thresholds.keys()) {
     if (!selectors.has(selector)) {
@@ -198,7 +211,9 @@ export const main = (args) => {
     );
     for (const row of rows) {
       console.log(
-        `| ${row.id} | ${row.unit} | ${row.before.toFixed(3)} | ${row.after.toFixed(3)} | ${row.change.toFixed(2)}% | ${row.threshold === undefined ? '' : `${row.threshold}%`} | ${row.failed ? 'regression' : 'ok'} |`
+        row.added
+          ? `| ${row.id} | ${row.unit} | | ${row.after.toFixed(3)} | | | new |`
+          : `| ${row.id} | ${row.unit} | ${row.before.toFixed(3)} | ${row.after.toFixed(3)} | ${row.change.toFixed(2)}% | ${row.threshold === undefined ? '' : `${row.threshold}%`} | ${row.failed ? 'regression' : 'ok'} |`
       );
     }
     return rows.some((row) => {

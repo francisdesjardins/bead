@@ -1,14 +1,14 @@
 # Bead, on the TypeScript side
 
-Bead is a binary wire protocol: the envelopes of a request, its result or failure, the
-notifications of a subscription and the commands a server sends back, written at fixed offsets.
-This project is its TypeScript implementation — a WebSocket, an HTTP, a Web Worker and an in-memory
-transport, each a client and a server, a server's transports joined into one, a client and a server
-router over them, the service, session and
-notification managers, the client and server that put the three layers together, the service
-layer a service is served and called through, and a gateway that answers its procedures over HTTP
-and JSON. Nothing in it imports a framework at run time. The
-specification and the conformance files both sides play are in [`spec/`](../../spec/).
+Bead is a binary wire protocol: the envelopes of a request, its result or failure, the notifications
+of a subscription and the commands a server sends back, written at fixed offsets. This project is
+its TypeScript implementation — a WebSocket, an HTTP, a Web Worker and an in-memory transport, each
+a client and a server, a server's transports joined into one, a client and a server router over
+them, the service, session and notification managers, the client and server that put the three
+layers together, the service layer a service is served and called through, and a gateway that
+answers its procedures over HTTP and JSON, beside the caller of the HTTP client beadc generates.
+Nothing in it imports a framework at run time. The specification and the conformance files both
+sides play are in [`spec/`](../../spec/).
 
 ```ts
 import { createWSTransportClient } from '@francisdesjardins/bead/ws-transport-client';
@@ -51,23 +51,24 @@ global `WebSocket`, its platform's bound applies. Each end drains it until the p
 `maximumMessageBytes` and its value, as it reports a protocol error, before its close; a client over
 the global `WebSocket`, whose `error` cannot be told from a drop, tells its close alone (spec 15.1,
 15.3). The `closeTimeout` of each end, 5 seconds, `CLOSE_TIMEOUT`, bounds each close it begins, and
-`ws` is given it; over the global `WebSocket`, the client's close is its platform's to bound. A WebSocket server judges a request at its address in the order of spec
-15.2: 400 as HTTP answers it to a field holding a control character but a tab or an octet past
-ASCII, to a target holding an octet other than visible ASCII or a path whose percent-decoding holds
-NUL, to a `Host` missing, repeated or no host, or to a target in absolute-form that names none;
-403 to a host it does not take, whatever the request; 405 to a method but `GET` or `HEAD`; 426 to a
-request that asks no WebSocket, a `HEAD` and an `HTTP/1.0` request among them, and to a version but
-13, the one it speaks; 400 to a malformed upgrade, two `Authorization` lines among it; 403 to an
-`Origin` neither its own nor among `origins`; 503 `busy`, its `Retry-After` 1, to an upgrade it
-would take past `maximumConnections`, 10,000, or `maximumConnectionsPerAddress`, 64, or once its
-stop began. Each refusal but HTTP's own is marked, its body empty, closes its connection, and is
-told, `refusal`; an `Upgrade` listing `websocket` among other protocols is taken — see
-[HTTP](#http). An upgrade takes its place as it is judged, after its origin, and holds it until its
-socket closes, so upgrades that cross take no more places than there are; behind a proxy, every
-client is the proxy's address unless `trustedProxies` or `unnamedProxies` names it, and its health
-warns once its busiest address holds 80% of `maximumConnectionsPerAddress`, before the first 503,
-gauged `largestAddressConnections`. A head that does not come whole within `headersTimeout`, 30
-seconds, is answered 408 by Node's own parser.
+`ws` is given it; over the global `WebSocket`, the client's close is its platform's to bound. A
+WebSocket server judges a request at its address in the order of spec 15.2: 400 as HTTP answers it
+to a field holding a control character but a tab or an octet past ASCII, to a target holding an
+octet other than visible ASCII or a path whose percent-decoding holds NUL, to a `Host` missing,
+repeated or no host, or to a target in absolute-form that names none; 403 to a host it does not
+take, whatever the request; 405 to a method but `GET` or `HEAD`; 426 to a request that asks no
+WebSocket, a `HEAD` and an `HTTP/1.0` request among them, and to a version but 13, the one it
+speaks; 400 to a malformed upgrade, two `Authorization` lines among it; 403 to an `Origin` neither
+its own nor among `origins`; 503 `busy`, its `Retry-After` 1, to an upgrade it would take past
+`maximumConnections`, 10,000, or `maximumConnectionsPerAddress`, 64, or once its stop began. Each
+refusal but HTTP's own is marked, its body empty, closes its connection, and is told, `refusal`; an
+`Upgrade` listing `websocket` among other protocols is taken — see [HTTP](#http). An upgrade takes
+its place as it is judged, after its origin, and holds it until its socket closes, so upgrades that
+cross take no more places than there are; behind a proxy, every client is the proxy's address unless
+`trustedProxies` or `unnamedProxies` names it, and its health warns once its busiest address holds
+80% of `maximumConnectionsPerAddress`, before the first 503, gauged `largestAddressConnections`. A
+head that does not come whole within `headersTimeout`, 30 seconds, is answered 408 by Node's own
+parser.
 
 What waits for a client's socket — what the server handed it that the socket has not taken — is
 held to a pace, as Kestrel holds a response to its `MinResponseDataRate`: each envelope moves the
@@ -165,29 +166,33 @@ machine.
 A WebSocket client writes the credential its connect is given in its upgrade's `Authorization`: a
 string, `credential`, or `credentialProvider`, whose value each attempt awaits, a reconnection's
 included, with the attempt's `signal` — where a credential past its end is renewed, as SignalR's
-`accessTokenFactory` is (spec 15.2, decision 0032). One provider call is pending per client: another
-attempt joins its outcome within its own cancellation, timeout or disposal bound. Late values
-reach only an attempt that still waits, and late failures are observed. Provider completion is
-told in a later turn; its callbacks cannot replace the connect's result. A provider's own
-cancellation fails its attempt while that attempt's signal stays live. The server hands it beside every envelope of
-that connection, as it came, trimmed, so a request presenting `ELSEWHERE` stands for it, resolved
-per request by the verifier, as over HTTP: one that no longer holds, or whose end has come, is
-refused on the request that presents it, and the connection stays. One connection carries one
-credential: a client presents another by connecting again, its provider handing the new one, and
-gives its router's default `ELSEWHERE` the same bytes, from one source; between the two, a call
-fails before it goes, `DESTINATION_UNREACHABLE`. A connect refuses, a `ProgrammerError`, nothing
-moved: a credential and a provider together; one that is no field value — anything but visible
-ASCII, spaces and tabs, or a space or a tab first or last; one over `ws://` off the loopback, its
-upgrade crossing in the clear; and one over a `WebSocket` without `ws`'s shape — a page's, Node's
-global — which writes no field of its caller's choosing: a page presents a `JWT`, in the envelope. A
-value the provider hands that is no field value fails its attempt the same way, which a reconnection
-does not try again; what it throws fails that attempt, its cause. An upgrade that carries an
-`Origin` carries none, whatever its `Authorization`: a page's browser writes its own authentication
-on it, as it sends its cookies, so any page the server takes would present its user's credential.
-Two `Authorization` lines on an upgrade are refused 400, `malformed`. No client follows a redirect:
-a 3xx answered to an upgrade fails its connect, its status named over `ws`, "the server refused the
-upgrade: 302". The `connection` event shows an upgrade as the HTTP server shows a connect, headers
-aside — its method, its target and its peer — so no event carries its credential.
+`accessTokenFactory` is (spec 15.2, decision 0032). A client has one call of its provider under way
+at a time: an attempt that comes while one is waits for its outcome, and one that meets a call no
+attempt waits on any more lets it settle before it calls again, each within its own bounds, its
+cancellation, its timeout and the client's dispose, which end it at once whatever the provider does.
+A value that comes late is handed only to an attempt still waiting for it, and a failure that comes
+late is observed, never left unhandled. The attempt's `signal` is aborted once the attempt ends, in
+a later turn than its connect settles, so what a listener of it throws never takes the place of the
+connect's outcome; a provider that cancels itself while that `signal` is still live fails its
+attempt as any failure of its does. The server hands it beside every envelope of that connection, as
+it came, trimmed, so a request presenting `ELSEWHERE` stands for it, resolved per request by the
+verifier, as over HTTP: one that no longer holds, or whose end has come, is refused on the request
+that presents it, and the connection stays. One connection carries one credential: a client presents
+another by connecting again, its provider handing the new one, and gives its router's default
+`ELSEWHERE` the same bytes, from one source; between the two, a call fails before it goes,
+`DESTINATION_UNREACHABLE`. A connect refuses, a `ProgrammerError`, nothing moved: a credential and a
+provider together; one that is no field value — anything but visible ASCII, spaces and tabs, or a
+space or a tab first or last; one over `ws://` off the loopback, its upgrade crossing in the clear;
+and one over a `WebSocket` without `ws`'s shape — a page's, Node's global — which writes no field of
+its caller's choosing: a page presents a `JWT`, in the envelope. A value the provider hands that is
+no field value fails its attempt the same way, which a reconnection does not try again; what it
+throws fails that attempt, its cause. An upgrade that carries an `Origin` carries none, whatever its
+`Authorization`: a page's browser writes its own authentication on it, as it sends its cookies, so
+any page the server takes would present its user's credential. Two `Authorization` lines on an
+upgrade are refused 400, `malformed`. No client follows a redirect: a 3xx answered to an upgrade
+fails its connect, its status named over `ws`, "the server refused the upgrade: 302". The
+`connection` event shows an upgrade as the HTTP server shows a connect, headers aside — its method,
+its target and its peer — so no event carries its credential.
 
 ```ts
 import { WebSocket } from 'ws';
@@ -638,9 +643,8 @@ cell a code point. `judgeRules` judges rules written by hand alike, a `json` bin
 verdict of `spec/validations.json` plays through the validators beadc generates for
 `spec/validations.proto`, in `src/proto/__tests__/generated/`, which `yarn validations:check` holds
 to beadc and `yarn validations:generate` writes, builder/ installed, through the root's
-`tools/check-validations.mjs`; the root's
-`tools/protovalidate-differential.mjs` plays them against protovalidate-es through the testee in
-`tools/protovalidate-differential/`.
+`tools/check-validations.mjs`; the root's `tools/protovalidate-differential.mjs` plays them against
+protovalidate-es through the testee in `tools/protovalidate-differential/`.
 
 ```ts
 const greeter = createServiceServer<typeof GreeterProcedures, string>(GreeterProcedures, {
@@ -999,21 +1003,21 @@ A request names its authority by its target when the target is in absolute-form,
 HTTP/1.0 request may leave out (RFC 9112 §3.2.2); over HTTP/2, by its `:authority`, a `host` beside
 it ignored (RFC 9113 §8.3.1); otherwise by its `Host`. An authority is a host and an optional port
 of spec 15.12's grammar, RFC 3986's narrowed: no userinfo, no percent-encoded octet, no `*`, `+`,
-`,`, `;` or `=` in a name, no `IPvFuture` literal, no colon without a port. An HTTP/1.1 request without a `Host`,
-and one with two `Host` fields or an authority that is none, is answered 400 as HTTP answers it,
-unmarked, before anything else of it is read (RFC 9112 §3.2); over HTTP/2, its stream is reset,
-`PROTOCOL_ERROR`, nothing written (RFC 9113 §8.1.1). An empty `Host` is a host, and so is a name of
-invalid punycode. So is a request answered whose field holds a control character but a tab, or an
-octet past ASCII: RFC 9110 §5.5 calls the first invalid and keeps the second out of every field
-defined since, and Node's parser answers the first itself. So is one whose target holds an octet
-other than visible ASCII, in its path or its query, or whose path's percent-decoding holds NUL,
-`%00`: a target holds a URI's characters (RFC 3986 §2); Node's parser answers each such octet
+`,`, `;` or `=` in a name, no `IPvFuture` literal, no colon without a port. An HTTP/1.1 request
+without a `Host`, and one with two `Host` fields or an authority that is none, is answered 400 as
+HTTP answers it, unmarked, before anything else of it is read (RFC 9112 §3.2); over HTTP/2, its
+stream is reset, `PROTOCOL_ERROR`, nothing written (RFC 9113 §8.1.1). An empty `Host` is a host, and
+so is a name of invalid punycode. So is a request answered whose field holds a control character but
+a tab, or an octet past ASCII: RFC 9110 §5.5 calls the first invalid and keeps the second out of
+every field defined since, and Node's parser answers the first itself. So is one whose target holds
+an octet other than visible ASCII, in its path or its query, or whose path's percent-decoding holds
+NUL, `%00`: a target holds a URI's characters (RFC 3986 §2); Node's parser answers each such octet
 itself over HTTP/1.1, and nghttp2 resets a control character in `:path`, the transport the rest;
-`%00` in a query, and every other octet percent-encoded, are taken. So is one whose field value starts or
-ends with a space or a tab, which RFC 9113 §8.2.1 calls malformed over HTTP/2; over HTTP/1.1 the
-parser strips it first (RFC 9110 §5.5). Node's HTTP/2 parser drops a field whose value starts or
-ends with a space or a tab, and a control character's, so the request is judged without it; a
-server created with `strictFieldWhitespaceValidation: false` hands the padded value to the
+`%00` in a query, and every other octet percent-encoded, are taken. So is one whose field value
+starts or ends with a space or a tab, which RFC 9113 §8.2.1 calls malformed over HTTP/2; over
+HTTP/1.1 the parser strips it first (RFC 9110 §5.5). Node's HTTP/2 parser drops a field whose value
+starts or ends with a space or a tab, and a control character's, so the request is judged without
+it; a server created with `strictFieldWhitespaceValidation: false` hands the padded value to the
 transport, which resets the stream `PROTOCOL_ERROR`, as the C# side does.
 
 Every server takes `localhost`, a name under `.localhost`, an IPv6 address in brackets and an IPv4
@@ -1272,29 +1276,36 @@ subscription, a bound of the calls it answers, are one caller's, never every cal
 `Bearer` token as a `JWT`; a command its server sends is answered `SERVICE_UNKNOWN`, and a
 connection's session ends with its exchange. It judges a request in the order of `transcoding.md`
 10.1 by the HTTP transport's own gates — hosts, origins and CORS, Fetch Metadata, its bounds, calls
-and streams counted apart — from one policy object, `httpPolicyOf`, which `createHTTPTransportServer`
-takes too, so two listeners never keep two lists alike; a member given in the policy and beside it
-is refused. It listens on its own port, or answers as `listener` on a server the application builds;
-one origin for `/bead` and `/api/…` comes from a proxy in front. It serves the document at
-`/openapi.json`, byte for byte, with its `etag`; Swagger UI is the application's to serve.
+and streams counted apart — from one policy object, `httpPolicyOf`, which
+`createHTTPTransportServer` takes too, so two listeners never keep two lists alike; a member given
+in the policy and beside it is refused. It listens on its own port, or answers as `listener` on a
+server the application builds; one origin for `/bead` and `/api/…` comes from a proxy in front. It
+serves the document at `/openapi.json`, byte for byte, with its `etag`; Swagger UI is the
+application's to serve.
 
-The same `bead_http.ts` exports `<Service>HttpClient`. Its constructor takes the gateway base URL
-first, `new HelloHttpClient(url, options?)`, with optional `fetch`, default `authorization` and
-`maximumBodyBytes` (16,778,240) in the options object. Each procedure has
-`client.<procedure>(request, options?)`, on its default POST route alone; a notifying one also has
-`client.subscribe<Procedure>(request, options?)`, an async iterable whose first entry is
-`{ kind: 'result', value }`, then `{ kind: 'notification', value }`. A problem throws `FailureError`
-with its code, scope and detail. A stream's failure throws too; an incomplete stream fails and
-never reconnects. Breaking its iteration releases its response. The call options take `signal`,
-an `authorization` override and `withoutAuthorization: true` to omit any default. A credential
-destined off the machine in the clear fails `DESTINATION_UNREACHABLE` before encoding or dispatch,
-by spec 13.4's URL rule. Fetch uses `redirect: 'manual'` and `credentials: 'same-origin'`; a supplied fetch
-keeps those settings. A base URL path prefixes the default routes. Authorization uses the
-transport's field check; an empty field presents no credential. The body bound applies to each
-unary answer and each event; exceeding it raises `PAYLOAD_TOO_LARGE`. A malformed body raises
-`PAYLOAD_UNDECODABLE`, a truncated stream `DESTINATION_LOST`. A gateway problem without a code
-maps by `bead-refusal`, then by status. Intermediary statuses map by whether the procedure may
-have run; status and Retry-After stay in the failure's detail.
+The same `bead_http.ts` exports a client of each service, `<Service>HttpClient`, which calls its
+gateway through `fetch` (`transcoding.md` 12): `new HelloHttpClient(url, options?)` takes the
+gateway's base URL, `http` or `https` with no userinfo, query or fragment, whose path prefixes each
+route, and its options a `fetch`, a default `authorization` and `maximumBodyBytes`, 16,778,240 by
+default. Each procedure a client calls is a method, `hello.sayHello(request, options?)`, on its
+default `POST` route alone, whatever rules map it, and one that notifies is also
+`hello.subscribeCountDown(request, options?)`, an async iterable of its result first,
+`{ kind: 'result', value }`, then each notification, `{ kind: 'notification', value }`; breaking out
+of it releases its response. A call's options take a `signal`, an `authorization` of its own and
+`withoutAuthorization: true`, which presents none, its client's default either. An authorization is
+held to the transport's check of a field value, a `ProgrammerError` otherwise, an empty one
+presenting none; one that would leave the machine in the clear fails `DESTINATION_UNREACHABLE`
+before anything is encoded or sent, by spec 13.4's rule on a URL. Each fetch is handed
+`redirect: 'manual'` and `credentials: 'same-origin'`, a `fetch` given among them, so the client
+follows no redirect and a page's sends nothing its browser adds beyond its own origin's; a redirect
+answered, or one a `fetch` followed all the same, which its `redirected` says, fails the call,
+`DESTINATION_LOST`. A problem throws a `FailureError` of its code, its scope and its detail, and so
+does the failure that ends a stream; a problem of the gateway's own, which carries no code, is read
+by its `bead-refusal`, then by its status, and a status an intermediary answers by whether the
+procedure may have run, the status and its `Retry-After` kept in the failure's detail. Each whole
+answer and each event is held to `maximumBodyBytes`, `PAYLOAD_TOO_LARGE` past it; a body that does
+not read is `PAYLOAD_UNDECODABLE`, and a stream cut before its failure `DESTINATION_LOST`, never
+reconnected.
 
 ### What a server holds
 
@@ -1817,12 +1828,13 @@ first.
   words (`CREDIT · up to 2.5 MiB`, `CHUNK · at 1 MiB · more`); a subscription keeps its last 50
   notifications and counts the others. Its **Envelopes** mode lists every envelope on its own. A
   call selected shows its **Overview**, its failure whole — where it was raised, the relays it
-  crossed, its destination, and a PAYLOAD_INVALID's violations as a table, read by the package's
-  own reader of its detail, a row each with its field, its rule, its words and its bounds, then the
-  more its closing line counts, that its side stopped, or that the detail was cut; its **Payload**, as a tree where it reads as one; its **Exchange**, its
-  envelopes as beads on its thread, a third lane for a destination behind a relay, a transfer's bytes
-  against its credit; its **Diff**, a notification against the one before it, an answer against its
-  procedure's last; and its **Trace**, the stack that made it, each frame opened in Sources.
+  crossed, its destination, and a PAYLOAD_INVALID's violations as a table, read by the package's own
+  reader of its detail, a row each with its field, its rule, its words and its bounds, then the more
+  its closing line counts, that its side stopped, or that the detail was cut; its **Payload**, as a
+  tree where it reads as one; its **Exchange**, its envelopes as beads on its thread, a third lane
+  for a destination behind a relay, a transfer's bytes against its credit; its **Diff**, a
+  notification against the one before it, an answer against its procedure's last; and its **Trace**,
+  the stack that made it, each frame opened in Sources.
 - **State**: what a client's connection held at the moment a cursor stands on, rebuilt from the
   panel's records — its session, the calls in flight, the subscriptions and their credit, the
   transfers and how far they went. It replays nothing, and sends nothing to the page.
@@ -1835,8 +1847,8 @@ first.
 - **Wire**: for a page whose clients announce nothing, the HTTP transport's exchanges the Network
   panel saw, read with the package's codec, a line an exchange and its envelopes beneath, each
   procedure named where a client of the page told its name, a PAYLOAD_INVALID summed up on one line
-  by its first violation and their count; an exchange copies as the skeleton of
-  an entry of `spec/conversations.json`.
+  by its first violation and their count; an exchange copies as the skeleton of an entry of
+  `spec/conversations.json`.
 
 The bar filters by client and by the package's own filter, as `bead:debug` reads one
 (`d(rx), -token, e(request)`), the last filter that held kept while one is refused, with its

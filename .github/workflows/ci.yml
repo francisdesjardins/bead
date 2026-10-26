@@ -659,7 +659,7 @@ jobs:
             echo "::error title=actions::an action above is not pinned by a commit's full sha"
             exit 1
           fi
-      # Every dependency of every lockfile, the three yarn.lock, the C# side's packages.lock.json
+      # Every dependency of every lockfile, the five yarn.lock, the C# side's packages.lock.json
       # and the spec's requirements.txt, against the advisories OSV knows, the scanner at its
       # digest. A known vulnerability fails the job.
       - name: The dependencies, against the known advisories

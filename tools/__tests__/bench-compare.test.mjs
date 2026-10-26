@@ -89,6 +89,18 @@ test('applies measure thresholds and identity overrides before the default', () 
   }, /matches no/);
 });
 
+test('takes the in-memory transport and the units of exchanges', () => {
+  for (const options of [
+    { name: 'exchange.throughput', unit: 'exchanges/s' },
+    { name: 'exchange.memory', unit: 'B/exchange' },
+  ]) {
+    const exchanges = report([100], options);
+    exchanges.measures[0].transport = 'memory';
+    exchanges.measures[0].id = `local.memory.0.${options.name}`;
+    assert.equal(compare(exchanges, exchanges)[0].failed, false);
+  }
+});
+
 test('handles zero baselines and rejects negative allocation counts', () => {
   assert.equal(compare(report([0]), report([0]))[0].change, 0);
   assert.equal(compare(report([0]), report([1]), thresholdsOf(['25%']))[0].failed, true);
@@ -146,7 +158,7 @@ test('validates even-run medians, finite samples, counts and statistics', () => 
   }
 });
 
-test('rejects duplicate, missing, additional and incompatible measurements', () => {
+test('rejects duplicate, missing and incompatible measurements, and lists an added one as new', () => {
   const duplicate = report();
   duplicate.measures.push(duplicate.measures[0]);
   assert.throws(() => {
@@ -155,9 +167,16 @@ test('rejects duplicate, missing, additional and incompatible measurements', () 
   const extra = report();
   extra.measures.push(report([100], { name: 'call.p95' }).measures[0]);
   extra.measures[1].samples = [100, 100, 100];
-  assert.throws(() => {
-    compare(report(), extra);
-  }, /different measurement sets/);
+  const added = compare(report(), extra).find((row) => {
+    return row.added;
+  });
+  assert.deepEqual(added, {
+    id: 'local.http.0.call.p95',
+    unit: 'us',
+    after: 100,
+    added: true,
+    failed: false,
+  });
   assert.throws(() => {
     compare(extra, report());
   }, /missing/);
