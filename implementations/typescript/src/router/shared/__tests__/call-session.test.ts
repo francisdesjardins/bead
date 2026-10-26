@@ -27,6 +27,13 @@ const OTHER_TOKEN = toSessionToken(new Uint8Array(16).fill(2));
 // definition
 
 test.describe('credentialSchemesDetailOf', () => {
+  test('names a scheme to come by the word scheme and its number, in the order of the numbers', () => {
+    expect(
+      credentialSchemesDetailOf([65_535, CredentialScheme.ELSEWHERE, 4, CredentialScheme.OPAQUE, 4])
+    ).toBe('OPAQUE, ELSEWHERE, scheme 4, scheme 65535');
+    expect(credentialSchemesDetailOf([])).toBe('');
+  });
+
   test('names the schemes a side takes in the order of their numbers, a comma and a space between', () => {
     expect(credentialSchemesDetailOf([CredentialScheme.OPAQUE])).toBe('OPAQUE');
     expect(

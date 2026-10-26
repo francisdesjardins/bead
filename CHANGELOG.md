@@ -105,6 +105,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- The TypeScript side names a credential scheme to come `scheme 4` in `CREDENTIAL_UNSUPPORTED`'s
+  detail, as the C# side and its own header refusals do, where it wrote the bare number.
 - The builder, the TypeScript side and the example use Buf 1.75 and the current Oxlint and Oxfmt
   pins, their indirect dependencies refreshed, `fast-uri` past its four advisories among them; the
   C# side and the example use .NET SDK 10.0.403; CI uses Python 3.14.9 and Semgrep 1.182.1, and the
