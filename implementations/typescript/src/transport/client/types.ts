@@ -355,8 +355,9 @@ export interface IWSTransportClientConnectOptions extends ITransportClientAddres
    * beside it. What it throws fails that attempt, its cause, which a reconnection counts as a refused
    * connect; a value it hands that is no field value fails it with a {@link ProgrammerError}, which
    * a reconnection does not try again.
-   * Only one call is pending per client; an attempt joins a live call. A call abandoned by its last
-   * waiter is cancelled in a later turn; another attempt waits for it to settle, then calls anew.
+   * Only one call is pending per provider identity. Attempts are sequential: another attempt using
+   * the same provider waits for its earlier call to settle, then calls anew; another provider asks
+   * at once. The attempt's signal is aborted in a later turn once it ends, opened or not.
    * Cancellation, timeout and disposal bound each wait. The provider's own cancellation is its
    * failure while the attempt's signal stays live.
    */

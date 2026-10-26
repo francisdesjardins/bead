@@ -1282,6 +1282,7 @@ public sealed class HttpTransportClientTests
 
     // definition
 
+    // spec 15.15
     [Fact]
     public async Task Bounds_an_unresponsive_HTTP_connect_by_cancellation_timeout_and_disposal()
     {
@@ -1333,6 +1334,7 @@ public sealed class HttpTransportClientTests
         Assert.Equal((true, isSecure), (faked.Client.Carries(Bearer), faked.Client.IsSecure));
     }
 
+    // spec 15.15
     [Fact]
     public async Task Draws_its_connection_sends_an_envelope_settled_on_the_head_of_its_answer_and_hears_the_answer_as_a_message()
     {
@@ -1790,6 +1792,7 @@ public sealed class HttpTransportClientTests
         }
     }
 
+    // spec 15.15
     [Fact]
     public async Task Lets_go_of_a_connection_drawn_as_its_connect_gave_up_and_closes_even_when_the_server_cannot_hear_its_DELETE()
     {
@@ -1916,6 +1919,7 @@ public sealed class HttpTransportClientTests
         });
     }
 
+    // spec 15.15
     [Fact]
     public async Task Refuses_a_connection_disposed_between_its_answer_and_the_end_of_connect()
     {
@@ -1959,6 +1963,7 @@ public sealed class HttpTransportClientTests
         Assert.Equal((HttpMethod.Delete, Token), ((await fetch.CallOf(3)).Method, fetch.Calls[3].ConnectionToken));
     }
 
+    // spec 15.15
     [Fact]
     public async Task Refuses_to_connect_where_no_connection_is_drawn_and_lets_go_of_one_drawn_as_it_gave_up()
     {

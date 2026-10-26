@@ -187,6 +187,7 @@ test('releases a late reconnection answer without opening after cancellation', a
   ).toEqual(['POST', 'DELETE', 'POST', 'DELETE']);
 });
 
+// spec 15.15
 test('bounds an unresponsive HTTP connect by cancellation timeout and disposal', async () => {
   for (const ending of ['cancel', 'timeout', 'dispose']) {
     const clock = createTestClock();
@@ -444,6 +445,7 @@ test('cancels a reconnection whose last attempt closes before cancellation is ch
   ).toEqual(['POST', 'DELETE', 'POST', 'DELETE']);
 });
 
+// spec 15.15
 test('refuses a connection disposed between its answer and the end of connect', async () => {
   const fake = createFakeFetch();
   const client = createHTTPTransportClient({ isListening: false, fetch: fake.fetch });
@@ -562,6 +564,7 @@ test.describe('createHTTPTransportClient', () => {
     await tcpSocketsClosed();
   });
 
+  // spec 15.15
   test('draws its connection, sends an envelope settled on the head of its answer, and hears the answer as a message', async () => {
     await using started = await startServer();
     const { port, server } = started;
@@ -1049,6 +1052,7 @@ test.describe('createHTTPTransportClient', () => {
     }
   });
 
+  // spec 15.15
   test('lets go of a connection drawn as its connect gave up, and closes even when the server cannot hear its DELETE', async () => {
     expect(DISCONNECT_TIMEOUT).toBe(5_000);
 
@@ -1153,6 +1157,7 @@ test.describe('createHTTPTransportClient', () => {
       .toEqual(['sent', 'settled', 'message']);
   });
 
+  // spec 15.15
   test('refuses to connect where no connection is drawn, and lets go of one drawn as it gave up', async () => {
     const refused = createFakeFetch();
     const client = createHTTPTransportClient({ isListening: false, fetch: refused.fetch });

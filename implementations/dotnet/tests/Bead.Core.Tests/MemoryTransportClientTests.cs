@@ -63,6 +63,7 @@ public sealed class MemoryTransportClientTests
 
     // definition
 
+    // spec 15.15
     [Fact]
     public async Task Hands_each_envelope_on_whole_once_and_in_order_in_a_later_turn_than_its_send()
     {
@@ -704,6 +705,7 @@ public sealed class MemoryTransportClientTests
         }
     }
 
+    // spec 15.15
     [Fact]
     public async Task Gives_up_a_connect_its_dispose_its_token_or_its_clock_ends_before_its_server_drew_it()
     {
@@ -837,6 +839,7 @@ public sealed class MemoryTransportClientTests
         // sent before it accepts; a C# client connects to a MemoryTransportServer alone
     }
 
+    // spec 15.15
     [Fact]
     public async Task Fails_a_connect_its_server_closed_as_it_opened_what_it_sent_before_unheard()
     {
@@ -872,6 +875,7 @@ public sealed class MemoryTransportClientTests
         Assert.Empty(server.ConnectionHandles);
     }
 
+    // spec 15.15
     [Fact]
     public async Task Closes_at_once_unclean_a_connection_its_server_draws_once_a_dispose_gave_up_on_its_connect()
     {

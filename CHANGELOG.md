@@ -7,6 +7,19 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+
+- A WebSocket client asks one credential at a time of each provider by its identity: a different
+  provider can answer while an earlier source stays pending; a later attempt using that source
+  waits for it to settle within its own bounds, then asks anew.
+
+### Fixed
+
+- A WebSocket connect lets go of its socket on every failure and writes no credential that settles
+  in the turn its attempt is disposed or times out.
+- A C# WebSocket connect disposed as its credential arrives reports the attempt's end, with
+  cancellation and timeout taking precedence, even when its aborted socket fails first.
+
 ## [0.7.0] - 2026-10-26
 
 ### Added
