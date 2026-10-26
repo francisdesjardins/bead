@@ -685,6 +685,8 @@ export const createHTTPGateway = (given: IHTTPGatewayOptions): IHTTPGateway => {
     let held = 0;
     let sequence = 0;
     let waiting: ((taken: boolean) => void) | undefined;
+    // one write after the one before it, so each keeps its own settlement and pace
+    let pending = Promise.resolve(true);
     const unsent = (): number => {
       return Math.max(held, response.writableLength ?? 0);
     };
@@ -754,8 +756,14 @@ export const createHTTPGateway = (given: IHTTPGatewayOptions): IHTTPGateway => {
         }
       });
     };
-    writers.set(response, write);
-    return write;
+    const enqueue = (bytes: Uint8Array): Promise<boolean> => {
+      pending = pending.then(() => {
+        return write(bytes);
+      });
+      return pending;
+    };
+    writers.set(response, enqueue);
+    return enqueue;
   };
 
   /** Writes an exchange's whole response: its fields, and its body unless it answers a `HEAD`. */
@@ -1364,6 +1372,8 @@ export const createHTTPGateway = (given: IHTTPGatewayOptions): IHTTPGateway => {
 
     if (isStream) {
       const write = writerOf(response);
+      // the stream's end follows its last queued event
+      let written = Promise.resolve(false);
       const opened = createEventStream(
         {
           answer: (problem) => {
@@ -1371,8 +1381,10 @@ export const createHTTPGateway = (given: IHTTPGatewayOptions): IHTTPGateway => {
             close();
           },
           end: () => {
-            response.end();
-            close();
+            void written.then(() => {
+              response.end();
+              close();
+            });
           },
           open: () => {
             // * its head goes with its first write, so that a drop past its bound writes nothing
@@ -1390,7 +1402,8 @@ export const createHTTPGateway = (given: IHTTPGatewayOptions): IHTTPGateway => {
 
             // ! a reader past what it may hold unsent is dropped, as a WebSocket's is, before
             // the write that would pass it goes (10.2)
-            await write(chunk);
+            written = write(chunk);
+            await written;
           },
         },
         { clock, heartbeat }

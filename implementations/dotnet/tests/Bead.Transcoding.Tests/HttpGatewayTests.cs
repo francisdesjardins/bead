@@ -1954,6 +1954,58 @@ public sealed class HttpGatewayTests
     }
 
     [Fact]
+    public async Task Settles_every_held_write_once_its_response_drains()
+    {
+        await using var service = await TranscodingService.Start();
+        await using var gateway = new HttpGateway(Exchanges.OptionsOf(service.Memory, null) with { Window = 2, Heartbeat = Timeout.InfiniteTimeSpan });
+        using var cancelling = CancellationTokenSource.CreateLinkedTokenSource(Cancelled);
+        using var body = new HeldResponseBody();
+        var context = new DefaultHttpContext();
+        var credited = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        service.Server.Router.Debug += (_, envelope) =>
+        {
+            if (envelope.Header is CreditHeader { Paced: true, CreditEnd: >= 4 })
+            {
+                credited.TrySetResult();
+            }
+        };
+        var reported = ReportedBy(gateway);
+
+        context.Request.Method = "POST";
+        context.Request.Host = new HostString("127.0.0.1");
+        context.Request.ContentType = "application/json";
+        context.Request.Headers.Accept = "text/event-stream";
+        context.Request.ContentLength = 2;
+        context.Request.Body = new MemoryStream("{}"u8.ToArray());
+        context.RequestAborted = cancelling.Token;
+        context.Features.Get<IHttpRequestFeature>()!.RawTarget = "/api/Transcoding/watch";
+        context.Response.Body = body;
+        var serving = gateway.Answer(context);
+
+        try
+        {
+            await body.Writing.Task.WaitAsync(Patience, Cancelled);
+            var notifying = Task.WhenAll(service.Watched(2), service.Watched(1));
+            await notifying.WaitAsync(Patience, Cancelled);
+
+            Assert.Equal(1, body.Writes);
+            body.Released.TrySetResult();
+            await notifying.WaitAsync(Patience, Cancelled);
+            await credited.Task.WaitAsync(Patience, Cancelled);
+
+            Assert.Equal("event: result\nid: 1\ndata: {}\n\nid: 2\ndata: {\"remaining\":2}\n\nid: 3\ndata: {\"remaining\":1}\n\n", Encoding.UTF8.GetString(body.ToArray()));
+            Assert.Equal(3, body.Writes);
+            Assert.Empty(reported);
+        }
+        finally
+        {
+            body.Released.TrySetResult();
+            await cancelling.CancelAsync();
+            await serving.WaitAsync(Patience, Cancelled);
+        }
+    }
+
+    [Fact]
     public async Task Releases_a_stream_closed_while_its_response_waits_for_drainage()
     {
         await using var service = await TranscodingService.Start();

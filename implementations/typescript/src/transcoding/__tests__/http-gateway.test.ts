@@ -1989,14 +1989,15 @@ test('waits for a stream response to drain before writing its next event', async
           chunks.push(new TextDecoder().decode(chunk));
           const isTaken =
             chunks.length === 1
-              ? write(chunk)
+              ? write(chunk, () => {
+                  waiting.resolve();
+                })
               : write(chunk, typeof done === 'function' ? done : undefined);
 
           if (chunks.length === 1) {
             drain = () => {
               response.emit('drain');
             };
-            waiting.resolve();
             return false;
           }
 
@@ -2027,9 +2028,88 @@ test('waits for a stream response to drain before writing its next event', async
     expect(drain).toBeDefined();
     drain?.();
     await notifying;
+    await until(() => {
+      return chunks.length === 2;
+    });
     expect(chunks).toEqual([
       'event: result\nid: 1\ndata: {}\n\n',
       'id: 2\ndata: {"remaining":2}\n\n',
+    ]);
+    expect(reported).toEqual([]);
+  } finally {
+    socket.destroy();
+  }
+});
+
+test('settles every held write once its response drains', async () => {
+  const waiting = Promise.withResolvers<void>();
+  const chunks: string[] = [];
+  let drain: (() => void) | undefined;
+  await using fixture = await startTranscoding({
+    window: 2,
+    heartbeat: Infinity,
+    createServer: (listener) => {
+      return createNodeServer((request, response) => {
+        const write = response.write.bind(response);
+
+        response.write = (
+          chunk: Uint8Array,
+          done?: BufferEncoding | ((error?: Error | null) => void)
+        ): boolean => {
+          chunks.push(new TextDecoder().decode(chunk));
+          const isTaken =
+            chunks.length === 1
+              ? write(chunk, () => {
+                  waiting.resolve();
+                })
+              : write(chunk, typeof done === 'function' ? done : undefined);
+
+          if (chunks.length === 1) {
+            drain = () => {
+              response.emit('drain');
+            };
+            return false;
+          }
+
+          return isTaken;
+        };
+        listener(request, response);
+      });
+    },
+  });
+  const credited = Promise.withResolvers<void>();
+  fixture.server.router.on('debug', ({ header }) => {
+    if (header.kind === EnvelopeKind.CREDIT && header.creditEnd >= 4) {
+      credited.resolve();
+    }
+  });
+  const reported = reportedBy(fixture.gateway);
+  const socket = opened(
+    fixture.port,
+    octetsOf(fixture.port, {
+      body: '{}',
+      lines: [
+        'POST /api/Transcoding/watch HTTP/1.1',
+        'content-type: application/json',
+        'accept: text/event-stream',
+      ],
+    })
+  );
+
+  try {
+    await waiting.promise;
+    const notifying = Promise.all([fixture.watched(2), fixture.watched(1)]);
+    await notifying;
+    await new Promise(setImmediate);
+
+    expect(chunks).toEqual(['event: result\nid: 1\ndata: {}\n\n']);
+    expect(drain).toBeDefined();
+    drain?.();
+    await credited.promise;
+    expect(chunks).toEqual([
+      'event: result\nid: 1\ndata: {}\n\n',
+      'id: 2\ndata: {"remaining":2}\n\n',
+      'id: 3\ndata: {"remaining":1}\n\n',
     ]);
     expect(reported).toEqual([]);
   } finally {
