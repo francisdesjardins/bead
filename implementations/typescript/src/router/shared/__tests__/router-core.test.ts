@@ -727,6 +727,47 @@ test.describe('createRouterCore', () => {
       expect(calls).toBe(3);
     });
 
+    test('keeps the replacement call when its report listener cancels a failed resolver’s call', async () => {
+      const { port, reported, sent } = createPort();
+      using core = createRouterCore(port);
+      const requests: IRequestResolverProps<Handle>[] = [];
+      const failure = new Error('the resolver failed');
+      const report = port.report;
+
+      core.registerResolver(
+        Object.assign((props: IRequestResolverProps<Handle>) => {
+          requests.push(props);
+
+          if (requests.length === 1) {
+            throw failure;
+          }
+
+          return Promise.resolve();
+        }, echo)
+      );
+      port.report = (reason, connectionHandle) => {
+        report(reason, connectionHandle);
+        core.receive(cancelOf(5), 'a');
+        core.receive(requestOf(5), 'a');
+      };
+      core.receive(requestOf(5), 'a');
+
+      expect(reported).toEqual([[failure, 'a']]);
+      expect(requests).toHaveLength(2);
+      expect(requests[0]?.signal.aborted).toBe(true);
+      expect(requests[1]?.signal.aborted).toBe(false);
+      expect(core.gauges().counts['answeringCalls']).toBe(1);
+      expect(sent).toEqual([]);
+
+      await core.respond({ payload: Uint8Array.of(1) }, requests[0]!);
+      expect(sent).toEqual([]);
+      await core.respond({ payload: Uint8Array.of(2) }, requests[1]!);
+
+      expect(answersOf(sent)).toEqual([['a', 'result', 5, [2]]]);
+      expect(core.gauges().counts['answeringCalls']).toBe(0);
+      expect(reported).toEqual([[failure, 'a']]);
+    });
+
     test('lets go of the call id of a resolver that fails without answering, and of that one alone', async () => {
       const { port, reported, sent } = createPort();
       using core = createRouterCore(port);
@@ -4215,6 +4256,73 @@ test.describe('createRouterCore', () => {
           return [monotonic + 2, wall];
         })
       );
+    });
+
+    test('counts an unreadable request once when its refusal transport throws or rejects', async () => {
+      for (const isThrown of [true, false]) {
+        const registry = createMetricsRegistry();
+        const { port, reported, sent } = createPort();
+        const failure = new Error('the refusal transport failed');
+        const failed = Promise.withResolvers<void>();
+        const send = port.send;
+        const report = port.report;
+
+        port.send = (message, connectionHandle) => {
+          if (isThrown) {
+            throw failure;
+          }
+
+          return send(message, connectionHandle).then(() => {
+            throw failure;
+          });
+        };
+        port.report = (reason, connectionHandle) => {
+          report(reason, connectionHandle);
+
+          if (reason === failure) {
+            failed.resolve();
+          }
+        };
+        using core = createRouterCore(port, {
+          clock: createTestClock(),
+          metrics: registry.attach('server'),
+        });
+        // * a readable prefix names the call; its request header has no procedure fields.
+        const unreadable = fromHexadecimal('A1 10 00 02 00 00 00 01');
+
+        core.receive(unreadable, 'a');
+        await failed.promise;
+        expect(sent).toHaveLength(isThrown ? 0 : 1);
+        expect(
+          reported.filter(([reason]) => {
+            return reason === failure;
+          })
+        ).toEqual([[failure, 'a']]);
+        expect(core.gauges().counts['answeringCalls']).toBe(0);
+
+        port.send = send;
+        core.receive(unreadable, 'a');
+        expect(sent).toHaveLength(isThrown ? 1 : 2);
+        expect(sent.at(-1)?.envelope).toMatchObject({
+          failure: {
+            code: ProtocolCode.ENVELOPE_MALFORMED,
+            detail: 'a 0x10 header of flags 0x00 is 12 bytes, not 8 of 8',
+            scope: FailureScope.PROTOCOL,
+          },
+          header: { callId: 1, kind: EnvelopeKind.FAILURE },
+        });
+        expect(core.gauges().counts['answeringCalls']).toBe(0);
+        expect(countedOf(registry)).toEqual([
+          'bead_server_call_duration_seconds_count{service="_OTHER",procedure="_OTHER",type="request"} 2',
+          `bead_server_call_handled_total{service="_OTHER",procedure="_OTHER",type="request",outcome="failure",code="ENVELOPE_MALFORMED"} ${isThrown ? '1' : '2'}`,
+          ...(isThrown
+            ? [
+                'bead_server_call_handled_total{service="_OTHER",procedure="_OTHER",type="request",outcome="error"} 1',
+              ]
+            : []),
+          'bead_server_call_started_total{service="_OTHER",procedure="_OTHER",type="request"} 2',
+        ]);
+      }
     });
 
     test('count a call that carries no series under _OTHER, and a router given no registry counts nothing', async () => {

@@ -10,14 +10,21 @@ import {
 import {
   AnySchema,
   EmptySchema,
+  FieldDescriptorProtoSchema,
+  FieldOptionsSchema,
   Int32ValueSchema,
   Int64ValueSchema,
   ListValueSchema,
   StringValueSchema,
   ValueSchema,
+  type FieldOptions,
 } from '@bufbuild/protobuf/wkt';
 import { expect, test } from '@playwright/test';
-import { PresenceSchema } from '../../proto/__tests__/generated/validations_pb';
+import {
+  MapsSchema,
+  PresenceSchema,
+  type Maps,
+} from '../../proto/__tests__/generated/validations_pb';
 import { ProgrammerError } from '../../transport/shared/errors';
 import {
   base64Of,
@@ -115,6 +122,146 @@ const writeEdges = (init: Parameters<typeof create<typeof EdgesSchema>>[1]): str
 };
 
 // tests
+
+test('reads enum lists by name or number and refuses an invalid member at its index', () => {
+  const expected = create(FieldOptionsSchema, { targets: [1, 4] });
+
+  for (const body of [
+    '{"targets":[1,4]}',
+    '{"targets":["TARGET_TYPE_FILE","TARGET_TYPE_FIELD"]}',
+  ]) {
+    const message = readProtoJson(FieldOptionsSchema, {
+      bytes: ENCODER.encode(body),
+      registry: REGISTRY,
+    }) as FieldOptions;
+
+    expect(message).toEqual(expected);
+    expect(fromBinary(FieldOptionsSchema, toBinary(FieldOptionsSchema, message))).toEqual(expected);
+    expect(writeProtoJson(FieldOptionsSchema, { message, registry: REGISTRY })).toBe(
+      '{"targets":["TARGET_TYPE_FILE","TARGET_TYPE_FIELD"]}'
+    );
+  }
+
+  for (const [member, reason] of [
+    ['999', 'no value of OptionTargetType of that number'],
+    ['"NOPE"', 'no value of OptionTargetType of that name'],
+    ['true', 'no OptionTargetType'],
+  ]) {
+    expect(() => {
+      readProtoJson(FieldOptionsSchema, {
+        bytes: ENCODER.encode(`{"targets":[1,${member}]}`),
+        registry: REGISTRY,
+      });
+    }).toThrow(expect.objectContaining({ pointer: '#/targets/1', reason }));
+  }
+});
+
+test('refuses unknown numbers of a closed enum and keeps open enum numbers', () => {
+  const read = (body: string) => {
+    return readProtoJson(FieldDescriptorProtoSchema, {
+      bytes: ENCODER.encode(body),
+      registry: REGISTRY,
+    });
+  };
+
+  for (const body of ['{"type":1}', '{"type":"TYPE_DOUBLE"}']) {
+    const message = read(body);
+
+    expect(message).toEqual(create(FieldDescriptorProtoSchema, { type: 1 }));
+    expect(writeProtoJson(FieldDescriptorProtoSchema, { message, registry: REGISTRY })).toBe(
+      '{"type":"TYPE_DOUBLE"}'
+    );
+  }
+
+  for (const body of ['{"type":0}', '{"type":999}']) {
+    let refused: unknown;
+
+    try {
+      read(body);
+    } catch (error) {
+      refused = error;
+    }
+
+    expect(refused).toBeInstanceOf(JsonFormError);
+    expect(refused).toMatchObject({
+      pointer: '#/type',
+      reason: 'no value of Type of that number',
+    });
+  }
+
+  expect(readEdges('{"aliased":7}').aliased).toBe(7);
+  expect(writeEdges({ aliased: 7 as Aliased })).toBe('{"aliased":7}');
+});
+
+test('refuses an Empty value that is not an object', () => {
+  for (const body of ['1', '[]']) {
+    let refused: unknown;
+
+    try {
+      readProtoJson(EmptySchema, { bytes: ENCODER.encode(body), registry: REGISTRY });
+    } catch (error) {
+      refused = error;
+    }
+
+    expect(refused).toBeInstanceOf(JsonFormError);
+    expect(refused).toMatchObject({ pointer: '#', reason: 'an Empty that is no object' });
+  }
+});
+
+test('reads unsigned 64-bit map keys exactly and refuses keys outside their bounds', () => {
+  for (const [field, kind] of [
+    ['byUint64', 'uint64'],
+    ['byFixed64', 'fixed64'],
+  ] as const) {
+    const read = (body: string) => {
+      return readProtoJson(MapsSchema, { bytes: ENCODER.encode(body), registry: REGISTRY }) as Maps;
+    };
+    const message = read(
+      `{"${field}":{"9007199254740993":"large","18446744073709551615":"max","0":"zero"}}`
+    );
+    const expected = create(MapsSchema, {
+      [field]: { '0': 'zero', '9007199254740993': 'large', '18446744073709551615': 'max' },
+    });
+
+    expect(message).toEqual(expected);
+    expect(fromBinary(MapsSchema, toBinary(MapsSchema, message))).toEqual(expected);
+    expect(writeProtoJson(MapsSchema, { message, registry: REGISTRY })).toBe(
+      `{"${field}":{"0":"zero","18446744073709551615":"max","9007199254740993":"large"}}`
+    );
+
+    for (const [key, reason] of [
+      ['-1', `a ${kind} key past its range`],
+      ['18446744073709551616', `a ${kind} key past its range`],
+      ['01', `a ${kind} key off -?(0|[1-9][0-9]*)`],
+      ['1e3', `a ${kind} key off -?(0|[1-9][0-9]*)`],
+    ]) {
+      let refused: unknown;
+
+      try {
+        read(`{"${field}":{"${key}":"x"}}`);
+      } catch (error) {
+        refused = error;
+      }
+
+      expect(refused).toBeInstanceOf(JsonFormError);
+      expect(refused).toMatchObject({ pointer: `#/${field}/${key}`, reason });
+    }
+  }
+});
+
+test('reads the limits of unsigned 64-bit numbers without rounding', () => {
+  for (const digits of ['0', '9007199254740993', '18446744073709551615']) {
+    for (const value of [digits, `"${digits}"`]) {
+      expect(readEverything(`{"aUint64":${value}}`).aUint64).toBe(BigInt(digits));
+    }
+  }
+
+  for (const value of ['-1', '18446744073709551616']) {
+    expect(() => {
+      return readEverything(`{"aUint64":${value}}`);
+    }).toThrow('a uint64 past its range');
+  }
+});
 
 test('reads a proto body by Bead’s mapping, each scalar and well-known form as pinned', () => {
   const everything = readEverything(

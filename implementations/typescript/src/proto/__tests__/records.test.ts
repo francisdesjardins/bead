@@ -91,6 +91,15 @@ const expectRefused = (payloads: readonly string[]): void => {
 // definition
 
 test.describe("the check of a proto payload's records", () => {
+  test('refuses reserved wire types on unknown fields as well as known fields', () => {
+    for (const hex of ['A0 06 01', '1A 03 A0 06 01']) {
+      expect(thrownBy(bytesOf(hex)), hex).toBeUndefined();
+    }
+    for (const hex of ['0E', '0F', 'A6 06', 'A7 06', '1A 02 A6 06', '1A 02 A7 06']) {
+      expect(thrownBy(bytesOf(hex)), hex).toBeInstanceOf(SyntaxError);
+    }
+  });
+
   test('takes every record a message holds, a group closed by its own end group, a map of messages, a repeated scalar packed or not, and an unknown field of each wire type skipped', () => {
     const payloads = [
       '',

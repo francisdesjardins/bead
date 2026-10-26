@@ -555,6 +555,104 @@ test.describe('createMemoryTransportClient', () => {
     expect([client.isOpen(), server.clients.length]).toEqual([true, 1]);
   });
 
+  test('refuses a second connect or reconnect while one is pending', async () => {
+    for (const isReconnect of [false, true]) {
+      await using server = createMemoryTransportServer();
+      const held = Promise.withResolvers<void>();
+      const release = Promise.withResolvers<void>();
+      let isHolding = !isReconnect;
+      const accepting: IMemoryTransportServerLike = {
+        accept: async (peer, options) => {
+          if (isHolding) {
+            held.resolve();
+            await release.promise;
+          }
+
+          return server.accept(peer, options);
+        },
+      };
+      await using client = createMemoryTransportClient({ server: accepting });
+      const drawn: string[] = [];
+      const clientCloses: boolean[][] = [];
+      const serverCloses: boolean[] = [];
+      const errors: Error[] = [];
+      let starts = 0;
+
+      server.on('connection', (...[, , handle]) => {
+        drawn.push(handle);
+      });
+      server.on('close', (isClean) => {
+        serverCloses.push(isClean);
+      });
+      server.on('error', (error) => {
+        errors.push(error);
+      });
+      client.on('close', (...flags) => {
+        clientCloses.push(flags);
+      });
+      client.on('error', (error) => {
+        errors.push(error);
+      });
+      client.on('reconnect', () => {
+        starts += 1;
+      });
+      await server.start();
+
+      if (isReconnect) {
+        await client.connect({});
+        isHolding = true;
+      }
+
+      const pending = isReconnect ? client.reconnect({ maxAttempts: 1 }) : client.connect({});
+
+      try {
+        await held.promise;
+        await turn();
+
+        const state = isReconnect ? 'reconnecting' : 'connecting';
+
+        await expect(client.connect({})).rejects.toThrow(
+          new ProgrammerError(`the transport client is already ${state}`)
+        );
+        await expect(client.reconnect()).rejects.toThrow(
+          new ProgrammerError(
+            isReconnect
+              ? 'the transport client is already reconnecting'
+              : 'the transport client cannot reconnect while connecting'
+          )
+        );
+        expect(client.isReconnecting()).toBe(isReconnect);
+        expect(client.isConnecting()).toBe(!isReconnect);
+        expect([starts, drawn.length, server.clients, clientCloses, serverCloses, errors]).toEqual([
+          isReconnect ? 1 : 0,
+          isReconnect ? 1 : 0,
+          [],
+          [],
+          isReconnect ? [false] : [],
+          [],
+        ]);
+      } finally {
+        release.resolve();
+        await pending;
+      }
+
+      await turn();
+      expect(client.isOpen()).toBe(true);
+      expect(server.clients).toHaveLength(1);
+      expect(drawn).toHaveLength(isReconnect ? 2 : 1);
+      expect(clientCloses).toEqual([]);
+      await client.disconnect();
+      await turn();
+      expect([client.isClosed(), server.clients, clientCloses, serverCloses, errors]).toEqual([
+        true,
+        [],
+        [[true, false]],
+        isReconnect ? [false, true] : [true],
+        [],
+      ]);
+    }
+  });
+
   // spec 15.13
   test('reconnects with its last connect’s options, replacing its connection without a close', async () => {
     await using server = createMemoryTransportServer();
@@ -617,6 +715,49 @@ test.describe('createMemoryTransportClient', () => {
     expect(gaveUp).toBeInstanceOf(ReconnectError);
     expect((gaveUp as ReconnectError).cause).toBeInstanceOf(ConnectError);
     expect([client.isClosed(), closedAtClient.length]).toEqual([true, 1]);
+  });
+
+  test('cancels a reconnection before its first attempt when its start listener cancels', async () => {
+    await using pair = await connected();
+    const { atClient, atServer, client, connectionHandle, server } = pair;
+    const cancelling = new AbortController();
+    const reason = new Error('the caller cancels at the start');
+    const drawn: string[] = [];
+    const errors: Error[] = [];
+    let starts = 0;
+
+    server.on('connection', (...[, , handle]) => {
+      drawn.push(handle);
+    });
+    server.on('error', (error) => {
+      errors.push(error);
+    });
+    client.on('error', (error) => {
+      errors.push(error);
+    });
+    client.on('reconnect', () => {
+      starts += 1;
+      cancelling.abort(reason);
+    });
+
+    const cancelled: unknown = await client
+      .reconnect({ maxAttempts: 1, signal: cancelling.signal })
+      .catch((error: unknown) => {
+        return error;
+      });
+
+    await turn();
+    expect(cancelled).toBeInstanceOf(CancelError);
+    expect(cancelled).toMatchObject({ cause: reason, message: 'the reconnection was cancelled' });
+    expect([starts, client.isClosed(), server.clients, drawn, atClient, atServer, errors]).toEqual([
+      1,
+      true,
+      [],
+      [],
+      [],
+      [['close', false, connectionHandle]],
+      [],
+    ]);
   });
 
   // spec 15.13

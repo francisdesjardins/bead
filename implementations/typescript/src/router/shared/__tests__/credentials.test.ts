@@ -291,6 +291,41 @@ test.describe('createCredentialResolver', () => {
       .toBeUndefined();
   });
 
+  test('starts no key set ask for a call whose signal is cancelled already', async () => {
+    const clock = createTestClock(NOW);
+    const { asks, keySet } = createKeySet();
+    const resolver = createCredentialResolver({ audience: AUDIENCE, keySet }, { clock });
+    const cancelling = new AbortController();
+    const reason = new Error('the caller leaves before resolution');
+    const named = jwtOf(tokenOf(claimsOf(SET_ISSUER), { key: SET_KEY_BYTES, kid: 'set-1' }));
+
+    cancelling.abort(reason);
+
+    const cancelled: unknown = await resolver
+      .resolve(named, cancelling.signal)
+      .catch((error: unknown) => {
+        return error;
+      });
+
+    expect(cancelled).toBeInstanceOf(CancelError);
+    expect(cancelled).toHaveProperty('cause', reason);
+    expect([asks, duesOn(clock)]).toEqual([[], []]);
+
+    const next = resolver.resolve(named, new AbortController().signal);
+
+    await expect
+      .poll(() => {
+        return asks.length;
+      })
+      .toBe(1);
+    expect(asks[0]?.issuer).toBe(SET_ISSUER);
+    expect(asks[0]?.signal.aborted).toBe(false);
+    asks[0]?.settle.resolve([SET_KEY]);
+
+    expect(await next).toMatchObject({ identifier: { issuer: SET_ISSUER, sub: 'grace' } });
+    expect(asks).toHaveLength(1);
+  });
+
   test('lets a call’s cancel end its own wait, never the ask the others wait on', async () => {
     const clock = createTestClock(NOW);
     const { asks, keySet } = createKeySet();
