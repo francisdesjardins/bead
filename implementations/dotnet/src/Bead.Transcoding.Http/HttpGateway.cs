@@ -1403,7 +1403,10 @@ public sealed class HttpGateway : IAsyncDisposable
         var (bytes, drop) = write;
         if (!_drops.TryGetValue(context, out var current) || current != drop) { return; }
         context.RequestAborted.ThrowIfCancellationRequested();
-        if (bytes.Length > _options.MaximumUnsentBytes)
+        var writer = context.Response.BodyWriter;
+        // a host exposes its queued bytes here; Kestrel exposes only those not yet flushed
+        var pending = writer.CanGetUnflushedBytes ? writer.UnflushedBytes : 0;
+        if (bytes.Length > _options.MaximumUnsentBytes - pending)
         {
             var detail = string.Create(CultureInfo.InvariantCulture, $"the response is dropped: maximumUnsentBytes {_options.MaximumUnsentBytes} bytes");
             DropWriter(context, (drop, detail));

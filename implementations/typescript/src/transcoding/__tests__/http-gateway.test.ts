@@ -2302,6 +2302,48 @@ test('paces every response body and reports its send bound', async () => {
   }
 });
 
+test('counts pending bytes with the write at the maximumUnsentBytes edge', async () => {
+  for (const bound of [5, 6]) {
+    const chunks: string[] = [];
+    await using fixture = await startTranscoding({
+      document: '{}',
+      maximumUnsentBytes: bound,
+      createServer: (listener) => {
+        return createNodeServer((request, response) => {
+          const write = response.write.bind(response);
+          Object.defineProperty(response, 'writableLength', {
+            get: () => {
+              return 4;
+            },
+          });
+          response.write = (
+            chunk: Uint8Array,
+            done?: BufferEncoding | ((error?: Error | null) => void)
+          ): boolean => {
+            chunks.push(new TextDecoder().decode(chunk));
+            return write(chunk, typeof done === 'function' ? done : undefined);
+          };
+          listener(request, response);
+        });
+      },
+    });
+    const reported = reportedBy(fixture.gateway);
+    const received = await receivedOn(
+      fixture.port,
+      octetsOf(fixture.port, { lines: ['GET /openapi.json HTTP/1.1'] })
+    );
+    if (bound === 5) {
+      expect(received).toBe(0);
+      expect(chunks).toEqual([]);
+      expect(reported).toEqual(['the response is dropped: maximumUnsentBytes 5 bytes']);
+    } else {
+      expect(received).toBeGreaterThan(0);
+      expect(chunks).toEqual(['{}']);
+      expect(reported).toEqual([]);
+    }
+  }
+});
+
 test('bounds every response body by maximumUnsentBytes before writing', async () => {
   for (const kind of ['answer', 'problem', 'document', 'event']) {
     await using fixture = await startTranscoding({ maximumUnsentBytes: 1, heartbeat: Infinity });

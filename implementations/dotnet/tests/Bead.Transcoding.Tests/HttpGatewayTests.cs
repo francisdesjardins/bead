@@ -2106,6 +2106,41 @@ public sealed class HttpGatewayTests
     }
 
     [Fact]
+    public async Task Counts_pending_bytes_with_the_write_at_the_maximumUnsentBytes_edge()
+    {
+        foreach (var bound in new[] { 5, 6 })
+        {
+            await using var service = await TranscodingService.Start();
+            await using var gateway = new HttpGateway(Exchanges.OptionsOf(service.Memory, null) with { Document = "{}"u8.ToArray(), MaximumUnsentBytes = bound });
+            using var cancelling = CancellationTokenSource.CreateLinkedTokenSource(Cancelled);
+            using var body = new MemoryStream();
+            var context = PaceContext("document", cancelling.Token);
+            var lifetime = new DeadlineLifetime(cancelling);
+            context.Features.Set<IHttpRequestLifetimeFeature>(lifetime);
+            context.Response.Body = body;
+            // four bytes held by the host before this write's two bytes are handed to it
+            context.Response.BodyWriter.GetMemory(4).Span[..4].Fill((byte)'h');
+            context.Response.BodyWriter.Advance(4);
+            Assert.Equal(4, context.Response.BodyWriter.UnflushedBytes);
+            var reported = ReportedBy(gateway);
+            await gateway.Answer(context).WaitAsync(Patience, Cancelled);
+            if (bound == 5)
+            {
+                Assert.Equal(1, lifetime.Aborts);
+                Assert.Empty(body.ToArray());
+                Assert.Equal(["the response is dropped: maximumUnsentBytes 5 bytes"], reported);
+            }
+            else
+            {
+                Assert.Equal(0, lifetime.Aborts);
+                // the stream adapter also flushes its four buffered bytes when the host completes
+                Assert.Equal("{}hhhh", Encoding.UTF8.GetString(body.ToArray()));
+                Assert.Empty(reported);
+            }
+        }
+    }
+
+    [Fact]
     public async Task Bounds_every_response_body_by_maximumUnsentBytes_before_writing()
     {
         foreach (var kind in new[] { "answer", "problem", "document", "event" })

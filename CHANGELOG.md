@@ -229,6 +229,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Every gateway response body obeys its send pace and maximumUnsentBytes bound: whole answers,
   problems, the OpenAPI document and events. Whole bodies go in slices of at most 64 KiB; a drop
   reports its bound once and releases the exchange and socket, cancelling a stream's call.
+  Stream writes settle in order and return each notification's credit. The byte bound includes
+  the host's exposed pending bytes and the write handed to it.
 
 - beadc retries temporary work area creation when a concurrent invocation removes its empty
   `.beadc` parent, with at most three attempts.
