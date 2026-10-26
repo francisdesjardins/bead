@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Text;
 using Bead.Transcoding.Http;
 using Bead.Transcoding.V1;
@@ -9,6 +10,9 @@ namespace Bead.Interop.Tests;
 public sealed class HttpInteropTests(InteropTests.TypeScriptServer server) : IClassFixture<InteropTests.TypeScriptServer>
 {
     private const string Reason = "it starts the TypeScript server, and Node or the TypeScript side are not installed";
+
+    /// <summary>How long a stream waits for its place: the gateway keeps one stream an address.</summary>
+    private static readonly TimeSpan Patience = TimeSpan.FromSeconds(10);
 
     private static CancellationToken Cancelled
     {
@@ -23,6 +27,47 @@ public sealed class HttpInteropTests(InteropTests.TypeScriptServer server) : ICl
         var ports = await server.Ports();
 
         return new Uri($"http://127.0.0.1:{ports.GatewayPort}");
+    }
+
+    // * a stream's end, once the gateway frees the place the test before held: busy before any entry, it goes again
+    private static async Task<FailureException> FailureOnceAdmitted(Func<Task> stream)
+    {
+        var since = Stopwatch.GetTimestamp();
+
+        while (true)
+        {
+            var failure = await Assert.ThrowsAsync<FailureException>(stream);
+
+            if (failure.Code != (ushort)ProtocolCode.CapacityExceeded || Stopwatch.GetElapsedTime(since) > Patience)
+            {
+                return failure;
+            }
+
+            await Task.Delay(TimeSpan.FromMilliseconds(50), Cancelled);
+        }
+    }
+
+    // a stream's first entry, once the gateway has its place, as FailureOnceAdmitted waits for it
+    private static async Task<IAsyncEnumerator<T>> OpenedOnceAdmitted<T>(Func<IAsyncEnumerator<T>> open)
+    {
+        var since = Stopwatch.GetTimestamp();
+
+        while (true)
+        {
+            var stream = open();
+
+            try
+            {
+                Assert.True(await stream.MoveNextAsync());
+
+                return stream;
+            }
+            catch (FailureException failure) when (failure.Code == (ushort)ProtocolCode.CapacityExceeded && Stopwatch.GetElapsedTime(since) <= Patience)
+            {
+                await stream.DisposeAsync();
+                await Task.Delay(TimeSpan.FromMilliseconds(50), Cancelled);
+            }
+        }
     }
 
     [Fact(Skip = Reason, SkipUnless = nameof(InteropTests.IsInterop), SkipType = typeof(InteropTests))]
@@ -54,8 +99,10 @@ public sealed class HttpInteropTests(InteropTests.TypeScriptServer server) : ICl
     {
         using var client = new TranscodingHttpClient(await Gateway());
         var received = new List<(bool IsResult, int Value)>();
-        var failed = await Assert.ThrowsAsync<FailureException>(async () =>
+        var failed = await FailureOnceAdmitted(async () =>
         {
+            received.Clear();
+
             await foreach (var entry in client.SubscribeTicks(new TicksRequest { From = 2 }))
             {
                 received.Add((entry.IsResult, entry.IsResult ? entry.Result!.Ticks : entry.Notification!.Remaining));
@@ -76,8 +123,7 @@ public sealed class HttpInteropTests(InteropTests.TypeScriptServer server) : ICl
         using var client = new TranscodingHttpClient(url);
         var size = await Assert.ThrowsAsync<FailureException>(() => { return client.Text(new string('x', 1025)); });
         Assert.Equal(((ushort)ProtocolCode.PayloadTooLarge, FailureOrigin.Peer), (size.Code, size.Origin));
-        await using var iterator = client.SubscribeWatch(new Empty()).GetAsyncEnumerator(Cancelled);
-        Assert.True(await iterator.MoveNextAsync());
+        await using var iterator = await OpenedOnceAdmitted(() => { return client.SubscribeWatch(new Empty()).GetAsyncEnumerator(Cancelled); });
         Assert.True(iterator.Current.IsResult);
         var busy = await Assert.ThrowsAsync<FailureException>(async () => { await foreach (var entry in client.SubscribeWatch(new Empty())) { _ = entry; } });
         Assert.Equal(((ushort)ProtocolCode.CapacityExceeded, FailureOrigin.Peer), (busy.Code, busy.Origin));

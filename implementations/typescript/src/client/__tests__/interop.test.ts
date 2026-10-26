@@ -93,6 +93,9 @@ const interopTokenOf = (sub: string): string => {
 };
 
 /** Whether the interop must run: a path to the other side gone wrong then fails, not skips. */
+/** How long a stream waits for its place, in milliseconds: the gateway keeps one stream an address. */
+const PATIENCE = 10_000;
+
 const REQUIRED = process.env['BEAD_INTEROP_REQUIRED'] === '1';
 
 const SLOW = { milliseconds: 3_600_000 };
@@ -191,6 +194,60 @@ const startServer = async (): Promise<{
   throw new Error('the C# interop server ended before it said its port');
 };
 
+const isCapacityExceeded = (reason: unknown): boolean => {
+  return (reason as { code?: unknown } | undefined)?.code === ProtocolCode.CAPACITY_EXCEEDED;
+};
+
+const pause = (milliseconds: number): Promise<void> => {
+  return new Promise((resolve) => {
+    setTimeout(resolve, milliseconds);
+  });
+};
+
+// * a stream's end, once the gateway frees the place the test before held: busy before any entry, it goes again
+const failureOnceAdmitted = async (stream: () => Promise<void>): Promise<unknown> => {
+  const since = performance.now();
+
+  for (;;) {
+    const failure = await stream().then(
+      () => {
+        return new Error('the stream ended with no failure');
+      },
+      (reason: unknown) => {
+        return reason;
+      }
+    );
+
+    if (!isCapacityExceeded(failure) || performance.now() - since > PATIENCE) {
+      return failure;
+    }
+
+    await pause(50);
+  }
+};
+
+// a stream's first entry, once the gateway has its place, as failureOnceAdmitted waits for it
+const openedOnceAdmitted = async <T>(
+  open: () => AsyncIterator<T>
+): Promise<{ first: IteratorResult<T>; iterator: AsyncIterator<T> }> => {
+  const since = performance.now();
+
+  for (;;) {
+    const iterator = open();
+
+    try {
+      return { first: await iterator.next(), iterator };
+    } catch (reason) {
+      if (!isCapacityExceeded(reason) || performance.now() - since > PATIENCE) {
+        throw reason;
+      }
+
+      await iterator.return?.();
+      await pause(50);
+    }
+  }
+};
+
 // definition
 
 test.describe('the C# server of the interop service', () => {
@@ -263,14 +320,18 @@ test.describe('the C# server of the interop service', () => {
     const client = new TranscodingHttpClient(`http://${HOST}:${String(ports.gatewayPort)}`);
     const received: { kind: string; value: number }[] = [];
 
-    await expect(async () => {
+    const failure = await failureOnceAdmitted(async () => {
+      received.length = 0;
+
       for await (const entry of client.subscribeTicks({ from: 2 })) {
         received.push({
           kind: entry.kind,
           value: entry.kind === 'result' ? entry.value.ticks : entry.value.remaining,
         });
       }
-    }).rejects.toMatchObject({ code: 2, scope: FailureScope.APPLICATION });
+    });
+
+    expect(failure).toMatchObject({ code: 2, scope: FailureScope.APPLICATION });
     expect(received).toEqual([
       { kind: 'result', value: 2 },
       { kind: 'notification', value: 1 },
@@ -291,9 +352,11 @@ test.describe('the C# server of the interop service', () => {
       code: ProtocolCode.PAYLOAD_TOO_LARGE,
       origin: 'peer',
     });
-    const iterator = client.subscribeWatch({})[Symbol.asyncIterator]();
+    const { first, iterator } = await openedOnceAdmitted(() => {
+      return client.subscribeWatch({})[Symbol.asyncIterator]();
+    });
     try {
-      expect(await iterator.next()).toMatchObject({ done: false, value: { kind: 'result' } });
+      expect(first).toMatchObject({ done: false, value: { kind: 'result' } });
       await expect(async () => {
         for await (const event of client.subscribeWatch({})) {
           void event;
