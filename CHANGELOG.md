@@ -7,8 +7,27 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- A broker as a transport, its core on both sides: a participant's client and server transports
+  over a broker's adapter, a connection placed once through a server's name, opened in three legs
+  and named by both its ends, its parcels numbered so that a copy never reaches the router and
+  nothing overtakes, an envelope sent in parts under its peer's bound, a heartbeat and a will of
+  Bead's own, and the credential a request presents carried beside it (spec 15.16 to 15.24,
+  decisions 0038 to 0040).
+- An in-memory broker on both sides, which copies, reorders, drops and overruns as a test asks: the
+  broker cases of `spec/transports.json`, both roles, and the conversations play over it.
+- `spec/vectors.json`'s `parcels` and `parcelRefusals`, a broker's parcels read and written back and
+  the messages refused as parcels; `spec/transports.json`'s 36 broker cases, a client role among
+  them; and `spec/durations.json`'s broker places, `brokerParticipant.heartbeat`,
+  `brokerTransportServer.acceptTimeout` and `brokerParticipant.bodyGracePeriod`, and the way
+  `broker` of `transportClient.connectTimeout`.
+
 ### Changed
 
+- A connection over a broker is placed at its open, and nothing overtakes on it, where decision
+  0021 had a request published to its procedure's topic and a cancel overtake it; 15.15, how a
+  connect ends, stands under a heading of its own, `### A connect`.
 - A WebSocket client asks one credential at a time of each provider by its identity: a different
   provider can answer while an earlier source stays pending; a later attempt using that source
   waits for it to settle within its own bounds, then asks anew.

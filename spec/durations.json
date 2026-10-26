@@ -3043,6 +3043,10 @@
               "language": "C#"
             }
           ]
+        },
+        {
+          "id": "broker",
+          "name": "a broker client's connect"
         }
       ],
       "observed": "held",
@@ -3127,6 +3131,413 @@
         {
           "input": "never",
           "outcome": "never"
+        },
+        {
+          "input": "-2 ms",
+          "outcome": "refused",
+          "reason": "under the floor"
+        },
+        {
+          "input": "-1 ms",
+          "outcome": "refused",
+          "reason": "under the floor",
+          "differs": [
+            {
+              "row": "A duration of -1 ms",
+              "language": "C#"
+            }
+          ]
+        },
+        {
+          "input": "NaN",
+          "outcome": "refused",
+          "reason": "not a number"
+        },
+        {
+          "input": "\"1000\"",
+          "outcome": "refused",
+          "reason": "not a number"
+        },
+        {
+          "input": "true",
+          "outcome": "refused",
+          "reason": "not a number"
+        }
+      ]
+    },
+    {
+      "id": "brokerParticipant.heartbeat",
+      "name": "a broker participant's heartbeat on a silent connection",
+      "clauses": [
+        "1.4",
+        "15.21"
+      ],
+      "kind": "timeout",
+      "never": "taken",
+      "neverClause": "15.21",
+      "ways": [
+        {
+          "id": "options",
+          "name": "the participant's options, as it is built"
+        }
+      ],
+      "observed": "refusal",
+      "outcomes": [
+        {
+          "input": "0",
+          "outcome": "refused",
+          "reason": "0 refused"
+        },
+        {
+          "input": "0.00001 ms, under a tick",
+          "outcome": "refused",
+          "reason": "under the floor",
+          "differs": [
+            {
+              "row": "A duration finer than a tick",
+              "language": "C#"
+            }
+          ]
+        },
+        {
+          "input": "half a millisecond",
+          "outcome": "refused",
+          "reason": "under the floor"
+        },
+        {
+          "input": "a millisecond",
+          "outcome": "taken"
+        },
+        {
+          "input": "1.4 ms",
+          "outcome": "taken"
+        },
+        {
+          "input": "1.5 ms",
+          "outcome": "taken"
+        },
+        {
+          "input": "2.5 ms",
+          "outcome": "taken"
+        },
+        {
+          "input": "0.41 s, as written",
+          "outcome": "taken"
+        },
+        {
+          "input": "2.01 s, as written",
+          "outcome": "taken"
+        },
+        {
+          "input": "the ceiling",
+          "outcome": "taken"
+        },
+        {
+          "input": "0.00001 ms past the ceiling",
+          "outcome": "refused",
+          "reason": "past the ceiling",
+          "differs": [
+            {
+              "row": "A duration finer than a tick",
+              "language": "C#"
+            }
+          ]
+        },
+        {
+          "input": "0.4 ms past the ceiling",
+          "outcome": "refused",
+          "reason": "past the ceiling"
+        },
+        {
+          "input": "half a millisecond past the ceiling",
+          "outcome": "refused",
+          "reason": "past the ceiling"
+        },
+        {
+          "input": "never",
+          "outcome": "taken"
+        },
+        {
+          "input": "-2 ms",
+          "outcome": "refused",
+          "reason": "under the floor"
+        },
+        {
+          "input": "-1 ms",
+          "outcome": "refused",
+          "reason": "under the floor",
+          "differs": [
+            {
+              "row": "A duration of -1 ms",
+              "language": "C#"
+            }
+          ]
+        },
+        {
+          "input": "NaN",
+          "outcome": "refused",
+          "reason": "not a number"
+        },
+        {
+          "input": "\"1000\"",
+          "outcome": "refused",
+          "reason": "not a number"
+        },
+        {
+          "input": "true",
+          "outcome": "refused",
+          "reason": "not a number"
+        }
+      ]
+    },
+    {
+      "id": "brokerTransportServer.acceptTimeout",
+      "name": "how long a broker server's half-open connection waits for its client's first parcel",
+      "clauses": [
+        "1.4",
+        "15.23",
+        "15.23.2"
+      ],
+      "kind": "timeout",
+      "never": "refused",
+      "neverClause": "15.23",
+      "ways": [
+        {
+          "id": "options",
+          "name": "the transport server's options, as it is built"
+        }
+      ],
+      "default": {
+        "milliseconds": 30000,
+        "clause": "15.23.2",
+        "ways": [
+          "options"
+        ]
+      },
+      "observed": "held",
+      "outcomes": [
+        {
+          "input": "0",
+          "outcome": "refused",
+          "reason": "0 refused"
+        },
+        {
+          "input": "0.00001 ms, under a tick",
+          "outcome": "refused",
+          "reason": "under the floor",
+          "differs": [
+            {
+              "row": "A duration finer than a tick",
+              "language": "C#"
+            }
+          ]
+        },
+        {
+          "input": "half a millisecond",
+          "outcome": "refused",
+          "reason": "under the floor"
+        },
+        {
+          "input": "a millisecond",
+          "outcome": "held",
+          "held": 1
+        },
+        {
+          "input": "1.4 ms",
+          "outcome": "held",
+          "held": 1
+        },
+        {
+          "input": "1.5 ms",
+          "outcome": "held",
+          "held": 2
+        },
+        {
+          "input": "2.5 ms",
+          "outcome": "held",
+          "held": 3
+        },
+        {
+          "input": "0.41 s, as written",
+          "outcome": "held",
+          "held": 410
+        },
+        {
+          "input": "2.01 s, as written",
+          "outcome": "held",
+          "held": 2010
+        },
+        {
+          "input": "the ceiling",
+          "outcome": "held",
+          "held": 2147483647
+        },
+        {
+          "input": "0.00001 ms past the ceiling",
+          "outcome": "refused",
+          "reason": "past the ceiling",
+          "differs": [
+            {
+              "row": "A duration finer than a tick",
+              "language": "C#"
+            }
+          ]
+        },
+        {
+          "input": "0.4 ms past the ceiling",
+          "outcome": "refused",
+          "reason": "past the ceiling"
+        },
+        {
+          "input": "half a millisecond past the ceiling",
+          "outcome": "refused",
+          "reason": "past the ceiling"
+        },
+        {
+          "input": "never",
+          "outcome": "refused",
+          "reason": "never refused"
+        },
+        {
+          "input": "-2 ms",
+          "outcome": "refused",
+          "reason": "under the floor"
+        },
+        {
+          "input": "-1 ms",
+          "outcome": "refused",
+          "reason": "under the floor",
+          "differs": [
+            {
+              "row": "A duration of -1 ms",
+              "language": "C#"
+            }
+          ]
+        },
+        {
+          "input": "NaN",
+          "outcome": "refused",
+          "reason": "not a number"
+        },
+        {
+          "input": "\"1000\"",
+          "outcome": "refused",
+          "reason": "not a number"
+        },
+        {
+          "input": "true",
+          "outcome": "refused",
+          "reason": "not a number"
+        }
+      ]
+    },
+    {
+      "id": "brokerParticipant.bodyGracePeriod",
+      "name": "how long an envelope's parts come over a broker before their rate is held",
+      "clauses": [
+        "1.4",
+        "15.12",
+        "15.12.16"
+      ],
+      "kind": "timeout",
+      "never": "refused",
+      "neverClause": "15.12",
+      "ways": [
+        {
+          "id": "options",
+          "name": "the participant's options, as it is built"
+        }
+      ],
+      "default": {
+        "milliseconds": 5000,
+        "clause": "15.12.16",
+        "ways": [
+          "options"
+        ]
+      },
+      "observed": "held",
+      "outcomes": [
+        {
+          "input": "0",
+          "outcome": "refused",
+          "reason": "0 refused"
+        },
+        {
+          "input": "0.00001 ms, under a tick",
+          "outcome": "refused",
+          "reason": "under the floor",
+          "differs": [
+            {
+              "row": "A duration finer than a tick",
+              "language": "C#"
+            }
+          ]
+        },
+        {
+          "input": "half a millisecond",
+          "outcome": "refused",
+          "reason": "under the floor"
+        },
+        {
+          "input": "a millisecond",
+          "outcome": "held",
+          "held": 1
+        },
+        {
+          "input": "1.4 ms",
+          "outcome": "held",
+          "held": 1
+        },
+        {
+          "input": "1.5 ms",
+          "outcome": "held",
+          "held": 2
+        },
+        {
+          "input": "2.5 ms",
+          "outcome": "held",
+          "held": 3
+        },
+        {
+          "input": "0.41 s, as written",
+          "outcome": "held",
+          "held": 410
+        },
+        {
+          "input": "2.01 s, as written",
+          "outcome": "held",
+          "held": 2010
+        },
+        {
+          "input": "the ceiling",
+          "outcome": "held",
+          "held": 2147483647
+        },
+        {
+          "input": "0.00001 ms past the ceiling",
+          "outcome": "refused",
+          "reason": "past the ceiling",
+          "differs": [
+            {
+              "row": "A duration finer than a tick",
+              "language": "C#"
+            }
+          ]
+        },
+        {
+          "input": "0.4 ms past the ceiling",
+          "outcome": "refused",
+          "reason": "past the ceiling"
+        },
+        {
+          "input": "half a millisecond past the ceiling",
+          "outcome": "refused",
+          "reason": "past the ceiling"
+        },
+        {
+          "input": "never",
+          "outcome": "refused",
+          "reason": "never refused"
         },
         {
           "input": "-2 ms",

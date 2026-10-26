@@ -1,6 +1,6 @@
-"""The bounds' defaults sections 15.3 and 15.12 state, by the names they give them, in milliseconds for a
-time: spec/transports.json's defaults, and the defaults of spec/durations.json's places that 15.12
-states, both read from here, so the two files cannot disagree."""
+"""The bounds' defaults sections 15.3, 15.12 and 15.23 state, by the names they give them, in milliseconds
+for a time: spec/transports.json's defaults, and the defaults of spec/durations.json's places that
+15.12 and 15.23 state, both read from here, so the two files cannot disagree."""
 
 # a router's limits by default that the bounds are drawn from (spec 12.2): its largest envelope, its
 # chunk, its window, the transfers a connection receives at once, and the calls a connection's peer
@@ -37,4 +37,9 @@ DEFAULTS = {
     'bodyGracePeriod': 5_000,
     'maximumMessageBytes': MAXIMUM_ENVELOPE_BYTES,
     'heartbeat': 30_000,
+    # a broker's (spec 15.23): a half-open connection's wait for its third leg, one envelope's parts,
+    # bounded by default as an envelope is, and what a participant holds in parts, as bodyBytesBudget
+    'acceptTimeout': 30_000,
+    'maximumEnvelopePartsBytes': MAXIMUM_ENVELOPE_BYTES,
+    'heldBytesBudget': 268_435_456,
 }

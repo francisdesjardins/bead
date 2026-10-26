@@ -1,6 +1,7 @@
 // dependencies
 
 import type { IClock } from './clock';
+import type { BROKER_DELIVERIES, BROKER_PUBLISHED, TRANSPORTS } from './constants';
 
 // interfaces
 
@@ -166,7 +167,119 @@ export interface IWorkerPortLike {
   start(): void;
 }
 
+/**
+ * A message a broker's adapter hands its participant (spec 15.24): the topic it came to, its
+ * payload, whether its broker handed it as one it kept, and its acknowledgement, which the
+ * participant calls once it took it, handed on or dropped as a copy, never once its router is done
+ * with it (spec 15.19).
+ */
+export interface IBrokerMessage {
+  readonly payload: Uint8Array;
+  /** Handed on as a message its broker kept, which a participant drops in silence (spec 15.23). */
+  readonly retained?: boolean | undefined;
+  readonly topic: BrokerTopic;
+  settle(): void;
+}
+
+/**
+ * The peer of a broker's connection, as its OPEN or its ACCEPT named it (spec 15.18): its
+ * participant's id, its incarnation, the largest parcel its inbox takes whole, and whether its own
+ * leg is secure.
+ */
+export interface IBrokerPeer {
+  readonly bound: number;
+  readonly id: string;
+  readonly incarnation: Uint8Array;
+  readonly isSecure: boolean;
+}
+
+/** What a participant publishes: a payload to a topic, and how long its broker may keep it. */
+export interface IBrokerPublication {
+  /** Milliseconds its broker keeps it before onward delivery, where its adapter offers `expiry`. */
+  readonly expiresAfter?: number | undefined;
+  readonly payload: Uint8Array;
+  readonly signal?: AbortSignal | undefined;
+  readonly topic: BrokerTopic;
+}
+
+/** How a participant subscribes a topic: alone, or as one member of a group. */
+export interface IBrokerSubscription {
+  /** The group it joins, whose broker hands each message to one member, where `groups` is offered. */
+  readonly group?: string | undefined;
+  readonly signal?: AbortSignal | undefined;
+}
+
+/** How a participant starts its link: the will its broker publishes should the link be lost. */
+export interface IBrokerStart {
+  readonly signal?: AbortSignal | undefined;
+  /** What its broker publishes once it loses the link without a clean end, where `will` is offered. */
+  readonly will?: { readonly payload: Uint8Array; readonly topic: BrokerTopic } | undefined;
+}
+
+/** What an adapter offers besides what every adapter does (spec 15.24). */
+export interface IBrokerCapabilities {
+  /** A message's life in its broker, a publication's `expiresAfter`. */
+  readonly expiry?: boolean | undefined;
+  /** A subscription in a group, its broker handing each message to one member. */
+  readonly groups?: boolean | undefined;
+  /** A publication no subscriber takes, said so: {@link BROKER_PUBLISHED}'s `NO_SUBSCRIBER`. */
+  readonly noSubscriber?: boolean | undefined;
+  /** A will, published once its link is lost without a clean end. */
+  readonly will?: boolean | undefined;
+}
+
+/**
+ * One broker's client, as a participant reaches it (spec 15.24): the identity its broker
+ * authenticates its link by, a link that keeps no broker session, publications and subscriptions
+ * at topics, each message with its acknowledgement, the link's loss, its bounds, its delivery and
+ * whether its leg is secure. An adapter routes nothing of Bead's: it carries bytes at topics.
+ */
+export interface IBrokerAdapter {
+  readonly capabilities: IBrokerCapabilities;
+  /** At least once, its broker acknowledging each publication it took and pacing its link; or at most once. */
+  readonly delivery: BrokerDelivery;
+  /** The identity its broker authenticates its link by, a token (spec 15.16): never one Bead draws. */
+  readonly id: string;
+  /** Its leg under TLS, its broker on the loopback, or in memory (spec 15.22). */
+  readonly isSecure: boolean;
+  /** The largest payload a message to its own inbox carries, whole. */
+  readonly receiveBound: number;
+  /** Its connections' handles' type: `BROKER` in memory. */
+  readonly type: TRANSPORTS;
+  /** The largest payload a message it publishes to `topic` carries, its own bytes deducted. */
+  maximumPayloadBytes(topic: BrokerTopic): number;
+  off(event: 'down', listener: () => void): unknown;
+  off(event: 'message', listener: (message: IBrokerMessage) => void): unknown;
+  /** Its link lost: every message after is a new link's. */
+  on(event: 'down', listener: () => void): unknown;
+  on(event: 'message', listener: (message: IBrokerMessage) => void): unknown;
+  /**
+   * Publishes a payload, settling once its broker took it, at least once, or as it goes, at most
+   * once; or said refused when no subscriber takes it, where its broker says so.
+   */
+  publish(publication: IBrokerPublication): Promise<BrokerPublished>;
+  /** Connects a link that keeps no broker session, its will set where it takes one. */
+  start(options?: IBrokerStart): Promise<void>;
+  /** Ends its link cleanly, so no will goes. */
+  stop(): Promise<void>;
+  /** Holds a subscription, settling once its broker holds it. */
+  subscribe(topic: BrokerTopic, options?: IBrokerSubscription): Promise<void>;
+  unsubscribe(topic: BrokerTopic): Promise<void>;
+}
+
 // types
+
+/**
+ * A topic, by its tokens (spec 15.16): `['bead', 'i', 'ada']`, a participant's inbox; each adapter
+ * writes it as its broker's binding says.
+ */
+export type BrokerTopic = readonly string[];
+
+/** The delivery an adapter gives (spec 15.19). */
+export type BrokerDelivery = (typeof BROKER_DELIVERIES)[keyof typeof BROKER_DELIVERIES];
+
+/** What a broker said of a publication. */
+export type BrokerPublished = (typeof BROKER_PUBLISHED)[keyof typeof BROKER_PUBLISHED];
 
 /** What a transport receives and sends: what a WebSocket, `ws` or a socket deliver. */
 export type Data = string | ArrayBuffer | ArrayBufferView | Blob;

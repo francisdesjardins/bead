@@ -75,4 +75,13 @@ public sealed class ConversationsTests
     {
         await ConversationPlayer.Play(ConversationOf(name), new PlayerOptions { IsInMemory = true, WallClock = WallClock });
     }
+
+    // spec 15.16 to 15.24: the same through a broker pair over the in-memory broker, whose
+    // connection is secure and two-way and carries nothing toward its client, as an in-memory one
+    [Theory]
+    [MemberData(nameof(InMemoryNames))]
+    public async Task Plays_through_a_broker_pair(string name)
+    {
+        await ConversationPlayer.Play(ConversationOf(name), new PlayerOptions { IsOverBroker = true, WallClock = WallClock });
+    }
 }

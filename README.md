@@ -17,11 +17,12 @@ This repository holds the protocol and its implementations, side by side:
 
 - **the specification**, and the conformance files every implementation plays;
 - **a TypeScript implementation**: WebSocket, HTTP, Web Worker and in-memory transports, each a
-  client and a server, a server's transports joined into one, the client and server routers, the
-  service, session and notification managers, a gateway that answers a service's procedures over
-  HTTP and JSON, and a demo;
+  client and a server, a broker's core over an in-memory broker, a server's transports joined into
+  one, the client and server routers, the service, session and notification managers, a gateway
+  that answers a service's procedures over HTTP and JSON, and a demo;
 - **a C# implementation** at behavioural parity with it: the same envelope, the same routers, the
-  WebSocket, HTTP and in-memory transports, the joined one, and the same gateway;
+  WebSocket, HTTP and in-memory transports, the broker's core over an in-memory broker, the joined
+  one, and the same gateway;
 - **an interop service** each side offers, which the other side's client calls over both
   transports, beside a gateway whose routes the other side's generated HTTP client calls.
 
@@ -80,7 +81,8 @@ halfway. A call presents its own credential — a signed token, say — which ou
 connection and crosses a relay to the server that verifies it, and the server sometimes has to ask
 the client something. Bead carries all of it in one small binary envelope, whatever carries the
 envelope: WebSocket, plain HTTP where WebSocket cannot pass, a Web Worker in the page, memory
-between two routers of one process, and, ahead, a topic-based publish/subscribe broker
+between two routers of one process, and a topic-based publish/subscribe broker, its core and an
+in-memory broker on both sides, its first binding to a real broker ahead
 ([Where Bead goes](#where-bead-goes)).
 
 - **Read without decoding.** A fixed 8-byte prefix and fixed offsets say what an envelope is, which
@@ -106,7 +108,7 @@ topic-based publish/subscribe broker that already joins services and devices. Th
 or a collaborative tool that follows state as it changes, an app that uploads large files while it
 keeps working, a back office whose server needs to ask the client something, or a gateway that
 forwards calls it never reads. A browser speaks Bead natively, with no proxy in between. Over a
-broker, Bead is to add what topics alone lack: calls with their answers and failures, cancels, each
+broker, Bead adds what topics alone lack: calls with their answers and failures, cancels, each
 client's own pace, and transfers under credit. Both ends keep the same API, whatever carries the
 envelopes.
 
@@ -115,9 +117,10 @@ envelopes.
 A version here is the product's, its `v*` tag; the spec and its two companions move on an axis of
 their own ([0008](docs/decisions/0008-three-version-axes-and-names-qualified-by-their-owner.md)).
 
-- **Next**: a topic-based publish/subscribe broker as one more transport, one core and one adapter
-  a broker, the first MQTT 5's, Bead's envelope, routers and sessions the same at each end
-  ([0021](docs/decisions/0021-a-broker-is-a-transport-and-bead-is-never-a-network.md)).
+- **Next**: a broker's first binding, MQTT 5's, over the core both sides hold: its adapter on each
+  side, Bead's envelope, routers and sessions the same at each end, and the interop against a real
+  broker in CI ([0021](docs/decisions/0021-a-broker-is-a-transport-and-bead-is-never-a-network.md),
+  [0038](docs/decisions/0038-over-a-broker-a-connection-is-placed-once-at-its-open-named-by-both-its-ends.md)).
 - **Then**: a third language's core, its router, its service layer and its sessions, playing the
   conformance files over the in-memory transport before it has a socket
   ([0036](docs/decisions/0036-an-in-memory-transport-joins-two-routers-of-one-process-and-a-server-takes-several-transports-through-one.md)).
@@ -183,11 +186,11 @@ procedures, each under a version of its own. Beside them:
 
 | File                                                    | What it holds                                                                                                                                                                                                                                                                                               |
 | ------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| [`vectors.json`](spec/vectors.json)                     | 238 named vectors in 11 groups: headers and envelopes read and written back to their bytes, the refusals, each with its code, a `JWT`'s verdicts, and the credentials refused with their told reason                                                                                                        |
+| [`vectors.json`](spec/vectors.json)                     | 310 named vectors in 13 groups: headers and envelopes read and written back to their bytes, the refusals, each with its code, a `JWT`'s verdicts, the credentials refused with their told reason, and a broker's parcels and the messages refused as parcels                                                |
 | [`conversations.json`](spec/conversations.json)         | The conversations: envelopes in and out of a server, step by step, over one connection or several, under the limits and pacing each one sets                                                                                                                                                                |
-| [`transports.json`](spec/transports.json)               | 124 cases: what a transport's server does at its edge, over HTTP and over a WebSocket, the bytes each way                                                                                                                                                                                                   |
+| [`transports.json`](spec/transports.json)               | 160 cases: what a transport's server does at its edge, over HTTP, over a WebSocket and over a broker, the bytes each way, and over a broker what a client's transport does with the parcels its acceptors send                                                                                              |
 | [`clocks.json`](spec/clocks.json)                       | 9 clock cases: what every side's test clock does when a case advances it                                                                                                                                                                                                                                    |
-| [`durations.json`](spec/durations.json)                 | 27 places that take a duration an application gives a side, by 43 ways, and what each makes of each of 19 inputs: held, at once, never, its default, or refused and why                                                                                                                                     |
+| [`durations.json`](spec/durations.json)                 | 30 places that take a duration an application gives a side, by 47 ways, and what each makes of each of 19 inputs: held, at once, never, its default, or refused and why                                                                                                                                     |
 | [`identities.json`](spec/identities.json)               | 31 procedure names, 28 ids and revisions and 6 procedure kinds, each declared the six ways a side declares, and 8 pairs of names: what a router takes, or refuses and why, as a procedure is declared                                                                                                       |
 | [`codecs.json`](spec/codecs.json)                       | Payloads read and values written, in `raw`, `text`, `json` and `proto`: the bytes written back, a JSON value in its canonical form, the fields a `proto` payload reads, or refused and why                                                                                                                  |
 | [`codecs.proto`](spec/codecs.proto)                     | `Probe`, the fixed message the `proto` rows of `codecs.json` read and write, which each side's tests generate with their stock protobuf generator                                                                                                                                                           |

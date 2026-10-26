@@ -5,6 +5,7 @@ import type { CLOSE_EVENT, ERROR_EVENT, MESSAGE_EVENT } from '../shared/constant
 import type {
   Data,
   EmitterListener,
+  IBrokerPeer,
   IEventIteratorOptions,
   IMemoryEndLike,
   IMemoryTransportServerLike,
@@ -510,6 +511,33 @@ export type FetchLike = (url: string, init: IFetchInit) => Promise<IFetchRespons
 export type HTTPTransportClient = ITransportClient<
   IHTTPClientConnection,
   IHTTPTransportClientConnectOptions
+>;
+
+// ── Broker ────────────────────────────────────────────────────────────────────
+
+// interfaces
+
+/** What a broker connect takes besides: the server it opens a connection to, by its name. */
+export interface IBrokerTransportClientConnectOptions extends ITransportClientConnectOptions {
+  /** The server's name, a token (spec 15.16): its OPEN goes there, to one participant serving it. */
+  server: string;
+}
+
+export interface IBrokerTransportClientOptions {
+  /**
+   * What may wait on its connection for its broker, handed to its adapter and not yet taken; a
+   * parcel past it loses the connection, 4000, told on `error` (spec 15.23). A whole number above
+   * 0. Defaults to {@link MAXIMUM_UNSENT_BYTES}.
+   */
+  maximumUnsentBytes?: number | undefined;
+}
+
+// types
+
+/** A client of a broker's transport: its socket is its connection's peer, the server's participant. */
+export type BrokerTransportClient = ITransportClient<
+  IBrokerPeer,
+  IBrokerTransportClientConnectOptions
 >;
 
 // ── Memory ────────────────────────────────────────────────────────────────────

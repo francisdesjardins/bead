@@ -33,6 +33,15 @@
     // an unmapped one falls through to node resolution and answers from whatever `dist/` happens
     // to exist on the machine.
     "paths": {
+      "@francisdesjardins/bead/broker-participant": [
+        "../../src/transport/shared/broker-participant.ts"
+      ],
+      "@francisdesjardins/bead/broker-transport-client": [
+        "../../src/transport/client/broker-transport-client.ts"
+      ],
+      "@francisdesjardins/bead/broker-transport-server": [
+        "../../src/transport/server/broker-transport-server.ts"
+      ],
       "@francisdesjardins/bead/client": ["../../src/client/client.ts"],
       "@francisdesjardins/bead/http-client": ["../../src/client/http-client.ts"],
       "@francisdesjardins/bead/http-gateway": ["../../src/transcoding/http-gateway.ts"],
@@ -46,6 +55,7 @@
       "@francisdesjardins/bead/joined-transport-server": [
         "../../src/transport/server/joined-transport-server.ts"
       ],
+      "@francisdesjardins/bead/memory-broker": ["../../src/transport/shared/memory-broker.ts"],
       "@francisdesjardins/bead/memory-transport-client": [
         "../../src/transport/client/memory-transport-client.ts"
       ],

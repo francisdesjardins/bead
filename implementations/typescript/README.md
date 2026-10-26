@@ -3,7 +3,8 @@
 Bead is a binary wire protocol: the envelopes of a request, its result or failure, the notifications
 of a subscription and the commands a server sends back, written at fixed offsets. This project is
 its TypeScript implementation — a WebSocket, an HTTP, a Web Worker and an in-memory transport, each
-a client and a server, a server's transports joined into one, a client and a server router over
+a client and a server, a broker's core over an in-memory broker, a server's transports joined into
+one, a client and a server router over
 them, the service, session and notification managers, the client and server that put the three
 layers together, the service layer a service is served and called through, and a gateway that
 answers its procedures over HTTP and JSON, beside the caller of the HTTP client beadc generates.
@@ -26,9 +27,9 @@ first layer of a transport → router → service stack, which is why they sit t
 Each end — client or server — has a shared half and a transport. The shared half owns the events and the guards
 around the life of the connection — `reconnect` and the drop behind `await using` for a client, `start` and `stop`
 and the connection registry for a server. The transport supplies what only it knows: how to open,
-close and send on the wire. WebSocket, HTTP, a Web Worker and memory each supply theirs — see
-[HTTP](#http) and [In memory](#in-memory-and-a-servers-transports-joined); another transport
-supplies its own.
+close and send on the wire. WebSocket, HTTP, a Web Worker, memory and a broker each supply theirs —
+see [HTTP](#http), [In memory](#in-memory-and-a-servers-transports-joined) and
+[Over a broker](#over-a-broker); another transport supplies its own.
 
 The client runs on the global `WebSocket` — every browser, and Node 24.9, the package's floor — or
 on any constructor passed as `WebSocket`, which is how `ws` plugs in; its suite runs on both. The
@@ -1216,6 +1217,56 @@ their handles, each listener within its guard; its stop stops each, and its gaug
 Two transports of one type, whose handles might be one, are refused as the join is built: one
 transport binds both addresses. The join starts nothing: each transport is started where it
 listens, and one port for two still comes from a proxy in front.
+
+### Over a broker
+
+`broker-participant`, `broker-transport-client`, `broker-transport-server` and `memory-broker` carry
+Bead over a topic-based publish/subscribe broker (spec 15.16 to 15.24, decisions 0038 to 0040): a
+broker is a transport, and Bead is never a network of its own. A participant,
+`createBrokerParticipant({ adapter })`, is one link of a side to its broker, through an adapter of
+that broker's client; its id is the identity the broker authenticates the link by, and its inbox,
+`bead/i/<id>`, takes every parcel of its connections. `participant.transportServer({ names })`
+serves names, each a server's topic, `bead/s/<name>`, alone or, with `group: true`, in a group its
+broker places each OPEN with; `participant.transportClient()` holds one connection at a time,
+`connect({ server })` opening it through a name.
+
+```ts
+const broker = createMemoryBroker();
+const serving = createBrokerParticipant({ adapter: broker.adapter({ id: 'server' }) });
+const calling = createBrokerParticipant({ adapter: broker.adapter({ id: 'client' }) });
+const transport = serving.transportServer({ names: ['interop'] });
+const client = calling.transportClient();
+
+await transport.start();
+await client.connect({ server: 'interop' });
+```
+
+A connection is placed once, at its open, and named by both its ends, as a TCP connection is a pair
+of sockets: the client's OPEN to the name draws its half, the ACCEPT its server answers to the
+client's inbox draws the other, and the client's PING naming both is the third leg, which draws the
+server's handle, `type=BROKER;participant=<id>;ordinal=n`, and tells its router the connection;
+every call, cancel, chunk, credit, notification and command after it goes inbox to inbox. A REFUSE,
+400 `malformed`, 426 `layout-refused` or 503 `busy`, or a broker that says nothing serves the name,
+fails the connect with a `ConnectError` whose `cause` is a `BrokerRefusedError` naming its status
+and reason. Each parcel is numbered: a copy a broker delivers again is dropped before the router
+sees it, and a gap loses the connection at once, a CLOSE of 4000, so nothing overtakes. An envelope
+past the peer's receive bound goes in parts, each as large as that bound lets it, held to
+`maximumEnvelopePartsBytes`, `heldBytesBudget` and `minimumBodyBytesPerSecond` once
+`bodyGracePeriod` passed. A connection silent for `heartbeat`, 30,000 ms by default on the
+platform's timer, is pinged, and one that answered nothing by the next is closed with 4001. A
+request's credential crosses in its DATA, toward the server alone, and a transport is secure while
+both legs are, each end marking its own in its OPEN or ACCEPT. Every link is a new incarnation that
+keeps no broker session: a link lost closes each of its connections, unclean, and its participant
+connects anew, resetting its peers; a will, where its adapter leaves one, tells them at once by a
+GONE.
+
+`createMemoryBroker()` is a broker of one process, every capability an adapter may offer: each
+message copied as it is published and handed on in a later turn, in its publisher's order on its
+topic; groups; wills; a publication refused when no subscriber takes it; `maximumQueuedMessages` a
+subscriber, past which a message is dropped. A test asks `fault(MEMORY_BROKER_FAULTS.COPY)`, `HOLD`,
+`DROP` or `REDELIVER` of the next message, and `adapter.lose()` of a link. The broker cases of
+[`spec/transports.json`](../../spec/transports.json), in both roles, and the conversations play over
+it; a binding to a real broker, MQTT 5's first, brings its own adapter.
 
 ### HTTP/JSON transcoding, a gateway
 

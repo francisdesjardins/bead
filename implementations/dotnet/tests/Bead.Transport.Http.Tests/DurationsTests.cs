@@ -134,6 +134,7 @@ public sealed partial class DurationsTests
             ["http"] = new(nameof(HttpConnectOptions.Timeout), ConnectTimeoutByHttp),
             ["webSocket"] = new(nameof(WebSocketConnectOptions.Timeout), ConnectTimeoutByWebSocket),
             ["memory"] = new(nameof(MemoryConnectOptions.Timeout), ConnectTimeoutByMemory),
+            ["broker"] = new(nameof(BrokerConnectOptions.Timeout), ConnectTimeoutByBroker),
         }),
         ["transportClient.reconnectionDelay"] = ("a delay", new()
         {
@@ -154,6 +155,18 @@ public sealed partial class DurationsTests
         ["gateway.heartbeat"] = (nameof(HttpGatewayOptions.Heartbeat), new()
         {
             ["options"] = new(nameof(HttpGatewayOptions.Heartbeat), HeartbeatByGateway),
+        }),
+        ["brokerParticipant.heartbeat"] = ("a heartbeat", new()
+        {
+            ["options"] = new(nameof(BrokerParticipantOptions.Heartbeat), BrokerHeartbeatByOptions),
+        }),
+        ["brokerTransportServer.acceptTimeout"] = (nameof(BrokerTransportServerOptions.AcceptTimeout), new()
+        {
+            ["options"] = new(nameof(BrokerTransportServerOptions.AcceptTimeout), AcceptTimeoutByOptions),
+        }),
+        ["brokerParticipant.bodyGracePeriod"] = (nameof(BrokerParticipantOptions.BodyGracePeriod), new()
+        {
+            ["options"] = new(nameof(BrokerParticipantOptions.BodyGracePeriod), BrokerBodyGracePeriodByOptions),
         }),
     };
 
