@@ -733,6 +733,198 @@ credential_refusals = [
 ]
 
 
+# ── A broker's parcels (section 15.17) ──────────────────────────────────────────────────────────
+
+# a parcel's kinds, each a row of 15.17's table, and its flags
+OPEN, ACCEPT, REFUSE, DATA, PING, PONG, CLOSE, RESET, GONE = range(1, 10)
+ROW = {kind: f'15.17.{kind}' for kind in range(1, 10)}
+MORE, CARRIES_CREDENTIAL, SECURE = 0x01, 0x02, 0x04
+PARCEL_LAYOUT, LAYOUT_TO_COME = 0xB1, 0xB2
+
+# the halves of a connection, its opener's and its acceptor's, a participant's incarnation, its id, and
+# an id of 64 characters, the longest token, base64url's alphabet whole (RFC 4648 §5)
+OPENER = '11 12 13 14 15 16 17 18'
+ACCEPTOR = '21 22 23 24 25 26 27 28'
+NO_HALF = '00 00 00 00 00 00 00 00'
+INCARNATION = hexadecimal(bytes(range(0x31, 0x41)))
+PARTICIPANT = 'peer'
+LONGEST_ID = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_'
+assert len(LONGEST_ID) == 64
+
+# what a DATA carries: an envelope of vectors' own, whole, or cut in two parts
+CARRIED = f'A1 10 00 03  00 00 00 03  00 02 00 01 | {ascii_hex("hi")}'
+FIRST_PART, LAST_PART = 'A1 10 00 03  00 00 00 03', '00 02 00 01  68 69'
+CREDENTIAL = 'Interop sub=ada'
+
+
+def parcel_of(kind, sequence, body='', *, flags=0, opener=OPENER, acceptor=ACCEPTOR, layout=PARCEL_LAYOUT, kept=0):
+    """A parcel's bytes: its 28 bytes of prefix, a bar, then its body."""
+    head = f'{layout:02X} {kind:02X} {flags:02X} {kept:02X}  {opener}  {acceptor}  {hexadecimal(sequence.to_bytes(8, "big"))}'
+    # the one bar parts the prefix from the body, an envelope's own bar within it a space
+    return head + (f' | {body.replace(" | ", "  ")}' if body else '')
+
+
+def identity_of(identifier, incarnation=INCARNATION, bound=None):
+    """An OPEN's or an ACCEPT's body: its id's length and its id, its incarnation, its receive bound;
+    a GONE's, its incarnation then its id, when bound is None."""
+    named = f'{len(identifier):02X}' + (f' {ascii_hex(identifier)}' if identifier else '')
+    return f'{named}  {incarnation}  {hexadecimal(bound.to_bytes(4, "big"))}' if bound is not None else f'{incarnation}  {named}'
+
+
+def fields_of(kind, sequence, *, flags=0, opener=OPENER, acceptor=ACCEPTOR, layout=PARCEL_LAYOUT, **body):
+    return {'layout': layout, 'kind': kind, 'flags': flags, 'opener': opener, 'acceptor': acceptor, 'sequence': sequence,
+            **body}
+
+
+def credential_of(credential):
+    return f'{hexadecimal(len(credential).to_bytes(2, "big"))}  {ascii_hex(credential)}'
+
+
+# each kind, read to its fields and written back to its bytes; written false for one a reader reads and
+# no writer writes: an advisory kind, a layout to come, and what its acceptor refuses
+parcels = [
+    ('an OPEN marked secure', ['15.17', ROW[OPEN], '15.18'],
+     parcel_of(OPEN, 1, identity_of(PARTICIPANT, bound=65_536), flags=SECURE, acceptor=NO_HALF),
+     fields_of(OPEN, 1, flags=SECURE, acceptor=NO_HALF, id=PARTICIPANT, incarnation=INCARNATION, bound=65_536), True),
+    ('an OPEN not marked secure, its id of one character and its receive bound the least', ['15.17', ROW[OPEN], '15.18'],
+     parcel_of(OPEN, 1, identity_of('p', bound=1_024), acceptor=NO_HALF),
+     fields_of(OPEN, 1, acceptor=NO_HALF, id='p', incarnation=INCARNATION, bound=1_024), True),
+    ('an ACCEPT marked secure, its id the longest token and its receive bound the largest', ['15.17', ROW[ACCEPT], '15.18'],
+     parcel_of(ACCEPT, 1, identity_of(LONGEST_ID, bound=2 ** 32 - 1), flags=SECURE),
+     fields_of(ACCEPT, 1, flags=SECURE, id=LONGEST_ID, incarnation=INCARNATION, bound=2 ** 32 - 1), True),
+    ('a REFUSE 400 malformed', ['15.17', ROW[REFUSE]], parcel_of(REFUSE, 1, '01 90', acceptor=NO_HALF),
+     fields_of(REFUSE, 1, acceptor=NO_HALF, status=400), True),
+    ('a REFUSE 426 layout-refused, naming the layouts it reads', ['15.17', ROW[REFUSE]],
+     parcel_of(REFUSE, 1, '01 AA  B1', acceptor=NO_HALF), fields_of(REFUSE, 1, acceptor=NO_HALF, status=426, layouts=[0xB1]),
+     True),
+    ('a REFUSE 426 layout-refused, naming two layouts', ['15.17', ROW[REFUSE]],
+     parcel_of(REFUSE, 1, '01 AA  B1 B2', acceptor=NO_HALF),
+     fields_of(REFUSE, 1, acceptor=NO_HALF, status=426, layouts=[0xB1, 0xB2]), True),
+    ('a REFUSE 503 busy', ['15.17', ROW[REFUSE]], parcel_of(REFUSE, 1, '01 F7', acceptor=NO_HALF),
+     fields_of(REFUSE, 1, acceptor=NO_HALF, status=503), True),
+    ('a DATA carrying an envelope', ['15.17', ROW[DATA]], parcel_of(DATA, 3, CARRIED), fields_of(DATA, 3, carried=CARRIED),
+     True),
+    ('a DATA carrying a credential beside an envelope', ['15.17', ROW[DATA], '15.22'],
+     parcel_of(DATA, 3, f'{credential_of(CREDENTIAL)}  {CARRIED}', flags=CARRIES_CREDENTIAL),
+     fields_of(DATA, 3, flags=CARRIES_CREDENTIAL, credential=CREDENTIAL, carried=CARRIED), True),
+    ('a DATA carrying a credential and the first part of an envelope, more to come', ['15.17', ROW[DATA], '15.20'],
+     parcel_of(DATA, 3, f'{credential_of(CREDENTIAL)}  {FIRST_PART}', flags=MORE | CARRIES_CREDENTIAL),
+     fields_of(DATA, 3, flags=MORE | CARRIES_CREDENTIAL, credential=CREDENTIAL, carried=FIRST_PART), True),
+    ('a DATA carrying a part with more to come, and no credential', ['15.17', ROW[DATA], '15.20'],
+     parcel_of(DATA, 4, FIRST_PART, flags=MORE), fields_of(DATA, 4, flags=MORE, carried=FIRST_PART), True),
+    ('a DATA carrying the last part of an envelope', ['15.17', ROW[DATA], '15.20'], parcel_of(DATA, 5, LAST_PART),
+     fields_of(DATA, 5, carried=LAST_PART), True),
+    ('a DATA of the largest sequence', ['1.2', '15.17', ROW[DATA]], parcel_of(DATA, 2 ** 53 - 1, CARRIED),
+     fields_of(DATA, 2 ** 53 - 1, carried=CARRIED), True),
+    ('a PING', ['15.17', ROW[PING]], parcel_of(PING, 2), fields_of(PING, 2), True),
+    ('a PONG answering the PING of sequence 2', ['15.17', ROW[PONG]], parcel_of(PONG, 2, '00 00 00 00 00 00 00 02'),
+     fields_of(PONG, 2, answers=2), True),
+    *[(f'a CLOSE of {code}', ['15.17', ROW[CLOSE]], parcel_of(CLOSE, 4, hexadecimal(code.to_bytes(2, 'big'))),
+       fields_of(CLOSE, 4, code=code), True) for code in (1000, 1001, 1002, 1009, 4000, 4001)],
+    ('a RESET, its sequence 0', ['15.17', ROW[RESET]], parcel_of(RESET, 0), fields_of(RESET, 0), True),
+    ('a GONE, its halves zero and its sequence 0', ['15.17', ROW[GONE]],
+     parcel_of(GONE, 0, identity_of(PARTICIPANT), opener=NO_HALF, acceptor=NO_HALF),
+     fields_of(GONE, 0, opener=NO_HALF, acceptor=NO_HALF, incarnation=INCARNATION, id=PARTICIPANT), True),
+    # an advisory kind is taken in its order and skipped, whatever its flags, its kept byte and its
+    # body: a reader reads its prefix alone
+    ('an advisory kind, 0x80, read to its prefix', ['15.17'], parcel_of(0x80, 3, '01 02 03'),
+     {'layout': PARCEL_LAYOUT, 'kind': 0x80, 'opener': OPENER, 'acceptor': ACCEPTOR, 'sequence': 3}, False),
+    ('the last advisory kind, read to its prefix whatever its flags and its kept byte', ['15.17'],
+     parcel_of(0xFF, 3, flags=0xFF, kept=0xFF), {'layout': PARCEL_LAYOUT, 'kind': 0xFF, 'opener': OPENER,
+                                                 'acceptor': ACCEPTOR, 'sequence': 3}, False),
+    # every layout keeps a parcel's 28 bytes of prefix, an OPEN's id at the head of its body, and a
+    # REFUSE whole: the OPEN its acceptor refuses 426, and the REFUSE an opener reads of it
+    ('an OPEN of a layout to come, 0xB2, read to its prefix and its id', ['15.17', ROW[OPEN], '15.18'],
+     parcel_of(OPEN, 1, f'{identity_of(PARTICIPANT, bound=65_536)}  01 02 03 04', flags=0x80, acceptor=NO_HALF,
+               layout=LAYOUT_TO_COME),
+     {'layout': LAYOUT_TO_COME, 'kind': OPEN, 'opener': OPENER, 'acceptor': NO_HALF, 'sequence': 1, 'id': PARTICIPANT},
+     False),
+    ('a REFUSE of a layout to come, 0xB2, read whole', ['15.17', ROW[REFUSE]],
+     parcel_of(REFUSE, 1, '01 AA  B2', acceptor=NO_HALF, layout=LAYOUT_TO_COME),
+     fields_of(REFUSE, 1, acceptor=NO_HALF, layout=LAYOUT_TO_COME, status=426, layouts=[0xB2]), False),
+    # what an OPEN's acceptor refuses 400 malformed (spec 15.18) reads, and no participant writes it
+    ('an OPEN whose id is no token, read for its acceptor to refuse', ['15.17', ROW[OPEN], '15.18'],
+     parcel_of(OPEN, 1, identity_of('a/b', bound=65_536), flags=SECURE, acceptor=NO_HALF),
+     fields_of(OPEN, 1, flags=SECURE, acceptor=NO_HALF, id='a/b', incarnation=INCARNATION, bound=65_536), False),
+    ('an OPEN whose receive bound is under 1,024 bytes, read for its acceptor to refuse', ['15.17', ROW[OPEN], '15.18'],
+     parcel_of(OPEN, 1, identity_of(PARTICIPANT, bound=1_023), flags=SECURE, acceptor=NO_HALF),
+     fields_of(OPEN, 1, flags=SECURE, acceptor=NO_HALF, id=PARTICIPANT, incarnation=INCARNATION, bound=1_023), False),
+]
+
+NO_PARCEL, DOES_NOT_READ = 'no-parcel', 'does-not-read'
+
+# what a side refuses of a message: no parcel, which it drops in silence and reports, or a parcel that
+# does not read, which closes its connection with 1002 (spec 15.17)
+parcel_refusals = [
+    ('no byte at all', ['15.17'], '', NO_PARCEL),
+    ('27 bytes, one short of a prefix', ['15.17'], ' '.join(parcel_of(PING, 2).split()[:27]), NO_PARCEL),
+    ('a first byte of 0xB0', ['15.17'], parcel_of(PING, 2, layout=0xB0), NO_PARCEL),
+    ('a first byte of 0xC0', ['15.17'], parcel_of(PING, 2, layout=0xC0), NO_PARCEL),
+    ('an envelope of 28 bytes, its first byte 0xA1', ['15.17'],
+     f'A1 10 00 03  00 00 00 03  00 02 00 01 | {ascii_hex("0123456789abcdef")}', NO_PARCEL),
+    ('a kind of 0x00, never one', ['15.17'], parcel_of(0x00, 3), DOES_NOT_READ),
+    ('a kind to come, 0x0A', ['15.17'], parcel_of(0x0A, 3), DOES_NOT_READ),
+    ('a kind to come, 0x7F', ['15.17'], parcel_of(0x7F, 3), DOES_NOT_READ),
+    ('a DATA marked SECURE, a flag its kind does not take', ['15.17', ROW[DATA]], parcel_of(DATA, 3, CARRIED, flags=SECURE),
+     DOES_NOT_READ),
+    ('a DATA marked 0x08, a flag no kind takes', ['15.17', ROW[DATA]], parcel_of(DATA, 3, CARRIED, flags=0x08), DOES_NOT_READ),
+    ('an OPEN marked MORE', ['15.17', ROW[OPEN]],
+     parcel_of(OPEN, 1, identity_of(PARTICIPANT, bound=65_536), flags=MORE | SECURE, acceptor=NO_HALF), DOES_NOT_READ),
+    ('a PING marked SECURE', ['15.17', ROW[PING]], parcel_of(PING, 2, flags=SECURE), DOES_NOT_READ),
+    ('a kept byte of 0x01', ['15.17'], parcel_of(PING, 2, kept=0x01), DOES_NOT_READ),
+    ('an OPEN whose opener\'s half is all zero', ['15.17', ROW[OPEN]],
+     parcel_of(OPEN, 1, identity_of(PARTICIPANT, bound=65_536), opener=NO_HALF, acceptor=NO_HALF), DOES_NOT_READ),
+    ('an OPEN naming an acceptor\'s half', ['15.17', ROW[OPEN]], parcel_of(OPEN, 1, identity_of(PARTICIPANT, bound=65_536)),
+     DOES_NOT_READ),
+    ('a REFUSE naming an acceptor\'s half', ['15.17', ROW[REFUSE]], parcel_of(REFUSE, 1, '01 F7'), DOES_NOT_READ),
+    ('an ACCEPT whose acceptor\'s half is all zero', ['15.17', ROW[ACCEPT]],
+     parcel_of(ACCEPT, 1, identity_of(PARTICIPANT, bound=65_536), acceptor=NO_HALF), DOES_NOT_READ),
+    ('a DATA whose acceptor\'s half is all zero', ['15.17', ROW[DATA]], parcel_of(DATA, 3, CARRIED, acceptor=NO_HALF),
+     DOES_NOT_READ),
+    ('a GONE naming a half', ['15.17', ROW[GONE]], parcel_of(GONE, 0, identity_of(PARTICIPANT), acceptor=NO_HALF),
+     DOES_NOT_READ),
+    ('a sequence past 2⁵³ − 1', ['1.2', '15.17'], parcel_of(DATA, 2 ** 53, CARRIED), DOES_NOT_READ),
+    ('a DATA of sequence 0', ['15.17', ROW[DATA]], parcel_of(DATA, 0, CARRIED), DOES_NOT_READ),
+    ('a RESET with a sequence', ['15.17', ROW[RESET]], parcel_of(RESET, 3), DOES_NOT_READ),
+    ('a GONE with a sequence', ['15.17', ROW[GONE]],
+     parcel_of(GONE, 1, identity_of(PARTICIPANT), opener=NO_HALF, acceptor=NO_HALF), DOES_NOT_READ),
+    ('an OPEN cut short of its receive bound', ['15.17', ROW[OPEN]],
+     ' '.join(parcel_of(OPEN, 1, identity_of(PARTICIPANT, bound=65_536), acceptor=NO_HALF).split()[:-1]), DOES_NOT_READ),
+    ('an OPEN with a byte past its receive bound', ['15.17', ROW[OPEN]],
+     parcel_of(OPEN, 1, f'{identity_of(PARTICIPANT, bound=65_536)}  00', acceptor=NO_HALF), DOES_NOT_READ),
+    ('an ACCEPT whose id is no token', ['15.17', ROW[ACCEPT]], parcel_of(ACCEPT, 1, identity_of('a/b', bound=65_536)),
+     DOES_NOT_READ),
+    ('an ACCEPT whose id is empty', ['15.17', ROW[ACCEPT]], parcel_of(ACCEPT, 1, identity_of('', bound=65_536)),
+     DOES_NOT_READ),
+    ('an ACCEPT whose id is past the longest token', ['15.17', ROW[ACCEPT]],
+     parcel_of(ACCEPT, 1, identity_of(LONGEST_ID + 'a', bound=65_536)), DOES_NOT_READ),
+    ('an ACCEPT whose receive bound is under 1,024 bytes', ['15.17', ROW[ACCEPT], '15.18'],
+     parcel_of(ACCEPT, 1, identity_of(PARTICIPANT, bound=1_023)), DOES_NOT_READ),
+    ('a GONE whose id is no token', ['15.17', ROW[GONE]],
+     parcel_of(GONE, 0, identity_of('a b'), opener=NO_HALF, acceptor=NO_HALF), DOES_NOT_READ),
+    ('a GONE cut short of its id', ['15.17', ROW[GONE]],
+     ' '.join(parcel_of(GONE, 0, identity_of(PARTICIPANT), opener=NO_HALF, acceptor=NO_HALF).split()[:-1]), DOES_NOT_READ),
+    ('a PING with a body', ['15.17', ROW[PING]], parcel_of(PING, 2, '00'), DOES_NOT_READ),
+    ('a PONG cut short', ['15.17', ROW[PONG]], parcel_of(PONG, 2, '00 00 00 00 00 00 02'), DOES_NOT_READ),
+    ('a RESET with a body', ['15.17', ROW[RESET]], parcel_of(RESET, 0, '00'), DOES_NOT_READ),
+    ('a CLOSE of 1003, a code it does not name', ['15.17', ROW[CLOSE]], parcel_of(CLOSE, 4, '03 EB'), DOES_NOT_READ),
+    ('a CLOSE cut short', ['15.17', ROW[CLOSE]], parcel_of(CLOSE, 4, '03'), DOES_NOT_READ),
+    ('a REFUSE of 404, a status it does not name', ['15.17', ROW[REFUSE]], parcel_of(REFUSE, 1, '01 94', acceptor=NO_HALF),
+     DOES_NOT_READ),
+    ('a REFUSE 426 naming no layout', ['15.17', ROW[REFUSE]], parcel_of(REFUSE, 1, '01 AA', acceptor=NO_HALF),
+     DOES_NOT_READ),
+    ('a REFUSE 503 with a byte after its status', ['15.17', ROW[REFUSE]],
+     parcel_of(REFUSE, 1, '01 F7  00', acceptor=NO_HALF), DOES_NOT_READ),
+    ('a DATA marked CREDENTIAL whose credential runs past its bytes', ['15.17', ROW[DATA]],
+     parcel_of(DATA, 3, f'00 40  {ascii_hex("Interop")}', flags=CARRIES_CREDENTIAL), DOES_NOT_READ),
+    ('a DATA marked CREDENTIAL whose credential is empty', ['15.17', ROW[DATA]],
+     parcel_of(DATA, 3, f'00 00  {CARRIED}', flags=CARRIES_CREDENTIAL), DOES_NOT_READ),
+    ('a DATA carrying nothing', ['15.17', ROW[DATA]], parcel_of(DATA, 3), DOES_NOT_READ),
+    ('a DATA marked CREDENTIAL carrying nothing past its credential', ['15.17', ROW[DATA]],
+     parcel_of(DATA, 3, credential_of(CREDENTIAL), flags=CARRIES_CREDENTIAL), DOES_NOT_READ),
+]
+
+
 def entry(**fields):
     return {key: value for key, value in fields.items() if value is not None}
 
@@ -757,6 +949,9 @@ document = {
         'clauses are the units of spec.md an entry checks: a clause, 9.2; an item of its numbered list, 9.2.5; a row of its table, counted from 1, 15.6.8.',
         "A JWT verdict gives a token, the keys, each a JWK with its issuer and its algorithm, the receiver's audience, or the set of them a relay that verifies holds, an array, any of which aud may name, and now, the wall clock's reading, which a test gives as W; then whether the token holds, with its session's identifier, its claims set and its end, in milliseconds since the epoch, or why it does not: the step of section 13.8 that refused it.",
         "A credential refusal gives the scheme a request presents, by its name or, to come, its number, and the situation a test sets up on a server of its own before it: another-connections-session, an OPAQUE of the session another connection holds; no-session, an OPAQUE no session holds; nothing-carried, an ELSEWHERE whose transport carried nothing; verifier-makes-none, an ELSEWHERE its verifier settles with no session of; end-come, an ELSEWHERE whose end the wall clock has reached as its verifier settles; scheme-to-come; no-verifier, an ELSEWHERE to a server given no verifier; no-keys, a JWT to a server given no keys and no key set. Then the code the request is answered with, and the one word the server tells the access it refused with (section 13.12); a JWT's reasons are its verdicts', the step of section 13.8 that refused it.",
+        "A parcel is a broker's message, read to its fields and written back to its bytes (section 15.17): its layout, 177 for 0xB1; its kind, OPEN 1, ACCEPT 2, REFUSE 3, DATA 4, PING 5, PONG 6, CLOSE 7, RESET 8, GONE 9, 128 to 255 advisory; its flags, MORE 1, CREDENTIAL 2 and SECURE 4 together; its opener's half and its acceptor's, 8 bytes each in hexadecimal; its sequence; then its body's fields: an OPEN's and an ACCEPT's id, a character a byte, incarnation, in hexadecimal, and bound, its receive bound; a REFUSE's status, and layouts, those it reads, on a 426; a DATA's credential, a character a byte, where it carries one, and carried, the envelope or the part it carries, in hexadecimal; a PONG's answers, the sequence of the PING it answers; a CLOSE's code; a GONE's incarnation and id. A field a parcel's kind has no part for is left out.",
+        "written false marks a parcel a reader reads and no writer writes, which a side reads alone: an advisory kind, read to its prefix — layout, kind, halves and sequence — whatever its flags, its kept byte and its body, to be taken in its order and skipped; an OPEN of a layout to come, read to its prefix and its id, which its acceptor refuses 426; a REFUSE of a layout to come, read whole, which every layout keeps; and an OPEN whose id is no token or whose receive bound is under 1,024, which its acceptor refuses 400 (section 15.18).",
+        "A parcel refusal is what a side makes of a message that does not read as a parcel: no-parcel, under 28 bytes or of a first byte outside 0xB1 to 0xBF, which it drops in silence and reports; or does-not-read, a parcel of layout 0xB1 that does not read, which closes its connection with 1002, reported.",
     ],
     'specVersion': spec_version(),
     'headers': [entry(name=name, clauses=clauses, bytes=data, header=header) for name, clauses, data, header in headers],
@@ -779,6 +974,10 @@ document = {
     'credentialRefusals': [{'name': name, 'clauses': clauses, 'scheme': scheme, 'situation': situation, 'code': code,
                             'reason': reason}
                            for name, clauses, scheme, situation, code, reason in credential_refusals],
+    'parcels': [{'name': name, 'clauses': clauses, 'bytes': data, 'parcel': parcel, **({} if written else {'written': False})}
+                for name, clauses, data, parcel, written in parcels],
+    'parcelRefusals': [{'name': name, 'clauses': clauses, 'bytes': data, 'refused': refused}
+                       for name, clauses, data, refused in parcel_refusals],
 }
 
 with open(OUT, 'w', encoding='utf-8', newline='\n') as file:

@@ -602,7 +602,7 @@ for group in ('conversations', 'transports', 'exits'):
 
             if 'until' in step and 'timer' in step['until']:
                 armed = step['until']['timer']
-            elif {'send', 'expect', 'advance'} & set(step):
+            elif {'send', 'expect', 'advance', 'publish', 'connect', 'transportSend'} & set(step):
                 armed = None
 
 # a conversation that opens its connections names one, opened already, on every other step but those
@@ -1453,7 +1453,7 @@ NUMBER = rf'\b(\d{{1,3}}(?:,\d{{3}})+|\d+|{"|".join(NUMBER_WORDS)})\b'
 CITED = re.compile(r'`[^`]*`|\]\([^)]*\)|§\s*[\d.]+(?:[–-][\d.]+)?|\b(?:spec|debugging) \d+(?:\.\d+)+')
 
 # the transports a case is played over, each by the name a row gives it
-TRANSPORT_NAMES = {'http': 'HTTP', 'websocket': 'WebSocket'}
+TRANSPORT_NAMES = {'http': 'HTTP', 'websocket': 'WebSocket', 'broker': 'a broker'}
 
 
 def number_of(written):
@@ -1568,6 +1568,10 @@ COUNTS = {
             (1, r'^{n} cases', len(named['transports']), "transports' cases"),
             *[(1, rf'\b{{n}} over {name}\b', transport_counts.get(transport, 0), f'cases over {name}')
               for transport, name in TRANSPORT_NAMES.items()],
+            # over a broker, the cases of each role, the server's unless a case says client
+            *[(1, rf'\b{{n}} of a {role}\b', sum(case['transport'] == 'broker' and case.get('role', 'server') == role
+                                              for case in named['transports']), f'broker cases of the {role} role')
+              for role in ('server', 'client')],
             (1, r'\b{n} of them on the real clock', sum(bool(case.get('realTime')) for case in named['transports']),
              'cases marked realTime'),
             (1, r'\b{n} on the clock the server is given, advanced',

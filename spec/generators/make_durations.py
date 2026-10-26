@@ -392,7 +392,41 @@ places = [
             way('webSocket', "a WebSocket client's connect"),
             way('memory', "an in-memory client's connect"),
             way('worker', "a Web Worker client's connect", differs=('C#', WEB_WORKER)),
+            way('broker', "a broker client's connect"),
         ],
+        'observed': 'held',
+    },
+    # a broker's (spec 15.21, 15.23): its heartbeat on the platform's timer, as a WebSocket's, observed
+    # by its refusal alone; a half-open connection's wait and the grace of an envelope's parts on the
+    # clock given (decision 0011). A participant's link reconnects as a transport client does, its delay
+    # transportClient.reconnectionDelay's
+    {
+        'id': 'brokerParticipant.heartbeat',
+        'name': "a broker participant's heartbeat on a silent connection",
+        'kind': 'timeout',
+        'never': 'taken',
+        'neverClause': '15.21',
+        'ways': [way('options', "the participant's options, as it is built")],
+        'observed': 'refusal',
+    },
+    {
+        'id': 'brokerTransportServer.acceptTimeout',
+        'name': "how long a broker server's half-open connection waits for its client's first parcel",
+        'kind': 'timeout',
+        'never': 'refused',
+        'neverClause': '15.23',
+        'ways': [way('options', "the transport server's options, as it is built")],
+        'default': default('15.23.2', milliseconds=DEFAULTS['acceptTimeout'], ways=['options']),
+        'observed': 'held',
+    },
+    {
+        'id': 'brokerParticipant.bodyGracePeriod',
+        'name': "how long an envelope's parts come over a broker before their rate is held",
+        'kind': 'timeout',
+        'never': 'refused',
+        'neverClause': '15.12',
+        'ways': [way('options', "the participant's options, as it is built")],
+        'default': default('15.12.16', milliseconds=DEFAULTS['bodyGracePeriod'], ways=['options']),
         'observed': 'held',
     },
     {
