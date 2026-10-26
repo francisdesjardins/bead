@@ -22,7 +22,9 @@
 //   fetches it; `blueprint` over `builder/tools/fuzz/`, beadc's, alike. Each target is bundled by
 //   the TypeScript side's esbuild into its folder's `.build/`, which Jazzer.js instruments alone.
 //   Node and Jazzer.js hold about 220 MiB of their own before the first input, so libFuzzer's
-//   limit on the process is 512 MiB.
+//   limit on the process is 512 MiB; `blueprint`'s, which loads beadc's descriptors and schemas
+//   before it, about 170 MiB more, is 768 MiB. Node holds its heap to 256 MiB, as the C# side's
+//   runtime does: what a run keeps past it fails as a finding, never as a slow climb to the limit.
 // - C#: libFuzzer as libfuzzer-dotnet builds it for Windows, over
 //   `implementations/dotnet/tools/Bead.Fuzz/`, which it runs as its child, once SharpFuzz has
 //   instrumented Bead.Core and Bead.Transport.WebSockets in a copy of its build.
@@ -710,14 +712,14 @@ const runTypeScript = ({ target, inputs, flags }) => {
       '--timeout=1000',
       '--',
       ...flagsOf({ side: 'typescript', target }),
-      '-rss_limit_mb=512',
+      `-rss_limit_mb=${String(target === 'blueprint' ? 768 : 512)}`,
       ...flags,
     ],
     {
       cwd: folder,
       env: {
         BEAD_VECTORS: join(ROOT, 'spec', 'vectors.json'),
-        NODE_OPTIONS: '--enable-source-maps',
+        NODE_OPTIONS: '--enable-source-maps --max-old-space-size=256',
       },
     }
   );
