@@ -138,7 +138,9 @@ public sealed class WebSocketTransportClient : IRouterClientTransport, IAsyncDis
     private WebSocketConnectOptions? _lastConnectOptions;
     // the socket of a connect under way, taken before anything is awaited: a dispose aborts it
     private ClientWebSocket? _connecting;
+    // what ends a connect when its client is disposed
     private CancellationTokenSource? _connectDisposed;
+    // the provider's one pending call, which another attempt joins within its own bound
     private Task<string>? _credentialPending;
     // the open connection; a connection this side dropped is none, and its end tells nothing
     private volatile WebSocketConnection? _connection;
@@ -868,8 +870,8 @@ public sealed class WebSocketTransportClient : IRouterClientTransport, IAsyncDis
         }
     }
 
-    // CancelAsync marks the attempt ended and schedules its callbacks; neither their throw nor
-    // their completion holds the connect. The callback task owns its source until it settles.
+    // the attempt ends and its callbacks are scheduled by CancelAsync: neither their throw nor
+    // their completion holds the connect; the callback task owns its source until it settles
     private static void EndAttempt(CancellationTokenSource attempt)
     {
         _ = attempt.CancelAsync().ContinueWith((completed) =>

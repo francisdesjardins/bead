@@ -215,7 +215,9 @@ export const createWSTransportClient = (options?: IWSTransportClientOptions): WS
       let isSecure = false;
       // the credential the upgrade of the current connection carried; none before it opens
       let carried: string | undefined;
+      // the provider's one pending call, shared by attempts within their own bounds
       let pendingCredential: Promise<string> | undefined;
+      // each attempt still waiting for that call's outcome
       const credentialWaiters = new Set<ICredentialWaiter>();
 
       // a drop closes as a network does, and the open socket's `onclose` reports it
@@ -441,7 +443,7 @@ export const createWSTransportClient = (options?: IWSTransportClientOptions): WS
                   return (open(credential), undefined);
                 }
 
-                // One provider call per client is pending; another attempt joins its outcome.
+                // one provider call per client is pending; another attempt joins its outcome
                 providerAttempt.owns = pendingCredential === undefined;
                 const credentialWaiter: ICredentialWaiter = {
                   resolve: (provided) => {

@@ -19,44 +19,28 @@ namespace Bead.Transport.WebSockets.Tests;
 /// </summary>
 public sealed class WebSocketTransportClientTests : IAsyncLifetime
 {
-    [Fact]
-    public async Task Bounds_an_unresponsive_WebSocket_handshake_by_cancellation_timeout_and_disposal()
-    {
-        var unobserved = new ConcurrentQueue<Exception>();
-        void Observe(object? sender, UnobservedTaskExceptionEventArgs args)
-        {
-            foreach (var reason in args.Exception.Flatten().InnerExceptions)
-            {
-                if (reason.Message.Contains("late upgrade failure", StringComparison.Ordinal))
-                {
-                    unobserved.Enqueue(reason);
-                    args.SetObserved();
-                }
-            }
-        }
-        TaskScheduler.UnobservedTaskException += Observe;
-        try
-        {
-            foreach (var ending in new[] { "cancel", "timeout", "dispose" })
-            {
-                var released = await LateUpgrade(ending);
-                for (var tries = 0; tries < 10 && released.IsAlive; tries++)
-                {
-                    GC.Collect();
-                    GC.WaitForPendingFinalizers();
-                    await Task.Yield();
-                }
-                Assert.False(released.IsAlive);
-                GC.Collect();
-                GC.WaitForPendingFinalizers();
-            }
-            Assert.Empty(unobserved);
-        }
-        finally
-        {
-            TaskScheduler.UnobservedTaskException -= Observe;
-        }
-    }
+    // constants
+
+    private const string Host = "127.0.0.1";
+
+    // a bearer credential, RFC 6750's own example, its auth-scheme included
+    private const string Bearer = "Bearer mF_9.B5f-4.1JqM";
+
+    // a router's largest envelope by default (spec 15.3)
+    private const int EnvelopeLimit = 16_778_240;
+
+    private static readonly TimeSpan Patience = TimeSpan.FromSeconds(10);
+
+    // a frame of an opcode RFC 6455 reserves, which fails the connection that reads it (§5.2)
+    private static readonly byte[] ReservedFrame = [0x83, 0x01, 0x78];
+
+    private readonly WebSocketTransportServer _server = new();
+    private readonly Channel<(bool WasClean, string ConnectionHandle)> _closes = Channel.CreateUnbounded<(bool, string)>();
+    private readonly Channel<string> _connections = Channel.CreateUnbounded<string>();
+    private readonly WebSocketTransportClient _client = new();
+    private int _port;
+
+    // helpers
 
     // the scope releases every task before its caller forces collection of the late failure
     private async Task<WeakReference> LateUpgrade(string ending)
@@ -93,29 +77,6 @@ public sealed class WebSocketTransportClientTests : IAsyncLifetime
             return Answer.Task;
         }
     }
-
-    // constants
-
-    private const string Host = "127.0.0.1";
-
-    // a bearer credential, RFC 6750's own example, its auth-scheme included
-    private const string Bearer = "Bearer mF_9.B5f-4.1JqM";
-
-    // a router's largest envelope by default (spec 15.3)
-    private const int EnvelopeLimit = 16_778_240;
-
-    private static readonly TimeSpan Patience = TimeSpan.FromSeconds(10);
-
-    // a frame of an opcode RFC 6455 reserves, which fails the connection that reads it (§5.2)
-    private static readonly byte[] ReservedFrame = [0x83, 0x01, 0x78];
-
-    private readonly WebSocketTransportServer _server = new();
-    private readonly Channel<(bool WasClean, string ConnectionHandle)> _closes = Channel.CreateUnbounded<(bool, string)>();
-    private readonly Channel<string> _connections = Channel.CreateUnbounded<string>();
-    private readonly WebSocketTransportClient _client = new();
-    private int _port;
-
-    // helpers
 
     private sealed class ObservedRequests(bool refuse) : DelegatingHandler(new SocketsHttpHandler
     {
@@ -384,6 +345,45 @@ public sealed class WebSocketTransportClientTests : IAsyncLifetime
     }
 
     // definition
+
+    [Fact]
+    public async Task Bounds_an_unresponsive_WebSocket_handshake_by_cancellation_timeout_and_disposal()
+    {
+        var unobserved = new ConcurrentQueue<Exception>();
+        void Observe(object? sender, UnobservedTaskExceptionEventArgs args)
+        {
+            foreach (var reason in args.Exception.Flatten().InnerExceptions)
+            {
+                if (reason.Message.Contains("late upgrade failure", StringComparison.Ordinal))
+                {
+                    unobserved.Enqueue(reason);
+                    args.SetObserved();
+                }
+            }
+        }
+        TaskScheduler.UnobservedTaskException += Observe;
+        try
+        {
+            foreach (var ending in new[] { "cancel", "timeout", "dispose" })
+            {
+                var released = await LateUpgrade(ending);
+                for (var tries = 0; tries < 10 && released.IsAlive; tries++)
+                {
+                    GC.Collect();
+                    GC.WaitForPendingFinalizers();
+                    await Task.Yield();
+                }
+                Assert.False(released.IsAlive);
+                GC.Collect();
+                GC.WaitForPendingFinalizers();
+            }
+            Assert.Empty(unobserved);
+        }
+        finally
+        {
+            TaskScheduler.UnobservedTaskException -= Observe;
+        }
+    }
 
     public async ValueTask InitializeAsync()
     {
