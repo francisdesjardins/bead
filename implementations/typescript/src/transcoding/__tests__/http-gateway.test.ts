@@ -2117,6 +2117,95 @@ test('settles every held write once its response drains', async () => {
   }
 });
 
+test('ignores a late write callback while the next stream write waits for its own completion', async () => {
+  const chunks: string[] = [];
+  const callbacks: ((error?: Error | null) => void)[] = [];
+  const written = Array.from({ length: 3 }, () => {
+    return Promise.withResolvers<void>();
+  });
+  let drain: (() => void) | undefined;
+  await using fixture = await startTranscoding({
+    window: 2,
+    heartbeat: Infinity,
+    createServer: (listener) => {
+      return createNodeServer((request, response) => {
+        const write = response.write.bind(response);
+
+        drain = () => {
+          response.emit('drain');
+        };
+        response.write = (
+          chunk: Uint8Array,
+          done?: BufferEncoding | ((error?: Error | null) => void)
+        ): boolean => {
+          const index = chunks.length;
+
+          chunks.push(new TextDecoder().decode(chunk));
+          if (typeof done === 'function') {
+            callbacks.push(done);
+          }
+          write(chunk, () => {
+            written[index]?.resolve();
+          });
+
+          return false;
+        };
+        listener(request, response);
+      });
+    },
+  });
+  const credited = Promise.withResolvers<void>();
+  fixture.server.router.on('debug', ({ header }) => {
+    if (header.kind === EnvelopeKind.CREDIT && header.creditEnd >= 4) {
+      credited.resolve();
+    }
+  });
+  const reported = reportedBy(fixture.gateway);
+  const socket = opened(
+    fixture.port,
+    octetsOf(fixture.port, {
+      body: '{}',
+      lines: [
+        'POST /api/Transcoding/watch HTTP/1.1',
+        'content-type: application/json',
+        'accept: text/event-stream',
+      ],
+    })
+  );
+
+  try {
+    await written[0]?.promise;
+    await Promise.all([fixture.watched(2), fixture.watched(1)]);
+    expect(callbacks).toHaveLength(1);
+    expect(chunks).toEqual(['event: result\nid: 1\ndata: {}\n\n']);
+    drain?.();
+    await written[1]?.promise;
+
+    expect(callbacks).toHaveLength(2);
+    callbacks[0]?.(new Error('the first write completed late'));
+    await new Promise(setImmediate);
+
+    expect(chunks).toEqual([
+      'event: result\nid: 1\ndata: {}\n\n',
+      'id: 2\ndata: {"remaining":2}\n\n',
+    ]);
+    callbacks[1]?.();
+    await written[2]?.promise;
+
+    expect(callbacks).toHaveLength(3);
+    callbacks[2]?.();
+    await credited.promise;
+    expect(chunks).toEqual([
+      'event: result\nid: 1\ndata: {}\n\n',
+      'id: 2\ndata: {"remaining":2}\n\n',
+      'id: 3\ndata: {"remaining":1}\n\n',
+    ]);
+    expect(reported).toEqual([]);
+  } finally {
+    socket.destroy();
+  }
+});
+
 test('releases a stream closed while its response waits for drainage', async () => {
   const waiting = Promise.withResolvers<void>();
   const released = Promise.withResolvers<void>();
@@ -2418,6 +2507,43 @@ test('bounds an accepted slice until its pending bytes are flushed', async () =>
   expect(reported).toEqual([
     'the response is dropped: minimumSendBytesPerSecond 1000000 after sendGracePeriod 1ms',
   ]);
+});
+
+test('finishes a document whose write callback completes inline despite its false return', async () => {
+  const body = 'a'.repeat(64 * 1024 + 7);
+
+  for (const error of [undefined, null]) {
+    const sizes: number[] = [];
+    await using fixture = await startTranscoding({
+      document: body,
+      createServer: (listener) => {
+        return createNodeServer((request, response) => {
+          const write = response.write.bind(response);
+
+          response.write = (
+            chunk: Uint8Array,
+            done?: BufferEncoding | ((error?: Error | null) => void)
+          ): boolean => {
+            sizes.push(chunk.length);
+            write(chunk);
+            if (typeof done === 'function') {
+              done(error);
+            }
+
+            return false;
+          };
+          listener(request, response);
+        });
+      },
+    });
+    const reported = reportedBy(fixture.gateway);
+    const received = await send(fixture.port, { method: 'GET', path: '/openapi.json' });
+
+    expect(received.status).toBe(200);
+    expect(received.body).toBe(body);
+    expect(sizes).toEqual([65536, 7]);
+    expect(reported).toEqual([]);
+  }
 });
 
 test('writes whole answers and documents in slices of at most 64 KiB', async () => {
