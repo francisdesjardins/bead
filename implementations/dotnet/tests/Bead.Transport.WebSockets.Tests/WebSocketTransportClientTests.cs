@@ -795,6 +795,38 @@ public sealed class WebSocketTransportClientTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Disposes_while_a_credential_provider_runs_synchronous_code()
+    {
+        using var release = new ManualResetEventSlim();
+        var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        await using var client = new WebSocketTransportClient();
+        var connecting = Task.Run(() =>
+        {
+            return client.Connect(Target with
+            {
+                CredentialProvider = (_) =>
+                {
+                    entered.TrySetResult();
+                    release.Wait(Cancelled);
+                    return ValueTask.FromResult(Bearer);
+                },
+            }, Cancelled);
+        }, Cancelled);
+        try
+        {
+            await entered.Task.WaitAsync(Patience, Cancelled);
+            await Task.Run(async () => { await client.DisposeAsync(); }, Cancelled).WaitAsync(Patience, Cancelled);
+        }
+        finally
+        {
+            release.Set();
+        }
+        var failure = await Assert.ThrowsAsync<WebSocketException>(() => { return connecting.WaitAsync(Patience, Cancelled); });
+        Assert.Equal("the transport client was disposed as it connected", failure.Message);
+        Assert.Equal(ReadyState.Closed, client.ReadyState);
+    }
+
+    [Fact]
     public async Task Finishes_a_connect_while_its_provider_callback_blocks()
     {
         using var release = new ManualResetEventSlim();

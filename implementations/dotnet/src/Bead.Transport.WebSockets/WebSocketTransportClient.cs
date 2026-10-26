@@ -621,6 +621,7 @@ public sealed class WebSocketTransportClient : IRouterClientTransport, IAsyncDis
         if (options.CredentialProvider is { } provider)
         {
             Task<string> pending;
+            TaskCompletionSource<string>? source = null;
             lock (_gate)
             {
                 if (_credentialPending is { IsCompleted: false } waiting)
@@ -629,8 +630,8 @@ public sealed class WebSocketTransportClient : IRouterClientTransport, IAsyncDis
                 }
                 else
                 {
-                    pending = Providing();
-                    _credentialPending = pending;
+                    source = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
+                    pending = _credentialPending = source.Task;
                     _ = pending.ContinueWith((completed) =>
                     {
                         _ = completed.Exception;
@@ -642,9 +643,22 @@ public sealed class WebSocketTransportClient : IRouterClientTransport, IAsyncDis
                 }
             }
 
-            async Task<string> Providing()
+            // the pending call is published before user code runs, outside the client's lock
+            if (source is not null)
             {
-                return await provider(tokens.Provider).ConfigureAwait(false);
+                _ = Providing(source);
+            }
+
+            async Task Providing(TaskCompletionSource<string> answer)
+            {
+                try
+                {
+                    answer.TrySetResult(await provider(tokens.Provider).ConfigureAwait(false));
+                }
+                catch (Exception reason)
+                {
+                    answer.TrySetException(reason);
+                }
             }
 
             try
