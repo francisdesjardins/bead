@@ -110,16 +110,23 @@ export interface IBrokerParticipantOptions {
   maximumEnvelopePartsBytes?: number | undefined;
   /**
    * The slowest, in bytes a second, an envelope's parts may come once `bodyGracePeriod` passed, on
-   * its clock (spec 15.20): a whole number, 0 holding none. Defaults to
+   * its clock (spec 15.20): a whole number above 0. Defaults to
    * {@link MINIMUM_BODY_BYTES_PER_SECOND}.
    */
   minimumBodyBytesPerSecond?: number | undefined;
   /**
    * How its link connects again once lost, each time as a new incarnation: `delay` milliseconds
-   * between attempts, 1,000 by default, `maxAttempts` attempts, without end by default; `false`
-   * for none, which leaves it closed once its link is lost.
+   * between attempts, 1,000 by default, `maxAttempts` attempts, without end by default, `signal`
+   * aborted ending them; `false` for none, which leaves it closed once its link is lost.
    */
-  reconnect?: false | { delay?: number | undefined; maxAttempts?: number | undefined } | undefined;
+  reconnect?:
+    | false
+    | {
+        delay?: number | undefined;
+        maxAttempts?: number | undefined;
+        signal?: AbortSignal | undefined;
+      }
+    | undefined;
   /**
    * The delivery its application requires: one at least once of an adapter that gives at most once
    * is a {@link ProgrammerError} as it is built (spec 15.19).
@@ -369,11 +376,12 @@ export const createBrokerParticipant = (options: IBrokerParticipantOptions): IBr
       : {
           delay: assertHeldDelay('a delay', reconnect.delay ?? 1_000),
           maxAttempts: reconnect.maxAttempts ?? Infinity,
+          signal: reconnect.signal,
         };
 
   assertCount('heldBytesBudget', { value: heldBytesBudget });
   assertCount('maximumEnvelopePartsBytes', { value: maximumEnvelopePartsBytes });
-  assertCount('minimumBodyBytesPerSecond', { mayBeNone: true, value: minimumBodyBytesPerSecond });
+  assertCount('minimumBodyBytesPerSecond', { value: minimumBodyBytesPerSecond });
 
   const receiveBound = Math.min(adapter.receiveBound, LARGEST_RECEIVE_BOUND);
 
@@ -1040,11 +1048,19 @@ export const createBrokerParticipant = (options: IBrokerParticipantOptions): IBr
   const relink = async (
     former: { acceptor: Uint8Array; opener: Uint8Array; peer: string }[]
   ): Promise<void> => {
-    const { delay, maxAttempts } = reconnection ?? { delay: 0, maxAttempts: 0 };
+    const { delay, maxAttempts, signal } = reconnection ?? { delay: 0, maxAttempts: 0 };
+    // ! the same words as the C# side's: a stop or a cancel ends the reconnection, told so
+    const ended = (reason: string): GenericError => {
+      return new GenericError(`the link of ${id} went down, and its reconnection ended: ${reason}`);
+    };
 
     for (let attempt = 1; ; attempt += 1) {
       if (isStopped) {
-        throw new GenericError(`the participant ${id} is stopped`);
+        throw ended(`the participant ${id} is stopped`);
+      }
+
+      if (signal?.aborted === true) {
+        throw ended('the reconnection was cancelled');
       }
 
       try {
@@ -1059,12 +1075,16 @@ export const createBrokerParticipant = (options: IBrokerParticipantOptions): IBr
         }
       }
 
-      await createPromise(
-        (resolve) => {
-          resolve();
-        },
-        { clock, delay }
-      );
+      try {
+        await createPromise(
+          (resolve) => {
+            resolve();
+          },
+          { clock, delay, signal }
+        );
+      } catch {
+        throw ended('the reconnection was cancelled');
+      }
     }
 
     for (const { acceptor, opener, peer } of former) {

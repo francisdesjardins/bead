@@ -27,7 +27,7 @@ public sealed record BrokerParticipantOptions
     /// <summary>One envelope's parts together (spec 15.23): the router's <c>maximumEnvelopeBytes</c> unless told, at its default.</summary>
     public long MaximumEnvelopePartsBytes { get; init; } = RouterLimits.Default.MaximumEnvelopeBytes;
 
-    /// <summary>The slowest parts may come, in bytes a second, once the grace passed since an envelope's first (spec 15.12): 240 unless told; 0 holds none.</summary>
+    /// <summary>The slowest parts may come, in bytes a second, once the grace passed since an envelope's first (spec 15.12): 240 unless told; a whole number above 0.</summary>
     public int MinimumBodyBytesPerSecond { get; init; } = ServerBounds.MinimumBodyBytesPerSecond;
 
     /// <summary>How long an envelope's parts come before their rate is held (spec 15.12): 5 seconds unless told; never is refused.</summary>
@@ -110,7 +110,7 @@ public sealed class BrokerParticipant : IAsyncDisposable
 
         ServerBounds.AssertCount((nameof(BrokerParticipantOptions.HeldBytesBudget), given.HeldBytesBudget));
         ServerBounds.AssertCount((nameof(BrokerParticipantOptions.MaximumEnvelopePartsBytes), given.MaximumEnvelopePartsBytes));
-        ServerBounds.AssertCountOrNone((nameof(BrokerParticipantOptions.MinimumBodyBytesPerSecond), given.MinimumBodyBytesPerSecond));
+        ServerBounds.AssertCount((nameof(BrokerParticipantOptions.MinimumBodyBytesPerSecond), given.MinimumBodyBytesPerSecond));
 
         var receiveBound = Math.Min(adapter.ReceiveBound, BrokerParcels.LargestBound);
 

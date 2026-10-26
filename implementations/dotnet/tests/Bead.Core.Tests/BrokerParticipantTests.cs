@@ -272,6 +272,18 @@ public sealed class BrokerParticipantTests
     }
 
     [Fact]
+    public void Is_refused_as_built_with_a_minimumBodyBytesPerSecond_of_0_as_an_HTTP_server_is()
+    {
+        var adapter = new MemoryBroker().Adapter(new MemoryBrokerAdapterOptions { Id = "ada" });
+
+        Assert.Equal("MinimumBodyBytesPerSecond is a whole number above 0, not 0 (Parameter 'MinimumBodyBytesPerSecond')", Assert.Throws<ArgumentOutOfRangeException>(() =>
+        {
+            return new BrokerParticipant(adapter, new BrokerParticipantOptions { MinimumBodyBytesPerSecond = 0 });
+        }).Message);
+        Assert.Equal("ada", new BrokerParticipant(adapter, new BrokerParticipantOptions { MinimumBodyBytesPerSecond = 1 }).Id);
+    }
+
+    [Fact]
     public void Refuses_a_server_transport_a_name_another_of_its_server_transports_serves()
     {
         var participant = new BrokerParticipant(new MemoryBroker().Adapter(new MemoryBrokerAdapterOptions { Id = "server" }));
@@ -692,12 +704,14 @@ public sealed class BrokerParticipantTests
             // socket's peer
             await (isRefused ? adapter.Stop() : acceptor.Stop());
             await client.Send(new TransportMessage((byte[])[0xA1, 0x16, 0x00, 0x02, 0x00, 0x00, 0x00, 0x01], false));
+            // ! its close is told once its state is Closed: awaited by the close, never the state
             await BrokerPair.Until(
                 () =>
                 {
-                    return client.ReadyState == ReadyState.Closed;
+                    return !closes.IsEmpty;
                 },
                 $"its connection ends: {isRefused}");
+            Assert.Equal(ReadyState.Closed, client.ReadyState);
             Assert.Equal([false], closes);
             Assert.Empty(reported);
         }
@@ -787,6 +801,39 @@ public sealed class BrokerParticipantTests
         // * its broker holds its id's link of another start already: each attempt is refused
         await adapter.Start();
         Assert.Equal("the link of ada went down, and 2 attempts did not bring it back", (await reported.Task.WaitAsync(BrokerPair.Patience, Cancelled)).Message);
+        Assert.False(participant.IsLinked);
+    }
+
+    [Fact]
+    public async Task Reports_its_reconnection_ended_once_its_signal_is_aborted()
+    {
+        var broker = new MemoryBroker();
+        var adapter = broker.Adapter(new MemoryBrokerAdapterOptions { Id = "ada" });
+        using var cancelling = new CancellationTokenSource();
+        await using var participant = new BrokerParticipant(adapter, new BrokerParticipantOptions
+        {
+            Reconnect = new TransportReconnectOptions
+            {
+                Delay = (_, _) =>
+                {
+                    return TimeSpan.FromMinutes(1);
+                },
+                CancellationToken = cancelling.Token,
+            },
+        });
+        var reported = new TaskCompletionSource<Exception>(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        participant.Error += (reason) =>
+        {
+            reported.TrySetResult(reason);
+        };
+        await participant.Start();
+        adapter.Lose();
+
+        // * each attempt is refused, and the wait before the next one is cut short
+        await adapter.Start();
+        await cancelling.CancelAsync();
+        Assert.Equal("the link of ada went down, and its reconnection ended: the reconnection was cancelled", (await reported.Task.WaitAsync(BrokerPair.Patience, Cancelled)).Message);
         Assert.False(participant.IsLinked);
     }
 

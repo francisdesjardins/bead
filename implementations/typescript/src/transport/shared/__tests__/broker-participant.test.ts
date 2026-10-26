@@ -496,6 +496,15 @@ test.describe('broker participant', () => {
     ).toBe('ada');
   });
 
+  test('is refused as built with a minimumBodyBytesPerSecond of 0, as an HTTP server is', () => {
+    const adapter = createMemoryBroker().adapter({ id: 'ada' });
+
+    expect(() => {
+      return createBrokerParticipant({ adapter, minimumBodyBytesPerSecond: 0 });
+    }).toThrow(new ProgrammerError('minimumBodyBytesPerSecond is a whole number above 0, not 0'));
+    expect(createBrokerParticipant({ adapter, minimumBodyBytesPerSecond: 1 }).id).toBe('ada');
+  });
+
   test('refuses a server transport a name another of its server transports serves', () => {
     const participant = createBrokerParticipant({
       adapter: createMemoryBroker().adapter({ id: 'server' }),
@@ -1071,6 +1080,34 @@ test.describe('broker participant', () => {
 
     expect(await reported).toMatchObject({
       message: 'the link of ada went down, and 2 attempts did not bring it back',
+    });
+    expect(participant.isLinked).toBe(false);
+
+    await participant.stop();
+  });
+
+  test('reports its reconnection ended once its signal is aborted', async () => {
+    const broker = createMemoryBroker();
+    const adapter = broker.adapter({ id: 'ada' });
+    const cancelling = new AbortController();
+    const participant = createBrokerParticipant({
+      adapter,
+      reconnect: { delay: 60_000, signal: cancelling.signal },
+    });
+    const reported = new Promise<Error>((resolve) => {
+      participant.on('error', resolve);
+    });
+
+    await participant.start();
+    adapter.lose();
+
+    // * each attempt is refused, and the wait before the next one is cut short
+    await adapter.start();
+    cancelling.abort();
+
+    expect(await reported).toMatchObject({
+      message:
+        'the link of ada went down, and its reconnection ended: the reconnection was cancelled',
     });
     expect(participant.isLinked).toBe(false);
 

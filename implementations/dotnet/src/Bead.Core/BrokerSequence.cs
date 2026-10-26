@@ -279,11 +279,6 @@ internal sealed class BrokerParts(BrokerPartsBounds bounds, Action late)
     // when, from the first part, the parts so far are owed by: the grace, or their bytes at the rate
     private TimeSpan DeadlineOf()
     {
-        if (bounds.MinimumBodyBytesPerSecond == 0)
-        {
-            return Timeout.InfiniteTimeSpan;
-        }
-
         var owed = TimeSpan.FromMilliseconds(Math.Round(_held.Count * 1_000d / bounds.MinimumBodyBytesPerSecond, MidpointRounding.AwayFromZero));
 
         return owed > bounds.BodyGracePeriod ? owed : bounds.BodyGracePeriod;
@@ -293,7 +288,7 @@ internal sealed class BrokerParts(BrokerPartsBounds bounds, Action late)
     public void Rearm()
     {
         // the first at the grace itself, as a body's rate is held from its grace (spec 15.12)
-        var deadline = _timer is null && bounds.MinimumBodyBytesPerSecond > 0 ? bounds.BodyGracePeriod : DeadlineOf();
+        var deadline = _timer is null ? bounds.BodyGracePeriod : DeadlineOf();
 
         if (deadline == Timeout.InfiniteTimeSpan)
         {
