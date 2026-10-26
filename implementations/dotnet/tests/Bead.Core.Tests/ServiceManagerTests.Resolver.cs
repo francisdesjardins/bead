@@ -9,6 +9,43 @@ namespace Bead.Tests;
 public sealed partial class ServiceManagerTests
 {
     [Fact]
+    public async Task Traces_an_application_failure_as_the_answer_with_its_request_and_duration()
+    {
+        var clock = new FakeTimeProvider(Started);
+        var router = new RecordingRouter { Clock = clock };
+        var manager = new ServiceManager(router);
+        var seen = RecordDebug(manager);
+        var failure = Failure.OfApplication(7, "why");
+        var resolver = manager.GetRequestResolver(Echo, Answered())((_, response) =>
+        {
+            clock.Advance(TimeSpan.FromMilliseconds(30));
+
+            return response.Fail(failure);
+        });
+
+        await resolver.Handle(PropsOf(Encode(new Text("hi")))).WaitAsync(Patience, Cancelled);
+
+        Assert.Equal([new Responded(Target, null, failure)], router.Responses);
+        Assert.Equal(2, seen.Count);
+        Assert.Equal<(Exception?, DebugDirection, object?, object?, TimeSpan?, DateTimeOffset)>(
+            [
+                (null, DebugDirection.Rx, new Text("hi"), null, null, Started),
+                (null, DebugDirection.Tx, new Text("hi"), failure, TimeSpan.FromMilliseconds(30), Started),
+            ],
+            seen.Select((told) =>
+            {
+                return (told.Error, told.Event.Direction, told.Event.Rx, told.Event.Tx, told.Event.Duration, told.Event.StartedAt);
+            }));
+        Assert.Equal<(uint?, string?, DebugType)>(
+            [(Header.CallId, Handle, DebugType.Request), (Header.CallId, Handle, DebugType.Request)],
+            seen.Select((told) =>
+            {
+                return (told.Event.CallId, told.Event.ConnectionHandle, told.Event.Type);
+            }));
+        Assert.Empty(router.Reports);
+    }
+
+    [Fact]
     public async Task Hands_the_router_a_procedure_payload_limit_with_its_requests_and_its_resolver()
     {
         var router = new RecordingRouter();

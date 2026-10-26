@@ -32,6 +32,49 @@ import {
 
 test.describe('createServiceManager', () => {
   test.describe('getRequestResolver', () => {
+    test('traces an application failure as the answer with its request and duration', async () => {
+      const clock = createTestClock(1_000);
+      const { calls, router } = createFakeRouter('server', clock);
+      const manager = createServiceManager(router);
+      const seen = recordDebug(manager);
+      const failure = { code: 7, detail: 'why' };
+      const resolver = manager.getRequestResolver(echo, { serializer: serverSerializer })((
+        _request,
+        response
+      ) => {
+        clock.tick(30);
+
+        return response(null, failure);
+      });
+
+      await resolver(propsOf(encode({ text: 'hi' })));
+
+      expect(calls.respond).toEqual([
+        {
+          request: { connectionHandle, header },
+          response: { failure: { ...failure, scope: FailureScope.APPLICATION } },
+        },
+      ]);
+      expect(seen).toHaveLength(2);
+      expect(
+        seen.map(({ error, info }) => {
+          return [error, info.direction, info.rx, info.tx, info.duration, info.startedAt];
+        })
+      ).toEqual([
+        [null, 'rx', { text: 'hi' }, undefined, undefined, 1_000],
+        [null, 'tx', { text: 'hi' }, failure, 30, 1_000],
+      ]);
+      expect(
+        seen.map(({ info }) => {
+          return [info.callId, info.connectionHandle, info.type];
+        })
+      ).toEqual([
+        [header.callId, connectionHandle, 'request'],
+        [header.callId, connectionHandle, 'request'],
+      ]);
+      expect(calls.report).toEqual([]);
+    });
+
     test('hands the router a procedure’s payload limit, with its requests and its resolver, and nothing else it carries', async () => {
       const { calls, router } = createFakeRouter();
       const manager = createServiceManager(router);
