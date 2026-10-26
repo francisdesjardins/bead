@@ -226,6 +226,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- HTTP clients count an exchange whose executor fails after dispatch as handed over and lose the
+  connection. An executor's own failure is reported once before the close; answer reads, listens
+  and disconnects reach their ending on both sides, including a cancellation the executor raises.
+
 - beadc retries temporary work area creation when a concurrent invocation removes its empty
   `.beadc` parent, with at most three attempts.
 - The TypeScript WebSocket client refuses a connection disposed by its credential provider's

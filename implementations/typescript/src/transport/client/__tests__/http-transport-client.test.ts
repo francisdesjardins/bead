@@ -143,6 +143,168 @@ const connectFake = async (respond?: Parameters<typeof createFakeFetch>[0]) => {
 
 // definition
 
+test('settles a send and loses its connection when a supplied answer throws as it is read', async () => {
+  for (const field of ['redirected', 'refusal', 'content-length']) {
+    const reason = new Error('answer read failed');
+    let calls = 0;
+    await using client = createHTTPTransportClient({
+      isListening: false,
+      fetch: () => {
+        calls += 1;
+        const response = responseOf({
+          status: calls === 1 ? 201 : field === 'refusal' ? 400 : 200,
+          headers: { [CONNECTION_TOKEN_HEADER]: 'T'.repeat(22), 'content-type': BEAD_MEDIA_TYPE },
+        });
+        if (calls === 2) {
+          if (field === 'redirected') {
+            Object.defineProperty(response, 'redirected', {
+              get: () => {
+                throw reason;
+              },
+            });
+          } else {
+            response.headers.get = () => {
+              throw reason;
+            };
+          }
+        }
+        return Promise.resolve(response);
+      },
+    });
+    await client.connect({ host, port: 8080 });
+    const told: string[] = [];
+    const errors: Error[] = [];
+    client.on('error', (error) => {
+      errors.push(error);
+      told.push('error');
+    });
+    client.on('close', () => {
+      told.push('close');
+    });
+    const closed = nextEvent(client, 'close');
+    await expect(
+      client.send({ data: envelopeOf(ENVELOPE_KINDS.REQUEST, { callId: 1 }) })
+    ).resolves.toBeUndefined();
+    expect(await closed).toEqual([false, false]);
+    expect(client.isClosed()).toBe(true);
+    expect(told).toEqual(['error', 'close']);
+    expect(errors).toHaveLength(1);
+    expect(errors[0]).toMatchObject({
+      message: 'the HTTP executor failed: answer read failed',
+      cause: reason,
+    });
+    expect(calls).toBe(3);
+  }
+});
+
+test('loses an exchange whose executor fails and reports it once before closing', async () => {
+  for (const path of ['send', 'answer', 'listen', 'listen-body', 'close']) {
+    for (const reason of [
+      new Error('executor refused'),
+      new DOMException('executor refused', 'AbortError'),
+    ]) {
+      const fake = createFakeFetch();
+      const listening = path.startsWith('listen');
+      await using client = createHTTPTransportClient({ fetch: fake.fetch, isListening: listening });
+      const connecting = client.connect({ host, port: 8080 });
+      fake.calls[0]?.answer({
+        status: 201,
+        headers: {
+          [CONNECTION_TOKEN_HEADER]: 'T'.repeat(22),
+          ...(listening ? { [LISTEN_HEADER]: '?1' } : {}),
+        },
+      });
+      await connecting;
+      const told: string[] = [];
+      const errors: Error[] = [];
+      client.on('error', (error) => {
+        errors.push(error);
+        told.push('error');
+      });
+      client.on('close', () => {
+        told.push('close');
+      });
+      const closed = nextEvent(client, 'close');
+      if (path === 'close') {
+        const closing = client.disconnect();
+        fake.calls[1]?.fail(reason);
+        await closing;
+      } else if (path === 'listen') {
+        fake.calls[1]?.fail(reason);
+      } else if (path === 'listen-body') {
+        fake.calls[1]?.answer({
+          status: 200,
+          headers: { 'content-type': BEAD_BATCH_MEDIA_TYPE, [SEQUENCE_HEADER]: '1' },
+          pieces: [reason],
+        });
+      } else {
+        const sending = client.send({ data: envelopeOf(ENVELOPE_KINDS.REQUEST, { callId: 1 }) });
+        if (path === 'send') {
+          fake.calls[1]?.fail(reason);
+        } else {
+          fake.calls[1]?.answer({
+            status: 200,
+            headers: { 'content-type': BEAD_MEDIA_TYPE },
+            later: Promise.reject(reason),
+          });
+        }
+        await expect(sending).resolves.toBeUndefined();
+      }
+      expect(await closed).toEqual([path === 'close', false]);
+      expect(client.isClosed()).toBe(true);
+      expect(told).toEqual(['error', 'close']);
+      expect(errors).toHaveLength(1);
+      expect(errors[0]).toMatchObject({
+        message: 'the HTTP executor failed: executor refused',
+        cause: reason,
+      });
+      expect(
+        fake.calls.map((call) => {
+          return call.init.method;
+        })
+      ).toEqual([
+        'POST',
+        listening ? 'GET' : path === 'close' ? 'DELETE' : 'POST',
+        ...(path === 'close' ? [] : ['DELETE']),
+      ]);
+    }
+  }
+});
+
+test('counts a synchronous executor throw as handed over and observes a failed release', async () => {
+  const reason = new Error('executor refused');
+  let calls = 0;
+  await using client = createHTTPTransportClient({
+    isListening: false,
+    fetch: () => {
+      calls += 1;
+      if (calls === 1) {
+        return Promise.resolve(
+          responseOf({ status: 201, headers: { [CONNECTION_TOKEN_HEADER]: 'T'.repeat(22) } })
+        );
+      }
+      throw reason;
+    },
+  });
+  await client.connect({ host, port: 8080 });
+  const errors: Error[] = [];
+  client.on('error', (error) => {
+    errors.push(error);
+  });
+  const closed = nextEvent(client, 'close');
+  await expect(
+    client.send({ data: envelopeOf(ENVELOPE_KINDS.REQUEST, { callId: 1 }) })
+  ).resolves.toBeUndefined();
+  expect(await closed).toEqual([false, false]);
+  expect(client.isClosed()).toBe(true);
+  expect(calls).toBe(3);
+  expect(errors).toHaveLength(1);
+  expect(errors[0]).toMatchObject({
+    message: 'the HTTP executor failed: executor refused',
+    cause: reason,
+  });
+});
+
 test('cancels a reconnection whose last attempt closes before cancellation is checked', async () => {
   const { client: transport, fake } = await connectFake((init) => {
     return responseOf(
