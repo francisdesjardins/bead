@@ -67,6 +67,24 @@ public sealed class HttpInteropTests(InteropTests.TypeScriptServer server) : ICl
     }
 
     [Fact(Skip = Reason, SkipUnless = nameof(InteropTests.IsInterop), SkipType = typeof(InteropTests))]
+    public async Task Reads_the_other_gateway_own_route_size_and_busy_refusals()
+    {
+        var url = await Gateway();
+        using var missing = new TranscodingHttpClient(new Uri(url, "/missing/"));
+        var route = await Assert.ThrowsAsync<FailureException>(() => { return missing.Json(PayloadCodecs.Json.Decode("null"u8.ToArray())); });
+        Assert.Equal(((ushort)ProtocolCode.DestinationUnreachable, FailureOrigin.Peer, "the HTTP call answers 404; a path no route matches"), (route.Code, route.Origin, route.Detail));
+        using var client = new TranscodingHttpClient(url);
+        var size = await Assert.ThrowsAsync<FailureException>(() => { return client.Text(new string('x', 1025)); });
+        Assert.Equal(((ushort)ProtocolCode.PayloadTooLarge, FailureOrigin.Peer), (size.Code, size.Origin));
+        await using var iterator = client.SubscribeWatch(new Empty()).GetAsyncEnumerator(Cancelled);
+        Assert.True(await iterator.MoveNextAsync());
+        Assert.True(iterator.Current.IsResult);
+        var busy = await Assert.ThrowsAsync<FailureException>(async () => { await foreach (var entry in client.SubscribeWatch(new Empty())) { _ = entry; } });
+        Assert.Equal(((ushort)ProtocolCode.CapacityExceeded, FailureOrigin.Peer), (busy.Code, busy.Origin));
+        Assert.StartsWith("the HTTP call answers 503; Retry-After: 1;", busy.Detail, StringComparison.Ordinal);
+    }
+
+    [Fact(Skip = Reason, SkipUnless = nameof(InteropTests.IsInterop), SkipType = typeof(InteropTests))]
     public async Task Compares_the_gateways_OpenAPI_documents_byte_for_byte()
     {
         await using var memory = new MemoryTransportServer();

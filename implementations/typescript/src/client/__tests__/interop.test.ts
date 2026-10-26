@@ -278,6 +278,36 @@ test.describe('the C# server of the interop service', () => {
     ]);
   });
 
+  test('reads the other gateway own route size and busy refusals', async () => {
+    const url = `http://${HOST}:${String(ports.gatewayPort)}`;
+    const missing = new TranscodingHttpClient(`${url}/missing`);
+    await expect(missing.json(null)).rejects.toMatchObject({
+      code: ProtocolCode.DESTINATION_UNREACHABLE,
+      origin: 'peer',
+      detail: 'the HTTP call answers 404; a path no route matches',
+    });
+    const client = new TranscodingHttpClient(url);
+    await expect(client.text('x'.repeat(1025))).rejects.toMatchObject({
+      code: ProtocolCode.PAYLOAD_TOO_LARGE,
+      origin: 'peer',
+    });
+    const iterator = client.subscribeWatch({})[Symbol.asyncIterator]();
+    try {
+      expect(await iterator.next()).toMatchObject({ done: false, value: { kind: 'result' } });
+      await expect(async () => {
+        for await (const event of client.subscribeWatch({})) {
+          void event;
+        }
+      }).rejects.toMatchObject({
+        code: ProtocolCode.CAPACITY_EXCEEDED,
+        origin: 'peer',
+        detail: expect.stringContaining('the HTTP call answers 503; Retry-After: 1;'),
+      });
+    } finally {
+      await iterator.return?.();
+    }
+  });
+
   test('compares the gateways OpenAPI documents byte for byte', async () => {
     await using local = await startTranscoding();
     const remote = await fetch(`http://${HOST}:${String(ports.gatewayPort)}/openapi.json`);

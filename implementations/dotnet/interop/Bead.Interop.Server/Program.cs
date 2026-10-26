@@ -51,6 +51,8 @@ await using var gateway = new HttpGateway(new HttpGatewayOptions
     Document = HttpRoutes.OpenApiDocument.ToArray(),
     ProblemTypes = HttpRoutes.ProblemTypes,
     Origins = origins,
+    MaximumBodyBytes = 1024,
+    MaximumConnectionsPerAddress = 1,
 });
 var gatewayAddress = await gateway.Start(new HttpGatewayStartOptions { Address = "127.0.0.1", FindOpenPort = true });
 

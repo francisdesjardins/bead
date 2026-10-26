@@ -54,7 +54,11 @@ const address = await server.transport.start({
   port,
 });
 const httpAddress = await httpServer.transport.start({ address: '127.0.0.1', findOpenPort: true });
-const transcoding = await startTranscoding({ origins });
+const transcoding = await startTranscoding({
+  origins,
+  maximumBodyBytes: 1024,
+  maximumConnectionsPerAddress: 1,
+});
 
 process.stdout
   .write(`${JSON.stringify({ gatewayPort: transcoding.port, httpPort: httpAddress.port, port: address.port })}

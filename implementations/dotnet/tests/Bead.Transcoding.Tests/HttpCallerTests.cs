@@ -221,7 +221,8 @@ public sealed class HttpCallerTests
         using var redirect = new TranscodingHttpClient(new Uri("http://localhost"), new HttpCallerOptions { Handler = redirectHandler });
         var moved = await Assert.ThrowsAsync<FailureException>(() => { return redirect.Json(Json("null")); });
 
-        Assert.All(new[] { body, events, moved }, (failure) => { Assert.Equal((ushort)ProtocolCode.PayloadUndecodable, failure.Code); });
+        Assert.All(new[] { body, events }, (failure) => { Assert.Equal((ushort)ProtocolCode.PayloadTooLarge, failure.Code); });
+        Assert.Equal((ushort)ProtocolCode.DestinationLost, moved.Code);
         using var follows = new HttpClientHandler { AllowAutoRedirect = true };
         Assert.Throws<ArgumentException>(() => { return new TranscodingHttpClient(new Uri("http://localhost"), new HttpCallerOptions { Handler = follows }); });
     }
@@ -246,7 +247,7 @@ public sealed class HttpCallerTests
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => { return waiting; });
         Assert.True(seen.IsCancellationRequested);
 
-        foreach (var url in new[] { "http://user:secret@localhost", "http://localhost/path", "http://localhost?x=1", "http://localhost/#fragment", "ftp://localhost" })
+        foreach (var url in new[] { "http://user:secret@localhost", "http://localhost?x=1", "http://localhost/#fragment", "ftp://localhost" })
         {
             Assert.Throws<ArgumentException>(() => { return new TranscodingHttpClient(new Uri(url)); });
         }
@@ -276,11 +277,11 @@ public sealed class HttpCallerTests
     [Fact]
     public async Task Refuses_a_truncated_stream_and_malformed_problems_without_another_call()
     {
-        foreach (var (body, status, type) in new[] {
-            ("event: result\ndata: {}\n\n", HttpStatusCode.OK, "text/event-stream"),
-            ("{}", HttpStatusCode.BadRequest, "application/problem+json"),
-            ("{\"code\":0,\"scope\":\"protocol\"}", HttpStatusCode.BadRequest, "application/problem+json"),
-            ("{}", HttpStatusCode.OK, "application/json"),
+        foreach (var (body, status, type, code, origin) in new[] {
+            ("event: result\ndata: {}\n\n", HttpStatusCode.OK, "text/event-stream", ProtocolCode.DestinationLost, FailureOrigin.Local),
+            ("{}", HttpStatusCode.BadRequest, "application/problem+json", ProtocolCode.PayloadUndecodable, FailureOrigin.Peer),
+            ("{\"code\":0,\"scope\":\"protocol\"}", HttpStatusCode.BadRequest, "application/problem+json", ProtocolCode.PayloadUndecodable, FailureOrigin.Local),
+            ("{}", HttpStatusCode.OK, "application/json", ProtocolCode.PayloadUndecodable, FailureOrigin.Local),
         })
         {
             var sent = 0;
@@ -295,7 +296,7 @@ public sealed class HttpCallerTests
                 await foreach (var entry in client.SubscribeWatch(new Empty())) { _ = entry; }
             });
 
-            Assert.Equal((ProtocolCode.PayloadUndecodable, FailureOrigin.Local), ((ProtocolCode)failed.Code, failed.Origin));
+            Assert.Equal((code, origin), ((ProtocolCode)failed.Code, failed.Origin));
             Assert.Equal(1, sent);
         }
     }
@@ -311,7 +312,7 @@ public sealed class HttpCallerTests
         });
         using var client = new TranscodingHttpClient(new Uri("http://localhost"), new HttpCallerOptions { Handler = handler });
 
-        foreach (var authorization in new[] { "Bearer bad\r\ninjected: value", "\u0001", "Bearer José" })
+        foreach (var authorization in new[] { "Bearer bad\r\ninjected: value", "\u0001", "Bearer José", " Bearer good", "Bearer good ", "\tBearer good", "Bearer good\t" })
         {
             await Assert.ThrowsAsync<ArgumentException>(() => { return client.Json(Json("null"), new HttpCallOptions { Authorization = authorization }); });
         }
@@ -337,8 +338,301 @@ public sealed class HttpCallerTests
         }
     }
 
-    private sealed class StubHandler(Func<HttpRequestMessage, CancellationToken, Task<HttpResponseMessage>> send) : HttpMessageHandler
+
+    [Fact]
+    public async Task Maps_an_unmarked_HTTP_401_and_keeps_its_status_and_Retry_After()
     {
+        using var handler = new StubHandler((request, _) =>
+        {
+            var response = new HttpResponseMessage((HttpStatusCode)401) { RequestMessage = request, Content = new StringContent("upstream") };
+            response.Headers.TryAddWithoutValidation("retry-after", "7");
+            return Task.FromResult(response);
+        });
+        using var client = new TranscodingHttpClient(new Uri("http://localhost"), new HttpCallerOptions { Handler = handler });
+        var failed = await Assert.ThrowsAsync<FailureException>(() => { return client.Json(Json("null")); });
+        Assert.Equal((ProtocolCode.SessionRequired, FailureScope.Protocol, FailureOrigin.Peer, "the HTTP call answers 401; Retry-After: 7"), ((ProtocolCode)failed.Code, failed.Scope, failed.Origin, failed.Detail));
+    }
+
+
+    [Fact]
+    public async Task Maps_an_unmarked_HTTP_403_and_keeps_its_status_and_Retry_After()
+    {
+        using var handler = new StubHandler((request, _) =>
+        {
+            var response = new HttpResponseMessage((HttpStatusCode)403) { RequestMessage = request, Content = new StringContent("upstream") };
+            response.Headers.TryAddWithoutValidation("retry-after", "7");
+            return Task.FromResult(response);
+        });
+        using var client = new TranscodingHttpClient(new Uri("http://localhost"), new HttpCallerOptions { Handler = handler });
+        var failed = await Assert.ThrowsAsync<FailureException>(() => { return client.Json(Json("null")); });
+        Assert.Equal((ProtocolCode.AccessDenied, FailureScope.Protocol, FailureOrigin.Peer, "the HTTP call answers 403; Retry-After: 7"), ((ProtocolCode)failed.Code, failed.Scope, failed.Origin, failed.Detail));
+    }
+
+
+    [Fact]
+    public async Task Maps_an_unmarked_HTTP_404_and_keeps_its_status_and_Retry_After()
+    {
+        using var handler = new StubHandler((request, _) =>
+        {
+            var response = new HttpResponseMessage((HttpStatusCode)404) { RequestMessage = request, Content = new StringContent("upstream") };
+            response.Headers.TryAddWithoutValidation("retry-after", "7");
+            return Task.FromResult(response);
+        });
+        using var client = new TranscodingHttpClient(new Uri("http://localhost"), new HttpCallerOptions { Handler = handler });
+        var failed = await Assert.ThrowsAsync<FailureException>(() => { return client.Json(Json("null")); });
+        Assert.Equal((ProtocolCode.DestinationUnreachable, FailureScope.Protocol, FailureOrigin.Peer, "the HTTP call answers 404; Retry-After: 7"), ((ProtocolCode)failed.Code, failed.Scope, failed.Origin, failed.Detail));
+    }
+
+
+    [Fact]
+    public async Task Maps_an_unmarked_HTTP_413_and_keeps_its_status_and_Retry_After()
+    {
+        using var handler = new StubHandler((request, _) =>
+        {
+            var response = new HttpResponseMessage((HttpStatusCode)413) { RequestMessage = request, Content = new StringContent("upstream") };
+            response.Headers.TryAddWithoutValidation("retry-after", "7");
+            return Task.FromResult(response);
+        });
+        using var client = new TranscodingHttpClient(new Uri("http://localhost"), new HttpCallerOptions { Handler = handler });
+        var failed = await Assert.ThrowsAsync<FailureException>(() => { return client.Json(Json("null")); });
+        Assert.Equal((ProtocolCode.PayloadTooLarge, FailureScope.Protocol, FailureOrigin.Peer, "the HTTP call answers 413; Retry-After: 7"), ((ProtocolCode)failed.Code, failed.Scope, failed.Origin, failed.Detail));
+    }
+
+
+    [Fact]
+    public async Task Maps_an_unmarked_HTTP_429_and_keeps_its_status_and_Retry_After()
+    {
+        using var handler = new StubHandler((request, _) =>
+        {
+            var response = new HttpResponseMessage((HttpStatusCode)429) { RequestMessage = request, Content = new StringContent("upstream") };
+            response.Headers.TryAddWithoutValidation("retry-after", "7");
+            return Task.FromResult(response);
+        });
+        using var client = new TranscodingHttpClient(new Uri("http://localhost"), new HttpCallerOptions { Handler = handler });
+        var failed = await Assert.ThrowsAsync<FailureException>(() => { return client.Json(Json("null")); });
+        Assert.Equal((ProtocolCode.CapacityExceeded, FailureScope.Protocol, FailureOrigin.Peer, "the HTTP call answers 429; Retry-After: 7"), ((ProtocolCode)failed.Code, failed.Scope, failed.Origin, failed.Detail));
+    }
+
+
+    [Fact]
+    public async Task Maps_an_unmarked_HTTP_503_and_keeps_its_status_and_Retry_After()
+    {
+        using var handler = new StubHandler((request, _) =>
+        {
+            var response = new HttpResponseMessage((HttpStatusCode)503) { RequestMessage = request, Content = new StringContent("upstream") };
+            response.Headers.TryAddWithoutValidation("retry-after", "7");
+            return Task.FromResult(response);
+        });
+        using var client = new TranscodingHttpClient(new Uri("http://localhost"), new HttpCallerOptions { Handler = handler });
+        var failed = await Assert.ThrowsAsync<FailureException>(() => { return client.Json(Json("null")); });
+        Assert.Equal((ProtocolCode.DestinationUnreachable, FailureScope.Protocol, FailureOrigin.Peer, "the HTTP call answers 503; Retry-After: 7"), ((ProtocolCode)failed.Code, failed.Scope, failed.Origin, failed.Detail));
+    }
+
+
+    [Fact]
+    public async Task Maps_an_unmarked_HTTP_502_and_keeps_its_status_and_Retry_After()
+    {
+        using var handler = new StubHandler((request, _) =>
+        {
+            var response = new HttpResponseMessage((HttpStatusCode)502) { RequestMessage = request, Content = new StringContent("upstream") };
+            response.Headers.TryAddWithoutValidation("retry-after", "7");
+            return Task.FromResult(response);
+        });
+        using var client = new TranscodingHttpClient(new Uri("http://localhost"), new HttpCallerOptions { Handler = handler });
+        var failed = await Assert.ThrowsAsync<FailureException>(() => { return client.Json(Json("null")); });
+        Assert.Equal((ProtocolCode.DestinationLost, FailureScope.Protocol, FailureOrigin.Peer, "the HTTP call answers 502; Retry-After: 7"), ((ProtocolCode)failed.Code, failed.Scope, failed.Origin, failed.Detail));
+    }
+
+
+    [Fact]
+    public async Task Maps_an_unmarked_HTTP_504_and_keeps_its_status_and_Retry_After()
+    {
+        using var handler = new StubHandler((request, _) =>
+        {
+            var response = new HttpResponseMessage((HttpStatusCode)504) { RequestMessage = request, Content = new StringContent("upstream") };
+            response.Headers.TryAddWithoutValidation("retry-after", "7");
+            return Task.FromResult(response);
+        });
+        using var client = new TranscodingHttpClient(new Uri("http://localhost"), new HttpCallerOptions { Handler = handler });
+        var failed = await Assert.ThrowsAsync<FailureException>(() => { return client.Json(Json("null")); });
+        Assert.Equal((ProtocolCode.DestinationLost, FailureScope.Protocol, FailureOrigin.Peer, "the HTTP call answers 504; Retry-After: 7"), ((ProtocolCode)failed.Code, failed.Scope, failed.Origin, failed.Detail));
+    }
+
+
+    [Fact]
+    public async Task Maps_an_unmarked_HTTP_307_and_keeps_its_status_and_Retry_After()
+    {
+        using var handler = new StubHandler((request, _) =>
+        {
+            var response = new HttpResponseMessage((HttpStatusCode)307) { RequestMessage = request, Content = new StringContent("upstream") };
+            response.Headers.TryAddWithoutValidation("retry-after", "7");
+            return Task.FromResult(response);
+        });
+        using var client = new TranscodingHttpClient(new Uri("http://localhost"), new HttpCallerOptions { Handler = handler });
+        var failed = await Assert.ThrowsAsync<FailureException>(() => { return client.Json(Json("null")); });
+        Assert.Equal((ProtocolCode.DestinationLost, FailureScope.Protocol, FailureOrigin.Peer, "the HTTP call answers 307; Retry-After: 7"), ((ProtocolCode)failed.Code, failed.Scope, failed.Origin, failed.Detail));
+    }
+
+
+    [Fact]
+    public async Task Maps_an_unmarked_HTTP_418_and_keeps_its_status_and_Retry_After()
+    {
+        using var handler = new StubHandler((request, _) =>
+        {
+            var response = new HttpResponseMessage((HttpStatusCode)418) { RequestMessage = request, Content = new StringContent("upstream") };
+            response.Headers.TryAddWithoutValidation("retry-after", "7");
+            return Task.FromResult(response);
+        });
+        using var client = new TranscodingHttpClient(new Uri("http://localhost"), new HttpCallerOptions { Handler = handler });
+        var failed = await Assert.ThrowsAsync<FailureException>(() => { return client.Json(Json("null")); });
+        Assert.Equal((ProtocolCode.DestinationLost, FailureScope.Protocol, FailureOrigin.Peer, "the HTTP call answers 418; Retry-After: 7"), ((ProtocolCode)failed.Code, failed.Scope, failed.Origin, failed.Detail));
+    }
+
+
+    [Fact]
+    public async Task Reads_gateway_problems_by_their_refusal_before_their_status()
+    {
+        foreach (var (status, refusal, code) in new[] {
+            (503, "busy", ProtocolCode.CapacityExceeded), (404, "path-unknown", ProtocolCode.DestinationUnreachable),
+            (413, "too-large", ProtocolCode.PayloadTooLarge), (403, "host-refused", ProtocolCode.AccessDenied),
+            (403, "origin-refused", ProtocolCode.AccessDenied), (405, "method-refused", ProtocolCode.DestinationUnreachable),
+            (400, "malformed", ProtocolCode.PayloadUndecodable), (415, "type-refused", ProtocolCode.PayloadUndecodable),
+            (408, "too-slow", ProtocolCode.DestinationUnreachable), (401, "", ProtocolCode.SessionRequired), (502, "", ProtocolCode.DestinationLost),
+        })
+        {
+            using var handler = new StubHandler((request, _) =>
+            {
+                var response = new HttpResponseMessage((HttpStatusCode)status) { RequestMessage = request, Content = new StringContent("{\"type\":\"about:blank\",\"detail\":\"by the gateway\"}", Encoding.UTF8, "Application/Problem+JSON") };
+                response.Headers.TryAddWithoutValidation("bead-refusal", refusal);
+                response.Headers.TryAddWithoutValidation("retry-after", "7");
+                return Task.FromResult(response);
+            });
+            using var client = new TranscodingHttpClient(new Uri("http://localhost"), new HttpCallerOptions { Handler = handler });
+            var failed = await Assert.ThrowsAsync<FailureException>(() => { return client.Json(Json("null")); });
+            Assert.Equal((code, FailureOrigin.Peer, FailureScope.Protocol, $"the HTTP call answers {status}; Retry-After: 7; by the gateway"), ((ProtocolCode)failed.Code, failed.Origin, failed.Scope, failed.Detail));
+        }
+    }
+
+    [Fact]
+    public async Task Joins_a_base_URL_path_to_its_default_routes_and_treats_an_empty_authorization_as_none()
+    {
+        foreach (var path in new[] { "/proxy", "/proxy/" })
+        {
+            var sent = 0;
+            using var handler = new StubHandler((request, _) =>
+            {
+                sent++;
+                Assert.Equal("http://example.com/proxy/api/Transcoding/json", request.RequestUri!.AbsoluteUri);
+                Assert.False(request.Headers.Contains("Authorization"));
+                return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { RequestMessage = request, Content = new StringContent("null", Encoding.UTF8, "Application/JSON") });
+            });
+            using var client = new TranscodingHttpClient(new Uri($"http://example.com{path}"), new HttpCallerOptions { Handler = handler, Authorization = "" });
+            Assert.Equal(JsonValueKind.Null, (await client.Json(Json("null"))).ValueKind);
+            Assert.Equal(1, sent);
+        }
+    }
+
+    [Fact]
+    public async Task Reads_a_leading_stream_BOM_and_media_types_without_case()
+    {
+        using var handler = Stub("\uFEFFevent: result\r\ndata: {}\r\n\r\nevent: failure\r\ndata: {\"status\":502}\r\n\r\n", ("Text/Event-Stream", HttpStatusCode.OK, null));
+        using var client = new TranscodingHttpClient(new Uri("http://localhost"), new HttpCallerOptions { Handler = handler });
+        var events = new List<HttpEvent<Empty, Tick>>();
+        var failed = await Assert.ThrowsAsync<FailureException>(async () => { await foreach (var entry in client.SubscribeWatch(new Empty())) { events.Add(entry); } });
+        Assert.Equal(((ushort)ProtocolCode.DestinationLost, FailureOrigin.Peer), (failed.Code, failed.Origin));
+        Assert.True(Assert.Single(events).IsResult);
+        Assert.Equal(new Empty(), events[0].Result);
+    }
+
+    [Fact]
+    public async Task Wraps_malformed_JSON_UTF_8_base64_and_event_framing_as_an_undecodable_payload()
+    {
+        var route = HttpRoutes.All.Single((entry) => { return entry.Procedure.ProcedureName == "watch"; });
+        foreach (var (body, raw) in new[] { ("event: result\ndata: {\n\n", false), ("event: result\ndata: \"%%%\"\n\n", true), ("event: message\ndata: {}\n\n", false) })
+        {
+            var mapped = raw ? route with { Result = HttpPayload.Raw } : route;
+            using var handler = Stub(body, ("text/event-stream", HttpStatusCode.OK, null));
+            using var caller = new HttpCaller([mapped], new Uri("http://localhost"), new HttpCallerOptions { Handler = handler });
+            var failed = await Assert.ThrowsAsync<FailureException>(async () => { await foreach (var entry in caller.Subscribe<object, Tick>(mapped, new Empty())) { _ = entry; } });
+            Assert.Equal(((ushort)ProtocolCode.PayloadUndecodable, FailureOrigin.Local), (failed.Code, failed.Origin));
+        }
+        foreach (var type in new[] { "application/json", "application/problem+json", "text/event-stream" })
+        {
+            using var handler = new StubHandler((request, _) =>
+            {
+                var response = new HttpResponseMessage(type == "application/problem+json" ? HttpStatusCode.BadRequest : HttpStatusCode.OK) { RequestMessage = request, Content = new ByteArrayContent([255]) };
+                response.Content.Headers.ContentType = new MediaTypeHeaderValue(type);
+                return Task.FromResult(response);
+            });
+            using var client = new TranscodingHttpClient(new Uri("http://localhost"), new HttpCallerOptions { Handler = handler });
+            var failed = await Assert.ThrowsAsync<FailureException>(async () =>
+            {
+                if (type == "text/event-stream") { await foreach (var entry in client.SubscribeWatch(new Empty())) { _ = entry; } }
+                else { await client.Json(Json("null")); }
+            });
+            Assert.Equal(((ushort)ProtocolCode.PayloadUndecodable, FailureOrigin.Local, "the HTTP payload cannot be decoded"), (failed.Code, failed.Origin, failed.Detail));
+            Assert.NotNull(failed.InnerException);
+        }
+    }
+
+    [Fact]
+    public async Task Disposes_its_client_without_disposing_a_supplied_handler()
+    {
+        var disposed = 0;
+        using var handler = new StubHandler((request, _) => { return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { RequestMessage = request, Content = new StringContent("null", Encoding.UTF8, "application/json") }); }, () => { disposed++; });
+        using (var client = new TranscodingHttpClient(new Uri("http://localhost"), new HttpCallerOptions { Handler = handler })) { await client.Json(Json("null")); }
+        Assert.Equal(0, disposed);
+        using var other = new TranscodingHttpClient(new Uri("http://localhost"), new HttpCallerOptions { Handler = handler });
+        Assert.Equal(JsonValueKind.Null, (await other.Json(Json("null"))).ValueKind);
+    }
+
+    [Fact]
+    public async Task Bounds_the_decoded_message_even_when_the_body_bound_is_larger()
+    {
+        var maximumBodyBytes = LimitDefaults.MaximumEnvelopeBytes + 1;
+        using var handler = new StubHandler((request, _) =>
+        {
+            var response = new HttpResponseMessage(HttpStatusCode.OK) { RequestMessage = request, Content = new ByteArrayContent(new byte[maximumBodyBytes]) };
+            response.Content.Headers.ContentType = new MediaTypeHeaderValue("application/octet-stream");
+            return Task.FromResult(response);
+        });
+        using var client = new TranscodingHttpClient(new Uri("http://localhost"), new HttpCallerOptions { MaximumBodyBytes = maximumBodyBytes, Handler = handler });
+        var failed = await Assert.ThrowsAsync<FailureException>(() => { return client.Raw(ReadOnlyMemory<byte>.Empty); });
+        Assert.Equal(((ushort)ProtocolCode.PayloadTooLarge, FailureOrigin.Local, "the HTTP payload passes maximumEnvelopeBytes"), (failed.Code, failed.Origin, failed.Detail));
+    }
+
+    [Fact]
+    public async Task Maps_a_gateway_problem_without_a_refusal_by_its_status()
+    {
+        foreach (var (status, code) in new[] {
+            (400, ProtocolCode.PayloadUndecodable), (401, ProtocolCode.SessionRequired),
+            (403, ProtocolCode.AccessDenied), (404, ProtocolCode.DestinationUnreachable),
+            (405, ProtocolCode.DestinationUnreachable), (408, ProtocolCode.DestinationUnreachable),
+            (413, ProtocolCode.PayloadTooLarge), (415, ProtocolCode.PayloadUndecodable),
+            (422, ProtocolCode.PayloadInvalid), (429, ProtocolCode.CapacityExceeded),
+            (431, ProtocolCode.PayloadTooLarge), (500, ProtocolCode.DestinationLost),
+            (501, ProtocolCode.ProcedureUnknown), (502, ProtocolCode.DestinationLost),
+            (503, ProtocolCode.DestinationUnreachable), (504, ProtocolCode.DestinationLost),
+        })
+        {
+            using var handler = new StubHandler((request, _) =>
+            {
+                return Task.FromResult(new HttpResponseMessage((HttpStatusCode)status) { RequestMessage = request, Content = new StringContent("{\"type\":\"about:blank\"}", Encoding.UTF8, "application/problem+json") });
+            });
+            using var client = new TranscodingHttpClient(new Uri("http://localhost"), new HttpCallerOptions { Handler = handler });
+            var failed = await Assert.ThrowsAsync<FailureException>(() => { return client.Json(Json("null")); });
+            Assert.Equal((code, FailureOrigin.Peer, FailureScope.Protocol, $"the HTTP call answers {status}"), ((ProtocolCode)failed.Code, failed.Origin, failed.Scope, failed.Detail));
+        }
+    }
+
+    private sealed class StubHandler(Func<HttpRequestMessage, CancellationToken, Task<HttpResponseMessage>> send, Action? disposed = null) : HttpMessageHandler
+    {
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing) { disposed?.Invoke(); }
+            base.Dispose(disposing);
+        }
+
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
             return send(request, cancellationToken);

@@ -228,6 +228,11 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- Generated HTTP clients read gateway refusals and intermediary statuses as Bead failures, keep
+  status and Retry-After in their detail, distinguish body bounds from malformed payloads and lost
+  streams, and accept a base URL path. Authorization follows the transports' field check; event
+  decoding is bounded and linear. C# disposes only its own handler; fetch uses same-origin credentials.
+
 - The C# gateway writes its heartbeat comment a heartbeat after its stream's last write, armed again
   by each write, as the TypeScript side does, where it wrote one each heartbeat whatever went; and
   it refuses a JSON text nested past 202 levels as `nested past 100` before its message is read,

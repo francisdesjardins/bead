@@ -3,12 +3,13 @@
 // The client half of transcoding (decision 0037, design 3.17): default POST routes, Bead's own
 // JSON mapping, problems as failures, and a fetch stream that carries its caller's authorization.
 
-import { fromBinary } from '@bufbuild/protobuf';
+import { fromBinary, toBinary } from '@bufbuild/protobuf';
 import type { GivenOf, ValueOf } from '../service/descriptors';
 import { FailureScope, LIMIT_DEFAULTS, ProtocolCode } from '../router/shared/constants';
 import { FailureError } from '../router/shared/errors';
 import { PAYLOAD_CODECS } from '../router/shared/payloads';
 import { ProgrammerError } from '../transport/shared/errors';
+import { isFieldValue } from '../transport/client/transport-client';
 import { isSecureUrl } from '../transport/shared/secure';
 import { base64Of, readProtoJson, typeRegistryOf, writeProtoJson } from './json-form';
 import type { HttpPayload, IHttpRouteInit } from './routes';
@@ -64,22 +65,136 @@ export interface IHTTPCaller {
 const ENCODER = new TextEncoder();
 const MAXIMUM_BODY_BYTES = LIMIT_DEFAULTS.maximumEnvelopeBytes;
 
-const invalid = (detail: string): FailureError => {
-  return new FailureError({
-    code: ProtocolCode.PAYLOAD_UNDECODABLE,
-    detail,
-    scope: FailureScope.PROTOCOL,
-    side: 'client',
-  });
+const localFailure = (
+  code: ProtocolCode,
+  detail: string,
+  options: { cause?: unknown } = {}
+): FailureError => {
+  return new FailureError(
+    {
+      code,
+      detail,
+      scope: FailureScope.PROTOCOL,
+      side: 'client',
+    },
+    options
+  );
 };
 
-// A refusal without a Bead code is an HTTP error, never a fabricated application failure.
-const failureOf = (bytes: Uint8Array): FailureError => {
-  const problem = PAYLOAD_CODECS.json.decode(bytes) as {
+const invalid = (detail: string, cause?: unknown): FailureError => {
+  return localFailure(ProtocolCode.PAYLOAD_UNDECODABLE, detail, { cause });
+};
+
+// A gateway problem reads its own table backwards; an intermediary leaves the outcome unknown.
+const statusCodeOf = (status: number, problem: boolean): ProtocolCode => {
+  if (problem) {
+    switch (status) {
+      case 400:
+      case 415:
+        return ProtocolCode.PAYLOAD_UNDECODABLE;
+      case 405:
+      case 408:
+        return ProtocolCode.DESTINATION_UNREACHABLE;
+      case 422:
+        return ProtocolCode.PAYLOAD_INVALID;
+      case 431:
+        return ProtocolCode.PAYLOAD_TOO_LARGE;
+      case 501:
+        return ProtocolCode.PROCEDURE_UNKNOWN;
+    }
+  }
+  switch (status) {
+    case 401:
+      return ProtocolCode.SESSION_REQUIRED;
+    case 403:
+      return ProtocolCode.ACCESS_DENIED;
+    case 404:
+    case 503:
+      return ProtocolCode.DESTINATION_UNREACHABLE;
+    case 413:
+      return ProtocolCode.PAYLOAD_TOO_LARGE;
+    case 429:
+      return ProtocolCode.CAPACITY_EXCEEDED;
+    default:
+      return ProtocolCode.DESTINATION_LOST;
+  }
+};
+
+const statusFailure = (
+  status: number,
+  options: {
+    refusal?: string | null | undefined;
+    retry?: string | null | undefined;
+    detail?: string | undefined;
+    problem?: boolean;
+  } = {}
+): FailureError => {
+  let code = statusCodeOf(status, options.problem === true);
+
+  switch (options.refusal) {
+    case undefined:
+    case null:
+      break;
+    case 'busy':
+      code = ProtocolCode.CAPACITY_EXCEEDED;
+      break;
+    case 'host-refused':
+    case 'origin-refused':
+      code = ProtocolCode.ACCESS_DENIED;
+      break;
+    case 'path-unknown':
+    case 'method-refused':
+      code = ProtocolCode.DESTINATION_UNREACHABLE;
+      break;
+    case 'too-large':
+      code = ProtocolCode.PAYLOAD_TOO_LARGE;
+      break;
+    case 'malformed':
+    case 'type-refused':
+      code = ProtocolCode.PAYLOAD_UNDECODABLE;
+      break;
+    default:
+      break;
+  }
+
+  const detail = `the HTTP call answers ${String(status)}${options.retry === undefined || options.retry === null ? '' : `; Retry-After: ${options.retry}`}${options.detail === undefined || options.detail === '' ? '' : `; ${options.detail}`}`;
+
+  return new FailureError({ code, detail, origin: 'peer', scope: FailureScope.PROTOCOL });
+};
+
+const failureOf = (bytes: Uint8Array, response?: Response): FailureError => {
+  let problem: {
     code?: unknown;
     scope?: unknown;
     detail?: unknown;
+    status?: unknown;
   } | null;
+
+  try {
+    problem = PAYLOAD_CODECS.json.decode(bytes) as typeof problem;
+  } catch (cause) {
+    throw invalid('the HTTP payload cannot be decoded', cause);
+  }
+
+  if (
+    problem !== null &&
+    typeof problem === 'object' &&
+    !Array.isArray(problem) &&
+    problem.code === undefined &&
+    problem.scope === undefined &&
+    (problem.detail === undefined || typeof problem.detail === 'string')
+  ) {
+    const status = response?.status ?? problem.status;
+
+    if (typeof status === 'number' && Number.isInteger(status) && status >= 100 && status <= 599) {
+      return statusFailure(status, {
+        refusal: response?.headers.get('bead-refusal'),
+        retry: response?.headers.get('retry-after'),
+        detail: problem.detail,
+        problem: true,
+      });
+    }
+  }
 
   if (
     typeof problem?.code !== 'number' ||
@@ -121,11 +236,10 @@ export const createHTTPCaller = (
     url.username !== '' ||
     url.password !== '' ||
     url.search !== '' ||
-    url.hash !== '' ||
-    url.pathname !== '/'
+    url.hash !== ''
   ) {
     throw new ProgrammerError(
-      'an HTTP client URL is an HTTP or HTTPS origin without user information'
+      'an HTTP client URL uses HTTP or HTTPS without user information, query or fragment'
     );
   }
 
@@ -142,39 +256,74 @@ export const createHTTPCaller = (
   });
   const registry = typeRegistryOf(schemas);
   const fetcher = options.fetch ?? globalThis.fetch;
+  const bounded = (payload: HttpPayload, value: unknown): unknown => {
+    const bytes =
+      typeof payload === 'string'
+        ? PAYLOAD_CODECS[payload].encode(value as never)
+        : toBinary(payload, value as never);
+    if (bytes.length > LIMIT_DEFAULTS.maximumEnvelopeBytes) {
+      throw localFailure(
+        ProtocolCode.PAYLOAD_TOO_LARGE,
+        'the HTTP payload passes maximumEnvelopeBytes'
+      );
+    }
+    return value;
+  };
   const read = (payload: HttpPayload, bytes: Uint8Array): unknown => {
-    return typeof payload === 'string'
-      ? PAYLOAD_CODECS[payload].decode(bytes)
-      : readProtoJson(payload, { bytes, registry });
+    try {
+      return bounded(
+        payload,
+        typeof payload === 'string'
+          ? PAYLOAD_CODECS[payload].decode(bytes)
+          : readProtoJson(payload, { bytes, registry })
+      );
+    } catch (cause) {
+      if (cause instanceof FailureError) {
+        throw cause;
+      }
+      throw invalid('the HTTP payload cannot be decoded', cause);
+    }
   };
   const eventValue = (payload: HttpPayload, data: string): unknown => {
     const bytes = ENCODER.encode(data);
 
     if (payload === 'text' || payload === 'raw') {
-      const value = PAYLOAD_CODECS.json.decode(bytes);
+      let value: unknown;
+
+      try {
+        value = PAYLOAD_CODECS.json.decode(bytes);
+      } catch (cause) {
+        throw invalid('the HTTP payload cannot be decoded', cause);
+      }
 
       if (typeof value !== 'string') {
         throw invalid('an HTTP text or raw event holds a JSON string');
       }
 
       if (payload === 'text') {
-        return value;
+        return bounded(payload, value);
       }
 
-      const raw = Uint8Array.from(atob(value), (character) => {
-        return character.charCodeAt(0);
-      });
+      let raw: Uint8Array;
+
+      try {
+        raw = Uint8Array.from(atob(value), (character) => {
+          return character.charCodeAt(0);
+        });
+      } catch (cause) {
+        throw invalid('the HTTP payload cannot be decoded', cause);
+      }
 
       if (base64Of(raw) !== value) {
         throw invalid('an HTTP raw event holds standard padded base64');
       }
 
-      return raw;
+      return bounded(payload, raw);
     }
 
     return read(payload, bytes);
   };
-  const whole = async (response: Response): Promise<Uint8Array> => {
+  const whole = async (response: Response, signal?: AbortSignal): Promise<Uint8Array> => {
     const chunks: Uint8Array[] = [];
     let size = 0;
 
@@ -192,13 +341,23 @@ export const createHTTPCaller = (
           size += chunk.value.length;
 
           if (size > maximum) {
-            throw invalid('the HTTP body passes maximumBodyBytes');
+            throw localFailure(
+              ProtocolCode.PAYLOAD_TOO_LARGE,
+              'the HTTP body passes maximumBodyBytes'
+            );
           }
 
           chunks.push(chunk.value);
         }
+      } catch (cause) {
+        if (cause instanceof FailureError || signal?.aborted === true) {
+          throw cause;
+        }
+        throw localFailure(ProtocolCode.DESTINATION_LOST, 'the HTTP body ends before its answer', {
+          cause,
+        });
       } finally {
-        await reader.cancel();
+        await reader.cancel().catch(() => {});
         reader.releaseLock();
       }
     }
@@ -231,8 +390,10 @@ export const createHTTPCaller = (
       );
     }
 
-    const target = new URL(template.template, url);
-    const authorization =
+    const base = new URL(url);
+    base.pathname = `${base.pathname.replace(/\/$/u, '')}/`;
+    const target = new URL(template.template.replace(/^\//u, ''), base);
+    const credential =
       given.withoutAuthorization === true
         ? undefined
         : (given.authorization ?? options.authorization);
@@ -241,16 +402,20 @@ export const createHTTPCaller = (
       throw new ProgrammerError('an HTTP route stays on its gateway origin');
     }
 
+    if (credential !== undefined && !isFieldValue(credential)) {
+      throw new ProgrammerError(
+        'a credential holds visible ASCII, spaces and tabs alone, none first or last'
+      );
+    }
+
+    const authorization = credential === '' ? undefined : credential;
+
     if (authorization !== undefined && !isSecureUrl(target.href)) {
       throw new FailureError({
         code: ProtocolCode.DESTINATION_UNREACHABLE,
         scope: FailureScope.PROTOCOL,
         side: 'client',
       });
-    }
-
-    if (authorization !== undefined && /[^\t\x20-\x7e]/u.test(authorization)) {
-      throw new ProgrammerError('Authorization is an HTTP field value');
     }
 
     const bytes = route.procedure.request.encode(value as never);
@@ -269,7 +434,7 @@ export const createHTTPCaller = (
         ...(authorization === undefined ? {} : { authorization }),
       },
       redirect: 'manual',
-      credentials: 'omit',
+      credentials: 'same-origin',
       ...(given.signal === undefined ? {} : { signal: given.signal }),
     });
 
@@ -279,20 +444,19 @@ export const createHTTPCaller = (
       (response.status >= 300 && response.status < 400)
     ) {
       await response.body?.cancel();
-      throw invalid('the HTTP client follows no redirect');
+      throw statusFailure(response.status, { retry: response.headers.get('retry-after') });
     }
 
     if (response.status !== 200) {
-      const bytes_ = await whole(response);
-
       if (
         response.headers.get('content-type')?.split(';')[0]?.trim().toLowerCase() ===
         'application/problem+json'
       ) {
-        throw failureOf(bytes_);
+        throw failureOf(await whole(response, given.signal), response);
       }
 
-      throw invalid(`the HTTP call answers ${String(response.status)} without a Bead problem`);
+      await response.body?.cancel();
+      throw statusFailure(response.status, { retry: response.headers.get('retry-after') });
     }
 
     return response;
@@ -309,7 +473,7 @@ export const createHTTPCaller = (
       throw invalid('the HTTP result has another media type');
     }
 
-    return read(route.result, await whole(response));
+    return read(route.result, await whole(response, given?.signal));
   };
   const subscribe: IHTTPCaller['subscribe'] = async function* (
     route,
@@ -332,8 +496,11 @@ export const createHTTPCaller = (
     }
 
     const reader = response.body.getReader();
-    const decoder = new TextDecoder('utf-8', { fatal: true });
-    let buffered = '';
+    const decoder = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true });
+    let fragments: Uint8Array[] = [];
+    let lineSize = 0;
+    let firstLine = true;
+    let skipLF = false;
     let name = '';
     let data: string[] = [];
     let size = 0;
@@ -344,27 +511,80 @@ export const createHTTPCaller = (
         const chunk = await reader.read();
 
         if (chunk.done) {
-          throw invalid('the HTTP event stream ends without a failure');
+          if (lineSize > 0) {
+            const pending = new Uint8Array(lineSize);
+            let offset = 0;
+            for (const fragment of fragments) {
+              pending.set(fragment, offset);
+              offset += fragment.length;
+            }
+            try {
+              decoder.decode(pending);
+            } catch (cause) {
+              throw invalid('the HTTP payload cannot be decoded', cause);
+            }
+          }
+          throw localFailure(
+            ProtocolCode.DESTINATION_LOST,
+            'the HTTP event stream ends without a failure'
+          );
         }
 
-        buffered += decoder.decode(chunk.value, { stream: true });
+        let start = 0;
 
-        for (;;) {
-          const end = buffered.search(/[\r\n]/u);
+        for (let index = 0; index <= chunk.value.length; index += 1) {
+          const octet = chunk.value[index];
 
-          if (end === -1 || (buffered[end] === '\r' && end === buffered.length - 1)) {
+          if (skipLF && index !== chunk.value.length) {
+            skipLF = false;
+            if (octet === 10) {
+              start = index + 1;
+              continue;
+            }
+          }
+
+          if (index !== chunk.value.length && octet !== 10 && octet !== 13) {
+            continue;
+          }
+
+          const fragment = chunk.value.subarray(start, index);
+          if (fragment.length > 0) {
+            fragments.push(fragment);
+          }
+          lineSize += fragment.length;
+          size += fragment.length;
+
+          if (size > maximum) {
+            throw localFailure(
+              ProtocolCode.PAYLOAD_TOO_LARGE,
+              'the HTTP event passes maximumBodyBytes'
+            );
+          }
+          if (index === chunk.value.length) {
             break;
           }
 
-          const line = buffered.slice(0, end);
-          const width = buffered[end] === '\r' && buffered[end + 1] === '\n' ? 2 : 1;
-
-          buffered = buffered.slice(end + width);
-          size += ENCODER.encode(line).length;
-
-          if (size > maximum) {
-            throw invalid('the HTTP event passes maximumBodyBytes');
+          const bytes = new Uint8Array(lineSize);
+          let offset = 0;
+          for (const part of fragments) {
+            bytes.set(part, offset);
+            offset += part.length;
           }
+          let line: string;
+          try {
+            line = decoder.decode(bytes);
+          } catch (cause) {
+            throw invalid('the HTTP payload cannot be decoded', cause);
+          }
+          if (firstLine) {
+            line = line.replace(/^\uFEFF/u, '');
+            firstLine = false;
+          }
+          const length = lineSize;
+          lineSize = 0;
+          fragments = [];
+          skipLF = octet === 13;
+          start = index + 1;
 
           if (line === '') {
             if (data.length > 0) {
@@ -381,9 +601,10 @@ export const createHTTPCaller = (
                 throw invalid('the HTTP event stream holds one result then notifications');
               }
 
+              const payload = eventValue(hasResult ? route.notification : route.result, text);
               yield hasResult
-                ? { kind: 'notification', value: eventValue(route.notification, text) }
-                : { kind: 'result', value: eventValue(route.result, text) };
+                ? { kind: 'notification', value: payload }
+                : { kind: 'result', value: payload };
               hasResult = true;
             }
 
@@ -395,16 +616,19 @@ export const createHTTPCaller = (
           } else if (line.startsWith('data:')) {
             data.push(line.slice(5).replace(/^ /u, ''));
           } else if (line.startsWith(':')) {
-            size -= ENCODER.encode(line).length;
+            size -= length;
           }
         }
-
-        if (size + ENCODER.encode(buffered).length > maximum) {
-          throw invalid('the HTTP event passes maximumBodyBytes');
-        }
       }
+    } catch (cause) {
+      if (cause instanceof FailureError || given?.signal?.aborted === true) {
+        throw cause;
+      }
+      throw localFailure(ProtocolCode.DESTINATION_LOST, 'the HTTP body ends before its answer', {
+        cause,
+      });
     } finally {
-      await reader.cancel();
+      await reader.cancel().catch(() => {});
       reader.releaseLock();
     }
   };
