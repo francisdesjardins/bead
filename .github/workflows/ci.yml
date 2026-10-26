@@ -379,11 +379,7 @@ jobs:
           fi
           git archive --format=tar "$tag" | node builder/src/cli.ts breaking --against - --error-format github --fail-on-warning
           cd examples/hello
-          # countDown's count past 10 is a rule of its .proto, which retires HELLO_FAILURE_TOO_FAR
-          git archive --format=tar "$tag" | node ../../builder/src/cli.ts breaking --against - --error-format github --fail-on-warning \
-            --except PROCEDURE_RULES_TIGHTENED@service:1/procedure:2 \
-            --except NAME_NO_DELETE@service:1/failure:2 \
-            --except buf:ENUM_VALUE_NO_DELETE@hello/v1/hello.proto
+          git archive --format=tar "$tag" | node ../../builder/src/cli.ts breaking --against - --error-format github --fail-on-warning
 
   # ── Examples ─────────────────────────────────────────────────────────────────
   # Each project of examples/, written as a consumer writes one, its runtimes from their source: a
