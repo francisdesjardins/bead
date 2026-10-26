@@ -922,6 +922,32 @@ public sealed class WebSocketTransportClientTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Releases_a_replacement_opened_by_its_close_listener_before_dispose_completes()
+    {
+        var closes = new List<(bool WasClean, bool WasQuick)>();
+        var errors = new List<Exception>();
+        Task<Exception?>? replacement = null;
+
+        _client.Close += (clean, quick) =>
+        {
+            closes.Add((clean, quick));
+            replacement = Record.ExceptionAsync(() => { return _client.Connect(Target, Cancelled); }).AsTask();
+        };
+        _client.Error += errors.Add;
+        await _client.Connect(Target, Cancelled);
+        await _client.DisposeAsync().AsTask().WaitAsync(Patience, Cancelled);
+
+        Assert.Equal(ReadyState.Closed, _client.ReadyState);
+        Assert.NotNull(replacement);
+        var failure = await replacement.WaitAsync(Patience, Cancelled);
+
+        Assert.True(failure is null or WebSocketException or OperationCanceledException);
+        Assert.Equal(ReadyState.Closed, _client.ReadyState);
+        Assert.Equal([(true, false)], closes);
+        Assert.Empty(errors);
+    }
+
+    [Fact]
     public async Task A_dispose_on_a_client_never_connected_does_nothing()
     {
         await _client.DisposeAsync();

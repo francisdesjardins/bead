@@ -279,10 +279,18 @@ export const createTransportClient = <
       }
     },
     [Symbol.asyncDispose]: async () => {
-      if (client.isOpen()) {
-        await client.disconnect();
-      } else {
+      const wasOpen = client.isOpen();
+
+      try {
+        if (wasOpen) {
+          await client.disconnect();
+        }
+      } finally {
         client[dispose]();
+
+        if (wasOpen) {
+          setReadyStateClosed(client);
+        }
       }
     },
 
