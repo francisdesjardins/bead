@@ -382,15 +382,20 @@ const workerOf = (): IWorkerLike => {
 
 // what the page's client counts: the calls it made, and the commands it answered
 const metricsRegistry = createMetricsRegistry();
+// the sign-up's short-detail link bounds the client's own refusals, on any transport
+const limits =
+  new URLSearchParams(location.search).get('detail') === 'short'
+    ? { maximumDetailBytes: 256 }
+    : undefined;
 const workerClient =
   transport === 'worker'
-    ? createWorkerClient({ metricsRegistry, transport: { worker: workerOf() } })
+    ? createWorkerClient({ limits, metricsRegistry, transport: { worker: workerOf() } })
     : undefined;
 const client: IClient =
   workerClient ??
   (transport === 'http'
-    ? createHTTPClient({ metricsRegistry })
-    : createWSClient({ metricsRegistry }));
+    ? createHTTPClient({ limits, metricsRegistry })
+    : createWSClient({ limits, metricsRegistry }));
 const { services } = client;
 // the page's own port: the server relays the upgrade to the Bead server behind it
 const port = Number(
