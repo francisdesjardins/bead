@@ -80,17 +80,7 @@ public sealed class HttpCaller : IDisposable
         }
 
         var handler = _options.Handler ?? new SocketsHttpHandler { AllowAutoRedirect = false, UseCookies = false, ConnectCallback = HappyEyeballs.ConnectCallback };
-        var inner = handler;
-
-        while (inner is DelegatingHandler { InnerHandler: { } next })
-        {
-            inner = next;
-        }
-
-        if (inner is HttpClientHandler { AllowAutoRedirect: true } or SocketsHttpHandler { AllowAutoRedirect: true })
-        {
-            throw new ArgumentException("an HTTP client's handler follows no redirect: AllowAutoRedirect is false", nameof(options));
-        }
+        HttpRedirects.AssertHandler(handler, nameof(options));
 
         _url = url;
         _http = new HttpClient(handler, disposeHandler: _options.Handler is null) { Timeout = Timeout.InfiniteTimeSpan };

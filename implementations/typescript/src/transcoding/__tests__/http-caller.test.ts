@@ -43,6 +43,26 @@ const stubOf = (
   };
 };
 
+test('refuses an answer from a supplied executor that follows a redirect', async () => {
+  let disposed = 0;
+  const client = new TranscodingHttpClient('http://localhost', {
+    fetch: () => {
+      const response = new Response(
+        new ReadableStream<Uint8Array>({
+          cancel: () => {
+            disposed += 1;
+          },
+        }),
+        { headers: { 'content-type': 'application/json' } }
+      );
+      Object.defineProperty(response, 'redirected', { value: true });
+      return Promise.resolve(response);
+    },
+  });
+  await expect(client.json(null)).rejects.toMatchObject({ code: ProtocolCode.DESTINATION_LOST });
+  expect(disposed).toBe(1);
+});
+
 test('calls default routes with protobuf JSON and every native encoding through its gateway', async () => {
   await using fixture = await startTranscoding();
   const client = new TranscodingHttpClient(urlOf(fixture.port));

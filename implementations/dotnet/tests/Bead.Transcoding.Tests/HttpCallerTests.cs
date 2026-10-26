@@ -45,6 +45,43 @@ public sealed class HttpCallerTests
     }
 
     [Fact]
+    public void Refuses_a_given_handler_that_would_follow_a_redirect_AllowAutoRedirect_named_before_any_exchange()
+    {
+        using var sockets = new SocketsHttpHandler();
+        using var platform = new HttpClientHandler();
+        using var wrapped = new Wrapper(new Wrapper(new SocketsHttpHandler()));
+        foreach (var handler in new HttpMessageHandler[] { sockets, platform, wrapped })
+        {
+            var caller = Assert.Throws<ArgumentException>(() => { return new TranscodingHttpClient(new Uri("http://localhost"), new HttpCallerOptions { Handler = handler }); });
+            Assert.Equal("a handler given would follow a redirect, which the client follows none of: its AllowAutoRedirect is true (spec 15.6) (Parameter 'options')", caller.Message);
+            Assert.Equal("options", caller.ParamName);
+            Assert.Contains("AllowAutoRedirect", caller.Message, StringComparison.Ordinal);
+        }
+        using var accepted = new Wrapper(new SocketsHttpHandler { AllowAutoRedirect = false });
+        using var client = new TranscodingHttpClient(new Uri("http://localhost"), new HttpCallerOptions { Handler = accepted });
+    }
+
+    [Fact]
+    public async Task Refuses_an_answer_from_a_supplied_executor_that_follows_a_redirect()
+    {
+        var disposed = 0;
+        using var handler = new StubHandler((_, _) =>
+        {
+            var response = new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                RequestMessage = new HttpRequestMessage(HttpMethod.Post, "http://elsewhere.example"),
+                Content = new StreamContent(new FragmentedStream("null"u8.ToArray(), () => { disposed++; })),
+            };
+            response.Content.Headers.ContentType = new MediaTypeHeaderValue("application/json");
+            return Task.FromResult(response);
+        });
+        using var client = new TranscodingHttpClient(new Uri("http://localhost"), new HttpCallerOptions { Handler = handler });
+        var failure = await Assert.ThrowsAsync<FailureException>(() => { return client.Json(Json("null")); });
+        Assert.Equal((ushort)ProtocolCode.DestinationLost, failure.Code);
+        Assert.Equal(1, disposed);
+    }
+
+    [Fact]
     public async Task Calls_default_routes_with_protobuf_JSON_and_every_native_encoding_through_its_gateway()
     {
         await using var fixture = await Started();
@@ -622,6 +659,13 @@ public sealed class HttpCallerTests
             using var client = new TranscodingHttpClient(new Uri("http://localhost"), new HttpCallerOptions { Handler = handler });
             var failed = await Assert.ThrowsAsync<FailureException>(() => { return client.Json(Json("null")); });
             Assert.Equal((code, FailureOrigin.Peer, FailureScope.Protocol, $"the HTTP call answers {status}"), ((ProtocolCode)failed.Code, failed.Origin, failed.Scope, failed.Detail));
+        }
+    }
+
+    private sealed class Wrapper : DelegatingHandler
+    {
+        public Wrapper(HttpMessageHandler inner) : base(inner)
+        {
         }
     }
 
