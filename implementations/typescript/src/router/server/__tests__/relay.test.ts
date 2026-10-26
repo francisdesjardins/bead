@@ -3,6 +3,8 @@ import { createServer, type IncomingMessage } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { expect, test } from '@playwright/test';
 import { createHTTPTransportClient } from '../../../transport/client/http-transport-client';
+import { createMemoryTransportClient } from '../../../transport/client/memory-transport-client';
+import { createMemoryTransportServer } from '../../../transport/server/memory-transport-server';
 import type { TransportServerConnectionHandle } from '../../../transport/server/types';
 import { CancelError, ProgrammerError, TimeoutError } from '../../../transport/shared/errors';
 import {
@@ -215,6 +217,76 @@ const failuresOf = (answers: [RouterAnswer, IRequestHeader][]) => {
 
 // definition
 
+test('keeps the first response error when its detail-free fallback succeeds or fails', async () => {
+  for (const fallbackFails of [false, true]) {
+    const firstError = new Error('private response failure');
+    const fallbackError = new Error('private fallback failure');
+    const fallback = Promise.withResolvers<void>();
+    const responding = Promise.withResolvers<void>();
+    const attempts: {
+      answer: RouterAnswer;
+      target: { connectionHandle: Handle; header: IRequestHeader };
+    }[] = [];
+    const reports: Error[] = [];
+    const relay = createRelay({
+      failures: SERVER_FAILURES,
+      limits: LIMIT_DEFAULTS,
+      options: undefined,
+      report: (error) => {
+        reports.push(error);
+      },
+      request: () => {
+        throw new Error('no connection target');
+      },
+      respond: (answer, { connectionHandle, header }) => {
+        attempts.push({ answer, target: { connectionHandle, header } });
+
+        if (attempts.length === 1) {
+          return Promise.reject(firstError);
+        }
+
+        responding.resolve();
+
+        return fallback.promise;
+      },
+    });
+    const { asked, target } = createTarget();
+    const header = headerOf(1);
+
+    relay.register(target, { destinationId: 7 });
+
+    let hasEnded = false;
+    const handling = relay.handlerOf(7)?.(propsOf(header));
+    const ended = expect(
+      handling?.finally(() => {
+        hasEnded = true;
+      })
+    ).rejects.toBe(firstError);
+
+    await responding.promise;
+
+    expect(hasEnded).toBe(false);
+
+    if (fallbackFails) {
+      fallback.reject(fallbackError);
+    } else {
+      fallback.resolve();
+    }
+
+    await ended;
+
+    expect(asked).toHaveLength(1);
+    expect(attempts).toEqual([
+      { answer: { payload: Uint8Array.of(9) }, target: { connectionHandle: first, header } },
+      {
+        answer: { failure: SERVER_FAILURES.procedureFailed },
+        target: { connectionHandle: first, header },
+      },
+    ]);
+    expect(reports).toEqual([]);
+  }
+});
+
 test('refuses bearer credentials when a destination supplies no carriage metadata and still forwards none or OPAQUE', async () => {
   const { answers, own, relay, reports } = createTestRelay();
   const { asked, target } = createTarget();
@@ -367,6 +439,72 @@ test.describe('createRelay, credentials', () => {
   const jwtNaming = (aud: unknown) => {
     return { scheme: CredentialScheme.JWT, token: tokenNaming(aud) } as const;
   };
+
+  test('counts ELSEWHERE in leg B’s payload bound and forwards its carried credential at the boundary', async () => {
+    await using server = createMemoryTransportServer();
+    await using transport = createMemoryTransportClient({ server });
+    using relay = createRouterServer(server, {
+      relay: {
+        beforeRoute: () => {
+          return true;
+        },
+      },
+    });
+    using client = createRouterClient(transport);
+    const reports: Error[] = [];
+    const { asked, target } = createTarget({
+      chunkBytes: 1_024,
+      maximumEnvelopeBytes: 1_024,
+      maximumTransfers: 0,
+      windowBytes: 2_048,
+    });
+
+    relay.on('error', (error) => {
+      reports.push(error);
+    });
+    relay.registerDestination(
+      {
+        ...target,
+        transport: {
+          carries: (credential) => {
+            return credential === CARRIED;
+          },
+          isSecure: true,
+        },
+      },
+      { audience: 'bead-interop', destinationId: 7 }
+    );
+
+    await server.start();
+    await transport.connect({});
+
+    const request = {
+      options: {
+        credential: { carried: CARRIED, scheme: CredentialScheme.ELSEWHERE } as const,
+        destinationId: 7,
+        timeout: 5_000,
+      },
+      procedure: { procedureId: 1, procedureName: 'echo', serviceId: 2, serviceRevision: 3 },
+    };
+    const payload = new Uint8Array(1_008).fill(42);
+
+    await expect(client.request(new Uint8Array(1_009), request)).rejects.toMatchObject({
+      code: ProtocolCode.PAYLOAD_TOO_LARGE,
+      detail: 'a payload is 1008 bytes at most, not 1009',
+      origin: 'peer',
+    });
+    expect(asked).toEqual([]);
+
+    expect((await client.request(payload, request)).payload).toEqual(Uint8Array.of(9));
+
+    expect(asked).toHaveLength(1);
+    expect(asked[0]?.payload).toEqual(payload);
+    expect(asked[0]?.options.credential).toEqual({
+      carried: CARRIED,
+      scheme: CredentialScheme.ELSEWHERE,
+    });
+    expect(reports).toEqual([]);
+  });
 
   test('answers a call leg B cannot carry DESTINATION_UNREACHABLE, nothing tried: a JWT whose aud names not its destination’s audience, or to one of none; an ELSEWHERE to one of none, or over a leg B that carries none; either in the clear', () => {
     const plain: Handle = 'type=WS;ip=192.0.2.1;port=50003;ordinal=1';

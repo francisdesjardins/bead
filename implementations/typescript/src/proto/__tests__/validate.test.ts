@@ -160,6 +160,23 @@ test('compares byte strings at their exact boundaries and finds nonempty parts',
   }
 });
 
+test('orders string map keys by code points with each prefix before its extensions', () => {
+  const expected: [string, string][] = [
+    ['', 'empty'],
+    ['a', 'prefix'],
+    ['ab', 'ascii extension'],
+    ['a\uE000', 'BMP extension'],
+    ['a😀', 'astral extension'],
+    ['\uE000', 'BMP'],
+    ['😀', 'astral'],
+    ['😀a', 'astral prefix'],
+  ];
+
+  for (const entries of [expected, expected.toReversed()]) {
+    expect(entriesByKey(Object.fromEntries(entries), 'string')).toEqual(expected);
+  }
+});
+
 test('orders both boolean map keys with their values in either insertion order', () => {
   for (const map of [
     { true: 'yes', false: 'no' },

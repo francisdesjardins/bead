@@ -28,6 +28,56 @@ const receivingOf = (name: string, creditEnd = 0): IReceivingOf => {
 // definition
 
 test.describe('createAnsweringCalls', () => {
+  test('counts no ending for an absent call or a stale header on a replacement call', () => {
+    const calls = createAnsweringCalls<Handle>({ clock: createTestClock() });
+    const counted: string[] = [];
+    const series: IProcedureSeries = {
+      end: (ending, microseconds) => {
+        counted.push(`end ${String(ending)} ${String(microseconds)}`);
+      },
+      start: () => {
+        counted.push('start');
+      },
+    };
+    const first = headerOf(1);
+
+    calls.end({ connectionHandle: 'a', header: first }, CallEnding.RESULT);
+
+    expect(counted).toEqual([]);
+
+    const controller = calls.open({ connectionHandle: 'a', header: first }, series);
+
+    calls.end({ connectionHandle: 'b', header: first }, CallEnding.RESULT);
+    calls.end({ connectionHandle: 'a', header: { ...first } }, CallEnding.RESULT);
+
+    expect(counted).toEqual(['start']);
+    expect(calls.take({ callId: 1, connectionHandle: 'a' })).toBe(controller);
+
+    calls.end({ connectionHandle: 'a', header: first }, CallEnding.RESULT);
+
+    const replacement = headerOf(1);
+    const next = calls.open({ connectionHandle: 'a', header: replacement }, series);
+
+    calls.end({ connectionHandle: 'a', header: first }, CallEnding.RESULT);
+    calls.end({ connectionHandle: 'a', header: headerOf(3) }, CallEnding.ERROR);
+
+    expect(counted).toEqual(['start', `end ${String(CallEnding.CANCELLED)} 0`, 'start']);
+    expect(calls.controllerOf(replacement)).toBe(next);
+    expect(calls.countOn('a')).toBe(1);
+
+    calls.end({ connectionHandle: 'a', header: replacement }, CallEnding.RESULT);
+    calls.close({ callId: 1, connectionHandle: 'a' }, next);
+    calls.end({ connectionHandle: 'a', header: replacement }, CallEnding.ERROR);
+
+    expect(counted).toEqual([
+      'start',
+      `end ${String(CallEnding.CANCELLED)} 0`,
+      'start',
+      `end ${String(CallEnding.RESULT)} 0`,
+    ]);
+    expect(calls.countOn('a')).toBe(0);
+  });
+
   test('count a call opened with a series once: as its end says, else cancelled as it is taken, closed with its connection, an error as it is closed unanswered', async () => {
     const clock = createTestClock();
     const calls = createAnsweringCalls<Handle>({ clock });

@@ -125,6 +125,33 @@ test.afterEach(() => {
 // definition
 
 test.describe('announceToDevtools', () => {
+  test('keeps a client usable when its hook returns no withdrawal function', async () => {
+    for (const returned of [undefined, null, 7, 'no', {}]) {
+      const sources: IDevtoolsSource[] = [];
+
+      (globalThis as Record<symbol, unknown>)[DEVTOOLS_HOOK_KEY] = {
+        register: (source: IDevtoolsSource) => {
+          sources.push(source);
+
+          return returned;
+        },
+      };
+
+      const client = createClient({ transport: createEchoTransport() });
+
+      try {
+        expect(sources).toHaveLength(1);
+        expect(client.services.isDebugging).toBe(false);
+        await expect(client.services.getRequest(ECHO, { serializer })('hello')()).resolves.toBe(
+          'hello'
+        );
+      } finally {
+        await client[Symbol.asyncDispose]();
+        await client[Symbol.asyncDispose]();
+      }
+    }
+  });
+
   test('keys the hook by the package that owns it, in the global symbol registry', () => {
     expect(DEVTOOLS_HOOK_KEY).toBe(Symbol.for('@francisdesjardins/bead/devtools-hook'));
   });

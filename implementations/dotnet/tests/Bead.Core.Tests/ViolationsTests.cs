@@ -119,6 +119,18 @@ public sealed class ViolationsTests
 
     // definition
 
+    [Fact]
+    public void Keeps_a_full_violation_detail_closed_to_smaller_violations_after_the_first_refusal()
+    {
+        var small = new Violation { Bounds = BoundsOf("{}"), FieldPath = "a", Message = "", RuleId = "required" };
+        var large = small with { FieldPath = new string('a', 200) };
+        const string First = "{\"fieldPath\":\"a\",\"ruleId\":\"required\"}";
+
+        Assert.Equal(First + "\n{\"more\":0}", Violations.DetailOf(new Judged { Violations = [small] }, 80));
+        Assert.Equal(First + "\n{\"more\":1}", Violations.DetailOf(new Judged { Violations = [small, large] }, 80));
+        Assert.Equal(First + "\n{\"more\":2}", Violations.DetailOf(new Judged { Violations = [small, large, small] }, 80));
+    }
+
     /// <summary>The names of every entry of <c>details</c>.</summary>
     public static TheoryData<string> Details { get; } = new(Root.GetProperty("details").EnumerateArray().Select((entry) =>
     {

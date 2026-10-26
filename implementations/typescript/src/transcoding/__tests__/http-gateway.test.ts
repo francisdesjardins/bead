@@ -262,6 +262,49 @@ const rawAsEdges = (): readonly IHttpRouteInit[] => {
 
 // tests
 
+// transcoding 2.3
+test('hands each exchange’s client address and socket port to its transport after its proxy policy', async () => {
+  for (const { address, trustedProxies, unnamedProxies } of [
+    { address: '127.0.0.1', trustedProxies: [], unnamedProxies: 0 },
+    { address: '203.0.113.9', trustedProxies: ['127.0.0.1'], unnamedProxies: 0 },
+    { address: '203.0.113.9', trustedProxies: [], unnamedProxies: 1 },
+  ]) {
+    await using fixture = await startTranscoding({
+      createServer: (listener) => {
+        return createNodeServer((request, response) => {
+          const handed = Object.create(request, {
+            socket: { value: { remoteAddress: '127.0.0.1', remotePort: 43210 } },
+          }) as IHTTPRequestLike;
+
+          listener(handed, response);
+        });
+      },
+      trustedProxies,
+      unnamedProxies,
+    });
+    const peers: { address: string; port: number }[] = [];
+
+    fixture.memory.on('connection', () => {
+      for (const peer of fixture.memory.clients) {
+        peers.push({ address: peer.address, port: peer.port });
+      }
+    });
+
+    // * a forwarded port never replaces the exchange's socket port.
+    expect(
+      await send(fixture.port, {
+        headers: { 'x-forwarded-for': '203.0.113.9:54321' },
+        method: 'GET',
+        path: '/v1/books/2',
+      })
+    ).toMatchObject({ body: '{"name":"2","title":"A tale"}', status: 200 });
+    expect(peers).toEqual([{ address, port: 43210 }]);
+    await until(() => {
+      return fixture.memory.clients.length === 0;
+    });
+  }
+});
+
 test('draws one Bead connection per exchange, and closes it as its response ends', async () => {
   await using fixture = await startTranscoding();
   const opened: string[] = [];
@@ -866,6 +909,7 @@ test('answers 502 a text result that is no UTF-8, reported, none of its words in
   expect(reported).toHaveLength(1);
 });
 
+// transcoding 10.2
 test('words each refusal of its gates exactly, none of them what its request carried', async () => {
   const json = 'content-type: application/json';
   const book = '{"aString":"0123456789"}';
@@ -1040,6 +1084,7 @@ test('words each refusal of its gates exactly, none of them what its request car
 });
 
 // transcoding 7.7.6
+// transcoding 10.2
 test('words each refusal of its bounds exactly', async () => {
   const echo: Pick<IOwnCase, 'body' | 'lines'> = {
     body: '{}',
@@ -1720,6 +1765,7 @@ test('ends a stream whose notification its stock library refuses with 502 as its
   expect(reported).toHaveLength(1);
 });
 
+// transcoding 10.2
 test('reads a held body past its grace when its minimum rate is zero', async () => {
   const reading = Promise.withResolvers<void>();
   const clock = createTestClock();
@@ -2117,6 +2163,95 @@ test('settles every held write once its response drains', async () => {
   }
 });
 
+test('ignores a late write callback while the next stream write waits for its own completion', async () => {
+  const chunks: string[] = [];
+  const callbacks: ((error?: Error | null) => void)[] = [];
+  const written = Array.from({ length: 3 }, () => {
+    return Promise.withResolvers<void>();
+  });
+  let drain: (() => void) | undefined;
+  await using fixture = await startTranscoding({
+    window: 2,
+    heartbeat: Infinity,
+    createServer: (listener) => {
+      return createNodeServer((request, response) => {
+        const write = response.write.bind(response);
+
+        drain = () => {
+          response.emit('drain');
+        };
+        response.write = (
+          chunk: Uint8Array,
+          done?: BufferEncoding | ((error?: Error | null) => void)
+        ): boolean => {
+          const index = chunks.length;
+
+          chunks.push(new TextDecoder().decode(chunk));
+          if (typeof done === 'function') {
+            callbacks.push(done);
+          }
+          write(chunk, () => {
+            written[index]?.resolve();
+          });
+
+          return false;
+        };
+        listener(request, response);
+      });
+    },
+  });
+  const credited = Promise.withResolvers<void>();
+  fixture.server.router.on('debug', ({ header }) => {
+    if (header.kind === EnvelopeKind.CREDIT && header.creditEnd >= 4) {
+      credited.resolve();
+    }
+  });
+  const reported = reportedBy(fixture.gateway);
+  const socket = opened(
+    fixture.port,
+    octetsOf(fixture.port, {
+      body: '{}',
+      lines: [
+        'POST /api/Transcoding/watch HTTP/1.1',
+        'content-type: application/json',
+        'accept: text/event-stream',
+      ],
+    })
+  );
+
+  try {
+    await written[0]?.promise;
+    await Promise.all([fixture.watched(2), fixture.watched(1)]);
+    expect(callbacks).toHaveLength(1);
+    expect(chunks).toEqual(['event: result\nid: 1\ndata: {}\n\n']);
+    drain?.();
+    await written[1]?.promise;
+
+    expect(callbacks).toHaveLength(2);
+    callbacks[0]?.(new Error('the first write completed late'));
+    await new Promise(setImmediate);
+
+    expect(chunks).toEqual([
+      'event: result\nid: 1\ndata: {}\n\n',
+      'id: 2\ndata: {"remaining":2}\n\n',
+    ]);
+    callbacks[1]?.();
+    await written[2]?.promise;
+
+    expect(callbacks).toHaveLength(3);
+    callbacks[2]?.();
+    await credited.promise;
+    expect(chunks).toEqual([
+      'event: result\nid: 1\ndata: {}\n\n',
+      'id: 2\ndata: {"remaining":2}\n\n',
+      'id: 3\ndata: {"remaining":1}\n\n',
+    ]);
+    expect(reported).toEqual([]);
+  } finally {
+    socket.destroy();
+  }
+});
+
 test('releases a stream closed while its response waits for drainage', async () => {
   const waiting = Promise.withResolvers<void>();
   const released = Promise.withResolvers<void>();
@@ -2204,6 +2339,7 @@ test('writes a comment on a quiet stream each heartbeat on its clock, and drops 
   expect(reported).toEqual(['the response is dropped: maximumUnsentBytes 1 bytes']);
 });
 
+// transcoding 10.2
 test('paces every response body and reports its send bound', async () => {
   for (const kind of ['answer', 'problem', 'document', 'event']) {
     const closed = Promise.withResolvers<void>();
@@ -2344,6 +2480,7 @@ test('counts pending bytes with the write at the maximumUnsentBytes edge', async
   }
 });
 
+// transcoding 10.2
 test('bounds every response body by maximumUnsentBytes before writing', async () => {
   for (const kind of ['answer', 'problem', 'document', 'event']) {
     await using fixture = await startTranscoding({ maximumUnsentBytes: 1, heartbeat: Infinity });
@@ -2377,6 +2514,7 @@ test('bounds every response body by maximumUnsentBytes before writing', async ()
   }
 });
 
+// transcoding 10.2
 test('bounds an accepted slice until its pending bytes are flushed', async () => {
   const closed = Promise.withResolvers<void>();
   const sizes: number[] = [];
@@ -2418,6 +2556,43 @@ test('bounds an accepted slice until its pending bytes are flushed', async () =>
   expect(reported).toEqual([
     'the response is dropped: minimumSendBytesPerSecond 1000000 after sendGracePeriod 1ms',
   ]);
+});
+
+test('finishes a document whose write callback completes inline despite its false return', async () => {
+  const body = 'a'.repeat(64 * 1024 + 7);
+
+  for (const error of [undefined, null]) {
+    const sizes: number[] = [];
+    await using fixture = await startTranscoding({
+      document: body,
+      createServer: (listener) => {
+        return createNodeServer((request, response) => {
+          const write = response.write.bind(response);
+
+          response.write = (
+            chunk: Uint8Array,
+            done?: BufferEncoding | ((error?: Error | null) => void)
+          ): boolean => {
+            sizes.push(chunk.length);
+            write(chunk);
+            if (typeof done === 'function') {
+              done(error);
+            }
+
+            return false;
+          };
+          listener(request, response);
+        });
+      },
+    });
+    const reported = reportedBy(fixture.gateway);
+    const received = await send(fixture.port, { method: 'GET', path: '/openapi.json' });
+
+    expect(received.status).toBe(200);
+    expect(received.body).toBe(body);
+    expect(sizes).toEqual([65536, 7]);
+    expect(reported).toEqual([]);
+  }
 });
 
 test('writes whole answers and documents in slices of at most 64 KiB', async () => {

@@ -305,6 +305,25 @@ public sealed class HostsAndOriginsTests
 
     // definition
 
+    // spec 15.1
+    [Fact]
+    public void Trims_only_spaces_and_tabs_around_a_carried_credential_and_keeps_its_scheme_and_inner_whitespace()
+    {
+        foreach (var (lines, carried) in new (string[] Lines, string? Carried)[]
+        {
+            ([], null),
+            ([""], null),
+            ([" \t \t"], null),
+            (["Bearer token"], "Bearer token"),
+            ([" \tBearer token\t "], "Bearer token"),
+            (["\tBasic a \t b\t"], "Basic a \t b"),
+            (["\u00a0Bearer token\u00a0"], "\u00a0Bearer token\u00a0"),
+        })
+        {
+            Assert.Equal(carried, HostsAndOrigins.CredentialOf(lines));
+        }
+    }
+
     [Fact]
     public void Takes_a_Host_HTTP_takes_one_line_none_in_a_request_that_needs_none_its_value_uri_host_and_an_optional_port_without_the_whitespace_around_it_and_none_of_a_percent_encoded_octet_star_plus_comma_semicolon_or_equals_in_a_name_an_IPvFuture_literal_or_a_colon_with_no_port()
     {

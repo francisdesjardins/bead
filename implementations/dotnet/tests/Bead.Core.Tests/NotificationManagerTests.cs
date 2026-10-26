@@ -27,6 +27,46 @@ public sealed class NotificationManagerTests
     // definition
 
     [Fact]
+    public void Forgets_a_removed_subscription_s_metrics_series_and_keeps_another_connection_s_series()
+    {
+        var registry = new MetricsRegistry();
+        var metrics = registry.Give(RouterSide.Server);
+        var procedure = new Procedure { ProcedureId = 1, ProcedureName = "news", ServiceId = 10, ServiceRevision = 1 };
+        var one = metrics.DeclareResolver(procedure, true).Notifying;
+        var other = metrics.DeclareResolver(procedure with { ProcedureId = 2, ProcedureName = "other" }, true).Notifying;
+        var notifications = new NotificationManager(PacingLimits.Default)
+        {
+            SeriesOf = (address) => { return address.ProcedureId == 1 ? one : other; },
+        };
+        var before = registry.Exposition();
+
+        notifications.Register(procedure.Address, CallOf(13, First));
+        notifications.Register(ProcedureOf(10, 2), CallOf(13, Second));
+
+        Assert.NotNull(one);
+        Assert.NotNull(other);
+        Assert.Same(one, notifications.TargetOf(13, First).Series);
+        Assert.Same(other, notifications.TargetOf(13, Second).Series);
+        Assert.Null(notifications.TargetOf(99, First).Series);
+        Assert.Null(notifications.TargetOf(13, Unknown).Series);
+
+        Assert.Equal(13u, notifications.Unregister(13, First));
+        Assert.Null(notifications.TargetOf(13, First).Series);
+        Assert.Same(other, notifications.TargetOf(13, Second).Series);
+        notifications.Clean(Second);
+        Assert.Null(notifications.TargetOf(13, Second).Series);
+
+        // * the same place may subscribe without counting; a removed series never comes back.
+        notifications.SeriesOf = null;
+        notifications.Register(procedure.Address, CallOf(13, First));
+        Assert.True(notifications.Has(13, First));
+        Assert.Null(notifications.TargetOf(13, First).Series);
+        Assert.Equal(13u, notifications.Unregister(13, First));
+        Assert.Empty(notifications.Subscriptions());
+        Assert.Equal(before, registry.Exposition());
+    }
+
+    [Fact]
     public void Holds_one_subscription_a_procedure_for_each_session_of_a_connection_its_connection_s_and_each_credential_s_by_its_identifier_octet_for_octet()
     {
         var notifications = new NotificationManager(PacingLimits.Default);

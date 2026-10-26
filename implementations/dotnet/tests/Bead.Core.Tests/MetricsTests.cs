@@ -9,6 +9,7 @@ namespace Bead.Tests;
 /// service's server given a registry, the series each of its steps moved. The TypeScript side plays
 /// the same file.
 /// </summary>
+// debugging 1.1
 public sealed class MetricsTests
 {
     // constants

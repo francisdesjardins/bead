@@ -43,6 +43,47 @@ const answeredOf = (
 // definition
 
 test.describe('createMetricsRegistry', () => {
+  test('shares notification counts across repeated declarations and keeps another procedure separate', () => {
+    const registry = createMetricsRegistry();
+    const procedure = { ...echo, serviceId: 1, serviceRevision: 1 };
+    const first = registry
+      .attach('server')
+      .declareResolver(procedure, { notifies: true }).notifying;
+    const second = registry
+      .attach('server')
+      .declareResolver({ ...procedure, serviceRevision: 2 }, { notifies: true }).notifying;
+    const other = registry
+      .attach('server')
+      .declareResolver(
+        { ...procedure, procedureId: 2, procedureName: 'other' },
+        { notifies: true }
+      ).notifying;
+
+    expect(first).toBeDefined();
+    expect(second).toBe(first);
+    expect(other).toBeDefined();
+    expect(other).not.toBe(first);
+
+    first?.sent();
+    second?.sent();
+    second?.failed();
+    other?.failed();
+
+    expect(
+      registry
+        .exposition()
+        .text.split('\n')
+        .filter((line) => {
+          return line.startsWith('bead_notifications_sent_total{');
+        })
+    ).toEqual([
+      'bead_notifications_sent_total{service="1",procedure="echo",outcome="sent"} 2',
+      'bead_notifications_sent_total{service="1",procedure="echo",outcome="failed"} 1',
+      'bead_notifications_sent_total{service="1",procedure="other",outcome="sent"} 0',
+      'bead_notifications_sent_total{service="1",procedure="other",outcome="failed"} 1',
+    ]);
+  });
+
   test('writes a lone surrogate in a name as U+FFFD, as spec 7.4 writes a detail', () => {
     const registry = createMetricsRegistry();
     const client = registry.attach('client');
@@ -277,6 +318,7 @@ test.describe('createMetricsRegistry', () => {
 });
 
 test.describe('microsecondsOf', () => {
+  // debugging 11.4
   test('holds a duration in whole microseconds, its fraction dropped, a reading’s binary fraction losing none', () => {
     expect(
       [0, 0.03, 0.0309, 0.3 - 0.2, 1, 1_000.0004, 2.5].map((milliseconds) => {

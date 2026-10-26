@@ -174,6 +174,48 @@ public sealed class CredentialResolverTests
     // definition
 
     [Fact]
+    public async Task Refuses_a_token_without_a_string_issuer_without_asking_for_keys_and_accepts_a_named_issuer_afterward()
+    {
+        var clock = new FakeTimeProvider(Start);
+        var keySet = new RecordingKeySet(SetIssuer);
+        var resolver = ResolverOf(new Credentials { Audience = Audience, KeySet = keySet.KeySet }, clock);
+
+        foreach (var issuer in new object?[] { null, null, 7, Array.Empty<object>(), new Dictionary<string, object>() }.Select((value, index) =>
+        {
+            return (Value: value, IsAbsent: index == 0);
+        }))
+        {
+            var claims = ClaimsOf(SetIssuer);
+
+            if (issuer.IsAbsent)
+            {
+                claims.Remove("iss");
+            }
+            else
+            {
+                claims["iss"] = issuer.Value!;
+            }
+
+            var token = Credential.Jwt(SignedOf((Second, "set-1"), claims));
+            var resolution = await resolver.ResolutionOf(RequestOf(token), Cancelled);
+
+            Assert.Null(resolution.Session);
+            Assert.Equal("kid", resolution.Reason);
+            Assert.Empty(keySet.Asks);
+        }
+
+        var next = ResolvedOf((resolver, Credential.Jwt(TokenOf((Second, "set-1"), SetIssuer))));
+
+        Assert.Single(keySet.Asks);
+        Assert.Equal(SetIssuer, keySet.Asks[0].Issuer);
+        keySet.Asks[0].Settle.SetResult([SetKeyOf((Second, "set-1"))]);
+        var session = await next;
+
+        Assert.Equal((SetIssuer, "grace"), (session!.Identifier!.Issuer, session.Identifier.Sub));
+        Assert.Single(keySet.Asks);
+    }
+
+    [Fact]
     public async Task Fails_every_waiter_on_a_malformed_key_set_answer_and_accepts_a_valid_answer_at_the_next_deadline()
     {
         IReadOnlyList<JwtSetKey>[] answers =
