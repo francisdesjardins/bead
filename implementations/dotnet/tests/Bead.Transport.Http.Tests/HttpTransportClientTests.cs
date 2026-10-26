@@ -419,6 +419,9 @@ public sealed class HttpTransportClientTests
 
         public Exception? Cut { get; init; }
 
+        // a supplied answer can fail while its content headers compute their length
+        public Exception? LengthFailure { get; init; }
+
         // settled once its body is read at all
         public TaskCompletionSource? Read { get; init; }
 
@@ -481,6 +484,10 @@ public sealed class HttpTransportClientTests
 
         protected override bool TryComputeLength(out long length)
         {
+            if (answer.LengthFailure is { } failure)
+            {
+                throw failure;
+            }
             length = 0;
 
             return false;
@@ -3630,31 +3637,98 @@ public sealed class HttpTransportClientTests
     }
 
     [Fact]
-    public async Task Propagates_an_unexpected_send_failure_without_leaving_the_send_pending()
+    public async Task Settles_a_send_and_loses_its_connection_when_a_supplied_answer_throws_as_it_is_read()
     {
+        var reason = new InvalidOperationException("answer read failed");
         await using var faked = await ConnectFake(NotListening);
-        var failure = new InvalidOperationException("the handler cannot carry the request");
-        var told = EndOf(faked.Client);
+        var told = new List<string>();
+        var errors = new List<Exception>();
+        faked.Client.Error += (error) => { errors.Add(error); told.Add("error"); };
+        faked.Client.Close += (_, _) => { told.Add("close"); };
         var sending = faked.Client.Send(new TransportMessage(EnvelopeOf(EnvelopeKind.Request, (1, 0)), false));
-
-        (await faked.Fetch.CallOf(1)).Fail(failure);
-
-        Assert.Same(failure, await Assert.ThrowsAsync<InvalidOperationException>(() =>
+        (await faked.Fetch.CallOf(1)).Answer(new Answer
         {
-            return sending.WaitAsync(Patience, Cancelled);
-        }));
-        Assert.Equal(ReadyState.Open, faked.Client.ReadyState);
-        Assert.Empty(told);
-        Assert.Empty(faked.Heard);
-
-        var next = faked.Client.Send(new TransportMessage(EnvelopeOf(EnvelopeKind.Request, (2, 0)), false));
-
-        (await faked.Fetch.CallOf(2)).Answer(new Answer { Status = 204 });
-        await next.WaitAsync(Patience, Cancelled);
-
-        Assert.Equal(ReadyState.Open, faked.Client.ReadyState);
-        Assert.Empty(told);
+            Status = 200,
+            Headers = Bead,
+            LengthFailure = reason,
+        });
+        await sending.WaitAsync(Patience, Cancelled);
+        Assert.Equal((false, false), await faked.Closed().WaitAsync(Patience, Cancelled));
+        Assert.Equal(ReadyState.Closed, faked.Client.ReadyState);
+        Assert.Equal(["error", "close"], told);
+        var failure = Assert.Single(errors);
+        Assert.Equal("the HTTP executor failed: answer read failed", failure.Message);
+        Assert.Same(reason, failure.InnerException);
         Assert.Equal(3, faked.Fetch.Count);
+    }
+
+    [Fact]
+    public async Task Loses_an_exchange_whose_executor_fails_and_reports_it_once_before_closing()
+    {
+        foreach (var path in new[] { "send", "answer", "listen", "listen-body", "close" })
+        {
+            foreach (var reason in new Exception[] { new InvalidOperationException("executor refused"), new OperationCanceledException("executor refused") })
+            {
+                var listening = path.StartsWith("listen", StringComparison.Ordinal);
+                await using var faked = await ConnectFake(new HttpTransportClientOptions { IsListening = listening }, new Fetch { IsDeleteHeld = path == "close" });
+                var client = faked.Client;
+                var told = new List<string>();
+                var errors = new List<Exception>();
+                client.Error += (error) => { errors.Add(error); told.Add("error"); };
+                client.Close += (_, _) => { told.Add("close"); };
+                var call = path is "listen" or "listen-body" ? await faked.Fetch.CallOf(1) : null;
+                if (path == "close")
+                {
+                    var closing = client.CloseConnection();
+                    (await faked.Fetch.CallOf(1)).Fail(reason);
+                    await closing.WaitAsync(Patience, Cancelled);
+                }
+                else if (path == "listen") { call!.Fail(reason); }
+                else if (path == "listen-body")
+                {
+                    call!.Answer(new Answer { Status = 200, Headers = new Dictionary<string, string> { ["content-type"] = HttpTransport.BatchMediaType, [HttpTransport.SequenceHeader] = "1" }, Pieces = [], Cut = reason });
+                }
+                else
+                {
+                    var sending = client.Send(new TransportMessage(EnvelopeOf(EnvelopeKind.Request, (1, 0)), false));
+                    call = await faked.Fetch.CallOf(1);
+                    if (path == "send") { call.Fail(reason); }
+                    else { call.Answer(new Answer { Status = 200, Headers = new Dictionary<string, string> { ["content-type"] = HttpTransport.MediaType }, Pieces = [], Cut = reason }); }
+                    await sending.WaitAsync(Patience, Cancelled);
+                }
+                Assert.Equal((path == "close", false), await faked.Closed().WaitAsync(Patience, Cancelled));
+                Assert.Equal(ReadyState.Closed, client.ReadyState);
+                Assert.Equal(["error", "close"], told);
+                var failure = Assert.Single(errors);
+                Assert.Equal("the HTTP executor failed: executor refused", failure.Message);
+                Assert.Same(reason, failure.InnerException);
+                Assert.Equal(path == "close" ? new[] { HttpMethod.Post, HttpMethod.Delete } : new[] { HttpMethod.Post, listening ? HttpMethod.Get : HttpMethod.Post, HttpMethod.Delete }, faked.Fetch.Calls.Select((entry) => { return entry.Method; }));
+            }
+        }
+    }
+
+    [Fact]
+    public async Task Counts_a_synchronous_executor_throw_as_handed_over_and_observes_a_failed_release()
+    {
+        var reason = new InvalidOperationException("executor refused");
+        var calls = 0;
+        using var fetch = new Fetch((_) =>
+        {
+            calls++;
+            if (calls == 1) { return DrawnOf(false); }
+            throw reason;
+        })
+        { IsDeleteHeld = true };
+        await using var faked = await ConnectFake(NotListening, fetch);
+        var errors = new List<Exception>();
+        faked.Client.Error += errors.Add;
+        await faked.Client.Send(new TransportMessage(EnvelopeOf(EnvelopeKind.Request, (1, 0)), false)).WaitAsync(Patience, Cancelled);
+        Assert.Equal((false, false), await faked.Closed().WaitAsync(Patience, Cancelled));
+        Assert.Equal(ReadyState.Closed, faked.Client.ReadyState);
+        Assert.Equal(3, calls);
+        var failure = Assert.Single(errors);
+        Assert.Equal("the HTTP executor failed: executor refused", failure.Message);
+        Assert.Same(reason, failure.InnerException);
     }
 
     [Fact]

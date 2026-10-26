@@ -1954,6 +1954,58 @@ public sealed class HttpGatewayTests
     }
 
     [Fact]
+    public async Task Settles_every_held_write_once_its_response_drains()
+    {
+        await using var service = await TranscodingService.Start();
+        await using var gateway = new HttpGateway(Exchanges.OptionsOf(service.Memory, null) with { Window = 2, Heartbeat = Timeout.InfiniteTimeSpan });
+        using var cancelling = CancellationTokenSource.CreateLinkedTokenSource(Cancelled);
+        using var body = new HeldResponseBody();
+        var context = new DefaultHttpContext();
+        var credited = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        service.Server.Router.Debug += (_, envelope) =>
+        {
+            if (envelope.Header is CreditHeader { Paced: true, CreditEnd: >= 4 })
+            {
+                credited.TrySetResult();
+            }
+        };
+        var reported = ReportedBy(gateway);
+
+        context.Request.Method = "POST";
+        context.Request.Host = new HostString("127.0.0.1");
+        context.Request.ContentType = "application/json";
+        context.Request.Headers.Accept = "text/event-stream";
+        context.Request.ContentLength = 2;
+        context.Request.Body = new MemoryStream("{}"u8.ToArray());
+        context.RequestAborted = cancelling.Token;
+        context.Features.Get<IHttpRequestFeature>()!.RawTarget = "/api/Transcoding/watch";
+        context.Response.Body = body;
+        var serving = gateway.Answer(context);
+
+        try
+        {
+            await body.Writing.Task.WaitAsync(Patience, Cancelled);
+            var notifying = Task.WhenAll(service.Watched(2), service.Watched(1));
+            await notifying.WaitAsync(Patience, Cancelled);
+
+            Assert.Equal(1, body.Writes);
+            body.Released.TrySetResult();
+            await notifying.WaitAsync(Patience, Cancelled);
+            await credited.Task.WaitAsync(Patience, Cancelled);
+
+            Assert.Equal("event: result\nid: 1\ndata: {}\n\nid: 2\ndata: {\"remaining\":2}\n\nid: 3\ndata: {\"remaining\":1}\n\n", Encoding.UTF8.GetString(body.ToArray()));
+            Assert.Equal(3, body.Writes);
+            Assert.Empty(reported);
+        }
+        finally
+        {
+            body.Released.TrySetResult();
+            await cancelling.CancelAsync();
+            await serving.WaitAsync(Patience, Cancelled);
+        }
+    }
+
+    [Fact]
     public async Task Releases_a_stream_closed_while_its_response_waits_for_drainage()
     {
         await using var service = await TranscodingService.Start();
@@ -2004,48 +2056,235 @@ public sealed class HttpGatewayTests
     }
 
     [Fact]
-    public async Task Aborts_a_unary_response_whose_held_write_passes_its_send_deadline()
+    public async Task Paces_every_response_body_and_reports_its_send_bound()
     {
-        await using var service = await TranscodingService.Start();
-        await using var gateway = new HttpGateway(Exchanges.OptionsOf(service.Memory, null) with
+        foreach (var kind in new[] { "answer", "problem", "document", "event" })
         {
-            MinimumSendBytesPerSecond = 1_000_000,
-            SendGracePeriod = TimeSpan.FromMilliseconds(1),
-        });
-        using var cancelling = CancellationTokenSource.CreateLinkedTokenSource(Cancelled);
-        using var body = new HeldResponseBody();
-        var lifetime = new DeadlineLifetime(cancelling);
-        var context = new DefaultHttpContext();
-        var reported = ReportedBy(gateway);
+            await using var service = await TranscodingService.Start();
+            await using var gateway = new HttpGateway(Exchanges.OptionsOf(service.Memory, null) with
+            {
+                Heartbeat = Timeout.InfiniteTimeSpan,
+                MinimumSendBytesPerSecond = 1_000_000,
+                SendGracePeriod = TimeSpan.FromMilliseconds(1),
+                MaximumExchanges = 1,
+                MaximumConnections = 1,
+            });
+            using var cancelling = CancellationTokenSource.CreateLinkedTokenSource(Cancelled);
+            using var body = new HeldResponseBody();
+            var lifetime = new DeadlineLifetime(cancelling);
+            var context = PaceContext(kind, cancelling.Token);
+            context.Features.Set<IHttpRequestLifetimeFeature>(lifetime);
+            context.Response.Body = body;
+            var reported = ReportedBy(gateway);
+            var serving = gateway.Answer(context);
+            try
+            {
+                // * no release competes with the deadline: its abort ends the held write.
+                await body.Writing.Task.WaitAsync(Patience, Cancelled);
+                Assert.Equal(cancelling.Token, await body.Aborted.Task.WaitAsync(Patience, Cancelled));
+                await serving.WaitAsync(Patience, Cancelled);
+                await Until(() => { return service.Memory.ConnectionHandles.Count == 0; });
+                await service.Watched(2);
+                Assert.Equal(1, lifetime.Aborts);
+                Assert.Equal(1, body.Writes);
+                Assert.Equal(kind == "problem" ? 404 : 200, context.Response.StatusCode);
+                Assert.Empty(body.ToArray());
+                using var probeBody = new SliceBody();
+                using var probeCancellation = CancellationTokenSource.CreateLinkedTokenSource(Cancelled);
+                var probe = PaceContext(kind == "event" ? "event" : "answer", probeCancellation.Token);
+                probe.Response.Body = probeBody;
+                var probing = gateway.Answer(probe);
+                await probeBody.FirstWritten.Task.WaitAsync(Patience, Cancelled);
+                Assert.Equal(200, probe.Response.StatusCode);
+                if (kind == "event") { await probeCancellation.CancelAsync(); }
+                await probing.WaitAsync(Patience, Cancelled);
+                await Until(() => { return service.Memory.ConnectionHandles.Count == 0; });
+                Assert.Equal(["the response is dropped: minimumSendBytesPerSecond 1000000 after sendGracePeriod 1ms"], reported);
+            }
+            finally { body.Released.TrySetResult(); await cancelling.CancelAsync(); await serving.WaitAsync(Patience, Cancelled); }
+        }
+    }
 
-        context.Features.Set<IHttpRequestLifetimeFeature>(lifetime);
-        context.Request.Method = "POST";
-        context.Request.Host = new HostString("127.0.0.1");
-        context.Request.ContentType = "application/json";
-        context.Request.ContentLength = 2;
-        context.Request.Body = new MemoryStream("{}"u8.ToArray());
-        context.Features.Get<IHttpRequestFeature>()!.RawTarget = "/api/Transcoding/echo";
-        context.Response.Body = body;
-        var serving = gateway.Answer(context);
-
-        try
+    [Fact]
+    public async Task Counts_pending_bytes_with_the_write_at_the_maximumUnsentBytes_edge()
+    {
+        foreach (var bound in new[] { 5, 6 })
         {
-            // * the write has no release: its pace aborts it, with no competing completion.
-            await body.Writing.Task.WaitAsync(Patience, Cancelled);
-            Assert.Equal(cancelling.Token, await body.Aborted.Task.WaitAsync(Patience, Cancelled));
-            await serving.WaitAsync(Patience, Cancelled);
+            await using var service = await TranscodingService.Start();
+            await using var gateway = new HttpGateway(Exchanges.OptionsOf(service.Memory, null) with { Document = "{}"u8.ToArray(), MaximumUnsentBytes = bound });
+            using var cancelling = CancellationTokenSource.CreateLinkedTokenSource(Cancelled);
+            using var body = new MemoryStream();
+            var context = PaceContext("document", cancelling.Token);
+            var lifetime = new DeadlineLifetime(cancelling);
+            context.Features.Set<IHttpRequestLifetimeFeature>(lifetime);
+            context.Response.Body = body;
+            // four bytes held by the host before this write's two bytes are handed to it
+            context.Response.BodyWriter.GetMemory(4).Span[..4].Fill((byte)'h');
+            context.Response.BodyWriter.Advance(4);
+            Assert.Equal(4, context.Response.BodyWriter.UnflushedBytes);
+            var reported = ReportedBy(gateway);
+            await gateway.Answer(context).WaitAsync(Patience, Cancelled);
+            if (bound == 5)
+            {
+                Assert.Equal(1, lifetime.Aborts);
+                Assert.Empty(body.ToArray());
+                Assert.Equal(["the response is dropped: maximumUnsentBytes 5 bytes"], reported);
+            }
+            else
+            {
+                Assert.Equal(0, lifetime.Aborts);
+                // the stream adapter also flushes its four buffered bytes when the host completes
+                Assert.Equal("{}hhhh", Encoding.UTF8.GetString(body.ToArray()));
+                Assert.Empty(reported);
+            }
+        }
+    }
+
+    [Fact]
+    public async Task Bounds_every_response_body_by_maximumUnsentBytes_before_writing()
+    {
+        foreach (var kind in new[] { "answer", "problem", "document", "event" })
+        {
+            await using var service = await TranscodingService.Start();
+            await using var gateway = new HttpGateway(Exchanges.OptionsOf(service.Memory, null) with { MaximumUnsentBytes = 1, Heartbeat = Timeout.InfiniteTimeSpan });
+            using var cancelling = CancellationTokenSource.CreateLinkedTokenSource(Cancelled);
+            using var body = new MemoryStream();
+            var lifetime = new DeadlineLifetime(cancelling);
+            var context = PaceContext(kind, cancelling.Token);
+            context.Features.Set<IHttpRequestLifetimeFeature>(lifetime);
+            context.Response.Body = body;
+            var reported = ReportedBy(gateway);
+            await gateway.Answer(context).WaitAsync(Patience, Cancelled);
             await Until(() => { return service.Memory.ConnectionHandles.Count == 0; });
-
+            await service.Watched(2);
             Assert.Equal(1, lifetime.Aborts);
-            Assert.Equal(1, body.Writes);
+            Assert.Equal(kind == "problem" ? 404 : 200, context.Response.StatusCode);
             Assert.Empty(body.ToArray());
+            Assert.Equal(["the response is dropped: maximumUnsentBytes 1 bytes"], reported);
+        }
+    }
+
+    [Fact]
+    public async Task Writes_whole_answers_and_documents_in_slices_of_at_most_64_KiB()
+    {
+        var bytes = Enumerable.Repeat((byte)'a', 3 * 64 * 1024 + 7).ToArray();
+        foreach (var kind in new[] { "answer", "document" })
+        {
+            await using var service = await TranscodingService.Start();
+            await using var gateway = new HttpGateway(Exchanges.OptionsOf(service.Memory, null) with { Document = bytes });
+            var context = PaceContext(kind, Cancelled);
+            using var body = new SliceBody();
+            using var request = new MemoryStream(bytes);
+            if (kind == "answer")
+            {
+                context.Features.Get<IHttpRequestFeature>()!.RawTarget = "/api/Transcoding/raw";
+                context.Request.ContentType = "application/octet-stream";
+                context.Request.ContentLength = bytes.Length;
+                context.Request.Body = request;
+            }
+            context.Response.Body = body;
+            var reported = ReportedBy(gateway);
+            await gateway.Answer(context).WaitAsync(Patience, Cancelled);
+            Assert.Equal(200, context.Response.StatusCode);
+            Assert.Equal(bytes, body.ToArray());
+            Assert.Equal([65536, 65536, 65536, 7], body.Sizes);
             Assert.Empty(reported);
         }
-        finally
+    }
+
+    [Fact]
+    public async Task Bounds_an_accepted_slice_until_its_pending_bytes_are_flushed()
+    {
+        var bytes = Enumerable.Repeat((byte)'a', 3 * 65536 + 7).ToArray();
+        await using var service = await TranscodingService.Start();
+        await using var gateway = new HttpGateway(Exchanges.OptionsOf(service.Memory, null) with { MinimumSendBytesPerSecond = 1_000_000, SendGracePeriod = TimeSpan.FromMilliseconds(1) });
+        using var cancelling = CancellationTokenSource.CreateLinkedTokenSource(Cancelled);
+        var lifetime = new DeadlineLifetime(cancelling);
+        var context = PaceContext("answer", cancelling.Token);
+        context.Features.Set<IHttpRequestLifetimeFeature>(lifetime);
+        context.Features.Get<IHttpRequestFeature>()!.RawTarget = "/api/Transcoding/raw";
+        context.Request.ContentType = "application/octet-stream";
+        context.Request.ContentLength = bytes.Length;
+        context.Request.Body = new MemoryStream(bytes);
+        using var body = new HeldFlushBody();
+        context.Response.Body = body;
+        var reported = ReportedBy(gateway);
+        var serving = gateway.Answer(context);
+        await body.Flushing.Task.WaitAsync(Patience, Cancelled);
+        await serving.WaitAsync(Patience, Cancelled);
+        await Until(() => { return service.Memory.ConnectionHandles.Count == 0; });
+        Assert.Equal(1, lifetime.Aborts);
+        Assert.Equal([65536], body.Sizes);
+        Assert.Equal(65536, body.Length);
+        Assert.Equal(["the response is dropped: minimumSendBytesPerSecond 1000000 after sendGracePeriod 1ms"], reported);
+    }
+
+    private sealed class HeldFlushBody : MemoryStream
+    {
+        public List<int> Sizes { get; } = [];
+        public TaskCompletionSource Flushing { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public override ValueTask WriteAsync(ReadOnlyMemory<byte> buffer, CancellationToken cancellationToken = default)
         {
-            body.Released.TrySetResult();
-            await cancelling.CancelAsync();
-            await serving.WaitAsync(Patience, Cancelled);
+            Sizes.Add(buffer.Length);
+            return base.WriteAsync(buffer, cancellationToken);
+        }
+        public override async Task FlushAsync(CancellationToken cancellationToken)
+        {
+            Flushing.TrySetResult();
+            var pending = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            await pending.Task.WaitAsync(cancellationToken);
+        }
+    }
+
+    [Fact]
+    public async Task Reports_each_drop_when_a_host_reuses_its_context()
+    {
+        await using var service = await TranscodingService.Start();
+        await using var gateway = new HttpGateway(Exchanges.OptionsOf(service.Memory, null) with { MaximumUnsentBytes = 1 });
+        var context = PaceContext("problem", Cancelled);
+        var reported = ReportedBy(gateway);
+        for (var index = 0; index < 2; index++)
+        {
+            using var cancelling = CancellationTokenSource.CreateLinkedTokenSource(Cancelled);
+            using var body = new MemoryStream();
+            var lifetime = new DeadlineLifetime(cancelling);
+            context.Features.Set<IHttpRequestLifetimeFeature>(lifetime);
+            context.Response.Body = body;
+            context.Response.Headers.Clear();
+            await gateway.Answer(context).WaitAsync(Patience, Cancelled);
+            Assert.Equal(1, lifetime.Aborts);
+            Assert.Empty(body.ToArray());
+        }
+        Assert.Equal(Enumerable.Repeat("the response is dropped: maximumUnsentBytes 1 bytes", 2), reported);
+    }
+
+    private static DefaultHttpContext PaceContext(string kind, CancellationToken token)
+    {
+        var hasBody = kind is "answer" or "event";
+        var context = new DefaultHttpContext();
+        context.Request.Method = hasBody ? "POST" : "GET";
+        context.Request.Host = new HostString("127.0.0.1");
+        if (hasBody)
+        {
+            context.Request.ContentType = "application/json";
+            context.Request.ContentLength = 2;
+            context.Request.Body = new MemoryStream("{}"u8.ToArray());
+        }
+        if (kind == "event") { context.Request.Headers.Accept = "text/event-stream"; }
+        context.RequestAborted = token;
+        context.Features.Get<IHttpRequestFeature>()!.RawTarget = kind switch { "problem" => "/missing", "document" => "/openapi.json", "event" => "/api/Transcoding/watch", _ => "/api/Transcoding/echo" };
+        return context;
+    }
+
+    private sealed class SliceBody : MemoryStream
+    {
+        public List<int> Sizes { get; } = [];
+        public TaskCompletionSource FirstWritten { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public override ValueTask WriteAsync(ReadOnlyMemory<byte> buffer, CancellationToken cancellationToken = default)
+        {
+            Sizes.Add(buffer.Length);
+            FirstWritten.TrySetResult();
+            return base.WriteAsync(buffer, cancellationToken);
         }
     }
 
@@ -2144,11 +2383,13 @@ public sealed class HttpGatewayTests
             return options with { MaximumUnsentBytes = 1 };
         });
 
+        var reported = ReportedBy(bounded.Gateway);
         try
         {
             var dropped = await Received(bounded.Port, OctetsOf(bounded.Port, new OwnCase(["POST /api/Transcoding/watch HTTP/1.1", "content-type: application/json", "accept: text/event-stream"], 0, "") { Body = "{}" }));
 
             Assert.Empty(dropped);
+            Assert.Equal(["the response is dropped: maximumUnsentBytes 1 bytes"], reported);
         }
         finally
         {

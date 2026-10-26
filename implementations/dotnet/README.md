@@ -128,6 +128,11 @@ It listens on its own port, or answers in the application's own Kestrel pipeline
 comes from a proxy in front. It serves the document at `/openapi.json`, byte for byte, with its
 `etag`; Swagger UI is the application's to serve.
 
+Every body the gateway writes meets `MaximumUnsentBytes` and its send pace,
+`MinimumSendBytesPerSecond` after `SendGracePeriod`: whole answers, problems, the document and
+stream events. Whole bodies go in slices of at most 64 KiB, paced one slice at a time. A drop
+reports the bound on `Error`, releases the exchange's place and socket, and cancels a stream's call.
+
 ### The parts of the core, the manager and the HTTP server
 
 `RouterCore`, `ServiceManager` and `HttpTransportServer` are each built of parts: a private nested

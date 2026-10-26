@@ -233,6 +233,14 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   the connect's continuation.
   A provider's own cancellation is its failure; a late HTTP connection is released. A provider's
   completion callback runs after connect settles and cannot refuse that connect.
+- HTTP clients count an exchange whose executor fails after dispatch as handed over and lose the
+  connection. An executor's own failure is reported once before the close; answer reads, listens
+  and disconnects reach their ending on both sides, including a cancellation the executor raises.
+- Every gateway response body obeys its send pace and maximumUnsentBytes bound: whole answers,
+  problems, the OpenAPI document and events. Whole bodies go in slices of at most 64 KiB; a drop
+  reports its bound once and releases the exchange and socket, cancelling a stream's call.
+  Stream writes settle in order and return each notification's credit. The byte bound includes
+  the host's exposed pending bytes and the write handed to it.
 
 - beadc retries temporary work area creation when a concurrent invocation removes its empty
   `.beadc` parent, with at most three attempts.

@@ -1261,6 +1261,11 @@ result, each notification a `message`, the failure that ends it, each an `id`, p
 response takes, 16 at once; one that carries `Last-Event-ID` is answered 204, so an `EventSource`
 stops rather than calls again.
 
+Every body the gateway writes meets `maximumUnsentBytes` and its send pace,
+`minimumSendBytesPerSecond` after `sendGracePeriod`: whole answers, problems, the document and
+stream events. Whole bodies go in slices of at most 64 KiB, paced one slice at a time. A drop
+reports the bound on `error`, releases the exchange's place and socket, and cancels a stream's call.
+
 Each exchange draws one Bead connection, closed as its response ends: a connection's session, a
 subscription, a bound of the calls it answers, are one caller's, never every caller's. Its
 `authorization` is presented whole as `ELSEWHERE`, or under `authorization: 'bearer-jwt'` its
