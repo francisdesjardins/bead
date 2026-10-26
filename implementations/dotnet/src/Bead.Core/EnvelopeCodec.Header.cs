@@ -165,7 +165,7 @@ public static partial class EnvelopeCodec
         return $"0x{value:x2}";
     }
 
-    /// <summary>A credential scheme's name, for a detail; its number for a scheme to come.</summary>
+    /// <summary>A credential scheme's name, for a detail; <c>scheme</c> and its number for a scheme to come.</summary>
     internal static string SchemeNameOf(CredentialScheme scheme)
     {
         return scheme switch
