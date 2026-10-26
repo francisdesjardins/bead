@@ -43,7 +43,7 @@ test.describe('createServiceManager', () => {
       expect(manager.isDebugging).toBe(false);
     });
 
-    // debugging 4.1, 4.1.1, 4.1.2, 4.1.3, 4.1.4, 4.1.6 and 4.1.8
+    // debugging 1.1, 4.1, 4.1.1, 4.1.2, 4.1.3, 4.1.4, 4.1.6 and 4.1.8
     test('tells each step of a request, with copies and, once answered, a duration', async () => {
       const clock = createTestClock(1_000);
       const { control, router } = createFakeRouter('server', clock);
@@ -218,7 +218,7 @@ test.describe('createServiceManager', () => {
       ]);
     });
 
-    // debugging 4.1.6
+    // debugging 4.1.6 and 11.4
     test('tells a duration in whole milliseconds, its fraction dropped', async () => {
       const clock = createTestClock(Date.UTC(2026, 0, 1));
       const { control, router } = createFakeRouter('server', clock);
@@ -298,7 +298,7 @@ test.describe('createServiceManager', () => {
       ]);
     });
 
-    // debugging 3.1, 3.2 and 3.4
+    // debugging 3.1, 3.2, 3.4 and 3.5
     test('reads no clock for a call made, a request answered, a notification sent and one heard while nobody listens, and three for a call with a listener', async () => {
       const clock = createTestClock(Date.UTC(2026, 0, 1));
       const client = createFakeRouter('client', clock);

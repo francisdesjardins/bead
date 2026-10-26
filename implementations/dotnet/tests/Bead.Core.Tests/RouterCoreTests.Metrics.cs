@@ -79,6 +79,7 @@ public sealed partial class RouterCoreTests
             }));
     }
 
+    // debugging 11.4
     [Fact]
     public async Task Holds_a_duration_in_whole_microseconds_its_fraction_dropped_a_TimeSpan_s_ticks_over_10()
     {
@@ -165,7 +166,7 @@ public sealed partial class RouterCoreTests
         Assert.Equal(["bead_client_call_started_total{service=\"_OTHER\",procedure=\"_OTHER\",type=\"command\"} 1"], MetricsTests.CountsOf(registry));
     }
 
-    // debugging 3.3 and 3.4
+    // debugging 3.3, 3.4 and 3.5
     [Fact]
     public async Task Reads_the_monotonic_clock_twice_more_for_a_counted_call_than_for_one_counted_nothing_once_at_each_of_its_gates_and_the_wall_clock_never()
     {

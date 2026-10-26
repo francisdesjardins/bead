@@ -262,6 +262,49 @@ const rawAsEdges = (): readonly IHttpRouteInit[] => {
 
 // tests
 
+// transcoding 2.3
+test('hands each exchange’s client address and socket port to its transport after its proxy policy', async () => {
+  for (const { address, trustedProxies, unnamedProxies } of [
+    { address: '127.0.0.1', trustedProxies: [], unnamedProxies: 0 },
+    { address: '203.0.113.9', trustedProxies: ['127.0.0.1'], unnamedProxies: 0 },
+    { address: '203.0.113.9', trustedProxies: [], unnamedProxies: 1 },
+  ]) {
+    await using fixture = await startTranscoding({
+      createServer: (listener) => {
+        return createNodeServer((request, response) => {
+          const handed = Object.create(request, {
+            socket: { value: { remoteAddress: '127.0.0.1', remotePort: 43210 } },
+          }) as IHTTPRequestLike;
+
+          listener(handed, response);
+        });
+      },
+      trustedProxies,
+      unnamedProxies,
+    });
+    const peers: { address: string; port: number }[] = [];
+
+    fixture.memory.on('connection', () => {
+      for (const peer of fixture.memory.clients) {
+        peers.push({ address: peer.address, port: peer.port });
+      }
+    });
+
+    // * a forwarded port never replaces the exchange's socket port.
+    expect(
+      await send(fixture.port, {
+        headers: { 'x-forwarded-for': '203.0.113.9:54321' },
+        method: 'GET',
+        path: '/v1/books/2',
+      })
+    ).toMatchObject({ body: '{"name":"2","title":"A tale"}', status: 200 });
+    expect(peers).toEqual([{ address, port: 43210 }]);
+    await until(() => {
+      return fixture.memory.clients.length === 0;
+    });
+  }
+});
+
 test('draws one Bead connection per exchange, and closes it as its response ends', async () => {
   await using fixture = await startTranscoding();
   const opened: string[] = [];
@@ -866,6 +909,7 @@ test('answers 502 a text result that is no UTF-8, reported, none of its words in
   expect(reported).toHaveLength(1);
 });
 
+// transcoding 10.2
 test('words each refusal of its gates exactly, none of them what its request carried', async () => {
   const json = 'content-type: application/json';
   const book = '{"aString":"0123456789"}';
@@ -1040,6 +1084,7 @@ test('words each refusal of its gates exactly, none of them what its request car
 });
 
 // transcoding 7.7.6
+// transcoding 10.2
 test('words each refusal of its bounds exactly', async () => {
   const echo: Pick<IOwnCase, 'body' | 'lines'> = {
     body: '{}',
@@ -1720,6 +1765,7 @@ test('ends a stream whose notification its stock library refuses with 502 as its
   expect(reported).toHaveLength(1);
 });
 
+// transcoding 10.2
 test('reads a held body past its grace when its minimum rate is zero', async () => {
   const reading = Promise.withResolvers<void>();
   const clock = createTestClock();
@@ -2204,6 +2250,7 @@ test('writes a comment on a quiet stream each heartbeat on its clock, and drops 
   expect(reported).toEqual(['the response is dropped: maximumUnsentBytes 1 bytes']);
 });
 
+// transcoding 10.2
 test('paces every response body and reports its send bound', async () => {
   for (const kind of ['answer', 'problem', 'document', 'event']) {
     const closed = Promise.withResolvers<void>();
@@ -2344,6 +2391,7 @@ test('counts pending bytes with the write at the maximumUnsentBytes edge', async
   }
 });
 
+// transcoding 10.2
 test('bounds every response body by maximumUnsentBytes before writing', async () => {
   for (const kind of ['answer', 'problem', 'document', 'event']) {
     await using fixture = await startTranscoding({ maximumUnsentBytes: 1, heartbeat: Infinity });
@@ -2377,6 +2425,7 @@ test('bounds every response body by maximumUnsentBytes before writing', async ()
   }
 });
 
+// transcoding 10.2
 test('bounds an accepted slice until its pending bytes are flushed', async () => {
   const closed = Promise.withResolvers<void>();
   const sizes: number[] = [];
