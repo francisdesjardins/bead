@@ -12,6 +12,21 @@ namespace Bead.Protobuf.Tests;
 /// </summary>
 public sealed class ValidatorsTests
 {
+    [Fact]
+    public void Orders_both_boolean_map_keys_with_their_values_in_either_insertion_order()
+    {
+        foreach (var entries in new[]
+        {
+            new Dictionary<bool, string> { [true] = "yes", [false] = "no" },
+            new Dictionary<bool, string> { [false] = "no", [true] = "yes" },
+        })
+        {
+            Assert.Equal(
+                [new KeyValuePair<bool, string>(false, "no"), new KeyValuePair<bool, string>(true, "yes")],
+                Validators.ByKey(entries));
+        }
+    }
+
     // constants
 
     private static readonly JsonElement Root = Load();

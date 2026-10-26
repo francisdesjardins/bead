@@ -6,7 +6,7 @@
 
 // dependencies
 
-import type { DescMessage } from '@bufbuild/protobuf';
+import { type DescMessage, ScalarType } from '@bufbuild/protobuf';
 import { expect, test } from '@playwright/test';
 import { ProbeSchema } from '../../router/shared/__tests__/codecs_pb';
 import { checkProtoRecords } from '../records';
@@ -91,6 +91,36 @@ const expectRefused = (payloads: readonly string[]): void => {
 // definition
 
 test.describe("the check of a proto payload's records", () => {
+  test('reads enum map values as varints and refuses other wire types or undeclared entry fields', () => {
+    const message = {
+      fields: [{ fieldKind: 'map', mapKey: ScalarType.STRING, mapKind: 'enum', number: 1 }],
+    } as unknown as DescMessage;
+
+    for (const hex of [
+      '',
+      '0A 00',
+      '0A 03 0A 01 61',
+      '0A 02 10 01',
+      '0A 05 0A 01 61 10 01',
+      '0A 05 10 01 0A 01 61',
+      '0A 02 10 7F',
+      '0A 04 10 01 10 00',
+    ]) {
+      expect(thrownBy(bytesOf(hex), message), hex).toBeUndefined();
+    }
+
+    for (const hex of [
+      '0A 02 12 00',
+      '0A 05 15 00 00 00 00',
+      '0A 02 13 14',
+      '0A 02 18 01',
+      '0A 02 10 80',
+      '0A 02 08 01',
+    ]) {
+      expect(thrownBy(bytesOf(hex), message), hex).toBeInstanceOf(SyntaxError);
+    }
+  });
+
   test('takes every record a message holds, a group closed by its own end group, a map of messages, a repeated scalar packed or not, and an unknown field of each wire type skipped', () => {
     const payloads = [
       '',

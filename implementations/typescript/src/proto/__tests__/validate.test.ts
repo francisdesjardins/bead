@@ -12,6 +12,10 @@ import { expect, test } from '@playwright/test';
 import type { IJudged, IViolation } from '../../router/shared/violations';
 import { violationsDetailOf } from '../../router/shared/violations';
 import {
+  bytesContain,
+  bytesEndWith,
+  bytesEqual,
+  bytesStartWith,
   codePointLength,
   entriesByKey,
   isUnique,
@@ -131,6 +135,42 @@ const sentOf = ({ more, stopped, violations }: IJudged) => {
 };
 
 // definition
+
+test('compares byte strings at their exact boundaries and finds nonempty parts', () => {
+  const bytes = Uint8Array.of(1, 2, 1, 3);
+  const cases = [
+    [[], false, true, true, true],
+    [[1, 2, 1, 3], true, true, true, true],
+    [[1, 2], false, true, false, true],
+    [[1, 3], false, false, true, true],
+    [[2, 1], false, false, false, true],
+    [[1, 1], false, false, false, false],
+    [[1, 2, 1, 3, 4], false, false, false, false],
+  ] as const;
+
+  for (const [part, equal, starts, ends, contains] of cases) {
+    const other = Uint8Array.from(part);
+
+    expect([
+      bytesEqual(bytes, other),
+      bytesStartWith(bytes, other),
+      bytesEndWith(bytes, other),
+      bytesContain(bytes, other),
+    ]).toEqual([equal, starts, ends, contains]);
+  }
+});
+
+test('orders both boolean map keys with their values in either insertion order', () => {
+  for (const map of [
+    { true: 'yes', false: 'no' },
+    { false: 'no', true: 'yes' },
+  ]) {
+    expect(entriesByKey(map, 'bool')).toEqual([
+      ['false', 'no'],
+      ['true', 'yes'],
+    ]);
+  }
+});
 
 test.describe('the verdicts', () => {
   test.describe.configure({ retries: 0 });
