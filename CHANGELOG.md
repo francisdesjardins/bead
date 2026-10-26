@@ -226,6 +226,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- Every gateway response body obeys its send pace and maximumUnsentBytes bound: whole answers,
+  problems, the OpenAPI document and events. Whole bodies go in slices of at most 64 KiB; a drop
+  reports its bound once and releases the exchange and socket, cancelling a stream's call.
+
 - beadc retries temporary work area creation when a concurrent invocation removes its empty
   `.beadc` parent, with at most three attempts.
 - The TypeScript WebSocket client refuses a connection disposed by its credential provider's

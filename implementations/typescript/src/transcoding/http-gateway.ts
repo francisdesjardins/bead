@@ -238,6 +238,7 @@ interface IServedRoute {
 /** A response as the gateway writes it: Node's, its write's backpressure and its drain. */
 interface IResponseLike extends IHTTPResponseLike {
   on(event: 'close' | 'drain' | 'finish', listener: () => void): unknown;
+  write(chunk: Uint8Array, done?: (error?: Error | null) => void): unknown;
 }
 
 /** An exchange under way: its request, its response, and what it holds. */
@@ -665,6 +666,98 @@ export const createHTTPGateway = (given: IHTTPGatewayOptions): IHTTPGateway => {
 
   // ── Writing ────────────────────────────────────────────────────────────────
 
+  const writers = new WeakMap<IResponseLike, (bytes: Uint8Array) => Promise<boolean>>();
+  const dropped = new WeakSet<IResponseLike>();
+  const dropWriter = (response: IResponseLike, detail: string): void => {
+    if (dropped.has(response)) {
+      return;
+    }
+    dropped.add(response);
+    report(new Error(detail));
+    response.destroy();
+  };
+  const writerOf = (response: IResponseLike): ((bytes: Uint8Array) => Promise<boolean>) => {
+    const known = writers.get(response);
+    if (known !== undefined) {
+      return known;
+    }
+    let gone = false;
+    let held = 0;
+    let sequence = 0;
+    let waiting: ((taken: boolean) => void) | undefined;
+    const unsent = (): number => {
+      return Math.max(held, response.writableLength ?? 0);
+    };
+    const sendPace = createSendPace(
+      {
+        unsent,
+        late: () => {
+          dropWriter(
+            response,
+            `the response is dropped: minimumSendBytesPerSecond ${String(pace.minimumSendBytesPerSecond)} after sendGracePeriod ${String(pace.sendGracePeriod)}ms`
+          );
+        },
+      },
+      pace
+    );
+    const drain = (): void => {
+      held = 0;
+      sendPace.stop();
+      const resolve = waiting;
+      waiting = undefined;
+      resolve?.(!gone);
+    };
+    response.on('drain', () => {
+      if ((response.writableLength ?? 0) === 0) {
+        drain();
+      }
+    });
+    const end = (): void => {
+      gone = true;
+      drain();
+    };
+    response.on('close', end);
+    response.on('finish', end);
+    const write = (bytes: Uint8Array): Promise<boolean> => {
+      if (gone) {
+        return Promise.resolve(false);
+      }
+      if (unsent() + bytes.length > maximumUnsentBytes) {
+        dropWriter(
+          response,
+          `the response is dropped: maximumUnsentBytes ${String(maximumUnsentBytes)} bytes`
+        );
+        return Promise.resolve(false);
+      }
+      return new Promise((resolve) => {
+        const own = { sequence: ++sequence, completed: false };
+        waiting = resolve;
+        held = bytes.length;
+        const taken =
+          response.write(bytes, (error) => {
+            own.completed = true;
+            if (own.sequence !== sequence) {
+              return;
+            }
+            if (error !== undefined && error !== null) {
+              gone = true;
+            }
+            drain();
+          }) !== false;
+        if (gone || own.completed) {
+          drain();
+          return;
+        }
+        sendPace.hand(bytes.length);
+        if (taken && (response.writableLength ?? 0) === 0) {
+          drain();
+        }
+      });
+    };
+    writers.set(response, write);
+    return write;
+  };
+
   /** Writes an exchange's whole response: its fields, and its body unless it answers a `HEAD`. */
   const answer = (
     exchange: IExchange,
@@ -706,7 +799,19 @@ export const createHTTPGateway = (given: IHTTPGatewayOptions): IHTTPGateway => {
     if (body === undefined || request.method === 'HEAD') {
       response.end();
     } else {
-      response.end(body);
+      const write = writerOf(response);
+      const whole = async (): Promise<void> => {
+        for (let offset = 0; offset < body.length; offset += 64 * 1024) {
+          if (!(await write(body.subarray(offset, offset + 64 * 1024)))) {
+            return;
+          }
+        }
+        response.end();
+      };
+      void whole().catch((error: unknown) => {
+        report(error);
+        response.destroy();
+      });
     }
   };
 
@@ -1258,17 +1363,7 @@ export const createHTTPGateway = (given: IHTTPGatewayOptions): IHTTPGateway => {
     let settle = (): void => {};
 
     if (isStream) {
-      const sendPace = createSendPace(
-        {
-          late: () => {
-            response.destroy();
-          },
-          unsent: () => {
-            return response.writableLength ?? 0;
-          },
-        },
-        pace
-      );
+      const write = writerOf(response);
       const opened = createEventStream(
         {
           answer: (problem) => {
@@ -1286,38 +1381,22 @@ export const createHTTPGateway = (given: IHTTPGatewayOptions): IHTTPGateway => {
               'content-type': EVENT_STREAM_MEDIA_TYPE,
             });
           },
-          write: (text) => {
+          write: async (text) => {
             if (isGone) {
-              return Promise.resolve();
+              return;
             }
 
             const chunk = ENCODER.encode(text);
 
             // ! a reader past what it may hold unsent is dropped, as a WebSocket's is, before
             // the write that would pass it goes (10.2)
-            if ((response.writableLength ?? 0) + chunk.length > maximumUnsentBytes) {
-              response.destroy();
-
-              return Promise.resolve();
-            }
-
-            const isTaken = response.write(chunk) !== false;
-
-            sendPace.hand(chunk.length);
-
-            return isTaken
-              ? Promise.resolve()
-              : new Promise((resolve) => {
-                  response.on('drain', resolve);
-                  response.on('close', resolve);
-                });
+            await write(chunk);
           },
         },
         { clock, heartbeat }
       );
 
       response.on('close', () => {
-        sendPace.stop();
         opened.close();
       });
       stream = opened;
@@ -1572,6 +1651,7 @@ export const createHTTPGateway = (given: IHTTPGatewayOptions): IHTTPGateway => {
       request,
       response,
     };
+    writerOf(response);
 
     // 1: what HTTP refuses of its own, unmarked: a field or a target past visible ASCII among it
     const named =
