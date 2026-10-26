@@ -473,15 +473,17 @@ test.describe('createNotificationManager', () => {
         ?.offer({ payload: new Uint8Array(1) });
     };
 
-    expect(notifications.gauges()).toMatchObject({
-      ceilings: { largestQueuedNotificationBytes: 100, largestQueuedNotifications: 5 },
-      counts: {
-        largestQueuedNotificationBytes: 0,
-        largestQueuedNotifications: 0,
-        pausedSubscriptions: 0,
-        queuedNotificationBytes: 0,
-        queuedNotifications: 0,
-      },
+    expect(notifications.gauges().ceilings).toEqual({
+      largestQueuedNotificationBytes: 100,
+      largestQueuedNotifications: 5,
+    });
+    expect(notifications.gauges().counts).toEqual({
+      largestQueuedNotificationBytes: 0,
+      largestQueuedNotifications: 0,
+      notifiedSubscriptions: 0,
+      pausedSubscriptions: 0,
+      queuedNotificationBytes: 0,
+      queuedNotifications: 0,
     });
 
     register(1);
@@ -524,7 +526,9 @@ test.describe('createNotificationManager', () => {
 
     notifications.pacingOf(5, second)?.credit(10);
 
-    expect(notifications.gauges().counts).toMatchObject({
+    expect(notifications.gauges().counts).toEqual({
+      largestQueuedNotificationBytes: 40,
+      notifiedSubscriptions: 5,
       largestQueuedNotifications: 2,
       pausedSubscriptions: 2,
       queuedNotificationBytes: 70,

@@ -128,17 +128,18 @@ test.describe('createTimers', () => {
 test.describe('createSessionManager', () => {
   test.describe('sessions', () => {
     test('create makes a session without storing it: no token, no timeout, no data', () => {
-      using sessions = createSessionManager<IUser>();
+      const clock = createTestClock(Date.UTC(2026, 0, 1));
+      using sessions = createSessionManager<IUser>({ clock });
       const session = sessions.create(first);
 
-      expect(session).toMatchObject({
+      expect(session).toEqual({
         connectionHandle: first,
         connectionInactivityTimeout: Infinity,
         data: undefined,
+        lastActivity: clock.Date.now(),
         sessionInactivityTimeout: Infinity,
         sessionToken: undefined,
       });
-      expect(session.lastActivity).toBeGreaterThan(0);
       expect(sessions.has(first)).toBe(false);
     });
 
@@ -182,6 +183,7 @@ test.describe('createSessionManager', () => {
       expect(after.sessionToken).not.toBe(before.sessionToken);
       expect(sessionTokenOfBoth(sessions)).toEqual([after.sessionToken, undefined]);
       expect(sessions.connectionHandles()).toEqual([first]);
+      expect(sessions.getAll()).toEqual([after]);
     });
 
     test('hands out copies: changing one, however deep, changes nothing stored', () => {
@@ -649,10 +651,7 @@ test.describe('createSessionManager', () => {
         });
       }).toThrow(ProgrammerError);
       expect(sessions.has(second)).toBe(false);
-      expect(sessions.get(first)).toMatchObject({
-        connectionInactivityTimeout: Infinity,
-        sessionInactivityTimeout: Infinity,
-      });
+      expect(sessions.get(first)).toEqual(session);
     });
 
     test('the session a timer reaches is the one stored when it fires', () => {
@@ -698,6 +697,7 @@ test.describe('createSessionManager', () => {
     test('a timeout past the longest a timer waits is refused, by a reset, a store, an update and a default, and nothing changes', () => {
       const clock = createTestClock();
       using sessions = createSessionManager<IUser>({ clock });
+      const reached = record(sessions, 'connectionInactivityTimeoutReached');
       const session = sessions.set({ ...sessions.create(first), sessionInactivityTimeout: 1_000 });
       const past = 2 ** 31;
 
@@ -748,6 +748,10 @@ test.describe('createSessionManager', () => {
       sessions.resetSessionInactivityTimeout(session, Infinity);
 
       expect(delaysOn(clock)).toEqual([2 ** 31 - 1]);
+      clock.tick(2 ** 31 - 2);
+      expect(reached).toEqual([]);
+      clock.tick(1);
+      expect(reached).toHaveLength(1);
     });
 
     test('removing every listener does not unhook the timers', () => {
@@ -838,9 +842,11 @@ test.describe('createSessionManager', () => {
       using sessions = createSessionManager<IUser>({ clock });
       const connectionReached = record(sessions, 'connectionInactivityTimeoutReached');
       const changed = record(sessions, 'lastActivityChanged');
+      const sessionReached = record(sessions, 'sessionInactivityTimeoutReached');
       const session = sessions.getOrElseSet(first);
 
       sessions.updateConnectionInactivityTimeout({ ...session, connectionInactivityTimeout: 200 });
+      sessions.updateSessionInactivityTimeout({ ...session, sessionInactivityTimeout: 200 });
       clock.tick(1);
       // the clock held on one millisecond
       sessions.touch(first);
@@ -851,12 +857,16 @@ test.describe('createSessionManager', () => {
         clock.armed.map(({ delay }) => {
           return delay;
         })
-      ).toEqual([200, 200, 200]);
+      ).toEqual([200, 200, 200, 200, 200, 200]);
 
-      clock.runAll();
+      clock.tick(199);
+      expect(connectionReached).toEqual([]);
+      expect(sessionReached).toEqual([]);
+      clock.tick(1);
 
       expect(changed).toHaveLength(1);
       expect(connectionReached).toHaveLength(1);
+      expect(sessionReached).toHaveLength(1);
     });
 
     test('the activity it reports reads the wall clock, which a clock set by hand moves alone', () => {

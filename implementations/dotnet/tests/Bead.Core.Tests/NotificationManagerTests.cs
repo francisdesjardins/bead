@@ -24,24 +24,6 @@ public sealed class NotificationManagerTests
         return new SubscribingCall(callId, connectionHandle, paced);
     }
 
-    // the candidates of a procedure in the order of their handles, for a test that pins who, not in which order
-    private static List<(string ConnectionHandle, uint CallId)> CandidatesOf(NotificationManager notifications, ProcedureAddress procedure)
-    {
-        return [.. notifications.Candidates(procedure).OrderBy((candidate) =>
-        {
-            return candidate.ConnectionHandle;
-        }, StringComparer.Ordinal)];
-    }
-
-    // a connection's subscriptions in the order of their call ids, for a test that pins which, not in which order
-    private static List<Subscription> SubscriptionsOf(NotificationManager notifications, string connectionHandle)
-    {
-        return [.. notifications.Subscriptions(connectionHandle).OrderBy((subscription) =>
-        {
-            return subscription.CallId;
-        })];
-    }
-
     // definition
 
     [Fact]
@@ -93,11 +75,14 @@ public sealed class NotificationManagerTests
 
         Assert.Equal(
             [new Subscription(1, First, ProcedureOf(10, 1)), new Subscription(5, First, ProcedureOf(20, 1))],
-            SubscriptionsOf(notifications, First));
-        Assert.Equal([new Subscription(3, Second, ProcedureOf(10, 2))], SubscriptionsOf(notifications, Second));
-        Assert.Equal([(First, 1u)], CandidatesOf(notifications, ProcedureOf(10, 1)));
-        Assert.Equal([(Second, 3u)], CandidatesOf(notifications, ProcedureOf(10, 2)));
-        Assert.Equal([(First, 5u)], CandidatesOf(notifications, ProcedureOf(20, 1)));
+            notifications.Subscriptions(First));
+        Assert.Equal([new Subscription(3, Second, ProcedureOf(10, 2))], notifications.Subscriptions(Second));
+        Assert.Equal(
+            [new Subscription(1, First, ProcedureOf(10, 1)), new Subscription(5, First, ProcedureOf(20, 1)), new Subscription(3, Second, ProcedureOf(10, 2))],
+            notifications.Subscriptions());
+        Assert.Equal([(First, 1u)], notifications.Candidates(ProcedureOf(10, 1)));
+        Assert.Equal([(Second, 3u)], notifications.Candidates(ProcedureOf(10, 2)));
+        Assert.Equal([(First, 5u)], notifications.Candidates(ProcedureOf(20, 1)));
     }
 
     [Fact]
@@ -131,7 +116,7 @@ public sealed class NotificationManagerTests
         notifications.Register(ProcedureOf(10, 1), CallOf(13, First));
         notifications.Register(ProcedureOf(10, 1), CallOf(13, Second));
 
-        Assert.Equal([(First, 13u), (Second, 13u)], CandidatesOf(notifications, ProcedureOf(10, 1)));
+        Assert.Equal([(First, 13u), (Second, 13u)], notifications.Candidates(ProcedureOf(10, 1)));
         Assert.True(notifications.Has(13, First));
         Assert.True(notifications.Has(13, Second));
 
@@ -152,7 +137,7 @@ public sealed class NotificationManagerTests
 
         var candidates = notifications.Candidates(ProcedureOf(10, 1));
 
-        Assert.Equal([(First, 1u), (Second, 3u)], CandidatesOf(notifications, ProcedureOf(10, 1)));
+        Assert.Equal([(First, 1u), (Second, 3u)], candidates);
 
         candidates.Clear();
 
@@ -176,7 +161,7 @@ public sealed class NotificationManagerTests
         {
             return notifications.Register(ProcedureOf(20, 2), CallOf(7, First));
         });
-        Assert.Equal([new Subscription(7, First, ProcedureOf(10, 1))], SubscriptionsOf(notifications, First));
+        Assert.Equal([new Subscription(7, First, ProcedureOf(10, 1))], notifications.Subscriptions(First));
 
         // nothing of what was refused is held
         Assert.False(notifications.Has(9, First));
@@ -199,8 +184,8 @@ public sealed class NotificationManagerTests
         notifications.Clean(Unknown);
 
         Assert.Empty(notifications.Subscriptions(First));
-        Assert.Equal([new Subscription(3, Second, ProcedureOf(10, 1))], SubscriptionsOf(notifications, Second));
-        Assert.Equal([(Second, 3u)], CandidatesOf(notifications, ProcedureOf(10, 1)));
+        Assert.Equal([new Subscription(3, Second, ProcedureOf(10, 1))], notifications.Subscriptions(Second));
+        Assert.Equal([(Second, 3u)], notifications.Candidates(ProcedureOf(10, 1)));
         Assert.Empty(notifications.Candidates(ProcedureOf(10, 2)));
         Assert.Empty(notifications.Candidates(ProcedureOf(20, 1)));
         Assert.False(notifications.Has(1, First));
@@ -234,7 +219,7 @@ public sealed class NotificationManagerTests
         Assert.Null(notifications.Unregister(3, Second));
         Assert.Null(notifications.Unregister(99, First));
         Assert.Empty(notifications.Candidates(ProcedureOf(20, 1)));
-        Assert.Equal([new Subscription(1, First, ProcedureOf(10, 1))], SubscriptionsOf(notifications, First));
+        Assert.Equal([new Subscription(1, First, ProcedureOf(10, 1))], notifications.Subscriptions(First));
         Assert.Empty(notifications.Subscriptions(Second));
 
         // a call id let go of may subscribe again
@@ -407,9 +392,17 @@ public sealed class NotificationManagerTests
             notifications.Gauges().Counts);
         notifications.PacingOf(5, Second)?.Credit(10);
 
-        var counts = notifications.Gauges().Counts;
-
-        Assert.Equal((2, 2, 70, 3), (counts["largestQueuedNotifications"], counts["pausedSubscriptions"], counts["queuedNotificationBytes"], counts["queuedNotifications"]));
+        Assert.Equal(
+            new Dictionary<string, long>
+            {
+                ["largestQueuedNotificationBytes"] = 40,
+                ["largestQueuedNotifications"] = 2,
+                ["notifiedSubscriptions"] = 5,
+                ["pausedSubscriptions"] = 2,
+                ["queuedNotificationBytes"] = 70,
+                ["queuedNotifications"] = 3,
+            },
+            notifications.Gauges().Counts);
     }
 
     [Fact]

@@ -197,6 +197,61 @@ public sealed partial class RouterServerTests
         });
     }
 
+    // the reached-at-keep window, without a verifier rejecting a credential already at its end
+    private async Task ReachedAtKeep()
+    {
+        var now = _time.GetUtcNow().ToUnixTimeMilliseconds();
+        var identifier = new SessionIdentifier { Scheme = CredentialScheme.Elsewhere, Id = "ada" };
+
+        Start(new RouterServerOptions
+        {
+            SessionOf = (request, _) =>
+            {
+                return ValueTask.FromResult<CallSession?>(new CallSession
+                {
+                    Identifier = identifier,
+                    End = now + (request.Header.CallId == 5 ? 5_000 : 0),
+                });
+            },
+        });
+        _transport.Open(First);
+        EchoOf((_, response) =>
+        {
+            return response.Answer("renewed");
+        });
+        NotifierOf(async (request, response) =>
+        {
+            if (request.Payload == "forget")
+            {
+                await response.RegisterNotification();
+                Assert.True(await Router.Unsubscribe(new CallAddress(1, First)));
+                await response.Fail(Failure.OfApplication(1));
+
+                return;
+            }
+
+            // ! the renewal's arrival precedes the end's post, in this same scheduler turn
+            Deliver(First, RequestOf(5));
+            await response.RegisterNotification();
+            await response.Answer("ok");
+        });
+
+        Deliver(First, SubscribingOf(1, "forget"));
+        await Settle();
+        Assert.Equal(["first failure 1 1"], SentSince());
+        Assert.Equal(KeptOf((0, 0)), await KeptCounts());
+
+        Deliver(First, SubscribingOf(3, "renew"));
+        await Settle();
+        Assert.Equal(["first result 3 ok", "first result 5 renewed"], SentSince());
+        Assert.Equal(KeptOf((1, 1)), await KeptCounts());
+        await AdvanceBy(4_999);
+        Assert.Empty(SentSince());
+        await AdvanceBy(1);
+        Assert.Equal(["first failure 3 SessionRequired"], SentSince());
+        Assert.Empty(Reported());
+    }
+
     // definition
 
     [Fact]
@@ -397,6 +452,9 @@ public sealed partial class RouterServerTests
         await AdvanceBy(1);
         Assert.Equal(["first failure 5 SessionRequired"], SentSince());
         Assert.Empty(Reported());
+
+        using var reached = new RouterServerTests();
+        await reached.ReachedAtKeep();
     }
 
     [Fact]
