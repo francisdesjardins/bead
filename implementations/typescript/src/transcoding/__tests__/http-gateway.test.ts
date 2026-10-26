@@ -1937,11 +1937,14 @@ test('drops a late notification after an unreadable notification starts ending i
       return createNodeServer((request, response) => {
         const write = response.write.bind(response);
 
-        response.write = (chunk: Uint8Array): boolean => {
+        response.write = (
+          chunk: Uint8Array,
+          done?: BufferEncoding | ((error?: Error | null) => void)
+        ): boolean => {
           chunks.push(new TextDecoder().decode(chunk));
           firstWritten.resolve();
 
-          return write(chunk);
+          return write(chunk, typeof done === 'function' ? done : undefined);
         };
         listener(request, response);
       });
@@ -1978,21 +1981,18 @@ test('waits for a stream response to drain before writing its next event', async
     createServer: (listener) => {
       return createNodeServer((request, response) => {
         const write = response.write.bind(response);
-        const on = response.on.bind(response);
 
-        response.on = (event, listener) => {
-          const listening = on(event, listener);
-
-          if (event === 'drain') {
-            waiting.resolve();
-          }
-
-          return listening;
-        };
-
-        response.write = (chunk: Uint8Array): boolean => {
+        response.write = (
+          chunk: Uint8Array,
+          done?: BufferEncoding | ((error?: Error | null) => void)
+        ): boolean => {
           chunks.push(new TextDecoder().decode(chunk));
-          const isTaken = write(chunk);
+          const isTaken =
+            chunks.length === 1
+              ? write(chunk, () => {
+                  waiting.resolve();
+                })
+              : write(chunk, typeof done === 'function' ? done : undefined);
 
           if (chunks.length === 1) {
             drain = () => {
@@ -2028,9 +2028,88 @@ test('waits for a stream response to drain before writing its next event', async
     expect(drain).toBeDefined();
     drain?.();
     await notifying;
+    await until(() => {
+      return chunks.length === 2;
+    });
     expect(chunks).toEqual([
       'event: result\nid: 1\ndata: {}\n\n',
       'id: 2\ndata: {"remaining":2}\n\n',
+    ]);
+    expect(reported).toEqual([]);
+  } finally {
+    socket.destroy();
+  }
+});
+
+test('settles every held write once its response drains', async () => {
+  const waiting = Promise.withResolvers<void>();
+  const chunks: string[] = [];
+  let drain: (() => void) | undefined;
+  await using fixture = await startTranscoding({
+    window: 2,
+    heartbeat: Infinity,
+    createServer: (listener) => {
+      return createNodeServer((request, response) => {
+        const write = response.write.bind(response);
+
+        response.write = (
+          chunk: Uint8Array,
+          done?: BufferEncoding | ((error?: Error | null) => void)
+        ): boolean => {
+          chunks.push(new TextDecoder().decode(chunk));
+          const isTaken =
+            chunks.length === 1
+              ? write(chunk, () => {
+                  waiting.resolve();
+                })
+              : write(chunk, typeof done === 'function' ? done : undefined);
+
+          if (chunks.length === 1) {
+            drain = () => {
+              response.emit('drain');
+            };
+            return false;
+          }
+
+          return isTaken;
+        };
+        listener(request, response);
+      });
+    },
+  });
+  const credited = Promise.withResolvers<void>();
+  fixture.server.router.on('debug', ({ header }) => {
+    if (header.kind === EnvelopeKind.CREDIT && header.creditEnd >= 4) {
+      credited.resolve();
+    }
+  });
+  const reported = reportedBy(fixture.gateway);
+  const socket = opened(
+    fixture.port,
+    octetsOf(fixture.port, {
+      body: '{}',
+      lines: [
+        'POST /api/Transcoding/watch HTTP/1.1',
+        'content-type: application/json',
+        'accept: text/event-stream',
+      ],
+    })
+  );
+
+  try {
+    await waiting.promise;
+    const notifying = Promise.all([fixture.watched(2), fixture.watched(1)]);
+    await notifying;
+    await new Promise(setImmediate);
+
+    expect(chunks).toEqual(['event: result\nid: 1\ndata: {}\n\n']);
+    expect(drain).toBeDefined();
+    drain?.();
+    await credited.promise;
+    expect(chunks).toEqual([
+      'event: result\nid: 1\ndata: {}\n\n',
+      'id: 2\ndata: {"remaining":2}\n\n',
+      'id: 3\ndata: {"remaining":1}\n\n',
     ]);
     expect(reported).toEqual([]);
   } finally {
@@ -2049,30 +2128,13 @@ test('releases a stream closed while its response waits for drainage', async () 
     createServer: (listener) => {
       return createNodeServer((request, response) => {
         const write = response.write.bind(response);
-        const on = response.on.bind(response);
-        let isWaiting = false;
-
-        response.on = (event, listener) => {
-          if (event === 'drain') {
-            isWaiting = true;
-          }
-
-          if (event === 'close' && isWaiting) {
-            const listening = on(event, () => {
-              Reflect.apply(listener, response, []);
-              released.resolve();
-            });
-
-            waiting.resolve();
-
-            return listening;
-          }
-
-          return on(event, listener);
-        };
+        response.once('close', () => {
+          released.resolve();
+        });
         response.write = (chunk: Uint8Array): boolean => {
           chunks.push(new TextDecoder().decode(chunk));
           write(chunk);
+          waiting.resolve();
 
           return false;
         };
@@ -2137,28 +2199,200 @@ test('writes a comment on a quiet stream each heartbeat on its clock, and drops 
 
   // a stream's write past what its response may hold unsent: dropped, its socket aborted, nothing written
   await using bounded = await startTranscoding({ maximumUnsentBytes: 1 });
-
+  const reported = reportedBy(bounded.gateway);
   expect(await receivedOn(bounded.port, octetsOf(bounded.port, watch))).toBe(0);
+  expect(reported).toEqual(['the response is dropped: maximumUnsentBytes 1 bytes']);
 });
 
-test('aborts a stream whose held write passes its send deadline', async () => {
+test('paces every response body and reports its send bound', async () => {
+  for (const kind of ['answer', 'problem', 'document', 'event']) {
+    const closed = Promise.withResolvers<void>();
+    const chunks: Uint8Array[] = [];
+    const statuses: number[] = [];
+    let requests = 0;
+    await using fixture = await startTranscoding({
+      heartbeat: Infinity,
+      maximumExchanges: 1,
+      maximumConnections: 1,
+      minimumSendBytesPerSecond: 1_000_000,
+      sendGracePeriod: 1,
+      createServer: (listener) => {
+        return createNodeServer((request, response) => {
+          requests += 1;
+          if (requests > 1) {
+            listener(request, response);
+            return;
+          }
+          Object.defineProperty(response, 'writableLength', {
+            get: () => {
+              return chunks.length === 0 ? 0 : 1;
+            },
+          });
+          response.write = (chunk: Uint8Array): boolean => {
+            statuses.push(response.statusCode);
+            chunks.push(chunk);
+            return false;
+          };
+          response.once('close', () => {
+            closed.resolve();
+          });
+          listener(request, response);
+        });
+      },
+    });
+    const reported = reportedBy(fixture.gateway);
+    const path =
+      kind === 'problem'
+        ? '/missing'
+        : kind === 'document'
+          ? '/openapi.json'
+          : kind === 'event'
+            ? '/api/Transcoding/watch'
+            : '/api/Transcoding/echo';
+    const hasBody = kind === 'answer' || kind === 'event';
+    // * no release competes with the deadline: the write stays held until its socket is aborted.
+    const received = receivedOn(
+      fixture.port,
+      octetsOf(fixture.port, {
+        ...(hasBody ? { body: '{}' } : {}),
+        lines: [
+          (hasBody ? 'POST ' : 'GET ') + path + ' HTTP/1.1',
+          ...(hasBody ? ['content-type: application/json'] : []),
+          ...(kind === 'event' ? ['accept: text/event-stream'] : []),
+        ],
+      })
+    );
+    await closed.promise;
+    expect(await received).toBe(0);
+    await until(() => {
+      return fixture.memory.clients.length === 0;
+    });
+    await fixture.watched(2);
+    expect(chunks).toHaveLength(1);
+    expect(statuses).toEqual([kind === 'problem' ? 404 : 200]);
+    expect(chunks[0]?.length).toBeGreaterThan(0);
+    if (kind === 'event') {
+      const probe = opened(
+        fixture.port,
+        octetsOf(fixture.port, {
+          body: '{}',
+          lines: [
+            'POST /api/Transcoding/watch HTTP/1.1',
+            'content-type: application/json',
+            'accept: text/event-stream',
+          ],
+        })
+      );
+      try {
+        await readUntil(probe, 'data: {}\n\n');
+      } finally {
+        probe.destroy();
+      }
+    } else {
+      expect((await send(fixture.port, { path: '/api/Transcoding/echo', body: '{}' })).status).toBe(
+        200
+      );
+    }
+    await until(() => {
+      return fixture.memory.clients.length === 0;
+    });
+    expect(reported).toEqual([
+      'the response is dropped: minimumSendBytesPerSecond 1000000 after sendGracePeriod 1ms',
+    ]);
+  }
+});
+
+test('counts pending bytes with the write at the maximumUnsentBytes edge', async () => {
+  for (const bound of [5, 6]) {
+    const chunks: string[] = [];
+    await using fixture = await startTranscoding({
+      document: '{}',
+      maximumUnsentBytes: bound,
+      createServer: (listener) => {
+        return createNodeServer((request, response) => {
+          const write = response.write.bind(response);
+          Object.defineProperty(response, 'writableLength', {
+            get: () => {
+              return 4;
+            },
+          });
+          response.write = (
+            chunk: Uint8Array,
+            done?: BufferEncoding | ((error?: Error | null) => void)
+          ): boolean => {
+            chunks.push(new TextDecoder().decode(chunk));
+            return write(chunk, typeof done === 'function' ? done : undefined);
+          };
+          listener(request, response);
+        });
+      },
+    });
+    const reported = reportedBy(fixture.gateway);
+    const received = await receivedOn(
+      fixture.port,
+      octetsOf(fixture.port, { lines: ['GET /openapi.json HTTP/1.1'] })
+    );
+    if (bound === 5) {
+      expect(received).toBe(0);
+      expect(chunks).toEqual([]);
+      expect(reported).toEqual(['the response is dropped: maximumUnsentBytes 5 bytes']);
+    } else {
+      expect(received).toBeGreaterThan(0);
+      expect(chunks).toEqual(['{}']);
+      expect(reported).toEqual([]);
+    }
+  }
+});
+
+test('bounds every response body by maximumUnsentBytes before writing', async () => {
+  for (const kind of ['answer', 'problem', 'document', 'event']) {
+    await using fixture = await startTranscoding({ maximumUnsentBytes: 1, heartbeat: Infinity });
+    const reported = reportedBy(fixture.gateway);
+    const path =
+      kind === 'problem'
+        ? '/missing'
+        : kind === 'document'
+          ? '/openapi.json'
+          : kind === 'event'
+            ? '/api/Transcoding/watch'
+            : '/api/Transcoding/echo';
+    const hasBody = kind === 'answer' || kind === 'event';
+    const received = await receivedOn(
+      fixture.port,
+      octetsOf(fixture.port, {
+        ...(hasBody ? { body: '{}' } : {}),
+        lines: [
+          (hasBody ? 'POST ' : 'GET ') + path + ' HTTP/1.1',
+          ...(hasBody ? ['content-type: application/json'] : []),
+          ...(kind === 'event' ? ['accept: text/event-stream'] : []),
+        ],
+      })
+    );
+    expect(received).toBe(0);
+    await until(() => {
+      return fixture.memory.clients.length === 0;
+    });
+    await fixture.watched(2);
+    expect(reported).toEqual(['the response is dropped: maximumUnsentBytes 1 bytes']);
+  }
+});
+
+test('bounds an accepted slice until its pending bytes are flushed', async () => {
   const closed = Promise.withResolvers<void>();
-  const chunks: string[] = [];
+  const sizes: number[] = [];
   await using fixture = await startTranscoding({
-    heartbeat: Infinity,
     minimumSendBytesPerSecond: 1_000_000,
     sendGracePeriod: 1,
     createServer: (listener) => {
       return createNodeServer((request, response) => {
         Object.defineProperty(response, 'writableLength', {
           get: () => {
-            return chunks.length === 0 ? 0 : 1;
+            return sizes.length === 0 ? 0 : 65536;
           },
         });
-        response.write = (chunk: Uint8Array): boolean => {
-          chunks.push(new TextDecoder().decode(chunk));
-
-          return false;
+        response.write = (bytes: Uint8Array): boolean => {
+          sizes.push(bytes.length);
+          return true;
         };
         response.once('close', () => {
           closed.resolve();
@@ -2168,28 +2402,60 @@ test('aborts a stream whose held write passes its send deadline', async () => {
     },
   });
   const reported = reportedBy(fixture.gateway);
-  // * the write has no release: only its pace can close it, with no competing drain or timer.
   const received = receivedOn(
     fixture.port,
     octetsOf(fixture.port, {
-      body: '{}',
-      lines: [
-        'POST /api/Transcoding/watch HTTP/1.1',
-        'content-type: application/json',
-        'accept: text/event-stream',
-      ],
+      body: 'a'.repeat(3 * 65536 + 7),
+      lines: ['POST /api/Transcoding/raw HTTP/1.1', 'content-type: application/octet-stream'],
     })
   );
-
   await closed.promise;
   expect(await received).toBe(0);
   await until(() => {
     return fixture.memory.clients.length === 0;
   });
-  await fixture.watched(2);
+  expect(sizes).toEqual([65536]);
+  expect(reported).toEqual([
+    'the response is dropped: minimumSendBytesPerSecond 1000000 after sendGracePeriod 1ms',
+  ]);
+});
 
-  expect(chunks).toEqual(['event: result\nid: 1\ndata: {}\n\n']);
-  expect(reported).toEqual([]);
+test('writes whole answers and documents in slices of at most 64 KiB', async () => {
+  const body = 'a'.repeat(3 * 64 * 1024 + 7);
+  for (const kind of ['answer', 'document']) {
+    const sizes: number[] = [];
+    await using fixture = await startTranscoding({
+      document: body,
+      createServer: (listener) => {
+        return createNodeServer((request, response) => {
+          const write = response.write.bind(response);
+          response.write = (
+            chunk: Uint8Array,
+            done?: BufferEncoding | ((error?: Error | null) => void)
+          ): boolean => {
+            sizes.push(chunk.length);
+            return write(chunk, typeof done === 'function' ? done : undefined);
+          };
+          listener(request, response);
+        });
+      },
+    });
+    const reported = reportedBy(fixture.gateway);
+    const received = await send(
+      fixture.port,
+      kind === 'document'
+        ? { method: 'GET', path: '/openapi.json' }
+        : {
+            path: '/api/Transcoding/raw',
+            headers: { 'content-type': 'application/octet-stream' },
+            body,
+          }
+    );
+    expect(received.status).toBe(200);
+    expect(received.body).toBe(body);
+    expect(sizes).toEqual([65536, 65536, 65536, 7]);
+    expect(reported).toEqual([]);
+  }
 });
 
 test('stops heartbeats after their write loses its response', async () => {
@@ -2203,7 +2469,10 @@ test('stops heartbeats after their write loses its response', async () => {
       return createNodeServer((request, response) => {
         const write = response.write.bind(response);
 
-        response.write = (chunk: Uint8Array): boolean => {
+        response.write = (
+          chunk: Uint8Array,
+          done?: BufferEncoding | ((error?: Error | null) => void)
+        ): boolean => {
           const text = new TextDecoder().decode(chunk);
 
           chunks.push(text);
@@ -2214,7 +2483,7 @@ test('stops heartbeats after their write loses its response', async () => {
             return false;
           }
 
-          const taken = write(chunk);
+          const taken = write(chunk, typeof done === 'function' ? done : undefined);
 
           written.resolve();
 
