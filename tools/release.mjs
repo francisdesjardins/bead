@@ -640,8 +640,8 @@ export const prepare = (root, options = {}) => {
     const kept = `${REPORTS}/v${product}-typescript.json and -csharp.json`;
     log(
       last === null
-        ? `owed by hand: both benches run, their reports kept as ${kept} (README.md, "Measurement")`
-        : `owed by hand: both benches run, their reports kept as ${kept}, each compared with ${last.name}'s on the machine that made them (README.md, "Measurement")`
+        ? `owed by hand: both benches run through tools/bench-release.mjs, their reports kept as ${kept} (README.md, "Measurement")`
+        : `owed by hand: both benches run through tools/bench-release.mjs, their reports kept as ${kept}, each compared with ${last.name}'s on the machine that made them; regression and inconclusive measures confirmed by interleaving before the finish (README.md, "Measurement")`
     );
   }
   if (first) {
