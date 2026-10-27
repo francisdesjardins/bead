@@ -290,6 +290,56 @@ jobs:
         if: always()
         run: if [ -n "${BEAD_MQTT_BROKER:-}" ]; then node tools/mqtt-broker.mjs stop; fi
 
+  # ── AMQP 1.0 ─────────────────────────────────────────────────────────────────
+  # The cases over AMQP 1.0, each adapter against the fixture, and the interop over AMQP 1.0 both
+  # ways, against a RabbitMQ 4.4.0 of the run's own, by its digest, a password drawn for the run, its
+  # heartbeat lowered so that an id's lockout after a silent loss is waited out in about 40 s
+  # (decision 0043). On the runner's host, as the MQTT 5 job is, and with no page leg: no page reaches
+  # an AMQP 1.0 broker. `BEAD_AMQP_REQUIRED=1` turns a case that would skip without a broker into one
+  # that fails, as `BEAD_INTEROP_REQUIRED=1` does the interop's.
+  amqp:
+    name: AMQP 1.0, against RabbitMQ
+    runs-on: ubuntu-26.04
+    timeout-minutes: 20
+    env:
+      BEAD_AMQP_REQUIRED: 1
+      BEAD_INTEROP_REQUIRED: 1
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          global-json-file: implementations/dotnet/global.json
+          cache: true
+          cache-dependency-path: implementations/dotnet/**/packages.lock.json
+      - name: Locate the Yarn cache
+        id: yarn-cache
+        working-directory: implementations/typescript
+        run: echo "dir=$($YARN config get cacheFolder)" >> "$GITHUB_OUTPUT"
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ steps.yarn-cache.outputs.dir }}
+          key: yarn-cache-${{ runner.os }}-node${{ env.NODE_VERSION }}-${{ hashFiles('implementations/typescript/yarn.lock') }}
+          restore-keys: yarn-cache-${{ runner.os }}-node${{ env.NODE_VERSION }}-
+      - run: $YARN install --immutable
+        working-directory: implementations/typescript
+      - name: RabbitMQ 4.4.0 by its digest, a password drawn for this run
+        run: node tools/amqp-broker.mjs start --github-env
+      # the cases over AMQP 1.0, the adapter against the fixture, and the TypeScript client over
+      # AMQP 1.0
+      - run: $YARN test:amqp
+        working-directory: implementations/typescript
+      - run: dotnet test --project tests/Bead.Transport.Amqp.Tests
+        working-directory: implementations/dotnet
+      - run: dotnet test --project tests/Bead.Interop.Tests --filter-trait "transport=AMQP"
+        working-directory: implementations/dotnet
+      # the broker start left, which a start that failed left none of
+      - name: The broker stopped
+        if: always()
+        run: if [ -n "${BEAD_AMQP_BROKER:-}" ]; then node tools/amqp-broker.mjs stop; fi
+
   # ── Builder ──────────────────────────────────────────────────────────────────
   # beadc's own gate, from builder/, its toolchain its own. On Linux: types, the goldens' types,
   # lint, format, buf's lint and format over its options and its fixtures, and the options'
@@ -747,6 +797,7 @@ jobs:
         typescript,
         dotnet,
         mqtt,
+        amqp,
         builder,
         examples,
         protobuf-conformance,
