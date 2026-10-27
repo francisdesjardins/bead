@@ -302,4 +302,224 @@ public sealed class BrokerTransportServerTests
         Assert.True(client.Carries("Bearer token"));
         Assert.False(client.Carries(" Bearer"));
     }
+
+    [Fact]
+    public async Task Starts_once_its_broker_holds_each_name_it_serves_fails_its_start_on_a_name_refused_and_stops_once_it_let_each_go()
+    {
+        var broker = new MemoryBroker();
+        var holding = new HoldingAdapter(broker.Adapter(new MemoryBrokerAdapterOptions { Id = "server" }));
+        await using var participant = new BrokerParticipant(holding);
+        await using var server = participant.Server(new BrokerTransportServerOptions { Names = ["interop", "echo"] });
+
+        var reported = new ConcurrentQueue<string>();
+
+        server.Error += (reason, connectionHandle) =>
+        {
+            reported.Enqueue(reason.Message);
+        };
+
+        // * its start asks each name at once and waits on each one's SUBACK, the gauge counting none
+        // until its broker holds it
+        var starting = server.Start();
+
+        await BrokerPair.Until(
+            () =>
+            {
+                return holding.Subscribing.Count == 2;
+            },
+            "each name asked of its broker");
+        Assert.False(starting.IsCompleted);
+        Assert.Equal(0, server.Gauges().Counts["names"]);
+        holding.Subscribing.Dequeue().SetResult();
+        await BrokerPair.Until(
+            () =>
+            {
+                return server.Gauges().Counts["names"] == 1;
+            },
+            "the first name held");
+        Assert.False(starting.IsCompleted);
+        holding.Subscribing.Dequeue().SetResult();
+        await starting.WaitAsync(BrokerPair.Patience, Cancelled);
+        Assert.Equal(2, server.Gauges().Counts["names"]);
+
+        // * its stop lets each go at once and waits on each one's UNSUBACK, the gauge counting it
+        // until its broker let it go
+        var stopping = server.Stop();
+
+        await BrokerPair.Until(
+            () =>
+            {
+                return holding.Unsubscribing.Count == 2;
+            },
+            "each name let go of");
+        Assert.False(stopping.IsCompleted);
+        Assert.Equal(2, server.Gauges().Counts["names"]);
+        holding.Unsubscribing.Dequeue().SetResult();
+        await BrokerPair.Until(
+            () =>
+            {
+                return server.Gauges().Counts["names"] == 1;
+            },
+            "the first name let go");
+        Assert.False(stopping.IsCompleted);
+
+        // * one its broker refuses to let go is reported, and its stop settles all the same
+        holding.Unsubscribing.Dequeue().SetException(new IOException("its broker refused to let bead/s/echo go: 0x80"));
+        await stopping.WaitAsync(BrokerPair.Patience, Cancelled);
+        Assert.Equal((ReadyState.Closed, 0L), (server.ReadyState, server.Gauges().Counts["names"]));
+        Assert.Equal(["its broker refused to let bead/s/echo go: 0x80"], reported);
+
+        // * a name its broker refuses fails its start as it is refused, and is counted none
+        var refusing = server.Start();
+
+        await BrokerPair.Until(
+            () =>
+            {
+                return holding.Subscribing.Count == 2;
+            },
+            "each name asked anew");
+        holding.Subscribing.Dequeue().SetException(new InvalidOperationException("its broker refused bead/s/interop"));
+        Assert.Equal("its broker refused bead/s/interop", (await Assert.ThrowsAsync<InvalidOperationException>(() =>
+        {
+            return refusing.WaitAsync(BrokerPair.Patience, Cancelled);
+        })).Message);
+        holding.Subscribing.Dequeue().SetException(new InvalidOperationException("its broker refused bead/s/echo"));
+        await participant.Scheduler.WhenIdle();
+        Assert.Equal(0, server.Gauges().Counts["names"]);
+        Assert.Single(reported);
+    }
+
+    // an adapter that holds each subscription and unsubscription of a server's name until the test
+    // settles it, and passes every other call on
+    private sealed class HoldingAdapter(MemoryBrokerAdapter inner) : IBrokerAdapter
+    {
+        public Queue<TaskCompletionSource> Subscribing { get; } = new();
+
+        public Queue<TaskCompletionSource> Unsubscribing { get; } = new();
+
+        public event Action<BrokerMessage>? Message
+        {
+            add
+            {
+                inner.Message += value;
+            }
+
+            remove
+            {
+                inner.Message -= value;
+            }
+        }
+
+        public event Action<BrokerDown>? Down
+        {
+            add
+            {
+                inner.Down += value;
+            }
+
+            remove
+            {
+                inner.Down -= value;
+            }
+        }
+
+        public string Type
+        {
+            get
+            {
+                return inner.Type;
+            }
+        }
+
+        public string Id
+        {
+            get
+            {
+                return inner.Id;
+            }
+        }
+
+        public BrokerCapabilities Capabilities
+        {
+            get
+            {
+                return inner.Capabilities;
+            }
+        }
+
+        public BrokerDelivery Delivery
+        {
+            get
+            {
+                return inner.Delivery;
+            }
+        }
+
+        public bool IsSecure
+        {
+            get
+            {
+                return inner.IsSecure;
+            }
+        }
+
+        public long ReceiveBound(IReadOnlyList<string> topic)
+        {
+            return inner.ReceiveBound(topic);
+        }
+
+        public Task Start(BrokerStart? start = null)
+        {
+            return inner.Start(start);
+        }
+
+        public async Task Subscribe(IReadOnlyList<string> topic, BrokerSubscription? subscription = null)
+        {
+            if (topic is [_, "s", _])
+            {
+                var held = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+
+                lock (Subscribing)
+                {
+                    Subscribing.Enqueue(held);
+                }
+
+                await held.Task;
+            }
+
+            await inner.Subscribe(topic, subscription);
+        }
+
+        public async Task Unsubscribe(IReadOnlyList<string> topic)
+        {
+            if (topic is [_, "s", _])
+            {
+                var held = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+
+                lock (Unsubscribing)
+                {
+                    Unsubscribing.Enqueue(held);
+                }
+
+                await held.Task;
+            }
+
+            await inner.Unsubscribe(topic);
+        }
+
+        public Task<BrokerPublished> Publish(BrokerPublication publication)
+        {
+            return inner.Publish(publication);
+        }
+
+        public long MaximumPayloadBytes(IReadOnlyList<string> topic)
+        {
+            return inner.MaximumPayloadBytes(topic);
+        }
+
+        public Task Stop()
+        {
+            return inner.Stop();
+        }
+    }
 }

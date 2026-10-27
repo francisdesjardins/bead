@@ -193,6 +193,12 @@ export interface IBrokerPeer {
   readonly isSecure: boolean;
 }
 
+/** A link lost, as its adapter tells it: whether another link of its identity took it over. */
+export interface IBrokerDown {
+  /** Ended by its broker for another link of its id (spec 15.21): its participant connects no more. */
+  readonly isTakenOver: boolean;
+}
+
 /** What a participant publishes: a payload to a topic, and how long its broker may keep it. */
 export interface IBrokerPublication {
   /** Milliseconds its broker keeps it before onward delivery, where its adapter offers `expiry`. */
@@ -236,28 +242,31 @@ export interface IBrokerCapabilities {
  */
 export interface IBrokerAdapter {
   readonly capabilities: IBrokerCapabilities;
-  /** At least once, its broker acknowledging each publication it took and pacing its link; or at most once. */
+  /**
+   * At least once, its broker acknowledging each publication it took, and its adapter holding what it
+   * publishes to the quota its broker gives; or at most once.
+   */
   readonly delivery: BrokerDelivery;
   /** The identity its broker authenticates its link by, a token (spec 15.16): never one Bead draws. */
   readonly id: string;
   /** Its leg under TLS, its broker on the loopback, or in memory (spec 15.22). */
   readonly isSecure: boolean;
-  /** The largest payload a message to its own inbox carries, whole. */
-  readonly receiveBound: number;
-  /** Its connections' handles' type: `BROKER` in memory. */
+  /** Its connections' handles' type: `BROKER` in memory, `MQTT` over MQTT 5. */
   readonly type: TRANSPORTS;
   /** The largest payload a message it publishes to `topic` carries, its own bytes deducted. */
   maximumPayloadBytes(topic: BrokerTopic): number;
-  off(event: 'down', listener: () => void): unknown;
+  off(event: 'down', listener: (down: IBrokerDown) => void): unknown;
   off(event: 'message', listener: (message: IBrokerMessage) => void): unknown;
-  /** Its link lost: every message after is a new link's. */
-  on(event: 'down', listener: () => void): unknown;
+  /** Its link lost, or taken over: every message after is a new link's. */
+  on(event: 'down', listener: (down: IBrokerDown) => void): unknown;
   on(event: 'message', listener: (message: IBrokerMessage) => void): unknown;
   /**
    * Publishes a payload, settling once its broker took it, at least once, or as it goes, at most
    * once; or said refused when no subscriber takes it, where its broker says so.
    */
   publish(publication: IBrokerPublication): Promise<BrokerPublished>;
+  /** The largest payload a message to `topic`, its own inbox, carries whole. */
+  receiveBound(topic: BrokerTopic): number;
   /** Connects a link that keeps no broker session, its will set where it takes one. */
   start(options?: IBrokerStart): Promise<void>;
   /** Ends its link cleanly, so no will goes. */

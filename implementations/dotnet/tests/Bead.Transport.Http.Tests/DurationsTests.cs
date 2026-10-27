@@ -1,5 +1,6 @@
 using Bead.Tests;
 using Bead.Transcoding.Http;
+using Bead.Transport.Mqtt;
 using Bead.Transport.WebSockets;
 
 namespace Bead.Transport.Http.Tests;
@@ -167,6 +168,14 @@ public sealed partial class DurationsTests
         ["brokerParticipant.bodyGracePeriod"] = (nameof(BrokerParticipantOptions.BodyGracePeriod), new()
         {
             ["options"] = new(nameof(BrokerParticipantOptions.BodyGracePeriod), BrokerBodyGracePeriodByOptions),
+        }),
+        ["mqttBrokerAdapter.keepAlive"] = (nameof(MqttBrokerAdapterOptions.KeepAlive), new()
+        {
+            ["options"] = new(nameof(MqttBrokerAdapterOptions.KeepAlive), KeepAliveByOptions),
+        }),
+        ["mqttBrokerAdapter.connectTimeout"] = (nameof(MqttBrokerAdapterOptions.ConnectTimeout), new()
+        {
+            ["options"] = new(nameof(MqttBrokerAdapterOptions.ConnectTimeout), MqttConnectTimeoutByOptions),
         }),
     };
 

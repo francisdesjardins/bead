@@ -326,4 +326,41 @@ test.describe('memory broker', () => {
 
     expect(cid.isLinked).toBe(false);
   });
+
+  test('takes a link over as a test asks, as a second link of its id would: its subscriptions dropped, its will published, its down told taken over (spec 15.24)', async () => {
+    const broker = createMemoryBroker();
+    const ada = broker.adapter({ id: 'ada' });
+    const bob = broker.adapter({ id: 'bob' });
+    const departure: BrokerTopic = ['bead', 'd', 'bob'];
+    const heard = heardBy(ada);
+    const downs: { isTakenOver: boolean }[] = [];
+
+    bob.on('down', (down) => {
+      downs.push(down);
+    });
+    await ada.start();
+    await ada.subscribe(departure);
+    await bob.start({ will: { payload: bytesOf('gone'), topic: departure } });
+    await bob.subscribe(['bead', 'i', 'bob']);
+    bob.takeOver();
+
+    expect(bob.isLinked).toBe(false);
+    expect(downs).toEqual([]);
+
+    await settled();
+
+    expect(downs).toEqual([{ isTakenOver: true }]);
+    expect(heard).toEqual([{ retained: false, text: 'gone', topic: 'bead/d/bob' }]);
+    // * no link of its id holds its inbox now
+    expect(await ada.publish({ payload: bytesOf('x'), topic: ['bead', 'i', 'bob'] })).toBe(
+      BROKER_PUBLISHED.NO_SUBSCRIBER
+    );
+
+    // a loss tells its down otherwise, and a takeover of a link not up does nothing
+    await bob.start();
+    bob.lose();
+    bob.takeOver();
+    await settled();
+    expect(downs).toEqual([{ isTakenOver: true }, { isTakenOver: false }]);
+  });
 });

@@ -429,6 +429,28 @@ places = [
         'default': default('15.12.16', milliseconds=DEFAULTS['bodyGracePeriod'], ways=['options']),
         'observed': 'held',
     },
+    # MQTT 5's adapter (spec 15.26, 15.30): its Keep Alive and the wait for its CONNACK, each on its
+    # library's timer, so observed by its refusal alone; a Keep Alive is held in whole seconds, 65,535
+    # at most, a ceiling of its own below 1.4's
+    {
+        'id': 'mqttBrokerAdapter.keepAlive',
+        'name': "an MQTT 5 adapter's Keep Alive, which its broker counts its link lost by",
+        'kind': 'timeout',
+        'never': 'refused',
+        'neverClause': '15.30',
+        'ways': [way('options', "the adapter's options, as it is built")],
+        'ceiling': {'milliseconds': 65_535_000, 'clause': '15.30'},
+        'observed': 'refusal',
+    },
+    {
+        'id': 'mqttBrokerAdapter.connectTimeout',
+        'name': "how long an MQTT 5 adapter's start waits for its CONNACK",
+        'kind': 'timeout',
+        'never': 'refused',
+        'neverClause': '15.30',
+        'ways': [way('options', "the adapter's options, as it is built")],
+        'observed': 'refusal',
+    },
     {
         'id': 'transportClient.reconnectionDelay',
         'name': "a reconnection's delay",
@@ -499,7 +521,7 @@ def outcome_of(value, place):
         met = {'outcome': 'refused', 'reason': '0 refused'}
     elif value < 1:
         met = {'outcome': 'refused', 'reason': 'under the floor'}
-    elif value > CEILING:
+    elif value > place.get('ceiling', {}).get('milliseconds', CEILING):
         met = {'outcome': 'refused', 'reason': 'past the ceiling'}
     else:
         met = {'outcome': 'held', 'held': nearest(value)}
@@ -519,8 +541,9 @@ def unit_order(unit):
 def clauses_of(place):
     """The units a place cites: what it observes of each, and nothing else — 1.4, which holds and
     refuses its durations; the clause that says whether it may be without end, where 1.4 does not
-    alone, since 1.4 lets a timeout or a bound be without end and never a delay; and the clause that
-    states its default."""
+    alone, since 1.4 lets a timeout or a bound be without end and never a delay; the clause that
+    states a ceiling of its own below 1.4's, where it has one; and the clause that states its
+    default."""
     if place['never'] != ('refused' if place['kind'] == 'delay' else 'taken') and 'neverClause' not in place:
         raise SystemExit(f'{place["id"]}: never {place["never"]}, which no clause states')
 
@@ -530,7 +553,8 @@ def clauses_of(place):
     if place['observed'] == 'refusal' and 'default' in place:
         raise SystemExit(f'{place["id"]}: a default, which a place observed by its refusal never reads')
 
-    cited = {'1.4', place.get('neverClause', '1.4'), place.get('default', {}).get('clause', '1.4')}
+    cited = {'1.4', place.get('neverClause', '1.4'), place.get('ceiling', {}).get('clause', '1.4'),
+             place.get('default', {}).get('clause', '1.4')}
 
     return sorted(cited, key=unit_order)
 

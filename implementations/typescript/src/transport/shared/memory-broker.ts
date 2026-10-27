@@ -12,6 +12,7 @@ import type {
   BrokerTopic,
   IBrokerAdapter,
   IBrokerCapabilities,
+  IBrokerDown,
   IBrokerMessage,
   IBrokerPublication,
   IBrokerStart,
@@ -25,6 +26,7 @@ export type {
   BrokerTopic,
   IBrokerAdapter,
   IBrokerCapabilities,
+  IBrokerDown,
   IBrokerMessage,
   IBrokerPublication,
   IBrokerStart,
@@ -61,7 +63,10 @@ export interface IMemoryBrokerPublication extends IBrokerPublication {
   readonly retained?: boolean | undefined;
 }
 
-/** An adapter of the in-memory broker: an adapter as any, its link lost and its acknowledgements counted. */
+/**
+ * An adapter of the in-memory broker: an adapter as any, its link lost or taken over and its
+ * acknowledgements counted.
+ */
 export interface IMemoryBrokerAdapter extends IBrokerAdapter {
   /** Whether its link is up: started, and neither stopped nor lost. */
   readonly isLinked: boolean;
@@ -70,6 +75,11 @@ export interface IMemoryBrokerAdapter extends IBrokerAdapter {
   /** Its link lost, as a test asks: its will published, its `down` told in a later turn. */
   lose(): void;
   publish(publication: IMemoryBrokerPublication): Promise<BrokerPublished>;
+  /**
+   * Its link taken over, as a test asks, as by a second link of its id: its subscriptions dropped,
+   * its will published, its `down` told taken over in a later turn.
+   */
+  takeOver(): void;
 }
 
 /** A broker in one process (spec 15.24), whose adapters each stand for one link of a participant. */
@@ -142,7 +152,8 @@ const keyOf = (topic: BrokerTopic): string => {
  * and handed on whole in a later turn than its publish, in the order its publisher published it to
  * that topic, once — or, as a test asks, again, behind the next, never, or to another member of its
  * group. A subscriber's queue drops a message past `maximumQueuedMessages`; a message past its
- * `expiresAfter` on the clock is deleted; a will is published as a link is lost, never at a stop.
+ * `expiresAfter` on the clock is deleted; a will is published as a link is lost or taken over, never
+ * at a stop.
  * Its handles' type is `BROKER`, and it never leaves the process, so its every leg is secure.
  *
  * @example
@@ -312,7 +323,7 @@ export const createMemoryBroker = (options?: IMemoryBrokerOptions): IMemoryBroke
 
       ids.add(id);
 
-      const emitter = createEmitter<{ down: []; message: [IBrokerMessage] }>();
+      const emitter = createEmitter<{ down: [IBrokerDown]; message: [IBrokerMessage] }>();
       let unsettled = 0;
       const linkOf = (): ILink => {
         const link = links.get(adapter);
@@ -324,13 +335,32 @@ export const createMemoryBroker = (options?: IMemoryBrokerOptions): IMemoryBroke
         return link;
       };
       const offered = Object.freeze({ ...capabilities });
+      // * its link ended without a clean end: what it held dropped, its will published, its `down`
+      // told in a later turn
+      const end = (down: IBrokerDown): void => {
+        const link = links.get(adapter);
+
+        if (link === undefined) {
+          return;
+        }
+
+        unlink(link);
+        unsettled = 0;
+
+        if (link.will !== undefined) {
+          publishFrom(undefined, link.will);
+        }
+
+        queueMicrotask(() => {
+          emitter.emit('down', down);
+        });
+      };
 
       const adapter: IMemoryBrokerAdapter = {
         capabilities: offered,
         delivery,
         id,
         isSecure: true,
-        receiveBound: maximumMessageBytes,
         type: TRANSPORT_BROKER,
 
         get isLinked() {
@@ -341,30 +371,21 @@ export const createMemoryBroker = (options?: IMemoryBrokerOptions): IMemoryBroke
         },
 
         lose: () => {
-          const link = links.get(adapter);
-
-          if (link === undefined) {
-            return;
-          }
-
-          unlink(link);
-          unsettled = 0;
-
-          if (link.will !== undefined) {
-            publishFrom(undefined, link.will);
-          }
-
-          queueMicrotask(() => {
-            emitter.emit('down');
-          });
+          end({ isTakenOver: false });
         },
         maximumPayloadBytes: () => {
           return maximumMessageBytes;
         },
-        off: (event: 'down' | 'message', listener: (message: IBrokerMessage) => void) => {
+        off: (
+          event: 'down' | 'message',
+          listener: ((down: IBrokerDown) => void) | ((message: IBrokerMessage) => void)
+        ) => {
           emitter.off(event, listener as never);
         },
-        on: (event: 'down' | 'message', listener: (message: IBrokerMessage) => void) => {
+        on: (
+          event: 'down' | 'message',
+          listener: ((down: IBrokerDown) => void) | ((message: IBrokerMessage) => void)
+        ) => {
           emitter.on(event, listener as never);
         },
         publish: (publication) => {
@@ -385,6 +406,10 @@ export const createMemoryBroker = (options?: IMemoryBrokerOptions): IMemoryBroke
           } catch (reason) {
             return Promise.reject(toError(reason));
           }
+        },
+        // it has no packet: every message's payload is its own, whatever its topic
+        receiveBound: () => {
+          return maximumMessageBytes;
         },
         start: (startOptions?: IBrokerStart) => {
           if (links.has(adapter)) {
@@ -452,6 +477,11 @@ export const createMemoryBroker = (options?: IMemoryBrokerOptions): IMemoryBroke
           } catch (reason) {
             return Promise.reject(toError(reason));
           }
+        },
+        // ! the broker keeps one adapter to an id: a takeover's second link is the test's to imagine,
+        // holding no subscription
+        takeOver: () => {
+          end({ isTakenOver: true });
         },
         unsubscribe: (topic) => {
           links.get(adapter)?.subscriptions.delete(keyOf(topic));

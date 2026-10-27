@@ -12,6 +12,7 @@ import { encodeParcel, ParcelKind, readParcel, writeParcel } from '../../shared/
 import { createBrokerParticipant } from '../../shared/broker-participant';
 import { ProgrammerError } from '../../shared/errors';
 import { createMemoryBroker } from '../../shared/memory-broker';
+import type { BrokerTopic, IBrokerAdapter } from '../../shared/types';
 import { createTestClock } from '../../shared/__tests__/fixtures';
 import {
   ACCEPT_TIMEOUT,
@@ -381,5 +382,114 @@ test.describe('createBrokerTransportServer', () => {
 
     await client.disconnect();
     await Promise.all([participant.stop(), ada.stop()]);
+  });
+
+  test('starts once its broker holds each name it serves, fails its start on a name refused, and stops once it let each go', async () => {
+    const broker = createMemoryBroker();
+    const adapter = broker.adapter({ id: 'server' });
+    // each SUBSCRIBE and UNSUBSCRIBE of a name answered when the test says, or refused
+    const answers: { refuse: (error: Error) => void; settle: () => void; what: string }[] = [];
+    const held = Object.assign(Object.create(adapter) as IBrokerAdapter, {
+      subscribe: (topic: BrokerTopic, options?: Parameters<IBrokerAdapter['subscribe']>[1]) => {
+        if (topic[1] !== 's') {
+          return adapter.subscribe(topic, options);
+        }
+
+        return new Promise<void>((resolve, reject) => {
+          answers.push({
+            refuse: reject,
+            settle: () => {
+              void adapter.subscribe(topic, options).then(resolve);
+            },
+            what: `subscribe ${topic.join('/')}`,
+          });
+        });
+      },
+      unsubscribe: (topic: BrokerTopic) => {
+        return new Promise<void>((resolve, reject) => {
+          answers.push({
+            refuse: reject,
+            settle: () => {
+              void adapter.unsubscribe(topic).then(resolve);
+            },
+            what: `unsubscribe ${topic.join('/')}`,
+          });
+        });
+      },
+    });
+    const participant = createBrokerParticipant({ adapter: held });
+    const server = participant.transportServer({ names: ['ada', 'bob'] });
+    const reported: string[] = [];
+
+    server.on('error', ({ message }) => {
+      reported.push(message);
+    });
+
+    let isStarted = false;
+    const starting = server.start().then(() => {
+      isStarted = true;
+    });
+
+    await turn();
+    expect(
+      answers.map(({ what }) => {
+        return what;
+      })
+    ).toEqual(['subscribe bead/s/ada', 'subscribe bead/s/bob']);
+    answers[0]?.settle();
+    await turn();
+
+    // * the gauge counts a name from its SUBACK: one held, one asked
+    expect([isStarted, server.gauges().counts['names']]).toEqual([false, 1]);
+    answers[1]?.settle();
+    await starting;
+    expect(server.gauges().counts['names']).toBe(2);
+
+    let isStopped = false;
+    const stopping = server.stop().then(() => {
+      isStopped = true;
+    });
+
+    await turn();
+
+    // * to its UNSUBACK, each name let go at once
+    const unsubscribing = answers.splice(0).filter(({ what }) => {
+      return what.startsWith('unsubscribe');
+    });
+
+    expect(
+      unsubscribing.map(({ what }) => {
+        return what;
+      })
+    ).toEqual(['unsubscribe bead/s/ada', 'unsubscribe bead/s/bob']);
+    expect([isStopped, server.gauges().counts['names']]).toEqual([false, 2]);
+    unsubscribing[0]?.settle();
+    await turn();
+    expect([isStopped, server.gauges().counts['names']]).toEqual([false, 1]);
+
+    // * one its broker refuses to let go is reported, and its stop settles all the same
+    unsubscribing[1]?.refuse(new Error('its broker refused to let bead/s/bob go: 0x80'));
+    await stopping;
+    expect([server.gauges().counts['names'], reported]).toEqual([
+      0,
+      ['its broker refused to let bead/s/bob go: 0x80'],
+    ]);
+    await participant.stop();
+
+    // a name its broker refuses fails the start, and is not held
+    const other = createBrokerParticipant({
+      adapter: Object.assign(Object.create(broker.adapter({ id: 'other' })) as IBrokerAdapter, {
+        subscribe: (topic: BrokerTopic) => {
+          return topic[1] === 's'
+            ? Promise.reject(new Error('its broker refused the subscription to bead/s/carol: 0x87'))
+            : Promise.resolve();
+        },
+      }),
+    });
+    const refused = other.transportServer({ names: ['carol'] });
+
+    await expect(refused.start()).rejects.toThrow('0x87');
+    expect(refused.gauges().counts['names']).toBe(0);
+    await other.stop();
   });
 });

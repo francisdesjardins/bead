@@ -205,6 +205,13 @@
           "Bead.Core": "[0.7.0, )"
         }
       },
+      "bead.transport.mqtt": {
+        "type": "Project",
+        "dependencies": {
+          "Bead.Core": "[0.7.0, )",
+          "MQTTnet": "[5.2.0.1603, )"
+        }
+      },
       "bead.transport.websockets": {
         "type": "Project",
         "dependencies": {
@@ -216,6 +223,12 @@
         "requested": "[3.36.2, )",
         "resolved": "3.36.2",
         "contentHash": "Ci1q1iJg74qAE5riTA2FbMS0wPbpruPQI/JQ9DrAsRo2VsSxgt1e/pmxGxgrci+pXJEgrSYg2vPl8rrStZkclQ=="
+      },
+      "MQTTnet": {
+        "type": "CentralTransitive",
+        "requested": "[5.2.0.1603, )",
+        "resolved": "5.2.0.1603",
+        "contentHash": "iNuWVo/568aRo2ExEN2qkC4J5b07ckKqt+9Uok2kIbbK7PMBsXvYiKVENPHmOBWFB5ExhlNQb/qQ8M9/IYRTdQ=="
       }
     }
   }

@@ -26,6 +26,17 @@ alone. With `CI=true`, a restore that would change a `packages.lock.json` fails.
 the TypeScript server needs that side installed; with `BEAD_INTEROP_REQUIRED=1`, an interop that
 would skip fails instead.
 
+What plays against a real broker of MQTT 5 — the cases over MQTT 5, the adapter's link over a
+WebSocket, the interop over MQTT 5 — needs one given by `BEAD_MQTT_URL`, and is skipped, saying so,
+where none is; `BEAD_MQTT_REQUIRED=1` fails it instead. [`tools/mqtt-broker.mjs`](../../tools/mqtt-broker.mjs)
+starts a Mosquitto of the run's own, under Docker or a native one, with a password drawn for the
+run, and stops it whatever the command's end:
+
+```sh
+node ../../tools/mqtt-broker.mjs run -- dotnet test --project tests/Bead.Transport.Mqtt.Tests
+node ../../tools/mqtt-broker.mjs run -- dotnet test --project tests/Bead.Interop.Tests --filter-trait "transport=MQTT"
+```
+
 ## Layout
 
 One solution, `Bead.slnx`:
@@ -44,6 +55,8 @@ src/
   Bead.Transport.WebSockets/    the server on Kestrel and the client on ClientWebSocket, one
                                 connection class for both
   Bead.Transport.Http/          the server on Kestrel and the client on HttpClient
+  Bead.Transport.Mqtt/          a broker's adapter over MQTTnet, MQTT 5's binding (spec 15.25 to
+                                15.31, decision 0041)
   Bead.Transcoding/             the transcoding layer, pure, no socket: a route table's types, its
                                 templates matched raw, a request bound from its route, Bead's own
                                 mapping of protobuf's JSON over a message's descriptor, a
@@ -119,11 +132,47 @@ envelope past the peer's receive bound goes in parts under `MaximumEnvelopeParts
 `TimeProvider.System`'s timer, as the TypeScript side's heartbeat does on its platform's; a
 request's credential crosses in its DATA, toward the server alone. Every link is a new incarnation
 that keeps no broker session, its connections lost with it and its peers reset once it is back.
-`MemoryBroker` offers every capability an adapter may, and copies, holds, drops and redelivers a
-message as a test asks (`Fault`), bounds each subscriber's queue, and loses a link with its will
-(`Lose`): the broker cases of [`spec/transports.json`](../../spec/transports.json), in both roles,
-play over it in `BrokerTransportsTests`, and the conversations through a broker pair. A binding to
-a real broker, MQTT 5's first, is a project of its own, beside its adapter.
+A link another of its id takes over (the adapter's `Down` telling `BrokerDown.IsTakenOver`) closes
+each connection alike, is reported, and connects no more until the application starts its
+participant again, or a server's transport over it: two holders of one id never take each other
+over without end. An OPEN lives in its broker its connect's time left, and a DATA that carries a
+credential twice the heartbeat, where the adapter offers a message's life. A server's transport
+starts once its broker holds each name it serves and stops once it let each go, its gauge `names`
+its broker's word. `MemoryBroker` offers every capability an adapter may, and copies, holds, drops
+and redelivers a message as a test asks (`Fault`), bounds each subscriber's queue, and loses a link
+with its will (`Lose`) or has it taken over (`TakeOver`): the broker cases of
+[`spec/transports.json`](../../spec/transports.json), in both roles, play over it in
+`BrokerTransportsTests`, and the conversations through a broker pair. `BrokerCasePlayer` plays them,
+over whatever broker it is given.
+
+A binding to a real broker is a project of its own, beside its adapter. `Bead.Transport.Mqtt`'s
+`MqttBrokerAdapter` links a participant to a broker of MQTT 5 over MQTTnet (spec 15.25 to 15.31,
+decision 0041): `mqtt://`, `mqtts://`, or a WebSocket of subprotocol `mqtt`, `ws://` or `wss://`;
+one network connection that keeps no session, its Client Identifier the participant's id,
+authenticated by a `Password` under its id, or a `PasswordProvider` asked at each link's start, or a
+TLS client certificate (`Tls`); a subscription of QoS 1 and Retain Handling 2 for each topic, a
+name in a group as its shared subscription `$share/<name>/<root>/s/<name>`; each publication of QoS 1
+counted to its byte by `MqttPackets` before it goes and held to its CONNACK's Receive Maximum,
+PUBACK 0x10 read as no subscriber; each message handed on before its PUBACK, which goes once the
+core settled it; a will of the participant's GONE; a DISCONNECT of 0x00 at a stop, one of 0x8E read
+as the link taken over. MQTTnet's automation is off: no reconnection, resubscription, offline queue
+or alias, each incarnation a client of its own. Its handles' type is `MQTT`.
+
+```csharp
+await using var participant = new BrokerParticipant(new MqttBrokerAdapter(new MqttBrokerAdapterOptions
+{
+    Id = "server",
+    Password = password,
+    Uri = new Uri("mqtt://127.0.0.1:1883"),
+}));
+await using var transport = participant.Server(new BrokerTransportServerOptions { Names = ["interop"], IsInGroup = true });
+
+await transport.Start();
+```
+
+`MqttBrokerAdapterTests` play its every packet against a scripted MQTT 5 peer, `MqttScript`, and
+`MqttTransportsTests` the cases over MQTT 5 against the broker a run gives, each participant through
+a relay of its own that a case's `lose` cuts.
 
 ### HTTP/JSON transcoding, a gateway
 

@@ -1,8 +1,9 @@
 // ── Interop ───────────────────────────────────────────────────────────────────
 
-// Bead's TypeScript client against the C# server of the interop service, over WebSocket and over
-// HTTP: the same procedures, the same failures, the same cancel. It builds and starts a .NET program:
-// where .NET is not installed, it is skipped, saying so, or fails where `BEAD_INTEROP_REQUIRED=1`.
+// Bead's TypeScript client against the C# server of the interop service, over WebSocket, HTTP and
+// MQTT 5: the same procedures, failures and cancel. Without .NET, or without a broker
+// (`BEAD_MQTT_URL`), it is skipped, saying so, or fails where `BEAD_INTEROP_REQUIRED=1` or
+// `BEAD_MQTT_REQUIRED=1`.
 
 // dependencies
 
@@ -19,8 +20,18 @@ import { INTEROP_SERVICE } from '../../../interop/credentials';
 import { InteropClient, InteropProcedures } from '../../../interop/generated/interop_bead';
 import { offerInteropClient } from '../../../interop/handlers';
 import { PAYLOAD_CODECS } from '../../router/shared/payloads';
-import type { FetchLike } from '../../transport/client/types';
+import type { BrokerTransportClient, FetchLike } from '../../transport/client/types';
+import { createLinkRelay, type ILinkRelay } from '../../transport/server/__tests__/link-relay';
+import { ParcelKind, readParcel } from '../../transport/shared/broker-parcel';
+import {
+  createBrokerParticipant,
+  type IBrokerParticipant,
+} from '../../transport/shared/broker-participant';
+import { createMqttBrokerAdapter } from '../../transport/shared/mqtt-broker-adapter';
 import { noop } from '../../transport/shared/noop';
+import type { IBrokerAdapter } from '../../transport/shared/types';
+import { createClient } from '../client';
+import type { IClient } from '../types';
 import { TranscodingHttpClient } from '../../transcoding/__tests__/generated/bead_http';
 import { startTranscoding } from '../../transcoding/__tests__/transcoding-service';
 import { createHTTPClient, type HTTPClient } from '../http-client';
@@ -42,6 +53,23 @@ interface IPorts {
   httpPort: number;
   port: number;
 }
+
+/**
+ * The participant the TypeScript client links over MQTT 5 by, through a relay of the test's own
+ * that a cut ends, its adapter wrapped so that a test has it publish each parcel twice, and the
+ * ACCEPTs it read for an opener's half it had read one for already.
+ */
+interface IMqttLink {
+  acceptedTwice: number;
+  isCopying: boolean;
+  readonly participant: IBrokerParticipant;
+  readonly relay: ILinkRelay;
+}
+
+// types
+
+/** A client the interop's cases call through, whichever its transport. */
+type InteropTransportClient = HTTPClient | IClient<BrokerTransportClient> | WSClient;
 
 // constants
 
@@ -98,29 +126,58 @@ const PATIENCE = 10_000;
 
 const REQUIRED = process.env['BEAD_INTEROP_REQUIRED'] === '1';
 
+// the broker the MQTT 5 cases call through, where one is given, and the run's password
+const MQTT_URL = process.env['BEAD_MQTT_URL'];
+const MQTT_PASSWORD = process.env['BEAD_MQTT_PASSWORD'] ?? '';
+const IS_MQTT_REQUIRED = process.env['BEAD_MQTT_REQUIRED'] === '1';
+const NO_BROKER = 'no broker: BEAD_MQTT_URL is not set (node tools/mqtt-broker.mjs start)';
+
 const SLOW = { milliseconds: 3_600_000 };
 
-/** Each transport the C# server is called over: its client, its port, and whether it carries transfers. */
+// the link of the TypeScript client over MQTT 5, while its cases run
+let mqttLink: IMqttLink | undefined;
+
+/**
+ * Each transport the C# server is called over: its client, how it connects to the C# server,
+ * whether it carries transfers, and whether it plays here.
+ */
 const TRANSPORTS = [
   {
     carriesTransfers: true,
-    create: (): HTTPClient | WSClient => {
+    connect: (client: InteropTransportClient, ports: IPorts): Promise<void> => {
+      return (client as WSClient).connect({ host: HOST, port: ports.port });
+    },
+    create: (): InteropTransportClient => {
       return createWSClient();
     },
     label: 'WebSocket',
-    portOf: ({ port }: IPorts) => {
-      return port;
-    },
+    skipped: undefined,
   },
   {
     carriesTransfers: false,
-    create: (): HTTPClient | WSClient => {
+    connect: (client: InteropTransportClient, ports: IPorts): Promise<void> => {
+      return (client as HTTPClient).connect({ host: HOST, port: ports.httpPort });
+    },
+    create: (): InteropTransportClient => {
       return createHTTPClient({ transport: { fetch: fetchInOrder() } });
     },
     label: 'HTTP',
-    portOf: ({ httpPort }: IPorts) => {
-      return httpPort;
+    skipped: undefined,
+  },
+  {
+    carriesTransfers: true,
+    connect: (client: InteropTransportClient): Promise<void> => {
+      return (client as IClient<BrokerTransportClient>).connect({ server: 'interop-cs' });
     },
+    create: (): InteropTransportClient => {
+      if (mqttLink === undefined) {
+        throw new Error('no link over MQTT 5');
+      }
+
+      return createClient({ transport: mqttLink.participant.transportClient() });
+    },
+    label: 'MQTT 5',
+    skipped: MQTT_URL === undefined && !IS_MQTT_REQUIRED ? NO_BROKER : undefined,
   },
 ] as const;
 
@@ -192,6 +249,69 @@ const startServer = async (): Promise<{
   }
 
   throw new Error('the C# interop server ended before it said its port');
+};
+
+/**
+ * The TypeScript client's link over MQTT 5: its participant `ts-client`, started through a relay of
+ * the test's own, its adapter wrapped to publish each parcel twice while `isCopying`, and every
+ * ACCEPT it reads for a half it read one for already counted.
+ */
+const startMqttLink = async (url: string): Promise<IMqttLink> => {
+  const broker = new URL(url);
+  const relay = await createLinkRelay({ host: broker.hostname, port: Number(broker.port) });
+  const adapter = createMqttBrokerAdapter({
+    id: 'ts-client',
+    password: MQTT_PASSWORD,
+    url: `${broker.protocol}//${HOST}:${String(relay.port)}`,
+  });
+  const answered = new Set<string>();
+  const copying = Object.assign(Object.create(adapter) as IBrokerAdapter, {
+    publish: (publication: Parameters<IBrokerAdapter['publish']>[0]) => {
+      if (link.isCopying) {
+        void adapter.publish(publication).catch(noop);
+      }
+
+      return adapter.publish(publication);
+    },
+  });
+  const participant = createBrokerParticipant({ adapter: copying, reconnect: { delay: 100 } });
+  const link: IMqttLink = { acceptedTwice: 0, isCopying: false, participant, relay };
+
+  // * an ACCEPT for an opener's half it read one for already: a second member of a group, or a
+  // second group, handed the OPEN
+  adapter.on('message', ({ payload, topic }) => {
+    const read = readParcel(payload);
+
+    if (topic[1] !== 'i' || !('parcel' in read) || read.parcel.kind !== ParcelKind.ACCEPT) {
+      return;
+    }
+
+    const half = Buffer.from(read.parcel.opener).toString('hex');
+
+    link.acceptedTwice += answered.has(half) ? 1 : 0;
+    answered.add(half);
+  });
+  await participant.start();
+
+  return link;
+};
+
+/** The TypeScript interop server, started over MQTT 5 beside the C# one, its first line read. */
+const startTypeScriptServer = async (): Promise<ChildProcessWithoutNullStreams> => {
+  const server = spawn(process.execPath, ['interop/serve.ts'], {
+    cwd: fileURLToPath(new URL('../../../', import.meta.url)),
+    stdio: ['pipe', 'pipe', 'pipe'],
+  });
+
+  server.stderr.pipe(process.stderr);
+
+  for await (const line of createInterface({ input: server.stdout })) {
+    if (portsOfLine(line) !== undefined) {
+      return server;
+    }
+  }
+
+  throw new Error('the TypeScript interop server ended before it said its port');
 };
 
 const isCapacityExceeded = (reason: unknown): boolean => {
@@ -381,9 +501,36 @@ test.describe('the C# server of the interop service', () => {
     expect(Buffer.from(await remote.arrayBuffer())).toEqual(Buffer.from(await own.arrayBuffer()));
   });
 
-  for (const { carriesTransfers, create, label, portOf } of TRANSPORTS) {
+  for (const { carriesTransfers, connect, create, label, skipped } of TRANSPORTS) {
     test.describe(`over ${label}`, () => {
-      let client: HTTPClient | WSClient;
+      // the TypeScript server, beside the C# one, of the name both serve in a group
+      let typeScriptServer: ChildProcessWithoutNullStreams | undefined;
+
+      test.skip(skipped !== undefined, skipped);
+
+      if (label === 'MQTT 5') {
+        test.beforeAll(async () => {
+          test.setTimeout(60_000);
+          expect(MQTT_URL, NO_BROKER).toBeDefined();
+          mqttLink = await startMqttLink(MQTT_URL ?? '');
+          typeScriptServer = await startTypeScriptServer();
+        });
+
+        test.afterAll(async () => {
+          await mqttLink?.participant.stop();
+          await mqttLink?.relay[Symbol.asyncDispose]();
+          mqttLink = undefined;
+
+          if (typeScriptServer !== undefined) {
+            const exited = once(typeScriptServer, 'exit');
+
+            typeScriptServer.stdin.end();
+            await exited;
+          }
+        });
+      }
+
+      let client: InteropTransportClient;
       // the interop service's client side, made once a test, unpaced unless the test made it first
       let made: InteropClient | undefined;
 
@@ -412,7 +559,7 @@ test.describe('the C# server of the interop service', () => {
       test.beforeEach(async () => {
         client = create();
         made = undefined;
-        await client.connect({ host: HOST, port: portOf(ports) });
+        await connect(client, ports);
       });
 
       test.afterEach(async () => {
@@ -642,9 +789,15 @@ test.describe('the C# server of the interop service', () => {
 
           // given the credential at its connect, over ws, which writes it on the upgrade
           await client[Symbol.asyncDispose]();
-          client = createWSClient({ transport: { WebSocket: WsWebSocket } });
+          const webSocketClient = createWSClient({ transport: { WebSocket: WsWebSocket } });
+
+          client = webSocketClient;
           made = undefined;
-          await client.connect({ credential: elsewhere.carried, host: HOST, port: portOf(ports) });
+          await webSocketClient.connect({
+            credential: elsewhere.carried,
+            host: HOST,
+            port: ports.port,
+          });
         }
 
         await expect(interop().whoami(null)({ credential: elsewhere })).resolves.toBe('ada');
@@ -719,6 +872,89 @@ test.describe('the C# server of the interop service', () => {
           // compared, not diffed: three mebibytes would bury a failure
           expect(echoed === long).toBe(true);
           expect(sent === long).toBe(true);
+        });
+      }
+
+      // * what a broker alone has (spec 15.18 to 15.21, 15.25 to 15.31)
+      if (label === 'MQTT 5') {
+        test('a name served by two in one group answers each of sixteen connections, and no OPEN reaches both', async () => {
+          const link = mqttLink as IMqttLink;
+          const before = link.acceptedTwice;
+
+          for (let index = 0; index < 16; index += 1) {
+            const each = createClient({ transport: link.participant.transportClient() });
+
+            try {
+              await each.connect({ server: 'interop-both' });
+              await expect(new InteropClient(each).echo({ index })()).resolves.toEqual({ index });
+            } finally {
+              await each[Symbol.asyncDispose]();
+            }
+          }
+
+          // ! the count proves one group of a member of each side: two would hand each OPEN to both
+          expect(link.acceptedTwice - before).toBe(0);
+        });
+
+        test('a parcel its broker delivers twice is answered once', async () => {
+          const link = mqttLink as IMqttLink;
+
+          link.isCopying = true;
+
+          try {
+            await expect(interop().echo({ copied: true })()).resolves.toEqual({ copied: true });
+            await expect(interop().bytes({ length: 10 })()).resolves.toBe('x'.repeat(10));
+          } finally {
+            link.isCopying = false;
+          }
+        });
+
+        test('a string of 100,000 characters goes in parts both ways, under its broker’s Maximum Packet Size', async () => {
+          const long = 'y'.repeat(100_000);
+
+          expect((await interop().echo(long)()) === long).toBe(true);
+        });
+
+        test('a link cut at its relay closes its connection unclean, as a dropped socket does', async () => {
+          const link = mqttLink as IMqttLink;
+          const closes: boolean[] = [];
+
+          (client as IClient<BrokerTransportClient>).router.transport.on('close', (wasClean) => {
+            closes.push(wasClean);
+          });
+          await expect(interop().echo('before')()).resolves.toBe('before');
+          link.relay.cut();
+          await expect
+            .poll(() => {
+              return closes;
+            })
+            .toEqual([false]);
+          await expect
+            .poll(() => {
+              return link.participant.isLinked;
+            })
+            .toBe(true);
+        });
+
+        test('a link lost connects anew, and the next connection through the name is answered', async () => {
+          const link = mqttLink as IMqttLink;
+          const former = link.participant.incarnation;
+
+          link.relay.cut();
+          await expect
+            .poll(() => {
+              return link.participant.isLinked && link.participant.incarnation !== former;
+            })
+            .toBe(true);
+
+          const next = createClient({ transport: link.participant.transportClient() });
+
+          try {
+            await next.connect({ server: 'interop-cs' });
+            await expect(new InteropClient(next).echo('after')()).resolves.toBe('after');
+          } finally {
+            await next[Symbol.asyncDispose]();
+          }
         });
       }
     });

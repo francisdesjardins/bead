@@ -2,7 +2,7 @@
   "name": "@francisdesjardins/bead",
   "version": "0.7.0",
   "private": true,
-  "description": "Bead, the binary wire protocol, on the TypeScript side: a WebSocket, an HTTP, a Web Worker, an in-memory and a broker's transport, each a client and a server, an in-memory broker, a server's transports joined into one, a client and a server router with the service, session and notification managers, the client and server over them, and a gateway that answers a service's procedures over HTTP and JSON.",
+  "description": "Bead, the binary wire protocol, on the TypeScript side: a WebSocket, an HTTP, a Web Worker, an in-memory and a broker's transport, each a client and a server, an in-memory broker and an adapter of MQTT 5, a server's transports joined into one, a client and a server router with the service, session and notification managers, the client and server over them, and a gateway that answers a service's procedures over HTTP and JSON.",
   "license": "Apache-2.0",
   "author": "Francis Desjardins <francis.desjardins@gmail.com>",
   "repository": {
@@ -25,6 +25,7 @@
     "./memory-broker": "./src/transport/shared/memory-broker.ts",
     "./memory-transport-client": "./src/transport/client/memory-transport-client.ts",
     "./memory-transport-server": "./src/transport/server/memory-transport-server.ts",
+    "./mqtt-broker-adapter": "./src/transport/shared/mqtt-broker-adapter.ts",
     "./notification-manager": "./src/router/server/notification-manager.ts",
     "./proto": "./src/proto/proto.ts",
     "./router-client": "./src/router/client/router-client.ts",
@@ -62,6 +63,7 @@
     "test": "playwright test",
     "test:coverage": "c8 playwright test",
     "test:interop": "playwright test src/client/__tests__/interop.test.ts",
+    "test:mqtt": "playwright test --grep \"over MQTT 5\"",
     "test:browser": "playwright test --config playwright.browser.config.ts",
     "test:demo": "playwright test --config playwright.demo.config.ts",
     "test:devtools": "playwright test --config playwright.devtools.config.ts",
@@ -82,6 +84,8 @@
     "@types/ws": "^8.18.2",
     "c8": "12.0.0",
     "esbuild": "0.28.2",
+    "mqtt": "5.16.1",
+    "mqtt-packet": "9.0.2",
     "oxfmt": "0.74.0",
     "oxlint": "^1.89.0",
     "oxlint-tsgolint": "7.0.2005",
@@ -97,10 +101,14 @@
     }
   },
   "peerDependencies": {
-    "@bufbuild/protobuf": "^2.13.0"
+    "@bufbuild/protobuf": "^2.13.0",
+    "mqtt": "^5.16.1"
   },
   "peerDependenciesMeta": {
     "@bufbuild/protobuf": {
+      "optional": true
+    },
+    "mqtt": {
       "optional": true
     }
   },

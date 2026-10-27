@@ -13,7 +13,8 @@
     "A credential refusal gives the scheme a request presents, by its name or, to come, its number, and the situation a test sets up on a server of its own before it: another-connections-session, an OPAQUE of the session another connection holds; no-session, an OPAQUE no session holds; nothing-carried, an ELSEWHERE whose transport carried nothing; verifier-makes-none, an ELSEWHERE its verifier settles with no session of; end-come, an ELSEWHERE whose end the wall clock has reached as its verifier settles; scheme-to-come; no-verifier, an ELSEWHERE to a server given no verifier; no-keys, a JWT to a server given no keys and no key set. Then the code the request is answered with, and the one word the server tells the access it refused with (section 13.12); a JWT's reasons are its verdicts', the step of section 13.8 that refused it.",
     "A parcel is a broker's message, read to its fields and written back to its bytes (section 15.17): its layout, 177 for 0xB1; its kind, OPEN 1, ACCEPT 2, REFUSE 3, DATA 4, PING 5, PONG 6, CLOSE 7, RESET 8, GONE 9, 128 to 255 advisory; its flags, MORE 1, CREDENTIAL 2 and SECURE 4 together; its opener's half and its acceptor's, 8 bytes each in hexadecimal; its sequence; then its body's fields: an OPEN's and an ACCEPT's id, a character a byte, incarnation, in hexadecimal, and bound, its receive bound; a REFUSE's status, and layouts, those it reads, on a 426; a DATA's credential, a character a byte, where it carries one, and carried, the envelope or the part it carries, in hexadecimal; a PONG's answers, the sequence of the PING it answers; a CLOSE's code; a GONE's incarnation and id. A field a parcel's kind has no part for is left out.",
     "written false marks a parcel a reader reads and no writer writes, which a side reads alone: an advisory kind, read to its prefix — layout, kind, halves and sequence — whatever its flags, its kept byte and its body, to be taken in its order and skipped; an OPEN of a layout to come, read to its prefix and its id, which its acceptor refuses 426; a REFUSE of a layout to come, read whole, which every layout keeps; and an OPEN whose id is no token or whose receive bound is under 1,024, which its acceptor refuses 400 (section 15.18).",
-    "A parcel refusal is what a side makes of a message that does not read as a parcel: no-parcel, under 28 bytes or of a first byte outside 0xB1 to 0xBF, which it drops in silence and reports; or does-not-read, a parcel of layout 0xB1 that does not read, which closes its connection with 1002, reported."
+    "A parcel refusal is what a side makes of a message that does not read as a parcel: no-parcel, under 28 bytes or of a first byte outside 0xB1 to 0xBF, which it drops in silence and reports; or does-not-read, a parcel of layout 0xB1 that does not read, which closes its connection with 1002, reported.",
+    "An MQTT 5 publish bound is section 15.30's count with no broker: a PUBLISH to topic, its UTF-8 bytes, at qos, 1 or 0, with a Message Expiry Interval where expiry is true; largestPayload, the largest payload whose packet is within maximumPacketSize and whose Remaining Length is at most 268,435,455, null where an empty one does not fit; and packetBytes, that packet's every byte, null alike."
   ],
   "specVersion": "0.8.0",
   "headers": [
@@ -4874,6 +4875,980 @@
       ],
       "bytes": "B1 04 02 00  11 12 13 14 15 16 17 18  21 22 23 24 25 26 27 28  00 00 00 00 00 00 00 03 | 00 0F  49 6E 74 65 72 6F 70 20 73 75 62 3D 61 64 61",
       "refused": "does-not-read"
+    }
+  ],
+  "mqttPublishBounds": [
+    {
+      "name": "bead/i/server at QoS 1 with a life, under 129 bytes: a Remaining Length of 127",
+      "clauses": [
+        "15.30"
+      ],
+      "topic": "bead/i/server",
+      "maximumPacketSize": 129,
+      "qos": 1,
+      "expiry": true,
+      "largestPayload": 104,
+      "packetBytes": 129
+    },
+    {
+      "name": "bead/i/server at QoS 1 with a life, under 131 bytes: a Remaining Length of 128",
+      "clauses": [
+        "15.30"
+      ],
+      "topic": "bead/i/server",
+      "maximumPacketSize": 131,
+      "qos": 1,
+      "expiry": true,
+      "largestPayload": 105,
+      "packetBytes": 131
+    },
+    {
+      "name": "bead/i/server at QoS 1 with a life, under 16,386 bytes: a Remaining Length of 16,383",
+      "clauses": [
+        "15.30"
+      ],
+      "topic": "bead/i/server",
+      "maximumPacketSize": 16386,
+      "qos": 1,
+      "expiry": true,
+      "largestPayload": 16360,
+      "packetBytes": 16386
+    },
+    {
+      "name": "bead/i/server at QoS 1 with a life, under 16,388 bytes: a Remaining Length of 16,384",
+      "clauses": [
+        "15.30"
+      ],
+      "topic": "bead/i/server",
+      "maximumPacketSize": 16388,
+      "qos": 1,
+      "expiry": true,
+      "largestPayload": 16361,
+      "packetBytes": 16388
+    },
+    {
+      "name": "bead/i/server at QoS 1 with a life, under 2,097,155 bytes: a Remaining Length of 2,097,151",
+      "clauses": [
+        "15.30"
+      ],
+      "topic": "bead/i/server",
+      "maximumPacketSize": 2097155,
+      "qos": 1,
+      "expiry": true,
+      "largestPayload": 2097128,
+      "packetBytes": 2097155
+    },
+    {
+      "name": "bead/i/server at QoS 1 with a life, under 2,097,157 bytes: a Remaining Length of 2,097,152",
+      "clauses": [
+        "15.30"
+      ],
+      "topic": "bead/i/server",
+      "maximumPacketSize": 2097157,
+      "qos": 1,
+      "expiry": true,
+      "largestPayload": 2097129,
+      "packetBytes": 2097157
+    },
+    {
+      "name": "bead/i/server at QoS 1 with a life, under 1,052 bytes: a Remaining Length of 1,049",
+      "clauses": [
+        "15.30"
+      ],
+      "topic": "bead/i/server",
+      "maximumPacketSize": 1052,
+      "qos": 1,
+      "expiry": true,
+      "largestPayload": 1026,
+      "packetBytes": 1052
+    },
+    {
+      "name": "bead/i/server at QoS 1 with a life, under 4,096 bytes: a Remaining Length of 4,093",
+      "clauses": [
+        "15.30"
+      ],
+      "topic": "bead/i/server",
+      "maximumPacketSize": 4096,
+      "qos": 1,
+      "expiry": true,
+      "largestPayload": 4070,
+      "packetBytes": 4096
+    },
+    {
+      "name": "bead/i/server at QoS 1 with a life, under 16,777,216 bytes: a Remaining Length of 16,777,211",
+      "clauses": [
+        "15.30"
+      ],
+      "topic": "bead/i/server",
+      "maximumPacketSize": 16777216,
+      "qos": 1,
+      "expiry": true,
+      "largestPayload": 16777188,
+      "packetBytes": 16777216
+    },
+    {
+      "name": "bead/i/server at QoS 1 with a life, under 268,435,460 bytes: a Remaining Length of 268,435,455",
+      "clauses": [
+        "15.30"
+      ],
+      "topic": "bead/i/server",
+      "maximumPacketSize": 268435460,
+      "qos": 1,
+      "expiry": true,
+      "largestPayload": 268435432,
+      "packetBytes": 268435460
+    },
+    {
+      "name": "bead/i/server at QoS 1 without a life, under 129 bytes: a Remaining Length of 127",
+      "clauses": [
+        "15.30"
+      ],
+      "topic": "bead/i/server",
+      "maximumPacketSize": 129,
+      "qos": 1,
+      "expiry": false,
+      "largestPayload": 109,
+      "packetBytes": 129
+    },
+    {
+      "name": "bead/i/server at QoS 1 without a life, under 131 bytes: a Remaining Length of 128",
+      "clauses": [
+        "15.30"
+      ],
+      "topic": "bead/i/server",
+      "maximumPacketSize": 131,
+      "qos": 1,
+      "expiry": false,
+      "largestPayload": 110,
+      "packetBytes": 131
+    },
+    {
+      "name": "bead/i/server at QoS 1 without a life, under 16,386 bytes: a Remaining Length of 16,383",
+      "clauses": [
+        "15.30"
+      ],
+      "topic": "bead/i/server",
+      "maximumPacketSize": 16386,
+      "qos": 1,
+      "expiry": false,
+      "largestPayload": 16365,
+      "packetBytes": 16386
+    },
+    {
+      "name": "bead/i/server at QoS 1 without a life, under 16,388 bytes: a Remaining Length of 16,384",
+      "clauses": [
+        "15.30"
+      ],
+      "topic": "bead/i/server",
+      "maximumPacketSize": 16388,
+      "qos": 1,
+      "expiry": false,
+      "largestPayload": 16366,
+      "packetBytes": 16388
+    },
+    {
+      "name": "bead/i/server at QoS 1 without a life, under 2,097,155 bytes: a Remaining Length of 2,097,151",
+      "clauses": [
+        "15.30"
+      ],
+      "topic": "bead/i/server",
+      "maximumPacketSize": 2097155,
+      "qos": 1,
+      "expiry": false,
+      "largestPayload": 2097133,
+      "packetBytes": 2097155
+    },
+    {
+      "name": "bead/i/server at QoS 1 without a life, under 2,097,157 bytes: a Remaining Length of 2,097,152",
+      "clauses": [
+        "15.30"
+      ],
+      "topic": "bead/i/server",
+      "maximumPacketSize": 2097157,
+      "qos": 1,
+      "expiry": false,
+      "largestPayload": 2097134,
+      "packetBytes": 2097157
+    },
+    {
+      "name": "bead/i/server at QoS 1 without a life, under 1,052 bytes: a Remaining Length of 1,049",
+      "clauses": [
+        "15.30"
+      ],
+      "topic": "bead/i/server",
+      "maximumPacketSize": 1052,
+      "qos": 1,
+      "expiry": false,
+      "largestPayload": 1031,
+      "packetBytes": 1052
+    },
+    {
+      "name": "bead/i/server at QoS 1 without a life, under 4,096 bytes: a Remaining Length of 4,093",
+      "clauses": [
+        "15.30"
+      ],
+      "topic": "bead/i/server",
+      "maximumPacketSize": 4096,
+      "qos": 1,
+      "expiry": false,
+      "largestPayload": 4075,
+      "packetBytes": 4096
+    },
+    {
+      "name": "bead/i/server at QoS 1 without a life, under 16,777,216 bytes: a Remaining Length of 16,777,211",
+      "clauses": [
+        "15.30"
+      ],
+      "topic": "bead/i/server",
+      "maximumPacketSize": 16777216,
+      "qos": 1,
+      "expiry": false,
+      "largestPayload": 16777193,
+      "packetBytes": 16777216
+    },
+    {
+      "name": "bead/i/server at QoS 1 without a life, under 268,435,460 bytes: a Remaining Length of 268,435,455",
+      "clauses": [
+        "15.30"
+      ],
+      "topic": "bead/i/server",
+      "maximumPacketSize": 268435460,
+      "qos": 1,
+      "expiry": false,
+      "largestPayload": 268435437,
+      "packetBytes": 268435460
+    },
+    {
+      "name": "bead/i/server at QoS 0 with a life, under 129 bytes: a Remaining Length of 127",
+      "clauses": [
+        "15.30"
+      ],
+      "topic": "bead/i/server",
+      "maximumPacketSize": 129,
+      "qos": 0,
+      "expiry": true,
+      "largestPayload": 106,
+      "packetBytes": 129
+    },
+    {
+      "name": "bead/i/server at QoS 0 with a life, under 131 bytes: a Remaining Length of 128",
+      "clauses": [
+        "15.30"
+      ],
+      "topic": "bead/i/server",
+      "maximumPacketSize": 131,
+      "qos": 0,
+      "expiry": true,
+      "largestPayload": 107,
+      "packetBytes": 131
+    },
+    {
+      "name": "bead/i/server at QoS 0 with a life, under 16,386 bytes: a Remaining Length of 16,383",
+      "clauses": [
+        "15.30"
+      ],
+      "topic": "bead/i/server",
+      "maximumPacketSize": 16386,
+      "qos": 0,
+      "expiry": true,
+      "largestPayload": 16362,
+      "packetBytes": 16386
+    },
+    {
+      "name": "bead/i/server at QoS 0 with a life, under 16,388 bytes: a Remaining Length of 16,384",
+      "clauses": [
+        "15.30"
+      ],
+      "topic": "bead/i/server",
+      "maximumPacketSize": 16388,
+      "qos": 0,
+      "expiry": true,
+      "largestPayload": 16363,
+      "packetBytes": 16388
+    },
+    {
+      "name": "bead/i/server at QoS 0 with a life, under 2,097,155 bytes: a Remaining Length of 2,097,151",
+      "clauses": [
+        "15.30"
+      ],
+      "topic": "bead/i/server",
+      "maximumPacketSize": 2097155,
+      "qos": 0,
+      "expiry": true,
+      "largestPayload": 2097130,
+      "packetBytes": 2097155
+    },
+    {
+      "name": "bead/i/server at QoS 0 with a life, under 2,097,157 bytes: a Remaining Length of 2,097,152",
+      "clauses": [
+        "15.30"
+      ],
+      "topic": "bead/i/server",
+      "maximumPacketSize": 2097157,
+      "qos": 0,
+      "expiry": true,
+      "largestPayload": 2097131,
+      "packetBytes": 2097157
+    },
+    {
+      "name": "bead/i/server at QoS 0 with a life, under 1,052 bytes: a Remaining Length of 1,049",
+      "clauses": [
+        "15.30"
+      ],
+      "topic": "bead/i/server",
+      "maximumPacketSize": 1052,
+      "qos": 0,
+      "expiry": true,
+      "largestPayload": 1028,
+      "packetBytes": 1052
+    },
+    {
+      "name": "bead/i/server at QoS 0 with a life, under 4,096 bytes: a Remaining Length of 4,093",
+      "clauses": [
+        "15.30"
+      ],
+      "topic": "bead/i/server",
+      "maximumPacketSize": 4096,
+      "qos": 0,
+      "expiry": true,
+      "largestPayload": 4072,
+      "packetBytes": 4096
+    },
+    {
+      "name": "bead/i/server at QoS 0 with a life, under 16,777,216 bytes: a Remaining Length of 16,777,211",
+      "clauses": [
+        "15.30"
+      ],
+      "topic": "bead/i/server",
+      "maximumPacketSize": 16777216,
+      "qos": 0,
+      "expiry": true,
+      "largestPayload": 16777190,
+      "packetBytes": 16777216
+    },
+    {
+      "name": "bead/i/server at QoS 0 with a life, under 268,435,460 bytes: a Remaining Length of 268,435,455",
+      "clauses": [
+        "15.30"
+      ],
+      "topic": "bead/i/server",
+      "maximumPacketSize": 268435460,
+      "qos": 0,
+      "expiry": true,
+      "largestPayload": 268435434,
+      "packetBytes": 268435460
+    },
+    {
+      "name": "bead/i/server at QoS 0 without a life, under 129 bytes: a Remaining Length of 127",
+      "clauses": [
+        "15.30"
+      ],
+      "topic": "bead/i/server",
+      "maximumPacketSize": 129,
+      "qos": 0,
+      "expiry": false,
+      "largestPayload": 111,
+      "packetBytes": 129
+    },
+    {
+      "name": "bead/i/server at QoS 0 without a life, under 131 bytes: a Remaining Length of 128",
+      "clauses": [
+        "15.30"
+      ],
+      "topic": "bead/i/server",
+      "maximumPacketSize": 131,
+      "qos": 0,
+      "expiry": false,
+      "largestPayload": 112,
+      "packetBytes": 131
+    },
+    {
+      "name": "bead/i/server at QoS 0 without a life, under 16,386 bytes: a Remaining Length of 16,383",
+      "clauses": [
+        "15.30"
+      ],
+      "topic": "bead/i/server",
+      "maximumPacketSize": 16386,
+      "qos": 0,
+      "expiry": false,
+      "largestPayload": 16367,
+      "packetBytes": 16386
+    },
+    {
+      "name": "bead/i/server at QoS 0 without a life, under 16,388 bytes: a Remaining Length of 16,384",
+      "clauses": [
+        "15.30"
+      ],
+      "topic": "bead/i/server",
+      "maximumPacketSize": 16388,
+      "qos": 0,
+      "expiry": false,
+      "largestPayload": 16368,
+      "packetBytes": 16388
+    },
+    {
+      "name": "bead/i/server at QoS 0 without a life, under 2,097,155 bytes: a Remaining Length of 2,097,151",
+      "clauses": [
+        "15.30"
+      ],
+      "topic": "bead/i/server",
+      "maximumPacketSize": 2097155,
+      "qos": 0,
+      "expiry": false,
+      "largestPayload": 2097135,
+      "packetBytes": 2097155
+    },
+    {
+      "name": "bead/i/server at QoS 0 without a life, under 2,097,157 bytes: a Remaining Length of 2,097,152",
+      "clauses": [
+        "15.30"
+      ],
+      "topic": "bead/i/server",
+      "maximumPacketSize": 2097157,
+      "qos": 0,
+      "expiry": false,
+      "largestPayload": 2097136,
+      "packetBytes": 2097157
+    },
+    {
+      "name": "bead/i/server at QoS 0 without a life, under 1,052 bytes: a Remaining Length of 1,049",
+      "clauses": [
+        "15.30"
+      ],
+      "topic": "bead/i/server",
+      "maximumPacketSize": 1052,
+      "qos": 0,
+      "expiry": false,
+      "largestPayload": 1033,
+      "packetBytes": 1052
+    },
+    {
+      "name": "bead/i/server at QoS 0 without a life, under 4,096 bytes: a Remaining Length of 4,093",
+      "clauses": [
+        "15.30"
+      ],
+      "topic": "bead/i/server",
+      "maximumPacketSize": 4096,
+      "qos": 0,
+      "expiry": false,
+      "largestPayload": 4077,
+      "packetBytes": 4096
+    },
+    {
+      "name": "bead/i/server at QoS 0 without a life, under 16,777,216 bytes: a Remaining Length of 16,777,211",
+      "clauses": [
+        "15.30"
+      ],
+      "topic": "bead/i/server",
+      "maximumPacketSize": 16777216,
+      "qos": 0,
+      "expiry": false,
+      "largestPayload": 16777195,
+      "packetBytes": 16777216
+    },
+    {
+      "name": "bead/i/server at QoS 0 without a life, under 268,435,460 bytes: a Remaining Length of 268,435,455",
+      "clauses": [
+        "15.30"
+      ],
+      "topic": "bead/i/server",
+      "maximumPacketSize": 268435460,
+      "qos": 0,
+      "expiry": false,
+      "largestPayload": 268435439,
+      "packetBytes": 268435460
+    },
+    {
+      "name": "an inbox of a 64-character id at QoS 1 with a life, under 129 bytes: a Remaining Length of 127",
+      "clauses": [
+        "15.30"
+      ],
+      "topic": "bead/i/ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_",
+      "maximumPacketSize": 129,
+      "qos": 1,
+      "expiry": true,
+      "largestPayload": 46,
+      "packetBytes": 129
+    },
+    {
+      "name": "an inbox of a 64-character id at QoS 1 with a life, under 131 bytes: a Remaining Length of 128",
+      "clauses": [
+        "15.30"
+      ],
+      "topic": "bead/i/ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_",
+      "maximumPacketSize": 131,
+      "qos": 1,
+      "expiry": true,
+      "largestPayload": 47,
+      "packetBytes": 131
+    },
+    {
+      "name": "an inbox of a 64-character id at QoS 1 with a life, under 16,386 bytes: a Remaining Length of 16,383",
+      "clauses": [
+        "15.30"
+      ],
+      "topic": "bead/i/ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_",
+      "maximumPacketSize": 16386,
+      "qos": 1,
+      "expiry": true,
+      "largestPayload": 16302,
+      "packetBytes": 16386
+    },
+    {
+      "name": "an inbox of a 64-character id at QoS 1 with a life, under 16,388 bytes: a Remaining Length of 16,384",
+      "clauses": [
+        "15.30"
+      ],
+      "topic": "bead/i/ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_",
+      "maximumPacketSize": 16388,
+      "qos": 1,
+      "expiry": true,
+      "largestPayload": 16303,
+      "packetBytes": 16388
+    },
+    {
+      "name": "an inbox of a 64-character id at QoS 1 with a life, under 2,097,155 bytes: a Remaining Length of 2,097,151",
+      "clauses": [
+        "15.30"
+      ],
+      "topic": "bead/i/ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_",
+      "maximumPacketSize": 2097155,
+      "qos": 1,
+      "expiry": true,
+      "largestPayload": 2097070,
+      "packetBytes": 2097155
+    },
+    {
+      "name": "an inbox of a 64-character id at QoS 1 with a life, under 2,097,157 bytes: a Remaining Length of 2,097,152",
+      "clauses": [
+        "15.30"
+      ],
+      "topic": "bead/i/ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_",
+      "maximumPacketSize": 2097157,
+      "qos": 1,
+      "expiry": true,
+      "largestPayload": 2097071,
+      "packetBytes": 2097157
+    },
+    {
+      "name": "an inbox of a 64-character id at QoS 1 with a life, under 1,052 bytes: a Remaining Length of 1,049",
+      "clauses": [
+        "15.30"
+      ],
+      "topic": "bead/i/ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_",
+      "maximumPacketSize": 1052,
+      "qos": 1,
+      "expiry": true,
+      "largestPayload": 968,
+      "packetBytes": 1052
+    },
+    {
+      "name": "an inbox of a 64-character id at QoS 1 with a life, under 4,096 bytes: a Remaining Length of 4,093",
+      "clauses": [
+        "15.30"
+      ],
+      "topic": "bead/i/ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_",
+      "maximumPacketSize": 4096,
+      "qos": 1,
+      "expiry": true,
+      "largestPayload": 4012,
+      "packetBytes": 4096
+    },
+    {
+      "name": "an inbox of a 64-character id at QoS 1 with a life, under 16,777,216 bytes: a Remaining Length of 16,777,211",
+      "clauses": [
+        "15.30"
+      ],
+      "topic": "bead/i/ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_",
+      "maximumPacketSize": 16777216,
+      "qos": 1,
+      "expiry": true,
+      "largestPayload": 16777130,
+      "packetBytes": 16777216
+    },
+    {
+      "name": "an inbox of a 64-character id at QoS 1 with a life, under 268,435,460 bytes: a Remaining Length of 268,435,455",
+      "clauses": [
+        "15.30"
+      ],
+      "topic": "bead/i/ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_",
+      "maximumPacketSize": 268435460,
+      "qos": 1,
+      "expiry": true,
+      "largestPayload": 268435374,
+      "packetBytes": 268435460
+    },
+    {
+      "name": "an inbox of a 64-character id at QoS 1 without a life, under 129 bytes: a Remaining Length of 127",
+      "clauses": [
+        "15.30"
+      ],
+      "topic": "bead/i/ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_",
+      "maximumPacketSize": 129,
+      "qos": 1,
+      "expiry": false,
+      "largestPayload": 51,
+      "packetBytes": 129
+    },
+    {
+      "name": "an inbox of a 64-character id at QoS 1 without a life, under 131 bytes: a Remaining Length of 128",
+      "clauses": [
+        "15.30"
+      ],
+      "topic": "bead/i/ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_",
+      "maximumPacketSize": 131,
+      "qos": 1,
+      "expiry": false,
+      "largestPayload": 52,
+      "packetBytes": 131
+    },
+    {
+      "name": "an inbox of a 64-character id at QoS 1 without a life, under 16,386 bytes: a Remaining Length of 16,383",
+      "clauses": [
+        "15.30"
+      ],
+      "topic": "bead/i/ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_",
+      "maximumPacketSize": 16386,
+      "qos": 1,
+      "expiry": false,
+      "largestPayload": 16307,
+      "packetBytes": 16386
+    },
+    {
+      "name": "an inbox of a 64-character id at QoS 1 without a life, under 16,388 bytes: a Remaining Length of 16,384",
+      "clauses": [
+        "15.30"
+      ],
+      "topic": "bead/i/ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_",
+      "maximumPacketSize": 16388,
+      "qos": 1,
+      "expiry": false,
+      "largestPayload": 16308,
+      "packetBytes": 16388
+    },
+    {
+      "name": "an inbox of a 64-character id at QoS 1 without a life, under 2,097,155 bytes: a Remaining Length of 2,097,151",
+      "clauses": [
+        "15.30"
+      ],
+      "topic": "bead/i/ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_",
+      "maximumPacketSize": 2097155,
+      "qos": 1,
+      "expiry": false,
+      "largestPayload": 2097075,
+      "packetBytes": 2097155
+    },
+    {
+      "name": "an inbox of a 64-character id at QoS 1 without a life, under 2,097,157 bytes: a Remaining Length of 2,097,152",
+      "clauses": [
+        "15.30"
+      ],
+      "topic": "bead/i/ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_",
+      "maximumPacketSize": 2097157,
+      "qos": 1,
+      "expiry": false,
+      "largestPayload": 2097076,
+      "packetBytes": 2097157
+    },
+    {
+      "name": "an inbox of a 64-character id at QoS 1 without a life, under 1,052 bytes: a Remaining Length of 1,049",
+      "clauses": [
+        "15.30"
+      ],
+      "topic": "bead/i/ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_",
+      "maximumPacketSize": 1052,
+      "qos": 1,
+      "expiry": false,
+      "largestPayload": 973,
+      "packetBytes": 1052
+    },
+    {
+      "name": "an inbox of a 64-character id at QoS 1 without a life, under 4,096 bytes: a Remaining Length of 4,093",
+      "clauses": [
+        "15.30"
+      ],
+      "topic": "bead/i/ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_",
+      "maximumPacketSize": 4096,
+      "qos": 1,
+      "expiry": false,
+      "largestPayload": 4017,
+      "packetBytes": 4096
+    },
+    {
+      "name": "an inbox of a 64-character id at QoS 1 without a life, under 16,777,216 bytes: a Remaining Length of 16,777,211",
+      "clauses": [
+        "15.30"
+      ],
+      "topic": "bead/i/ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_",
+      "maximumPacketSize": 16777216,
+      "qos": 1,
+      "expiry": false,
+      "largestPayload": 16777135,
+      "packetBytes": 16777216
+    },
+    {
+      "name": "an inbox of a 64-character id at QoS 1 without a life, under 268,435,460 bytes: a Remaining Length of 268,435,455",
+      "clauses": [
+        "15.30"
+      ],
+      "topic": "bead/i/ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_",
+      "maximumPacketSize": 268435460,
+      "qos": 1,
+      "expiry": false,
+      "largestPayload": 268435379,
+      "packetBytes": 268435460
+    },
+    {
+      "name": "an inbox of a 64-character id at QoS 0 with a life, under 129 bytes: a Remaining Length of 127",
+      "clauses": [
+        "15.30"
+      ],
+      "topic": "bead/i/ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_",
+      "maximumPacketSize": 129,
+      "qos": 0,
+      "expiry": true,
+      "largestPayload": 48,
+      "packetBytes": 129
+    },
+    {
+      "name": "an inbox of a 64-character id at QoS 0 with a life, under 131 bytes: a Remaining Length of 128",
+      "clauses": [
+        "15.30"
+      ],
+      "topic": "bead/i/ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_",
+      "maximumPacketSize": 131,
+      "qos": 0,
+      "expiry": true,
+      "largestPayload": 49,
+      "packetBytes": 131
+    },
+    {
+      "name": "an inbox of a 64-character id at QoS 0 with a life, under 16,386 bytes: a Remaining Length of 16,383",
+      "clauses": [
+        "15.30"
+      ],
+      "topic": "bead/i/ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_",
+      "maximumPacketSize": 16386,
+      "qos": 0,
+      "expiry": true,
+      "largestPayload": 16304,
+      "packetBytes": 16386
+    },
+    {
+      "name": "an inbox of a 64-character id at QoS 0 with a life, under 16,388 bytes: a Remaining Length of 16,384",
+      "clauses": [
+        "15.30"
+      ],
+      "topic": "bead/i/ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_",
+      "maximumPacketSize": 16388,
+      "qos": 0,
+      "expiry": true,
+      "largestPayload": 16305,
+      "packetBytes": 16388
+    },
+    {
+      "name": "an inbox of a 64-character id at QoS 0 with a life, under 2,097,155 bytes: a Remaining Length of 2,097,151",
+      "clauses": [
+        "15.30"
+      ],
+      "topic": "bead/i/ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_",
+      "maximumPacketSize": 2097155,
+      "qos": 0,
+      "expiry": true,
+      "largestPayload": 2097072,
+      "packetBytes": 2097155
+    },
+    {
+      "name": "an inbox of a 64-character id at QoS 0 with a life, under 2,097,157 bytes: a Remaining Length of 2,097,152",
+      "clauses": [
+        "15.30"
+      ],
+      "topic": "bead/i/ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_",
+      "maximumPacketSize": 2097157,
+      "qos": 0,
+      "expiry": true,
+      "largestPayload": 2097073,
+      "packetBytes": 2097157
+    },
+    {
+      "name": "an inbox of a 64-character id at QoS 0 with a life, under 1,052 bytes: a Remaining Length of 1,049",
+      "clauses": [
+        "15.30"
+      ],
+      "topic": "bead/i/ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_",
+      "maximumPacketSize": 1052,
+      "qos": 0,
+      "expiry": true,
+      "largestPayload": 970,
+      "packetBytes": 1052
+    },
+    {
+      "name": "an inbox of a 64-character id at QoS 0 with a life, under 4,096 bytes: a Remaining Length of 4,093",
+      "clauses": [
+        "15.30"
+      ],
+      "topic": "bead/i/ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_",
+      "maximumPacketSize": 4096,
+      "qos": 0,
+      "expiry": true,
+      "largestPayload": 4014,
+      "packetBytes": 4096
+    },
+    {
+      "name": "an inbox of a 64-character id at QoS 0 with a life, under 16,777,216 bytes: a Remaining Length of 16,777,211",
+      "clauses": [
+        "15.30"
+      ],
+      "topic": "bead/i/ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_",
+      "maximumPacketSize": 16777216,
+      "qos": 0,
+      "expiry": true,
+      "largestPayload": 16777132,
+      "packetBytes": 16777216
+    },
+    {
+      "name": "an inbox of a 64-character id at QoS 0 with a life, under 268,435,460 bytes: a Remaining Length of 268,435,455",
+      "clauses": [
+        "15.30"
+      ],
+      "topic": "bead/i/ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_",
+      "maximumPacketSize": 268435460,
+      "qos": 0,
+      "expiry": true,
+      "largestPayload": 268435376,
+      "packetBytes": 268435460
+    },
+    {
+      "name": "an inbox of a 64-character id at QoS 0 without a life, under 129 bytes: a Remaining Length of 127",
+      "clauses": [
+        "15.30"
+      ],
+      "topic": "bead/i/ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_",
+      "maximumPacketSize": 129,
+      "qos": 0,
+      "expiry": false,
+      "largestPayload": 53,
+      "packetBytes": 129
+    },
+    {
+      "name": "an inbox of a 64-character id at QoS 0 without a life, under 131 bytes: a Remaining Length of 128",
+      "clauses": [
+        "15.30"
+      ],
+      "topic": "bead/i/ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_",
+      "maximumPacketSize": 131,
+      "qos": 0,
+      "expiry": false,
+      "largestPayload": 54,
+      "packetBytes": 131
+    },
+    {
+      "name": "an inbox of a 64-character id at QoS 0 without a life, under 16,386 bytes: a Remaining Length of 16,383",
+      "clauses": [
+        "15.30"
+      ],
+      "topic": "bead/i/ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_",
+      "maximumPacketSize": 16386,
+      "qos": 0,
+      "expiry": false,
+      "largestPayload": 16309,
+      "packetBytes": 16386
+    },
+    {
+      "name": "an inbox of a 64-character id at QoS 0 without a life, under 16,388 bytes: a Remaining Length of 16,384",
+      "clauses": [
+        "15.30"
+      ],
+      "topic": "bead/i/ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_",
+      "maximumPacketSize": 16388,
+      "qos": 0,
+      "expiry": false,
+      "largestPayload": 16310,
+      "packetBytes": 16388
+    },
+    {
+      "name": "an inbox of a 64-character id at QoS 0 without a life, under 2,097,155 bytes: a Remaining Length of 2,097,151",
+      "clauses": [
+        "15.30"
+      ],
+      "topic": "bead/i/ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_",
+      "maximumPacketSize": 2097155,
+      "qos": 0,
+      "expiry": false,
+      "largestPayload": 2097077,
+      "packetBytes": 2097155
+    },
+    {
+      "name": "an inbox of a 64-character id at QoS 0 without a life, under 2,097,157 bytes: a Remaining Length of 2,097,152",
+      "clauses": [
+        "15.30"
+      ],
+      "topic": "bead/i/ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_",
+      "maximumPacketSize": 2097157,
+      "qos": 0,
+      "expiry": false,
+      "largestPayload": 2097078,
+      "packetBytes": 2097157
+    },
+    {
+      "name": "an inbox of a 64-character id at QoS 0 without a life, under 1,052 bytes: a Remaining Length of 1,049",
+      "clauses": [
+        "15.30"
+      ],
+      "topic": "bead/i/ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_",
+      "maximumPacketSize": 1052,
+      "qos": 0,
+      "expiry": false,
+      "largestPayload": 975,
+      "packetBytes": 1052
+    },
+    {
+      "name": "an inbox of a 64-character id at QoS 0 without a life, under 4,096 bytes: a Remaining Length of 4,093",
+      "clauses": [
+        "15.30"
+      ],
+      "topic": "bead/i/ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_",
+      "maximumPacketSize": 4096,
+      "qos": 0,
+      "expiry": false,
+      "largestPayload": 4019,
+      "packetBytes": 4096
+    },
+    {
+      "name": "an inbox of a 64-character id at QoS 0 without a life, under 16,777,216 bytes: a Remaining Length of 16,777,211",
+      "clauses": [
+        "15.30"
+      ],
+      "topic": "bead/i/ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_",
+      "maximumPacketSize": 16777216,
+      "qos": 0,
+      "expiry": false,
+      "largestPayload": 16777137,
+      "packetBytes": 16777216
+    },
+    {
+      "name": "an inbox of a 64-character id at QoS 0 without a life, under 268,435,460 bytes: a Remaining Length of 268,435,455",
+      "clauses": [
+        "15.30"
+      ],
+      "topic": "bead/i/ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_",
+      "maximumPacketSize": 268435460,
+      "qos": 0,
+      "expiry": false,
+      "largestPayload": 268435381,
+      "packetBytes": 268435460
+    },
+    {
+      "name": "no payload fits: bead/i/server at QoS 1 with a life, under 24 bytes",
+      "clauses": [
+        "15.30"
+      ],
+      "topic": "bead/i/server",
+      "maximumPacketSize": 24,
+      "qos": 1,
+      "expiry": true,
+      "largestPayload": null,
+      "packetBytes": null
     }
   ]
 }

@@ -24,7 +24,7 @@ import {
   MESSAGE_EVENT,
   REFUSAL_EVENT,
 } from '../shared/constants';
-import { ProgrammerError } from '../shared/errors';
+import { notServedOf, ProgrammerError } from '../shared/errors';
 import { gaugesOf } from '../shared/gauges';
 import { transferableOf } from '../shared/transferable';
 import type { IBrokerPeer } from '../shared/types';
@@ -165,12 +165,24 @@ export const createBrokerTransportServer = (
         return count;
       };
 
-      // * in a group, its capacity is its broker's placement: its names let go while it is full
-      const place = (): void => {
+      // * in a group, its capacity is its broker's placement: its names let go while it is full;
+      // settles once its broker holds each, or let each go
+      const wantOf = (name: string): Promise<void> => {
+        return port.want(name, {
+          group: group ? name : undefined,
+          isWanted: isServing && (!group || held.size < maximumConnections),
+        });
+      };
+
+      const place = async (): Promise<void> => {
+        await Promise.all([...served].map(wantOf));
+      };
+
+      // a name its broker refuses at a rejoin is reported and left unheld, the gauge saying so
+      const replace = (): void => {
         for (const name of served) {
-          port.want(name, {
-            group: group ? name : undefined,
-            isWanted: isServing && (!group || held.size < maximumConnections),
+          wantOf(name).catch((reason: unknown) => {
+            server.emit(ERROR_EVENT, notServedOf(name, reason), '');
           });
         }
       };
@@ -248,7 +260,7 @@ export const createBrokerTransportServer = (
                   tell(CLOSE_EVENT, [wasClean, handle]);
                 }
 
-                place();
+                replace();
               },
               report: (error) => {
                 server.emit(ERROR_EVENT, error, entry.handle ?? '');
@@ -266,7 +278,7 @@ export const createBrokerTransportServer = (
         }, acceptTimeout);
         // a browser's timer has no `unref`
         (entry.timer as { unref?: () => unknown }).unref?.();
-        place();
+        replace();
       };
 
       // * an OPEN judged in its order (spec 15.18): its layout, its id and bound, then its place
@@ -372,29 +384,32 @@ export const createBrokerTransportServer = (
 
           await entryOf(connection.connectionHandle)?.connection?.send(new Uint8Array(bytes));
         },
+        // * settles once its broker holds each name it serves, and fails on one refused; links anew
+        // a participant whose link was taken over
         start: async ({ signal }) => {
-          await port.linked({ signal });
+          await port.linked({ isStart: true, signal });
 
           for (const name of served) {
             port.serve(name, { offer });
           }
 
           isServing = true;
-          place();
+          await place();
 
           return { address: port.id, port: 0 };
         },
-        // * no OPEN taken from its start, its names let go, each connection closed with 1001; its
-        // participant's link kept
-        stop: () => {
+        // * no OPEN taken from its start, each connection closed with 1001, and its names let go,
+        // settling once its broker let each go; its participant's link kept
+        stop: async () => {
           isServing = false;
-          place();
+
+          const letGo = place();
 
           for (const { connection } of held.values()) {
             connection?.close(CloseCode.GOING_AWAY);
           }
 
-          return Promise.resolve();
+          await letGo;
         },
       };
     }

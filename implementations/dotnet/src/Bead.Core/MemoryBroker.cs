@@ -68,7 +68,8 @@ public sealed record MemoryBrokerFaultOptions
 /// copied as it is published, whole, in a later turn than its publish, in the order its publisher
 /// published it to that topic, once; or, as a test asks, again, behind the next, never, or to
 /// another member of its group. It holds a queue for each subscriber, bounded as it is given, past
-/// which it drops a message, and publishes a link's will as the link is lost, never at a stop. Its
+/// which it drops a message, and publishes a link's will as the link is lost or taken over, never at
+/// a stop. Its
 /// handles' type is <see cref="TransportTypes.Broker"/>, and it never leaves the process, so its
 /// legs are secure.
 /// </summary>
@@ -364,7 +365,7 @@ public sealed class MemoryBroker
 
 /// <summary>
 /// One link to a <see cref="MemoryBroker"/> (spec 15.24): the adapter its participant is built
-/// over, its acknowledgements counted, and, on a test's word, its link lost.
+/// over, its acknowledgements counted, and, on a test's word, its link lost or taken over.
 /// </summary>
 public sealed class MemoryBrokerAdapter : IBrokerAdapter
 {
@@ -391,7 +392,7 @@ public sealed class MemoryBrokerAdapter : IBrokerAdapter
     public event Action<BrokerMessage>? Message;
 
     /// <inheritdoc/>
-    public event Action? Down;
+    public event Action<BrokerDown>? Down;
 
     /// <summary>Its handles' type, <see cref="TransportTypes.Broker"/>.</summary>
     public string Type
@@ -432,13 +433,10 @@ public sealed class MemoryBrokerAdapter : IBrokerAdapter
         }
     }
 
-    /// <summary>Its broker's bound on a message, or the largest a receive bound's field holds when none.</summary>
-    public long ReceiveBound
+    /// <summary>Its broker's bound on a message, whatever its inbox's topic, or the largest a receive bound's field holds when none: it has no packet to count.</summary>
+    public long ReceiveBound(IReadOnlyList<string> topic)
     {
-        get
-        {
-            return _broker.MaximumMessageBytes ?? BrokerParcels.LargestBound;
-        }
+        return _broker.MaximumMessageBytes ?? BrokerParcels.LargestBound;
     }
 
     /// <summary>Whether its link is up: started, and neither stopped nor lost.</summary>
@@ -555,11 +553,27 @@ public sealed class MemoryBrokerAdapter : IBrokerAdapter
     /// </summary>
     public void Lose()
     {
-        _broker.Scheduler.Post(Lost);
+        _broker.Scheduler.Post(() =>
+        {
+            Lost(new BrokerDown());
+        });
     }
 
-    /// <summary>In a turn of its broker's: its link lost, its will published, <see cref="Down"/> raised.</summary>
-    internal void Lost()
+    /// <summary>
+    /// Its link taken over by another link of its id, as a test asks: as <see cref="Lose"/>, its
+    /// subscriptions dropped, since the link that takes it over holds none, and its will published,
+    /// then <see cref="Down"/> raised telling it taken over. Its broker keeps one adapter to an id.
+    /// </summary>
+    public void TakeOver()
+    {
+        _broker.Scheduler.Post(() =>
+        {
+            Lost(new BrokerDown { IsTakenOver = true });
+        });
+    }
+
+    /// <summary>In a turn of its broker's: its link lost or taken over, its will published, <see cref="Down"/> raised.</summary>
+    internal void Lost(BrokerDown down)
     {
         if (!_isLinked)
         {
@@ -579,7 +593,7 @@ public sealed class MemoryBrokerAdapter : IBrokerAdapter
             _broker.Route((will, false));
         }
 
-        Down?.Invoke();
+        Down?.Invoke(down);
     }
 
     /// <summary>The subscription it holds to <paramref name="topic"/>'s key, or none.</summary>

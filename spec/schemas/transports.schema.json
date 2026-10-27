@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "Bead's transports' cases, spec/transports.json",
   "type": "object",
-  "required": ["$comment", "specVersion", "wallClock", "defaults", "responses", "cases"],
+  "required": ["$comment", "specVersion", "wallClock", "defaults", "responses", "cases", "brokers"],
   "additionalProperties": false,
   "properties": {
     "$schema": { "const": "schemas/transports.schema.json" },
@@ -47,6 +47,13 @@
       "type": "array",
       "minItems": 1,
       "items": { "$ref": "#/$defs/case" }
+    },
+    "brokers": {
+      "description": "The real brokers the cases of a binding play against, by their transport.",
+      "type": "object",
+      "required": ["mqtt"],
+      "additionalProperties": false,
+      "properties": { "mqtt": { "$ref": "#/$defs/mqttBroker" } }
     }
   },
   "$defs": {
@@ -101,8 +108,32 @@
         }
       }
     },
+    "mqttBroker": {
+      "description": "The Mosquitto the cases over MQTT 5 play against, which tools/mqtt-broker.mjs starts for a run (spec 15.31): its Maximum Packet Size, whether it takes retained messages, whether it offers shared subscriptions, and the users every case names, each authenticated by the run's password, its Client Identifier tied to its user.",
+      "type": "object",
+      "required": [
+        "$comment",
+        "maximumPacketSize",
+        "retainAvailable",
+        "sharedSubscriptions",
+        "users"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "$comment": { "$ref": "common.schema.json#/$defs/comment" },
+        "maximumPacketSize": { "type": "integer", "minimum": 1024, "maximum": 268435460 },
+        "retainAvailable": { "type": "boolean" },
+        "sharedSubscriptions": { "type": "boolean" },
+        "users": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/participant" }
+        }
+      }
+    },
     "options": {
-      "description": "The server's bounds a case sets, and what it takes besides: hosts, origins, the proxies it trusts, and how many it counts that trustedProxies does not name; over a broker, the names its server serves, whether in a group, and the in-memory broker's queue for each subscriber.",
+      "description": "The server's bounds a case sets, and what it takes besides: hosts, origins, the proxies it trusts, and how many it counts that trustedProxies does not name; over a broker, the names its server serves, whether in a group, a twin that serves them beside it, whether each peer leaves a will, a client's connect's time, and the in-memory broker's queue for each subscriber.",
       "type": "object",
       "minProperties": 1,
       "$ref": "#/$defs/bounds",
@@ -132,6 +163,18 @@
           "description": "The messages the in-memory broker holds for each subscriber, published to it and not yet handed on, past which it drops one (spec 15.24).",
           "type": "integer",
           "minimum": 1
+        },
+        "twin": {
+          "description": "A participant beside the peers that serves the server's names in their group, reading every OPEN its broker hands it and answering none (spec 15.18).",
+          "$ref": "#/$defs/participant"
+        },
+        "wills": {
+          "description": "true has each peer's link leave a will, the GONE of its id and of the incarnation its OPENs name (spec 15.21).",
+          "const": true
+        },
+        "timeout": {
+          "description": "In the client role, its connect's time (spec 15.15).",
+          "$ref": "common.schema.json#/$defs/duration"
         }
       }
     },
@@ -164,7 +207,7 @@
       "properties": {
         "name": { "$ref": "common.schema.json#/$defs/name" },
         "clauses": { "$ref": "common.schema.json#/$defs/clauses" },
-        "transport": { "enum": ["http", "websocket", "broker"] },
+        "transport": { "enum": ["http", "websocket", "broker", "mqtt"] },
         "limits": { "$ref": "conversations.schema.json#/$defs/limits" },
         "answersPings": {
           "description": "false for a peer that leaves the server's pings unanswered; its pings are answered otherwise.",
@@ -194,7 +237,10 @@
       },
       "allOf": [
         {
-          "if": { "required": ["transport"], "properties": { "transport": { "const": "broker" } } },
+          "if": {
+            "required": ["transport"],
+            "properties": { "transport": { "enum": ["broker", "mqtt"] } }
+          },
           "then": { "properties": { "steps": { "items": { "$ref": "#/$defs/brokerStep" } } } },
           "else": {
             "properties": { "steps": { "items": { "$ref": "#/$defs/step" } } },
@@ -412,6 +458,11 @@
         "shape": {
           "description": "half: 8 bytes, never all zero; incarnation: 16 bytes.",
           "enum": ["half", "incarnation"]
+        },
+        "unlike": {
+          "description": "A value captured before, by its name, which this one is not.",
+          "type": "string",
+          "pattern": "^[a-z][a-zA-Z0-9]*$"
         }
       }
     },
@@ -562,7 +613,7 @@
       }
     },
     "brokerExpectation": {
-      "description": "What a peer reads next, a parcel and the refusal told beside a REFUSE, or what the transport under test does next: a close it tells; in the client role, its connect opened or failed, an envelope it hands its router, or whether it says it is secure.",
+      "description": "What a peer reads next, a parcel and the refusal told beside a REFUSE, or what the transport under test does next: a close it tells; in the client role, its connect opened or failed, an envelope it hands its router, or whether it says it is secure; where each OPEN of some openers was placed; or the lives the side under test asked its adapter.",
       "type": "object",
       "additionalProperties": false,
       "oneOf": [
@@ -571,7 +622,9 @@
         { "required": ["opened"] },
         { "required": ["failed"] },
         { "required": ["received"] },
-        { "required": ["secure"] }
+        { "required": ["secure"] },
+        { "required": ["placed"] },
+        { "required": ["lives"] }
       ],
       "dependentRequired": { "told": ["parcel"] },
       "properties": {
@@ -600,11 +653,37 @@
           }
         },
         "received": { "$ref": "conversations.schema.json#/$defs/expect" },
-        "secure": { "type": "boolean" }
+        "secure": { "type": "boolean" },
+        "placed": {
+          "description": "Each OPEN of these openers' halves reached the server under test or the participant with, its twin, never both and never neither: the server's ACCEPT read on the opener's inbox, the twin's OPEN read on the name.",
+          "type": "object",
+          "required": ["with", "openers"],
+          "additionalProperties": false,
+          "properties": {
+            "with": { "$ref": "#/$defs/participant" },
+            "openers": {
+              "type": "array",
+              "minItems": 1,
+              "uniqueItems": true,
+              "items": { "$ref": "#/$defs/half" }
+            }
+          }
+        },
+        "lives": {
+          "description": "What the side under test asked its adapter of each publication's life, exactly, in milliseconds on the clock given, null for none: an OPEN's, a DATA's that carries a credential, and every other parcel's.",
+          "type": "object",
+          "required": ["open", "credential", "other"],
+          "additionalProperties": false,
+          "properties": {
+            "open": { "type": ["integer", "null"], "minimum": 1 },
+            "credential": { "type": ["integer", "null"], "minimum": 1 },
+            "other": { "type": ["integer", "null"], "minimum": 1 }
+          }
+        }
       }
     },
     "brokerStep": {
-      "description": "Over a broker, what the test does — publish, stop, wait, and in the client role connect and transportSend — or what the side under test does next — expect, reported — or a gauge or a timer waited for, or time moved: one of them.",
+      "description": "Over a broker, what the test does — publish, stop, wait, lose, takeover, leave, and in the client role connect and transportSend — or what the side under test does next — expect, reported — or a gauge or a timer waited for, or time moved: one of them.",
       "type": "object",
       "additionalProperties": false,
       "oneOf": [
@@ -616,13 +695,17 @@
         { "required": ["stop"] },
         { "required": ["wait"] },
         { "required": ["connect"] },
-        { "required": ["transportSend"] }
+        { "required": ["transportSend"] },
+        { "required": ["lose"] },
+        { "required": ["takeover"] },
+        { "required": ["leave"] }
       ],
       "dependentRequired": {
         "from": ["publish"],
         "to": ["publish"],
         "retained": ["publish"],
-        "refused": ["publish"]
+        "refused": ["publish"],
+        "at": ["expect", "on"]
       },
       "properties": {
         "publish": { "$ref": "#/$defs/published" },
@@ -632,6 +715,22 @@
         "refused": { "const": "no-subscriber" },
         "on": {
           "description": "The peer whose inbox an expect reads, or whose connection a close or a report names.",
+          "$ref": "#/$defs/participant"
+        },
+        "at": {
+          "description": "In the client role, the departure of the client under test, which every peer subscribes, read in place of the peer's inbox.",
+          "const": "departure"
+        },
+        "lose": {
+          "description": "The link of that participant, the one under test or a peer, lost without a clean end: in memory its adapter's, over MQTT 5 its relay cut.",
+          "$ref": "#/$defs/participant"
+        },
+        "takeover": {
+          "description": "The link of the participant under test taken over by another link of its id: in memory its adapter's takeOver, over MQTT 5 a link of the player's own under its id.",
+          "enum": ["server", "client"]
+        },
+        "leave": {
+          "description": "A peer that lets its inbox go, its unsubscription settled.",
           "$ref": "#/$defs/participant"
         },
         "within": {
@@ -646,7 +745,7 @@
           "items": { "type": "string", "minLength": 1 }
         },
         "until": {
-          "description": "A gauge of the transport under test, or of the in-memory broker for unsettled, and the value it waits for; or a timer armed on the side's given clock.",
+          "description": "A gauge of the transport under test, or of its adapter for unsettled, and the value it waits for; or a timer armed on the side's given clock.",
           "type": "object",
           "oneOf": [{ "required": ["gauge", "is"] }, { "required": ["timer"] }],
           "additionalProperties": false,

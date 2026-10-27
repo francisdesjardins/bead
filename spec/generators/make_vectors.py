@@ -7,7 +7,10 @@ import json
 import math
 import os
 import re
+import string
 
+from mqtt_packets import (LARGEST_PACKET, MAXIMUM_PACKET_SIZE, largest_payload, publish_bytes, remaining_length,
+                          width)
 from spec_version import spec_version
 
 # the conformance files sit one folder up from their generators
@@ -925,6 +928,52 @@ parcel_refusals = [
 ]
 
 
+# ── An MQTT 5 PUBLISH's bytes (section 15.30) ────────────────────────────────────────────────────
+
+# an inbox of the server, and one of a 64-character id, the longest token (section 15.16): base64url's
+# whole alphabet
+SERVER_INBOX = 'bead/i/server'
+LONGEST_INBOX = 'bead/i/' + string.ascii_uppercase + string.ascii_lowercase + string.digits + '-_'
+assert len(LONGEST_INBOX) == len('bead/i/') + 64
+
+
+def bound_of(remaining):
+    """The bound whose largest packet has that Remaining Length: its every byte."""
+    return 1 + width(remaining) + remaining
+
+
+# the bounds a count is held at: each side of each width of a Remaining Length, then a participant's
+# least receive bound and its broker's, its own maximumPacketSize by default, and the protocol's largest
+# packet, which a CONNACK that names none leaves
+PUBLISH_BOUNDS = [*[bound_of(remaining) for remaining in (127, 128, 16_383, 16_384, 2_097_151, 2_097_152)],
+                  1_052, 4_096, MAXIMUM_PACKET_SIZE, LARGEST_PACKET]
+assert PUBLISH_BOUNDS[:6] == [129, 131, 16_386, 16_388, 2_097_155, 2_097_157]
+
+
+def topic_named(topic):
+    return topic if topic == SERVER_INBOX else 'an inbox of a 64-character id'
+
+
+def publish_bound(topic, maximum, qos, expiry):
+    largest = largest_payload(topic, maximum, qos=qos, expiry=expiry)
+    packet = None if largest is None else publish_bytes(len(topic.encode('utf-8')), largest, qos=qos, expiry=expiry)
+    remaining = None if largest is None else remaining_length(len(topic.encode('utf-8')), largest, qos=qos, expiry=expiry)
+    assert packet is None or packet <= maximum
+    life = 'with a life' if expiry else 'without a life'
+    named = f'{topic_named(topic)} at QoS {qos} {life}, under {maximum:,} bytes'
+    return (named + ('' if remaining is None else f': a Remaining Length of {remaining:,}'), ['15.30'], topic, maximum,
+            qos, expiry, largest, packet)
+
+
+mqtt_publish_bounds = [publish_bound(topic, maximum, qos, expiry)
+                       for topic in (SERVER_INBOX, LONGEST_INBOX) for qos in (1, 0) for expiry in (True, False)
+                       for maximum in PUBLISH_BOUNDS]
+# ! an empty PUBLISH to the server's inbox at QoS 1 with a life is 25 bytes: under 24 none fits
+mqtt_publish_bounds.append(('no payload fits: ' + publish_bound(SERVER_INBOX, 24, 1, True)[0], ['15.30'],
+                            SERVER_INBOX, 24, 1, True, None, None))
+assert mqtt_publish_bounds[-1][6] is None and publish_bytes(len(SERVER_INBOX), 0, qos=1, expiry=True) == 25
+
+
 def entry(**fields):
     return {key: value for key, value in fields.items() if value is not None}
 
@@ -952,6 +1001,7 @@ document = {
         "A parcel is a broker's message, read to its fields and written back to its bytes (section 15.17): its layout, 177 for 0xB1; its kind, OPEN 1, ACCEPT 2, REFUSE 3, DATA 4, PING 5, PONG 6, CLOSE 7, RESET 8, GONE 9, 128 to 255 advisory; its flags, MORE 1, CREDENTIAL 2 and SECURE 4 together; its opener's half and its acceptor's, 8 bytes each in hexadecimal; its sequence; then its body's fields: an OPEN's and an ACCEPT's id, a character a byte, incarnation, in hexadecimal, and bound, its receive bound; a REFUSE's status, and layouts, those it reads, on a 426; a DATA's credential, a character a byte, where it carries one, and carried, the envelope or the part it carries, in hexadecimal; a PONG's answers, the sequence of the PING it answers; a CLOSE's code; a GONE's incarnation and id. A field a parcel's kind has no part for is left out.",
         "written false marks a parcel a reader reads and no writer writes, which a side reads alone: an advisory kind, read to its prefix — layout, kind, halves and sequence — whatever its flags, its kept byte and its body, to be taken in its order and skipped; an OPEN of a layout to come, read to its prefix and its id, which its acceptor refuses 426; a REFUSE of a layout to come, read whole, which every layout keeps; and an OPEN whose id is no token or whose receive bound is under 1,024, which its acceptor refuses 400 (section 15.18).",
         "A parcel refusal is what a side makes of a message that does not read as a parcel: no-parcel, under 28 bytes or of a first byte outside 0xB1 to 0xBF, which it drops in silence and reports; or does-not-read, a parcel of layout 0xB1 that does not read, which closes its connection with 1002, reported.",
+        "An MQTT 5 publish bound is section 15.30's count with no broker: a PUBLISH to topic, its UTF-8 bytes, at qos, 1 or 0, with a Message Expiry Interval where expiry is true; largestPayload, the largest payload whose packet is within maximumPacketSize and whose Remaining Length is at most 268,435,455, null where an empty one does not fit; and packetBytes, that packet's every byte, null alike.",
     ],
     'specVersion': spec_version(),
     'headers': [entry(name=name, clauses=clauses, bytes=data, header=header) for name, clauses, data, header in headers],
@@ -978,6 +1028,9 @@ document = {
                 for name, clauses, data, parcel, written in parcels],
     'parcelRefusals': [{'name': name, 'clauses': clauses, 'bytes': data, 'refused': refused}
                        for name, clauses, data, refused in parcel_refusals],
+    'mqttPublishBounds': [{'name': name, 'clauses': clauses, 'topic': topic, 'maximumPacketSize': maximum, 'qos': qos,
+                           'expiry': expiry, 'largestPayload': largest, 'packetBytes': packet}
+                          for name, clauses, topic, maximum, qos, expiry, largest, packet in mqtt_publish_bounds],
 }
 
 with open(OUT, 'w', encoding='utf-8', newline='\n') as file:

@@ -10,6 +10,7 @@ import re
 from datetime import datetime
 
 from bounds import DEFAULTS
+from mqtt_packets import largest_payload, receive_bound
 from spec_version import spec_version
 
 # the conformance files sit one folder up from their generators
@@ -1274,6 +1275,12 @@ LEAST_BOUND = 1_024
 # ! the in-memory broker of the cases bounds no message, so a participant over it announces the
 # largest receive bound its field holds
 UNBOUNDED = 2 ** 32 - 1
+# the transports a broker case plays on: the in-memory broker of the side under test, and MQTT 5
+# against a real broker (spec 15.25 to 15.31)
+IN_MEMORY, MQTT = 'broker', 'mqtt'
+# the broker the cases over MQTT 5 play against: its Maximum Packet Size, which puts every
+# envelope of the interop past 4 KB in parts, its retained messages refused (spec 15.31)
+MQTT_BROKER_PACKET_SIZE = 4_096
 # a parcel's prefix, which a part's bytes share its bound with (spec 15.17, 15.20)
 PARCEL_PREFIX = 28
 # the credential the interop server's ELSEWHERE verifier reads as the sub ada (interop-service.json)
@@ -1334,17 +1341,32 @@ class Connection:
 
 class Captures:
     """What the side under test's parcels give a case once, captured as they are first read and put in
-    after: its incarnation, which every connection of its link names."""
+    after: its incarnation, which every connection of its link names; and the receive bound it
+    announces over the transport the case is written for."""
 
-    def __init__(self):
+    # whether a case read the bound its side announces over MQTT 5, and so plays spec 15.30's count
+    counted = False
+
+    def __init__(self, transport):
         self.taken = set()
+        self.transport = transport
 
-    def __call__(self, name, shape):
+    def __call__(self, name, shape, *, unlike=None):
         if name in self.taken:
             return '{%s}' % name
 
         self.taken.add(name)
-        return {'capture': name, 'shape': shape}
+        return {'capture': name, 'shape': shape, **({'unlike': unlike} if unlike else {})}
+
+    def bound(self, participant):
+        """The receive bound the side under test announces: over the in-memory broker the largest its
+        field holds; over MQTT 5 the largest payload of a message to its inbox within its default
+        maximumPacketSize, a life counted (spec 15.30)."""
+        if self.transport == IN_MEMORY:
+            return UNBOUNDED
+
+        Captures.counted = True
+        return receive_bound(f'bead/i/{participant}')
 
 
 def raw_parcel(kind, opener, acceptor, sequence, body='', *, flags=0, layout=PARCEL_LAYOUT):
@@ -1361,10 +1383,11 @@ def publish(peer, to, *sent, retained=False, refused=None):
             **({'retained': True} if retained else {}), **({'refused': refused} if refused else {})}
 
 
-def reads(peer, parcel, *, told=None, within=None):
-    """The next parcel a peer reads, on its inbox or, in the client role, on the server's name."""
+def reads(peer, parcel, *, told=None, within=None, at=None):
+    """The next parcel a peer reads, on its inbox or, in the client role, on the server's name, or on
+    the departure of the client under test."""
     return {'expect': {'parcel': parcel, **({'told': told} if told else {})}, 'on': peer,
-            **({'within': within} if within else {})}
+            **({'at': at} if at else {}), **({'within': within} if within else {})}
 
 
 def reported(*naming, on=None):
@@ -1383,6 +1406,22 @@ def waits(milliseconds):
     return {'wait': milliseconds}
 
 
+def lose(participant):
+    """The link of that participant lost without a clean end: in memory its adapter's, over MQTT 5 its
+    relay cut (spec 15.21)."""
+    return {'lose': participant}
+
+
+def take_over(participant):
+    """The link of the participant under test taken over by another link of its id (spec 15.21)."""
+    return {'takeover': participant}
+
+
+def leave(peer):
+    """A peer lets its inbox go, so that the next parcel to it finds no subscriber."""
+    return {'leave': peer}
+
+
 # ── The server role ─────────────────────────────────────────────────────────────────────────────
 
 
@@ -1392,12 +1431,13 @@ def open_of(connection, *, bound=PEER_BOUND, secure=True, identity=None, incarna
                               incarnation=incarnation, bound=bound)
 
 
-def accepted(captures, connection, *, copies=1, **opening):
+def accepted(captures, connection, *, copies=1, incarnation=None, **opening):
     """An OPEN, published as many times as given in one turn, and the ACCEPT the server answers it
-    with on its peer's inbox, its own half captured."""
+    with on its peer's inbox, its own half captured, and its incarnation unless one is given."""
     sent = open_of(connection, **opening)
-    answer = connection.by_side(Kind.ACCEPT, flags=Flag.SECURE, id=SERVER, incarnation=captures('incarnation', 'incarnation'),
-                                bound=UNBOUNDED)
+    answer = connection.by_side(Kind.ACCEPT, flags=Flag.SECURE, id=SERVER,
+                                incarnation=incarnation or captures('incarnation', 'incarnation'),
+                                bound=captures.bound(SERVER))
     answer['acceptor'] = {'capture': connection.label, 'shape': 'half'}
     connection.acceptor = connection.captured()
     return [publish(connection.peer, 'name', *[sent] * copies), reads(connection.peer, answer)]
@@ -1478,26 +1518,42 @@ def chunk_of(call_id, offset, data_, last):
     return {'kind': CHUNK, 'callId': call_id, 'offset': offset, 'isLast': last, 'payload': hexadecimal(data_)}
 
 
-broker = []
+# the cases of each transport, each function written once for both, what differs computed from the
+# transport it is given
+played = {IN_MEMORY: [], MQTT: []}
 
 
-def case(function):
-    broker.append(function())
-    return function
+def case(*transports, over_mqtt=()):
+    """A case written for the transports it plays on, each function given the one it is written
+    for; over MQTT 5 it cites besides the binding's units it plays, and spec 15.30's count where its
+    side's bound is read."""
+    def written(function):
+        for transport in transports:
+            Captures.counted = False
+            name, clauses, fields, steps = function(transport)
+
+            if transport == MQTT:
+                clauses = list(dict.fromkeys([*clauses, *over_mqtt, *(['15.30', '15.30.1'] if Captures.counted else [])]))
+
+            played[transport].append((name, clauses, fields, steps))
+
+        return function
+
+    return written
 
 
-@case
-def accepted_on_the_openers_inbox():
-    captures, first = Captures(), Connection('first', opener=half(1))
+@case(IN_MEMORY, MQTT)
+def accepted_on_the_openers_inbox(transport):
+    captures, first = Captures(transport), Connection('first', opener=half(1))
 
     return ('an OPEN to the server\'s name is accepted on the opener\'s inbox: an ACCEPT of sequence 1 naming the opener\'s half and its own, the server\'s id, incarnation and receive bound, marked secure',
             ['15.16', '15.17', '15.18'], {}, [
                 *accepted(captures, first), until('halfOpen', 1), until('connections', 0)])
 
 
-@case
-def told_at_the_third_leg():
-    captures = Captures()
+@case(IN_MEMORY, MQTT)
+def told_at_the_third_leg(transport):
+    captures = Captures(transport)
     first, second, third, fourth = (Connection(label, opener=half(n))
                                     for n, label in enumerate(('first', 'second', 'third', 'fourth'), 1))
 
@@ -1515,12 +1571,13 @@ def told_at_the_third_leg():
                 *accepted(captures, fourth), until('halfOpen', 1), until('connections', 0)])
 
 
-@case
-def malformed_open():
+@case(IN_MEMORY, MQTT)
+def malformed_open(transport):
     odd, low = Connection('odd', 'peer.1', opener=half(1)), Connection('low', opener=half(2))
 
-    # ! peer.1 is no token: its peer is an adapter of the in-memory broker, which takes any id, as a
-    # broker takes any name, where a participant refuses one as it is built
+    # ! peer.1 is no token: its peer is an adapter, of the in-memory broker or of a user of the MQTT 5
+    # broker, which takes any id, as a broker takes any name, where a participant refuses one as it
+    # is built
     return ('an OPEN whose id is no token or whose receive bound is under 1,024 bytes is refused 400 malformed, told, and opens nothing',
             ['15.18'], {'peers': ['peer.1', PEER]}, [
                 publish('peer.1', 'name', open_of(odd)), refused_open(odd, 400),
@@ -1528,8 +1585,8 @@ def malformed_open():
                 until('halfOpen', 0), until('connections', 0)])
 
 
-@case
-def layout_to_come_refused():
+@case(IN_MEMORY, MQTT)
+def layout_to_come_refused(transport):
     coming = Connection('coming', opener=half(1))
     # an OPEN of 0xB2: its prefix and its id where every layout keeps them, the rest its own
     body = f'{len(PEER):02X} {text(PEER)}  {INCARNATION}  {word(PEER_BOUND, 4)}  01 02 03 04'
@@ -1541,9 +1598,9 @@ def layout_to_come_refused():
                 refused_open(coming, 426, layouts=[PARCEL_LAYOUT]), until('halfOpen', 0)])
 
 
-@case
-def busy_past_its_connections():
-    captures = Captures()
+@case(IN_MEMORY, MQTT)
+def busy_past_its_connections(transport):
+    captures = Captures(transport)
     first, second, third = (Connection(label, opener=half(n)) for n, label in enumerate(('first', 'second', 'third'), 1))
 
     return ('past the connections the server holds, an OPEN is refused 503 busy, told, and one is accepted once a connection closes',
@@ -1554,9 +1611,9 @@ def busy_past_its_connections():
                 *accepted(captures, third)])
 
 
-@case
-def busy_past_an_ids_connections():
-    captures = Captures()
+@case(IN_MEMORY, MQTT)
+def busy_past_an_ids_connections(transport):
+    captures = Captures(transport)
     first, second = Connection('first', opener=half(1)), Connection('second', opener=half(2))
     other = Connection('other', 'other', opener=half(3))
 
@@ -1567,9 +1624,9 @@ def busy_past_an_ids_connections():
                 *opened(captures, other), until('connections', 2)])
 
 
-@case
-def open_delivered_twice():
-    captures, first = Captures(), Connection('first', opener=half(1))
+@case(IN_MEMORY, MQTT)
+def open_delivered_twice(transport):
+    captures, first = Captures(transport), Connection('first', opener=half(1))
 
     return ('an OPEN delivered twice opens one connection: its copy is dropped in silence',
             ['15.18', '15.19'], {}, [
@@ -1577,18 +1634,18 @@ def open_delivered_twice():
                 *third_leg(first), until('connections', 1), until('halfOpen', 0)])
 
 
-@case
-def a_request_in_data():
-    captures, first = Captures(), Connection('first', opener=half(1))
+@case(IN_MEMORY, MQTT)
+def a_request_in_data(transport):
+    captures, first = Captures(transport), Connection('first', opener=half(1))
 
     return ('a request in a DATA parcel is answered in a DATA parcel on the opener\'s inbox, its sequence the next',
             ['15.17.4', '15.19'], {}, [
                 *opened(captures, first), asks(first, ECHO), answers(first, result(1, '"x"'))])
 
 
-@case
-def data_delivered_twice():
-    captures, first = Captures(), Connection('first', opener=half(1))
+@case(IN_MEMORY, MQTT, over_mqtt=['15.29'])
+def data_delivered_twice(transport):
+    captures, first = Captures(transport), Connection('first', opener=half(1))
     steps = opened(captures, first)
     once = data(first, ECHO)
 
@@ -1599,9 +1656,9 @@ def data_delivered_twice():
                 asks(first, request(3, 'echo', '"y"')), answers(first, result(3, '"y"'))])
 
 
-@case
-def a_cancel_before_its_request():
-    captures, first = Captures(), Connection('first', opener=half(1))
+@case(IN_MEMORY, MQTT)
+def a_cancel_before_its_request(transport):
+    captures, first = Captures(transport), Connection('first', opener=half(1))
     steps = opened(captures, first)
     asked = data(first, ECHO)
     cancelled = data(first, cancel(1))
@@ -1612,9 +1669,9 @@ def a_cancel_before_its_request():
                 closes(first, LOST), reported('3', '4', on=PEER), until('connections', 0)])
 
 
-@case
-def a_result_in_parts():
-    captures, first = Captures(), Connection('first', opener=half(1))
+@case(IN_MEMORY, MQTT)
+def a_result_in_parts(transport):
+    captures, first = Captures(transport), Connection('first', opener=half(1))
     answer = result_bytes(1, LONG_VALUE)
     room = LEAST_BOUND - PARCEL_PREFIX
     cut = parts_of(answer, [room] * (len(octets(answer)) // room))
@@ -1628,9 +1685,9 @@ def a_result_in_parts():
                   for index, each in enumerate(cut)]])
 
 
-@case
-def a_request_in_parts():
-    captures, first = Captures(), Connection('first', opener=half(1))
+@case(IN_MEMORY, MQTT)
+def a_request_in_parts(transport):
+    captures, first = Captures(transport), Connection('first', opener=half(1))
     head, tail = parts_of(elsewhere(1), [10])
 
     return ('a request sent in parts is handed on once its last part came, with the credential its first part carried',
@@ -1640,9 +1697,9 @@ def a_request_in_parts():
                 publish(PEER, 'inbox', data(first, part=tail)), answers(first, result(1, '"ada"'))])
 
 
-@case
-def parts_past_their_bound():
-    captures, first = Captures(), Connection('first', opener=half(1))
+@case(IN_MEMORY, MQTT)
+def parts_past_their_bound(transport):
+    captures, first = Captures(transport), Connection('first', opener=half(1))
     head, tail, _ = parts_of(request(1, 'echo', '"' + 'x' * 70 + '"'), [40, 40])
 
     # the router's limits give the parts' bound, maximumEnvelopeBytes of 64 by default
@@ -1654,9 +1711,9 @@ def parts_past_their_bound():
                 closes(first, TOO_BIG), reported('maximumEnvelopePartsBytes', '64', on=PEER), until('connections', 0)])
 
 
-@case
-def parts_that_trickle():
-    captures, first = Captures(), Connection('first', opener=half(1))
+@case(IN_MEMORY, MQTT)
+def parts_that_trickle(transport):
+    captures, first = Captures(transport), Connection('first', opener=half(1))
     head, _ = parts_of(ECHO, [10])
 
     # 10 bytes, held 42 ms at 240 bytes a second, under the grace of 5 s, on the clock given
@@ -1667,9 +1724,9 @@ def parts_that_trickle():
                 closes(first, LOST), reported('minimumBodyBytesPerSecond', '240', on=PEER), until('connections', 0)])
 
 
-@case
-def parts_past_the_budget():
-    captures = Captures()
+@case(IN_MEMORY, MQTT)
+def parts_past_the_budget(transport):
+    captures = Captures(transport)
     ada, bob = Connection('ada', 'ada', opener=half(1)), Connection('bob', 'bob', opener=half(2))
     value = '"' + 'x' * 76 + '"'
     head, tail = parts_of(request(1, 'echo', value), [60])
@@ -1684,9 +1741,9 @@ def parts_past_the_budget():
                 publish('ada', 'inbox', data(ada, part=tail)), answers(ada, result(1, value))])
 
 
-@case
-def a_ping_answered():
-    captures, first = Captures(), Connection('first', opener=half(1))
+@case(IN_MEMORY, MQTT)
+def a_ping_answered(transport):
+    captures, first = Captures(transport), Connection('first', opener=half(1))
 
     def pinged():
         ping = first.by_peer(Kind.PING)
@@ -1697,9 +1754,9 @@ def a_ping_answered():
                 *opened(captures, first), *pinged(), asks(first, ECHO), answers(first, result(1, '"x"')), *pinged()])
 
 
-@case
-def the_heartbeat():
-    captures = Captures()
+@case(IN_MEMORY, MQTT)
+def the_heartbeat(transport):
+    captures = Captures(transport)
     busy, silent = Connection('busy', 'busy', opener=half(1)), Connection('silent', 'quiet', opener=half(2))
 
     def kept_up():
@@ -1717,9 +1774,9 @@ def the_heartbeat():
                 reads('quiet', silent.by_side(Kind.PING), within=2_000), closes(silent, UNANSWERED, within=2_000)])
 
 
-@case
-def a_clean_close():
-    captures, first = Captures(), Connection('first', opener=half(1))
+@case(IN_MEMORY, MQTT)
+def a_clean_close(transport):
+    captures, first = Captures(transport), Connection('first', opener=half(1))
     ping = None
 
     def last():
@@ -1734,9 +1791,9 @@ def a_clean_close():
                 until('connections', 0)])
 
 
-@case
-def a_reset():
-    captures = Captures()
+@case(IN_MEMORY, MQTT)
+def a_reset(transport):
+    captures = Captures(transport)
     first, other = Connection('first', opener=half(1)), Connection('other', 'other', opener=half(2))
     stranger = {'kind': Kind.RESET, 'opener': half(2), 'acceptor': half(9), 'sequence': 0, 'flags': 0}
 
@@ -1748,9 +1805,9 @@ def a_reset():
                 asks(other, ECHO), answers(other, result(1, '"x"'))])
 
 
-@case
-def a_gone():
-    captures = Captures()
+@case(IN_MEMORY, MQTT)
+def a_gone(transport):
+    captures = Captures(transport)
     first, second = Connection('first', opener=half(1)), Connection('second', opener=half(2))
 
     def pinged():
@@ -1767,9 +1824,9 @@ def a_gone():
                 until('connections', 0)])
 
 
-@case
-def a_stranger_pair():
-    captures, first = Captures(), Connection('first', opener=half(1))
+@case(IN_MEMORY, MQTT)
+def a_stranger_pair(transport):
+    captures, first = Captures(transport), Connection('first', opener=half(1))
     wrong_acceptor = {'kind': Kind.DATA, 'opener': half(1), 'acceptor': half(9), 'sequence': 3, 'flags': 0, 'envelope': ECHO}
     wrong_opener = {'kind': Kind.DATA, 'opener': half(8), 'acceptor': first.captured(), 'sequence': 3, 'flags': 0,
                     'envelope': ECHO}
@@ -1786,9 +1843,9 @@ def a_stranger_pair():
                 pinged(), reads(PEER, first.by_side(Kind.PONG, answers=ping['sequence']))])
 
 
-@case
-def parcels_that_do_not_read():
-    captures = Captures()
+@case(IN_MEMORY, MQTT)
+def parcels_that_do_not_read(transport):
+    captures = Captures(transport)
     advisory = Connection('advisory', opener=half(1))
     coming = Connection('coming', 'coming', opener=half(2))
     flagged = Connection('flagged', 'flagged', opener=half(3))
@@ -1820,11 +1877,21 @@ def parcels_that_do_not_read():
                 until('connections', 1)])
 
 
-@case
-def a_stop():
-    captures = Captures()
+@case(IN_MEMORY, MQTT, over_mqtt=['15.27'])
+def a_stop(transport):
+    captures = Captures(transport)
     first, other = Connection('first', opener=half(1)), Connection('other', 'other', opener=half(2))
     late = Connection('late', 'late', opener=half(3))
+
+    if transport == MQTT:
+        # ! over two links an OPEN published as the stop begins races its UNSUBSCRIBE: the stop
+        # settles once its broker let the name go, its UNSUBACK come, and an OPEN after it finds no
+        # subscriber (spec 15.27)
+        return ('a server that stops closes each connection with 1001 and lets its name go: an OPEN after it finds no subscriber',
+                ['15.18', '15.21'], {'peers': [PEER, 'other', 'late']}, [
+                    *opened(captures, first), *opened(captures, other), {'stop': True},
+                    closes(first, GOING_AWAY), closes(other, GOING_AWAY), until('connections', 0), until('names', 0),
+                    publish('late', 'name', open_of(late), refused='no-subscriber')])
 
     # ! the OPEN is published in the turn the stop begins, before it, so it crosses the stop
     return ('a server that stops refuses an OPEN 503 busy and closes each connection with 1001',
@@ -1835,9 +1902,9 @@ def a_stop():
                 until('connections', 0), until('names', 0)])
 
 
-@case
-def elsewhere_carried():
-    captures, first = Captures(), Connection('first', opener=half(1))
+@case(IN_MEMORY, MQTT)
+def elsewhere_carried(transport):
+    captures, first = Captures(transport), Connection('first', opener=half(1))
 
     return ('a request presenting ELSEWHERE hands the verifier the credential its DATA carried, whoami answering the sub it names; whoami presenting none is refused SESSION_REQUIRED',
             ['15.22', '9.2.6', '13.11'], {}, [
@@ -1845,9 +1912,9 @@ def elsewhere_carried():
                 asks(first, request(3, 'whoami', 'null')), answers(first, failure(3, SESSION_REQUIRED))])
 
 
-@case
-def elsewhere_not_carried():
-    captures, first = Captures(), Connection('first', opener=half(1))
+@case(IN_MEMORY, MQTT)
+def elsewhere_not_carried(transport):
+    captures, first = Captures(transport), Connection('first', opener=half(1))
 
     # each request's own: a DATA that carries none hands nothing, whatever an earlier one carried
     return ('a request presenting ELSEWHERE whose DATA carries no credential is answered SESSION_REQUIRED',
@@ -1856,9 +1923,9 @@ def elsewhere_not_carried():
                 asks(first, elsewhere(3)), answers(first, failure(3, SESSION_REQUIRED, detail=NO_CREDENTIAL))])
 
 
-@case
-def two_subscribers():
-    captures = Captures()
+@case(IN_MEMORY, MQTT)
+def two_subscribers(transport):
+    captures = Captures(transport)
     ada, bob = Connection('ada', 'ada', opener=half(1)), Connection('bob', 'bob', opener=half(2))
 
     return ('two subscribers of one procedure each get its notification on their own inbox, connection and call id, the paced one at its credit',
@@ -1872,28 +1939,21 @@ def two_subscribers():
                 asks(bob, credit_of(1, 2, paced=True)), answers(bob, notification(1, '8'))])
 
 
-@case
-def a_transfer_and_a_retained_message():
-    captures, first = Captures(), Connection('first', opener=half(1))
-    last_credit = None
+@case(IN_MEMORY, MQTT)
+def a_transfer(transport):
+    captures, first = Captures(transport), Connection('first', opener=half(1))
 
-    def credited_last():
-        nonlocal last_credit
-        last_credit = data(first, credit_of(1, 100))
-        return publish(PEER, 'inbox', last_credit, retained=True)
-
-    return ('a transfer goes under its receiver\'s credit; a retained message is dropped in silence',
+    return ('a transfer goes under its receiver\'s credit',
             ['15.23', '12.4', '12.5'], {'limits': CHUNKED}, [
                 *opened(captures, first), asks(first, request(1, 'bytes', '{"length":98}')),
                 answers(first, result_opening(1, RESULT_100[:28], 100)),
                 asks(first, credit_of(1, 76)), answers(first, chunk_of(1, 28, RESULT_100[28:76], False)),
-                credited_last(), publish(PEER, 'inbox', last_credit),
-                answers(first, chunk_of(1, 76, RESULT_100[76:], True))])
+                asks(first, credit_of(1, 100)), answers(first, chunk_of(1, 76, RESULT_100[76:], True))])
 
 
-@case
-def a_group_at_its_bound():
-    captures = Captures()
+@case(IN_MEMORY, MQTT, over_mqtt=['15.27'])
+def a_group_at_its_bound(transport):
+    captures = Captures(transport)
     first, second, third = (Connection(label, opener=half(n)) for n, label in enumerate(('first', 'second', 'third'), 1))
 
     return ('a server serving its name in a group leaves it while it holds maximumConnections, and serves it again once it holds fewer',
@@ -1904,9 +1964,11 @@ def a_group_at_its_bound():
                 until('names', 1), *accepted(captures, third)])
 
 
-@case
-def a_queue_overrun():
-    captures, first = Captures(), Connection('first', opener=half(1))
+# ! a queue bound per subscriber is the in-memory broker's: a real broker's is its own, for every
+# client, and overruns only behind a subscriber that does not read
+@case(IN_MEMORY)
+def a_queue_overrun(transport):
+    captures, first = Captures(transport), Connection('first', opener=half(1))
     steps = opened(captures, first)
     burst = [data(first, request(call_id, 'echo', value)) for call_id, value in ((1, '"a"'), (3, '"b"'), (5, '"c"'))]
 
@@ -1931,7 +1993,7 @@ def opening_read(captures, connection, *, secure=True):
     """The OPEN the client's connect publishes to the server's name, as a peer reads it there: its
     half captured under the connection's label, or put in where another peer read it first."""
     opening = connection.by_side(Kind.OPEN, flags=Flag.SECURE if secure else 0, id=CLIENT,
-                                 incarnation=captures('incarnation', 'incarnation'), bound=UNBOUNDED)
+                                 incarnation=captures('incarnation', 'incarnation'), bound=captures.bound(CLIENT))
     opening['opener'] = connection.opener or {'capture': connection.label, 'shape': 'half'}
     opening['acceptor'] = NO_HALF
     connection.opener = connection.opener or connection.captured()
@@ -1956,9 +2018,9 @@ def client_opened(captures, connection, *, secure=True):
             reads(connection.peer, connection.by_side(Kind.PING))]
 
 
-@case
-def a_connect_opens():
-    captures, first = Captures(), Connection('first', acceptor=half(1))
+@case(IN_MEMORY, MQTT)
+def a_connect_opens(transport):
+    captures, first = Captures(transport), Connection('first', acceptor=half(1))
 
     return ('a client\'s connect publishes an OPEN of sequence 1 to the server\'s name, naming its half, id, incarnation and receive bound, and nothing else until answered',
             ['15.18'], {'role': 'client'}, [
@@ -1966,9 +2028,9 @@ def a_connect_opens():
                 reads(PEER, first.by_side(Kind.PING))])
 
 
-@case
-def the_first_accept_taken():
-    captures = Captures()
+@case(IN_MEMORY, MQTT)
+def the_first_accept_taken(transport):
+    captures = Captures(transport)
     first, second = Connection('first', acceptor=half(1)), Connection('second', 'other', acceptor=half(2))
 
     def second_read():
@@ -1989,9 +2051,9 @@ def the_first_accept_taken():
                     'procedureId': PROCEDURES['echo'], 'payload': text('"x"')}))])
 
 
-@case
-def a_refuse_fails_the_connect():
-    captures = Captures()
+@case(IN_MEMORY, MQTT)
+def a_refuse_fails_the_connect(transport):
+    captures = Captures(transport)
     first, second = Connection('first'), Connection('second')
 
     return ('a REFUSE fails the connect, naming its status and reason, 426 with the layouts it names',
@@ -2004,9 +2066,9 @@ def a_refuse_fails_the_connect():
                 side(failed={'status': 426, 'reason': 'layout-refused', 'layouts': [LAYOUT_TO_COME]})])
 
 
-@case
-def a_late_accept_reset():
-    captures = Captures()
+@case(IN_MEMORY, MQTT)
+def a_late_accept_reset(transport):
+    captures = Captures(transport)
     first, late = Connection('first'), Connection('late', 'other', acceptor=half(2))
     never = Connection('never', 'other', opener=half(9), acceptor=half(3))
 
@@ -2024,17 +2086,17 @@ def a_late_accept_reset():
                 accepts(never), reads('other', never.by_side(Kind.RESET))])
 
 
-@case
-def an_accept_not_secure():
-    captures, first = Captures(), Connection('first', acceptor=half(1))
+@case(IN_MEMORY, MQTT)
+def an_accept_not_secure(transport):
+    captures, first = Captures(transport), Connection('first', acceptor=half(1))
 
     return ('a client whose acceptor\'s ACCEPT is not marked secure is not secure, though its own leg is',
             ['15.22', '13.4'], {'role': 'client'}, [*client_opened(captures, first, secure=False), side(secure=False)])
 
 
-@case
-def a_credential_toward_the_client():
-    captures, first = Captures(), Connection('first', acceptor=half(1))
+@case(IN_MEMORY, MQTT)
+def a_credential_toward_the_client(transport):
+    captures, first = Captures(transport), Connection('first', acceptor=half(1))
 
     return ('a client closes with 1002 a connection whose server\'s DATA carries a credential',
             ['15.22'], {'role': 'client'}, [
@@ -2044,10 +2106,148 @@ def a_credential_toward_the_client():
                 reads(PEER, first.by_side(Kind.CLOSE, code=PROTOCOL_ERROR)), closed(False), reported()])
 
 
-@case
-def nobody_serves_the_name():
+@case(IN_MEMORY, MQTT, over_mqtt=['15.28'])
+def nobody_serves_the_name(transport):
     return ('a connect fails at once when its broker says nothing serves the name',
             ['15.18'], {'role': 'client'}, [connects('nobody'), side(failed={'reason': 'no-subscriber'})])
+
+
+# ── What a real broker adds ─────────────────────────────────────────────────────────────────────
+
+
+@case(IN_MEMORY)
+def a_retained_message(transport):
+    captures, first = Captures(transport), Connection('first', opener=half(1))
+    steps = opened(captures, first)
+    kept = data(first, ECHO)
+    # ! the PING takes the sequence the retained DATA held: a DATA taken would make the PING a copy,
+    # dropped, and its echo would come where the PONG is read
+    first.sent -= 1
+    ping = first.by_peer(Kind.PING)
+
+    # over a real broker no retained message reaches a participant: its subscriptions take none, and
+    # one published live comes RETAIN 0 (spec 15.27, 15.31)
+    return ('a retained message is dropped in silence',
+            ['15.23'], {}, [
+                *steps, publish(PEER, 'inbox', kept, retained=True), publish(PEER, 'inbox', ping),
+                reads(PEER, first.by_side(Kind.PONG, answers=ping['sequence'])), until('unsettled', 0)])
+
+
+@case(IN_MEMORY, MQTT, over_mqtt=['15.25', '15.31'])
+def a_name_served_with_a_twin(transport):
+    captures = Captures(transport)
+    connections = [Connection(f'opener{n}', opener=half(n)) for n in range(1, 5)]
+
+    # the twin serves the name in its group beside the server under test, and answers nothing: each
+    # OPEN reaches one of them, as a listening socket's accept takes one connection. Over MQTT 5 it
+    # holds the share name of 15.25 and the name's own topic its access control grants (15.31)
+    return ('a name served in a group by the server and a twin hands each OPEN to one of them alone',
+            ['15.16', '15.18'], {'options': {'group': True, 'twin': 'twin'}}, [
+                until('names', 1), publish(PEER, 'name', *[open_of(connection) for connection in connections]),
+                {'expect': {'placed': {'with': 'twin', 'openers': [connection.opener for connection in connections]}}}])
+
+
+@case(IN_MEMORY, MQTT, over_mqtt=['15.28'])
+def a_parcel_no_subscriber_takes(transport):
+    captures, first = Captures(transport), Connection('first', opener=half(1))
+
+    # the peer lets its inbox go, then asks: the server's answer finds no subscriber, which over
+    # MQTT 5 its PUBACK of 0x10 says
+    return ('a parcel its broker says no subscriber takes ends its connection, unclean: its peer\'s inbox is gone',
+            ['15.21'], {}, [
+                *opened(captures, first), leave(PEER), asks(first, ECHO), closed(False, on=PEER),
+                until('connections', 0)])
+
+
+@case(IN_MEMORY, MQTT, over_mqtt=['15.26'])
+def a_peers_will(transport):
+    captures, first = Captures(transport), Connection('first', opener=half(1))
+
+    # where a_gone publishes a GONE by hand, the peer's broker publishes it here, as its link is lost
+    return ('a peer whose link is lost without a clean end has its will close each connection bound to it, unclean',
+            ['15.21'], {'options': {'wills': True}}, [
+                *opened(captures, first), until('departures', 1), lose(PEER), closed(False, on=PEER),
+                until('connections', 0), until('departures', 0)])
+
+
+@case(IN_MEMORY, MQTT, over_mqtt=['15.28'])
+def the_lives_a_client_asks(transport):
+    captures, first = Captures(transport), Connection('first', acceptor=half(1))
+    envelope = {'kind': REQUEST, 'callId': 1, 'flags': 0, 'serviceId': SERVICE_ID,
+                'procedureId': PROCEDURES['echo'], 'payload': text('"x"')}
+
+    # ! the clock given stands still from the link's start to the OPEN, so the connect's time left
+    # is its whole time; the third leg's PING and a DATA without a credential ask none
+    return ('a client asks its adapter a life of its connect\'s time left on its OPEN, of twice heartbeat on its DATA that carries a credential, and of none on any other parcel',
+            ['15.18', '15.22'], {'role': 'client', 'options': {'timeout': 10_000, 'heartbeat': 30_000}}, [
+                *client_opened(captures, first),
+                {'transportSend': {'envelope': ECHO, 'credential': ADA}},
+                reads(PEER, first.by_side(Kind.DATA, flags=Flag.CREDENTIAL, credential=ADA, envelope=envelope)),
+                {'transportSend': {'envelope': ECHO}},
+                reads(PEER, first.by_side(Kind.DATA, envelope=envelope)),
+                {'expect': {'lives': {'open': 10_000, 'credential': 60_000, 'other': None}}}])
+
+
+@case(MQTT)
+def a_result_under_its_brokers_bound(transport):
+    captures, first = Captures(transport), Connection('first', opener=half(1))
+    value = '"' + 'x' * 4_998 + '"'
+    answer = result_bytes(1, value)
+    # the server's adapter publishes to the peer's inbox within its broker's Maximum Packet Size, a
+    # life counted, whatever the peer's own bound (spec 15.20, 15.30)
+    room = largest_payload(f'bead/i/{PEER}', MQTT_BROKER_PACKET_SIZE) - PARCEL_PREFIX
+    cut = parts_of(answer, [room])
+    assert [len(octets(each)) for each in cut] == [4_044, 964]
+
+    return ('a result goes in parts under its broker\'s Maximum Packet Size where its peer\'s receive bound is larger, each part as large as that bound lets it',
+            ['15.20', '15.30'], {}, [
+                *opened(captures, first, bound=UNBOUNDED), asks(first, request(1, 'bytes', '{"length":4998}')),
+                *[reads(PEER, first.by_side(Kind.DATA, flags=Flag.MORE if index < len(cut) - 1 else 0, part=each))
+                  for index, each in enumerate(cut)]])
+
+
+@case(IN_MEMORY, MQTT, over_mqtt=['15.26'])
+def a_clients_will(transport):
+    captures, first = Captures(transport), Connection('first', acceptor=half(1))
+    steps = client_opened(captures, first)
+
+    # every peer subscribes the client's departure in the client role, and reads its GONE there
+    return ('a client whose link is lost without a clean end is told gone by its will, a GONE of its id and incarnation on its departure, and its connection closes unclean',
+            ['15.21'], {'role': 'client'}, [
+                *steps, lose(CLIENT),
+                reads(PEER, gone_of(CLIENT, captures('incarnation', 'incarnation')), at='departure'),
+                side(closed={'clean': False})])
+
+
+@case(IN_MEMORY, MQTT, over_mqtt=['15.26'])
+def a_link_lost_and_anew(transport):
+    captures = Captures(transport)
+    first, second = Connection('first', opener=half(1)), Connection('second', opener=half(2))
+    steps = opened(captures, first)
+
+    # ! its reconnection's first attempt goes at once, so nothing is advanced: the participant links
+    # anew as another incarnation, its inbox and its name subscribed again, then resets its peer
+    return ('a participant whose link is lost closes each connection, unclean, and connects anew as another incarnation, resetting each peer it held one with',
+            ['15.21'], {}, [
+                *steps, lose(SERVER), closed(False, on=PEER), reads(PEER, first.by_side(Kind.RESET)),
+                until('names', 1),
+                *accepted(captures, second, incarnation=captures('anew', 'incarnation', unlike='incarnation'))])
+
+
+@case(IN_MEMORY, MQTT, over_mqtt=['15.26'])
+def a_link_taken_over(transport):
+    captures = Captures(transport)
+    first, second = Connection('first', opener=half(1)), Connection('second', opener=half(2))
+
+    # ! a participant fenced arms no timer: no relink comes, so the name stays unserved and its inbox
+    # unread, which the broker's word on the peer's OPEN and on its PING says
+    return ('a participant whose link another of its id takes over closes each connection, unclean, reports it, and connects no more',
+            ['15.21', '15.24'], {}, [
+                *opened(captures, first), take_over(SERVER), closed(False, on=PEER),
+                reported(SERVER, 'taken over'), until('connections', 0), until('names', 0),
+                publish(PEER, 'name', open_of(second), refused='no-subscriber'),
+                publish(PEER, 'inbox', first.by_peer(Kind.PING), refused='no-subscriber')])
+
 
 # responses as a server may cut them, which every side's reader reads alike
 responses = [
@@ -2172,6 +2372,27 @@ def tell(steps, options):
         expectation['told'] = told_of(heads[step['on']], expectation['status'], reason, options)
 
 
+def mqtt_broker():
+    """The broker the cases over MQTT 5 play against, and every user they name: the participant under
+    test of each role, each peer and each twin, its access control spec 15.31's."""
+    users = {SERVER, CLIENT}
+
+    for _name, _clauses, fields, _steps in played[MQTT]:
+        users.update(fields.get('peers', [PEER]))
+        users.update([fields['options']['twin']] if 'twin' in fields.get('options', {}) else [])
+
+    return {
+        '$comment': [
+            "The Mosquitto 2.1.2 the cases over MQTT 5 play against, which tools/mqtt-broker.mjs starts for a run: its Maximum Packet Size, its retained messages refused, its shared subscriptions offered, and its users, each authenticated by the run's password, its Client Identifier tied to its user.",
+            "Its access control is spec 15.31's for them: a participant reads its own inbox and its will writes its own departure; every participant writes any inbox and reads any departure; and every user reads and writes every name, so that a peer plays an acceptor. Its queues are lifted, its receive maximum toward a participant none, and it persists nothing.",
+        ],
+        'maximumPacketSize': MQTT_BROKER_PACKET_SIZE,
+        'retainAvailable': False,
+        'sharedSubscriptions': True,
+        'users': sorted(users),
+    }
+
+
 # the cases over HTTP played on the real clock, as what no clock given reaches is
 HTTP_REAL_TIME = {'a request whose head does not come whole within headersTimeout is answered 408, unmarked, and told by none'}
 assert HTTP_REAL_TIME <= {name for name, *_ in cases}
@@ -2185,7 +2406,7 @@ for _name, _clauses, _fields, _steps in websocket:
 document = {
     '$schema': 'schemas/transports.schema.json',
     '$comment': [
-        "Bead's transports' cases: what a server of the interop service (its blueprint, interop-blueprint.json, and what it does, interop-service.json) does at its transport's edge, over HTTP, over WebSocket and over a broker, with what a peer of the test's own sends it, played by every implementation's tests against its own server; and, over a broker, what a client's transport does with what the peers that play its acceptors send it.",
+        "Bead's transports' cases: what a server of the interop service (its blueprint, interop-blueprint.json, and what it does, interop-service.json) does at its transport's edge, over HTTP, over WebSocket and over a broker, in memory or over MQTT 5, with what a peer of the test's own sends it, played by every implementation's tests against its own server; and, over a broker, what a client's transport does with what the peers that play its acceptors send it.",
         'A step is what the test does — send, close, until — or what the server under test does next — expect, report. send writes a request to a socket of its own, opened for the exchange it names with on: head, its octets as text, in which {host} is the server\'s host and port, an IP literal, which every server takes, and {token}, or any other name a field captured, the value captured under it, each of its characters one octet, its code point (ISO-8859-1), so that a character past U+007F is an octet past ASCII, and one without its last CRLF a head that never comes whole; body, its octets in hexadecimal, a content-length given past them leaving the body to come. close drops that socket.',
         'expect reads the response on the exchange it names: its status; its fields, by name in any case, each its value, null for one absent, {"shape"} for a value of that shape, {"capture", "shape"} to keep it under that name; its body, exactly, in hexadecimal; or envelope, the one envelope it holds, as conversations.json expects one; or batch, the envelopes of a batch in order. told, on a marked refusal, is what the server\'s transport tells of it (spec 15.1): its status, its reason, the request\'s authority and origin as they came, or null, the client\'s address and the port it sent from, {port}, the local port of the socket the exchange was sent on, {host} put in as in a head; null where it tells nothing, as of the 404 that ends an exchange or a listen already taken as its connection closes (spec 15.7). A response is read by its content-length, or de-chunked, as responses checks every reader. orLost true lets the exchange be lost instead, its socket ending before any status, as a request handed on may be when its connection closes (spec 15.7). An expect of end, once a response was read, reads that its server ended its side of the socket, as an answer written before its body is whole has it (spec 15.12). The cut that follows a head is no step\'s to read: an exchange of that connection after its close, refused 404 connection-unknown, stands for it.',
         'Over WebSocket, an exchange answered 101 keeps its socket as a WebSocket. send then writes a message: binary, in hexadecimal; text; frames, each with its opcode, its fin and its payload; or close and its code; every frame masked, as a client\'s is. expect then reads the next thing the server sends on it: envelope, one binary message holding that envelope; binary, its bytes; close, a close frame and its code; ping, a ping; end, the socket ended. The peer answers every ping with a pong, unless its case says answersPings false. within bounds an expect\'s wait, and after is the soonest what it reads may come, each in milliseconds from its step\'s start. stop stops the server under test. A case marked realTime plays on the real clock what no clock given reaches.',
@@ -2195,11 +2416,13 @@ document = {
         'Here an advance goes no further than the due its until timer named, and one meant to fire that timer ends on it: what a timer fired leads to, on the platform\'s threads, reads the clock, which must not have run past it. Here an until timer waits for the earliest timer armed to be due as it names, and the only one so due: one armed before it and not yet cleared, on the platform\'s threads, would fire first.',
         'options, where given, are the server\'s bounds by the names sections 15.3 and 15.12 give them, and its hosts, * among them, its origins, its trustedProxies and its unnamedProxies, for either transport; any other is its default, as defaults states them, in milliseconds for a time. connectionInactivityTimeout is the HTTP server\'s own connection timeout (spec 13.7), which its server layer holds, not its transport. limits, where given, are its router\'s, as in conversations.json.',
         'Shapes: token, 16 bytes in base64url without padding; delay-seconds, a number of seconds in ASCII digits; http-date, an IMF-fixdate (RFC 9110, section 5.6.7).',
-        "Over a broker (transport broker), the broker is the in-memory one of the side under test (spec 15.24), its messages bounded by none, so a participant over it announces the largest receive bound its field holds, 4294967295. role is server unless a case says client. In the server role, the server under test is the interop service's on a broker server transport over a participant whose id is server, serving its options' names, interop unless they name others, in a group when group is true; in the client role, the side under test is a broker client transport alone, built with no reconnection, over a participant whose id is client. peers are the test's own participants, adapters of the same broker, by their ids, peer unless the case names others: an id that is no token among them, which the in-memory broker takes as a broker takes any name. Each subscribes its inbox before the first step, and in the client role the server's name, interop, alone, so that each reads every OPEN; a peer answers nothing of its own.",
-        'publish is what a peer, from, publishes in one turn, each in its order, none awaited before the next: to the server\'s name, to the inbox of the participant under test, or to its own departure, as its broker publishes its will; each a parcel by its fields, which its peer\'s codec writes, or bytes, for what no writer writes, in hexadecimal, a captured half put in by its {name}. retained true hands it on marked retained, as a broker hands a message it kept; refused no-subscriber says the broker refuses it, no subscriber taking it. A case copies a parcel by publishing it twice, and reorders by publishing out of its sequence. A parcel\'s fields are vectors.json\'s, its envelope or its part what a DATA carries: envelope, as a send of conversations.json writes one, or, read, as conversations.json expects one; part, in hexadecimal. A half is its 8 bytes, a captured half\'s {name}, or, read, {"capture", "shape"}; an incarnation alike. A field a parcel is read without is one it does not have: a DATA read without credential carries none.',
-        "expect parcel reads the next parcel a peer receives, on its inbox or, in the client role, on the server's name, each field its value; told, beside a REFUSE, is what the server tells of the refusal, its status, its reason and its address, the id the OPEN claims, its authority, its origin and its port none (spec 15.1, 15.18). In the server role, expect closed reads the next close the server's transport tells of a connection of the peer named on, clean or not. reported reads the next error the transport under test reports of its own (spec 15.1), its message naming each of the words given, with the connection of the peer named on, or, where on is absent, with none, or of the client's one connection. Before each publish and stop, and at the end, the transport under test reported nothing, and told no refusal, that a case does not expect.",
+        "Over a broker (transport broker), the broker is the in-memory one of the side under test (spec 15.24), its messages bounded by none, so a participant over it announces the largest receive bound its field holds, 4294967295. role is server unless a case says client. In the server role, the server under test is the interop service's on a broker server transport over a participant whose id is server, serving its options' names, interop unless they name others, in a group when group is true; in the client role, the side under test is a broker client transport alone, built with no reconnection, over a participant whose id is client. peers are the test's own participants, adapters of the same broker, by their ids, peer unless the case names others: an id that is no token among them, which the in-memory broker takes as a broker takes any name. Each subscribes its inbox before the first step, and in the client role the server's name, interop, alone, so that each reads every OPEN, and the departure of client, so that each reads its GONE; a peer answers nothing of its own.",
+        "Over MQTT 5 (transport mqtt), the broker is a Mosquitto 2.1.2 as brokers.mqtt describes it, which tools/mqtt-broker.mjs starts for a run, its access control spec 15.31's for its users. Every participant is a link of the side's MQTT adapter to it, through a relay of the player's own that a lose cuts, authenticated by its id and the run's password; the participant under test is server or client, as over a broker, its adapter's maximumPacketSize its default, so that it announces the receive bound of its inbox within 16,777,216 bytes, 16777188 (spec 15.30). Each peer subscribes as over a broker, and answers nothing of its own. The cases are played one at a time on a side, every participant of a case, its peers, its twin and a takeover's link among them, stopped clean before the next, since every case's participant under test has the same id, and a link left up would take the next case's over. Where no broker is given, BEAD_MQTT_URL unset, each case over MQTT 5 is skipped, saying so; BEAD_MQTT_REQUIRED=1 fails it instead.",
+        'publish is what a peer, from, publishes in one turn, each in its order, none awaited before the next: to the server\'s name, to the inbox of the participant under test, or to its own departure, as its broker publishes its will; each a parcel by its fields, which its peer\'s codec writes, or bytes, for what no writer writes, in hexadecimal, a captured half put in by its {name}. retained true hands it on marked retained, as a broker hands a message it kept; refused no-subscriber is the broker\'s word on it, no subscriber taking it, the in-memory broker\'s refusal or MQTT 5\'s PUBACK of 0x10, where every other publication is taken. A case copies a parcel by publishing it twice, and reorders by publishing out of its sequence. A parcel\'s fields are vectors.json\'s, its envelope or its part what a DATA carries: envelope, as a send of conversations.json writes one, or, read, as conversations.json expects one; part, in hexadecimal. A half is its 8 bytes, a captured half\'s {name}, or, read, {"capture", "shape"}; an incarnation alike. A field a parcel is read without is one it does not have: a DATA read without credential carries none.',
+        "expect parcel reads the next parcel a peer receives, on its inbox or, in the client role, on the server's name, each field its value; told, beside a REFUSE, is what the server tells of the refusal, its status, its reason and its address, the id the OPEN claims, its authority, its origin and its port none (spec 15.1, 15.18). at departure, in the client role, reads the departure of the client under test instead of the peer's inbox. A captured value's unlike names one captured before, which it is not. In the server role, expect closed reads the next close the server's transport tells of a connection of the peer named on, clean or not. reported reads the next error the transport under test reports of its own (spec 15.1), its message naming each of the words given, with the connection of the peer named on, or, where on is absent, with none, or of the client's one connection. Before each publish and stop, and at the end, the transport under test reported nothing, and told no refusal, that a case does not expect.",
         'In the client role, connect starts the connect of the client under test to the server of that name; transportSend sends an envelope, in hexadecimal, through its transport, with the credential given, a field value; and expect reads what its transport does next: opened, its connect opened; failed, its connect failed, naming the status and the reason of the REFUSE it read, and the layouts of a 426, or the reason no-subscriber, its broker saying nothing serves the name; closed, its connection closed, clean or not; received, the envelope it hands its router, as conversations.json expects one; secure, whether it says it is secure.',
-        "Over a broker, until names a gauge of the transport under test: connections, those its router was told; halfOpen, those answered by an ACCEPT whose third leg has not come; partsBytes, what its participant holds in parts; names, the names it holds a subscription to; departures, the peers' departures its participant subscribes; or unsettled, the messages the in-memory broker handed its participant and it has not acknowledged. stop stops the server's transport under test, its participant's link kept, crossing a publish where it gives one: published in the turn the stop begins, before it. wait waits that many milliseconds on the real clock, in a case marked realTime. options, over a broker, are also those of section 15.23 by their names, heartbeat its participant's, and maximumQueuedMessages, the messages the in-memory broker holds for each subscriber, published to it and not yet handed on, past which it drops one, as a broker whose queue is full does.",
+        "Over a broker, until names a gauge of the transport under test: connections, those its router was told; halfOpen, those answered by an ACCEPT whose third leg has not come; partsBytes, what its participant holds in parts; names, the names its broker holds a subscription to, from its SUBACK to its UNSUBACK over MQTT 5; departures, the peers' departures its participant subscribes; or unsettled, the messages its adapter handed its participant and it has not acknowledged. stop stops the server's transport under test, its participant's link kept, crossing a publish where it gives one: published in the turn the stop begins, before it. wait waits that many milliseconds on the real clock, in a case marked realTime. options, over a broker, are also those of section 15.23 by their names, heartbeat its participant's, in either role; timeout, in the client role, its connect's time (spec 15.15); twin, a participant beside the peers that serves the server's names in their group, reading every OPEN its broker hands it and answering none; wills true, each peer's link leaving a will, the GONE of its id and of the incarnation its OPENs name; and maximumQueuedMessages, the messages the in-memory broker holds for each subscriber, published to it and not yet handed on, past which it drops one, as a broker whose queue is full does.",
+        "lose loses the link of that participant, the one under test or a peer, without a clean end: in memory its adapter's lose, over MQTT 5 its relay cut, its broker publishing its will where it leaves one. takeover takes the link of the participant under test over by another link of its id: in memory its adapter's takeOver, its subscriptions dropped and its will published; over MQTT 5 a link of the player's own under its id, which subscribes nothing, stopped clean once the case ends. leave has a peer let its inbox go, its unsubscription settled, so that the next parcel to it finds no subscriber. expect placed reads that each OPEN of the openers given, their halves, reached the server under test or the participant with, its twin, never both and never neither: the server's ACCEPT read on the opener's inbox, the twin's OPEN read on the name. expect lives reads what the side under test asked its adapter of each publication's life, by an adapter the player wraps around the side's, in milliseconds on the clock given, exactly: open, an OPEN's; credential, a DATA's that carries a credential; other, every other parcel's, null for none.",
         'clauses are the units of spec.md an entry checks: a clause, 9.2; an item of its numbered list, 9.2.5; a row of its table, counted from 1, 15.6.8.',
     ],
     'specVersion': spec_version(),
@@ -2217,14 +2440,15 @@ document = {
         {'name': name, 'clauses': clauses, 'transport': 'websocket', **fields, 'steps': steps}
         for name, clauses, fields, steps in websocket
     ] + [
-        {'name': name, 'clauses': clauses, 'transport': 'broker', **fields, 'steps': steps}
-        for name, clauses, fields, steps in broker
+        {'name': name, 'clauses': clauses, 'transport': transport, **fields, 'steps': steps}
+        for transport in (IN_MEMORY, MQTT) for name, clauses, fields, steps in played[transport]
     ],
+    'brokers': {MQTT: mqtt_broker()},
 }
 
 with open(ROOT + 'transports.json', 'w', encoding='utf-8', newline='\n') as file:
     json.dump(document, file, ensure_ascii=False, indent=2)
     file.write('\n')
 
-print(len(cases), 'cases over HTTP,', len(websocket), 'over WebSocket,', len(broker), 'over a broker,', len(responses),
-      'responses')
+print(len(cases), 'cases over HTTP,', len(websocket), 'over WebSocket,', len(played[IN_MEMORY]), 'over a broker,',
+      len(played[MQTT]), 'over MQTT 5,', len(responses), 'responses')

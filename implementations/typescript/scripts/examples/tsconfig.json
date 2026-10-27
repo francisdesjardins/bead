@@ -62,6 +62,9 @@
       "@francisdesjardins/bead/memory-transport-server": [
         "../../src/transport/server/memory-transport-server.ts"
       ],
+      "@francisdesjardins/bead/mqtt-broker-adapter": [
+        "../../src/transport/shared/mqtt-broker-adapter.ts"
+      ],
       "@francisdesjardins/bead/notification-manager": [
         "../../src/router/server/notification-manager.ts"
       ],
