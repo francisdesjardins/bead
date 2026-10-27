@@ -164,7 +164,9 @@ public sealed partial class DurationsTests
     private static async Task<Observed> ConnectTimeoutByBroker(TimeSpan? given)
     {
         var clock = new SteppingClock(Epoch);
-        var broker = new MemoryBroker();
+        // ! on the connect's clock: its OPEN lives the connect's time left, which a broker on the
+        // real clock sees pass before it hands the OPEN on, 1 ms of it
+        var broker = new MemoryBroker(new MemoryBrokerOptions { Clock = clock });
         var reached = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var peer = broker.Adapter(new MemoryBrokerAdapterOptions { Id = "peer" });
 

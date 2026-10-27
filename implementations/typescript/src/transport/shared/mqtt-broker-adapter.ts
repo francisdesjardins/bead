@@ -83,6 +83,8 @@ export interface IMqttBrokerAdapterOptions {
 
 /** An adapter over MQTT 5 (spec 15.25 to 15.31): an adapter as any, its acknowledgements counted. */
 export interface IMqttBrokerAdapter extends IBrokerAdapter {
+  /** Whether its link is up: its CONNACK read, and neither stopped nor lost since. */
+  readonly isLinked: boolean;
   /** The messages it handed its participant at least once that are not acknowledged yet. */
   readonly unsettled: number;
 }
@@ -187,7 +189,8 @@ const assertKeepAlive = (duration: unknown): number => {
  * Packet Size and its Keep Alive; its will the participant's GONE, QoS 1, RETAIN 0, a Will Delay
  * Interval of 0. Its library reconnects nothing, subscribes nothing again and holds nothing while
  * down. Each subscription is of QoS 1, No Local 0, Retain As Published 0 and Retain Handling 2, a
- * group's its shared subscription, held once its SUBACK grants QoS 1. Each publication is of QoS 1,
+ * group's its shared subscription, held once its SUBACK grants QoS 1, and let go once its UNSUBACK
+ * came under 0x80, one of 0x80 or more refusing it. Each publication is of QoS 1,
  * or 0 at most once, RETAIN 0, a life in whole seconds where asked and no other property, counted
  * to its byte and refused past its CONNACK's Maximum Packet Size, held to its CONNACK's Receive
  * Maximum, later ones waiting in their order; its PUBACK of 0x10 says no subscriber, of 0x80 or
@@ -613,13 +616,17 @@ export const createMqttBrokerAdapter = (options: IMqttBrokerAdapterOptions): IMq
     id,
     isSecure: protocol === 'mqtts:' || isSecureUrl(url),
     type: TRANSPORT_MQTT,
+    get isLinked() {
+      return live() !== undefined;
+    },
     get unsettled() {
       return unsettled;
     },
 
+    // * the last link's bound while it is down, a start under way among it
     maximumPayloadBytes: (topic) => {
       return (
-        largestPayload(topicOf(topic), current?.maximumPacketSize ?? lastMaximumPacketSize, {
+        largestPayload(topicOf(topic), live()?.maximumPacketSize ?? lastMaximumPacketSize, {
           qos: isAtMostOnce ? 0 : 1,
         }) ?? 0
       );
@@ -879,12 +886,21 @@ export const createMqttBrokerAdapter = (options: IMqttBrokerAdapterOptions): IMq
 
       return awaited<void>(incarnation, {
         begin: ({ reject, resolve }) => {
-          incarnation.client.unsubscribe(filter, (error) => {
-            if (!isFailure(error)) {
+          incarnation.client.unsubscribe(filter, (error, unsuback) => {
+            // * the UNSUBACK's own code: 0x00, or 0x11 where its broker held none, lets it go
+            const code = (unsuback as { granted?: number[] } | undefined)?.granted?.[0] ?? 0;
+
+            if (isFailure(error)) {
+              reject(toError(error));
+            } else if (code >= 0x80) {
+              reject(
+                new GenericError(
+                  `the broker of ${id} refused to let the subscription to ${filter} go: ${reasonOf(code)}`
+                )
+              );
+            } else {
               incarnation.filters.delete(key);
               resolve();
-            } else {
-              reject(toError(error));
             }
           });
         },

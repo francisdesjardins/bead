@@ -1060,7 +1060,22 @@ public sealed class BrokerParticipantTests
         {
             reported.Enqueue(reason.Message);
         };
+
+        // a connect its link is taken over under fails, naming it
+        var silent = pair.Broker.Adapter(new MemoryBrokerAdapterOptions { Id = "silent" });
+
+        await silent.Start();
+        await silent.Subscribe(["bead", "s", "silent"]);
+
+        await using var waiting = pair.ClientParticipant.Client();
+        var pending = waiting.Connect(new BrokerConnectOptions { Server = "silent" }, Cancelled);
+
+        await pair.Scheduler.WhenIdle();
         pair.ClientAdapter.TakeOver();
+        Assert.Equal("the link of client was taken over by another link of its id as it connected", (await Assert.ThrowsAsync<ConnectException>(() =>
+        {
+            return pending.WaitAsync(BrokerPair.Patience, Cancelled);
+        })).Message);
 
         // * its connection closed, unclean, as at any down, and the takeover reported, once
         Assert.False(await closed.Task.WaitAsync(BrokerPair.Patience, Cancelled));
@@ -1084,7 +1099,7 @@ public sealed class BrokerParticipantTests
             return refused.Connect(new BrokerConnectOptions { Server = "interop" }, Cancelled);
         });
 
-        Assert.Equal("the link of client was taken over by another link of its id", failure.Message);
+        Assert.Equal("the link of client was taken over by another link of its id, and connects no more until it is started again", failure.Message);
         Assert.False(pair.ClientAdapter.IsLinked);
 
         // * its application's start links it anew, another incarnation, and a connect then opens
@@ -1096,6 +1111,220 @@ public sealed class BrokerParticipantTests
 
         Assert.Equal(ReadyState.Open, again.ReadyState);
         Assert.Single(reported);
+    }
+
+    [Fact]
+    public async Task Fails_a_link_that_goes_down_as_it_connects_at_its_start_or_as_it_links_anew_and_fences_it_where_another_link_of_its_id_took_it_over_then_spec_15_21()
+    {
+        var broker = new MemoryBroker();
+        var inner = broker.Adapter(new MemoryBrokerAdapterOptions { Id = "ada" });
+        var granting = new GrantingAdapter(inner);
+        await using var participant = new BrokerParticipant(granting, new BrokerParticipantOptions
+        {
+            Reconnect = new TransportReconnectOptions { Delay = Immediately, MaximumAttempts = 5 },
+        });
+        var reported = new ConcurrentQueue<string>();
+        var lost = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        participant.Error += (reason) =>
+        {
+            reported.Enqueue(reason.Message);
+        };
+
+        // * heard after its participant's own: its participant's turn is posted by then
+        inner.Down += (_) =>
+        {
+            lost.TrySetResult();
+        };
+
+        async Task Granted()
+        {
+            await BrokerPair.Until(
+                () =>
+                {
+                    return !granting.Inbox.IsEmpty;
+                },
+                "its inbox asked of its broker");
+            Assert.True(granting.Inbox.TryDequeue(out var grant));
+            grant.SetResult();
+        }
+
+        // a loss as it subscribes its inbox fails its start, though its SUBACK came
+        var starting = participant.Start();
+
+        await BrokerPair.Until(
+            () =>
+            {
+                return !granting.Inbox.IsEmpty;
+            },
+            "its inbox asked of its broker");
+        inner.Lose();
+        await lost.Task.WaitAsync(BrokerPair.Patience, Cancelled);
+        await participant.Scheduler.WhenIdle();
+        await Granted();
+        Assert.Equal("the link of ada went down as it connected", (await Assert.ThrowsAsync<IOException>(() =>
+        {
+            return starting.WaitAsync(BrokerPair.Patience, Cancelled);
+        })).Message);
+        Assert.False(participant.IsLinked);
+        Assert.Empty(reported);
+
+        // * the next start links anew
+        var again = participant.Start();
+
+        await Granted();
+        await again.WaitAsync(BrokerPair.Patience, Cancelled);
+        Assert.True(participant.IsLinked);
+
+        // a takeover as it links anew fences it: reported once, and no attempt after it
+        inner.Lose();
+        await BrokerPair.Until(
+            () =>
+            {
+                return !granting.Inbox.IsEmpty;
+            },
+            "its inbox asked anew of its broker");
+        inner.TakeOver();
+        await BrokerPair.Until(
+            () =>
+            {
+                return !reported.IsEmpty;
+            },
+            "the takeover reported");
+        await Granted();
+        await participant.Scheduler.WhenIdle();
+        Assert.Equal(["the link of ada was taken over by another link of its id"], reported);
+        Assert.Empty(granting.Inbox);
+        Assert.False(participant.IsLinked);
+
+        await using var refused = participant.Client();
+
+        Assert.Equal("the link of ada was taken over by another link of its id, and connects no more until it is started again", (await Assert.ThrowsAsync<ConnectException>(() =>
+        {
+            return refused.Connect(new BrokerConnectOptions { Server = "interop" }, Cancelled);
+        })).Message);
+    }
+
+    // an adapter that holds its inbox's SUBSCRIBE until the test grants it, as a SUBACK that came
+    // before its link's loss was read, and passes every other call on
+    private sealed class GrantingAdapter(MemoryBrokerAdapter inner) : IBrokerAdapter
+    {
+        public ConcurrentQueue<TaskCompletionSource> Inbox { get; } = new();
+
+        public event Action<BrokerMessage>? Message
+        {
+            add
+            {
+                inner.Message += value;
+            }
+
+            remove
+            {
+                inner.Message -= value;
+            }
+        }
+
+        public event Action<BrokerDown>? Down
+        {
+            add
+            {
+                inner.Down += value;
+            }
+
+            remove
+            {
+                inner.Down -= value;
+            }
+        }
+
+        public string Type
+        {
+            get
+            {
+                return inner.Type;
+            }
+        }
+
+        public string Id
+        {
+            get
+            {
+                return inner.Id;
+            }
+        }
+
+        public BrokerCapabilities Capabilities
+        {
+            get
+            {
+                return inner.Capabilities;
+            }
+        }
+
+        public BrokerDelivery Delivery
+        {
+            get
+            {
+                return inner.Delivery;
+            }
+        }
+
+        public bool IsSecure
+        {
+            get
+            {
+                return inner.IsSecure;
+            }
+        }
+
+        public long ReceiveBound(IReadOnlyList<string> topic)
+        {
+            return inner.ReceiveBound(topic);
+        }
+
+        public Task Start(BrokerStart? start = null)
+        {
+            return inner.Start(start);
+        }
+
+        public async Task Subscribe(IReadOnlyList<string> topic, BrokerSubscription? subscription = null)
+        {
+            if (topic is [_, "i", _])
+            {
+                var grant = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+
+                Inbox.Enqueue(grant);
+                await grant.Task;
+
+                // * granted before its loss was read: its SUBACK came all the same
+                if (!inner.IsLinked)
+                {
+                    return;
+                }
+            }
+
+            await inner.Subscribe(topic, subscription);
+        }
+
+        public Task Unsubscribe(IReadOnlyList<string> topic)
+        {
+            return inner.Unsubscribe(topic);
+        }
+
+        public Task<BrokerPublished> Publish(BrokerPublication publication)
+        {
+            return inner.Publish(publication);
+        }
+
+        public long MaximumPayloadBytes(IReadOnlyList<string> topic)
+        {
+            return inner.MaximumPayloadBytes(topic);
+        }
+
+        public Task Stop()
+        {
+            return inner.Stop();
+        }
     }
 
     // an adapter that writes down each call its participant makes of it, in order, and passes it on,

@@ -461,7 +461,7 @@ public sealed class BrokerParticipant : IAsyncDisposable
         {
             if (_isTakenOver)
             {
-                throw new ConnectException(TakenOver);
+                throw new ConnectException($"{TakenOver}, and connects no more until it is started again");
             }
         }
 
@@ -735,7 +735,7 @@ public sealed class BrokerParticipant : IAsyncDisposable
 
         foreach (var pending in _connects.Values.ToList())
         {
-            pending.Down(down.IsTakenOver ? TakenOver : $"the link of {Id} went down as it connected");
+            pending.Down(down.IsTakenOver ? $"{TakenOver} as it connected" : $"the link of {Id} went down as it connected");
         }
 
         _connects.Clear();

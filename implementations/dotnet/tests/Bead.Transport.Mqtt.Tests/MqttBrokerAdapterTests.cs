@@ -252,6 +252,59 @@ public sealed class MqttBrokerAdapterTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Fails_its_start_where_its_broker_cannot_be_reached_over_TCP_TLS_or_a_WebSocket_naming_why()
+    {
+        int port;
+
+        // a port no one listens on any more
+        using (var listener = new System.Net.Sockets.TcpListener(IPAddress.Loopback, 0))
+        {
+            listener.Start();
+            port = ((IPEndPoint)listener.LocalEndpoint).Port;
+            listener.Stop();
+        }
+
+        // * and a host no name resolves to (RFC 6761 §6.4), on the port of its scheme
+        foreach (var uri in new[] { $"mqtt://127.0.0.1:{port}", $"mqtts://127.0.0.1:{port}", $"ws://127.0.0.1:{port}/mqtt", $"wss://127.0.0.1:{port}/mqtt", "mqtt://broker.invalid", "mqtts://broker.invalid" })
+        {
+            await using var adapter = AdapterOf((options) =>
+            {
+                return options with { Uri = new Uri(uri) };
+            });
+            var (_, downs) = HeardOf(adapter);
+
+            Assert.Contains("the link of ada ended before its CONNACK", Assert.IsType<IOException>(await FailureOf(() =>
+            {
+                return adapter.Start();
+            })).Message, StringComparison.Ordinal);
+            Assert.Equal((false, 0), (adapter.IsLinked, downs.Count));
+        }
+    }
+
+    [Fact]
+    public async Task Fails_its_start_over_TLS_where_its_broker_s_certificate_chains_to_no_authority_it_trusts()
+    {
+        await using var secured = MqttScript.Start(Certificate.Value);
+        await using var untrusting = new MqttBrokerAdapter(new MqttBrokerAdapterOptions
+        {
+            Id = Id,
+            Tls = new MqttBrokerTlsOptions { ClientCertificates = [Certificate.Value] },
+            Uri = secured.Uri,
+        });
+
+        Assert.Contains("the link of ada ended before its CONNACK", Assert.IsType<IOException>(await FailureOf(() =>
+        {
+            return untrusting.Start();
+        })).Message, StringComparison.Ordinal);
+
+        // * no CONNECT went: its broker's certificate was refused before it
+        await Assert.ThrowsAsync<TimeoutException>(() =>
+        {
+            return secured.Link(TimeSpan.FromMilliseconds(200));
+        });
+    }
+
+    [Fact]
     public async Task Keeps_a_Server_Keep_Alive_shorter_than_its_own_a_PINGREQ_once_nothing_went_for_that_long_spec_15_26()
     {
         await using var adapter = AdapterOf((options) =>
@@ -285,7 +338,15 @@ public sealed class MqttBrokerAdapterTests : IAsyncLifetime
 
         var (_, downs) = HeardOf(adapter);
 
+        // what its stop finds unsettled fails, nothing of it left to a later link
+        var pending = adapter.Subscribe(Inbox);
+
+        await link.Next<MqttSubscribePacket>();
         await adapter.Stop();
+        Assert.Equal("the link of ada stopped", (await FailureOf(() =>
+        {
+            return pending;
+        })).Message);
 
         var disconnect = await link.Next<MqttDisconnectPacket>();
 
@@ -380,6 +441,40 @@ public sealed class MqttBrokerAdapterTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Lets_a_subscription_go_once_its_UNSUBACK_came_naming_the_topic_itself_where_it_held_none_and_refuses_it_on_a_code_of_0x80_or_more_spec_15_27()
+    {
+        await using var adapter = AdapterOf();
+        var link = await LinkUp((adapter, _script));
+
+        async Task<string> Answered((string[] Topic, MqttUnsubscribeReasonCode Code) answer)
+        {
+            var leaving = adapter.Unsubscribe(answer.Topic);
+            var unsubscribe = await link.Next<MqttUnsubscribePacket>();
+
+            await link.Send(new MqttUnsubAckPacket { PacketIdentifier = unsubscribe.PacketIdentifier, ReasonCodes = [answer.Code] });
+            await leaving.WaitAsync(Patience, Cancelled);
+
+            return Assert.Single(unsubscribe.TopicFilters);
+        }
+
+        // * one its broker held none of is let go all the same, 0x11
+        Assert.Equal("bead/d/bob", await Answered((["bead", "d", "bob"], MqttUnsubscribeReasonCode.NoSubscriptionExisted)));
+        Assert.Equal("bead/d/bob", await Answered((["bead", "d", "bob"], MqttUnsubscribeReasonCode.Success)));
+        Assert.Contains("0x87", (await FailureOf(() =>
+        {
+            return Answered((["bead", "d", "eve"], MqttUnsubscribeReasonCode.NotAuthorized));
+        })).Message, StringComparison.Ordinal);
+        Assert.Contains("0x80", (await FailureOf(() =>
+        {
+            return Answered((["bead", "d", "eve"], MqttUnsubscribeReasonCode.UnspecifiedError));
+        })).Message, StringComparison.Ordinal);
+
+        // its link kept
+        Assert.True(adapter.IsLinked);
+        await adapter.Stop();
+    }
+
+    [Fact]
     public async Task Refuses_a_group_once_its_CONNACK_says_Shared_Subscription_Available_0_or_its_SUBACK_0x9E_spec_15_25()
     {
         await using var adapter = AdapterOf();
@@ -460,7 +555,7 @@ public sealed class MqttBrokerAdapterTests : IAsyncLifetime
         });
         var quickLink = await LinkUp((quick, _script));
 
-        Assert.Equal((BrokerCapabilities)0, quick.Capabilities & BrokerCapabilities.NoSubscriber);
+        Assert.Equal((BrokerDelivery.AtMostOnce, (BrokerCapabilities)0), (quick.Delivery, quick.Capabilities & BrokerCapabilities.NoSubscriber));
         Assert.Equal(BrokerPublished.Taken, await quick.Publish(new BrokerPublication { Topic = Inbox, Payload = payload }).WaitAsync(Patience, Cancelled));
         Assert.Equal(MqttQualityOfServiceLevel.AtMostOnce, (await quickLink.Next<MqttPublishPacket>()).QualityOfServiceLevel);
         await quick.Stop();
@@ -574,6 +669,51 @@ public sealed class MqttBrokerAdapterTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Tells_its_link_up_once_its_CONNACK_came_and_bounds_what_it_publishes_by_that_CONNACK_s_Maximum_Packet_Size_the_last_link_s_while_it_is_down_spec_15_30()
+    {
+        await using var adapter = AdapterOf();
+
+        (bool, long?) Read()
+        {
+            return (adapter.IsLinked, adapter.MaximumPayloadBytes(Inbox));
+        }
+
+        static long? BoundOf(long packetSize)
+        {
+            return MqttPackets.LargestPayload(("bead/i/ada", packetSize), new MqttPublishShape(1, true));
+        }
+
+        // * before any link, what MQTT 5 writes at most
+        Assert.Equal((false, BoundOf(MqttPackets.LargestPacketSize)), Read());
+
+        var limited = ScriptedLink.ConnAck();
+
+        limited.MaximumPacketSize = 1_024;
+
+        var first = await LinkUp((adapter, _script), (limited, null));
+
+        Assert.Equal((true, BoundOf(1_024)), Read());
+        first.Cut();
+        await Until(() =>
+        {
+            return !adapter.IsLinked;
+        });
+
+        // the last link's while it is down, and while the next one starts
+        Assert.Equal((false, BoundOf(1_024)), Read());
+
+        var starting = adapter.Start();
+        var second = await _script.Link();
+
+        Assert.Equal((false, BoundOf(1_024)), Read());
+        await second.Send(ScriptedLink.ConnAck());
+        await starting.WaitAsync(Patience, Cancelled);
+        Assert.Equal((true, BoundOf(MqttPackets.LargestPacketSize)), Read());
+        await adapter.Stop();
+        Assert.Equal((false, BoundOf(MqttPackets.LargestPacketSize)), Read());
+    }
+
+    [Fact]
     public async Task Hands_each_message_on_before_its_PUBACK_which_goes_once_it_is_settled_and_once_spec_15_29()
     {
         await using var adapter = AdapterOf();
@@ -603,6 +743,21 @@ public sealed class MqttBrokerAdapterTests : IAsyncLifetime
         await Task.Delay(50, Cancelled);
         Assert.Single(link.PacketsOf<MqttPubAckPacket>());
         Assert.Single(messages);
+
+        // * one of QoS 0, which no PUBACK answers, handed on with nothing to acknowledge
+        var quick = PublishOf(("bead/i/ada", [8], 0));
+
+        quick.QualityOfServiceLevel = MqttQualityOfServiceLevel.AtMostOnce;
+        await link.Send(quick);
+        await Until(() =>
+        {
+            return messages.Count > 1;
+        });
+
+        var last = messages.Last();
+
+        last.Settle();
+        Assert.Equal(("08", 0), (Convert.ToHexString(last.Payload.Span), adapter.Unsettled));
         await adapter.Stop();
     }
 
@@ -743,6 +898,18 @@ public sealed class MqttBrokerAdapterTests : IAsyncLifetime
         await Task.Delay(50, Cancelled);
         Assert.Empty(second.PacketsOf<MqttPubAckPacket>());
         Assert.Single(downs);
+
+        // a listener let go hears no loss after
+        var later = new ConcurrentQueue<BrokerDown>();
+
+        adapter.Down += later.Enqueue;
+        adapter.Down -= later.Enqueue;
+        second.Cut();
+        await Until(() =>
+        {
+            return downs.Count > 1;
+        });
+        Assert.Empty(later);
         await adapter.Stop();
     }
 
@@ -773,6 +940,11 @@ public sealed class MqttBrokerAdapterTests : IAsyncLifetime
         var link = await LinkUp((adapter, _script));
         var subscribing = adapter.Subscribe(Inbox);
 
+        // one link at a time: a start of a link up is refused
+        Assert.Equal("the link of ada is up already", Assert.IsType<InvalidOperationException>(await FailureOf(() =>
+        {
+            return adapter.Start();
+        })).Message);
         await SubAckOf((link, 1));
         await subscribing.WaitAsync(Patience, Cancelled);
         link.Cut();
@@ -813,6 +985,41 @@ public sealed class MqttBrokerAdapterTests : IAsyncLifetime
             return starting;
         });
         Assert.Empty(downs);
+        await FailureOf(() =>
+        {
+            return adapter.Start(new BrokerStart { CancellationToken = new CancellationToken(true) });
+        });
+
+        // a stop before its CONNACK ends the start, and one as it asks its password, too
+        var stoppedEarly = adapter.Start();
+
+        await _script.Link();
+        await adapter.Stop();
+        Assert.Contains("before its CONNACK", (await FailureOf(() =>
+        {
+            return stoppedEarly;
+        })).Message, StringComparison.Ordinal);
+
+        var asking = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
+        await using var asked = AdapterOf((options) =>
+        {
+            return options with
+            {
+                Password = null,
+                PasswordProvider = (_) =>
+                {
+                    return asking.Task;
+                },
+            };
+        });
+        var askedStart = asked.Start();
+
+        await asked.Stop();
+        asking.SetResult(Password);
+        Assert.Equal("the link of ada stopped as it started", (await FailureOf(() =>
+        {
+            return askedStart;
+        })).Message);
 
         var single = ScriptedLink.ConnAck();
 
@@ -867,6 +1074,23 @@ public sealed class MqttBrokerAdapterTests : IAsyncLifetime
         });
         await Task.Delay(50, Cancelled);
         Assert.IsType<MqttConnectPacket>(Assert.Single(again.Packets));
+
+        // and a publication given up once its PUBLISH went retires its link, too
+        using var abandoned = new CancellationTokenSource();
+        var publishing = adapter.Publish(new BrokerPublication { Topic = Inbox, Payload = (byte[])[3], CancellationToken = abandoned.Token });
+
+        await again.Next<MqttPublishPacket>();
+        await abandoned.CancelAsync();
+        Assert.IsAssignableFrom<OperationCanceledException>(await FailureOf(() =>
+        {
+            return publishing;
+        }));
+        await Until(() =>
+        {
+            return downs.Count > 1;
+        });
+        Assert.Equal([new BrokerDown(), new BrokerDown()], downs);
+        await again.Closed.WaitAsync(Patience, Cancelled);
         await adapter.Stop();
     }
 
@@ -890,10 +1114,15 @@ public sealed class MqttBrokerAdapterTests : IAsyncLifetime
         ];
 
         Assert.Equal([true, true, true, true, true, false, false], uris.Select(IsSecure));
-        Assert.Throws<ArgumentException>(() =>
+
+        // what is none of its four is refused as it is built, and so is an id that is none
+        foreach (var refused in new[] { new MqttBrokerAdapterOptions { Id = Id, Uri = new Uri("http://broker.example") }, new MqttBrokerAdapterOptions { Id = "", Uri = new Uri("mqtt://127.0.0.1") } })
         {
-            return new MqttBrokerAdapter(new MqttBrokerAdapterOptions { Id = Id, Uri = new Uri("http://broker.example") });
-        });
+            Assert.Throws<ArgumentException>(() =>
+            {
+                return new MqttBrokerAdapter(refused);
+            });
+        }
     }
 
     [Fact(Skip = MqttFixture.Reason, SkipUnless = nameof(IsMqtt))]

@@ -389,6 +389,117 @@ public sealed class BrokerTransportServerTests
         Assert.Single(reported);
     }
 
+    [Fact]
+    public async Task Serves_its_name_again_in_its_group_once_a_connection_closes_as_its_broker_lets_it_go_and_reports_a_name_its_broker_refuses_to_let_go_or_to_serve_again()
+    {
+        var broker = new MemoryBroker();
+        var holding = new HoldingAdapter(broker.Adapter(new MemoryBrokerAdapterOptions { Id = "server" }));
+        await using var participant = new BrokerParticipant(holding);
+        await using var server = participant.Server(new BrokerTransportServerOptions { Names = ["interop"], IsInGroup = true, MaximumConnections = 1 });
+        await using var clients = new BrokerParticipant(broker.Adapter(new MemoryBrokerAdapterOptions { Id = "client" }));
+        var reported = new ConcurrentQueue<string>();
+        var closes = new ConcurrentQueue<bool>();
+
+        server.Error += (reason, connectionHandle) =>
+        {
+            reported.Enqueue(reason.Message);
+        };
+        server.Close += (isClean, connectionHandle) =>
+        {
+            closes.Enqueue(isClean);
+        };
+
+        var starting = server.Start();
+
+        await BrokerPair.Until(
+            () =>
+            {
+                return holding.Subscribing.Count == 1;
+            },
+            "its name asked of its broker");
+        holding.Subscribing.Dequeue().SetResult();
+        await starting.WaitAsync(BrokerPair.Patience, Cancelled);
+        await clients.Start();
+
+        // * full at its first connection: its name let go of, counted until its UNSUBACK came
+        await using var first = clients.Client();
+
+        await first.Connect(new BrokerConnectOptions { Server = "interop" }, Cancelled);
+        await BrokerPair.Until(
+            () =>
+            {
+                return holding.Unsubscribing.Count == 1;
+            },
+            "its name let go of as it is full");
+
+        // a connection that closes meanwhile asks nothing of a name its broker still holds, and asks
+        // it anew once its broker let it go
+        await first.CloseConnection();
+        await BrokerPair.Until(
+            () =>
+            {
+                return !closes.IsEmpty;
+            },
+            "the connection closed");
+        await participant.Scheduler.WhenIdle();
+        Assert.Empty(holding.Subscribing);
+        holding.Unsubscribing.Dequeue().SetResult();
+        await BrokerPair.Until(
+            () =>
+            {
+                return holding.Subscribing.Count == 1;
+            },
+            "its name asked anew");
+        holding.Subscribing.Dequeue().SetResult();
+        await BrokerPair.Until(
+            () =>
+            {
+                return server.Gauges().Counts["names"] == 1;
+            },
+            "its name served again");
+
+        // * one its broker refuses to let go is reported
+        await using var second = clients.Client();
+
+        await second.Connect(new BrokerConnectOptions { Server = "interop" }, Cancelled);
+        await BrokerPair.Until(
+            () =>
+            {
+                return holding.Unsubscribing.Count == 1;
+            },
+            "its name let go of as it is full again");
+        holding.Unsubscribing.Dequeue().SetException(new IOException("its broker refused to let bead/s/interop go: 0x80"));
+        await BrokerPair.Until(
+            () =>
+            {
+                return !reported.IsEmpty;
+            },
+            "the refusal reported");
+
+        // and one its broker refuses to serve again is reported, and left unheld
+        await second.CloseConnection();
+        await BrokerPair.Until(
+            () =>
+            {
+                return holding.Subscribing.Count == 1;
+            },
+            "its name asked anew once it holds fewer");
+        holding.Subscribing.Dequeue().SetException(new IOException("its broker refused the subscription to $share/interop/bead/s/interop: 0x87"));
+        await BrokerPair.Until(
+            () =>
+            {
+                return reported.Count == 2;
+            },
+            "the second refusal reported");
+        Assert.Equal(
+            [
+                "its broker refused to let bead/s/interop go: 0x80",
+                "the name interop is not served: its broker refused its subscription, its broker refused the subscription to $share/interop/bead/s/interop: 0x87",
+            ],
+            reported);
+        Assert.Equal(0, server.Gauges().Counts["names"]);
+    }
+
     // an adapter that holds each subscription and unsubscription of a server's name until the test
     // settles it, and passes every other call on
     private sealed class HoldingAdapter(MemoryBrokerAdapter inner) : IBrokerAdapter
