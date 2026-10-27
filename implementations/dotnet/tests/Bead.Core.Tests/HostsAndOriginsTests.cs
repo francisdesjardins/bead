@@ -6,6 +6,23 @@ namespace Bead.Tests;
 /// </summary>
 public sealed class HostsAndOriginsTests
 {
+    [Fact]
+    public void Takes_custom_origin_schemes_with_digits_and_punctuation_and_refuses_invalid_scheme_characters()
+    {
+        foreach (var scheme in new[] { "demo+1", "demo-1", "demo.1", "a0+-." })
+        {
+            var origin = $"{scheme}://Example.COM:80";
+            HostsAndOrigins.AssertOrigins([origin], "Origins");
+            Assert.True(HostsAndOrigins.IsTakenOrigin(origin, ("localhost", [origin])));
+            Assert.False(HostsAndOrigins.IsTakenOrigin(origin, ("localhost", [])));
+            Assert.False(HostsAndOrigins.IsTakenTarget($"{scheme}://bead.example/path"));
+        }
+        foreach (var scheme in new[] { "1demo", "Demo", "demo_1", "demo^1" })
+        {
+            Assert.Throws<ArgumentException>(() => { HostsAndOrigins.AssertOrigins([$"{scheme}://bead.example"], "Origins"); });
+        }
+    }
+
     // constants
 
     private static readonly string[] Hosts = ["bead.test", "xn--bad-bma.test"];

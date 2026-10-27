@@ -5,14 +5,14 @@
 import type { GenFile, GenMessage } from "@bufbuild/protobuf/codegenv2";
 import { fileDesc, messageDesc } from "@bufbuild/protobuf/codegenv2";
 import type { FieldMask } from "@bufbuild/protobuf/wkt";
-import { file_google_protobuf_field_mask } from "@bufbuild/protobuf/wkt";
-import type { Message } from "@bufbuild/protobuf";
+import { file_google_protobuf_field_mask, file_google_protobuf_struct } from "@bufbuild/protobuf/wkt";
+import type { JsonObject, Message } from "@bufbuild/protobuf";
 
 /**
  * Describes the file patch_binding.proto.
  */
 export const file_patch_binding: GenFile = /*@__PURE__*/
-  fileDesc("ChNwYXRjaF9iaW5kaW5nLnByb3RvEhZiZWFkLnRyYW5zY29kaW5nLnRlc3RzIuoBCgxQYXRjaFByb2ZpbGUSFAoMZGlzcGxheV9uYW1lGAEgASgJEjwKDm5lc3RlZF9wcm9maWxlGAIgASgLMiQuYmVhZC50cmFuc2NvZGluZy50ZXN0cy5QYXRjaFByb2ZpbGUSOwoNZW1wdHlfcHJvZmlsZRgDIAEoCzIkLmJlYWQudHJhbnNjb2RpbmcudGVzdHMuUGF0Y2hQcm9maWxlEg8KBWNvdW50GAQgASgDSAASGgoMc3RyaW5nX2NvdW50GAUgASgDQgIwAUgAEg8KBWxhYmVsGAYgASgJSABCCwoJc2VsZWN0aW9uInYKDFBhdGNoUmVxdWVzdBI1Cgdwcm9maWxlGAEgASgLMiQuYmVhZC50cmFuc2NvZGluZy50ZXN0cy5QYXRjaFByb2ZpbGUSLwoLdXBkYXRlX21hc2sYAiABKAsyGi5nb29nbGUucHJvdG9idWYuRmllbGRNYXNrQimqAiZCZWFkLlRyYW5zY29kaW5nLlRlc3RzLkJpbmRpbmdGaXh0dXJlc2IGcHJvdG8z", [file_google_protobuf_field_mask]);
+  fileDesc("ChNwYXRjaF9iaW5kaW5nLnByb3RvEhZiZWFkLnRyYW5zY29kaW5nLnRlc3RzIuoBCgxQYXRjaFByb2ZpbGUSFAoMZGlzcGxheV9uYW1lGAEgASgJEjwKDm5lc3RlZF9wcm9maWxlGAIgASgLMiQuYmVhZC50cmFuc2NvZGluZy50ZXN0cy5QYXRjaFByb2ZpbGUSOwoNZW1wdHlfcHJvZmlsZRgDIAEoCzIkLmJlYWQudHJhbnNjb2RpbmcudGVzdHMuUGF0Y2hQcm9maWxlEg8KBWNvdW50GAQgASgDSAASGgoMc3RyaW5nX2NvdW50GAUgASgDQgIwAUgAEg8KBWxhYmVsGAYgASgJSABCCwoJc2VsZWN0aW9uInYKDFBhdGNoUmVxdWVzdBI1Cgdwcm9maWxlGAEgASgLMiQuYmVhZC50cmFuc2NvZGluZy50ZXN0cy5QYXRjaFByb2ZpbGUSLwoLdXBkYXRlX21hc2sYAiABKAsyGi5nb29nbGUucHJvdG9idWYuRmllbGRNYXNrIm8KElBhdGNoU3RydWN0UmVxdWVzdBIoCgdwcm9maWxlGAEgASgLMhcuZ29vZ2xlLnByb3RvYnVmLlN0cnVjdBIvCgt1cGRhdGVfbWFzaxgCIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5GaWVsZE1hc2tCKaoCJkJlYWQuVHJhbnNjb2RpbmcuVGVzdHMuQmluZGluZ0ZpeHR1cmVzYgZwcm90bzM", [file_google_protobuf_field_mask, file_google_protobuf_struct]);
 
 /**
  * @generated from message bead.transcoding.tests.PatchProfile
@@ -85,4 +85,26 @@ export type PatchRequest = Message<"bead.transcoding.tests.PatchRequest"> & {
  */
 export const PatchRequestSchema: GenMessage<PatchRequest> = /*@__PURE__*/
   messageDesc(file_patch_binding, 1);
+
+/**
+ * @generated from message bead.transcoding.tests.PatchStructRequest
+ */
+export type PatchStructRequest = Message<"bead.transcoding.tests.PatchStructRequest"> & {
+  /**
+   * @generated from field: google.protobuf.Struct profile = 1;
+   */
+  profile?: JsonObject | undefined;
+
+  /**
+   * @generated from field: google.protobuf.FieldMask update_mask = 2;
+   */
+  updateMask?: FieldMask | undefined;
+};
+
+/**
+ * Describes the message bead.transcoding.tests.PatchStructRequest.
+ * Use `create(PatchStructRequestSchema)` to create a new message.
+ */
+export const PatchStructRequestSchema: GenMessage<PatchStructRequest> = /*@__PURE__*/
+  messageDesc(file_patch_binding, 2);
 

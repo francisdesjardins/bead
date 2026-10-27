@@ -22,6 +22,23 @@ import {
 } from '../hosts-and-origins';
 import { LISTENING_ADDRESSES, LISTENING_NAMES, NO_LISTENING_ADDRESSES } from './addresses';
 
+test('takes custom origin schemes with digits and punctuation and refuses invalid scheme characters', () => {
+  for (const scheme of ['demo+1', 'demo-1', 'demo.1', 'a0+-.']) {
+    const origin = `${scheme}://Example.COM:80`;
+    expect(() => {
+      assertOrigins([origin]);
+    }).not.toThrow();
+    expect(isTakenOrigin(origin, { host: 'localhost', origins: [origin] })).toBe(true);
+    expect(isTakenOrigin(origin, { host: 'localhost', origins: [] })).toBe(false);
+    expect(requestTargetOf(`${scheme}://bead.example/path`)).toBeUndefined();
+  }
+  for (const scheme of ['1demo', 'Demo', 'demo_1', 'demo^1']) {
+    expect(() => {
+      assertOrigins([`${scheme}://bead.example`]);
+    }).toThrow(ProgrammerError);
+  }
+});
+
 // constants
 
 // the rows the C# side judges alike: what every server takes, by its host on any port

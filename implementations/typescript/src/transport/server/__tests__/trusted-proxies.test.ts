@@ -59,6 +59,85 @@ const REFUSED = [
 // definition
 
 test.describe('trusted proxies', () => {
+  test('reads one to five ASCII port digits and stops forwarding at any other port', () => {
+    const trustedProxies = trustedProxiesOf(['127.0.0.1', '10.0.0.0/8']);
+    for (const [node, address] of [
+      ['192.0.2.7', '192.0.2.7'],
+      ['[2001:db8::1]', '2001:db8::1'],
+    ]) {
+      for (const port of ['0', '9', '00000', '65535', '99999']) {
+        const entry = `${node}:${port}`;
+        expect(addressOfEntry(entry), entry).toBe(address);
+        expect(
+          clientAddressOf('127.0.0.1', { forwarded: `203.0.113.9, ${entry}`, trustedProxies }),
+          entry
+        ).toBe(address);
+      }
+      for (const port of ['', '123456', 'x', '1x', '１２', '١']) {
+        const entry = `${node}:${port}`;
+        expect(addressOfEntry(entry), entry).toBeUndefined();
+        expect(
+          clientAddressOf('127.0.0.1', { forwarded: `203.0.113.9, ${entry}`, trustedProxies }),
+          entry
+        ).toBe('127.0.0.1');
+        expect(
+          clientAddressOf('127.0.0.1', {
+            forwarded: `203.0.113.9, ${entry}, 10.0.0.1`,
+            trustedProxies,
+          }),
+          entry
+        ).toBe('10.0.0.1');
+      }
+    }
+  });
+
+  test('keeps a direct client address when no forwarding policy is supplied', () => {
+    expect(
+      ['192.0.2.7', '::ffff:192.0.2.7', '2001:DB8::1', 'fe80::1%3'].map((address) => {
+        return clientAddressOf(address);
+      })
+    ).toEqual(['192.0.2.7', '192.0.2.7', '2001:db8::1', 'fe80::1']);
+  });
+
+  test('stops at a malformed bracketed forwarding entry before reading a claimed client', () => {
+    const trustedProxies = trustedProxiesOf(['127.0.0.1', '10.0.0.0/8']);
+    for (const entry of ['[', '[::1', '[2001:db8::1', '[::1]extra', '[::1]:x']) {
+      expect(addressOfEntry(entry), entry).toBeUndefined();
+      expect(
+        clientAddressOf('127.0.0.1', { forwarded: `203.0.113.9, ${entry}`, trustedProxies }),
+        entry
+      ).toBe('127.0.0.1');
+      expect(
+        clientAddressOf('127.0.0.1', {
+          forwarded: `203.0.113.9, ${entry}, 10.0.0.1`,
+          trustedProxies,
+        }),
+        entry
+      ).toBe('10.0.0.1');
+    }
+  });
+
+  test('trusts only the two addresses of an uncompressed IPv6 prefix of 127 bits', () => {
+    const network = '2001:db8:1:2:3:4:5:6/127';
+    const trustedProxies = trustedProxiesOf([network]);
+
+    expect(
+      [
+        '2001:db8:1:2:3:4:5:5',
+        '2001:db8:1:2:3:4:5:6',
+        '2001:db8:1:2:3:4:5:7',
+        '2001:db8:1:2:3:4:5:8',
+      ].map((remote) => {
+        return clientAddressOf(remote, { forwarded: '203.0.113.9', trustedProxies });
+      })
+    ).toEqual(['2001:db8:1:2:3:4:5:5', '203.0.113.9', '203.0.113.9', '2001:db8:1:2:3:4:5:8']);
+    expect(() => {
+      assertTrustedProxies(['2001:db8:1:2:3:4:5:7/127']);
+    }).toThrow(
+      `a trustedProxies network has no bits set past its prefix: write ${network}, not 2001:db8:1:2:3:4:5:7/127`
+    );
+  });
+
   // spec 15.12
   test('refuses a trustedProxies entry that is a name, a bracketed or zoned address, an IPv4-mapped one, a prefix of 0 or past its family’s bits, or a network whose bits past its prefix are set', () => {
     expect(() => {

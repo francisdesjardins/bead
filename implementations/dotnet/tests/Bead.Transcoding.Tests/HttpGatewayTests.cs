@@ -34,6 +34,40 @@ public sealed class HttpGatewayTests
 
     // transcoding 2.3
     [Fact]
+    public async Task Serves_a_mounted_route_without_a_remote_endpoint()
+    {
+        await using var service = await TranscodingService.Start();
+        await using var gateway = new HttpGateway(Exchanges.OptionsOf(service.Memory, null));
+        var peers = new List<(string Address, int Port)>();
+        var reported = ReportedBy(gateway);
+        service.Memory.Connection += (_) =>
+        {
+            foreach (var peer in service.Memory.Clients)
+            {
+                peers.Add((peer.Address, peer.Port));
+            }
+        };
+        var context = new DefaultHttpContext();
+        context.Request.Method = "GET";
+        context.Request.Protocol = "HTTP/1.1";
+        context.Request.Path = "/v1/books/2";
+        context.Request.Host = new HostString("127.0.0.1");
+        context.Features.Get<IHttpRequestFeature>()!.RawTarget = "/v1/books/2";
+        Assert.Null(context.Connection.RemoteIpAddress);
+        using var body = new MemoryStream();
+        context.Response.Body = body;
+
+        await gateway.Answer(context).WaitAsync(Patience, Cancelled);
+
+        Assert.Equal(StatusCodes.Status200OK, context.Response.StatusCode);
+        Assert.Equal("application/json", context.Response.ContentType);
+        Assert.Equal("{\"name\":\"2\",\"title\":\"A tale\"}", Encoding.UTF8.GetString(body.ToArray()));
+        Assert.Equal([("local", 0)], peers);
+        await Until(() => { return service.Memory.Clients.Count == 0; });
+        Assert.Empty(reported);
+    }
+
+    [Fact]
     public async Task Hands_each_exchange_s_client_address_and_socket_port_to_its_transport_after_its_proxy_policy()
     {
         foreach (var (address, trustedProxies, unnamedProxies) in new (string, string[], int)[]
@@ -1858,6 +1892,53 @@ public sealed class HttpGatewayTests
             await answered.Content.ReadAsStringAsync(Cancelled));
         Assert.Single(reported);
         await Until(() => { return memory.ConnectionHandles.Count == 0; });
+    }
+
+    [Fact]
+    public async Task Reports_one_send_bound_drop_when_consecutive_stream_frames_exceed_the_bound()
+    {
+        await using var memory = new MemoryTransportServer();
+        await memory.Start();
+        var options = Exchanges.OptionsOf(memory, null);
+        await using var gateway = new HttpGateway(options with
+        {
+            Heartbeat = Timeout.InfiniteTimeSpan,
+            MaximumUnsentBytes = 1,
+            Routes = [.. options.Routes.Select((route) =>
+            {
+                return route.Procedure == TranscodingProcedures.Watch.Procedure
+                    ? route with { Result = HttpPayload.Json, Notification = HttpPayload.Json }
+                    : route;
+            })],
+        });
+        var reported = ReportedBy(gateway);
+        var requests = 0;
+        var frames = 0;
+        memory.Message += (message, connectionHandle) =>
+        {
+            var envelope = EnvelopeCodec.ReadEnvelope(message.Bytes.Span, new EnvelopeReadOptions { Side = RouterSide.Server });
+            if (envelope?.Header is not RequestHeader header)
+            {
+                return;
+            }
+            Interlocked.Increment(ref requests);
+            _ = memory.Send(new TransportMessage(EnvelopeCodec.WriteEnvelope(new Envelope { Header = new ResultHeader { CallId = header.CallId }, Payload = "{}"u8.ToArray() }), false), connectionHandle);
+            Interlocked.Increment(ref frames);
+            for (var index = 0; index < 3; index++)
+            {
+                _ = memory.Send(new TransportMessage(EnvelopeCodec.WriteEnvelope(new Envelope { Header = new NotificationHeader { CallId = header.CallId }, Payload = "{\"value\":1}"u8.ToArray() }), false), connectionHandle);
+                Interlocked.Increment(ref frames);
+            }
+            _ = memory.Send(new TransportMessage(EnvelopeCodec.WriteEnvelope(new Envelope { Header = new FailureHeader { CallId = header.CallId }, Failure = Failure.OfProtocol(ProtocolCode.SessionRequired) }), false), connectionHandle);
+            Interlocked.Increment(ref frames);
+        };
+        var address = await gateway.Start(new HttpGatewayStartOptions { Address = "127.0.0.1", FindOpenPort = true }, Cancelled);
+        var received = await Received(address.Port, OctetsOf(address.Port, new OwnCase(["POST /api/Transcoding/watch HTTP/1.1", "content-type: application/json", "accept: text/event-stream"], 0, "") { Body = "{}" }));
+        await Until(() => { return memory.ConnectionHandles.Count == 0; });
+        Assert.Empty(received);
+        Assert.Equal(1, requests);
+        Assert.Equal(5, frames);
+        Assert.Equal(["the response is dropped: maximumUnsentBytes 1 bytes"], reported);
     }
 
     [Fact]

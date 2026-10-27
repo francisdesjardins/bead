@@ -14,6 +14,20 @@ namespace Bead.Transcoding.Tests;
 public sealed class BindingTests
 {
     [Fact]
+    public void Keeps_arbitrary_Struct_members_out_of_an_inferred_PATCH_mask()
+    {
+        foreach (var body in new[] { "{}", "{\"customKey\":1}", "{\"customKey\":1,\"other_key\":{\"nested\":false}}" })
+        {
+            var read = Assert.IsType<PatchStructRequest>(BindOf(
+                (PatchStructRequest.Descriptor, new HttpRouteTemplate { Method = "PATCH", Template = "/v1/profile", Body = "profile" }),
+                ("/v1/profile", body)));
+
+            Assert.Equal(Struct.Parser.ParseJson(body), read.Profile);
+            Assert.Equal(new FieldMask(), read.UpdateMask);
+        }
+    }
+
+    [Fact]
     public void Fills_a_PATCH_mask_from_snake_case_fields_through_nested_and_empty_message_bodies()
     {
         foreach (var body in new[]

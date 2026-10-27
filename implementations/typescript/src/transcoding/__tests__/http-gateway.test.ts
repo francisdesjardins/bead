@@ -266,6 +266,45 @@ const rawAsEdges = (): readonly IHttpRouteInit[] => {
 // tests
 
 // transcoding 2.3
+test('serves a mounted route without a remote endpoint', async () => {
+  await using fixture = await startTranscoding({
+    createServer: (listener) => {
+      return createNodeServer((request, response) => {
+        const handed: IHTTPRequestLike = {
+          headers: request.headers,
+          httpVersion: request.httpVersion,
+          httpVersionMajor: request.httpVersionMajor,
+          method: 'GET',
+          rawHeaders: request.rawHeaders,
+          socket: {},
+          url: request.url,
+          destroy: request.destroy.bind(request),
+          on: request.on.bind(request),
+        };
+        listener(handed, response);
+      });
+    },
+  });
+  const peers: { address: string; port: number }[] = [];
+  const reported = reportedBy(fixture.gateway);
+  fixture.memory.on('connection', () => {
+    for (const peer of fixture.memory.clients) {
+      peers.push({ address: peer.address, port: peer.port });
+    }
+  });
+
+  expect(await send(fixture.port, { method: 'GET', path: '/v1/books/2' })).toMatchObject({
+    body: '{"name":"2","title":"A tale"}',
+    headers: { 'content-type': 'application/json' },
+    status: 200,
+  });
+  expect(peers).toEqual([{ address: 'local', port: 0 }]);
+  await until(() => {
+    return fixture.memory.clients.length === 0;
+  });
+  expect(reported).toEqual([]);
+});
+
 test('hands each exchange’s client address and socket port to its transport after its proxy policy', async () => {
   for (const { address, trustedProxies, unnamedProxies } of [
     { address: '127.0.0.1', trustedProxies: [], unnamedProxies: 0 },
@@ -2021,6 +2060,99 @@ test('writes an event’s data through the runtime reader, its records checked',
   });
 });
 
+test('reports one send-bound drop when consecutive stream frames exceed the bound', async () => {
+  await using memory = createMemoryTransportServer();
+  await memory.start();
+  await using gateway = createHTTPGateway({
+    createServer: createNodeServer,
+    heartbeat: Infinity,
+    maximumUnsentBytes: 1,
+    routes: HTTP_ROUTES.map((init) => {
+      return init.procedure === TranscodingProcedures.watch
+        ? {
+            ...init,
+            result: 'json',
+            notification: 'json',
+            procedure: {
+              ...init.procedure,
+              result: TranscodingProcedures.json.result,
+              notification: TranscodingProcedures.json.result,
+            },
+          }
+        : init;
+    }),
+    transport: memory,
+  });
+  const reported = reportedBy(gateway);
+  let requests = 0;
+  let frames = 0;
+  memory.on('message', ({ data }, connectionHandle) => {
+    const envelope = readEnvelope(bytesOf(data), {
+      failures: SERVER_FAILURES,
+      maximumEnvelopeBytes: LIMIT_DEFAULTS.maximumEnvelopeBytes,
+    });
+    if (envelope?.kind !== EnvelopeKind.REQUEST) {
+      return;
+    }
+    requests += 1;
+    const { callId } = envelope.header;
+    void memory.send(
+      {
+        data: writeEnvelope({
+          header: { callId, kind: EnvelopeKind.RESULT },
+          kind: EnvelopeKind.RESULT,
+          payload: new TextEncoder().encode('{}'),
+        }),
+      },
+      connectionHandle
+    );
+    frames += 1;
+    for (let index = 0; index < 3; index += 1) {
+      void memory.send(
+        {
+          data: writeEnvelope({
+            header: { callId, kind: EnvelopeKind.NOTIFICATION },
+            kind: EnvelopeKind.NOTIFICATION,
+            payload: new TextEncoder().encode('{"value":1}'),
+          }),
+        },
+        connectionHandle
+      );
+      frames += 1;
+    }
+    void memory.send(
+      {
+        data: writeEnvelope({
+          failure: SERVER_FAILURES.sessionRequired,
+          header: { callId, kind: EnvelopeKind.FAILURE },
+          kind: EnvelopeKind.FAILURE,
+        }),
+      },
+      connectionHandle
+    );
+    frames += 1;
+  });
+  const { port } = await gateway.start({ address: '127.0.0.1' });
+  const received = await receivedOn(
+    port,
+    octetsOf(port, {
+      body: '{}',
+      lines: [
+        'POST /api/Transcoding/watch HTTP/1.1',
+        'content-type: application/json',
+        'accept: text/event-stream',
+      ],
+    })
+  );
+  await until(() => {
+    return memory.clients.length === 0;
+  });
+  expect(received).toBe(0);
+  expect(requests).toBe(1);
+  expect(frames).toBe(5);
+  expect(reported).toEqual(['the response is dropped: maximumUnsentBytes 1 bytes']);
+});
+
 test('writes native JSON results and notifications in stream order', async () => {
   await using memory = createMemoryTransportServer();
   await memory.start();
@@ -2933,6 +3065,52 @@ test('bounds an accepted slice until its pending bytes are flushed', async () =>
   expect(reported).toEqual([
     'the response is dropped: minimumSendBytesPerSecond 1000000 after sendGracePeriod 1ms',
   ]);
+});
+
+test('writes a document through a host that exposes no pending-byte count', async () => {
+  const body = 'a'.repeat(2 * 64 * 1024 + 7);
+  const sizes: number[] = [];
+  let ends = 0;
+  await using fixture = await startTranscoding({
+    document: body,
+    createServer: (listener) => {
+      return createNodeServer((request, response) => {
+        const host: IHTTPResponseLike = {
+          get headersSent() {
+            return response.headersSent;
+          },
+          get writableFinished() {
+            return response.writableFinished;
+          },
+          destroy: () => {
+            response.destroy();
+          },
+          end: (data?: Uint8Array) => {
+            ends += 1;
+            response.end(data);
+          },
+          on: response.on.bind(response),
+          setHeader: response.setHeader.bind(response),
+          write: (chunk) => {
+            sizes.push(chunk.length);
+            return response.write(chunk);
+          },
+          writeHead: response.writeHead.bind(response),
+        };
+        expect(host.writableLength).toBeUndefined();
+        listener(request, host);
+      });
+    },
+  });
+  const reported = reportedBy(fixture.gateway);
+  const received = await send(fixture.port, { method: 'GET', path: '/openapi.json' });
+
+  expect(received.status).toBe(200);
+  expect(received.headers['content-type']).toBe('application/json');
+  expect(received.body).toBe(body);
+  expect(sizes).toEqual([65536, 65536, 7]);
+  expect(ends).toBe(1);
+  expect(reported).toEqual([]);
 });
 
 test('finishes a document whose write callback completes inline despite its false return', async () => {

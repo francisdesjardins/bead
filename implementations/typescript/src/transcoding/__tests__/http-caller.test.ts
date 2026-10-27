@@ -1,8 +1,10 @@
+import { createServer } from 'node:http';
 import { expect, test } from '@playwright/test';
 import { FailureScope, LIMIT_DEFAULTS, ProtocolCode } from '../../router/shared/constants';
 import { FailureError } from '../../router/shared/errors';
 import { ProgrammerError } from '../../transport/shared/errors';
 import { createHTTPCaller, type HTTPEvent } from '../http-caller';
+import type { IHttpRouteInit } from '../routes';
 import { HTTP_ROUTES, TranscodingHttpClient } from './generated/bead_http';
 import { GOOD_CREDENTIAL, SESSION, startTranscoding } from './transcoding-service';
 
@@ -966,4 +968,388 @@ test('fails a result that leaves a required field unset with PAYLOAD_UNDECODABLE
     scope: FailureScope.PROTOCOL,
   });
   expect(sent).toBe(1);
+});
+
+test('refuses invalid low-level call inputs before HTTP dispatch', async () => {
+  const generated = HTTP_ROUTES.find((route) => {
+    return route.procedure.procedure.procedureName === 'json';
+  });
+  const template = generated?.routes[0];
+  if (generated === undefined || template === undefined) {
+    throw new Error('json has a generated default route');
+  }
+  let sent = 0;
+  const fetcher: typeof fetch = () => {
+    sent += 1;
+    return Promise.resolve(new Response('null'));
+  };
+  const choices: IHttpRouteInit['routes'][] = [
+    [],
+    [{ ...template, method: 'GET' }],
+    [{ ...template, body: undefined }],
+    [{ ...template, responseBody: 'field' }],
+    [{ ...template, template: '/items/{name}' }],
+  ];
+  for (const routes of choices) {
+    const route = { ...generated, routes };
+    const caller = createHTTPCaller([route], 'http://localhost', { fetch: fetcher });
+    await expect(caller.call(route, null)).rejects.toThrow(
+      'an HTTP client calls a default POST route with a whole body and result'
+    );
+  }
+  const elsewhere = {
+    ...generated,
+    routes: [{ ...template, template: 'https://elsewhere.example/call' }],
+  };
+  const caller = createHTTPCaller([generated, elsewhere], 'http://localhost', { fetch: fetcher });
+  await expect(caller.call(elsewhere, null)).rejects.toThrow(
+    'an HTTP route stays on its gateway origin'
+  );
+  for (const authorization of [' Bearer x', 'Bearer x ', 'Bearer\nx', '\t', 'É']) {
+    await expect(caller.call(generated, null, { authorization })).rejects.toThrow(
+      'a credential holds visible ASCII, spaces and tabs alone, none first or last'
+    );
+  }
+  await expect(async () => {
+    for await (const event of caller.subscribe(generated, null)) {
+      throw new Error(`a non-notifying call yielded ${event.kind}`);
+    }
+  }).rejects.toThrow('only a notifying HTTP procedure opens a stream');
+  expect(sent).toBe(0);
+});
+
+test('refuses invalid UTF-8 on a terminated event line and releases its reader', async () => {
+  let cancelled = 0;
+  let sent = 0;
+  const stream = new ReadableStream<Uint8Array>({
+    start: (controller) => {
+      for (const octet of [...new TextEncoder().encode('event: result\ndata: '), 255, 10, 10]) {
+        controller.enqueue(Uint8Array.of(octet));
+      }
+    },
+    cancel: () => {
+      cancelled += 1;
+    },
+  });
+  const client = new TranscodingHttpClient('http://localhost', {
+    fetch: () => {
+      sent += 1;
+      return Promise.resolve(
+        new Response(stream, { headers: { 'content-type': 'text/event-stream' } })
+      );
+    },
+  });
+  const received: HTTPEvent<unknown, unknown>[] = [];
+  const failed = await (async () => {
+    for await (const event of client.subscribeWatch({})) {
+      received.push(event);
+    }
+  })().catch((error: unknown) => {
+    return error;
+  });
+  expect(failed).toBeInstanceOf(FailureError);
+  expect(failed).toMatchObject({
+    code: ProtocolCode.PAYLOAD_UNDECODABLE,
+    origin: 'local',
+    scope: FailureScope.PROTOCOL,
+    detail: 'the HTTP payload cannot be decoded',
+  });
+  expect((failed as FailureError).cause).toBeInstanceOf(TypeError);
+  expect(received).toEqual([]);
+  expect(sent).toBe(1);
+  expect(cancelled).toBe(1);
+  expect(stream.locked).toBe(false);
+});
+
+test('propagates a response read error after cancellation without mapping it to a failure', async () => {
+  for (const streaming of [false, true]) {
+    const abort = new AbortController();
+    const broken = new Error('the cancelled response reader broke');
+    let reads = 0;
+    let sent = 0;
+    const stream = new ReadableStream<Uint8Array>(
+      {
+        pull: (controller) => {
+          reads += 1;
+          if (reads === 1) {
+            controller.enqueue(
+              new TextEncoder().encode(streaming ? 'event: result\ndata: ' : 'nu')
+            );
+            return;
+          }
+          abort.abort();
+          throw broken;
+        },
+      },
+      { highWaterMark: 0 }
+    );
+    const client = new TranscodingHttpClient('http://localhost', {
+      fetch: () => {
+        sent += 1;
+        return Promise.resolve(
+          new Response(stream, {
+            headers: { 'content-type': streaming ? 'text/event-stream' : 'application/json' },
+          })
+        );
+      },
+    });
+    const received: HTTPEvent<unknown, unknown>[] = [];
+    const failed = await (async () => {
+      if (streaming) {
+        for await (const event of client.subscribeWatch({}, { signal: abort.signal })) {
+          received.push(event);
+        }
+      } else {
+        await client.json(null, { signal: abort.signal });
+      }
+    })().catch((error: unknown) => {
+      return error;
+    });
+    expect(failed).toBe(broken);
+    expect(abort.signal.aborted).toBe(true);
+    expect(received).toEqual([]);
+    expect(sent).toBe(1);
+    expect(reads).toBe(2);
+    expect(stream.locked).toBe(false);
+  }
+});
+
+test('refuses malformed JSON in native stream data before delivering an event', async () => {
+  const generated = HTTP_ROUTES.find((entry) => {
+    return entry.procedure.procedure.procedureName === 'watch';
+  });
+  if (generated === undefined) {
+    throw new Error('watch is a generated route');
+  }
+  for (const result of ['text', 'raw'] as const) {
+    const route = { ...generated, result };
+    let cancelled = 0;
+    let sent = 0;
+    const fetcher = stubOf('event: result\ndata: {\n\n', {
+      fragmented: true,
+      cancelled: () => {
+        cancelled += 1;
+      },
+    });
+    const caller = createHTTPCaller([route], 'http://localhost', {
+      fetch: (url, init) => {
+        sent += 1;
+        return fetcher(url, init);
+      },
+    });
+    const received: HTTPEvent<unknown, unknown>[] = [];
+    const failed = await (async () => {
+      for await (const event of caller.subscribe(route, {})) {
+        received.push(event);
+      }
+    })().catch((error: unknown) => {
+      return error;
+    });
+    expect(failed).toBeInstanceOf(FailureError);
+    expect(failed).toMatchObject({
+      code: ProtocolCode.PAYLOAD_UNDECODABLE,
+      scope: FailureScope.PROTOCOL,
+      origin: 'local',
+      detail: 'the HTTP payload cannot be decoded',
+    });
+    expect((failed as FailureError).cause).toBeInstanceOf(Error);
+    expect(received).toEqual([]);
+    expect(sent).toBe(1);
+    expect(cancelled).toBe(1);
+  }
+});
+
+test('reads an empty raw result and maps an empty non-problem refusal by status', async () => {
+  for (const status of [200, 503]) {
+    let sent = 0;
+    const response = new Response(null, {
+      status,
+      headers: { 'content-type': 'application/octet-stream', 'retry-after': '7' },
+    });
+    const client = new TranscodingHttpClient('http://localhost', {
+      fetch: () => {
+        sent += 1;
+        return Promise.resolve(response);
+      },
+    });
+    if (status === 200) {
+      expect(await client.raw(new Uint8Array())).toEqual(new Uint8Array());
+    } else {
+      await expect(client.raw(new Uint8Array())).rejects.toMatchObject({
+        code: ProtocolCode.DESTINATION_UNREACHABLE,
+        scope: FailureScope.PROTOCOL,
+        origin: 'peer',
+        detail: 'the HTTP call answers 503; Retry-After: 7',
+      });
+    }
+    expect(sent).toBe(1);
+    expect(response.body).toBeNull();
+  }
+});
+
+test('rejects empty responses with no required media type and releases their content', async () => {
+  for (const [streaming, status, code, detail] of [
+    [false, 200, ProtocolCode.PAYLOAD_UNDECODABLE, 'the HTTP result has another media type'],
+    [true, 200, ProtocolCode.PAYLOAD_UNDECODABLE, 'the HTTP subscription answers no event stream'],
+    [false, 503, ProtocolCode.DESTINATION_UNREACHABLE, 'the HTTP call answers 503'],
+  ] as const) {
+    let sent = 0;
+    const response = new Response(null, { status });
+    const client = new TranscodingHttpClient('http://localhost', {
+      fetch: () => {
+        sent += 1;
+        return Promise.resolve(response);
+      },
+    });
+    const received: HTTPEvent<unknown, unknown>[] = [];
+    await expect(async () => {
+      if (streaming) {
+        for await (const event of client.subscribeWatch({})) {
+          received.push(event);
+        }
+      } else {
+        await client.json(null);
+      }
+    }).rejects.toMatchObject({
+      code,
+      detail,
+      scope: FailureScope.PROTOCOL,
+      origin: status === 200 ? 'local' : 'peer',
+    });
+    expect(received).toEqual([]);
+    expect(sent).toBe(1);
+    expect(response.body).toBeNull();
+  }
+});
+
+test('refuses an empty event stream from a supplied executor and over HTTP', async () => {
+  for (const wire of [false, true]) {
+    let sent = 0;
+    await using host = createServer((_request, response) => {
+      sent += 1;
+      response.writeHead(200, { 'content-type': 'text/event-stream', 'content-length': '0' });
+      response.end();
+    });
+    await new Promise<void>((resolve) => {
+      host.listen(0, '127.0.0.1', resolve);
+    });
+    const address = host.address();
+    if (address === null || typeof address === 'string') {
+      throw new Error('the HTTP fixture listens on no port');
+    }
+    let answered: Response | undefined;
+    const client = new TranscodingHttpClient(urlOf(address.port), {
+      fetch: async (url, init) => {
+        if (wire) {
+          answered = await fetch(url, init);
+          expect(answered.body).not.toBeNull();
+        } else {
+          sent += 1;
+          answered = new Response(null, { headers: { 'content-type': 'text/event-stream' } });
+        }
+        return answered;
+      },
+    });
+    const received: HTTPEvent<unknown, unknown>[] = [];
+    await expect(async () => {
+      for await (const event of client.subscribeWatch({})) {
+        received.push(event);
+      }
+    }).rejects.toMatchObject({
+      code: wire ? ProtocolCode.DESTINATION_LOST : ProtocolCode.PAYLOAD_UNDECODABLE,
+      detail: wire
+        ? 'the HTTP event stream ends without a failure'
+        : 'the HTTP subscription answers no event stream',
+      scope: FailureScope.PROTOCOL,
+      origin: 'local',
+    });
+    expect(received).toEqual([]);
+    expect(sent).toBe(1);
+    expect(answered?.bodyUsed).toBe(wire);
+    expect(answered?.body?.locked ?? false).toBe(false);
+  }
+});
+
+test('maps unmarked HTTP statuses without treating an intermediary as its gateway', async () => {
+  for (const [status, code] of [
+    [201, ProtocolCode.DESTINATION_LOST],
+    [204, ProtocolCode.DESTINATION_LOST],
+    [299, ProtocolCode.DESTINATION_LOST],
+    [300, ProtocolCode.DESTINATION_LOST],
+    [304, ProtocolCode.DESTINATION_LOST],
+    [399, ProtocolCode.DESTINATION_LOST],
+    [400, ProtocolCode.DESTINATION_LOST],
+    [401, ProtocolCode.SESSION_REQUIRED],
+    [403, ProtocolCode.ACCESS_DENIED],
+    [404, ProtocolCode.DESTINATION_UNREACHABLE],
+    [405, ProtocolCode.DESTINATION_LOST],
+    [408, ProtocolCode.DESTINATION_LOST],
+    [413, ProtocolCode.PAYLOAD_TOO_LARGE],
+    [415, ProtocolCode.DESTINATION_LOST],
+    [422, ProtocolCode.DESTINATION_LOST],
+    [429, ProtocolCode.CAPACITY_EXCEEDED],
+    [431, ProtocolCode.DESTINATION_LOST],
+    [500, ProtocolCode.DESTINATION_LOST],
+    [501, ProtocolCode.DESTINATION_LOST],
+    [502, ProtocolCode.DESTINATION_LOST],
+    [503, ProtocolCode.DESTINATION_UNREACHABLE],
+    [504, ProtocolCode.DESTINATION_LOST],
+    [599, ProtocolCode.DESTINATION_LOST],
+  ] as const) {
+    let sent = 0;
+    const client = new TranscodingHttpClient('http://localhost', {
+      fetch: () => {
+        sent += 1;
+        return Promise.resolve(new Response(null, { status, headers: { 'retry-after': '7' } }));
+      },
+    });
+    await expect(client.json(null)).rejects.toMatchObject({
+      code,
+      scope: FailureScope.PROTOCOL,
+      origin: 'peer',
+      detail: `the HTTP call answers ${String(status)}; Retry-After: 7`,
+    });
+    expect(sent).toBe(1);
+  }
+});
+
+test('refuses a stream failure with an invalid HTTP problem status and no Bead code', async () => {
+  for (const data of [
+    'null',
+    '{}',
+    '{"status":99}',
+    '{"status":600}',
+    '{"status":1.5}',
+    '{"status":"502"}',
+    '{"status":null}',
+  ]) {
+    let cancelled = 0;
+    let sent = 0;
+    const fetcher = stubOf(`event: failure\ndata: ${data}\n\n`, {
+      fragmented: true,
+      cancelled: () => {
+        cancelled += 1;
+      },
+    });
+    const client = new TranscodingHttpClient('http://localhost', {
+      fetch: (url, init) => {
+        sent += 1;
+        return fetcher(url, init);
+      },
+    });
+    const received: HTTPEvent<unknown, unknown>[] = [];
+    await expect(async () => {
+      for await (const event of client.subscribeWatch({})) {
+        received.push(event);
+      }
+    }).rejects.toMatchObject({
+      code: ProtocolCode.PAYLOAD_UNDECODABLE,
+      scope: FailureScope.PROTOCOL,
+      origin: 'local',
+      detail: 'the HTTP problem holds no Bead failure',
+    });
+    expect(received).toEqual([]);
+    expect(sent).toBe(1);
+    expect(cancelled).toBe(1);
+  }
 });
