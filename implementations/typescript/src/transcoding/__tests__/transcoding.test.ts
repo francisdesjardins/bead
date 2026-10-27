@@ -13,6 +13,7 @@ import { isDeepStrictEqual } from 'node:util';
 import { type DescMessage, fromBinary, type Message } from '@bufbuild/protobuf';
 import { reflect, type ReflectMessage } from '@bufbuild/protobuf/reflect';
 import { expect, test } from '@playwright/test';
+import { protoCodecOf } from '../../proto/codec';
 import { fromHexadecimal } from '../../router/shared/__tests__/vectors';
 import { createTestClock } from '../../transport/shared/__tests__/fixtures';
 import { HEARTBEAT } from '../events';
@@ -39,7 +40,8 @@ import {
   writeProtoJson,
 } from '../transcoding';
 import { HTTP_ROUTES, OPENAPI_DOCUMENT } from './generated/bead_http';
-import { EdgesSchema, EverythingSchema } from './generated/transcoding_pb';
+import { EdgesSchema, EverythingSchema, RequiringSchema } from './generated/transcoding_pb';
+import { NeedsSchema } from './generated/transcoding-required_pb';
 import { startTranscoding } from './transcoding-service';
 
 // interfaces
@@ -167,6 +169,8 @@ const FILE = JSON.parse(
 const MESSAGES: Readonly<Record<string, DescMessage>> = Object.freeze({
   [EdgesSchema.typeName]: EdgesSchema,
   [EverythingSchema.typeName]: EverythingSchema,
+  [NeedsSchema.typeName]: NeedsSchema,
+  [RequiringSchema.typeName]: RequiringSchema,
 });
 
 const REGISTRY = typeRegistryOf([
@@ -875,7 +879,8 @@ test.describe('plays transcoding.json', () => {
   for (const entry of FILE.writings) {
     test(`writings: ${entry.name}`, () => {
       const schema = messageOf(entry.message);
-      const message = fromBinary(schema, fromHexadecimal(entry.payload), { recursionLimit: 101 });
+      // * read through the runtime's reader, as the gateway reads a result
+      const message = protoCodecOf(schema).decode(fromHexadecimal(entry.payload));
       const write = (): string => {
         return writeProtoJson(schema, { message, registry: REGISTRY });
       };

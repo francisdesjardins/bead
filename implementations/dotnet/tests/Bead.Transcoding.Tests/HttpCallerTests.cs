@@ -783,6 +783,48 @@ public sealed class HttpCallerTests
         }
     }
 
+    [Fact]
+    public async Task Fails_a_request_whose_value_leaves_a_required_field_unset_before_anything_goes_with_the_codec_s_refusal()
+    {
+        var sent = 0;
+        using var handler = new StubHandler((request, _) =>
+        {
+            Interlocked.Increment(ref sent);
+
+            var response = new HttpResponseMessage(HttpStatusCode.OK) { RequestMessage = request, Content = new StringContent("{}") };
+
+            response.Content.Headers.ContentType = new MediaTypeHeaderValue("application/json");
+
+            return Task.FromResult(response);
+        });
+        using var client = new TranscodingHttpClient(new Uri("http://localhost"), new HttpCallerOptions { Handler = handler });
+
+        // * the codec's writer's refusal, its words, thrown before the request is built (spec 17.9.7)
+        var refused = await Assert.ThrowsAsync<FormatException>(() =>
+        {
+            return client.Require(new Requiring { Needs = new Needs { Count = 1 } });
+        });
+
+        Assert.Equal("a proto message leaves bead.transcoding.v1.Needs.name unset", refused.Message);
+        Assert.Equal(0, sent);
+    }
+
+    [Fact]
+    public async Task Fails_a_result_that_leaves_a_required_field_unset_with_PAYLOAD_UNDECODABLE()
+    {
+        using var handler = Stub("{\"count\":1}", ("application/json", HttpStatusCode.OK, null));
+        using var client = new TranscodingHttpClient(new Uri("http://localhost"), new HttpCallerOptions { Handler = handler });
+
+        // * its result read by 5.2 whole, step 4 among it
+        var failed = await Assert.ThrowsAsync<FailureException>(() =>
+        {
+            return client.Require(new Requiring());
+        });
+
+        Assert.Equal(((ushort)ProtocolCode.PayloadUndecodable, FailureOrigin.Local, "the HTTP payload cannot be decoded"), (failed.Code, failed.Origin, failed.Detail));
+        Assert.Equal("a required field unset", Assert.IsType<JsonFormException>(failed.InnerException).Message);
+    }
+
     private sealed class StubHandler(Func<HttpRequestMessage, CancellationToken, Task<HttpResponseMessage>> send, Action? disposed = null) : HttpMessageHandler
     {
         protected override void Dispose(bool disposing)

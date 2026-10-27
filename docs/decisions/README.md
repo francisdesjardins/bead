@@ -146,12 +146,13 @@ table.
 
 ### Payloads
 
-| #                                                                                                   | Decision                                                                                                                                | Status   |
-| --------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- | -------- |
-| [0016](0016-a-json-payload-has-one-form-whichever-side-writes-it.md)                                | A JSON payload is read as I-JSON, its noncharacters aside, and written in RFC 8785's canonical form, the same bytes from every language | accepted |
-| [0028](0028-a-proto-payloads-records-are-read-against-its-message-before-its-library-reads-them.md) | A `proto` payload's records are read against its message before its library reads them                                                  | accepted |
-| [0031](0031-a-proto-payload-is-protobufs-format-and-bead-states-only-its-own.md)                    | A `proto` payload is protobuf's binary format, read and written through each side's stock library, and Bead states only what is its own | accepted |
-| [0035](0035-a-payload-that-reads-is-held-to-its-messages-rules-before-its-resolver-sees-it.md)      | A payload that reads is held to its message's rules before its resolver sees it                                                         | accepted |
+| #                                                                                                                                           | Decision                                                                                                                                | Status   |
+| ------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- | -------- |
+| [0016](0016-a-json-payload-has-one-form-whichever-side-writes-it.md)                                                                        | A JSON payload is read as I-JSON, its noncharacters aside, and written in RFC 8785's canonical form, the same bytes from every language | accepted |
+| [0028](0028-a-proto-payloads-records-are-read-against-its-message-before-its-library-reads-them.md)                                         | A `proto` payload's records are read against its message before its library reads them                                                  | accepted |
+| [0031](0031-a-proto-payload-is-protobufs-format-and-bead-states-only-its-own.md)                                                            | A `proto` payload is protobuf's binary format, read and written through each side's stock library, and Bead states only what is its own | accepted |
+| [0035](0035-a-payload-that-reads-is-held-to-its-messages-rules-before-its-resolver-sees-it.md)                                              | A payload that reads is held to its message's rules before its resolver sees it                                                         | accepted |
+| [0042](0042-a-proto-message-that-leaves-a-required-field-unset-neither-reads-nor-writes-and-a-gateway-refuses-it-where-its-server-would.md) | A `proto` message that leaves a required field unset neither reads nor writes, and a gateway refuses it where its server would          | accepted |
 
 ### Services and their names
 
@@ -224,7 +225,7 @@ table.
 
 ## Writing one
 
-The next decision is 0042. Its file is `NNNN-the-decision-in-a-few-words.md`, and its title states
+The next decision is 0043. Its file is `NNNN-the-decision-in-a-few-words.md`, and its title states
 the decision, not its subject. The title may grow with the record; the file's name stays, unless it
 would mislead.
 

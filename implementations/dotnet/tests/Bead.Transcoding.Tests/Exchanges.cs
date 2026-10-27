@@ -186,6 +186,8 @@ internal static partial class Exchanges
                             {
                                 "hanging" => service.Hanging,
                                 "cancelled" => service.Cancelled,
+                                "requires" => service.Requires,
+                                "reported" => service.Reported,
                                 _ => throw new InvalidOperationException($"no count {count.Name}"),
                             };
                         }

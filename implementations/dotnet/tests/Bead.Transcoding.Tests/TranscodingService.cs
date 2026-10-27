@@ -15,6 +15,8 @@ internal sealed class TranscodingService : IAsyncDisposable
     private readonly List<string> _refused = [];
     private int _hanging;
     private int _cancelled;
+    private int _requires;
+    private int _reported;
     private TranscodingServer<string>? _transcoding;
 
     private TranscodingService(MemoryTransportServer memory, Server<string> server)
@@ -55,6 +57,30 @@ internal sealed class TranscodingService : IAsyncDisposable
             lock (_gate)
             {
                 return _cancelled;
+            }
+        }
+    }
+
+    /// <summary>The calls of require its resolver took.</summary>
+    public int Requires
+    {
+        get
+        {
+            lock (_gate)
+            {
+                return _requires;
+            }
+        }
+    }
+
+    /// <summary>The failures its server reported on its error (spec 9.0).</summary>
+    public int Reported
+    {
+        get
+        {
+            lock (_gate)
+            {
+                return _reported;
             }
         }
     }
@@ -106,6 +132,14 @@ internal sealed class TranscodingService : IAsyncDisposable
         _transcoding = transcoding;
 
         var sent = new Dictionary<string, int>(StringComparer.Ordinal);
+
+        Server.Router.Error += (_, _) =>
+        {
+            lock (_gate)
+            {
+                _reported += 1;
+            }
+        };
 
         // * the notifications the server sent, by connection, which ticks waits on before it ends
         // its subscription, so none is dropped behind its failure
@@ -264,6 +298,24 @@ internal sealed class TranscodingService : IAsyncDisposable
                     _cancelled += 1;
                 }
             }
+        });
+        transcoding.On(TranscodingProcedures.Require, (request, response) =>
+        {
+            lock (_gate)
+            {
+                _requires += 1;
+            }
+
+            // * a Needs of no field where none is set, which its server's codec cannot write
+            return response.Answer(request.Payload.Needs ?? new Needs());
+        });
+        transcoding.On(TranscodingProcedures.GetNeeds, (request, response) =>
+        {
+            return response.Answer(request.Payload);
+        });
+        transcoding.On(TranscodingProcedures.UpdateNeeds, (request, response) =>
+        {
+            return response.Answer(request.Payload.Needs ?? new Needs());
         });
         transcoding.On(TranscodingProcedures.Cancels, async (request, response) =>
         {

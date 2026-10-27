@@ -3,15 +3,13 @@
 // Messages: protoc-gen-es 2.16.0, for @bufbuild/protobuf 2.13.0 or later.
 
 import type { IViolationRule, IViolationSink } from "../../../proto/proto";
-import { checkProtoRecords, codePointLength, validatorOf } from "../../../proto/proto";
-import type { AskResponse, Book, CancelsRequest, CancelsResponse, Edges, Everything, FailRequest, GetBookRequest, GetOperationRequest, ListBooksRequest, ListBooksResponse, ListOperationsRequest, ListOperationsResponse, Operation, Ruled, Tick, TicksRequest, TicksResponse, UpdateBookRequest, WhoAmIResponse } from "./transcoding_pb";
-import { AskResponseSchema, BookSchema, CancelsRequestSchema, CancelsResponseSchema, EdgesSchema, EverythingSchema, FailRequestSchema, GetBookRequestSchema, GetOperationRequestSchema, ListBooksRequestSchema, ListBooksResponseSchema, ListOperationsRequestSchema, ListOperationsResponseSchema, OperationSchema, RuledSchema, TickSchema, TicksRequestSchema, TicksResponseSchema, UpdateBookRequestSchema, WhoAmIResponseSchema } from "./transcoding_pb";
+import { codePointLength, protoCodecOf, validatorOf } from "../../../proto/proto";
+import type { Ruled } from "./transcoding_pb";
+import { AskResponseSchema, BookSchema, CancelsRequestSchema, CancelsResponseSchema, EdgesSchema, EverythingSchema, FailRequestSchema, GetBookRequestSchema, GetOperationRequestSchema, ListBooksRequestSchema, ListBooksResponseSchema, ListOperationsRequestSchema, ListOperationsResponseSchema, OperationSchema, RequiringSchema, RuledSchema, TickSchema, TicksRequestSchema, TicksResponseSchema, UpdateBookRequestSchema, WhoAmIResponseSchema } from "./transcoding_pb";
 import type { IServiceClient, IServiceClientOptions, IServiceServer, ServiceResolvers, ServiceServerOptions } from "../../../service/service";
-import { commandOf, createServiceClient, createServiceServer, failuresOf, GENERATED_CODE_SUPPORTS_VERSION_4, PAYLOAD_CODECS, payloadCodecOf, requestOf } from "../../../service/service";
-import type { MessageInitShape } from "@bufbuild/protobuf";
-import { create, fromBinary, toBinary } from "@bufbuild/protobuf";
-import type { Empty } from "@bufbuild/protobuf/wkt";
+import { commandOf, createServiceClient, createServiceServer, failuresOf, GENERATED_CODE_SUPPORTS_VERSION_6, PAYLOAD_CODECS, requestOf } from "../../../service/service";
 import { EmptySchema } from "@bufbuild/protobuf/wkt";
+import { NeedsSchema, NeedsUpdateSchema } from "./transcoding-required_pb";
 
 
 // * each request's rules, judged before its resolver, every rule a site of its own (spec 18, decision 0035)
@@ -55,8 +53,8 @@ export const TranscodingProcedures = Object.freeze({
     admission: 'none',
     failures: {},
     procedure: { procedureId: 1, procedureName: 'echo', serviceId: 1, serviceRevision: 1 },
-    request: payloadCodecOf<Everything, MessageInitShape<typeof EverythingSchema>>({ decode: (bytes) => { checkProtoRecords(bytes, EverythingSchema); return fromBinary(EverythingSchema, bytes, { recursionLimit: 101 }); }, encode: (given) => { return toBinary(EverythingSchema, create(EverythingSchema, given)); } }),
-    result: payloadCodecOf<Everything, MessageInitShape<typeof EverythingSchema>>({ decode: (bytes) => { checkProtoRecords(bytes, EverythingSchema); return fromBinary(EverythingSchema, bytes, { recursionLimit: 101 }); }, encode: (given) => { return toBinary(EverythingSchema, create(EverythingSchema, given)); } }),
+    request: protoCodecOf(EverythingSchema),
+    result: protoCodecOf(EverythingSchema),
   }),
   /**
    * Answers its request. Admits every call.
@@ -65,8 +63,8 @@ export const TranscodingProcedures = Object.freeze({
     admission: 'none',
     failures: {},
     procedure: { procedureId: 2, procedureName: 'echoEdges', serviceId: 1, serviceRevision: 1 },
-    request: payloadCodecOf<Edges, MessageInitShape<typeof EdgesSchema>>({ decode: (bytes) => { checkProtoRecords(bytes, EdgesSchema); return fromBinary(EdgesSchema, bytes, { recursionLimit: 101 }); }, encode: (given) => { return toBinary(EdgesSchema, create(EdgesSchema, given)); } }),
-    result: payloadCodecOf<Edges, MessageInitShape<typeof EdgesSchema>>({ decode: (bytes) => { checkProtoRecords(bytes, EdgesSchema); return fromBinary(EdgesSchema, bytes, { recursionLimit: 101 }); }, encode: (given) => { return toBinary(EdgesSchema, create(EdgesSchema, given)); } }),
+    request: protoCodecOf(EdgesSchema),
+    result: protoCodecOf(EdgesSchema),
   }),
   /**
    * Answers the book its name names: its title "A tale", its pages its revision. Admits every call.
@@ -75,8 +73,8 @@ export const TranscodingProcedures = Object.freeze({
     admission: 'none',
     failures: {},
     procedure: { procedureId: 3, procedureName: 'getBook', serviceId: 1, serviceRevision: 1 },
-    request: payloadCodecOf<GetBookRequest, MessageInitShape<typeof GetBookRequestSchema>>({ decode: (bytes) => { checkProtoRecords(bytes, GetBookRequestSchema); return fromBinary(GetBookRequestSchema, bytes, { recursionLimit: 101 }); }, encode: (given) => { return toBinary(GetBookRequestSchema, create(GetBookRequestSchema, given)); } }),
-    result: payloadCodecOf<Book, MessageInitShape<typeof BookSchema>>({ decode: (bytes) => { checkProtoRecords(bytes, BookSchema); return fromBinary(BookSchema, bytes, { recursionLimit: 101 }); }, encode: (given) => { return toBinary(BookSchema, create(BookSchema, given)); } }),
+    request: protoCodecOf(GetBookRequestSchema),
+    result: protoCodecOf(BookSchema),
   }),
   /**
    * Answers its shelf's two books, a and b, titled A and B, and no page after. Admits every call.
@@ -85,8 +83,8 @@ export const TranscodingProcedures = Object.freeze({
     admission: 'none',
     failures: {},
     procedure: { procedureId: 4, procedureName: 'listBooks', serviceId: 1, serviceRevision: 1 },
-    request: payloadCodecOf<ListBooksRequest, MessageInitShape<typeof ListBooksRequestSchema>>({ decode: (bytes) => { checkProtoRecords(bytes, ListBooksRequestSchema); return fromBinary(ListBooksRequestSchema, bytes, { recursionLimit: 101 }); }, encode: (given) => { return toBinary(ListBooksRequestSchema, create(ListBooksRequestSchema, given)); } }),
-    result: payloadCodecOf<ListBooksResponse, MessageInitShape<typeof ListBooksResponseSchema>>({ decode: (bytes) => { checkProtoRecords(bytes, ListBooksResponseSchema); return fromBinary(ListBooksResponseSchema, bytes, { recursionLimit: 101 }); }, encode: (given) => { return toBinary(ListBooksResponseSchema, create(ListBooksResponseSchema, given)); } }),
+    request: protoCodecOf(ListBooksRequestSchema),
+    result: protoCodecOf(ListBooksResponseSchema),
   }),
   /**
    * Answers its request. Admits every call.
@@ -95,8 +93,8 @@ export const TranscodingProcedures = Object.freeze({
     admission: 'none',
     failures: {},
     procedure: { procedureId: 5, procedureName: 'updateBook', serviceId: 1, serviceRevision: 1 },
-    request: payloadCodecOf<UpdateBookRequest, MessageInitShape<typeof UpdateBookRequestSchema>>({ decode: (bytes) => { checkProtoRecords(bytes, UpdateBookRequestSchema); return fromBinary(UpdateBookRequestSchema, bytes, { recursionLimit: 101 }); }, encode: (given) => { return toBinary(UpdateBookRequestSchema, create(UpdateBookRequestSchema, given)); } }),
-    result: payloadCodecOf<UpdateBookRequest, MessageInitShape<typeof UpdateBookRequestSchema>>({ decode: (bytes) => { checkProtoRecords(bytes, UpdateBookRequestSchema); return fromBinary(UpdateBookRequestSchema, bytes, { recursionLimit: 101 }); }, encode: (given) => { return toBinary(UpdateBookRequestSchema, create(UpdateBookRequestSchema, given)); } }),
+    request: protoCodecOf(UpdateBookRequestSchema),
+    result: protoCodecOf(UpdateBookRequestSchema),
   }),
   /**
    * Archives a book, and answers nothing. Admits every call.
@@ -105,8 +103,8 @@ export const TranscodingProcedures = Object.freeze({
     admission: 'none',
     failures: {},
     procedure: { procedureId: 6, procedureName: 'archiveBook', serviceId: 1, serviceRevision: 1 },
-    request: payloadCodecOf<GetBookRequest, MessageInitShape<typeof GetBookRequestSchema>>({ decode: (bytes) => { checkProtoRecords(bytes, GetBookRequestSchema); return fromBinary(GetBookRequestSchema, bytes, { recursionLimit: 101 }); }, encode: (given) => { return toBinary(GetBookRequestSchema, create(GetBookRequestSchema, given)); } }),
-    result: payloadCodecOf<Empty, MessageInitShape<typeof EmptySchema>>({ decode: (bytes) => { checkProtoRecords(bytes, EmptySchema); return fromBinary(EmptySchema, bytes, { recursionLimit: 101 }); }, encode: (given) => { return toBinary(EmptySchema, create(EmptySchema, given)); } }),
+    request: protoCodecOf(GetBookRequestSchema),
+    result: protoCodecOf(EmptySchema),
   }),
   /**
    * Answers one operation, its name its request's and "/a" after it, not done. Admits every call.
@@ -115,8 +113,8 @@ export const TranscodingProcedures = Object.freeze({
     admission: 'none',
     failures: {},
     procedure: { procedureId: 7, procedureName: 'listOperations', serviceId: 1, serviceRevision: 1 },
-    request: payloadCodecOf<ListOperationsRequest, MessageInitShape<typeof ListOperationsRequestSchema>>({ decode: (bytes) => { checkProtoRecords(bytes, ListOperationsRequestSchema); return fromBinary(ListOperationsRequestSchema, bytes, { recursionLimit: 101 }); }, encode: (given) => { return toBinary(ListOperationsRequestSchema, create(ListOperationsRequestSchema, given)); } }),
-    result: payloadCodecOf<ListOperationsResponse, MessageInitShape<typeof ListOperationsResponseSchema>>({ decode: (bytes) => { checkProtoRecords(bytes, ListOperationsResponseSchema); return fromBinary(ListOperationsResponseSchema, bytes, { recursionLimit: 101 }); }, encode: (given) => { return toBinary(ListOperationsResponseSchema, create(ListOperationsResponseSchema, given)); } }),
+    request: protoCodecOf(ListOperationsRequestSchema),
+    result: protoCodecOf(ListOperationsResponseSchema),
   }),
   /**
    * Answers the operation its name names, done. Admits every call.
@@ -125,8 +123,8 @@ export const TranscodingProcedures = Object.freeze({
     admission: 'none',
     failures: {},
     procedure: { procedureId: 8, procedureName: 'getOperation', serviceId: 1, serviceRevision: 1 },
-    request: payloadCodecOf<GetOperationRequest, MessageInitShape<typeof GetOperationRequestSchema>>({ decode: (bytes) => { checkProtoRecords(bytes, GetOperationRequestSchema); return fromBinary(GetOperationRequestSchema, bytes, { recursionLimit: 101 }); }, encode: (given) => { return toBinary(GetOperationRequestSchema, create(GetOperationRequestSchema, given)); } }),
-    result: payloadCodecOf<Operation, MessageInitShape<typeof OperationSchema>>({ decode: (bytes) => { checkProtoRecords(bytes, OperationSchema); return fromBinary(OperationSchema, bytes, { recursionLimit: 101 }); }, encode: (given) => { return toBinary(OperationSchema, create(OperationSchema, given)); } }),
+    request: protoCodecOf(GetOperationRequestSchema),
+    result: protoCodecOf(OperationSchema),
   }),
   /**
    * Answers nothing, once its rules took its request. Admits every call.
@@ -135,8 +133,8 @@ export const TranscodingProcedures = Object.freeze({
     admission: 'none',
     failures: {},
     procedure: { procedureId: 9, procedureName: 'judge', serviceId: 1, serviceRevision: 1 },
-    request: payloadCodecOf<Ruled, MessageInitShape<typeof RuledSchema>>({ decode: (bytes) => { checkProtoRecords(bytes, RuledSchema); return fromBinary(RuledSchema, bytes, { recursionLimit: 101 }); }, encode: (given) => { return toBinary(RuledSchema, create(RuledSchema, given)); } }),
-    result: payloadCodecOf<Empty, MessageInitShape<typeof EmptySchema>>({ decode: (bytes) => { checkProtoRecords(bytes, EmptySchema); return fromBinary(EmptySchema, bytes, { recursionLimit: 101 }); }, encode: (given) => { return toBinary(EmptySchema, create(EmptySchema, given)); } }),
+    request: protoCodecOf(RuledSchema),
+    result: protoCodecOf(EmptySchema),
     validate: validatorOf(RuledSchema, rulesOfRuled),
   }),
   /**
@@ -145,10 +143,10 @@ export const TranscodingProcedures = Object.freeze({
   ticks: requestOf({
     admission: 'none',
     failures: { COUNTED: 2 },
-    notification: payloadCodecOf<Tick, MessageInitShape<typeof TickSchema>>({ decode: (bytes) => { checkProtoRecords(bytes, TickSchema); return fromBinary(TickSchema, bytes, { recursionLimit: 101 }); }, encode: (given) => { return toBinary(TickSchema, create(TickSchema, given)); } }),
+    notification: protoCodecOf(TickSchema),
     procedure: { procedureId: 10, procedureName: 'ticks', serviceId: 1, serviceRevision: 1 },
-    request: payloadCodecOf<TicksRequest, MessageInitShape<typeof TicksRequestSchema>>({ decode: (bytes) => { checkProtoRecords(bytes, TicksRequestSchema); return fromBinary(TicksRequestSchema, bytes, { recursionLimit: 101 }); }, encode: (given) => { return toBinary(TicksRequestSchema, create(TicksRequestSchema, given)); } }),
-    result: payloadCodecOf<TicksResponse, MessageInitShape<typeof TicksResponseSchema>>({ decode: (bytes) => { checkProtoRecords(bytes, TicksResponseSchema); return fromBinary(TicksResponseSchema, bytes, { recursionLimit: 101 }); }, encode: (given) => { return toBinary(TicksResponseSchema, create(TicksResponseSchema, given)); } }),
+    request: protoCodecOf(TicksRequestSchema),
+    result: protoCodecOf(TicksResponseSchema),
   }),
   /**
    * Answers nothing, then notifies nothing, and ends its subscription never. Admits every call.
@@ -156,10 +154,10 @@ export const TranscodingProcedures = Object.freeze({
   watch: requestOf({
     admission: 'none',
     failures: {},
-    notification: payloadCodecOf<Tick, MessageInitShape<typeof TickSchema>>({ decode: (bytes) => { checkProtoRecords(bytes, TickSchema); return fromBinary(TickSchema, bytes, { recursionLimit: 101 }); }, encode: (given) => { return toBinary(TickSchema, create(TickSchema, given)); } }),
+    notification: protoCodecOf(TickSchema),
     procedure: { procedureId: 11, procedureName: 'watch', serviceId: 1, serviceRevision: 1 },
-    request: payloadCodecOf<Empty, MessageInitShape<typeof EmptySchema>>({ decode: (bytes) => { checkProtoRecords(bytes, EmptySchema); return fromBinary(EmptySchema, bytes, { recursionLimit: 101 }); }, encode: (given) => { return toBinary(EmptySchema, create(EmptySchema, given)); } }),
-    result: payloadCodecOf<Empty, MessageInitShape<typeof EmptySchema>>({ decode: (bytes) => { checkProtoRecords(bytes, EmptySchema); return fromBinary(EmptySchema, bytes, { recursionLimit: 101 }); }, encode: (given) => { return toBinary(EmptySchema, create(EmptySchema, given)); } }),
+    request: protoCodecOf(EmptySchema),
+    result: protoCodecOf(EmptySchema),
   }),
   /**
    * Answers its request. Admits every call.
@@ -198,8 +196,8 @@ export const TranscodingProcedures = Object.freeze({
     admission: 'none',
     failures: { REFUSED: 1 },
     procedure: { procedureId: 15, procedureName: 'fail', serviceId: 1, serviceRevision: 1 },
-    request: payloadCodecOf<FailRequest, MessageInitShape<typeof FailRequestSchema>>({ decode: (bytes) => { checkProtoRecords(bytes, FailRequestSchema); return fromBinary(FailRequestSchema, bytes, { recursionLimit: 101 }); }, encode: (given) => { return toBinary(FailRequestSchema, create(FailRequestSchema, given)); } }),
-    result: payloadCodecOf<Empty, MessageInitShape<typeof EmptySchema>>({ decode: (bytes) => { checkProtoRecords(bytes, EmptySchema); return fromBinary(EmptySchema, bytes, { recursionLimit: 101 }); }, encode: (given) => { return toBinary(EmptySchema, create(EmptySchema, given)); } }),
+    request: protoCodecOf(FailRequestSchema),
+    result: protoCodecOf(EmptySchema),
   }),
   /**
    * Answers its call's session's identifier. Admits a call in a session.
@@ -208,8 +206,8 @@ export const TranscodingProcedures = Object.freeze({
     admission: 'session',
     failures: {},
     procedure: { procedureId: 16, procedureName: 'whoAmI', serviceId: 1, serviceRevision: 1 },
-    request: payloadCodecOf<Empty, MessageInitShape<typeof EmptySchema>>({ decode: (bytes) => { checkProtoRecords(bytes, EmptySchema); return fromBinary(EmptySchema, bytes, { recursionLimit: 101 }); }, encode: (given) => { return toBinary(EmptySchema, create(EmptySchema, given)); } }),
-    result: payloadCodecOf<WhoAmIResponse, MessageInitShape<typeof WhoAmIResponseSchema>>({ decode: (bytes) => { checkProtoRecords(bytes, WhoAmIResponseSchema); return fromBinary(WhoAmIResponseSchema, bytes, { recursionLimit: 101 }); }, encode: (given) => { return toBinary(WhoAmIResponseSchema, create(WhoAmIResponseSchema, given)); } }),
+    request: protoCodecOf(EmptySchema),
+    result: protoCodecOf(WhoAmIResponseSchema),
   }),
   /**
    * Commands its caller, by answer, and answers the code the command failed with, or 0. Admits every call.
@@ -218,8 +216,8 @@ export const TranscodingProcedures = Object.freeze({
     admission: 'none',
     failures: {},
     procedure: { procedureId: 17, procedureName: 'ask', serviceId: 1, serviceRevision: 1 },
-    request: payloadCodecOf<Empty, MessageInitShape<typeof EmptySchema>>({ decode: (bytes) => { checkProtoRecords(bytes, EmptySchema); return fromBinary(EmptySchema, bytes, { recursionLimit: 101 }); }, encode: (given) => { return toBinary(EmptySchema, create(EmptySchema, given)); } }),
-    result: payloadCodecOf<AskResponse, MessageInitShape<typeof AskResponseSchema>>({ decode: (bytes) => { checkProtoRecords(bytes, AskResponseSchema); return fromBinary(AskResponseSchema, bytes, { recursionLimit: 101 }); }, encode: (given) => { return toBinary(AskResponseSchema, create(AskResponseSchema, given)); } }),
+    request: protoCodecOf(EmptySchema),
+    result: protoCodecOf(AskResponseSchema),
   }),
   /**
    * A command its caller answers. Admits every call.
@@ -228,8 +226,8 @@ export const TranscodingProcedures = Object.freeze({
     admission: 'none',
     failures: {},
     procedure: { procedureId: 18, procedureName: 'answer', serviceId: 1, serviceRevision: 1 },
-    request: payloadCodecOf<Empty, MessageInitShape<typeof EmptySchema>>({ decode: (bytes) => { checkProtoRecords(bytes, EmptySchema); return fromBinary(EmptySchema, bytes, { recursionLimit: 101 }); }, encode: (given) => { return toBinary(EmptySchema, create(EmptySchema, given)); } }),
-    result: payloadCodecOf<Empty, MessageInitShape<typeof EmptySchema>>({ decode: (bytes) => { checkProtoRecords(bytes, EmptySchema); return fromBinary(EmptySchema, bytes, { recursionLimit: 101 }); }, encode: (given) => { return toBinary(EmptySchema, create(EmptySchema, given)); } }),
+    request: protoCodecOf(EmptySchema),
+    result: protoCodecOf(EmptySchema),
   }),
   /**
    * Answers never, and counts each of its calls that ends cancelled. Admits every call.
@@ -238,8 +236,8 @@ export const TranscodingProcedures = Object.freeze({
     admission: 'none',
     failures: {},
     procedure: { procedureId: 19, procedureName: 'hang', serviceId: 1, serviceRevision: 1 },
-    request: payloadCodecOf<Empty, MessageInitShape<typeof EmptySchema>>({ decode: (bytes) => { checkProtoRecords(bytes, EmptySchema); return fromBinary(EmptySchema, bytes, { recursionLimit: 101 }); }, encode: (given) => { return toBinary(EmptySchema, create(EmptySchema, given)); } }),
-    result: payloadCodecOf<Empty, MessageInitShape<typeof EmptySchema>>({ decode: (bytes) => { checkProtoRecords(bytes, EmptySchema); return fromBinary(EmptySchema, bytes, { recursionLimit: 101 }); }, encode: (given) => { return toBinary(EmptySchema, create(EmptySchema, given)); } }),
+    request: protoCodecOf(EmptySchema),
+    result: protoCodecOf(EmptySchema),
   }),
   /**
    * Answers how many of hang's calls ended cancelled, once they are at least its atLeast, or 1 second passed. Admits every call.
@@ -248,8 +246,38 @@ export const TranscodingProcedures = Object.freeze({
     admission: 'none',
     failures: {},
     procedure: { procedureId: 20, procedureName: 'cancels', serviceId: 1, serviceRevision: 1 },
-    request: payloadCodecOf<CancelsRequest, MessageInitShape<typeof CancelsRequestSchema>>({ decode: (bytes) => { checkProtoRecords(bytes, CancelsRequestSchema); return fromBinary(CancelsRequestSchema, bytes, { recursionLimit: 101 }); }, encode: (given) => { return toBinary(CancelsRequestSchema, create(CancelsRequestSchema, given)); } }),
-    result: payloadCodecOf<CancelsResponse, MessageInitShape<typeof CancelsResponseSchema>>({ decode: (bytes) => { checkProtoRecords(bytes, CancelsResponseSchema); return fromBinary(CancelsResponseSchema, bytes, { recursionLimit: 101 }); }, encode: (given) => { return toBinary(CancelsResponseSchema, create(CancelsResponseSchema, given)); } }),
+    request: protoCodecOf(CancelsRequestSchema),
+    result: protoCodecOf(CancelsResponseSchema),
+  }),
+  /**
+   * Answers its request's needs, or a Needs of no field where none is set. Admits every call.
+   */
+  require: requestOf({
+    admission: 'none',
+    failures: {},
+    procedure: { procedureId: 21, procedureName: 'require', serviceId: 1, serviceRevision: 1 },
+    request: protoCodecOf(RequiringSchema),
+    result: protoCodecOf(NeedsSchema),
+  }),
+  /**
+   * Answers its request. Admits every call.
+   */
+  getNeeds: requestOf({
+    admission: 'none',
+    failures: {},
+    procedure: { procedureId: 22, procedureName: 'getNeeds', serviceId: 1, serviceRevision: 1 },
+    request: protoCodecOf(NeedsSchema),
+    result: protoCodecOf(NeedsSchema),
+  }),
+  /**
+   * Answers its request's needs. Admits every call.
+   */
+  updateNeeds: requestOf({
+    admission: 'none',
+    failures: {},
+    procedure: { procedureId: 23, procedureName: 'updateNeeds', serviceId: 1, serviceRevision: 1 },
+    request: protoCodecOf(NeedsUpdateSchema),
+    result: protoCodecOf(NeedsSchema),
   }),
 });
 
@@ -403,6 +431,18 @@ export class TranscodingClient {
    */
   public readonly cancels: IServiceClient<typeof TranscodingProcedures>['request']['cancels'];
   /**
+   * Answers its request's needs, or a Needs of no field where none is set.
+   */
+  public readonly require: IServiceClient<typeof TranscodingProcedures>['request']['require'];
+  /**
+   * Answers its request.
+   */
+  public readonly getNeeds: IServiceClient<typeof TranscodingProcedures>['request']['getNeeds'];
+  /**
+   * Answers its request's needs.
+   */
+  public readonly updateNeeds: IServiceClient<typeof TranscodingProcedures>['request']['updateNeeds'];
+  /**
    * The notification of each procedure that notifies, at the window its options gave, or unpaced.
    */
   public readonly notifications: IServiceClient<typeof TranscodingProcedures>['notifications'];
@@ -436,10 +476,13 @@ export class TranscodingClient {
     this.ask = service.request.ask;
     this.hang = service.request.hang;
     this.cancels = service.request.cancels;
+    this.require = service.request.require;
+    this.getNeeds = service.request.getNeeds;
+    this.updateNeeds = service.request.updateNeeds;
     this.notifications = service.notifications;
     this.on = service.on;
   }
 }
 
 // the contract with the runtime this file needs: an older runtime lacks the constant, and fails here
-void GENERATED_CODE_SUPPORTS_VERSION_4;
+void GENERATED_CODE_SUPPORTS_VERSION_6;

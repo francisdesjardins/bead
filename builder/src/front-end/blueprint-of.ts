@@ -32,6 +32,7 @@ import {
   type IProcedureEntry,
   type IRange,
   type IServiceEntry,
+  LEGACY_REQUIRED_FEATURE,
   VALIDATE_FEATURE,
 } from '../model/blueprint.ts';
 import { FORMAT, specVersion } from '../version.ts';
@@ -511,6 +512,11 @@ export const blueprintOf = (input: IProtoInput): IProtoBlueprint => {
   const validates = [...messages.values()].some((message) => {
     return message.rules !== undefined;
   });
+  const requiresFields = [...messages.values()].some((message) => {
+    return (message.fields ?? []).some((field) => {
+      return field.legacyRequired === true;
+    });
+  });
 
   reservedIds.sort(
     byKey((range) => {
@@ -527,7 +533,10 @@ export const blueprintOf = (input: IProtoInput): IProtoBlueprint => {
   const blueprint: IBlueprint = {
     format: FORMAT,
     specVersion: specVersion(),
-    requires: validates ? [VALIDATE_FEATURE] : [],
+    requires: [
+      ...(requiresFields ? [LEGACY_REQUIRED_FEATURE] : []),
+      ...(validates ? [VALIDATE_FEATURE] : []),
+    ],
     proto: {
       files: [...files.values()].sort(
         byKey((file) => {

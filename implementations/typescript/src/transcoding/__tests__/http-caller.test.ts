@@ -922,3 +922,48 @@ test('maps a gateway problem without a refusal by its status', async () => {
     });
   }
 });
+
+// spec 17.9.7, transcoding 5.2.4
+test('fails a request whose value leaves a required field unset before anything goes, with the codec’s refusal', async () => {
+  let sent = 0;
+  const client = new TranscodingHttpClient('http://localhost', {
+    fetch: () => {
+      sent += 1;
+
+      return Promise.resolve(
+        new Response('{}', { headers: { 'content-type': 'application/json' } })
+      );
+    },
+  });
+  const refused = await client.require({ needs: { count: 1 } }).catch((error: unknown) => {
+    return error;
+  });
+
+  // * the codec's own refusal, a writer's, as it is on every encoding: no Bead failure
+  expect(refused).toBeInstanceOf(TypeError);
+  expect((refused as Error).message).toBe(
+    'a proto message leaves bead.transcoding.v1.Needs.name unset'
+  );
+  expect(sent).toBe(0);
+});
+
+test('fails a result that leaves a required field unset with PAYLOAD_UNDECODABLE', async () => {
+  let sent = 0;
+  const client = new TranscodingHttpClient('http://localhost', {
+    fetch: () => {
+      sent += 1;
+
+      return Promise.resolve(
+        new Response('{"count":1}', { headers: { 'content-type': 'application/json' } })
+      );
+    },
+  });
+
+  await expect(client.require({})).rejects.toMatchObject({
+    code: ProtocolCode.PAYLOAD_UNDECODABLE,
+    detail: 'the HTTP payload cannot be decoded',
+    origin: 'local',
+    scope: FailureScope.PROTOCOL,
+  });
+  expect(sent).toBe(1);
+});

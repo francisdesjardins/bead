@@ -31,8 +31,8 @@ public static class PayloadCodecs
 
     /// <summary>
     /// A codec of <paramref name="decode"/> and <paramref name="encode"/>: a protobuf message's,
-    /// from its stock library's reader and writer, which generated code passes with Bead's bound
-    /// set (spec 17.9). One that is none is an <see cref="ArgumentNullException"/>.
+    /// which <c>Bead.Protobuf</c>'s <c>ProtoCodecs</c> makes of its stock library's reader and
+    /// writer, spec 17.9 held whole. One that is none is an <see cref="ArgumentNullException"/>.
     /// </summary>
     public static IPayloadCodec<T> Of<T>(Func<ReadOnlyMemory<byte>, T> decode, Func<T, ReadOnlyMemory<byte>> encode)
     {

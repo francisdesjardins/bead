@@ -6,6 +6,7 @@ import { expect, test } from '@playwright/test';
 import { Ajv2020 } from 'ajv/dist/2020.js';
 
 import { checkRoots } from '../../check.ts';
+import { editionRoot } from '../../front-end/__tests__/derive.ts';
 import { hasError } from '../../diagnostics.ts';
 import type { IBlueprint } from '../../model/blueprint.ts';
 import {
@@ -370,4 +371,159 @@ test("one blueprint gives one sequence of bytes: members sorted, two spaces, a f
   // * a command is called by no HTTP client: no route
   expect(value.paths['/api/Interop/clock']).toBeUndefined();
   expect(oasValidator()(value)).toBe(true);
+});
+
+// the blueprint of a root, which no error refuses
+const blueprintOf = (root: string): IBlueprint => {
+  const checked = checkRoots([root]);
+
+  expect(hasError(checked.diagnostics), JSON.stringify(checked.diagnostics)).toBe(false);
+
+  if (checked.blueprint === undefined) {
+    throw new Error(`${root}: no blueprint`);
+  }
+
+  return checked.blueprint;
+};
+
+const REQUIRED = 'features.field_presence = LEGACY_REQUIRED';
+
+// transcoding 11.4: a query's parameter required where protobuf requires its field, down a path of
+// fields required or held present by a variable
+test('requires a query parameter whose field is required on a path required or held present by a variable', () => {
+  const root = editionRoot('required-parameters', {
+    imports: ['google/protobuf/field_mask.proto'],
+    messages: [
+      '// Deep.',
+      'message Deep {',
+      `  int32 level = 1 [${REQUIRED}];`,
+      '}',
+      '',
+      '// Inner.',
+      'message Inner {',
+      '  string name = 1;',
+      `  int32 count = 2 [${REQUIRED}];`,
+      '  Deep deep = 3;',
+      '}',
+      '',
+      '// Outer.',
+      'message Outer {',
+      `  string id = 1 [${REQUIRED}];`,
+      `  int32 size = 2 [${REQUIRED}];`,
+      '  Inner inner = 3;',
+      '  Inner held = 4;',
+      `  Inner kept = 5 [${REQUIRED}];`,
+      `  google.protobuf.FieldMask update_mask = 6 [${REQUIRED}];`,
+      '}',
+    ],
+    rpcs: [
+      ['Get', 'Outer', 'get: "/v1/outers/{held.name}"'],
+      ['Update', 'Outer', 'patch: "/v1/outers/{id}" body: "inner"'],
+    ],
+  });
+  const document = documentValueOf(blueprintOf(root), { prefix: '/api' }) as {
+    paths: Record<string, Record<string, { parameters: Record<string, unknown>[] }>>;
+  };
+  const queryOf = (path: string, method: string): Record<string, boolean> => {
+    return Object.fromEntries(
+      (document.paths[path]?.[method]?.parameters ?? [])
+        .filter((parameter) => {
+          return parameter['in'] === 'query';
+        })
+        .map((parameter) => {
+          return [String(parameter['name']), parameter['required'] === true];
+        })
+    );
+  };
+
+  // * held present by its variable, held's count is required; inner's, of a field neither required
+  // nor held, is not, nor is a level below a deep no path requires
+  expect(queryOf('/v1/outers/{held.name}', 'get')).toEqual({
+    id: true,
+    size: true,
+    'inner.name': false,
+    'inner.count': false,
+    'inner.deep.level': false,
+    'held.count': true,
+    'held.deep.level': false,
+    'kept.name': false,
+    'kept.count': true,
+    'kept.deep.level': false,
+    updateMask: true,
+  });
+  // * a PATCH derives its update_mask from its body (transcoding 4.5): no caller need send it
+  expect(queryOf('/v1/outers/{id}', 'patch')).toEqual({
+    size: true,
+    'held.name': false,
+    'held.count': false,
+    'held.deep.level': false,
+    'kept.name': false,
+    'kept.count': true,
+    'kept.deep.level': false,
+    updateMask: false,
+  });
+  expect(
+    document.paths['/v1/outers/{held.name}']?.['get']?.parameters.find((parameter) => {
+      return parameter['name'] === 'updateMask';
+    })
+  ).toMatchObject({
+    in: 'query',
+    required: true,
+    description: expect.stringContaining('update_mask'),
+  });
+});
+
+// transcoding 11.5: a body less what its variables bind keeps each rule of what remains
+test('keeps the rules of a body a variable binds into', () => {
+  const root = editionRoot('body-rules', {
+    imports: ['buf/validate/validate.proto'],
+    messages: [
+      '// A book.',
+      'message Book {',
+      '  string name = 1;',
+      '  int32 pages = 2 [(buf.validate.field).int32.gt = 0];',
+      '  string title = 3 [(buf.validate.field).required = true];',
+      '}',
+      '',
+      '// An update of a book.',
+      'message UpdateBookRequest {',
+      '  Book book = 1;',
+      '  string reason = 2 [(buf.validate.field).string.min_len = 1];',
+      '}',
+    ],
+    rpcs: [
+      ['UpdateBook', 'UpdateBookRequest', 'patch: "/v1/{book.name}" body: "book"'],
+      ['RenameBook', 'UpdateBookRequest', 'post: "/v1/{book.name}:rename" body: "*"'],
+    ],
+  });
+  const document = documentValueOf(blueprintOf(root), { prefix: '/api' }) as {
+    paths: Record<string, Record<string, Record<string, unknown>>>;
+    components: { schemas: Record<string, { properties: Record<string, unknown> }> };
+  };
+  const bodyOf = (path: string, method: string): Record<string, unknown> => {
+    const body = document.paths[path]?.[method]?.['requestBody'] as {
+      content: { 'application/json': { schema: Record<string, unknown> } };
+    };
+
+    return body.content['application/json'].schema;
+  };
+  const book = document.components.schemas['x.v1.Book'];
+  const request = document.components.schemas['x.v1.UpdateBookRequest'];
+  const inline = {
+    type: 'object',
+    properties: { pages: book?.properties['pages'], title: book?.properties['title'] },
+    additionalProperties: false,
+    required: ['title'],
+    description: "x.v1.Book. Bead's mapping reads each field by its proto name too.",
+  };
+
+  // * each field left to the body keeps its rules, the message's component's own
+  expect(book?.properties['pages']).toMatchObject({ allOf: [{ type: 'integer' }, {}] });
+  expect(bodyOf('/v1/{book.name}', 'patch')).toEqual(inline);
+  expect(bodyOf('/v1/{book.name}:rename', 'post')).toEqual({
+    type: 'object',
+    properties: { book: inline, reason: request?.properties['reason'] },
+    additionalProperties: false,
+    description: "x.v1.UpdateBookRequest. Bead's mapping reads each field by its proto name too.",
+  });
 });

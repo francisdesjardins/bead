@@ -77,13 +77,17 @@
           "if": { "properties": { "encoding": { "const": "proto" } } },
           "then": {
             "not": { "required": ["written"] },
-            "properties": { "refused": { "enum": ["not its message", "nested past 100"] } }
+            "properties": {
+              "refused": {
+                "enum": ["not its message", "nested past 100", "a required field unset"]
+              }
+            }
           }
         }
       ]
     },
     "read": {
-      "description": "What a proto reader read of the top Probe of spec/codecs.proto: its text, its number and how deep messages nest below it; its counts and its stamps, where it holds any; its children, where it holds any; and its delimited, where it is set. protobuf fixes no message's bytes whole, so a row pins these alone.",
+      "description": "What a proto reader read of the top Probe of spec/codecs.proto: its text, its number and how deep messages nest below it; its counts and its stamps, where it holds any; its children, where it holds any; its delimited, where it is set; and its shade, where a record set it (spec 17.9.8). protobuf fixes no message's bytes whole, so a row pins these alone.",
       "type": "object",
       "required": ["text", "number", "nested"],
       "additionalProperties": false,
@@ -100,7 +104,11 @@
           "propertyNames": { "$ref": "#/$defs/codeUnits" },
           "additionalProperties": { "$ref": "#/$defs/held" }
         },
-        "delimited": { "$ref": "#/$defs/held" }
+        "delimited": { "$ref": "#/$defs/held" },
+        "shade": {
+          "description": "The number of Shade, a closed enum, that its last record of a number Shade declares gave it: 0 or 1.",
+          "enum": [0, 1]
+        }
       }
     },
     "held": {
@@ -171,8 +179,10 @@
         {
           "if": { "properties": { "encoding": { "const": "proto" } } },
           "then": {
-            "not": { "required": ["refused"] },
-            "properties": { "value": { "required": ["probe"] } }
+            "properties": {
+              "value": { "required": ["probe"] },
+              "refused": { "const": "a required field unset" }
+            }
           }
         },
         {
@@ -236,7 +246,7 @@
       }
     },
     "probe": {
-      "description": "A Probe of spec/codecs.proto given to a proto writer, one field set or none, so that protobuf fixes the bytes it writes: its text, its number, or its child set to the empty message.",
+      "description": "A Probe of spec/codecs.proto given to a proto writer, one field set or none, so that protobuf fixes the bytes it writes: its text, its number, its child set to the empty message, or its needs set to a Needs of the fields it gives.",
       "type": "object",
       "maxProperties": 1,
       "additionalProperties": false,
@@ -247,6 +257,15 @@
           "description": "The empty message: child set, no field of it set.",
           "type": "object",
           "maxProperties": 0
+        },
+        "needs": {
+          "description": "A Needs, whose fields protobuf requires (spec 17.9.7): must and shade, each set to its number where it is given, unset where it is not.",
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "must": { "$ref": "common.schema.json#/$defs/u32" },
+            "shade": { "type": "integer", "minimum": -2147483648, "maximum": 2147483647 }
+          }
         }
       }
     },
@@ -263,7 +282,8 @@
         "not a finite number",
         "no JSON value",
         "not its message",
-        "nested past 100"
+        "nested past 100",
+        "a required field unset"
       ]
     }
   }

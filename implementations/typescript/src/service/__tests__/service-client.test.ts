@@ -1,8 +1,10 @@
+import { UninterpretedOption_NamePartSchema } from '@bufbuild/protobuf/wkt';
 import { expect, test } from '@playwright/test';
+import { protoCodecOf } from '../../proto/codec';
 import { FailureScope, ProtocolCode } from '../../router/shared/constants';
 import { FailureError } from '../../router/shared/errors';
 import { createMetricsRegistry } from '../../router/shared/metrics-registry';
-import { PAYLOAD_CODECS } from '../../router/shared/payloads';
+import { type IPayloadCodec, PAYLOAD_CODECS } from '../../router/shared/payloads';
 import type { IDebugEvent, IProcedure } from '../../router/shared/types';
 import { violationsOf } from '../../router/shared/violations';
 import { ProgrammerError } from '../../transport/shared/errors';
@@ -48,6 +50,35 @@ const ECHO_PROCEDURES = Object.freeze({
     validate: notEmpty,
   }),
 });
+
+/**
+ * A procedure of service 8 whose request and result are a proto2 `NamePart`, which requires both
+ * its fields, each side's codec `proto` or `raw` as given: a peer that reads its payload as `raw`
+ * sends what a Bead writer of the message never writes.
+ */
+const namePartOf = ({ request, result }: { request: 'proto' | 'raw'; result: 'proto' | 'raw' }) => {
+  const codecOf = (encoding: 'proto' | 'raw') => {
+    return encoding === 'proto'
+      ? (protoCodecOf(UninterpretedOption_NamePartSchema) as IPayloadCodec<unknown>)
+      : (PAYLOAD_CODECS.raw as IPayloadCodec<unknown>);
+  };
+
+  return Object.freeze({
+    part: requestOf({
+      admission: 'none',
+      failures: {},
+      procedure: { procedureId: 1, procedureName: 'part', serviceId: 8, serviceRevision: 1 },
+      request: codecOf(request),
+      result: codecOf(result),
+    }),
+  });
+};
+
+// a NamePart that leaves is_extension unset, `name_part` "a" alone
+const PARTIAL = Uint8Array.of(0x0a, 0x01, 0x61);
+
+const UNSET =
+  'a proto message leaves google.protobuf.UninterpretedOption.NamePart.is_extension unset';
 
 /** What `call` fails with; a call that is taken fails the test. */
 const failureOf = (call: PromiseLike<unknown>): Promise<FailureError> => {
@@ -433,5 +464,62 @@ test.describe('createServiceClient', () => {
     expect(reported).toEqual([
       new ProgrammerError('clock answers failure 2, which it does not list'),
     ]);
+  });
+
+  // spec 17.2.4, 17.9.7
+  test('fails a call whose request leaves a required field unset before anything goes, and sends nothing', async () => {
+    await using connected = await connectWorker();
+    const procedures = namePartOf({ request: 'proto', result: 'proto' });
+    const server = createServiceServer(procedures);
+    const client = createServiceClient(procedures, connected.client);
+    const seen: unknown[] = [];
+
+    server.on('part', (request, response) => {
+      seen.push(request.payload);
+
+      return response(request.payload);
+    });
+    server.offer(connected.server);
+
+    const refused = await Promise.resolve(client.request.part({ namePart: 'a' })()).then(
+      () => {
+        throw new Error('the call was taken');
+      },
+      (error: unknown) => {
+        return error;
+      }
+    );
+
+    // * the codec's own refusal, its writer's, passed on: no Bead failure, nothing sent
+    expect(refused).toBeInstanceOf(TypeError);
+    expect((refused as Error).message).toBe(UNSET);
+    expect(seen).toEqual([]);
+    await expect(
+      client.request.part({ isExtension: false, namePart: 'a' })()
+    ).resolves.toMatchObject({ isExtension: false, namePart: 'a' });
+    expect(seen).toHaveLength(1);
+  });
+
+  test('fails a call whose result leaves a required field unset with PAYLOAD_UNDECODABLE', async () => {
+    await using connected = await connectWorker();
+    const server = createServiceServer(namePartOf({ request: 'raw', result: 'raw' }));
+    const client = createServiceClient(
+      namePartOf({ request: 'raw', result: 'proto' }),
+      connected.client
+    );
+
+    server.on('part', (_request, response) => {
+      return response(PARTIAL);
+    });
+    server.offer(connected.server);
+
+    const refused = await failureOf(client.request.part(Uint8Array.of())());
+
+    expect(refused).toBeInstanceOf(FailureError);
+    expect(refused).toMatchObject({
+      code: ProtocolCode.PAYLOAD_UNDECODABLE,
+      origin: 'local',
+      scope: FailureScope.PROTOCOL,
+    });
   });
 });

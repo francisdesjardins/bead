@@ -64,7 +64,7 @@ public static class Validators
 
     // strings by their code points (spec 18.5): an ordinal comparison of UTF-16 code units but
     // where a surrogate meets a unit from U+E000, which code points order the other way
-    private static readonly Comparer<string> ByCodePoints = Comparer<string>.Create((one, other) =>
+    internal static readonly Comparer<string> ByCodePoints = Comparer<string>.Create((one, other) =>
     {
         var length = Math.Min(one.Length, other.Length);
 

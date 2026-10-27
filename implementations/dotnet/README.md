@@ -48,10 +48,11 @@ src/
                                 them, the service layer a service is served and called through,
                                 the in-memory transport, the joined server transport, and a
                                 broker's core over an in-memory broker
-  Bead.Protobuf/                the check of a proto payload's records against its message's
-                                descriptor, which a generated proto codec calls before
-                                Google.Protobuf reads them, and what the validators beadc generates
-                                are made of: Bead.Core references no Google.Protobuf
+  Bead.Protobuf/                the runtime codec of a proto message, which a generated binding
+                                names: its records checked against its descriptor before
+                                Google.Protobuf reads them, its required fields judged both ways;
+                                and what the validators beadc generates are made of: Bead.Core
+                                references no Google.Protobuf
   Bead.Transport.WebSockets/    the server on Kestrel and the client on ClientWebSocket, one
                                 connection class for both
   Bead.Transport.Http/          the server on Kestrel and the client on HttpClient
@@ -459,13 +460,20 @@ the listens, the outboxes and the server's life, under one lock on the C# side.
   none or `OPAQUE`, is handed a `SessionRequest` of its connection and its header, which carries no
   transport credential.
 
-- **A `proto` payload** is read by the codec beadc generates over Google.Protobuf, which calls
-  `ProtoRecords.Check`, of `Bead.Protobuf`, first: it walks the payload's records by the message's
-  own descriptor, its shape built once and cached by it, and refuses what protobuf refuses where a
-  stock library reads on, a field at a wire type its type does not take and a map's entry with a
-  field it does not declare among them (spec 17.9, [decision
-  0028](../../docs/decisions/0028-a-proto-payloads-records-are-read-against-its-message-before-its-library-reads-them.md)).
-  A project that binds `proto` references `Bead.Protobuf`, which carries Google.Protobuf with it.
+- **A `proto` payload** is read and written by `ProtoCodecs.Of<T>()`, of `Bead.Protobuf`, which
+  the code beadc generates names, and which holds spec 17.9 once over Google.Protobuf.
+  `ProtoRecords.Check` walks the payload's records by the message's own descriptor first, its
+  shape built once and cached by it, and refuses what protobuf refuses where a stock library reads
+  on, a field at a wire type its type does not take and a map's entry with a field it does not
+  declare among them ([decision
+  0028](../../docs/decisions/0028-a-proto-payloads-records-are-read-against-its-message-before-its-library-reads-them.md));
+  a singular closed enum's record of a number its enum does not declare is dropped before the
+  library reads (17.9.8). `ProtoRequired.Check` then refuses a message that leaves a field of
+  `LEGACY_REQUIRED` presence unset, at any depth but inside an extension or an `Any`, reading and
+  writing, with a `FormatException` in the same words (17.9.7, [decision
+  0042](../../docs/decisions/0042-a-proto-message-that-leaves-a-required-field-unset-neither-reads-nor-writes-and-a-gateway-refuses-it-where-its-server-would.md)).
+  `ProtoCodecs.Read` reads a message by its descriptor so, as a gateway reads a result. A project
+  that binds `proto` references `Bead.Protobuf`, which carries Google.Protobuf with it.
 - **A `proto` request's rules** are protovalidate's options on its message, which beadc compiles
   into each side's validator ([decision
   0035](../../docs/decisions/0035-a-payload-that-reads-is-held-to-its-messages-rules-before-its-resolver-sees-it.md)):

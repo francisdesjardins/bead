@@ -34,6 +34,7 @@ public sealed class JsonFormException : Exception
 
         At = options.At;
         Place = options.Place;
+        IsUnset = options.IsUnset;
     }
 
     /// <summary>The tokens of the place its reading met it, from the value read; none for its text's own.</summary>
@@ -41,6 +42,12 @@ public sealed class JsonFormException : Exception
 
     /// <summary>Where its request carried it, a parameter or a pointer of 7.4; none where nothing places it.</summary>
     public RequestPlace? Place { get; }
+
+    /// <summary>
+    /// Whether it is 5.2's step 4, a required field unset, which a binding places as a violation's
+    /// field is (7.4): <see cref="At"/> is the member its object lacks.
+    /// </summary>
+    public bool IsUnset { get; }
 
     /// <summary>Its place's pointer, the value read the body whole; none where its reading met it nowhere.</summary>
     [SuppressMessage(
@@ -70,6 +77,9 @@ public sealed record JsonFormExceptionOptions
 
     /// <summary>Where its request carried it; none where nothing places it.</summary>
     public RequestPlace? Place { get; init; }
+
+    /// <summary>Whether it is 5.2's step 4, a required field unset.</summary>
+    public bool IsUnset { get; init; }
 
     /// <summary>What refused it first; none.</summary>
     public Exception? InnerException { get; init; }

@@ -1,3 +1,6 @@
+using Bead.Codecs.V1;
+using Google.Protobuf;
+
 namespace Bead.Tests;
 
 /// <summary>
@@ -439,6 +442,51 @@ public sealed class ServiceServerTests
         Assert.Equal(
             ["requester clock", "requester guarded", "resolver login", "resolver news", "resolver sayHello"],
             server.Intercepted.Declared.Order(StringComparer.Ordinal));
+    }
+
+    [Fact]
+    public async Task Answers_PAYLOAD_UNDECODABLE_to_a_request_that_leaves_a_required_field_unset_before_its_resolver()
+    {
+        await using var link = await ServiceLink.Open();
+        var server = new ServiceServer<RequiredProcedures, string>([RequiredProcedures.Echo]);
+        var client = new ServiceClient<RequiredProcedures>([RequiredProcedures.RawEcho], link.Client);
+        var resolved = new List<Probe>();
+
+        server.On(RequiredProcedures.Echo, (request, response) =>
+        {
+            resolved.Add(request.Payload);
+
+            return response.Answer(request.Payload);
+        });
+        server.Offer(link.Server);
+
+        // * a peer of no such codec sends what the codec refuses to read (spec 17.9.7)
+        Assert.Equal((ushort)ProtocolCode.PayloadUndecodable, await CodeOf(client.RequesterOf(RequiredProcedures.RawEcho)(RequiredProcedures.Unset.ToByteArray())()));
+        Assert.Empty(resolved);
+        Assert.Empty(link.Reported);
+    }
+
+    [Fact]
+    public async Task Answers_PROCEDURE_FAILED_to_a_result_that_leaves_a_required_field_unset_and_reports_it()
+    {
+        await using var link = await ServiceLink.Open();
+        var server = new ServiceServer<RequiredProcedures, string>([RequiredProcedures.Echo]);
+        var client = new ServiceClient<RequiredProcedures>([RequiredProcedures.Echo], link.Client);
+
+        server.On(RequiredProcedures.Echo, (_, response) =>
+        {
+            return response.Answer(RequiredProcedures.Unset);
+        });
+        server.Offer(link.Server);
+
+        Assert.Equal((ushort)ProtocolCode.ProcedureFailed, await CodeOf(client.RequesterOf(RequiredProcedures.Echo)(new Probe())()));
+
+        // * reported in the codec's words, its writer's (spec 17.2, item 5)
+        var reported = await link.FirstReported.WaitAsync(Patience, Cancelled);
+
+        Assert.IsType<FormatException>(reported);
+        Assert.Equal(RequiredProcedures.Words, reported.Message);
+        Assert.Single(link.Reported);
     }
 
     [Fact]

@@ -53,9 +53,6 @@ const SERVER_MEMBERS: readonly (readonly [string, string])[] = [
   ['proceduresWithoutResolver', 'The procedures a client calls that no resolver answers yet.'],
 ];
 
-// the decoder's nesting limit, the TypeScript side's own (decision 0031)
-const RECURSION_LIMIT = 101;
-
 // helpers
 
 // a string as a single-quoted literal, whatever it holds
@@ -164,37 +161,11 @@ export const printService = (
       ];
     }
 
-    const message = messageOf(binding.message);
-    const schema = f.importSchema(message);
+    const schema = f.importSchema(messageOf(binding.message));
 
-    // ! the check first, by the schema protobuf-es reads with: it refuses what protobuf refuses
-    // where protobuf-es reads on
-    return [
-      fromRuntime('payloadCodecOf'),
-      '<',
-      f.importShape(message),
-      ', ',
-      f.import('MessageInitShape', '@bufbuild/protobuf', true),
-      '<typeof ',
-      schema,
-      '>>({ decode: (bytes) => { ',
-      f.import('checkProtoRecords', protoRuntime),
-      '(bytes, ',
-      schema,
-      '); return ',
-      f.runtime.fromBinary,
-      '(',
-      schema,
-      `, bytes, { recursionLimit: ${String(RECURSION_LIMIT)} }); }, encode: (given) => { return `,
-      f.runtime.toBinary,
-      '(',
-      schema,
-      ', ',
-      f.runtime.create,
-      '(',
-      schema,
-      ', given)); } })',
-    ];
+    // * the runtime's codec of the schema: spec 17.9 whole, the records checked before protobuf-es
+    // reads, the bound, and a required field unset refused both ways (decisions 0028 and 0042)
+    return [f.import('protoCodecOf', protoRuntime), '(', schema, ')'];
   };
   const server = [fromRuntime('IServiceServer', true), `<typeof ${procedures}, Data>`];
   const client = [fromRuntime('IServiceClient', true), `<typeof ${procedures}>`];

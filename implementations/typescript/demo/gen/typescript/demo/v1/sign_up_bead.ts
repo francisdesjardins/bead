@@ -3,13 +3,11 @@
 // Messages: protoc-gen-es 2.16.0, for @bufbuild/protobuf 2.13.0 or later.
 
 import type { IPatternTable, IViolationRule, IViolationSink } from "../../../../../src/proto/proto";
-import { checkProtoRecords, codePointLength, matchesPattern, validatorOf } from "../../../../../src/proto/proto";
-import type { SignUpRequest, SignUpResponse } from "./sign_up_pb";
+import { codePointLength, matchesPattern, protoCodecOf, validatorOf } from "../../../../../src/proto/proto";
+import type { SignUpRequest } from "./sign_up_pb";
 import { SignUpRequestSchema, SignUpResponseSchema } from "./sign_up_pb";
 import type { IServiceClient, IServiceClientOptions, IServiceServer, ServiceResolvers, ServiceServerOptions } from "../../../../../src/service/service";
-import { createServiceClient, createServiceServer, failuresOf, GENERATED_CODE_SUPPORTS_VERSION_4, payloadCodecOf, requestOf } from "../../../../../src/service/service";
-import type { MessageInitShape } from "@bufbuild/protobuf";
-import { create, fromBinary, toBinary } from "@bufbuild/protobuf";
+import { createServiceClient, createServiceServer, failuresOf, GENERATED_CODE_SUPPORTS_VERSION_6, requestOf } from "../../../../../src/service/service";
 
 
 // * each request's rules, judged before its resolver, every rule a site of its own (spec 18, decision 0035)
@@ -107,8 +105,8 @@ export const SignUpProcedures = Object.freeze({
     admission: 'none',
     failures: {},
     procedure: { procedureId: 1, procedureName: 'signUp', serviceId: 2, serviceRevision: 1 },
-    request: payloadCodecOf<SignUpRequest, MessageInitShape<typeof SignUpRequestSchema>>({ decode: (bytes) => { checkProtoRecords(bytes, SignUpRequestSchema); return fromBinary(SignUpRequestSchema, bytes, { recursionLimit: 101 }); }, encode: (given) => { return toBinary(SignUpRequestSchema, create(SignUpRequestSchema, given)); } }),
-    result: payloadCodecOf<SignUpResponse, MessageInitShape<typeof SignUpResponseSchema>>({ decode: (bytes) => { checkProtoRecords(bytes, SignUpResponseSchema); return fromBinary(SignUpResponseSchema, bytes, { recursionLimit: 101 }); }, encode: (given) => { return toBinary(SignUpResponseSchema, create(SignUpResponseSchema, given)); } }),
+    request: protoCodecOf(SignUpRequestSchema),
+    result: protoCodecOf(SignUpResponseSchema),
     validate: validatorOf(SignUpRequestSchema, rulesOfSignUpRequest),
   }),
 });
@@ -212,4 +210,4 @@ export class SignUpClient {
 }
 
 // the contract with the runtime this file needs: an older runtime lacks the constant, and fails here
-void GENERATED_CODE_SUPPORTS_VERSION_4;
+void GENERATED_CODE_SUPPORTS_VERSION_6;

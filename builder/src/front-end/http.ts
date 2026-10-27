@@ -8,7 +8,8 @@
 // OpenAPI document describes. A well-known type of `google/protobuf/` is never entered: its JSON is
 // its own form. And the rules a `.proto` alone can judge, each by name, over the descriptors: a
 // variable's field, a body, a response body, a `custom` pattern, a binding within a binding, a
-// binding whose body is not its rule's, a field the query cannot carry, an `update_mask`, an `Any`.
+// binding whose body is not its rule's, a field the query cannot carry, an `update_mask`, a required
+// field no part of a route sets, a `patch` whose body's message requires a field, an `Any`.
 // What a blueprint can judge, a template's grammar among it, is `check-blueprint.ts`'s.
 
 // dependencies
@@ -41,6 +42,7 @@ import {
   NULL_VALUE,
   parseTemplate,
   queryCarries,
+  requiredUnboundOf,
   type ITemplate,
   WELL_KNOWN_MESSAGES,
 } from '../model/routes.ts';
@@ -226,6 +228,11 @@ const fieldEntryOf = (field: DescField): IFieldEntry => {
     ...(label === undefined ? {} : { label }),
     ...(key === undefined ? {} : { key }),
     presence,
+    // * proto2's required, an edition's LEGACY_REQUIRED: a message that leaves it unset neither
+    // reads nor writes (spec 17.9.7)
+    ...(field.presence === FeatureSet_FieldPresence.LEGACY_REQUIRED
+      ? { legacyRequired: true as const }
+      : {}),
     ...(field.oneof === undefined ? {} : { oneof: field.oneof.name }),
     ...(description === undefined ? {} : { description }),
     ...(field.deprecated ? { deprecated: true as const } : {}),
@@ -435,8 +442,9 @@ export const shapeEntriesOf = (
  * The findings of `google.api.http` over `input`'s procedures that a `.proto` alone can judge, each
  * by its rule: a `custom` pattern, a binding within a binding, a binding whose body is not its
  * rule's, a variable's field, a body, a response body, a field a mapped `get` or `delete` leaves
- * the query that it cannot carry, a `patch`'s `update_mask` of another type, and an `Any` a binding
- * reaches.
+ * the query that it cannot carry, a `patch`'s `update_mask` of another type, a field of
+ * `LEGACY_REQUIRED` presence no part of a rule's request sets, a `patch` whose derived mask names a
+ * required field on every call, and an `Any` a binding reaches.
  */
 export const checkHttp = (input: IProtoInput): IDiagnostic[] => {
   const diagnostics: IDiagnostic[] = [];
@@ -605,6 +613,60 @@ export const checkHttp = (input: IProtoInput): IDiagnostic[] => {
           file: mask.parent.file,
           path: fieldPathOf(mask),
           message: `${name}'s request holds an update_mask that is no ${FIELD_MASK}: a gateway fills none from its PATCH's body (AIP-134)`,
+        });
+      }
+
+      // * a field protobuf requires that neither the template, the body nor the query sets: every
+      // call is refused (transcoding 5.2, step 4)
+      const unbound = nativeRequest
+        ? undefined
+        : requiredUnboundOf(request.typeName, {
+            messages: entries,
+            variables,
+            ...(rule.body === undefined ? {} : { body: rule.body }),
+          });
+
+      if (unbound !== undefined) {
+        report('HTTP_REQUIRED_UNBOUND', {
+          file: method.parent.file,
+          path: places.template,
+          message: `${name}'s ${rule.method.toLowerCase()} rule leaves ${unbound} unset whatever its caller sends: protobuf requires it, and neither its template, its body nor its query can set it, so a gateway refuses every call to it (transcoding 5.2)`,
+        });
+      }
+
+      // * a patch whose mask is derived from its body: a required field of the body's message, which
+      // no variable binds, is among its paths on every call (transcoding 4.5, AIP-203)
+      const body =
+        rule.method === 'PATCH' && rule.body !== undefined && rule.body !== '*'
+          ? request.fields.find((field) => {
+              return field.name === rule.body;
+            })
+          : undefined;
+      const held = body?.fieldKind === 'message' ? body.message : undefined;
+      const required =
+        held !== undefined &&
+        !WELL_KNOWN_MESSAGES.has(held.typeName) &&
+        mask?.fieldKind === 'message' &&
+        mask.message.typeName === FIELD_MASK
+          ? held.fields.filter((field) => {
+              return (
+                field.presence === FeatureSet_FieldPresence.LEGACY_REQUIRED &&
+                !variables.has(`${rule.body ?? ''}.${field.name}`)
+              );
+            })
+          : [];
+
+      if (held !== undefined && required.length > 0) {
+        const names = required
+          .map((field) => {
+            return field.name;
+          })
+          .join(', ');
+
+        report('HTTP_PATCH_REQUIRED', {
+          file: method.parent.file,
+          path: places.body,
+          message: `${name}'s patch rule derives its update_mask from its body, whose ${held.typeName} requires ${names}: the mask names ${required.length === 1 ? 'it' : 'them'} on every call, and a caller keeps ${required.length === 1 ? 'it' : 'them'} unchanged only by an update_mask of its own (transcoding 4.5, AIP-203)`,
         });
       }
     }

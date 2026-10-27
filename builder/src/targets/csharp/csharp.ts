@@ -23,7 +23,11 @@ import {
   FileDescriptorSetSchema,
 } from '@bufbuild/protobuf/wkt';
 
-import { type IServiceEntry, VALIDATE_FEATURE } from '../../model/blueprint.ts';
+import {
+  type IServiceEntry,
+  LEGACY_REQUIRED_FEATURE,
+  VALIDATE_FEATURE,
+} from '../../model/blueprint.ts';
 import { judgedMessagesOf, plansOf } from '../../model/rules.ts';
 import { csharpPathOf, protocPin } from '../../protoc.ts';
 import { csharpNamespaceOf } from '../names.ts';
@@ -85,7 +89,7 @@ const messageTypesOf = (files: readonly FileDescriptorProto[]): Map<string, stri
 /** The C# target: a `Bead.cs` for each service's file, over the service layer. */
 export const csharpTarget: ITarget<ICSharpOptions> = Object.freeze({
   name: 'csharp',
-  features: new Set([VALIDATE_FEATURE]),
+  features: new Set([LEGACY_REQUIRED_FEATURE, VALIDATE_FEATURE]),
   http: true,
   generate: (input: ITargetInput, options: ICSharpOptions): readonly IGeneratedFile[] => {
     const { blueprint } = input;
@@ -177,7 +181,7 @@ export const csharpTarget: ITarget<ICSharpOptions> = Object.freeze({
         '// the contract with the runtime this file needs: an older runtime lacks the constant, and fails here',
         'file static class GeneratedCodeContract',
         '{',
-        '    private const bool Supported = global::Bead.GeneratedCode.SupportsVersion4;',
+        '    private const bool Supported = global::Bead.GeneratedCode.SupportsVersion6;',
         '}',
         '',
       ];

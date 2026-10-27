@@ -6,7 +6,14 @@
 
 // dependencies
 
-import { type DescField, type DescMessage, type Message, ScalarType } from '@bufbuild/protobuf';
+import {
+  create,
+  type DescField,
+  type DescMessage,
+  type Message,
+  ScalarType,
+} from '@bufbuild/protobuf';
+import { FieldMaskSchema } from '@bufbuild/protobuf/wkt';
 import { ProgrammerError } from '../transport/shared/errors';
 import {
   cutOf,
@@ -15,7 +22,9 @@ import {
   type ITypeRegistry,
   type JsonNode,
   JsonFormError,
+  judgeUnset,
   pointerOf,
+  readDraft,
   readJsonText,
   readMessage,
   type RequestPlace,
@@ -288,15 +297,21 @@ const isWithin = (tokens: readonly IJsonToken[], path: readonly DescField[]): bo
 /**
  * Where the request carried the value its reading refused at `at` (7.4): a variable's field path as
  * its template writes it, or a query's by JSON names, an item's index left out; or a pointer into
- * its body, the field a `body` names its root.
+ * its body, the field a `body` names its root. A field left unset (5.2, step 4) is placed as a
+ * violation's field is: a parameter by JSON names where the route's query would bind it, its route
+ * of no body or of a body naming another field, else the member the body's object lacks.
  */
 const placeOfReading = (
   at: readonly IJsonToken[],
   {
+    bodyField,
+    isUnset,
     queried,
     routeBody,
     variables,
   }: {
+    bodyField: DescField | undefined;
+    isUnset: boolean;
     queried: readonly (readonly DescField[])[];
     routeBody: string | undefined;
     variables: readonly { fieldPath: string; path: readonly DescField[] }[];
@@ -318,16 +333,35 @@ const placeOfReading = (
     return { parameter: jsonNamesOf(parameter) };
   }
 
+  const isInBody =
+    routeBody === '*' || (bodyField !== undefined && at[0]?.text === bodyField.jsonName);
+
+  if (isUnset && !isInBody) {
+    return {
+      parameter: at
+        .map(({ text }) => {
+          return text;
+        })
+        .join('.'),
+    };
+  }
+
   return { pointer: pointerOf(routeBody === '*' ? at : at.slice(1)) };
 };
 
 /** What `read` gives of a request, a refusal of its reading placed where the request carried it. */
-const placed = <T>(read: () => T, place: (at: readonly IJsonToken[]) => RequestPlace): T => {
+const placed = <T>(
+  read: () => T,
+  place: (at: readonly IJsonToken[], isUnset: boolean) => RequestPlace
+): T => {
   try {
     return read();
   } catch (error) {
     if (error instanceof JsonFormError && error.at !== undefined) {
-      throw new JsonFormError(error.reason, { place: place(error.at) });
+      throw new JsonFormError(error.reason, {
+        isUnset: error.isUnset,
+        place: place(error.at, error.isUnset),
+      });
     }
 
     throw error;
@@ -368,13 +402,6 @@ const maskPathsOf = (
   });
 };
 
-/** A snake-case path's lowerCamelCase, as a FieldMask's JSON writes it. */
-const camelOf = (path: string): string => {
-  return path.replaceAll(/_([a-z])/gu, (_match, letter: string) => {
-    return letter.toUpperCase();
-  });
-};
-
 // definition
 
 /**
@@ -382,10 +409,11 @@ const camelOf = (path: string): string => {
  * Bead's mapping (transcoding 4): a variable by its proto names; the query's parameters by their
  * field paths, each field by its JSON name or its proto name, when its route has no body or one
  * that names a field; the body whole or that field's; and a `PATCH`'s `update_mask`, unset, the
- * paths of the keys its body holds. A field two of them set, a parameter no field path names, one of
- * a message, a map or a repeated message, or of a field its route binds otherwise, a field named
- * twice, or a query under a body of the request whole, is a {@link JsonFormError}, as is every
- * refusal of the reading: a gateway answers each 400 `PAYLOAD_UNDECODABLE`.
+ * paths of the keys its body holds by proto names, set on the message once it is read (4.5); then
+ * step 4 of 5.2, a required field unset. A field two of them set, a parameter no field path names,
+ * one of a message, a map or a repeated message, or of a field its route binds otherwise, a field
+ * named twice, or a query under a body of the request whole, is a {@link JsonFormError}, as is
+ * every refusal of the reading: a gateway answers each 400 `PAYLOAD_UNDECODABLE`.
  */
 export const bindRequest = (schema: DescMessage, options: IBindingOptions): Message => {
   const { body, isPatch = false, query, registry, routeBody, variables } = options;
@@ -510,34 +538,45 @@ export const bindRequest = (schema: DescMessage, options: IBindingOptions): Mess
     setAt(draft, { parameter: jsonNamesOf(path), path, value: { items, kind: 'array' } });
   }
 
-  // * a PATCH's update_mask, unset by its query and its body, the keys its body holds (4.5)
   const mask = schema.fields.find((field) => {
     return field.name === UPDATE_MASK;
   });
-
-  if (
+  const derived =
     isPatch &&
     bodyField?.fieldKind === 'message' &&
     bodyNode !== undefined &&
     mask?.fieldKind === 'message' &&
+    mask.oneof === undefined &&
     mask.message.typeName === FIELD_MASK &&
     !isMaskGiven
-  ) {
-    const paths = maskPathsOf(bodyField.message, { node: bodyNode, prefix: '' });
-
-    setAt(draft, {
-      parameter: UPDATE_MASK,
-      path: [mask],
-      value: { kind: 'string', value: paths.map(camelOf).join(',') },
-    });
-  }
+      ? { mask, paths: maskPathsOf(bodyField.message, { node: bodyNode, prefix: '' }) }
+      : undefined;
 
   return placed(
     () => {
-      return readMessage(schema, { node: draft, registry });
+      const message = readDraft(schema, { node: draft, registry });
+
+      // * a PATCH's update_mask, unset by its query and its body, the keys its body holds by proto
+      // names, set on the message read: never read back through 5.4.3, which no `line_1` survives
+      if (derived !== undefined) {
+        (message as Message & Record<string, unknown>)[derived.mask.localName] = create(
+          FieldMaskSchema,
+          { paths: derived.paths }
+        );
+      }
+
+      judgeUnset(schema, message);
+
+      return message;
     },
-    (at) => {
-      return placeOfReading(at, { queried, routeBody, variables: variablePaths });
+    (at, isUnset) => {
+      return placeOfReading(at, {
+        bodyField,
+        isUnset,
+        queried,
+        routeBody,
+        variables: variablePaths,
+      });
     }
   );
 };

@@ -1,0 +1,43 @@
+edition = "2023";
+
+package x.v1;
+
+import "bead/options.proto";
+import "google/api/annotations.proto";
+import "google/protobuf/field_mask.proto";
+
+option (bead.file) = {
+  admission: {
+    none: {}
+  }
+};
+
+// A thing, its count required.
+message Thing {
+  string name = 1;
+  int32 count = 2 [features.field_presence = LEGACY_REQUIRED];
+  string note = 3;
+}
+
+// A patch of a thing, its mask derived from its body.
+message UpdateThingRequest {
+  Thing thing = 1;
+  google.protobuf.FieldMask update_mask = 2;
+}
+
+// A patch whose derived mask names the count on every call.
+service XService {
+  option (bead.service) = {
+    id: 1
+    revision: 1
+  };
+
+  // Updates.
+  rpc Update(UpdateThingRequest) returns (Thing) {
+    option (bead.procedure) = {id: 1};
+    option (google.api.http) = {
+      patch: "/v1/things/{thing.name}"
+      body: "thing"
+    };
+  }
+}

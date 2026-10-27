@@ -24,6 +24,7 @@ test.describe('the proto entry', () => {
       'isUnique',
       'judgeRules',
       'matchesPattern',
+      'protoCodecOf',
       'utf8Length',
       'validatorOf',
     ]);

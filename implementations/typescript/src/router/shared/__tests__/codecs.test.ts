@@ -7,11 +7,11 @@
 // dependencies
 
 import { readFileSync } from 'node:fs';
-import { create, fromBinary, type MessageInitShape, toBinary } from '@bufbuild/protobuf';
+import { isFieldSet, type MessageInitShape } from '@bufbuild/protobuf';
 import { expect, test } from '@playwright/test';
-import { checkProtoRecords } from '../../../proto/records';
+import { protoCodecOf } from '../../../proto/codec';
 import { ProgrammerError } from '../../../transport/shared/errors';
-import { type IPayloadCodec, PAYLOAD_CODECS, payloadCodecOf } from '../payloads';
+import { type IPayloadCodec, PAYLOAD_CODECS } from '../payloads';
 import { type Probe, ProbeSchema } from './codecs_pb';
 
 // interfaces
@@ -51,12 +51,16 @@ interface IProbeRead extends IProbeHeld {
   children?: Record<string, IProbeHeld>;
   counts?: number[];
   delimited?: IProbeHeld;
+  /** The number of Shade, a closed enum, its records set it to, where they set it (spec 17.9.8). */
+  shade?: number;
   stamps?: number[];
 }
 
 /** A `Probe` given to a writer, one field set or none: its text as UTF-16 code units. */
 interface IProbeValue {
   child?: Record<string, never>;
+  /** A `Needs`, each of its required fields set where it is given (spec 17.9.7). */
+  needs?: { must?: number; shade?: number };
   number?: number;
   text?: string;
 }
@@ -86,22 +90,8 @@ const LANGUAGE = 'TypeScript';
 // the string the form loneSurrogate names: a, U+D800, b
 const LONE_SURROGATE = `a${String.fromCharCode(0xd800)}b`;
 
-/**
- * `Probe`'s codec, as generated code makes a `proto` binding's: its records checked against its
- * descriptor, then protobuf-es's reader with spec 17.9.3's bound, and its writer over the
- * initializer it takes.
- */
-const PROBE_CODEC = payloadCodecOf<Probe, MessageInitShape<typeof ProbeSchema>>({
-  decode: (bytes) => {
-    checkProtoRecords(bytes, ProbeSchema);
-
-    // ! protobuf-es counts the top message: 101 is spec 17.9's 100 below it
-    return fromBinary(ProbeSchema, bytes, { recursionLimit: 101 });
-  },
-  encode: (given) => {
-    return toBinary(ProbeSchema, create(ProbeSchema, given));
-  },
-});
+// `Probe`'s codec, as generated code makes a `proto` binding's: the runtime's codec of its schema
+const PROBE_CODEC = protoCodecOf(ProbeSchema);
 
 // each encoding's codec, by the file's names
 const CODECS_BY_ENCODING = Object.freeze({ ...PAYLOAD_CODECS, proto: PROBE_CODEC });
@@ -185,13 +175,21 @@ const readOf = (probe: Probe): IProbeRead => {
           ),
         }),
     ...(probe.delimited === undefined ? {} : { delimited: heldOf(probe.delimited) }),
+    // * a field of its own presence, its default on the prototype: only its presence tells it was set
+    ...(isFieldSet(probe, ProbeSchema.field.shade) ? { shade: probe.shade } : {}),
   };
 };
 
 /** A `Probe`'s initializer, as a row gives one. */
-const probeOf = ({ child, number, text }: IProbeValue): MessageInitShape<typeof ProbeSchema> => {
+const probeOf = ({
+  child,
+  needs,
+  number,
+  text,
+}: IProbeValue): MessageInitShape<typeof ProbeSchema> => {
   return {
     ...(child === undefined ? {} : { child: {} }),
+    ...(needs === undefined ? {} : { needs }),
     ...(number === undefined ? {} : { number }),
     ...(text === undefined ? {} : { text: stringOfUnits(text) }),
   };

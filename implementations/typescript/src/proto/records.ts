@@ -7,6 +7,7 @@
 // dependencies
 
 import type { DescField, DescMessage, ScalarType } from '@bufbuild/protobuf';
+import type { FeatureSet_FieldPresence } from '@bufbuild/protobuf/wkt';
 
 // interfaces
 
@@ -20,11 +21,23 @@ interface IFieldShape {
   readonly takes: number;
 }
 
+/**
+ * What spec 17.9.7's walk takes of a message that reaches a field of `LEGACY_REQUIRED` presence:
+ * those it declares, and the fields that hold a message reaching one, each by number.
+ */
+export interface IRequiredShape {
+  /** Its singular, repeated and map fields whose message reaches one, a group's among them. */
+  readonly holders: readonly DescField[];
+  readonly required: readonly DescField[];
+}
+
 /** A message's fields by number, and whether it takes a field it does not declare. */
 interface IMessageShape {
   readonly fields: Map<number, IFieldShape>;
   /** A map's entry takes its key and its value alone (spec 17.9.6). */
   readonly isClosed: boolean;
+  /** Its walk's facts once its closure is searched: `null` where it reaches no required field. */
+  required?: IRequiredShape | null;
 }
 
 /** One walk of a payload: where it is, where the message it is in ends, how deep, in which group. */
@@ -56,6 +69,10 @@ const NOT_PACKED = 0;
 const VARINTS = 1;
 
 const NO_GROUP = 0;
+
+// ! `FeatureSet.FieldPresence.LEGACY_REQUIRED` of descriptor.proto, which protobuf-es gives proto2's
+// `required` too: a literal of its type, since no protobuf code loads here
+const LEGACY_REQUIRED: FeatureSet_FieldPresence.LEGACY_REQUIRED = 3;
 
 // what a varint's byte at each place is worth, ten places at most
 const PLACES = Object.freeze(
@@ -187,6 +204,97 @@ const shapeOf = (message: DescMessage): IMessageShape => {
   }
 
   return shape;
+};
+
+/** Whether `field` is of `LEGACY_REQUIRED` presence: a singular field, outside any oneof. */
+const isRequired = (field: DescField): boolean => {
+  return field.presence === LEGACY_REQUIRED;
+};
+
+/** The message a field's records hold, a list's items' or a map's values' among them; none for a scalar. */
+const heldOf = (field: DescField): DescMessage | undefined => {
+  switch (field.fieldKind) {
+    case 'message':
+      return field.message;
+    case 'list':
+      return field.listKind === 'message' ? field.message : undefined;
+    case 'map':
+      return field.mapKind === 'message' ? field.message : undefined;
+    case 'enum':
+    case 'scalar':
+      return undefined;
+  }
+};
+
+/** Fields by number, as spec 17.9.7's walk takes them. */
+const byNumber = (one: DescField, other: DescField): number => {
+  return one.number - other.number;
+};
+
+/**
+ * Searches the closure of `root` for what reaches a required field, and sets each shape's walk
+ * facts: one least fixed point over the whole closure, cycles included, so no message is judged
+ * from a search still under way. A message searched before is taken as it was judged. An `Any`
+ * holds its message as bytes and an extension is no field of the descriptor, so neither is reached.
+ */
+const searchRequired = (root: DescMessage): void => {
+  const closure: DescMessage[] = [];
+  const seen = new Set<DescMessage>();
+  const pending = [root];
+
+  for (let message = pending.pop(); message !== undefined; message = pending.pop()) {
+    if (seen.has(message) || shapeOf(message).required !== undefined) {
+      continue;
+    }
+
+    seen.add(message);
+    closure.push(message);
+
+    for (const field of message.fields) {
+      const held = heldOf(field);
+
+      if (held !== undefined) {
+        pending.push(held);
+      }
+    }
+  }
+
+  const reaching = new Set<DescMessage>();
+  const reaches = (message: DescMessage): boolean => {
+    const known = shapeOf(message).required;
+
+    return reaching.has(message) || (known !== undefined && known !== null);
+  };
+  const holds = (field: DescField): boolean => {
+    const held = heldOf(field);
+
+    return held !== undefined && reaches(held);
+  };
+
+  for (let isMoved = true; isMoved;) {
+    isMoved = false;
+
+    for (const message of closure) {
+      if (
+        !reaching.has(message) &&
+        message.fields.some((field) => {
+          return isRequired(field) || holds(field);
+        })
+      ) {
+        reaching.add(message);
+        isMoved = true;
+      }
+    }
+  }
+
+  for (const message of closure) {
+    shapeOf(message).required = reaching.has(message)
+      ? {
+          holders: message.fields.filter(holds).toSorted(byNumber),
+          required: message.fields.filter(isRequired).toSorted(byNumber),
+        }
+      : null;
+  }
 };
 
 /** The varint at the reader, ten bytes at most and within its message; the reader moves past it. */
@@ -391,24 +499,29 @@ const walkRecords = (reader: IReader, shape: IMessageShape): void => {
  * a map's entry each counting (17.9.3); a field at a wire type its type does not take, in a map's
  * entry too (17.9.5); and a map's entry with a field other than its key and its value (17.9.6).
  * It reads nothing of the message and allocates nothing per record; each message's shape is built
- * once, from its descriptor.
+ * once, from its descriptor. `protoCodecOf` runs it first, as generated code reads a payload.
  *
  * @example
- * import { create, fromBinary, toBinary } from '@bufbuild/protobuf';
+ * import { fromBinary } from '@bufbuild/protobuf';
  * import { checkProtoRecords } from '@francisdesjardins/bead/proto';
- * import { payloadCodecOf } from '@francisdesjardins/bead/service';
  *
- * const sayHelloRequest = payloadCodecOf({
- *   decode: (bytes) => {
- *     checkProtoRecords(bytes, SayHelloRequestSchema);
+ * checkProtoRecords(bytes, SayHelloRequestSchema);
  *
- *     return fromBinary(SayHelloRequestSchema, bytes, { recursionLimit: 101 });
- *   },
- *   encode: (given) => {
- *     return toBinary(SayHelloRequestSchema, create(SayHelloRequestSchema, given));
- *   },
- * });
+ * const request = fromBinary(SayHelloRequestSchema, bytes, { recursionLimit: 101 });
  */
 export const checkProtoRecords = (bytes: Uint8Array, message: DescMessage): void => {
   walkRecords({ at: 0, bytes, depth: 0, end: bytes.length, group: NO_GROUP }, shapeOf(message));
+};
+
+/**
+ * What spec 17.9.7's walk takes of `message`: its fields of `LEGACY_REQUIRED` presence and those
+ * that hold a message reaching one; none where it reaches none, which costs one lookup once its
+ * closure is searched.
+ */
+export const requiredShapeOf = (message: DescMessage): IRequiredShape | undefined => {
+  if (shapeOf(message).required === undefined) {
+    searchRequired(message);
+  }
+
+  return shapeOf(message).required ?? undefined;
 };
