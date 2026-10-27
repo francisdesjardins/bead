@@ -598,9 +598,9 @@ public sealed class MqttBrokerAdapter : IBrokerAdapter, IAsyncDisposable
         {
             throw new OperationCanceledException($"what the link of {Id} was asked was given up", reason, asked.Token);
         }
-        // ! MQTTnet may fail what waits on a link as it goes down before its end is told: a lost
-        // link all the same
-        catch (Exception reason) when (asked.Link.IsEnded || reason is MqttClientDisconnectedException or MqttClientUnexpectedDisconnectReceivedException)
+        // ! MQTTnet may fail what waits on a link as it goes down before its end is told, or refuse
+        // what is asked once it knows itself down: a lost link all the same
+        catch (Exception reason) when (asked.Link.IsEnded || reason is MqttClientDisconnectedException or MqttClientUnexpectedDisconnectReceivedException or MqttClientNotConnectedException)
         {
             throw new IOException(asked.Link.Ended?.Message ?? $"the link of {Id} went down", reason);
         }

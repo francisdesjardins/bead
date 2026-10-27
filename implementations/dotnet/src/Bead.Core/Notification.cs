@@ -97,9 +97,9 @@ public interface INotification<TRequest, TNotification> : INotificationLike
 
 /// <summary>
 /// One procedure's notification: its callbacks, its one subscribing request, and its state, each
-/// field answering one question — is its request in flight, is its last callback leaving, which call
-/// subscribed, how many times it was dropped — guarded by one lock, since callbacks register from
-/// any thread.
+/// field answering one question — is the registration that subscribes in flight, is its last
+/// callback leaving, which call subscribed, how many times it was dropped — guarded by one lock,
+/// since callbacks register from any thread.
 /// </summary>
 internal sealed class Notification<TRequest, TResponse, TNotification> : INotification<TRequest, TNotification>
 {
@@ -110,7 +110,7 @@ internal sealed class Notification<TRequest, TResponse, TNotification> : INotifi
     private readonly Action<Failure?> _onDropped;
     private readonly Action<Exception?, object?> _trace;
     private readonly List<Func<TNotification, Task>> _callbacks = [];
-    private Task? _registering;
+    private (Task Subscription, Task Registration)? _registering;
     private Task? _unregistering;
     private (uint CallId, TResponse Response)? _subscription;
     private int _generation;
@@ -146,7 +146,13 @@ internal sealed class Notification<TRequest, TResponse, TNotification> : INotifi
 
         return (options) =>
         {
-            return Registering(payload, (callback, options));
+            // ! its outcome made before it runs, the very task its caller holds: a registration waiting
+            // on this one resumes once this one has settled, not as its subscription does
+            var settled = new TaskCompletionSource<INotificationRegistration>(TaskCreationOptions.RunContinuationsAsynchronously);
+
+            _ = Settle(Registering(payload, (callback, options, settled.Task)), settled);
+
+            return settled.Task;
         };
     }
 
@@ -224,9 +230,9 @@ internal sealed class Notification<TRequest, TResponse, TNotification> : INotifi
         _onDropped(failure);
     }
 
-    private async Task<INotificationRegistration> Registering(TRequest payload, (Func<TNotification, Task> Callback, RequestOptions? Options) registration)
+    private async Task<INotificationRegistration> Registering(TRequest payload, (Func<TNotification, Task> Callback, RequestOptions? Options, Task Settled) registration)
     {
-        var (callback, options) = registration;
+        var (callback, options, settled) = registration;
         int own;
 
         // listening first, so a notification the registration lets through is not lost
@@ -252,27 +258,37 @@ internal sealed class Notification<TRequest, TResponse, TNotification> : INotifi
             }
 
             TaskCompletionSource? subscribing = null;
-            Task registering;
+            (Task Subscription, Task Registration)? registering;
 
             // decided and marked at once, so two registering together send one request; a
-            // registration in flight is waited on even when the router already holds it
+            // registration in flight, until it has settled, is waited on even when the router
+            // already holds it
             lock (_gate)
             {
-                if (_registering is not { IsCompleted: false } && !_router.HasNotification(this))
+                if (_registering is not { Registration.IsCompleted: false } && !_router.HasNotification(this))
                 {
                     subscribing = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-                    _registering = subscribing.Task;
+                    _registering = (subscribing.Task, settled);
                 }
 
-                registering = _registering is { IsCompleted: false } inFlight ? inFlight : Task.CompletedTask;
+                registering = _registering is { Registration.IsCompleted: false } inFlight ? inFlight : null;
             }
 
             if (subscribing is not null)
             {
                 await Settle(Subscribing(payload, options), subscribing);
             }
+            else if (registering is { } first)
+            {
+                // the first settles before those that waited on it, whichever way it settles
+                await Quietly(first.Registration);
+            }
 
-            await registering;
+            // what the subscription said is every waiter's to hear, not what the first heard after it
+            if (registering is { } subscribed)
+            {
+                await subscribed.Subscription;
+            }
 
             // dropped with its connection meanwhile: nothing is left to listen to
             lock (_gate)
@@ -336,6 +352,13 @@ internal sealed class Notification<TRequest, TResponse, TNotification> : INotifi
         {
             gate.TrySetException(reason);
         }
+    }
+
+    // the same, the gate settling as its work did: with its result, its failure or its cancellation
+    private static async Task Settle<T>(Task<T> work, TaskCompletionSource<T> gate)
+    {
+        await Quietly(work);
+        gate.TrySetFromTask(work);
     }
 
     // the last callback out stops the notification: at the other end first, when it can be told, so
