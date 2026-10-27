@@ -94,6 +94,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- Over MQTT 5 on a WebSocket, each side sends every message to its broker as one binary frame, and
+  a page cuts its messages to 16 KiB at most, which Chromium sends whole: Mosquitto 2.1.2's WebSocket
+  listener frames what it sends amid a fragmented message as a continuation, which ends the link. A
+  page's burst keeps its link, the demo's glyph among them.
 - A WebSocket connect lets go of its socket on every failure and writes no credential that settles
   in the turn its attempt is disposed or times out.
 - A C# WebSocket connect disposed as its credential arrives reports the attempt's end, with

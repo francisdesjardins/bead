@@ -24,6 +24,7 @@ import {
 import { LARGEST_PACKET_SIZE, largestPayload } from '../mqtt-packets';
 import type { IBrokerDown, IBrokerMessage, IBrokerStart } from '../types';
 import { TLS_FIXTURE } from '../../server/__tests__/tls-fixture';
+import { createFrameRelay, unwholeOf } from './frame-relay';
 import { createMqttScript, type IMqttScript, type IScriptedLink } from './mqtt-script';
 
 // constants
@@ -1010,6 +1011,9 @@ test.describe('createMqttBrokerAdapter', () => {
 });
 
 test.describe('createMqttBrokerAdapter, against a broker over MQTT 5', () => {
+  // ! one at a time: each links as the fixture's user, and a second link of an id takes over
+  test.describe.configure({ mode: 'serial' });
+
   test('carries a link over a WebSocket of subprotocol mqtt (spec 15.25)', async () => {
     test.skip(MQTT_WS_URL === undefined && !IS_MQTT_REQUIRED, NO_BROKER);
     expect(MQTT_WS_URL, NO_BROKER).toBeDefined();
@@ -1053,6 +1057,58 @@ test.describe('createMqttBrokerAdapter, against a broker over MQTT 5', () => {
       expect(await adapter.publish({ payload: parcel, topic: ['bead', 'i', 'nobody'] })).toBe(
         BROKER_PUBLISHED.NO_SUBSCRIBER
       );
+    } finally {
+      await adapter.stop();
+    }
+  });
+
+  test('sends each WebSocket message to its broker as one binary frame, a burst past 64 KiB among them (spec 15.25)', async () => {
+    test.skip(MQTT_WS_URL === undefined && !IS_MQTT_REQUIRED, NO_BROKER);
+    expect(MQTT_WS_URL, NO_BROKER).toBeDefined();
+
+    await using relay = await createFrameRelay(MQTT_WS_URL ?? '');
+    const adapter = createMqttBrokerAdapter({
+      id: FIXTURE_USER,
+      password: MQTT_PASSWORD,
+      url: relay.url,
+    });
+    const inbox = ['bead', 'i', FIXTURE_USER];
+    const heard: Uint8Array[] = [];
+
+    adapter.on('message', (message) => {
+      heard.push(message.payload);
+      message.settle();
+    });
+    await adapter.start();
+
+    try {
+      await adapter.subscribe(inbox);
+
+      // * each the largest its broker takes, together past 64 KiB, all asked at once
+      const size = adapter.maximumPayloadBytes(inbox);
+      const payloads = Array.from({ length: Math.ceil(196_608 / size) }, (_, index) => {
+        return new Uint8Array(size).fill(index);
+      });
+
+      expect(
+        await Promise.all(
+          payloads.map((payload) => {
+            return adapter.publish({ payload, topic: inbox });
+          })
+        )
+      ).toEqual(
+        payloads.map(() => {
+          return BROKER_PUBLISHED.TAKEN;
+        })
+      );
+      await until(() => {
+        return heard.length === payloads.length;
+      });
+      expect(heard).toEqual(payloads);
+      expect(adapter.isLinked).toBe(true);
+      // * what its client sent, each message one frame: none ends no message, none continues one
+      expect(relay.frames.length).toBeGreaterThan(payloads.length);
+      expect(unwholeOf(relay.frames)).toEqual([]);
     } finally {
       await adapter.stop();
     }

@@ -1164,6 +1164,57 @@ public sealed class MqttBrokerAdapterTests : IAsyncLifetime
         }
     }
 
+    [Fact(Skip = MqttFixture.Reason, SkipUnless = nameof(IsMqtt))]
+    public async Task Sends_each_WebSocket_message_to_its_broker_as_one_binary_frame_a_burst_past_64_KiB_among_them_spec_15_25()
+    {
+        await using var relay = FrameRelay.Start(MqttFixture.WebSocketUrl);
+        await using var adapter = new MqttBrokerAdapter(new MqttBrokerAdapterOptions { Id = FixtureUser, Password = MqttFixture.Password, Uri = relay.Uri });
+        string[] inbox = ["bead", "i", FixtureUser];
+        var heard = new ConcurrentQueue<byte[]>();
+
+        adapter.Message += (message) =>
+        {
+            heard.Enqueue(message.Payload.ToArray());
+            message.Settle();
+        };
+        await adapter.Start();
+
+        try
+        {
+            await adapter.Subscribe(inbox);
+
+            // * each the largest its broker takes, together past 64 KiB, all asked at once
+            var size = (int)adapter.MaximumPayloadBytes(inbox);
+            var payloads = Enumerable.Range(0, (196_608 + size - 1) / size).Select((index) =>
+            {
+                return Enumerable.Repeat((byte)index, size).ToArray();
+            }).ToArray();
+            var published = await Task.WhenAll(payloads.Select((payload) =>
+            {
+                return adapter.Publish(new BrokerPublication { Topic = inbox, Payload = payload });
+            })).WaitAsync(Patience, Cancelled);
+
+            Assert.All(published, (outcome) =>
+            {
+                Assert.Equal(BrokerPublished.Taken, outcome);
+            });
+            await Until(() =>
+            {
+                return heard.Count == payloads.Length;
+            });
+            Assert.Equal(payloads, heard);
+            Assert.True(adapter.IsLinked);
+
+            // * what its client sent, each message one frame: none ends no message, none continues one
+            Assert.True(relay.Frames.Count > payloads.Length);
+            Assert.Empty(FrameRelay.UnwholeOf(relay.Frames));
+        }
+        finally
+        {
+            await adapter.Stop();
+        }
+    }
+
     /// <summary>Whether a broker is given, or asked for: the fixture's tests run, and fail where none is.</summary>
     public static bool IsMqtt
     {
