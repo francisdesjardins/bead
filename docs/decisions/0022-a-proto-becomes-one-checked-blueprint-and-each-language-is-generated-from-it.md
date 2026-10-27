@@ -176,8 +176,10 @@ rules in protovalidate's own shape, a service's file and full name — sits in `
 a blueprint written by hand leaves out. Beside them, under no feature, each procedure's `http`, its
 `google.api.http` rules, each of its `additional_bindings` a rule of its own in their order, and its
 `idempotency_level`, the `.proto`'s words resolved; every field of every message a binding names or
-a field of one reaches, by its name, number, JSON name, type, label, key, presence and `oneof`, and
-the enums they name, each value by its name and number, aliases in their order; a well-known type by
+a field of one reaches, by its name, number, JSON name, type, label, key, presence and `oneof`, a
+field of `LEGACY_REQUIRED` presence marked `legacyRequired: true` under the feature
+`legacy-required`, its presence `explicit`, of no label and no `oneof`, which every target and the
+document generate ([0042](0042-a-proto-message-that-leaves-a-required-field-unset-neither-reads-nor-writes-and-a-gateway-refuses-it-where-its-server-would.md)), and the enums they name, each value by its name and number, aliases in their order; a well-known type by
 its full name alone. A procedure's default routes are no member: beadc derives them, its prefix
 `beadc.yaml`'s, so a blueprint written by hand, its bindings all native, has them with nothing
 written
@@ -244,16 +246,18 @@ that takes none. A client class takes its Bead client, then the layer's options,
 a requester of each procedure its server answers, under the procedure's name, its notifications
 under `notifications`, at the windows its caller gives, unpaced by default
 ([0002](0002-a-subscription-goes-at-its-clients-pace.md)), and `on` for the commands it answers. A
-file names the contract it needs, `GENERATED_CODE_SUPPORTS_VERSION_4` or
-`GeneratedCode.SupportsVersion4`, and a route table 5, `./transcoding`'s
+file names the contract it needs, `GENERATED_CODE_SUPPORTS_VERSION_6` or
+`GeneratedCode.SupportsVersion6`, and a route table 5, `./transcoding`'s
 `GENERATED_CODE_SUPPORTS_VERSION_5` or `GeneratedCode.SupportsVersion5`, the runtimes carrying both
 ([0018](0018-a-services-procedures-are-typed-descriptors-served-and-called-through-one-layer.md)); a
 service's file imports nothing of Bead's but `./service`, and `./proto` where it binds `proto`, a
 route table `./transcoding`, each from a path relative to its output's folder or a package's name;
 the C# it writes qualifies every type as `global::Bead.` and `global::`, and a project whose code
-binds `proto` references `Bead.Protobuf`, whose `ProtoRecords.Check` its codec calls before
-Google.Protobuf reads, as the TypeScript codec calls `checkProtoRecords` before `fromBinary`
-([0028](0028-a-proto-payloads-records-are-read-against-its-message-before-its-library-reads-them.md)).
+binds `proto` references `Bead.Protobuf`, whose `ProtoCodecs.Of` is its codec, as the TypeScript
+codec is `protoCodecOf` of `./proto`, each checking a payload's records before its stock library
+reads them
+([0028](0028-a-proto-payloads-records-are-read-against-its-message-before-its-library-reads-them.md))
+and judging its required fields ([0042](0042-a-proto-message-that-leaves-a-required-field-unset-neither-reads-nor-writes-and-a-gateway-refuses-it-where-its-server-would.md)).
 The TypeScript target runs on `@bufbuild/protoplugin`, in beadc's process, its `target=ts`, its
 header written above protoplugin's imports, never its preamble, its imports printed as symbols. A
 service with no `proto` member is written at the folder's root under its name; one with a `proto`

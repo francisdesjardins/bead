@@ -12,7 +12,10 @@
   [0022](0022-a-proto-becomes-one-checked-blueprint-and-each-language-is-generated-from-it.md)'s;
   the check of a payload's records, 17.9.3's count of a group and a map's entry, 17.9.5, 17.9.6,
   `Probe`'s fields 10 to 13 and protobuf's conformance suite,
-  [0028](0028-a-proto-payloads-records-are-read-against-its-message-before-its-library-reads-them.md)'s
+  [0028](0028-a-proto-payloads-records-are-read-against-its-message-before-its-library-reads-them.md)'s;
+  17.9's items 7 and 8, a message that leaves a required field unset and a closed enum's undeclared
+  number, the runtime codec generated code calls, `Probe`'s fields 7, 8 and 14 and the reason
+  `a required field unset`, [0042](0042-a-proto-message-that-leaves-a-required-field-unset-neither-reads-nor-writes-and-a-gateway-refuses-it-where-its-server-would.md)'s
 
 ## Context
 
@@ -145,15 +148,29 @@ keeps, a known field at a wire type its type does not take among them, a row of 
 Its items 1 to 4 are this record's; 3's count of a group and a map's entry, and items 5 and 6, the
 levelings of a field at a wire type its type does not take and of a map's entry with a field it
 does not declare, are
-[0028](0028-a-proto-payloads-records-are-read-against-its-message-before-its-library-reads-them.md)'s.
+[0028](0028-a-proto-payloads-records-are-read-against-its-message-before-its-library-reads-them.md)'s;
+items 7 and 8, a message that leaves a required field unset and a closed enum's undeclared number,
+added after item 6, are [0042](0042-a-proto-message-that-leaves-a-required-field-unset-neither-reads-nor-writes-and-a-gateway-refuses-it-where-its-server-would.md)'s.
 
-**Generated code sets the bound, in both languages.** What a target writes of a `proto` binding,
-laid out here over lines: the stock library's functions passed to the runtime's codec with Bead's
+**The runtime codec sets the bound, in both languages.** What a target writes of a `proto` binding
+is the runtime's codec of its message's schema, which reads through the stock library with Bead's
 bound, the payload's records checked against its message before the library reads them
-([0028](0028-a-proto-payloads-records-are-read-against-its-message-before-its-library-reads-them.md)):
+([0028](0028-a-proto-payloads-records-are-read-against-its-message-before-its-library-reads-them.md))
+and its required fields judged once it is read ([0042](0042-a-proto-message-that-leaves-a-required-field-unset-neither-reads-nor-writes-and-a-gateway-refuses-it-where-its-server-would.md)):
 
 ```ts
-request: payloadCodecOf<SayHelloRequest, MessageInitShape<typeof SayHelloRequestSchema>>({
+request: protoCodecOf(SayHelloRequestSchema),
+```
+
+```csharp
+global::Bead.Protobuf.ProtoCodecs.Of<global::Hello.V1.SayHelloRequest>()
+```
+
+What the codec runs, laid out here over lines, its required walk and the C# side's filter of a
+closed enum's record aside:
+
+```ts
+payloadCodecOf<SayHelloRequest, MessageInitShape<typeof SayHelloRequestSchema>>({
   decode: (bytes) => {
     checkProtoRecords(bytes, SayHelloRequestSchema);
     return fromBinary(SayHelloRequestSchema, bytes, { recursionLimit: 101 });
@@ -161,7 +178,7 @@ request: payloadCodecOf<SayHelloRequest, MessageInitShape<typeof SayHelloRequest
   encode: (given) => {
     return toBinary(SayHelloRequestSchema, create(SayHelloRequestSchema, given));
   },
-}),
+});
 ```
 
 ```csharp
@@ -215,24 +232,29 @@ message Probe {
   string text = 1;
   uint32 number = 2;
   Probe child = 3;
+  Needs needs = 7;
+  repeated Needs needs_items = 8;
   repeated uint32 counts = 10;
   repeated fixed32 stamps = 11;
   map<string, Probe> children = 12;
   Probe delimited = 13 [features.message_encoding = DELIMITED];
+  Shade shade = 14 [features.field_presence = EXPLICIT];
 }
 ```
 
-Its first three fields are the ones the rows below read, beside fields it does not declare; the four
-after them, a packed record, a repeated fixed32, a map's entries and a group, are
-[0028](0028-a-proto-payloads-records-are-read-against-its-message-before-its-library-reads-them.md)'s,
-and implicit presence keeps `text` and `number` as proto3 reads them. A `proto` payload row pins an
+Its first three fields are the ones the rows below read, beside fields it does not declare; 10 to
+13, a packed record, a repeated fixed32, a map's entries and a group, are
+[0028](0028-a-proto-payloads-records-are-read-against-its-message-before-its-library-reads-them.md)'s;
+7, 8 and 14, a message of fields protobuf requires, alone and repeated, and a closed enum, are
+[0042](0042-a-proto-message-that-leaves-a-required-field-unset-neither-reads-nor-writes-and-a-gateway-refuses-it-where-its-server-would.md)'s; and implicit presence keeps `text` and `number` as proto3 reads them. A `proto` payload row pins an
 outcome: taken, with the fields read (`read`: its `text` as UTF-16 code units, its `number`, how
 deep messages nest below the top, and, where it holds them, its `counts`, its `stamps`, its
-`children` and its `delimited`), or refused, with its reason. A `proto` value row pins written bytes
+`children`, its `delimited` and its `shade`), or refused, with its reason. A `proto` value row pins written bytes
 only where protobuf fixes them, one field at a time. The schema's `encoding` takes `proto`; its
-reasons `not its message` (17.9.1) and `nested past 100` (17.9.3), derived by the regeneration
-alone, as 0016's are. `make_codecs.py` reads each row's bytes with a reader of `Probe` written with
-the standard library from protobuf's Encoding guide, and Bead's 17.9.2 to 17.9.6. The rows, those
+reasons `not its message` (17.9.1), `nested past 100` (17.9.3) and `a required field unset`
+(17.9.7), derived by the regeneration alone, as 0016's are. `make_codecs.py` reads each row's bytes
+with a reader of `Probe` written with the standard library from protobuf's Encoding guide, and
+Bead's 17.9.2 to 17.9.8. The rows, those
 [0028](0028-a-proto-payloads-records-are-read-against-its-message-before-its-library-reads-them.md)
 states aside:
 
@@ -286,8 +308,9 @@ protoc-gen-es run by buf, both from npm (`@bufbuild/protobuf`, `@bufbuild/protoc
 `@bufbuild/buf`, development dependencies), its output,
 `src/router/shared/__tests__/codecs_pb.ts`, committed and held to what buf writes by `yarn check`;
 the C# side with Grpc.Tools' `<Protobuf Include>` in `Bead.Core.Tests`, beside Google.Protobuf,
-generated at each build. Each plays the rows through `payloadCodecOf` and `PayloadCodecs.Of` over
-the same calls generated code writes, the check of the records and the bound included:
+generated at each build. Each plays the rows through the runtime codec generated code calls,
+`protoCodecOf` and `ProtoCodecs.Of`, the check of the records, the bound and the required walk
+included:
 `codecs.test.ts` and `CodecsTests`.
 
 **The rule has its gate** ([0006](0006-a-rule-has-its-gate.md)): `spec/check.py` over the `proto`

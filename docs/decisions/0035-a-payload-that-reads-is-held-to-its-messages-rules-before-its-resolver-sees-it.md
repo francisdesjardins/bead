@@ -133,7 +133,10 @@ Each target declares the features it generates, and `beadc generate` refuses one
 feature its blueprint requires, `FEATURE_UNGENERATED`: a rule is never declared and played by one
 side alone. `beadc breaking` reports `PROCEDURE_RULES_TIGHTENED`, a `WIRE` rule, for a request an
 earlier peer sends that the current refuses; a rule loosened moves the revision alone. The generated
-code's contract is 4, `GENERATED_CODE_SUPPORTS_VERSION_4` and `GeneratedCode.SupportsVersion4`,
+code's contract that first generates the validators is 4, which the runtimes hold no longer since
+contract 6, `GENERATED_CODE_SUPPORTS_VERSION_6` and `GeneratedCode.SupportsVersion6`, has generated
+code call the runtime codec of a schema
+([0042](0042-a-proto-message-that-leaves-a-required-field-unset-neither-reads-nor-writes-and-a-gateway-refuses-it-where-its-server-would.md)),
 beside 5 for a route table
 ([0037](0037-a-procedure-is-also-an-http-route-which-a-gateway-answers-as-one-more-client-of-its-server.md)),
 and no runtime holds 3: code that names 3 judges no request by its rules, so it conforms through no
