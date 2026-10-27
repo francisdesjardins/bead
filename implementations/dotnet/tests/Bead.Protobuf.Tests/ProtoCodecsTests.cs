@@ -33,7 +33,7 @@ public sealed class ProtoCodecsTests
     }
 
     // * no generated parser: the same record check and filtering that ReadInto runs before parsing
-    private static void CheckEdition(EditionOptions options, bool closed)
+    private static void CheckEdition(bool closed, EditionOptions options)
     {
         var inner = new DescriptorProto
         {
@@ -139,13 +139,13 @@ public sealed class ProtoCodecsTests
     [Fact]
     public void Resolves_an_edition_enum_from_its_nearest_message_before_its_file()
     {
-        CheckEdition(new EditionOptions { File = FeatureSet.Types.EnumType.Closed, Outer = FeatureSet.Types.EnumType.Closed, Inner = FeatureSet.Types.EnumType.Open }, false);
-        CheckEdition(new EditionOptions { File = FeatureSet.Types.EnumType.Open, Outer = FeatureSet.Types.EnumType.Open, Inner = FeatureSet.Types.EnumType.Closed }, true);
+        CheckEdition(false, new EditionOptions { File = FeatureSet.Types.EnumType.Closed, Outer = FeatureSet.Types.EnumType.Closed, Inner = FeatureSet.Types.EnumType.Open });
+        CheckEdition(true, new EditionOptions { File = FeatureSet.Types.EnumType.Open, Outer = FeatureSet.Types.EnumType.Open, Inner = FeatureSet.Types.EnumType.Closed });
 
         foreach (var holder in new[] { 0, 1, 2 })
         {
-            CheckEdition(new EditionOptions { File = FeatureSet.Types.EnumType.Open, Outer = FeatureSet.Types.EnumType.Closed, Holder = holder }, true);
-            CheckEdition(new EditionOptions { File = FeatureSet.Types.EnumType.Closed, Outer = FeatureSet.Types.EnumType.Open, Holder = holder }, false);
+            CheckEdition(true, new EditionOptions { File = FeatureSet.Types.EnumType.Open, Outer = FeatureSet.Types.EnumType.Closed, Holder = holder });
+            CheckEdition(false, new EditionOptions { File = FeatureSet.Types.EnumType.Closed, Outer = FeatureSet.Types.EnumType.Open, Holder = holder });
         }
     }
 
@@ -154,8 +154,8 @@ public sealed class ProtoCodecsTests
     {
         foreach (var holder in new[] { 0, 1, 2 })
         {
-            CheckEdition(new EditionOptions { File = FeatureSet.Types.EnumType.Closed, Holder = holder }, true);
-            CheckEdition(new EditionOptions { File = FeatureSet.Types.EnumType.Open, Holder = holder }, false);
+            CheckEdition(true, new EditionOptions { File = FeatureSet.Types.EnumType.Closed, Holder = holder });
+            CheckEdition(false, new EditionOptions { File = FeatureSet.Types.EnumType.Open, Holder = holder });
         }
     }
 
@@ -164,7 +164,7 @@ public sealed class ProtoCodecsTests
     {
         foreach (var holder in new[] { 0, 1, 2 })
         {
-            CheckEdition(new EditionOptions { Holder = holder }, false);
+            CheckEdition(false, new EditionOptions { Holder = holder });
         }
     }
 
