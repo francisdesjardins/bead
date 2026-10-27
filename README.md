@@ -139,12 +139,6 @@ envelopes.
   call's cost measured against an uncounted one, a constrained C side and publication, each bound
   by the records that [the index](docs/decisions/README.md#where-bead-goes) names, with what else is
   ahead.
-- **An idea**: HTTP and WebSocket on one port, mounted in an application's own web server in place
-  of the small local proxy that couples the two transports, one server taking its connections from
-  both through a joined transport
-  ([0036](docs/decisions/0036-an-in-memory-transport-joins-two-routers-of-one-process-and-a-server-takes-several-transports-through-one.md)),
-  a change of [0004](docs/decisions/0004-one-behaviour-in-every-language.md)'s rule by a decision
-  of its own.
 
 ## Layout
 

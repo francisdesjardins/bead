@@ -140,11 +140,6 @@ that meets the Tenth Man:
   keeps ahead of a gateway's problems, each a round of its own: a report's context, the exchange and
   the route it came of; an event for each refusal of the gateway's own; and an occurrence's id in a
   problem, [RFC 9457 §3.1.5](https://www.rfc-editor.org/rfc/rfc9457#section-3.1.5)'s `instance`;
-- **HTTP and WebSocket on one port**, mounted in an application's own web server in place of the
-  small local proxy that couples the two transports, one server taking its connections from both
-  through a joined transport
-  ([0036](0036-an-in-memory-transport-joins-two-routers-of-one-process-and-a-server-takes-several-transports-through-one.md)):
-  a change of [0004](0004-one-behaviour-in-every-language.md)'s rule;
 - **publication**: the packages on npm and NuGet, beadc's image on a registry, and the options'
   number of protobuf's global registry
   ([0008](0008-three-version-axes-and-names-qualified-by-their-owner.md)).
