@@ -972,6 +972,49 @@ public sealed class HttpCallerTests
         }
     }
 
+    [Fact]
+    public async Task Rejects_empty_responses_with_no_required_media_type_and_releases_their_content()
+    {
+        foreach (var (streaming, status, code, detail) in new[]
+        {
+            (false, HttpStatusCode.OK, ProtocolCode.PayloadUndecodable, "the HTTP result has another media type"),
+            (true, HttpStatusCode.OK, ProtocolCode.PayloadUndecodable, "the HTTP subscription answers no event stream"),
+            (false, HttpStatusCode.ServiceUnavailable, ProtocolCode.DestinationUnreachable, "the HTTP call answers 503"),
+        })
+        {
+            var sent = 0;
+            var disposed = 0;
+            using var stream = new FragmentedStream([], () => { disposed++; });
+            using var handler = new StubHandler((request, _) =>
+            {
+                sent++;
+                return Task.FromResult(new HttpResponseMessage(status) { RequestMessage = request, Content = new StreamContent(stream) });
+            });
+            using var client = new TranscodingHttpClient(new Uri("http://localhost"), new HttpCallerOptions { Handler = handler });
+            var received = 0;
+            var failed = await Assert.ThrowsAsync<FailureException>(async () =>
+            {
+                if (streaming)
+                {
+                    await foreach (var entry in client.SubscribeWatch(new Empty()))
+                    {
+                        _ = entry;
+                        received++;
+                    }
+                }
+                else
+                {
+                    await client.Json(Json("null"));
+                }
+            });
+            Assert.Equal((code, detail, FailureScope.Protocol, status == HttpStatusCode.OK ? FailureOrigin.Local : FailureOrigin.Peer), ((ProtocolCode)failed.Code, failed.Detail, failed.Scope, failed.Origin));
+            Assert.Equal(0, received);
+            Assert.Equal(1, sent);
+            Assert.True(disposed > 0);
+            Assert.False(stream.CanRead);
+        }
+    }
+
     private sealed class Wrapper : DelegatingHandler
     {
         public Wrapper(HttpMessageHandler inner) : base(inner)

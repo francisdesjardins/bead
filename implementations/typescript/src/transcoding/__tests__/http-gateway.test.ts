@@ -2021,6 +2021,99 @@ test('writes an event’s data through the runtime reader, its records checked',
   });
 });
 
+test('reports one send-bound drop when consecutive stream frames exceed the bound', async () => {
+  await using memory = createMemoryTransportServer();
+  await memory.start();
+  await using gateway = createHTTPGateway({
+    createServer: createNodeServer,
+    heartbeat: Infinity,
+    maximumUnsentBytes: 1,
+    routes: HTTP_ROUTES.map((init) => {
+      return init.procedure === TranscodingProcedures.watch
+        ? {
+            ...init,
+            result: 'json',
+            notification: 'json',
+            procedure: {
+              ...init.procedure,
+              result: TranscodingProcedures.json.result,
+              notification: TranscodingProcedures.json.result,
+            },
+          }
+        : init;
+    }),
+    transport: memory,
+  });
+  const reported = reportedBy(gateway);
+  let requests = 0;
+  let frames = 0;
+  memory.on('message', ({ data }, connectionHandle) => {
+    const envelope = readEnvelope(bytesOf(data), {
+      failures: SERVER_FAILURES,
+      maximumEnvelopeBytes: LIMIT_DEFAULTS.maximumEnvelopeBytes,
+    });
+    if (envelope?.kind !== EnvelopeKind.REQUEST) {
+      return;
+    }
+    requests += 1;
+    const { callId } = envelope.header;
+    void memory.send(
+      {
+        data: writeEnvelope({
+          header: { callId, kind: EnvelopeKind.RESULT },
+          kind: EnvelopeKind.RESULT,
+          payload: new TextEncoder().encode('{}'),
+        }),
+      },
+      connectionHandle
+    );
+    frames += 1;
+    for (let index = 0; index < 3; index += 1) {
+      void memory.send(
+        {
+          data: writeEnvelope({
+            header: { callId, kind: EnvelopeKind.NOTIFICATION },
+            kind: EnvelopeKind.NOTIFICATION,
+            payload: new TextEncoder().encode('{"value":1}'),
+          }),
+        },
+        connectionHandle
+      );
+      frames += 1;
+    }
+    void memory.send(
+      {
+        data: writeEnvelope({
+          failure: SERVER_FAILURES.sessionRequired,
+          header: { callId, kind: EnvelopeKind.FAILURE },
+          kind: EnvelopeKind.FAILURE,
+        }),
+      },
+      connectionHandle
+    );
+    frames += 1;
+  });
+  const { port } = await gateway.start({ address: '127.0.0.1' });
+  const received = await receivedOn(
+    port,
+    octetsOf(port, {
+      body: '{}',
+      lines: [
+        'POST /api/Transcoding/watch HTTP/1.1',
+        'content-type: application/json',
+        'accept: text/event-stream',
+      ],
+    })
+  );
+  await until(() => {
+    return memory.clients.length === 0;
+  });
+  expect(received).toBe(0);
+  expect(requests).toBe(1);
+  expect(frames).toBe(5);
+  expect(reported).toEqual(['the response is dropped: maximumUnsentBytes 1 bytes']);
+});
+
 test('writes native JSON results and notifications in stream order', async () => {
   await using memory = createMemoryTransportServer();
   await memory.start();

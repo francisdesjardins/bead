@@ -10,6 +10,17 @@ namespace Bead.Tests;
 public sealed class TrustedProxiesTests
 {
     [Fact]
+    public void Keeps_a_direct_client_address_when_no_forwarding_policy_is_supplied()
+    {
+        var trust = TrustedProxies.TrustOf((null, "TrustedProxies"), (0, "UnnamedProxies"));
+        string[] addresses = ["192.0.2.7", "::ffff:192.0.2.7", "2001:DB8::1", "fe80::1%3"];
+        Assert.Equal(["192.0.2.7", "192.0.2.7", "2001:db8::1", "fe80::1"], addresses.Select((address) =>
+        {
+            return TrustedProxies.ClientAddressOf(IPAddress.Parse(address), (null, trust));
+        }));
+    }
+
+    [Fact]
     public void Stops_at_a_malformed_bracketed_forwarding_entry_before_reading_a_claimed_client()
     {
         var trust = TrustOf(["127.0.0.1", "10.0.0.0/8"], 0);

@@ -59,6 +59,14 @@ const REFUSED = [
 // definition
 
 test.describe('trusted proxies', () => {
+  test('keeps a direct client address when no forwarding policy is supplied', () => {
+    expect(
+      ['192.0.2.7', '::ffff:192.0.2.7', '2001:DB8::1', 'fe80::1%3'].map((address) => {
+        return clientAddressOf(address);
+      })
+    ).toEqual(['192.0.2.7', '192.0.2.7', '2001:db8::1', 'fe80::1']);
+  });
+
   test('stops at a malformed bracketed forwarding entry before reading a claimed client', () => {
     const trustedProxies = trustedProxiesOf(['127.0.0.1', '10.0.0.0/8']);
     for (const entry of ['[', '[::1', '[2001:db8::1', '[::1]extra', '[::1]:x']) {

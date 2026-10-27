@@ -1861,6 +1861,53 @@ public sealed class HttpGatewayTests
     }
 
     [Fact]
+    public async Task Reports_one_send_bound_drop_when_consecutive_stream_frames_exceed_the_bound()
+    {
+        await using var memory = new MemoryTransportServer();
+        await memory.Start();
+        var options = Exchanges.OptionsOf(memory, null);
+        await using var gateway = new HttpGateway(options with
+        {
+            Heartbeat = Timeout.InfiniteTimeSpan,
+            MaximumUnsentBytes = 1,
+            Routes = [.. options.Routes.Select((route) =>
+            {
+                return route.Procedure == TranscodingProcedures.Watch.Procedure
+                    ? route with { Result = HttpPayload.Json, Notification = HttpPayload.Json }
+                    : route;
+            })],
+        });
+        var reported = ReportedBy(gateway);
+        var requests = 0;
+        var frames = 0;
+        memory.Message += (message, connectionHandle) =>
+        {
+            var envelope = EnvelopeCodec.ReadEnvelope(message.Bytes.Span, new EnvelopeReadOptions { Side = RouterSide.Server });
+            if (envelope?.Header is not RequestHeader header)
+            {
+                return;
+            }
+            Interlocked.Increment(ref requests);
+            _ = memory.Send(new TransportMessage(EnvelopeCodec.WriteEnvelope(new Envelope { Header = new ResultHeader { CallId = header.CallId }, Payload = "{}"u8.ToArray() }), false), connectionHandle);
+            Interlocked.Increment(ref frames);
+            for (var index = 0; index < 3; index++)
+            {
+                _ = memory.Send(new TransportMessage(EnvelopeCodec.WriteEnvelope(new Envelope { Header = new NotificationHeader { CallId = header.CallId }, Payload = "{\"value\":1}"u8.ToArray() }), false), connectionHandle);
+                Interlocked.Increment(ref frames);
+            }
+            _ = memory.Send(new TransportMessage(EnvelopeCodec.WriteEnvelope(new Envelope { Header = new FailureHeader { CallId = header.CallId }, Failure = Failure.OfProtocol(ProtocolCode.SessionRequired) }), false), connectionHandle);
+            Interlocked.Increment(ref frames);
+        };
+        var address = await gateway.Start(new HttpGatewayStartOptions { Address = "127.0.0.1", FindOpenPort = true }, Cancelled);
+        var received = await Received(address.Port, OctetsOf(address.Port, new OwnCase(["POST /api/Transcoding/watch HTTP/1.1", "content-type: application/json", "accept: text/event-stream"], 0, "") { Body = "{}" }));
+        await Until(() => { return memory.ConnectionHandles.Count == 0; });
+        Assert.Empty(received);
+        Assert.Equal(1, requests);
+        Assert.Equal(5, frames);
+        Assert.Equal(["the response is dropped: maximumUnsentBytes 1 bytes"], reported);
+    }
+
+    [Fact]
     public async Task Writes_native_JSON_results_and_notifications_in_stream_order()
     {
         await using var memory = new MemoryTransportServer();

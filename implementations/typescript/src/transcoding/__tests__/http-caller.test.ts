@@ -1185,3 +1185,38 @@ test('reads an empty raw result and maps an empty non-problem refusal by status'
     expect(response.body).toBeNull();
   }
 });
+
+test('rejects empty responses with no required media type and releases their content', async () => {
+  for (const [streaming, status, code, detail] of [
+    [false, 200, ProtocolCode.PAYLOAD_UNDECODABLE, 'the HTTP result has another media type'],
+    [true, 200, ProtocolCode.PAYLOAD_UNDECODABLE, 'the HTTP subscription answers no event stream'],
+    [false, 503, ProtocolCode.DESTINATION_UNREACHABLE, 'the HTTP call answers 503'],
+  ] as const) {
+    let sent = 0;
+    const response = new Response(null, { status });
+    const client = new TranscodingHttpClient('http://localhost', {
+      fetch: () => {
+        sent += 1;
+        return Promise.resolve(response);
+      },
+    });
+    const received: HTTPEvent<unknown, unknown>[] = [];
+    await expect(async () => {
+      if (streaming) {
+        for await (const event of client.subscribeWatch({})) {
+          received.push(event);
+        }
+      } else {
+        await client.json(null);
+      }
+    }).rejects.toMatchObject({
+      code,
+      detail,
+      scope: FailureScope.PROTOCOL,
+      origin: status === 200 ? 'local' : 'peer',
+    });
+    expect(received).toEqual([]);
+    expect(sent).toBe(1);
+    expect(response.body).toBeNull();
+  }
+});
