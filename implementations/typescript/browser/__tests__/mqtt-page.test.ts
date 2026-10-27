@@ -4,8 +4,9 @@
 // subprotocol `mqtt` to the Mosquitto `BEAD_MQTT_WS_URL` names, calling each side's interop server
 // through its name (spec 15.25 to 15.31); where none is given, skipped, saying so, or failed where
 // `BEAD_MQTT_REQUIRED=1`. The C# server is built and started by .NET: where .NET is not installed,
-// its half is skipped, saying so, or fails where `BEAD_INTEROP_REQUIRED=1`. And what no page does: a
-// TLS client certificate, which its browser chooses, refused as the adapter is built.
+// its half is skipped, saying so, or fails where `BEAD_INTEROP_REQUIRED=1`. Its adapter alone,
+// through a relay that records its frames, sending each message as one. And what no page does: a TLS
+// client certificate, which its browser chooses, refused as the adapter is built.
 
 // dependencies
 
@@ -17,6 +18,7 @@ import { createInterface } from 'node:readline';
 import { fileURLToPath } from 'node:url';
 import { expect, type Page, test } from '@playwright/test';
 import { build } from 'esbuild';
+import { createFrameRelay, unwholeOf } from '../../src/transport/shared/__tests__/frame-relay';
 import type { IMqttPageReport, IMqttPageTarget } from '../mqtt-page';
 
 // constants
@@ -196,6 +198,44 @@ for (const each of SERVERS) {
 }
 
 test.describe('a page over MQTT 5, its own', () => {
+  test('sends each WebSocket message to its broker as one binary frame, a burst past 64 KiB among them (spec 15.25)', async ({
+    page,
+  }) => {
+    test.skip(MQTT_WS_URL === undefined && !IS_MQTT_REQUIRED, NO_BROKER);
+    expect(MQTT_WS_URL, NO_BROKER).toBeDefined();
+
+    await using relay = await createFrameRelay(MQTT_WS_URL ?? '');
+    const served = await servePage();
+
+    try {
+      await loaded(page, served.port);
+
+      const target = { id: 'fixture', password: MQTT_PASSWORD, url: relay.url };
+      const report = await page.evaluate((given) => {
+        const { burstOverMqtt } = globalThis as unknown as {
+          burstOverMqtt: (on: typeof given) => Promise<Record<string, unknown>>;
+        };
+
+        return burstOverMqtt(given);
+      }, target);
+      const count = (report['heard'] as unknown[] | undefined)?.length ?? 0;
+
+      // * what the page sent, each message one frame: none ends no message, none continues one
+      expect(unwholeOf(relay.frames)).toEqual([]);
+      expect(relay.frames.length).toBeGreaterThan(count);
+      expect(report).toEqual({
+        heard: Array.from({ length: count }, (_, index) => {
+          return index;
+        }),
+        isLinked: true,
+        taken: count,
+      });
+      expect(count).toBeGreaterThan(1);
+    } finally {
+      served.close();
+    }
+  });
+
   test('refuses a client certificate in a page, naming why', async ({ page }) => {
     const served = await servePage();
 

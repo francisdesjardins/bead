@@ -1976,7 +1976,10 @@ _Vectors: `mqttPublishBounds`._
 participant's link over TCP, over TLS, or over a WebSocket whose subprotocol is `mqtt`
 ([MQTT 5.0 §6](https://docs.oasis-open.org/mqtt/mqtt/v5.0/os/mqtt-v5.0-os.html);
 [RFC 6455 §1.9](https://www.rfc-editor.org/rfc/rfc6455#section-1.9)); no other version of MQTT
-carries one. A parcel is the payload of one PUBLISH, and a topic its tokens joined by `/`: an inbox
+carries one. Over a WebSocket, a participant sends each message to its broker as one binary frame,
+never fragmented ([RFC 6455 §5.4](https://www.rfc-editor.org/rfc/rfc6455#section-5.4)), whatever
+packets it holds ([MQTT 5.0 §6](https://docs.oasis-open.org/mqtt/mqtt/v5.0/os/mqtt-v5.0-os.html)).
+A parcel is the payload of one PUBLISH, and a topic its tokens joined by `/`: an inbox
 `<root>/i/<id>`, a server's name `<root>/s/<name>`, a departure `<root>/d/<id>`. A name served in a
 group is subscribed as the shared subscription `$share/<name>/<root>/s/<name>`, its share name the
 server's name, so that every participant serving it, whatever its side, joins one group. A broker

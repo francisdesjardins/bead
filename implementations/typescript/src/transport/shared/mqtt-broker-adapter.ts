@@ -24,6 +24,7 @@ import {
   topicOf,
 } from './mqtt-packets';
 import { isSecureUrl } from './secure';
+import { withSlicedSends } from './sliced-sends';
 import type {
   BrokerDelivery,
   BrokerPublished,
@@ -196,7 +197,8 @@ const assertKeepAlive = (duration: unknown): number => {
  * Maximum, later ones waiting in their order; its PUBACK of 0x10 says no subscriber, of 0x80 or
  * more refuses it. Each message is handed on before its PUBACK, which goes once it is settled. A
  * DISCONNECT of 0x8E tells its link taken over; any other end, lost; its stop sends a DISCONNECT
- * of 0x00, so that no will goes. Its leg is secure under TLS or to the loopback.
+ * of 0x00, so that no will goes. Its leg is secure under TLS or to the loopback. In a page, its
+ * WebSocket sends no message past 16 KiB, which Chromium sends as one frame.
  *
  * @example
  * const adapter = createMqttBrokerAdapter({ id: 'server', password, url: 'mqtts://broker:8883' });
@@ -440,6 +442,15 @@ export const createMqttBrokerAdapter = (options: IMqttBrokerAdapterOptions): IMq
       clean: true,
       clientId: id,
       connectTimeout,
+      // ! in a page alone, each message one frame (spec 15.25): in Node, `ws` fragments none, and
+      // its stream sends with a callback, which the sliced send would drop
+      ...(isNode()
+        ? {}
+        : {
+            createWebsocket: (webSocketUrl: string, protocols: string[]) => {
+              return withSlicedSends(new WebSocket(webSocketUrl, protocols));
+            },
+          }),
       // * handed on before its PUBACK, each QoS 1 message
       // oxlint-disable-next-line max-params, bead/options-last -- MQTT.js's own hook, whatever it takes
       customHandleAcks: (_topic, _message, packet: IPublishPacket, done) => {
