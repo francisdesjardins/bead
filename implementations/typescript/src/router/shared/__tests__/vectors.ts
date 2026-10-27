@@ -91,6 +91,53 @@ export interface ICredentialRefusalVector {
     | 'verifier-makes-none';
 }
 
+/**
+ * A parcel as the vectors write it (spec 15.17): its prefix, its flags but where it is read without
+ * them, and its body's fields, its halves, its incarnation and what a DATA carries in hexadecimal.
+ */
+export interface IParcelVectorFields {
+  acceptor: string;
+  answers?: number;
+  bound?: number;
+  carried?: string;
+  code?: number;
+  credential?: string;
+  flags?: number;
+  id?: string;
+  incarnation?: string;
+  kind: number;
+  layout: number;
+  layouts?: number[];
+  opener: string;
+  sequence: number;
+  status?: number;
+}
+
+/** A parcel's bytes and what they say; `written` false where no writer writes it. */
+export interface IParcelVector extends INamed {
+  clauses: string[];
+  parcel: IParcelVectorFields;
+  written?: false;
+}
+
+/** An MQTT 5 PUBLISH under a Maximum Packet Size: its largest payload and the packet it makes. */
+export interface IMqttPublishBoundVector {
+  clauses: string[];
+  expiry: boolean;
+  largestPayload: number | null;
+  maximumPacketSize: number;
+  name: string;
+  packetBytes: number | null;
+  qos: 0 | 1;
+  topic: string;
+}
+
+/** Bytes that read as no parcel, or as a parcel that does not read. */
+export interface IParcelRefusalVector extends INamed {
+  clauses: string[];
+  refused: 'does-not-read' | 'no-parcel';
+}
+
 export interface IVectors {
   credentialRefusals: ICredentialRefusalVector[];
   envelopeRefusals: IRefusalVector[];
@@ -105,6 +152,9 @@ export interface IVectors {
   headerRefusals: IRefusalVector[];
   headers: (INamed & { header: EnvelopeHeader })[];
   jwtVerdicts: IJwtVerdictVector[];
+  mqttPublishBounds: IMqttPublishBoundVector[];
+  parcelRefusals: IParcelRefusalVector[];
+  parcels: IParcelVector[];
   prefixRefusals: IRefusalVector[];
   prefixes: (INamed & { prefix: { callId: number; kind: number; layout: number } })[];
   reads: (INamed & { header: EnvelopeHeader | null; side: RouterSide })[];

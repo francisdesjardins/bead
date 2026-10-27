@@ -3,7 +3,8 @@
 Bead is a binary wire protocol: the envelopes of a request, its result or failure, the notifications
 of a subscription and the commands a server sends back, written at fixed offsets. This project is
 its TypeScript implementation — a WebSocket, an HTTP, a Web Worker and an in-memory transport, each
-a client and a server, a server's transports joined into one, a client and a server router over
+a client and a server, a broker's core over an in-memory broker and over MQTT 5, a server's
+transports joined into one, a client and a server router over
 them, the service, session and notification managers, the client and server that put the three
 layers together, the service layer a service is served and called through, and a gateway that
 answers its procedures over HTTP and JSON, beside the caller of the HTTP client beadc generates.
@@ -26,9 +27,9 @@ first layer of a transport → router → service stack, which is why they sit t
 Each end — client or server — has a shared half and a transport. The shared half owns the events and the guards
 around the life of the connection — `reconnect` and the drop behind `await using` for a client, `start` and `stop`
 and the connection registry for a server. The transport supplies what only it knows: how to open,
-close and send on the wire. WebSocket, HTTP, a Web Worker and memory each supply theirs — see
-[HTTP](#http) and [In memory](#in-memory-and-a-servers-transports-joined); another transport
-supplies its own.
+close and send on the wire. WebSocket, HTTP, a Web Worker, memory and a broker each supply theirs —
+see [HTTP](#http), [In memory](#in-memory-and-a-servers-transports-joined) and
+[Over a broker](#over-a-broker); another transport supplies its own.
 
 The client runs on the global `WebSocket` — every browser, and Node 24.9, the package's floor — or
 on any constructor passed as `WebSocket`, which is how `ws` plugs in; its suite runs on both. The
@@ -1217,6 +1218,119 @@ Two transports of one type, whose handles might be one, are refused as the join 
 transport binds both addresses. The join starts nothing: each transport is started where it
 listens, and one port for two still comes from a proxy in front.
 
+### Over a broker
+
+`broker-participant`, `broker-transport-client`, `broker-transport-server` and `memory-broker` carry
+Bead over a topic-based publish/subscribe broker (spec 15.16 to 15.24, decisions 0038 to 0040): a
+broker is a transport, and Bead is never a network of its own. A participant,
+`createBrokerParticipant({ adapter })`, is one link of a side to its broker, through an adapter of
+that broker's client; its id is the identity the broker authenticates the link by, and its inbox,
+`bead/i/<id>`, takes every parcel of its connections. `participant.transportServer({ names })`
+serves names, each a server's topic, `bead/s/<name>`, alone or, with `group: true`, in a group its
+broker places each OPEN with; `participant.transportClient()` holds one connection at a time,
+`connect({ server })` opening it through a name.
+
+```ts
+const broker = createMemoryBroker();
+const serving = createBrokerParticipant({ adapter: broker.adapter({ id: 'server' }) });
+const calling = createBrokerParticipant({ adapter: broker.adapter({ id: 'client' }) });
+const transport = serving.transportServer({ names: ['interop'] });
+const client = calling.transportClient();
+
+await transport.start();
+await client.connect({ server: 'interop' });
+```
+
+A connection is placed once, at its open, and named by both its ends, as a TCP connection is a pair
+of sockets: the client's OPEN to the name draws its half, the ACCEPT its server answers to the
+client's inbox draws the other, and the client's PING naming both is the third leg, which draws the
+server's handle, `type=BROKER;participant=<id>;ordinal=n`, and tells its router the connection;
+every call, cancel, chunk, credit, notification and command after it goes inbox to inbox. A REFUSE,
+400 `malformed`, 426 `layout-refused` or 503 `busy`, or a broker that says nothing serves the name,
+fails the connect with a `ConnectError` whose `cause` is a `BrokerRefusedError` naming its status
+and reason. Each parcel is numbered: a copy a broker delivers again is dropped before the router
+sees it, and a gap loses the connection at once, a CLOSE of 4000, so nothing overtakes. An envelope
+past the peer's receive bound goes in parts, each as large as that bound lets it, held to
+`maximumEnvelopePartsBytes`, `heldBytesBudget` and `minimumBodyBytesPerSecond` once
+`bodyGracePeriod` passed. A connection silent for `heartbeat`, 30,000 ms by default on the
+platform's timer, is pinged, and one that answered nothing by the next is closed with 4001. A
+request's credential crosses in its DATA, toward the server alone, and a transport is secure while
+both legs are, each end marking its own in its OPEN or ACCEPT. Every link is a new incarnation that
+keeps no broker session: a link lost closes each of its connections, unclean, and its participant
+connects anew, resetting its peers; a will, where its adapter leaves one, tells them at once by a
+GONE.
+
+`createMemoryBroker()` is a broker of one process, every capability an adapter may offer: each
+message copied as it is published and handed on in a later turn, in its publisher's order on its
+topic; groups; wills; a publication refused when no subscriber takes it; `maximumQueuedMessages` a
+subscriber, past which a message is dropped. A test asks `fault(MEMORY_BROKER_FAULTS.COPY)`, `HOLD`,
+`DROP` or `REDELIVER` of the next message, `adapter.lose()` of a link, and `adapter.takeOver()`, as
+a second link of its id would. The broker cases of
+[`spec/transports.json`](../../spec/transports.json), in both roles, and the conversations play over
+it.
+
+A link that its broker ends for another link of its id, a takeover, closes each connection, unclean,
+is reported, and connects no more until its application starts it again — its participant's
+`start()` or a server transport's — so that two holders of one id never take each other over
+without end; any other link lost connects anew. A server's transport starts once its broker holds
+each name it serves, failing on one refused, and stops once it let each go, its gauge `names`
+counting a name from its subscription's acknowledgement to its release's. Where the adapter offers a
+message's life, an OPEN lives in its broker its connect's time left, and a DATA that carries a
+credential twice `heartbeat`; nothing else has a life.
+
+#### MQTT 5
+
+`mqtt-broker-adapter`'s `createMqttBrokerAdapter` binds a participant to a broker of MQTT 5.0 (spec
+15.25 to 15.31, decision 0041), over [MQTT.js](https://github.com/mqttjs/MQTT.js), which the
+package takes as an optional peer, `mqtt@^5.16.1`: over TCP (`mqtt://`), TLS (`mqtts://`) or a
+WebSocket of subprotocol `mqtt` (`ws://`, `wss://`), in Node and in a page, whose bundler takes
+MQTT.js's browser build.
+
+```ts
+const adapter = createMqttBrokerAdapter({
+  id: 'server',
+  password: () => readPassword(),
+  url: 'mqtts://broker.example:8883',
+});
+const participant = createBrokerParticipant({ adapter });
+const transport = participant.transportServer({ group: true, names: ['interop'] });
+
+await transport.start();
+```
+
+Each link is one network connection that keeps no session — Clean Start 1, a Session Expiry
+Interval of 0 — its Client Identifier the participant's id, authenticated by a Password under its id
+as User Name, a string or asked at each link's start, or by a TLS client certificate, `tls: { cert,
+key }`, over `mqtts` or `wss` in Node alone: a page chooses none, and the adapter refuses one there.
+Its CONNECT says a Receive Maximum of 65,535, a Topic Alias Maximum of 0, its `maximumPacketSize`,
+16,777,216 bytes by default, and its `keepAlive`, 30 s by default; its start waits `connectTimeout`,
+30 s by default, for a CONNACK of Reason Code 0x00 whose Maximum QoS is not 0. Its will is the
+participant's GONE, QoS 1, RETAIN 0, a Will Delay Interval of 0; its stop sends a DISCONNECT of
+0x00, so that none goes; a DISCONNECT of 0x8E from its broker is its link taken over. MQTT.js
+reconnects nothing, subscribes nothing again and holds nothing while down: what is asked of a link
+that is down is refused at once.
+
+A name in a group is the shared subscription `$share/<name>/bead/s/<name>`, every subscription of
+QoS 1, No Local 0, Retain As Published 0 and Retain Handling 2, held once its SUBACK grants QoS 1. A
+parcel is one PUBLISH of QoS 1, or 0 at `delivery: 'at-most-once'`, RETAIN 0, a Message Expiry
+Interval in whole seconds rounded up where the core asks a life, and no other property; counted to
+its byte (`mqtt-packets`, spec 15.30) and refused past its CONNACK's Maximum Packet Size before it
+goes; held to its CONNACK's Receive Maximum, which MQTT.js does not keep, later ones waiting in
+their order. Its PUBACK of 0x10 is no subscriber, read on `packetreceive`, since MQTT.js's own
+callback hides it; 0x80 or more refuses it. Each message is handed on inside MQTT.js's
+`customHandleAcks`, its PUBACK sent once the core settles it, which it does as it takes it; a packet
+past its own Maximum Packet Size closes the link, no DISCONNECT (a row of
+[`docs/support.md`](../../docs/support.md)'s "Leveled down"). Its leg is secure under TLS or to the
+loopback. The deployment's half — its access control by the participant's id, its Client Identifier
+tied to what it authenticated, its queues and its receive maximum — is spec 15.31's.
+
+`spec/transports.json`'s cases over MQTT 5 play against a Mosquitto 2.1.2 of the run's own, which the
+root's [`tools/mqtt-broker.mjs`](../../tools/mqtt-broker.mjs) starts by its digest, under a container
+name, loopback ports and a password drawn for the run: `node ../../tools/mqtt-broker.mjs run -- yarn
+test:mqtt` runs the cases, the adapter's link over a WebSocket and the interop over MQTT 5 against
+it. Where `BEAD_MQTT_URL` names no broker, each is skipped, saying so; `BEAD_MQTT_REQUIRED=1` fails
+it instead. The adapter's own tests play a scripted MQTT 5 peer, and need none.
+
 ### HTTP/JSON transcoding, a gateway
 
 `http-gateway`'s `createHTTPGateway` answers a service's procedures as routes of HTTP
@@ -1745,8 +1859,12 @@ HTTP, each listen on a local port of their own; the page's HTTP server passes ea
 `/bead` on to the first, byte for byte, and each exchange on `/bead` to the second, through
 `demo/relay.ts`, a small proxy that neither the protocol nor the transports know of. The page goes
 over WebSocket, or over HTTP with `?transport=http`, where what the server sends of its own comes
-back by a listen; `/health` gives both servers' health, and `/metrics` what both count into their
-one metrics registry, in the Prometheus text format 0.0.4. With `?transport=worker`, the Bead
+back by a listen, or, where it runs beside a broker (`node ../../tools/mqtt-broker.mjs run -- yarn
+demo`), over MQTT 5 with `?transport=mqtt`, a client participant of its own over the broker's
+WebSocket, connecting through the name `demo` to a server participant, the module that carries it,
+`demo/over-mqtt.ts`, loaded apart, so that a page served as files carries no MQTT library; `/health`
+gives both servers' health, and `/metrics` what both count into their one metrics registry, in the
+Prometheus text format 0.0.4. With `?transport=worker`, the Bead
 server and the identity provider run in a Web Worker of the page — `demo/worker.ts`, built to
 `dist/worker.js` beside `dist/page.js` — and no backend answers anything but the files: that pair is
 what a playground takes. `yarn playground:build:file` builds it, with the page, into
@@ -1782,8 +1900,8 @@ field its path names, the field marked `aria-invalid` and described by it, the f
 no field above the form. "Validate before sending" calls through a client side whose options say
 `validates`, which refuses the same request before anything goes on the wire. `yarn test:demo` runs
 the demo's tests, in a Playwright config of their own: its procedures in Node, a server and a client
-joined in memory, and the form in Chromium, against the static build `yarn playground:build:file`
-makes.
+joined in memory, and over MQTT 5 where `BEAD_MQTT_URL` names a broker, skipped, saying so, where
+none does; and the form in Chromium, against the static build `yarn playground:build:file` makes.
 
 The internal demo mounts beside the page a gateway of beadc's route table for that service,
 `POST /api/SignUp/signUp` and `/openapi.json`, over a third Bead server on the in-memory transport;

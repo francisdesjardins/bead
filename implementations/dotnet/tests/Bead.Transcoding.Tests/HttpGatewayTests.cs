@@ -32,6 +32,55 @@ public sealed class HttpGatewayTests
 {
     private const string Origin = "https://app.example";
 
+    // transcoding 2.3
+    [Fact]
+    public async Task Hands_each_exchange_s_client_address_and_socket_port_to_its_transport_after_its_proxy_policy()
+    {
+        foreach (var (address, trustedProxies, unnamedProxies) in new (string, string[], int)[]
+        {
+            ("127.0.0.1", [], 0),
+            ("203.0.113.9", ["127.0.0.1"], 0),
+            ("203.0.113.9", [], 1),
+        })
+        {
+            await using var service = await TranscodingService.Start();
+            await using var gateway = new HttpGateway(Exchanges.OptionsOf(service.Memory, null) with
+            {
+                TrustedProxies = trustedProxies,
+                UnnamedProxies = unnamedProxies,
+            });
+            var peers = new List<(string Address, int Port)>();
+
+            service.Memory.Connection += (_) =>
+            {
+                foreach (var peer in service.Memory.Clients)
+                {
+                    peers.Add((peer.Address, peer.Port));
+                }
+            };
+
+            var context = new DefaultHttpContext();
+
+            context.Connection.RemoteIpAddress = IPAddress.Loopback;
+            context.Connection.RemotePort = 43210;
+            context.Request.Method = "GET";
+            context.Request.Protocol = "HTTP/1.1";
+            context.Request.Host = new HostString("127.0.0.1");
+            context.Request.Headers["x-forwarded-for"] = "203.0.113.9:54321";
+            context.Features.Get<IHttpRequestFeature>()!.RawTarget = "/v1/books/2";
+            using var body = new MemoryStream();
+
+            context.Response.Body = body;
+            await gateway.Answer(context).WaitAsync(Patience, Cancelled);
+
+            // * a forwarded port never replaces the exchange's socket port.
+            Assert.Equal(StatusCodes.Status200OK, context.Response.StatusCode);
+            Assert.Equal("{\"name\":\"2\",\"title\":\"A tale\"}", Encoding.UTF8.GetString(body.ToArray()));
+            Assert.Equal([(address, 43210)], peers);
+            await Until(() => { return service.Memory.Clients.Count == 0; });
+        }
+    }
+
     [Fact]
     public async Task Answers_a_call_whose_peer_closes_before_its_result_with_502_and_releases_its_place()
     {
@@ -905,6 +954,7 @@ public sealed class HttpGatewayTests
         }
     }
 
+    // transcoding 10.2
     [Fact]
     public async Task Words_each_refusal_of_its_gates_exactly_none_of_them_what_its_request_carried()
     {
@@ -961,6 +1011,7 @@ public sealed class HttpGatewayTests
     }
 
     // transcoding 7.7.6
+    // transcoding 10.2
     [Fact]
     public async Task Words_each_refusal_of_its_bounds_exactly()
     {
@@ -1788,6 +1839,7 @@ public sealed class HttpGatewayTests
         }
     }
 
+    // transcoding 10.2
     [Fact]
     public async Task Reads_a_held_body_past_its_grace_when_its_minimum_rate_is_zero()
     {
@@ -2173,6 +2225,7 @@ public sealed class HttpGatewayTests
         }
     }
 
+    // transcoding 10.2
     [Fact]
     public async Task Paces_every_response_body_and_reports_its_send_bound()
     {
@@ -2258,6 +2311,7 @@ public sealed class HttpGatewayTests
         }
     }
 
+    // transcoding 10.2
     [Fact]
     public async Task Bounds_every_response_body_by_maximumUnsentBytes_before_writing()
     {
@@ -2310,6 +2364,7 @@ public sealed class HttpGatewayTests
         }
     }
 
+    // transcoding 10.2
     [Fact]
     public async Task Bounds_an_accepted_slice_until_its_pending_bytes_are_flushed()
     {

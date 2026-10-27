@@ -205,6 +205,7 @@ const countOn = (
 
 // definition
 
+// debugging 1.1
 test.describe('the expositions', () => {
   for (const {
     counts,
@@ -267,6 +268,7 @@ test.describe('the expositions', () => {
   }
 });
 
+// debugging 1.1
 test.describe('the exits', () => {
   // played once, as the C# side plays them: a retry would hide what fails there
   test.describe.configure({ retries: 0 });

@@ -94,13 +94,21 @@ public sealed class TransportsTests
     {
         foreach (var each in Root.GetProperty(entry.Group).EnumerateArray())
         {
-            if (NameOf(each) == entry.Name)
+            // * a case by its name among those this player plays: one over a broker may share it
+            if (NameOf(each) == entry.Name && (entry.Group != "cases" || IsPlayedHere(each)))
             {
                 return each;
             }
         }
 
         throw new KeyNotFoundException($"no {entry.Group} \"{entry.Name}\"");
+    }
+
+    // whether a case is of a transport this player plays: over a broker, the core's player plays it
+    // (BrokerTransportsTests)
+    private static bool IsPlayedHere(JsonElement entry)
+    {
+        return entry.GetProperty("transport").GetString() is "http" or "websocket";
     }
 
     // whether a row of the support matrix excuses this side from a case
@@ -481,7 +489,14 @@ public sealed class TransportsTests
 
             // the bound the WebSocket server layer takes when built alone and told none
             "maximumMessageBytes" => new WebSocketTransportServer(webSocket).MaximumMessageBytes,
-            "heartbeat" => (long)webSocket.Heartbeat.TotalMilliseconds,
+
+            // a WebSocket's heartbeat and a broker participant's, alike
+            "heartbeat" => Alike(((long)webSocket.Heartbeat.TotalMilliseconds, (long)new BrokerParticipantOptions().Heartbeat.TotalMilliseconds)),
+
+            // a broker's, its server transport's and its participant's (spec 15.23)
+            "acceptTimeout" => (long)new BrokerTransportServerOptions { Names = ["interop"] }.AcceptTimeout.TotalMilliseconds,
+            "maximumEnvelopePartsBytes" => new BrokerParticipantOptions().MaximumEnvelopePartsBytes,
+            "heldBytesBudget" => new BrokerParticipantOptions().HeldBytesBudget,
             _ => throw new ArgumentException($"the file states a default no test reads: {bound}", nameof(bound)),
         };
     }
@@ -683,11 +698,14 @@ public sealed class TransportsTests
 
     // definition
 
-    /// <summary>The names of every case this side plays: each but those a row of the support matrix excuses it from.</summary>
+    /// <summary>
+    /// The names of every case over HTTP and over WebSocket this side plays: each but those a row of
+    /// the support matrix excuses it from.
+    /// </summary>
     public static TheoryData<string> Names { get; } = new(
         Root.GetProperty("cases").EnumerateArray().Where((entry) =>
         {
-            return !IsExcused(entry);
+            return IsPlayedHere(entry) && !IsExcused(entry);
         }).Select(NameOf));
 
     /// <summary>The names of the responses every side's reader reads alike.</summary>
@@ -813,14 +831,20 @@ public sealed class TransportsTests
     [Fact]
     public void Plays_every_case_but_those_a_row_of_the_support_matrix_excuses_this_side_from()
     {
-        var cases = Root.GetProperty("cases").EnumerateArray().ToList();
+        var cases = Root.GetProperty("cases").EnumerateArray().Where(IsPlayedHere).ToList();
         var played = Names.Select((row) =>
         {
             return row.Data;
         }).ToHashSet();
 
-        // each case plays under its own name
-        Assert.Equal(cases.Count, cases.Select(NameOf).Distinct().Count());
+        // each case plays under its own name over its transport: a broker's case and its twin over
+        // MQTT 5 share theirs, each looked up by both
+        var every = Root.GetProperty("cases").EnumerateArray().ToList();
+
+        Assert.Equal(every.Count, every.Select((entry) =>
+        {
+            return (entry.GetProperty("transport").GetString(), NameOf(entry));
+        }).Distinct().Count());
         Assert.All(cases, (entry) =>
         {
             Assert.Equal(!IsExcused(entry), played.Contains(NameOf(entry)));

@@ -21,13 +21,24 @@ const pathOf = (relative: string): string => {
 
 // definition
 
-// the page, for a browser; the server, for Node, `ws` left to the package that has it
+// the page, for a browser, and what it loads over MQTT 5 apart; the server, for Node, `ws` and `mqtt`
+// left to the package that has them
 await Promise.all([
   build({
     bundle: true,
     entryPoints: [pathOf('page.ts')],
     format: 'esm',
     outfile: pathOf('dist/page.js'),
+    platform: 'browser',
+    sourcemap: 'inline',
+    target: 'es2022',
+  }),
+  // the page's client over MQTT 5, for `?transport=mqtt`, which a page served as files never loads
+  build({
+    bundle: true,
+    entryPoints: [pathOf('over-mqtt.ts')],
+    format: 'esm',
+    outfile: pathOf('dist/over-mqtt.js'),
     platform: 'browser',
     sourcemap: 'inline',
     target: 'es2022',
@@ -45,7 +56,7 @@ await Promise.all([
   build({
     bundle: true,
     entryPoints: [pathOf('server.ts')],
-    external: ['ws'],
+    external: ['mqtt', 'ws'],
     format: 'esm',
     outfile: fileURLToPath(SERVER),
     platform: 'node',

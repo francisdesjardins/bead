@@ -37,6 +37,18 @@ import {
 } from '../../transport/client/transport-client';
 import { createWorkerTransportClient } from '../../transport/client/worker-transport-client';
 import { createWSTransportClient } from '../../transport/client/ws-transport-client';
+import {
+  ParcelFlag,
+  ParcelKind,
+  readParcel,
+  writeParcel,
+} from '../../transport/shared/broker-parcel';
+import { createBrokerParticipant } from '../../transport/shared/broker-participant';
+import {
+  createMemoryBroker,
+  type IMemoryBrokerAdapter,
+} from '../../transport/shared/memory-broker';
+import { createMqttBrokerAdapter } from '../../transport/shared/mqtt-broker-adapter';
 import { createFakeFetch } from '../../transport/client/__tests__/fake-fetch';
 import { createFakeWebSocket } from '../../transport/client/__tests__/fake-websocket';
 import {
@@ -101,8 +113,12 @@ interface IReport {
   refusal?: unknown;
 }
 
-/** A place this side plays: its words for its duration, and each way it builds it by. */
+/**
+ * A place this side plays: its words for its duration, its ceiling where narrower than a timer's,
+ * and each way it builds it by.
+ */
 interface IPlayed {
+  ceiling?: number;
   phrase: string;
   ways: Readonly<Record<string, Way>>;
 }
@@ -131,6 +147,8 @@ type SessionTimeout = 'connectionInactivityTimeout' | 'sessionInactivityTimeout'
 const first: Handle = 'type=WS;ip=127.0.0.1;port=50001;ordinal=1';
 const second: Handle = 'type=WS;ip=127.0.0.1;port=50002;ordinal=1';
 const host = '127.0.0.1';
+// the half a broker case's peer opens with
+const BROKER_OPENER = Uint8Array.of(0xa1, 0, 0, 0, 0, 0, 0, 1);
 
 const echo: IProcedure = Object.freeze({
   procedureId: 1,
@@ -1192,6 +1210,184 @@ const connectOfMemory: Way = (given) => {
   );
 };
 
+// ── broker ──
+
+// an OPEN from `peer` to the name `interop`, its half A1…01, its bound 65,536
+const openFrom = async (peer: IMemoryBrokerAdapter): Promise<void> => {
+  await peer.publish({
+    payload: writeParcel({
+      acceptor: new Uint8Array(8),
+      bound: 65_536,
+      id: peer.id,
+      incarnation: new Uint8Array(16).fill(0xc0),
+      kind: ParcelKind.OPEN,
+      opener: BROKER_OPENER,
+      sequence: 1,
+    }),
+    topic: ['bead', 's', 'interop'],
+  });
+};
+
+// a broker participant built with `heartbeat`: on the platform's timer, so held to its refusal alone
+const heartbeatOfParticipant: Way = (given) => {
+  const adapter = createMemoryBroker().adapter({ id: 'ada' });
+  const building = attempt(() => {
+    return createBrokerParticipant({ adapter, ...optionOf('heartbeat', given) });
+  });
+
+  return Promise.resolve(
+    'refusal' in building
+      ? { moved: movedOf({ 'its link started': adapter.isLinked }), refusal: building.refusal }
+      : {}
+  );
+};
+
+// an MQTT 5 adapter built with `name`: on the platform's timers, so held to its refusal alone
+const ofMqttAdapter = (name: 'connectTimeout' | 'keepAlive'): Way => {
+  return (given) => {
+    const building = attempt(() => {
+      return createMqttBrokerAdapter({
+        id: 'ada',
+        url: 'mqtt://127.0.0.1:1883',
+        ...optionOf(name, given),
+      });
+    });
+
+    return Promise.resolve('refusal' in building ? { moved: [], refusal: building.refusal } : {});
+  };
+};
+
+// a broker server's half-open connection, its third leg never come: the due of its accept's timer
+const acceptTimeoutOfServer: Way = async (given) => {
+  const clock = createTestClock();
+  const broker = createMemoryBroker({ clock });
+  const participant = createBrokerParticipant({
+    adapter: broker.adapter({ id: 'server' }),
+    clock,
+    heartbeat: Infinity,
+  });
+  const building = attempt(() => {
+    return participant.transportServer({ names: ['interop'], ...optionOf('acceptTimeout', given) });
+  });
+
+  if ('refusal' in building) {
+    return {
+      moved: movedOf({ 'its link started': participant.isLinked }),
+      refusal: building.refusal,
+    };
+  }
+
+  const peer = broker.adapter({ id: 'peer' });
+
+  await building.built.start();
+  await peer.start();
+  // its inbox held, as a participant's is, so that the ACCEPT finds a subscriber
+  await peer.subscribe(['bead', 'i', 'peer']);
+  await openFrom(peer);
+  await turnsUntil(() => {
+    return building.built.gauges().counts['halfOpen'] === 1;
+  });
+
+  const held = dueOf(delaysOn(clock));
+
+  await participant.stop();
+
+  return { held };
+};
+
+// an envelope's first part over a broker, at a rate that asks nothing of it: the due of its grace
+const bodyGracePeriodOfParticipant: Way = async (given) => {
+  const clock = createTestClock();
+  const broker = createMemoryBroker({ clock });
+  const adapter = broker.adapter({ id: 'server' });
+  const building = attempt(() => {
+    return createBrokerParticipant({
+      adapter,
+      clock,
+      heartbeat: Infinity,
+      minimumBodyBytesPerSecond: 1_000_000_000,
+      ...optionOf('bodyGracePeriod', given),
+    });
+  });
+
+  if ('refusal' in building) {
+    return { moved: movedOf({ 'its link started': adapter.isLinked }), refusal: building.refusal };
+  }
+
+  const participant = building.built;
+  const server = participant.transportServer({ names: ['interop'] });
+  const peer = broker.adapter({ id: 'peer' });
+  let acceptor: Uint8Array = new Uint8Array(8);
+
+  peer.on('message', ({ payload, settle }) => {
+    const read = readParcel(payload);
+
+    acceptor = 'parcel' in read ? read.parcel.acceptor : acceptor;
+    settle();
+  });
+  await server.start();
+  await peer.start();
+  await peer.subscribe(['bead', 'i', 'peer']);
+  await openFrom(peer);
+  await turnsUntil(() => {
+    return acceptor.some((byte) => {
+      return byte !== 0;
+    });
+  });
+
+  const pair = { acceptor, opener: BROKER_OPENER };
+
+  for (const parcel of [
+    { kind: ParcelKind.PING, sequence: 2 },
+    { carried: new Uint8Array(10), flags: ParcelFlag.MORE, kind: ParcelKind.DATA, sequence: 3 },
+  ]) {
+    await peer.publish({
+      payload: writeParcel({ ...pair, ...parcel }),
+      topic: ['bead', 'i', 'server'],
+    });
+  }
+
+  await turnsUntil(() => {
+    return server.gauges().counts['partsBytes'] === 10;
+  });
+
+  const held = dueOf(delaysOn(clock));
+
+  await participant.stop();
+
+  return { held };
+};
+
+// a broker client's connect, the one participant serving its name never answering
+const connectOfBroker: Way = async (given) => {
+  const clock = createTestClock();
+  const broker = createMemoryBroker({ clock });
+  const silent = broker.adapter({ id: 'silent' });
+  const opens: unknown[] = [];
+  const participant = createBrokerParticipant({ adapter: broker.adapter({ id: 'ada' }), clock });
+  const client = participant.transportClient();
+
+  silent.on('message', ({ payload, settle }) => {
+    opens.push(payload);
+    settle();
+  });
+  await silent.start();
+  await silent.subscribe(['bead', 's', 'interop']);
+
+  return connectTimed(
+    { client, clock },
+    {
+      connect: (options) => {
+        return client.connect({ ...options, server: 'interop' });
+      },
+      given,
+      hasMoved: () => {
+        return opens.length > 0 || participant.isLinked;
+      },
+    }
+  );
+};
+
 // a Web Worker client's connect, its worker never answering
 const connectOfWorker: Way = async (given) => {
   const clock = createTestClock();
@@ -1585,6 +1781,7 @@ const PLAYED: Readonly<Record<string, IPlayed>> = Object.freeze({
   'transportClient.connectTimeout': {
     phrase: "a connect's timeout",
     ways: {
+      broker: connectOfBroker,
       http: connectOfHTTP,
       memory: connectOfMemory,
       webSocket: connectOfWebSocket,
@@ -1602,6 +1799,28 @@ const PLAYED: Readonly<Record<string, IPlayed>> = Object.freeze({
   'webSocketTransportServer.headersTimeout': {
     phrase: 'headersTimeout',
     ways: { options: ofWSServer('headersTimeout') },
+  },
+  'brokerParticipant.heartbeat': {
+    phrase: 'a heartbeat',
+    ways: { options: heartbeatOfParticipant },
+  },
+  'brokerTransportServer.acceptTimeout': {
+    phrase: 'acceptTimeout',
+    ways: { options: acceptTimeoutOfServer },
+  },
+  'brokerParticipant.bodyGracePeriod': {
+    phrase: 'bodyGracePeriod',
+    ways: { options: bodyGracePeriodOfParticipant },
+  },
+  // ! a Keep Alive is a Two Byte Integer of seconds: its ceiling 65,535 of them
+  'mqttBrokerAdapter.keepAlive': {
+    ceiling: 65_535_000,
+    phrase: 'keepAlive',
+    ways: { options: ofMqttAdapter('keepAlive') },
+  },
+  'mqttBrokerAdapter.connectTimeout': {
+    phrase: 'connectTimeout',
+    ways: { options: ofMqttAdapter('connectTimeout') },
   },
 });
 
@@ -1635,11 +1854,18 @@ const playOf = (place: IDurationPlace, way: IDurationWay): IPlayed & { play: Way
 const expectOutcome = async (
   place: IDurationPlace,
   {
+    ceiling,
     input,
     label,
     phrase,
     play,
-  }: { input: IDurationInput; label: string; phrase: string; play: Way }
+  }: {
+    ceiling?: number | undefined;
+    input: IDurationInput;
+    label: string;
+    phrase: string;
+    play: Way;
+  }
 ): Promise<void> => {
   const given = givenOf(input);
   const outcome = outcomeOf(place, input);
@@ -1654,7 +1880,7 @@ const expectOutcome = async (
   expect(report.refusal, label).toBeInstanceOf(ProgrammerError);
   expect({ ...report, refusal: (report.refusal as Error).message }, label).toEqual({
     moved: [],
-    refusal: refusalOf(place, { given, phrase }),
+    refusal: refusalOf(place, { ceiling, given, phrase }),
   });
 };
 
@@ -1685,7 +1911,7 @@ test.describe('the durations', () => {
           continue;
         }
 
-        const { phrase, play } = playOf(place, way);
+        const { ceiling, phrase, play } = playOf(place, way);
 
         for (const input of DURATIONS.inputs) {
           if (isExcused(place, { input, way })) {
@@ -1695,7 +1921,7 @@ test.describe('the durations', () => {
           const label = `${way.id}, ${input.name}`;
 
           await test.step(label, async () => {
-            await expectOutcome(place, { input, label, phrase, play });
+            await expectOutcome(place, { ceiling, input, label, phrase, play });
           });
         }
 

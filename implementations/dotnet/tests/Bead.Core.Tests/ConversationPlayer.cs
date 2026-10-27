@@ -24,6 +24,15 @@ internal sealed record PlayerOptions
     /// the same (<see cref="ConversationPlayer.CanStandFor"/>).
     /// </summary>
     public bool IsInMemory { get; init; }
+
+    /// <summary>
+    /// Whether its clients reach the server through a broker pair over the in-memory broker (spec
+    /// 15.16 to 15.24), each connection a <see cref="BrokerTransportClient"/> of one participant and
+    /// the server a <see cref="BrokerTransportServer"/> of another: the whole router over parcels,
+    /// sequences and parts. A conversation such a pair cannot stand for is played scripted, as
+    /// <see cref="IsInMemory"/> says.
+    /// </summary>
+    public bool IsOverBroker { get; init; }
 }
 
 /// <summary>
@@ -218,7 +227,7 @@ internal static class ConversationPlayer
 
     // an envelope sent, and the credential its transport carried beside it, as a conversation
     // writes what it expects
-    private static string OutOf((ReadOnlyMemory<byte> Bytes, string? Carried) sent)
+    internal static string OutOf((ReadOnlyMemory<byte> Bytes, string? Carried) sent)
     {
         var bytes = sent.Bytes;
         var envelope = EnvelopeCodec.ReadEnvelope(
@@ -302,7 +311,7 @@ internal static class ConversationPlayer
 
     // what a conversation expects, and what its transport carried beside a request, written as OutOf
     // writes what was sent
-    private static string ExpectedOf((JsonElement Expected, string? Carried) step)
+    internal static string ExpectedOf((JsonElement Expected, string? Carried) step)
     {
         var expected = step.Expected;
         var kind = expected.GetProperty("kind").GetInt32();
@@ -377,8 +386,8 @@ internal static class ConversationPlayer
 
         // the server's clock, which settles once its router and its resolvers are idle
         var clock = new SteppingClock(options.WallClock) { Settle = scheduler.WhenIdle };
-        IPlayedTransport transport = options.IsInMemory && CanStandFor(conversation)
-            ? new InMemoryTransport(scheduler, clock)
+        IPlayedTransport transport = (options.IsInMemory || options.IsOverBroker) && CanStandFor(conversation)
+            ? (options.IsOverBroker ? new BrokerPairTransport(scheduler, clock) : new InMemoryTransport(scheduler, clock))
             : new ScriptedTransport { Clock = clock };
 
         // what the server reported, each with the connection it came with
@@ -755,6 +764,162 @@ internal static class ConversationPlayer
         public ValueTask DisposeAsync()
         {
             return _server.DisposeAsync();
+        }
+
+        public (ReadOnlyMemory<byte> Bytes, string? Carried)? Next(string name)
+        {
+            var handle = HandleOf(name);
+
+            lock (_gate)
+            {
+                return _sent.TryGetValue(handle, out var sent) && sent.TryDequeue(out var next) ? next : null;
+            }
+        }
+
+        public IReadOnlyList<(string Name, ReadOnlyMemory<byte> Bytes, string? Carried)> Left()
+        {
+            lock (_gate)
+            {
+                return [.. _sent.SelectMany((sent) =>
+                {
+                    return sent.Value.Select((left) =>
+                    {
+                        return (NameOf(sent.Key), left.Bytes, left.Carried);
+                    });
+                })];
+            }
+        }
+    }
+
+    // a broker pair over the in-memory broker: the server's transport over its participant, and each
+    // connection a client's transport of another participant's, all on the server's scheduler, so its
+    // idle is theirs and the broker's too. A name opened again is a new connection, under the handle
+    // it drew
+    private sealed class BrokerPairTransport : IPlayedTransport, IAsyncDisposable
+    {
+        private readonly BrokerParticipant _serverParticipant;
+        private readonly BrokerParticipant _clientParticipant;
+        private readonly BrokerTransportServer _server;
+
+        // what is sent on the scheduler, and taken on the test's
+        private readonly Lock _gate = new();
+
+        // by name, its client and its handle; and back
+        private readonly Dictionary<string, BrokerTransportClient> _clients = [];
+        private readonly Dictionary<string, string> _handles = [];
+        private readonly Dictionary<string, string> _names = [];
+
+        // by handle, what was sent on it and not yet taken, in order
+        private readonly Dictionary<string, Queue<(ReadOnlyMemory<byte> Bytes, string? Carried)>> _sent = [];
+
+        public BrokerPairTransport(SerialScheduler scheduler, TimeProvider clock)
+        {
+            var broker = new MemoryBroker(new MemoryBrokerOptions { Clock = clock, Scheduler = scheduler });
+
+            _serverParticipant = new BrokerParticipant(broker.Adapter(new MemoryBrokerAdapterOptions { Id = "server" }), new BrokerParticipantOptions { Clock = clock, Scheduler = scheduler });
+            _clientParticipant = new BrokerParticipant(broker.Adapter(new MemoryBrokerAdapterOptions { Id = "client" }), new BrokerParticipantOptions { Clock = clock, Scheduler = scheduler });
+            _server = _serverParticipant.Server(new BrokerTransportServerOptions { Names = ["interop"] });
+        }
+
+        public IServerTransport Server
+        {
+            get
+            {
+                return _server;
+            }
+        }
+
+        public string HandleOf(string name)
+        {
+            return _handles.GetValueOrDefault(name, name);
+        }
+
+        public string NameOf(string connectionHandle)
+        {
+            return _names.GetValueOrDefault(connectionHandle, connectionHandle);
+        }
+
+        // * what the step asks of a connection is what a broker pair's is: CanStandFor chose it so
+        public async Task Open(string name, Carrying carrying)
+        {
+            if (_server.ReadyState != ReadyState.Open)
+            {
+                await _server.Start();
+            }
+
+            var client = _clientParticipant.Client();
+            var drawn = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
+
+            void Drawn(string connectionHandle)
+            {
+                drawn.TrySetResult(connectionHandle);
+            }
+
+            _server.Connection += Drawn;
+
+            string handle;
+
+            try
+            {
+                await client.Connect(new BrokerConnectOptions { Server = "interop" });
+
+                // * told at its third leg, which follows the connect's own end
+                handle = await drawn.Task.WaitAsync(Patience);
+            }
+            finally
+            {
+                _server.Connection -= Drawn;
+            }
+
+            client.Message += (message) =>
+            {
+                lock (_gate)
+                {
+                    if (!_sent.TryGetValue(handle, out var sent))
+                    {
+                        sent = [];
+                        _sent[handle] = sent;
+                    }
+
+                    sent.Enqueue((message.Bytes, message.Credential));
+                }
+            };
+            _clients[name] = client;
+            _handles[name] = handle;
+            _names[handle] = name;
+        }
+
+        public Task Deliver(TransportMessage message, string name)
+        {
+            return _clients[name].Send(message);
+        }
+
+        // closed by its client, unclean, as the scripted transport tells it
+        public async Task Closed(string name)
+        {
+            if (_clients.Remove(name, out var client))
+            {
+                await client.CloseConnection(new TransportDisconnectOptions { IsClean = false });
+                await client.DisposeAsync();
+            }
+        }
+
+        // closes every connection still open, then stops the server and both participants
+        public async Task CloseEach()
+        {
+            foreach (var name in _clients.Keys.ToList())
+            {
+                await Closed(name);
+            }
+
+            await DisposeAsync();
+        }
+
+        public async ValueTask DisposeAsync()
+        {
+            await _server.DisposeAsync();
+            await _clientParticipant.DisposeAsync();
+            await _serverParticipant.DisposeAsync();
         }
 
         public (ReadOnlyMemory<byte> Bytes, string? Carried)? Next(string name)

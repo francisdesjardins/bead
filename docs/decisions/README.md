@@ -38,17 +38,19 @@ transport, never a network of its own
 the conformance files and the interop. The records bind, in the present, parts the repository does
 not hold:
 
-- **a topic-based publish/subscribe broker's transport**
-  ([0021](0021-a-broker-is-a-transport-and-bead-is-never-a-network.md)), one core and one adapter a
-  broker: what stands for a connection there
-  ([0020](0020-http-draws-a-connection-by-a-token-and-a-listen-holds-it.md)), what carries
-  `ELSEWHERE` ([0010](0010-a-request-presents-a-credential-of-a-scheme.md)), what silence is
-  ([0012](0012-a-listen-held-is-not-silence.md)), a relay as its bridge to another transport, and a
-  relay that carries a subscription, which a page across a broker needs
-  ([0019](0019-a-relay-terminates-each-leg-and-routes-nothing-past-it.md)); and a broker in memory,
-  which repeats, reorders and delays on purpose, sharing the in-memory transport's delivery and
-  never its guarantees
-  ([0036](0036-an-in-memory-transport-joins-two-routers-of-one-process-and-a-server-takes-several-transports-through-one.md));
+- **a topic-based publish/subscribe broker's bindings**
+  ([0021](0021-a-broker-is-a-transport-and-bead-is-never-a-network.md)), each a subsection of the
+  spec's section 15, on its version, over the core and the in-memory broker that
+  [0038](0038-over-a-broker-a-connection-is-placed-once-at-its-open-named-by-both-its-ends.md),
+  [0039](0039-a-brokers-transport-numbers-its-parcels-and-sends-an-envelope-in-parts-under-its-peers-bound.md)
+  and
+  [0040](0040-a-brokers-adapter-offers-bytes-at-topics-and-bead-keeps-its-own-credit-credential-and-heartbeat.md)
+  state, MQTT 5's standing
+  ([0041](0041-over-mqtt-5-a-participant-is-one-clean-link-and-a-parcel-one-publish-each-counted-to-its-byte.md)):
+  AMQP 1.0 on RabbitMQ 4, its adapter on each side and the interop against a real broker in CI,
+  which proves the core common; and a relay that carries a subscription, which a page across a
+  broker needs
+  ([0019](0019-a-relay-terminates-each-leg-and-routes-nothing-past-it.md));
 - **a third language's core**, its router, its service layer and its sessions before it has a
   socket, playing its conformance over the in-memory transport it carries first
   ([0036](0036-an-in-memory-transport-joins-two-routers-of-one-process-and-a-server-takes-several-transports-through-one.md)),
@@ -57,9 +59,10 @@ not hold:
   ([0035](0035-a-payload-that-reads-is-held-to-its-messages-rules-before-its-resolver-sees-it.md)),
   and each part it lacks, its transports among them, a row of the support matrix
   ([0004](0004-one-behaviour-in-every-language.md));
-- **the transports' client part** of the conformance, with the outcomes the spec names for a
-  client's call ([0004](0004-one-behaviour-in-every-language.md)) and the defaults of a client's
-  durations ([0014](0014-every-place-that-takes-a-duration-is-a-row-of-one-file.md));
+- **the transports' client part** of the conformance over HTTP and a WebSocket, as the broker's
+  cases have one, with the outcomes the spec names for a client's call
+  ([0004](0004-one-behaviour-in-every-language.md)) and the defaults of a client's durations
+  ([0014](0014-every-place-that-takes-a-duration-is-a-row-of-one-file.md));
 - **a relay across languages in the interop**, one side's relay in front of the other's
   destination, in the twin tests' place for a relay's two legs' limits and the session its
   requesters share ([0004](0004-one-behaviour-in-every-language.md),
@@ -77,6 +80,15 @@ not hold:
 
 Ahead besides, each by a decision of its own that meets the Tenth Man:
 
+- **a connection's age and a graceful drain**, for every long-lived transport at once, a
+  WebSocket's and a broker's, as HTTP/2's `GOAWAY` drains one
+  ([RFC 9113 §6.8](https://www.rfc-editor.org/rfc/rfc9113#section-6.8)) and gRPC's
+  `MAX_CONNECTION_AGE` re-spreads them
+  ([0038](0038-over-a-broker-a-connection-is-placed-once-at-its-open-named-by-both-its-ends.md));
+- what
+  [0040](0040-a-brokers-adapter-offers-bytes-at-topics-and-bead-keeps-its-own-credit-credential-and-heartbeat.md)
+  keeps ahead of a broker: an acceptor that proves itself to its opener, and a publisher's identity
+  a broker vouches for standing for an `ELSEWHERE`;
 - **a payload's rules written in CEL**, a total subset beadc compiles into each side beside the
   rules it compiles already, and then the rules
   [0035](0035-a-payload-that-reads-is-held-to-its-messages-rules-before-its-resolver-sees-it.md)
@@ -163,6 +175,10 @@ table.
 | [0029](0029-a-listen-names-its-cursor-and-its-wait-in-fields-of-its-own.md)                                               | A listen names its cursor and its wait in fields of its own, at the connection's one URL                                                                           | accepted |
 | [0032](0032-a-websocket-upgrade-from-no-page-carries-its-credential-beside-every-envelope.md)                             | A WebSocket upgrade from no page carries its credential beside every envelope of its connection, a client follows no redirect, and a connect bounds what it awaits | accepted |
 | [0036](0036-an-in-memory-transport-joins-two-routers-of-one-process-and-a-server-takes-several-transports-through-one.md) | An in-memory transport joins two routers of one process, and a server takes several transports through one                                                         | accepted |
+| [0038](0038-over-a-broker-a-connection-is-placed-once-at-its-open-named-by-both-its-ends.md)                              | Over a broker, a connection is placed once at its open, and named by both its ends                                                                                 | accepted |
+| [0039](0039-a-brokers-transport-numbers-its-parcels-and-sends-an-envelope-in-parts-under-its-peers-bound.md)              | A broker's transport numbers its parcels, and sends an envelope in parts under its peer's bound                                                                    | accepted |
+| [0040](0040-a-brokers-adapter-offers-bytes-at-topics-and-bead-keeps-its-own-credit-credential-and-heartbeat.md)           | A broker's adapter offers bytes at topics, and Bead keeps its own credit, credential and heartbeat                                                                 | accepted |
+| [0041](0041-over-mqtt-5-a-participant-is-one-clean-link-and-a-parcel-one-publish-each-counted-to-its-byte.md)             | Over MQTT 5, a participant is one clean link and a parcel one PUBLISH, each counted to its byte                                                                    | accepted |
 
 ### A server's edge
 
@@ -208,7 +224,7 @@ table.
 
 ## Writing one
 
-The next decision is 0038. Its file is `NNNN-the-decision-in-a-few-words.md`, and its title states
+The next decision is 0042. Its file is `NNNN-the-decision-in-a-few-words.md`, and its title states
 the decision, not its subject. The title may grow with the record; the file's name stays, unless it
 would mislead.
 

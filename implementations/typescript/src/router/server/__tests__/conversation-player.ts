@@ -15,9 +15,15 @@ import {
   createMemoryTransportClient,
   type MemoryTransportClient,
 } from '../../../transport/client/memory-transport-client';
+import type { BrokerTransportClient } from '../../../transport/client/types';
 import { createMemoryTransportServer } from '../../../transport/server/memory-transport-server';
 import type { TransportServerConnectionHandle } from '../../../transport/server/types';
+import {
+  createBrokerParticipant,
+  type IBrokerParticipant,
+} from '../../../transport/shared/broker-participant';
 import { createEmitter } from '../../../transport/shared/emitter';
+import { createMemoryBroker } from '../../../transport/shared/memory-broker';
 import {
   createTestClock,
   duesOn,
@@ -406,6 +412,129 @@ const createMemoryConnections = (clock: TestClock) => {
 };
 
 /**
+ * The connections a conversation names over a broker pair (spec 15.16 to 15.24): a broker server
+ * transport over the in-memory broker on `clock`, serving `interop`, and for each name a participant
+ * of its own, its id the name, a broker client transport over it; what each client's transport
+ * hears kept for the steps that expect it. The whole router runs over parcels, sequences and parts.
+ */
+const createBrokerConnections = (clock: TestClock) => {
+  const broker = createMemoryBroker({ clock });
+  // ! no heartbeat: its PINGs, on the platform's timer, would cross what a step counts
+  const server = createBrokerParticipant({
+    adapter: broker.adapter({ id: 'server' }),
+    clock,
+    heartbeat: Infinity,
+  });
+  const transport = server.transportServer({ names: ['interop'] });
+  const participants = new Map<string, IBrokerParticipant>();
+  const clients = new Map<string, BrokerTransportClient>();
+  const handles = new Map<string, TransportServerConnectionHandle>();
+  const heard = new Map<string, ISent[]>();
+  const queueOf = (name: string): ISent[] => {
+    const queue = heard.get(name) ?? [];
+
+    heard.set(name, queue);
+
+    return queue;
+  };
+  const clientOf = (name: string): BrokerTransportClient => {
+    const client = clients.get(name);
+
+    if (client === undefined) {
+      throw new Error(`no step opened ${name}`);
+    }
+
+    return client;
+  };
+
+  transport.on('connection', (...[peer, , connectionHandle]) => {
+    handles.set(peer.id, connectionHandle);
+  });
+
+  return {
+    // unclean, as the scripted connections close
+    close: async (name: string): Promise<void> => {
+      await clientOf(name).disconnect({ isClean: false });
+    },
+    closeAll: async (): Promise<void> => {
+      for (const client of clients.values()) {
+        await client[Symbol.asyncDispose]();
+      }
+
+      for (const participant of [...participants.values(), server]) {
+        await participant.stop();
+      }
+    },
+    count: (): number => {
+      return [...heard.values()].reduce((total, queue) => {
+        return total + queue.length;
+      }, 0);
+    },
+    handleOf: (name: string): TransportServerConnectionHandle | undefined => {
+      return handles.get(name);
+    },
+    message: async (
+      name: string,
+      { credential, data }: { credential?: string; data: Data }
+    ): Promise<void> => {
+      await clientOf(name).send({ credential, data });
+    },
+    next: (name: string): ISent | undefined => {
+      return queueOf(name).shift();
+    },
+    // a broker pair stands for a connection secure and two-way alone, which carries no credential
+    // toward its client; its server told once its third leg came
+    open: async (
+      name: string,
+      _flags: { carriesCredential: boolean; isSecure: boolean; isTwoWay: boolean }
+    ): Promise<void> => {
+      const participant =
+        participants.get(name) ??
+        createBrokerParticipant({
+          adapter: broker.adapter({ id: name }),
+          clock,
+          heartbeat: Infinity,
+        });
+      const client = clients.get(name) ?? participant.transportClient();
+
+      if (!clients.has(name)) {
+        client.on('message', ({ credential, data }) => {
+          queueOf(name).push({ bytes: bytesOf(data), credential });
+        });
+      }
+
+      participants.set(name, participant);
+      clients.set(name, client);
+
+      const before = handles.get(name);
+
+      await client.connect({ server: 'interop' });
+
+      while (handles.get(name) === before) {
+        await new Promise(setImmediate);
+      }
+    },
+    start: async (): Promise<void> => {
+      await transport.start();
+    },
+    transport,
+    untaken: (): Record<string, (IExpected | undefined)[]> => {
+      const untaken: Record<string, (IExpected | undefined)[]> = {};
+
+      for (const [name, queue] of heard) {
+        if (queue.length > 0) {
+          untaken[name] = queue.map(({ bytes }) => {
+            return expectedOf(bytes);
+          });
+        }
+      }
+
+      return untaken;
+    },
+  };
+};
+
+/**
  * Whether a pair of the in-memory transport stands for each connection `conversation` opens (spec
  * 15.13): every one secure and two-way, and none a request its server sends expects carried toward
  * its client, which an in-memory one never carries.
@@ -535,10 +664,13 @@ export const playConversation = async (
   {
     inMemory = false,
     metricsRegistry,
+    overBroker = false,
     wallClock,
   }: {
     inMemory?: boolean | undefined;
     metricsRegistry?: IMetricsRegistry | undefined;
+    /** Through a broker pair over the in-memory broker, as through an in-memory pair. */
+    overBroker?: boolean | undefined;
     /** The instant its file starts every case at. */
     wallClock: string;
   }
@@ -547,11 +679,15 @@ export const playConversation = async (
   // the clock every layer runs on: only a step that moves time moves it
   const clock = createTestClock(Date.parse(wallClock));
 
-  if (inMemory && !isPlayedInMemory(conversation)) {
-    throw new Error('an in-memory pair stands for no connection of this conversation');
+  if ((inMemory || overBroker) && !isPlayedInMemory(conversation)) {
+    throw new Error('a pair stands for no connection of this conversation');
   }
 
-  const connections = inMemory ? createMemoryConnections(clock) : createScriptedConnections();
+  const connections = overBroker
+    ? createBrokerConnections(clock)
+    : inMemory
+      ? createMemoryConnections(clock)
+      : createScriptedConnections();
   const relayOptions: IRelayOptions = {
     ...(relay?.beforeRoute === undefined ? {} : { beforeRoute: ADMISSIONS[relay.beforeRoute] }),
     ...(relay?.verifies === undefined ? {} : { verifies: relay.verifies }),

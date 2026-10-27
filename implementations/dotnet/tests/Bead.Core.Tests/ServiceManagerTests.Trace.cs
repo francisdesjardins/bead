@@ -23,7 +23,7 @@ public sealed partial class ServiceManagerTests
         Assert.False(manager.IsDebugging);
     }
 
-    // debugging 4.1, 4.1.1, 4.1.2, 4.1.3, 4.1.4, 4.1.5, 4.1.6, 4.1.7 and 4.1.8
+    // debugging 1.1, 4.1, 4.1.1, 4.1.2, 4.1.3, 4.1.4, 4.1.5, 4.1.6, 4.1.7 and 4.1.8
     [Fact]
     public async Task Tells_each_step_of_a_request_and_once_answered_its_duration()
     {
@@ -228,7 +228,7 @@ public sealed partial class ServiceManagerTests
             }));
     }
 
-    // debugging 4.1.6
+    // debugging 4.1.6 and 11.4
     [Fact]
     public async Task Tells_a_duration_in_whole_milliseconds_its_fraction_dropped()
     {
@@ -303,7 +303,7 @@ public sealed partial class ServiceManagerTests
             }));
     }
 
-    // debugging 3.1, 3.2 and 3.4
+    // debugging 3.1, 3.2, 3.4 and 3.5
     [Fact]
     public async Task Reads_no_clock_for_a_call_made_a_request_answered_a_notification_sent_and_one_heard_while_nobody_listens_and_three_for_a_call_with_a_listener()
     {

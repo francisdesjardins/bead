@@ -2,7 +2,7 @@
 
 // dependencies
 
-import { assertHeld } from './clock';
+import { assertHeld, PLATFORM_CLOCK, type TimeoutId } from './clock';
 
 // interfaces
 
@@ -10,6 +10,13 @@ import { assertHeld } from './clock';
 export interface IHeartbeat {
   /** The peer answered a ping: the connection is alive. */
   answer(): void;
+  stop(): void;
+}
+
+/** One connection's heartbeat on silence alone: told of all it hears, and stopped as it ends. */
+export interface ISilenceHeartbeat {
+  /** Something of the connection came: its silence starts again, and a ping before is answered. */
+  heard(): void;
   stop(): void;
 }
 
@@ -79,6 +86,85 @@ export const createHeartbeat = (
   return {
     answer: () => {
       isAnswered = true;
+    },
+    stop,
+  };
+};
+
+/**
+ * Pings a connection once nothing of it has come for `heartbeat` milliseconds, and drops it once
+ * nothing has come by `heartbeat` after that ping; anything heard answers, as TCP sends a keep-alive
+ * only when nothing came within its interval (RFC 9293 §3.8.4): a broker's connection, whose
+ * parcels each tell it alive (spec 15.21). Nothing at all for `Infinity`. It runs on the platform's
+ * timer, never a clock given, as the WebSocket's does (decision 0011), and keeps no process alive.
+ *
+ * @example
+ * const heartbeat = createSilenceHeartbeat(30_000, {
+ *   drop: () => connection.close(4001),
+ *   ping: () => connection.ping(),
+ * });
+ * connection.onParcel(() => heartbeat.heard());
+ */
+export const createSilenceHeartbeat = (
+  heartbeat: number,
+  { drop, ping }: { drop: () => void; ping: () => void }
+): ISilenceHeartbeat => {
+  const now = (): number => {
+    return PLATFORM_CLOCK.performance.now();
+  };
+  let lastHeard = now();
+  let pingedAt: number | undefined;
+  let timer: TimeoutId | undefined;
+  let isStopped = heartbeat === Infinity;
+
+  const stop = (): void => {
+    isStopped = true;
+    PLATFORM_CLOCK.clearTimeout(timer);
+    timer = undefined;
+  };
+  // * silent since what was heard last, or since its ping: due at `heartbeat` past it, or rearmed
+  // for what is left of it
+  const check = (): void => {
+    const silent = now() - (pingedAt ?? lastHeard);
+
+    if (isStopped) {
+      return;
+    }
+
+    if (silent < heartbeat) {
+      return (arm(heartbeat - silent), undefined);
+    }
+
+    if (pingedAt === undefined) {
+      pingedAt = now();
+      ping();
+      arm(heartbeat);
+
+      return undefined;
+    }
+
+    stop();
+    drop();
+  };
+  const arm = (delay: number): void => {
+    if (isStopped) {
+      return;
+    }
+
+    // ! a millisecond at least, counted whole: no timer is armed for less (decision 0011)
+    timer = PLATFORM_CLOCK.setTimeout(check, Math.max(1, Math.ceil(delay)));
+    // a browser's timer has no `unref`
+    (timer as { unref?: () => unknown }).unref?.();
+  };
+
+  if (!isStopped) {
+    arm(heartbeat);
+  }
+
+  return {
+    heard: () => {
+      lastHeard = now();
+      pingedAt = undefined;
     },
     stop,
   };

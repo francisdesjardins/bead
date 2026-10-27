@@ -13,6 +13,12 @@
     <!-- the transports share what makes a client reconnect, as the TypeScript side's createTransportClient -->
     <InternalsVisibleTo Include="Bead.Transport.Http" />
     <InternalsVisibleTo Include="Bead.Transport.WebSockets" />
+    <!-- MQTT 5's adapter holds its durations and judges its leg secure as every transport does -->
+    <InternalsVisibleTo Include="Bead.Transport.Mqtt" />
+    <!-- its tests play the broker's cases with the core's player, which reads its parcels -->
+    <InternalsVisibleTo Include="Bead.Transport.Mqtt.Tests" />
+    <!-- the interop over MQTT 5 reads a participant's incarnation and an ACCEPT's half -->
+    <InternalsVisibleTo Include="Bead.Interop.Tests" />
     <!-- the interop service holds a duration a payload gives as every place of this side does -->
     <InternalsVisibleTo Include="Bead.Interop" />
     <!-- the fuzz targets read the parsers held here, the transports' fields and the JWT verifier among them -->

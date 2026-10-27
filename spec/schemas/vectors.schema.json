@@ -15,7 +15,10 @@
     "failures",
     "failureRefusals",
     "jwtVerdicts",
-    "credentialRefusals"
+    "credentialRefusals",
+    "parcels",
+    "parcelRefusals",
+    "mqttPublishBounds"
   ],
   "additionalProperties": false,
   "properties": {
@@ -283,9 +286,136 @@
           "reason": { "enum": ["session", "nothing-carried", "verifier", "end", "scheme"] }
         }
       }
+    },
+    "parcels": {
+      "description": "A broker's parcels, read to their fields and written back to their bytes, but those marked written false, which a reader reads alone (section 15.17).",
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["name", "clauses", "bytes", "parcel"],
+        "additionalProperties": false,
+        "properties": {
+          "name": { "$ref": "common.schema.json#/$defs/name" },
+          "clauses": { "$ref": "common.schema.json#/$defs/clauses" },
+          "bytes": { "$ref": "common.schema.json#/$defs/bytes" },
+          "parcel": { "$ref": "#/$defs/parcel" },
+          "written": {
+            "description": "false for a parcel no writer writes: an advisory kind, a layout to come, an OPEN its acceptor refuses.",
+            "const": false
+          }
+        }
+      }
+    },
+    "parcelRefusals": {
+      "description": "Messages a side refuses as parcels: no parcel, dropped in silence and reported, or a parcel that does not read, which closes its connection with 1002 (section 15.17).",
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["name", "clauses", "bytes", "refused"],
+        "additionalProperties": false,
+        "properties": {
+          "name": { "$ref": "common.schema.json#/$defs/name" },
+          "clauses": { "$ref": "common.schema.json#/$defs/clauses" },
+          "bytes": { "$ref": "common.schema.json#/$defs/bytes" },
+          "refused": { "enum": ["no-parcel", "does-not-read"] }
+        }
+      }
+    },
+    "mqttPublishBounds": {
+      "description": "An MQTT 5 PUBLISH counted to its every byte, and the largest payload to a topic within a Maximum Packet Size, with no broker (section 15.30).",
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": [
+          "name",
+          "clauses",
+          "topic",
+          "maximumPacketSize",
+          "qos",
+          "expiry",
+          "largestPayload",
+          "packetBytes"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "name": { "$ref": "common.schema.json#/$defs/name" },
+          "clauses": { "$ref": "common.schema.json#/$defs/clauses" },
+          "topic": { "type": "string", "minLength": 1 },
+          "maximumPacketSize": { "type": "integer", "minimum": 1, "maximum": 268435460 },
+          "qos": { "enum": [0, 1] },
+          "expiry": {
+            "description": "true where the PUBLISH carries a Message Expiry Interval, five bytes of its properties.",
+            "type": "boolean"
+          },
+          "largestPayload": {
+            "description": "The largest payload within the bound, or null where an empty PUBLISH does not fit.",
+            "type": ["integer", "null"],
+            "minimum": 0
+          },
+          "packetBytes": {
+            "description": "The bytes of the PUBLISH that payload makes, or null where none fits.",
+            "type": ["integer", "null"],
+            "minimum": 1
+          }
+        }
+      }
     }
   },
   "$defs": {
+    "half": {
+      "description": "A connection's half, its opener's or its acceptor's: 8 bytes in hexadecimal, all zero where the parcel names none.",
+      "type": "string",
+      "pattern": "^[0-9A-F]{2}(?: [0-9A-F]{2}){7}$"
+    },
+    "parcel": {
+      "description": "A parcel's fields: its prefix, then its body's by its kind; an advisory kind and a layout to come are read to their prefix, an OPEN of a layout to come to its id besides.",
+      "type": "object",
+      "required": ["layout", "kind", "opener", "acceptor", "sequence"],
+      "additionalProperties": false,
+      "properties": {
+        "layout": { "type": "integer", "minimum": 177, "maximum": 191 },
+        "kind": {
+          "description": "OPEN 1, ACCEPT 2, REFUSE 3, DATA 4, PING 5, PONG 6, CLOSE 7, RESET 8, GONE 9; 128 to 255 advisory.",
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 255
+        },
+        "flags": {
+          "description": "MORE 1 and CREDENTIAL 2 on a DATA, SECURE 4 on an OPEN and an ACCEPT, together.",
+          "$ref": "common.schema.json#/$defs/u8"
+        },
+        "opener": { "$ref": "#/$defs/half" },
+        "acceptor": { "$ref": "#/$defs/half" },
+        "sequence": { "$ref": "common.schema.json#/$defs/u53" },
+        "id": { "description": "A participant's id, a character a byte.", "type": "string" },
+        "incarnation": {
+          "description": "A participant's incarnation, 16 bytes in hexadecimal.",
+          "type": "string",
+          "pattern": "^[0-9A-F]{2}(?: [0-9A-F]{2}){15}$"
+        },
+        "bound": { "$ref": "common.schema.json#/$defs/u32" },
+        "status": { "enum": [400, 426, 503] },
+        "layouts": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "type": "integer", "minimum": 177, "maximum": 191 }
+        },
+        "credential": {
+          "description": "The credential a DATA carries, a character a byte.",
+          "type": "string",
+          "minLength": 1
+        },
+        "carried": {
+          "description": "What a DATA carries past its credential: an envelope, or a part of one.",
+          "$ref": "common.schema.json#/$defs/bytes"
+        },
+        "answers": { "$ref": "common.schema.json#/$defs/u53" },
+        "code": { "enum": [1000, 1001, 1002, 1009, 4000, 4001] }
+      }
+    },
     "side": {
       "description": "The side that reads.",
       "enum": ["client", "server"]

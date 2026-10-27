@@ -13,6 +13,7 @@ import type {
 import type {
   Data,
   EmitterListener,
+  IBrokerPeer,
   IEventIteratorOptions,
   IEventMethods,
   IGauges,
@@ -270,13 +271,15 @@ export interface ITransportServerDefineOptions<Socket = unknown, Request = unkno
  * `type=WS;ip=127.0.0.1;port=50000;ordinal=3`, one on a socket of its own, by its peer's port and
  * the rank its transport took it at; `type=HTTP;ip=127.0.0.1;ordinal=7`, one a transport draws, or a
  * worker takes, by its rank alone. A transport gives none twice, so no two connections it holds
- * share one, two sockets from one address and port among them. Its form is this implementation's,
+ * share one, two sockets from one address and port among them; `type=BROKER;participant=peer;ordinal=2`,
+ * one over a broker, by its peer participant's id (spec 15.18). Its form is this implementation's,
  * written for a reader of a trace: an application compares a handle whole. A handle is never a
  * secret: it names a connection in reports and events, and no token enters it.
  */
 export type TransportServerConnectionHandle =
   | `type=${TRANSPORTS};ip=${string};ordinal=${number}`
-  | `type=${TRANSPORTS};ip=${string};port=${number};ordinal=${number}`;
+  | `type=${TRANSPORTS};ip=${string};port=${number};ordinal=${number}`
+  | `type=${TRANSPORTS};participant=${string};ordinal=${number}`;
 
 /** The connections by handle: what a transport registers each one in and removes it from. */
 export type TransportServerConnections<Socket> = Map<
@@ -845,6 +848,58 @@ export type HTTPTransportServer = ITransportServer<IDrawnConnection, IDrawingReq
    */
   isTwoWay(connectionHandle: TransportServerConnectionHandle): boolean;
 };
+
+// ── Broker ────────────────────────────────────────────────────────────────────
+
+// interfaces
+
+/** A broker server transport's options (spec 15.18, 15.23): the names it serves, and its bounds. */
+export interface IBrokerTransportServerOptions {
+  /**
+   * Milliseconds a half-open connection waits for its client's first parcel naming both halves,
+   * before it is forgotten, telling nothing, on its participant's clock: from 1 to 2³¹ − 1, rounded
+   * to the nearest whole one; 0 and `Infinity` are refused. Defaults to {@link ACCEPT_TIMEOUT}.
+   */
+  acceptTimeout?: number | undefined;
+  /**
+   * Whether it serves each name in a group, its broker handing each OPEN to one member, which a name
+   * served by several participants needs (spec 15.18): it lets its names go while it holds
+   * `maximumConnections`, and takes them again once it holds fewer. Its adapter must offer groups.
+   */
+  group?: boolean | undefined;
+  /**
+   * The connections it holds at once, half-open ones among them; past them, an OPEN is refused 503
+   * `busy`. A whole number above 0. Defaults to {@link MAXIMUM_CONNECTIONS}.
+   */
+  maximumConnections?: number | undefined;
+  /**
+   * The connections one participant's id holds at once, proven by its third leg; past them, its
+   * OPEN is refused 503 `busy`. A whole number above 0. Defaults to
+   * {@link MAXIMUM_CONNECTIONS_PER_ADDRESS}.
+   */
+  maximumConnectionsPerAddress?: number | undefined;
+  /**
+   * What may wait on one connection for its broker, handed to its adapter and not yet taken; a parcel
+   * past it loses the connection, 4000, reported naming it (spec 15.23). A whole number above 0.
+   * Defaults to {@link MAXIMUM_UNSENT_BYTES}.
+   */
+  maximumUnsentBytes?: number | undefined;
+  /** The names it serves, each a token, as a host name stands for the servers behind it. */
+  names: readonly string[];
+  /**
+   * What its application says of its own leg (spec 13.4): `false` leaves each connection in the
+   * clear; when not given, one is secure while its own leg and its peer's are.
+   */
+  secure?: boolean | undefined;
+}
+
+// types
+
+/**
+ * A server's transport over a broker participant: each connection's socket is its peer, as its
+ * OPEN named it, and no request opened it.
+ */
+export type BrokerTransportServer = ITransportServer<IBrokerPeer, undefined>;
 
 // ── Joined ────────────────────────────────────────────────────────────────────
 

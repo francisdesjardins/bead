@@ -2658,7 +2658,7 @@ test.describe('createRouterClient', () => {
   });
 
   test.describe('debug', () => {
-    // debugging 5.1
+    // debugging 1.1 and 5.1
     test('tells each envelope out and in, with its connection, server, a copy of its header, and never its session token', async () => {
       const { deliver, transport } = createScriptedTransport();
       using router = createRouterClient(transport);
@@ -3098,6 +3098,7 @@ test.describe('createRouterClient', () => {
       ]);
     });
 
+    // debugging 11.4
     test('observes a call on a clock whose monotonic reading moves by 100 µs, as a browser’s does, as 0 or 100 µs', async () => {
       const metricsRegistry = createMetricsRegistry();
       const clock = createTestClock();

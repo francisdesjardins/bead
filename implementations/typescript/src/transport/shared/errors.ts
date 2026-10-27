@@ -45,6 +45,17 @@ export const tooBigOf = (
   );
 };
 
+/**
+ * A name its broker refused a subscription to as its participant linked anew or its server's
+ * transport served it again, as it is reported: the broker's refusal kept as `cause`.
+ */
+export const notServedOf = (name: string, reason: unknown): GenericError => {
+  return new GenericError(
+    `the name ${name} is not served: its broker refused its subscription, ${reasonMessage(reason)}`,
+    { cause: reason }
+  );
+};
+
 // definition
 
 /**

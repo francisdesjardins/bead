@@ -318,6 +318,7 @@ test.describe('createMetricsRegistry', () => {
 });
 
 test.describe('microsecondsOf', () => {
+  // debugging 11.4
   test('holds a duration in whole microseconds, its fraction dropped, a reading’s binary fraction losing none', () => {
     expect(
       [0, 0.03, 0.0309, 0.3 - 0.2, 1, 1_000.0004, 2.5].map((milliseconds) => {

@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "Bead's transports' cases, spec/transports.json",
   "type": "object",
-  "required": ["$comment", "specVersion", "wallClock", "defaults", "responses", "cases"],
+  "required": ["$comment", "specVersion", "wallClock", "defaults", "responses", "cases", "brokers"],
   "additionalProperties": false,
   "properties": {
     "$schema": { "const": "schemas/transports.schema.json" },
@@ -10,7 +10,7 @@
     "specVersion": { "$ref": "common.schema.json#/$defs/specVersion" },
     "wallClock": { "$ref": "common.schema.json#/$defs/wallClock" },
     "defaults": {
-      "description": "The bounds' defaults, as sections 15.3 and 15.12 state them, in milliseconds for a time: each side checks its own against them.",
+      "description": "The bounds' defaults, as sections 15.3, 15.12 and 15.23 state them, in milliseconds for a time: each side checks its own against them.",
       "$ref": "#/$defs/bounds",
       "required": [
         "maximumConnections",
@@ -30,7 +30,10 @@
         "minimumBodyBytesPerSecond",
         "bodyGracePeriod",
         "maximumMessageBytes",
-        "heartbeat"
+        "heartbeat",
+        "acceptTimeout",
+        "maximumEnvelopePartsBytes",
+        "heldBytesBudget"
       ],
       "unevaluatedProperties": false
     },
@@ -44,6 +47,13 @@
       "type": "array",
       "minItems": 1,
       "items": { "$ref": "#/$defs/case" }
+    },
+    "brokers": {
+      "description": "The real brokers the cases of a binding play against, by their transport.",
+      "type": "object",
+      "required": ["mqtt"],
+      "additionalProperties": false,
+      "properties": { "mqtt": { "$ref": "#/$defs/mqttBroker" } }
     }
   },
   "$defs": {
@@ -70,7 +80,7 @@
         },
         "sendGracePeriod": { "$ref": "common.schema.json#/$defs/duration" },
         "maximumUnsentBytes": {
-          "description": "What waits for a WebSocket's socket, at most (spec 15.12).",
+          "description": "What waits for a WebSocket's socket, or at either end of a broker's connection for its broker, at most (spec 15.12, 15.23).",
           "type": "integer",
           "minimum": 1
         },
@@ -78,11 +88,52 @@
         "minimumBodyBytesPerSecond": { "type": "integer", "minimum": 1 },
         "bodyGracePeriod": { "$ref": "common.schema.json#/$defs/duration" },
         "maximumMessageBytes": { "type": "integer", "minimum": 1 },
-        "heartbeat": { "$ref": "common.schema.json#/$defs/duration" }
+        "heartbeat": {
+          "description": "A WebSocket's heartbeat (spec 15.3), or a broker participant's on a silent connection (spec 15.21).",
+          "$ref": "common.schema.json#/$defs/duration"
+        },
+        "acceptTimeout": {
+          "description": "How long a broker server's half-open connection waits for its client's first parcel (spec 15.23).",
+          "$ref": "common.schema.json#/$defs/duration"
+        },
+        "maximumEnvelopePartsBytes": {
+          "description": "One envelope's parts together, at most, over a broker (spec 15.20, 15.23).",
+          "type": "integer",
+          "minimum": 1
+        },
+        "heldBytesBudget": {
+          "description": "What a broker participant holds in parts across its connections, at most (spec 15.20, 15.23).",
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    },
+    "mqttBroker": {
+      "description": "The Mosquitto the cases over MQTT 5 play against, which tools/mqtt-broker.mjs starts for a run (spec 15.31): its Maximum Packet Size, whether it takes retained messages, whether it offers shared subscriptions, and the users every case names, each authenticated by the run's password, its Client Identifier tied to its user.",
+      "type": "object",
+      "required": [
+        "$comment",
+        "maximumPacketSize",
+        "retainAvailable",
+        "sharedSubscriptions",
+        "users"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "$comment": { "$ref": "common.schema.json#/$defs/comment" },
+        "maximumPacketSize": { "type": "integer", "minimum": 1024, "maximum": 268435460 },
+        "retainAvailable": { "type": "boolean" },
+        "sharedSubscriptions": { "type": "boolean" },
+        "users": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/participant" }
+        }
       }
     },
     "options": {
-      "description": "The server's bounds a case sets, and what it takes besides: hosts, origins, the proxies it trusts, and how many it counts that trustedProxies does not name.",
+      "description": "The server's bounds a case sets, and what it takes besides: hosts, origins, the proxies it trusts, and how many it counts that trustedProxies does not name; over a broker, the names its server serves, whether in a group, a twin that serves them beside it, whether each peer leaves a will, a client's connect's time, and the in-memory broker's queue for each subscriber.",
       "type": "object",
       "minProperties": 1,
       "$ref": "#/$defs/bounds",
@@ -96,6 +147,34 @@
           "type": "integer",
           "minimum": 0,
           "maximum": 8
+        },
+        "names": {
+          "description": "The names a broker server serves, interop unless given (spec 15.16).",
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/token" }
+        },
+        "group": {
+          "description": "true serves each of a broker server's names in a group (spec 15.18).",
+          "const": true
+        },
+        "maximumQueuedMessages": {
+          "description": "The messages the in-memory broker holds for each subscriber, published to it and not yet handed on, past which it drops one (spec 15.24).",
+          "type": "integer",
+          "minimum": 1
+        },
+        "twin": {
+          "description": "A participant beside the peers that serves the server's names in their group, reading every OPEN its broker hands it and answering none (spec 15.18).",
+          "$ref": "#/$defs/participant"
+        },
+        "wills": {
+          "description": "true has each peer's link leave a will, the GONE of its id and of the incarnation its OPENs name (spec 15.21).",
+          "const": true
+        },
+        "timeout": {
+          "description": "In the client role, its connect's time (spec 15.15).",
+          "$ref": "common.schema.json#/$defs/duration"
         }
       }
     },
@@ -121,14 +200,14 @@
       }
     },
     "case": {
-      "description": "What a server of the interop service does at its transport's edge with what a peer of the test's own sends it.",
+      "description": "What a server of the interop service does at its transport's edge with what a peer of the test's own sends it; over a broker, in the client role, what a client's transport does with what the peers that play its acceptors send it.",
       "type": "object",
       "required": ["name", "clauses", "transport", "steps"],
       "additionalProperties": false,
       "properties": {
         "name": { "$ref": "common.schema.json#/$defs/name" },
         "clauses": { "$ref": "common.schema.json#/$defs/clauses" },
-        "transport": { "enum": ["http", "websocket"] },
+        "transport": { "enum": ["http", "websocket", "broker", "mqtt"] },
         "limits": { "$ref": "conversations.schema.json#/$defs/limits" },
         "answersPings": {
           "description": "false for a peer that leaves the server's pings unanswered; its pings are answered otherwise.",
@@ -142,10 +221,33 @@
         "differs": { "$ref": "common.schema.json#/$defs/differs" },
         "steps": {
           "type": "array",
+          "minItems": 1
+        },
+        "role": {
+          "description": "Over a broker, the side under test: a server unless client is given.",
+          "const": "client"
+        },
+        "peers": {
+          "description": "Over a broker, the test's own participants by their ids, peer unless given.",
+          "type": "array",
           "minItems": 1,
-          "items": { "$ref": "#/$defs/step" }
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/participant" }
         }
-      }
+      },
+      "allOf": [
+        {
+          "if": {
+            "required": ["transport"],
+            "properties": { "transport": { "enum": ["broker", "mqtt"] } }
+          },
+          "then": { "properties": { "steps": { "items": { "$ref": "#/$defs/brokerStep" } } } },
+          "else": {
+            "properties": { "steps": { "items": { "$ref": "#/$defs/step" } } },
+            "not": { "anyOf": [{ "required": ["role"] }, { "required": ["peers"] }] }
+          }
+        }
+      ]
     },
     "exchange": {
       "description": "An exchange's name, its own socket.",
@@ -334,6 +436,360 @@
       "description": "token: 16 bytes in base64url without padding; delay-seconds: a number of seconds in ASCII digits; http-date: an IMF-fixdate.",
       "enum": ["token", "delay-seconds", "http-date"]
     },
-    "status": { "type": "integer", "minimum": 100, "maximum": 599 }
+    "status": { "type": "integer", "minimum": 100, "maximum": 599 },
+    "token": {
+      "description": "A topic's token: 1 to 64 characters of base64url's alphabet (spec 15.16).",
+      "type": "string",
+      "pattern": "^[A-Za-z0-9_-]{1,64}$"
+    },
+    "participant": {
+      "description": "A participant's id, a peer's possibly no token, which the in-memory broker takes as a broker takes any name.",
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 255
+    },
+    "captured": {
+      "description": "A value of the side under test, captured as it is first read, put in after by its {name}.",
+      "type": "object",
+      "required": ["capture", "shape"],
+      "additionalProperties": false,
+      "properties": {
+        "capture": { "type": "string", "pattern": "^[a-z][a-zA-Z0-9]*$" },
+        "shape": {
+          "description": "half: 8 bytes, never all zero; incarnation: 16 bytes.",
+          "enum": ["half", "incarnation"]
+        },
+        "unlike": {
+          "description": "A value captured before, by its name, which this one is not.",
+          "type": "string",
+          "pattern": "^[a-z][a-zA-Z0-9]*$"
+        }
+      }
+    },
+    "half": {
+      "description": "A half: its 8 bytes in hexadecimal, all zero where the parcel names none, or a captured half's {name}.",
+      "type": "string",
+      "pattern": "^(?:[0-9A-F]{2}(?: [0-9A-F]{2}){7}|\\{[a-z][a-zA-Z0-9]*\\})$"
+    },
+    "incarnation": {
+      "description": "An incarnation: its 16 bytes in hexadecimal, or a captured one's {name}.",
+      "type": "string",
+      "pattern": "^(?:[0-9A-F]{2}(?: [0-9A-F]{2}){15}|\\{[a-z][a-zA-Z0-9]*\\})$"
+    },
+    "sentParcel": {
+      "description": "A parcel a peer publishes, by its fields, which its codec writes: a DATA's envelope as a send of conversations.json writes one.",
+      "type": "object",
+      "required": ["kind", "opener", "acceptor", "sequence", "flags"],
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "description": "OPEN 1, ACCEPT 2, REFUSE 3, DATA 4, PING 5, PONG 6, CLOSE 7, RESET 8, GONE 9 (spec 15.17).",
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9
+        },
+        "sequence": { "$ref": "common.schema.json#/$defs/u53" },
+        "flags": {
+          "description": "MORE 1 and CREDENTIAL 2 on a DATA, SECURE 4 on an OPEN and an ACCEPT, together.",
+          "$ref": "common.schema.json#/$defs/u8"
+        },
+        "id": { "$ref": "#/$defs/participant" },
+        "bound": { "$ref": "common.schema.json#/$defs/u32" },
+        "status": { "enum": [400, 426, 503] },
+        "layouts": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "type": "integer", "minimum": 177, "maximum": 191 }
+        },
+        "credential": {
+          "description": "The credential a DATA carries, a field value.",
+          "type": "string",
+          "minLength": 1
+        },
+        "part": {
+          "description": "A part of an envelope a DATA carries, in hexadecimal.",
+          "$ref": "common.schema.json#/$defs/bytes"
+        },
+        "answers": { "$ref": "common.schema.json#/$defs/u53" },
+        "code": { "enum": [1000, 1001, 1002, 1009, 4000, 4001] },
+        "opener": { "$ref": "#/$defs/half" },
+        "acceptor": { "$ref": "#/$defs/half" },
+        "incarnation": { "$ref": "#/$defs/incarnation" },
+        "envelope": { "$ref": "common.schema.json#/$defs/bytes" }
+      },
+      "not": { "required": ["envelope", "part"] }
+    },
+    "readParcel": {
+      "description": "A parcel a peer reads, each field its value, a half or an incarnation captured; a DATA's envelope as conversations.json expects one. A field it is read without is one it does not have.",
+      "type": "object",
+      "required": ["kind", "opener", "acceptor", "sequence", "flags"],
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "description": "OPEN 1, ACCEPT 2, REFUSE 3, DATA 4, PING 5, PONG 6, CLOSE 7, RESET 8, GONE 9 (spec 15.17).",
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9
+        },
+        "sequence": { "$ref": "common.schema.json#/$defs/u53" },
+        "flags": {
+          "description": "MORE 1 and CREDENTIAL 2 on a DATA, SECURE 4 on an OPEN and an ACCEPT, together.",
+          "$ref": "common.schema.json#/$defs/u8"
+        },
+        "id": { "$ref": "#/$defs/participant" },
+        "bound": { "$ref": "common.schema.json#/$defs/u32" },
+        "status": { "enum": [400, 426, 503] },
+        "layouts": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "type": "integer", "minimum": 177, "maximum": 191 }
+        },
+        "credential": {
+          "description": "The credential a DATA carries, a field value.",
+          "type": "string",
+          "minLength": 1
+        },
+        "part": {
+          "description": "A part of an envelope a DATA carries, in hexadecimal.",
+          "$ref": "common.schema.json#/$defs/bytes"
+        },
+        "answers": { "$ref": "common.schema.json#/$defs/u53" },
+        "code": { "enum": [1000, 1001, 1002, 1009, 4000, 4001] },
+        "opener": { "oneOf": [{ "$ref": "#/$defs/half" }, { "$ref": "#/$defs/captured" }] },
+        "acceptor": { "oneOf": [{ "$ref": "#/$defs/half" }, { "$ref": "#/$defs/captured" }] },
+        "incarnation": {
+          "oneOf": [{ "$ref": "#/$defs/incarnation" }, { "$ref": "#/$defs/captured" }]
+        },
+        "envelope": { "$ref": "conversations.schema.json#/$defs/expect" }
+      },
+      "not": { "required": ["envelope", "part"] }
+    },
+    "published": {
+      "description": "What a peer publishes in one turn, in its order: each a parcel by its fields, or bytes, in hexadecimal, a captured half put in by its {name}.",
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "minProperties": 1,
+        "maxProperties": 1,
+        "additionalProperties": false,
+        "properties": {
+          "parcel": { "$ref": "#/$defs/sentParcel" },
+          "bytes": {
+            "type": "string",
+            "pattern": "^(?:(?:[0-9A-F]{2}|\\{[a-z][a-zA-Z0-9]*\\})[ |]*)*$"
+          }
+        }
+      }
+    },
+    "publication": {
+      "description": "A peer, from, publishing to the server's name, the inbox of the participant under test, or its own departure.",
+      "type": "object",
+      "required": ["publish", "from", "to"],
+      "additionalProperties": false,
+      "properties": {
+        "publish": { "$ref": "#/$defs/published" },
+        "from": { "$ref": "#/$defs/participant" },
+        "to": { "enum": ["name", "inbox", "departure"] },
+        "retained": {
+          "description": "Handed on marked retained, as a broker hands a message it kept.",
+          "const": true
+        },
+        "refused": {
+          "description": "The broker refuses it, no subscriber taking it.",
+          "const": "no-subscriber"
+        }
+      }
+    },
+    "brokerTold": {
+      "description": "A REFUSE's refusal told: its status, its reason and its address, the id the OPEN claims; its authority, its origin and its port none (spec 15.1, 15.18).",
+      "type": "object",
+      "required": ["status", "reason", "address"],
+      "additionalProperties": false,
+      "properties": {
+        "status": { "enum": [400, 426, 503] },
+        "reason": { "enum": ["malformed", "layout-refused", "busy"] },
+        "address": { "$ref": "#/$defs/participant" }
+      }
+    },
+    "brokerExpectation": {
+      "description": "What a peer reads next, a parcel and the refusal told beside a REFUSE, or what the transport under test does next: a close it tells; in the client role, its connect opened or failed, an envelope it hands its router, or whether it says it is secure; where each OPEN of some openers was placed; or the lives the side under test asked its adapter.",
+      "type": "object",
+      "additionalProperties": false,
+      "oneOf": [
+        { "required": ["parcel"] },
+        { "required": ["closed"] },
+        { "required": ["opened"] },
+        { "required": ["failed"] },
+        { "required": ["received"] },
+        { "required": ["secure"] },
+        { "required": ["placed"] },
+        { "required": ["lives"] }
+      ],
+      "dependentRequired": { "told": ["parcel"] },
+      "properties": {
+        "parcel": { "$ref": "#/$defs/readParcel" },
+        "told": { "$ref": "#/$defs/brokerTold" },
+        "closed": {
+          "type": "object",
+          "required": ["clean"],
+          "additionalProperties": false,
+          "properties": { "clean": { "type": "boolean" } }
+        },
+        "opened": { "const": true },
+        "failed": {
+          "description": "The connect failed: the status and the reason of the REFUSE it read, and the layouts of a 426, or no-subscriber, its broker saying nothing serves the name.",
+          "type": "object",
+          "required": ["reason"],
+          "additionalProperties": false,
+          "properties": {
+            "status": { "enum": [400, 426, 503] },
+            "reason": { "enum": ["malformed", "layout-refused", "busy", "no-subscriber"] },
+            "layouts": {
+              "type": "array",
+              "minItems": 1,
+              "items": { "type": "integer", "minimum": 177, "maximum": 191 }
+            }
+          }
+        },
+        "received": { "$ref": "conversations.schema.json#/$defs/expect" },
+        "secure": { "type": "boolean" },
+        "placed": {
+          "description": "Each OPEN of these openers' halves reached the server under test or the participant with, its twin, never both and never neither: the server's ACCEPT read on the opener's inbox, the twin's OPEN read on the name.",
+          "type": "object",
+          "required": ["with", "openers"],
+          "additionalProperties": false,
+          "properties": {
+            "with": { "$ref": "#/$defs/participant" },
+            "openers": {
+              "type": "array",
+              "minItems": 1,
+              "uniqueItems": true,
+              "items": { "$ref": "#/$defs/half" }
+            }
+          }
+        },
+        "lives": {
+          "description": "What the side under test asked its adapter of each publication's life, exactly, in milliseconds on the clock given, null for none: an OPEN's, a DATA's that carries a credential, and every other parcel's.",
+          "type": "object",
+          "required": ["open", "credential", "other"],
+          "additionalProperties": false,
+          "properties": {
+            "open": { "type": ["integer", "null"], "minimum": 1 },
+            "credential": { "type": ["integer", "null"], "minimum": 1 },
+            "other": { "type": ["integer", "null"], "minimum": 1 }
+          }
+        }
+      }
+    },
+    "brokerStep": {
+      "description": "Over a broker, what the test does — publish, stop, wait, lose, takeover, leave, and in the client role connect and transportSend — or what the side under test does next — expect, reported — or a gauge or a timer waited for, or time moved: one of them.",
+      "type": "object",
+      "additionalProperties": false,
+      "oneOf": [
+        { "required": ["publish", "from", "to"] },
+        { "required": ["expect"] },
+        { "required": ["reported"] },
+        { "required": ["until"] },
+        { "required": ["advance"] },
+        { "required": ["stop"] },
+        { "required": ["wait"] },
+        { "required": ["connect"] },
+        { "required": ["transportSend"] },
+        { "required": ["lose"] },
+        { "required": ["takeover"] },
+        { "required": ["leave"] }
+      ],
+      "dependentRequired": {
+        "from": ["publish"],
+        "to": ["publish"],
+        "retained": ["publish"],
+        "refused": ["publish"],
+        "at": ["expect", "on"]
+      },
+      "properties": {
+        "publish": { "$ref": "#/$defs/published" },
+        "from": { "$ref": "#/$defs/participant" },
+        "to": { "enum": ["name", "inbox", "departure"] },
+        "retained": { "const": true },
+        "refused": { "const": "no-subscriber" },
+        "on": {
+          "description": "The peer whose inbox an expect reads, or whose connection a close or a report names.",
+          "$ref": "#/$defs/participant"
+        },
+        "at": {
+          "description": "In the client role, the departure of the client under test, which every peer subscribes, read in place of the peer's inbox.",
+          "const": "departure"
+        },
+        "lose": {
+          "description": "The link of that participant, the one under test or a peer, lost without a clean end: in memory its adapter's, over MQTT 5 its relay cut.",
+          "$ref": "#/$defs/participant"
+        },
+        "takeover": {
+          "description": "The link of the participant under test taken over by another link of its id: in memory its adapter's takeOver, over MQTT 5 a link of the player's own under its id.",
+          "enum": ["server", "client"]
+        },
+        "leave": {
+          "description": "A peer that lets its inbox go, its unsubscription settled.",
+          "$ref": "#/$defs/participant"
+        },
+        "within": {
+          "description": "How long an expect waits, in milliseconds, where not a patience of its own.",
+          "type": "integer",
+          "minimum": 1
+        },
+        "expect": { "$ref": "#/$defs/brokerExpectation" },
+        "reported": {
+          "description": "The next error the transport under test reports of its own, its message naming each of these words.",
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "until": {
+          "description": "A gauge of the transport under test, or of its adapter for unsettled, and the value it waits for; or a timer armed on the side's given clock.",
+          "type": "object",
+          "oneOf": [{ "required": ["gauge", "is"] }, { "required": ["timer"] }],
+          "additionalProperties": false,
+          "properties": {
+            "timer": { "$ref": "common.schema.json#/$defs/timer" },
+            "gauge": {
+              "enum": ["connections", "halfOpen", "partsBytes", "names", "departures", "unsettled"]
+            },
+            "is": { "type": "integer", "minimum": 0 }
+          }
+        },
+        "advance": { "$ref": "common.schema.json#/$defs/advance" },
+        "stop": {
+          "description": "Stops the server's transport under test, its participant's link kept; crossing, what a peer publishes in the turn the stop begins, before it.",
+          "oneOf": [
+            { "const": true },
+            {
+              "type": "object",
+              "required": ["crossing"],
+              "additionalProperties": false,
+              "properties": { "crossing": { "$ref": "#/$defs/publication" } }
+            }
+          ]
+        },
+        "wait": {
+          "description": "Milliseconds waited on the real clock, in a case marked realTime.",
+          "type": "integer",
+          "minimum": 1
+        },
+        "connect": {
+          "description": "The client under test connects to the server of this name.",
+          "$ref": "#/$defs/token"
+        },
+        "transportSend": {
+          "description": "An envelope the client's transport sends, in hexadecimal, and the credential it carries beside it, a field value.",
+          "type": "object",
+          "required": ["envelope"],
+          "additionalProperties": false,
+          "properties": {
+            "envelope": { "$ref": "common.schema.json#/$defs/bytes" },
+            "credential": { "type": "string", "minLength": 1 }
+          }
+        }
+      }
+    }
   }
 }

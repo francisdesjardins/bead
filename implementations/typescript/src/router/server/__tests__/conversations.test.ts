@@ -340,4 +340,14 @@ test.describe('the conversations', () => {
       });
     }
   });
+
+  // spec 15.16 to 15.24: the same through a broker pair over the in-memory broker, whose connection
+  // is secure and two-way and carries nothing toward its client, as an in-memory one
+  test.describe('through a broker pair', () => {
+    for (const conversation of CONVERSATIONS.filter(isPlayedInMemory)) {
+      test(conversation.name, async () => {
+        await playConversation(conversation, { overBroker: true, wallClock: WALL_CLOCK });
+      });
+    }
+  });
 });
