@@ -231,6 +231,65 @@ jobs:
       - run: $YARN test:browser
         working-directory: implementations/typescript
 
+  # ── MQTT 5 ───────────────────────────────────────────────────────────────────
+  # The cases over MQTT 5, each adapter against the fixture over TCP and WebSocket, the interop over
+  # MQTT 5 both ways, the internal demo's sign-up and a page's client over WebSocket, against a
+  # Mosquitto 2.1.2 of the run's own, by its digest, a password drawn for the run (decision 0041). On
+  # the runner's host, where Docker is: the Playwright image of the other jobs reaches none, and a
+  # service container starts before any step could draw its password. `BEAD_MQTT_REQUIRED=1` turns a
+  # case that would skip without a broker into one that fails, as `BEAD_INTEROP_REQUIRED=1` does the
+  # interop's.
+  mqtt:
+    name: MQTT 5, against Mosquitto
+    needs: playwright
+    runs-on: ubuntu-26.04
+    timeout-minutes: 20
+    env:
+      BEAD_MQTT_REQUIRED: 1
+      BEAD_INTEROP_REQUIRED: 1
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          global-json-file: implementations/dotnet/global.json
+          cache: true
+          cache-dependency-path: implementations/dotnet/**/packages.lock.json
+      - name: Locate the Yarn cache
+        id: yarn-cache
+        working-directory: implementations/typescript
+        run: echo "dir=$($YARN config get cacheFolder)" >> "$GITHUB_OUTPUT"
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ steps.yarn-cache.outputs.dir }}
+          key: yarn-cache-${{ runner.os }}-node${{ env.NODE_VERSION }}-${{ hashFiles('implementations/typescript/yarn.lock') }}
+          restore-keys: yarn-cache-${{ runner.os }}-node${{ env.NODE_VERSION }}-
+      - run: $YARN install --immutable
+        working-directory: implementations/typescript
+      - name: Mosquitto 2.1.2 by its digest, a password drawn for this run
+        run: node tools/mqtt-broker.mjs start --github-env
+      # the cases over MQTT 5, the adapter over WebSocket, and the TypeScript client over MQTT 5
+      - run: $YARN test:mqtt
+        working-directory: implementations/typescript
+      # the internal demo's server and its page's client over MQTT 5, as `?transport=mqtt` links them
+      - run: $YARN test:demo --project unit --grep "over MQTT 5"
+        working-directory: implementations/typescript
+      - run: dotnet test --project tests/Bead.Transport.Mqtt.Tests
+        working-directory: implementations/dotnet
+      - run: dotnet test --project tests/Bead.Interop.Tests --filter-trait "transport=MQTT"
+        working-directory: implementations/dotnet
+      - run: $YARN playwright install --with-deps chromium && $YARN test:browser --grep "MQTT 5"
+        working-directory: implementations/typescript
+        env:
+          # the page's leg installs its Chromium, which no image of this job holds
+          PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: 0
+      # the broker start left, which a start that failed left none of
+      - name: The broker stopped
+        if: always()
+        run: if [ -n "${BEAD_MQTT_BROKER:-}" ]; then node tools/mqtt-broker.mjs stop; fi
+
   # ── Builder ──────────────────────────────────────────────────────────────────
   # beadc's own gate, from builder/, its toolchain its own. On Linux: types, the goldens' types,
   # lint, format, buf's lint and format over its options and its fixtures, and the options'
@@ -687,6 +746,7 @@ jobs:
         playwright,
         typescript,
         dotnet,
+        mqtt,
         builder,
         examples,
         protobuf-conformance,
