@@ -210,6 +210,8 @@ jobs:
       - run: dotnet format Bead.slnx --verify-no-changes --exclude ../../builder/test/golden/csharp interop/Bead.Interop/Generated tests/Bead.Protobuf.Tests/Generated
       # every project, which `dotnet test` does not: it builds the test projects alone
       - run: dotnet build Bead.slnx
+      # the bench, outside Bead.slnx, built so that a release's measure finds it whole
+      - run: dotnet build -c Release tools/Bead.Benchmarks
       # the tests under coverage, one cobertura report per test project, then what they ran held to
       # the C# side's floor in tools/coverage-floors.json, the report in the run's summary
       - run: >-
