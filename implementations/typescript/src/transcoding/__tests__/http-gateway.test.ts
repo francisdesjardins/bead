@@ -266,6 +266,45 @@ const rawAsEdges = (): readonly IHttpRouteInit[] => {
 // tests
 
 // transcoding 2.3
+test('serves a mounted route without a remote endpoint', async () => {
+  await using fixture = await startTranscoding({
+    createServer: (listener) => {
+      return createNodeServer((request, response) => {
+        const handed: IHTTPRequestLike = {
+          headers: request.headers,
+          httpVersion: request.httpVersion,
+          httpVersionMajor: request.httpVersionMajor,
+          method: 'GET',
+          rawHeaders: request.rawHeaders,
+          socket: {},
+          url: request.url,
+          destroy: request.destroy.bind(request),
+          on: request.on.bind(request),
+        };
+        listener(handed, response);
+      });
+    },
+  });
+  const peers: { address: string; port: number }[] = [];
+  const reported = reportedBy(fixture.gateway);
+  fixture.memory.on('connection', () => {
+    for (const peer of fixture.memory.clients) {
+      peers.push({ address: peer.address, port: peer.port });
+    }
+  });
+
+  expect(await send(fixture.port, { method: 'GET', path: '/v1/books/2' })).toMatchObject({
+    body: '{"name":"2","title":"A tale"}',
+    headers: { 'content-type': 'application/json' },
+    status: 200,
+  });
+  expect(peers).toEqual([{ address: 'local', port: 0 }]);
+  await until(() => {
+    return fixture.memory.clients.length === 0;
+  });
+  expect(reported).toEqual([]);
+});
+
 test('hands each exchange’s client address and socket port to its transport after its proxy policy', async () => {
   for (const { address, trustedProxies, unnamedProxies } of [
     { address: '127.0.0.1', trustedProxies: [], unnamedProxies: 0 },
@@ -3026,6 +3065,52 @@ test('bounds an accepted slice until its pending bytes are flushed', async () =>
   expect(reported).toEqual([
     'the response is dropped: minimumSendBytesPerSecond 1000000 after sendGracePeriod 1ms',
   ]);
+});
+
+test('writes a document through a host that exposes no pending-byte count', async () => {
+  const body = 'a'.repeat(2 * 64 * 1024 + 7);
+  const sizes: number[] = [];
+  let ends = 0;
+  await using fixture = await startTranscoding({
+    document: body,
+    createServer: (listener) => {
+      return createNodeServer((request, response) => {
+        const host: IHTTPResponseLike = {
+          get headersSent() {
+            return response.headersSent;
+          },
+          get writableFinished() {
+            return response.writableFinished;
+          },
+          destroy: () => {
+            response.destroy();
+          },
+          end: (data?: Uint8Array) => {
+            ends += 1;
+            response.end(data);
+          },
+          on: response.on.bind(response),
+          setHeader: response.setHeader.bind(response),
+          write: (chunk) => {
+            sizes.push(chunk.length);
+            return response.write(chunk);
+          },
+          writeHead: response.writeHead.bind(response),
+        };
+        expect(host.writableLength).toBeUndefined();
+        listener(request, host);
+      });
+    },
+  });
+  const reported = reportedBy(fixture.gateway);
+  const received = await send(fixture.port, { method: 'GET', path: '/openapi.json' });
+
+  expect(received.status).toBe(200);
+  expect(received.headers['content-type']).toBe('application/json');
+  expect(received.body).toBe(body);
+  expect(sizes).toEqual([65536, 65536, 7]);
+  expect(ends).toBe(1);
+  expect(reported).toEqual([]);
 });
 
 test('finishes a document whose write callback completes inline despite its false return', async () => {

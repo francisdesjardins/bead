@@ -10,6 +10,28 @@ namespace Bead.Tests;
 public sealed class TrustedProxiesTests
 {
     [Fact]
+    public void Reads_one_to_five_ASCII_port_digits_and_stops_forwarding_at_any_other_port()
+    {
+        var trust = TrustOf(["127.0.0.1", "10.0.0.0/8"], 0);
+        foreach (var (node, address) in new[] { ("192.0.2.7", "192.0.2.7"), ("[2001:db8::1]", "2001:db8::1") })
+        {
+            foreach (var port in new[] { "0", "9", "00000", "65535", "99999" })
+            {
+                var entry = $"{node}:{port}";
+                Assert.Equal(address, TrustedProxies.AddressOfEntry(entry));
+                Assert.Equal(address, TrustedProxies.ClientAddressOf(Loopback, ($"203.0.113.9, {entry}", trust)));
+            }
+            foreach (var port in new[] { "", "123456", "x", "1x", "１２", "١" })
+            {
+                var entry = $"{node}:{port}";
+                Assert.Null(TrustedProxies.AddressOfEntry(entry));
+                Assert.Equal("127.0.0.1", TrustedProxies.ClientAddressOf(Loopback, ($"203.0.113.9, {entry}", trust)));
+                Assert.Equal("10.0.0.1", TrustedProxies.ClientAddressOf(Loopback, ($"203.0.113.9, {entry}, 10.0.0.1", trust)));
+            }
+        }
+    }
+
+    [Fact]
     public void Keeps_a_direct_client_address_when_no_forwarding_policy_is_supplied()
     {
         var trust = TrustedProxies.TrustOf((null, "TrustedProxies"), (0, "UnnamedProxies"));

@@ -5,6 +5,10 @@ using System.Text.Json;
 using Bead.Transcoding.Http;
 using Bead.Transcoding.V1;
 using Google.Protobuf.WellKnownTypes;
+using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.Logging;
 
 namespace Bead.Transcoding.Tests;
 
@@ -1012,6 +1016,57 @@ public sealed class HttpCallerTests
             Assert.Equal(1, sent);
             Assert.True(disposed > 0);
             Assert.False(stream.CanRead);
+        }
+    }
+
+    [Fact]
+    public async Task Refuses_an_empty_event_stream_from_a_supplied_executor_and_over_HTTP()
+    {
+        foreach (var wire in new[] { false, true })
+        {
+            var sent = 0;
+            var disposed = 0;
+            var builder = WebApplication.CreateSlimBuilder();
+            builder.Logging.ClearProviders();
+            builder.WebHost.UseUrls("http://127.0.0.1:0");
+            await using var host = builder.Build();
+            host.Run(async (context) =>
+            {
+                Interlocked.Increment(ref sent);
+                context.Response.StatusCode = StatusCodes.Status200OK;
+                context.Response.ContentType = "text/event-stream";
+                context.Response.ContentLength = 0;
+                await context.Response.CompleteAsync();
+            });
+            await host.StartAsync(Cancelled);
+            using var stream = new FragmentedStream([], () => { disposed++; });
+            using var handler = new StubHandler((request, _) =>
+            {
+                Interlocked.Increment(ref sent);
+                var content = new StreamContent(stream);
+                content.Headers.ContentType = new MediaTypeHeaderValue("text/event-stream");
+                return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { RequestMessage = request, Content = content });
+            });
+            using var client = new TranscodingHttpClient(new Uri(host.Urls.Single()), wire ? null : new HttpCallerOptions { Handler = handler });
+            var received = 0;
+            var failure = await Assert.ThrowsAsync<FailureException>(async () =>
+            {
+                await foreach (var _ in client.SubscribeWatch(new Empty()))
+                {
+                    received++;
+                }
+            });
+            Assert.Equal((ushort)ProtocolCode.DestinationLost, failure.Code);
+            Assert.Equal("the HTTP event stream ends without a failure", failure.Detail);
+            Assert.Equal(FailureScope.Protocol, failure.Scope);
+            Assert.Equal(FailureOrigin.Local, failure.Origin);
+            Assert.Equal(0, received);
+            Assert.Equal(1, sent);
+            if (!wire)
+            {
+                Assert.True(disposed > 0);
+                Assert.False(stream.CanRead);
+            }
         }
     }
 

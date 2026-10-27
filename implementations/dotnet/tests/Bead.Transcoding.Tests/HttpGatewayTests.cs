@@ -34,6 +34,40 @@ public sealed class HttpGatewayTests
 
     // transcoding 2.3
     [Fact]
+    public async Task Serves_a_mounted_route_without_a_remote_endpoint()
+    {
+        await using var service = await TranscodingService.Start();
+        await using var gateway = new HttpGateway(Exchanges.OptionsOf(service.Memory, null));
+        var peers = new List<(string Address, int Port)>();
+        var reported = ReportedBy(gateway);
+        service.Memory.Connection += (_) =>
+        {
+            foreach (var peer in service.Memory.Clients)
+            {
+                peers.Add((peer.Address, peer.Port));
+            }
+        };
+        var context = new DefaultHttpContext();
+        context.Request.Method = "GET";
+        context.Request.Protocol = "HTTP/1.1";
+        context.Request.Path = "/v1/books/2";
+        context.Request.Host = new HostString("127.0.0.1");
+        context.Features.Get<IHttpRequestFeature>()!.RawTarget = "/v1/books/2";
+        Assert.Null(context.Connection.RemoteIpAddress);
+        using var body = new MemoryStream();
+        context.Response.Body = body;
+
+        await gateway.Answer(context).WaitAsync(Patience, Cancelled);
+
+        Assert.Equal(StatusCodes.Status200OK, context.Response.StatusCode);
+        Assert.Equal("application/json", context.Response.ContentType);
+        Assert.Equal("{\"name\":\"2\",\"title\":\"A tale\"}", Encoding.UTF8.GetString(body.ToArray()));
+        Assert.Equal([("local", 0)], peers);
+        await Until(() => { return service.Memory.Clients.Count == 0; });
+        Assert.Empty(reported);
+    }
+
+    [Fact]
     public async Task Hands_each_exchange_s_client_address_and_socket_port_to_its_transport_after_its_proxy_policy()
     {
         foreach (var (address, trustedProxies, unnamedProxies) in new (string, string[], int)[]

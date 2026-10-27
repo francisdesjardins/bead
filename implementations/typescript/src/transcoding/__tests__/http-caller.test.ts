@@ -1,3 +1,4 @@
+import { createServer } from 'node:http';
 import { expect, test } from '@playwright/test';
 import { FailureScope, LIMIT_DEFAULTS, ProtocolCode } from '../../router/shared/constants';
 import { FailureError } from '../../router/shared/errors';
@@ -1218,6 +1219,54 @@ test('rejects empty responses with no required media type and releases their con
     expect(received).toEqual([]);
     expect(sent).toBe(1);
     expect(response.body).toBeNull();
+  }
+});
+
+test('refuses an empty event stream from a supplied executor and over HTTP', async () => {
+  for (const wire of [false, true]) {
+    let sent = 0;
+    await using host = createServer((_request, response) => {
+      sent += 1;
+      response.writeHead(200, { 'content-type': 'text/event-stream', 'content-length': '0' });
+      response.end();
+    });
+    await new Promise<void>((resolve) => {
+      host.listen(0, '127.0.0.1', resolve);
+    });
+    const address = host.address();
+    if (address === null || typeof address === 'string') {
+      throw new Error('the HTTP fixture listens on no port');
+    }
+    let answered: Response | undefined;
+    const client = new TranscodingHttpClient(urlOf(address.port), {
+      fetch: async (url, init) => {
+        if (wire) {
+          answered = await fetch(url, init);
+          expect(answered.body).not.toBeNull();
+        } else {
+          sent += 1;
+          answered = new Response(null, { headers: { 'content-type': 'text/event-stream' } });
+        }
+        return answered;
+      },
+    });
+    const received: HTTPEvent<unknown, unknown>[] = [];
+    await expect(async () => {
+      for await (const event of client.subscribeWatch({})) {
+        received.push(event);
+      }
+    }).rejects.toMatchObject({
+      code: wire ? ProtocolCode.DESTINATION_LOST : ProtocolCode.PAYLOAD_UNDECODABLE,
+      detail: wire
+        ? 'the HTTP event stream ends without a failure'
+        : 'the HTTP subscription answers no event stream',
+      scope: FailureScope.PROTOCOL,
+      origin: 'local',
+    });
+    expect(received).toEqual([]);
+    expect(sent).toBe(1);
+    expect(answered?.bodyUsed).toBe(wire);
+    expect(answered?.body?.locked ?? false).toBe(false);
   }
 });
 
