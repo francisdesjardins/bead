@@ -25,6 +25,47 @@ test.describe('DisconnectError', () => {
 test.describe('FailureError', () => {
   const token = toSessionToken(new Uint8Array(16).fill(7));
 
+  test('matches failure code sets by scope code and the known side', () => {
+    const protocol = new FailureError({ ...SERVER_FAILURES.subscriptionUnknown, origin: 'peer' });
+    const application = new FailureError({
+      code: 21,
+      scope: FailureScope.APPLICATION,
+      side: 'server',
+      origin: 'peer',
+    });
+    const relayed = new FailureError({
+      code: 21,
+      scope: FailureScope.PROTOCOL,
+      origin: 'relayed',
+      relays: 1,
+    });
+
+    for (const error of [protocol, application, relayed]) {
+      const isProtocol = error.scope === FailureScope.PROTOCOL;
+
+      expect(error.isProtocol([ProtocolCode.SUBSCRIPTION_UNKNOWN])).toBe(isProtocol);
+      expect(error.isProtocol([ProtocolCode.SUBSCRIPTION_UNKNOWN], 'server')).toBe(
+        isProtocol && error.side === 'server'
+      );
+      expect(error.isProtocol([ProtocolCode.SUBSCRIPTION_UNKNOWN], 'client')).toBe(false);
+      expect(error.isProtocol([ProtocolCode.SERVICE_UNKNOWN])).toBe(false);
+      expect(error.isProtocol([])).toBe(false);
+      expect(error.isApplication([21])).toBe(!isProtocol);
+      expect(error.isApplication([7])).toBe(false);
+      expect(error.isApplication([])).toBe(false);
+    }
+  });
+
+  test('carries no header when none is supplied explicitly', () => {
+    const error = new FailureError(
+      { code: 21, scope: FailureScope.APPLICATION, side: 'server', origin: 'peer' },
+      { header: undefined }
+    );
+
+    expect(error.header).toBeUndefined();
+    expect(error.message).toBe('server application failure 21');
+  });
+
   test('carries the failure and where it belongs, and keeps a redacted copy of the header', () => {
     const header: IFailureHeader = {
       callId: 3,
