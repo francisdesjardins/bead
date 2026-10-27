@@ -903,6 +903,75 @@ public sealed class HttpCallerTests
         }
     }
 
+    [Fact]
+    public async Task Refuses_malformed_JSON_in_native_stream_data_before_delivering_an_event()
+    {
+        var generated = HttpRoutes.All.Single((entry) => { return entry.Procedure.ProcedureName == "watch"; });
+        foreach (var result in new[] { HttpPayload.Text, HttpPayload.Raw })
+        {
+            var route = generated with { Result = result };
+            var disposed = 0;
+            var sent = 0;
+            using var stream = new FragmentedStream("event: result\ndata: {\n\n"u8.ToArray(), () => { disposed++; });
+            using var handler = new StubHandler((request, _) =>
+            {
+                sent++;
+                var content = new StreamContent(stream);
+                content.Headers.ContentType = new MediaTypeHeaderValue("text/event-stream");
+                return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { RequestMessage = request, Content = content });
+            });
+            using var caller = new HttpCaller([route], new Uri("http://localhost"), new HttpCallerOptions { Handler = handler });
+            var received = 0;
+            var failed = await Assert.ThrowsAsync<FailureException>(async () =>
+            {
+                await foreach (var entry in caller.Subscribe<object, Tick>(route, new Empty()))
+                {
+                    _ = entry;
+                    received++;
+                }
+            });
+            Assert.Equal((ProtocolCode.PayloadUndecodable, FailureScope.Protocol, FailureOrigin.Local, "the HTTP payload cannot be decoded"), ((ProtocolCode)failed.Code, failed.Scope, failed.Origin, failed.Detail));
+            Assert.NotNull(failed.InnerException);
+            Assert.Equal(0, received);
+            Assert.Equal(1, sent);
+            Assert.True(disposed > 0);
+            Assert.False(stream.CanRead);
+        }
+    }
+
+    [Fact]
+    public async Task Reads_an_empty_raw_result_and_maps_an_empty_non_problem_refusal_by_status()
+    {
+        foreach (var status in new[] { HttpStatusCode.OK, HttpStatusCode.ServiceUnavailable })
+        {
+            var sent = 0;
+            var disposed = 0;
+            using var stream = new FragmentedStream([], () => { disposed++; });
+            using var handler = new StubHandler((request, _) =>
+            {
+                sent++;
+                var content = new StreamContent(stream);
+                content.Headers.ContentType = new MediaTypeHeaderValue("application/octet-stream");
+                var response = new HttpResponseMessage(status) { RequestMessage = request, Content = content };
+                response.Headers.TryAddWithoutValidation("retry-after", "7");
+                return Task.FromResult(response);
+            });
+            using var client = new TranscodingHttpClient(new Uri("http://localhost"), new HttpCallerOptions { Handler = handler });
+            if (status == HttpStatusCode.OK)
+            {
+                Assert.True((await client.Raw(ReadOnlyMemory<byte>.Empty)).IsEmpty);
+            }
+            else
+            {
+                var failed = await Assert.ThrowsAsync<FailureException>(() => { return client.Raw(ReadOnlyMemory<byte>.Empty); });
+                Assert.Equal((ProtocolCode.DestinationUnreachable, FailureScope.Protocol, FailureOrigin.Peer, "the HTTP call answers 503; Retry-After: 7"), ((ProtocolCode)failed.Code, failed.Scope, failed.Origin, failed.Detail));
+            }
+            Assert.Equal(1, sent);
+            Assert.True(disposed > 0);
+            Assert.False(stream.CanRead);
+        }
+    }
+
     private sealed class Wrapper : DelegatingHandler
     {
         public Wrapper(HttpMessageHandler inner) : base(inner)

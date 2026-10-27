@@ -1112,3 +1112,76 @@ test('propagates a response read error after cancellation without mapping it to 
     expect(stream.locked).toBe(false);
   }
 });
+
+test('refuses malformed JSON in native stream data before delivering an event', async () => {
+  const generated = HTTP_ROUTES.find((entry) => {
+    return entry.procedure.procedure.procedureName === 'watch';
+  });
+  if (generated === undefined) {
+    throw new Error('watch is a generated route');
+  }
+  for (const result of ['text', 'raw'] as const) {
+    const route = { ...generated, result };
+    let cancelled = 0;
+    let sent = 0;
+    const fetcher = stubOf('event: result\ndata: {\n\n', {
+      fragmented: true,
+      cancelled: () => {
+        cancelled += 1;
+      },
+    });
+    const caller = createHTTPCaller([route], 'http://localhost', {
+      fetch: (url, init) => {
+        sent += 1;
+        return fetcher(url, init);
+      },
+    });
+    const received: HTTPEvent<unknown, unknown>[] = [];
+    const failed = await (async () => {
+      for await (const event of caller.subscribe(route, {})) {
+        received.push(event);
+      }
+    })().catch((error: unknown) => {
+      return error;
+    });
+    expect(failed).toBeInstanceOf(FailureError);
+    expect(failed).toMatchObject({
+      code: ProtocolCode.PAYLOAD_UNDECODABLE,
+      scope: FailureScope.PROTOCOL,
+      origin: 'local',
+      detail: 'the HTTP payload cannot be decoded',
+    });
+    expect((failed as FailureError).cause).toBeInstanceOf(Error);
+    expect(received).toEqual([]);
+    expect(sent).toBe(1);
+    expect(cancelled).toBe(1);
+  }
+});
+
+test('reads an empty raw result and maps an empty non-problem refusal by status', async () => {
+  for (const status of [200, 503]) {
+    let sent = 0;
+    const response = new Response(null, {
+      status,
+      headers: { 'content-type': 'application/octet-stream', 'retry-after': '7' },
+    });
+    const client = new TranscodingHttpClient('http://localhost', {
+      fetch: () => {
+        sent += 1;
+        return Promise.resolve(response);
+      },
+    });
+    if (status === 200) {
+      expect(await client.raw(new Uint8Array())).toEqual(new Uint8Array());
+    } else {
+      await expect(client.raw(new Uint8Array())).rejects.toMatchObject({
+        code: ProtocolCode.DESTINATION_UNREACHABLE,
+        scope: FailureScope.PROTOCOL,
+        origin: 'peer',
+        detail: 'the HTTP call answers 503; Retry-After: 7',
+      });
+    }
+    expect(sent).toBe(1);
+    expect(response.body).toBeNull();
+  }
+});
