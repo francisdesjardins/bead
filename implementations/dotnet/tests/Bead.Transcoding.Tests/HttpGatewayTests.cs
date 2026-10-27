@@ -2219,6 +2219,40 @@ public sealed class HttpGatewayTests
         Assert.Equal(["the response is dropped: minimumSendBytesPerSecond 1000000 after sendGracePeriod 1ms"], reported);
     }
 
+    [Fact]
+    public async Task Stops_a_document_when_its_response_write_throws()
+    {
+        var bytes = Enumerable.Repeat((byte)'a', 2 * 65536 + 7).ToArray();
+        await using var service = await TranscodingService.Start();
+        await using var gateway = new HttpGateway(Exchanges.OptionsOf(service.Memory, null) with { Document = bytes });
+        using var cancelling = CancellationTokenSource.CreateLinkedTokenSource(Cancelled);
+        var lifetime = new DeadlineLifetime(cancelling);
+        var context = PaceContext("document", cancelling.Token);
+        context.Features.Set<IHttpRequestLifetimeFeature>(lifetime);
+        using var body = new FailedDocumentBody();
+        context.Response.Body = body;
+        var reported = ReportedBy(gateway);
+
+        await gateway.Answer(context).WaitAsync(Patience, Cancelled);
+
+        Assert.Empty(body.ToArray());
+        Assert.Equal([65536], body.Sizes);
+        Assert.Equal(0, lifetime.Aborts);
+        Assert.Empty(reported);
+    }
+
+    private sealed class FailedDocumentBody : MemoryStream
+    {
+        public List<int> Sizes { get; } = [];
+
+        public override ValueTask WriteAsync(ReadOnlyMemory<byte> buffer, CancellationToken cancellationToken = default)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            Sizes.Add(buffer.Length);
+            throw new IOException("the document write failed");
+        }
+    }
+
     private sealed class HeldFlushBody : MemoryStream
     {
         public List<int> Sizes { get; } = [];

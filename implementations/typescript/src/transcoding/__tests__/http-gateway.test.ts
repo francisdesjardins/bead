@@ -2546,6 +2546,59 @@ test('finishes a document whose write callback completes inline despite its fals
   }
 });
 
+test('finishes accepted document slices with no pending bytes before their callbacks', async () => {
+  const body = 'a'.repeat(2 * 64 * 1024 + 7);
+  const sizes: number[] = [];
+  const callbacks: ((error?: Error | null) => void)[] = [];
+  let ends = 0;
+  await using fixture = await startTranscoding({
+    document: body,
+    createServer: (listener) => {
+      return createNodeServer((request, response) => {
+        const write = response.write.bind(response);
+        const end = response.end.bind(response);
+
+        Object.defineProperty(response, 'writableLength', {
+          get: () => {
+            return 0;
+          },
+        });
+        response.write = (
+          chunk: Uint8Array,
+          done?: BufferEncoding | ((error?: Error | null) => void)
+        ): boolean => {
+          sizes.push(chunk.length);
+          write(chunk);
+          if (typeof done === 'function') {
+            callbacks.push(done);
+          }
+          // a prior slice's callback settles while this slice owns the writer
+          if (callbacks.length > 1) {
+            callbacks[callbacks.length - 2]?.(new Error('a prior slice completed late'));
+          }
+
+          return true;
+        };
+        response.end = () => {
+          ends += 1;
+          return end();
+        };
+        listener(request, response);
+      });
+    },
+  });
+  const reported = reportedBy(fixture.gateway);
+  const received = await send(fixture.port, { method: 'GET', path: '/openapi.json' });
+
+  expect(received.status).toBe(200);
+  expect(received.body).toBe(body);
+  expect(sizes).toEqual([65536, 65536, 7]);
+  expect(callbacks).toHaveLength(3);
+  expect(ends).toBe(1);
+  expect(reported).toEqual([]);
+  callbacks[2]?.();
+});
+
 test('stops a document at its failed write callback without ending a partial response', async () => {
   for (const inline of [true, false]) {
     const waiting = Promise.withResolvers<void>();
@@ -2607,6 +2660,39 @@ test('stops a document at its failed write callback without ending a partial res
     }
     expect(await received).toBe(0);
   }
+});
+
+test('stops a document when its response write throws', async () => {
+  const sizes: number[] = [];
+  let ends = 0;
+  await using fixture = await startTranscoding({
+    document: 'a'.repeat(2 * 64 * 1024 + 7),
+    createServer: (listener) => {
+      return createNodeServer((request, response) => {
+        const end = response.end.bind(response);
+
+        response.write = (chunk: Uint8Array): boolean => {
+          sizes.push(chunk.length);
+          throw new Error('the document write failed');
+        };
+        response.end = () => {
+          ends += 1;
+          return end();
+        };
+        listener(request, response);
+      });
+    },
+  });
+  const reported = reportedBy(fixture.gateway);
+  const received = await receivedOn(
+    fixture.port,
+    octetsOf(fixture.port, { lines: ['GET /openapi.json HTTP/1.1'] })
+  );
+
+  expect(received).toBe(0);
+  expect(sizes).toEqual([65536]);
+  expect(ends).toBe(0);
+  expect(reported).toEqual(['the document write failed']);
 });
 
 test('writes whole answers and documents in slices of at most 64 KiB', async () => {
