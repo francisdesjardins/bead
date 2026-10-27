@@ -6,6 +6,8 @@
 // this generates each again, apart, from a copy of the `.proto` beside a beadc.yaml of its own, and
 // fails on any difference: a file edited by hand, or a `.proto`, a rule or a target moved without
 // it. Each beadc.yaml gives `openapi.problemTypes` as spec/transcoding.json's defaults name it.
+// spec/transcoding.proto imports spec/transcoding-required.proto, its edition's messages, so both
+// are copied.
 //
 // - TypeScript: `implementations/typescript/src/transcoding/__tests__/generated/`, played by
 //   `src/transcoding/__tests__/transcoding.test.ts` and `http-gateway.test.ts`;
@@ -37,7 +39,8 @@ import { fileURLToPath } from 'node:url';
 const ROOT = fileURLToPath(new URL('../', import.meta.url));
 const BEADC = join(ROOT, 'builder', 'src', 'cli.ts');
 const FETCH_PROTOC = join(ROOT, 'builder', 'tools', 'fetch-protoc.mjs');
-const PROTO = join(ROOT, 'spec', 'transcoding.proto');
+// ! every `.proto` spec/transcoding.proto imports goes with it, by its name under spec/
+const PROTOS = Object.freeze(['transcoding.proto', 'transcoding-required.proto']);
 
 // ! spec/transcoding.json's defaults: the problem types of the gateway it plays
 const PROBLEM_TYPES = 'https://example.com/problems/';
@@ -92,7 +95,9 @@ const checkOf = (side, protoc) => {
 
   try {
     mkdirSync(join(apart, 'spec'));
-    writeFileSync(join(apart, 'spec', 'transcoding.proto'), readFileSync(PROTO));
+    for (const name of PROTOS) {
+      writeFileSync(join(apart, 'spec', name), readFileSync(join(ROOT, 'spec', name)));
+    }
     writeFileSync(
       join(apart, 'beadc.yaml'),
       [

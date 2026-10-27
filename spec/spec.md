@@ -80,7 +80,10 @@ to one meaning of `advance`. The why of each rule is in the decisions:
   a broker's adapter and the in-memory broker, and the credit, the credential and the heartbeat
   Bead keeps over a broker, section 15;
 - [0041](../docs/decisions/0041-over-mqtt-5-a-participant-is-one-clean-link-and-a-parcel-one-publish-each-counted-to-its-byte.md):
-  MQTT 5's binding of a broker, section 15.
+  MQTT 5's binding of a broker, section 15;
+- [0042](../docs/decisions/0042-a-proto-message-that-leaves-a-required-field-unset-neither-reads-nor-writes-and-a-gateway-refuses-it-where-its-server-would.md):
+  a `proto` message that leaves a required field unset, and a closed enum's undeclared number,
+  section 17.9.
 
 **Version: 0.8.0**, of layout `0xA1`, its broker parcels of layout `0xB1`. Each of its
 conformance files repeats it as its `specVersion`, and follows its schema in
@@ -2265,6 +2268,33 @@ generator writes for the message. What is Bead's:
 6. A map's entry with a field other than its key and its value does not read (section 17.2), where
    protobuf's reference parsers skip it: one stock library reads such an entry apart, so every side
    refuses it.
+7. A message that leaves a field of `LEGACY_REQUIRED` presence unset — proto2's `required`, an
+   edition's `features.field_presence = LEGACY_REQUIRED` — does not read (section 17.2), and a
+   writer MUST refuse to write it. protobuf has such a field "required for parsing and
+   serialization" ([Feature Settings](https://protobuf.dev/editions/features/#field_presence)).
+   Its C++, Java and Go parsers refuse one, and so do Go's writer, upb's and protobuf-es's, while
+   C++ checks only in a debug build and Google.Protobuf reads and writes it.
+
+   Every message the payload holds is looked into, of any syntax: a singular field's, a repeated
+   field's items, a map's values, a group and a delimited field. An extension, which every side
+   reads as an unknown field, is not looked into. Neither is an `Any`'s message, which the payload
+   holds as bytes, as C++ and Go hold it in their JSON mapping too.
+
+   The walk takes a message's own fields first, by their numbers. It then takes each message it
+   holds, depth first, by field number: a repeated field's items by index, a map's entries by key
+   in section 18.5's order. The first field it finds unset is the one refused.
+
+   A field is unset where the message, once read, holds no value of it. A field that one of a
+   message's records sets, where the message is given twice, is set. A map's value is the last
+   its key was given. A closed enum's field is unset where item 8 leaves it so.
+
+8. A singular field of a closed enum — proto2's, an edition's `features.enum_type = CLOSED` —
+   takes no record whose number its enum declares no value of. Such a record sets nothing, as
+   protobuf keeps it among the unknown fields
+   ([Enum Behavior](https://protobuf.dev/programming-guides/enum/)). The field holds the last
+   declared number its records give, or none, and a `oneof` it is a member of holds what its
+   other records give it. A repeated field's items and a map's values keep such a number, as both
+   stock libraries read them.
 
 Where two stock libraries part on what protobuf states no rule of, the support matrix says what
 each does. The `proto` rows of `spec/codecs.json` read and write `Probe`, the message of

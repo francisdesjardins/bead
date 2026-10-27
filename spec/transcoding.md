@@ -11,7 +11,9 @@ This document is a companion of [`spec.md`](spec.md), which states the wire, as
 [`debugging.md`](debugging.md) is: a gateway is beside the wire, never in place of it, one more
 client of a server, and a side may offer none. Sections 2 to 10 each name the conformance file that
 checks them, [`transcoding.json`](transcoding.json), whose entries play the messages and the
-service of `spec/transcoding.proto`; sections 11 and 12 name none: the builder's tests hold the
+service of `spec/transcoding.proto`, and the messages it imports from
+`spec/transcoding-required.proto`, of edition 2023, whose fields protobuf requires; sections 11 and
+12 name none: the builder's tests hold the
 document it writes, and each side's twin tests its client. Each entry cites the units it checks, which
 [`transcoding-units.txt`](transcoding-units.txt) lists, each cited or why no entry cites it, with the
 hash of its text. The why of each rule is in the decisions:
@@ -28,6 +30,9 @@ hash of its text. The why of each rule is in the decisions:
   the binary payload, its stock library's (5.2, 5.6);
 - [0035](../docs/decisions/0035-a-payload-that-reads-is-held-to-its-messages-rules-before-its-resolver-sees-it.md):
   a request its rules refuse, answered with its violations (7.4);
+- [0042](../docs/decisions/0042-a-proto-message-that-leaves-a-required-field-unset-neither-reads-nor-writes-and-a-gateway-refuses-it-where-its-server-would.md):
+  a request that leaves a required field unset, refused where its server would refuse it, and where
+  it is placed (4.5, 5.2, 5.6, 7.4, 11);
 - [0002](../docs/decisions/0002-a-subscription-goes-at-its-clients-pace.md): a stream at its
   reader's pace (8.8);
 - [0024](../docs/decisions/0024-a-server-takes-the-loopbacks-names-ip-literals-and-the-hosts-it-is-told.md),
@@ -239,11 +244,16 @@ step 8 judges it. A `proto` body is one JSON text, read whole, so an empty one i
 4.5. Where a `patch` rule's `body` names a message field of its request, and that request has a
 field `update_mask` of `google.protobuf.FieldMask` that neither its query nor its body sets, a
 gateway MUST set it to the paths of the members its body's object holds, none where its body is
-`null`, as [AIP-134](https://google.aip.dev/134) has an omitted mask stand for what was sent: each
-member by the proto name of the field it names, in the body's order; a member whose value is an
-object of a message field that is not a well-known type, by its own members' paths in turn, behind
-its name and a `.`, or by its own path where it holds none; a member of any other field, a map, a
-repeated field, a well-known type or a `null` among them, by its own path.
+`null`, as [AIP-134](https://google.aip.dev/134) has an omitted mask stand for what was sent: a mask
+set on the message once its value is read (section 5.2), by proto names, never read back through
+section 5.4's form; each member by the proto name of the field it names, in the body's order; a
+member whose value is an object of a message field that is not a well-known type, by its own
+members' paths in turn, behind its name and a `.`, or by its own path where it holds none; a member
+of any other field, a map, a repeated field, a well-known type or a `null` among them, by its own
+path. A field of `LEGACY_REQUIRED` presence of the body's message is among its paths whenever
+section 5.2 takes the request, since that section refuses a body that leaves one unset. A caller
+keeps such a field unchanged only by an `update_mask` of its own ([AIP-203](https://google.aip.dev/203)
+marks a field required by `field_behavior`, not by protobuf's presence, for this reason).
 
 ## 5. The JSON form
 
@@ -266,8 +276,19 @@ as section 15.6 of `spec.md` refuses a `POST` of no type. A `json`, `text` or `r
 field: its route's body is `*`, and no variable or query binds it. `bead.Json`, `bead.Text` and
 `bead.Raw` are those encodings, never messages that section 5.6 writes.
 
-5.2. A gateway MUST read a `proto` request's body in this order, and refuse it, 400
-`PAYLOAD_UNDECODABLE`, at the first step that refuses:
+5.2. A gateway MUST read a `proto` request's body as section 4 binds it, and refuse it, 400
+`PAYLOAD_UNDECODABLE`, at the first refusal it meets, in this order:
+
+- its text, by step 1;
+- section 4's own refusals, as it binds the request's value from its body, its variables and its
+  query (section 4.1), but for a body of the request whole that is no object, which steps 2 and 3
+  refuse as the message's, with nothing bound beside it;
+- that value, by steps 2 and 3, in one walk: each object's members in the order the value holds
+  them, which is its body's as its text writes them, then what its variables bind, then its
+  query's parameters in their order, with a repeated scalar's items after all of them; each
+  member, and all it holds, is read before the member after it;
+- its `update_mask`, where section 4.5 derives one;
+- step 4, then step 5:
 
 1. the text, as section 17.5 of `spec.md` reads a `json` payload — UTF-8, no byte order mark, one
    JSON text, no member named twice, no surrogate alone, no number past the largest double — but for
@@ -285,8 +306,10 @@ field: its route's body is `*`, and no variable or query binds it. `bead.Json`, 
    a `oneof`'s member that is `null` beside another that sets it, taken, and two members of one
    `oneof` that set it, refused;
 3. each scalar by section 5.3, and each well-known type by section 5.4;
-4. the message so built, encoded by its stock library, read as section 17.9 of `spec.md` reads a
-   payload.
+4. the message so built, as section 17.9.7 of `spec.md` judges a payload: the first field of
+   `LEGACY_REQUIRED` presence that its walk finds unset (no member names it, or one names it
+   `null`), an `Any`'s message never looked into;
+5. the message, encoded by its stock library, read as section 17.9 of `spec.md` reads a payload.
 
 5.3. A scalar's JSON, where protobuf's JSON mapping takes more than one form, is one of these, and
 a gateway MUST refuse any other:
@@ -365,6 +388,10 @@ side:
    digits, the fewest that hold it, as protobuf's own libraries write them; a `FieldMask`'s paths
    in lowerCamelCase by `,`; a wrapper as its value; a `Struct`, a `Value` and a `ListValue` as the
    JSON they hold; an `Empty` as `{}`; an `Any` that holds nothing as `{}`.
+
+A field of `LEGACY_REQUIRED` presence is set in every message it writes but an `Any`'s, since
+section 17.9.7 of `spec.md` reads no result that leaves one unset. An `Any`'s message is written as
+it holds it, such a field left out where it is unset, as protobuf's C++ and Go libraries write one.
 
 5.7. A gateway MUST refuse to write a result, a failure of its own (section 7.6), where Bead's proto
 JSON form holds none of it: a `Timestamp` outside section 5.4's range, or whose nanoseconds are not
@@ -447,14 +474,20 @@ A `PAYLOAD_UNDECODABLE` of the gateway's reading (section 7.6) holds, so placed,
 met what it refuses: `parameter`, a variable's field path, or a query's by JSON names, or the name
 of a parameter that names no field; `pointer`, the value of its body it met, by the JSON name of
 each field, and each member that names none, each map's key and each `Struct`'s member as its body
-wrote it, `#` the body itself; neither for its text, its query whole, or a query whose bytes are not
-UTF-8. Its `detail` is its mapping's own words, which name no member or key of the request: a
-problem's `detail` never repeats what its request carried, and where its place helps, it goes in its
-`parameter` or its `pointer`.
+wrote it, `#` the body itself; a field step 4 of section 5.2 finds unset, as items 1 and 2 place a
+violation's field: `parameter`, its field path by JSON names, where the route's query would bind it
+(section 4.3); `pointer`, its path by JSON names from the body, where the body holds its object;
+neither for its text, its query whole, or a query whose bytes are not
+UTF-8. Its `detail` is its mapping's own words, which name no member or key of the request, `a
+required field unset` for step 4's: a problem's `detail` never repeats what its request carried, and
+where its place helps, it goes in its `parameter` or its `pointer`.
 
-A `pointer`, of a violation or of a reading, is always a JSON Pointer into the body as its request
-wrote it, which resolves there ([RFC 6901 §4](https://www.rfc-editor.org/rfc/rfc6901#section-4)):
-a name or a key past 64 bytes of UTF-8 is never written into it, and it points at the value that
+A `pointer`, of a violation or of a reading, is a JSON Pointer into the body as its request wrote
+it, by the JSON name of each field ([RFC 6901 §6](https://www.rfc-editor.org/rfc/rfc6901#section-6)).
+It resolves there ([RFC 6901 §4](https://www.rfc-editor.org/rfc/rfc6901#section-4)) where the
+body names each field on its way by its JSON name and holds it. It names a field left unset (step
+4 of section 5.2) as the member its object lacks, an evaluation RFC 6901 makes an error, which is
+its meaning here. A name or a key past 64 bytes of UTF-8 is never written into it, and it points at the value that
 holds that name or key, a violation's key cut short (section 18.4 of `spec.md`) alike. A
 `parameter`, which is no pointer, writes such a name as section 18.4 cuts a key, its first 64 bytes,
 back to the start of the character the cut fell in, then `...`.
@@ -683,10 +716,16 @@ its definitions'.
 11.4. A variable is a parameter `in: path`; a multi-segment variable is written expanded into the
 path, each `*` a parameter named by the literal before it, and a `**` one parameter of
 `x-bead-segments: true`, since a path parameter's value holds no unescaped `/`. A query's fields are
-parameters by their JSON field paths, a repeated one `explode: true`.
+parameters by their JSON field paths, a repeated one `explode: true`. A query's parameter is
+`required: true` where its field is of `LEGACY_REQUIRED` presence and each message field on its path
+is too, or is held present by a variable of the route, since section 5.2 refuses a request that
+leaves it unset. Its `description` says its proto name, which the gateway also reads (section 4.3),
+as section 11.9 says a field's.
 
-11.5. An operation's body is its request's schema less what its variables bind, or its `body`
-field's, of its encoding's media type; its 200 is its result's schema, or its `response_body`
+11.5. An operation's body is its request's schema less what its variables bind — which keeps each
+rule of what remains, and whose `required` lists a message field that a variable binds into where a
+field of `LEGACY_REQUIRED` presence of its message is left to the body — or its `body` field's, of
+its encoding's media type; its 200 is its result's schema, or its `response_body`
 field's, and, for a procedure that notifies, `text/event-stream` beside it, its events' schemas in
 `x-bead-events`; its `default` is a `Problem`, its 422 a `ValidationProblem` where its request holds
 rules, and its 401 carries `WWW-Authenticate` where its admission is not `none`.
@@ -702,7 +741,9 @@ numbers, each the one form section 5.6 writes, which section 5.2 reads: a 32-bit
 `float` or a `double` a `number` or one of `"NaN"`, `"Infinity"` and `"-Infinity"`; `bytes` a
 `string` of `contentEncoding: base64`; an enum its names; a repeated field an `array`; a map an
 `object` whose `propertyNames` its key's form; a `oneof` its members, two never `required`
-together; `additionalProperties: false`; and its rules as JSON Schema 2020-12's validation
+together; in its `required`, each field of `LEGACY_REQUIRED` presence beside those its rules
+require, by number, each once, since section 5.2 refuses a message that leaves one unset;
+`additionalProperties: false`; and its rules as JSON Schema 2020-12's validation
 vocabulary states them, from the same blueprint.
 
 11.8. A form whose `format` or `contentEncoding` the base dialect only annotates carries a

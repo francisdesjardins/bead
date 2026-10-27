@@ -47,6 +47,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - A WebSocket client asks one credential at a time of each provider by its identity: a different
   provider can answer while an earlier source stays pending; a later attempt using that source
   waits for it to settle within its own bounds, then asks anew.
+- `spec/codecs.json`'s rows of 17.9.7 and 17.9.8 over `Probe`'s `needs`, `needs_items` and `shade`,
+  and `spec/transcoding.json`'s readings, bindings, writings and exchanges of a required field,
+  over `spec/transcoding-required.proto`, of edition 2023, and the procedures `require`,
+  `getNeeds` and `updateNeeds`.
 
 ### Fixed
 

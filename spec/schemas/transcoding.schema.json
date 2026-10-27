@@ -96,7 +96,7 @@
       }
     },
     "message": {
-      "description": "A message of spec/transcoding.proto, by its full name.",
+      "description": "A message of spec/transcoding.proto, or of spec/transcoding-required.proto, which it imports, by its full name.",
       "type": "string",
       "pattern": "^bead\\.transcoding\\.v1\\.[A-Z][A-Za-z0-9]*$"
     },
