@@ -728,6 +728,144 @@ test('wraps malformed JSON UTF-8 base64 and event framing as an undecodable payl
   }
 });
 
+test('refuses non-string and noncanonical raw event data and releases its reader', async () => {
+  const generated = HTTP_ROUTES.find((entry) => {
+    return entry.procedure.procedure.procedureName === 'watch';
+  });
+  if (generated === undefined) {
+    throw new Error('watch is a generated route');
+  }
+  const route = { ...generated, result: 'raw' as const };
+
+  for (const [data, detail] of [
+    ['null', 'an HTTP text or raw event holds a JSON string'],
+    ['"AB=="', 'an HTTP raw event holds standard padded base64'],
+  ] as const) {
+    let cancelled = 0;
+    let sent = 0;
+    const fetcher = stubOf(`event: result\ndata: ${data}\n\n`, {
+      fragmented: true,
+      cancelled: () => {
+        cancelled += 1;
+      },
+    });
+    const caller = createHTTPCaller([route], 'http://localhost', {
+      fetch: (url, init) => {
+        sent += 1;
+        return fetcher(url, init);
+      },
+    });
+    const received: HTTPEvent<unknown, unknown>[] = [];
+
+    await expect(async () => {
+      for await (const event of caller.subscribe(route, {})) {
+        received.push(event);
+      }
+    }).rejects.toMatchObject({
+      code: ProtocolCode.PAYLOAD_UNDECODABLE,
+      scope: FailureScope.PROTOCOL,
+      origin: 'local',
+      detail,
+    });
+    expect(received).toEqual([]);
+    expect(sent).toBe(1);
+    expect(cancelled).toBe(1);
+  }
+});
+
+test('refuses invalid result media and malformed JSON without another call', async () => {
+  for (const [body, type, detail] of [
+    ['null', 'text/plain', 'the HTTP result has another media type'],
+    ['{', 'application/json', 'the HTTP payload cannot be decoded'],
+  ] as const) {
+    let cancelled = 0;
+    let sent = 0;
+    const responses: Response[] = [];
+    const fetcher = stubOf(body, {
+      type,
+      cancelled: () => {
+        cancelled += 1;
+      },
+    });
+    const client = new TranscodingHttpClient('http://localhost', {
+      fetch: async (url, init) => {
+        sent += 1;
+        const response =
+          type === 'application/json'
+            ? new Response(body, { headers: { 'content-type': type } })
+            : await fetcher(url, init);
+
+        responses.push(response);
+        return response;
+      },
+    });
+
+    await expect(client.json(null)).rejects.toMatchObject({
+      code: ProtocolCode.PAYLOAD_UNDECODABLE,
+      scope: FailureScope.PROTOCOL,
+      origin: 'local',
+      detail,
+    });
+    expect(sent).toBe(1);
+    expect(cancelled).toBe(type === 'text/plain' ? 1 : 0);
+    expect(responses[0]?.body?.locked).toBe(false);
+  }
+});
+
+test('maps failed response reads to destination lost and releases their readers', async () => {
+  for (const streaming of [false, true]) {
+    const broken = new Error('the response reader broke');
+    let reads = 0;
+    let sent = 0;
+    const stream = new ReadableStream<Uint8Array>({
+      pull: (controller) => {
+        reads += 1;
+        if (reads === 1) {
+          controller.enqueue(new TextEncoder().encode(streaming ? 'event: result\ndata: ' : 'nu'));
+          return;
+        }
+        throw broken;
+      },
+    });
+    const client = new TranscodingHttpClient('http://localhost', {
+      fetch: () => {
+        sent += 1;
+        return Promise.resolve(
+          new Response(stream, {
+            headers: { 'content-type': streaming ? 'text/event-stream' : 'application/json' },
+          })
+        );
+      },
+    });
+    const received: HTTPEvent<unknown, unknown>[] = [];
+
+    const failed = await (async () => {
+      if (streaming) {
+        for await (const event of client.subscribeWatch({})) {
+          received.push(event);
+        }
+      } else {
+        await client.json(null);
+      }
+    })().catch((error: unknown) => {
+      return error;
+    });
+    expect(failed).toBeInstanceOf(FailureError);
+    expect(failed).toMatchObject({
+      code: ProtocolCode.DESTINATION_LOST,
+      scope: FailureScope.PROTOCOL,
+      origin: 'local',
+      detail: 'the HTTP body ends before its answer',
+      cause: broken,
+    });
+    expect((failed as FailureError).cause).toBe(broken);
+    expect(received).toEqual([]);
+    expect(sent).toBe(1);
+    expect(reads).toBe(2);
+    expect(stream.locked).toBe(false);
+  }
+});
+
 test('bounds the decoded message even when the body bound is larger', async () => {
   const maximumBodyBytes = LIMIT_DEFAULTS.maximumEnvelopeBytes + 1;
   const client = new TranscodingHttpClient('http://localhost', {
