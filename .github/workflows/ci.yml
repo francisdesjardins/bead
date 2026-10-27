@@ -285,6 +285,8 @@ jobs:
         env:
           # the page's leg installs its Chromium, which no image of this job holds
           PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: 0
+      - run: $YARN devtools:build && $YARN playground:build:file && $YARN test:devtools --grep "over MQTT 5"
+        working-directory: implementations/typescript
       # the broker start left, which a start that failed left none of
       - name: The broker stopped
         if: always()
