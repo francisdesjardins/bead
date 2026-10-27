@@ -14,6 +14,21 @@ namespace Bead.Transcoding.Tests;
 public sealed class BindingTests
 {
     [Fact]
+    public void Reads_raw_Unicode_query_values_and_keeps_malformed_percent_escapes_literal()
+    {
+        foreach (var (text, value) in new[]
+        {
+            ("é", "é"), ("😀", "😀"), ("A😀Z", "A😀Z"), ("%C3%A9", "é"), ("%F0%9F%98%80", "😀"),
+            ("%", "%"), ("%F", "%F"), ("%G0", "%G0"), ("%0G", "%0G"), ("100%done", "100%done"),
+        })
+        {
+            Assert.Equal(new GetBookRequest { Name = "2", Tags = { value } }, Bind(
+                ("getBook", new HttpRouteTemplate { Method = "GET", Template = "/v1/books/{name}" }),
+                ($"/v1/books/2?tags={text}", null)));
+        }
+    }
+
+    [Fact]
     public void Keeps_arbitrary_Struct_members_out_of_an_inferred_PATCH_mask()
     {
         foreach (var body in new[] { "{}", "{\"customKey\":1}", "{\"customKey\":1,\"other_key\":{\"nested\":false}}" })

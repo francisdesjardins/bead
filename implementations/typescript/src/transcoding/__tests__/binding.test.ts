@@ -70,6 +70,25 @@ const refusalOf = (query: string): string | undefined => {
 
 // tests
 
+test('reads raw Unicode query values and keeps malformed percent escapes literal', () => {
+  for (const [text, value] of [
+    ['é', 'é'],
+    ['😀', '😀'],
+    ['A😀Z', 'A😀Z'],
+    ['%C3%A9', 'é'],
+    ['%F0%9F%98%80', '😀'],
+    ['%', '%'],
+    ['%F', '%F'],
+    ['%G0', '%G0'],
+    ['%0G', '%0G'],
+    ['100%done', '100%done'],
+  ]) {
+    expect(getBook({ query: `tags=${text}`, variables: { name: '2' } })).toEqual(
+      create(GetBookRequestSchema, { name: '2', tags: [value!] })
+    );
+  }
+});
+
 test('keeps arbitrary Struct members out of an inferred PATCH mask', () => {
   const registry = typeRegistryOf([PatchStructRequestSchema]);
   for (const body of ['{}', '{"customKey":1}', '{"customKey":1,"other_key":{"nested":false}}']) {
