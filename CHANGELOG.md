@@ -7,6 +7,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-10-27
+
 ### Added
 
 - A broker as a transport, its core on both sides: a participant's client and server transports
@@ -57,6 +59,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- The spec moves to 0.9.0 (`spec-v0.9.0`), its companion, `spec/debugging.md`, to 0.4.1
+  (`debugging-v0.4.1`), and the transcoding's companion, `spec/transcoding.md`, to 0.2.0
+  (`transcoding-v0.2.0`).
 - A connection over a broker is placed at its open, and nothing overtakes on it, where decision
   0021 had a request published to its procedure's topic and a cancel overtake it; 15.15, how a
   connect ends, stands under a heading of its own, `### A connect`.
@@ -2005,7 +2010,8 @@ duration }`: on the C# side `StartedAt`, a `DateTimeOffset`, and `Duration`, a `
   workflows.
 - The licence, Apache-2.0.
 
-[Unreleased]: https://github.com/francisdesjardins/bead/compare/v0.7.0...develop
+[Unreleased]: https://github.com/francisdesjardins/bead/compare/v0.8.0...develop
+[0.8.0]: https://github.com/francisdesjardins/bead/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/francisdesjardins/bead/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/francisdesjardins/bead/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/francisdesjardins/bead/compare/v0.4.1...v0.5.0

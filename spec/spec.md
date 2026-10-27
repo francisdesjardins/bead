@@ -87,7 +87,7 @@ to one meaning of `advance`. The why of each rule is in the decisions:
 - [0043](../docs/decisions/0043-over-amqp-1-0-a-participant-is-one-connection-whose-exclusive-inbox-ends-with-it-and-a-parcel-one-message-of-one-profile-each-counted-to-its-byte.md):
   AMQP 1.0's binding of a broker, on RabbitMQ 4, section 15.
 
-**Version: 0.8.0**, of layout `0xA1`, its broker parcels of layout `0xB1`. Each of its
+**Version: 0.9.0**, of layout `0xA1`, its broker parcels of layout `0xB1`. Each of its
 conformance files repeats it as its `specVersion`, and follows its schema in
 [`schemas/`](schemas/). The interop's blueprint,
 [`interop-blueprint.json`](interop-blueprint.json), and what its service does,

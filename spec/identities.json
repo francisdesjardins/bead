@@ -10,7 +10,7 @@
     "differs names the row of docs/support.md an entry crosses, which names this file and the entry, and the language it excuses: an input that language cannot be given. A harness plays every entry but those a differs excuses its language from.",
     "clauses are the units of spec.md an entry checks: a clause, 16.4; a row of its table, counted from 1, 16.2.1."
   ],
-  "specVersion": "0.8.0",
+  "specVersion": "0.9.0",
   "ways": [
     "client-resolver",
     "server-resolver",

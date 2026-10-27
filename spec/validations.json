@@ -9,7 +9,7 @@
     "Each verdict is judged by the generator, which reads the value it wrote the payload from by validate.proto v1.2.2's rules in 18.5's order, its patterns by RE2 itself, its classes of Unicode 17.0.0 by the files spec/generators/ucd.json pins; protovalidate-es judges every verdict alike but for its order, its paths' rendering and its classes' Unicode version.",
     "clauses are the units of spec.md an entry checks: a clause, 18.2; an item of its numbered list, 18.8.3; a row of its table, 18.3.1."
   ],
-  "specVersion": "0.8.0",
+  "specVersion": "0.9.0",
   "verdicts": [
     {
       "name": "an int32 at its lte is taken",
