@@ -3,6 +3,7 @@ import { FailureScope, LIMIT_DEFAULTS, ProtocolCode } from '../../router/shared/
 import { FailureError } from '../../router/shared/errors';
 import { ProgrammerError } from '../../transport/shared/errors';
 import { createHTTPCaller, type HTTPEvent } from '../http-caller';
+import type { IHttpRouteInit } from '../routes';
 import { HTTP_ROUTES, TranscodingHttpClient } from './generated/bead_http';
 import { GOOD_CREDENTIAL, SESSION, startTranscoding } from './transcoding-service';
 
@@ -966,4 +967,148 @@ test('fails a result that leaves a required field unset with PAYLOAD_UNDECODABLE
     scope: FailureScope.PROTOCOL,
   });
   expect(sent).toBe(1);
+});
+
+test('refuses invalid low-level call inputs before HTTP dispatch', async () => {
+  const generated = HTTP_ROUTES.find((route) => {
+    return route.procedure.procedure.procedureName === 'json';
+  });
+  const template = generated?.routes[0];
+  if (generated === undefined || template === undefined) {
+    throw new Error('json has a generated default route');
+  }
+  let sent = 0;
+  const fetcher: typeof fetch = () => {
+    sent += 1;
+    return Promise.resolve(new Response('null'));
+  };
+  const choices: IHttpRouteInit['routes'][] = [
+    [],
+    [{ ...template, method: 'GET' }],
+    [{ ...template, body: undefined }],
+    [{ ...template, responseBody: 'field' }],
+    [{ ...template, template: '/items/{name}' }],
+  ];
+  for (const routes of choices) {
+    const route = { ...generated, routes };
+    const caller = createHTTPCaller([route], 'http://localhost', { fetch: fetcher });
+    await expect(caller.call(route, null)).rejects.toThrow(
+      'an HTTP client calls a default POST route with a whole body and result'
+    );
+  }
+  const elsewhere = {
+    ...generated,
+    routes: [{ ...template, template: 'https://elsewhere.example/call' }],
+  };
+  const caller = createHTTPCaller([generated, elsewhere], 'http://localhost', { fetch: fetcher });
+  await expect(caller.call(elsewhere, null)).rejects.toThrow(
+    'an HTTP route stays on its gateway origin'
+  );
+  for (const authorization of [' Bearer x', 'Bearer x ', 'Bearer\nx', '\t', 'É']) {
+    await expect(caller.call(generated, null, { authorization })).rejects.toThrow(
+      'a credential holds visible ASCII, spaces and tabs alone, none first or last'
+    );
+  }
+  await expect(async () => {
+    for await (const event of caller.subscribe(generated, null)) {
+      throw new Error(`a non-notifying call yielded ${event.kind}`);
+    }
+  }).rejects.toThrow('only a notifying HTTP procedure opens a stream');
+  expect(sent).toBe(0);
+});
+
+test('refuses invalid UTF-8 on a terminated event line and releases its reader', async () => {
+  let cancelled = 0;
+  let sent = 0;
+  const stream = new ReadableStream<Uint8Array>({
+    start: (controller) => {
+      for (const octet of [...new TextEncoder().encode('event: result\ndata: '), 255, 10, 10]) {
+        controller.enqueue(Uint8Array.of(octet));
+      }
+    },
+    cancel: () => {
+      cancelled += 1;
+    },
+  });
+  const client = new TranscodingHttpClient('http://localhost', {
+    fetch: () => {
+      sent += 1;
+      return Promise.resolve(
+        new Response(stream, { headers: { 'content-type': 'text/event-stream' } })
+      );
+    },
+  });
+  const received: HTTPEvent<unknown, unknown>[] = [];
+  const failed = await (async () => {
+    for await (const event of client.subscribeWatch({})) {
+      received.push(event);
+    }
+  })().catch((error: unknown) => {
+    return error;
+  });
+  expect(failed).toBeInstanceOf(FailureError);
+  expect(failed).toMatchObject({
+    code: ProtocolCode.PAYLOAD_UNDECODABLE,
+    origin: 'local',
+    scope: FailureScope.PROTOCOL,
+    detail: 'the HTTP payload cannot be decoded',
+  });
+  expect((failed as FailureError).cause).toBeInstanceOf(TypeError);
+  expect(received).toEqual([]);
+  expect(sent).toBe(1);
+  expect(cancelled).toBe(1);
+  expect(stream.locked).toBe(false);
+});
+
+test('propagates a response read error after cancellation without mapping it to a failure', async () => {
+  for (const streaming of [false, true]) {
+    const abort = new AbortController();
+    const broken = new Error('the cancelled response reader broke');
+    let reads = 0;
+    let sent = 0;
+    const stream = new ReadableStream<Uint8Array>(
+      {
+        pull: (controller) => {
+          reads += 1;
+          if (reads === 1) {
+            controller.enqueue(
+              new TextEncoder().encode(streaming ? 'event: result\ndata: ' : 'nu')
+            );
+            return;
+          }
+          abort.abort();
+          throw broken;
+        },
+      },
+      { highWaterMark: 0 }
+    );
+    const client = new TranscodingHttpClient('http://localhost', {
+      fetch: () => {
+        sent += 1;
+        return Promise.resolve(
+          new Response(stream, {
+            headers: { 'content-type': streaming ? 'text/event-stream' : 'application/json' },
+          })
+        );
+      },
+    });
+    const received: HTTPEvent<unknown, unknown>[] = [];
+    const failed = await (async () => {
+      if (streaming) {
+        for await (const event of client.subscribeWatch({}, { signal: abort.signal })) {
+          received.push(event);
+        }
+      } else {
+        await client.json(null, { signal: abort.signal });
+      }
+    })().catch((error: unknown) => {
+      return error;
+    });
+    expect(failed).toBe(broken);
+    expect(abort.signal.aborted).toBe(true);
+    expect(received).toEqual([]);
+    expect(sent).toBe(1);
+    expect(reads).toBe(2);
+    expect(stream.locked).toBe(false);
+  }
 });

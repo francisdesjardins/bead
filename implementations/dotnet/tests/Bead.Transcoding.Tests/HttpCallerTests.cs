@@ -776,6 +776,133 @@ public sealed class HttpCallerTests
         }
     }
 
+    [Fact]
+    public async Task Refuses_invalid_low_level_call_inputs_before_HTTP_dispatch()
+    {
+        var generated = HttpRoutes.All.Single((route) => { return route.Procedure.ProcedureName == "json"; });
+        var template = generated.Routes[0];
+        var sent = 0;
+        using var handler = new StubHandler((request, _) =>
+        {
+            sent++;
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { RequestMessage = request, Content = new StringContent("null") });
+        });
+        HttpRouteTemplate[][] choices =
+        [
+            [],
+            [template with { Method = "GET" }],
+            [template with { Body = null }],
+            [template with { ResponseBody = "field" }],
+            [template with { Template = "/items/{name}" }],
+        ];
+        foreach (var routes in choices)
+        {
+            var route = generated with { Routes = routes };
+            using var caller = new HttpCaller([route], new Uri("http://localhost"), new HttpCallerOptions { Handler = handler });
+            var failed = await Assert.ThrowsAsync<ArgumentException>(() => { return caller.Call<JsonElement>(route, Json("null")); });
+            Assert.Equal("an HTTP client calls a default POST route with a whole body and result (Parameter 'route')", failed.Message);
+            Assert.Equal("route", failed.ParamName);
+        }
+        var elsewhere = generated with { Routes = [template with { Template = "https://elsewhere.example/call" }] };
+        using var valid = new HttpCaller([generated, elsewhere], new Uri("http://localhost"), new HttpCallerOptions { Handler = handler });
+        var moved = await Assert.ThrowsAsync<ArgumentException>(() => { return valid.Call<JsonElement>(elsewhere, Json("null")); });
+        Assert.Equal("an HTTP route stays on its gateway origin (Parameter 'route')", moved.Message);
+        foreach (var authorization in new[] { " Bearer x", "Bearer x ", "Bearer\nx", "\t", "É" })
+        {
+            var refused = await Assert.ThrowsAsync<ArgumentException>(() =>
+            {
+                return valid.Call<JsonElement>(generated, Json("null"), new HttpCallOptions { Authorization = authorization });
+            });
+            Assert.Equal("a credential holds visible ASCII, spaces and tabs alone, none first or last (Parameter 'options')", refused.Message);
+            Assert.Equal("options", refused.ParamName);
+        }
+        var subscription = await Assert.ThrowsAsync<ArgumentException>(async () =>
+        {
+            await foreach (var entry in valid.Subscribe<JsonElement, JsonElement>(generated, Json("null")))
+            {
+                Assert.Fail($"a non-notifying call yielded {entry}");
+            }
+        });
+        Assert.Equal("only a notifying HTTP procedure opens a stream (Parameter 'call')", subscription.Message);
+        Assert.Equal("call", subscription.ParamName);
+        Assert.Equal(0, sent);
+    }
+
+    [Fact]
+    public async Task Refuses_invalid_UTF_8_on_a_terminated_event_line_and_releases_its_reader()
+    {
+        var disposed = 0;
+        var sent = 0;
+        byte[] bytes = [.. Encoding.UTF8.GetBytes("event: result\ndata: "), 255, 10, 10];
+        using var stream = new FragmentedStream(bytes, () => { disposed++; });
+        using var handler = new StubHandler((request, _) =>
+        {
+            sent++;
+            var content = new StreamContent(stream);
+            content.Headers.ContentType = new MediaTypeHeaderValue("text/event-stream");
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { RequestMessage = request, Content = content });
+        });
+        using var client = new TranscodingHttpClient(new Uri("http://localhost"), new HttpCallerOptions { Handler = handler });
+        var received = 0;
+        var failed = await Assert.ThrowsAsync<FailureException>(async () =>
+        {
+            await foreach (var entry in client.SubscribeWatch(new Empty()))
+            {
+                _ = entry;
+                received++;
+            }
+        });
+        Assert.Equal((ProtocolCode.PayloadUndecodable, FailureOrigin.Local, FailureScope.Protocol, "the HTTP payload cannot be decoded"), ((ProtocolCode)failed.Code, failed.Origin, failed.Scope, failed.Detail));
+        Assert.IsType<DecoderFallbackException>(failed.InnerException);
+        Assert.Equal(0, received);
+        Assert.Equal(1, sent);
+        Assert.True(disposed > 0);
+        Assert.False(stream.CanRead);
+    }
+
+    [Fact]
+    public async Task Propagates_a_response_read_error_after_cancellation_without_mapping_it_to_a_failure()
+    {
+        foreach (var streaming in new[] { false, true })
+        {
+            using var abort = new CancellationTokenSource();
+            var broken = new IOException("the cancelled response reader broke");
+            var sent = 0;
+            using var stream = new FailedReadStream(Encoding.UTF8.GetBytes(streaming ? "event: result\ndata: " : "nu"), broken) { BeforeFailure = abort.Cancel };
+            using var handler = new StubHandler((request, _) =>
+            {
+                sent++;
+                var content = new StreamContent(stream);
+                content.Headers.ContentType = new MediaTypeHeaderValue(streaming ? "text/event-stream" : "application/json");
+                return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { RequestMessage = request, Content = content });
+            });
+            using var client = new TranscodingHttpClient(new Uri("http://localhost"), new HttpCallerOptions { Handler = handler });
+            var received = 0;
+            var failed = await Assert.ThrowsAsync<IOException>(async () =>
+            {
+                var options = new HttpCallOptions { CancellationToken = abort.Token };
+                if (streaming)
+                {
+                    await foreach (var entry in client.SubscribeWatch(new Empty(), options))
+                    {
+                        _ = entry;
+                        received++;
+                    }
+                }
+                else
+                {
+                    await client.Json(Json("null"), options);
+                }
+            });
+            Assert.Same(broken, failed);
+            Assert.True(abort.IsCancellationRequested);
+            Assert.Equal(0, received);
+            Assert.Equal(1, sent);
+            Assert.Equal(2, stream.Reads);
+            Assert.False(stream.CanRead);
+        }
+    }
+
     private sealed class Wrapper : DelegatingHandler
     {
         public Wrapper(HttpMessageHandler inner) : base(inner)
@@ -861,11 +988,14 @@ public sealed class HttpCallerTests
     {
         public int Reads { get; private set; }
 
+        public Action? BeforeFailure { get; init; }
+
         public override ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
         {
             Reads++;
             if (Reads > 1)
             {
+                BeforeFailure?.Invoke();
                 return ValueTask.FromException<int>(failure);
             }
             return base.ReadAsync(buffer, cancellationToken);

@@ -10,6 +10,18 @@ namespace Bead.Tests;
 public sealed class TrustedProxiesTests
 {
     [Fact]
+    public void Stops_at_a_malformed_bracketed_forwarding_entry_before_reading_a_claimed_client()
+    {
+        var trust = TrustOf(["127.0.0.1", "10.0.0.0/8"], 0);
+        foreach (var entry in new[] { "[", "[::1", "[2001:db8::1", "[::1]extra", "[::1]:x" })
+        {
+            Assert.Null(TrustedProxies.AddressOfEntry(entry));
+            Assert.Equal("127.0.0.1", TrustedProxies.ClientAddressOf(Loopback, ($"203.0.113.9, {entry}", trust)));
+            Assert.Equal("10.0.0.1", TrustedProxies.ClientAddressOf(Loopback, ($"203.0.113.9, {entry}, 10.0.0.1", trust)));
+        }
+    }
+
+    [Fact]
     public void Trusts_only_the_two_addresses_of_an_uncompressed_IPv6_prefix_of_127_bits()
     {
         const string network = "2001:db8:1:2:3:4:5:6/127";

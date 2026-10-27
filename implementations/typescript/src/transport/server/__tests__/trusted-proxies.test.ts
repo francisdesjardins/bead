@@ -59,6 +59,24 @@ const REFUSED = [
 // definition
 
 test.describe('trusted proxies', () => {
+  test('stops at a malformed bracketed forwarding entry before reading a claimed client', () => {
+    const trustedProxies = trustedProxiesOf(['127.0.0.1', '10.0.0.0/8']);
+    for (const entry of ['[', '[::1', '[2001:db8::1', '[::1]extra', '[::1]:x']) {
+      expect(addressOfEntry(entry), entry).toBeUndefined();
+      expect(
+        clientAddressOf('127.0.0.1', { forwarded: `203.0.113.9, ${entry}`, trustedProxies }),
+        entry
+      ).toBe('127.0.0.1');
+      expect(
+        clientAddressOf('127.0.0.1', {
+          forwarded: `203.0.113.9, ${entry}, 10.0.0.1`,
+          trustedProxies,
+        }),
+        entry
+      ).toBe('10.0.0.1');
+    }
+  });
+
   test('trusts only the two addresses of an uncompressed IPv6 prefix of 127 bits', () => {
     const network = '2001:db8:1:2:3:4:5:6/127';
     const trustedProxies = trustedProxiesOf([network]);
