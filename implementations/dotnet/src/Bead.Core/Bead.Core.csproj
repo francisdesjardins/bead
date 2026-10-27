@@ -17,6 +17,9 @@
     <InternalsVisibleTo Include="Bead.Transport.Mqtt" />
     <!-- its tests play the broker's cases with the core's player, which reads its parcels -->
     <InternalsVisibleTo Include="Bead.Transport.Mqtt.Tests" />
+    <!-- AMQP 1.0's adapter, and its tests, alike -->
+    <InternalsVisibleTo Include="Bead.Transport.Amqp" />
+    <InternalsVisibleTo Include="Bead.Transport.Amqp.Tests" />
     <!-- the interop over MQTT 5 reads a participant's incarnation and an ACCEPT's half -->
     <InternalsVisibleTo Include="Bead.Interop.Tests" />
     <!-- the interop service holds a duration a payload gives as every place of this side does -->

@@ -83,7 +83,9 @@ to one meaning of `advance`. The why of each rule is in the decisions:
   MQTT 5's binding of a broker, section 15;
 - [0042](../docs/decisions/0042-a-proto-message-that-leaves-a-required-field-unset-neither-reads-nor-writes-and-a-gateway-refuses-it-where-its-server-would.md):
   a `proto` message that leaves a required field unset, and a closed enum's undeclared number,
-  section 17.9.
+  section 17.9;
+- [0043](../docs/decisions/0043-over-amqp-1-0-a-participant-is-one-connection-whose-exclusive-inbox-ends-with-it-and-a-parcel-one-message-of-one-profile-each-counted-to-its-byte.md):
+  AMQP 1.0's binding of a broker, on RabbitMQ 4, section 15.
 
 **Version: 0.8.0**, of layout `0xA1`, its broker parcels of layout `0xB1`. Each of its
 conformance files repeats it as its `specVersion`, and follows its schema in
@@ -2065,6 +2067,132 @@ what that participant publishes a round trip (section 15.28), and is sized for i
 writes a retained message and none reaches one: one left on a Bead topic is the deployment's to
 clear, and a broker that serves Bead alone MAY refuse them. A broker that persists what it holds may
 keep at rest, for its life, a credential a DATA carries (section 15.22).
+
+### AMQP 1.0 on RabbitMQ 4
+
+_Vectors: `amqpMessages`, `amqpPublishBounds`._
+
+15.32. A broker of AMQP 1.0
+([OASIS AMQP 1.0](https://docs.oasis-open.org/amqp/core/v1.0/os/amqp-core-overview-v1.0-os.html))
+that is RabbitMQ 4 carries a participant's link over TCP or over TLS; no other version of AMQP
+carries one, and its management, its addresses and its permissions are RabbitMQ 4's. A parcel is
+the Data section of one message, and a topic its tokens joined by `.`: an inbox `<root>.i.<id>`, a
+server's name `<root>.s.<name>`. A participant reads a topic from the queue of its name, at the
+address `/queues/<topic>`, and writes one through the topic exchange named its root, at
+`/exchanges/<root>/<topic>`
+([RabbitMQ 4, AMQP 1.0 addresses v2](https://www.rabbitmq.com/docs/amqp#address-v2)). A server's
+name is its queue, and every participant serving it, alone or in a group, whatever its side,
+consumes it, its broker handing each message to one. Its adapter leaves no will and writes no
+departure. Its connections' handles' type is `AMQP` (section 15.1).
+
+15.33. A participant's link is one network connection, opened anew each time it links. Its OPEN
+carries its id as its container-id, `vhost:` and its virtual host as its hostname where it is given
+one, and its `idleTimeout` as its idle-time-out; it counts its link lost once nothing came for twice
+that ([AMQP 1.0 §2.4.5](https://docs.oasis-open.org/amqp/core/v1.0/os/amqp-core-transport-v1.0-os.html#doc-doc-idle-time-out)).
+Its SASL is PLAIN, its id the user, with a password, or EXTERNAL where its TLS client certificate
+authenticates it. On it a participant holds a session for its inbox's receiver, one for each name
+it serves, holding that name's receiver, one sending to inboxes and one sending to names, each
+sending one to the anonymous terminus
+([Anonymous Terminus v1.0](https://docs.oasis-open.org/amqp/anonterm/v1.0/anonterm-v1.0.html)); a
+name past what its broker's channel-max leaves is refused. It declares its inbox through its
+broker's management on that connection
+([Link Pairing v1.0](https://docs.oasis-open.org/amqp/linkpair/v1.0/linkpair-v1.0.html)), so that
+it ends with it: a queue of its name, exclusive, classic and not durable, declared once answered 200
+or 201, then bound to its root's exchange by its own name, once answered 204. Any other answer, or
+the end of its management's links, of their session or of its connection meanwhile, fails its
+start and closes its connection, its inbox ending with it; while another connection of its id holds
+the inbox, its broker answers 400, so that the earlier link keeps the id, and its participant's
+reconnection tries again. A link is up once its OPEN came and its inbox's receiver attached. The end
+of its connection that it did not ask, or of its inbox's session or receiver, is its link lost: it
+closes its connection, and its inbox is never attached again in place, since a receiver detached
+hands its unsettled messages back on the same connection. A name's receiver its broker ends is
+attached again once, on a session of its own; that refused, or the name lost again on the same
+link, is its link lost. A sending session that ends refuses each publication it held, its link
+kept, and the next publication begins another. A participant's stop detaches its receivers and
+closes its connection with no error. No link of an id takes another over. Nothing of a link reaches
+another: no library reconnects it, recovers it, or holds what it publishes while it is down, and
+what is asked of a link that is down is refused at once.
+
+15.34. A participant subscribes a topic by a receiver of its queue, on the session 15.33 gives it,
+its sender settle mode unsettled where its adapter delivers at least once and settled where at most
+once, its receiver settle mode first, no max-message-size, and its credit its own
+([AMQP 1.0 §2.6.7](https://docs.oasis-open.org/amqp/core/v1.0/os/amqp-core-transport-v1.0-os.html#doc-flow-control)):
+its inbox's receiver `linkCredit` as it attaches and a name's 1, each one more as each message is
+settled, so that a name's queue hands each of its members one OPEN at a time, the others waiting
+there for whichever member reads next, as RabbitMQ's fair dispatch at a prefetch of 1 does
+([RabbitMQ 4, consumer prefetch](https://www.rabbitmq.com/docs/consumer-prefetch)). A subscription
+is held once its ATTACH named its source, and refused when its ATTACH names none and a DETACH
+follows it, or when its broker ends its session: a name its broker's access control denies ends
+that name's session alone. A subscription asked again while it is under way waits for it. A name
+is let go once each message its receiver handed on was settled and then its DETACH came, none
+handed on after it is asked, all within one `connectTimeout`, past which its link is lost: a
+message detached unsettled goes back to its queue, and an OPEN whose connection its server took and
+has since closed would be answered anew, its pair gone. A name whose subscription is under way as it
+is let go is never held, and is let go once its ATTACH is answered. An inbox is let go once its
+broker's management deleted it, answered within `connectTimeout`, what comes to it meanwhile handed
+on and credited.
+
+15.35. A participant publishes each parcel as one message of format 0, unsettled where its adapter
+delivers at least once and settled where at most once, within its sender's credit, later ones
+waiting in their order: a header only where 15.18 or 15.22 gives the parcel a life, its ttl alone,
+that life in whole milliseconds rounded up, 1 at least and 4,294,967,295 at most; properties whose
+`to` alone is set; one Data section, the parcel; no other section or field. Each section is a
+described list of its fields up to the last set, those before it null, each value in the smallest
+of its encodings ([AMQP 1.0 §1.6](https://docs.oasis-open.org/amqp/core/v1.0/os/amqp-core-types-v1.0-os.html#section-encodings)).
+A message settled `accepted` is taken; `released`, no subscriber takes it — its exchange routes its
+topic to no queue: an inbox its broker ended, or a name no deployment provisioned; `rejected`, or
+any other outcome, refuses it
+([AMQP 1.0 §3.4](https://docs.oasis-open.org/amqp/core/v1.0/os/amqp-core-messaging-v1.0-os.html#section-delivery-state)).
+A publication whose message, counted as section 15.37 counts it, would pass its sender's ATTACH
+max-message-size is refused as it is asked, and never sent.
+
+15.36. A participant settles a message `accepted` once its core took its parcel (section 15.19),
+and never `released` or `modified`, which its broker answers by handing it again behind later
+ones. A message whose body is other than one Data section, or whose payload passes the receive
+bound of the topic it came to, is no parcel (section 15.17), and its link is kept.
+
+15.37. A message of N bytes of payload to an address of D bytes in UTF-8 counts
+S = L + 10 + D + 3 + w(N) + N bytes, where L is 13 with a life and 0 without, and w(N) is 2 under 256
+and 5 otherwise. The largest payload a message to a topic carries within a bound is the largest N,
+at most 4,294,967,295, whose S is within it, counted with a life whatever the message. What a
+participant publishes to a topic is held within its sender's ATTACH max-message-size, or within
+4,294,967,295 bytes where it names none; its receive bound of a topic (section 15.18) is the largest
+payload of a message to that topic within its own `maximumMessageSize`. Under its default, an inbox
+`bead.i.server` takes a payload of 16,777,156 bytes; under a max-message-size of 4,096, a message to
+`bead.i.peer` carries 4,038.
+
+| Bound                | By default | Bounds                                                                                                                                                                                            |
+| -------------------- | ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `maximumMessageSize` | 16,777,216 | the largest message, as its publisher writes it, whose payload it takes, 1 to 4,294,967,295 bytes: its receive bound                                                                              |
+| `linkCredit`         | 1,000      | the messages its broker may deliver its inbox's receiver before it settles one, 1 to 2,147,483,647                                                                                                |
+| `idleTimeout`        | 30 s       | its OPEN's idle-time-out, 1 ms to 1,073,741,823 ms: it counts its link lost silent for twice it                                                                                                   |
+| `connectTimeout`     | 30 s       | how long its start waits for its broker's OPEN, its sessions and its inbox; its inbox's deletion, for its answer; a name let go, for what it handed on to be settled and its DETACH; and its stop |
+
+None of them is ever without end or 0. A Data section's payload is a `vbin32` of 4,294,967,295 bytes
+at most ([AMQP 1.0 §1.6.19](https://docs.oasis-open.org/amqp/core/v1.0/os/amqp-core-types-v1.0-os.html#type-binary)),
+and an OPEN names a receive bound on 4 bytes (section 15.17): `maximumMessageSize` reaches
+4,294,967,295 at most. A FLOW's `link-credit` is a uint, and `linkCredit` reaches 2,147,483,647 at
+most, every side keeping to what one library takes ([`docs/support.md`](../docs/support.md),
+"Leveled down").
+
+15.38. A deployment's broker authenticates each participant's link, by a user name and a password
+or by a TLS client certificate it maps to a user, and that user is its id. It provisions its root's
+topic exchange, and for each server's name a queue of that name bound to it by that name; no
+participant declares either. Its permissions, by user: a participant alone configures, writes the
+bindings of and reads its inbox; every participant writes its root's exchange and, by its topic
+permissions, any inbox; a server's participants alone read its name's queue, and its clients alone
+write its name; no participant writes the default exchange, configures another queue or binds
+another key. A publication to a name that no participant consumes waits in its queue for its life,
+so a connect to it waits its time (section 15.15). Its queues hold `maximumConnections` ×
+`maximumUnsentBytes` at least, or are unbounded: one that drops loses connections by their gaps
+(section 15.19), one that rejects ends them (section 15.21). Its max_message_size bounds the largest
+message a participant publishes and the largest its library holds, `linkCredit` of them at most on
+their way to its inbox's receiver, and is sized for its participants; its
+session_max_per_connection bounds the names a participant serves. It ends an inbox once it ends the
+connection that held it: at once on a close or a reset, and after three of its heartbeat and its
+close for a connection gone silent, which is how long an inbox outlives a process that held it, a
+parcel to it taken meanwhile, and how long its id's next link is refused. A broker that writes what
+it holds to disk may keep at rest, for its life, a credential a DATA carries (section 15.22).
 
 ## 16. Services and procedures
 

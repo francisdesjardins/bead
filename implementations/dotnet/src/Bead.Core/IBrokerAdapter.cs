@@ -7,11 +7,12 @@ public enum BrokerDelivery
 {
     /// <summary>
     /// At least once: its broker acknowledges each publication it took, and its adapter holds what it
-    /// publishes to the quota its broker gives (MQTT QoS 1, AMQP settled).
+    /// publishes to the quota its broker gives (MQTT QoS 1; AMQP 1.0 an unsettled transfer, its
+    /// outcome <c>accepted</c>).
     /// </summary>
     AtLeastOnce,
 
-    /// <summary>At most once: nothing is acknowledged, and nothing paces the link (MQTT QoS 0, core NATS).</summary>
+    /// <summary>At most once: nothing is acknowledged, and nothing paces the link (MQTT QoS 0, AMQP 1.0 a transfer settled as it goes, core NATS).</summary>
     AtMostOnce,
 }
 

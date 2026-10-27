@@ -8,6 +8,7 @@
     <Project Path="src/Bead.Protobuf/Bead.Protobuf.csproj" />
     <Project Path="src/Bead.Transcoding/Bead.Transcoding.csproj" />
     <Project Path="src/Bead.Transcoding.Http/Bead.Transcoding.Http.csproj" />
+    <Project Path="src/Bead.Transport.Amqp/Bead.Transport.Amqp.csproj" />
     <Project Path="src/Bead.Transport.Http/Bead.Transport.Http.csproj" />
     <Project Path="src/Bead.Transport.Mqtt/Bead.Transport.Mqtt.csproj" />
     <Project Path="src/Bead.Transport.WebSockets/Bead.Transport.WebSockets.csproj" />
@@ -19,6 +20,7 @@
     <Project Path="tests/Bead.Interop.Tests/Bead.Interop.Tests.csproj" />
     <Project Path="tests/Bead.Protobuf.Tests/Bead.Protobuf.Tests.csproj" />
     <Project Path="tests/Bead.Transcoding.Tests/Bead.Transcoding.Tests.csproj" />
+    <Project Path="tests/Bead.Transport.Amqp.Tests/Bead.Transport.Amqp.Tests.csproj" />
     <Project Path="tests/Bead.Transport.Http.Tests/Bead.Transport.Http.Tests.csproj" />
     <Project Path="tests/Bead.Transport.Mqtt.Tests/Bead.Transport.Mqtt.Tests.csproj" />
     <Project Path="tests/Bead.Transport.WebSockets.Tests/Bead.Transport.WebSockets.Tests.csproj" />

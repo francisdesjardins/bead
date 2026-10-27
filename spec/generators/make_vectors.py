@@ -9,6 +9,7 @@ import os
 import re
 import string
 
+import amqp_messages
 from mqtt_packets import (LARGEST_PACKET, MAXIMUM_PACKET_SIZE, largest_payload, publish_bytes, remaining_length,
                           width)
 from spec_version import spec_version
@@ -974,6 +975,78 @@ mqtt_publish_bounds.append(('no payload fits: ' + publish_bound(SERVER_INBOX, 24
 assert mqtt_publish_bounds[-1][6] is None and publish_bytes(len(SERVER_INBOX), 0, qos=1, expiry=True) == 25
 
 
+# ── An AMQP 1.0 message's bytes (sections 15.35 and 15.37) ──────────────────────────────────────
+
+# the addresses a parcel is written to: the inbox of a peer, a name a server's participants serve in
+# a group, and the longest, a root and an id of 64 characters each (section 15.16)
+PEER_ADDRESS = amqp_messages.address_of('bead', 'bead.i.peer')
+NAME_ADDRESS = amqp_messages.address_of('bead', 'bead.s.interop-both')
+SERVER_ADDRESS = amqp_messages.address_of('bead', 'bead.i.server')
+LONGEST_ADDRESS = amqp_messages.address_of('r' * 64, 'r' * 64 + '.i.' + 't' * 64)
+assert [len(each) for each in (PEER_ADDRESS, NAME_ADDRESS, SERVER_ADDRESS, LONGEST_ADDRESS)] == [27, 35, 29, 207]
+# every payload byte of a vector, as AMQPNetLite 2.5.4's rows were written
+PAYLOAD_BYTE = 0x5A
+
+
+def address_named(address):
+    return {PEER_ADDRESS: "a peer's inbox", NAME_ADDRESS: 'a name', SERVER_ADDRESS: "the server's inbox",
+            LONGEST_ADDRESS: 'the longest address'}[address]
+
+
+def life_named(ttl):
+    return 'without a life' if ttl is None else f'of a life of {ttl:,} ms'
+
+
+# each address with each width of a payload and of a ttl: a payload empty, of one byte, at vbin8's
+# edge and past it; no life, then a ttl of each width a life takes, smalluint's edges and uint's,
+# whose 1 at least leaves uint0 unwritten (section 15.35)
+AMQP_MESSAGES = [(0, None), (1, None), (255, None), (256, None), (0, 1), (1, 255), (255, 256), (256, 4_294_967_295)]
+
+
+def amqp_message(address, payload, ttl):
+    data = amqp_messages.encode(address, bytes([PAYLOAD_BYTE]) * payload, ttl)
+    payload_named = ('an empty payload' if payload == 0 else 'a payload of 1 byte' if payload == 1
+                     else f'a payload of {payload:,} bytes')
+    return (f'{address_named(address)}, {payload_named}, {life_named(ttl)}: {len(data):,} bytes',
+            ['15.35'], address, payload, ttl, hexadecimal(data))
+
+
+amqp_message_vectors = [amqp_message(address, payload, ttl)
+                        for address in (PEER_ADDRESS, NAME_ADDRESS, LONGEST_ADDRESS) for payload, ttl in AMQP_MESSAGES]
+
+
+def amqp_bounds_of(address):
+    """The bounds a count is held at for an address: under an empty message, at it, a byte past it; at
+    vbin8's last payload, a byte past it, and the last bound it holds; at vbin32's first, a byte past
+    it; at a receive bound of 1,024 and a byte under it; the brokers' cases' max-message-size and a byte
+    past it; an adapter's maximumMessageSize by default; and 4,294,967,295, a sender's ATTACH that
+    names none."""
+    d = len(address.encode('utf-8'))
+    empty = amqp_messages.message_bytes(d, 0, life=True)
+    last_small = amqp_messages.message_bytes(d, 255, life=True)
+    first_large = amqp_messages.message_bytes(d, 256, life=True)
+    least = amqp_messages.message_bytes(d, 1_024, life=True)
+    return [empty - 1, empty, empty + 1, last_small, last_small + 1, first_large - 1, first_large, first_large + 1,
+            least - 1, least, 4_096, 4_097, amqp_messages.MAXIMUM_MESSAGE_SIZE, amqp_messages.LARGEST_UINT]
+
+
+def amqp_publish_bound(address, maximum):
+    largest = amqp_messages.largest_payload(address, maximum)
+    size = None if largest is None else amqp_messages.message_bytes(len(address.encode('utf-8')), largest, life=True)
+    assert size is None or size <= maximum
+    named = f'{address_named(address)} under {maximum:,} bytes'
+    return ((f'no payload fits: {named}' if size is None else f'{named}: a message of {size:,}'), ['15.37'], address,
+            maximum, largest, size)
+
+
+amqp_publish_bounds = [amqp_publish_bound(address, maximum)
+                       for address in (SERVER_ADDRESS, PEER_ADDRESS, LONGEST_ADDRESS) for maximum in amqp_bounds_of(address)]
+# ! a message under 4,294,967,295 bytes carries at most 4,294,967,264 to the server's inbox: the cap of
+# a payload binds no bound a sender's ATTACH names, as a uint holds the largest
+assert amqp_messages.largest_payload(SERVER_ADDRESS, amqp_messages.LARGEST_UINT) == 4_294_967_295 - 13 - 10 - 29 - 3 - 5
+assert amqp_messages.receive_bound('bead', 'server') in [largest for *_, largest, _ in amqp_publish_bounds]
+
+
 def entry(**fields):
     return {key: value for key, value in fields.items() if value is not None}
 
@@ -1002,6 +1075,8 @@ document = {
         "written false marks a parcel a reader reads and no writer writes, which a side reads alone: an advisory kind, read to its prefix — layout, kind, halves and sequence — whatever its flags, its kept byte and its body, to be taken in its order and skipped; an OPEN of a layout to come, read to its prefix and its id, which its acceptor refuses 426; a REFUSE of a layout to come, read whole, which every layout keeps; and an OPEN whose id is no token or whose receive bound is under 1,024, which its acceptor refuses 400 (section 15.18).",
         "A parcel refusal is what a side makes of a message that does not read as a parcel: no-parcel, under 28 bytes or of a first byte outside 0xB1 to 0xBF, which it drops in silence and reports; or does-not-read, a parcel of layout 0xB1 that does not read, which closes its connection with 1002, reported.",
         "An MQTT 5 publish bound is section 15.30's count with no broker: a PUBLISH to topic, its UTF-8 bytes, at qos, 1 or 0, with a Message Expiry Interval where expiry is true; largestPayload, the largest payload whose packet is within maximumPacketSize and whose Remaining Length is at most 268,435,455, null where an empty one does not fit; and packetBytes, that packet's every byte, null alike.",
+        "An AMQP 1.0 message is section 15.35's profile: a message to the address to, its UTF-8 bytes, of payloadLength bytes each payloadByte, with a header whose ttl is ttl, in milliseconds, where ttl is given, and none where it is not; bytes is the whole message, which a side's writer writes to its every byte.",
+        "An AMQP 1.0 publish bound is section 15.37's count with no broker: a message to address, its UTF-8 bytes, a life counted whatever the message; largestPayload, the largest payload whose message is within maximumMessageSize, at most 4,294,967,295, null where an empty one does not fit; and messageBytes, that message's every byte, null alike.",
     ],
     'specVersion': spec_version(),
     'headers': [entry(name=name, clauses=clauses, bytes=data, header=header) for name, clauses, data, header in headers],
@@ -1031,6 +1106,12 @@ document = {
     'mqttPublishBounds': [{'name': name, 'clauses': clauses, 'topic': topic, 'maximumPacketSize': maximum, 'qos': qos,
                            'expiry': expiry, 'largestPayload': largest, 'packetBytes': packet}
                           for name, clauses, topic, maximum, qos, expiry, largest, packet in mqtt_publish_bounds],
+    'amqpMessages': [entry(name=name, clauses=clauses, to=to, payloadLength=payload, payloadByte=PAYLOAD_BYTE, ttl=ttl,
+                           bytes=data)
+                     for name, clauses, to, payload, ttl, data in amqp_message_vectors],
+    'amqpPublishBounds': [{'name': name, 'clauses': clauses, 'address': address, 'maximumMessageSize': maximum,
+                           'largestPayload': largest, 'messageBytes': size}
+                          for name, clauses, address, maximum, largest, size in amqp_publish_bounds],
 }
 
 with open(OUT, 'w', encoding='utf-8', newline='\n') as file:

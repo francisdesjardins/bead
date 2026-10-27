@@ -8,6 +8,7 @@ export const MESSAGE_EVENT = 'message';
 export const RECONNECT_EVENT = 'reconnect';
 export const REFUSAL_EVENT = 'refusal';
 
+export const TRANSPORT_AMQP = 'AMQP';
 export const TRANSPORT_BROKER = 'BROKER';
 export const TRANSPORT_HTTP = 'HTTP';
 export const TRANSPORT_MEMORY = 'MEMORY';
@@ -115,6 +116,7 @@ export type MESSAGE_EVENT = typeof MESSAGE_EVENT;
 export type RECONNECT_EVENT = typeof RECONNECT_EVENT;
 export type REFUSAL_EVENT = typeof REFUSAL_EVENT;
 
+export type TRANSPORT_AMQP = typeof TRANSPORT_AMQP;
 export type TRANSPORT_BROKER = typeof TRANSPORT_BROKER;
 export type TRANSPORT_HTTP = typeof TRANSPORT_HTTP;
 export type TRANSPORT_MEMORY = typeof TRANSPORT_MEMORY;
@@ -122,6 +124,7 @@ export type TRANSPORT_MQTT = typeof TRANSPORT_MQTT;
 export type TRANSPORT_WORKER = typeof TRANSPORT_WORKER;
 export type TRANSPORT_WS = typeof TRANSPORT_WS;
 export type TRANSPORTS =
+  | TRANSPORT_AMQP
   | TRANSPORT_BROKER
   | TRANSPORT_HTTP
   | TRANSPORT_MEMORY

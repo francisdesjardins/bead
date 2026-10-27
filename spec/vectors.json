@@ -14,7 +14,9 @@
     "A parcel is a broker's message, read to its fields and written back to its bytes (section 15.17): its layout, 177 for 0xB1; its kind, OPEN 1, ACCEPT 2, REFUSE 3, DATA 4, PING 5, PONG 6, CLOSE 7, RESET 8, GONE 9, 128 to 255 advisory; its flags, MORE 1, CREDENTIAL 2 and SECURE 4 together; its opener's half and its acceptor's, 8 bytes each in hexadecimal; its sequence; then its body's fields: an OPEN's and an ACCEPT's id, a character a byte, incarnation, in hexadecimal, and bound, its receive bound; a REFUSE's status, and layouts, those it reads, on a 426; a DATA's credential, a character a byte, where it carries one, and carried, the envelope or the part it carries, in hexadecimal; a PONG's answers, the sequence of the PING it answers; a CLOSE's code; a GONE's incarnation and id. A field a parcel's kind has no part for is left out.",
     "written false marks a parcel a reader reads and no writer writes, which a side reads alone: an advisory kind, read to its prefix — layout, kind, halves and sequence — whatever its flags, its kept byte and its body, to be taken in its order and skipped; an OPEN of a layout to come, read to its prefix and its id, which its acceptor refuses 426; a REFUSE of a layout to come, read whole, which every layout keeps; and an OPEN whose id is no token or whose receive bound is under 1,024, which its acceptor refuses 400 (section 15.18).",
     "A parcel refusal is what a side makes of a message that does not read as a parcel: no-parcel, under 28 bytes or of a first byte outside 0xB1 to 0xBF, which it drops in silence and reports; or does-not-read, a parcel of layout 0xB1 that does not read, which closes its connection with 1002, reported.",
-    "An MQTT 5 publish bound is section 15.30's count with no broker: a PUBLISH to topic, its UTF-8 bytes, at qos, 1 or 0, with a Message Expiry Interval where expiry is true; largestPayload, the largest payload whose packet is within maximumPacketSize and whose Remaining Length is at most 268,435,455, null where an empty one does not fit; and packetBytes, that packet's every byte, null alike."
+    "An MQTT 5 publish bound is section 15.30's count with no broker: a PUBLISH to topic, its UTF-8 bytes, at qos, 1 or 0, with a Message Expiry Interval where expiry is true; largestPayload, the largest payload whose packet is within maximumPacketSize and whose Remaining Length is at most 268,435,455, null where an empty one does not fit; and packetBytes, that packet's every byte, null alike.",
+    "An AMQP 1.0 message is section 15.35's profile: a message to the address to, its UTF-8 bytes, of payloadLength bytes each payloadByte, with a header whose ttl is ttl, in milliseconds, where ttl is given, and none where it is not; bytes is the whole message, which a side's writer writes to its every byte.",
+    "An AMQP 1.0 publish bound is section 15.37's count with no broker: a message to address, its UTF-8 bytes, a life counted whatever the message; largestPayload, the largest payload whose message is within maximumMessageSize, at most 4,294,967,295, null where an empty one does not fit; and messageBytes, that message's every byte, null alike."
   ],
   "specVersion": "0.8.0",
   "headers": [
@@ -5849,6 +5851,682 @@
       "expiry": true,
       "largestPayload": null,
       "packetBytes": null
+    }
+  ],
+  "amqpMessages": [
+    {
+      "name": "a peer's inbox, an empty payload, without a life: 42 bytes",
+      "clauses": [
+        "15.35"
+      ],
+      "to": "/exchanges/bead/bead.i.peer",
+      "payloadLength": 0,
+      "payloadByte": 90,
+      "bytes": "00 53 73 C0 20 03 40 40 A1 1B 2F 65 78 63 68 61 6E 67 65 73 2F 62 65 61 64 2F 62 65 61 64 2E 69 2E 70 65 65 72 00 53 75 A0 00"
+    },
+    {
+      "name": "a peer's inbox, a payload of 1 byte, without a life: 43 bytes",
+      "clauses": [
+        "15.35"
+      ],
+      "to": "/exchanges/bead/bead.i.peer",
+      "payloadLength": 1,
+      "payloadByte": 90,
+      "bytes": "00 53 73 C0 20 03 40 40 A1 1B 2F 65 78 63 68 61 6E 67 65 73 2F 62 65 61 64 2F 62 65 61 64 2E 69 2E 70 65 65 72 00 53 75 A0 01 5A"
+    },
+    {
+      "name": "a peer's inbox, a payload of 255 bytes, without a life: 297 bytes",
+      "clauses": [
+        "15.35"
+      ],
+      "to": "/exchanges/bead/bead.i.peer",
+      "payloadLength": 255,
+      "payloadByte": 90,
+      "bytes": "00 53 73 C0 20 03 40 40 A1 1B 2F 65 78 63 68 61 6E 67 65 73 2F 62 65 61 64 2F 62 65 61 64 2E 69 2E 70 65 65 72 00 53 75 A0 FF 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A"
+    },
+    {
+      "name": "a peer's inbox, a payload of 256 bytes, without a life: 301 bytes",
+      "clauses": [
+        "15.35"
+      ],
+      "to": "/exchanges/bead/bead.i.peer",
+      "payloadLength": 256,
+      "payloadByte": 90,
+      "bytes": "00 53 73 C0 20 03 40 40 A1 1B 2F 65 78 63 68 61 6E 67 65 73 2F 62 65 61 64 2F 62 65 61 64 2E 69 2E 70 65 65 72 00 53 75 B0 00 00 01 00 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A"
+    },
+    {
+      "name": "a peer's inbox, an empty payload, of a life of 1 ms: 52 bytes",
+      "clauses": [
+        "15.35"
+      ],
+      "to": "/exchanges/bead/bead.i.peer",
+      "payloadLength": 0,
+      "payloadByte": 90,
+      "ttl": 1,
+      "bytes": "00 53 70 C0 05 03 40 40 52 01 00 53 73 C0 20 03 40 40 A1 1B 2F 65 78 63 68 61 6E 67 65 73 2F 62 65 61 64 2F 62 65 61 64 2E 69 2E 70 65 65 72 00 53 75 A0 00"
+    },
+    {
+      "name": "a peer's inbox, a payload of 1 byte, of a life of 255 ms: 53 bytes",
+      "clauses": [
+        "15.35"
+      ],
+      "to": "/exchanges/bead/bead.i.peer",
+      "payloadLength": 1,
+      "payloadByte": 90,
+      "ttl": 255,
+      "bytes": "00 53 70 C0 05 03 40 40 52 FF 00 53 73 C0 20 03 40 40 A1 1B 2F 65 78 63 68 61 6E 67 65 73 2F 62 65 61 64 2F 62 65 61 64 2E 69 2E 70 65 65 72 00 53 75 A0 01 5A"
+    },
+    {
+      "name": "a peer's inbox, a payload of 255 bytes, of a life of 256 ms: 310 bytes",
+      "clauses": [
+        "15.35"
+      ],
+      "to": "/exchanges/bead/bead.i.peer",
+      "payloadLength": 255,
+      "payloadByte": 90,
+      "ttl": 256,
+      "bytes": "00 53 70 C0 08 03 40 40 70 00 00 01 00 00 53 73 C0 20 03 40 40 A1 1B 2F 65 78 63 68 61 6E 67 65 73 2F 62 65 61 64 2F 62 65 61 64 2E 69 2E 70 65 65 72 00 53 75 A0 FF 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A"
+    },
+    {
+      "name": "a peer's inbox, a payload of 256 bytes, of a life of 4,294,967,295 ms: 314 bytes",
+      "clauses": [
+        "15.35"
+      ],
+      "to": "/exchanges/bead/bead.i.peer",
+      "payloadLength": 256,
+      "payloadByte": 90,
+      "ttl": 4294967295,
+      "bytes": "00 53 70 C0 08 03 40 40 70 FF FF FF FF 00 53 73 C0 20 03 40 40 A1 1B 2F 65 78 63 68 61 6E 67 65 73 2F 62 65 61 64 2F 62 65 61 64 2E 69 2E 70 65 65 72 00 53 75 B0 00 00 01 00 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A"
+    },
+    {
+      "name": "a name, an empty payload, without a life: 50 bytes",
+      "clauses": [
+        "15.35"
+      ],
+      "to": "/exchanges/bead/bead.s.interop-both",
+      "payloadLength": 0,
+      "payloadByte": 90,
+      "bytes": "00 53 73 C0 28 03 40 40 A1 23 2F 65 78 63 68 61 6E 67 65 73 2F 62 65 61 64 2F 62 65 61 64 2E 73 2E 69 6E 74 65 72 6F 70 2D 62 6F 74 68 00 53 75 A0 00"
+    },
+    {
+      "name": "a name, a payload of 1 byte, without a life: 51 bytes",
+      "clauses": [
+        "15.35"
+      ],
+      "to": "/exchanges/bead/bead.s.interop-both",
+      "payloadLength": 1,
+      "payloadByte": 90,
+      "bytes": "00 53 73 C0 28 03 40 40 A1 23 2F 65 78 63 68 61 6E 67 65 73 2F 62 65 61 64 2F 62 65 61 64 2E 73 2E 69 6E 74 65 72 6F 70 2D 62 6F 74 68 00 53 75 A0 01 5A"
+    },
+    {
+      "name": "a name, a payload of 255 bytes, without a life: 305 bytes",
+      "clauses": [
+        "15.35"
+      ],
+      "to": "/exchanges/bead/bead.s.interop-both",
+      "payloadLength": 255,
+      "payloadByte": 90,
+      "bytes": "00 53 73 C0 28 03 40 40 A1 23 2F 65 78 63 68 61 6E 67 65 73 2F 62 65 61 64 2F 62 65 61 64 2E 73 2E 69 6E 74 65 72 6F 70 2D 62 6F 74 68 00 53 75 A0 FF 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A"
+    },
+    {
+      "name": "a name, a payload of 256 bytes, without a life: 309 bytes",
+      "clauses": [
+        "15.35"
+      ],
+      "to": "/exchanges/bead/bead.s.interop-both",
+      "payloadLength": 256,
+      "payloadByte": 90,
+      "bytes": "00 53 73 C0 28 03 40 40 A1 23 2F 65 78 63 68 61 6E 67 65 73 2F 62 65 61 64 2F 62 65 61 64 2E 73 2E 69 6E 74 65 72 6F 70 2D 62 6F 74 68 00 53 75 B0 00 00 01 00 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A"
+    },
+    {
+      "name": "a name, an empty payload, of a life of 1 ms: 60 bytes",
+      "clauses": [
+        "15.35"
+      ],
+      "to": "/exchanges/bead/bead.s.interop-both",
+      "payloadLength": 0,
+      "payloadByte": 90,
+      "ttl": 1,
+      "bytes": "00 53 70 C0 05 03 40 40 52 01 00 53 73 C0 28 03 40 40 A1 23 2F 65 78 63 68 61 6E 67 65 73 2F 62 65 61 64 2F 62 65 61 64 2E 73 2E 69 6E 74 65 72 6F 70 2D 62 6F 74 68 00 53 75 A0 00"
+    },
+    {
+      "name": "a name, a payload of 1 byte, of a life of 255 ms: 61 bytes",
+      "clauses": [
+        "15.35"
+      ],
+      "to": "/exchanges/bead/bead.s.interop-both",
+      "payloadLength": 1,
+      "payloadByte": 90,
+      "ttl": 255,
+      "bytes": "00 53 70 C0 05 03 40 40 52 FF 00 53 73 C0 28 03 40 40 A1 23 2F 65 78 63 68 61 6E 67 65 73 2F 62 65 61 64 2F 62 65 61 64 2E 73 2E 69 6E 74 65 72 6F 70 2D 62 6F 74 68 00 53 75 A0 01 5A"
+    },
+    {
+      "name": "a name, a payload of 255 bytes, of a life of 256 ms: 318 bytes",
+      "clauses": [
+        "15.35"
+      ],
+      "to": "/exchanges/bead/bead.s.interop-both",
+      "payloadLength": 255,
+      "payloadByte": 90,
+      "ttl": 256,
+      "bytes": "00 53 70 C0 08 03 40 40 70 00 00 01 00 00 53 73 C0 28 03 40 40 A1 23 2F 65 78 63 68 61 6E 67 65 73 2F 62 65 61 64 2F 62 65 61 64 2E 73 2E 69 6E 74 65 72 6F 70 2D 62 6F 74 68 00 53 75 A0 FF 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A"
+    },
+    {
+      "name": "a name, a payload of 256 bytes, of a life of 4,294,967,295 ms: 322 bytes",
+      "clauses": [
+        "15.35"
+      ],
+      "to": "/exchanges/bead/bead.s.interop-both",
+      "payloadLength": 256,
+      "payloadByte": 90,
+      "ttl": 4294967295,
+      "bytes": "00 53 70 C0 08 03 40 40 70 FF FF FF FF 00 53 73 C0 28 03 40 40 A1 23 2F 65 78 63 68 61 6E 67 65 73 2F 62 65 61 64 2F 62 65 61 64 2E 73 2E 69 6E 74 65 72 6F 70 2D 62 6F 74 68 00 53 75 B0 00 00 01 00 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A"
+    },
+    {
+      "name": "the longest address, an empty payload, without a life: 222 bytes",
+      "clauses": [
+        "15.35"
+      ],
+      "to": "/exchanges/rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr/rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr.i.tttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttt",
+      "payloadLength": 0,
+      "payloadByte": 90,
+      "bytes": "00 53 73 C0 D4 03 40 40 A1 CF 2F 65 78 63 68 61 6E 67 65 73 2F 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 2F 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 2E 69 2E 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 00 53 75 A0 00"
+    },
+    {
+      "name": "the longest address, a payload of 1 byte, without a life: 223 bytes",
+      "clauses": [
+        "15.35"
+      ],
+      "to": "/exchanges/rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr/rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr.i.tttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttt",
+      "payloadLength": 1,
+      "payloadByte": 90,
+      "bytes": "00 53 73 C0 D4 03 40 40 A1 CF 2F 65 78 63 68 61 6E 67 65 73 2F 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 2F 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 2E 69 2E 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 00 53 75 A0 01 5A"
+    },
+    {
+      "name": "the longest address, a payload of 255 bytes, without a life: 477 bytes",
+      "clauses": [
+        "15.35"
+      ],
+      "to": "/exchanges/rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr/rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr.i.tttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttt",
+      "payloadLength": 255,
+      "payloadByte": 90,
+      "bytes": "00 53 73 C0 D4 03 40 40 A1 CF 2F 65 78 63 68 61 6E 67 65 73 2F 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 2F 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 2E 69 2E 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 00 53 75 A0 FF 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A"
+    },
+    {
+      "name": "the longest address, a payload of 256 bytes, without a life: 481 bytes",
+      "clauses": [
+        "15.35"
+      ],
+      "to": "/exchanges/rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr/rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr.i.tttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttt",
+      "payloadLength": 256,
+      "payloadByte": 90,
+      "bytes": "00 53 73 C0 D4 03 40 40 A1 CF 2F 65 78 63 68 61 6E 67 65 73 2F 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 2F 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 2E 69 2E 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 00 53 75 B0 00 00 01 00 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A"
+    },
+    {
+      "name": "the longest address, an empty payload, of a life of 1 ms: 232 bytes",
+      "clauses": [
+        "15.35"
+      ],
+      "to": "/exchanges/rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr/rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr.i.tttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttt",
+      "payloadLength": 0,
+      "payloadByte": 90,
+      "ttl": 1,
+      "bytes": "00 53 70 C0 05 03 40 40 52 01 00 53 73 C0 D4 03 40 40 A1 CF 2F 65 78 63 68 61 6E 67 65 73 2F 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 2F 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 2E 69 2E 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 00 53 75 A0 00"
+    },
+    {
+      "name": "the longest address, a payload of 1 byte, of a life of 255 ms: 233 bytes",
+      "clauses": [
+        "15.35"
+      ],
+      "to": "/exchanges/rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr/rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr.i.tttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttt",
+      "payloadLength": 1,
+      "payloadByte": 90,
+      "ttl": 255,
+      "bytes": "00 53 70 C0 05 03 40 40 52 FF 00 53 73 C0 D4 03 40 40 A1 CF 2F 65 78 63 68 61 6E 67 65 73 2F 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 2F 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 2E 69 2E 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 00 53 75 A0 01 5A"
+    },
+    {
+      "name": "the longest address, a payload of 255 bytes, of a life of 256 ms: 490 bytes",
+      "clauses": [
+        "15.35"
+      ],
+      "to": "/exchanges/rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr/rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr.i.tttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttt",
+      "payloadLength": 255,
+      "payloadByte": 90,
+      "ttl": 256,
+      "bytes": "00 53 70 C0 08 03 40 40 70 00 00 01 00 00 53 73 C0 D4 03 40 40 A1 CF 2F 65 78 63 68 61 6E 67 65 73 2F 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 2F 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 2E 69 2E 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 00 53 75 A0 FF 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A"
+    },
+    {
+      "name": "the longest address, a payload of 256 bytes, of a life of 4,294,967,295 ms: 494 bytes",
+      "clauses": [
+        "15.35"
+      ],
+      "to": "/exchanges/rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr/rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr.i.tttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttt",
+      "payloadLength": 256,
+      "payloadByte": 90,
+      "ttl": 4294967295,
+      "bytes": "00 53 70 C0 08 03 40 40 70 FF FF FF FF 00 53 73 C0 D4 03 40 40 A1 CF 2F 65 78 63 68 61 6E 67 65 73 2F 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 2F 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 72 2E 69 2E 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 74 00 53 75 B0 00 00 01 00 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A"
+    }
+  ],
+  "amqpPublishBounds": [
+    {
+      "name": "no payload fits: the server's inbox under 56 bytes",
+      "clauses": [
+        "15.37"
+      ],
+      "address": "/exchanges/bead/bead.i.server",
+      "maximumMessageSize": 56,
+      "largestPayload": null,
+      "messageBytes": null
+    },
+    {
+      "name": "the server's inbox under 57 bytes: a message of 57",
+      "clauses": [
+        "15.37"
+      ],
+      "address": "/exchanges/bead/bead.i.server",
+      "maximumMessageSize": 57,
+      "largestPayload": 0,
+      "messageBytes": 57
+    },
+    {
+      "name": "the server's inbox under 58 bytes: a message of 58",
+      "clauses": [
+        "15.37"
+      ],
+      "address": "/exchanges/bead/bead.i.server",
+      "maximumMessageSize": 58,
+      "largestPayload": 1,
+      "messageBytes": 58
+    },
+    {
+      "name": "the server's inbox under 312 bytes: a message of 312",
+      "clauses": [
+        "15.37"
+      ],
+      "address": "/exchanges/bead/bead.i.server",
+      "maximumMessageSize": 312,
+      "largestPayload": 255,
+      "messageBytes": 312
+    },
+    {
+      "name": "the server's inbox under 313 bytes: a message of 312",
+      "clauses": [
+        "15.37"
+      ],
+      "address": "/exchanges/bead/bead.i.server",
+      "maximumMessageSize": 313,
+      "largestPayload": 255,
+      "messageBytes": 312
+    },
+    {
+      "name": "the server's inbox under 315 bytes: a message of 312",
+      "clauses": [
+        "15.37"
+      ],
+      "address": "/exchanges/bead/bead.i.server",
+      "maximumMessageSize": 315,
+      "largestPayload": 255,
+      "messageBytes": 312
+    },
+    {
+      "name": "the server's inbox under 316 bytes: a message of 316",
+      "clauses": [
+        "15.37"
+      ],
+      "address": "/exchanges/bead/bead.i.server",
+      "maximumMessageSize": 316,
+      "largestPayload": 256,
+      "messageBytes": 316
+    },
+    {
+      "name": "the server's inbox under 317 bytes: a message of 317",
+      "clauses": [
+        "15.37"
+      ],
+      "address": "/exchanges/bead/bead.i.server",
+      "maximumMessageSize": 317,
+      "largestPayload": 257,
+      "messageBytes": 317
+    },
+    {
+      "name": "the server's inbox under 1,083 bytes: a message of 1,083",
+      "clauses": [
+        "15.37"
+      ],
+      "address": "/exchanges/bead/bead.i.server",
+      "maximumMessageSize": 1083,
+      "largestPayload": 1023,
+      "messageBytes": 1083
+    },
+    {
+      "name": "the server's inbox under 1,084 bytes: a message of 1,084",
+      "clauses": [
+        "15.37"
+      ],
+      "address": "/exchanges/bead/bead.i.server",
+      "maximumMessageSize": 1084,
+      "largestPayload": 1024,
+      "messageBytes": 1084
+    },
+    {
+      "name": "the server's inbox under 4,096 bytes: a message of 4,096",
+      "clauses": [
+        "15.37"
+      ],
+      "address": "/exchanges/bead/bead.i.server",
+      "maximumMessageSize": 4096,
+      "largestPayload": 4036,
+      "messageBytes": 4096
+    },
+    {
+      "name": "the server's inbox under 4,097 bytes: a message of 4,097",
+      "clauses": [
+        "15.37"
+      ],
+      "address": "/exchanges/bead/bead.i.server",
+      "maximumMessageSize": 4097,
+      "largestPayload": 4037,
+      "messageBytes": 4097
+    },
+    {
+      "name": "the server's inbox under 16,777,216 bytes: a message of 16,777,216",
+      "clauses": [
+        "15.37"
+      ],
+      "address": "/exchanges/bead/bead.i.server",
+      "maximumMessageSize": 16777216,
+      "largestPayload": 16777156,
+      "messageBytes": 16777216
+    },
+    {
+      "name": "the server's inbox under 4,294,967,295 bytes: a message of 4,294,967,295",
+      "clauses": [
+        "15.37"
+      ],
+      "address": "/exchanges/bead/bead.i.server",
+      "maximumMessageSize": 4294967295,
+      "largestPayload": 4294967235,
+      "messageBytes": 4294967295
+    },
+    {
+      "name": "no payload fits: a peer's inbox under 54 bytes",
+      "clauses": [
+        "15.37"
+      ],
+      "address": "/exchanges/bead/bead.i.peer",
+      "maximumMessageSize": 54,
+      "largestPayload": null,
+      "messageBytes": null
+    },
+    {
+      "name": "a peer's inbox under 55 bytes: a message of 55",
+      "clauses": [
+        "15.37"
+      ],
+      "address": "/exchanges/bead/bead.i.peer",
+      "maximumMessageSize": 55,
+      "largestPayload": 0,
+      "messageBytes": 55
+    },
+    {
+      "name": "a peer's inbox under 56 bytes: a message of 56",
+      "clauses": [
+        "15.37"
+      ],
+      "address": "/exchanges/bead/bead.i.peer",
+      "maximumMessageSize": 56,
+      "largestPayload": 1,
+      "messageBytes": 56
+    },
+    {
+      "name": "a peer's inbox under 310 bytes: a message of 310",
+      "clauses": [
+        "15.37"
+      ],
+      "address": "/exchanges/bead/bead.i.peer",
+      "maximumMessageSize": 310,
+      "largestPayload": 255,
+      "messageBytes": 310
+    },
+    {
+      "name": "a peer's inbox under 311 bytes: a message of 310",
+      "clauses": [
+        "15.37"
+      ],
+      "address": "/exchanges/bead/bead.i.peer",
+      "maximumMessageSize": 311,
+      "largestPayload": 255,
+      "messageBytes": 310
+    },
+    {
+      "name": "a peer's inbox under 313 bytes: a message of 310",
+      "clauses": [
+        "15.37"
+      ],
+      "address": "/exchanges/bead/bead.i.peer",
+      "maximumMessageSize": 313,
+      "largestPayload": 255,
+      "messageBytes": 310
+    },
+    {
+      "name": "a peer's inbox under 314 bytes: a message of 314",
+      "clauses": [
+        "15.37"
+      ],
+      "address": "/exchanges/bead/bead.i.peer",
+      "maximumMessageSize": 314,
+      "largestPayload": 256,
+      "messageBytes": 314
+    },
+    {
+      "name": "a peer's inbox under 315 bytes: a message of 315",
+      "clauses": [
+        "15.37"
+      ],
+      "address": "/exchanges/bead/bead.i.peer",
+      "maximumMessageSize": 315,
+      "largestPayload": 257,
+      "messageBytes": 315
+    },
+    {
+      "name": "a peer's inbox under 1,081 bytes: a message of 1,081",
+      "clauses": [
+        "15.37"
+      ],
+      "address": "/exchanges/bead/bead.i.peer",
+      "maximumMessageSize": 1081,
+      "largestPayload": 1023,
+      "messageBytes": 1081
+    },
+    {
+      "name": "a peer's inbox under 1,082 bytes: a message of 1,082",
+      "clauses": [
+        "15.37"
+      ],
+      "address": "/exchanges/bead/bead.i.peer",
+      "maximumMessageSize": 1082,
+      "largestPayload": 1024,
+      "messageBytes": 1082
+    },
+    {
+      "name": "a peer's inbox under 4,096 bytes: a message of 4,096",
+      "clauses": [
+        "15.37"
+      ],
+      "address": "/exchanges/bead/bead.i.peer",
+      "maximumMessageSize": 4096,
+      "largestPayload": 4038,
+      "messageBytes": 4096
+    },
+    {
+      "name": "a peer's inbox under 4,097 bytes: a message of 4,097",
+      "clauses": [
+        "15.37"
+      ],
+      "address": "/exchanges/bead/bead.i.peer",
+      "maximumMessageSize": 4097,
+      "largestPayload": 4039,
+      "messageBytes": 4097
+    },
+    {
+      "name": "a peer's inbox under 16,777,216 bytes: a message of 16,777,216",
+      "clauses": [
+        "15.37"
+      ],
+      "address": "/exchanges/bead/bead.i.peer",
+      "maximumMessageSize": 16777216,
+      "largestPayload": 16777158,
+      "messageBytes": 16777216
+    },
+    {
+      "name": "a peer's inbox under 4,294,967,295 bytes: a message of 4,294,967,295",
+      "clauses": [
+        "15.37"
+      ],
+      "address": "/exchanges/bead/bead.i.peer",
+      "maximumMessageSize": 4294967295,
+      "largestPayload": 4294967237,
+      "messageBytes": 4294967295
+    },
+    {
+      "name": "no payload fits: the longest address under 234 bytes",
+      "clauses": [
+        "15.37"
+      ],
+      "address": "/exchanges/rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr/rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr.i.tttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttt",
+      "maximumMessageSize": 234,
+      "largestPayload": null,
+      "messageBytes": null
+    },
+    {
+      "name": "the longest address under 235 bytes: a message of 235",
+      "clauses": [
+        "15.37"
+      ],
+      "address": "/exchanges/rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr/rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr.i.tttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttt",
+      "maximumMessageSize": 235,
+      "largestPayload": 0,
+      "messageBytes": 235
+    },
+    {
+      "name": "the longest address under 236 bytes: a message of 236",
+      "clauses": [
+        "15.37"
+      ],
+      "address": "/exchanges/rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr/rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr.i.tttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttt",
+      "maximumMessageSize": 236,
+      "largestPayload": 1,
+      "messageBytes": 236
+    },
+    {
+      "name": "the longest address under 490 bytes: a message of 490",
+      "clauses": [
+        "15.37"
+      ],
+      "address": "/exchanges/rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr/rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr.i.tttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttt",
+      "maximumMessageSize": 490,
+      "largestPayload": 255,
+      "messageBytes": 490
+    },
+    {
+      "name": "the longest address under 491 bytes: a message of 490",
+      "clauses": [
+        "15.37"
+      ],
+      "address": "/exchanges/rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr/rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr.i.tttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttt",
+      "maximumMessageSize": 491,
+      "largestPayload": 255,
+      "messageBytes": 490
+    },
+    {
+      "name": "the longest address under 493 bytes: a message of 490",
+      "clauses": [
+        "15.37"
+      ],
+      "address": "/exchanges/rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr/rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr.i.tttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttt",
+      "maximumMessageSize": 493,
+      "largestPayload": 255,
+      "messageBytes": 490
+    },
+    {
+      "name": "the longest address under 494 bytes: a message of 494",
+      "clauses": [
+        "15.37"
+      ],
+      "address": "/exchanges/rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr/rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr.i.tttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttt",
+      "maximumMessageSize": 494,
+      "largestPayload": 256,
+      "messageBytes": 494
+    },
+    {
+      "name": "the longest address under 495 bytes: a message of 495",
+      "clauses": [
+        "15.37"
+      ],
+      "address": "/exchanges/rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr/rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr.i.tttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttt",
+      "maximumMessageSize": 495,
+      "largestPayload": 257,
+      "messageBytes": 495
+    },
+    {
+      "name": "the longest address under 1,261 bytes: a message of 1,261",
+      "clauses": [
+        "15.37"
+      ],
+      "address": "/exchanges/rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr/rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr.i.tttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttt",
+      "maximumMessageSize": 1261,
+      "largestPayload": 1023,
+      "messageBytes": 1261
+    },
+    {
+      "name": "the longest address under 1,262 bytes: a message of 1,262",
+      "clauses": [
+        "15.37"
+      ],
+      "address": "/exchanges/rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr/rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr.i.tttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttt",
+      "maximumMessageSize": 1262,
+      "largestPayload": 1024,
+      "messageBytes": 1262
+    },
+    {
+      "name": "the longest address under 4,096 bytes: a message of 4,096",
+      "clauses": [
+        "15.37"
+      ],
+      "address": "/exchanges/rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr/rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr.i.tttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttt",
+      "maximumMessageSize": 4096,
+      "largestPayload": 3858,
+      "messageBytes": 4096
+    },
+    {
+      "name": "the longest address under 4,097 bytes: a message of 4,097",
+      "clauses": [
+        "15.37"
+      ],
+      "address": "/exchanges/rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr/rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr.i.tttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttt",
+      "maximumMessageSize": 4097,
+      "largestPayload": 3859,
+      "messageBytes": 4097
+    },
+    {
+      "name": "the longest address under 16,777,216 bytes: a message of 16,777,216",
+      "clauses": [
+        "15.37"
+      ],
+      "address": "/exchanges/rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr/rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr.i.tttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttt",
+      "maximumMessageSize": 16777216,
+      "largestPayload": 16776978,
+      "messageBytes": 16777216
+    },
+    {
+      "name": "the longest address under 4,294,967,295 bytes: a message of 4,294,967,295",
+      "clauses": [
+        "15.37"
+      ],
+      "address": "/exchanges/rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr/rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr.i.tttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttt",
+      "maximumMessageSize": 4294967295,
+      "largestPayload": 4294967057,
+      "messageBytes": 4294967295
     }
   ]
 }

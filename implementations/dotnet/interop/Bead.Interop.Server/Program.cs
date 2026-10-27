@@ -5,15 +5,17 @@ using Bead.Interop;
 using Bead.Transcoding.Http;
 using Bead.Transcoding.Tests;
 using Bead.Transcoding.V1;
+using Bead.Transport.Amqp;
 using Bead.Transport.Http;
 using Bead.Transport.Mqtt;
 using Bead.Transport.WebSockets;
 
 // The C# server of Bead's interop service, on 127.0.0.1, over WebSocket and over HTTP, each a server
-// of its own, and over MQTT 5 where `BEAD_MQTT_URL` names a broker, its participant `cs-server`
-// serving `interop-cs` alone and `interop-both` in a group with the TypeScript side's; each given
-// the service's credentials on the system's clock, which is theirs: its first line on the standard
-// output says their ports and those names, as {"port":n,"httpPort":m,"gatewayPort":g,"mqtt":[…]};
+// of its own, over MQTT 5 where `BEAD_MQTT_URL` names a broker and over AMQP 1.0 where
+// `BEAD_AMQP_URL` names a RabbitMQ, its participant on each `cs-server`, serving `interop-cs` alone
+// and `interop-both` in a group with the TypeScript side's; each given the service's credentials on
+// the system's clock, which is theirs: its first line on the standard output says their ports and
+// those names, as {"port":n,"httpPort":m,"gatewayPort":g,"mqtt":[…],"amqp":[…]};
 // it serves until its standard input closes. A port given as its one argument is the WebSocket
 // server's; none, any free one. The HTTP server takes any free one. Each names the origins
 // `BEAD_INTEROP_ORIGINS` lists, separated by spaces, none when it is not set: a page of another
@@ -46,7 +48,7 @@ InteropHandlers.Offer(server);
 InteropHandlers.Offer(httpServer);
 
 // * over MQTT 5, a participant of its own: its name alone, and the one both sides serve in a group
-string[] mqttNames = ["interop-cs", "interop-both"];
+string[] brokerNames = ["interop-cs", "interop-both"];
 var mqttUrl = Environment.GetEnvironmentVariable("BEAD_MQTT_URL");
 await using var participant = mqttUrl is { Length: > 0 }
     ? new BrokerParticipant(new MqttBrokerAdapter(new MqttBrokerAdapterOptions
@@ -56,12 +58,25 @@ await using var participant = mqttUrl is { Length: > 0 }
         Uri = new Uri(mqttUrl),
     }))
     : null;
-List<BrokerTransportServer> brokerTransports = participant is null
-    ? []
-    : [
-        participant.Server(new BrokerTransportServerOptions { Names = [mqttNames[0]] }),
-        participant.Server(new BrokerTransportServerOptions { Names = [mqttNames[1]], IsInGroup = true }),
-    ];
+
+// * over AMQP 1.0, a participant of its own alike, on its own broker
+var amqpUrl = Environment.GetEnvironmentVariable("BEAD_AMQP_URL");
+await using var amqpParticipant = amqpUrl is { Length: > 0 }
+    ? new BrokerParticipant(new AmqpBrokerAdapter(new AmqpBrokerAdapterOptions
+    {
+        Id = "cs-server",
+        Password = Environment.GetEnvironmentVariable("BEAD_AMQP_PASSWORD"),
+        Uri = new Uri(amqpUrl),
+    }))
+    : null;
+List<BrokerTransportServer> brokerTransports = [.. new[] { participant, amqpParticipant }.OfType<BrokerParticipant>().SelectMany((each) =>
+{
+    return new[]
+    {
+        each.Server(new BrokerTransportServerOptions { Names = [brokerNames[0]] }),
+        each.Server(new BrokerTransportServerOptions { Names = [brokerNames[1]], IsInGroup = true }),
+    };
+})];
 var brokerServers = brokerTransports.Select((transport) =>
 {
     return new Server<string>(transport, new ServerOptions { Credentials = credentials });
@@ -97,7 +112,15 @@ var said = new JsonObject { ["port"] = address.Port, ["httpPort"] = httpAddress.
 
 if (participant is not null)
 {
-    said["mqtt"] = new JsonArray([.. mqttNames.Select((name) =>
+    said["mqtt"] = new JsonArray([.. brokerNames.Select((name) =>
+    {
+        return (JsonNode)JsonValue.Create(name);
+    })]);
+}
+
+if (amqpParticipant is not null)
+{
+    said["amqp"] = new JsonArray([.. brokerNames.Select((name) =>
     {
         return (JsonNode)JsonValue.Create(name);
     })]);

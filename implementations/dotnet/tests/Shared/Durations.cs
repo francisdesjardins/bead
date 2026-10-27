@@ -47,10 +47,12 @@ internal static class Durations
     private const string Language = "C#";
 
     // the ceilings of a place's own below 1.4's, in milliseconds, which the file's generator holds
-    // its outcomes to: MQTT 5's Keep Alive, a Two Byte Integer of seconds (spec 15.30)
+    // its outcomes to: MQTT 5's Keep Alive, a Two Byte Integer of seconds (spec 15.30), and AMQP
+    // 1.0's idle-time-out, which its library enforces twice over within its own milliseconds (spec 15.37)
     private static readonly Dictionary<string, long> Ceilings = new(StringComparer.Ordinal)
     {
         ["mqttBrokerAdapter.keepAlive"] = 65_535_000,
+        ["amqpBrokerAdapter.idleTimeout"] = 1_073_741_823,
     };
 
     private static readonly JsonElement Root = Load();

@@ -199,6 +199,13 @@
           "Bead.Transcoding": "[0.7.0, )"
         }
       },
+      "bead.transport.amqp": {
+        "type": "Project",
+        "dependencies": {
+          "AMQPNetLite.Core": "[2.5.4, )",
+          "Bead.Core": "[0.7.0, )"
+        }
+      },
       "bead.transport.http": {
         "type": "Project",
         "dependencies": {
@@ -217,6 +224,12 @@
         "dependencies": {
           "Bead.Core": "[0.7.0, )"
         }
+      },
+      "AMQPNetLite.Core": {
+        "type": "CentralTransitive",
+        "requested": "[2.5.4, )",
+        "resolved": "2.5.4",
+        "contentHash": "KWrULsIa7+1Dq8g8ULhQk/pyC916tqLTRTLOfVsjftD2k7WjUvGzgfut5u12u00a2k+FFo8nPnCLEEZpRYK2yA=="
       },
       "Google.Protobuf": {
         "type": "CentralTransitive",

@@ -24,6 +24,16 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   broker's Receive Maximum, its PUBACK once taken, 0x10 as no subscriber, a subscription let go once
   its UNSUBACK came under 0x80 and refused on 0x80 or more, and a will of Bead's GONE (spec 15.25 to
   15.31, decision 0041).
+- AMQP 1.0 on RabbitMQ 4 as a broker's second binding, on both sides: an adapter over rhea (an
+  optional peer dependency, in Node) and a `Bead.Transport.Amqp` package over AMQPNetLite, each link
+  one fresh connection whose exclusive inbox, declared through RabbitMQ's management on it, ends with
+  it, each served name a provisioned queue its participants consume in turn, a session of its own
+  for each name and for what goes to names and to inboxes, a parcel one message of one profile counted
+  to its byte under the broker's max-message-size and the participant's own, sent through the root's
+  topic exchange, accepted, released as no subscriber or rejected, settled once taken under credit of
+  its own, a name's 1 so that its queue hands each member one OPEN at a time, a name let go within
+  `connectTimeout` or its link lost, and a life as its header's ttl (spec 15.32 to 15.38, decision
+  0043).
 - An in-memory broker on both sides, which copies, reorders, drops and overruns as a test asks: the
   broker cases of `spec/transports.json`, both roles, and the conversations play over it.
 - `spec/vectors.json`'s `parcels` and `parcelRefusals`, a broker's parcels read and written back and
@@ -35,6 +45,12 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `tools/mqtt-broker.mjs`, a broker of its own per run with a password drawn for it;
   `spec/vectors.json`'s `mqttPublishBounds`; `spec/durations.json`'s `mqttBrokerAdapter.keepAlive`
   and `mqttBrokerAdapter.connectTimeout`; the interop over MQTT 5, both ways, in CI's job `mqtt`.
+- `spec/transports.json`'s 39 cases over AMQP 1.0 and its `brokers.amqp`, played against RabbitMQ
+  4.4.0 by `tools/amqp-broker.mjs`, a broker of its own per run on the fixture it shares with
+  `tools/mqtt-broker.mjs`; `spec/vectors.json`'s `amqpMessages`, the profile written to its every
+  byte by the spec's own writer, and `amqpPublishBounds`; `spec/durations.json`'s
+  `amqpBrokerAdapter.idleTimeout` and `amqpBrokerAdapter.connectTimeout`; the interop over AMQP 1.0,
+  both ways, in CI's job `amqp`.
 - The internal demo over MQTT 5, `?transport=mqtt`: its page a client participant over the broker's
   WebSocket, served where a broker is given (`node tools/mqtt-broker.mjs run -- yarn demo`), and
   `yarn test:demo`'s leg over it, which skips, saying so, where none is.

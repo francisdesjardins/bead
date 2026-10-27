@@ -2,15 +2,17 @@
 
 // Bead's transports' cases, `spec/transports.json`, played against this side's server of the
 // interop service, or a broker client's transport: by a peer writing octets, then frames, per
-// exchange, or by participants of the in-memory broker or of the Mosquitto `BEAD_MQTT_URL` names.
+// exchange, or by participants of the in-memory broker, `BEAD_MQTT_URL`'s or `BEAD_AMQP_URL`'s.
 // The C# side plays the same file.
 
 // dependencies
 
+import { once } from 'node:events';
 import { readFileSync } from 'node:fs';
 import { createServer as createNodeServer } from 'node:http';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { expect, test } from '@playwright/test';
+import rhea from 'rhea';
 import { WebSocketServer } from 'ws';
 import { interopCredentialsOf } from '../../../../interop/credentials';
 import { offerInterop } from '../../../../interop/handlers';
@@ -31,6 +33,12 @@ import { createServer } from '../../../server/server';
 import type { IServer, IServerTransportLike } from '../../../server/types';
 import { createWSServer } from '../../../server/ws-server';
 import { BrokerRefusedError } from '../../client/broker-transport-client';
+import { createAmqpBrokerAdapter, type IAmqpBrokerAdapter } from '../../shared/amqp-broker-adapter';
+import {
+  declareInbox,
+  queuePathOf,
+  requestOf as managementRequestOf,
+} from '../../shared/amqp-management';
 import type { BrokerTransportClient } from '../../client/types';
 import {
   createBrokerParticipant,
@@ -39,6 +47,7 @@ import {
 import { ParcelKind, readParcel } from '../../shared/broker-parcel';
 import { HELD_BYTES_BUDGET } from '../../shared/broker-sequence';
 import { ConnectError } from '../../shared/errors';
+import type { BrokerTopic, IBrokerMessage, IBrokerSubscription } from '../../shared/types';
 import { BROKER_PUBLISHED, createMemoryBroker } from '../../shared/memory-broker';
 import { createMqttBrokerAdapter, type IMqttBrokerAdapter } from '../../shared/mqtt-broker-adapter';
 import { createTestClock, duesOn, type TestClock } from '../../shared/__tests__/fixtures';
@@ -239,8 +248,9 @@ interface IBrokerStep extends Partial<IPublication> {
 }
 
 /**
- * The broker a case plays over, in memory or a Mosquitto over MQTT 5: an adapter of each of its
- * participants, a link lost or taken over as a step asks, and every link it holds let go.
+ * The broker a case plays over, in memory, a Mosquitto over MQTT 5 or a RabbitMQ over AMQP 1.0: an
+ * adapter of each of its participants, a link lost or taken over as a step asks, and every link it
+ * holds let go.
  */
 interface IBrokerWorld {
   adapterOf(id: string): Promise<PeerAdapter & { readonly unsettled: number }>;
@@ -286,7 +296,13 @@ const TRANSPORTS = JSON.parse(
 const HOST = '127.0.0.1';
 
 // the transports this harness plays a case over
-const PLAYED_TRANSPORTS: ReadonlySet<string> = new Set(['broker', 'http', 'mqtt', 'websocket']);
+const PLAYED_TRANSPORTS: ReadonlySet<string> = new Set([
+  'amqp',
+  'broker',
+  'http',
+  'mqtt',
+  'websocket',
+]);
 
 // the Mosquitto the cases over MQTT 5 play against, where one is given, and the run's password
 const MQTT_URL = process.env['BEAD_MQTT_URL'];
@@ -294,6 +310,15 @@ const MQTT_PASSWORD = process.env['BEAD_MQTT_PASSWORD'] ?? '';
 // ! where a broker must be given, its absence fails a case rather than skip it
 const IS_MQTT_REQUIRED = process.env['BEAD_MQTT_REQUIRED'] === '1';
 const NO_BROKER = 'no broker: BEAD_MQTT_URL is not set (node tools/mqtt-broker.mjs start)';
+
+// the RabbitMQ the cases over AMQP 1.0 play against, where one is given, and the run's password
+const AMQP_URL = process.env['BEAD_AMQP_URL'];
+const AMQP_PASSWORD = process.env['BEAD_AMQP_PASSWORD'] ?? '';
+// ! where a broker must be given, its absence fails a case rather than skip it
+const IS_AMQP_REQUIRED = process.env['BEAD_AMQP_REQUIRED'] === '1';
+const NO_AMQP_BROKER = 'no broker: BEAD_AMQP_URL is not set (node tools/amqp-broker.mjs start)';
+// the fixture's user that reads its queues and purges them, granted nothing a participant is
+const AMQP_FIXTURE_USER = 'fixture';
 
 // how long `expect placed` waits, once each OPEN was placed, for one placed twice
 const PLACED_GRACE = 250;
@@ -364,78 +389,95 @@ const PATIENCE = 10_000;
 
 // ! every option and limit this harness reads, by transport, as the C# side's: one it does not read
 // fails its case, where it would play on the default unseen
-const OPTION_KEYS: Readonly<Record<'broker' | 'http' | 'mqtt' | 'websocket', ReadonlySet<string>>> =
-  Object.freeze({
-    broker: new Set([
-      'maximumConnections',
-      'maximumConnectionsPerAddress',
-      'maximumUnsentBytes',
-      'minimumBodyBytesPerSecond',
-      'bodyGracePeriod',
-      'heartbeat',
-      'acceptTimeout',
-      'maximumEnvelopePartsBytes',
-      'heldBytesBudget',
-      'names',
-      'group',
-      'maximumQueuedMessages',
-      'timeout',
-      'twin',
-      'wills',
-    ]),
-    // the in-memory broker's queue is its own: Mosquitto's is every client's
-    mqtt: new Set([
-      'maximumConnections',
-      'maximumConnectionsPerAddress',
-      'maximumUnsentBytes',
-      'minimumBodyBytesPerSecond',
-      'bodyGracePeriod',
-      'heartbeat',
-      'acceptTimeout',
-      'maximumEnvelopePartsBytes',
-      'heldBytesBudget',
-      'names',
-      'group',
-      'timeout',
-      'twin',
-      'wills',
-    ]),
-    http: new Set([
-      'maximumConnections',
-      'maximumConnectionsPerAddress',
-      'maximumWaitingExchanges',
-      'bodyBytesBudget',
-      'maximumBodyBytes',
-      'maximumOutboxBytes',
-      'maximumWait',
-      'exchangeTimeout',
-      'inactivityTimeout',
-      'hosts',
-      'origins',
-      'trustedProxies',
-      'unnamedProxies',
-      'minimumSendBytesPerSecond',
-      'sendGracePeriod',
-      'headersTimeout',
-      'minimumBodyBytesPerSecond',
-      'bodyGracePeriod',
-      'connectionInactivityTimeout',
-    ]),
-    websocket: new Set([
-      'maximumMessageBytes',
-      'heartbeat',
-      'hosts',
-      'origins',
-      'trustedProxies',
-      'unnamedProxies',
-      'maximumConnections',
-      'maximumConnectionsPerAddress',
-      'minimumSendBytesPerSecond',
-      'sendGracePeriod',
-      'maximumUnsentBytes',
-      'headersTimeout',
-    ]),
-  });
+const OPTION_KEYS: Readonly<
+  Record<'amqp' | 'broker' | 'http' | 'mqtt' | 'websocket', ReadonlySet<string>>
+> = Object.freeze({
+  // RabbitMQ's queues are the deployment's, as Mosquitto's are, and it leaves no will
+  amqp: new Set([
+    'maximumConnections',
+    'maximumConnectionsPerAddress',
+    'maximumUnsentBytes',
+    'minimumBodyBytesPerSecond',
+    'bodyGracePeriod',
+    'heartbeat',
+    'acceptTimeout',
+    'maximumEnvelopePartsBytes',
+    'heldBytesBudget',
+    'names',
+    'group',
+    'timeout',
+    'twin',
+  ]),
+  broker: new Set([
+    'maximumConnections',
+    'maximumConnectionsPerAddress',
+    'maximumUnsentBytes',
+    'minimumBodyBytesPerSecond',
+    'bodyGracePeriod',
+    'heartbeat',
+    'acceptTimeout',
+    'maximumEnvelopePartsBytes',
+    'heldBytesBudget',
+    'names',
+    'group',
+    'maximumQueuedMessages',
+    'timeout',
+    'twin',
+    'wills',
+  ]),
+  // the in-memory broker's queue is its own: Mosquitto's is every client's
+  mqtt: new Set([
+    'maximumConnections',
+    'maximumConnectionsPerAddress',
+    'maximumUnsentBytes',
+    'minimumBodyBytesPerSecond',
+    'bodyGracePeriod',
+    'heartbeat',
+    'acceptTimeout',
+    'maximumEnvelopePartsBytes',
+    'heldBytesBudget',
+    'names',
+    'group',
+    'timeout',
+    'twin',
+    'wills',
+  ]),
+  http: new Set([
+    'maximumConnections',
+    'maximumConnectionsPerAddress',
+    'maximumWaitingExchanges',
+    'bodyBytesBudget',
+    'maximumBodyBytes',
+    'maximumOutboxBytes',
+    'maximumWait',
+    'exchangeTimeout',
+    'inactivityTimeout',
+    'hosts',
+    'origins',
+    'trustedProxies',
+    'unnamedProxies',
+    'minimumSendBytesPerSecond',
+    'sendGracePeriod',
+    'headersTimeout',
+    'minimumBodyBytesPerSecond',
+    'bodyGracePeriod',
+    'connectionInactivityTimeout',
+  ]),
+  websocket: new Set([
+    'maximumMessageBytes',
+    'heartbeat',
+    'hosts',
+    'origins',
+    'trustedProxies',
+    'unnamedProxies',
+    'maximumConnections',
+    'maximumConnectionsPerAddress',
+    'minimumSendBytesPerSecond',
+    'sendGracePeriod',
+    'maximumUnsentBytes',
+    'headersTimeout',
+  ]),
+});
 const LIMIT_KEYS: ReadonlySet<string> = new Set([
   'maximumEnvelopeBytes',
   'chunkBytes',
@@ -1046,6 +1088,229 @@ const mqttWorldOf = (url: string, password: string): IBrokerWorld => {
   };
 };
 
+/**
+ * The RabbitMQ at `url` a case plays over: each participant a link of this side's AMQP 1.0 adapter,
+ * through a relay of its own that a `lose` cuts; no `takeover`, which no case over AMQP 1.0 asks. In
+ * the client role each peer reads the name it plays the server of through a queue of its own,
+ * `bead.p.<id>`, bound by that name, so that each is handed every OPEN, as over MQTT 5. A name's
+ * queue is purged as a case begins, and each inbox awaited gone as it ends, so that the next case's
+ * links of the same ids declare theirs anew.
+ */
+const amqpWorldOf = async (
+  url: string,
+  {
+    isClient,
+    names,
+    password,
+    under,
+  }: { isClient: boolean; names: readonly string[]; password: string; under: string }
+): Promise<IBrokerWorld> => {
+  const broker = new URL(url);
+  const relays = new Map<string, ILinkRelay>();
+  const container = rhea.create_container({ id: 'transports-fixture' });
+  const sides: ReturnType<typeof container.connect>[] = [];
+
+  container.on('error', () => {
+    // its connection's end is read where it is held
+  });
+
+  // a connection of its own to the broker as `user`, its OPEN answered
+  const connectionOf = async (user: string): Promise<ReturnType<typeof container.connect>> => {
+    const connection = container.connect({
+      host: broker.hostname,
+      password,
+      port: Number(broker.port),
+      reconnect: false,
+      username: user,
+    });
+
+    connection.on('disconnected', () => {
+      // closed with the case
+    });
+    await new Promise<void>((resolve, reject) => {
+      connection.once('connection_open', () => {
+        resolve();
+      });
+      connection.once('connection_close', () => {
+        reject(new Error(`${user} could not link to its broker`));
+      });
+    });
+
+    return connection;
+  };
+
+  // * a peer of the client role: its inbox and what it publishes its adapter's, the names it
+  // subscribes read on a connection of its own through its own queue, bound by each name
+  const asServer = (adapter: IAmqpBrokerAdapter, id: string): IAmqpBrokerAdapter => {
+    const listeners = new Set<(message: IBrokerMessage) => void>();
+    const queue = `bead.p.${id}`;
+    let side: ReturnType<typeof container.connect> | undefined;
+
+    return Object.assign(Object.create(adapter) as IAmqpBrokerAdapter, {
+      off: (event: 'down' | 'message', listener: never) => {
+        listeners.delete(listener);
+        adapter.off(event as 'message', listener);
+      },
+      on: (event: 'down' | 'message', listener: never) => {
+        if (event === 'message') {
+          listeners.add(listener);
+        }
+
+        adapter.on(event as 'message', listener);
+      },
+      stop: async () => {
+        side?.close();
+        side = undefined;
+        await adapter.stop();
+      },
+      subscribe: async (topic: BrokerTopic, subscription?: IBrokerSubscription) => {
+        if (topic[1] !== 's') {
+          return adapter.subscribe(topic, subscription);
+        }
+
+        if (side === undefined) {
+          side = await connectionOf(id);
+          sides.push(side);
+          await declareInbox(side, { queue });
+
+          const receiver = side.open_receiver({ source: { address: `/queues/${queue}` } });
+
+          receiver.on('message', (context: { message?: { body?: unknown } }) => {
+            const content = (context.message?.body as { content?: unknown } | undefined)?.content;
+
+            for (const listener of listeners) {
+              listener({
+                payload: new Uint8Array(content instanceof Uint8Array ? content : []),
+                settle: () => {
+                  // accepted as it came
+                },
+                topic,
+              });
+            }
+          });
+          await once(receiver, 'receiver_open');
+        }
+
+        const { status } = await managementRequestOf(side, {
+          body: rhea.types.wrap_map({
+            arguments: rhea.types.wrap_map({}),
+            binding_key: topic.join('.'),
+            destination_queue: queue,
+            source: 'bead',
+          }),
+          method: 'POST',
+          path: '/bindings',
+        });
+
+        expect(status, `${queue} bound by ${topic.join('.')}`).toBe(204);
+
+        return undefined;
+      },
+    });
+  };
+
+  // * the fixture's own connection, each request of its management on it
+  const managed = async <T>(
+    manage: (connection: ReturnType<typeof container.connect>) => Promise<T>
+  ): Promise<T> => {
+    const connection = container.connect({
+      host: broker.hostname,
+      password,
+      port: Number(broker.port),
+      reconnect: false,
+      username: AMQP_FIXTURE_USER,
+    });
+
+    connection.on('disconnected', () => {
+      // closed below
+    });
+
+    try {
+      await new Promise<void>((resolve, reject) => {
+        connection.once('connection_open', () => {
+          resolve();
+        });
+        connection.once('connection_close', () => {
+          reject(new Error('the fixture user could not link to its broker'));
+        });
+      });
+
+      return await manage(connection);
+    } finally {
+      connection.close();
+    }
+  };
+
+  await managed(async (connection) => {
+    for (const name of names) {
+      await managementRequestOf(connection, {
+        method: 'DELETE',
+        path: `${queuePathOf(`bead.s.${name}`)}/messages`,
+      });
+    }
+  });
+
+  return {
+    adapterOf: async (id) => {
+      const relay = await createLinkRelay({
+        host: broker.hostname,
+        port: Number(broker.port),
+      });
+
+      relays.set(id, relay);
+
+      const adapter = createAmqpBrokerAdapter({
+        id,
+        password,
+        url: `${broker.protocol}//${HOST}:${String(relay.port)}`,
+      });
+
+      return isClient && id !== under ? asServer(adapter, id) : adapter;
+    },
+    lose: (id) => {
+      relays.get(id)?.cut();
+
+      return Promise.resolve();
+    },
+    takeover: () => {
+      return Promise.reject(
+        new Error('no link of an id takes another over over AMQP 1.0, and no case asks it')
+      );
+    },
+    [Symbol.asyncDispose]: async () => {
+      for (const side of sides) {
+        side.close();
+      }
+
+      for (const relay of relays.values()) {
+        await relay[Symbol.asyncDispose]();
+      }
+
+      // * each inbox gone with its connection, which its broker deletes a few milliseconds after
+      await managed(async (connection) => {
+        const deadline = Date.now() + PATIENCE;
+
+        for (const queue of [...relays.keys()].flatMap((id) => {
+          return [`bead.i.${id}`, `bead.p.${id}`];
+        })) {
+          while (Date.now() < deadline) {
+            const { status } = await managementRequestOf(connection, {
+              method: 'GET',
+              path: queuePathOf(queue),
+            });
+
+            if (status === 404) {
+              break;
+            }
+
+            await sleep(POLL);
+          }
+        }
+      });
+    },
+  };
+};
+
 /** The incarnation each peer's OPENs name in `steps`, which its will names where a case asks one. */
 const willsOf = (steps: readonly IBrokerStep[]): Map<string, string> => {
   const wills = new Map<string, string>();
@@ -1113,7 +1378,8 @@ const placedOf = async (
 };
 
 /**
- * Plays a broker case (spec 15.16 to 15.31) in memory, or over the Mosquitto `BEAD_MQTT_URL` names:
+ * Plays a broker case (spec 15.16 to 15.38) in memory, over the Mosquitto `BEAD_MQTT_URL` names or
+ * over the RabbitMQ `BEAD_AMQP_URL` names:
  * in the server role, the interop service's server on a broker server transport over the
  * participant `server`, its link connecting anew once lost; in the client role, a broker client
  * transport alone over the participant `client`, with no reconnection; its adapter wrapped to note
@@ -1123,7 +1389,7 @@ const placedOf = async (
  */
 const playBrokerCase = async (
   testCase: ICase,
-  { transport }: { transport: 'broker' | 'mqtt' }
+  { transport }: { transport: 'amqp' | 'broker' | 'mqtt' }
 ): Promise<void> => {
   const { limits, options = {}, peers: ids = ['peer'], role, steps } = testCase;
   const isClient = role === 'client';
@@ -1149,11 +1415,18 @@ const playBrokerCase = async (
   }
 
   const clock = createTestClock(Date.parse(TRANSPORTS.wallClock));
+  const under = isClient ? 'client' : 'server';
   const world =
     transport === 'broker'
       ? memoryWorldOf(clock, { maximumQueuedMessages: options.maximumQueuedMessages })
-      : mqttWorldOf(MQTT_URL ?? '', MQTT_PASSWORD);
-  const under = isClient ? 'client' : 'server';
+      : transport === 'mqtt'
+        ? mqttWorldOf(MQTT_URL ?? '', MQTT_PASSWORD)
+        : await amqpWorldOf(AMQP_URL ?? '', {
+            isClient,
+            names: options.names ?? ['interop'],
+            password: AMQP_PASSWORD,
+            under,
+          });
   const values = new Map<string, string>();
   const reports: IReport[] = [];
   const refusals: ITransportServerRefusal[] = [];
@@ -1665,7 +1938,7 @@ test.describe('the transports', () => {
     }
 
     // played apart, one at a time, against a broker of the run's own
-    if (transport === 'mqtt') {
+    if (transport === 'mqtt' || transport === 'amqp') {
       continue;
     }
 
@@ -1863,6 +2136,24 @@ test.describe('the transports, over MQTT 5', () => {
       test.skip(MQTT_URL === undefined && !IS_MQTT_REQUIRED, NO_BROKER);
       expect(MQTT_URL, NO_BROKER).toBeDefined();
       await playBrokerCase(testCase, { transport: 'mqtt' });
+    });
+  }
+});
+
+test.describe('the transports, over AMQP 1.0', () => {
+  // * one case at a time: each case's participant under test has the same id, and a second link of
+  // one id is refused its inbox while the first holds it (spec 15.33)
+  test.describe.configure({ mode: 'serial', retries: 0, timeout: 30_000 });
+
+  for (const testCase of TRANSPORTS.cases) {
+    if (testCase.transport !== 'amqp' || isExcused(testCase)) {
+      continue;
+    }
+
+    test(testCase.name, async () => {
+      test.skip(AMQP_URL === undefined && !IS_AMQP_REQUIRED, NO_AMQP_BROKER);
+      expect(AMQP_URL, NO_AMQP_BROKER).toBeDefined();
+      await playBrokerCase(testCase, { transport: 'amqp' });
     });
   }
 });

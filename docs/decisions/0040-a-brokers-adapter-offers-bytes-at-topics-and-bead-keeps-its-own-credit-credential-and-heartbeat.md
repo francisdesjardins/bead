@@ -166,12 +166,13 @@ message's life: the deployment's to weigh, each binding stating it.
 
 **What stays open**: an acceptor that proves itself to its opener; a publisher identity a broker
 vouches for, standing for an `ELSEWHERE`, which RabbitMQ's validated `user-id` would give the AMQP
-1.0 binding; and a relay that carries a subscription
+1.0 binding, weighed by [0043](0043-over-amqp-1-0-a-participant-is-one-connection-whose-exclusive-inbox-ends-with-it-and-a-parcel-one-message-of-one-profile-each-counted-to-its-byte.md) and left open; and a relay that carries a subscription
 ([0019](0019-a-relay-terminates-each-leg-and-routes-nothing-past-it.md)).
 
 **No interop over the in-memory broker**: it joins no two processes, so the interop over a broker
-is each binding's, against a real broker in CI, MQTT 5's first
-([0041](0041-over-mqtt-5-a-participant-is-one-clean-link-and-a-parcel-one-publish-each-counted-to-its-byte.md)), each a row of [`docs/support.md`](../support.md).
+is each binding's, against a real broker in CI, MQTT 5's
+([0041](0041-over-mqtt-5-a-participant-is-one-clean-link-and-a-parcel-one-publish-each-counted-to-its-byte.md))
+and AMQP 1.0's ([0043](0043-over-amqp-1-0-a-participant-is-one-connection-whose-exclusive-inbox-ends-with-it-and-a-parcel-one-message-of-one-profile-each-counted-to-its-byte.md)), each a row of [`docs/support.md`](../support.md).
 
 **Its gates**: the broker cases of `spec/transports.json` of a request presenting `ELSEWHERE` with
 its DATA's credential and without, a client not secure by its acceptor's leg, a client refusing a

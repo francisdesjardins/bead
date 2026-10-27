@@ -311,6 +311,7 @@ __metadata:
   peerDependencies:
     "@bufbuild/protobuf": ^2.13.0
     mqtt: ^5.16.1
+    rhea: ^3.0.5
   dependenciesMeta:
     "@bufbuild/buf":
       built: true
@@ -320,6 +321,8 @@ __metadata:
     "@bufbuild/protobuf":
       optional: true
     mqtt:
+      optional: true
+    rhea:
       optional: true
   languageName: node
   linkType: soft

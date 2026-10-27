@@ -33,6 +33,9 @@
     // an unmapped one falls through to node resolution and answers from whatever `dist/` happens
     // to exist on the machine.
     "paths": {
+      "@francisdesjardins/bead/amqp-broker-adapter": [
+        "../../src/transport/shared/amqp-broker-adapter.ts"
+      ],
       "@francisdesjardins/bead/broker-participant": [
         "../../src/transport/shared/broker-participant.ts"
       ],

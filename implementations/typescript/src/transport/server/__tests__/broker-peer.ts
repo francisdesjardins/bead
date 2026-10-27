@@ -1,8 +1,8 @@
 // ── Broker peer ───────────────────────────────────────────────────────────────
 
-// The test's own participants of a broker, in memory or over MQTT 5, as `spec/transports.json`
-// plays them: each publishes the parcels a case writes by their fields and reads its inbox,
-// answering nothing of its own.
+// The test's own participants of a broker, in memory, over MQTT 5 or over AMQP 1.0, as
+// `spec/transports.json` plays them: each publishes the parcels a case writes by their fields and
+// reads its inbox, answering nothing of its own.
 
 // dependencies
 
@@ -331,9 +331,14 @@ export const createBrokerPeers = async (
       await adapter.start({ will: willOf(id, wills?.get(id)) });
       await adapter.subscribe([ROOT, 'i', id]);
 
+      // * in the client role a peer plays the server: its name, and its departure where a will is
+      // left
       if (isClient) {
         await adapter.subscribe([ROOT, 's', 'interop']);
-        await adapter.subscribe([ROOT, 'd', under]);
+
+        if (adapter.capabilities.will === true) {
+          await adapter.subscribe([ROOT, 'd', under]);
+        }
       }
     }
   } catch (reason) {

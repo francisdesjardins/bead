@@ -17,11 +17,11 @@ const SERVER = new URL(`dist/interop-server-${process.pid}.mjs`, INTEROP);
 
 // definition
 
-// `ws` and `mqtt` are left to the package that has them
+// `ws`, `mqtt` and `rhea` are left to the package that has them
 await build({
   bundle: true,
   entryPoints: [fileURLToPath(new URL('interop-server.ts', INTEROP))],
-  external: ['mqtt', 'ws'],
+  external: ['mqtt', 'rhea', 'ws'],
   format: 'esm',
   logLevel: 'silent',
   outfile: fileURLToPath(SERVER),

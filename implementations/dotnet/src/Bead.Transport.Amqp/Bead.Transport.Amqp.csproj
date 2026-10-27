@@ -1,0 +1,29 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- Bead over a broker of AMQP 1.0 that is RabbitMQ 4, on AMQPNetLite: what Bead's amqp-broker-adapter is, on .NET (0043). -->
+  <PropertyGroup>
+    <RootNamespace>Bead.Transport.Amqp</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../Bead.Core/Bead.Core.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="AMQPNetLite.Core" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- the tests count a message with no broker, and pair its management with a scripted peer -->
+    <InternalsVisibleTo Include="Bead.Transport.Amqp.Tests" />
+    <!-- the durations' harness builds its adapter by the places the file names -->
+    <InternalsVisibleTo Include="Bead.Transport.Http.Tests" />
+    <!-- the interop's tests read the run's broker through its management, as the adapter's do -->
+    <InternalsVisibleTo Include="Bead.Interop.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- what Bead times takes the clock it is given, never the platform's own: 0011 -->
+    <PackageReference Include="Microsoft.CodeAnalysis.BannedApiAnalyzers" PrivateAssets="all" />
+    <AdditionalFiles Include="../BannedSymbols.txt" />
+  </ItemGroup>
+</Project>

@@ -37,6 +37,17 @@ node ../../tools/mqtt-broker.mjs run -- dotnet test --project tests/Bead.Transpo
 node ../../tools/mqtt-broker.mjs run -- dotnet test --project tests/Bead.Interop.Tests --filter-trait "transport=MQTT"
 ```
 
+What plays against a RabbitMQ 4, AMQP 1.0's broker — the cases over AMQP 1.0, what of its adapter
+only a real broker shows, the interop over AMQP 1.0 — needs one given by `BEAD_AMQP_URL` alike,
+`BEAD_AMQP_REQUIRED=1` failing it where none is. [`tools/amqp-broker.mjs`](../../tools/amqp-broker.mjs)
+starts a RabbitMQ of the run's own under Docker, its exchange, its names' queues and its
+permissions provisioned, its `heartbeat` lowered to 10 s:
+
+```sh
+node ../../tools/amqp-broker.mjs run -- dotnet test --project tests/Bead.Transport.Amqp.Tests
+node ../../tools/amqp-broker.mjs run -- dotnet test --project tests/Bead.Interop.Tests --filter-trait "transport=AMQP"
+```
+
 ## Layout
 
 One solution, `Bead.slnx`:
@@ -58,6 +69,8 @@ src/
   Bead.Transport.Http/          the server on Kestrel and the client on HttpClient
   Bead.Transport.Mqtt/          a broker's adapter over MQTTnet, MQTT 5's binding (spec 15.25 to
                                 15.31, decision 0041)
+  Bead.Transport.Amqp/          a broker's adapter over AMQPNetLite, AMQP 1.0's binding on
+                                RabbitMQ 4 (spec 15.32 to 15.38, decision 0043)
   Bead.Transcoding/             the transcoding layer, pure, no socket: a route table's types, its
                                 templates matched raw, a request bound from its route, Bead's own
                                 mapping of protobuf's JSON over a message's descriptor, a
@@ -174,6 +187,26 @@ await transport.Start();
 `MqttBrokerAdapterTests` play its every packet against a scripted MQTT 5 peer, `MqttScript`, and
 `MqttTransportsTests` the cases over MQTT 5 against the broker a run gives, each participant through
 a relay of its own that a case's `lose` cuts.
+
+`Bead.Transport.Amqp`'s `AmqpBrokerAdapter` links a participant to a RabbitMQ 4 over AMQP 1.0, on
+AMQPNetLite (spec 15.32 to 15.38, decision 0043): `amqp://` or `amqps://`; one network connection
+opened anew at each start, its container-id the participant's id, authenticated by SASL PLAIN under
+its id, its `Password` or `PasswordProvider`, or by EXTERNAL under a TLS client certificate
+(`Tls`), its idle-time-out its `IdleTimeout`; its inbox an exclusive queue declared through
+RabbitMQ's management on that connection, so that it ends with it (`AmqpManagement`); a session for
+its inbox's receiver, one for each name, a name's queue its members compete on, and one for each of
+its two senders, to inboxes and to names, each to the anonymous terminus, through the topic
+exchange named the root; each publication one message of the profile `AmqpMessages` counts to its
+byte, held to its sender's credit, `released` read as no subscriber; each message handed on before
+its `accepted`, which goes once the core settled it, with one more credit, its inbox's
+`LinkCredit` and a name's 1, so that the name's queue hands each member one OPEN at a time; a name
+let go within its `ConnectTimeout`, what it handed on settled and its DETACH answered, or its link
+lost; no receiver naming a max-message-size, a message past its `MaximumMessageSize` handed on as no parcel; a held
+name's receiver its broker ends attached again once. AMQPNetLite's automation is off: it reconnects
+nothing, and no message goes already written, its encoders' bytes held to the profile by
+`amqpMessages`. Its handles' type is `AMQP`. `AmqpBrokerAdapterTests` and `AmqpManagementTests` play
+its every frame against a scripted AMQP 1.0 peer, `AmqpScript`, and against the broker a run gives
+what only it shows; `AmqpTransportsTests` the cases over AMQP 1.0.
 
 ### HTTP/JSON transcoding, a gateway
 

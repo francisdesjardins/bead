@@ -121,6 +121,27 @@ export interface IParcelVector extends INamed {
 }
 
 /** An MQTT 5 PUBLISH under a Maximum Packet Size: its largest payload and the packet it makes. */
+/** A message of AMQP 1.0's profile written to its every byte (spec 15.35). */
+export interface IAmqpMessageVector {
+  bytes: string;
+  clauses: string[];
+  name: string;
+  payloadByte: number;
+  payloadLength: number;
+  to: string;
+  ttl?: number;
+}
+
+/** The largest payload of a message to an address within a bound, and that message's bytes (spec 15.37). */
+export interface IAmqpPublishBoundVector {
+  address: string;
+  clauses: string[];
+  largestPayload: number | null;
+  maximumMessageSize: number;
+  messageBytes: number | null;
+  name: string;
+}
+
 export interface IMqttPublishBoundVector {
   clauses: string[];
   expiry: boolean;
@@ -139,6 +160,8 @@ export interface IParcelRefusalVector extends INamed {
 }
 
 export interface IVectors {
+  amqpMessages: IAmqpMessageVector[];
+  amqpPublishBounds: IAmqpPublishBoundVector[];
   credentialRefusals: ICredentialRefusalVector[];
   envelopeRefusals: IRefusalVector[];
   envelopes: (INamed & { envelope: IEnvelopeVector })[];
