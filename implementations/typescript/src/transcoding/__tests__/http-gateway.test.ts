@@ -20,7 +20,7 @@ import { createMemoryTransportServer } from '../../transport/server/memory-trans
 import type { IHTTPRequestLike, IHTTPResponseLike } from '../../transport/server/types';
 import { createTestClock } from '../../transport/shared/__tests__/fixtures';
 import type { IClock } from '../../transport/shared/clock';
-import { ProgrammerError } from '../../transport/shared/errors';
+import { CancelError, ProgrammerError } from '../../transport/shared/errors';
 import { createHTTPGateway, type IHTTPGateway } from '../http-gateway';
 import type { IHttpRouteInit } from '../routes';
 import { HTTP_ROUTES, OPENAPI_DOCUMENT } from './generated/bead_http';
@@ -784,6 +784,103 @@ test('answers 500 a connection its server failed to draw but by refusing it, rep
     status: 500,
   });
   expect(reported).toEqual(['the transport broke']);
+});
+
+test('answers 500 without detail when its call timer fails', async () => {
+  const clock = createTestClock();
+  let attempts = 0;
+  await using fixture = await startTranscoding({
+    clock: {
+      ...clock,
+      setTimeout: (callback, delay) => {
+        if (delay === 54_321) {
+          attempts += 1;
+          throw new Error('the call timer broke');
+        }
+
+        return clock.setTimeout(callback, delay);
+      },
+    },
+    timeout: 54_321,
+  });
+  const reported = reportedBy(fixture.gateway);
+  const answered = await send(fixture.port, { method: 'GET', path: '/v1/books/2' });
+
+  expect(answered.status).toBe(500);
+  expect(answered.body).toBe('{"status":500,"title":"Internal Server Error","type":"about:blank"}');
+  expect(answered.headers['bead-refusal']).toBeUndefined();
+  expect(attempts).toBe(1);
+  expect(reported).toEqual(['the call timer broke']);
+  await until(() => {
+    return fixture.memory.clients.length === 0;
+  });
+});
+
+test('abandons a held connection when its response closes', async () => {
+  const accepting = Promise.withResolvers<void>();
+  const released = Promise.withResolvers<void>();
+  const completed = Promise.withResolvers<void>();
+  const closed = Promise.withResolvers<void>();
+  let signal: AbortSignal | undefined;
+  let endResponse: (() => void) | undefined;
+  let hasHeaders: (() => boolean) | undefined;
+  let ends = 0;
+  await using gateway = createHTTPGateway({
+    createServer: (listener) => {
+      return createNodeServer((request, response) => {
+        const end = response.end.bind(response);
+
+        endResponse = () => {
+          response.destroy();
+        };
+        hasHeaders = () => {
+          return response.headersSent;
+        };
+        response.end = () => {
+          ends += 1;
+          return end();
+        };
+        response.on('close', () => {
+          closed.resolve();
+        });
+        listener(request, response);
+      });
+    },
+    routes: HTTP_ROUTES,
+    transport: {
+      accept: async (_peer, options) => {
+        signal = options?.signal;
+        accepting.resolve();
+        await released.promise;
+        completed.resolve();
+        throw new CancelError('the response ended before its connection opened');
+      },
+    },
+  });
+  const reported = reportedBy(gateway);
+  const { port } = await gateway.start();
+  const received = receivedOn(port, octetsOf(port, { lines: ['GET /v1/books/2 HTTP/1.1'] }));
+
+  try {
+    await accepting.promise;
+    expect(signal?.aborted).toBe(false);
+    endResponse?.();
+    await closed.promise;
+    await new Promise(setImmediate);
+
+    expect(signal?.aborted).toBe(true);
+    expect(hasHeaders?.()).toBe(false);
+    expect(ends).toBe(0);
+    expect(reported).toEqual([]);
+  } finally {
+    released.resolve();
+  }
+  await completed.promise;
+  await new Promise(setImmediate);
+  expect(await received).toBe(0);
+  expect(hasHeaders?.()).toBe(false);
+  expect(ends).toBe(0);
+  expect(reported).toEqual([]);
 });
 
 test('reports each failure it answers a call with 500 or above, and none below', async () => {

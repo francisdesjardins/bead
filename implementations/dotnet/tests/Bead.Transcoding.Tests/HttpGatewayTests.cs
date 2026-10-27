@@ -2241,6 +2241,97 @@ public sealed class HttpGatewayTests
         Assert.Empty(reported);
     }
 
+    [Fact]
+    public async Task Abandons_a_held_connection_when_its_response_closes()
+    {
+        var accepting = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var released = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        CancellationToken accepted = default;
+        await using var memory = new MemoryTransportServer(new MemoryTransportServerOptions
+        {
+            Accepting = async (token) =>
+            {
+                accepted = token;
+                accepting.TrySetResult();
+                await released.Task;
+                token.ThrowIfCancellationRequested();
+            },
+        });
+        await memory.Start();
+        await using var gateway = new HttpGateway(Exchanges.OptionsOf(memory, null));
+        using var cancelling = CancellationTokenSource.CreateLinkedTokenSource(Cancelled);
+        var context = PaceContext("document", cancelling.Token);
+        context.Features.Get<IHttpRequestFeature>()!.RawTarget = "/v1/books/2";
+        using var body = new MemoryStream();
+        context.Response.Body = body;
+        var reported = ReportedBy(gateway);
+        var serving = gateway.Answer(context);
+
+        try
+        {
+            await accepting.Task.WaitAsync(Patience, Cancelled);
+            Assert.False(accepted.IsCancellationRequested);
+            await cancelling.CancelAsync();
+
+            Assert.True(accepted.IsCancellationRequested);
+            Assert.Empty(body.ToArray());
+            Assert.Empty(context.Response.Headers);
+            Assert.Empty(memory.ConnectionHandles);
+            Assert.Empty(reported);
+        }
+        finally
+        {
+            released.TrySetResult();
+        }
+        await serving.WaitAsync(Patience, Cancelled);
+        Assert.Empty(body.ToArray());
+        Assert.Empty(context.Response.Headers);
+        Assert.Empty(memory.ConnectionHandles);
+        Assert.Empty(reported);
+    }
+
+    [Fact]
+    public async Task Answers_500_without_detail_when_its_call_timer_fails()
+    {
+        var clock = new FailedCallTimer();
+        await using var service = await TranscodingService.Start();
+        await using var gateway = new HttpGateway(Exchanges.OptionsOf(service.Memory, null) with
+        {
+            Clock = clock,
+            Timeout = TimeSpan.FromMilliseconds(54_321),
+        });
+        var context = PaceContext("document", Cancelled);
+        context.Features.Get<IHttpRequestFeature>()!.RawTarget = "/v1/books/2";
+        using var body = new MemoryStream();
+        context.Response.Body = body;
+        var reported = ReportedBy(gateway);
+
+        await gateway.Answer(context).WaitAsync(Patience, Cancelled);
+
+        Assert.Equal(500, context.Response.StatusCode);
+        Assert.Equal("{\"status\":500,\"title\":\"Internal Server Error\",\"type\":\"about:blank\"}", Encoding.UTF8.GetString(body.ToArray()));
+        Assert.False(context.Response.Headers.ContainsKey("bead-refusal"));
+        Assert.Equal(1, clock.Attempts);
+        Assert.Equal(["the call timer broke"], reported);
+        await Until(() => { return service.Memory.ConnectionHandles.Count == 0; });
+    }
+
+    private sealed class FailedCallTimer : TimeProvider
+    {
+        public int Attempts { get; private set; }
+
+        public override ITimer CreateTimer(TimerCallback callback, object? state, TimeSpan dueTime, TimeSpan period)
+        {
+            if (dueTime == TimeSpan.FromMilliseconds(54_321))
+            {
+                Attempts += 1;
+                throw new InvalidOperationException("the call timer broke");
+            }
+
+            return base.CreateTimer(callback, state, dueTime, period);
+        }
+    }
+
     private sealed class FailedDocumentBody : MemoryStream
     {
         public List<int> Sizes { get; } = [];
