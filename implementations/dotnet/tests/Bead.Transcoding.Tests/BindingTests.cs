@@ -1,4 +1,5 @@
 using System.Text;
+using Bead.Transcoding.Tests.BindingFixtures;
 using Bead.Transcoding.V1;
 using Google.Protobuf.WellKnownTypes;
 using static Bead.Transcoding.Tests.TranscodingFile;
@@ -12,6 +13,32 @@ namespace Bead.Transcoding.Tests;
 /// </summary>
 public sealed class BindingTests
 {
+    [Fact]
+    public void Fills_a_PATCH_mask_from_snake_case_fields_through_nested_and_empty_message_bodies()
+    {
+        foreach (var body in new[]
+        {
+            "{\"displayName\":\"Ada\",\"nestedProfile\":{\"displayName\":\"Grace\"},\"emptyProfile\":{}}",
+            "{\"display_name\":\"Ada\",\"nested_profile\":{\"display_name\":\"Grace\"},\"empty_profile\":{}}",
+        })
+        {
+            var read = BindOf(
+                (PatchRequest.Descriptor, new HttpRouteTemplate { Method = "PATCH", Template = "/v1/profile", Body = "profile" }),
+                ("/v1/profile", body));
+
+            Assert.Equal(new PatchRequest
+            {
+                Profile = new PatchProfile
+                {
+                    DisplayName = "Ada",
+                    NestedProfile = new PatchProfile { DisplayName = "Grace" },
+                    EmptyProfile = new PatchProfile(),
+                },
+                UpdateMask = new FieldMask { Paths = { "display_name", "nested_profile.display_name", "empty_profile" } },
+            }, read);
+        }
+    }
+
     private static readonly HttpBinding Binding = new(Form);
 
     private static Google.Protobuf.IMessage Bind((string Procedure, HttpRouteTemplate Rule) route, (string Target, string? Body) request)

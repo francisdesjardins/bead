@@ -11,16 +11,18 @@ import {
 } from 'node:http2';
 import { connect, type Socket } from 'node:net';
 import { setTimeout as sleep } from 'node:timers/promises';
-import { create, toBinary } from '@bufbuild/protobuf';
+import { create, fromBinary, toBinary, type MessageInitShape } from '@bufbuild/protobuf';
+import { UninterpretedOption_NamePartSchema } from '@bufbuild/protobuf/wkt';
 import { expect, test } from '@playwright/test';
 import { EnvelopeKind, LIMIT_DEFAULTS, SERVER_FAILURES } from '../../router/shared/constants';
 import { bytesOf, readEnvelope, writeEnvelope } from '../../router/shared/envelope';
+import { payloadCodecOf } from '../../service/service';
 import { httpPolicyOf } from '../../transport/server/http-policy';
 import { createMemoryTransportServer } from '../../transport/server/memory-transport-server';
 import type { IHTTPRequestLike, IHTTPResponseLike } from '../../transport/server/types';
 import { createTestClock } from '../../transport/shared/__tests__/fixtures';
 import type { IClock } from '../../transport/shared/clock';
-import { ProgrammerError } from '../../transport/shared/errors';
+import { CancelError, ProgrammerError } from '../../transport/shared/errors';
 import { createHTTPGateway, type IHTTPGateway } from '../http-gateway';
 import type { IHttpRouteInit } from '../routes';
 import { HTTP_ROUTES, OPENAPI_DOCUMENT } from './generated/bead_http';
@@ -827,6 +829,103 @@ test('answers 500 a connection its server failed to draw but by refusing it, rep
     status: 500,
   });
   expect(reported).toEqual(['the transport broke']);
+});
+
+test('answers 500 without detail when its call timer fails', async () => {
+  const clock = createTestClock();
+  let attempts = 0;
+  await using fixture = await startTranscoding({
+    clock: {
+      ...clock,
+      setTimeout: (callback, delay) => {
+        if (delay === 54_321) {
+          attempts += 1;
+          throw new Error('the call timer broke');
+        }
+
+        return clock.setTimeout(callback, delay);
+      },
+    },
+    timeout: 54_321,
+  });
+  const reported = reportedBy(fixture.gateway);
+  const answered = await send(fixture.port, { method: 'GET', path: '/v1/books/2' });
+
+  expect(answered.status).toBe(500);
+  expect(answered.body).toBe('{"status":500,"title":"Internal Server Error","type":"about:blank"}');
+  expect(answered.headers['bead-refusal']).toBeUndefined();
+  expect(attempts).toBe(1);
+  expect(reported).toEqual(['the call timer broke']);
+  await until(() => {
+    return fixture.memory.clients.length === 0;
+  });
+});
+
+test('abandons a held connection when its response closes', async () => {
+  const accepting = Promise.withResolvers<void>();
+  const released = Promise.withResolvers<void>();
+  const completed = Promise.withResolvers<void>();
+  const closed = Promise.withResolvers<void>();
+  let signal: AbortSignal | undefined;
+  let endResponse: (() => void) | undefined;
+  let hasHeaders: (() => boolean) | undefined;
+  let ends = 0;
+  await using gateway = createHTTPGateway({
+    createServer: (listener) => {
+      return createNodeServer((request, response) => {
+        const end = response.end.bind(response);
+
+        endResponse = () => {
+          response.destroy();
+        };
+        hasHeaders = () => {
+          return response.headersSent;
+        };
+        response.end = () => {
+          ends += 1;
+          return end();
+        };
+        response.on('close', () => {
+          closed.resolve();
+        });
+        listener(request, response);
+      });
+    },
+    routes: HTTP_ROUTES,
+    transport: {
+      accept: async (_peer, options) => {
+        signal = options?.signal;
+        accepting.resolve();
+        await released.promise;
+        completed.resolve();
+        throw new CancelError('the response ended before its connection opened');
+      },
+    },
+  });
+  const reported = reportedBy(gateway);
+  const { port } = await gateway.start();
+  const received = receivedOn(port, octetsOf(port, { lines: ['GET /v1/books/2 HTTP/1.1'] }));
+
+  try {
+    await accepting.promise;
+    expect(signal?.aborted).toBe(false);
+    endResponse?.();
+    await closed.promise;
+    await new Promise(setImmediate);
+
+    expect(signal?.aborted).toBe(true);
+    expect(hasHeaders?.()).toBe(false);
+    expect(ends).toBe(0);
+    expect(reported).toEqual([]);
+  } finally {
+    released.resolve();
+  }
+  await completed.promise;
+  await new Promise(setImmediate);
+  expect(await received).toBe(0);
+  expect(hasHeaders?.()).toBe(false);
+  expect(ends).toBe(0);
+  expect(reported).toEqual([]);
 });
 
 test('reports each failure it answers a call with 500 or above, and none below', async () => {
@@ -1738,6 +1837,191 @@ test('serves its document to a HEAD and to a preflight that asks for no field', 
   });
 });
 
+test('binds missing and explicit proto2 required fields before calling its peer', async () => {
+  const schema = UninterpretedOption_NamePartSchema;
+  await using memory = createMemoryTransportServer();
+  await memory.start();
+  await using gateway = createHTTPGateway({
+    createServer: createNodeServer,
+    routes: HTTP_ROUTES.filter((init) => {
+      return init.procedure === TranscodingProcedures.raw;
+    }).map((init) => {
+      return {
+        ...init,
+        request: schema,
+        procedure: {
+          ...init.procedure,
+          request: payloadCodecOf({
+            decode: (bytes) => {
+              return fromBinary(schema, bytes);
+            },
+            encode: (given: MessageInitShape<typeof schema>) => {
+              return toBinary(schema, create(schema, given));
+            },
+          }),
+        },
+      };
+    }),
+    transport: memory,
+  });
+  const reported = reportedBy(gateway);
+  let connections = 0;
+  const requests: number[][] = [];
+
+  memory.on('connection', () => {
+    connections += 1;
+  });
+  memory.on('message', ({ data }, connectionHandle) => {
+    const envelope = readEnvelope(bytesOf(data), {
+      failures: SERVER_FAILURES,
+      maximumEnvelopeBytes: LIMIT_DEFAULTS.maximumEnvelopeBytes,
+    });
+
+    if (envelope?.kind !== EnvelopeKind.REQUEST) {
+      return;
+    }
+
+    requests.push([...envelope.payload]);
+    void memory.send(
+      {
+        data: writeEnvelope({
+          header: { callId: envelope.header.callId, kind: EnvelopeKind.RESULT },
+          kind: EnvelopeKind.RESULT,
+          payload: new TextEncoder().encode('ok'),
+        }),
+      },
+      connectionHandle
+    );
+  });
+  const { port } = await gateway.start({ address: '127.0.0.1' });
+  const missing = await send(port, { body: '{}', path: '/api/Transcoding/raw' });
+
+  expect(missing.status).toBe(500);
+  expect(missing.headers['content-type']).toBe('application/problem+json');
+  expect(missing.headers['bead-refusal']).toBeUndefined();
+  expect(missing.body).toBe('{"status":500,"title":"Internal Server Error","type":"about:blank"}');
+  expect(reported).toEqual([
+    'cannot encode field google.protobuf.UninterpretedOption.NamePart.name_part to binary: required field not set',
+  ]);
+  expect(connections).toBe(0);
+  expect(requests).toEqual([]);
+
+  for (const body of [
+    '{"namePart":"Ada","isExtension":false}',
+    '{"namePart":"","isExtension":false}',
+  ]) {
+    const answered = await send(port, { body, path: '/api/Transcoding/raw' });
+
+    expect(answered.status).toBe(200);
+    expect(answered.headers['content-type']).toBe('application/octet-stream');
+    expect(answered.headers['bead-refusal']).toBeUndefined();
+    expect(answered.body).toBe('ok');
+  }
+  expect(requests).toEqual([
+    [10, 3, 65, 100, 97, 16, 0],
+    [10, 0, 16, 0],
+  ]);
+  expect(connections).toBe(2);
+  expect(reported).toHaveLength(1);
+  await until(() => {
+    return memory.clients.length === 0;
+  });
+});
+
+test('writes native JSON results and notifications in stream order', async () => {
+  await using memory = createMemoryTransportServer();
+  await memory.start();
+  await using gateway = createHTTPGateway({
+    createServer: createNodeServer,
+    heartbeat: Infinity,
+    routes: HTTP_ROUTES.map((init) => {
+      return init.procedure === TranscodingProcedures.watch
+        ? {
+            ...init,
+            result: 'json',
+            notification: 'json',
+            procedure: {
+              ...init.procedure,
+              result: TranscodingProcedures.json.result,
+              notification: TranscodingProcedures.json.result,
+            },
+          }
+        : init;
+    }),
+    transport: memory,
+  });
+  const reported = reportedBy(gateway);
+  const result = '{"label":"Été","count":1.00}';
+  const notification = '["雪",null,true]';
+  let requests = 0;
+
+  memory.on('message', ({ data }, connectionHandle) => {
+    const envelope = readEnvelope(bytesOf(data), {
+      failures: SERVER_FAILURES,
+      maximumEnvelopeBytes: LIMIT_DEFAULTS.maximumEnvelopeBytes,
+    });
+
+    if (envelope?.kind !== EnvelopeKind.REQUEST) {
+      return;
+    }
+
+    requests += 1;
+    const { callId } = envelope.header;
+
+    for (const outgoing of [
+      {
+        header: { callId, kind: EnvelopeKind.RESULT },
+        kind: EnvelopeKind.RESULT,
+        payload: new TextEncoder().encode(result),
+      },
+      {
+        header: { callId, kind: EnvelopeKind.NOTIFICATION },
+        kind: EnvelopeKind.NOTIFICATION,
+        payload: new TextEncoder().encode(notification),
+      },
+    ] as const) {
+      void memory.send(
+        {
+          data: writeEnvelope(outgoing),
+        },
+        connectionHandle
+      );
+    }
+    void memory.send(
+      {
+        data: writeEnvelope({
+          failure: SERVER_FAILURES.sessionRequired,
+          header: { callId, kind: EnvelopeKind.FAILURE },
+          kind: EnvelopeKind.FAILURE,
+        }),
+      },
+      connectionHandle
+    );
+  });
+  const { port } = await gateway.start({ address: '127.0.0.1' });
+  const answered = await send(port, {
+    body: '{}',
+    headers: { accept: 'text/event-stream' },
+    path: '/api/Transcoding/watch',
+  });
+  const prefix = `event: result\nid: 1\ndata: ${result}\n\nid: 2\ndata: ${notification}\n\nevent: failure\nid: 3\ndata: `;
+
+  expect(answered.status).toBe(200);
+  expect(answered.headers['content-type']).toBe('text/event-stream');
+  expect(answered.headers['bead-refusal']).toBeUndefined();
+  expect(answered.body.slice(0, prefix.length)).toBe(prefix);
+  expect(JSON.parse(answered.body.slice(prefix.length).trim())).toMatchObject({
+    scope: 'protocol',
+    status: 401,
+    title: 'SESSION_REQUIRED',
+  });
+  expect(requests).toBe(1);
+  expect(reported).toEqual([]);
+  await until(() => {
+    return memory.clients.length === 0;
+  });
+});
+
 test('ends a stream whose notification its stock library refuses with 502 as its last event', async () => {
   // * ticks' notification told it is an Edges: a Tick's remaining, field 1 a varint, where an Edges' at is a message
   await using fixture = await startTranscoding({
@@ -2593,6 +2877,155 @@ test('finishes a document whose write callback completes inline despite its fals
     expect(sizes).toEqual([65536, 7]);
     expect(reported).toEqual([]);
   }
+});
+
+test('finishes accepted document slices with no pending bytes before their callbacks', async () => {
+  const body = 'a'.repeat(2 * 64 * 1024 + 7);
+  const sizes: number[] = [];
+  const callbacks: ((error?: Error | null) => void)[] = [];
+  let ends = 0;
+  await using fixture = await startTranscoding({
+    document: body,
+    createServer: (listener) => {
+      return createNodeServer((request, response) => {
+        const write = response.write.bind(response);
+        const end = response.end.bind(response);
+
+        Object.defineProperty(response, 'writableLength', {
+          get: () => {
+            return 0;
+          },
+        });
+        response.write = (
+          chunk: Uint8Array,
+          done?: BufferEncoding | ((error?: Error | null) => void)
+        ): boolean => {
+          sizes.push(chunk.length);
+          write(chunk);
+          if (typeof done === 'function') {
+            callbacks.push(done);
+          }
+          // a prior slice's callback settles while this slice owns the writer
+          if (callbacks.length > 1) {
+            callbacks[callbacks.length - 2]?.(new Error('a prior slice completed late'));
+          }
+
+          return true;
+        };
+        response.end = () => {
+          ends += 1;
+          return end();
+        };
+        listener(request, response);
+      });
+    },
+  });
+  const reported = reportedBy(fixture.gateway);
+  const received = await send(fixture.port, { method: 'GET', path: '/openapi.json' });
+
+  expect(received.status).toBe(200);
+  expect(received.body).toBe(body);
+  expect(sizes).toEqual([65536, 65536, 7]);
+  expect(callbacks).toHaveLength(3);
+  expect(ends).toBe(1);
+  expect(reported).toEqual([]);
+  callbacks[2]?.();
+});
+
+test('stops a document at its failed write callback without ending a partial response', async () => {
+  for (const inline of [true, false]) {
+    const waiting = Promise.withResolvers<void>();
+    const sizes: number[] = [];
+    let complete: ((error?: Error | null) => void) | undefined;
+    let destroy: (() => void) | undefined;
+    let ends = 0;
+    await using fixture = await startTranscoding({
+      document: 'a'.repeat(2 * 64 * 1024 + 7),
+      createServer: (listener) => {
+        return createNodeServer((request, response) => {
+          const end = response.end.bind(response);
+
+          destroy = () => {
+            response.destroy();
+          };
+          response.end = () => {
+            ends += 1;
+            return end();
+          };
+          response.write = (
+            chunk: Uint8Array,
+            done?: BufferEncoding | ((error?: Error | null) => void)
+          ): boolean => {
+            sizes.push(chunk.length);
+            if (typeof done === 'function') {
+              complete = done;
+              if (inline) {
+                done(new Error('the document write failed'));
+              }
+            }
+            waiting.resolve();
+
+            return false;
+          };
+          listener(request, response);
+        });
+      },
+    });
+    const reported = reportedBy(fixture.gateway);
+    const received = receivedOn(
+      fixture.port,
+      octetsOf(fixture.port, { lines: ['GET /openapi.json HTTP/1.1'] })
+    );
+
+    try {
+      await waiting.promise;
+      expect(complete).toBeDefined();
+      if (!inline) {
+        complete?.(new Error('the document write failed'));
+      }
+      await new Promise(setImmediate);
+
+      expect(sizes).toEqual([65536]);
+      expect(ends).toBe(0);
+      expect(reported).toEqual([]);
+    } finally {
+      destroy?.();
+    }
+    expect(await received).toBe(0);
+  }
+});
+
+test('stops a document when its response write throws', async () => {
+  const sizes: number[] = [];
+  let ends = 0;
+  await using fixture = await startTranscoding({
+    document: 'a'.repeat(2 * 64 * 1024 + 7),
+    createServer: (listener) => {
+      return createNodeServer((request, response) => {
+        const end = response.end.bind(response);
+
+        response.write = (chunk: Uint8Array): boolean => {
+          sizes.push(chunk.length);
+          throw new Error('the document write failed');
+        };
+        response.end = () => {
+          ends += 1;
+          return end();
+        };
+        listener(request, response);
+      });
+    },
+  });
+  const reported = reportedBy(fixture.gateway);
+  const received = await receivedOn(
+    fixture.port,
+    octetsOf(fixture.port, { lines: ['GET /openapi.json HTTP/1.1'] })
+  );
+
+  expect(received).toBe(0);
+  expect(sizes).toEqual([65536]);
+  expect(ends).toBe(0);
+  expect(reported).toEqual(['the document write failed']);
 });
 
 test('writes whole answers and documents in slices of at most 64 KiB', async () => {

@@ -210,6 +210,85 @@ const delaysArmed = (clock: ReturnType<typeof createTestClock>) => {
 // definition
 
 test.describe('createServer', () => {
+  test('takes a supplied manager’s token and data in separate expiry-aware reads', async () => {
+    const { ask, open, sent, transport } = createScriptedTransport();
+    const inner = createSessionManager();
+    const reads: [string, number][] = [];
+    let nextRead = 999;
+    let expires = false;
+    const expireOnRead = (member: string, connectionHandle: Handle) => {
+      if (expires) {
+        const now = nextRead++;
+
+        reads.push([member, now]);
+
+        if (now >= 1000) {
+          inner.delete(connectionHandle);
+        }
+      }
+    };
+    const sessions: typeof inner = {
+      ...inner,
+      get: (connectionHandle) => {
+        expireOnRead('get', connectionHandle);
+
+        return inner.get(connectionHandle);
+      },
+      sessionTokenOf: (connectionHandle) => {
+        expireOnRead('sessionTokenOf', connectionHandle);
+
+        return inner.sessionTokenOf(connectionHandle);
+      },
+    };
+    await using server = createServer({
+      sessions: () => {
+        return sessions;
+      },
+      transport,
+    });
+    const seen: unknown[] = [];
+    const answered = Promise.withResolvers<void>();
+
+    server.services.getRequestResolver(echo, {
+      beforeRequest: server.requireSession,
+      serializer: text,
+    })((request, response) => {
+      seen.push(request.session);
+      answered.resolve();
+
+      return response(request.payload);
+    });
+    open(first);
+    inner.set({ ...inner.create(first), data: { role: 'member' } });
+    expires = true;
+    ask(first, { procedure: echo });
+    await answered.promise;
+    await expect
+      .poll(() => {
+        return sent.length;
+      })
+      .toBe(1);
+
+    expect(reads.slice(0, 2)).toEqual([
+      ['sessionTokenOf', 999],
+      ['get', 1000],
+    ]);
+    expect(seen).toEqual([{ data: undefined }]);
+    expect(inner.get(first)).toBeUndefined();
+    expect(sent[0]?.envelope?.kind).toBe(EnvelopeKind.RESULT);
+    ask(first, { procedure: echo });
+    await expect
+      .poll(() => {
+        return sent.length;
+      })
+      .toBe(2);
+    expect(seen).toHaveLength(1);
+    expect(sent[1]?.envelope).toMatchObject({
+      kind: EnvelopeKind.FAILURE,
+      failure: { code: ProtocolCode.SESSION_REQUIRED },
+    });
+  });
+
   test('builds each layer on the one under it, the router with the sessions’ tokens', async () => {
     const { open, transport } = createScriptedTransport();
     const built: unknown[] = [];

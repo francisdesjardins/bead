@@ -632,6 +632,112 @@ public sealed class HttpCallerTests
     }
 
     [Fact]
+    public async Task Refuses_non_string_and_noncanonical_raw_event_data_and_releases_its_reader()
+    {
+        var route = HttpRoutes.All.Single((entry) => { return entry.Procedure.ProcedureName == "watch"; }) with { Result = HttpPayload.Raw };
+
+        foreach (var (data, detail) in new[]
+        {
+            ("null", "an HTTP text or raw event holds a JSON string"),
+            ("\"AB==\"", "an HTTP raw event holds standard padded base64"),
+        })
+        {
+            var disposed = 0;
+            var sent = 0;
+            using var handler = new StubHandler((request, _) =>
+            {
+                sent++;
+                var content = new StreamContent(new FragmentedStream(Encoding.UTF8.GetBytes($"event: result\ndata: {data}\n\n"), () => { disposed++; }));
+                content.Headers.ContentType = new MediaTypeHeaderValue("text/event-stream");
+                return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { RequestMessage = request, Content = content });
+            });
+            using var caller = new HttpCaller([route], new Uri("http://localhost"), new HttpCallerOptions { Handler = handler });
+            var received = new List<HttpEvent<ReadOnlyMemory<byte>, Tick>>();
+            var failed = await Assert.ThrowsAsync<FailureException>(async () =>
+            {
+                await foreach (var entry in caller.Subscribe<ReadOnlyMemory<byte>, Tick>(route, new Empty()))
+                {
+                    received.Add(entry);
+                }
+            });
+
+            Assert.Equal((ProtocolCode.PayloadUndecodable, FailureScope.Protocol, FailureOrigin.Local, detail), ((ProtocolCode)failed.Code, failed.Scope, failed.Origin, failed.Detail));
+            Assert.Empty(received);
+            Assert.Equal(1, sent);
+            Assert.True(disposed > 0);
+        }
+    }
+
+    [Fact]
+    public async Task Refuses_invalid_result_media_and_malformed_JSON_without_another_call()
+    {
+        foreach (var (body, type, detail) in new[]
+        {
+            ("null", "text/plain", "the HTTP result has another media type"),
+            ("{", "application/json", "the HTTP payload cannot be decoded"),
+        })
+        {
+            var disposed = 0;
+            var sent = 0;
+            using var handler = new StubHandler((request, _) =>
+            {
+                sent++;
+                var content = new StreamContent(new FragmentedStream(Encoding.UTF8.GetBytes(body), () => { disposed++; }));
+                content.Headers.ContentType = new MediaTypeHeaderValue(type);
+                return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { RequestMessage = request, Content = content });
+            });
+            using var client = new TranscodingHttpClient(new Uri("http://localhost"), new HttpCallerOptions { Handler = handler });
+            var failed = await Assert.ThrowsAsync<FailureException>(() => { return client.Json(Json("null")); });
+
+            Assert.Equal((ProtocolCode.PayloadUndecodable, FailureScope.Protocol, FailureOrigin.Local, detail), ((ProtocolCode)failed.Code, failed.Scope, failed.Origin, failed.Detail));
+            Assert.Equal(1, sent);
+            Assert.True(disposed > 0);
+        }
+    }
+
+    [Fact]
+    public async Task Maps_failed_response_reads_to_destination_lost_and_releases_their_readers()
+    {
+        foreach (var streaming in new[] { false, true })
+        {
+            var broken = new IOException("the response reader broke");
+            var sent = 0;
+            using var stream = new FailedReadStream(Encoding.UTF8.GetBytes(streaming ? "event: result\ndata: " : "nu"), broken);
+            using var handler = new StubHandler((request, _) =>
+            {
+                sent++;
+                var content = new StreamContent(stream);
+                content.Headers.ContentType = new MediaTypeHeaderValue(streaming ? "text/event-stream" : "application/json");
+                return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { RequestMessage = request, Content = content });
+            });
+            using var client = new TranscodingHttpClient(new Uri("http://localhost"), new HttpCallerOptions { Handler = handler });
+            var received = 0;
+            var failed = await Assert.ThrowsAsync<FailureException>(async () =>
+            {
+                if (streaming)
+                {
+                    await foreach (var entry in client.SubscribeWatch(new Empty()))
+                    {
+                        _ = entry;
+                        received++;
+                    }
+                }
+                else
+                {
+                    await client.Json(Json("null"));
+                }
+            });
+
+            Assert.Equal((ProtocolCode.DestinationLost, FailureScope.Protocol, FailureOrigin.Local, "the HTTP body ends before its answer"), ((ProtocolCode)failed.Code, failed.Scope, failed.Origin, failed.Detail));
+            Assert.Same(broken, failed.InnerException);
+            Assert.Equal(0, received);
+            Assert.Equal(1, sent);
+            Assert.Equal(2, stream.Reads);
+            Assert.False(stream.CanRead);
+        }
+    }
+
+    [Fact]
     public async Task Bounds_the_decoded_message_even_when_the_body_bound_is_larger()
     {
         var maximumBodyBytes = LimitDefaults.MaximumEnvelopeBytes + 1;
@@ -706,6 +812,21 @@ public sealed class HttpCallerTests
             }
 
             base.Dispose(disposing);
+        }
+    }
+
+    private sealed class FailedReadStream(byte[] bytes, IOException failure) : MemoryStream(bytes)
+    {
+        public int Reads { get; private set; }
+
+        public override ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
+        {
+            Reads++;
+            if (Reads > 1)
+            {
+                return ValueTask.FromException<int>(failure);
+            }
+            return base.ReadAsync(buffer, cancellationToken);
         }
     }
 
