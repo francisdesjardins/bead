@@ -625,7 +625,7 @@ export const writeParcel = (fields: ParcelFields): Uint8Array => {
 
   if (
     (kind === ParcelKind.OPEN || kind === ParcelKind.ACCEPT) &&
-    (!isToken(id) || bound < LEAST_RECEIVE_BOUND)
+    (!isToken(id) || bound < LEAST_RECEIVE_BOUND || bound > LARGEST_RECEIVE_BOUND)
   ) {
     throw new ProgrammerError(
       `${kindNamed(kind)} names a token and a receive bound of 1,024 bytes at least`

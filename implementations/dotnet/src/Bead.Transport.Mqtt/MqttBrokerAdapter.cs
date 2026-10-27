@@ -229,6 +229,13 @@ public sealed class MqttBrokerAdapter : IBrokerAdapter, IAsyncDisposable
             using var timeout = new CancellationTokenSource(_options.ConnectTimeout, TimeProvider.System);
             using var linked = CancellationTokenSource.CreateLinkedTokenSource(token, timeout.Token, link.Life.Token);
             var password = _options.PasswordProvider is { } provider ? await provider(linked.Token) : _options.Password;
+
+            // ! stopped as it asked its password: no CONNECT goes
+            if (link.IsEnded)
+            {
+                throw new IOException($"the link of {Id} stopped as it started");
+            }
+
             MqttClientConnectResult connected;
 
             try
@@ -242,7 +249,7 @@ public sealed class MqttBrokerAdapter : IBrokerAdapter, IAsyncDisposable
             }
             catch (Exception reason) when (reason is not OperationCanceledException || !token.IsCancellationRequested)
             {
-                throw new IOException($"the link of {Id} did not connect: {reason.Message}", reason);
+                throw new IOException($"the link of {Id} ended before its CONNACK: {reason.Message}", reason);
             }
 
             if (connected.ResultCode != MqttClientConnectResultCode.Success)
@@ -349,7 +356,11 @@ public sealed class MqttBrokerAdapter : IBrokerAdapter, IAsyncDisposable
         throw new IOException(string.Create(CultureInfo.InvariantCulture, $"its broker refused the subscription of {Id} to {filter}: SUBACK 0x{(int)code:X2}"));
     }
 
-    /// <summary>Lets the subscription to <paramref name="topic"/> go, by the filter its SUBSCRIBE named; settles once its UNSUBACK came.</summary>
+    /// <summary>
+    /// Lets the subscription to <paramref name="topic"/> go, by the filter its SUBSCRIBE named, or the
+    /// topic itself where it held none; settles once its UNSUBACK came of 0x00, or 0x11 where its
+    /// broker held none, and fails on 0x80 or more, an <see cref="IOException"/> naming it.
+    /// </summary>
     public async Task Unsubscribe(IReadOnlyList<string> topic)
     {
         var link = LinkUp();
@@ -468,6 +479,7 @@ public sealed class MqttBrokerAdapter : IBrokerAdapter, IAsyncDisposable
     public async Task Stop()
     {
         Link? link;
+        var stopped = new InvalidOperationException($"the link of {Id} stopped");
 
         lock (_gate)
         {
@@ -475,7 +487,9 @@ public sealed class MqttBrokerAdapter : IBrokerAdapter, IAsyncDisposable
 
             if (link is not null)
             {
+                // ! named before its DISCONNECT goes, which fails what it awaits before its end
                 link.IsStopping = true;
+                link.Ended = stopped;
             }
         }
 
@@ -495,7 +509,7 @@ public sealed class MqttBrokerAdapter : IBrokerAdapter, IAsyncDisposable
         }
         finally
         {
-            End((link, null), new InvalidOperationException($"the link of {Id} stopped"));
+            End((link, null), stopped);
         }
     }
 

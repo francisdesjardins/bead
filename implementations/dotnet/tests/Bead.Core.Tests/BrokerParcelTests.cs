@@ -155,6 +155,7 @@ public sealed class BrokerParcelTests
             ("a layout to come", ping with { Layout = 0xB2 }),
             ("an OPEN whose id is no token", open with { Id = "a/b" }),
             ("an OPEN whose receive bound is under 1,024", open with { Bound = 1_023 }),
+            ("an OPEN whose receive bound passes its 4 bytes", open with { Bound = BrokerParcels.LargestBound + 1 }),
             ("an OPEN naming an acceptor's half", open with { Acceptor = Acceptor }),
             ("an ACCEPT whose receive bound is under 1,024", open with { Kind = BrokerParcelKinds.Accept, Acceptor = Acceptor, Bound = 1_023 }),
             ("a PING marked SECURE", ping with { Flags = BrokerParcelFlags.Secure }),

@@ -450,6 +450,9 @@ export const createBrokerParticipant = (options: IBrokerParticipantOptions): IBr
   let isStopped = false;
   // ! taken over by another link of its id: it connects no more until its application starts it
   let isTakenOver = false;
+  // a link under way, and each down heard as one connects: that attempt fails
+  let isLinking = false;
+  let downsAsItLinks = 0;
   // each link and each down its own, so that what a former link asked does nothing on the next
   let epoch = 0;
 
@@ -1085,8 +1088,23 @@ export const createBrokerParticipant = (options: IBrokerParticipantOptions): IBr
           }
         : undefined;
 
-    await adapter.start({ signal, will });
-    await adapter.subscribe(inbox, { signal });
+    const downsBefore = downsAsItLinks;
+
+    isLinking = true;
+
+    try {
+      await adapter.start({ signal, will });
+      await adapter.subscribe(inbox, { signal });
+    } finally {
+      isLinking = false;
+    }
+
+    // ! a link that went down as it connected is none: this attempt fails, and the next links
+    // anew, rather than call it up and miss its loss
+    if (downsAsItLinks !== downsBefore) {
+      throw new GenericError(`the link of ${id} went down as it connected`);
+    }
+
     incarnation = drawnIncarnation;
     epoch += 1;
     isLinked = true;
@@ -1156,6 +1174,14 @@ export const createBrokerParticipant = (options: IBrokerParticipantOptions): IBr
         await link();
         break;
       } catch (reason) {
+        // * taken over as it linked anew: no attempt follows it
+        if (isTakenOver) {
+          throw new GenericError(
+            `the link of ${id} was taken over by another link of its id, and connects no more until it is started again`,
+            { cause: reason }
+          );
+        }
+
         if (attempt >= maxAttempts) {
           throw new GenericError(
             `the link of ${id} went down, and ${String(attempt)} attempts did not bring it back`,
@@ -1193,8 +1219,25 @@ export const createBrokerParticipant = (options: IBrokerParticipantOptions): IBr
     awaiting.clear();
   };
 
+  // * fenced: two holders of one id that each linked anew would take each other over without end;
+  // the later link keeps the id (spec 15.21)
+  const fence = (): void => {
+    isTakenOver = true;
+    linking = undefined;
+    report(new GenericError(`the link of ${id} was taken over by another link of its id`));
+  };
+
   const down = (event?: IBrokerDown): void => {
     if (!isLinked) {
+      // * down as it connects: the attempt under way fails; taken over, none follows it
+      if (isLinking) {
+        downsAsItLinks += 1;
+
+        if (event?.isTakenOver === true) {
+          fence();
+        }
+      }
+
       return;
     }
 
@@ -1221,12 +1264,8 @@ export const createBrokerParticipant = (options: IBrokerParticipantOptions): IBr
 
     departures.clear();
 
-    // * fenced: two holders of one id that each linked anew would take each other over without end;
-    // the later link keeps the id (spec 15.21)
     if (event?.isTakenOver === true) {
-      isTakenOver = true;
-      linking = undefined;
-      report(new GenericError(`the link of ${id} was taken over by another link of its id`));
+      fence();
 
       return;
     }
@@ -1241,7 +1280,11 @@ export const createBrokerParticipant = (options: IBrokerParticipantOptions): IBr
 
     linking = relink(former).catch((reason: unknown) => {
       linking = undefined;
-      report(toError(reason));
+
+      // * taken over as it linked anew: its fence reported it
+      if (!isTakenOver) {
+        report(toError(reason));
+      }
 
       throw toError(reason);
     });

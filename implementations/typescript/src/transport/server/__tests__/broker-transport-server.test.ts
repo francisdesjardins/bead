@@ -37,6 +37,50 @@ const turn = (): Promise<void> => {
   return new Promise(setImmediate);
 };
 
+/** Turns until `isDone` holds, a hundred at most. */
+const until = async (isDone: () => boolean): Promise<void> => {
+  for (let count = 0; count < 100 && !isDone(); count += 1) {
+    await turn();
+  }
+};
+
+/**
+ * `adapter`, each SUBSCRIBE and UNSUBSCRIBE of a server's name held until the test answers it,
+ * settled or refused, and every other call passed on.
+ */
+const holdingOf = (adapter: IBrokerAdapter) => {
+  const answers: { refuse: (error: Error) => void; settle: () => void; what: string }[] = [];
+  const asked = (what: string, passed: () => Promise<void>): Promise<void> => {
+    return new Promise<void>((resolve, reject) => {
+      answers.push({
+        refuse: reject,
+        settle: () => {
+          void passed().then(resolve, reject);
+        },
+        what,
+      });
+    });
+  };
+  const held = Object.assign(Object.create(adapter) as IBrokerAdapter, {
+    subscribe: (topic: BrokerTopic, options?: Parameters<IBrokerAdapter['subscribe']>[1]) => {
+      return topic[1] === 's'
+        ? asked(`subscribe ${topic.join('/')}`, () => {
+            return adapter.subscribe(topic, options);
+          })
+        : adapter.subscribe(topic, options);
+    },
+    unsubscribe: (topic: BrokerTopic) => {
+      return topic[1] === 's'
+        ? asked(`unsubscribe ${topic.join('/')}`, () => {
+            return adapter.unsubscribe(topic);
+          })
+        : adapter.unsubscribe(topic);
+    },
+  });
+
+  return { answers, held };
+};
+
 // definition
 
 test.describe('createBrokerTransportServer', () => {
@@ -491,5 +535,98 @@ test.describe('createBrokerTransportServer', () => {
     await expect(refused.start()).rejects.toThrow('0x87');
     expect(refused.gauges().counts['names']).toBe(0);
     await other.stop();
+  });
+
+  test('serves its name again in its group once a connection closes as its broker lets it go, and reports a name its broker refuses to let go or to serve again', async () => {
+    const broker = createMemoryBroker();
+    const { answers, held } = holdingOf(broker.adapter({ id: 'server' }));
+    const participant = createBrokerParticipant({ adapter: held });
+    const server = participant.transportServer({
+      group: true,
+      maximumConnections: 1,
+      names: ['interop'],
+    });
+    const clients = createBrokerParticipant({ adapter: broker.adapter({ id: 'client' }) });
+    const reported: string[] = [];
+    const closes: boolean[] = [];
+    const asked = (what: string): number => {
+      return answers.filter((answer) => {
+        return answer.what === what;
+      }).length;
+    };
+
+    server.on('error', ({ message }) => {
+      reported.push(message);
+    });
+    server.on('close', (wasClean) => {
+      closes.push(wasClean);
+    });
+
+    const starting = server.start();
+
+    await until(() => {
+      return answers.length === 1;
+    });
+    answers.shift()?.settle();
+    await starting;
+    await clients.start();
+
+    // * full at its first connection: its name let go of, counted until its UNSUBACK came
+    const first = clients.transportClient();
+
+    await first.connect({ server: 'interop' });
+    await until(() => {
+      return asked('unsubscribe bead/s/interop') === 1;
+    });
+
+    // a connection that closes meanwhile asks nothing of a name its broker still holds, and asks
+    // it anew once its broker let it go
+    await first.disconnect();
+    await until(() => {
+      return closes.length > 0;
+    });
+    await turn();
+    expect(asked('subscribe bead/s/interop')).toBe(0);
+    answers.shift()?.settle();
+    await until(() => {
+      return asked('subscribe bead/s/interop') === 1;
+    });
+    answers.shift()?.settle();
+    await until(() => {
+      return server.gauges().counts['names'] === 1;
+    });
+    expect(server.gauges().counts['names']).toBe(1);
+
+    // * one its broker refuses to let go is reported
+    const second = clients.transportClient();
+
+    await second.connect({ server: 'interop' });
+    await until(() => {
+      return asked('unsubscribe bead/s/interop') === 1;
+    });
+    answers.shift()?.refuse(new Error('its broker refused to let bead/s/interop go: 0x80'));
+    await until(() => {
+      return reported.length > 0;
+    });
+
+    // and one its broker refuses to serve again is reported, and left unheld
+    await second.disconnect();
+    await until(() => {
+      return asked('subscribe bead/s/interop') === 1;
+    });
+    answers
+      .shift()
+      ?.refuse(
+        new Error('its broker refused the subscription to $share/interop/bead/s/interop: 0x87')
+      );
+    await until(() => {
+      return reported.length > 1;
+    });
+    expect(reported).toEqual([
+      'its broker refused to let bead/s/interop go: 0x80',
+      'the name interop is not served: its broker refused its subscription, its broker refused the subscription to $share/interop/bead/s/interop: 0x87',
+    ]);
+    expect(server.gauges().counts['names']).toBe(0);
+    await Promise.all([clients.stop(), participant.stop()]);
   });
 });
