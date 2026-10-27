@@ -122,6 +122,7 @@ test.describe('broker parcel', () => {
       { ...open, kind: 0 },
       { ...open, id: 'a/b' },
       { ...open, bound: 1_023 },
+      { ...open, bound: 2 ** 32 },
       { ...open, acceptor },
       { ...open, bound: 1_023, kind: ParcelKind.ACCEPT, acceptor },
       { acceptor: none, kind: ParcelKind.PING, opener, sequence: 2 },

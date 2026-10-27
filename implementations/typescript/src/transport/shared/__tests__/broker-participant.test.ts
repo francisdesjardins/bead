@@ -1061,6 +1061,85 @@ test.describe('broker participant', () => {
     await participant.stop();
   });
 
+  test('fails a link that goes down as it connects, at its start or as it links anew, and fences it where another link of its id took it over then (spec 15.21)', async () => {
+    const broker = createMemoryBroker();
+    const adapter = broker.adapter({ id: 'ada' });
+    // * its inbox's SUBSCRIBE held until the test grants it, as a SUBACK that came before its
+    // link's loss was read
+    const grants: (() => void)[] = [];
+    const granting = Object.assign(Object.create(adapter) as IBrokerAdapter, {
+      subscribe: (topic: BrokerTopic, options?: Parameters<IBrokerAdapter['subscribe']>[1]) => {
+        if (topic[1] !== 'i') {
+          return adapter.subscribe(topic, options);
+        }
+
+        return new Promise<void>((resolve, reject) => {
+          grants.push(() => {
+            if (adapter.isLinked) {
+              adapter.subscribe(topic, options).then(resolve, reject);
+            } else {
+              resolve();
+            }
+          });
+        });
+      },
+    });
+    const participant = createBrokerParticipant({
+      adapter: granting,
+      reconnect: { delay: 0, maxAttempts: 5 },
+    });
+    const reported: string[] = [];
+    const asked = async (): Promise<void> => {
+      for (let count = 0; count < 100 && grants.length === 0; count += 1) {
+        await settled();
+      }
+    };
+
+    participant.on('error', ({ message }) => {
+      reported.push(message);
+    });
+
+    // a loss as it subscribes its inbox fails its start, though its SUBACK came
+    const starting = participant.start();
+
+    await asked();
+    adapter.lose();
+    await settled();
+    grants.shift()?.();
+    await expect(starting).rejects.toThrow('the link of ada went down as it connected');
+    expect([participant.isLinked, reported]).toEqual([false, []]);
+
+    // * the next start links anew
+    const again = participant.start();
+
+    await asked();
+    grants.shift()?.();
+    await again;
+    expect(participant.isLinked).toBe(true);
+
+    // a takeover as it links anew fences it: reported once, and no attempt after it
+    adapter.lose();
+    await asked();
+    adapter.takeOver();
+    await settled();
+    expect(reported).toEqual(['the link of ada was taken over by another link of its id']);
+    grants.shift()?.();
+
+    for (let count = 0; count < 10; count += 1) {
+      await settled();
+    }
+
+    expect([reported, grants.length, participant.isLinked]).toEqual([
+      ['the link of ada was taken over by another link of its id'],
+      0,
+      false,
+    ]);
+    await expect(participant.transportClient().connect({ server: 'interop' })).rejects.toThrow(
+      'the link of ada was taken over by another link of its id, and connects no more until it is started again'
+    );
+    await participant.stop();
+  });
+
   test('reports its link given up on once its reconnection’s attempts run out', async () => {
     const broker = createMemoryBroker();
     const adapter = broker.adapter({ id: 'ada' });

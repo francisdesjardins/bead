@@ -21,8 +21,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   dependency, in Node and in a page over WebSocket) and a `Bead.Transport.Mqtt` package over MQTTnet,
   each a link that keeps no session, authenticated by a password or a client certificate, a parcel
   one PUBLISH of QoS 1 counted to its byte under both ends' Maximum Packet Size and held to its
-  broker's Receive Maximum, its PUBACK once taken, 0x10 as no subscriber, and a will of Bead's GONE
-  (spec 15.25 to 15.31, decision 0041).
+  broker's Receive Maximum, its PUBACK once taken, 0x10 as no subscriber, a subscription let go once
+  its UNSUBACK came under 0x80 and refused on 0x80 or more, and a will of Bead's GONE (spec 15.25 to
+  15.31, decision 0041).
 - An in-memory broker on both sides, which copies, reorders, drops and overruns as a test asks: the
   broker cases of `spec/transports.json`, both roles, and the conversations play over it.
 - `spec/vectors.json`'s `parcels` and `parcelRefusals`, a broker's parcels read and written back and
