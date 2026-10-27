@@ -1,4 +1,5 @@
 using System.Text;
+using Bead.Transcoding.Tests.BindingFixtures;
 using Bead.Transcoding.V1;
 using Google.Protobuf;
 using Google.Protobuf.Reflection;
@@ -14,6 +15,18 @@ namespace Bead.Transcoding.Tests;
 /// </summary>
 public sealed class JsonFormTests
 {
+    [Fact]
+    public void Writes_an_unset_64_bit_oneof_field_as_zero_in_a_response_body()
+    {
+        foreach (var message in new[] { new PatchProfile(), new PatchProfile { Label = "Ada" } })
+        {
+            foreach (var name in new[] { "count", "string_count" })
+            {
+                Assert.Equal("\"0\"", Encoding.UTF8.GetString(Form.WriteField(message, name)));
+            }
+        }
+    }
+
     private static IMessage Read<TMessage>(string body)
         where TMessage : IMessage<TMessage>, new()
     {

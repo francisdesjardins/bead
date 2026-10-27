@@ -26,6 +26,7 @@ import {
   type Maps,
 } from '../../proto/__tests__/generated/validations_pb';
 import { ProgrammerError } from '../../transport/shared/errors';
+import { PatchProfileSchema } from './binding-fixtures/generated/patch_binding_pb';
 import {
   base64Of,
   JsonFormError,
@@ -731,6 +732,17 @@ test('writes a message nested 100 deep, and refuses one nested past 100', () => 
       registry: REGISTRY,
     });
   }).toThrow('a message nested past 100');
+});
+
+test('writes an unset 64-bit oneof field as zero in a response body', () => {
+  for (const message of [
+    create(PatchProfileSchema),
+    create(PatchProfileSchema, { selection: { case: 'label', value: 'Ada' } }),
+  ]) {
+    for (const name of ['count', 'string_count']) {
+      expect(writeFieldJson(PatchProfileSchema, { message, name, registry: REGISTRY })).toBe('"0"');
+    }
+  }
 });
 
 test('writes a response body’s field at its default where its oneof holds another member or none', () => {

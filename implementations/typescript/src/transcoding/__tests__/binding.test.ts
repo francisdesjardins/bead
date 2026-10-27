@@ -4,6 +4,10 @@ import { ProgrammerError } from '../../transport/shared/errors';
 import { bindRequest, type IBindingOptions } from '../binding';
 import { JsonFormError, typeRegistryOf } from '../json-form';
 import {
+  PatchRequestSchema,
+  type PatchRequest,
+} from './binding-fixtures/generated/patch_binding_pb';
+import {
   EverythingSchema,
   GetBookRequestSchema,
   UpdateBookRequestSchema,
@@ -238,6 +242,32 @@ test('fills no update_mask path of a PATCH’s body that is no object, and refus
       return updateBook('{"title":"t","nope":1}');
     })
   ).toBe('a key no field names');
+});
+
+test('fills a PATCH mask from snake-case fields through nested and empty message bodies', () => {
+  for (const body of [
+    '{"displayName":"Ada","nestedProfile":{"displayName":"Grace"},"emptyProfile":{}}',
+    '{"display_name":"Ada","nested_profile":{"display_name":"Grace"},"empty_profile":{}}',
+  ]) {
+    const read = bindRequest(PatchRequestSchema, {
+      body: ENCODER.encode(body),
+      isPatch: true,
+      registry: typeRegistryOf([PatchRequestSchema]),
+      routeBody: 'profile',
+      variables: {},
+    }) as PatchRequest;
+
+    expect(read).toEqual(
+      create(PatchRequestSchema, {
+        profile: {
+          displayName: 'Ada',
+          nestedProfile: { displayName: 'Grace' },
+          emptyProfile: {},
+        },
+        updateMask: { paths: ['display_name', 'nested_profile.display_name', 'empty_profile'] },
+      })
+    );
+  }
 });
 
 test('throws a programmer’s error for a variable that names no field', () => {

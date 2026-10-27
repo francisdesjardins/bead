@@ -1,0 +1,23 @@
+syntax = "proto3";
+
+package bead.transcoding.tests;
+
+import "google/protobuf/field_mask.proto";
+
+option csharp_namespace = "Bead.Transcoding.Tests.BindingFixtures";
+
+message PatchProfile {
+  string display_name = 1;
+  PatchProfile nested_profile = 2;
+  PatchProfile empty_profile = 3;
+  oneof selection {
+    int64 count = 4;
+    int64 string_count = 5 [jstype = JS_STRING];
+    string label = 6;
+  }
+}
+
+message PatchRequest {
+  PatchProfile profile = 1;
+  google.protobuf.FieldMask update_mask = 2;
+}
