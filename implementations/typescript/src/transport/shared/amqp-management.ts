@@ -6,7 +6,13 @@
 
 // dependencies
 
-import rhea, { type Connection, type EventContext, type Receiver, type Sender } from 'rhea';
+import rhea, {
+  type Connection,
+  type EventContext,
+  type Receiver,
+  type Sender,
+  type Session,
+} from 'rhea';
 import { GenericError, toCancelError } from './errors';
 
 // interfaces
@@ -49,6 +55,39 @@ const conditionOf = (error: unknown): string => {
   return typeof description === 'string' && description !== ''
     ? `${condition}, ${description}`
     : condition;
+};
+
+/**
+ * Answers at once the DETACH its peer sent `link`, as its close is heard: rhea answers one a turn
+ * later, which would go after an END its session sent meanwhile, a frame on a channel that ended
+ * (AMQP 1.0 §2.5.5).
+ */
+export const answerDetach = (link: Receiver | Sender | undefined): void => {
+  link?.close();
+};
+
+/**
+ * Ends `session` once its peer's BEGIN came, and nothing once its connection's CLOSE went: rhea,
+ * answered BEGIN past its END, begins it again, a BEGIN its peer reads as another session's.
+ */
+export const endSession = (session: Session | undefined): void => {
+  const { remote } = (session ?? {}) as { remote?: { begin?: unknown } };
+
+  if (session !== undefined && remote?.begin === undefined) {
+    session.once('session_open', () => {
+      if (session.connection.is_open()) {
+        endSession(session);
+      }
+    });
+
+    return;
+  }
+
+  try {
+    session?.close();
+  } catch {
+    // its connection ended already
+  }
 };
 
 // each request's message-id, which its answer's correlation-id names: one counter for every pair
@@ -103,11 +142,7 @@ export const requestOf = (
     };
     // * the session ended, whatever came: what it held goes with it
     const end = (): void => {
-      try {
-        session.close();
-      } catch {
-        // its connection ended already
-      }
+      endSession(session);
     };
     const fail = (error: Error): void => {
       if (isSettled) {
@@ -127,8 +162,10 @@ export const requestOf = (
     };
     const ended = (what: string) => {
       return (context: EventContext): void => {
-        const error = (context.receiver ?? context.sender ?? context.session)?.error;
+        const link = context.receiver ?? context.sender;
+        const error = (link ?? context.session)?.error;
 
+        answerDetach(link);
         fail(
           new GenericError(
             `the management's ${what} ended as it asked ${method} ${path}: ${conditionOf(error)}`

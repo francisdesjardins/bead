@@ -175,8 +175,9 @@ const rawAddressOf = (terminus: unknown): string | undefined => {
  * A scripted AMQP 1.0 peer on 127.0.0.1, on a port of its own, its management answering as RabbitMQ
  * 4's does unless told, 201 to a declaration, 204 to a binding and 200 to a deletion, offering SASL
  * PLAIN: over TCP, or
- * over TLS under `tls`'s certificate, `amqps://localhost`, asking a client certificate and offering
- * SASL EXTERNAL to one it trusts; its OPEN of `channelMax` where given.
+ * over TLS under `tls`'s certificate, `amqps://localhost`, asking a client certificate, verifying it
+ * against that certificate as its CA, refusing one it does not sign, and offering SASL EXTERNAL to
+ * one it signs; its OPEN of `channelMax` where given.
  */
 export const createAmqpScript = async (options?: {
   channelMax?: number | undefined;
@@ -250,6 +251,20 @@ export const createAmqpScript = async (options?: {
 
     lastPlain = undefined;
     connections.add(connection);
+
+    // ! a frame on a channel the adapter ended is refused in whatever read it comes (AMQP 1.0
+    // §2.5.5), where rhea maps that channel a turn longer
+    const mapped = connection as unknown as {
+      on_end: (frame: { channel: number }) => void;
+      remote_channel_map: Record<number, unknown>;
+    };
+    const onEnd = mapped.on_end;
+
+    mapped.on_end = (frame) => {
+      onEnd.call(connection, frame);
+      // oxlint-disable-next-line typescript/no-dynamic-delete -- rhea's own map, by channel
+      delete mapped.remote_channel_map[frame.channel];
+    };
 
     // the script's sender paired with the management receiver of the session, which answers
     const answerer = new WeakMap<Session, Sender>();
@@ -564,7 +579,6 @@ export const createAmqpScript = async (options?: {
           cert: tls.cert,
           enable_sasl_external: true,
           key: tls.key,
-          rejectUnauthorized: false,
           requestCert: true,
           transport: 'tls',
         }),

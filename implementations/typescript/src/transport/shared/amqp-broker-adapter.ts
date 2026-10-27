@@ -11,7 +11,7 @@ import rhea, {
   type Sender,
   type Session,
 } from 'rhea';
-import { bindInbox, declareInbox, deleteInbox } from './amqp-management';
+import { answerDetach, bindInbox, declareInbox, deleteInbox, endSession } from './amqp-management';
 import {
   encodeMessage,
   exchangeAddressOf,
@@ -613,6 +613,8 @@ export const createAmqpBrokerAdapter = (options: IAmqpBrokerAdapterOptions): IAm
     const ended = (context: EventContext): void => {
       const error = context.sender?.error ?? context.session?.error;
 
+      answerDetach(context.sender);
+
       if (incarnation.sending[kind] === sending) {
         incarnation.sending[kind] = undefined;
       }
@@ -795,6 +797,7 @@ export const createAmqpBrokerAdapter = (options: IAmqpBrokerAdapterOptions): IAm
         ended(context.session?.error);
       });
       receiver.on('receiver_close', (context: EventContext) => {
+        answerDetach(receiver);
         ended(context.receiver?.error);
       });
       receiver.on('message', (context: EventContext) => {
@@ -822,8 +825,8 @@ export const createAmqpBrokerAdapter = (options: IAmqpBrokerAdapterOptions): IAm
     });
   };
 
-  // a session's end, asked: whatever came after is its own
-  const close = (endpoint: Session | Receiver | undefined): void => {
+  // a receiver's DETACH, asked: whatever came after is its own
+  const close = (endpoint: Receiver | undefined): void => {
     try {
       endpoint?.close();
     } catch {
@@ -837,7 +840,7 @@ export const createAmqpBrokerAdapter = (options: IAmqpBrokerAdapterOptions): IAm
     return (condition: string): void => {
       const key = topicOf(receiving.topic);
 
-      close(receiving.session);
+      endSession(receiving.session);
 
       if (receiving.isLeaving || incarnation.isRetired) {
         return;
@@ -1036,7 +1039,7 @@ export const createAmqpBrokerAdapter = (options: IAmqpBrokerAdapterOptions): IAm
     const forget = (): void => {
       settled();
       receiving.isLeaving = true;
-      close(session);
+      endSession(session);
     };
     const attached = awaited<void>(incarnation, {
       begin: ({ reject, resolve }) => {
@@ -1083,7 +1086,7 @@ export const createAmqpBrokerAdapter = (options: IAmqpBrokerAdapterOptions): IAm
       begin: ({ resolve }) => {
         const { receiver, session } = receiving;
         const done = (): void => {
-          close(session);
+          endSession(session);
           resolve();
         };
         // * once: its drain is told no more as its DETACH goes
@@ -1548,13 +1551,13 @@ export const createAmqpBrokerAdapter = (options: IAmqpBrokerAdapterOptions): IAm
         ]);
 
         for (const { session } of receivings) {
-          close(session);
+          endSession(session);
         }
 
-        close(incarnation.inboxSession);
+        endSession(incarnation.inboxSession);
 
         for (const sending of Object.values(incarnation.sending)) {
-          close(sending?.session);
+          endSession(sending?.session);
         }
 
         // * then its CLOSE, of no error, and its peer's awaited

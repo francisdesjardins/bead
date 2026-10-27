@@ -264,6 +264,8 @@ internal sealed class ScriptedConnection
     private TaskCompletionSource _heard = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private readonly HashSet<(ushort Channel, uint Handle)> _detached = [];
     private readonly HashSet<ushort> _ended = [];
+    // the channels the adapter's END came on, until a BEGIN opens one anew
+    private readonly HashSet<ushort> _endedByAdapter = [];
     private uint _deliveryTag;
     private volatile bool _isClosing;
 
@@ -719,6 +721,15 @@ internal sealed class ScriptedConnection
             {
                 while (await NextFrame() is { } frame)
                 {
+                    // ! a frame on a channel once the adapter's END came on it is a protocol error
+                    // (AMQP 1.0 §2.5.5): its connection cut, as rhea's peer refuses one
+                    if (IsPastEnd(frame))
+                    {
+                        Cut();
+
+                        break;
+                    }
+
                     lock (_frames)
                     {
                         _frames.Add(frame);
@@ -742,6 +753,35 @@ internal sealed class ScriptedConnection
                 _closed.TrySetResult();
             }
         });
+    }
+
+    // whether a frame comes on a channel the adapter ended: a BEGIN opens one anew, and OPEN and CLOSE
+    // are the connection's
+    private bool IsPastEnd(ScriptedFrame frame)
+    {
+        lock (_frames)
+        {
+            if (frame.Performative is Begin)
+            {
+                _endedByAdapter.Remove(frame.Channel);
+
+                return false;
+            }
+
+            if (frame.Performative is global::Amqp.Framing.Open or AmqpClose)
+            {
+                return false;
+            }
+
+            var isPast = _endedByAdapter.Contains(frame.Channel);
+
+            if (frame.Performative is AmqpEnd)
+            {
+                _endedByAdapter.Add(frame.Channel);
+            }
+
+            return isPast;
+        }
     }
 
     // whether a transfer is a management request: one on a sender of the adapter's to the management node
