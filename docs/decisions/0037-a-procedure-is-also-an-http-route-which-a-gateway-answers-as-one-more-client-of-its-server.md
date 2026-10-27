@@ -188,7 +188,7 @@ are never kept alike in silence; one origin for `/bead` and `/api/…` comes fro
   code arose: the caller's 400, 413, 422; the server's answer the gateway could not take, and a
   `proto` request its server could not read, 502; the gateway's own configuration, a scheme its
   server takes none of, 500. An application failure is 400, its identity in `type`, `title` and
-  `code`; its own status waits for the options' v1 freeze. `PAYLOAD_INVALID` is 422, its violations
+  `code`; its own status belongs to the options' v1, ahead. `PAYLOAD_INVALID` is 422, its violations
   in `errors`, each pointing at its field by JSON names.
 - **Notifications as Server-Sent Events** (8), chosen by `accept: text/event-stream` alone: the
   result, then each notification as a plain `message` event, then the failure that ends them, each

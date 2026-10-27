@@ -78,8 +78,10 @@ a message only to a window whose origin is its target origin
 **It is tested apart from the package, in two projects of its own**: its pure modules in Node, the
 panel's model among them; and, in Chromium, the extension loaded against the demo's static build,
 the page's events followed through the hook, the bridge and the background to the panel, and the
-panel as a page on a fake DevTools API, for what only DevTools gives it. The package's unit project
-keeps its claim that nothing under test needs a page.
+panel as a page on a fake DevTools API, for what only DevTools gives it. Over MQTT 5, the extension
+follows the demo's client over a broker of the run's own, in CI's job `mqtt` (`hook.test.ts`,
+`follows the page’s calls, each service debug step and its envelopes to the panel over MQTT 5`).
+The package's unit project keeps its claim that nothing under test needs a page.
 
 **It changes nothing the languages share**: no wire, no conformance file, no behaviour a peer sees.
 A browser page is the TypeScript side's platform, and the support matrix says so; no Tenth Man
@@ -98,4 +100,4 @@ A browser page is the TypeScript side's platform, and the support matrix says so
 - A DevTools panel cannot be driven by Playwright: what the panel does with DevTools' own APIs is
   tested on a fake of them, and the rest end to end.
 - The support matrix holds a row, "A page's DevTools hook", platform: a .NET client runs in no page
-  an extension reaches, until one runs under WebAssembly.
+  an extension reaches.

@@ -168,33 +168,33 @@ A WebSocket client writes the credential its connect is given in its upgrade's `
 string, `credential`, or `credentialProvider`, whose value each attempt awaits, a reconnection's
 included, with the attempt's `signal` — where a credential past its end is renewed, as SignalR's
 `accessTokenFactory` is (spec 15.2, decision 0032). A client asks one credential at a time of each
-provider, identified by its function's identity. Its attempts are sequential: an attempt using the same provider waits for its earlier
-call to settle, then asks anew; a different provider asks at once. An answer from an earlier
-attempt serves none after it, and a late failure is observed, never left unhandled. A provider
-that ignores its signal and never settles holds every later attempt that would ask it; those
-attempts end within their own cancellation, timeout and dispose bounds (spec 15.15). A provider
-honours its signal so that later attempts can ask it again. The attempt's `signal` is aborted once
-the attempt ends, in a later turn than its connect settles, so what a listener of it throws never takes the place of the
-connect's outcome; a provider that cancels itself while that `signal` is still live fails its
-attempt as any failure of its does. The server hands it beside every envelope of that connection, as
-it came, trimmed, so a request presenting `ELSEWHERE` stands for it, resolved per request by the
-verifier, as over HTTP: one that no longer holds, or whose end has come, is refused on the request
-that presents it, and the connection stays. One connection carries one credential: a client presents
-another by connecting again, its provider handing the new one, and gives its router's default
-`ELSEWHERE` the same bytes, from one source; between the two, a call fails before it goes,
-`DESTINATION_UNREACHABLE`. A connect refuses, a `ProgrammerError`, nothing moved: a credential and a
-provider together; one that is no field value — anything but visible ASCII, spaces and tabs, or a
-space or a tab first or last; one over `ws://` off the loopback, its upgrade crossing in the clear;
-and one over a `WebSocket` without `ws`'s shape — a page's, Node's global — which writes no field of
-its caller's choosing: a page presents a `JWT`, in the envelope. A value the provider hands that is
-no field value fails its attempt the same way, which a reconnection does not try again; what it
-throws fails that attempt, its cause. An upgrade that carries an `Origin` carries none, whatever its
-`Authorization`: a page's browser writes its own authentication on it, as it sends its cookies, so
-any page the server takes would present its user's credential. Two `Authorization` lines on an
-upgrade are refused 400, `malformed`. No client follows a redirect: a 3xx answered to an upgrade
-fails its connect, its status named over `ws`, "the server refused the upgrade: 302". The
-`connection` event shows an upgrade as the HTTP server shows a connect, headers aside — its method,
-its target and its peer — so no event carries its credential.
+provider, identified by its function's identity. Its attempts are sequential: an attempt using the
+same provider waits for its earlier call to settle, then asks anew; a different provider asks at
+once. An answer from an earlier attempt serves none after it, and a late failure is observed, never
+left unhandled. A provider that ignores its signal and never settles holds every later attempt that
+would ask it; those attempts end within their own cancellation, timeout and dispose bounds (spec
+15.15). A provider honours its signal so that later attempts can ask it again. The attempt's
+`signal` is aborted once the attempt ends, in a later turn than its connect settles, so what a
+listener of it throws never takes the place of the connect's outcome; a provider that cancels itself
+while that `signal` is still live fails its attempt as any failure of its does. The server hands it
+beside every envelope of that connection, as it came, trimmed, so a request presenting `ELSEWHERE`
+stands for it, resolved per request by the verifier, as over HTTP: one that no longer holds, or
+whose end has come, is refused on the request that presents it, and the connection stays. One
+connection carries one credential: a client presents another by connecting again, its provider
+handing the new one, and gives its router's default `ELSEWHERE` the same bytes, from one source;
+between the two, a call fails before it goes, `DESTINATION_UNREACHABLE`. A connect refuses, a
+`ProgrammerError`, nothing moved: a credential and a provider together; one that is no field value —
+anything but visible ASCII, spaces and tabs, or a space or a tab first or last; one over `ws://` off
+the loopback, its upgrade crossing in the clear; and one over a `WebSocket` without `ws`'s shape — a
+page's, Node's global — which writes no field of its caller's choosing: a page presents a `JWT`, in
+the envelope. A value the provider hands that is no field value fails its attempt the same way,
+which a reconnection does not try again; what it throws fails that attempt, its cause. An upgrade
+that carries an `Origin` carries none, whatever its `Authorization`: a page's browser writes its own
+authentication on it, as it sends its cookies, so any page the server takes would present its user's
+credential. Two `Authorization` lines on an upgrade are refused 400, `malformed`. No client follows
+a redirect: a 3xx answered to an upgrade fails its connect, its status named over `ws`, "the server
+refused the upgrade: 302". The `connection` event shows an upgrade as the HTTP server shows a
+connect, headers aside — its method, its target and its peer — so no event carries its credential.
 
 ```ts
 import { WebSocket } from 'ws';
@@ -2080,5 +2080,11 @@ unit project: its pure modules in Node, the panel's model among them, fed one tr
 procedures, `__tests__/traffic.ts`; the extension loaded in Chromium against the demo's static
 build, the page's calls followed to the panel and the watch stopped as the panel closes —
 `hook.test.ts`, which holds the hook, the bridge and the background, since they run only together;
-and the panel as a page on a fake DevTools API, for what only DevTools gives it.
-`yarn devtools:build` and `yarn playground:build:file` make what they load.
+in it, the demo's client followed over MQTT 5,
+`follows the page’s calls, each service debug step and its envelopes to the panel over MQTT 5`:
+`demo/serve.ts` beside a broker of the run's own, its page at `?transport=mqtt`, its one WebSocket
+the broker's — `node ../../tools/mqtt-broker.mjs run -- yarn test:devtools` plays it, CI's job
+`mqtt` runs it, `--grep "over MQTT 5"`, and where `BEAD_MQTT_URL` and `BEAD_MQTT_WS_URL` name no
+broker it is skipped, saying so, or failed under `BEAD_MQTT_REQUIRED=1`; and the panel as a page on
+a fake DevTools API, for what only DevTools gives it. `yarn devtools:build` and
+`yarn playground:build:file` make what they load.

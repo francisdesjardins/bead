@@ -1,9 +1,7 @@
 name: CI
 
 # Every job on every push and pull request: the spec is shared, so a change anywhere can break
-# either side. `ci-ok` stands for every job; it fails when any other job did not pass. Branch
-# protection, which would make it the one check a branch requires, waits on GitHub Pro or a public
-# repository.
+# either side. `ci-ok` stands for every job; it fails when any other job did not pass.
 on:
   # Branches only: a tag pushed by a release points at a commit its branch's run already checked.
   push:

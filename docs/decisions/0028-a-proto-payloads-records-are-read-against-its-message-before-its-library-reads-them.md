@@ -265,7 +265,7 @@ codec, the check in front:
   ([0037](0037-a-procedure-is-also-an-http-route-which-a-gateway-answers-as-one-more-client-of-its-server.md));
   the runner closes a text-format suite after it, whose 909 tests a testee skips, since Bead's
   `proto` carries no text form. Each count moves only with the pin, or with a form the testees
-  answer. A third language adds its testee's command.
+  answer. Rust, and each language after it, adds its testee's command.
 - **The testees**, `implementations/typescript/tools/protobuf-conformance/` on the TypeScript side's
   own install, type-checked by its own `tsconfig.json` once its code is generated, since the side's
   type-check and lint cannot read it without that code, and `implementations/dotnet/tools/Bead.ProtobufConformance/`, outside `Bead.slnx`
@@ -346,8 +346,8 @@ v36.2 does not reach; each side's twin tests of the check, `src/proto/__tests__/
 `tests/Bead.Protobuf.Tests/ProtoRecordsTests.cs`, one sentence each pair, hold what no entry of
 `Probe` reaches.
 
-**A third language** checks a payload's records by its own library's descriptor, plays the entries,
-and adds its testee to the suite.
+**Rust, and each language after it,** checks a payload's records by its own library's descriptor,
+plays the entries, and adds its testee to the suite.
 
 **Out of scope**: the U+FEFF row, which stays open; the writer's surrogate; and the upstream
 reports, protobuf-es's points, its packed reading, its map entries, its depth count and its wire

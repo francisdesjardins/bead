@@ -95,6 +95,9 @@ tests/
   Shared/                       what several test projects link: the test clock, the durations'
                                 helper, the JSON payloads, the addresses a server listens on
 tools/
+  Bead.Benchmarks/              the bench, outside the solution: the seven layers on the loopback,
+                                in the TypeScript bench's units (README, Measurement); CI's dotnet
+                                job builds it in Release
   Bead.Fuzz/                    the fuzz targets, the TypeScript side's one for one, which
                                 tools/fuzz.mjs runs under libFuzzer (README, Fuzzing)
   Bead.ProtobufConformance/     protobuf's conformance testee, outside the solution: its
@@ -106,14 +109,14 @@ tools/
                                 at run time (decision 0035)
 ```
 
-A transport that needs a framework has a project of its own. Each transport server is a Kestrel
-application of its own: one port for both comes from a proxy in front, never from a server they
-share. The in-memory transport needs none, and lives in `Bead.Core`: `MemoryTransportClient` and
-`MemoryTransportServer`, two routers of one process, each envelope copied and handed on in a later
-turn, a credential and the client's address beside each request (spec 15.13). One server takes
-its connections from several transports through `JoinedServerTransport`, each handle its own
-transport's, two of one type refused (spec 15.14): an in-memory transport beside a WebSocket one,
-say, its service offered once.
+A transport that needs a framework has a project of its own. Each transport server over HTTP or a
+WebSocket is a Kestrel application of its own: one port for both comes from a proxy in front, never
+from a server they share. The in-memory transport needs none, and lives in `Bead.Core`:
+`MemoryTransportClient` and `MemoryTransportServer`, two routers of one process, each envelope
+copied and handed on in a later turn, a credential and the client's address beside each request
+(spec 15.13). One server takes its connections from several transports through
+`JoinedServerTransport`, each handle its own transport's, two of one type refused (spec 15.14): an
+in-memory transport beside a WebSocket one, say, its service offered once.
 
 A broker's core lives in `Bead.Core` too, needing no framework (spec 15.16 to 15.24, decisions 0038
 to 0040): a broker is a transport, and Bead is never a network of its own. A `BrokerParticipant` is

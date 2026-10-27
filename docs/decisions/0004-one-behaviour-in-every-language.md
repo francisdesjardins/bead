@@ -8,8 +8,8 @@
 Bead is a protocol before it is a package. It has a TypeScript implementation and a C# one, a
 builder generates servers and clients in each from the same definitions
 ([0022](0022-a-proto-becomes-one-checked-blueprint-and-each-language-is-generated-from-it.md)), and
-a constrained C side is where Bead goes. Two implementations of the same bytes drift unless
-something holds them to those bytes, and only a test both run does.
+Rust, the third language, and a constrained C side besides are where Bead goes. Two implementations
+of the same bytes drift unless something holds them to those bytes, and only a test both run does.
 
 Three ways were weighed. One core shared by every language, compiled once and bound in each, holds
 the behaviour by construction, but costs each platform its idioms and its debugging, and makes every
@@ -23,13 +23,20 @@ copies do.
 implementation does, in the RFC 2119 sense. A unit no entry cites, which `spec/units.txt` lists,
 binds every implementation all the same: the entries say what a side does, and the text states what
 it must. Beside it, `spec/vectors.json` holds the bytes of envelopes and what they say, and what a
-reader refuses with which code; `spec/conversations.json` holds what a server of the interop
-service — its API, `spec/interop-blueprint.json`, and its behaviour, relay and credentials,
-`spec/interop-service.json` — does with what its clients send, over one connection or several:
-the envelopes it answers, what it reports, and the silence it keeps; `spec/transports.json`
-holds what a transport's server does at its edge, over HTTP and over a WebSocket: the exchanges and
-the messages it takes, and what it gives back; `spec/clocks.json` holds what every side's test clock
-does when a case advances it; `spec/durations.json` holds what every place that takes a duration an
+reader refuses with which code, a broker's parcels and the messages refused as parcels, and an
+MQTT 5 PUBLISH and an AMQP 1.0 message counted to their every byte; `spec/conversations.json`
+holds what a server of the interop service — its API, `spec/interop-blueprint.json`, and its
+behaviour, relay and credentials, `spec/interop-service.json` — does with what its clients send,
+over one connection or several: the envelopes it answers, what it reports, and the silence it
+keeps; `spec/transports.json` holds what a transport's server does at its edge, over HTTP, over a
+WebSocket and over a broker, in memory, over MQTT 5 and over AMQP 1.0: the exchanges, the messages
+and the parcels it takes, and what it gives back; and, over a broker, what a client's transport
+does with the parcels its acceptors send
+([0038](0038-over-a-broker-a-connection-is-placed-once-at-its-open-named-by-both-its-ends.md),
+[0041](0041-over-mqtt-5-a-participant-is-one-clean-link-and-a-parcel-one-publish-each-counted-to-its-byte.md),
+[0043](0043-over-amqp-1-0-a-participant-is-one-connection-whose-exclusive-inbox-ends-with-it-and-a-parcel-one-message-of-one-profile-each-counted-to-its-byte.md));
+`spec/clocks.json` holds what every side's test clock does when a case advances it;
+`spec/durations.json` holds what every place that takes a duration an
 application gives a side makes of every input; `spec/identities.json` holds what a router takes, or
 refuses, as a procedure is declared to it
 ([0017](0017-ids-are-for-life-and-a-procedures-name-takes-one-ascii-form.md)); `spec/codecs.json`
@@ -51,13 +58,15 @@ and its exchanges
 ([0037](0037-a-procedure-is-also-an-http-route-which-a-gateway-answers-as-one-more-client-of-its-server.md)).
 
 **The interop runs both ways, and is required.** Each implementation's interop server offers the
-interop service over WebSocket and over HTTP, and each implementation's client calls every other's
-server over both: the C# client against the TypeScript server, and the TypeScript client against the
-C# server; and each side's generated HTTP client calls the other side's gateway, the two served
-OpenAPI documents compared byte for byte (`HttpInteropTests.cs`, `interop.test.ts`). Each side finds
-the other from the directory that holds `spec/spec.md`, and starts its server. Where the other
-runtime is missing, the interop is skipped, saying so; `BEAD_INTEROP_REQUIRED=1` turns the skip into
-a failure, and CI sets it.
+interop service over WebSocket and over HTTP, and over MQTT 5 and over AMQP 1.0 against a real
+broker of each binding, and each implementation's client calls every other's server over each: the
+C# client against the TypeScript server, and the TypeScript client against the C# server; and each
+side's generated HTTP client calls the other side's gateway, the two served OpenAPI documents
+compared byte for byte (`HttpInteropTests.cs`, `interop.test.ts`). Each side finds the other from
+the directory that holds `spec/spec.md`, and starts its server. Where the other runtime is missing,
+the interop is skipped, saying so; `BEAD_INTEROP_REQUIRED=1` turns the skip into a failure, and CI
+sets it. Over a broker, where `BEAD_MQTT_URL` or `BEAD_AMQP_URL` names none, it is skipped alike,
+and `BEAD_MQTT_REQUIRED=1` and `BEAD_AMQP_REQUIRED=1`, which CI sets, fail it instead.
 
 **One vocabulary, its steps named by who acts.** A step is what the test does — `send` an envelope,
 an HTTP request or a WebSocket message; `open` a connection, again once it closed; `close` it;
@@ -137,13 +146,18 @@ given or captured value is put in: the server's `{host}`, a connection's `{token
 read as the file's `$comment` says: one socket per exchange unless a case says otherwise; its
 status; its fields by name, in any case; its body by its length, or de-chunked. Over a WebSocket,
 the peer frames RFC 6455 itself where a case needs what a library will not do: a ping left
-unanswered, a message in fragments, a frame past the bound. A value drawn at random is captured by
-one of the shapes the schema names, each defined once in ASCII classes — `token`, `delay-seconds`,
-`http-date` — never by a free pattern. A case sets the bounds it plays by the names section 15 gives
-them, in a table as section 12.2 names the router's limits, and the file's `defaults` holds their
-defaults, which each side checks against its own; the bound per address is played from one source,
-through the address a proxy on the same machine forwards, which section 15.12 states as both sides
-take it:
+unanswered, a message in fragments, a frame past the bound. Over a broker the file plays both roles,
+a server's transport and a client's, the test's peers one acceptor or two, a case reading what the
+side under test publishes to a name and to their inboxes, over each side's in-memory broker and
+against a real broker of each binding, the Mosquitto over MQTT 5 and the RabbitMQ over AMQP 1.0 that
+the file's `brokers` describes
+([0038](0038-over-a-broker-a-connection-is-placed-once-at-its-open-named-by-both-its-ends.md)). A
+value drawn at random is captured by one of the shapes the schema names, each defined once in ASCII
+classes — `token`, `delay-seconds`, `http-date` — never by a free pattern. A case sets the bounds it
+plays by the names section 15 gives them, in a table as section 12.2 names the router's limits, and
+the file's `defaults` holds their defaults, which each side checks against its own; the bound per
+address is played from one source, through the address a proxy on the same machine forwards, which
+section 15.12 states as both sides take it:
 
 ```json
 {
@@ -212,10 +226,14 @@ same in either order, or whose order an `until` fixes. A gauge is read, and a re
 scripted, because a gauge shows what the wire does not — a listen held sends nothing — where a
 scripted refusal stands in for what the wire can show.
 
-**A WebSocket's ping plays on the real clock.** Both sides ping and drop a peer that leaves a ping
-unanswered (section 15.3); the C# side's platform times it, which no clock given reaches. A few
-cases are marked as played in real time, at a heartbeat of 200 ms: a ping seen within its bounds,
-and a peer that never answers dropped within its own.
+**A WebSocket's ping and a broker's heartbeat play on the real clock.** Both sides ping and drop a
+peer that leaves a ping unanswered (section 15.3); the C# side's platform times it, which no clock
+given reaches. Over a broker, each side pings a connection silent for its `heartbeat`, and closes
+with 4001 one whose peer answers nothing, on its platform's clock (section 15.21). A few cases are
+marked as played in real time: over a WebSocket, at a heartbeat of 200 ms, a ping seen within its
+bounds, and a peer that never answers dropped within its own; over each broker, at a heartbeat of
+500 ms, a silent connection pinged, none whose peer sends, and one whose peer answers nothing
+closed.
 
 **Time is a step, on the clock every side is given**
 ([0011](0011-every-side-takes-its-time-from-a-clock-it-is-given.md)). `advance` steps it from due to
@@ -322,10 +340,10 @@ that differs, or on any file a generator writes that is not committed.
 **What no entry plays stays with each side's twin tests**, and `docs/support.md` says so: a
 destination that is a router the relay calls through, with its two legs' limits and the session
 every requester presenting none or `OPAQUE` shares behind it (sections 14.3 and 14.7), until the
-interop plays a relay across languages, which is open work
+interop plays a relay across languages, which is ahead
 ([0019](0019-a-relay-terminates-each-leg-and-routes-nothing-past-it.md)), and its leg B refused or
 lost there over HTTP (section 14.5, its fourth and fifth rows), whose responses the twins script,
-until the transports' file has a client part; HTTP/2 and TLS, which both
+until the transports' file has a client part over HTTP and a WebSocket; HTTP/2 and TLS, which both
 servers serve, an open row of the matrix naming both; keep-alive, pipelining and a connection used
 again, which one socket per exchange leaves out; and the transport's contract with its router — its
 events, its handles, its gauges.
@@ -334,9 +352,10 @@ events, its handles, its gauges.
 with the case that plays it, and the cell of the matrix it proves points to that case in the same
 change; the twins of a transport's contract stay.
 
-**The client part comes by a decision of its own**, with the outcomes the spec names for a client's
-call — a result, a failure and its code, refused, lost, timed out, disconnected — which each side
-gives as a property of its error, never as a class.
+**Over a broker the file plays a client's transport; over HTTP and a WebSocket its client part is
+ahead**, by a decision of its own, with the outcomes the spec names for a client's call — a result,
+a failure and its code, refused, lost, timed out, disconnected — which each side gives as a property
+of its error, never as a class.
 
 **One vocabulary, and the spec's words.** The conversations and the transports' cases speak `send`
 and `expect`, as their generators write them, and both sides name the relays a failure crossed
@@ -345,10 +364,10 @@ and `expect`, as their generators write them, and both sides name the relays a f
 **The harnesses play the conformance files without retry**, on both sides: Playwright retries a
 failed test twice on CI, which would hide on the TypeScript side what fails the C# side's run.
 
-**The file gives a broker's conformance a vocabulary to start from**: named connections, a clock
-advanced, and, later, a client part. A broker's own part is decided with its transport
-([0021](0021-a-broker-is-a-transport-and-bead-is-never-a-network.md)), and this file commits it to
-nothing.
+**The broker's cases speak the file's vocabulary**, named connections and a clock advanced, in both
+roles ([0038](0038-over-a-broker-a-connection-is-placed-once-at-its-open-named-by-both-its-ends.md) to
+[0041](0041-over-mqtt-5-a-participant-is-one-clean-link-and-a-parcel-one-publish-each-counted-to-its-byte.md),
+[0043](0043-over-amqp-1-0-a-participant-is-one-connection-whose-exclusive-inbox-ends-with-it-and-a-parcel-one-message-of-one-profile-each-counted-to-its-byte.md)).
 
 **`spec/check.py` holds the frame**, in the spec job, and reports group by group which sides' tests
 name each file and group, failing on one a side never names. It reads the tests' sources: it sees
@@ -362,6 +381,8 @@ harnesses skip what is excused in their loops, and check nothing more.
 TypeScript side for its interop server, runs the C# tests, the C# client's interop among them, then
 the TypeScript side's `test:interop`, and its `test:browser`, whose page of another origin calls
 both sides' HTTP servers in Chromium. The `typescript` job leaves out the tests of the C# server.
+Over MQTT 5 and over AMQP 1.0, the jobs `mqtt` and `amqp` run it both ways, each against a broker
+of the run's own, on the runner's host.
 
 **A language joins with every vector, conversation and transport case passing, and with interop
 against every language already here**: a client of each against a server of each other, N × (N − 1)
@@ -404,7 +425,7 @@ in seven rounds. Its objections, each with its answer:
 | A destination that is a router called through leaves 14.3's two legs' limits and 14.7's shared session unplayed                                       | Accepted as found: those stay with the twin tests and the matrix says so. Refused here: a relay across languages in the interop, a topology of its own, which is a change of its own.                                                                                                          |
 | The conversations' shape and both harnesses hold one connection, one queue and reports without their connection                                       | Accepted: `on` stands beside a step's action, each connection has its own queue, a report names its connection, and leg B's request gives its flags.                                                                                                                                           |
 | A raw HTTP/1.1 peer written once per language is a new source of divergence and cannot express what it was brought for                                | Accepted: the generator renders each request to its octets, the file's comment fixes how a response is read, a shared set of response octets checks each reader, and the WebSocket peer frames RFC 6455 itself where a case needs it; one socket per exchange is named for what it leaves out. |
-| The client part has no shared vocabulary and no example                                                                                               | Accepted: it comes by a decision of its own, with the outcomes the spec names for a client's call.                                                                                                                                                                                             |
+| The client part has no shared vocabulary and no example                                                                                               | Accepted: the client part is a decision of its own, with the outcomes the spec names for a client's call: over a broker [0038](0038-over-a-broker-a-connection-is-placed-once-at-its-open-named-by-both-its-ends.md)'s, and over HTTP and a WebSocket one ahead.                               |
 | A side will skip by name a case that crosses a platform's difference, and naming the file proves nothing                                              | Accepted: a case carries `differs`, the check ties it to its row, and each harness checks that it played every case but those excused.                                                                                                                                                         |
 | Retiring the twins a case covers loses what only they assert                                                                                          | Accepted: no twin is retired whole; an assertion leaves both sides when a case plays it, the matrix's cells move with it, and the transport's contract keeps its twins.                                                                                                                        |
 | Excluding the WebSocket's ping leaves out a behaviour both sides share                                                                                | Accepted: it plays on the real clock, in a few cases marked so, at a heartbeat of 200 ms.                                                                                                                                                                                                      |
@@ -470,7 +491,7 @@ the twins.
 | The outbox at a relay is not racy: both sides answer `DESTINATION_LOST` by construction, while the procedure cannot have run; a case would choose between section 14.5's fourth and fifth rows | Accepted in part: the outbox's turn is reported whichever row it takes, and the text, not a case, decides which, by the user's decision: section 15.9 says that an envelope past its outbox is one its transport had, as a notification handed to its transport counts as sent (`debugging.md` section 10.1) and as a transport's send settles on queueing, never on delivery. A send that rejected would answer the fourth row only if the connection closed after the rejection, and would add a report to the outbox's own case. |
 | Totals written by several changes at once collide                                                                                                                                              | Accepted: a change names what it adds, the totals stay in `docs/support.md` and the README's table of files, the change that merges last counts them again, and `spec/check.py` holds them to the files; the changelog states none.                                                                                                                                                                                                                                                                                                 |
 | A destination over HTTP that does not listen is played over real sockets already, by twins                                                                                                     | Accepted: the case adds its registration on the wire, its exact octets and the citation of section 14.5's fourth row, and carries the twins' detail; the matrix's cell names it beside them, and they stay for what the client hears, which the file does not hold.                                                                                                                                                                                                                                                                 |
-| Leaving a leg B through a router called over HTTP to scripted twins widens an exception this record bounded, with no row saying so                                                             | Accepted: the widening is a decision of its own, kept here with its reason — the transports' file plays a server, never the client a relay calls through, until it has a client part — and the record's list of what no entry plays, and the matrix's, are extended, not doubled.                                                                                                                                                                                                                                                   |
+| Leaving a leg B through a router called over HTTP to scripted twins widens an exception this record bounded, with no row saying so                                                             | Accepted: the widening is a decision of its own, kept here with its reason — the transports' file plays a server, never the client a relay calls through, until it has a client part over HTTP and a WebSocket — and the record's list of what no entry plays, and the matrix's, are extended, not doubled.                                                                                                                                                                                                                         |
 
 ### On the fixes of 0.3.0
 

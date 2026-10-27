@@ -27,8 +27,8 @@ library's two functions
 ([0018](0018-a-services-procedures-are-typed-descriptors-served-and-called-through-one-layer.md)).
 Every side needs one answer to a protobuf message that does not decode, and a conformance file that
 pins it, as `spec/codecs.json` pins `raw`, `text` and `json`
-([0016](0016-a-json-payload-has-one-form-whichever-side-writes-it.md)); and a third language needs
-to know what of the format is Bead's to state, and what is protobuf's.
+([0016](0016-a-json-payload-has-one-form-whichever-side-writes-it.md)); and Rust, and each language
+after it, needs to know what of the format is Bead's to state, and what is protobuf's.
 
 **What the stock libraries do.** Probed on 2026-10-05: protobuf-es 2.16.0 and Google.Protobuf 3.36.2
 agree on every outcome a protobuf payload's reader meets first — a premature end, a string that is
@@ -150,7 +150,7 @@ levelings of a field at a wire type its type does not take and of a map's entry 
 does not declare, are
 [0028](0028-a-proto-payloads-records-are-read-against-its-message-before-its-library-reads-them.md)'s;
 items 7 and 8, a message that leaves a required field unset and a closed enum's undeclared number,
-added after item 6, are [0042](0042-a-proto-message-that-leaves-a-required-field-unset-neither-reads-nor-writes-and-a-gateway-refuses-it-where-its-server-would.md)'s.
+are [0042](0042-a-proto-message-that-leaves-a-required-field-unset-neither-reads-nor-writes-and-a-gateway-refuses-it-where-its-server-would.md)'s.
 
 **The runtime codec sets the bound, in both languages.** What a target writes of a `proto` binding
 is the runtime's codec of its message's schema, which reads through the stock library with Bead's
@@ -337,8 +337,8 @@ pin no whole message's bytes, so a library's order of fields is never one of the
 **A C# read of a `proto` payload costs a copy** of its bytes after their length, and a stream
 around them, for the bound to be Bead's rather than the library's.
 
-**A third language** plays the `proto` rows through its own stock library and its target's calls,
-sets the bound in its library, and finds its own outcome for the platform row.
+**Rust, and each language after it,** plays the `proto` rows through its own stock library and its
+target's calls, sets the bound in its library, and finds its own outcome for the platform row.
 
 **The matrix's `proto` rows.** The feature "Payloads" counts `proto`; the open row "A string's
 leading U+FEFF in a proto payload" holds the one `differs` of these rows, the TypeScript side's; the

@@ -211,20 +211,25 @@ close unclean whatever code the peer answers with, and reports it, naming the bo
 `ws` and .NET included, the TypeScript client giving `ws` its `closeTimeout`: a peer that has not
 answered by then is dropped; a client over the global `WebSocket` leaves its close to its platform.
 
-**A transport tells on its `error` what it ends a connection for of its own** (spec 15.1), a
-client's as a server's: a protocol error on it; a message it fails with 1009, or over HTTP an
-envelope past its `maximumBodyBytes`, an answer's or a batch's, and a connection a server drops
+**A transport tells on its `error` what it ends a connection for of its own**, a client's as a
+server's, as spec 15.1 lists it: a protocol error on it; a message it fails with 1009, or over HTTP
+an envelope past its `maximumBodyBytes`, an answer's or a batch's, and a connection a server drops
 behind a bound, each naming the bound in the spec's spelling and its value, the same words on both
-sides; and a batch that does not read, saying what of it does not. It tells it once, as the
-connection ends, its close or its drop begun, and before its close, which is then unclean; its close
-is told in a `finally`, so a listener's throw keeps nothing open. It never tells a peer that drops
-without its closing handshake, its TCP connection ended or reset, nor one its heartbeat drops, nor
-its own drop of a peer that never answered a close within its close timeout, nor, over HTTP, a
-server gone, a refusal of its own, an answer of another type, an exchange lost or a listen given up
-past its inactivity timeout: each one's close tells it. A client over the global `WebSocket`, whose
-bare `error` cannot be told from a drop, tells none, a platform row of `docs/support.md`, "A
-WebSocket client's error once open". `close` stays its pair of booleans, and **a connection's close
-code carried on `close`**, what its peer said, is ahead, by a round of its own.
+sides; a batch that does not read, saying what of it does not; a Web Worker client's worker that
+errs, named by its message and where its script threw it; and a broker connection lost to a gap, a
+bound or a parcel that does not read, naming it, and a message a broker's participant takes that is
+no parcel, which it drops and which ends no connection (spec 15.17, 15.19, 15.20). It tells a
+connection's own once, as the connection ends, its close or its drop begun, and before its close,
+which is then unclean; its close is told in a `finally`, so a listener's throw keeps nothing open.
+It never tells a peer that drops without its closing handshake, its TCP connection ended or reset,
+nor, over a broker, a RESET, a GONE or its participant's link lost (spec 15.21), nor one its
+heartbeat drops, nor its own drop of a peer that never answered a close within its close timeout,
+nor, over HTTP, a server gone, a refusal of its own, an answer of another type, an exchange lost or
+a listen given up past its inactivity timeout: each one's close tells it. A client over the global
+`WebSocket`, whose bare `error` cannot be told from a drop, tells none, a platform row of
+`docs/support.md`, "A WebSocket client's error once open". `close` stays its pair of booleans, and
+**a connection's close code carried on `close`**, what its peer said, is ahead, by a round of its
+own.
 
 **An HTTP exchange whose executor was called and failed is of unknown outcome**: its envelopes count
 as handed over, its send resolves as a lost exchange's does (spec 15.7), and its connection is lost;
@@ -263,8 +268,7 @@ and no test holds.
 the calls a connection has answered, as HTTP/2's connection window; a raise of
 `maximumAnsweringCalls` for one trusted connection; a requester's queue past it; a budget of what
 waits for every socket together, as `bodyBytesBudget` is for bodies; and 0030's fit of the bound per
-address, an IPv6 client keyed by its prefix and a value fit for a NAT, landing for both transports
-at once.
+address, an IPv6 client keyed by its prefix and a value fit for a NAT, for both transports at once.
 
 **The gate.** `spec/conversations.json`, played by both sides: a request past the calls its
 connection has its side answer refused while the others go on, and one taken once a call ends; a

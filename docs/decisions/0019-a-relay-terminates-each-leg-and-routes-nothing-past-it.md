@@ -55,8 +55,8 @@ finds the destination unknown. Who may register which destination is the applica
 reach one is its `beforeRoute`'s (spec 14.1, 14.7).
 
 **A relay carries no subscription**: it refuses a request that opens one with
-`SUBSCRIPTION_UNSUPPORTED` (22), the code of any path that carries no notification back. A relay
-that carries one is a decision of its own.
+`SUBSCRIPTION_UNSUPPORTED` (22), the code of any path that carries no notification back. One that
+carries a subscription is ahead, by a decision of its own, which a page across a broker needs.
 
 **It forms no chain**: leg B names no destination, so no loop can form, and nothing is routed past
 the relay.
@@ -80,9 +80,10 @@ target in the session its own credential resolves to, which the target verifies
 and so does a paced subscription ([0002](0002-a-subscription-goes-at-its-clients-pace.md)).
 
 **A relay is played as a conversation across connections**, against each side's own relay, and a
-relay across languages, one side's relay in front of the other's destination, is open work: until
-the interop plays one, a relay's two legs' limits and the session its requesters share are held by
-each side's twin tests ([0004](0004-one-behaviour-in-every-language.md)).
+relay across languages in the interop, one side's relay in front of the other's destination, is
+ahead, in the twin tests' place: until the interop plays one, a relay's two legs' limits and the
+session its requesters share are held by each side's twin tests
+([0004](0004-one-behaviour-in-every-language.md)).
 
 **The rule is section 14 of [`spec/spec.md`](../../spec/spec.md)**, and `spec/conversations.json`
 plays it against every implementation's relay.

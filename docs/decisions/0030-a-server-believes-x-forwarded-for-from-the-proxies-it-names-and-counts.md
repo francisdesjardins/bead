@@ -214,9 +214,8 @@ says; an IPv6 host holds a /64 or more ([RFC 6177](https://www.rfc-editor.org/rf
 [RFC 7421](https://www.rfc-editor.org/rfc/rfc7421)) and walks out of a bound keyed by one address.
 15.12 names both.
 
-**Ahead, each by a decision of its own**: `Forwarded`, once a proxy that writes it alone is met;
-IPv6 keyed by a prefix; a per-address value fit for a NAT; each for an HTTP server and a WebSocket
-server at once.
+**Ahead, each by a decision of its own**: `Forwarded`; IPv6 keyed by a prefix; a per-address value
+fit for a NAT; each for an HTTP server and a WebSocket server at once.
 
 **The gate.** `spec/transports.json`, played by both sides. Over HTTP: the bound behind a proxy
 named; a field from a socket no entry holds, not read; the walk past two networks, what a client

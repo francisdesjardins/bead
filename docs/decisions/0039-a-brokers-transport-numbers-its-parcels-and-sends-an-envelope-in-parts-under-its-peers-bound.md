@@ -34,13 +34,14 @@ NATS keeps a publisher's order alike; an AMQP inbox ends with its link. A messag
 awaited means one dropped for good.
 
 **A broker bounds a message, often below Bead's envelope.** With a parcel's 28 bytes of prefix,
-one message carries an envelope of about 268 MB on Mosquitto 2.1.2, the protocol's, its
-`max_packet_size` without a limit by default, 1,048,510 on EMQX 6.3.2 (1 MiB), about 16,777,124 on
-RabbitMQ 4.4.0 (16 MiB) and 1,048,548 on nats-server 2.15.1 (`max_payload` 1 MiB): a chunk of
-1,048,576 bytes needs two parts on EMQX and NATS, and an envelope of `maximumEnvelopeBytes`,
-16,778,240, seventeen. A packet past its receiver's Maximum Packet Size is discarded by its broker,
-a loss ([MQTT-3.1.2-25]), and one a broker sends all the same ends its receiver's link (MQTT 5.0
-§3.1.2.11.4, §4.13.1), as [0041](0041-over-mqtt-5-a-participant-is-one-clean-link-and-a-parcel-one-publish-each-counted-to-its-byte.md) counts it.
+one message to a server's inbox, `bead/i/server` or `bead.i.server`, carries an envelope of about
+268 MB on Mosquitto 2.1.2, the protocol's, its `max_packet_size` without a limit by default;
+1,048,521 on EMQX 6.3.2 (1 MiB), as 15.30 counts it; 16,777,128 on RabbitMQ 4.4.0 (16 MiB), as
+15.37 counts it; and 1,048,548 on nats-server 2.15.1 (`max_payload` 1 MiB): a chunk of 1,048,576
+bytes needs two parts on EMQX and NATS, and an envelope of `maximumEnvelopeBytes`, 16,778,240,
+seventeen there and two on RabbitMQ. A packet past its receiver's Maximum Packet Size is discarded
+by its broker, a loss ([MQTT-3.1.2-25]), and one a broker sends all the same ends its receiver's
+link (MQTT 5.0 §3.1.2.11.4, §4.13.1), as [0041](0041-over-mqtt-5-a-participant-is-one-clean-link-and-a-parcel-one-publish-each-counted-to-its-byte.md) counts it.
 
 The options weighed:
 
@@ -131,8 +132,12 @@ client's parcels crossing its one link, and a parcel past the gap it leaves ends
 told; a dropped tail shows at the connection's next heartbeat. Each binding states the queue
 settings a server participant needs.
 
-**A reorder within one link would lose a connection**: should the AMQP 1.0 binding measure a
-RabbitMQ requeue that reorders past the next parcel, it brings a hold then, with its case.
+**No binding reorders a connection's parcels**: a reorder within one link would lose a connection;
+MQTT 5 resends into no session that was not kept, and the AMQP 1.0 binding settles each message
+`accepted` alone, never `released` or `modified`, which RabbitMQ hands again behind later ones, and
+never attaches its inbox again in place, so no requeue reaches a live connection (spec 15.33, 15.36;
+[0043](0043-over-amqp-1-0-a-participant-is-one-connection-whose-exclusive-inbox-ends-with-it-and-a-parcel-one-message-of-one-profile-each-counted-to-its-byte.md)).
+Nothing is held past a gap.
 
 **One envelope in parts each way**: a large result holds its direction until its last part, as a
 WebSocket's fragmented message does; the transfers of 12.4 stay the way to interleave large payloads

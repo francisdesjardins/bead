@@ -949,10 +949,10 @@ step, on the clock its side runs on (decision 0011):
    dropped, so no fraction reaches a timer;
 3. as its session comes to be kept, by a reading of its own apart from the one its verdict took, as
    a renewal moves _E_, and at its timer's due, the side reads _W_ again, never counting down, and
-   takes _R_ = _E_ − _W_: at _R_ ≤ 0 the session ends in a turn of its own, past the answer that kept
-   it, with no timer armed; otherwise it arms a timer of min(_R_, 2³¹ − 1) ms in place of the one
-   before, so an end is never refused for its distance, and a wall clock set by hand takes effect at
-   the next due;
+   takes _R_ = _E_ − _W_: at _R_ ≤ 0 the session ends in a turn of its own, past the answer that
+   kept it, with no timer armed; otherwise it arms a timer of min(_R_, 2³¹ − 1) ms in place of the
+   one before, so an end is never refused for its distance, and a wall clock set by hand takes
+   effect at the next due;
 4. an `ELSEWHERE` whose end _W_ has reached when its verification settles does not hold:
    `SESSION_REQUIRED` (section 13.11).
 
@@ -1157,15 +1157,15 @@ _Transports: `spec/transports.json`._
 and when it closes, and, over HTTP, when a listen is held and when it ends (section 13.7). On a
 connection, it hands each envelope on once, in the order its side sent it — over a broker by the
 sequence of its parcels (section 15.19) — unless its section says otherwise: HTTP keeps the outbox's
-order for what the server sends of its own (section 15.9), and
-none between a client's exchanges, so that a CANCEL may come before its REQUEST (section 15.5). A
-transport that keeps no order states what may overtake, and one that may hand an envelope on twice
-states what a copy is, each with what the side that receives it does of it. A server's transport
-names each connection it holds by a handle, which its router, its sessions and its relays name the
-connection by, and what it reports (`debugging.md` 4.1, 5.1). It draws the handle as it takes the
-connection, never from the peer's address alone, which another connection may share
-([RFC 9293 §3.4.1](https://www.rfc-editor.org/rfc/rfc9293#section-3.4.1)), and gives none twice:
-no two connections it holds are one, and its bounds, its gauges and its stop reach each. A server's
+order for what the server sends of its own (section 15.9), and none between a client's exchanges, so
+that a CANCEL may come before its REQUEST (section 15.5). A transport that keeps no order states
+what may overtake, and one that may hand an envelope on twice states what a copy is, each with what
+the side that receives it does of it. A server's transport names each connection it holds by a
+handle, which its router, its sessions and its relays name the connection by, and what it reports
+(`debugging.md` 4.1, 5.1). It draws the handle as it takes the connection, never from the peer's
+address alone, which another connection may share
+([RFC 9293 §3.4.1](https://www.rfc-editor.org/rfc/rfc9293#section-3.4.1)), and gives none twice: no
+two connections it holds are one, and its bounds, its gauges and its stop reach each. A server's
 transport stops when its application stops it: from then on it takes nothing new (sections 15.2,
 15.7) and it closes each connection it holds (sections 15.3, 15.7). A handle is no secret, and
 carries none (section 15.4); its form is its implementation's, written for a reader of a trace, and
@@ -1181,20 +1181,19 @@ fails no exchange and closes nothing. What a side's transport reports on its `er
 a server's, is what it ends a connection for of its own — a protocol error on it; a message it fails
 with 1009, or over HTTP an envelope past its `maximumBodyBytes`, an answer's or a batch's, and a
 connection a server drops behind a bound, each naming the bound and its value (sections 15.3,
-15.12); a batch that does not read, saying what of it does not (section 15.9); a Web Worker
-client's worker that errs, an exception its script did not catch, which ends no worker, named by its
-message and where its script threw it, its server told the close unclean; a broker connection lost
-to a gap, a bound or a parcel that does not read, naming it, and a message a broker's participant
-takes that is no parcel, which it drops and which ends no connection (sections 15.17, 15.19,
-15.20) — and what a listener throws, as it throws: a connection's own once, as it ends, its close or its drop
-begun, so that no
-listener's throw keeps it open, and before its close, which is then unclean. It reports no peer that
-drops without its closing handshake, its TCP connection ended or reset, nor, over a broker, a RESET,
-a GONE or its participant's link lost (section 15.21), nor one its heartbeat drops,
+15.12); a batch that does not read, saying what of it does not (section 15.9); a Web Worker client's
+worker that errs, an exception its script did not catch, which ends no worker, named by its message
+and where its script threw it, its server told the close unclean; a broker connection lost to a gap,
+a bound or a parcel that does not read, naming it, and a message a broker's participant takes that
+is no parcel, which it drops and which ends no connection (sections 15.17, 15.19, 15.20) — and what
+a listener throws, as it throws: a connection's own once, as it ends, its close or its drop begun,
+so that no listener's throw keeps it open, and before its close, which is then unclean. It reports
+no peer that drops without its closing handshake, its TCP connection ended or reset, nor, over a
+broker, a RESET, a GONE or its participant's link lost (section 15.21), nor one its heartbeat drops,
 nor its own drop of a peer that never answered a close within its close timeout, nor, over HTTP, a
 server gone, a refusal of its own, an answer of another type, an exchange lost or a listen given up
-past its inactivity timeout: each one's close tells it, unclean, but for a client's own
-`disconnect` left unanswered, whose close is told as the `disconnect` asked.
+past its inactivity timeout: each one's close tells it, unclean, but for a client's own `disconnect`
+left unanswered, whose close is told as the `disconnect` asked.
 A server's transport tells each refusal it judges of its own: a request it refuses as it arrives,
 in section 15.6's order, or whose body it refuses as it comes, marked in `bead-refusal`. It never
 tells the 404 that ends an exchange or a listen it had taken as their connection closes (section
@@ -1223,9 +1222,8 @@ sends — a client's over HTTP, in memory or over a broker any field value, over
 its upgrade carried, compared in constant time; a Web Worker's none, nor a server's toward its
 client (sections 15.2, 15.9, 15.13, 15.22) — and whether it is secure — under TLS, on the loopback,
 or never leaving the machine — so that a side fails before it goes a call whose credential it cannot
-carry (section
-13.4). No failure's detail, event, trace or log carries that credential, nor a header's: only its
-credential scheme.
+carry (section 13.4). No failure's detail, event, trace or log carries that credential, nor a
+header's: only its credential scheme.
 
 ### WebSocket
 
@@ -1255,13 +1253,14 @@ given, and none otherwise. It asks for one credential at a time of each source, 
 by its reference: an attempt whose source's earlier ask is unsettled waits for it, within its own
 time (section 15.15), then asks anew, that earlier answer serving no later attempt; another source
 is asked at once; an ask that never settles holds every later attempt that would ask its source,
-so a provider honours the signal it is asked with; it fails that upgrade before it goes for one that is no field value, as
-section 15.5 says, and for one over a WebSocket that leaves the machine in the clear (section
-13.4), its upgrade being where it would cross. No server reads a credential from its target's
-query, which logs keep ([RFC 6750 §2.3](https://www.rfc-editor.org/rfc/rfc6750#section-2.3)), from
-a cookie, which a page's browser sends on its own, or from a subprotocol. A client writes no
-`Origin` on its upgrade: a page's browser writes its own, which the server judges (step 7). A server
-judges a request at its WebSocket's address in this order, and answers the first that applies:
+so a provider honours the signal it is asked with; it fails that upgrade before it goes for one that
+is no field value, as section 15.5 says, and for one over a WebSocket that leaves the machine in the
+clear (section 13.4), its upgrade being where it would cross. No server reads a credential from its
+target's query, which logs keep
+([RFC 6750 §2.3](https://www.rfc-editor.org/rfc/rfc6750#section-2.3)), from a cookie, which a page's
+browser sends on its own, or from a subprotocol. A client writes no `Origin` on its upgrade: a
+page's browser writes its own, which the server judges (step 7). A server judges a request at its
+WebSocket's address in this order, and answers the first that applies:
 
 1. What HTTP refuses of its own, a `Host` missing or repeated, a target in absolute-form it does not
    read, an authority that is no host, a target that holds an octet other than visible ASCII or a
@@ -1828,8 +1827,9 @@ parcel does not read: a kind to come, a parcel of a layout to come on a connecti
 kind does not take, a byte kept that is not 0, a half zero where it may not be or not zero where it
 must be, a body not its kind's, an ACCEPT's or a GONE's id that is no token, an ACCEPT's receive
 bound under 1,024, a GONE or a RESET with a sequence, any other with none; an OPEN's id that is no
-token, or its receive bound under 1,024, is its acceptor's to refuse (section 15.18). No parcel is written that a side refuses. An envelope is no parcel, and a parcel no
-envelope: their first bytes never meet.
+token, or its receive bound under 1,024, is its acceptor's to refuse (section 15.18). No parcel is
+written that a side refuses. An envelope is no parcel, and a parcel no envelope: their first bytes
+never meet.
 
 15.18. A client opens a connection by an OPEN to a server's name, its sequence 1, naming its half,
 its id, its incarnation (section 15.21) and its receive bound — the largest parcel its inbox takes
@@ -1850,15 +1850,14 @@ its connection named by both halves, and its client sends at once a PING of sequ
 them. A broker that says nothing serves the name fails it at once. Where its adapter offers a
 message's life, the OPEN lives in its broker its connect's time left (section 15.15), none when its
 time is without end, so that one no participant took in time is deleted there rather than taken
-late. The server tells its router the
-connection, drawing its handle (section 15.1), as it takes the client's first parcel naming both
-halves, which proves the client reads the inbox it named, and forgets a half-open connection,
-telling nothing, once `acceptTimeout` passes without it or a RESET names it. An ACCEPT of a
-connect that took another, ended or never was — a second participant's, to which its broker
-handed the OPEN again, one past its connect's end, each of several serving a name with no group —
-is answered with a RESET of its pair, to the inbox it names. A name served by several participants
-is served in a group; a participant serving one in a group unsubscribes it while it holds
-`maximumConnections`, and subscribes it again once it holds fewer.
+late. The server tells its router the connection, drawing its handle (section 15.1), as it takes the
+client's first parcel naming both halves, which proves the client reads the inbox it named, and
+forgets a half-open connection, telling nothing, once `acceptTimeout` passes without it or a RESET
+names it. An ACCEPT of a connect that took another, ended or never was — a second participant's, to
+which its broker handed the OPEN again, one past its connect's end, each of several serving a name
+with no group — is answered with a RESET of its pair, to the inbox it names. A name served by
+several participants is served in a group; a participant serving one in a group unsubscribes it
+while it holds `maximumConnections`, and subscribes it again once it holds fewer.
 
 15.19. Each end numbers the parcels it sends on a connection, from 1, one more each, but a RESET
 and a GONE, and its receiver hands them on in that order, each once. A parcel below the next one
@@ -1923,16 +1922,16 @@ that its broker publishes no will.
 value (section 15.5), on the first part of the DATA that carries the request, toward its server
 alone; where its adapter offers a message's life, that part lives in its broker twice `heartbeat`,
 none when `heartbeat` is without end, so that a credential waits there no longer than a live
-connection may be silent; a server's carries none, and a client closes with 1002 a connection whose server's DATA
-carries one. A request presenting `ELSEWHERE` stands for what its DATA carried (section 9.2, step
-6), never for its broker's authentication of the participant that published it, which stands for
-no request. A broker's transport is secure while its own leg and its peer's are: its adapter's
-connection under TLS, its broker on the loopback, judged as section 13.4 judges a client's URL, or
-in memory, each end saying so of its own by the `SECURE` of its OPEN or ACCEPT; a server's
-application may say otherwise of its own (section 13.4). A deployment's broker lets a participant
-alone subscribe its inbox and its will alone publish to its departure, by the id it authenticates,
-and lets serve a name only the participants its server's application runs: a participant serving a
-name receives the credentials its clients present.
+connection may be silent; a server's carries none, and a client closes with 1002 a connection whose
+server's DATA carries one. A request presenting `ELSEWHERE` stands for what its DATA carried
+(section 9.2, step 6), never for its broker's authentication of the participant that published it,
+which stands for no request. A broker's transport is secure while its own leg and its peer's are:
+its adapter's connection under TLS, its broker on the loopback, judged as section 13.4 judges a
+client's URL, or in memory, each end saying so of its own by the `SECURE` of its OPEN or ACCEPT; a
+server's application may say otherwise of its own (section 13.4). A deployment's broker lets a
+participant alone subscribe its inbox and its will alone publish to its departure, by the id it
+authenticates, and lets serve a name only the participants its server's application runs: a
+participant serving a name receives the credentials its clients present.
 
 15.23. A broker paces no call: a subscription's notifications go to its subscriber's inbox, each on
 its own connection and call id, at its own credit (sections 11.8 to 11.11), a transfer at its own
@@ -1965,7 +1964,8 @@ holds an in-memory broker that offers each of these: each message copied as it i
 handed on whole in a later turn than its publish, in the order its publisher published it to that
 topic, once, or, as a test asks, again, behind the next, never, or to another member of its group;
 a queue per subscriber bounded as it is given, past which a message is dropped; a link lost or
-taken over, its will published. Its handles' type is `BROKER`, and it never leaves the process, so it is secure.
+taken over, its will published. Its handles' type is `BROKER`, and it never leaves the process, so
+it is secure.
 
 ### MQTT 5
 
