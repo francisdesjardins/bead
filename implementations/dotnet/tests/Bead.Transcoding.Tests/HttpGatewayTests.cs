@@ -8,6 +8,7 @@ using System.Text.Json;
 using Bead.Transcoding.Http;
 using Bead.Transcoding.V1;
 using Google.Protobuf;
+using Google.Protobuf.Reflection;
 using Google.Protobuf.WellKnownTypes;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
@@ -1635,6 +1636,123 @@ public sealed class HttpGatewayTests
         {
             await Stopped(started);
         }
+    }
+
+    [Fact]
+    public async Task Binds_missing_and_explicit_proto2_required_fields_before_calling_its_peer()
+    {
+        await using var memory = new MemoryTransportServer();
+        await memory.Start();
+        var options = Exchanges.OptionsOf(memory, null);
+        await using var gateway = new HttpGateway(options with
+        {
+            Routes = [RouteOf("raw") with { Request = HttpPayload.Of(UninterpretedOption.Types.NamePart.Descriptor) }],
+        });
+        var reported = ReportedBy(gateway);
+        var connections = 0;
+        var requests = new List<byte[]>();
+
+        memory.Connection += (_) => { Interlocked.Increment(ref connections); };
+        memory.Message += (message, connectionHandle) =>
+        {
+            var envelope = EnvelopeCodec.ReadEnvelope(message.Bytes.Span, new EnvelopeReadOptions { Side = RouterSide.Server });
+
+            if (envelope?.Header is not RequestHeader header)
+            {
+                return;
+            }
+
+            requests.Add(envelope.Payload.ToArray());
+            _ = memory.Send(new TransportMessage(EnvelopeCodec.WriteEnvelope(new Envelope
+            {
+                Header = new ResultHeader { CallId = header.CallId },
+                Payload = "ok"u8.ToArray(),
+            }), false), connectionHandle);
+        };
+        var address = await gateway.Start(new HttpGatewayStartOptions { Address = "127.0.0.1", FindOpenPort = true }, Cancelled);
+        using var client = new HttpClient { BaseAddress = new Uri($"http://127.0.0.1:{address.Port}") };
+
+        foreach (var body in new[] { "{}", "{\"namePart\":\"Ada\",\"isExtension\":false}", "{\"namePart\":\"\",\"isExtension\":false}" })
+        {
+            using var request = Json("/api/Transcoding/raw", body);
+            using var answered = await client.SendAsync(request, Cancelled);
+
+            Assert.Equal(HttpStatusCode.OK, answered.StatusCode);
+            Assert.Equal("application/octet-stream", answered.Content.Headers.ContentType?.MediaType);
+            Assert.False(answered.Headers.Contains("bead-refusal"));
+            Assert.Equal("ok", await answered.Content.ReadAsStringAsync(Cancelled));
+        }
+
+        Assert.Equal(3, connections);
+        Assert.Equal(3, requests.Count);
+        Assert.Empty(requests[0]);
+        Assert.Equal(new byte[] { 10, 3, 65, 100, 97, 16, 0 }, requests[1]);
+        Assert.Equal(new byte[] { 10, 0, 16, 0 }, requests[2]);
+        Assert.Empty(reported);
+        await Until(() => { return memory.ConnectionHandles.Count == 0; });
+    }
+
+    [Fact]
+    public async Task Writes_native_JSON_results_and_notifications_in_stream_order()
+    {
+        await using var memory = new MemoryTransportServer();
+        await memory.Start();
+        var options = Exchanges.OptionsOf(memory, null);
+        await using var gateway = new HttpGateway(options with
+        {
+            Heartbeat = Timeout.InfiniteTimeSpan,
+            Routes = [.. options.Routes.Select((route) =>
+            {
+                return route.Procedure == TranscodingProcedures.Watch.Procedure
+                    ? route with { Result = HttpPayload.Json, Notification = HttpPayload.Json }
+                    : route;
+            })],
+        });
+        var reported = ReportedBy(gateway);
+        const string Result = "{\"label\":\"Été\",\"count\":1.00}";
+        const string Notification = "[\"雪\",null,true]";
+        var requests = 0;
+
+        memory.Message += (message, connectionHandle) =>
+        {
+            var envelope = EnvelopeCodec.ReadEnvelope(message.Bytes.Span, new EnvelopeReadOptions { Side = RouterSide.Server });
+
+            if (envelope?.Header is not RequestHeader header)
+            {
+                return;
+            }
+
+            Interlocked.Increment(ref requests);
+
+            foreach (var outgoing in new[]
+            {
+                new Envelope { Header = new ResultHeader { CallId = header.CallId }, Payload = Encoding.UTF8.GetBytes(Result) },
+                new Envelope { Header = new NotificationHeader { CallId = header.CallId }, Payload = Encoding.UTF8.GetBytes(Notification) },
+                new Envelope { Header = new FailureHeader { CallId = header.CallId }, Failure = Failure.OfProtocol(ProtocolCode.SessionRequired) },
+            })
+            {
+                _ = memory.Send(new TransportMessage(EnvelopeCodec.WriteEnvelope(outgoing), false), connectionHandle);
+            }
+        };
+        var address = await gateway.Start(new HttpGatewayStartOptions { Address = "127.0.0.1", FindOpenPort = true }, Cancelled);
+        using var client = new HttpClient { BaseAddress = new Uri($"http://127.0.0.1:{address.Port}") };
+        using var request = Json("/api/Transcoding/watch", "{}");
+        request.Headers.Accept.ParseAdd("text/event-stream");
+        using var answered = await client.SendAsync(request, Cancelled);
+        var body = await answered.Content.ReadAsStringAsync(Cancelled);
+        var prefix = $"event: result\nid: 1\ndata: {Result}\n\nid: 2\ndata: {Notification}\n\nevent: failure\nid: 3\ndata: ";
+
+        Assert.Equal(HttpStatusCode.OK, answered.StatusCode);
+        Assert.Equal("text/event-stream", answered.Content.Headers.ContentType?.MediaType);
+        Assert.False(answered.Headers.Contains("bead-refusal"));
+        Assert.StartsWith(prefix, body, StringComparison.Ordinal);
+        using var failure = JsonDocument.Parse(body[prefix.Length..].Trim());
+        Assert.Equal("protocol", failure.RootElement.GetProperty("scope").GetString());
+        Assert.Equal(401, failure.RootElement.GetProperty("status").GetInt32());
+        Assert.Equal("SESSION_REQUIRED", failure.RootElement.GetProperty("title").GetString());
+        Assert.Equal(1, requests);
+        Assert.Empty(reported);
+        await Until(() => { return memory.ConnectionHandles.Count == 0; });
     }
 
     [Fact]

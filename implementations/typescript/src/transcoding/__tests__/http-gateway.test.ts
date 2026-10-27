@@ -11,10 +11,12 @@ import {
 } from 'node:http2';
 import { connect, type Socket } from 'node:net';
 import { setTimeout as sleep } from 'node:timers/promises';
-import { create, toBinary } from '@bufbuild/protobuf';
+import { create, fromBinary, toBinary, type MessageInitShape } from '@bufbuild/protobuf';
+import { UninterpretedOption_NamePartSchema } from '@bufbuild/protobuf/wkt';
 import { expect, test } from '@playwright/test';
 import { EnvelopeKind, LIMIT_DEFAULTS, SERVER_FAILURES } from '../../router/shared/constants';
 import { bytesOf, readEnvelope, writeEnvelope } from '../../router/shared/envelope';
+import { payloadCodecOf } from '../../service/service';
 import { httpPolicyOf } from '../../transport/server/http-policy';
 import { createMemoryTransportServer } from '../../transport/server/memory-transport-server';
 import type { IHTTPRequestLike, IHTTPResponseLike } from '../../transport/server/types';
@@ -1787,6 +1789,191 @@ test('serves its document to a HEAD and to a preflight that asks for no field', 
       'access-control-allow-methods': 'GET, HEAD',
     },
     status: 204,
+  });
+});
+
+test('binds missing and explicit proto2 required fields before calling its peer', async () => {
+  const schema = UninterpretedOption_NamePartSchema;
+  await using memory = createMemoryTransportServer();
+  await memory.start();
+  await using gateway = createHTTPGateway({
+    createServer: createNodeServer,
+    routes: HTTP_ROUTES.filter((init) => {
+      return init.procedure === TranscodingProcedures.raw;
+    }).map((init) => {
+      return {
+        ...init,
+        request: schema,
+        procedure: {
+          ...init.procedure,
+          request: payloadCodecOf({
+            decode: (bytes) => {
+              return fromBinary(schema, bytes);
+            },
+            encode: (given: MessageInitShape<typeof schema>) => {
+              return toBinary(schema, create(schema, given));
+            },
+          }),
+        },
+      };
+    }),
+    transport: memory,
+  });
+  const reported = reportedBy(gateway);
+  let connections = 0;
+  const requests: number[][] = [];
+
+  memory.on('connection', () => {
+    connections += 1;
+  });
+  memory.on('message', ({ data }, connectionHandle) => {
+    const envelope = readEnvelope(bytesOf(data), {
+      failures: SERVER_FAILURES,
+      maximumEnvelopeBytes: LIMIT_DEFAULTS.maximumEnvelopeBytes,
+    });
+
+    if (envelope?.kind !== EnvelopeKind.REQUEST) {
+      return;
+    }
+
+    requests.push([...envelope.payload]);
+    void memory.send(
+      {
+        data: writeEnvelope({
+          header: { callId: envelope.header.callId, kind: EnvelopeKind.RESULT },
+          kind: EnvelopeKind.RESULT,
+          payload: new TextEncoder().encode('ok'),
+        }),
+      },
+      connectionHandle
+    );
+  });
+  const { port } = await gateway.start({ address: '127.0.0.1' });
+  const missing = await send(port, { body: '{}', path: '/api/Transcoding/raw' });
+
+  expect(missing.status).toBe(500);
+  expect(missing.headers['content-type']).toBe('application/problem+json');
+  expect(missing.headers['bead-refusal']).toBeUndefined();
+  expect(missing.body).toBe('{"status":500,"title":"Internal Server Error","type":"about:blank"}');
+  expect(reported).toEqual([
+    'cannot encode field google.protobuf.UninterpretedOption.NamePart.name_part to binary: required field not set',
+  ]);
+  expect(connections).toBe(0);
+  expect(requests).toEqual([]);
+
+  for (const body of [
+    '{"namePart":"Ada","isExtension":false}',
+    '{"namePart":"","isExtension":false}',
+  ]) {
+    const answered = await send(port, { body, path: '/api/Transcoding/raw' });
+
+    expect(answered.status).toBe(200);
+    expect(answered.headers['content-type']).toBe('application/octet-stream');
+    expect(answered.headers['bead-refusal']).toBeUndefined();
+    expect(answered.body).toBe('ok');
+  }
+  expect(requests).toEqual([
+    [10, 3, 65, 100, 97, 16, 0],
+    [10, 0, 16, 0],
+  ]);
+  expect(connections).toBe(2);
+  expect(reported).toHaveLength(1);
+  await until(() => {
+    return memory.clients.length === 0;
+  });
+});
+
+test('writes native JSON results and notifications in stream order', async () => {
+  await using memory = createMemoryTransportServer();
+  await memory.start();
+  await using gateway = createHTTPGateway({
+    createServer: createNodeServer,
+    heartbeat: Infinity,
+    routes: HTTP_ROUTES.map((init) => {
+      return init.procedure === TranscodingProcedures.watch
+        ? {
+            ...init,
+            result: 'json',
+            notification: 'json',
+            procedure: {
+              ...init.procedure,
+              result: TranscodingProcedures.json.result,
+              notification: TranscodingProcedures.json.result,
+            },
+          }
+        : init;
+    }),
+    transport: memory,
+  });
+  const reported = reportedBy(gateway);
+  const result = '{"label":"Été","count":1.00}';
+  const notification = '["雪",null,true]';
+  let requests = 0;
+
+  memory.on('message', ({ data }, connectionHandle) => {
+    const envelope = readEnvelope(bytesOf(data), {
+      failures: SERVER_FAILURES,
+      maximumEnvelopeBytes: LIMIT_DEFAULTS.maximumEnvelopeBytes,
+    });
+
+    if (envelope?.kind !== EnvelopeKind.REQUEST) {
+      return;
+    }
+
+    requests += 1;
+    const { callId } = envelope.header;
+
+    for (const outgoing of [
+      {
+        header: { callId, kind: EnvelopeKind.RESULT },
+        kind: EnvelopeKind.RESULT,
+        payload: new TextEncoder().encode(result),
+      },
+      {
+        header: { callId, kind: EnvelopeKind.NOTIFICATION },
+        kind: EnvelopeKind.NOTIFICATION,
+        payload: new TextEncoder().encode(notification),
+      },
+    ] as const) {
+      void memory.send(
+        {
+          data: writeEnvelope(outgoing),
+        },
+        connectionHandle
+      );
+    }
+    void memory.send(
+      {
+        data: writeEnvelope({
+          failure: SERVER_FAILURES.sessionRequired,
+          header: { callId, kind: EnvelopeKind.FAILURE },
+          kind: EnvelopeKind.FAILURE,
+        }),
+      },
+      connectionHandle
+    );
+  });
+  const { port } = await gateway.start({ address: '127.0.0.1' });
+  const answered = await send(port, {
+    body: '{}',
+    headers: { accept: 'text/event-stream' },
+    path: '/api/Transcoding/watch',
+  });
+  const prefix = `event: result\nid: 1\ndata: ${result}\n\nid: 2\ndata: ${notification}\n\nevent: failure\nid: 3\ndata: `;
+
+  expect(answered.status).toBe(200);
+  expect(answered.headers['content-type']).toBe('text/event-stream');
+  expect(answered.headers['bead-refusal']).toBeUndefined();
+  expect(answered.body.slice(0, prefix.length)).toBe(prefix);
+  expect(JSON.parse(answered.body.slice(prefix.length).trim())).toMatchObject({
+    scope: 'protocol',
+    status: 401,
+    title: 'SESSION_REQUIRED',
+  });
+  expect(requests).toBe(1);
+  expect(reported).toEqual([]);
+  await until(() => {
+    return memory.clients.length === 0;
   });
 });
 
