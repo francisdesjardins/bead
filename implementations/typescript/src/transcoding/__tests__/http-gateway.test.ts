@@ -11,12 +11,12 @@ import {
 } from 'node:http2';
 import { connect, type Socket } from 'node:net';
 import { setTimeout as sleep } from 'node:timers/promises';
-import { create, fromBinary, toBinary, type MessageInitShape } from '@bufbuild/protobuf';
+import { create, fromBinary, toBinary } from '@bufbuild/protobuf';
 import { UninterpretedOption_NamePartSchema } from '@bufbuild/protobuf/wkt';
 import { expect, test } from '@playwright/test';
+import { protoCodecOf } from '../../proto/codec';
 import { EnvelopeKind, LIMIT_DEFAULTS, SERVER_FAILURES } from '../../router/shared/constants';
 import { bytesOf, readEnvelope, writeEnvelope } from '../../router/shared/envelope';
-import { payloadCodecOf } from '../../service/service';
 import { httpPolicyOf } from '../../transport/server/http-policy';
 import { createMemoryTransportServer } from '../../transport/server/memory-transport-server';
 import type { IHTTPRequestLike, IHTTPResponseLike } from '../../transport/server/types';
@@ -28,6 +28,7 @@ import type { IHttpRouteInit } from '../routes';
 import { HTTP_ROUTES, OPENAPI_DOCUMENT } from './generated/bead_http';
 import { TranscodingProcedures } from './generated/transcoding_bead';
 import { EdgesSchema, TickSchema } from './generated/transcoding_pb';
+import { NeedsSchema } from './generated/transcoding-required_pb';
 import { GOOD_CREDENTIAL, SESSION, startTranscoding } from './transcoding-service';
 
 // interfaces
@@ -1837,7 +1838,7 @@ test('serves its document to a HEAD and to a preflight that asks for no field', 
   });
 });
 
-test('binds missing and explicit proto2 required fields before calling its peer', async () => {
+test('refuses a message that leaves a proto2 required field unset before calling its peer, and binds one set at its default', async () => {
   const schema = UninterpretedOption_NamePartSchema;
   await using memory = createMemoryTransportServer();
   await memory.start();
@@ -1849,17 +1850,7 @@ test('binds missing and explicit proto2 required fields before calling its peer'
       return {
         ...init,
         request: schema,
-        procedure: {
-          ...init.procedure,
-          request: payloadCodecOf({
-            decode: (bytes) => {
-              return fromBinary(schema, bytes);
-            },
-            encode: (given: MessageInitShape<typeof schema>) => {
-              return toBinary(schema, create(schema, given));
-            },
-          }),
-        },
+        procedure: { ...init.procedure, request: protoCodecOf(schema) },
       };
     }),
     transport: memory,
@@ -1896,13 +1887,14 @@ test('binds missing and explicit proto2 required fields before calling its peer'
   const { port } = await gateway.start({ address: '127.0.0.1' });
   const missing = await send(port, { body: '{}', path: '/api/Transcoding/raw' });
 
-  expect(missing.status).toBe(500);
+  // * step 4 of transcoding 5.2: the client's own request, 400, at the first field unset by number
+  expect(missing.status).toBe(400);
   expect(missing.headers['content-type']).toBe('application/problem+json');
   expect(missing.headers['bead-refusal']).toBeUndefined();
-  expect(missing.body).toBe('{"status":500,"title":"Internal Server Error","type":"about:blank"}');
-  expect(reported).toEqual([
-    'cannot encode field google.protobuf.UninterpretedOption.NamePart.name_part to binary: required field not set',
-  ]);
+  expect(missing.body).toBe(
+    '{"code":50,"detail":"a required field unset","pointer":"#/namePart","scope":"protocol","status":400,"title":"PAYLOAD_UNDECODABLE","type":"tag:francisdesjardins.ca,2026:bead/PAYLOAD_UNDECODABLE"}'
+  );
+  expect(reported).toEqual([]);
   expect(connections).toBe(0);
   expect(requests).toEqual([]);
 
@@ -1922,6 +1914,107 @@ test('binds missing and explicit proto2 required fields before calling its peer'
     [10, 0, 16, 0],
   ]);
   expect(connections).toBe(2);
+  expect(reported).toEqual([]);
+  await until(() => {
+    return memory.clients.length === 0;
+  });
+});
+
+test('answers 502 to a result that leaves a required field unset, and reports it', async () => {
+  // * the bytes its server echoes, `10 01`, a Needs of a count and no name (spec 17.9.7)
+  await using fixture = await startTranscoding({
+    routes: HTTP_ROUTES.map((init) => {
+      return init.procedure === TranscodingProcedures.raw
+        ? {
+            ...init,
+            procedure: { ...init.procedure, result: protoCodecOf(NeedsSchema) },
+            result: NeedsSchema,
+          }
+        : init;
+    }),
+  });
+  const reported = reportedBy(fixture.gateway);
+  const answered = await send(fixture.port, {
+    body: '\u0010\u0001',
+    headers: { 'content-type': 'application/octet-stream' },
+    path: '/api/Transcoding/raw',
+  });
+
+  expect(answered).toMatchObject({
+    body: '{"code":50,"scope":"protocol","status":502,"title":"PAYLOAD_UNDECODABLE","type":"tag:francisdesjardins.ca,2026:bead/PAYLOAD_UNDECODABLE"}',
+    status: 502,
+  });
+  expect(reported).toEqual(['a proto message leaves bead.transcoding.v1.Needs.name unset']);
+});
+
+test('writes an event’s data through the runtime reader, its records checked', async () => {
+  await using memory = createMemoryTransportServer();
+  await memory.start();
+  await using gateway = createHTTPGateway({
+    createServer: createNodeServer,
+    routes: HTTP_ROUTES.map((init) => {
+      return init.procedure === TranscodingProcedures.watch
+        ? {
+            ...init,
+            notification: EdgesSchema,
+            procedure: { ...init.procedure, notification: protoCodecOf(EdgesSchema) },
+          }
+        : init;
+    }),
+    transport: memory,
+  });
+  const reported = reportedBy(gateway);
+  // * `at`, a message, as a varint: protobuf-es reads it, an empty Timestamp, and 17.9.5 refuses it
+  const unchecked = new Uint8Array([8, 0]);
+
+  expect(fromBinary(EdgesSchema, unchecked).at).toBeDefined();
+  memory.on('message', ({ data }, connectionHandle) => {
+    const envelope = readEnvelope(bytesOf(data), {
+      failures: SERVER_FAILURES,
+      maximumEnvelopeBytes: LIMIT_DEFAULTS.maximumEnvelopeBytes,
+    });
+
+    if (envelope?.kind !== EnvelopeKind.REQUEST) {
+      return;
+    }
+
+    const { callId } = envelope.header;
+
+    void memory.send(
+      {
+        data: writeEnvelope({
+          header: { callId, kind: EnvelopeKind.RESULT },
+          kind: EnvelopeKind.RESULT,
+          payload: new Uint8Array(),
+        }),
+      },
+      connectionHandle
+    );
+
+    for (const payload of [new Uint8Array([0x70, 1]), unchecked]) {
+      void memory.send(
+        {
+          data: writeEnvelope({
+            header: { callId, kind: EnvelopeKind.NOTIFICATION },
+            kind: EnvelopeKind.NOTIFICATION,
+            payload,
+          }),
+        },
+        connectionHandle
+      );
+    }
+  });
+  const { port } = await gateway.start({ address: '127.0.0.1' });
+  const answered = await send(port, {
+    body: '{}',
+    headers: { accept: 'text/event-stream' },
+    path: '/api/Transcoding/watch',
+  });
+
+  expect(answered.status).toBe(200);
+  expect(answered.body).toBe(
+    'event: result\nid: 1\ndata: {}\n\nid: 2\ndata: {"ints":[1]}\n\nevent: failure\nid: 3\ndata: {"code":50,"scope":"protocol","status":502,"title":"PAYLOAD_UNDECODABLE","type":"tag:francisdesjardins.ca,2026:bead/PAYLOAD_UNDECODABLE"}\n\n'
+  );
   expect(reported).toHaveLength(1);
   await until(() => {
     return memory.clients.length === 0;

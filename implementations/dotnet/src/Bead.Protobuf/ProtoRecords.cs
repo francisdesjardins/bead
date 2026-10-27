@@ -1,5 +1,7 @@
+using System.Buffers;
 using System.Collections.Frozen;
 using System.Runtime.CompilerServices;
+using Google.Protobuf;
 using Google.Protobuf.Reflection;
 
 namespace Bead.Protobuf;
@@ -7,9 +9,14 @@ namespace Bead.Protobuf;
 /// <summary>
 /// A <c>proto</c> payload's records, read against its message before its stock library reads them
 /// (spec 17.9, decision 0028): the check the code beadc generates calls, which refuses what protobuf
-/// refuses where a stock library reads on, and reads nothing in the library's place. It walks the
-/// payload once, by the message's own descriptor, and allocates nothing per record. The TypeScript
-/// side's twin is <c>checkProtoRecords</c>, of <c>@francisdesjardins/bead/proto</c>.
+/// refuses where a stock library reads on, and reads nothing in the library's place but one thing:
+/// a singular closed enum's record of a number its enum declares no value of, which protobuf keeps
+/// among the unknown fields and Google.Protobuf would read as the field's (17.9.8), is dropped
+/// before the library reads, through <see cref="ProtoCodecs"/>. It walks the payload once, by the
+/// message's own descriptor, and allocates nothing per record. Each message's shape holds what
+/// <see cref="ProtoRequired"/> walks too (17.9.7): its fields protobuf requires, and those that
+/// hold a message reaching one. The TypeScript side's twin is <c>checkProtoRecords</c>, of
+/// <c>@francisdesjardins/bead/proto</c>.
 /// </summary>
 public static class ProtoRecords
 {
@@ -59,9 +66,37 @@ public static class ProtoRecords
     {
         ArgumentNullException.ThrowIfNull(message);
 
+        Checked(bytes, message);
+    }
+
+    /// <summary>
+    /// Checks <paramref name="bytes"/> as <see cref="Check"/> does: whether they hold a singular
+    /// closed enum's record of a number its enum declares no value of (17.9.8), which
+    /// <see cref="Filtered"/> drops.
+    /// </summary>
+    internal static bool Checked(ReadOnlySpan<byte> bytes, MessageDescriptor message)
+    {
         var walk = new Walk(bytes);
 
         walk.Message(ShapeOf(message), new Frame(bytes.Length, 0, 0));
+
+        return walk.IsUndeclared;
+    }
+
+    /// <summary>
+    /// <paramref name="bytes"/>, which <see cref="Checked"/> took, without each singular closed
+    /// enum's record of a number its enum declares no value of, the length of each record that held
+    /// one written again (17.9.8): what protobuf keeps among the unknown fields, Google.Protobuf then
+    /// never reads as the field's, which holds the last declared number its records give, or none.
+    /// </summary>
+    internal static byte[] Filtered(ReadOnlySpan<byte> bytes, MessageDescriptor message)
+    {
+        var output = new ArrayBufferWriter<byte>(Math.Max(bytes.Length, 1));
+        var rewrite = new Rewrite(bytes);
+
+        rewrite.Message(ShapeOf(message), ((bytes.Length, 0), output));
+
+        return output.WrittenSpan.ToArray();
     }
 
     // what a record of a field the message declares takes, read once from its descriptor
@@ -71,7 +106,7 @@ public static class ProtoRecords
 
         private Shape? _shape;
 
-        public FieldShape(FieldDescriptor field)
+        public FieldShape(FieldDescriptor field, bool isMapEntry)
         {
             Own = WireTypeOf(field.FieldType);
             Width = Own switch
@@ -89,6 +124,15 @@ public static class ProtoRecords
             {
                 _message = field.MessageType;
             }
+
+            // * spec 17.9.8: a singular field of a closed enum, a map's value apart, which keeps its number
+            if (field.FieldType == FieldType.Enum && !field.IsRepeated && !isMapEntry && ProtoEnums.IsClosed(field.EnumType))
+            {
+                Declared = field.EnumType.Values.Select((value) =>
+                {
+                    return value.Number;
+                }).ToFrozenSet();
+            }
         }
 
         /// <summary>The wire type of its type.</summary>
@@ -99,6 +143,12 @@ public static class ProtoRecords
 
         /// <summary>Whether it takes a packed record too.</summary>
         public bool IsPackable { get; }
+
+        /// <summary>
+        /// The numbers its enum declares, where it is a singular field of a closed enum, whose
+        /// record of any other sets nothing (17.9.8); null otherwise.
+        /// </summary>
+        public FrozenSet<int>? Declared { get; }
 
         /// <summary>
         /// The shape of the message it holds, or null: resolved at its first use, so that a message
@@ -137,16 +187,26 @@ public static class ProtoRecords
         }
     }
 
-    // a message's fields by their number, each what its records take
+    // a message's fields by their number, each what its records take; its fields protobuf
+    // requires, and those that hold a message reaching one (17.9.7)
     internal sealed class Shape
     {
         // an unknown group's: every field it holds unknown
         public static readonly Shape Unknown = new();
 
         private readonly FrozenDictionary<int, FieldShape> _fields;
+        private readonly MessageDescriptor? _message;
+
+        // whether it reaches a required field: 0 until it is known, then 1 for none and 2 for one
+        private int _reaches;
+
+        // its fields that hold a message reaching one, once known
+        private FieldDescriptor[]? _holding;
 
         public Shape(MessageDescriptor message)
         {
+            _message = message;
+            IsMapEntry = message.IsMapEntry;
             _fields = message.Fields.InFieldNumberOrder().ToFrozenDictionary(
                 (field) =>
                 {
@@ -154,23 +214,137 @@ public static class ProtoRecords
                 },
                 (field) =>
                 {
-                    return new FieldShape(field);
+                    return new FieldShape(field, IsMapEntry);
                 });
-            IsMapEntry = message.IsMapEntry;
+            Required = [.. message.Fields.InFieldNumberOrder().Where((field) =>
+            {
+                return field.IsRequired;
+            })];
         }
 
         private Shape()
         {
             _fields = FrozenDictionary<int, FieldShape>.Empty;
+            Required = [];
+            _reaches = 1;
+            _holding = [];
         }
 
         /// <summary>Whether it is a map's entry, which holds its key and its value and no other field.</summary>
         public bool IsMapEntry { get; }
 
+        /// <summary>Its fields of <c>LEGACY_REQUIRED</c> presence, by their numbers.</summary>
+        public FieldDescriptor[] Required { get; }
+
+        /// <summary>
+        /// Whether it or a message it holds, at any depth, has a field of <c>LEGACY_REQUIRED</c>
+        /// presence: known by one search over the messages it reaches, cycles among them, nothing
+        /// cached before the search ends, so that a message that reaches none costs one lookup after.
+        /// </summary>
+        public bool ReachesRequired
+        {
+            get
+            {
+                // ! a race searches twice, to the same answer
+                if (Volatile.Read(ref _reaches) == 0)
+                {
+                    Volatile.Write(ref _reaches, Searched(_message!) ? 2 : 1);
+                }
+
+                return _reaches == 2;
+            }
+        }
+
+        /// <summary>
+        /// Its fields that hold a message reaching a required field, by their numbers: a singular
+        /// field's, a repeated field's items, a map's message values, a group and a delimited field.
+        /// </summary>
+        public FieldDescriptor[] Holding
+        {
+            get
+            {
+                // ! a race builds the same fields twice
+                return _holding ??= ReachesRequired
+                    ? [.. _message!.Fields.InFieldNumberOrder().Where((each) =>
+                    {
+                        return HeldOf(each) is { } held && ShapeOf(held).ReachesRequired;
+                    })]
+                    : [];
+            }
+        }
+
         /// <summary>The field of <paramref name="number"/>, or null when the message declares none.</summary>
         public FieldShape? FieldOf(int number)
         {
             return _fields.GetValueOrDefault(number);
+        }
+
+        // the message a field holds: its own, or its map's value's; none for a scalar
+        private static MessageDescriptor? HeldOf(FieldDescriptor field)
+        {
+            if (field.IsMap)
+            {
+                var value = field.MessageType.FindFieldByNumber(2);
+
+                return value.FieldType is FieldType.Message or FieldType.Group ? value.MessageType : null;
+            }
+
+            return field.FieldType is FieldType.Message or FieldType.Group ? field.MessageType : null;
+        }
+
+        // whether `root` reaches a required field: every message it reaches found first, then those
+        // that reach one grown from those that have one, until none is added
+        private static bool Searched(MessageDescriptor root)
+        {
+            var found = new List<MessageDescriptor> { root };
+            var seen = new HashSet<MessageDescriptor> { root };
+            var holds = new Dictionary<MessageDescriptor, List<MessageDescriptor>>();
+
+            for (var index = 0; index < found.Count; index += 1)
+            {
+                var each = found[index];
+                var held = new List<MessageDescriptor>();
+
+                foreach (var field in each.Fields.InFieldNumberOrder())
+                {
+                    if (HeldOf(field) is { } message)
+                    {
+                        held.Add(message);
+
+                        if (seen.Add(message))
+                        {
+                            found.Add(message);
+                        }
+                    }
+                }
+
+                holds[each] = held;
+            }
+
+            var reaching = new HashSet<MessageDescriptor>(found.Where((message) =>
+            {
+                return message.Fields.InFieldNumberOrder().Any((field) =>
+                {
+                    return field.IsRequired;
+                });
+            }));
+            var isGrowing = reaching.Count > 0;
+
+            while (isGrowing && !reaching.Contains(root))
+            {
+                isGrowing = false;
+
+                foreach (var message in found)
+                {
+                    if (!reaching.Contains(message) && holds[message].Any(reaching.Contains))
+                    {
+                        reaching.Add(message);
+                        isGrowing = true;
+                    }
+                }
+            }
+
+            return reaching.Contains(root);
         }
     }
 
@@ -184,6 +358,9 @@ public static class ProtoRecords
         private readonly ReadOnlySpan<byte> _bytes = bytes;
 
         private int _at;
+
+        // whether it met a singular closed enum's record of a number its enum does not declare
+        public bool IsUndeclared { get; private set; }
 
         // the records of a message, up to its end or to the end group that closes it
         public void Message(Shape shape, Frame frame)
@@ -248,7 +425,15 @@ public static class ProtoRecords
             switch (wireType)
             {
                 case Varint:
-                    ReadVarint(frame.End);
+                    var value = ReadVarint(frame.End);
+
+                    // * spec 17.9.8: a record that sets nothing, which Filtered drops; an enum's
+                    // number is its varint's low 32 bits, as protobuf reads an int32
+                    if (field?.Declared is { } declared && !declared.Contains(unchecked((int)value)))
+                    {
+                        IsUndeclared = true;
+                    }
+
                     break;
                 case Fixed64:
                     Skip(8, frame.End);
@@ -392,6 +577,112 @@ public static class ProtoRecords
             }
 
             throw Refused("a tag of more than 5 bytes, or past 32 bits");
+        }
+    }
+
+    // one rewrite of a payload Walk took, each singular closed enum's record of a number its enum
+    // does not declare dropped, and each length that held one written again (17.9.8)
+    private ref struct Rewrite(ReadOnlySpan<byte> bytes)
+    {
+        private readonly ReadOnlySpan<byte> _bytes = bytes;
+
+        private int _at;
+
+        // the records of a message, up to its end or through the end group that closes it
+        public void Message(Shape shape, ((int End, int Group) Frame, ArrayBufferWriter<byte> Output) into)
+        {
+            var ((end, _), output) = into;
+
+            while (_at < end)
+            {
+                var start = _at;
+                var tag = Next();
+                var tagEnd = _at;
+                var field = shape.FieldOf((int)(tag >> 3));
+
+                switch ((int)(tag & 7))
+                {
+                    case EndGroup:
+                        output.Write(_bytes[start.._at]);
+
+                        return;
+                    case Varint:
+                        var value = Next();
+
+                        if (field?.Declared is { } declared && !declared.Contains(unchecked((int)value)))
+                        {
+                            continue;
+                        }
+
+                        break;
+                    case Fixed64:
+                        _at += 8;
+                        break;
+                    case Fixed32:
+                        _at += 4;
+                        break;
+                    case Delimited:
+                        var length = (int)Next();
+                        var delimitedEnd = _at + length;
+
+                        if (field?.Message is { } message)
+                        {
+                            var inner = new ArrayBufferWriter<byte>(Math.Max(length, 1));
+
+                            Message(message, ((delimitedEnd, 0), inner));
+                            output.Write(_bytes[start..tagEnd]);
+                            WriteLength(output, inner.WrittenCount);
+                            output.Write(inner.WrittenSpan);
+
+                            continue;
+                        }
+
+                        _at = delimitedEnd;
+                        break;
+                    default:
+                        // * a group: its tag, then its records through its end group
+                        output.Write(_bytes[start..tagEnd]);
+                        Message(field?.Message ?? Shape.Unknown, ((end, (int)(tag >> 3)), output));
+
+                        continue;
+                }
+
+                output.Write(_bytes[start.._at]);
+            }
+        }
+
+        // a length's varint
+        private static void WriteLength(ArrayBufferWriter<byte> output, int length)
+        {
+            var size = CodedOutputStream.ComputeLengthSize(length);
+            var span = output.GetSpan(size);
+            var value = (uint)length;
+
+            for (var index = 0; index < size; index += 1)
+            {
+                span[index] = (byte)(index == size - 1 ? value : (value & 0x7F) | 0x80);
+                value >>= 7;
+            }
+
+            output.Advance(size);
+        }
+
+        // a varint the walk took already
+        private ulong Next()
+        {
+            var value = 0UL;
+
+            for (var shift = 0; ; shift += 7)
+            {
+                var each = _bytes[_at++];
+
+                value |= (ulong)(each & 0x7F) << shift;
+
+                if ((each & 0x80) == 0)
+                {
+                    return value;
+                }
+            }
         }
     }
 }

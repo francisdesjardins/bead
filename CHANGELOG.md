@@ -47,6 +47,19 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - A WebSocket client asks one credential at a time of each provider by its identity: a different
   provider can answer while an earlier source stays pending; a later attempt using that source
   waits for it to settle within its own bounds, then asks anew.
+- A proto message that leaves a required field unset — proto2's `required`, an edition's
+  `LEGACY_REQUIRED` — at any depth but inside an `Any`, neither reads nor writes on either side
+  (spec 17.9.7, decision 0042). A request is answered `PAYLOAD_UNDECODABLE`, a result fails its
+  call, and a value fails before it goes. A gateway refuses one 400 `PAYLOAD_UNDECODABLE` after its
+  reading, placed as a violation's field is (transcoding 5.2.4, 7.4). Both sides and every gateway
+  must change.
+- A closed enum's undeclared number sets nothing on a singular field, on both sides (spec 17.9.8).
+- Generated code names `GENERATED_CODE_SUPPORTS_VERSION_6`, `GeneratedCode.SupportsVersion6`, and
+  calls `protoCodecOf` / `ProtoCodecs`. The runtimes no longer carry version 4, so code generated
+  before this change must be regenerated.
+- beadc's document requires each field of `LEGACY_REQUIRED` presence (transcoding 11.4, 11.5,
+  11.7). The blueprint marks one `legacyRequired`, under the feature `legacy-required`.
+  `HTTP_REQUIRED_UNBOUND` refuses a route no call can satisfy, and `HTTP_PATCH_REQUIRED` warns.
 - `spec/codecs.json`'s rows of 17.9.7 and 17.9.8 over `Probe`'s `needs`, `needs_items` and `shade`,
   and `spec/transcoding.json`'s readings, bindings, writings and exchanges of a required field,
   over `spec/transcoding-required.proto`, of edition 2023, and the procedures `require`,
@@ -58,6 +71,13 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   in the turn its attempt is disposed or times out.
 - A C# WebSocket connect disposed as its credential arrives reports the attempt's end, with
   cancellation and timeout taking precedence, even when its aborted socket fails first.
+- A PATCH body naming a field whose proto name holds an underscore before a digit binds on the
+  TypeScript side, its derived mask set by proto names (transcoding 4.5).
+- `HttpEvents.DataOf`, and an `Any`'s bytes on writing, read as 17.9 reads a payload, its records
+  checked and its depth bounded.
+- beadc keeps the rules of a body that a variable binds into.
+- The C# side's JSON mapping reads and writes a delimited field and a group as the message it
+  holds, as the TypeScript side does, where it refused one with `no form for a Group`.
 
 ## [0.7.0] - 2026-10-26
 

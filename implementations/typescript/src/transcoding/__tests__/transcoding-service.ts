@@ -20,8 +20,11 @@ import { TranscodingFailures, TranscodingServer } from './generated/transcoding_
 
 /** A gateway in front of a server of the service, and the counts its exchanges wait on. */
 export interface ITranscodingFixture extends AsyncDisposable {
-  /** The calls of `hang` its resolver took, and those that ended cancelled. */
-  readonly counts: { cancelled: number; hanging: number };
+  /**
+   * The calls of `hang` its resolver took, and those that ended cancelled; the calls of `require`
+   * its resolver took, and the errors its server reported.
+   */
+  readonly counts: { cancelled: number; hanging: number; reported: number; requires: number };
   readonly gateway: IHTTPGateway;
   /** The in-memory transport its gateway's connections cross. */
   readonly memory: ReturnType<typeof createMemoryTransportServer>;
@@ -65,7 +68,7 @@ export const startTranscoding = async (
       },
     }
   );
-  const counts = { cancelled: 0, hanging: 0 };
+  const counts = { cancelled: 0, hanging: 0, reported: 0, requires: 0 };
   const refused: string[] = [];
   const service = new TranscodingServer();
 
@@ -179,6 +182,21 @@ export const startTranscoding = async (
     }
 
     return response({ count: counts.cancelled });
+  });
+  service.on('require', (request, response) => {
+    counts.requires += 1;
+
+    // * a Needs of no field where none is set, which its codec refuses to write (spec 17.9.7)
+    return response(request.payload.needs ?? {});
+  });
+  service.on('getNeeds', (request, response) => {
+    return response(request.payload);
+  });
+  service.on('updateNeeds', (request, response) => {
+    return response(request.payload.needs ?? {});
+  });
+  server.router.on('error', () => {
+    counts.reported += 1;
   });
   service.offer(server);
   await memory.start();

@@ -243,7 +243,9 @@ public sealed class TranscodingTests
         {
             var name = entry.GetProperty("name").GetString()!;
             var descriptor = MessageOf(entry.GetProperty("message").GetString()!);
-            var message = Parsed(descriptor, Hex(entry.GetProperty("payload").GetString()!));
+
+            // * read as the gateway reads a result, through the runtime reader
+            var message = Answered(descriptor, Hex(entry.GetProperty("payload").GetString()!));
 
             if (StringOf(entry, "refused") is { } reason)
             {

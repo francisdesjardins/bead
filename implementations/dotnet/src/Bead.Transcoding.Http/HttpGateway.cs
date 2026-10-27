@@ -1057,16 +1057,15 @@ public sealed class HttpGateway : IAsyncDisposable
         await WriteWhole(context, (StatusCodes.Status200OK, "application/json", written));
     }
 
-    // ! the server's answer read: a proto result or notification by its stock library, its records
-    // checked first (spec 17.9), as its client's codec reads one; what refuses it is the answer's,
-    // never the gateway's (7.5, item 2), and EventDataOf reads a text one so too
+    // ! the server's answer read: a proto result or notification through the runtime reader, as
+    // spec 17.9 reads a payload and its client's codec reads one, a required field unset among what
+    // it refuses (17.9.7); what refuses it is the answer's, never the gateway's (7.5, item 2), and
+    // EventDataOf reads a text one so too
     private static IMessage Decoded(MessageDescriptor descriptor, ReadOnlyMemory<byte> bytes)
     {
         try
         {
-            ProtoRecords.Check(bytes.Span, descriptor);
-
-            return descriptor.Parser.ParseFrom(bytes.Span);
+            return ProtoCodecs.Read(descriptor, bytes);
         }
         catch (Exception reason) when (reason is FormatException or InvalidProtocolBufferException)
         {

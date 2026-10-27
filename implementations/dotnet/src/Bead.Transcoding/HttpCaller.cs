@@ -2,6 +2,7 @@ using System.Net.Http.Headers;
 using System.Runtime.CompilerServices;
 using System.Text;
 using System.Text.Json;
+using Bead.Protobuf;
 using Google.Protobuf;
 
 namespace Bead.Transcoding;
@@ -315,16 +316,26 @@ public sealed class HttpCaller : IDisposable
         }
     }
 
+    // ! a proto value judged by its required fields first (spec 17.9.7), as the codec's writer
+    // judges one: its FormatException thrown before anything goes, as the TypeScript side's codec
+    // throws before it writes
     private byte[] Write(HttpPayload payload, object? value)
     {
         return payload.Encoding switch
         {
-            HttpEncoding.Proto => _form.Write((IMessage)value!),
+            HttpEncoding.Proto => _form.Write(Judged((IMessage)value!)),
             HttpEncoding.Json => PayloadCodecs.Json.Encode((JsonElement)value!).ToArray(),
             HttpEncoding.Text => PayloadCodecs.Text.Encode((string)value!).ToArray(),
             HttpEncoding.Raw => ((ReadOnlyMemory<byte>)value!).ToArray(),
             _ => throw new ArgumentException("an HTTP payload names a supported encoding", nameof(payload)),
         };
+    }
+
+    private static IMessage Judged(IMessage message)
+    {
+        ProtoRequired.Check(message);
+
+        return message;
     }
 
     private TResult Read<TResult>(HttpPayload payload, ReadOnlyMemory<byte> bytes)

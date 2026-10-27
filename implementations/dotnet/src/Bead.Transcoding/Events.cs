@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Text;
+using Bead.Protobuf;
 
 namespace Bead.Transcoding;
 
@@ -78,8 +79,9 @@ public sealed class HttpEvents
     /// <summary>
     /// An event's data (8.4), one JSON text: a <c>proto</c> payload by Bead's proto JSON form, a
     /// <c>json</c> one as it is, a <c>text</c> one as a JSON string, a <c>raw</c> one as a JSON string
-    /// of its bytes in standard base64, padded. A <c>proto</c> payload Bead's proto JSON form holds
-    /// none of is a <see cref="JsonFormException"/>.
+    /// of its bytes in standard base64, padded. A <c>proto</c> payload is read as spec 17.9 reads one,
+    /// through <see cref="ProtoCodecs"/>: one that does not read is a <see cref="FormatException"/>,
+    /// and one Bead's proto JSON form holds none of a <see cref="JsonFormException"/>.
     /// </summary>
     public static ReadOnlyMemory<byte> DataOf(HttpPayload payload, (ReadOnlyMemory<byte> Bytes, JsonForm Form) of)
     {
@@ -89,7 +91,7 @@ public sealed class HttpEvents
 
         return payload.Encoding switch
         {
-            HttpEncoding.Proto => form.Write(payload.Descriptor!.Parser.ParseFrom(bytes.Span)),
+            HttpEncoding.Proto => form.Write(ProtoCodecs.Read(payload.Descriptor!, bytes)),
             HttpEncoding.Json => bytes,
             HttpEncoding.Text => Payloads.WriteJsonString(Payloads.ReadText(bytes)),
             _ => Payloads.WriteJsonString(Convert.ToBase64String(bytes.Span)),

@@ -60,9 +60,6 @@ const LINE_ENDS = /[\r\u{85}\u{2028}\u{2029}]/gu;
 const DICTIONARY = 'global::System.Collections.Generic.Dictionary';
 const READ_ONLY_DICTIONARY = 'global::System.Collections.Generic.IReadOnlyDictionary';
 
-// the decoder's nesting limit, spec 17.9's bound, as the C# side reads a payload
-const RECURSION_LIMIT = 101;
-
 // helpers
 
 const upperFirst = (name: string): string => {
@@ -320,49 +317,15 @@ export const printService = (service: IServiceEntry, options: ICSharpTemplateOpt
       indent
     );
   };
-  // a codec, at `indent`, the lines after its first indented one level more
-  const codecOf = (binding: IBinding, indent: string): string[] => {
+  // a codec: the runtime's of the message, which holds spec 17.9 whole, the records checked before
+  // Google.Protobuf reads, the bound, and a required field unset refused both ways (decisions 0028
+  // and 0042)
+  const codecOf = (binding: IBinding): string => {
     if (binding.encoding !== 'proto' || binding.message === undefined) {
-      return [NATIVE[binding.encoding as keyof typeof NATIVE][1]];
+      return NATIVE[binding.encoding as keyof typeof NATIVE][1];
     }
 
-    const message = options.messageOf(binding.message);
-    const inner = `${indent}${INDENT}`;
-    const body = `${inner}${INDENT}`;
-
-    return [
-      `global::Bead.PayloadCodecs.Of<${message}>(`,
-      `${inner}(bytes) =>`,
-      `${inner}{`,
-      `${body}// ! the check first, by the descriptor Google.Protobuf reads with: it refuses what protobuf`,
-      `${body}// refuses where a stock library reads on (decision 0028)`,
-      `${body}global::Bead.Protobuf.ProtoRecords.Check(bytes.Span, ${message}.Descriptor);`,
-      '',
-      `${body}// ! spec 17.9's bound, set here rather than left to the library's default. The payload is`,
-      `${body}// read as a message field holds one, after its length, and the top message counts: 101 is`,
-      `${body}// 100 below it`,
-      `${body}var framed = new byte[global::Google.Protobuf.CodedOutputStream.ComputeLengthSize(bytes.Length) + bytes.Length];`,
-      '',
-      `${body}using (var output = new global::Google.Protobuf.CodedOutputStream(framed))`,
-      `${body}{`,
-      `${body}${INDENT}output.WriteLength(bytes.Length);`,
-      `${body}}`,
-      '',
-      `${body}bytes.Span.CopyTo(framed.AsSpan(framed.Length - bytes.Length));`,
-      '',
-      `${body}using var stream = new global::System.IO.MemoryStream(framed, writable: false);`,
-      `${body}using var input = global::Google.Protobuf.CodedInputStream.CreateWithLimits(stream, int.MaxValue, ${String(RECURSION_LIMIT)});`,
-      `${body}var message = new ${message}();`,
-      '',
-      `${body}input.ReadMessage(message);`,
-      '',
-      `${body}return message;`,
-      `${inner}},`,
-      `${inner}(message) =>`,
-      `${inner}{`,
-      `${body}return global::Google.Protobuf.MessageExtensions.ToByteArray(message);`,
-      `${inner}})`,
-    ];
+    return `global::Bead.Protobuf.ProtoCodecs.Of<${options.messageOf(binding.message)}>()`;
   };
   const lines: string[] = [];
   // a sealed class of `members`; for a record the layer reads, the interface it implements and the
@@ -451,13 +414,7 @@ export const printService = (service: IServiceEntry, options: ICSharpTemplateOpt
     const bindings = `global::Bead.ProcedureBindings<${typesOf(procedure)}>`;
     const member = `${INDENT}${INDENT}${INDENT}`;
     const codecLines = (key: string, binding: IBinding): string[] => {
-      const [first, ...rest] = codecOf(binding, member);
-
-      const all = [`${member}${key} = ${String(first)}`, ...rest];
-
-      return all.map((line, at) => {
-        return at === all.length - 1 ? `${line},` : line;
-      });
+      return [`${member}${key} = ${codecOf(binding)},`];
     };
 
     lines.push(

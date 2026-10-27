@@ -31,9 +31,10 @@ public sealed record BindingOptions
 /// A <c>proto</c> request bound from its route's variables, its query and its body into one JSON
 /// value of its message, then read by Bead's mapping, so that one reader judges every field wherever
 /// it came from (transcoding 4, <c>http.proto</c>'s rules); a <c>PATCH</c>'s <c>update_mask</c>
-/// filled with the members its body holds (4.5). A refusal is a <see cref="JsonFormException"/>,
-/// which a gateway answers 400 <c>PAYLOAD_UNDECODABLE</c>, placed where the request carried what
-/// it refuses (7.4).
+/// filled with the members its body holds, set on the message by proto names (4.5); then the
+/// message judged by its required fields, 5.2's step 4. A refusal is a
+/// <see cref="JsonFormException"/>, which a gateway answers 400 <c>PAYLOAD_UNDECODABLE</c>, placed
+/// where the request carried what it refuses (7.4), a required field unset as a violation's field.
 /// </summary>
 public sealed class HttpBinding
 {
@@ -151,12 +152,12 @@ public sealed class HttpBinding
                 throw Refused("a parameter of a field the route binds otherwise", parameter);
             }
 
-            if (leaf.IsMap || (leaf.IsRepeated && leaf.FieldType == FieldType.Message))
+            if (leaf.IsMap || (leaf.IsRepeated && leaf.IsMessage()))
             {
                 throw Refused("a parameter of a map or a repeated message", parameter);
             }
 
-            if (leaf.FieldType == FieldType.Message && !leaf.MessageType.IsWrapper() && !StringForms.Contains(leaf.MessageType.FullName))
+            if (leaf.IsMessage() && !leaf.MessageType.IsWrapper() && !StringForms.Contains(leaf.MessageType.FullName))
             {
                 throw Refused("a parameter of a message", parameter);
             }
@@ -182,7 +183,7 @@ public sealed class HttpBinding
                 throw Refused("a field the query names twice", parameter);
             }
 
-            var value = leaf.FieldType != FieldType.Message
+            var value = !leaf.IsMessage()
                 ? TextJson(leaf.FieldType, text)
                 : leaf.MessageType.IsWrapper() ? TextJson(leaf.MessageType.FindFieldByNumber(1).FieldType, text) : JsonNode.StringOf(text);
 
@@ -194,6 +195,8 @@ public sealed class HttpBinding
             SetAlong(root, (items[key].Fields, JsonNode.ArrayOf(items[key].Values), JsonNamesOf(items[key].Fields)));
         }
 
+        // the route's body as a reading's place names it: `*`, or its field's JSON name
+        var placedBody = body is null or Whole ? body : request.FindFieldByName(body)?.JsonName ?? body;
         IMessage message;
 
         try
@@ -202,23 +205,35 @@ public sealed class HttpBinding
         }
         catch (JsonFormException refused) when (refused.At is { } at)
         {
-            throw Placed(refused, PlaceOf(at, (byVariable, byQuery, body)));
+            throw Placed(refused, PlaceOf((at, false), (byVariable, byQuery, placedBody)));
         }
 
-        // * a PATCH whose caller left its update_mask unset: the members its body's object holds (AIP-134)
+        // * a PATCH whose caller left its update_mask unset: the members its body's object holds
+        // (AIP-134), set on the message by proto names, never read back through 5.4's form
         if (options.IsPatch
             && body is not null and not Whole
             && request.FindFieldByName(UpdateMask) is { } mask
             && mask is { IsRepeated: false, FieldType: FieldType.Message }
             && mask.MessageType.FullName == FieldMask.Descriptor.FullName
             && !named.Contains(UpdateMask)
-            && request.FindFieldByName(body) is { FieldType: FieldType.Message } bodyField
+            && request.FindFieldByName(body) is { } bodyField
+            && bodyField.IsMessage()
             && sent is not null)
         {
             var paths = new FieldMask();
 
             paths.Paths.AddRange(MaskOf(sent, (bodyField.MessageType, "")));
             mask.Accessor.SetValue(message, paths);
+        }
+
+        // * 5.2's step 4, once the mask is set: a required update_mask the mask derived binds
+        try
+        {
+            JsonForm.Judge(message);
+        }
+        catch (JsonFormException refused) when (refused.At is { } at)
+        {
+            throw Placed(refused, PlaceOf((at, true), (byVariable, byQuery, placedBody)));
         }
 
         return message;
@@ -245,7 +260,7 @@ public sealed class HttpBinding
 
             if (index < parts.Length - 1)
             {
-                if (field.IsRepeated || field.FieldType != FieldType.Message || JsonForm.IsWellKnown(field.MessageType) || field.MessageType.IsWrapper())
+                if (field.IsRepeated || !field.IsMessage() || JsonForm.IsWellKnown(field.MessageType) || field.MessageType.IsWrapper())
                 {
                     return null;
                 }
@@ -283,7 +298,12 @@ public sealed class HttpBinding
     // a refusal of the reading, placed where the request carried it
     private static JsonFormException Placed(JsonFormException refused, RequestPlace place)
     {
-        return new JsonFormException(refused.Message, new JsonFormExceptionOptions { Place = place, InnerException = refused.InnerException });
+        return new JsonFormException(refused.Message, new JsonFormExceptionOptions
+        {
+            Place = place,
+            IsUnset = refused.IsUnset,
+            InnerException = refused.InnerException,
+        });
     }
 
     // whether a place's tokens begin with a path of fields, by their JSON names
@@ -300,14 +320,17 @@ public sealed class HttpBinding
 
     // where the request carried the value its reading refused at `at` (7.4): a variable's field path
     // as its template writes it, or a query's by JSON names, an item's index left out; or a pointer
-    // into its body, the field a body names its root
-    private static RequestPlace PlaceOf(IReadOnlyList<JsonToken> at, (List<(List<FieldDescriptor> Fields, string Parameter)> ByVariable, List<List<FieldDescriptor>> ByQuery, string? Body) sources)
+    // into its body, the field a body names, by its JSON name, its root. A field left unset (5.2, step 4) is placed as
+    // a violation's field is: a parameter by JSON names where the route's query would bind it, its
+    // route of no body or of a body naming another field, else the member the body's object lacks
+    private static RequestPlace PlaceOf((IReadOnlyList<JsonToken> Tokens, bool IsUnset) at, (List<(List<FieldDescriptor> Fields, string Parameter)> ByVariable, List<List<FieldDescriptor>> ByQuery, string? Body) sources)
     {
+        var (tokens, isUnset) = at;
         var (byVariable, byQuery, body) = sources;
 
         foreach (var (fields, parameter) in byVariable)
         {
-            if (IsWithin(at, fields))
+            if (IsWithin(tokens, fields))
             {
                 return new RequestPlace { Parameter = parameter };
             }
@@ -315,13 +338,26 @@ public sealed class HttpBinding
 
         foreach (var fields in byQuery)
         {
-            if (IsWithin(at, fields))
+            if (IsWithin(tokens, fields))
             {
                 return new RequestPlace { Parameter = JsonNamesOf(fields) };
             }
         }
 
-        return new RequestPlace { Pointer = JsonPlaces.PointerOf(body == Whole ? at : at.Skip(1)) };
+        var isInBody = body == Whole || (body is not null && tokens.Count > 0 && !tokens[0].IsGiven && tokens[0].Text == body);
+
+        if (isUnset && !isInBody)
+        {
+            return new RequestPlace
+            {
+                Parameter = string.Join('.', tokens.Select((token) =>
+                {
+                    return token.Text;
+                })),
+            };
+        }
+
+        return new RequestPlace { Pointer = JsonPlaces.PointerOf(body == Whole ? tokens : tokens.Skip(1)) };
     }
 
     // a variable's or a parameter's value made the field's JSON (4.2)
@@ -428,7 +464,7 @@ public sealed class HttpBinding
 
             if (member is { Kind: JsonNodeKind.Object, Members.Count: > 0 }
                 && !field.IsRepeated
-                && field.FieldType == FieldType.Message
+                && field.IsMessage()
                 && !JsonForm.IsWellKnown(field.MessageType)
                 && !field.MessageType.IsWrapper())
             {

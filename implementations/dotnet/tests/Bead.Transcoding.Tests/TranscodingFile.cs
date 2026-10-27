@@ -8,9 +8,9 @@ namespace Bead.Transcoding.Tests;
 
 /// <summary>
 /// What the tests read of <c>spec/transcoding.json</c> and of the code beadc generated of
-/// <c>spec/transcoding.proto</c> into <c>Generated/</c>, an output with <c>http: true</c>: the file's
-/// root, a message by its full name, a procedure's route by its name, and the mapping over the route
-/// table's messages.
+/// <c>spec/transcoding.proto</c> and <c>spec/transcoding-required.proto</c>, which it imports, into
+/// <c>Generated/</c>, an output with <c>http: true</c>: the file's root, a message by its full name,
+/// a procedure's route by its name, and the mapping over the route table's messages.
 /// </summary>
 internal static class TranscodingFile
 {
@@ -36,7 +36,7 @@ internal static class TranscodingFile
 
     public static MessageDescriptor MessageOf(string fullName)
     {
-        return TranscodingReflection.Descriptor.MessageTypes.Single((message) =>
+        return TranscodingReflection.Descriptor.MessageTypes.Concat(TranscodingRequiredReflection.Descriptor.MessageTypes).Single((message) =>
         {
             return message.FullName == fullName;
         });
@@ -65,10 +65,17 @@ internal static class TranscodingFile
         return entry.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.String ? value.GetString() : null;
     }
 
-    // a reading's or a writing's message, from its binary payload as its stock library reads it
+    // a reading's or a binding's message, from its binary payload as its stock library reads it
     public static IMessage Parsed(MessageDescriptor descriptor, byte[] payload)
     {
         return descriptor.Parser.ParseFrom(payload);
+    }
+
+    // a writing's result, from its binary payload as the gateway reads it, through the runtime
+    // reader (spec 17.9): a closed enum's undeclared number set aside among them
+    public static IMessage Answered(MessageDescriptor descriptor, byte[] payload)
+    {
+        return Bead.Protobuf.ProtoCodecs.Read(descriptor, payload);
     }
 
     private static JsonElement Load()

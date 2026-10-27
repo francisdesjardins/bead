@@ -382,40 +382,40 @@ test('writes two services of one .proto in one file, the contract with the runti
 
   expect(content).toContain('public sealed class CommentsServer<TData>\n');
   expect(content).toContain('public sealed class OtherServer<TData>\n');
-  expect(content.match(/GeneratedCode\.SupportsVersion4;/gu)).toHaveLength(1);
+  expect(content.match(/GeneratedCode\.SupportsVersion6;/gu)).toHaveLength(1);
   expect(content.match(/^\/\/ @generated/gmu)).toHaveLength(1);
   expect(content.match(/^namespace /gmu)).toHaveLength(1);
 });
 
-test("the codec a target writes checks a payload's records by its message's descriptor before its library reads it", () => {
+test("the codec a target writes is the runtime's codec of its message's schema, which holds spec 17.9 whole", () => {
   const content = contentOf(
     csharpTarget.generate(fixtureInput(MESSAGES), DEFAULTS),
     'Bead/Messages/V1/MessagesBead.cs'
   );
-  const decoders = [
-    ...content.matchAll(/\(bytes\) =>\n\s*\{\n(?<body>(?:.*\n)*?)\s*return message;/gu),
-  ].map((match) => {
-    return match.groups?.['body'] ?? '';
-  });
+  const codecs = [...content.matchAll(/^ {12}(?:Request|Result|Notification) = (.*),$/gmu)].map(
+    (match) => {
+      return match[1] ?? '';
+    }
+  );
 
-  expect(decoders.length).toBeGreaterThan(0);
+  expect(codecs.length).toBeGreaterThan(0);
 
-  // * the check first, by the descriptor of the very message Google.Protobuf reads into
-  for (const decoder of decoders) {
-    const check =
-      /global::Bead\.Protobuf\.ProtoRecords\.Check\(bytes\.Span, (?<message>[\w.:]+)\.Descriptor\);/u.exec(
-        decoder
-      );
-
-    expect(check, decoder).not.toBeNull();
-    expect(decoder.indexOf(check?.[0] ?? ''), decoder).toBeLessThan(decoder.indexOf('framed'));
-    expect(decoder, decoder).toContain(`var message = new ${check?.groups?.['message'] ?? ''}();`);
+  // * a proto binding's codec is the runtime's of its message, nothing of its own beside it
+  for (const codec of codecs) {
+    expect(codec).toMatch(
+      /^(?:global::Bead\.Protobuf\.ProtoCodecs\.Of<global::[\w.]+>\(\)|global::Bead\.PayloadCodecs\.(?:Raw|Text|Json))$/u
+    );
   }
 
-  // a file that binds no proto message names no check
+  expect(codecs).toContain(
+    'global::Bead.Protobuf.ProtoCodecs.Of<global::Bead.Messages.V1.Greeting>()'
+  );
+  expect(content).not.toMatch(/ProtoRecords|ParseFrom|ToByteArray|CodedInputStream/u);
+
+  // a file that binds no proto message names no codec of one
   expect(
     contentOf(csharpTarget.generate(interopInput(), INTEROP_OPTIONS), 'InteropBead.cs')
-  ).not.toContain('ProtoRecords');
+  ).not.toContain('ProtoCodecs');
 });
 
 test("writes */, <, & and two paragraphs as XML documentation, a command's among them, and a character C# reads as a line's end, a lone CR among them, as its reference", () => {

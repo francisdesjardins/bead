@@ -23,68 +23,8 @@ public sealed class HelloProcedures
         new global::Bead.ProcedureBindings<global::Hello.V1.SayHelloRequest, global::Hello.V1.SayHelloResponse>
         {
             Admission = global::Bead.AdmissionRule.None,
-            Request = global::Bead.PayloadCodecs.Of<global::Hello.V1.SayHelloRequest>(
-                (bytes) =>
-                {
-                    // ! the check first, by the descriptor Google.Protobuf reads with: it refuses what protobuf
-                    // refuses where a stock library reads on (decision 0028)
-                    global::Bead.Protobuf.ProtoRecords.Check(bytes.Span, global::Hello.V1.SayHelloRequest.Descriptor);
-
-                    // ! spec 17.9's bound, set here rather than left to the library's default. The payload is
-                    // read as a message field holds one, after its length, and the top message counts: 101 is
-                    // 100 below it
-                    var framed = new byte[global::Google.Protobuf.CodedOutputStream.ComputeLengthSize(bytes.Length) + bytes.Length];
-
-                    using (var output = new global::Google.Protobuf.CodedOutputStream(framed))
-                    {
-                        output.WriteLength(bytes.Length);
-                    }
-
-                    bytes.Span.CopyTo(framed.AsSpan(framed.Length - bytes.Length));
-
-                    using var stream = new global::System.IO.MemoryStream(framed, writable: false);
-                    using var input = global::Google.Protobuf.CodedInputStream.CreateWithLimits(stream, int.MaxValue, 101);
-                    var message = new global::Hello.V1.SayHelloRequest();
-
-                    input.ReadMessage(message);
-
-                    return message;
-                },
-                (message) =>
-                {
-                    return global::Google.Protobuf.MessageExtensions.ToByteArray(message);
-                }),
-            Result = global::Bead.PayloadCodecs.Of<global::Hello.V1.SayHelloResponse>(
-                (bytes) =>
-                {
-                    // ! the check first, by the descriptor Google.Protobuf reads with: it refuses what protobuf
-                    // refuses where a stock library reads on (decision 0028)
-                    global::Bead.Protobuf.ProtoRecords.Check(bytes.Span, global::Hello.V1.SayHelloResponse.Descriptor);
-
-                    // ! spec 17.9's bound, set here rather than left to the library's default. The payload is
-                    // read as a message field holds one, after its length, and the top message counts: 101 is
-                    // 100 below it
-                    var framed = new byte[global::Google.Protobuf.CodedOutputStream.ComputeLengthSize(bytes.Length) + bytes.Length];
-
-                    using (var output = new global::Google.Protobuf.CodedOutputStream(framed))
-                    {
-                        output.WriteLength(bytes.Length);
-                    }
-
-                    bytes.Span.CopyTo(framed.AsSpan(framed.Length - bytes.Length));
-
-                    using var stream = new global::System.IO.MemoryStream(framed, writable: false);
-                    using var input = global::Google.Protobuf.CodedInputStream.CreateWithLimits(stream, int.MaxValue, 101);
-                    var message = new global::Hello.V1.SayHelloResponse();
-
-                    input.ReadMessage(message);
-
-                    return message;
-                },
-                (message) =>
-                {
-                    return global::Google.Protobuf.MessageExtensions.ToByteArray(message);
-                }),
+            Request = global::Bead.Protobuf.ProtoCodecs.Of<global::Hello.V1.SayHelloRequest>(),
+            Result = global::Bead.Protobuf.ProtoCodecs.Of<global::Hello.V1.SayHelloResponse>(),
         });
 
     /// <summary>Counts down from a number to 0, a Tick a step, for a caller its connection greeted. Admits a call its hook <c>greeted</c> admits.</summary>
@@ -93,99 +33,9 @@ public sealed class HelloProcedures
         new global::Bead.ProcedureBindings<global::Hello.V1.CountDownRequest, global::Hello.V1.CountDownResponse, global::Hello.V1.Tick>
         {
             Admission = global::Bead.AdmissionRule.Hook("greeted"),
-            Request = global::Bead.PayloadCodecs.Of<global::Hello.V1.CountDownRequest>(
-                (bytes) =>
-                {
-                    // ! the check first, by the descriptor Google.Protobuf reads with: it refuses what protobuf
-                    // refuses where a stock library reads on (decision 0028)
-                    global::Bead.Protobuf.ProtoRecords.Check(bytes.Span, global::Hello.V1.CountDownRequest.Descriptor);
-
-                    // ! spec 17.9's bound, set here rather than left to the library's default. The payload is
-                    // read as a message field holds one, after its length, and the top message counts: 101 is
-                    // 100 below it
-                    var framed = new byte[global::Google.Protobuf.CodedOutputStream.ComputeLengthSize(bytes.Length) + bytes.Length];
-
-                    using (var output = new global::Google.Protobuf.CodedOutputStream(framed))
-                    {
-                        output.WriteLength(bytes.Length);
-                    }
-
-                    bytes.Span.CopyTo(framed.AsSpan(framed.Length - bytes.Length));
-
-                    using var stream = new global::System.IO.MemoryStream(framed, writable: false);
-                    using var input = global::Google.Protobuf.CodedInputStream.CreateWithLimits(stream, int.MaxValue, 101);
-                    var message = new global::Hello.V1.CountDownRequest();
-
-                    input.ReadMessage(message);
-
-                    return message;
-                },
-                (message) =>
-                {
-                    return global::Google.Protobuf.MessageExtensions.ToByteArray(message);
-                }),
-            Result = global::Bead.PayloadCodecs.Of<global::Hello.V1.CountDownResponse>(
-                (bytes) =>
-                {
-                    // ! the check first, by the descriptor Google.Protobuf reads with: it refuses what protobuf
-                    // refuses where a stock library reads on (decision 0028)
-                    global::Bead.Protobuf.ProtoRecords.Check(bytes.Span, global::Hello.V1.CountDownResponse.Descriptor);
-
-                    // ! spec 17.9's bound, set here rather than left to the library's default. The payload is
-                    // read as a message field holds one, after its length, and the top message counts: 101 is
-                    // 100 below it
-                    var framed = new byte[global::Google.Protobuf.CodedOutputStream.ComputeLengthSize(bytes.Length) + bytes.Length];
-
-                    using (var output = new global::Google.Protobuf.CodedOutputStream(framed))
-                    {
-                        output.WriteLength(bytes.Length);
-                    }
-
-                    bytes.Span.CopyTo(framed.AsSpan(framed.Length - bytes.Length));
-
-                    using var stream = new global::System.IO.MemoryStream(framed, writable: false);
-                    using var input = global::Google.Protobuf.CodedInputStream.CreateWithLimits(stream, int.MaxValue, 101);
-                    var message = new global::Hello.V1.CountDownResponse();
-
-                    input.ReadMessage(message);
-
-                    return message;
-                },
-                (message) =>
-                {
-                    return global::Google.Protobuf.MessageExtensions.ToByteArray(message);
-                }),
-            Notification = global::Bead.PayloadCodecs.Of<global::Hello.V1.Tick>(
-                (bytes) =>
-                {
-                    // ! the check first, by the descriptor Google.Protobuf reads with: it refuses what protobuf
-                    // refuses where a stock library reads on (decision 0028)
-                    global::Bead.Protobuf.ProtoRecords.Check(bytes.Span, global::Hello.V1.Tick.Descriptor);
-
-                    // ! spec 17.9's bound, set here rather than left to the library's default. The payload is
-                    // read as a message field holds one, after its length, and the top message counts: 101 is
-                    // 100 below it
-                    var framed = new byte[global::Google.Protobuf.CodedOutputStream.ComputeLengthSize(bytes.Length) + bytes.Length];
-
-                    using (var output = new global::Google.Protobuf.CodedOutputStream(framed))
-                    {
-                        output.WriteLength(bytes.Length);
-                    }
-
-                    bytes.Span.CopyTo(framed.AsSpan(framed.Length - bytes.Length));
-
-                    using var stream = new global::System.IO.MemoryStream(framed, writable: false);
-                    using var input = global::Google.Protobuf.CodedInputStream.CreateWithLimits(stream, int.MaxValue, 101);
-                    var message = new global::Hello.V1.Tick();
-
-                    input.ReadMessage(message);
-
-                    return message;
-                },
-                (message) =>
-                {
-                    return global::Google.Protobuf.MessageExtensions.ToByteArray(message);
-                }),
+            Request = global::Bead.Protobuf.ProtoCodecs.Of<global::Hello.V1.CountDownRequest>(),
+            Result = global::Bead.Protobuf.ProtoCodecs.Of<global::Hello.V1.CountDownResponse>(),
+            Notification = global::Bead.Protobuf.ProtoCodecs.Of<global::Hello.V1.Tick>(),
             Validate = global::Bead.Protobuf.Validators.Of<global::Hello.V1.CountDownRequest>(CountDownRequestRules.Check),
         });
 
@@ -195,68 +45,8 @@ public sealed class HelloProcedures
         new global::Bead.ProcedureBindings<global::Hello.V1.AskNameRequest, global::Hello.V1.AskNameResponse>
         {
             Admission = global::Bead.AdmissionRule.None,
-            Request = global::Bead.PayloadCodecs.Of<global::Hello.V1.AskNameRequest>(
-                (bytes) =>
-                {
-                    // ! the check first, by the descriptor Google.Protobuf reads with: it refuses what protobuf
-                    // refuses where a stock library reads on (decision 0028)
-                    global::Bead.Protobuf.ProtoRecords.Check(bytes.Span, global::Hello.V1.AskNameRequest.Descriptor);
-
-                    // ! spec 17.9's bound, set here rather than left to the library's default. The payload is
-                    // read as a message field holds one, after its length, and the top message counts: 101 is
-                    // 100 below it
-                    var framed = new byte[global::Google.Protobuf.CodedOutputStream.ComputeLengthSize(bytes.Length) + bytes.Length];
-
-                    using (var output = new global::Google.Protobuf.CodedOutputStream(framed))
-                    {
-                        output.WriteLength(bytes.Length);
-                    }
-
-                    bytes.Span.CopyTo(framed.AsSpan(framed.Length - bytes.Length));
-
-                    using var stream = new global::System.IO.MemoryStream(framed, writable: false);
-                    using var input = global::Google.Protobuf.CodedInputStream.CreateWithLimits(stream, int.MaxValue, 101);
-                    var message = new global::Hello.V1.AskNameRequest();
-
-                    input.ReadMessage(message);
-
-                    return message;
-                },
-                (message) =>
-                {
-                    return global::Google.Protobuf.MessageExtensions.ToByteArray(message);
-                }),
-            Result = global::Bead.PayloadCodecs.Of<global::Hello.V1.AskNameResponse>(
-                (bytes) =>
-                {
-                    // ! the check first, by the descriptor Google.Protobuf reads with: it refuses what protobuf
-                    // refuses where a stock library reads on (decision 0028)
-                    global::Bead.Protobuf.ProtoRecords.Check(bytes.Span, global::Hello.V1.AskNameResponse.Descriptor);
-
-                    // ! spec 17.9's bound, set here rather than left to the library's default. The payload is
-                    // read as a message field holds one, after its length, and the top message counts: 101 is
-                    // 100 below it
-                    var framed = new byte[global::Google.Protobuf.CodedOutputStream.ComputeLengthSize(bytes.Length) + bytes.Length];
-
-                    using (var output = new global::Google.Protobuf.CodedOutputStream(framed))
-                    {
-                        output.WriteLength(bytes.Length);
-                    }
-
-                    bytes.Span.CopyTo(framed.AsSpan(framed.Length - bytes.Length));
-
-                    using var stream = new global::System.IO.MemoryStream(framed, writable: false);
-                    using var input = global::Google.Protobuf.CodedInputStream.CreateWithLimits(stream, int.MaxValue, 101);
-                    var message = new global::Hello.V1.AskNameResponse();
-
-                    input.ReadMessage(message);
-
-                    return message;
-                },
-                (message) =>
-                {
-                    return global::Google.Protobuf.MessageExtensions.ToByteArray(message);
-                }),
+            Request = global::Bead.Protobuf.ProtoCodecs.Of<global::Hello.V1.AskNameRequest>(),
+            Result = global::Bead.Protobuf.ProtoCodecs.Of<global::Hello.V1.AskNameResponse>(),
         });
 
     /// <summary>Every procedure, in their ids' order: what its server and its client sides are built over.</summary>
@@ -474,5 +264,5 @@ file static class CountDownRequestRules
 // the contract with the runtime this file needs: an older runtime lacks the constant, and fails here
 file static class GeneratedCodeContract
 {
-    private const bool Supported = global::Bead.GeneratedCode.SupportsVersion4;
+    private const bool Supported = global::Bead.GeneratedCode.SupportsVersion6;
 }

@@ -814,6 +814,55 @@
         },
         "type": "object"
       },
+      "bead.transcoding.v1.Needs": {
+        "additionalProperties": false,
+        "description": "bead.transcoding.v1.Needs. Bead's mapping reads each field by its proto name too.",
+        "properties": {
+          "child": {
+            "$ref": "#/components/schemas/bead.transcoding.v1.Needs"
+          },
+          "count": {
+            "maximum": 2147483647,
+            "minimum": -2147483648,
+            "type": "integer"
+          },
+          "delimited": {
+            "$ref": "#/components/schemas/bead.transcoding.v1.Needs"
+          },
+          "line1": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "shade": {
+            "$ref": "#/components/schemas/bead.transcoding.v1.Shade"
+          }
+        },
+        "required": [
+          "name",
+          "count"
+        ],
+        "type": "object"
+      },
+      "bead.transcoding.v1.NeedsUpdate": {
+        "additionalProperties": false,
+        "description": "bead.transcoding.v1.NeedsUpdate. Bead's mapping reads each field by its proto name too.",
+        "properties": {
+          "needs": {
+            "$ref": "#/components/schemas/bead.transcoding.v1.Needs"
+          },
+          "updateMask": {
+            "description": "A google.protobuf.FieldMask: its paths in lowerCamelCase, by commas. A path whose snake case does not give it back is refused.",
+            "pattern": "^([a-z][A-Za-z0-9]*(\\.[a-z][A-Za-z0-9]*)*(,[a-z][A-Za-z0-9]*(\\.[a-z][A-Za-z0-9]*)*)*)?$",
+            "type": "string"
+          }
+        },
+        "required": [
+          "updateMask"
+        ],
+        "type": "object"
+      },
       "bead.transcoding.v1.Operation": {
         "additionalProperties": false,
         "description": "bead.transcoding.v1.Operation. Bead's mapping reads each field by its proto name too.",
@@ -823,6 +872,46 @@
           },
           "name": {
             "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "bead.transcoding.v1.Requiring": {
+        "additionalProperties": false,
+        "description": "bead.transcoding.v1.Requiring. Bead's mapping reads each field by its proto name too.",
+        "properties": {
+          "anInt32": {
+            "maximum": 2147483647,
+            "minimum": -2147483648,
+            "type": "integer"
+          },
+          "any": {
+            "description": "A google.protobuf.Any: its @type, a URL whose last part names a message of the document's, then that message's members, or its value for a well-known type of a form of its own; {} the empty Any.",
+            "properties": {
+              "@type": {
+                "pattern": "/",
+                "type": "string"
+              }
+            },
+            "type": "object"
+          },
+          "byKey": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/bead.transcoding.v1.Needs"
+            },
+            "propertyNames": {
+              "type": "string"
+            },
+            "type": "object"
+          },
+          "many": {
+            "items": {
+              "$ref": "#/components/schemas/bead.transcoding.v1.Needs"
+            },
+            "type": "array"
+          },
+          "needs": {
+            "$ref": "#/components/schemas/bead.transcoding.v1.Needs"
           }
         },
         "type": "object"
@@ -855,6 +944,23 @@
           }
         },
         "type": "object"
+      },
+      "bead.transcoding.v1.Shade": {
+        "anyOf": [
+          {
+            "enum": [
+              "SHADE_DARK",
+              "SHADE_LIGHT"
+            ],
+            "type": "string"
+          },
+          {
+            "maximum": 2147483647,
+            "minimum": -2147483648,
+            "type": "integer"
+          }
+        ],
+        "description": "bead.transcoding.v1.Shade, by the name of its value declared first for its number; a number where none names it. Bead's mapping reads any of its names, and its number."
       },
       "bead.transcoding.v1.Tick": {
         "additionalProperties": false,
@@ -1374,6 +1480,61 @@
         }
       }
     },
+    "/api/Transcoding/getNeeds": {
+      "post": {
+        "description": "Answers its request.",
+        "operationId": "Transcoding.getNeeds",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/bead.transcoding.v1.Needs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/bead.transcoding.v1.Needs"
+                }
+              }
+            },
+            "description": "The result."
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "A failure (transcoding 7)."
+          }
+        },
+        "security": [
+          {},
+          {
+            "credential": []
+          }
+        ],
+        "summary": "Answers its request.",
+        "tags": [
+          "Transcoding"
+        ],
+        "x-bead": {
+          "procedure": "getNeeds",
+          "procedureId": 22,
+          "procedureKind": "request",
+          "service": "Transcoding",
+          "serviceId": 1
+        }
+      }
+    },
     "/api/Transcoding/getOperation": {
       "get": {
         "description": "Answers the operation its name names, done.",
@@ -1816,6 +1977,61 @@
         }
       }
     },
+    "/api/Transcoding/require": {
+      "post": {
+        "description": "Answers its request's needs, or a Needs of no field where none is set.",
+        "operationId": "Transcoding.require",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/bead.transcoding.v1.Requiring"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/bead.transcoding.v1.Needs"
+                }
+              }
+            },
+            "description": "The result."
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "A failure (transcoding 7)."
+          }
+        },
+        "security": [
+          {},
+          {
+            "credential": []
+          }
+        ],
+        "summary": "Answers its request's needs, or a Needs of no field where none is set.",
+        "tags": [
+          "Transcoding"
+        ],
+        "x-bead": {
+          "procedure": "require",
+          "procedureId": 21,
+          "procedureKind": "request",
+          "service": "Transcoding",
+          "serviceId": 1
+        }
+      }
+    },
     "/api/Transcoding/text": {
       "post": {
         "description": "Answers its request.",
@@ -2061,6 +2277,61 @@
         "x-bead": {
           "procedure": "updateBook",
           "procedureId": 5,
+          "procedureKind": "request",
+          "service": "Transcoding",
+          "serviceId": 1
+        }
+      }
+    },
+    "/api/Transcoding/updateNeeds": {
+      "post": {
+        "description": "Answers its request's needs.",
+        "operationId": "Transcoding.updateNeeds",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/bead.transcoding.v1.NeedsUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/bead.transcoding.v1.Needs"
+                }
+              }
+            },
+            "description": "The result."
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "A failure (transcoding 7)."
+          }
+        },
+        "security": [
+          {},
+          {
+            "credential": []
+          }
+        ],
+        "summary": "Answers its request's needs.",
+        "tags": [
+          "Transcoding"
+        ],
+        "x-bead": {
+          "procedure": "updateNeeds",
+          "procedureId": 23,
           "procedureKind": "request",
           "service": "Transcoding",
           "serviceId": 1
@@ -2331,6 +2602,273 @@
         }
       }
     },
+    "/v1/children/{child.name}": {
+      "get": {
+        "description": "Answers its request.",
+        "operationId": "Transcoding.getNeeds.http1",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "child.name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Its field, name, is of LEGACY_REQUIRED presence: a request that leaves it unset is refused. Bead's mapping reads it by this proto name too.",
+            "in": "query",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Its field, count, is of LEGACY_REQUIRED presence: a request that leaves it unset is refused. Bead's mapping reads it by this proto name too.",
+            "in": "query",
+            "name": "count",
+            "required": true,
+            "schema": {
+              "maximum": 2147483647,
+              "minimum": -2147483648,
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "shade",
+            "schema": {
+              "$ref": "#/components/schemas/bead.transcoding.v1.Shade"
+            }
+          },
+          {
+            "in": "query",
+            "name": "line1",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/bead.transcoding.v1.Needs"
+                }
+              }
+            },
+            "description": "The result."
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "A failure (transcoding 7)."
+          }
+        },
+        "security": [
+          {},
+          {
+            "credential": []
+          }
+        ],
+        "summary": "Answers its request.",
+        "tags": [
+          "Transcoding"
+        ],
+        "x-bead": {
+          "procedure": "getNeeds",
+          "procedureId": 22,
+          "procedureKind": "request",
+          "service": "Transcoding",
+          "serviceId": 1
+        }
+      }
+    },
+    "/v1/needs/{name}": {
+      "get": {
+        "description": "Answers its request.",
+        "operationId": "Transcoding.getNeeds.http",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Its field, count, is of LEGACY_REQUIRED presence: a request that leaves it unset is refused. Bead's mapping reads it by this proto name too.",
+            "in": "query",
+            "name": "count",
+            "required": true,
+            "schema": {
+              "maximum": 2147483647,
+              "minimum": -2147483648,
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "shade",
+            "schema": {
+              "$ref": "#/components/schemas/bead.transcoding.v1.Shade"
+            }
+          },
+          {
+            "in": "query",
+            "name": "line1",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/bead.transcoding.v1.Needs"
+                }
+              }
+            },
+            "description": "The result."
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "A failure (transcoding 7)."
+          }
+        },
+        "security": [
+          {},
+          {
+            "credential": []
+          }
+        ],
+        "summary": "Answers its request.",
+        "tags": [
+          "Transcoding"
+        ],
+        "x-bead": {
+          "procedure": "getNeeds",
+          "procedureId": 22,
+          "procedureKind": "request",
+          "service": "Transcoding",
+          "serviceId": 1
+        }
+      }
+    },
+    "/v1/needs/{needs.name}": {
+      "patch": {
+        "description": "Answers its request's needs.",
+        "operationId": "Transcoding.updateNeeds.http",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "needs.name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "updateMask",
+            "schema": {
+              "description": "A google.protobuf.FieldMask: its paths in lowerCamelCase, by commas. A path whose snake case does not give it back is refused.",
+              "pattern": "^([a-z][A-Za-z0-9]*(\\.[a-z][A-Za-z0-9]*)*(,[a-z][A-Za-z0-9]*(\\.[a-z][A-Za-z0-9]*)*)*)?$",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "description": "bead.transcoding.v1.Needs. Bead's mapping reads each field by its proto name too.",
+                "properties": {
+                  "child": {
+                    "$ref": "#/components/schemas/bead.transcoding.v1.Needs"
+                  },
+                  "count": {
+                    "maximum": 2147483647,
+                    "minimum": -2147483648,
+                    "type": "integer"
+                  },
+                  "delimited": {
+                    "$ref": "#/components/schemas/bead.transcoding.v1.Needs"
+                  },
+                  "line1": {
+                    "type": "string"
+                  },
+                  "shade": {
+                    "$ref": "#/components/schemas/bead.transcoding.v1.Shade"
+                  }
+                },
+                "required": [
+                  "count"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/bead.transcoding.v1.Needs"
+                }
+              }
+            },
+            "description": "The result."
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "A failure (transcoding 7)."
+          }
+        },
+        "security": [
+          {},
+          {
+            "credential": []
+          }
+        ],
+        "summary": "Answers its request's needs.",
+        "tags": [
+          "Transcoding"
+        ],
+        "x-bead": {
+          "procedure": "updateNeeds",
+          "procedureId": 23,
+          "procedureKind": "request",
+          "service": "Transcoding",
+          "serviceId": 1
+        }
+      }
+    },
     "/v1/operations": {
       "get": {
         "description": "Answers one operation, its name its request's and \"/a\" after it, not done.",
@@ -2465,9 +3003,16 @@
                 "description": "bead.transcoding.v1.Ruled. Bead's mapping reads each field by its proto name too.",
                 "properties": {
                   "from": {
-                    "maximum": 2147483647,
-                    "minimum": -2147483648,
-                    "type": "integer"
+                    "allOf": [
+                      {
+                        "maximum": 2147483647,
+                        "minimum": -2147483648,
+                        "type": "integer"
+                      },
+                      {
+                        "maximum": 10
+                      }
+                    ]
                   }
                 },
                 "type": "object"

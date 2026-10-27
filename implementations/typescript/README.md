@@ -618,19 +618,24 @@ hands out is a function that carries its procedure's members, read bare.
 
 The codecs are spec 17's, `PAYLOAD_CODECS.raw`, `.text` and `.json`, the last reading a `JsonValue`
 and writing what section 17.7 takes; `payloadCodecOf({ decode, encode })` makes one of two
-functions, a protobuf message's from protobuf-es's `fromBinary(schema, bytes, { recursionLimit:
-101 })` and `toBinary` — 101, since protobuf-es counts the top message, and section 17.9 bounds a
-message 100 deep below it
-([0031](../../docs/decisions/0031-a-proto-payload-is-protobufs-format-and-bead-states-only-its-own.md)).
-Before it reads, generated code calls `checkProtoRecords(bytes, schema)`
-from `@francisdesjardins/bead/proto`, which reads the payload's records against the message's own
+functions. A protobuf message's is `protoCodecOf(schema)` of `@francisdesjardins/bead/proto`, which
+generated code calls and which holds section 17.9 whole. Its reader first calls
+`checkProtoRecords(bytes, schema)`, which reads the payload's records against the message's own
 descriptor and throws a `SyntaxError` where they are no encoding of it and protobuf-es would read on,
 or where sections 17.9.5 and 17.9.6 refuse them: a field at a wire type its type does not take, and
 a map's entry with a field other than its key and its value
 ([0028](../../docs/decisions/0028-a-proto-payloads-records-are-read-against-its-message-before-its-library-reads-them.md)).
-Each message's shape is built once, from its descriptor; `./proto` takes `@bufbuild/protobuf` as an
-optional peer, the check by its types alone, the validators by its `create`. Protobuf's conformance
-suite plays the generated codec, the check in front, through the testee in
+It then reads with protobuf-es's `fromBinary(schema, bytes, { recursionLimit: 101 })` — 101, since
+protobuf-es counts the top message, and section 17.9 bounds a message 100 deep below it
+([0031](../../docs/decisions/0031-a-proto-payload-is-protobufs-format-and-bead-states-only-its-own.md)),
+a closed enum's undeclared number setting nothing (17.9.8). Last, it walks the message for a field of
+`LEGACY_REQUIRED` presence left unset, proto2's `required`, at any depth but in an extension or an
+`Any`, and throws a `SyntaxError`; its writer walks the message it builds before `toBinary` and
+throws a `TypeError` in the same words
+([0042](../../docs/decisions/0042-a-proto-message-that-leaves-a-required-field-unset-neither-reads-nor-writes-and-a-gateway-refuses-it-where-its-server-would.md)).
+Each message's shape is built once, from its descriptor, a message that reaches no required field
+walked at the cost of one lookup; `./proto` takes `@bufbuild/protobuf` as an optional peer. Protobuf's
+conformance suite plays the generated codec through the testee in
 `tools/protobuf-conformance/`, which the root's `tools/protobuf-conformance.mjs` generates its code
 into and runs, with its failure list, `failing.txt`.
 
@@ -1372,7 +1377,10 @@ A `proto` body is read by Bead's own mapping of protobuf's JSON over its message
 result written in Bead's proto JSON form, one sequence of bytes on both sides: fields in their
 numbers' order, a map's entries sorted, a `float` at its shortest, each well-known type in its one
 form; protobuf-es's `fromJson` and `toJson` are never called, and the binary payload stays its
-own. A failure is an `application/problem+json`, its status by where its code arose:
+own. A request read whole that leaves a field of `LEGACY_REQUIRED` presence unset is refused 400
+`PAYLOAD_UNDECODABLE`, `a required field unset`, at the member its object lacks or at the query
+parameter that would set it, before its call; an `Any`'s message is taken as it is held, as its
+server takes it, and a `PATCH`'s derived `update_mask` is set by proto names. A failure is an `application/problem+json`, its status by where its code arose:
 `PAYLOAD_INVALID` 422 with each violation's `pointer` or `parameter`, `SESSION_REQUIRED` 401 with
 `www-authenticate`, a server's answer the gateway could not take 502. A request whose `accept`
 names `text/event-stream` to a procedure that notifies is a stream of Server-Sent Events: its

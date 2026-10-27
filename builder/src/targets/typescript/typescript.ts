@@ -15,7 +15,11 @@ import { create, createRegistry, type DescMessage, fromBinary } from '@bufbuild/
 import { CodeGeneratorRequestSchema, FileDescriptorSetSchema } from '@bufbuild/protobuf/wkt';
 import { createEcmaScriptPlugin } from '@bufbuild/protoplugin';
 
-import { type IServiceEntry, VALIDATE_FEATURE } from '../../model/blueprint.ts';
+import {
+  type IServiceEntry,
+  LEGACY_REQUIRED_FEATURE,
+  VALIDATE_FEATURE,
+} from '../../model/blueprint.ts';
 import { judgedMessagesOf, plansOf } from '../../model/rules.ts';
 import { beadcVersion, PROTOBUF_FLOOR, protocGenEsVersion } from '../../version.ts';
 import {
@@ -99,7 +103,7 @@ const parameterOf = (options: ITypeScriptOptions): string => {
 /** The TypeScript target: a `_bead.ts` for each service's file, over the service layer. */
 export const typescriptTarget: ITarget<ITypeScriptOptions> = Object.freeze({
   name: 'typescript',
-  features: new Set([VALIDATE_FEATURE]),
+  features: new Set([LEGACY_REQUIRED_FEATURE, VALIDATE_FEATURE]),
   http: true,
   generate: (input: ITargetInput, options: ITypeScriptOptions): readonly IGeneratedFile[] => {
     const { blueprint } = input;
@@ -168,7 +172,7 @@ export const typescriptTarget: ITarget<ITypeScriptOptions> = Object.freeze({
           f.print(
             '// the contract with the runtime this file needs: an older runtime lacks the constant, and fails here'
           );
-          f.print('void ', f.import('GENERATED_CODE_SUPPORTS_VERSION_4', runtime), ';');
+          f.print('void ', f.import('GENERATED_CODE_SUPPORTS_VERSION_6', runtime), ';');
         }
 
         // * an output with http: true: its route table and the document, over every service

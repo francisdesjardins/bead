@@ -85,6 +85,8 @@ export const RULES = Object.freeze({
   HTTP_RULE_BODY_DIFFERS: { level: Level.PROTO, severity: Severity.WARNING },
   HTTP_QUERY_UNBINDABLE: { level: Level.PROTO, severity: Severity.WARNING },
   HTTP_UPDATE_MASK: { level: Level.PROTO, severity: Severity.WARNING },
+  HTTP_REQUIRED_UNBOUND: { level: Level.PROTO, severity: Severity.ERROR },
+  HTTP_PATCH_REQUIRED: { level: Level.PROTO, severity: Severity.WARNING },
   HTTP_ANY: { level: Level.PROTO, severity: Severity.WARNING },
   // on both
   ADMISSION_EMPTY: { level: Level.BOTH, severity: Severity.ERROR },

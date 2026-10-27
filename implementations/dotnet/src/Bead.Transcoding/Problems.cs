@@ -387,7 +387,7 @@ public static partial class HttpProblems
                 {
                     var field = request.FindFieldByName(body);
 
-                    error["pointer"] = Fragment(field is { FieldType: FieldType.Message } ? PointerOf(field.MessageType, elements.Skip(1).ToList()) : []);
+                    error["pointer"] = Fragment(field is not null && field.IsMessage() ? PointerOf(field.MessageType, elements.Skip(1).ToList()) : []);
                 }
                 else if (elements.Count > 0 && PointerOf(request, elements.Select((element) =>
                 {
@@ -479,7 +479,7 @@ public static partial class HttpProblems
                 tokens.Add(subscript.StartsWith('"') ? JsonSerializer.Deserialize<string>(subscript)! : subscript);
             }
 
-            current = field.FieldType == FieldType.Message ? (field.IsMap ? field.MessageType.FindFieldByNumber(2) is { FieldType: FieldType.Message } value ? value.MessageType : null : field.MessageType) : null;
+            current = field.IsMessage() ? (field.IsMap ? field.MessageType.FindFieldByNumber(2) is { } value && value.IsMessage() ? value.MessageType : null : field.MessageType) : null;
         }
 
         return tokens;

@@ -12,10 +12,11 @@ namespace Bead.Tests;
 /// 0031): each payload read in its encoding, then refused, or written back to the bytes given, the
 /// value read equal by <see cref="JsonElement.DeepEquals"/> to the value read of those bytes and its
 /// raw text those very bytes, so that the value handed on is the canonical form's; a <c>proto</c>
-/// payload read as <c>Probe</c>, of <c>spec/codecs.proto</c>, through the codec generated code makes
-/// of Google.Protobuf, its records checked by <see cref="ProtoRecords"/> first (decision 0028), then
-/// refused, or its fields those read; each value built from its form and written, to its bytes or
-/// refused. An entry a row of the support matrix excuses this side from, a value no
+/// payload read as <c>Probe</c>, of <c>spec/codecs.proto</c>, through the runtime codec generated
+/// code names, <see cref="ProtoCodecs"/>: its records checked first (decision 0028), a closed enum's
+/// undeclared number set aside (17.9.8), its required fields judged once it is read (17.9.7,
+/// decision 0042), then refused, or its fields those read; each value built from its form and
+/// written, to its bytes or refused. An entry a row of the support matrix excuses this side from, a value no
 /// <see cref="JsonElement"/> holds, is counted and not played. The TypeScript side plays the same
 /// file.
 /// </summary>
@@ -32,41 +33,8 @@ public sealed class CodecsTests
 
     private static readonly JsonElement Root = Load();
 
-    // * the codec generated code makes of a proto binding: Google.Protobuf's reader and writer, Bead's
-    // bound set as generated code sets it
-    private static readonly IPayloadCodec<Probe> ProbeCodec = PayloadCodecs.Of(
-        (bytes) =>
-        {
-            // ! the check first, by the descriptor Google.Protobuf reads with: it refuses what protobuf
-            // refuses where a stock library reads on (decision 0028)
-            ProtoRecords.Check(bytes.Span, Probe.Descriptor);
-
-            // ! spec 17.9's bound, set here rather than left to the library's default. The payload is
-            // read as a message field holds one, after its length: the library then refuses a message
-            // that ends before its bytes do, a stray end group among them, as its own parse of bytes
-            // does and its parse of a stream does not; and the top message counts, so 101 is 100
-            // below it
-            var framed = new byte[CodedOutputStream.ComputeLengthSize(bytes.Length) + bytes.Length];
-
-            using (var output = new CodedOutputStream(framed))
-            {
-                output.WriteLength(bytes.Length);
-            }
-
-            bytes.Span.CopyTo(framed.AsSpan(framed.Length - bytes.Length));
-
-            using var stream = new MemoryStream(framed, writable: false);
-            using var input = CodedInputStream.CreateWithLimits(stream, int.MaxValue, 101);
-            var message = new Probe();
-
-            input.ReadMessage(message);
-
-            return message;
-        },
-        (Probe message) =>
-        {
-            return message.ToByteArray();
-        });
+    // * the codec a generated proto binding names, the runtime's
+    private static readonly IPayloadCodec<Probe> ProbeCodec = ProtoCodecs.Of<Probe>();
 
     // helpers
 
@@ -187,10 +155,25 @@ public sealed class CodecsTests
         }));
     }
 
-    // a probe built from its form: one field, or none
+    // a probe built from its form: one field, or none; needs of the fields it gives
     private static Probe ProbeOf(JsonElement form)
     {
         var probe = new Probe();
+
+        if (form.TryGetProperty("needs", out var needs))
+        {
+            probe.Needs = new Needs();
+
+            if (needs.TryGetProperty("must", out var must))
+            {
+                probe.Needs.Must = must.GetUInt32();
+            }
+
+            if (needs.TryGetProperty("shade", out var shade))
+            {
+                probe.Needs.Shade = (Shade)shade.GetInt32();
+            }
+        }
 
         if (form.TryGetProperty("text", out var text))
         {
@@ -233,7 +216,8 @@ public sealed class CodecsTests
     }
 
     // what was read of a probe, as read gives it: its text, number and nested, and below the top
-    // probe its counts, stamps, children and delimited, where it holds any
+    // probe its counts, stamps, children and delimited, where it holds any, and its shade, where a
+    // record set it
     private static JsonElement ReadOf((Probe Probe, bool IsTop) read)
     {
         var (probe, isTop) = read;
@@ -271,6 +255,11 @@ public sealed class CodecsTests
         if (isTop && probe.Delimited is not null)
         {
             fields["delimited"] = ReadOf((probe.Delimited, false));
+        }
+
+        if (isTop && probe.HasShade)
+        {
+            fields["shade"] = (int)probe.Shade;
         }
 
         return JsonSerializer.SerializeToElement(fields);
@@ -350,8 +339,8 @@ public sealed class CodecsTests
             case "proto":
                 if (isRefused)
                 {
-                    // * refused by the check, or past it by Google.Protobuf: a string that is not
-                    // UTF-8 is the library's to refuse
+                    // * refused by the check or the walk, or past them by Google.Protobuf: a string
+                    // that is not UTF-8 is the library's to refuse
                     var refusal = Assert.ThrowsAny<Exception>(() =>
                     {
                         return ProbeCodec.Decode(bytes);

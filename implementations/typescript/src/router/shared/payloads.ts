@@ -562,27 +562,25 @@ export const PAYLOAD_CODECS: Readonly<{
 });
 
 /**
- * A codec of `codec`'s two functions, frozen: a protobuf message's, from its stock library's binary
- * reader and writer, as generated code passes them, the bound of spec 17.9.3 set in its reader and
- * the payload's records checked first by `checkProtoRecords` of `./proto`. The runtime reads no
- * field of the message; what does not read throws, and a request's payload is answered
- * `PAYLOAD_UNDECODABLE` as any other's. One that is not a function is a {@link ProgrammerError}.
+ * A codec of `codec`'s two functions, frozen: an encoding of a project's own, or a protobuf
+ * message's, which generated code takes from `protoCodecOf` of `./proto`, spec 17.9 held there
+ * whole. The runtime reads no field of the message; what does not read throws, and a request's
+ * payload is answered `PAYLOAD_UNDECODABLE` as any other's. One that is not a function is a
+ * {@link ProgrammerError}.
  *
  * @example
- * import { create, fromBinary, toBinary } from '@bufbuild/protobuf';
- * import { checkProtoRecords } from '@francisdesjardins/bead/proto';
+ * import { protoCodecOf } from '@francisdesjardins/bead/proto';
  * import { payloadCodecOf } from '@francisdesjardins/bead/service';
  *
- * const sayHelloRequest = payloadCodecOf({
+ * const sayHelloRequest = protoCodecOf(SayHelloRequestSchema);
+ * const counted = { reads: 0 };
+ * const countedRequest = payloadCodecOf({
  *   decode: (bytes) => {
- *     checkProtoRecords(bytes, SayHelloRequestSchema);
+ *     counted.reads += 1;
  *
- *     // ! protobuf-es counts the top message: 101 is spec 17.9's 100 below it
- *     return fromBinary(SayHelloRequestSchema, bytes, { recursionLimit: 101 });
+ *     return sayHelloRequest.decode(bytes);
  *   },
- *   encode: (given) => {
- *     return toBinary(SayHelloRequestSchema, create(SayHelloRequestSchema, given));
- *   },
+ *   encode: sayHelloRequest.encode,
  * });
  */
 export const payloadCodecOf = <Value, Given = Value>(

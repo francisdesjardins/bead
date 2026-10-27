@@ -406,6 +406,123 @@ export const queryCarries = (
 };
 
 /**
+ * The first field of `LEGACY_REQUIRED` presence, by its proto path, of `fullName`'s message that no
+ * part of a route can set, which section 5.2 refuses on every call (transcoding 5.2, step 4): one on
+ * a path each message field of which is required, or held present by a variable, that no variable
+ * binds, that is no part of the route's `body` field, and that the query cannot set (4.3): a
+ * `Struct`, a `Value`, a `ListValue`, an `Any` or an `Empty`, a message the query reaches no field
+ * of, such as one of maps alone, or a message required of itself without end. None where a body of
+ * `*` takes the request whole, and none where every such field can be set.
+ */
+export const requiredUnboundOf = (
+  fullName: string,
+  details: {
+    readonly messages: ReadonlyMap<string, IMessageEntry>;
+    readonly variables: ReadonlySet<string>;
+    readonly body?: string;
+  }
+): string | undefined => {
+  const variables = [...details.variables];
+
+  if (details.body === '*') {
+    return undefined;
+  }
+
+  // whether the query sets some field of a message, which makes it present, at any depth
+  const settable = (name: string, seen: ReadonlySet<string>): boolean => {
+    return (details.messages.get(name)?.fields ?? []).some((field) => {
+      const held = messageTypeOf(field.type);
+
+      if (field.label === 'map') {
+        return false;
+      }
+
+      if (held === undefined) {
+        return true;
+      }
+
+      if (field.label === 'repeated') {
+        return false;
+      }
+
+      return (
+        STRING_FORMS.has(held) ||
+        (!WELL_KNOWN_MESSAGES.has(held) &&
+          !seen.has(held) &&
+          settable(held, new Set([...seen, held])))
+      );
+    });
+  };
+  const walk = (
+    name: string,
+    at: { readonly prefix: string; readonly chain: ReadonlySet<string> }
+  ): string | undefined => {
+    for (const field of details.messages.get(name)?.fields ?? []) {
+      const path = `${at.prefix}${field.fieldName}`;
+      const held = messageTypeOf(field.type);
+      const present = variables.some((variable) => {
+        return variable.startsWith(`${path}.`);
+      });
+
+      if (
+        details.variables.has(path) ||
+        (at.prefix === '' && field.fieldName === details.body) ||
+        held === undefined ||
+        field.label !== undefined
+      ) {
+        continue;
+      }
+
+      if (field.legacyRequired === true) {
+        if (STRING_FORMS.has(held)) {
+          continue;
+        }
+
+        // ! a message that requires itself, down a path no variable holds, is never whole
+        if (WELL_KNOWN_MESSAGES.has(held) || (at.chain.has(held) && !present)) {
+          return path;
+        }
+
+        const inner = walk(held, { prefix: `${path}.`, chain: new Set([...at.chain, held]) });
+
+        if (inner !== undefined) {
+          return inner;
+        }
+
+        const own = details.messages.get(held)?.fields ?? [];
+
+        // * present by a variable, by a required field of its own, or by a field the query sets
+        if (
+          present ||
+          own.some((each) => {
+            return each.legacyRequired === true;
+          }) ||
+          settable(held, new Set([held]))
+        ) {
+          continue;
+        }
+
+        return path;
+      }
+
+      // * a message a variable holds present has its required fields judged in turn, a chain of them
+      // from it
+      if (present && !WELL_KNOWN_MESSAGES.has(held)) {
+        const inner = walk(held, { prefix: `${path}.`, chain: new Set([held]) });
+
+        if (inner !== undefined) {
+          return inner;
+        }
+      }
+    }
+
+    return undefined;
+  };
+
+  return walk(fullName, { prefix: '', chain: new Set([fullName]) });
+};
+
+/**
  * Whether a procedure has a default `GET` (3.2): marked `NO_SIDE_EFFECTS`, a `proto` request, and
  * the query carrying it whole.
  */

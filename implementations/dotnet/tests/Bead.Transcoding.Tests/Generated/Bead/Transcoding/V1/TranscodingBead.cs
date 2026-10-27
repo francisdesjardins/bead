@@ -24,68 +24,8 @@ public sealed class TranscodingProcedures
         new global::Bead.ProcedureBindings<global::Bead.Transcoding.V1.Everything, global::Bead.Transcoding.V1.Everything>
         {
             Admission = global::Bead.AdmissionRule.None,
-            Request = global::Bead.PayloadCodecs.Of<global::Bead.Transcoding.V1.Everything>(
-                (bytes) =>
-                {
-                    // ! the check first, by the descriptor Google.Protobuf reads with: it refuses what protobuf
-                    // refuses where a stock library reads on (decision 0028)
-                    global::Bead.Protobuf.ProtoRecords.Check(bytes.Span, global::Bead.Transcoding.V1.Everything.Descriptor);
-
-                    // ! spec 17.9's bound, set here rather than left to the library's default. The payload is
-                    // read as a message field holds one, after its length, and the top message counts: 101 is
-                    // 100 below it
-                    var framed = new byte[global::Google.Protobuf.CodedOutputStream.ComputeLengthSize(bytes.Length) + bytes.Length];
-
-                    using (var output = new global::Google.Protobuf.CodedOutputStream(framed))
-                    {
-                        output.WriteLength(bytes.Length);
-                    }
-
-                    bytes.Span.CopyTo(framed.AsSpan(framed.Length - bytes.Length));
-
-                    using var stream = new global::System.IO.MemoryStream(framed, writable: false);
-                    using var input = global::Google.Protobuf.CodedInputStream.CreateWithLimits(stream, int.MaxValue, 101);
-                    var message = new global::Bead.Transcoding.V1.Everything();
-
-                    input.ReadMessage(message);
-
-                    return message;
-                },
-                (message) =>
-                {
-                    return global::Google.Protobuf.MessageExtensions.ToByteArray(message);
-                }),
-            Result = global::Bead.PayloadCodecs.Of<global::Bead.Transcoding.V1.Everything>(
-                (bytes) =>
-                {
-                    // ! the check first, by the descriptor Google.Protobuf reads with: it refuses what protobuf
-                    // refuses where a stock library reads on (decision 0028)
-                    global::Bead.Protobuf.ProtoRecords.Check(bytes.Span, global::Bead.Transcoding.V1.Everything.Descriptor);
-
-                    // ! spec 17.9's bound, set here rather than left to the library's default. The payload is
-                    // read as a message field holds one, after its length, and the top message counts: 101 is
-                    // 100 below it
-                    var framed = new byte[global::Google.Protobuf.CodedOutputStream.ComputeLengthSize(bytes.Length) + bytes.Length];
-
-                    using (var output = new global::Google.Protobuf.CodedOutputStream(framed))
-                    {
-                        output.WriteLength(bytes.Length);
-                    }
-
-                    bytes.Span.CopyTo(framed.AsSpan(framed.Length - bytes.Length));
-
-                    using var stream = new global::System.IO.MemoryStream(framed, writable: false);
-                    using var input = global::Google.Protobuf.CodedInputStream.CreateWithLimits(stream, int.MaxValue, 101);
-                    var message = new global::Bead.Transcoding.V1.Everything();
-
-                    input.ReadMessage(message);
-
-                    return message;
-                },
-                (message) =>
-                {
-                    return global::Google.Protobuf.MessageExtensions.ToByteArray(message);
-                }),
+            Request = global::Bead.Protobuf.ProtoCodecs.Of<global::Bead.Transcoding.V1.Everything>(),
+            Result = global::Bead.Protobuf.ProtoCodecs.Of<global::Bead.Transcoding.V1.Everything>(),
         });
 
     /// <summary>Answers its request. Admits every call.</summary>
@@ -94,68 +34,8 @@ public sealed class TranscodingProcedures
         new global::Bead.ProcedureBindings<global::Bead.Transcoding.V1.Edges, global::Bead.Transcoding.V1.Edges>
         {
             Admission = global::Bead.AdmissionRule.None,
-            Request = global::Bead.PayloadCodecs.Of<global::Bead.Transcoding.V1.Edges>(
-                (bytes) =>
-                {
-                    // ! the check first, by the descriptor Google.Protobuf reads with: it refuses what protobuf
-                    // refuses where a stock library reads on (decision 0028)
-                    global::Bead.Protobuf.ProtoRecords.Check(bytes.Span, global::Bead.Transcoding.V1.Edges.Descriptor);
-
-                    // ! spec 17.9's bound, set here rather than left to the library's default. The payload is
-                    // read as a message field holds one, after its length, and the top message counts: 101 is
-                    // 100 below it
-                    var framed = new byte[global::Google.Protobuf.CodedOutputStream.ComputeLengthSize(bytes.Length) + bytes.Length];
-
-                    using (var output = new global::Google.Protobuf.CodedOutputStream(framed))
-                    {
-                        output.WriteLength(bytes.Length);
-                    }
-
-                    bytes.Span.CopyTo(framed.AsSpan(framed.Length - bytes.Length));
-
-                    using var stream = new global::System.IO.MemoryStream(framed, writable: false);
-                    using var input = global::Google.Protobuf.CodedInputStream.CreateWithLimits(stream, int.MaxValue, 101);
-                    var message = new global::Bead.Transcoding.V1.Edges();
-
-                    input.ReadMessage(message);
-
-                    return message;
-                },
-                (message) =>
-                {
-                    return global::Google.Protobuf.MessageExtensions.ToByteArray(message);
-                }),
-            Result = global::Bead.PayloadCodecs.Of<global::Bead.Transcoding.V1.Edges>(
-                (bytes) =>
-                {
-                    // ! the check first, by the descriptor Google.Protobuf reads with: it refuses what protobuf
-                    // refuses where a stock library reads on (decision 0028)
-                    global::Bead.Protobuf.ProtoRecords.Check(bytes.Span, global::Bead.Transcoding.V1.Edges.Descriptor);
-
-                    // ! spec 17.9's bound, set here rather than left to the library's default. The payload is
-                    // read as a message field holds one, after its length, and the top message counts: 101 is
-                    // 100 below it
-                    var framed = new byte[global::Google.Protobuf.CodedOutputStream.ComputeLengthSize(bytes.Length) + bytes.Length];
-
-                    using (var output = new global::Google.Protobuf.CodedOutputStream(framed))
-                    {
-                        output.WriteLength(bytes.Length);
-                    }
-
-                    bytes.Span.CopyTo(framed.AsSpan(framed.Length - bytes.Length));
-
-                    using var stream = new global::System.IO.MemoryStream(framed, writable: false);
-                    using var input = global::Google.Protobuf.CodedInputStream.CreateWithLimits(stream, int.MaxValue, 101);
-                    var message = new global::Bead.Transcoding.V1.Edges();
-
-                    input.ReadMessage(message);
-
-                    return message;
-                },
-                (message) =>
-                {
-                    return global::Google.Protobuf.MessageExtensions.ToByteArray(message);
-                }),
+            Request = global::Bead.Protobuf.ProtoCodecs.Of<global::Bead.Transcoding.V1.Edges>(),
+            Result = global::Bead.Protobuf.ProtoCodecs.Of<global::Bead.Transcoding.V1.Edges>(),
         });
 
     /// <summary>Answers the book its name names: its title "A tale", its pages its revision. Admits every call.</summary>
@@ -164,68 +44,8 @@ public sealed class TranscodingProcedures
         new global::Bead.ProcedureBindings<global::Bead.Transcoding.V1.GetBookRequest, global::Bead.Transcoding.V1.Book>
         {
             Admission = global::Bead.AdmissionRule.None,
-            Request = global::Bead.PayloadCodecs.Of<global::Bead.Transcoding.V1.GetBookRequest>(
-                (bytes) =>
-                {
-                    // ! the check first, by the descriptor Google.Protobuf reads with: it refuses what protobuf
-                    // refuses where a stock library reads on (decision 0028)
-                    global::Bead.Protobuf.ProtoRecords.Check(bytes.Span, global::Bead.Transcoding.V1.GetBookRequest.Descriptor);
-
-                    // ! spec 17.9's bound, set here rather than left to the library's default. The payload is
-                    // read as a message field holds one, after its length, and the top message counts: 101 is
-                    // 100 below it
-                    var framed = new byte[global::Google.Protobuf.CodedOutputStream.ComputeLengthSize(bytes.Length) + bytes.Length];
-
-                    using (var output = new global::Google.Protobuf.CodedOutputStream(framed))
-                    {
-                        output.WriteLength(bytes.Length);
-                    }
-
-                    bytes.Span.CopyTo(framed.AsSpan(framed.Length - bytes.Length));
-
-                    using var stream = new global::System.IO.MemoryStream(framed, writable: false);
-                    using var input = global::Google.Protobuf.CodedInputStream.CreateWithLimits(stream, int.MaxValue, 101);
-                    var message = new global::Bead.Transcoding.V1.GetBookRequest();
-
-                    input.ReadMessage(message);
-
-                    return message;
-                },
-                (message) =>
-                {
-                    return global::Google.Protobuf.MessageExtensions.ToByteArray(message);
-                }),
-            Result = global::Bead.PayloadCodecs.Of<global::Bead.Transcoding.V1.Book>(
-                (bytes) =>
-                {
-                    // ! the check first, by the descriptor Google.Protobuf reads with: it refuses what protobuf
-                    // refuses where a stock library reads on (decision 0028)
-                    global::Bead.Protobuf.ProtoRecords.Check(bytes.Span, global::Bead.Transcoding.V1.Book.Descriptor);
-
-                    // ! spec 17.9's bound, set here rather than left to the library's default. The payload is
-                    // read as a message field holds one, after its length, and the top message counts: 101 is
-                    // 100 below it
-                    var framed = new byte[global::Google.Protobuf.CodedOutputStream.ComputeLengthSize(bytes.Length) + bytes.Length];
-
-                    using (var output = new global::Google.Protobuf.CodedOutputStream(framed))
-                    {
-                        output.WriteLength(bytes.Length);
-                    }
-
-                    bytes.Span.CopyTo(framed.AsSpan(framed.Length - bytes.Length));
-
-                    using var stream = new global::System.IO.MemoryStream(framed, writable: false);
-                    using var input = global::Google.Protobuf.CodedInputStream.CreateWithLimits(stream, int.MaxValue, 101);
-                    var message = new global::Bead.Transcoding.V1.Book();
-
-                    input.ReadMessage(message);
-
-                    return message;
-                },
-                (message) =>
-                {
-                    return global::Google.Protobuf.MessageExtensions.ToByteArray(message);
-                }),
+            Request = global::Bead.Protobuf.ProtoCodecs.Of<global::Bead.Transcoding.V1.GetBookRequest>(),
+            Result = global::Bead.Protobuf.ProtoCodecs.Of<global::Bead.Transcoding.V1.Book>(),
         });
 
     /// <summary>Answers its shelf's two books, a and b, titled A and B, and no page after. Admits every call.</summary>
@@ -234,68 +54,8 @@ public sealed class TranscodingProcedures
         new global::Bead.ProcedureBindings<global::Bead.Transcoding.V1.ListBooksRequest, global::Bead.Transcoding.V1.ListBooksResponse>
         {
             Admission = global::Bead.AdmissionRule.None,
-            Request = global::Bead.PayloadCodecs.Of<global::Bead.Transcoding.V1.ListBooksRequest>(
-                (bytes) =>
-                {
-                    // ! the check first, by the descriptor Google.Protobuf reads with: it refuses what protobuf
-                    // refuses where a stock library reads on (decision 0028)
-                    global::Bead.Protobuf.ProtoRecords.Check(bytes.Span, global::Bead.Transcoding.V1.ListBooksRequest.Descriptor);
-
-                    // ! spec 17.9's bound, set here rather than left to the library's default. The payload is
-                    // read as a message field holds one, after its length, and the top message counts: 101 is
-                    // 100 below it
-                    var framed = new byte[global::Google.Protobuf.CodedOutputStream.ComputeLengthSize(bytes.Length) + bytes.Length];
-
-                    using (var output = new global::Google.Protobuf.CodedOutputStream(framed))
-                    {
-                        output.WriteLength(bytes.Length);
-                    }
-
-                    bytes.Span.CopyTo(framed.AsSpan(framed.Length - bytes.Length));
-
-                    using var stream = new global::System.IO.MemoryStream(framed, writable: false);
-                    using var input = global::Google.Protobuf.CodedInputStream.CreateWithLimits(stream, int.MaxValue, 101);
-                    var message = new global::Bead.Transcoding.V1.ListBooksRequest();
-
-                    input.ReadMessage(message);
-
-                    return message;
-                },
-                (message) =>
-                {
-                    return global::Google.Protobuf.MessageExtensions.ToByteArray(message);
-                }),
-            Result = global::Bead.PayloadCodecs.Of<global::Bead.Transcoding.V1.ListBooksResponse>(
-                (bytes) =>
-                {
-                    // ! the check first, by the descriptor Google.Protobuf reads with: it refuses what protobuf
-                    // refuses where a stock library reads on (decision 0028)
-                    global::Bead.Protobuf.ProtoRecords.Check(bytes.Span, global::Bead.Transcoding.V1.ListBooksResponse.Descriptor);
-
-                    // ! spec 17.9's bound, set here rather than left to the library's default. The payload is
-                    // read as a message field holds one, after its length, and the top message counts: 101 is
-                    // 100 below it
-                    var framed = new byte[global::Google.Protobuf.CodedOutputStream.ComputeLengthSize(bytes.Length) + bytes.Length];
-
-                    using (var output = new global::Google.Protobuf.CodedOutputStream(framed))
-                    {
-                        output.WriteLength(bytes.Length);
-                    }
-
-                    bytes.Span.CopyTo(framed.AsSpan(framed.Length - bytes.Length));
-
-                    using var stream = new global::System.IO.MemoryStream(framed, writable: false);
-                    using var input = global::Google.Protobuf.CodedInputStream.CreateWithLimits(stream, int.MaxValue, 101);
-                    var message = new global::Bead.Transcoding.V1.ListBooksResponse();
-
-                    input.ReadMessage(message);
-
-                    return message;
-                },
-                (message) =>
-                {
-                    return global::Google.Protobuf.MessageExtensions.ToByteArray(message);
-                }),
+            Request = global::Bead.Protobuf.ProtoCodecs.Of<global::Bead.Transcoding.V1.ListBooksRequest>(),
+            Result = global::Bead.Protobuf.ProtoCodecs.Of<global::Bead.Transcoding.V1.ListBooksResponse>(),
         });
 
     /// <summary>Answers its request. Admits every call.</summary>
@@ -304,68 +64,8 @@ public sealed class TranscodingProcedures
         new global::Bead.ProcedureBindings<global::Bead.Transcoding.V1.UpdateBookRequest, global::Bead.Transcoding.V1.UpdateBookRequest>
         {
             Admission = global::Bead.AdmissionRule.None,
-            Request = global::Bead.PayloadCodecs.Of<global::Bead.Transcoding.V1.UpdateBookRequest>(
-                (bytes) =>
-                {
-                    // ! the check first, by the descriptor Google.Protobuf reads with: it refuses what protobuf
-                    // refuses where a stock library reads on (decision 0028)
-                    global::Bead.Protobuf.ProtoRecords.Check(bytes.Span, global::Bead.Transcoding.V1.UpdateBookRequest.Descriptor);
-
-                    // ! spec 17.9's bound, set here rather than left to the library's default. The payload is
-                    // read as a message field holds one, after its length, and the top message counts: 101 is
-                    // 100 below it
-                    var framed = new byte[global::Google.Protobuf.CodedOutputStream.ComputeLengthSize(bytes.Length) + bytes.Length];
-
-                    using (var output = new global::Google.Protobuf.CodedOutputStream(framed))
-                    {
-                        output.WriteLength(bytes.Length);
-                    }
-
-                    bytes.Span.CopyTo(framed.AsSpan(framed.Length - bytes.Length));
-
-                    using var stream = new global::System.IO.MemoryStream(framed, writable: false);
-                    using var input = global::Google.Protobuf.CodedInputStream.CreateWithLimits(stream, int.MaxValue, 101);
-                    var message = new global::Bead.Transcoding.V1.UpdateBookRequest();
-
-                    input.ReadMessage(message);
-
-                    return message;
-                },
-                (message) =>
-                {
-                    return global::Google.Protobuf.MessageExtensions.ToByteArray(message);
-                }),
-            Result = global::Bead.PayloadCodecs.Of<global::Bead.Transcoding.V1.UpdateBookRequest>(
-                (bytes) =>
-                {
-                    // ! the check first, by the descriptor Google.Protobuf reads with: it refuses what protobuf
-                    // refuses where a stock library reads on (decision 0028)
-                    global::Bead.Protobuf.ProtoRecords.Check(bytes.Span, global::Bead.Transcoding.V1.UpdateBookRequest.Descriptor);
-
-                    // ! spec 17.9's bound, set here rather than left to the library's default. The payload is
-                    // read as a message field holds one, after its length, and the top message counts: 101 is
-                    // 100 below it
-                    var framed = new byte[global::Google.Protobuf.CodedOutputStream.ComputeLengthSize(bytes.Length) + bytes.Length];
-
-                    using (var output = new global::Google.Protobuf.CodedOutputStream(framed))
-                    {
-                        output.WriteLength(bytes.Length);
-                    }
-
-                    bytes.Span.CopyTo(framed.AsSpan(framed.Length - bytes.Length));
-
-                    using var stream = new global::System.IO.MemoryStream(framed, writable: false);
-                    using var input = global::Google.Protobuf.CodedInputStream.CreateWithLimits(stream, int.MaxValue, 101);
-                    var message = new global::Bead.Transcoding.V1.UpdateBookRequest();
-
-                    input.ReadMessage(message);
-
-                    return message;
-                },
-                (message) =>
-                {
-                    return global::Google.Protobuf.MessageExtensions.ToByteArray(message);
-                }),
+            Request = global::Bead.Protobuf.ProtoCodecs.Of<global::Bead.Transcoding.V1.UpdateBookRequest>(),
+            Result = global::Bead.Protobuf.ProtoCodecs.Of<global::Bead.Transcoding.V1.UpdateBookRequest>(),
         });
 
     /// <summary>Archives a book, and answers nothing. Admits every call.</summary>
@@ -374,68 +74,8 @@ public sealed class TranscodingProcedures
         new global::Bead.ProcedureBindings<global::Bead.Transcoding.V1.GetBookRequest, global::Google.Protobuf.WellKnownTypes.Empty>
         {
             Admission = global::Bead.AdmissionRule.None,
-            Request = global::Bead.PayloadCodecs.Of<global::Bead.Transcoding.V1.GetBookRequest>(
-                (bytes) =>
-                {
-                    // ! the check first, by the descriptor Google.Protobuf reads with: it refuses what protobuf
-                    // refuses where a stock library reads on (decision 0028)
-                    global::Bead.Protobuf.ProtoRecords.Check(bytes.Span, global::Bead.Transcoding.V1.GetBookRequest.Descriptor);
-
-                    // ! spec 17.9's bound, set here rather than left to the library's default. The payload is
-                    // read as a message field holds one, after its length, and the top message counts: 101 is
-                    // 100 below it
-                    var framed = new byte[global::Google.Protobuf.CodedOutputStream.ComputeLengthSize(bytes.Length) + bytes.Length];
-
-                    using (var output = new global::Google.Protobuf.CodedOutputStream(framed))
-                    {
-                        output.WriteLength(bytes.Length);
-                    }
-
-                    bytes.Span.CopyTo(framed.AsSpan(framed.Length - bytes.Length));
-
-                    using var stream = new global::System.IO.MemoryStream(framed, writable: false);
-                    using var input = global::Google.Protobuf.CodedInputStream.CreateWithLimits(stream, int.MaxValue, 101);
-                    var message = new global::Bead.Transcoding.V1.GetBookRequest();
-
-                    input.ReadMessage(message);
-
-                    return message;
-                },
-                (message) =>
-                {
-                    return global::Google.Protobuf.MessageExtensions.ToByteArray(message);
-                }),
-            Result = global::Bead.PayloadCodecs.Of<global::Google.Protobuf.WellKnownTypes.Empty>(
-                (bytes) =>
-                {
-                    // ! the check first, by the descriptor Google.Protobuf reads with: it refuses what protobuf
-                    // refuses where a stock library reads on (decision 0028)
-                    global::Bead.Protobuf.ProtoRecords.Check(bytes.Span, global::Google.Protobuf.WellKnownTypes.Empty.Descriptor);
-
-                    // ! spec 17.9's bound, set here rather than left to the library's default. The payload is
-                    // read as a message field holds one, after its length, and the top message counts: 101 is
-                    // 100 below it
-                    var framed = new byte[global::Google.Protobuf.CodedOutputStream.ComputeLengthSize(bytes.Length) + bytes.Length];
-
-                    using (var output = new global::Google.Protobuf.CodedOutputStream(framed))
-                    {
-                        output.WriteLength(bytes.Length);
-                    }
-
-                    bytes.Span.CopyTo(framed.AsSpan(framed.Length - bytes.Length));
-
-                    using var stream = new global::System.IO.MemoryStream(framed, writable: false);
-                    using var input = global::Google.Protobuf.CodedInputStream.CreateWithLimits(stream, int.MaxValue, 101);
-                    var message = new global::Google.Protobuf.WellKnownTypes.Empty();
-
-                    input.ReadMessage(message);
-
-                    return message;
-                },
-                (message) =>
-                {
-                    return global::Google.Protobuf.MessageExtensions.ToByteArray(message);
-                }),
+            Request = global::Bead.Protobuf.ProtoCodecs.Of<global::Bead.Transcoding.V1.GetBookRequest>(),
+            Result = global::Bead.Protobuf.ProtoCodecs.Of<global::Google.Protobuf.WellKnownTypes.Empty>(),
         });
 
     /// <summary>Answers one operation, its name its request's and "/a" after it, not done. Admits every call.</summary>
@@ -444,68 +84,8 @@ public sealed class TranscodingProcedures
         new global::Bead.ProcedureBindings<global::Bead.Transcoding.V1.ListOperationsRequest, global::Bead.Transcoding.V1.ListOperationsResponse>
         {
             Admission = global::Bead.AdmissionRule.None,
-            Request = global::Bead.PayloadCodecs.Of<global::Bead.Transcoding.V1.ListOperationsRequest>(
-                (bytes) =>
-                {
-                    // ! the check first, by the descriptor Google.Protobuf reads with: it refuses what protobuf
-                    // refuses where a stock library reads on (decision 0028)
-                    global::Bead.Protobuf.ProtoRecords.Check(bytes.Span, global::Bead.Transcoding.V1.ListOperationsRequest.Descriptor);
-
-                    // ! spec 17.9's bound, set here rather than left to the library's default. The payload is
-                    // read as a message field holds one, after its length, and the top message counts: 101 is
-                    // 100 below it
-                    var framed = new byte[global::Google.Protobuf.CodedOutputStream.ComputeLengthSize(bytes.Length) + bytes.Length];
-
-                    using (var output = new global::Google.Protobuf.CodedOutputStream(framed))
-                    {
-                        output.WriteLength(bytes.Length);
-                    }
-
-                    bytes.Span.CopyTo(framed.AsSpan(framed.Length - bytes.Length));
-
-                    using var stream = new global::System.IO.MemoryStream(framed, writable: false);
-                    using var input = global::Google.Protobuf.CodedInputStream.CreateWithLimits(stream, int.MaxValue, 101);
-                    var message = new global::Bead.Transcoding.V1.ListOperationsRequest();
-
-                    input.ReadMessage(message);
-
-                    return message;
-                },
-                (message) =>
-                {
-                    return global::Google.Protobuf.MessageExtensions.ToByteArray(message);
-                }),
-            Result = global::Bead.PayloadCodecs.Of<global::Bead.Transcoding.V1.ListOperationsResponse>(
-                (bytes) =>
-                {
-                    // ! the check first, by the descriptor Google.Protobuf reads with: it refuses what protobuf
-                    // refuses where a stock library reads on (decision 0028)
-                    global::Bead.Protobuf.ProtoRecords.Check(bytes.Span, global::Bead.Transcoding.V1.ListOperationsResponse.Descriptor);
-
-                    // ! spec 17.9's bound, set here rather than left to the library's default. The payload is
-                    // read as a message field holds one, after its length, and the top message counts: 101 is
-                    // 100 below it
-                    var framed = new byte[global::Google.Protobuf.CodedOutputStream.ComputeLengthSize(bytes.Length) + bytes.Length];
-
-                    using (var output = new global::Google.Protobuf.CodedOutputStream(framed))
-                    {
-                        output.WriteLength(bytes.Length);
-                    }
-
-                    bytes.Span.CopyTo(framed.AsSpan(framed.Length - bytes.Length));
-
-                    using var stream = new global::System.IO.MemoryStream(framed, writable: false);
-                    using var input = global::Google.Protobuf.CodedInputStream.CreateWithLimits(stream, int.MaxValue, 101);
-                    var message = new global::Bead.Transcoding.V1.ListOperationsResponse();
-
-                    input.ReadMessage(message);
-
-                    return message;
-                },
-                (message) =>
-                {
-                    return global::Google.Protobuf.MessageExtensions.ToByteArray(message);
-                }),
+            Request = global::Bead.Protobuf.ProtoCodecs.Of<global::Bead.Transcoding.V1.ListOperationsRequest>(),
+            Result = global::Bead.Protobuf.ProtoCodecs.Of<global::Bead.Transcoding.V1.ListOperationsResponse>(),
         });
 
     /// <summary>Answers the operation its name names, done. Admits every call.</summary>
@@ -514,68 +94,8 @@ public sealed class TranscodingProcedures
         new global::Bead.ProcedureBindings<global::Bead.Transcoding.V1.GetOperationRequest, global::Bead.Transcoding.V1.Operation>
         {
             Admission = global::Bead.AdmissionRule.None,
-            Request = global::Bead.PayloadCodecs.Of<global::Bead.Transcoding.V1.GetOperationRequest>(
-                (bytes) =>
-                {
-                    // ! the check first, by the descriptor Google.Protobuf reads with: it refuses what protobuf
-                    // refuses where a stock library reads on (decision 0028)
-                    global::Bead.Protobuf.ProtoRecords.Check(bytes.Span, global::Bead.Transcoding.V1.GetOperationRequest.Descriptor);
-
-                    // ! spec 17.9's bound, set here rather than left to the library's default. The payload is
-                    // read as a message field holds one, after its length, and the top message counts: 101 is
-                    // 100 below it
-                    var framed = new byte[global::Google.Protobuf.CodedOutputStream.ComputeLengthSize(bytes.Length) + bytes.Length];
-
-                    using (var output = new global::Google.Protobuf.CodedOutputStream(framed))
-                    {
-                        output.WriteLength(bytes.Length);
-                    }
-
-                    bytes.Span.CopyTo(framed.AsSpan(framed.Length - bytes.Length));
-
-                    using var stream = new global::System.IO.MemoryStream(framed, writable: false);
-                    using var input = global::Google.Protobuf.CodedInputStream.CreateWithLimits(stream, int.MaxValue, 101);
-                    var message = new global::Bead.Transcoding.V1.GetOperationRequest();
-
-                    input.ReadMessage(message);
-
-                    return message;
-                },
-                (message) =>
-                {
-                    return global::Google.Protobuf.MessageExtensions.ToByteArray(message);
-                }),
-            Result = global::Bead.PayloadCodecs.Of<global::Bead.Transcoding.V1.Operation>(
-                (bytes) =>
-                {
-                    // ! the check first, by the descriptor Google.Protobuf reads with: it refuses what protobuf
-                    // refuses where a stock library reads on (decision 0028)
-                    global::Bead.Protobuf.ProtoRecords.Check(bytes.Span, global::Bead.Transcoding.V1.Operation.Descriptor);
-
-                    // ! spec 17.9's bound, set here rather than left to the library's default. The payload is
-                    // read as a message field holds one, after its length, and the top message counts: 101 is
-                    // 100 below it
-                    var framed = new byte[global::Google.Protobuf.CodedOutputStream.ComputeLengthSize(bytes.Length) + bytes.Length];
-
-                    using (var output = new global::Google.Protobuf.CodedOutputStream(framed))
-                    {
-                        output.WriteLength(bytes.Length);
-                    }
-
-                    bytes.Span.CopyTo(framed.AsSpan(framed.Length - bytes.Length));
-
-                    using var stream = new global::System.IO.MemoryStream(framed, writable: false);
-                    using var input = global::Google.Protobuf.CodedInputStream.CreateWithLimits(stream, int.MaxValue, 101);
-                    var message = new global::Bead.Transcoding.V1.Operation();
-
-                    input.ReadMessage(message);
-
-                    return message;
-                },
-                (message) =>
-                {
-                    return global::Google.Protobuf.MessageExtensions.ToByteArray(message);
-                }),
+            Request = global::Bead.Protobuf.ProtoCodecs.Of<global::Bead.Transcoding.V1.GetOperationRequest>(),
+            Result = global::Bead.Protobuf.ProtoCodecs.Of<global::Bead.Transcoding.V1.Operation>(),
         });
 
     /// <summary>Answers nothing, once its rules took its request. Admits every call.</summary>
@@ -584,68 +104,8 @@ public sealed class TranscodingProcedures
         new global::Bead.ProcedureBindings<global::Bead.Transcoding.V1.Ruled, global::Google.Protobuf.WellKnownTypes.Empty>
         {
             Admission = global::Bead.AdmissionRule.None,
-            Request = global::Bead.PayloadCodecs.Of<global::Bead.Transcoding.V1.Ruled>(
-                (bytes) =>
-                {
-                    // ! the check first, by the descriptor Google.Protobuf reads with: it refuses what protobuf
-                    // refuses where a stock library reads on (decision 0028)
-                    global::Bead.Protobuf.ProtoRecords.Check(bytes.Span, global::Bead.Transcoding.V1.Ruled.Descriptor);
-
-                    // ! spec 17.9's bound, set here rather than left to the library's default. The payload is
-                    // read as a message field holds one, after its length, and the top message counts: 101 is
-                    // 100 below it
-                    var framed = new byte[global::Google.Protobuf.CodedOutputStream.ComputeLengthSize(bytes.Length) + bytes.Length];
-
-                    using (var output = new global::Google.Protobuf.CodedOutputStream(framed))
-                    {
-                        output.WriteLength(bytes.Length);
-                    }
-
-                    bytes.Span.CopyTo(framed.AsSpan(framed.Length - bytes.Length));
-
-                    using var stream = new global::System.IO.MemoryStream(framed, writable: false);
-                    using var input = global::Google.Protobuf.CodedInputStream.CreateWithLimits(stream, int.MaxValue, 101);
-                    var message = new global::Bead.Transcoding.V1.Ruled();
-
-                    input.ReadMessage(message);
-
-                    return message;
-                },
-                (message) =>
-                {
-                    return global::Google.Protobuf.MessageExtensions.ToByteArray(message);
-                }),
-            Result = global::Bead.PayloadCodecs.Of<global::Google.Protobuf.WellKnownTypes.Empty>(
-                (bytes) =>
-                {
-                    // ! the check first, by the descriptor Google.Protobuf reads with: it refuses what protobuf
-                    // refuses where a stock library reads on (decision 0028)
-                    global::Bead.Protobuf.ProtoRecords.Check(bytes.Span, global::Google.Protobuf.WellKnownTypes.Empty.Descriptor);
-
-                    // ! spec 17.9's bound, set here rather than left to the library's default. The payload is
-                    // read as a message field holds one, after its length, and the top message counts: 101 is
-                    // 100 below it
-                    var framed = new byte[global::Google.Protobuf.CodedOutputStream.ComputeLengthSize(bytes.Length) + bytes.Length];
-
-                    using (var output = new global::Google.Protobuf.CodedOutputStream(framed))
-                    {
-                        output.WriteLength(bytes.Length);
-                    }
-
-                    bytes.Span.CopyTo(framed.AsSpan(framed.Length - bytes.Length));
-
-                    using var stream = new global::System.IO.MemoryStream(framed, writable: false);
-                    using var input = global::Google.Protobuf.CodedInputStream.CreateWithLimits(stream, int.MaxValue, 101);
-                    var message = new global::Google.Protobuf.WellKnownTypes.Empty();
-
-                    input.ReadMessage(message);
-
-                    return message;
-                },
-                (message) =>
-                {
-                    return global::Google.Protobuf.MessageExtensions.ToByteArray(message);
-                }),
+            Request = global::Bead.Protobuf.ProtoCodecs.Of<global::Bead.Transcoding.V1.Ruled>(),
+            Result = global::Bead.Protobuf.ProtoCodecs.Of<global::Google.Protobuf.WellKnownTypes.Empty>(),
             Validate = global::Bead.Protobuf.Validators.Of<global::Bead.Transcoding.V1.Ruled>(RuledRules.Check),
         });
 
@@ -655,99 +115,9 @@ public sealed class TranscodingProcedures
         new global::Bead.ProcedureBindings<global::Bead.Transcoding.V1.TicksRequest, global::Bead.Transcoding.V1.TicksResponse, global::Bead.Transcoding.V1.Tick>
         {
             Admission = global::Bead.AdmissionRule.None,
-            Request = global::Bead.PayloadCodecs.Of<global::Bead.Transcoding.V1.TicksRequest>(
-                (bytes) =>
-                {
-                    // ! the check first, by the descriptor Google.Protobuf reads with: it refuses what protobuf
-                    // refuses where a stock library reads on (decision 0028)
-                    global::Bead.Protobuf.ProtoRecords.Check(bytes.Span, global::Bead.Transcoding.V1.TicksRequest.Descriptor);
-
-                    // ! spec 17.9's bound, set here rather than left to the library's default. The payload is
-                    // read as a message field holds one, after its length, and the top message counts: 101 is
-                    // 100 below it
-                    var framed = new byte[global::Google.Protobuf.CodedOutputStream.ComputeLengthSize(bytes.Length) + bytes.Length];
-
-                    using (var output = new global::Google.Protobuf.CodedOutputStream(framed))
-                    {
-                        output.WriteLength(bytes.Length);
-                    }
-
-                    bytes.Span.CopyTo(framed.AsSpan(framed.Length - bytes.Length));
-
-                    using var stream = new global::System.IO.MemoryStream(framed, writable: false);
-                    using var input = global::Google.Protobuf.CodedInputStream.CreateWithLimits(stream, int.MaxValue, 101);
-                    var message = new global::Bead.Transcoding.V1.TicksRequest();
-
-                    input.ReadMessage(message);
-
-                    return message;
-                },
-                (message) =>
-                {
-                    return global::Google.Protobuf.MessageExtensions.ToByteArray(message);
-                }),
-            Result = global::Bead.PayloadCodecs.Of<global::Bead.Transcoding.V1.TicksResponse>(
-                (bytes) =>
-                {
-                    // ! the check first, by the descriptor Google.Protobuf reads with: it refuses what protobuf
-                    // refuses where a stock library reads on (decision 0028)
-                    global::Bead.Protobuf.ProtoRecords.Check(bytes.Span, global::Bead.Transcoding.V1.TicksResponse.Descriptor);
-
-                    // ! spec 17.9's bound, set here rather than left to the library's default. The payload is
-                    // read as a message field holds one, after its length, and the top message counts: 101 is
-                    // 100 below it
-                    var framed = new byte[global::Google.Protobuf.CodedOutputStream.ComputeLengthSize(bytes.Length) + bytes.Length];
-
-                    using (var output = new global::Google.Protobuf.CodedOutputStream(framed))
-                    {
-                        output.WriteLength(bytes.Length);
-                    }
-
-                    bytes.Span.CopyTo(framed.AsSpan(framed.Length - bytes.Length));
-
-                    using var stream = new global::System.IO.MemoryStream(framed, writable: false);
-                    using var input = global::Google.Protobuf.CodedInputStream.CreateWithLimits(stream, int.MaxValue, 101);
-                    var message = new global::Bead.Transcoding.V1.TicksResponse();
-
-                    input.ReadMessage(message);
-
-                    return message;
-                },
-                (message) =>
-                {
-                    return global::Google.Protobuf.MessageExtensions.ToByteArray(message);
-                }),
-            Notification = global::Bead.PayloadCodecs.Of<global::Bead.Transcoding.V1.Tick>(
-                (bytes) =>
-                {
-                    // ! the check first, by the descriptor Google.Protobuf reads with: it refuses what protobuf
-                    // refuses where a stock library reads on (decision 0028)
-                    global::Bead.Protobuf.ProtoRecords.Check(bytes.Span, global::Bead.Transcoding.V1.Tick.Descriptor);
-
-                    // ! spec 17.9's bound, set here rather than left to the library's default. The payload is
-                    // read as a message field holds one, after its length, and the top message counts: 101 is
-                    // 100 below it
-                    var framed = new byte[global::Google.Protobuf.CodedOutputStream.ComputeLengthSize(bytes.Length) + bytes.Length];
-
-                    using (var output = new global::Google.Protobuf.CodedOutputStream(framed))
-                    {
-                        output.WriteLength(bytes.Length);
-                    }
-
-                    bytes.Span.CopyTo(framed.AsSpan(framed.Length - bytes.Length));
-
-                    using var stream = new global::System.IO.MemoryStream(framed, writable: false);
-                    using var input = global::Google.Protobuf.CodedInputStream.CreateWithLimits(stream, int.MaxValue, 101);
-                    var message = new global::Bead.Transcoding.V1.Tick();
-
-                    input.ReadMessage(message);
-
-                    return message;
-                },
-                (message) =>
-                {
-                    return global::Google.Protobuf.MessageExtensions.ToByteArray(message);
-                }),
+            Request = global::Bead.Protobuf.ProtoCodecs.Of<global::Bead.Transcoding.V1.TicksRequest>(),
+            Result = global::Bead.Protobuf.ProtoCodecs.Of<global::Bead.Transcoding.V1.TicksResponse>(),
+            Notification = global::Bead.Protobuf.ProtoCodecs.Of<global::Bead.Transcoding.V1.Tick>(),
         });
 
     /// <summary>Answers nothing, then notifies nothing, and ends its subscription never. Admits every call.</summary>
@@ -756,99 +126,9 @@ public sealed class TranscodingProcedures
         new global::Bead.ProcedureBindings<global::Google.Protobuf.WellKnownTypes.Empty, global::Google.Protobuf.WellKnownTypes.Empty, global::Bead.Transcoding.V1.Tick>
         {
             Admission = global::Bead.AdmissionRule.None,
-            Request = global::Bead.PayloadCodecs.Of<global::Google.Protobuf.WellKnownTypes.Empty>(
-                (bytes) =>
-                {
-                    // ! the check first, by the descriptor Google.Protobuf reads with: it refuses what protobuf
-                    // refuses where a stock library reads on (decision 0028)
-                    global::Bead.Protobuf.ProtoRecords.Check(bytes.Span, global::Google.Protobuf.WellKnownTypes.Empty.Descriptor);
-
-                    // ! spec 17.9's bound, set here rather than left to the library's default. The payload is
-                    // read as a message field holds one, after its length, and the top message counts: 101 is
-                    // 100 below it
-                    var framed = new byte[global::Google.Protobuf.CodedOutputStream.ComputeLengthSize(bytes.Length) + bytes.Length];
-
-                    using (var output = new global::Google.Protobuf.CodedOutputStream(framed))
-                    {
-                        output.WriteLength(bytes.Length);
-                    }
-
-                    bytes.Span.CopyTo(framed.AsSpan(framed.Length - bytes.Length));
-
-                    using var stream = new global::System.IO.MemoryStream(framed, writable: false);
-                    using var input = global::Google.Protobuf.CodedInputStream.CreateWithLimits(stream, int.MaxValue, 101);
-                    var message = new global::Google.Protobuf.WellKnownTypes.Empty();
-
-                    input.ReadMessage(message);
-
-                    return message;
-                },
-                (message) =>
-                {
-                    return global::Google.Protobuf.MessageExtensions.ToByteArray(message);
-                }),
-            Result = global::Bead.PayloadCodecs.Of<global::Google.Protobuf.WellKnownTypes.Empty>(
-                (bytes) =>
-                {
-                    // ! the check first, by the descriptor Google.Protobuf reads with: it refuses what protobuf
-                    // refuses where a stock library reads on (decision 0028)
-                    global::Bead.Protobuf.ProtoRecords.Check(bytes.Span, global::Google.Protobuf.WellKnownTypes.Empty.Descriptor);
-
-                    // ! spec 17.9's bound, set here rather than left to the library's default. The payload is
-                    // read as a message field holds one, after its length, and the top message counts: 101 is
-                    // 100 below it
-                    var framed = new byte[global::Google.Protobuf.CodedOutputStream.ComputeLengthSize(bytes.Length) + bytes.Length];
-
-                    using (var output = new global::Google.Protobuf.CodedOutputStream(framed))
-                    {
-                        output.WriteLength(bytes.Length);
-                    }
-
-                    bytes.Span.CopyTo(framed.AsSpan(framed.Length - bytes.Length));
-
-                    using var stream = new global::System.IO.MemoryStream(framed, writable: false);
-                    using var input = global::Google.Protobuf.CodedInputStream.CreateWithLimits(stream, int.MaxValue, 101);
-                    var message = new global::Google.Protobuf.WellKnownTypes.Empty();
-
-                    input.ReadMessage(message);
-
-                    return message;
-                },
-                (message) =>
-                {
-                    return global::Google.Protobuf.MessageExtensions.ToByteArray(message);
-                }),
-            Notification = global::Bead.PayloadCodecs.Of<global::Bead.Transcoding.V1.Tick>(
-                (bytes) =>
-                {
-                    // ! the check first, by the descriptor Google.Protobuf reads with: it refuses what protobuf
-                    // refuses where a stock library reads on (decision 0028)
-                    global::Bead.Protobuf.ProtoRecords.Check(bytes.Span, global::Bead.Transcoding.V1.Tick.Descriptor);
-
-                    // ! spec 17.9's bound, set here rather than left to the library's default. The payload is
-                    // read as a message field holds one, after its length, and the top message counts: 101 is
-                    // 100 below it
-                    var framed = new byte[global::Google.Protobuf.CodedOutputStream.ComputeLengthSize(bytes.Length) + bytes.Length];
-
-                    using (var output = new global::Google.Protobuf.CodedOutputStream(framed))
-                    {
-                        output.WriteLength(bytes.Length);
-                    }
-
-                    bytes.Span.CopyTo(framed.AsSpan(framed.Length - bytes.Length));
-
-                    using var stream = new global::System.IO.MemoryStream(framed, writable: false);
-                    using var input = global::Google.Protobuf.CodedInputStream.CreateWithLimits(stream, int.MaxValue, 101);
-                    var message = new global::Bead.Transcoding.V1.Tick();
-
-                    input.ReadMessage(message);
-
-                    return message;
-                },
-                (message) =>
-                {
-                    return global::Google.Protobuf.MessageExtensions.ToByteArray(message);
-                }),
+            Request = global::Bead.Protobuf.ProtoCodecs.Of<global::Google.Protobuf.WellKnownTypes.Empty>(),
+            Result = global::Bead.Protobuf.ProtoCodecs.Of<global::Google.Protobuf.WellKnownTypes.Empty>(),
+            Notification = global::Bead.Protobuf.ProtoCodecs.Of<global::Bead.Transcoding.V1.Tick>(),
         });
 
     /// <summary>Answers its request. Admits every call.</summary>
@@ -887,68 +167,8 @@ public sealed class TranscodingProcedures
         new global::Bead.ProcedureBindings<global::Bead.Transcoding.V1.FailRequest, global::Google.Protobuf.WellKnownTypes.Empty>
         {
             Admission = global::Bead.AdmissionRule.None,
-            Request = global::Bead.PayloadCodecs.Of<global::Bead.Transcoding.V1.FailRequest>(
-                (bytes) =>
-                {
-                    // ! the check first, by the descriptor Google.Protobuf reads with: it refuses what protobuf
-                    // refuses where a stock library reads on (decision 0028)
-                    global::Bead.Protobuf.ProtoRecords.Check(bytes.Span, global::Bead.Transcoding.V1.FailRequest.Descriptor);
-
-                    // ! spec 17.9's bound, set here rather than left to the library's default. The payload is
-                    // read as a message field holds one, after its length, and the top message counts: 101 is
-                    // 100 below it
-                    var framed = new byte[global::Google.Protobuf.CodedOutputStream.ComputeLengthSize(bytes.Length) + bytes.Length];
-
-                    using (var output = new global::Google.Protobuf.CodedOutputStream(framed))
-                    {
-                        output.WriteLength(bytes.Length);
-                    }
-
-                    bytes.Span.CopyTo(framed.AsSpan(framed.Length - bytes.Length));
-
-                    using var stream = new global::System.IO.MemoryStream(framed, writable: false);
-                    using var input = global::Google.Protobuf.CodedInputStream.CreateWithLimits(stream, int.MaxValue, 101);
-                    var message = new global::Bead.Transcoding.V1.FailRequest();
-
-                    input.ReadMessage(message);
-
-                    return message;
-                },
-                (message) =>
-                {
-                    return global::Google.Protobuf.MessageExtensions.ToByteArray(message);
-                }),
-            Result = global::Bead.PayloadCodecs.Of<global::Google.Protobuf.WellKnownTypes.Empty>(
-                (bytes) =>
-                {
-                    // ! the check first, by the descriptor Google.Protobuf reads with: it refuses what protobuf
-                    // refuses where a stock library reads on (decision 0028)
-                    global::Bead.Protobuf.ProtoRecords.Check(bytes.Span, global::Google.Protobuf.WellKnownTypes.Empty.Descriptor);
-
-                    // ! spec 17.9's bound, set here rather than left to the library's default. The payload is
-                    // read as a message field holds one, after its length, and the top message counts: 101 is
-                    // 100 below it
-                    var framed = new byte[global::Google.Protobuf.CodedOutputStream.ComputeLengthSize(bytes.Length) + bytes.Length];
-
-                    using (var output = new global::Google.Protobuf.CodedOutputStream(framed))
-                    {
-                        output.WriteLength(bytes.Length);
-                    }
-
-                    bytes.Span.CopyTo(framed.AsSpan(framed.Length - bytes.Length));
-
-                    using var stream = new global::System.IO.MemoryStream(framed, writable: false);
-                    using var input = global::Google.Protobuf.CodedInputStream.CreateWithLimits(stream, int.MaxValue, 101);
-                    var message = new global::Google.Protobuf.WellKnownTypes.Empty();
-
-                    input.ReadMessage(message);
-
-                    return message;
-                },
-                (message) =>
-                {
-                    return global::Google.Protobuf.MessageExtensions.ToByteArray(message);
-                }),
+            Request = global::Bead.Protobuf.ProtoCodecs.Of<global::Bead.Transcoding.V1.FailRequest>(),
+            Result = global::Bead.Protobuf.ProtoCodecs.Of<global::Google.Protobuf.WellKnownTypes.Empty>(),
         });
 
     /// <summary>Answers its call's session's identifier. Admits a call in a session.</summary>
@@ -957,68 +177,8 @@ public sealed class TranscodingProcedures
         new global::Bead.ProcedureBindings<global::Google.Protobuf.WellKnownTypes.Empty, global::Bead.Transcoding.V1.WhoAmIResponse>
         {
             Admission = global::Bead.AdmissionRule.Session,
-            Request = global::Bead.PayloadCodecs.Of<global::Google.Protobuf.WellKnownTypes.Empty>(
-                (bytes) =>
-                {
-                    // ! the check first, by the descriptor Google.Protobuf reads with: it refuses what protobuf
-                    // refuses where a stock library reads on (decision 0028)
-                    global::Bead.Protobuf.ProtoRecords.Check(bytes.Span, global::Google.Protobuf.WellKnownTypes.Empty.Descriptor);
-
-                    // ! spec 17.9's bound, set here rather than left to the library's default. The payload is
-                    // read as a message field holds one, after its length, and the top message counts: 101 is
-                    // 100 below it
-                    var framed = new byte[global::Google.Protobuf.CodedOutputStream.ComputeLengthSize(bytes.Length) + bytes.Length];
-
-                    using (var output = new global::Google.Protobuf.CodedOutputStream(framed))
-                    {
-                        output.WriteLength(bytes.Length);
-                    }
-
-                    bytes.Span.CopyTo(framed.AsSpan(framed.Length - bytes.Length));
-
-                    using var stream = new global::System.IO.MemoryStream(framed, writable: false);
-                    using var input = global::Google.Protobuf.CodedInputStream.CreateWithLimits(stream, int.MaxValue, 101);
-                    var message = new global::Google.Protobuf.WellKnownTypes.Empty();
-
-                    input.ReadMessage(message);
-
-                    return message;
-                },
-                (message) =>
-                {
-                    return global::Google.Protobuf.MessageExtensions.ToByteArray(message);
-                }),
-            Result = global::Bead.PayloadCodecs.Of<global::Bead.Transcoding.V1.WhoAmIResponse>(
-                (bytes) =>
-                {
-                    // ! the check first, by the descriptor Google.Protobuf reads with: it refuses what protobuf
-                    // refuses where a stock library reads on (decision 0028)
-                    global::Bead.Protobuf.ProtoRecords.Check(bytes.Span, global::Bead.Transcoding.V1.WhoAmIResponse.Descriptor);
-
-                    // ! spec 17.9's bound, set here rather than left to the library's default. The payload is
-                    // read as a message field holds one, after its length, and the top message counts: 101 is
-                    // 100 below it
-                    var framed = new byte[global::Google.Protobuf.CodedOutputStream.ComputeLengthSize(bytes.Length) + bytes.Length];
-
-                    using (var output = new global::Google.Protobuf.CodedOutputStream(framed))
-                    {
-                        output.WriteLength(bytes.Length);
-                    }
-
-                    bytes.Span.CopyTo(framed.AsSpan(framed.Length - bytes.Length));
-
-                    using var stream = new global::System.IO.MemoryStream(framed, writable: false);
-                    using var input = global::Google.Protobuf.CodedInputStream.CreateWithLimits(stream, int.MaxValue, 101);
-                    var message = new global::Bead.Transcoding.V1.WhoAmIResponse();
-
-                    input.ReadMessage(message);
-
-                    return message;
-                },
-                (message) =>
-                {
-                    return global::Google.Protobuf.MessageExtensions.ToByteArray(message);
-                }),
+            Request = global::Bead.Protobuf.ProtoCodecs.Of<global::Google.Protobuf.WellKnownTypes.Empty>(),
+            Result = global::Bead.Protobuf.ProtoCodecs.Of<global::Bead.Transcoding.V1.WhoAmIResponse>(),
         });
 
     /// <summary>Commands its caller, by answer, and answers the code the command failed with, or 0. Admits every call.</summary>
@@ -1027,68 +187,8 @@ public sealed class TranscodingProcedures
         new global::Bead.ProcedureBindings<global::Google.Protobuf.WellKnownTypes.Empty, global::Bead.Transcoding.V1.AskResponse>
         {
             Admission = global::Bead.AdmissionRule.None,
-            Request = global::Bead.PayloadCodecs.Of<global::Google.Protobuf.WellKnownTypes.Empty>(
-                (bytes) =>
-                {
-                    // ! the check first, by the descriptor Google.Protobuf reads with: it refuses what protobuf
-                    // refuses where a stock library reads on (decision 0028)
-                    global::Bead.Protobuf.ProtoRecords.Check(bytes.Span, global::Google.Protobuf.WellKnownTypes.Empty.Descriptor);
-
-                    // ! spec 17.9's bound, set here rather than left to the library's default. The payload is
-                    // read as a message field holds one, after its length, and the top message counts: 101 is
-                    // 100 below it
-                    var framed = new byte[global::Google.Protobuf.CodedOutputStream.ComputeLengthSize(bytes.Length) + bytes.Length];
-
-                    using (var output = new global::Google.Protobuf.CodedOutputStream(framed))
-                    {
-                        output.WriteLength(bytes.Length);
-                    }
-
-                    bytes.Span.CopyTo(framed.AsSpan(framed.Length - bytes.Length));
-
-                    using var stream = new global::System.IO.MemoryStream(framed, writable: false);
-                    using var input = global::Google.Protobuf.CodedInputStream.CreateWithLimits(stream, int.MaxValue, 101);
-                    var message = new global::Google.Protobuf.WellKnownTypes.Empty();
-
-                    input.ReadMessage(message);
-
-                    return message;
-                },
-                (message) =>
-                {
-                    return global::Google.Protobuf.MessageExtensions.ToByteArray(message);
-                }),
-            Result = global::Bead.PayloadCodecs.Of<global::Bead.Transcoding.V1.AskResponse>(
-                (bytes) =>
-                {
-                    // ! the check first, by the descriptor Google.Protobuf reads with: it refuses what protobuf
-                    // refuses where a stock library reads on (decision 0028)
-                    global::Bead.Protobuf.ProtoRecords.Check(bytes.Span, global::Bead.Transcoding.V1.AskResponse.Descriptor);
-
-                    // ! spec 17.9's bound, set here rather than left to the library's default. The payload is
-                    // read as a message field holds one, after its length, and the top message counts: 101 is
-                    // 100 below it
-                    var framed = new byte[global::Google.Protobuf.CodedOutputStream.ComputeLengthSize(bytes.Length) + bytes.Length];
-
-                    using (var output = new global::Google.Protobuf.CodedOutputStream(framed))
-                    {
-                        output.WriteLength(bytes.Length);
-                    }
-
-                    bytes.Span.CopyTo(framed.AsSpan(framed.Length - bytes.Length));
-
-                    using var stream = new global::System.IO.MemoryStream(framed, writable: false);
-                    using var input = global::Google.Protobuf.CodedInputStream.CreateWithLimits(stream, int.MaxValue, 101);
-                    var message = new global::Bead.Transcoding.V1.AskResponse();
-
-                    input.ReadMessage(message);
-
-                    return message;
-                },
-                (message) =>
-                {
-                    return global::Google.Protobuf.MessageExtensions.ToByteArray(message);
-                }),
+            Request = global::Bead.Protobuf.ProtoCodecs.Of<global::Google.Protobuf.WellKnownTypes.Empty>(),
+            Result = global::Bead.Protobuf.ProtoCodecs.Of<global::Bead.Transcoding.V1.AskResponse>(),
         });
 
     /// <summary>A command its caller answers. Admits every call.</summary>
@@ -1097,68 +197,8 @@ public sealed class TranscodingProcedures
         new global::Bead.ProcedureBindings<global::Google.Protobuf.WellKnownTypes.Empty, global::Google.Protobuf.WellKnownTypes.Empty>
         {
             Admission = global::Bead.AdmissionRule.None,
-            Request = global::Bead.PayloadCodecs.Of<global::Google.Protobuf.WellKnownTypes.Empty>(
-                (bytes) =>
-                {
-                    // ! the check first, by the descriptor Google.Protobuf reads with: it refuses what protobuf
-                    // refuses where a stock library reads on (decision 0028)
-                    global::Bead.Protobuf.ProtoRecords.Check(bytes.Span, global::Google.Protobuf.WellKnownTypes.Empty.Descriptor);
-
-                    // ! spec 17.9's bound, set here rather than left to the library's default. The payload is
-                    // read as a message field holds one, after its length, and the top message counts: 101 is
-                    // 100 below it
-                    var framed = new byte[global::Google.Protobuf.CodedOutputStream.ComputeLengthSize(bytes.Length) + bytes.Length];
-
-                    using (var output = new global::Google.Protobuf.CodedOutputStream(framed))
-                    {
-                        output.WriteLength(bytes.Length);
-                    }
-
-                    bytes.Span.CopyTo(framed.AsSpan(framed.Length - bytes.Length));
-
-                    using var stream = new global::System.IO.MemoryStream(framed, writable: false);
-                    using var input = global::Google.Protobuf.CodedInputStream.CreateWithLimits(stream, int.MaxValue, 101);
-                    var message = new global::Google.Protobuf.WellKnownTypes.Empty();
-
-                    input.ReadMessage(message);
-
-                    return message;
-                },
-                (message) =>
-                {
-                    return global::Google.Protobuf.MessageExtensions.ToByteArray(message);
-                }),
-            Result = global::Bead.PayloadCodecs.Of<global::Google.Protobuf.WellKnownTypes.Empty>(
-                (bytes) =>
-                {
-                    // ! the check first, by the descriptor Google.Protobuf reads with: it refuses what protobuf
-                    // refuses where a stock library reads on (decision 0028)
-                    global::Bead.Protobuf.ProtoRecords.Check(bytes.Span, global::Google.Protobuf.WellKnownTypes.Empty.Descriptor);
-
-                    // ! spec 17.9's bound, set here rather than left to the library's default. The payload is
-                    // read as a message field holds one, after its length, and the top message counts: 101 is
-                    // 100 below it
-                    var framed = new byte[global::Google.Protobuf.CodedOutputStream.ComputeLengthSize(bytes.Length) + bytes.Length];
-
-                    using (var output = new global::Google.Protobuf.CodedOutputStream(framed))
-                    {
-                        output.WriteLength(bytes.Length);
-                    }
-
-                    bytes.Span.CopyTo(framed.AsSpan(framed.Length - bytes.Length));
-
-                    using var stream = new global::System.IO.MemoryStream(framed, writable: false);
-                    using var input = global::Google.Protobuf.CodedInputStream.CreateWithLimits(stream, int.MaxValue, 101);
-                    var message = new global::Google.Protobuf.WellKnownTypes.Empty();
-
-                    input.ReadMessage(message);
-
-                    return message;
-                },
-                (message) =>
-                {
-                    return global::Google.Protobuf.MessageExtensions.ToByteArray(message);
-                }),
+            Request = global::Bead.Protobuf.ProtoCodecs.Of<global::Google.Protobuf.WellKnownTypes.Empty>(),
+            Result = global::Bead.Protobuf.ProtoCodecs.Of<global::Google.Protobuf.WellKnownTypes.Empty>(),
         });
 
     /// <summary>Answers never, and counts each of its calls that ends cancelled. Admits every call.</summary>
@@ -1167,68 +207,8 @@ public sealed class TranscodingProcedures
         new global::Bead.ProcedureBindings<global::Google.Protobuf.WellKnownTypes.Empty, global::Google.Protobuf.WellKnownTypes.Empty>
         {
             Admission = global::Bead.AdmissionRule.None,
-            Request = global::Bead.PayloadCodecs.Of<global::Google.Protobuf.WellKnownTypes.Empty>(
-                (bytes) =>
-                {
-                    // ! the check first, by the descriptor Google.Protobuf reads with: it refuses what protobuf
-                    // refuses where a stock library reads on (decision 0028)
-                    global::Bead.Protobuf.ProtoRecords.Check(bytes.Span, global::Google.Protobuf.WellKnownTypes.Empty.Descriptor);
-
-                    // ! spec 17.9's bound, set here rather than left to the library's default. The payload is
-                    // read as a message field holds one, after its length, and the top message counts: 101 is
-                    // 100 below it
-                    var framed = new byte[global::Google.Protobuf.CodedOutputStream.ComputeLengthSize(bytes.Length) + bytes.Length];
-
-                    using (var output = new global::Google.Protobuf.CodedOutputStream(framed))
-                    {
-                        output.WriteLength(bytes.Length);
-                    }
-
-                    bytes.Span.CopyTo(framed.AsSpan(framed.Length - bytes.Length));
-
-                    using var stream = new global::System.IO.MemoryStream(framed, writable: false);
-                    using var input = global::Google.Protobuf.CodedInputStream.CreateWithLimits(stream, int.MaxValue, 101);
-                    var message = new global::Google.Protobuf.WellKnownTypes.Empty();
-
-                    input.ReadMessage(message);
-
-                    return message;
-                },
-                (message) =>
-                {
-                    return global::Google.Protobuf.MessageExtensions.ToByteArray(message);
-                }),
-            Result = global::Bead.PayloadCodecs.Of<global::Google.Protobuf.WellKnownTypes.Empty>(
-                (bytes) =>
-                {
-                    // ! the check first, by the descriptor Google.Protobuf reads with: it refuses what protobuf
-                    // refuses where a stock library reads on (decision 0028)
-                    global::Bead.Protobuf.ProtoRecords.Check(bytes.Span, global::Google.Protobuf.WellKnownTypes.Empty.Descriptor);
-
-                    // ! spec 17.9's bound, set here rather than left to the library's default. The payload is
-                    // read as a message field holds one, after its length, and the top message counts: 101 is
-                    // 100 below it
-                    var framed = new byte[global::Google.Protobuf.CodedOutputStream.ComputeLengthSize(bytes.Length) + bytes.Length];
-
-                    using (var output = new global::Google.Protobuf.CodedOutputStream(framed))
-                    {
-                        output.WriteLength(bytes.Length);
-                    }
-
-                    bytes.Span.CopyTo(framed.AsSpan(framed.Length - bytes.Length));
-
-                    using var stream = new global::System.IO.MemoryStream(framed, writable: false);
-                    using var input = global::Google.Protobuf.CodedInputStream.CreateWithLimits(stream, int.MaxValue, 101);
-                    var message = new global::Google.Protobuf.WellKnownTypes.Empty();
-
-                    input.ReadMessage(message);
-
-                    return message;
-                },
-                (message) =>
-                {
-                    return global::Google.Protobuf.MessageExtensions.ToByteArray(message);
-                }),
+            Request = global::Bead.Protobuf.ProtoCodecs.Of<global::Google.Protobuf.WellKnownTypes.Empty>(),
+            Result = global::Bead.Protobuf.ProtoCodecs.Of<global::Google.Protobuf.WellKnownTypes.Empty>(),
         });
 
     /// <summary>Answers how many of hang's calls ended cancelled, once they are at least its atLeast, or 1 second passed. Admits every call.</summary>
@@ -1237,68 +217,38 @@ public sealed class TranscodingProcedures
         new global::Bead.ProcedureBindings<global::Bead.Transcoding.V1.CancelsRequest, global::Bead.Transcoding.V1.CancelsResponse>
         {
             Admission = global::Bead.AdmissionRule.None,
-            Request = global::Bead.PayloadCodecs.Of<global::Bead.Transcoding.V1.CancelsRequest>(
-                (bytes) =>
-                {
-                    // ! the check first, by the descriptor Google.Protobuf reads with: it refuses what protobuf
-                    // refuses where a stock library reads on (decision 0028)
-                    global::Bead.Protobuf.ProtoRecords.Check(bytes.Span, global::Bead.Transcoding.V1.CancelsRequest.Descriptor);
+            Request = global::Bead.Protobuf.ProtoCodecs.Of<global::Bead.Transcoding.V1.CancelsRequest>(),
+            Result = global::Bead.Protobuf.ProtoCodecs.Of<global::Bead.Transcoding.V1.CancelsResponse>(),
+        });
 
-                    // ! spec 17.9's bound, set here rather than left to the library's default. The payload is
-                    // read as a message field holds one, after its length, and the top message counts: 101 is
-                    // 100 below it
-                    var framed = new byte[global::Google.Protobuf.CodedOutputStream.ComputeLengthSize(bytes.Length) + bytes.Length];
+    /// <summary>Answers its request's needs, or a Needs of no field where none is set. Admits every call.</summary>
+    public static global::Bead.RequestProcedure<TranscodingProcedures, global::Bead.Transcoding.V1.Requiring, global::Bead.Transcoding.V1.Needs, global::Bead.NoFailure> Require { get; } = new(
+        new global::Bead.Procedure { ServiceId = 1, ProcedureId = 21, ProcedureName = "require", ServiceRevision = 1 },
+        new global::Bead.ProcedureBindings<global::Bead.Transcoding.V1.Requiring, global::Bead.Transcoding.V1.Needs>
+        {
+            Admission = global::Bead.AdmissionRule.None,
+            Request = global::Bead.Protobuf.ProtoCodecs.Of<global::Bead.Transcoding.V1.Requiring>(),
+            Result = global::Bead.Protobuf.ProtoCodecs.Of<global::Bead.Transcoding.V1.Needs>(),
+        });
 
-                    using (var output = new global::Google.Protobuf.CodedOutputStream(framed))
-                    {
-                        output.WriteLength(bytes.Length);
-                    }
+    /// <summary>Answers its request. Admits every call.</summary>
+    public static global::Bead.RequestProcedure<TranscodingProcedures, global::Bead.Transcoding.V1.Needs, global::Bead.Transcoding.V1.Needs, global::Bead.NoFailure> GetNeeds { get; } = new(
+        new global::Bead.Procedure { ServiceId = 1, ProcedureId = 22, ProcedureName = "getNeeds", ServiceRevision = 1 },
+        new global::Bead.ProcedureBindings<global::Bead.Transcoding.V1.Needs, global::Bead.Transcoding.V1.Needs>
+        {
+            Admission = global::Bead.AdmissionRule.None,
+            Request = global::Bead.Protobuf.ProtoCodecs.Of<global::Bead.Transcoding.V1.Needs>(),
+            Result = global::Bead.Protobuf.ProtoCodecs.Of<global::Bead.Transcoding.V1.Needs>(),
+        });
 
-                    bytes.Span.CopyTo(framed.AsSpan(framed.Length - bytes.Length));
-
-                    using var stream = new global::System.IO.MemoryStream(framed, writable: false);
-                    using var input = global::Google.Protobuf.CodedInputStream.CreateWithLimits(stream, int.MaxValue, 101);
-                    var message = new global::Bead.Transcoding.V1.CancelsRequest();
-
-                    input.ReadMessage(message);
-
-                    return message;
-                },
-                (message) =>
-                {
-                    return global::Google.Protobuf.MessageExtensions.ToByteArray(message);
-                }),
-            Result = global::Bead.PayloadCodecs.Of<global::Bead.Transcoding.V1.CancelsResponse>(
-                (bytes) =>
-                {
-                    // ! the check first, by the descriptor Google.Protobuf reads with: it refuses what protobuf
-                    // refuses where a stock library reads on (decision 0028)
-                    global::Bead.Protobuf.ProtoRecords.Check(bytes.Span, global::Bead.Transcoding.V1.CancelsResponse.Descriptor);
-
-                    // ! spec 17.9's bound, set here rather than left to the library's default. The payload is
-                    // read as a message field holds one, after its length, and the top message counts: 101 is
-                    // 100 below it
-                    var framed = new byte[global::Google.Protobuf.CodedOutputStream.ComputeLengthSize(bytes.Length) + bytes.Length];
-
-                    using (var output = new global::Google.Protobuf.CodedOutputStream(framed))
-                    {
-                        output.WriteLength(bytes.Length);
-                    }
-
-                    bytes.Span.CopyTo(framed.AsSpan(framed.Length - bytes.Length));
-
-                    using var stream = new global::System.IO.MemoryStream(framed, writable: false);
-                    using var input = global::Google.Protobuf.CodedInputStream.CreateWithLimits(stream, int.MaxValue, 101);
-                    var message = new global::Bead.Transcoding.V1.CancelsResponse();
-
-                    input.ReadMessage(message);
-
-                    return message;
-                },
-                (message) =>
-                {
-                    return global::Google.Protobuf.MessageExtensions.ToByteArray(message);
-                }),
+    /// <summary>Answers its request's needs. Admits every call.</summary>
+    public static global::Bead.RequestProcedure<TranscodingProcedures, global::Bead.Transcoding.V1.NeedsUpdate, global::Bead.Transcoding.V1.Needs, global::Bead.NoFailure> UpdateNeeds { get; } = new(
+        new global::Bead.Procedure { ServiceId = 1, ProcedureId = 23, ProcedureName = "updateNeeds", ServiceRevision = 1 },
+        new global::Bead.ProcedureBindings<global::Bead.Transcoding.V1.NeedsUpdate, global::Bead.Transcoding.V1.Needs>
+        {
+            Admission = global::Bead.AdmissionRule.None,
+            Request = global::Bead.Protobuf.ProtoCodecs.Of<global::Bead.Transcoding.V1.NeedsUpdate>(),
+            Result = global::Bead.Protobuf.ProtoCodecs.Of<global::Bead.Transcoding.V1.Needs>(),
         });
 
     /// <summary>Every procedure, in their ids' order: what its server and its client sides are built over.</summary>
@@ -1324,6 +274,9 @@ public sealed class TranscodingProcedures
         Answer,
         Hang,
         Cancels,
+        Require,
+        GetNeeds,
+        UpdateNeeds,
     ];
 }
 
@@ -1535,6 +488,9 @@ public sealed class TranscodingClient
         Ask = _service.RequesterOf(TranscodingProcedures.Ask);
         Hang = _service.RequesterOf(TranscodingProcedures.Hang);
         Cancels = _service.RequesterOf(TranscodingProcedures.Cancels);
+        Require = _service.RequesterOf(TranscodingProcedures.Require);
+        GetNeeds = _service.RequesterOf(TranscodingProcedures.GetNeeds);
+        UpdateNeeds = _service.RequesterOf(TranscodingProcedures.UpdateNeeds);
         Notifications = new TranscodingNotifications
         {
             Ticks = _service.NotificationOf(TranscodingProcedures.Ticks),
@@ -1599,6 +555,15 @@ public sealed class TranscodingClient
     /// <summary>Answers how many of hang's calls ended cancelled, once they are at least its atLeast, or 1 second passed.</summary>
     public global::System.Func<global::Bead.Transcoding.V1.CancelsRequest, global::Bead.BoundCall<global::Bead.Transcoding.V1.CancelsResponse>> Cancels { get; }
 
+    /// <summary>Answers its request's needs, or a Needs of no field where none is set.</summary>
+    public global::System.Func<global::Bead.Transcoding.V1.Requiring, global::Bead.BoundCall<global::Bead.Transcoding.V1.Needs>> Require { get; }
+
+    /// <summary>Answers its request.</summary>
+    public global::System.Func<global::Bead.Transcoding.V1.Needs, global::Bead.BoundCall<global::Bead.Transcoding.V1.Needs>> GetNeeds { get; }
+
+    /// <summary>Answers its request's needs.</summary>
+    public global::System.Func<global::Bead.Transcoding.V1.NeedsUpdate, global::Bead.BoundCall<global::Bead.Transcoding.V1.Needs>> UpdateNeeds { get; }
+
     /// <summary>The notification of each procedure that notifies, at the window its options gave, or unpaced.</summary>
     public TranscodingNotifications Notifications { get; }
 
@@ -1658,5 +623,5 @@ file static class RuledRules
 // the contract with the runtime this file needs: an older runtime lacks the constant, and fails here
 file static class GeneratedCodeContract
 {
-    private const bool Supported = global::Bead.GeneratedCode.SupportsVersion4;
+    private const bool Supported = global::Bead.GeneratedCode.SupportsVersion6;
 }

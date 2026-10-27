@@ -1,0 +1,45 @@
+{
+  "patch": [
+    {
+      "op": "add",
+      "path": "/requires/0",
+      "value": "legacy-required"
+    },
+    {
+      "op": "add",
+      "path": "/proto",
+      "value": {
+        "files": [
+          {
+            "path": "x/v1/x.proto",
+            "package": "x.v1"
+          }
+        ],
+        "messages": [
+          {
+            "fullName": "x.v1.Request",
+            "file": "x/v1/x.proto",
+            "fields": [
+              {
+                "fieldName": "name",
+                "fieldNumber": 1,
+                "jsonName": "name",
+                "type": {
+                  "scalar": "string"
+                },
+                "presence": "explicit",
+                "legacyRequired": false
+              }
+            ]
+          }
+        ]
+      }
+    }
+  ],
+  "findings": [
+    {
+      "rule": "BLUEPRINT_SCHEMA",
+      "pointer": "/proto/messages/0/fields/0/legacyRequired"
+    }
+  ]
+}
