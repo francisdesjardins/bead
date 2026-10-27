@@ -2,6 +2,7 @@ using Bead.Codecs.V1;
 using Bead.Protobuf.Tests.Codec;
 using Bead.Transcoding.V1;
 using Google.Protobuf;
+using Google.Protobuf.Reflection;
 using Google.Protobuf.WellKnownTypes;
 using Needs = Bead.Transcoding.V1.Needs;
 using ProbeNeeds = Bead.Codecs.V1.Needs;
@@ -19,6 +20,86 @@ namespace Bead.Protobuf.Tests;
 public sealed class ProtoCodecsTests
 {
     // helpers
+
+    private sealed record EditionOptions
+    {
+        public FeatureSet.Types.EnumType? File { get; init; }
+
+        public FeatureSet.Types.EnumType? Outer { get; init; }
+
+        public FeatureSet.Types.EnumType? Inner { get; init; }
+
+        public int Holder { get; init; }
+    }
+
+    // * no generated parser: the same record check and filtering that ReadInto runs before parsing
+    private static void CheckEdition(bool closed, EditionOptions options)
+    {
+        var inner = new DescriptorProto
+        {
+            Name = "Inner",
+            Options = options.Inner is { } own ? new MessageOptions { Features = new FeatureSet { EnumType = own } } : null,
+            EnumType =
+            {
+                new EnumDescriptorProto
+                {
+                    Name = "Tone",
+                    Value = { new EnumValueDescriptorProto { Name = "LOW", Number = 0 }, new EnumValueDescriptorProto { Name = "HIGH", Number = 1 } },
+                },
+            },
+            Field =
+            {
+                new FieldDescriptorProto { Name = "tone", Number = 1, Label = FieldDescriptorProto.Types.Label.Optional, Type = FieldDescriptorProto.Types.Type.Enum, TypeName = ".edition.Outer.Holder.Inner.Tone" },
+            },
+        };
+        var file = new FileDescriptorProto
+        {
+            Name = "edition.proto",
+            Package = "edition",
+            Syntax = "editions",
+            Edition = Edition._2023,
+            Options = options.File is { } filed ? new Google.Protobuf.Reflection.FileOptions { Features = new FeatureSet { EnumType = filed } } : options.Holder switch
+            {
+                1 => new Google.Protobuf.Reflection.FileOptions(),
+                2 => new Google.Protobuf.Reflection.FileOptions { Features = new FeatureSet() },
+                _ => null,
+            },
+            MessageType =
+            {
+                new DescriptorProto
+                {
+                    Name = "Outer",
+                    Options = options.Outer is { } held ? new MessageOptions { Features = new FeatureSet { EnumType = held } } : null,
+                    NestedType =
+                    {
+                        new DescriptorProto
+                        {
+                            Name = "Holder",
+                            Options = options.Holder switch
+                            {
+                                1 => new MessageOptions(),
+                                2 => new MessageOptions { Features = new FeatureSet() },
+                                _ => null,
+                            },
+                            NestedType = { inner },
+                        },
+                    },
+                },
+            },
+        };
+        var message = FileDescriptor.BuildFromByteStrings([file.ToByteString()])[0].MessageTypes[0].NestedTypes[0].NestedTypes[0];
+
+        foreach (var hex in new[] { "08 05", "08 01 08 05" })
+        {
+            var bytes = BytesOf(hex);
+            var filtered = ProtoRecords.Checked(bytes, message);
+
+            Assert.Equal(closed, filtered);
+            Assert.Equal(closed ? (hex == "08 05" ? "" : "08 01") : hex, HexOf(filtered ? ProtoRecords.Filtered(bytes, message) : bytes));
+        }
+
+        Assert.False(ProtoRecords.Checked(BytesOf("08 01"), message));
+    }
 
     // bytes as the conformance files write them, in hexadecimal, a space between two
     private static byte[] BytesOf(string hexadecimal)
@@ -54,6 +135,38 @@ public sealed class ProtoCodecsTests
     }
 
     // definition
+
+    [Fact]
+    public void Resolves_an_edition_enum_from_its_nearest_message_before_its_file()
+    {
+        CheckEdition(false, new EditionOptions { File = FeatureSet.Types.EnumType.Closed, Outer = FeatureSet.Types.EnumType.Closed, Inner = FeatureSet.Types.EnumType.Open });
+        CheckEdition(true, new EditionOptions { File = FeatureSet.Types.EnumType.Open, Outer = FeatureSet.Types.EnumType.Open, Inner = FeatureSet.Types.EnumType.Closed });
+
+        foreach (var holder in new[] { 0, 1, 2 })
+        {
+            CheckEdition(true, new EditionOptions { File = FeatureSet.Types.EnumType.Open, Outer = FeatureSet.Types.EnumType.Closed, Holder = holder });
+            CheckEdition(false, new EditionOptions { File = FeatureSet.Types.EnumType.Closed, Outer = FeatureSet.Types.EnumType.Open, Holder = holder });
+        }
+    }
+
+    [Fact]
+    public void Resolves_an_edition_enum_from_its_file_when_no_message_sets_its_type()
+    {
+        foreach (var holder in new[] { 0, 1, 2 })
+        {
+            CheckEdition(true, new EditionOptions { File = FeatureSet.Types.EnumType.Closed, Holder = holder });
+            CheckEdition(false, new EditionOptions { File = FeatureSet.Types.EnumType.Open, Holder = holder });
+        }
+    }
+
+    [Fact]
+    public void Opens_an_edition_enum_when_no_message_or_file_sets_its_type()
+    {
+        foreach (var holder in new[] { 0, 1, 2 })
+        {
+            CheckEdition(false, new EditionOptions { Holder = holder });
+        }
+    }
 
     [Fact]
     public void Refuses_a_message_that_leaves_a_required_field_unset_at_every_depth_a_proto3_root_s_message_an_item_a_map_s_value_a_group_and_a_delimited_field()

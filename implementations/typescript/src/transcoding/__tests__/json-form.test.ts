@@ -57,6 +57,25 @@ const INT64_VALUE_URL = 'type.googleapis.com/google.protobuf.Int64Value';
 
 const ENCODER = new TextEncoder();
 
+test('refuses empty and trailing JSON texts through the public message reader', () => {
+  for (const text of ['', ' \t\r\n', '{} {}', '{} true', '[] 0', 'null false', '{}x']) {
+    expect(() => {
+      return readProtoJson(EmptySchema, { bytes: ENCODER.encode(text), registry: REGISTRY });
+    }).toThrow('not JSON');
+  }
+});
+
+test('bounds JSON arrays and objects before reading a message', () => {
+  for (const text of [
+    '['.repeat(203) + ']'.repeat(203),
+    '{"a":'.repeat(203) + '0' + '}'.repeat(203),
+  ]) {
+    expect(() => {
+      return readProtoJson(EmptySchema, { bytes: ENCODER.encode(text), registry: REGISTRY });
+    }).toThrow('nested past 100');
+  }
+});
+
 test('packs an Any with unset proto2 required fields and keeps explicit defaults on repeated reads', () => {
   const registry = typeRegistryOf([UninterpretedOption_NamePartSchema]);
   const typeUrl = 'type.googleapis.com/google.protobuf.UninterpretedOption.NamePart';

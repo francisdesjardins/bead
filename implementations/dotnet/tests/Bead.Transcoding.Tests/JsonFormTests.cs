@@ -16,6 +16,33 @@ namespace Bead.Transcoding.Tests;
 public sealed class JsonFormTests
 {
     [Fact]
+    public void Refuses_empty_and_trailing_JSON_texts_through_the_public_message_reader()
+    {
+        foreach (var text in new[] { "", " \t\r\n", "{} {}", "{} true", "[] 0", "null false", "{}x" })
+        {
+            var refused = Assert.Throws<JsonFormException>(() =>
+            {
+                return Form.Read(Empty.Descriptor, Encoding.UTF8.GetBytes(text));
+            });
+
+            Assert.Equal("not JSON", refused.Message);
+            Assert.IsAssignableFrom<System.Text.Json.JsonException>(refused.InnerException);
+        }
+    }
+
+    [Fact]
+    public void Bounds_JSON_arrays_and_objects_before_reading_a_message()
+    {
+        foreach (var text in new[] { new string('[', 203) + new string(']', 203), string.Concat(Enumerable.Repeat("{\"a\":", 203)) + "0" + new string('}', 203) })
+        {
+            Assert.Equal("nested past 100", Assert.Throws<JsonFormException>(() =>
+            {
+                return Form.Read(Empty.Descriptor, Encoding.UTF8.GetBytes(text));
+            }).Message);
+        }
+    }
+
+    [Fact]
     public void Reads_and_writes_signed_infinities_and_NaN_in_double_and_float_fields()
     {
         foreach (var (word, value) in new[] { ("Infinity", double.PositiveInfinity), ("-Infinity", double.NegativeInfinity), ("NaN", double.NaN) })

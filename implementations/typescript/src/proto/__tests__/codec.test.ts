@@ -15,8 +15,11 @@ import {
   isFieldSet,
   setExtension,
 } from '@bufbuild/protobuf';
+import { reflect } from '@bufbuild/protobuf/reflect';
 import {
   AnySchema,
+  Edition,
+  FeatureSet_EnumType,
   FieldDescriptorProto_Label,
   FieldDescriptorProto_Type,
   FileDescriptorProtoSchema,
@@ -167,6 +170,115 @@ const messageOf = (name: string): DescMessage => {
 };
 
 // helpers
+
+/** The codec of a singular enum field nested through three edition messages. */
+const editionCodec = (options: {
+  file?: FeatureSet_EnumType;
+  outer?: FeatureSet_EnumType;
+  inner?: FeatureSet_EnumType;
+  holder?: number;
+}) => {
+  const registry = createFileRegistry(
+    create(FileDescriptorProtoSchema, {
+      name: 'edition.proto',
+      package: 'edition',
+      syntax: 'editions',
+      edition: Edition.EDITION_2023,
+      options:
+        options.file === undefined
+          ? options.holder === 1
+            ? {}
+            : options.holder === 2
+              ? { features: {} }
+              : undefined
+          : { features: { enumType: options.file } },
+      messageType: [
+        {
+          name: 'Outer',
+          options:
+            options.outer === undefined ? undefined : { features: { enumType: options.outer } },
+          nestedType: [
+            {
+              name: 'Holder',
+              options:
+                options.holder === 1 ? {} : options.holder === 2 ? { features: {} } : undefined,
+              nestedType: [
+                {
+                  name: 'Inner',
+                  options:
+                    options.inner === undefined
+                      ? undefined
+                      : { features: { enumType: options.inner } },
+                  enumType: [
+                    {
+                      name: 'Tone',
+                      value: [
+                        { name: 'LOW', number: 0 },
+                        { name: 'HIGH', number: 1 },
+                      ],
+                    },
+                  ],
+                  field: [
+                    {
+                      name: 'tone',
+                      jsonName: 'tone',
+                      number: 1,
+                      label: OPTIONAL,
+                      type: FieldDescriptorProto_Type.ENUM,
+                      typeName: '.edition.Outer.Holder.Inner.Tone',
+                    },
+                  ],
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    }),
+    () => {
+      return undefined;
+    }
+  );
+  const schema = registry.getMessage('edition.Outer.Holder.Inner');
+  if (schema === undefined) {
+    throw new Error('no edition message');
+  }
+  const codec = protoCodecOf(schema);
+  const field = schema.field['tone']!;
+
+  return (closed: boolean) => {
+    const unknown = codec.decode(bytesOf('08 05'));
+    const last = codec.decode(bytesOf('08 01 08 05'));
+
+    expect(isFieldSet(unknown, field)).toBe(!closed);
+    expect(reflect(schema, unknown).get(field)).toBe(closed ? 0 : 5);
+    expect(reflect(schema, last).get(field)).toBe(closed ? 1 : 5);
+    expect(reflect(schema, codec.decode(bytesOf('08 01'))).get(field)).toBe(1);
+  };
+};
+
+test('resolves an edition enum from its nearest message before its file', () => {
+  const { CLOSED, OPEN } = FeatureSet_EnumType;
+  editionCodec({ file: CLOSED, outer: CLOSED, inner: OPEN })(false);
+  editionCodec({ file: OPEN, outer: OPEN, inner: CLOSED })(true);
+  for (const holder of [0, 1, 2]) {
+    editionCodec({ file: OPEN, outer: CLOSED, holder })(true);
+    editionCodec({ file: CLOSED, outer: OPEN, holder })(false);
+  }
+});
+
+test('resolves an edition enum from its file when no message sets its type', () => {
+  for (const holder of [0, 1, 2]) {
+    editionCodec({ file: FeatureSet_EnumType.CLOSED, holder })(true);
+    editionCodec({ file: FeatureSet_EnumType.OPEN, holder })(false);
+  }
+});
+
+test('opens an edition enum when no message or file sets its type', () => {
+  for (const holder of [0, 1, 2]) {
+    editionCodec({ holder })(false);
+  }
+});
 
 /** The bytes of `hex`, two digits each, a space between. */
 const bytesOf = (hex: string): Uint8Array => {

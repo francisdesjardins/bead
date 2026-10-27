@@ -9,6 +9,7 @@ import { noop } from '../../shared/noop';
 import {
   createTransportServer,
   generateHandle,
+  listenOn,
   ProgrammerError,
   type ITransportServerAddress,
   type ITransportServerDefineOptions,
@@ -17,6 +18,97 @@ import {
 
 const A = generateHandle({ ip: '10.0.0.1', ordinal: 1, port: 1, type: 'WS' });
 const B = generateHandle({ ip: '10.0.0.2', ordinal: 2, port: 2, type: 'WS' });
+
+test('draws another port for an occupied loopback in the platform bind failure', async () => {
+  const reason = Object.assign(new Error('bind'), { code: 'EADDRINUSE' });
+  const calls: { address: string; port: number }[] = [];
+  let draws = 0;
+  let closed = 0;
+  const result = await listenOn(
+    (address, port) => {
+      calls.push({ address, port });
+      if (address === '::1' && port === 42000) {
+        return Promise.reject(reason);
+      }
+      return Promise.resolve({
+        port: address === '127.0.0.1' ? 42000 + draws++ : port,
+        close: () => {
+          closed += 1;
+        },
+      });
+    },
+    { address: 'localhost', findOpenPort: true, port: 0 }
+  );
+
+  expect(result).toEqual({ address: 'localhost', port: 42001 });
+  expect(draws).toBe(2);
+  expect(closed).toBe(1);
+  expect(calls).toEqual([
+    { address: '127.0.0.1', port: 0 },
+    { address: '::1', port: 42000 },
+    { address: '127.0.0.1', port: 0 },
+    { address: '::1', port: 42001 },
+  ]);
+});
+
+test('falls back to IPv4 only for an absent loopback in the platform bind failure', async () => {
+  for (const code of ['EADDRNOTAVAIL', 'EAFNOSUPPORT']) {
+    const reason = Object.assign(new Error('bind'), { code });
+    const calls: { address: string; port: number }[] = [];
+    let closed = 0;
+    const result = await listenOn(
+      (address, port) => {
+        calls.push({ address, port });
+        if (address === '::1') {
+          return Promise.reject(reason);
+        }
+        return Promise.resolve({
+          port: 42000,
+          close: () => {
+            closed += 1;
+          },
+        });
+      },
+      { address: 'localhost', findOpenPort: true, port: 0 }
+    );
+
+    expect(result).toEqual({ address: '127.0.0.1', port: 42000 });
+    expect(calls).toEqual([
+      { address: '127.0.0.1', port: 0 },
+      { address: '::1', port: 42000 },
+    ]);
+    expect(closed).toBe(0);
+  }
+});
+
+test('propagates a bind failure whose platform errors name no absent loopback or occupied port', async () => {
+  const reason = Object.assign(new Error('bind'), { code: 'EACCES' });
+  const calls: { address: string; port: number }[] = [];
+  let closed = 0;
+  await expect(
+    listenOn(
+      (address, port) => {
+        calls.push({ address, port });
+        if (address === '::1') {
+          return Promise.reject(reason);
+        }
+        return Promise.resolve({
+          port: 42000,
+          close: () => {
+            closed += 1;
+          },
+        });
+      },
+      { address: 'localhost', findOpenPort: true, port: 0 }
+    )
+  ).rejects.toBe(reason);
+
+  expect(calls).toEqual([
+    { address: '127.0.0.1', port: 0 },
+    { address: '::1', port: 42000 },
+  ]);
+  expect(closed).toBe(1);
+});
 
 type StubDefineOptions = ITransportServerDefineOptions<{ id: string }, undefined>;
 
