@@ -59,6 +59,27 @@ const REFUSED = [
 // definition
 
 test.describe('trusted proxies', () => {
+  test('trusts only the two addresses of an uncompressed IPv6 prefix of 127 bits', () => {
+    const network = '2001:db8:1:2:3:4:5:6/127';
+    const trustedProxies = trustedProxiesOf([network]);
+
+    expect(
+      [
+        '2001:db8:1:2:3:4:5:5',
+        '2001:db8:1:2:3:4:5:6',
+        '2001:db8:1:2:3:4:5:7',
+        '2001:db8:1:2:3:4:5:8',
+      ].map((remote) => {
+        return clientAddressOf(remote, { forwarded: '203.0.113.9', trustedProxies });
+      })
+    ).toEqual(['2001:db8:1:2:3:4:5:5', '203.0.113.9', '203.0.113.9', '2001:db8:1:2:3:4:5:8']);
+    expect(() => {
+      assertTrustedProxies(['2001:db8:1:2:3:4:5:7/127']);
+    }).toThrow(
+      `a trustedProxies network has no bits set past its prefix: write ${network}, not 2001:db8:1:2:3:4:5:7/127`
+    );
+  });
+
   // spec 15.12
   test('refuses a trustedProxies entry that is a name, a bracketed or zoned address, an IPv4-mapped one, a prefix of 0 or past its family’s bits, or a network whose bits past its prefix are set', () => {
     expect(() => {

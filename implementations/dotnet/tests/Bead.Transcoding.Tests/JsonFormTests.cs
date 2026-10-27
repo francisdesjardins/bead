@@ -16,6 +16,31 @@ namespace Bead.Transcoding.Tests;
 public sealed class JsonFormTests
 {
     [Fact]
+    public void Packs_an_Any_with_unset_proto2_required_fields_and_keeps_explicit_defaults_on_repeated_reads()
+    {
+        var form = new JsonForm([UninterpretedOption.Types.NamePart.Descriptor]);
+        const string typeUrl = "type.googleapis.com/google.protobuf.UninterpretedOption.NamePart";
+        (string Members, byte[] Bytes)[] cases =
+        [
+            ("", []),
+            (",\"namePart\":\"Ada\"", [10, 3, 65, 100, 97]),
+            (",\"namePart\":\"\",\"isExtension\":false", [10, 0, 16, 0]),
+        ];
+
+        foreach (var (members, bytes) in cases)
+        {
+            var text = $"{{\"@type\":\"{typeUrl}\"{members}}}";
+            for (var pass = 0; pass < 2; pass++)
+            {
+                var any = Assert.IsType<Any>(form.Read(Any.Descriptor, Encoding.UTF8.GetBytes(text)));
+
+                Assert.Equal(new Any { TypeUrl = typeUrl, Value = ByteString.CopyFrom(bytes) }, any);
+                Assert.Equal(text, Encoding.UTF8.GetString(form.Write(any)));
+            }
+        }
+    }
+
+    [Fact]
     public void Writes_an_unset_64_bit_oneof_field_as_zero_in_a_response_body()
     {
         foreach (var message in new[] { new PatchProfile(), new PatchProfile { Label = "Ada" } })

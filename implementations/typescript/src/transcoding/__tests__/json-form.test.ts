@@ -16,6 +16,7 @@ import {
   Int64ValueSchema,
   ListValueSchema,
   StringValueSchema,
+  UninterpretedOption_NamePartSchema,
   ValueSchema,
   type FieldOptions,
 } from '@bufbuild/protobuf/wkt';
@@ -55,6 +56,26 @@ const INT32_VALUE_URL = 'type.googleapis.com/google.protobuf.Int32Value';
 const INT64_VALUE_URL = 'type.googleapis.com/google.protobuf.Int64Value';
 
 const ENCODER = new TextEncoder();
+
+test('packs an Any with unset proto2 required fields and keeps explicit defaults on repeated reads', () => {
+  const registry = typeRegistryOf([UninterpretedOption_NamePartSchema]);
+  const typeUrl = 'type.googleapis.com/google.protobuf.UninterpretedOption.NamePart';
+  const cases = [
+    { members: '', bytes: [] },
+    { members: ',"namePart":"Ada"', bytes: [10, 3, 65, 100, 97] },
+    { members: ',"namePart":"","isExtension":false', bytes: [10, 0, 16, 0] },
+  ];
+
+  for (const { members, bytes } of cases) {
+    const text = `{"@type":"${typeUrl}"${members}}`;
+    for (let pass = 0; pass < 2; pass += 1) {
+      const any = readProtoJson(AnySchema, { bytes: ENCODER.encode(text), registry });
+
+      expect(any).toEqual(create(AnySchema, { typeUrl, value: Uint8Array.from(bytes) }));
+      expect(writeProtoJson(AnySchema, { message: any, registry })).toBe(text);
+    }
+  }
+});
 
 // helpers
 

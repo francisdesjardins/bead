@@ -9,6 +9,27 @@ namespace Bead.Tests;
 /// </summary>
 public sealed class TrustedProxiesTests
 {
+    [Fact]
+    public void Trusts_only_the_two_addresses_of_an_uncompressed_IPv6_prefix_of_127_bits()
+    {
+        const string network = "2001:db8:1:2:3:4:5:6/127";
+        var trust = TrustOf([network], 0);
+        string[] addresses = ["2001:db8:1:2:3:4:5:5", "2001:db8:1:2:3:4:5:6", "2001:db8:1:2:3:4:5:7", "2001:db8:1:2:3:4:5:8"];
+
+        Assert.Equal(
+            ["2001:db8:1:2:3:4:5:5", "203.0.113.9", "203.0.113.9", "2001:db8:1:2:3:4:5:8"],
+            addresses.Select((address) =>
+            {
+                return TrustedProxies.ClientAddressOf(IPAddress.Parse(address), ("203.0.113.9", trust));
+            }));
+        var refused = Assert.Throws<ArgumentException>(() =>
+        {
+            TrustedProxies.Assert(["2001:db8:1:2:3:4:5:7/127"], "trustedProxies");
+        });
+        Assert.Equal($"trustedProxies cannot hold \"2001:db8:1:2:3:4:5:7/127\": its bits past the prefix are set: write {network}, not 2001:db8:1:2:3:4:5:7/127 (Parameter 'trustedProxies')", refused.Message);
+        Assert.Equal("trustedProxies", refused.ParamName);
+    }
+
     // constants
 
     private static readonly IPAddress Loopback = IPAddress.Loopback;

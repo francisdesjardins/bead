@@ -1,4 +1,5 @@
 import { create } from '@bufbuild/protobuf';
+import { AnySchema } from '@bufbuild/protobuf/wkt';
 import { expect, test } from '@playwright/test';
 import { ProgrammerError } from '../../transport/shared/errors';
 import { bindRequest, type IBindingOptions } from '../binding';
@@ -274,4 +275,39 @@ test('throws a programmer’s error for a variable that names no field', () => {
   expect(() => {
     return getBook({ variables: { 'sub.nope': 'x' } });
   }).toThrow(ProgrammerError);
+});
+
+test('propagates a supplied type registry’s error without placing it in the request', () => {
+  for (const failure of [
+    new Error('the type registry failed'),
+    new JsonFormError('the registry refuses'),
+  ]) {
+    const lookedUp: string[] = [];
+    let caught: unknown;
+
+    try {
+      bindRequest(AnySchema, {
+        body: ENCODER.encode(
+          '{"@type":"type.example/bead.transcoding.GetBookRequest","name":"books/1"}'
+        ),
+        registry: {
+          messageOf: (name) => {
+            lookedUp.push(name);
+            throw failure;
+          },
+        },
+        routeBody: '*',
+        variables: {},
+      });
+    } catch (error) {
+      caught = error;
+    }
+
+    expect(lookedUp).toEqual(['bead.transcoding.GetBookRequest']);
+    expect(caught).toBe(failure);
+    if (caught instanceof JsonFormError) {
+      expect(caught.at).toBeUndefined();
+      expect(caught.place).toBeUndefined();
+    }
+  }
 });
