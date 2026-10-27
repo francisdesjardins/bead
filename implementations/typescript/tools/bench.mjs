@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// node --expose-gc implementations/typescript/tools/bench.mjs [--runs 3] [--seconds 3] [--json] [--transcoding]
+// node --expose-gc implementations/typescript/tools/bench.mjs [--runs 3] [--seconds 3] [--json] [--transcoding] [--filter id-or-name]
 // The README defines bead-bench/1 and the scope of each measurement.
 
 import { build } from 'esbuild';
@@ -29,6 +29,12 @@ for (let at = 0; at < args.length; at++) {
     options.json = true;
   } else if (flag === '--transcoding') {
     options.transcoding = true;
+  } else if (flag === '--filter') {
+    const value = args[++at];
+    if (!value || value.startsWith('--') || options.filter !== undefined) {
+      throw new Error('--filter requires one id or name');
+    }
+    options.filter = value;
   } else if (flag === '--runs' || flag === '--seconds') {
     const value = Number(args[++at]);
     if (!Number.isSafeInteger(value) || value < 1) {
@@ -64,8 +70,43 @@ const percentile = (sorted, share) => {
   return sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * share))];
 };
 
+const selected = (name, { scenario = 'local', transport = 'none', sizeBytes = 0 } = {}) => {
+  return (
+    options.filter === undefined ||
+    options.filter === name ||
+    options.filter === `${scenario}.${transport}.${sizeBytes}.${name}`
+  );
+};
+const wanted = (names, dimensions = {}) => {
+  return names.some((name) => {
+    return selected(name, dimensions);
+  });
+};
+const callNames = (measure = 'call') => {
+  return ['p50', 'p95', 'p99', 'memory', 'throughput'].map((suffix) => {
+    return `${measure}.${suffix}`;
+  });
+};
+const wantsCalls = (dimensions, measure = 'call') => {
+  return SIZES.some((sizeBytes) => {
+    return wanted(callNames(measure), { ...dimensions, sizeBytes });
+  });
+};
+const wantsNotifications = (transport) => {
+  return wanted(
+    ['notification.p50', 'notification.p95', 'notification.p99', 'notification.throughput'],
+    { transport }
+  );
+};
+const wantsTransfer = (transport) => {
+  return wanted(['transfer.echo', 'transfer.throughput'], { transport, sizeBytes: TRANSFER_SIZE });
+};
+
 const measures = new Map();
 const record = (name, value, dimensions = {}) => {
+  if (!selected(name, dimensions)) {
+    return;
+  }
   const { scenario = 'local', transport = 'none', sizeBytes = 0, unit = 'us' } = dimensions;
   const id = `${scenario}.${transport}.${sizeBytes}.${name}`;
   if (!Number.isFinite(value) || value < 0) {
@@ -121,43 +162,51 @@ const transcoding = (reader) => {
   );
   const row = { sizeBytes: body.length, unit: 'ns' };
 
-  record(
-    'transcoding.read.bead',
-    codec(() => {
-      return reader.toBinary(schema, reader.readProtoJson(schema, { bytes: body, registry }));
-    }, 100),
-    row
-  );
-  record(
-    'transcoding.read.stock',
-    codec(() => {
-      return reader.toBinary(schema, reader.fromJsonString(schema, decoder.decode(body)));
-    }, 100),
-    row
-  );
-  record(
-    'transcoding.write.bead',
-    codec(() => {
-      return encoder.encode(
-        reader.writeProtoJson(schema, { message: reader.fromBinary(schema, payload), registry })
-      );
-    }, 100),
-    row
-  );
-  record(
-    'transcoding.write.stock',
-    codec(() => {
-      return encoder.encode(reader.toJsonString(schema, reader.fromBinary(schema, payload)));
-    }, 100),
-    row
-  );
+  if (selected('transcoding.read.bead', row)) {
+    record(
+      'transcoding.read.bead',
+      codec(() => {
+        return reader.toBinary(schema, reader.readProtoJson(schema, { bytes: body, registry }));
+      }, 100),
+      row
+    );
+  }
+  if (selected('transcoding.read.stock', row)) {
+    record(
+      'transcoding.read.stock',
+      codec(() => {
+        return reader.toBinary(schema, reader.fromJsonString(schema, decoder.decode(body)));
+      }, 100),
+      row
+    );
+  }
+  if (selected('transcoding.write.bead', row)) {
+    record(
+      'transcoding.write.bead',
+      codec(() => {
+        return encoder.encode(
+          reader.writeProtoJson(schema, { message: reader.fromBinary(schema, payload), registry })
+        );
+      }, 100),
+      row
+    );
+  }
+  if (selected('transcoding.write.stock', row)) {
+    record(
+      'transcoding.write.stock',
+      codec(() => {
+        return encoder.encode(reader.toJsonString(schema, reader.fromBinary(schema, payload)));
+      }, 100),
+      row
+    );
+  }
 };
 
 // The normal interop launcher reports both ports and serves until stdin closes.
 const startInterop = async () => {
   const child = spawn(
     'dotnet',
-    ['run', '-c', 'Release', '--project', 'interop/Bead.Interop.Server'],
+    ['run', '-c', 'Release', '--no-build', '--project', 'interop/Bead.Interop.Server'],
     { cwd: join(REPO, 'implementations/dotnet'), stdio: ['pipe', 'pipe', 'pipe'] }
   );
   const exited = once(child, 'exit');
@@ -263,68 +312,77 @@ const connect = async (reader, transport, settings = {}) => {
 // connection drawn, called once and closed, as a gateway does for each HTTP exchange.
 const calls = async (callOf, dimensions, { measure = 'call' } = {}) => {
   for (const sizeBytes of SIZES) {
-    const call = callOf('x'.repeat(sizeBytes));
     const row = { ...dimensions, sizeBytes };
+    if (!wanted(callNames(measure), row)) {
+      continue;
+    }
+    const call = callOf('x'.repeat(sizeBytes));
     for (let index = 0; index < 500; index++) {
       await call();
     }
     console.error(`calls ${row.scenario}/${row.transport}/${sizeBytes}`);
-    const durations = [];
-    let started = performance.now();
-    while (performance.now() - started < options.seconds * 1_000) {
-      const before = performance.now();
-      await call();
-      durations.push((performance.now() - before) * 1_000);
-    }
-    durations.sort((a, b) => {
-      return a - b;
-    });
-    for (const share of [0.5, 0.95, 0.99]) {
-      record(`${measure}.p${share * 100}`, percentile(durations, share), row);
-    }
-
-    // * Account for reclaimed bytes as well as live heap growth, including transient objects.
-    globalThis.gc?.();
-    const profiler = new GCProfiler();
-    let heapBefore;
-    let heapAfter;
-    let statistics;
-
-    profiler.start();
-    try {
-      heapBefore = getHeapStatistics().used_heap_size;
-      for (let index = 0; index < MEMORY_CALLS; index++) {
+    if (wanted([`${measure}.p50`, `${measure}.p95`, `${measure}.p99`], row)) {
+      const durations = [];
+      const started = performance.now();
+      while (performance.now() - started < options.seconds * 1_000) {
+        const before = performance.now();
         await call();
+        durations.push((performance.now() - before) * 1_000);
       }
-      heapAfter = getHeapStatistics().used_heap_size;
-    } finally {
-      ({ statistics } = profiler.stop());
+      durations.sort((a, b) => {
+        return a - b;
+      });
+      for (const share of [0.5, 0.95, 0.99]) {
+        record(`${measure}.p${share * 100}`, percentile(durations, share), row);
+      }
     }
 
-    let allocated = heapAfter - heapBefore;
-    for (const collection of statistics) {
-      const before = collection.beforeGC?.heapStatistics?.usedHeapSize;
-      const after = collection.afterGC?.heapStatistics?.usedHeapSize;
-      if (!Number.isFinite(before) || !Number.isFinite(after)) {
-        throw new Error('GCProfiler requires beforeGC/afterGC.heapStatistics.usedHeapSize');
-      }
-      allocated += before - after;
-    }
-    record(`${measure}.memory`, allocated / MEMORY_CALLS, {
-      ...row,
-      unit: `B/${measure}`,
-    });
+    if (selected(`${measure}.memory`, row)) {
+      // * Account for reclaimed bytes as well as live heap growth, including transient objects.
+      globalThis.gc?.();
+      const profiler = new GCProfiler();
+      let heapBefore;
+      let heapAfter;
+      let statistics;
 
-    let done = 0;
-    started = performance.now();
-    while (performance.now() - started < options.seconds * 1_000) {
-      await Promise.all(Array.from({ length: CONCURRENCY }, call));
-      done += CONCURRENCY;
+      profiler.start();
+      try {
+        heapBefore = getHeapStatistics().used_heap_size;
+        for (let index = 0; index < MEMORY_CALLS; index++) {
+          await call();
+        }
+        heapAfter = getHeapStatistics().used_heap_size;
+      } finally {
+        ({ statistics } = profiler.stop());
+      }
+
+      let allocated = heapAfter - heapBefore;
+      for (const collection of statistics) {
+        const before = collection.beforeGC?.heapStatistics?.usedHeapSize;
+        const after = collection.afterGC?.heapStatistics?.usedHeapSize;
+        if (!Number.isFinite(before) || !Number.isFinite(after)) {
+          throw new Error('GCProfiler requires beforeGC/afterGC.heapStatistics.usedHeapSize');
+        }
+        allocated += before - after;
+      }
+      record(`${measure}.memory`, allocated / MEMORY_CALLS, {
+        ...row,
+        unit: `B/${measure}`,
+      });
     }
-    record(`${measure}.throughput`, (done * 1_000) / (performance.now() - started), {
-      ...row,
-      unit: `${measure}s/s`,
-    });
+
+    if (selected(`${measure}.throughput`, row)) {
+      let done = 0;
+      const started = performance.now();
+      while (performance.now() - started < options.seconds * 1_000) {
+        await Promise.all(Array.from({ length: CONCURRENCY }, call));
+        done += CONCURRENCY;
+      }
+      record(`${measure}.throughput`, (done * 1_000) / (performance.now() - started), {
+        ...row,
+        unit: `${measure}s/s`,
+      });
+    }
   }
 };
 
@@ -445,7 +503,20 @@ try {
     nodePaths: [join(ROOT, 'node_modules')],
   });
   const reader = await import(pathToFileURL(outfile).href);
-  remote = options.transcoding ? undefined : await startInterop();
+  const needsInterop =
+    !options.transcoding &&
+    ['http', 'websocket'].some((transport) => {
+      return wantsCalls({ scenario: 'interop', transport });
+    });
+  if (needsInterop) {
+    if (process.env.BEAD_BENCH_INTEROP_BUILT !== '1') {
+      execFileSync('dotnet', ['build', '-c', 'Release', 'interop/Bead.Interop.Server'], {
+        cwd: join(REPO, 'implementations/dotnet'),
+        stdio: ['ignore', 'ignore', 'inherit'],
+      });
+    }
+    remote = await startInterop();
+  }
   for (let run = 0; run < options.runs; run++) {
     console.error(`run ${run + 1}/${options.runs}`);
     transcoding(reader);
@@ -469,23 +540,33 @@ try {
       const limits = { failures: reader.SERVER_FAILURES, maximumEnvelopeBytes: 16_778_240 };
       const value = 'x'.repeat(sizeBytes);
       const row = { sizeBytes, unit: 'ns' };
-      record(
-        'codec.roundTrip',
-        codec(() => {
-          return reader.readEnvelope(reader.writeEnvelope(envelope, 1_024), limits);
-        }, 1_000),
-        row
-      );
-      record(
-        'json.roundTrip',
-        codec(() => {
-          return reader.PAYLOAD_CODECS.json.decode(reader.PAYLOAD_CODECS.json.encode(value));
-        }, 100),
-        row
-      );
+      if (selected('codec.roundTrip', row)) {
+        record(
+          'codec.roundTrip',
+          codec(() => {
+            return reader.readEnvelope(reader.writeEnvelope(envelope, 1_024), limits);
+          }, 1_000),
+          row
+        );
+      }
+      if (selected('json.roundTrip', row)) {
+        record(
+          'json.roundTrip',
+          codec(() => {
+            return reader.PAYLOAD_CODECS.json.decode(reader.PAYLOAD_CODECS.json.encode(value));
+          }, 100),
+          row
+        );
+      }
     }
     for (const transport of ['websocket', 'http']) {
       for (const scenario of ['local', 'interop']) {
+        if (
+          !wantsCalls({ scenario, transport }) &&
+          !(scenario === 'local' && wantsNotifications(transport))
+        ) {
+          continue;
+        }
         const connection = await connect(reader, transport, {
           port:
             scenario === 'interop'
@@ -501,47 +582,54 @@ try {
             },
             { scenario, transport }
           );
-          if (scenario === 'local') {
+          if (scenario === 'local' && wantsNotifications(transport)) {
             await notifications(connection, reader, { transport });
           }
         } finally {
           await connection.close();
         }
       }
-      const connection = await connect(reader, transport, { large: true });
+      if (wantsTransfer(transport)) {
+        const connection = await connect(reader, transport, { large: true });
+        try {
+          await transfer(connection, transport);
+        } finally {
+          await connection.close();
+        }
+      }
+    }
+    // in memory: calls on one connection kept, against a connection drawn for each call
+    if (wantsCalls({ transport: 'memory' }) || wantsCalls({ transport: 'memory' }, 'exchange')) {
+      const connection = await connect(reader, 'memory');
       try {
-        await transfer(connection, transport);
+        const dimensions = { scenario: 'local', transport: 'memory' };
+        await calls((body) => {
+          return () => {
+            return connection.interop.echo(body)();
+          };
+        }, dimensions);
+        await calls(
+          (body) => {
+            return async () => {
+              const client = memoryClientOf(reader, { server: connection.server });
+              try {
+                await client.connect({});
+                return await new reader.InteropClient(client).echo(body)();
+              } finally {
+                await client[Symbol.asyncDispose]();
+              }
+            };
+          },
+          dimensions,
+          { measure: 'exchange' }
+        );
       } finally {
         await connection.close();
       }
     }
-    // in memory: calls on one connection kept, against a connection drawn for each call
-    const connection = await connect(reader, 'memory');
-    try {
-      const dimensions = { scenario: 'local', transport: 'memory' };
-      await calls((body) => {
-        return () => {
-          return connection.interop.echo(body)();
-        };
-      }, dimensions);
-      await calls(
-        (body) => {
-          return async () => {
-            const client = memoryClientOf(reader, { server: connection.server });
-            try {
-              await client.connect({});
-              return await new reader.InteropClient(client).echo(body)();
-            } finally {
-              await client[Symbol.asyncDispose]();
-            }
-          };
-        },
-        dimensions,
-        { measure: 'exchange' }
-      );
-    } finally {
-      await connection.close();
-    }
+  }
+  if (measures.size === 0) {
+    throw new Error(`filter matches no measurement: ${options.filter}`);
   }
   const result = {
     schema: 'bead-bench/1',
@@ -559,6 +647,7 @@ try {
     },
     method: {
       runs: options.runs,
+      filter: options.filter ?? null,
       seconds: options.seconds,
       concurrency: CONCURRENCY,
       notificationIntervalMs: 1,

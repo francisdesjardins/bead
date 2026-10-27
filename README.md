@@ -458,28 +458,43 @@ node ../../tools/coverage-report.mjs TestResults/coverage/*.cobertura.xml --unde
 
 ## Measurement
 
-Both sides measure the same seven layers on the loopback. Run each bench separately on a quiet
+Both sides measure the same seven layers on the loopback. Run one comparison at a time on a quiet
 machine, with Node, the TypeScript dependencies and .NET installed. Both benches start the other
 side's interop server as the interop tests do: `interop/serve.ts` for TypeScript, and
-`dotnet run -c Release --project interop/Bead.Interop.Server` for C#. The server reports its
+`dotnet run -c Release --no-build --project interop/Bead.Interop.Server` for C#, after one build. The server reports its
 WebSocket, HTTP and gateway ports and serves until its standard input closes. A launch failure
 fails the bench; every reported measure has every requested run.
 
-From the root:
+For a release, `tools/bench-release.mjs` runs at least five fresh processes (five by default).
+Each process runs one warm-up pass followed by two recorded runs (`--runs 2` by default). The
+orchestrator asks the bench for one extra run and drops the first from the statistics, on both
+sides and on a previous tag's checkout alike. It runs TypeScript under `node --expose-gc` and C#
+from its built binary, with the build outside the measurement processes. The TypeScript bench's
+C# interop server is built once, then launched with `--no-build`.
+
+From the root, screen each side against the last release's stored report:
 
 ```sh
-node --expose-gc implementations/typescript/tools/bench.mjs --runs 3 --seconds 3 --json > typescript.json
-dotnet build -c Release implementations/dotnet/tools/Bead.Benchmarks
-dotnet run -c Release --no-build --project implementations/dotnet/tools/Bead.Benchmarks -- --runs 3 --seconds 3 --json > csharp.json
-node tools/bench-compare.mjs typescript.json csharp.json
+node tools/bench-release.mjs typescript --output .bench/candidate-typescript.json
+node tools/bench-release.mjs csharp --output .bench/candidate-csharp.json
+node tools/bench-compare.mjs .bench/baseline-typescript.json .bench/candidate-typescript.json --threshold 25%
+node tools/bench-compare.mjs .bench/baseline-csharp.json .bench/candidate-csharp.json --threshold 25%
 ```
 
-`--runs` defaults to 3; `--seconds` defaults to 3 and bounds each timed phase of each run. Both
-require positive integers. Each codec warms for 5,000 round trips, each call payload for 500 calls,
-and each large echo for one call. Longer phases give the runtimes more time to warm. Without
-`--json`, the report prints its environment and method, then each measure's median, minimum and
-maximum. Progress goes to stderr; JSON alone goes to stdout. `--transcoding` runs the
-transcoding's measures alone, and starts no interop server.
+`--processes` requires an integer of at least 5; `--runs` and `--seconds` require positive integers.
+`--seconds` defaults to 3 and bounds each timed phase of each run. Each codec also warms for 5,000
+round trips, each call payload for 500 calls, and each large echo for one call. A full bench costs
+about 75 minutes per side at N=5, depending on the machine; a full baseline/candidate interleave
+costs twice that. Run the two client sides sequentially. `--transcoding` runs only the four
+transcoding measures and starts no interop server. `--filter <id-or-name>` on the orchestrator and
+on both benches selects an exact measurement ID or name. Shared phases, such as the three
+percentiles of one latency run, run once and report only the selected rows. An unmatched filter
+fails the run.
+
+Each bench also runs alone, writing `bead-bench/1`; its `--runs` defaults to 3 and includes no
+discarded pass. With `--json`, JSON alone goes to stdout. Without it, the bench prints its
+environment, method, and each measure's median, minimum and maximum. The orchestrator writes
+`bead-bench/2` to stdout, or to `--output <file>`. Progress and every process's value go to stderr.
 
 | Layer         | Measure                                                    | Unit and scope                                                                                                                                         |
 | ------------- | ---------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
@@ -526,7 +541,7 @@ value fails the run. Both counters include client and server in `local`, and onl
 process in `interop`. Neither counts the remote server or native allocations; V8 also excludes
 external buffers such as `ArrayBuffer` backing stores. The reports state each counter and scope.
 
-Both JSON reports use `bead-bench/1`:
+Each bench's `bead-bench/1` report carries:
 
 - `side`: `typescript` or `csharp`;
 - `environment`: CPU model and logical count, OS platform/release/architecture, Node and V8
@@ -538,37 +553,70 @@ Both JSON reports use `bead-bench/1`:
   central samples. The ID is `<scenario>.<transport>.<sizeBytes>.<name>`; codecs use transport
   `none`. Latency, codec time and memory use direction `lower`; throughputs use `higher`.
 
-The comparison matches IDs and checks units, directions, samples and statistics. Each baseline
-measure must be in the candidate; a measure the candidate adds is listed `new`, with no baseline to
-judge it by. It prints the candidate median's change relative to the baseline median's
-absolute value: positive means a larger value. A zero baseline gives an unbounded change unless
-both values are zero. It also identifies different memory methods. Every number belongs to its
-machine, runtime, method and run; compare on the same machine and inspect the spread.
+The orchestrator's `bead-bench/2` keeps the same identities and environment. Its `method` adds
+`processes` and `warmup`, with `runs` counting recorded runs per process. Each measure has
+`processes`, an array of recorded run arrays in process order, `warmups`, the discarded runs per
+process, and `medians`, the median of each process. Its `median`, `min` and `max` summarize these
+process medians. Runs within a process are not independent samples. Processes that differ in
+side, environment, commit, runtime versions, method, IDs or units are refused; any process failure
+fails the collection without publishing a report.
+
+The comparison reads both schemas, treating `/1` as one process. It checks units, directions,
+raw samples and statistics. Every baseline measure must be in the candidate; a measure the
+candidate adds is listed `new`, with no verdict. Different memory counters are identified.
+Without a threshold, cross-side and single-process comparisons print and exit 0. With a
+threshold, fewer than five processes on either side refuses a verdict (exit 2): re-bench the
+previous tag under this method. Invalid reports, missing or incompatible baseline measures and
+selectors matching nothing also exit 2.
 
 ```sh
 node tools/bench-compare.mjs baseline.json candidate.json --threshold 25%
 node tools/bench-compare.mjs baseline.json candidate.json --threshold 25% --threshold call.p99=15% --threshold local.http.1024.call.p99=10%
 ```
 
-A threshold tests regression: an increase for `lower`, a decrease for `higher`. An exact ID takes
-precedence over a measure name, which takes precedence over the default percentage. Repeat
-`--threshold` for distinct selectors. Equality passes; a regression strictly past its threshold
-exits 1. Without thresholds the tool prints a comparison and exits 0; invalid reports, a baseline
-measure missing or incompatible and selectors that match nothing exit 2. These commands run by hand;
-CI has no performance guard. CI's `dotnet` job builds the C# bench in Release, so that a release's
-measure finds it whole, and measures nothing.
+The effect is the Hodges–Lehmann relative change: the median of every candidate/baseline
+process-median ratio, minus one, in percent. Positive means a larger value; a zero baseline gives
+an unbounded increase unless both values are zero. A regression is an increase for `lower`, a
+decrease for `higher`. An exact ID's threshold takes precedence over a name's, then the default;
+repeat `--threshold` for distinct selectors. Equality passes.
 
-Each release keeps both reports, `.bench/v<version>-typescript.json` and
-`.bench/v<version>-csharp.json`, which git ignores, and compares each with the last release's on
-the machine that made them:
+A measure is `regression` only when its effect is strictly past the threshold and its exact
+one-sided Mann–Whitney p is at most .05, over process medians in the regression's direction. It is
+`inconclusive` when only the effect is past the threshold, and `ok` otherwise. Every labeling of
+the pooled observations is enumerated by its rank sum, counting ties exactly. At five processes
+per side without ties, U must reach 21 of 25 (p = 12/252). The output shows U, p, every process's
+median, and each measure's smallest detectable change: the infimum rank-significant percentage
+shift of the observed candidate spread, normalized to zero HL change, against the baseline.
+This describes empirical rank resolution at these samples, not a power guarantee. Relative
+resolution is unavailable with zero values or too few samples to attain p ≤ .05.
+
+Exit 1 means at least one `regression` and is advisory; `inconclusive` alone exits 0 and still
+requires review. At N=5, simulations on the transcoding measurements give roughly 1% false flags
+per unchanged measure and 70–90% detection at a +35% change. These rates depend on the
+measurement's distribution; 112 measures can give about one false flag per side, with noisier
+tails. The threshold and p test screen findings; confirmation settles them. CI has no performance
+guard: its `dotnet` job builds the C# bench in Release, so that a release's measure finds it whole,
+and measures nothing.
+
+Confirm every `regression` and `inconclusive` on a quiet machine against a checkout of the previous
+tag. `--tree` builds and runs that baseline, alternating baseline then candidate process by
+process. Both trees need their TypeScript dependencies installed. A bench without `--filter` runs
+whole; its report is then selected by the same ID or name. For example, from the candidate tree:
 
 ```sh
-node tools/bench-compare.mjs .bench/v0.7.0-typescript.json .bench/v0.8.0-typescript.json --threshold 25%
-node tools/bench-compare.mjs .bench/v0.7.0-csharp.json .bench/v0.8.0-csharp.json --threshold 25%
+git worktree add --detach ../bench-baseline v0.7.0
+# Install the TypeScript dependencies in ../bench-baseline/implementations/typescript.
+node tools/bench-release.mjs typescript --tree ../bench-baseline --baseline-output .bench/confirm-baseline-typescript.json --output .bench/confirm-candidate-typescript.json --filter call.p99
+node tools/bench-compare.mjs .bench/confirm-baseline-typescript.json .bench/confirm-candidate-typescript.json --threshold 25%
+node tools/bench-release.mjs csharp --tree ../bench-baseline --baseline-output .bench/confirm-baseline-csharp.json --output .bench/confirm-candidate-csharp.json --filter call.p99
+node tools/bench-compare.mjs .bench/confirm-baseline-csharp.json .bench/confirm-candidate-csharp.json --threshold 25%
 ```
 
-A regression past its threshold is read before the finish: explained in the release's notes, or
-fixed.
+For a full interleave, omit `--filter`. Each release keeps its two full reports,
+`.bench/v<version>-typescript.json` and `.bench/v<version>-csharp.json`, which git ignores. A
+`regression` or `inconclusive` is read before the finish, confirmed, then explained in the release's
+notes or fixed. A stored baseline from another session can include machine drift; the interleave
+reduces that drift's effect.
 
 ## Fuzzing
 
