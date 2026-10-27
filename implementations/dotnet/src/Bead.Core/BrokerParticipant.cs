@@ -57,7 +57,9 @@ public sealed record BrokerParticipantOptions
 /// halves their ends drew; its will, a GONE its broker publishes where its adapter offers one; and
 /// the heartbeat of each connection. When its link goes down it closes each connection, unclean,
 /// and connects again as another incarnation, its inbox and names subscribed anew before anything
-/// goes, then resets each peer it held a connection with.
+/// goes, then resets each peer it held a connection with; when another link of its id takes its
+/// link over, it closes each connection alike, reports it, and connects no more until it is started
+/// again, so that two holders of one id never take each other over without end.
 /// </summary>
 public sealed class BrokerParticipant : IAsyncDisposable
 {
@@ -77,7 +79,15 @@ public sealed class BrokerParticipant : IAsyncDisposable
     // the peers' departures it holds a subscription to, by the peer's id, and the connections each counts
     private readonly Dictionary<string, int> _departures = new(StringComparer.Ordinal);
     private readonly BrokerBudget _budget;
+    // the receive bound its inbox takes, asked of its adapter once, as it is built
+    private readonly long _receiveBound;
     private Task? _starting;
+    // its link taken over by another of its id: fenced, until its application starts it again
+    private bool _isTakenOver;
+    // its link went down as it connected: that attempt fails, rather than call it linked
+    private bool _isDownAsItLinks;
+    // what gives up the reconnection under way, as its link is taken over
+    private CancellationTokenSource? _relinking;
     private TaskCompletionSource _live = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private bool _isStopped;
 
@@ -112,7 +122,8 @@ public sealed class BrokerParticipant : IAsyncDisposable
         ServerBounds.AssertCount((nameof(BrokerParticipantOptions.MaximumEnvelopePartsBytes), given.MaximumEnvelopePartsBytes));
         ServerBounds.AssertCount((nameof(BrokerParticipantOptions.MinimumBodyBytesPerSecond), given.MinimumBodyBytesPerSecond));
 
-        var receiveBound = Math.Min(adapter.ReceiveBound, BrokerParcels.LargestBound);
+        // * asked by its inbox's topic, which a broker that counts a packet's every byte needs
+        var receiveBound = Math.Min(adapter.ReceiveBound([given.Root, "i", adapter.Id]), BrokerParcels.LargestBound);
 
         if (receiveBound < BrokerParcels.LeastBound)
         {
@@ -125,6 +136,7 @@ public sealed class BrokerParticipant : IAsyncDisposable
             BodyGracePeriod = Clocks.AssertHeldFinite((nameof(BrokerParticipantOptions.BodyGracePeriod), nameof(BrokerParticipantOptions.BodyGracePeriod)), given.BodyGracePeriod),
         };
         _adapter = adapter;
+        _receiveBound = receiveBound;
         _clock = _options.Clock ?? TimeProvider.System;
         _scheduler = _options.Scheduler ?? new SerialScheduler();
         _budget = new BrokerBudget(_options.HeldBytesBudget);
@@ -143,13 +155,16 @@ public sealed class BrokerParticipant : IAsyncDisposable
                 Take(message);
             });
         };
-        adapter.Down += () =>
+        adapter.Down += (down) =>
         {
-            _scheduler.Post(LinkDown);
+            _scheduler.Post(() =>
+            {
+                LinkDown(down);
+            });
         };
     }
 
-    /// <summary>What it reports of its own: a message to it that is no parcel, which it drops, or its link given up on.</summary>
+    /// <summary>What it reports of its own: a message to it that is no parcel, which it drops, its link given up on, or its link taken over.</summary>
     public event Action<Exception>? Error;
 
     /// <summary>The identity its broker authenticates its link by: its adapter's.</summary>
@@ -191,6 +206,15 @@ public sealed class BrokerParticipant : IAsyncDisposable
         }
     }
 
+    /// <summary>In its turn: whether its link went down as it connects, so that what failed then is its loss, not a refusal.</summary>
+    internal bool IsDownAsItLinks
+    {
+        get
+        {
+            return _isDownAsItLinks;
+        }
+    }
+
     internal SerialScheduler Scheduler
     {
         get
@@ -225,7 +249,7 @@ public sealed class BrokerParticipant : IAsyncDisposable
     {
         get
         {
-            return Math.Min(_adapter.ReceiveBound, BrokerParcels.LargestBound);
+            return _receiveBound;
         }
     }
 
@@ -334,7 +358,8 @@ public sealed class BrokerParticipant : IAsyncDisposable
     /// <summary>
     /// Starts its link: its incarnation drawn, its adapter started, its will set where it offers
     /// one, its inbox subscribed and the names of its server transports that serve; settles once all
-    /// of it is held. A second start shares the first, or starts anew once the first failed.
+    /// of it is held. A second start shares the first, or starts anew once the first failed, or once
+    /// its link was taken over.
     /// </summary>
     public Task Start()
     {
@@ -344,6 +369,9 @@ public sealed class BrokerParticipant : IAsyncDisposable
             {
                 return Task.FromException(new InvalidOperationException($"the participant {Id} is stopped"));
             }
+
+            // * its application's start lifts the fence a takeover set
+            _isTakenOver = false;
 
             // * one attempt shared; one that failed is let go, so the next starts another
             if (_starting is null || _starting.IsFaulted || _starting.IsCanceled)
@@ -422,9 +450,21 @@ public sealed class BrokerParticipant : IAsyncDisposable
         return Math.Min(_adapter.MaximumPayloadBytes(topic), BrokerParcels.LargestBound);
     }
 
-    /// <summary>Settles once its link is up, started or connected again; a cancel ends the wait.</summary>
+    /// <summary>
+    /// Settles once its link is up, started or connected again; a cancel ends the wait. Its link
+    /// taken over, it fails at once with a <see cref="ConnectException"/> naming it: a connect never
+    /// lifts the fence, which its application's start alone does.
+    /// </summary>
     internal async Task WhenLinked(CancellationToken cancellationToken)
     {
+        lock (_gate)
+        {
+            if (_isTakenOver)
+            {
+                throw new ConnectException(TakenOver);
+            }
+        }
+
         await Start().WaitAsync(cancellationToken);
 
         Task live;
@@ -586,6 +626,15 @@ public sealed class BrokerParticipant : IAsyncDisposable
         }
     }
 
+    // what its link taken over is reported by, and fails its connects with
+    private string TakenOver
+    {
+        get
+        {
+            return $"the link of {Id} was taken over by another link of its id";
+        }
+    }
+
     // a task whose failure is the link's to find: its loss tells it
     private static void Quietly(Task task)
     {
@@ -603,6 +652,8 @@ public sealed class BrokerParticipant : IAsyncDisposable
     // anything goes; then each peer of a former incarnation reset
     private async Task Link()
     {
+        _isDownAsItLinks = false;
+
         var bytes = new byte[16];
 
         RandomNumberGenerator.Fill(bytes);
@@ -631,6 +682,13 @@ public sealed class BrokerParticipant : IAsyncDisposable
             await server.Relink();
         }
 
+        // ! a link that went down as it connected is none: this attempt fails, and the next links
+        // anew, rather than call it up and miss its loss
+        if (_isDownAsItLinks)
+        {
+            throw new IOException($"the link of {Id} went down as it connected");
+        }
+
         lock (_gate)
         {
             _live.TrySetResult();
@@ -639,13 +697,26 @@ public sealed class BrokerParticipant : IAsyncDisposable
 
     // in its turn: its link lost: each connection closed, unclean, each connect to send its OPEN
     // again once linked, then its link connected again as another incarnation, and each peer it held
-    // a connection with reset
-    private void LinkDown()
+    // a connection with reset; or taken over: each connection closed alike, reported, and fenced
+    private void LinkDown(BrokerDown down)
     {
         lock (_gate)
         {
-            if (_isStopped || !_live.Task.IsCompleted)
+            if (_isStopped)
             {
+                return;
+            }
+
+            if (!_live.Task.IsCompleted)
+            {
+                // * down as it connects: the attempt under way fails; taken over, none follows it
+                _isDownAsItLinks = true;
+
+                if (down.IsTakenOver)
+                {
+                    Fence();
+                }
+
                 return;
             }
 
@@ -664,7 +735,7 @@ public sealed class BrokerParticipant : IAsyncDisposable
 
         foreach (var pending in _connects.Values.ToList())
         {
-            pending.Down($"the link of {Id} went down as it connected");
+            pending.Down(down.IsTakenOver ? TakenOver : $"the link of {Id} went down as it connected");
         }
 
         _connects.Clear();
@@ -680,6 +751,18 @@ public sealed class BrokerParticipant : IAsyncDisposable
         foreach (var server in servers)
         {
             server.Unlinked();
+        }
+
+        // * taken over: it connects no more, its server's transports taking no OPEN and its
+        // clients' connects failing, until its application starts it again (spec 15.21)
+        if (down.IsTakenOver)
+        {
+            lock (_gate)
+            {
+                Fence();
+            }
+
+            return;
         }
 
         // * no reconnection: it stays down, said so, and the next start or connect links it anew
@@ -698,8 +781,35 @@ public sealed class BrokerParticipant : IAsyncDisposable
         _scheduler.Cover(Relinking(peers));
     }
 
+    // under its gate: its link taken over, reported once, its reconnection under way given up and
+    // its next start a link anew
+    private void Fence()
+    {
+        if (_isTakenOver)
+        {
+            return;
+        }
+
+        _isTakenOver = true;
+        _starting = null;
+        _relinking?.Cancel();
+        _scheduler.Post(() =>
+        {
+            Report(new IOException(TakenOver));
+        });
+    }
+
     private async Task Relinking(List<(string PeerId, (ulong Opener, ulong Acceptor) Pair)> peers)
     {
+        var reconnect = _options.Reconnect ?? new TransportReconnectOptions { MaximumAttempts = int.MaxValue };
+        using var fenced = new CancellationTokenSource();
+        using var relinking = CancellationTokenSource.CreateLinkedTokenSource(reconnect.CancellationToken, fenced.Token);
+
+        lock (_gate)
+        {
+            _relinking = fenced;
+        }
+
         try
         {
             await TransportReconnection.Attempting(
@@ -707,7 +817,12 @@ public sealed class BrokerParticipant : IAsyncDisposable
                 {
                     return _scheduler.Run(Link);
                 },
-                (_options.Reconnect ?? new TransportReconnectOptions { MaximumAttempts = int.MaxValue }, _clock));
+                (reconnect with { CancellationToken = relinking.Token }, _clock));
+        }
+        catch (OperationCanceledException) when (fenced.IsCancellationRequested)
+        {
+            // taken over as it connected again: its fence reported it
+            return;
         }
         catch (ReconnectException reason)
         {
@@ -722,6 +837,16 @@ public sealed class BrokerParticipant : IAsyncDisposable
             Report(new IOException($"the link of {Id} went down, and its reconnection ended: {reason.Message}", reason));
 
             return;
+        }
+        finally
+        {
+            lock (_gate)
+            {
+                if (_relinking == fenced)
+                {
+                    _relinking = null;
+                }
+            }
         }
 
         await _scheduler.Run(() =>

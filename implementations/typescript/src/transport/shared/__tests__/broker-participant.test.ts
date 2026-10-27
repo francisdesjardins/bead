@@ -1251,4 +1251,114 @@ test.describe('broker participant', () => {
     await client.disconnect();
     await Promise.all([participant.stop(), ada.stop()]);
   });
+
+  test('gives no life to a publication of an adapter that offers none', async () => {
+    const broker = createMemoryBroker();
+    const peer = await peerOf(broker, { id: 'acceptor', isServing: true });
+    const lives: (number | undefined)[] = [];
+    const adapter = broker.adapter({
+      capabilities: { groups: true, noSubscriber: true, will: true },
+      id: 'ada',
+    });
+    const recorded = Object.assign(Object.create(adapter) as IBrokerAdapter, {
+      publish: (publication: Parameters<IBrokerAdapter['publish']>[0]) => {
+        lives.push(publication.expiresAfter);
+
+        return adapter.publish(publication);
+      },
+    });
+    const participant = createBrokerParticipant({ adapter: recorded, heartbeat: 30_000 });
+    const client = participant.transportClient();
+    const connecting = client.connect({ server: 'interop', timeout: 10_000 });
+
+    await settled();
+
+    const open = peer.heard[0]?.parcel;
+
+    if (open !== undefined) {
+      await peer.adapter.publish({
+        payload: acceptOf(open, { acceptor: HALF, id: 'acceptor' }),
+        topic: ['bead', 'i', 'ada'],
+      });
+    }
+
+    await connecting;
+    // * its OPEN, its third leg, and a DATA that carries a credential: none with a life
+    await client.send({ credential: 'Bearer token', data: Uint8Array.of(1) });
+    await settled();
+    expect(lives).toEqual([undefined, undefined, undefined]);
+    await client.disconnect();
+    await participant.stop();
+  });
+
+  test('a participant taken over reports it, connects no more, and fails each connect naming it until it is started again (spec 15.21)', async () => {
+    const broker = createMemoryBroker();
+    const peer = await peerOf(broker, { id: 'acceptor', isServing: true });
+    const adapter = broker.adapter({ id: 'ada' });
+    const clock = createTestClock();
+    const participant = createBrokerParticipant({ adapter, clock, reconnect: { delay: 1_000 } });
+    const client = participant.transportClient();
+    const reported: string[] = [];
+    const closes: boolean[] = [];
+
+    participant.on('error', ({ message }) => {
+      reported.push(message);
+    });
+    client.on('close', (wasClean) => {
+      closes.push(wasClean);
+    });
+
+    const connecting = client.connect({ server: 'interop' });
+
+    await settled();
+
+    const open = peer.heard[0]?.parcel;
+
+    if (open !== undefined) {
+      await peer.adapter.publish({
+        payload: acceptOf(open, { acceptor: HALF, id: 'acceptor' }),
+        topic: ['bead', 'i', 'ada'],
+      });
+    }
+
+    await connecting;
+
+    // a connect its link is taken over under fails, naming it
+    const pending = participant
+      .transportClient()
+      .connect({ server: 'interop' })
+      .catch((reason: unknown) => {
+        return reason;
+      });
+
+    await settled();
+    adapter.takeOver();
+    await settled();
+
+    expect(await pending).toMatchObject({
+      message: 'the link of ada was taken over by another link of its id as it connected',
+      name: 'ConnectError',
+    });
+    // * each connection closed unclean, reported, and no link anew past its reconnection's delay
+    expect(closes).toEqual([false]);
+    expect(reported).toEqual(['the link of ada was taken over by another link of its id']);
+    await clock.tickAsync(5_000);
+    await settled();
+    expect(participant.isLinked).toBe(false);
+    expect(adapter.isLinked).toBe(false);
+    await expect(participant.transportClient().connect({ server: 'interop' })).rejects.toThrow(
+      'the link of ada was taken over by another link of its id, and connects no more until it is started again'
+    );
+    expect(adapter.isLinked).toBe(false);
+
+    // its application's start links it anew, as another incarnation
+    const former = participant.incarnation;
+
+    await participant.start();
+    expect(participant.isLinked).toBe(true);
+    expect(hexadecimalOf(participant.incarnation ?? new Uint8Array())).not.toBe(
+      hexadecimalOf(former ?? new Uint8Array())
+    );
+    await participant.stop();
+  });
 });

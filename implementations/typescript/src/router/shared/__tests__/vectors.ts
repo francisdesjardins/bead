@@ -120,6 +120,18 @@ export interface IParcelVector extends INamed {
   written?: false;
 }
 
+/** An MQTT 5 PUBLISH under a Maximum Packet Size: its largest payload and the packet it makes. */
+export interface IMqttPublishBoundVector {
+  clauses: string[];
+  expiry: boolean;
+  largestPayload: number | null;
+  maximumPacketSize: number;
+  name: string;
+  packetBytes: number | null;
+  qos: 0 | 1;
+  topic: string;
+}
+
 /** Bytes that read as no parcel, or as a parcel that does not read. */
 export interface IParcelRefusalVector extends INamed {
   clauses: string[];
@@ -140,6 +152,7 @@ export interface IVectors {
   headerRefusals: IRefusalVector[];
   headers: (INamed & { header: EnvelopeHeader })[];
   jwtVerdicts: IJwtVerdictVector[];
+  mqttPublishBounds: IMqttPublishBoundVector[];
   parcelRefusals: IParcelRefusalVector[];
   parcels: IParcelVector[];
   prefixRefusals: IRefusalVector[];

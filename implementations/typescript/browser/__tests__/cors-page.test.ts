@@ -147,7 +147,8 @@ const startNotingProxy = async (port: number) => {
 
 /**
  * An interop server, started, naming `origin`, and the HTTP port it says it listens on: what it
- * writes before, `dotnet run` building it, comes first.
+ * writes before, `dotnet run` building it, comes first. It is given no broker: `mqtt-page`'s server
+ * of the same side links its participant's id, and a second link of it would take the first over.
  */
 const startServer = async (
   { args, command, cwd }: (typeof SERVERS)[number],
@@ -155,7 +156,7 @@ const startServer = async (
 ): Promise<{ httpPort: number; server: ChildProcessWithoutNullStreams }> => {
   const server = spawn(command, args, {
     cwd,
-    env: { ...process.env, BEAD_INTEROP_ORIGINS: origin },
+    env: { ...process.env, BEAD_INTEROP_ORIGINS: origin, BEAD_MQTT_URL: undefined },
     stdio: ['pipe', 'pipe', 'pipe'],
   });
 

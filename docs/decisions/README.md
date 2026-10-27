@@ -45,9 +45,11 @@ not hold:
   [0039](0039-a-brokers-transport-numbers-its-parcels-and-sends-an-envelope-in-parts-under-its-peers-bound.md)
   and
   [0040](0040-a-brokers-adapter-offers-bytes-at-topics-and-bead-keeps-its-own-credit-credential-and-heartbeat.md)
-  state: MQTT 5's first, its adapter on each side and the interop against a real broker in CI, then
-  AMQP 1.0 on RabbitMQ 4, which proves the core common; and a relay that carries a subscription,
-  which a page across a broker needs
+  state, MQTT 5's standing
+  ([0041](0041-over-mqtt-5-a-participant-is-one-clean-link-and-a-parcel-one-publish-each-counted-to-its-byte.md)):
+  AMQP 1.0 on RabbitMQ 4, its adapter on each side and the interop against a real broker in CI,
+  which proves the core common; and a relay that carries a subscription, which a page across a
+  broker needs
   ([0019](0019-a-relay-terminates-each-leg-and-routes-nothing-past-it.md));
 - **a third language's core**, its router, its service layer and its sessions before it has a
   socket, playing its conformance over the in-memory transport it carries first
@@ -176,6 +178,7 @@ table.
 | [0038](0038-over-a-broker-a-connection-is-placed-once-at-its-open-named-by-both-its-ends.md)                              | Over a broker, a connection is placed once at its open, and named by both its ends                                                                                 | accepted |
 | [0039](0039-a-brokers-transport-numbers-its-parcels-and-sends-an-envelope-in-parts-under-its-peers-bound.md)              | A broker's transport numbers its parcels, and sends an envelope in parts under its peer's bound                                                                    | accepted |
 | [0040](0040-a-brokers-adapter-offers-bytes-at-topics-and-bead-keeps-its-own-credit-credential-and-heartbeat.md)           | A broker's adapter offers bytes at topics, and Bead keeps its own credit, credential and heartbeat                                                                 | accepted |
+| [0041](0041-over-mqtt-5-a-participant-is-one-clean-link-and-a-parcel-one-publish-each-counted-to-its-byte.md)             | Over MQTT 5, a participant is one clean link and a parcel one PUBLISH, each counted to its byte                                                                    | accepted |
 
 ### A server's edge
 
@@ -221,7 +224,7 @@ table.
 
 ## Writing one
 
-The next decision is 0041. Its file is `NNNN-the-decision-in-a-few-words.md`, and its title states
+The next decision is 0042. Its file is `NNNN-the-decision-in-a-few-words.md`, and its title states
 the decision, not its subject. The title may grow with the record; the file's name stays, unless it
 would mislead.
 

@@ -168,7 +168,7 @@ public sealed class MemoryBrokerTests
         var will = new BrokerStart { Will = new BrokerPublication { Topic = departure, Payload = (byte[])[0xA] } };
         var leaving = broker.Adapter(new MemoryBrokerAdapterOptions { Id = "cid" });
 
-        leaving.Down += () =>
+        leaving.Down += (_) =>
         {
             Interlocked.Increment(ref downs);
         };
@@ -184,6 +184,42 @@ public sealed class MemoryBrokerTests
         Assert.Equal(["0A"], heard);
         Assert.Equal((1, false), (downs, leaving.IsLinked));
         Assert.True(lost.IsLinked);
+    }
+
+    [Fact]
+    public async Task Takes_a_link_over_as_a_test_asks_as_a_second_link_of_its_id_would_its_subscriptions_dropped_its_will_published_its_down_told_taken_over_spec_15_24()
+    {
+        var scheduler = new SerialScheduler();
+        var broker = new MemoryBroker(new MemoryBrokerOptions { Scheduler = scheduler });
+        var (ada, heard) = await LinkedOf((broker, "ada"));
+        var bob = broker.Adapter(new MemoryBrokerAdapterOptions { Id = "bob" });
+        IReadOnlyList<string> departure = ["bead", "d", "bob"];
+        IReadOnlyList<string> inbox = ["bead", "i", "bob"];
+        var downs = new ConcurrentQueue<bool>();
+
+        bob.Down += (down) =>
+        {
+            downs.Enqueue(down.IsTakenOver);
+        };
+        await ada.Subscribe(departure);
+        await bob.Start(new BrokerStart { Will = new BrokerPublication { Topic = departure, Payload = (byte[])[0xA] } });
+        await bob.Subscribe(inbox);
+        bob.TakeOver();
+        await scheduler.WhenIdle();
+
+        Assert.False(bob.IsLinked);
+        Assert.Equal([true], downs);
+        Assert.Equal(["0A"], heard);
+
+        // * no link of its id holds its inbox now
+        Assert.Equal(BrokerPublished.NoSubscriber, await ada.Publish(new BrokerPublication { Topic = inbox, Payload = (byte[])[1] }));
+
+        // a loss tells its down otherwise, and a takeover of a link not up does nothing
+        await bob.Start();
+        bob.Lose();
+        bob.TakeOver();
+        await scheduler.WhenIdle();
+        Assert.Equal([true, false], downs);
     }
 
     [Fact]
@@ -230,7 +266,7 @@ public sealed class MemoryBrokerTests
         var downs = 0;
         IReadOnlyList<string> inbox = ["bead", "i", "ada"];
 
-        ada.Down += () =>
+        ada.Down += (_) =>
         {
             Interlocked.Increment(ref downs);
         };

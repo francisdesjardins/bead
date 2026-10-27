@@ -25,6 +25,8 @@
     <ProjectReference Include="../../interop/Bead.Interop/Bead.Interop.csproj" />
     <!-- a gateway's durations, which the durations' harness plays beside the transports' -->
     <ProjectReference Include="../../src/Bead.Transcoding.Http/Bead.Transcoding.Http.csproj" />
+    <!-- MQTT 5's adapter's durations, its Keep Alive and its connect's wait -->
+    <ProjectReference Include="../../src/Bead.Transport.Mqtt/Bead.Transport.Mqtt.csproj" />
   </ItemGroup>
 
   <ItemGroup>

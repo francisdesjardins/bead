@@ -516,6 +516,19 @@ public sealed class BrokerTransportClient : IRouterClientTransport, IAsyncDispos
         _listeners.Tell(Close, (end.IsClean, false));
     }
 
+    // what is left of a connect's time since its start, a millisecond at least; none without end
+    private TimeSpan? LeftOf((TimeSpan Timeout, long Started) connect)
+    {
+        if (connect.Timeout == System.Threading.Timeout.InfiniteTimeSpan)
+        {
+            return null;
+        }
+
+        var left = connect.Timeout - _participant.Clock.GetElapsedTime(connect.Started);
+
+        return left < TimeSpan.FromMilliseconds(1) ? TimeSpan.FromMilliseconds(1) : left;
+    }
+
     // a state as a message words it: "open", "closing"…
     private static string NameOf(ReadyState readyState)
     {
@@ -566,6 +579,9 @@ public sealed class BrokerTransportClient : IRouterClientTransport, IAsyncDispos
 
         var clock = _participant.Clock;
 
+        // * the connect's start, on its monotonic clock: its OPEN lives the time left of it
+        var started = clock.GetTimestamp();
+
         try
         {
             using var timeout = options.Timeout == System.Threading.Timeout.InfiniteTimeSpan ? null : new CancellationTokenSource(options.Timeout, clock);
@@ -573,7 +589,7 @@ public sealed class BrokerTransportClient : IRouterClientTransport, IAsyncDispos
 
             try
             {
-                var connection = await Opening(options, linked.Token);
+                var connection = await Opening((options, started), linked.Token);
                 var isOpen = false;
 
                 // ! settled in a turn of its participant's, after every parcel taken before it: a
@@ -657,10 +673,13 @@ public sealed class BrokerTransportClient : IRouterClientTransport, IAsyncDispos
         }
     }
 
-    // its OPEN, once its link is up, to the server's name; its connection once the first ACCEPT
-    // naming its half came, failed as its link goes down before its answer
-    private async Task<BrokerConnection> Opening(BrokerConnectOptions options, CancellationToken cancellationToken)
+    // its OPEN, once its link is up, to the server's name, living in its broker the connect's time
+    // left, none when it is without end (spec 15.18); its connection once the first ACCEPT naming its
+    // half came, failed as its link goes down before its answer
+    private async Task<BrokerConnection> Opening((BrokerConnectOptions Options, long Started) connect, CancellationToken cancellationToken)
     {
+        var (options, started) = connect;
+
         await _participant.WhenLinked(cancellationToken);
 
         BrokerPendingConnect? pending = null;
@@ -680,6 +699,7 @@ public sealed class BrokerTransportClient : IRouterClientTransport, IAsyncDispos
             published = _participant.Publish(new BrokerPublication
             {
                 Topic = _participant.NameOf(options.Server),
+                ExpiresAfter = LeftOf((options.Timeout, started)),
                 Payload = BrokerParcels.Write(new BrokerParcel
                 {
                     Kind = BrokerParcelKinds.Open,

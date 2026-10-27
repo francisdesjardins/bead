@@ -46,6 +46,13 @@ internal static class Durations
     // the language a differs names to excuse this side
     private const string Language = "C#";
 
+    // the ceilings of a place's own below 1.4's, in milliseconds, which the file's generator holds
+    // its outcomes to: MQTT 5's Keep Alive, a Two Byte Integer of seconds (spec 15.30)
+    private static readonly Dictionary<string, long> Ceilings = new(StringComparer.Ordinal)
+    {
+        ["mqttBrokerAdapter.keepAlive"] = 65_535_000,
+    };
+
     private static readonly JsonElement Root = Load();
 
     // helpers
@@ -190,9 +197,9 @@ internal static class Durations
 
     /// <summary>
     /// The words of this side's refusal of a duration at a place, the one sentence for every
-    /// reason: the place's phrase, then what it takes — 0 for at once at a delay, and infinite for
-    /// never where never is not refused — then the duration as given, a fraction written with a dot
-    /// whatever the culture, never written <c>infinite</c> rather than -1.
+    /// reason: the place's phrase, then what it takes — 0 for at once at a delay, from 1 to its
+    /// ceiling, and infinite for never where never is not refused — then the duration as given, a
+    /// fraction written with a dot whatever the culture, never written <c>infinite</c> rather than -1.
     /// </summary>
     public static string RefusalOf((string Phrase, DurationPlace Place) of, TimeSpan given)
     {
@@ -201,7 +208,8 @@ internal static class Durations
         var zero = of.Place.Policy.Kind == "delay" ? "0 for at once, or " : "";
         var never = of.Place.Policy.Never == "refused" ? "" : ", or infinite for never";
         var written = given == Timeout.InfiniteTimeSpan ? "infinite" : given.TotalMilliseconds.ToString(CultureInfo.InvariantCulture);
+        var ceiling = Ceilings.GetValueOrDefault(of.Place.Id, int.MaxValue);
 
-        return $"{of.Phrase} is {zero}a number of milliseconds from 1 to 2147483647{never}, not {written}";
+        return string.Create(CultureInfo.InvariantCulture, $"{of.Phrase} is {zero}a number of milliseconds from 1 to {ceiling}{never}, not {written}");
     }
 }

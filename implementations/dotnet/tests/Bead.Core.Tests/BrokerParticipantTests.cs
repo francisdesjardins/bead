@@ -22,7 +22,7 @@ public sealed class BrokerParticipantTests
     public async Task Subscribes_its_inbox_before_anything_goes_takes_its_id_from_its_adapter_and_draws_its_incarnation_and_each_half_from_a_cryptographic_source_spec_15_24()
     {
         await using var pair = await BrokerPair.Of();
-        var recording = new RecordingAdapter(pair.Broker.Adapter(new MemoryBrokerAdapterOptions { Id = "ada" }));
+        var recording = new CallingAdapter(pair.Broker.Adapter(new MemoryBrokerAdapterOptions { Id = "ada" }));
         await using var participant = new BrokerParticipant(recording, new BrokerParticipantOptions());
         await using var client = participant.Client();
 
@@ -231,8 +231,8 @@ public sealed class BrokerParticipantTests
         var broker = new MemoryBroker();
 
         // adapters whose broker publishes 28 bytes at most to a peer's inbox: a prefix, and no more
-        await using var serving = new BrokerParticipant(new RecordingAdapter(broker.Adapter(new MemoryBrokerAdapterOptions { Id = "server" })) { Room = 28 });
-        await using var connecting = new BrokerParticipant(new RecordingAdapter(broker.Adapter(new MemoryBrokerAdapterOptions { Id = "ada" })) { Room = 28 });
+        await using var serving = new BrokerParticipant(new CallingAdapter(broker.Adapter(new MemoryBrokerAdapterOptions { Id = "server" })) { Room = 28 });
+        await using var connecting = new BrokerParticipant(new CallingAdapter(broker.Adapter(new MemoryBrokerAdapterOptions { Id = "ada" })) { Room = 28 });
         await using var server = serving.Server(new BrokerTransportServerOptions { Names = ["interop"] });
         await using var client = connecting.Client();
         var handles = new ConcurrentQueue<string>();
@@ -411,9 +411,9 @@ public sealed class BrokerParticipantTests
         {
             var broker = new MemoryBroker();
 
-            RecordingAdapter AdapterOf(string id)
+            CallingAdapter AdapterOf(string id)
             {
-                return new RecordingAdapter(broker.Adapter(new MemoryBrokerAdapterOptions { Id = id })) { Secure = id == insecure ? false : null };
+                return new CallingAdapter(broker.Adapter(new MemoryBrokerAdapterOptions { Id = id })) { Secure = id == insecure ? false : null };
             }
 
             await using var serving = new BrokerParticipant(AdapterOf("server"));
@@ -537,7 +537,7 @@ public sealed class BrokerParticipantTests
             return new BrokerParticipant(broker.Adapter(new MemoryBrokerAdapterOptions { Id = "ada" }), new BrokerParticipantOptions { Root = "a.b" });
         }).Message);
 
-        var recording = new RecordingAdapter(broker.Adapter(new MemoryBrokerAdapterOptions { Id = "bob" }));
+        var recording = new CallingAdapter(broker.Adapter(new MemoryBrokerAdapterOptions { Id = "bob" }));
         await using var participant = new BrokerParticipant(recording, new BrokerParticipantOptions { Root = "deploy" });
 
         await participant.Start();
@@ -999,9 +999,108 @@ public sealed class BrokerParticipantTests
         return (acceptor, heard, open.Opener);
     }
 
+    [Fact]
+    public async Task Gives_no_life_to_a_publication_of_an_adapter_that_offers_none()
+    {
+        var scheduler = new SerialScheduler();
+        var broker = new MemoryBroker(new MemoryBrokerOptions { Scheduler = scheduler });
+        var serving = new RecordingAdapter(broker.Adapter(new MemoryBrokerAdapterOptions { Id = "server" }));
+        var recording = new RecordingAdapter(broker.Adapter(new MemoryBrokerAdapterOptions
+        {
+            Id = "client",
+            Capabilities = BrokerCapabilities.Groups | BrokerCapabilities.Will | BrokerCapabilities.NoSubscriber,
+        }));
+        await using var server = new BrokerParticipant(serving, new BrokerParticipantOptions { Scheduler = scheduler });
+        await using var participant = new BrokerParticipant(recording, new BrokerParticipantOptions { Scheduler = scheduler });
+        await using var transport = server.Server(new BrokerTransportServerOptions { Names = ["interop"] });
+        var heard = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        transport.Message += (_, _) =>
+        {
+            heard.TrySetResult();
+        };
+        await transport.Start();
+
+        await using var client = participant.Client();
+
+        await client.Connect(new BrokerConnectOptions { Server = "interop" }, Cancelled);
+        await client.Send(new TransportMessage((byte[])[0xA1, 0x10, 0x00, 0x03, 0x00, 0x00, 0x00, 0x01, 0x00, 0x01, 0x00, 0x01, 0x22, 0x78, 0x22], false) { Credential = "Interop sub=ada" });
+        await heard.Task.WaitAsync(BrokerPair.Patience, Cancelled);
+
+        // * its OPEN, its credential's DATA and every other parcel asked no life of an adapter
+        // that offers none; its server's, which offers one, gave none to its own parcels
+        Assert.Contains(recording.Lives, (life) =>
+        {
+            return life.Kind == "open";
+        });
+        Assert.Contains(recording.Lives, (life) =>
+        {
+            return life.Kind == "credential";
+        });
+        Assert.All(recording.Lives.Concat(serving.Lives), (life) =>
+        {
+            Assert.Null(life.ExpiresAfter);
+        });
+    }
+
+    [Fact]
+    public async Task A_participant_taken_over_reports_it_connects_no_more_and_fails_each_connect_naming_it_until_it_is_started_again_spec_15_21()
+    {
+        await using var pair = await BrokerPair.Of();
+        await using var client = await pair.Connect();
+        var closed = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var reported = new ConcurrentQueue<string>();
+        var former = pair.ClientParticipant.Incarnation;
+
+        client.Close += (isClean, _) =>
+        {
+            closed.TrySetResult(isClean);
+        };
+        pair.ClientParticipant.Error += (reason) =>
+        {
+            reported.Enqueue(reason.Message);
+        };
+        pair.ClientAdapter.TakeOver();
+
+        // * its connection closed, unclean, as at any down, and the takeover reported, once
+        Assert.False(await closed.Task.WaitAsync(BrokerPair.Patience, Cancelled));
+        await BrokerPair.Until(
+            () =>
+            {
+                return !reported.IsEmpty;
+            },
+            "the takeover reported");
+        await pair.Scheduler.WhenIdle();
+        Assert.Equal(["the link of client was taken over by another link of its id"], reported);
+
+        // * it connects no more: no link anew, its reconnection's immediate attempt never made, and
+        // a connect fails at once naming the takeover
+        Assert.False(pair.ClientAdapter.IsLinked);
+        Assert.False(pair.ClientParticipant.IsLinked);
+
+        await using var refused = pair.ClientParticipant.Client();
+        var failure = await Assert.ThrowsAsync<ConnectException>(() =>
+        {
+            return refused.Connect(new BrokerConnectOptions { Server = "interop" }, Cancelled);
+        });
+
+        Assert.Equal("the link of client was taken over by another link of its id", failure.Message);
+        Assert.False(pair.ClientAdapter.IsLinked);
+
+        // * its application's start links it anew, another incarnation, and a connect then opens
+        await pair.ClientParticipant.Start();
+        Assert.True(pair.ClientParticipant.IsLinked);
+        Assert.NotEqual(former, pair.ClientParticipant.Incarnation);
+
+        await using var again = await pair.Connect();
+
+        Assert.Equal(ReadyState.Open, again.ReadyState);
+        Assert.Single(reported);
+    }
+
     // an adapter that writes down each call its participant makes of it, in order, and passes it on,
     // what it publishes to a topic bounded by Room when given, its leg secure as Secure says when given
-    private sealed class RecordingAdapter(MemoryBrokerAdapter inner) : IBrokerAdapter
+    private sealed class CallingAdapter(MemoryBrokerAdapter inner) : IBrokerAdapter
     {
         public long? Room { get; init; }
 
@@ -1020,7 +1119,7 @@ public sealed class BrokerParticipantTests
             }
         }
 
-        public event Action? Down
+        public event Action<BrokerDown>? Down
         {
             add
             {
@@ -1075,12 +1174,9 @@ public sealed class BrokerParticipantTests
             }
         }
 
-        public long ReceiveBound
+        public long ReceiveBound(IReadOnlyList<string> topic)
         {
-            get
-            {
-                return inner.ReceiveBound;
-            }
+            return inner.ReceiveBound(topic);
         }
 
         public Task Start(BrokerStart? start = null)

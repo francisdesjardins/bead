@@ -246,6 +246,14 @@ export const createBrokerTransportClient = (
             setReadyStateConnecting(client);
           }
 
+          // * its time from its start: its OPEN lives in its broker what is left of it (spec 15.18)
+          const startedAt = port.clock.performance.now();
+          const timeLeft = (): number | undefined => {
+            const left = timeout - (port.clock.performance.now() - startedAt);
+
+            return Number.isFinite(left) ? Math.max(1, Math.ceil(left)) : undefined;
+          };
+
           try {
             await createPromise(
               (resolve, reject) => {
@@ -290,7 +298,10 @@ export const createBrokerTransportClient = (
                     },
                   });
 
-                  const published = await port.open(server, opener);
+                  const published = await port.open(server, {
+                    expiresAfter: timeLeft(),
+                    opener,
+                  });
 
                   if (published === BROKER_PUBLISHED.NO_SUBSCRIBER) {
                     attempt.release();

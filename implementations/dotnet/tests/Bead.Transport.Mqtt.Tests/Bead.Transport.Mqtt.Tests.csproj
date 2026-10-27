@@ -1,0 +1,43 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <!-- xUnit v3 runs its tests as a program of their own -->
+    <OutputType>Exe</OutputType>
+    <IsPackable>false</IsPackable>
+    <RootNamespace>Bead.Transport.Mqtt.Tests</RootNamespace>
+    <!-- a test says what it shows by its name -->
+    <NoWarn>$(NoWarn);CS1591</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.TimeProvider.Testing" />
+    <PackageReference Include="xunit.v3" />
+    <PackageReference Include="Microsoft.Testing.Extensions.CodeCoverage" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Using Include="Xunit" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../../src/Bead.Transport.Mqtt/Bead.Transport.Mqtt.csproj" />
+    <!-- the interop service's server, which the broker's cases play in the server role -->
+    <ProjectReference Include="../../interop/Bead.Interop/Bead.Interop.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- the vectors, MQTT 5's publish bounds among them, and the transports' cases, MQTT 5's among them: the files both implementations' tests read -->
+    <Content Include="../../../../spec/vectors.json" Link="vectors.json" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="../../../../spec/transports.json" Link="transports.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- the broker's cases played by the core's own player, over a broker of MQTT 5 here, in memory there -->
+    <Compile Include="../Bead.Core.Tests/BrokerCasePlayer.cs" Link="BrokerCasePlayer.cs" />
+    <Compile Include="../Bead.Core.Tests/RecordingAdapter.cs" Link="RecordingAdapter.cs" />
+    <!-- what reads an envelope as a case expects one, and the vectors' bytes -->
+    <Compile Include="../Bead.Core.Tests/ConversationPlayer.cs" Link="ConversationPlayer.cs" />
+    <Compile Include="../Bead.Core.Tests/Vectors.cs" Link="Vectors.cs" />
+    <!-- the clock the conformance files' harnesses give the side under test -->
+    <Compile Include="../Shared/SteppingClock.cs" Link="SteppingClock.cs" />
+  </ItemGroup>
+</Project>

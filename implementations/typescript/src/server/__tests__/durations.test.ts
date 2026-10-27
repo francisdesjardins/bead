@@ -48,6 +48,7 @@ import {
   createMemoryBroker,
   type IMemoryBrokerAdapter,
 } from '../../transport/shared/memory-broker';
+import { createMqttBrokerAdapter } from '../../transport/shared/mqtt-broker-adapter';
 import { createFakeFetch } from '../../transport/client/__tests__/fake-fetch';
 import { createFakeWebSocket } from '../../transport/client/__tests__/fake-websocket';
 import {
@@ -112,8 +113,12 @@ interface IReport {
   refusal?: unknown;
 }
 
-/** A place this side plays: its words for its duration, and each way it builds it by. */
+/**
+ * A place this side plays: its words for its duration, its ceiling where narrower than a timer's,
+ * and each way it builds it by.
+ */
 interface IPlayed {
+  ceiling?: number;
   phrase: string;
   ways: Readonly<Record<string, Way>>;
 }
@@ -1237,6 +1242,21 @@ const heartbeatOfParticipant: Way = (given) => {
   );
 };
 
+// an MQTT 5 adapter built with `name`: on the platform's timers, so held to its refusal alone
+const ofMqttAdapter = (name: 'connectTimeout' | 'keepAlive'): Way => {
+  return (given) => {
+    const building = attempt(() => {
+      return createMqttBrokerAdapter({
+        id: 'ada',
+        url: 'mqtt://127.0.0.1:1883',
+        ...optionOf(name, given),
+      });
+    });
+
+    return Promise.resolve('refusal' in building ? { moved: [], refusal: building.refusal } : {});
+  };
+};
+
 // a broker server's half-open connection, its third leg never come: the due of its accept's timer
 const acceptTimeoutOfServer: Way = async (given) => {
   const clock = createTestClock();
@@ -1792,6 +1812,16 @@ const PLAYED: Readonly<Record<string, IPlayed>> = Object.freeze({
     phrase: 'bodyGracePeriod',
     ways: { options: bodyGracePeriodOfParticipant },
   },
+  // ! a Keep Alive is a Two Byte Integer of seconds: its ceiling 65,535 of them
+  'mqttBrokerAdapter.keepAlive': {
+    ceiling: 65_535_000,
+    phrase: 'keepAlive',
+    ways: { options: ofMqttAdapter('keepAlive') },
+  },
+  'mqttBrokerAdapter.connectTimeout': {
+    phrase: 'connectTimeout',
+    ways: { options: ofMqttAdapter('connectTimeout') },
+  },
 });
 
 // the ways of `place` this side plays, by their ids
@@ -1824,11 +1854,18 @@ const playOf = (place: IDurationPlace, way: IDurationWay): IPlayed & { play: Way
 const expectOutcome = async (
   place: IDurationPlace,
   {
+    ceiling,
     input,
     label,
     phrase,
     play,
-  }: { input: IDurationInput; label: string; phrase: string; play: Way }
+  }: {
+    ceiling?: number | undefined;
+    input: IDurationInput;
+    label: string;
+    phrase: string;
+    play: Way;
+  }
 ): Promise<void> => {
   const given = givenOf(input);
   const outcome = outcomeOf(place, input);
@@ -1843,7 +1880,7 @@ const expectOutcome = async (
   expect(report.refusal, label).toBeInstanceOf(ProgrammerError);
   expect({ ...report, refusal: (report.refusal as Error).message }, label).toEqual({
     moved: [],
-    refusal: refusalOf(place, { given, phrase }),
+    refusal: refusalOf(place, { ceiling, given, phrase }),
   });
 };
 
@@ -1874,7 +1911,7 @@ test.describe('the durations', () => {
           continue;
         }
 
-        const { phrase, play } = playOf(place, way);
+        const { ceiling, phrase, play } = playOf(place, way);
 
         for (const input of DURATIONS.inputs) {
           if (isExcused(place, { input, way })) {
@@ -1884,7 +1921,7 @@ test.describe('the durations', () => {
           const label = `${way.id}, ${input.name}`;
 
           await test.step(label, async () => {
-            await expectOutcome(place, { input, label, phrase, play });
+            await expectOutcome(place, { ceiling, input, label, phrase, play });
           });
         }
 

@@ -69,7 +69,7 @@ public sealed class BrokerTransportServer : IServerTransport, IAsyncDisposable, 
     private readonly HashSet<BrokerConnection> _held = [];
     // the accept timeout of each half-open connection
     private readonly Dictionary<BrokerConnection, ITimer> _accepting = [];
-    // the names it holds a subscription to
+    // the names its broker holds a subscription to, from its SUBACK to its UNSUBACK
     private readonly HashSet<string> _subscribed = new(StringComparer.Ordinal);
     // whether it left its names while it holds its bound, served in a group
     private bool _isFull;
@@ -204,8 +204,8 @@ public sealed class BrokerTransportServer : IServerTransport, IAsyncDisposable, 
     /// What it holds: <c>connections</c>, those its router was told of; <c>halfOpen</c>, those
     /// whose third leg has not come; <c>partsBytes</c>, what its participant holds in parts;
     /// <c>unsentBytes</c>, what waits for its broker on its connections; the largest of each one
-    /// connection holds; <c>names</c>, the names it holds a subscription to; <c>departures</c>, the
-    /// peers' departures its participant subscribes.
+    /// connection holds; <c>names</c>, the names its broker holds a subscription to, from its SUBACK
+    /// to its UNSUBACK; <c>departures</c>, the peers' departures its participant subscribes.
     /// </summary>
     public Gauges Gauges()
     {
@@ -252,9 +252,10 @@ public sealed class BrokerTransportServer : IServerTransport, IAsyncDisposable, 
     }
 
     /// <summary>
-    /// Starts its participant where it was not, and serves its names, each subscribed, in its group
-    /// where it serves in one; settles once its broker holds them, giving its participant's id and
-    /// port 0. Refused with an <see cref="InvalidOperationException"/> unless Uninitialized or Closed.
+    /// Starts its participant where it was not, or links it anew where its link was taken over, and
+    /// serves its names, each subscribed, in its group where it serves in one; settles once its
+    /// broker holds each, giving its participant's id and port 0, and fails on a name its broker
+    /// refused. Refused with an <see cref="InvalidOperationException"/> unless Uninitialized or Closed.
     /// </summary>
     public Task<TransportServerAddress> Start()
     {
@@ -270,7 +271,7 @@ public sealed class BrokerTransportServer : IServerTransport, IAsyncDisposable, 
     /// <summary>
     /// Takes no OPEN from now on, refusing 503 one that comes; lets its names go, and closes each
     /// connection with a CLOSE of 1001, its close told unclean; its participant's link is kept (spec
-    /// 15.21). It ends Closed.
+    /// 15.21). It settles once its broker let each name go, and ends Closed.
     /// </summary>
     public Task Stop()
     {
@@ -278,11 +279,11 @@ public sealed class BrokerTransportServer : IServerTransport, IAsyncDisposable, 
         {
             return _participant.Scheduler.Run(async () =>
             {
-                var names = _subscribed.ToList();
+                List<string> names;
 
                 lock (_gate)
                 {
-                    _subscribed.Clear();
+                    names = [.. _subscribed];
                 }
 
                 foreach (var connection in _held.ToList())
@@ -290,10 +291,9 @@ public sealed class BrokerTransportServer : IServerTransport, IAsyncDisposable, 
                     connection.Close((1001, false));
                 }
 
-                foreach (var name in names)
-                {
-                    await _participant.Unsubscribe(name);
-                }
+                // * all let go at once, a name counted until its UNSUBACK came: its broker's word, not
+                // the request's
+                await Task.WhenAll(names.Select(LeaveOne));
             });
         });
     }
@@ -511,7 +511,11 @@ public sealed class BrokerTransportServer : IServerTransport, IAsyncDisposable, 
         Accept(open);
     }
 
-    /// <summary>In its participant's turn: its names subscribed, as it starts and as its participant's link connects again.</summary>
+    /// <summary>
+    /// In its participant's turn: its names subscribed, as it starts, a name refused failing its
+    /// start, and as its participant's link connects again, a name refused then reported and left
+    /// unheld until its participant's next link.
+    /// </summary>
     internal async Task Relink()
     {
         if (_life.ReadyState is not (ReadyState.Open or ReadyState.Connecting) || _isFull)
@@ -616,16 +620,89 @@ public sealed class BrokerTransportServer : IServerTransport, IAsyncDisposable, 
         _listeners.Tell(Refusal, new TransportServerRefusal(id, null, null, 0, reason, status));
     }
 
-    // in its participant's turn: its names subscribed, alone or in its group
+    // in its participant's turn: its names subscribed, alone or in its group, all asked at once, each
+    // counted once its broker holds it; refused as it starts, its start fails, and at a link anew or
+    // a rejoin, it is reported and left unheld, the gauge saying so
     private async Task Join()
     {
-        foreach (var name in _options.Names)
+        List<string> asked;
+
+        // * one its broker holds already, its participant's link having joined it, is asked once
+        lock (_gate)
+        {
+            asked = [.. _options.Names.Where((name) =>
+            {
+                return !_subscribed.Contains(name);
+            })];
+        }
+
+        var joining = asked.Select(JoinOne).ToList();
+
+        // ! a start fails at its first name refused, as soon as its broker refused it, the others
+        // left to settle on their own, their failure observed
+        foreach (var each in joining)
+        {
+            _ = each.ContinueWith(
+                (failed) =>
+                {
+                    _ = failed.Exception;
+                },
+                CancellationToken.None,
+                TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously,
+                TaskScheduler.Default);
+        }
+
+        while (joining.Count > 0)
+        {
+            var settled = await Task.WhenAny(joining);
+
+            joining.Remove(settled);
+            await settled;
+        }
+    }
+
+    // in its participant's turn: one name subscribed, counted once its broker holds it
+    private async Task JoinOne(string name)
+    {
+        try
         {
             await _participant.Subscribe((name, _options.IsInGroup));
+        }
+        catch (Exception reason) when (_life.ReadyState == ReadyState.Open && !_participant.IsDownAsItLinks)
+        {
+            Report(new IOException($"the name {name} is not served: its broker refused its subscription, {reason.Message}", reason));
 
+            return;
+        }
+
+        lock (_gate)
+        {
+            _subscribed.Add(name);
+        }
+    }
+
+    // in its participant's turn: one name let go as it stops, counted until its UNSUBACK came; one
+    // its broker refused to let go is reported, and its stop settles all the same
+    private async Task LeaveOne(string name)
+    {
+        try
+        {
+            await _participant.Unsubscribe(name);
+        }
+        catch (Exception reason) when (reason is InvalidOperationException || !_participant.IsLinked || _participant.IsDownAsItLinks)
+        {
+            // its link lost meanwhile, or down as it was asked: a link that keeps no session lets
+            // each name go with it
+        }
+        catch (Exception reason)
+        {
+            _participant.Report(reason);
+        }
+        finally
+        {
             lock (_gate)
             {
-                _subscribed.Add(name);
+                _subscribed.Remove(name);
             }
         }
     }
@@ -643,12 +720,39 @@ public sealed class BrokerTransportServer : IServerTransport, IAsyncDisposable, 
 
         foreach (var name in _options.Names)
         {
-            lock (_gate)
-            {
-                _subscribed.Remove(name);
-            }
+            // * counted until its UNSUBACK came
+            _ = _participant.Unsubscribe(name).ContinueWith(
+                (left) =>
+                {
+                    _participant.Scheduler.Post(() =>
+                    {
+                        Left((name, left));
+                    });
+                },
+                CancellationToken.None,
+                TaskContinuationOptions.ExecuteSynchronously,
+                TaskScheduler.Default);
+        }
+    }
 
-            _ = _participant.Unsubscribe(name);
+    // in its participant's turn: a name it left, held no more once its UNSUBACK came; one its broker
+    // refused to let go reported; and one served again meanwhile, which its rejoin found still held
+    // and asked nothing of, asked anew
+    private void Left((string Name, Task Unsubscribed) left)
+    {
+        if (left.Unsubscribed.Exception?.InnerException is { } reason and not InvalidOperationException && _participant.IsLinked && !_participant.IsDownAsItLinks)
+        {
+            _participant.Report(reason);
+        }
+
+        lock (_gate)
+        {
+            _subscribed.Remove(left.Name);
+        }
+
+        if (!_isFull && _life.ReadyState == ReadyState.Open && _participant.IsLinked)
+        {
+            _participant.Scheduler.Cover(JoinOne(left.Name));
         }
     }
 

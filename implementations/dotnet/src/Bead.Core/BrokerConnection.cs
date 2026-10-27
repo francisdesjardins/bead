@@ -321,7 +321,9 @@ internal sealed class BrokerConnection
     /// Sends an envelope in DATA parcels: whole where it fits the smaller of its peer's bound and
     /// what its adapter publishes to its peer's inbox, in parts otherwise, each as large as that bound
     /// lets it but the last, the credential on the first (spec 15.20); each held to what may wait for
-    /// its broker.
+    /// its broker. The part that carries a credential lives in its broker twice its heartbeat, none
+    /// when its heartbeat is never, so that a credential waits there no longer than a live connection
+    /// may be silent (spec 15.22).
     /// </summary>
     public void Send(TransportMessage message)
     {
@@ -340,9 +342,12 @@ internal sealed class BrokerConnection
             return;
         }
 
+        var heartbeat = _participant.HeartbeatPeriod;
+        TimeSpan? life = heartbeat == Timeout.InfiniteTimeSpan ? null : heartbeat * 2;
+
         foreach (var part in parts)
         {
-            Publish(part);
+            Publish((part, part.Credential is null ? null : life));
         }
     }
 
@@ -354,6 +359,14 @@ internal sealed class BrokerConnection
     /// </summary>
     public void Publish(BrokerParcel parcel)
     {
+        Publish((parcel, null));
+    }
+
+    /// <summary>As <see cref="Publish(BrokerParcel)"/>, living in its broker as long as given, where its adapter offers a message's life.</summary>
+    public void Publish((BrokerParcel Parcel, TimeSpan? ExpiresAfter) publication)
+    {
+        var (parcel, expiresAfter) = publication;
+
         if (State == BrokerConnectionState.Closed)
         {
             return;
@@ -378,7 +391,7 @@ internal sealed class BrokerConnection
 
         _unsent += bytes.Length;
 
-        var published = _participant.Publish(new BrokerPublication { Topic = PeerInbox, Payload = bytes });
+        var published = _participant.Publish(new BrokerPublication { Topic = PeerInbox, Payload = bytes, ExpiresAfter = expiresAfter });
 
         _ = published.ContinueWith(
             (done) =>

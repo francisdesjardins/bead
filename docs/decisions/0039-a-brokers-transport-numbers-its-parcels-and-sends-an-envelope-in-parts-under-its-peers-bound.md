@@ -33,12 +33,14 @@ only into a resumed session ([MQTT-4.4.0-1]) and then in the original order ([MQ
 NATS keeps a publisher's order alike; an AMQP inbox ends with its link. A message past the next one
 awaited means one dropped for good.
 
-**A broker bounds a message, by default below Bead's envelope.** With a parcel's 28 bytes of
-prefix, one message carries an envelope of 1,999,934 bytes on Mosquitto 2.1.2 (`max_packet_size`
-2,000,000), 1,048,510 on EMQX 6.3.2 (1 MiB), about 16,777,124 on RabbitMQ 4.4.0 (16 MiB) and
-1,048,548 on nats-server 2.15.1 (`max_payload` 1 MiB): a chunk of 1,048,576 bytes needs two parts
-on EMQX and NATS, and an envelope of `maximumEnvelopeBytes`, 16,778,240, seventeen. A packet past
-its receiver's Maximum Packet Size is discarded unseen (MQTT 5.0 §3.1.2.11.4).
+**A broker bounds a message, often below Bead's envelope.** With a parcel's 28 bytes of prefix,
+one message carries an envelope of about 268 MB on Mosquitto 2.1.2, the protocol's, its
+`max_packet_size` without a limit by default, 1,048,510 on EMQX 6.3.2 (1 MiB), about 16,777,124 on
+RabbitMQ 4.4.0 (16 MiB) and 1,048,548 on nats-server 2.15.1 (`max_payload` 1 MiB): a chunk of
+1,048,576 bytes needs two parts on EMQX and NATS, and an envelope of `maximumEnvelopeBytes`,
+16,778,240, seventeen. A packet past its receiver's Maximum Packet Size is discarded by its broker,
+a loss ([MQTT-3.1.2-25]), and one a broker sends all the same ends its receiver's link (MQTT 5.0
+§3.1.2.11.4, §4.13.1), as [0041](0041-over-mqtt-5-a-participant-is-one-clean-link-and-a-parcel-one-publish-each-counted-to-its-byte.md) counts it.
 
 The options weighed:
 

@@ -37,7 +37,7 @@ import { assertHeldDelay, assertHeldFinite, type IClock, PLATFORM_CLOCK } from '
 import { BROKER_DELIVERIES, BROKER_PUBLISHED } from './constants';
 import { createPromise } from './create-promise';
 import { createEmitter } from './emitter';
-import { ConnectError, GenericError, ProgrammerError, toError } from './errors';
+import { ConnectError, GenericError, notServedOf, ProgrammerError, toError } from './errors';
 import { gaugesOf } from './gauges';
 import {
   assertHeartbeat,
@@ -51,6 +51,7 @@ import type {
   BrokerPublished,
   BrokerTopic,
   IBrokerAdapter,
+  IBrokerDown,
   IBrokerMessage,
   IBrokerPeer,
   IGauges,
@@ -68,6 +69,7 @@ export type {
   BrokerTopic,
   IBrokerAdapter,
   IBrokerCapabilities,
+  IBrokerDown,
   IBrokerMessage,
   IBrokerPeer,
   IBrokerPublication,
@@ -246,18 +248,36 @@ export interface IBrokerParticipantPort {
   ): IBrokerConnection;
   /** A half, 8 bytes from a cryptographic source, never all zero, none it holds. */
   drawHalf(): Uint8Array;
-  /** Resolves once its link is up, starting it the first time. */
-  linked(options?: { signal?: AbortSignal | undefined }): Promise<void>;
-  /** Publishes an OPEN of `opener`'s half to a server's name. */
-  open(name: string, opener: Uint8Array): Promise<BrokerPublished>;
+  /**
+   * Resolves once its link is up, starting it the first time; `isStart`, its application's start,
+   * links anew a participant whose link was taken over, which nothing else does.
+   */
+  linked(options?: {
+    isStart?: boolean | undefined;
+    signal?: AbortSignal | undefined;
+  }): Promise<void>;
+  /**
+   * Publishes an OPEN of `opener`'s half to a server's name, living `expiresAfter` milliseconds in
+   * its broker where its adapter offers a message's life (spec 15.18).
+   */
+  open(
+    name: string,
+    { expiresAfter, opener }: { expiresAfter?: number | undefined; opener: Uint8Array }
+  ): Promise<BrokerPublished>;
   /** Refuses an OPEN with `status`, to the inbox it names. */
   refuse(open: IParcel, status: number): void;
   report(error: Error): void;
   /** Holds `names` for one server's transport of it; one another holds already is a {@link ProgrammerError}. */
   reserve(names: readonly string[]): void;
   serve(name: string, serving: IBrokerServing): void;
-  /** Subscribes `name`, in its group when given, while wanted; lets it go once not. */
-  want(name: string, { group, isWanted }: { group?: string | undefined; isWanted: boolean }): void;
+  /**
+   * Subscribes `name`, in its group when given, while wanted, and lets it go once not: settles once
+   * its broker holds it, or let it go, failing on a subscription its broker refused.
+   */
+  want(
+    name: string,
+    { group, isWanted }: { group?: string | undefined; isWanted: boolean }
+  ): Promise<void>;
 }
 
 // constants
@@ -383,7 +403,12 @@ export const createBrokerParticipant = (options: IBrokerParticipantOptions): IBr
   assertCount('maximumEnvelopePartsBytes', { value: maximumEnvelopePartsBytes });
   assertCount('minimumBodyBytesPerSecond', { value: minimumBodyBytesPerSecond });
 
-  const receiveBound = Math.min(adapter.receiveBound, LARGEST_RECEIVE_BOUND);
+  const topicOf = (kind: 'd' | 'i' | 's', token: string): BrokerTopic => {
+    return Object.freeze([root, kind, token]);
+  };
+  const inbox = topicOf('i', id);
+  // * asked once, with its inbox, whose topic a broker's packet counts (spec 15.30)
+  const receiveBound = Math.min(adapter.receiveBound(inbox), LARGEST_RECEIVE_BOUND);
 
   if (receiveBound < LEAST_RECEIVE_BOUND) {
     throw new ProgrammerError(
@@ -391,6 +416,9 @@ export const createBrokerParticipant = (options: IBrokerParticipantOptions): IBr
     );
   }
 
+  // a DATA that carries a credential lives twice its heartbeat in its broker, none without one (spec
+  // 15.22)
+  const credentialLife = heartbeat === Infinity ? undefined : 2 * heartbeat;
   const emitter = createEmitter<{ error: [Error] }>();
   const held = createHeldBytes(heldBytesBudget);
   const partsBounds = {
@@ -399,11 +427,6 @@ export const createBrokerParticipant = (options: IBrokerParticipantOptions): IBr
     maximumEnvelopePartsBytes,
     minimumBodyBytesPerSecond,
   };
-  const topicOf = (kind: 'd' | 'i' | 's', token: string): BrokerTopic => {
-    return Object.freeze([root, kind, token]);
-  };
-  const inbox = topicOf('i', id);
-
   // its connections by both halves, half-open ones among them
   const connections = new Map<string, IConnectionRecord>();
   // the connects awaiting their answer, by the opener's half
@@ -412,10 +435,11 @@ export const createBrokerParticipant = (options: IBrokerParticipantOptions): IBr
   const serving = new Map<string, IBrokerServing>();
   // the names its servers' transports hold, each one's alone, from the time each is built
   const reserved = new Set<string>();
-  // the names wanted, their group, and whether the broker holds them now
+  // the names wanted, their group, whether the broker holds them now, from its SUBACK to its
+  // UNSUBACK, and what was asked of it last, each ask after the one before it
   const names = new Map<
     string,
-    { group: string | undefined; isHeld: boolean; isWanted: boolean }
+    { group: string | undefined; isHeld: boolean; isWanted: boolean; settling: Promise<void> }
   >();
   // the departures it subscribes, by peer, while it holds a connection with it
   const departures = new Map<string, { count: number; isAsked: boolean; isHeld: boolean }>();
@@ -424,58 +448,98 @@ export const createBrokerParticipant = (options: IBrokerParticipantOptions): IBr
   let linking: Promise<void> | undefined;
   let isLinked = false;
   let isStopped = false;
+  // ! taken over by another link of its id: it connects no more until its application starts it
+  let isTakenOver = false;
+  // each link and each down its own, so that what a former link asked does nothing on the next
+  let epoch = 0;
 
   const report = (error: Error): void => {
     emitter.emitEach('error', { onError: noop, params: [error] });
   };
 
+  // a publication with its life, where its adapter offers one and one is asked
+  const publicationOf = (
+    topic: BrokerTopic,
+    { expiresAfter, payload }: { expiresAfter?: number | undefined; payload: Uint8Array }
+  ) => {
+    return adapter.capabilities.expiry === true && expiresAfter !== undefined
+      ? { expiresAfter, payload, topic }
+      : { payload, topic };
+  };
+
   // a publication on the link, whatever its broker says of it; a link down tells itself by `down`
   const publish = (
     topic: BrokerTopic,
-    payload: Uint8Array
+    payload: Uint8Array,
+    options?: { expiresAfter?: number | undefined }
   ): Promise<BrokerPublished | undefined> => {
-    return adapter.publish({ payload, topic }).catch(() => {
-      return undefined;
-    });
+    return adapter
+      .publish(publicationOf(topic, { expiresAfter: options?.expiresAfter, payload }))
+      .catch(() => {
+        return undefined;
+      });
   };
 
   // ── names and departures ──
 
-  const holdName = (name: string): void => {
-    const entry = names.get(name);
+  // * a name held by its broker's word: from its SUBACK to its UNSUBACK, on the link that asked it
+  const settleName = async (
+    name: string,
+    entry: { group: string | undefined; isHeld: boolean; isWanted: boolean }
+  ): Promise<void> => {
+    const asked = epoch;
 
-    if (entry === undefined || !entry.isWanted || entry.isHeld || !isLinked) {
+    if (!isLinked) {
       return;
     }
 
-    entry.isHeld = true;
-    adapter
-      .subscribe(topicOf('s', name), entry.group === undefined ? {} : { group: entry.group })
-      .catch((reason: unknown) => {
-        entry.isHeld = false;
-        report(toError(reason));
-      });
+    if (entry.isWanted && !entry.isHeld) {
+      await adapter.subscribe(
+        topicOf('s', name),
+        entry.group === undefined ? {} : { group: entry.group }
+      );
+      entry.isHeld = asked === epoch;
+
+      return;
+    }
+
+    if (!entry.isWanted && entry.isHeld) {
+      try {
+        await adapter.unsubscribe(topicOf('s', name));
+      } catch (reason) {
+        // a link that went down let it go of its own
+        if (asked === epoch) {
+          report(toError(reason));
+        }
+      }
+
+      // ! nothing asks it again before this settles: each ask after the one before it
+      entry.isHeld = false;
+    }
   };
 
   const want = (
     name: string,
     { group, isWanted }: { group?: string | undefined; isWanted: boolean }
-  ): void => {
-    const entry = names.get(name) ?? { group, isHeld: false, isWanted };
+  ): Promise<void> => {
+    const entry = names.get(name) ?? {
+      group,
+      isHeld: false,
+      isWanted,
+      settling: Promise.resolve(),
+    };
 
     names.set(name, entry);
     entry.isWanted = isWanted;
 
-    if (isWanted) {
-      holdName(name);
+    // ! each ask after the one before it: a name let go as its SUBSCRIBE goes is let go once it came
+    const settled = entry.settling.then(() => {
+      return settleName(name, entry);
+    });
 
-      return;
-    }
+    entry.settling = settled.catch(noop);
 
-    if (entry.isHeld) {
-      entry.isHeld = false;
-      adapter.unsubscribe(topicOf('s', name)).catch(noop);
-    }
+    return settled;
   };
 
   // * a peer's departure subscribed while a connection with it is held, where a will can be left
@@ -553,7 +617,10 @@ export const createBrokerParticipant = (options: IBrokerParticipantOptions): IBr
     };
 
     // a parcel of this connection, numbered unless it is a RESET, held to what may wait for its broker
-    const sendParcel = (fields: Omit<ParcelFields, 'acceptor' | 'opener' | 'sequence'>): void => {
+    const sendParcel = (
+      fields: Omit<ParcelFields, 'acceptor' | 'opener' | 'sequence'>,
+      options?: { expiresAfter?: number | undefined }
+    ): void => {
       const isReset = fields.kind === ParcelKind.RESET;
       const bytes = writeParcel({
         ...fields,
@@ -578,7 +645,7 @@ export const createBrokerParticipant = (options: IBrokerParticipantOptions): IBr
       }
 
       unsentBytes += bytes.length;
-      void publish(peerInbox, bytes).then((published) => {
+      void publish(peerInbox, bytes, options).then((published) => {
         unsentBytes -= bytes.length;
 
         // a parcel its broker refused, or no subscriber took: its peer's inbox is gone, as a
@@ -699,12 +766,17 @@ export const createBrokerParticipant = (options: IBrokerParticipantOptions): IBr
           }
 
           for (const [index, carried] of pieces.entries()) {
-            sendParcel({
-              carried,
-              ...(index === 0 && credential !== undefined ? { credential } : {}),
-              flags: index < pieces.length - 1 ? ParcelFlag.MORE : 0,
-              kind: ParcelKind.DATA,
-            });
+            const isCarrying = index === 0 && credential !== undefined;
+
+            sendParcel(
+              {
+                carried,
+                ...(isCarrying ? { credential } : {}),
+                flags: index < pieces.length - 1 ? ParcelFlag.MORE : 0,
+                kind: ParcelKind.DATA,
+              },
+              isCarrying ? { expiresAfter: credentialLife } : {}
+            );
           }
 
           return Promise.resolve();
@@ -1016,17 +1088,34 @@ export const createBrokerParticipant = (options: IBrokerParticipantOptions): IBr
     await adapter.start({ signal, will });
     await adapter.subscribe(inbox, { signal });
     incarnation = drawnIncarnation;
+    epoch += 1;
     isLinked = true;
 
-    for (const name of names.keys()) {
-      holdName(name);
+    // * a name its broker refuses at a later link is reported and left unheld
+    for (const [name, { group, isWanted }] of names) {
+      want(name, { group, isWanted }).catch((reason: unknown) => {
+        report(notServedOf(name, reason));
+      });
     }
   };
 
-  const linked = (linkOptions?: { signal?: AbortSignal | undefined }): Promise<void> => {
+  const linked = (linkOptions?: {
+    isStart?: boolean | undefined;
+    signal?: AbortSignal | undefined;
+  }): Promise<void> => {
     if (isStopped) {
       return Promise.reject(new GenericError(`the participant ${id} is stopped`));
     }
+
+    if (isTakenOver && linkOptions?.isStart !== true) {
+      return Promise.reject(
+        new GenericError(
+          `the link of ${id} was taken over by another link of its id, and connects no more until it is started again`
+        )
+      );
+    }
+
+    isTakenOver = false;
 
     if (isLinked) {
       return Promise.resolve();
@@ -1104,12 +1193,13 @@ export const createBrokerParticipant = (options: IBrokerParticipantOptions): IBr
     awaiting.clear();
   };
 
-  const down = (): void => {
+  const down = (event?: IBrokerDown): void => {
     if (!isLinked) {
       return;
     }
 
     isLinked = false;
+    epoch += 1;
 
     const former = [...connections.values()].map(({ connection, peer }) => {
       return { acceptor: connection.acceptor, opener: connection.opener, peer: peer.id };
@@ -1119,13 +1209,27 @@ export const createBrokerParticipant = (options: IBrokerParticipantOptions): IBr
       record.drop();
     }
 
-    failAwaiting(`the link of ${id} went down as it connected`);
+    failAwaiting(
+      event?.isTakenOver === true
+        ? `the link of ${id} was taken over by another link of its id as it connected`
+        : `the link of ${id} went down as it connected`
+    );
 
     for (const entry of names.values()) {
       entry.isHeld = false;
     }
 
     departures.clear();
+
+    // * fenced: two holders of one id that each linked anew would take each other over without end;
+    // the later link keeps the id (spec 15.21)
+    if (event?.isTakenOver === true) {
+      isTakenOver = true;
+      linking = undefined;
+      report(new GenericError(`the link of ${id} was taken over by another link of its id`));
+
+      return;
+    }
 
     if (reconnection === undefined) {
       linking = undefined;
@@ -1177,26 +1281,23 @@ export const createBrokerParticipant = (options: IBrokerParticipantOptions): IBr
     connect,
     drawHalf,
     linked,
-    open: async (name, opener) => {
+    open: async (name, { expiresAfter, opener }) => {
       if (incarnation === undefined) {
         throw new GenericError(`the link of ${id} is not up`);
       }
 
-      const published = await adapter.publish({
-        payload: writeParcel({
-          acceptor: ZERO_HALF,
-          bound: receiveBound,
-          flags: adapter.isSecure ? ParcelFlag.SECURE : 0,
-          id,
-          incarnation,
-          kind: ParcelKind.OPEN,
-          opener,
-          sequence: 1,
-        }),
-        topic: topicOf('s', name),
+      const payload = writeParcel({
+        acceptor: ZERO_HALF,
+        bound: receiveBound,
+        flags: adapter.isSecure ? ParcelFlag.SECURE : 0,
+        id,
+        incarnation,
+        kind: ParcelKind.OPEN,
+        opener,
+        sequence: 1,
       });
 
-      return published;
+      return adapter.publish(publicationOf(topicOf('s', name), { expiresAfter, payload }));
     },
     refuse,
     report,
@@ -1269,7 +1370,7 @@ export const createBrokerParticipant = (options: IBrokerParticipantOptions): IBr
       return participant;
     },
     start: async (startOptions) => {
-      await linked(startOptions);
+      await linked({ isStart: true, signal: startOptions?.signal });
     },
     stop: async () => {
       if (isStopped) {

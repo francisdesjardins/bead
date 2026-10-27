@@ -1,8 +1,8 @@
 // ── Broker peer ───────────────────────────────────────────────────────────────
 
-// The test's own participants of the in-memory broker, as `spec/transports.json` plays them: each
-// publishes the parcels a case writes by their fields and reads its inbox, answering nothing of its
-// own.
+// The test's own participants of a broker, in memory or over MQTT 5, as `spec/transports.json`
+// plays them: each publishes the parcels a case writes by their fields and reads its inbox,
+// answering nothing of its own.
 
 // dependencies
 
@@ -13,21 +13,22 @@ import {
   hexadecimalOf,
 } from '../../../router/server/__tests__/expected-envelope';
 import { fromHexadecimal } from '../../../router/shared/__tests__/vectors';
-import { encodeParcel, readParcel } from '../../shared/broker-parcel';
+import { encodeParcel, ParcelKind, readParcel } from '../../shared/broker-parcel';
 import {
   BROKER_PUBLISHED,
   type BrokerPublished,
   type BrokerTopic,
-  type IMemoryBroker,
-  type IMemoryBrokerAdapter,
+  type IBrokerAdapter,
+  type IMemoryBrokerPublication,
 } from '../../shared/memory-broker';
 
 // interfaces
 
-/** A value of the side under test, kept under `capture` as it is first read. */
+/** A value of the side under test, kept under `capture` as it is first read, unlike one before. */
 export interface ICaptured {
   capture: string;
   shape: 'half' | 'incarnation';
+  unlike?: string;
 }
 
 /** A parcel as a case writes it, to publish or to read, each half a value, a `{name}` or a capture. */
@@ -66,14 +67,29 @@ export interface IHeardMessage {
 
 /** The test's participants, by their ids. */
 export interface IBrokerPeers {
-  /** The next message `id` is handed, or none within `within` milliseconds. */
-  next(id: string, within: number): Promise<IHeardMessage | undefined>;
+  /** Has `id` let its inbox go, its unsubscription settled. */
+  leave(id: string): Promise<void>;
+  /**
+   * The next message `id` is handed, or none within `within` milliseconds: on its inbox or the
+   * server's name, or, `at` the departure, on the departure of the participant under test.
+   */
+  next(
+    id: string,
+    { at, within }: { at?: 'departure' | undefined; within: number }
+  ): Promise<IHeardMessage | undefined>;
   /** Publishes `publication` in one turn, none awaited before the next; resolves with what the broker said. */
   publish(
     publication: IPublication,
     values: ReadonlyMap<string, string>
   ): Promise<BrokerPublished[]>;
 }
+
+// types
+
+/** A peer's adapter, as a case's broker gives it: one of the in-memory broker marks retained. */
+export type PeerAdapter = IBrokerAdapter & {
+  publish(publication: IMemoryBrokerPublication): Promise<BrokerPublished>;
+};
 
 // constants
 
@@ -146,8 +162,9 @@ const envelopeOf = (bytes: Uint8Array, expected: IExpected): IExpected | string 
 
 /**
  * What a message reads as, in the terms `expected` names it by: each half or incarnation as the
- * expected value, its `{name}` put in, or as the capture it matched in shape, which `values` keeps;
- * a field the parcel has that `expected` names none of shows as itself, so the comparison fails.
+ * expected value, its `{name}` put in, or as the capture it matched in shape and unlike the one it
+ * names, which `values` keeps; a field the parcel has that `expected` names none of shows as
+ * itself, so the comparison fails.
  */
 export const seenOf = (
   payload: Uint8Array,
@@ -179,7 +196,8 @@ export const seenOf = (
         (want.shape !== 'half' ||
           actual.some((byte) => {
             return byte !== 0;
-          }));
+          })) &&
+        (want.unlike === undefined || values.get(want.unlike) !== hex);
 
       if (isShaped) {
         captures.push([want.capture, hex]);
@@ -232,48 +250,96 @@ export const expectedSeenOf = (expected: IParcelFields): Record<string, unknown>
   };
 };
 
+/** The will a peer leaves where its case asks one: the GONE of its id and of `incarnation`. */
+const willOf = (id: string, incarnation: string | undefined) => {
+  return incarnation === undefined
+    ? undefined
+    : {
+        payload: encodeParcel({
+          acceptor: new Uint8Array(8),
+          flags: 0,
+          id,
+          incarnation: fromHexadecimal(incarnation),
+          kind: ParcelKind.GONE,
+          opener: new Uint8Array(8),
+          sequence: 0,
+        }),
+        topic: [ROOT, 'd', id],
+      };
+};
+
 // definition
 
 /**
- * The test's participants `ids` over `broker`, each started and its inbox subscribed, and in the
- * client role the server's name `interop` as well, alone, so that each reads every OPEN. `under` is
- * the id of the participant under test, whose inbox `inbox` names.
+ * The test's participants `ids`, each an adapter `adapterOf` resolves with, started, a will left where
+ * `wills` names its incarnation, and its inbox subscribed; in the client role the server's name
+ * `interop` as well, alone, so that each reads every OPEN, and the departure of the participant
+ * under test, so that each reads its GONE. `under` is the id of the participant under test, whose
+ * inbox `inbox` names.
  */
 export const createBrokerPeers = async (
-  broker: IMemoryBroker,
-  { ids, isClient, under }: { ids: readonly string[]; isClient: boolean; under: string }
+  adapterOf: (id: string) => Promise<PeerAdapter>,
+  {
+    ids,
+    isClient,
+    under,
+    wills,
+  }: {
+    ids: readonly string[];
+    isClient: boolean;
+    under: string;
+    wills?: ReadonlyMap<string, string> | undefined;
+  }
 ): Promise<IBrokerPeers & AsyncDisposable> => {
   const peers = new Map<
     string,
     {
-      adapter: IMemoryBrokerAdapter;
+      adapter: PeerAdapter;
+      departed: IHeardMessage[];
       heard: IHeardMessage[];
       waiting: (() => void)[];
     }
   >();
-
-  for (const id of ids) {
-    const adapter = broker.adapter({ id });
-    const peer = { adapter, heard: [] as IHeardMessage[], waiting: [] as (() => void)[] };
-
-    adapter.on('message', (message) => {
-      const { payload, topic } = message;
-
-      message.settle();
-      peer.heard.push({ payload, topic });
-
-      for (const wake of peer.waiting.splice(0)) {
-        wake();
-      }
-    });
-    await adapter.start();
-    await adapter.subscribe([ROOT, 'i', id]);
-
-    if (isClient) {
-      await adapter.subscribe([ROOT, 's', 'interop']);
+  const departure = [ROOT, 'd', under].join('/');
+  const stopAll = async (): Promise<void> => {
+    for (const { adapter } of peers.values()) {
+      await adapter.stop();
     }
+  };
 
-    peers.set(id, peer);
+  try {
+    for (const id of ids) {
+      const adapter = await adapterOf(id);
+      const peer = {
+        adapter,
+        departed: [] as IHeardMessage[],
+        heard: [] as IHeardMessage[],
+        waiting: [] as (() => void)[],
+      };
+
+      adapter.on('message', (message) => {
+        const { payload, topic } = message;
+
+        message.settle();
+        (topic.join('/') === departure ? peer.departed : peer.heard).push({ payload, topic });
+
+        for (const wake of peer.waiting.splice(0)) {
+          wake();
+        }
+      });
+      peers.set(id, peer);
+      await adapter.start({ will: willOf(id, wills?.get(id)) });
+      await adapter.subscribe([ROOT, 'i', id]);
+
+      if (isClient) {
+        await adapter.subscribe([ROOT, 's', 'interop']);
+        await adapter.subscribe([ROOT, 'd', under]);
+      }
+    }
+  } catch (reason) {
+    await stopAll();
+
+    throw reason;
   }
 
   const peerOf = (id: string) => {
@@ -287,12 +353,17 @@ export const createBrokerPeers = async (
   };
 
   return {
-    next: async (id, within) => {
+    leave: (id) => {
+      return peerOf(id).adapter.unsubscribe([ROOT, 'i', id]);
+    },
+    next: async (id, { at, within }) => {
       const peer = peerOf(id);
+      const queue = at === 'departure' ? peer.departed : peer.heard;
+      const deadline = Date.now() + within;
 
-      if (peer.heard.length === 0) {
+      while (queue.length === 0 && Date.now() < deadline) {
         await new Promise<void>((resolve) => {
-          const timer = setTimeout(resolve, within);
+          const timer = setTimeout(resolve, deadline - Date.now());
 
           peer.waiting.push(() => {
             clearTimeout(timer);
@@ -301,7 +372,7 @@ export const createBrokerPeers = async (
         });
       }
 
-      return peer.heard.shift();
+      return queue.shift();
     },
     publish: (publication, values) => {
       const { from, publish, retained, to } = publication;
@@ -324,11 +395,7 @@ export const createBrokerPeers = async (
         })
       );
     },
-    [Symbol.asyncDispose]: async () => {
-      for (const { adapter } of peers.values()) {
-        await adapter.stop();
-      }
-    },
+    [Symbol.asyncDispose]: stopAll,
   };
 };
 

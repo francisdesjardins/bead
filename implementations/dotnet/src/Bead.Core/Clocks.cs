@@ -39,7 +39,7 @@ public static class Clocks
 
         if (!IsHeld(duration))
         {
-            throw new ArgumentOutOfRangeException(names.Option, RefusalOf((names.What, duration), (false, true)));
+            throw new ArgumentOutOfRangeException(names.Option, RefusalOf((names.What, duration), (false, true, LongestTimer)));
         }
 
         return Rounded(duration);
@@ -51,9 +51,21 @@ public static class Clocks
     /// </summary>
     internal static TimeSpan AssertHeldFinite((string What, string Option) names, TimeSpan duration)
     {
-        if (!IsHeld(duration))
+        return AssertHeldWithin(names, (duration, LongestTimer));
+    }
+
+    /// <summary>
+    /// As <see cref="AssertHeldFinite"/>, under a ceiling of
+    /// the place's own below <see cref="LongestTimer"/>, a whole number of milliseconds: what a
+    /// protocol's field holds, as MQTT 5's Keep Alive holds 65,535 seconds.
+    /// </summary>
+    internal static TimeSpan AssertHeldWithin((string What, string Option) names, (TimeSpan Duration, TimeSpan Ceiling) held)
+    {
+        var (duration, ceiling) = held;
+
+        if (duration < ShortestTimer || duration > ceiling)
         {
-            throw new ArgumentOutOfRangeException(names.Option, RefusalOf((names.What, duration), (false, false)));
+            throw new ArgumentOutOfRangeException(names.Option, RefusalOf((names.What, duration), (false, false, ceiling)));
         }
 
         return Rounded(duration);
@@ -73,7 +85,7 @@ public static class Clocks
 
         if (!IsHeld(duration))
         {
-            throw new ArgumentOutOfRangeException(names.Option, RefusalOf((names.What, duration), (true, false)));
+            throw new ArgumentOutOfRangeException(names.Option, RefusalOf((names.What, duration), (true, false, LongestTimer)));
         }
 
         return Rounded(duration);
@@ -95,8 +107,8 @@ public static class Clocks
 
     // a refusal, in the same words on every machine and on every side: a fraction written with a dot
     // whatever the culture, never written "infinite" rather than -1, and what the place takes besides
-    // offered: zero, a delay's, and never where it is taken
-    private static string RefusalOf((string What, TimeSpan Duration) refused, (bool Zero, bool Never) offered)
+    // offered: zero, a delay's, and never where it is taken; and its ceiling
+    private static string RefusalOf((string What, TimeSpan Duration) refused, (bool Zero, bool Never, TimeSpan Ceiling) offered)
     {
         var written = refused.Duration == Timeout.InfiniteTimeSpan
             ? "infinite"
@@ -104,7 +116,7 @@ public static class Clocks
         var zero = offered.Zero ? "0 for at once, or " : "";
         var never = offered.Never ? ", or infinite for never" : "";
 
-        return string.Create(CultureInfo.InvariantCulture, $"{refused.What} is {zero}a number of milliseconds from 1 to {int.MaxValue}{never}, not {written}");
+        return string.Create(CultureInfo.InvariantCulture, $"{refused.What} is {zero}a number of milliseconds from 1 to {(long)offered.Ceiling.TotalMilliseconds}{never}, not {written}");
     }
 
     /// <summary>

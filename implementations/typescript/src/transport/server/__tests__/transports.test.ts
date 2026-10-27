@@ -1,8 +1,9 @@
 // ── Transports ────────────────────────────────────────────────────────────────
 
 // Bead's transports' cases, `spec/transports.json`, played against this side's server of the
-// interop service, or a broker client's transport: by a peer writing octets, then frames, on a socket
-// per exchange, or by participants of the in-memory broker. The C# side plays the same file.
+// interop service, or a broker client's transport: by a peer writing octets, then frames, per
+// exchange, or by participants of the in-memory broker or of the Mosquitto `BEAD_MQTT_URL` names.
+// The C# side plays the same file.
 
 // dependencies
 
@@ -35,9 +36,11 @@ import {
   createBrokerParticipant,
   MAXIMUM_ENVELOPE_PARTS_BYTES,
 } from '../../shared/broker-participant';
+import { ParcelKind, readParcel } from '../../shared/broker-parcel';
 import { HELD_BYTES_BUDGET } from '../../shared/broker-sequence';
 import { ConnectError } from '../../shared/errors';
 import { BROKER_PUBLISHED, createMemoryBroker } from '../../shared/memory-broker';
+import { createMqttBrokerAdapter, type IMqttBrokerAdapter } from '../../shared/mqtt-broker-adapter';
 import { createTestClock, duesOn, type TestClock } from '../../shared/__tests__/fixtures';
 import {
   BODY_BYTES_BUDGET,
@@ -71,10 +74,14 @@ import {
   expectedSeenOf,
   filledOf as parcelFilledOf,
   type IBrokerPeers,
+  type IHeardMessage,
   type IParcelFields,
   type IPublication,
+  type PeerAdapter,
   seenOf as parcelSeenOf,
 } from './broker-peer';
+import { createLinkRelay, type ILinkRelay } from './link-relay';
+import { createRecordingAdapter, type ILives } from './recording-adapter';
 import { createFakeWebSocketServer } from './fake-websocket-server';
 import {
   closeFrameOf,
@@ -186,6 +193,9 @@ interface ICase {
     maximumQueuedMessages?: number;
     maximumUnsentBytes?: number;
     names?: string[];
+    timeout?: number;
+    twin?: string;
+    wills?: true;
   };
   peers?: string[];
   realTime?: true;
@@ -194,12 +204,17 @@ interface ICase {
   transport: string;
 }
 
-/** What a broker case expects next: a parcel a peer reads, or what the transport under test does. */
+/**
+ * What a broker case expects next: a parcel a peer reads, or what the transport under test does,
+ * where its OPENs were placed, or the lives it asked.
+ */
 interface IBrokerExpectation {
   closed?: { clean: boolean };
   failed?: { layouts?: number[]; reason: string; status?: number };
+  lives?: ILives;
   opened?: true;
   parcel?: IParcelFields;
+  placed?: { openers: string[]; with: string };
   received?: IExpected;
   secure?: boolean;
   told?: { address: string; reason: string; status: number };
@@ -208,15 +223,30 @@ interface IBrokerExpectation {
 /** One step of a broker case. */
 interface IBrokerStep extends Partial<IPublication> {
   advance?: number;
+  at?: 'departure';
   connect?: string;
   expect?: IBrokerExpectation;
+  leave?: string;
+  lose?: string;
   on?: string;
   reported?: string[];
   stop?: true | { crossing: IPublication };
+  takeover?: 'client' | 'server';
   transportSend?: { credential?: string; envelope: string };
   until?: { gauge: string; is: number } | { timer: number };
   wait?: number;
   within?: number;
+}
+
+/**
+ * The broker a case plays over, in memory or a Mosquitto over MQTT 5: an adapter of each of its
+ * participants, a link lost or taken over as a step asks, and every link it holds let go.
+ */
+interface IBrokerWorld {
+  adapterOf(id: string): Promise<PeerAdapter & { readonly unsettled: number }>;
+  lose(id: string): Promise<void>;
+  takeover(id: string): Promise<void>;
+  [Symbol.asyncDispose](): Promise<void>;
 }
 
 /** A response cut across reads, as every side's reader reads it. */
@@ -256,7 +286,17 @@ const TRANSPORTS = JSON.parse(
 const HOST = '127.0.0.1';
 
 // the transports this harness plays a case over
-const PLAYED_TRANSPORTS: ReadonlySet<string> = new Set(['broker', 'http', 'websocket']);
+const PLAYED_TRANSPORTS: ReadonlySet<string> = new Set(['broker', 'http', 'mqtt', 'websocket']);
+
+// the Mosquitto the cases over MQTT 5 play against, where one is given, and the run's password
+const MQTT_URL = process.env['BEAD_MQTT_URL'];
+const MQTT_PASSWORD = process.env['BEAD_MQTT_PASSWORD'] ?? '';
+// ! where a broker must be given, its absence fails a case rather than skip it
+const IS_MQTT_REQUIRED = process.env['BEAD_MQTT_REQUIRED'] === '1';
+const NO_BROKER = 'no broker: BEAD_MQTT_URL is not set (node tools/mqtt-broker.mjs start)';
+
+// how long `expect placed` waits, once each OPEN was placed, for one placed twice
+const PLACED_GRACE = 250;
 
 // ! every key of a step this harness reads: one it does not know fails the step, rather than pass it
 // unplayed
@@ -277,15 +317,19 @@ const CASE_KEYS: ReadonlySet<string> = new Set([
 // a broker step's keys, and those that modify its act rather than make one
 const BROKER_STEP_KEYS: ReadonlySet<string> = new Set([
   'advance',
+  'at',
   'connect',
   'expect',
   'from',
+  'leave',
+  'lose',
   'on',
   'publish',
   'refused',
   'reported',
   'retained',
   'stop',
+  'takeover',
   'to',
   'transportSend',
   'until',
@@ -293,6 +337,7 @@ const BROKER_STEP_KEYS: ReadonlySet<string> = new Set([
   'within',
 ]);
 const BROKER_MODIFIERS: ReadonlySet<string> = new Set([
+  'at',
   'from',
   'on',
   'refused',
@@ -319,7 +364,7 @@ const PATIENCE = 10_000;
 
 // ! every option and limit this harness reads, by transport, as the C# side's: one it does not read
 // fails its case, where it would play on the default unseen
-const OPTION_KEYS: Readonly<Record<'broker' | 'http' | 'websocket', ReadonlySet<string>>> =
+const OPTION_KEYS: Readonly<Record<'broker' | 'http' | 'mqtt' | 'websocket', ReadonlySet<string>>> =
   Object.freeze({
     broker: new Set([
       'maximumConnections',
@@ -334,6 +379,26 @@ const OPTION_KEYS: Readonly<Record<'broker' | 'http' | 'websocket', ReadonlySet<
       'names',
       'group',
       'maximumQueuedMessages',
+      'timeout',
+      'twin',
+      'wills',
+    ]),
+    // the in-memory broker's queue is its own: Mosquitto's is every client's
+    mqtt: new Set([
+      'maximumConnections',
+      'maximumConnectionsPerAddress',
+      'maximumUnsentBytes',
+      'minimumBodyBytesPerSecond',
+      'bodyGracePeriod',
+      'heartbeat',
+      'acceptTimeout',
+      'maximumEnvelopePartsBytes',
+      'heldBytesBudget',
+      'names',
+      'group',
+      'timeout',
+      'twin',
+      'wills',
     ]),
     http: new Set([
       'maximumConnections',
@@ -892,17 +957,177 @@ const nextOf = async <T>(queue: T[], within: number): Promise<T | undefined> => 
   return queue.shift();
 };
 
+/** The in-memory broker a case plays over, on `clock`, its links lost and taken over by its adapters. */
+const memoryWorldOf = (
+  clock: TestClock,
+  { maximumQueuedMessages }: { maximumQueuedMessages?: number | undefined }
+): IBrokerWorld => {
+  const broker = createMemoryBroker({ clock, maximumQueuedMessages });
+  const adapters = new Map<string, ReturnType<typeof broker.adapter>>();
+  const adapterNamed = (id: string) => {
+    const adapter = adapters.get(id);
+
+    if (adapter === undefined) {
+      throw new Error(`no participant ${id} in the case`);
+    }
+
+    return adapter;
+  };
+
+  return {
+    adapterOf: (id) => {
+      const adapter = broker.adapter({ id });
+
+      adapters.set(id, adapter);
+
+      return Promise.resolve(adapter);
+    },
+    lose: (id) => {
+      adapterNamed(id).lose();
+
+      return Promise.resolve();
+    },
+    takeover: (id) => {
+      adapterNamed(id).takeOver();
+
+      return Promise.resolve();
+    },
+    [Symbol.asyncDispose]: () => {
+      return Promise.resolve();
+    },
+  };
+};
+
 /**
- * Plays a broker case (spec 15.16 to 15.24) on the in-memory broker: in the server role, the interop
- * service's server on a broker server transport over the participant `server`, serving its names; in
- * the client role, a broker client transport alone over the participant `client`; the test's peers,
- * each an adapter of the same broker, publishing parcels and reading their inboxes. The participant's
- * `maximumEnvelopePartsBytes` is its router's `maximumEnvelopeBytes` unless the case sets it, as an
- * application builds both alike.
+ * The Mosquitto at `url` a case plays over: each participant a link of this side's MQTT adapter,
+ * through a relay of its own that a `lose` cuts; a `takeover` a link of the player's own under the
+ * id, straight to the broker, which subscribes nothing; every relay and every such link let go.
  */
-const playBrokerCase = async (testCase: ICase): Promise<void> => {
+const mqttWorldOf = (url: string, password: string): IBrokerWorld => {
+  const broker = new URL(url);
+  const relays = new Map<string, ILinkRelay>();
+  const takeovers: IMqttBrokerAdapter[] = [];
+
+  return {
+    adapterOf: async (id) => {
+      const relay = await createLinkRelay({
+        host: broker.hostname,
+        port: Number(broker.port),
+      });
+
+      relays.set(id, relay);
+
+      return createMqttBrokerAdapter({
+        id,
+        password,
+        url: `${broker.protocol}//${HOST}:${String(relay.port)}`,
+      });
+    },
+    lose: (id) => {
+      relays.get(id)?.cut();
+
+      return Promise.resolve();
+    },
+    takeover: async (id) => {
+      const link = createMqttBrokerAdapter({ id, password, url });
+
+      takeovers.push(link);
+      await link.start();
+    },
+    [Symbol.asyncDispose]: async () => {
+      for (const link of takeovers) {
+        await link.stop();
+      }
+
+      for (const relay of relays.values()) {
+        await relay[Symbol.asyncDispose]();
+      }
+    },
+  };
+};
+
+/** The incarnation each peer's OPENs name in `steps`, which its will names where a case asks one. */
+const willsOf = (steps: readonly IBrokerStep[]): Map<string, string> => {
+  const wills = new Map<string, string>();
+
+  for (const { from, publish = [] } of steps) {
+    for (const item of publish) {
+      const incarnation = 'parcel' in item ? item.parcel.incarnation : undefined;
+
+      if (from !== undefined && typeof incarnation === 'string' && !wills.has(from)) {
+        wills.set(from, incarnation);
+      }
+    }
+  }
+
+  return wills;
+};
+
+/**
+ * Where each OPEN of `openers` went, read on the peer `on`'s inbox, the server's ACCEPT naming it,
+ * and on the twin's, the OPEN itself: once each was placed, a grace for one placed twice.
+ */
+const placedOf = async (
+  { openers, within }: { openers: readonly string[]; within: number },
+  readers: Readonly<Record<'server' | 'twin', (wait: number) => Promise<IHeardMessage | undefined>>>
+): Promise<Record<string, string[]>> => {
+  const placed = new Map<string, string[]>(
+    openers.map((opener) => {
+      return [canonicalOf(opener), []];
+    })
+  );
+  const isPlaced = (): boolean => {
+    return [...placed.values()].every((places) => {
+      return places.length > 0;
+    });
+  };
+  // the server's ACCEPT, or the twin's OPEN, naming an opener's half
+  const take = async (where: 'server' | 'twin'): Promise<boolean> => {
+    const message = await readers[where](POLL);
+    const read = message === undefined ? undefined : readParcel(message.payload);
+    const kind = where === 'server' ? ParcelKind.ACCEPT : ParcelKind.OPEN;
+
+    if (read !== undefined && 'parcel' in read && read.parcel.kind === kind) {
+      placed.get(hexadecimalOf(read.parcel.opener))?.push(where);
+    }
+
+    return message !== undefined;
+  };
+  const deadline = Date.now() + within;
+
+  while (!isPlaced() && Date.now() < deadline) {
+    const tookEither = (await Promise.all([take('server'), take('twin')])).includes(true);
+
+    if (!tookEither) {
+      await sleep(POLL);
+    }
+  }
+
+  const graceEnds = Date.now() + PLACED_GRACE;
+
+  while (Date.now() < graceEnds) {
+    await Promise.all([take('server'), take('twin')]);
+  }
+
+  return Object.fromEntries(placed);
+};
+
+/**
+ * Plays a broker case (spec 15.16 to 15.31) in memory, or over the Mosquitto `BEAD_MQTT_URL` names:
+ * in the server role, the interop service's server on a broker server transport over the
+ * participant `server`, its link connecting anew once lost; in the client role, a broker client
+ * transport alone over the participant `client`, with no reconnection; its adapter wrapped to note
+ * the lives it asks; the test's peers and twin publishing parcels and reading their inboxes. Its
+ * `maximumEnvelopePartsBytes` is its router's `maximumEnvelopeBytes` unless the case sets it. Every
+ * participant is stopped before the next case, whose own a link left up would take over.
+ */
+const playBrokerCase = async (
+  testCase: ICase,
+  { transport }: { transport: 'broker' | 'mqtt' }
+): Promise<void> => {
   const { limits, options = {}, peers: ids = ['peer'], role, steps } = testCase;
   const isClient = role === 'client';
+  const brokerSteps = steps as IBrokerStep[];
 
   expect(
     Object.keys(testCase).filter((key) => {
@@ -912,7 +1137,7 @@ const playBrokerCase = async (testCase: ICase): Promise<void> => {
   ).toEqual([]);
 
   for (const name of Object.keys(options)) {
-    if (!OPTION_KEYS.broker.has(name)) {
+    if (!OPTION_KEYS[transport].has(name)) {
       throw new Error(`a case sets an option no test reads: ${name}`);
     }
   }
@@ -924,21 +1149,11 @@ const playBrokerCase = async (testCase: ICase): Promise<void> => {
   }
 
   const clock = createTestClock(Date.parse(TRANSPORTS.wallClock));
-  const broker = createMemoryBroker({
-    clock,
-    maximumQueuedMessages: options.maximumQueuedMessages,
-  });
-  const adapter = broker.adapter({ id: isClient ? 'client' : 'server' });
-  const participant = createBrokerParticipant({
-    adapter,
-    bodyGracePeriod: options.bodyGracePeriod,
-    clock,
-    heartbeat: options.heartbeat,
-    heldBytesBudget: options.heldBytesBudget,
-    maximumEnvelopePartsBytes: options.maximumEnvelopePartsBytes ?? limits?.maximumEnvelopeBytes,
-    minimumBodyBytesPerSecond: options.minimumBodyBytesPerSecond,
-    reconnect: false,
-  });
+  const world =
+    transport === 'broker'
+      ? memoryWorldOf(clock, { maximumQueuedMessages: options.maximumQueuedMessages })
+      : mqttWorldOf(MQTT_URL ?? '', MQTT_PASSWORD);
+  const under = isClient ? 'client' : 'server';
   const values = new Map<string, string>();
   const reports: IReport[] = [];
   const refusals: ITransportServerRefusal[] = [];
@@ -947,57 +1162,12 @@ const playBrokerCase = async (testCase: ICase): Promise<void> => {
   const received: Uint8Array[] = [];
   // the peer each connection the server told was opened by, by its handle
   const addresses = new Map<string, string>();
+  let participant: ReturnType<typeof createBrokerParticipant> | undefined;
   let server: (AsyncDisposable & IServer<BrokerTransportServer, string>) | undefined;
   let client: BrokerTransportClient | undefined;
   let connecting: Promise<{ error: unknown } | { value: void }> | undefined;
   let peers: (IBrokerPeers & AsyncDisposable) | undefined;
-
-  if (isClient) {
-    client = participant.transportClient();
-    client.on('message', ({ data }) => {
-      received.push(new Uint8Array(data as ArrayBuffer | Uint8Array));
-    });
-    client.on('close', (wasClean) => {
-      closes.push({ address: undefined, wasClean });
-    });
-    client.on('error', (error) => {
-      errors.push({ connectionHandle: '', error });
-    });
-  } else {
-    const transport = participant.transportServer({
-      acceptTimeout: options.acceptTimeout,
-      group: options.group,
-      maximumConnections: options.maximumConnections,
-      maximumConnectionsPerAddress: options.maximumConnectionsPerAddress,
-      maximumUnsentBytes: options.maximumUnsentBytes,
-      names: options.names ?? ['interop'],
-    });
-
-    server = createServer<BrokerTransportServer, string>(
-      { transport },
-      { credentials: interopCredentialsOf(clock, limits), limits }
-    );
-    server.router.on('error', (error, connectionHandle) => {
-      reports.push({
-        code: error instanceof FailureError ? error.code : 'exception',
-        connectionHandle,
-      });
-    });
-    transport.on('refusal', (refusal) => {
-      refusals.push(refusal);
-    });
-    transport.on('error', (error, connectionHandle) => {
-      errors.push({ connectionHandle, error });
-    });
-    transport.on('connection', (...[peer, , connectionHandle]) => {
-      addresses.set(connectionHandle, peer.id);
-    });
-    transport.on('close', (wasClean, connectionHandle) => {
-      closes.push({ address: addresses.get(connectionHandle), wasClean });
-    });
-    offerInterop(server);
-    await transport.start();
-  }
+  let twin: (IBrokerPeers & AsyncDisposable) | undefined;
 
   const expectNothingReported = (when: string): void => {
     expect(reports, when).toEqual([]);
@@ -1011,9 +1181,97 @@ const playBrokerCase = async (testCase: ICase): Promise<void> => {
   };
 
   try {
-    peers = await createBrokerPeers(broker, { ids, isClient, under: adapter.id });
+    const adapter = createRecordingAdapter(await world.adapterOf(under));
 
-    for (const [index, step] of (steps as IBrokerStep[]).entries()) {
+    participant = createBrokerParticipant({
+      adapter,
+      bodyGracePeriod: options.bodyGracePeriod,
+      clock,
+      heartbeat: options.heartbeat,
+      heldBytesBudget: options.heldBytesBudget,
+      maximumEnvelopePartsBytes: options.maximumEnvelopePartsBytes ?? limits?.maximumEnvelopeBytes,
+      minimumBodyBytesPerSecond: options.minimumBodyBytesPerSecond,
+      reconnect: isClient ? false : {},
+    });
+
+    if (isClient) {
+      client = participant.transportClient();
+      client.on('message', ({ data }) => {
+        received.push(new Uint8Array(data as ArrayBuffer | Uint8Array));
+      });
+      client.on('close', (wasClean) => {
+        closes.push({ address: undefined, wasClean });
+      });
+      client.on('error', (error) => {
+        errors.push({ connectionHandle: '', error });
+      });
+    } else {
+      const names = options.names ?? ['interop'];
+      const transportServer = participant.transportServer({
+        acceptTimeout: options.acceptTimeout,
+        group: options.group,
+        maximumConnections: options.maximumConnections,
+        maximumConnectionsPerAddress: options.maximumConnectionsPerAddress,
+        maximumUnsentBytes: options.maximumUnsentBytes,
+        names,
+      });
+
+      server = createServer<BrokerTransportServer, string>(
+        { transport: transportServer },
+        { credentials: interopCredentialsOf(clock, limits), limits }
+      );
+      server.router.on('error', (error, connectionHandle) => {
+        reports.push({
+          code: error instanceof FailureError ? error.code : 'exception',
+          connectionHandle,
+        });
+      });
+      transportServer.on('refusal', (refusal) => {
+        refusals.push(refusal);
+      });
+      transportServer.on('error', (error, connectionHandle) => {
+        errors.push({ connectionHandle, error });
+      });
+      transportServer.on('connection', (...[peer, , connectionHandle]) => {
+        addresses.set(connectionHandle, peer.id);
+      });
+      transportServer.on('close', (wasClean, connectionHandle) => {
+        closes.push({ address: addresses.get(connectionHandle), wasClean });
+      });
+      offerInterop(server);
+
+      // * a twin serves the names in their group beside the server, reading each OPEN it is handed
+      if (options.twin !== undefined) {
+        const twinAdapter = await world.adapterOf(options.twin);
+
+        twin = await createBrokerPeers(
+          () => {
+            return Promise.resolve(twinAdapter);
+          },
+          { ids: [options.twin], isClient: false, under }
+        );
+
+        for (const name of names) {
+          await twinAdapter.subscribe(['bead', 's', name], { group: name });
+        }
+      }
+
+      await transportServer.start();
+    }
+
+    peers = await createBrokerPeers(
+      (id) => {
+        return world.adapterOf(id);
+      },
+      {
+        ids,
+        isClient,
+        under,
+        wills: options.wills === true ? willsOf(brokerSteps) : undefined,
+      }
+    );
+
+    for (const [index, step] of brokerSteps.entries()) {
       const at = `step ${String(index + 1)}`;
       const within = step.within ?? PATIENCE;
 
@@ -1056,8 +1314,25 @@ const playBrokerCase = async (testCase: ICase): Promise<void> => {
         await sleep(step.wait);
       }
 
+      if (step.lose !== undefined) {
+        await world.lose(step.lose);
+      }
+
+      if (step.takeover !== undefined) {
+        await world.takeover(step.takeover);
+      }
+
+      if (step.leave !== undefined) {
+        await peers.leave(step.leave);
+      }
+
       if (step.connect !== undefined && client !== undefined) {
-        connecting = settlingOf(client.connect({ server: step.connect }));
+        connecting = settlingOf(
+          client.connect({
+            server: step.connect,
+            ...(options.timeout === undefined ? {} : { timeout: options.timeout }),
+          })
+        );
       }
 
       if (step.transportSend !== undefined) {
@@ -1069,13 +1344,13 @@ const playBrokerCase = async (testCase: ICase): Promise<void> => {
       const expectation = step.expect;
 
       if (expectation?.parcel !== undefined) {
-        const message = await peers.next(step.on ?? 'peer', within);
+        const message = await peers.next(step.on ?? 'peer', { at: step.at, within });
 
         expect(
           message === undefined
             ? `nothing within ${String(within)} ms`
             : parcelSeenOf(message.payload, { expected: expectation.parcel, values }),
-          `${at}: the parcel ${step.on ?? 'peer'} reads`
+          `${at}: the parcel ${step.on ?? 'peer'} reads${step.at === undefined ? '' : ` at the ${step.at}`}`
         ).toEqual(expectedSeenOf(expectation.parcel));
 
         if (expectation.told !== undefined) {
@@ -1095,6 +1370,43 @@ const playBrokerCase = async (testCase: ICase): Promise<void> => {
             `${at}: what the refusal tells besides`
           ).toEqual({ authority: undefined, origin: undefined });
         }
+      }
+
+      if (expectation?.placed !== undefined) {
+        const { openers, with: other } = expectation.placed;
+
+        expect(other, `${at}: the twin the OPENs were placed with`).toBe(options.twin);
+
+        const { next } = peers;
+        const twinNext = twin?.next;
+        const placed = await placedOf(
+          { openers, within },
+          {
+            server: (wait) => {
+              return next(step.on ?? 'peer', { within: wait });
+            },
+            twin: (wait) => {
+              return twinNext?.(other, { within: wait }) ?? Promise.resolve(undefined);
+            },
+          }
+        );
+
+        expect(
+          Object.values(placed).map((places) => {
+            return places.length === 1 ? 'one of them' : places;
+          }),
+          `${at}: where each OPEN was placed, ${JSON.stringify(placed)}`
+        ).toEqual(
+          openers.map(() => {
+            return 'one of them';
+          })
+        );
+      }
+
+      if (expectation?.lives !== undefined) {
+        expect(adapter.lives(), `${at}: the lives its adapter was asked`).toEqual(
+          expectation.lives
+        );
       }
 
       if (expectation?.closed !== undefined) {
@@ -1210,9 +1522,11 @@ const playBrokerCase = async (testCase: ICase): Promise<void> => {
     expectNothingReported('at the end');
   } finally {
     await peers?.[Symbol.asyncDispose]();
+    await twin?.[Symbol.asyncDispose]();
     await server?.[Symbol.asyncDispose]();
     await client?.[Symbol.asyncDispose]();
-    await participant.stop();
+    await participant?.stop();
+    await world[Symbol.asyncDispose]();
   }
 };
 
@@ -1344,9 +1658,14 @@ test.describe('the transports', () => {
 
     if (transport === 'broker') {
       test(name, async () => {
-        await playBrokerCase(testCase);
+        await playBrokerCase(testCase, { transport });
       });
 
+      continue;
+    }
+
+    // played apart, one at a time, against a broker of the run's own
+    if (transport === 'mqtt') {
       continue;
     }
 
@@ -1528,4 +1847,22 @@ test.describe('the transports', () => {
         })
     );
   });
+});
+
+test.describe('the transports, over MQTT 5', () => {
+  // * one case at a time: each case's participant under test has the same id, and two links of one
+  // id take each other over (spec 15.21)
+  test.describe.configure({ mode: 'serial', retries: 0, timeout: 30_000 });
+
+  for (const testCase of TRANSPORTS.cases) {
+    if (testCase.transport !== 'mqtt' || isExcused(testCase)) {
+      continue;
+    }
+
+    test(testCase.name, async () => {
+      test.skip(MQTT_URL === undefined && !IS_MQTT_REQUIRED, NO_BROKER);
+      expect(MQTT_URL, NO_BROKER).toBeDefined();
+      await playBrokerCase(testCase, { transport: 'mqtt' });
+    });
+  }
 });

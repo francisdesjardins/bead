@@ -6,8 +6,8 @@ namespace Bead;
 public enum BrokerDelivery
 {
     /// <summary>
-    /// At least once: its broker acknowledges each publication it took, and its link's flow control
-    /// holds the participant's publications to what its broker takes (MQTT QoS 1, AMQP settled).
+    /// At least once: its broker acknowledges each publication it took, and its adapter holds what it
+    /// publishes to the quota its broker gives (MQTT QoS 1, AMQP settled).
     /// </summary>
     AtLeastOnce,
 
@@ -87,6 +87,16 @@ public sealed record BrokerSubscription
     public CancellationToken CancellationToken { get; init; }
 }
 
+/// <summary>How a link went down: lost, or taken over by another link of its identity (spec 15.21).</summary>
+public sealed record BrokerDown
+{
+    /// <summary>
+    /// Whether another link of its identity took it over, MQTT 5's DISCONNECT of 0x8E: its
+    /// participant connects no more until its application starts it again.
+    /// </summary>
+    public bool IsTakenOver { get; init; }
+}
+
 /// <summary>
 /// One message an adapter received: the topic it came to, its payload, whether its broker kept it
 /// retained, and its acknowledgement, which its participant gives as it takes it (spec 15.19).
@@ -142,7 +152,8 @@ public sealed record BrokerMessageOptions
 /// One broker's client, as its participant takes it (spec 15.24): the identity its broker
 /// authenticates its link by; a link that keeps no broker session; publications said taken or
 /// refused; subscriptions said held; each message with the topic it came to and its
-/// acknowledgement; its link lost; the largest payload a message carries; the delivery it gives;
+/// acknowledgement; its link lost, and whether another link of its identity took it over; the
+/// largest payload a message to a topic carries, its inbox among them; the delivery it gives;
 /// whether its leg is secure; and what it offers besides. It depends on no part of Bead's but this
 /// contract, so a broker's library stays its adapter's.
 /// </summary>
@@ -163,14 +174,20 @@ public interface IBrokerAdapter
     /// <summary>Whether its leg is secure: its connection under TLS, its broker on the loopback, or in memory (spec 15.22).</summary>
     bool IsSecure { get; }
 
-    /// <summary>The largest payload a message to its own inbox carries whole: the receive bound its participant announces.</summary>
-    long ReceiveBound { get; }
+    /// <summary>
+    /// The largest payload a message to <paramref name="topic"/>, its own inbox, carries whole: the
+    /// receive bound its participant announces, asked once, as it is built.
+    /// </summary>
+    long ReceiveBound(IReadOnlyList<string> topic);
 
     /// <summary>Each message it received, in the order its broker handed them.</summary>
     event Action<BrokerMessage>? Message;
 
-    /// <summary>Its link lost: its participant closes each connection and starts it again.</summary>
-    event Action? Down;
+    /// <summary>
+    /// Its link down, once an incarnation: lost, its participant closes each connection and starts it
+    /// again; or taken over, and its participant connects no more until it is started again.
+    /// </summary>
+    event Action<BrokerDown>? Down;
 
     /// <summary>
     /// Connects a link that keeps no broker session, its will set where it offers one; settles once

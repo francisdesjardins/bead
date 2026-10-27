@@ -5,9 +5,11 @@
   the credential a broker's transport carries, its security and who may serve a name, in 15.22; a
   broker that paces no call, what waits for it, nothing retained, and the bounds of a participant and
   its server's transport, in 15.23; the adapter's contract and the in-memory broker, in 15.24; the
-  heartbeat of 15.21; what 13.4, 13.7 and 14.3's step 5 count of a broker; the broker cases of
+  heartbeat of 15.21, and its participant fenced once its link is taken over; the life the core
+  gives an OPEN, in 15.18, and a DATA that carries a credential, in 15.22; what 13.4, 13.7 and 14.3's step 5 count of a broker; the broker cases of
   [`spec/transports.json`](../../spec/transports.json) of a credential, security, notifications, a
-  transfer, a retained message, the heartbeat and a queue's overrun; the place
+  transfer, a retained message, the heartbeat, a queue's overrun, the lives a client asks and a
+  link taken over; the place
   `brokerParticipant.heartbeat` and the way `broker` of `transportClient.connectTimeout` in
   [`spec/durations.json`](../../spec/durations.json); the twins of the participant, the in-memory
   broker and the heartbeat. A credential's scheme is
@@ -62,11 +64,15 @@ The options weighed:
 **An adapter brings one broker's client and offers bytes at topics** (spec 15.24), the same members
 on both sides, name for name: its handles' type, `BROKER` in memory; the id its broker authenticates
 its link by; to start a link that keeps no broker session, with its will where it takes one; to
-subscribe a topic, alone or in a group, said held once its broker holds it; to let one go; to
-publish a payload to a topic, said taken once its broker took it, or as it goes at most once, or
-refused, `no-subscriber` where its broker says so; each message, with its topic, its payload and its
-acknowledgement; its link lost; the largest payload a message to a topic carries, and to its inbox;
-the delivery it gives; whether its leg is secure; and to end its link cleanly, so no will goes. It
+subscribe a topic, alone or in a group, said held once its broker holds it; to let one go, said let
+go once its broker did; to publish a payload to a topic, said taken once its broker took it, or as
+it goes at most once, or refused, `no-subscriber` where its broker says so; each message, with its
+topic, its payload and its acknowledgement; its link lost, and whether another link of its id took
+it over; the largest payload a message to a topic carries, asked by the topic, its inbox's among
+them, since a binding counts a topic in each message; the delivery it gives, at least once, its
+broker acknowledging each publication it took and the adapter itself, not its library, holding what
+it publishes to the quota its broker gives, or at most once; whether its leg is secure; and to end
+its link cleanly, so no will goes. It
 names its optional capabilities: `groups`, `will`, `noSubscriber` and `expiry`, a message's life in
 its broker; a name served by several participants needs `groups`. So a broker's library stays in its
 adapter, and the core depends on none.
@@ -79,7 +85,8 @@ none by default, past which a message is dropped as a full broker queue drops on
 it is given, at least once by default; `noSubscriber` refusals; expiry on its clock; wills published
 as a link is lost, never at a stop; and, on a test's word, the next message copied, held behind the
 one after it, dropped, or handed again to another member of its group, and a participant's link
-lost. It never leaves the process, so it is secure. A broker in memory is a broker, which repeats,
+lost, or taken over by another of its id, its subscriptions dropped and its will published as a
+real takeover's are. It never leaves the process, so it is secure. A broker in memory is a broker, which repeats,
 reorders and drops on purpose, and plays the conformance before any broker's binding.
 
 **Bead keeps its own credit, end to end** (spec 15.23): a paced subscription's notifications by
@@ -107,8 +114,24 @@ loopback as 13.4 judges a URL, or in memory; a client's `isSecure` follows its c
 call. So a bearer credential, a `JWT` or an `ELSEWHERE`, crosses only legs under TLS or within a
 machine ([RFC 6750 §5.3](https://www.rfc-editor.org/rfc/rfc6750#section-5.3)). The broker reads what
 crosses it, as a proxy that terminates TLS does, which is the deployment's trust; a credential waits
-in its broker's queue, so each binding sets a message's life on a DATA that carries one and states
-that a broker's persistence may hold it at rest.
+in its broker's queue, so the core gives the first part of a DATA that carries one a life in its
+broker, twice `heartbeat`, where its adapter offers `expiry`, so that it waits there no longer than
+a live connection may be silent, and each binding states that a broker's persistence may hold it at
+rest. An OPEN lives its connect's time left alike, so that one no participant took in time is
+deleted in its broker rather than taken late; no other parcel has a life, a parcel deleted unsent
+being a loss the heartbeat finds.
+
+**A server's transport serves by its broker's word**: it starts once its broker holds each name
+it serves, a name refused failing its start, and stops once it let each go; its gauge `names`
+counts a name from its broker's acknowledgement of the subscription to its acknowledgement of the
+unsubscription, MQTT's SUBACK and UNSUBACK.
+
+**A participant whose link is taken over is fenced** (spec 15.21): its adapter says its link went
+down for another link of its id, and the participant closes each connection, unclean, reports it,
+and connects no more until its application starts it again, so that two holders of one id never
+take each other over without end; the later link keeps the id. MQTT 5 says it by a DISCONNECT of
+0x8E, and its will is the link's Will of Delay 0
+([0041](0041-over-mqtt-5-a-participant-is-one-clean-link-and-a-parcel-one-publish-each-counted-to-its-byte.md)).
 
 **Who may serve a name is the broker's access control**, by the id it authenticates: a participant
 alone subscribes its inbox, its will alone writes its departure, the server's participants alone
@@ -146,9 +169,9 @@ vouches for, standing for an `ELSEWHERE`, which RabbitMQ's validated `user-id` w
 1.0 binding; and a relay that carries a subscription
 ([0019](0019-a-relay-terminates-each-leg-and-routes-nothing-past-it.md)).
 
-**No interop over the in-memory broker**: it joins no two processes, so the interop's rows over a
-broker stay at none until a binding brings a real broker to CI, a row of
-[`docs/support.md`](../support.md).
+**No interop over the in-memory broker**: it joins no two processes, so the interop over a broker
+is each binding's, against a real broker in CI, MQTT 5's first
+([0041](0041-over-mqtt-5-a-participant-is-one-clean-link-and-a-parcel-one-publish-each-counted-to-its-byte.md)), each a row of [`docs/support.md`](../support.md).
 
 **Its gates**: the broker cases of `spec/transports.json` of a request presenting `ELSEWHERE` with
 its DATA's credential and without, a client not secure by its acceptor's leg, a client refusing a

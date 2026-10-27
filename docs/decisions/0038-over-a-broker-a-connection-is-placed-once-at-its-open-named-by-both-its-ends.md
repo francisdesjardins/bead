@@ -8,6 +8,7 @@
   15.21; the address 15.1 hands over a broker; the broker cases of
   [`spec/transports.json`](../../spec/transports.json) of the open and the end, in both roles; the
   place `brokerTransportServer.acceptTimeout` of [`spec/durations.json`](../../spec/durations.json).
+  Each binding is in its own record, MQTT 5's [0041](0041-over-mqtt-5-a-participant-is-one-clean-link-and-a-parcel-one-publish-each-counted-to-its-byte.md).
   A parcel, its sequence and its parts are
   [0039](0039-a-brokers-transport-numbers-its-parcels-and-sends-an-envelope-in-parts-under-its-peers-bound.md)'s;
   the adapter, the pace, the credential and the heartbeat

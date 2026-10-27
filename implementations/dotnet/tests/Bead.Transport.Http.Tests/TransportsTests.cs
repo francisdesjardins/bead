@@ -94,7 +94,8 @@ public sealed class TransportsTests
     {
         foreach (var each in Root.GetProperty(entry.Group).EnumerateArray())
         {
-            if (NameOf(each) == entry.Name)
+            // * a case by its name among those this player plays: one over a broker may share it
+            if (NameOf(each) == entry.Name && (entry.Group != "cases" || IsPlayedHere(each)))
             {
                 return each;
             }
@@ -836,10 +837,14 @@ public sealed class TransportsTests
             return row.Data;
         }).ToHashSet();
 
-        // each case plays under its own name, whatever its transport
+        // each case plays under its own name over its transport: a broker's case and its twin over
+        // MQTT 5 share theirs, each looked up by both
         var every = Root.GetProperty("cases").EnumerateArray().ToList();
 
-        Assert.Equal(every.Count, every.Select(NameOf).Distinct().Count());
+        Assert.Equal(every.Count, every.Select((entry) =>
+        {
+            return (entry.GetProperty("transport").GetString(), NameOf(entry));
+        }).Distinct().Count());
         Assert.All(cases, (entry) =>
         {
             Assert.Equal(!IsExcused(entry), played.Contains(NameOf(entry)));

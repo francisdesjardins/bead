@@ -78,7 +78,9 @@ to one meaning of `advance`. The why of each rule is in the decisions:
   a broker's parcels, their sequences, copies and losses, and an envelope in parts, section 15;
 - [0040](../docs/decisions/0040-a-brokers-adapter-offers-bytes-at-topics-and-bead-keeps-its-own-credit-credential-and-heartbeat.md):
   a broker's adapter and the in-memory broker, and the credit, the credential and the heartbeat
-  Bead keeps over a broker, section 15.
+  Bead keeps over a broker, section 15;
+- [0041](../docs/decisions/0041-over-mqtt-5-a-participant-is-one-clean-link-and-a-parcel-one-publish-each-counted-to-its-byte.md):
+  MQTT 5's binding of a broker, section 15.
 
 **Version: 0.8.0**, of layout `0xA1`, its broker parcels of layout `0xB1`. Each of its
 conformance files repeats it as its `specVersion`, and follows its schema in
@@ -1840,7 +1842,10 @@ from it. An OPEN whose id and half name a connection it holds is a copy, dropped
 client's connect takes the first ACCEPT or REFUSE naming its half, within its time (section
 15.15): on a REFUSE it fails naming its status and reason (section 15.6); on an ACCEPT it opens,
 its connection named by both halves, and its client sends at once a PING of sequence 2 naming
-them. A broker that says nothing serves the name fails it at once. The server tells its router the
+them. A broker that says nothing serves the name fails it at once. Where its adapter offers a
+message's life, the OPEN lives in its broker its connect's time left (section 15.15), none when its
+time is without end, so that one no participant took in time is deleted there rather than taken
+late. The server tells its router the
 connection, drawing its handle (section 15.1), as it takes the client's first parcel naming both
 halves, which proves the client reads the inbox it named, and forgets a half-open connection,
 telling nothing, once `acceptTimeout` passes without it or a RESET names it. An ACCEPT of a
@@ -1860,7 +1865,8 @@ and resends nothing into a link that kept no session: its connection is lost, a 
 sent, its close unclean, and the side reports it, naming the sequence awaited and the one that
 came (section 15.1). So nothing overtakes on a connection: a cancel never comes before its
 request. An adapter delivers at least once, its broker acknowledging each publication it took and
-pacing its link, or at most once, acknowledging none; either holds within its broker's queue
+its adapter holding what it publishes to the quota its broker gives, or at most once, acknowledging
+none; either holds within its broker's queue
 alone, and a message its broker drops leaves a loss. A participant takes a message — hands it on,
 or drops it as a copy — before it acknowledges it to its broker, and acknowledges it then, never
 once its router is done with it. A participant whose application requires delivery at least once
@@ -1886,7 +1892,9 @@ router's limits are the same over every broker (section 12.2).
 15.21. A connection ends by a CLOSE, sequenced, once all before it was handed on, clean when its
 code is 1000 and unclean otherwise, its sender forgetting the connection as it sends it; or by a
 RESET, at once, unclean, whatever its order. A parcel of a pair its receiver does not hold is
-dropped in silence, but an ACCEPT, answered as section 15.18 says. Each end PINGs a connection once
+dropped in silence, but an ACCEPT, answered as section 15.18 says. A parcel its broker refuses, or
+says no subscriber takes, ends its connection, unclean, as a dropped socket does: its peer's inbox
+is gone. Each end PINGs a connection once
 nothing of it has come for `heartbeat` — 30 seconds by default, or never — and closes it with 4001
 when nothing of it has come by `heartbeat` after that PING; any parcel answers, and a PING waits
 behind what was sent before it. The heartbeat runs on the platform's clock, as a WebSocket's does
@@ -1894,7 +1902,11 @@ behind what was sent before it. The heartbeat runs on the platform's clock, as a
 participant draws an incarnation, 16 bytes from a cryptographic source; each connection is bound
 to its peer's. A participant whose link goes down closes each of its connections, unclean, and
 connects anew as another incarnation, its inbox and its names subscribed again before anything
-goes, then sends a RESET to each peer it held a connection with. A participant whose adapter leaves
+goes, then sends a RESET to each peer it held a connection with. A participant whose link its broker
+ends for another link of its id, a takeover, closes each of its connections, unclean, reports it,
+and connects no more until its application starts it again: its server's transports take no OPEN
+and its clients' connects fail, naming it, so that two holders of one id never take each other over
+without end; the later link keeps the id. A participant whose adapter leaves
 a will has its broker publish, once it loses the link without a clean end, a GONE of its
 incarnation to its departure; it subscribes the departure of each peer it holds a connection with
 while it holds one, and closes, unclean, each connection bound to the id and incarnation a GONE
@@ -1904,7 +1916,9 @@ that its broker publishes no will.
 
 15.22. A client's transport over a broker carries the credential a request presents, any field
 value (section 15.5), on the first part of the DATA that carries the request, toward its server
-alone; a server's carries none, and a client closes with 1002 a connection whose server's DATA
+alone; where its adapter offers a message's life, that part lives in its broker twice `heartbeat`,
+none when `heartbeat` is without end, so that a credential waits there no longer than a live
+connection may be silent; a server's carries none, and a client closes with 1002 a connection whose server's DATA
 carries one. A request presenting `ELSEWHERE` stands for what its DATA carried (section 9.2, step
 6), never for its broker's authentication of the participant that published it, which stands for
 no request. A broker's transport is secure while its own leg and its peer's are: its adapter's
@@ -1936,16 +1950,118 @@ and its server's transport hold these bounds, besides those of section 15.12 the
 15.24. An adapter brings one broker's client, and offers its participant: the identity its broker
 authenticates its link by; to start a link that keeps no broker session; to publish a payload to a
 topic, said taken or refused by its broker; to subscribe a topic, said held by its broker; each
-message it receives, with the topic it came to, and its acknowledgement; its link lost; the largest
-payload a message to a topic carries, and to its inbox; the delivery it gives, at least once or at
+message it receives, with the topic it came to, and its acknowledgement; its link lost, and whether
+another link of its identity took it over; the largest payload a message to a topic carries, its
+inbox among them; the delivery it gives, at least once or at
 most once; whether its leg is secure. It may offer besides a subscription in a group, its broker
 handing each message to one member; a will; a publication refused when no subscriber takes it; a
 message's life in its broker. A name served by several participants needs groups. Each side's core
 holds an in-memory broker that offers each of these: each message copied as it is published and
 handed on whole in a later turn than its publish, in the order its publisher published it to that
 topic, once, or, as a test asks, again, behind the next, never, or to another member of its group;
-a queue per subscriber bounded as it is given, past which a message is dropped; a link lost, its
-will published. Its handles' type is `BROKER`, and it never leaves the process, so it is secure.
+a queue per subscriber bounded as it is given, past which a message is dropped; a link lost or
+taken over, its will published. Its handles' type is `BROKER`, and it never leaves the process, so it is secure.
+
+### MQTT 5
+
+_Vectors: `mqttPublishBounds`._
+
+15.25. A broker of MQTT 5.0
+([OASIS MQTT 5.0](https://docs.oasis-open.org/mqtt/mqtt/v5.0/os/mqtt-v5.0-os.html)) carries a
+participant's link over TCP, over TLS, or over a WebSocket whose subprotocol is `mqtt`
+([MQTT 5.0 §6](https://docs.oasis-open.org/mqtt/mqtt/v5.0/os/mqtt-v5.0-os.html);
+[RFC 6455 §1.9](https://www.rfc-editor.org/rfc/rfc6455#section-1.9)); no other version of MQTT
+carries one. A parcel is the payload of one PUBLISH, and a topic its tokens joined by `/`: an inbox
+`<root>/i/<id>`, a server's name `<root>/s/<name>`, a departure `<root>/d/<id>`. A name served in a
+group is subscribed as the shared subscription `$share/<name>/<root>/s/<name>`, its share name the
+server's name, so that every participant serving it, whatever its side, joins one group. A broker
+whose CONNACK says Shared Subscription Available 0, or that answers a shared subscription with
+0x9E, offers no group: its adapter refuses one, and a name over it is served by one participant
+alone (section 15.18). Its connections' handles' type is `MQTT` (section 15.1).
+
+15.26. A participant's link is one network connection. Its CONNECT carries Protocol Version 5;
+Clean Start 1 and a Session Expiry Interval of 0, so that its broker keeps no session past it and
+each link is a new incarnation (section 15.21); its participant's id as its Client Identifier; the
+deployment's authentication, a User Name, the id, with a Password, or none where its TLS client
+certificate authenticates it; a Receive Maximum of 65,535; a Topic Alias Maximum of 0, so that its
+broker sends no alias; its `maximumPacketSize` as its Maximum Packet Size; its `keepAlive`, in whole
+seconds rounded up, as its Keep Alive. Where its adapter leaves a will, the will is its
+participant's GONE to its departure, of QoS 1, RETAIN 0 and a Will Delay Interval of 0, so that its
+broker publishes it as it sees the link close without a clean end, a takeover by another link of
+its Client Identifier among them. A link is up once its CONNACK's Reason Code is 0x00; any other
+fails its start, as do a Maximum QoS of 0 and no CONNACK within `connectTimeout`. It sends a packet
+within each Keep Alive in force, the Server Keep Alive its CONNACK names where it names one. A
+participant's stop ends its link with a DISCONNECT of Reason Code 0x00, so that no will goes. A
+DISCONNECT its broker sends of Reason Code 0x8E is its link taken over (section 15.21); any other
+end of its network connection is its link lost. Nothing of a link reaches another: no library
+reconnects it, subscribes again for it, holds what it publishes while it is down, or keeps its
+aliases, and what is asked of a link that is down is refused at once.
+
+15.27. A participant subscribes each topic in a SUBSCRIBE of its own, at QoS 1, No Local 0, Retain
+As Published 0 and Retain Handling 2, with no Subscription Identifier. A subscription is held once
+its SUBACK grants QoS 1, and refused on any other code, QoS 0 granted among them. A SUBACK says a
+subscription is installed, never that its subscriber may read what it matches: its broker's access
+control decides what it delivers (section 15.31). An UNSUBSCRIBE names the filter its SUBSCRIBE
+named, and a subscription is let go once its UNSUBACK came.
+
+15.28. A participant publishes each parcel in a PUBLISH of QoS 1 where its adapter delivers at least
+once, of QoS 0 where at most once, never of QoS 2; of RETAIN 0; with no Topic Alias, Response Topic,
+Correlation Data, User Property, Subscription Identifier, Payload Format Indicator or Content Type;
+and with a Message Expiry Interval on an OPEN and on a DATA that carries a credential alone, the
+life sections 15.18 and 15.22 give each, in whole seconds rounded up, 1 at least. It holds at most
+its CONNACK's Receive Maximum, 65,535 where it names none, of its PUBLISH packets of QoS 1
+unacknowledged, later ones waiting in their order, and delays no other packet for them
+([MQTT 5.0 §4.9](https://docs.oasis-open.org/mqtt/mqtt/v5.0/os/mqtt-v5.0-os.html)). A PUBLISH of
+QoS 1 is taken once its PUBACK came with a Reason Code under 0x80 but 0x10; 0x10, No matching
+subscribers, says no subscriber takes it; 0x80 or more refuses it. A publication whose packet,
+counted as section 15.30 counts it, would pass its CONNACK's Maximum Packet Size is refused as it is
+asked, and never sent.
+
+15.29. A participant acknowledges a PUBLISH of QoS 1 with a PUBACK of Reason Code 0x00 once its core
+took its parcel (section 15.19), never with one of 0x80 or more. It drops in silence, and
+acknowledges, a PUBLISH whose RETAIN is 1. A packet past its own Maximum Packet Size is a Protocol
+Error: it closes its network connection, its link lost
+([MQTT 5.0 §4.13.1](https://docs.oasis-open.org/mqtt/mqtt/v5.0/os/mqtt-v5.0-os.html)).
+
+15.30. A PUBLISH of N bytes of payload to a topic of T bytes in UTF-8 counts S = 1 + v(R) + R bytes,
+where R = 2 + T + Q + v(P) + P + N, Q is 2 at QoS 1 and 0 at QoS 0, P is 5 with a Message Expiry
+Interval and 0 without, and v(n), the bytes of a Variable Byte Integer, is 1 under 128, 2 under
+16,384, 3 under 2,097,152 and 4 otherwise
+([MQTT 5.0 §2.1.4, §3.3.2](https://docs.oasis-open.org/mqtt/mqtt/v5.0/os/mqtt-v5.0-os.html)). The
+largest payload a message to a topic carries within a Maximum Packet Size is the largest N whose S
+is within it and whose R is at most 268,435,455, counted with a Message Expiry Interval whatever the
+message. A participant's receive bound (section 15.18) is the largest payload of a message to its
+inbox within its own Maximum Packet Size; what its adapter publishes to a topic is held within its
+CONNACK's, or within 268,435,460 bytes where its CONNACK names none. Under its default
+`maximumPacketSize`, an inbox `bead/i/server` takes a payload of 16,777,188 bytes; under a Maximum
+Packet Size of 4,096, a message to `bead/i/peer` carries 4,072.
+
+| Bound               | By default | Bounds                                                                                                       |
+| ------------------- | ---------- | ------------------------------------------------------------------------------------------------------------ |
+| `maximumPacketSize` | 16,777,216 | its CONNECT's Maximum Packet Size, the largest packet its broker sends it                                    |
+| `keepAlive`         | 30 s       | its CONNECT's Keep Alive, 1 to 65,535 seconds: its broker counts its link lost silent for half again as long |
+| `connectTimeout`    | 30 s       | how long its start waits for its CONNACK                                                                     |
+
+Neither `keepAlive` nor `connectTimeout` is ever without end or 0, and a `keepAlive` past 65,535
+seconds is refused.
+
+15.31. A deployment's broker authenticates each participant's link, by a User Name and a Password or
+by a TLS client certificate, and MUST tie its Client Identifier to the identity it authenticated, so
+that no participant links as another, takes its link over and has its broker publish its will; it
+takes ids past the 1 to 23 characters of `0-9 a-z A-Z` every broker of MQTT 5.0 takes. Its access
+control, by that id, lets a participant alone read its inbox and its will alone write its
+departure; lets every participant write any inbox and read any departure; lets read a server's name
+only the participants its server's application runs, granted on the name's own topic
+`<root>/s/<name>`, through which its broker delivers the name's shared subscription; and lets write
+it only its clients. A publication to a topic whose every subscriber its access control forbids is
+taken all the same, its PUBACK 0x00, so a connect to a name no participant may read waits its time
+(section 15.15). A server's participant's queues in its broker are lifted, or hold
+`maximumConnections` × `maximumUnsentBytes` at least: a queue that overruns drops, and loses
+connections by their gaps (section 15.19). Its receive maximum toward a server's participant bounds
+what that participant publishes a round trip (section 15.28), and is sized for it. No participant
+writes a retained message and none reaches one: one left on a Bead topic is the deployment's to
+clear, and a broker that serves Bead alone MAY refuse them. A broker that persists what it holds may
+keep at rest, for its life, a credential a DATA carries (section 15.22).
 
 ## 16. Services and procedures
 
