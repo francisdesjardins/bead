@@ -3,6 +3,7 @@ syntax = "proto3";
 package bead.transcoding.tests;
 
 import "google/protobuf/field_mask.proto";
+import "google/protobuf/struct.proto";
 
 option csharp_namespace = "Bead.Transcoding.Tests.BindingFixtures";
 
@@ -19,5 +20,10 @@ message PatchProfile {
 
 message PatchRequest {
   PatchProfile profile = 1;
+  google.protobuf.FieldMask update_mask = 2;
+}
+
+message PatchStructRequest {
+  google.protobuf.Struct profile = 1;
   google.protobuf.FieldMask update_mask = 2;
 }

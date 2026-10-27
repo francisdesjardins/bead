@@ -1,12 +1,14 @@
-import { create } from '@bufbuild/protobuf';
-import { AnySchema } from '@bufbuild/protobuf/wkt';
+import { create, fromJsonString } from '@bufbuild/protobuf';
+import { AnySchema, FieldMaskSchema } from '@bufbuild/protobuf/wkt';
 import { expect, test } from '@playwright/test';
 import { ProgrammerError } from '../../transport/shared/errors';
 import { bindRequest, type IBindingOptions } from '../binding';
 import { JsonFormError, typeRegistryOf } from '../json-form';
 import {
   PatchRequestSchema,
+  PatchStructRequestSchema,
   type PatchRequest,
+  type PatchStructRequest,
 } from './binding-fixtures/generated/patch_binding_pb';
 import {
   EverythingSchema,
@@ -67,6 +69,24 @@ const refusalOf = (query: string): string | undefined => {
 };
 
 // tests
+
+test('keeps arbitrary Struct members out of an inferred PATCH mask', () => {
+  const registry = typeRegistryOf([PatchStructRequestSchema]);
+  for (const body of ['{}', '{"customKey":1}', '{"customKey":1,"other_key":{"nested":false}}']) {
+    const read = bindRequest(PatchStructRequestSchema, {
+      body: ENCODER.encode(body),
+      isPatch: true,
+      registry,
+      routeBody: 'profile',
+      variables: {},
+    }) as PatchStructRequest;
+
+    expect(read.profile).toEqual(
+      fromJsonString(PatchStructRequestSchema, `{"profile":${body}}`).profile
+    );
+    expect(read.updateMask).toEqual(create(FieldMaskSchema));
+  }
+});
 
 test('binds a path variable, the query and the body into one request, as http.proto’s rules state', () => {
   const read = getBook({

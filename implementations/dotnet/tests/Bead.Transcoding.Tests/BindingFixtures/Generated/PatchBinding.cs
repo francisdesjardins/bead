@@ -25,21 +25,25 @@ namespace Bead.Transcoding.Tests.BindingFixtures {
       byte[] descriptorData = global::System.Convert.FromBase64String(
           string.Concat(
             "ChNwYXRjaF9iaW5kaW5nLnByb3RvEhZiZWFkLnRyYW5zY29kaW5nLnRlc3Rz",
-            "GiBnb29nbGUvcHJvdG9idWYvZmllbGRfbWFzay5wcm90byLqAQoMUGF0Y2hQ",
-            "cm9maWxlEhQKDGRpc3BsYXlfbmFtZRgBIAEoCRI8Cg5uZXN0ZWRfcHJvZmls",
-            "ZRgCIAEoCzIkLmJlYWQudHJhbnNjb2RpbmcudGVzdHMuUGF0Y2hQcm9maWxl",
-            "EjsKDWVtcHR5X3Byb2ZpbGUYAyABKAsyJC5iZWFkLnRyYW5zY29kaW5nLnRl",
-            "c3RzLlBhdGNoUHJvZmlsZRIPCgVjb3VudBgEIAEoA0gAEhoKDHN0cmluZ19j",
-            "b3VudBgFIAEoA0ICMAFIABIPCgVsYWJlbBgGIAEoCUgAQgsKCXNlbGVjdGlv",
-            "biJ2CgxQYXRjaFJlcXVlc3QSNQoHcHJvZmlsZRgBIAEoCzIkLmJlYWQudHJh",
-            "bnNjb2RpbmcudGVzdHMuUGF0Y2hQcm9maWxlEi8KC3VwZGF0ZV9tYXNrGAIg",
-            "ASgLMhouZ29vZ2xlLnByb3RvYnVmLkZpZWxkTWFza0IpqgImQmVhZC5UcmFu",
-            "c2NvZGluZy5UZXN0cy5CaW5kaW5nRml4dHVyZXNiBnByb3RvMw=="));
+            "GiBnb29nbGUvcHJvdG9idWYvZmllbGRfbWFzay5wcm90bxocZ29vZ2xlL3By",
+            "b3RvYnVmL3N0cnVjdC5wcm90byLqAQoMUGF0Y2hQcm9maWxlEhQKDGRpc3Bs",
+            "YXlfbmFtZRgBIAEoCRI8Cg5uZXN0ZWRfcHJvZmlsZRgCIAEoCzIkLmJlYWQu",
+            "dHJhbnNjb2RpbmcudGVzdHMuUGF0Y2hQcm9maWxlEjsKDWVtcHR5X3Byb2Zp",
+            "bGUYAyABKAsyJC5iZWFkLnRyYW5zY29kaW5nLnRlc3RzLlBhdGNoUHJvZmls",
+            "ZRIPCgVjb3VudBgEIAEoA0gAEhoKDHN0cmluZ19jb3VudBgFIAEoA0ICMAFI",
+            "ABIPCgVsYWJlbBgGIAEoCUgAQgsKCXNlbGVjdGlvbiJ2CgxQYXRjaFJlcXVl",
+            "c3QSNQoHcHJvZmlsZRgBIAEoCzIkLmJlYWQudHJhbnNjb2RpbmcudGVzdHMu",
+            "UGF0Y2hQcm9maWxlEi8KC3VwZGF0ZV9tYXNrGAIgASgLMhouZ29vZ2xlLnBy",
+            "b3RvYnVmLkZpZWxkTWFzayJvChJQYXRjaFN0cnVjdFJlcXVlc3QSKAoHcHJv",
+            "ZmlsZRgBIAEoCzIXLmdvb2dsZS5wcm90b2J1Zi5TdHJ1Y3QSLwoLdXBkYXRl",
+            "X21hc2sYAiABKAsyGi5nb29nbGUucHJvdG9idWYuRmllbGRNYXNrQimqAiZC",
+            "ZWFkLlRyYW5zY29kaW5nLlRlc3RzLkJpbmRpbmdGaXh0dXJlc2IGcHJvdG8z"));
       descriptor = pbr::FileDescriptor.FromGeneratedCode(descriptorData,
-          new pbr::FileDescriptor[] { global::Google.Protobuf.WellKnownTypes.FieldMaskReflection.Descriptor, },
+          new pbr::FileDescriptor[] { global::Google.Protobuf.WellKnownTypes.FieldMaskReflection.Descriptor, global::Google.Protobuf.WellKnownTypes.StructReflection.Descriptor, },
           new pbr::GeneratedClrTypeInfo(null, null, new pbr::GeneratedClrTypeInfo[] {
             new pbr::GeneratedClrTypeInfo(typeof(global::Bead.Transcoding.Tests.BindingFixtures.PatchProfile), global::Bead.Transcoding.Tests.BindingFixtures.PatchProfile.Parser, new[]{ "DisplayName", "NestedProfile", "EmptyProfile", "Count", "StringCount", "Label" }, new[]{ "Selection" }, null, null, null),
-            new pbr::GeneratedClrTypeInfo(typeof(global::Bead.Transcoding.Tests.BindingFixtures.PatchRequest), global::Bead.Transcoding.Tests.BindingFixtures.PatchRequest.Parser, new[]{ "Profile", "UpdateMask" }, null, null, null, null)
+            new pbr::GeneratedClrTypeInfo(typeof(global::Bead.Transcoding.Tests.BindingFixtures.PatchRequest), global::Bead.Transcoding.Tests.BindingFixtures.PatchRequest.Parser, new[]{ "Profile", "UpdateMask" }, null, null, null, null),
+            new pbr::GeneratedClrTypeInfo(typeof(global::Bead.Transcoding.Tests.BindingFixtures.PatchStructRequest), global::Bead.Transcoding.Tests.BindingFixtures.PatchStructRequest.Parser, new[]{ "Profile", "UpdateMask" }, null, null, null, null)
           }));
     }
     #endregion
@@ -760,6 +764,259 @@ namespace Bead.Transcoding.Tests.BindingFixtures {
           case 10: {
             if (profile_ == null) {
               Profile = new global::Bead.Transcoding.Tests.BindingFixtures.PatchProfile();
+            }
+            input.ReadMessage(Profile);
+            break;
+          }
+          case 18: {
+            if (updateMask_ == null) {
+              UpdateMask = new global::Google.Protobuf.WellKnownTypes.FieldMask();
+            }
+            input.ReadMessage(UpdateMask);
+            break;
+          }
+        }
+      }
+    }
+    #endif
+
+  }
+
+  [global::System.Diagnostics.DebuggerDisplayAttribute("{ToString(),nq}")]
+  public sealed partial class PatchStructRequest : pb::IMessage<PatchStructRequest>
+  #if !GOOGLE_PROTOBUF_REFSTRUCT_COMPATIBILITY_MODE
+      , pb::IBufferMessage
+  #endif
+  {
+    private static readonly pb::MessageParser<PatchStructRequest> _parser = new pb::MessageParser<PatchStructRequest>(() => new PatchStructRequest());
+    private pb::UnknownFieldSet _unknownFields;
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public static pb::MessageParser<PatchStructRequest> Parser { get { return _parser; } }
+
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public static pbr::MessageDescriptor Descriptor {
+      get { return global::Bead.Transcoding.Tests.BindingFixtures.PatchBindingReflection.Descriptor.MessageTypes[2]; }
+    }
+
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    pbr::MessageDescriptor pb::IMessage.Descriptor {
+      get { return Descriptor; }
+    }
+
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public PatchStructRequest() {
+      OnConstruction();
+    }
+
+    partial void OnConstruction();
+
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public PatchStructRequest(PatchStructRequest other) : this() {
+      profile_ = other.profile_ != null ? other.profile_.Clone() : null;
+      updateMask_ = other.updateMask_ != null ? other.updateMask_.Clone() : null;
+      _unknownFields = pb::UnknownFieldSet.Clone(other._unknownFields);
+    }
+
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public PatchStructRequest Clone() {
+      return new PatchStructRequest(this);
+    }
+
+    /// <summary>Field number for the "profile" field.</summary>
+    public const int ProfileFieldNumber = 1;
+    private global::Google.Protobuf.WellKnownTypes.Struct profile_;
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public global::Google.Protobuf.WellKnownTypes.Struct Profile {
+      get { return profile_; }
+      set {
+        profile_ = value;
+      }
+    }
+
+    /// <summary>Field number for the "update_mask" field.</summary>
+    public const int UpdateMaskFieldNumber = 2;
+    private global::Google.Protobuf.WellKnownTypes.FieldMask updateMask_;
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public global::Google.Protobuf.WellKnownTypes.FieldMask UpdateMask {
+      get { return updateMask_; }
+      set {
+        updateMask_ = value;
+      }
+    }
+
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public override bool Equals(object other) {
+      return Equals(other as PatchStructRequest);
+    }
+
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public bool Equals(PatchStructRequest other) {
+      if (ReferenceEquals(other, null)) {
+        return false;
+      }
+      if (ReferenceEquals(other, this)) {
+        return true;
+      }
+      if (!object.Equals(Profile, other.Profile)) return false;
+      if (!object.Equals(UpdateMask, other.UpdateMask)) return false;
+      return Equals(_unknownFields, other._unknownFields);
+    }
+
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public override int GetHashCode() {
+      int hash = 1;
+      if (profile_ != null) hash ^= Profile.GetHashCode();
+      if (updateMask_ != null) hash ^= UpdateMask.GetHashCode();
+      if (_unknownFields != null) {
+        hash ^= _unknownFields.GetHashCode();
+      }
+      return hash;
+    }
+
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public override string ToString() {
+      return pb::JsonFormatter.ToDiagnosticString(this);
+    }
+
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public void WriteTo(pb::CodedOutputStream output) {
+    #if !GOOGLE_PROTOBUF_REFSTRUCT_COMPATIBILITY_MODE
+      output.WriteRawMessage(this);
+    #else
+      if (profile_ != null) {
+        output.WriteRawTag(10);
+        output.WriteMessage(Profile);
+      }
+      if (updateMask_ != null) {
+        output.WriteRawTag(18);
+        output.WriteMessage(UpdateMask);
+      }
+      if (_unknownFields != null) {
+        _unknownFields.WriteTo(output);
+      }
+    #endif
+    }
+
+    #if !GOOGLE_PROTOBUF_REFSTRUCT_COMPATIBILITY_MODE
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    void pb::IBufferMessage.InternalWriteTo(ref pb::WriteContext output) {
+      if (profile_ != null) {
+        output.WriteRawTag(10);
+        output.WriteMessage(Profile);
+      }
+      if (updateMask_ != null) {
+        output.WriteRawTag(18);
+        output.WriteMessage(UpdateMask);
+      }
+      if (_unknownFields != null) {
+        _unknownFields.WriteTo(ref output);
+      }
+    }
+    #endif
+
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public int CalculateSize() {
+      int size = 0;
+      if (profile_ != null) {
+        size += 1 + pb::CodedOutputStream.ComputeMessageSize(Profile);
+      }
+      if (updateMask_ != null) {
+        size += 1 + pb::CodedOutputStream.ComputeMessageSize(UpdateMask);
+      }
+      if (_unknownFields != null) {
+        size += _unknownFields.CalculateSize();
+      }
+      return size;
+    }
+
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public void MergeFrom(PatchStructRequest other) {
+      if (other == null) {
+        return;
+      }
+      if (other.profile_ != null) {
+        if (profile_ == null) {
+          Profile = new global::Google.Protobuf.WellKnownTypes.Struct();
+        }
+        Profile.MergeFrom(other.Profile);
+      }
+      if (other.updateMask_ != null) {
+        if (updateMask_ == null) {
+          UpdateMask = new global::Google.Protobuf.WellKnownTypes.FieldMask();
+        }
+        UpdateMask.MergeFrom(other.UpdateMask);
+      }
+      _unknownFields = pb::UnknownFieldSet.MergeFrom(_unknownFields, other._unknownFields);
+    }
+
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public void MergeFrom(pb::CodedInputStream input) {
+    #if !GOOGLE_PROTOBUF_REFSTRUCT_COMPATIBILITY_MODE
+      input.ReadRawMessage(this);
+    #else
+      uint tag;
+      while ((tag = input.ReadTag()) != 0) {
+      if ((tag & 7) == 4) {
+        // Abort on any end group tag.
+        return;
+      }
+      switch(tag) {
+          default:
+            _unknownFields = pb::UnknownFieldSet.MergeFieldFrom(_unknownFields, input);
+            break;
+          case 10: {
+            if (profile_ == null) {
+              Profile = new global::Google.Protobuf.WellKnownTypes.Struct();
+            }
+            input.ReadMessage(Profile);
+            break;
+          }
+          case 18: {
+            if (updateMask_ == null) {
+              UpdateMask = new global::Google.Protobuf.WellKnownTypes.FieldMask();
+            }
+            input.ReadMessage(UpdateMask);
+            break;
+          }
+        }
+      }
+    #endif
+    }
+
+    #if !GOOGLE_PROTOBUF_REFSTRUCT_COMPATIBILITY_MODE
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    void pb::IBufferMessage.InternalMergeFrom(ref pb::ParseContext input) {
+      uint tag;
+      while ((tag = input.ReadTag()) != 0) {
+      if ((tag & 7) == 4) {
+        // Abort on any end group tag.
+        return;
+      }
+      switch(tag) {
+          default:
+            _unknownFields = pb::UnknownFieldSet.MergeFieldFrom(_unknownFields, ref input);
+            break;
+          case 10: {
+            if (profile_ == null) {
+              Profile = new global::Google.Protobuf.WellKnownTypes.Struct();
             }
             input.ReadMessage(Profile);
             break;
