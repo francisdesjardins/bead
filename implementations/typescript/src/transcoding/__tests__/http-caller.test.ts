@@ -1220,3 +1220,87 @@ test('rejects empty responses with no required media type and releases their con
     expect(response.body).toBeNull();
   }
 });
+
+test('maps unmarked HTTP statuses without treating an intermediary as its gateway', async () => {
+  for (const [status, code] of [
+    [201, ProtocolCode.DESTINATION_LOST],
+    [204, ProtocolCode.DESTINATION_LOST],
+    [299, ProtocolCode.DESTINATION_LOST],
+    [300, ProtocolCode.DESTINATION_LOST],
+    [304, ProtocolCode.DESTINATION_LOST],
+    [399, ProtocolCode.DESTINATION_LOST],
+    [400, ProtocolCode.DESTINATION_LOST],
+    [401, ProtocolCode.SESSION_REQUIRED],
+    [403, ProtocolCode.ACCESS_DENIED],
+    [404, ProtocolCode.DESTINATION_UNREACHABLE],
+    [405, ProtocolCode.DESTINATION_LOST],
+    [408, ProtocolCode.DESTINATION_LOST],
+    [413, ProtocolCode.PAYLOAD_TOO_LARGE],
+    [415, ProtocolCode.DESTINATION_LOST],
+    [422, ProtocolCode.DESTINATION_LOST],
+    [429, ProtocolCode.CAPACITY_EXCEEDED],
+    [431, ProtocolCode.DESTINATION_LOST],
+    [500, ProtocolCode.DESTINATION_LOST],
+    [501, ProtocolCode.DESTINATION_LOST],
+    [502, ProtocolCode.DESTINATION_LOST],
+    [503, ProtocolCode.DESTINATION_UNREACHABLE],
+    [504, ProtocolCode.DESTINATION_LOST],
+    [599, ProtocolCode.DESTINATION_LOST],
+  ] as const) {
+    let sent = 0;
+    const client = new TranscodingHttpClient('http://localhost', {
+      fetch: () => {
+        sent += 1;
+        return Promise.resolve(new Response(null, { status, headers: { 'retry-after': '7' } }));
+      },
+    });
+    await expect(client.json(null)).rejects.toMatchObject({
+      code,
+      scope: FailureScope.PROTOCOL,
+      origin: 'peer',
+      detail: `the HTTP call answers ${String(status)}; Retry-After: 7`,
+    });
+    expect(sent).toBe(1);
+  }
+});
+
+test('refuses a stream failure with an invalid HTTP problem status and no Bead code', async () => {
+  for (const data of [
+    'null',
+    '{}',
+    '{"status":99}',
+    '{"status":600}',
+    '{"status":1.5}',
+    '{"status":"502"}',
+    '{"status":null}',
+  ]) {
+    let cancelled = 0;
+    let sent = 0;
+    const fetcher = stubOf(`event: failure\ndata: ${data}\n\n`, {
+      fragmented: true,
+      cancelled: () => {
+        cancelled += 1;
+      },
+    });
+    const client = new TranscodingHttpClient('http://localhost', {
+      fetch: (url, init) => {
+        sent += 1;
+        return fetcher(url, init);
+      },
+    });
+    const received: HTTPEvent<unknown, unknown>[] = [];
+    await expect(async () => {
+      for await (const event of client.subscribeWatch({})) {
+        received.push(event);
+      }
+    }).rejects.toMatchObject({
+      code: ProtocolCode.PAYLOAD_UNDECODABLE,
+      scope: FailureScope.PROTOCOL,
+      origin: 'local',
+      detail: 'the HTTP problem holds no Bead failure',
+    });
+    expect(received).toEqual([]);
+    expect(sent).toBe(1);
+    expect(cancelled).toBe(1);
+  }
+});

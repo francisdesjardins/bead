@@ -1015,6 +1015,77 @@ public sealed class HttpCallerTests
         }
     }
 
+    [Fact]
+    public async Task Maps_unmarked_HTTP_statuses_without_treating_an_intermediary_as_its_gateway()
+    {
+        foreach (var (status, code) in new[]
+        {
+            (201, ProtocolCode.DestinationLost), (204, ProtocolCode.DestinationLost),
+            (299, ProtocolCode.DestinationLost), (300, ProtocolCode.DestinationLost),
+            (304, ProtocolCode.DestinationLost), (399, ProtocolCode.DestinationLost),
+            (400, ProtocolCode.DestinationLost), (401, ProtocolCode.SessionRequired),
+            (403, ProtocolCode.AccessDenied), (404, ProtocolCode.DestinationUnreachable),
+            (405, ProtocolCode.DestinationLost), (408, ProtocolCode.DestinationLost),
+            (413, ProtocolCode.PayloadTooLarge), (415, ProtocolCode.DestinationLost),
+            (422, ProtocolCode.DestinationLost), (429, ProtocolCode.CapacityExceeded),
+            (431, ProtocolCode.DestinationLost), (500, ProtocolCode.DestinationLost),
+            (501, ProtocolCode.DestinationLost), (502, ProtocolCode.DestinationLost),
+            (503, ProtocolCode.DestinationUnreachable), (504, ProtocolCode.DestinationLost),
+            (599, ProtocolCode.DestinationLost),
+        })
+        {
+            var sent = 0;
+            var disposed = 0;
+            using var stream = new FragmentedStream([], () => { disposed++; });
+            using var handler = new StubHandler((request, _) =>
+            {
+                sent++;
+                var response = new HttpResponseMessage((HttpStatusCode)status) { RequestMessage = request, Content = new StreamContent(stream) };
+                response.Headers.TryAddWithoutValidation("retry-after", "7");
+                return Task.FromResult(response);
+            });
+            using var client = new TranscodingHttpClient(new Uri("http://localhost"), new HttpCallerOptions { Handler = handler });
+            var failed = await Assert.ThrowsAsync<FailureException>(() => { return client.Json(Json("null")); });
+            Assert.Equal((code, FailureScope.Protocol, FailureOrigin.Peer, $"the HTTP call answers {status}; Retry-After: 7"), ((ProtocolCode)failed.Code, failed.Scope, failed.Origin, failed.Detail));
+            Assert.Equal(1, sent);
+            Assert.True(disposed > 0);
+            Assert.False(stream.CanRead);
+        }
+    }
+
+    [Fact]
+    public async Task Refuses_a_stream_failure_with_an_invalid_HTTP_problem_status_and_no_Bead_code()
+    {
+        foreach (var data in new[] { "null", "{}", "{\"status\":99}", "{\"status\":600}", "{\"status\":1.5}", "{\"status\":\"502\"}", "{\"status\":null}" })
+        {
+            var disposed = 0;
+            var sent = 0;
+            using var stream = new FragmentedStream(Encoding.UTF8.GetBytes($"event: failure\ndata: {data}\n\n"), () => { disposed++; });
+            using var handler = new StubHandler((request, _) =>
+            {
+                sent++;
+                var content = new StreamContent(stream);
+                content.Headers.ContentType = new MediaTypeHeaderValue("text/event-stream");
+                return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { RequestMessage = request, Content = content });
+            });
+            using var client = new TranscodingHttpClient(new Uri("http://localhost"), new HttpCallerOptions { Handler = handler });
+            var received = 0;
+            var failed = await Assert.ThrowsAsync<FailureException>(async () =>
+            {
+                await foreach (var entry in client.SubscribeWatch(new Empty()))
+                {
+                    _ = entry;
+                    received++;
+                }
+            });
+            Assert.Equal((ProtocolCode.PayloadUndecodable, FailureScope.Protocol, FailureOrigin.Local, "the HTTP problem holds no Bead failure"), ((ProtocolCode)failed.Code, failed.Scope, failed.Origin, failed.Detail));
+            Assert.Equal(0, received);
+            Assert.Equal(1, sent);
+            Assert.True(disposed > 0);
+            Assert.False(stream.CanRead);
+        }
+    }
+
     private sealed class Wrapper : DelegatingHandler
     {
         public Wrapper(HttpMessageHandler inner) : base(inner)

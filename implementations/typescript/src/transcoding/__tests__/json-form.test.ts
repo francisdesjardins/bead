@@ -77,6 +77,23 @@ test('packs an Any with unset proto2 required fields and keeps explicit defaults
   }
 });
 
+test('reads and writes signed infinities and NaN in double and float fields', () => {
+  for (const [word, value] of [
+    ['Infinity', Infinity],
+    ['-Infinity', -Infinity],
+    ['NaN', NaN],
+  ] as const) {
+    const text = `{"aDouble":"${word}","aFloat":"${word}"}`;
+    const message = readEdges(text);
+    expect(message.aDouble).toBe(value);
+    expect(message.aFloat).toBe(value);
+    expect(writeProtoJson(EdgesSchema, { message, registry: REGISTRY })).toBe(
+      `{"aFloat":"${word}","aDouble":"${word}"}`
+    );
+    expect(fromBinary(EdgesSchema, toBinary(EdgesSchema, message))).toEqual(message);
+  }
+});
+
 // helpers
 
 const readEverything = (body: string): Everything => {
