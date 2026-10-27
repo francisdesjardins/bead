@@ -1454,11 +1454,15 @@ NUMBER_WORDS = ('one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 
 NUMBER = rf'\b(\d{{1,3}}(?:,\d{{3}})+|\d+|{"|".join(NUMBER_WORDS)})\b'
 
 # what a row cites, which counts nothing: a code span, a link's target, a unit of the spec or the companion,
-# or a protocol named by its version, MQTT 5
-CITED = re.compile(r'`[^`]*`|\]\([^)]*\)|§\s*[\d.]+(?:[–-][\d.]+)?|\b(?:spec|debugging) \d+(?:\.\d+)+|\bMQTT 5\b')
+# or a protocol named by its version, MQTT 5 or AMQP 1.0
+CITED = re.compile(r'`[^`]*`|\]\([^)]*\)|§\s*[\d.]+(?:[–-][\d.]+)?|\b(?:spec|debugging) \d+(?:\.\d+)+|\bMQTT 5\b'
+                   r'|\bAMQP 1\.0\b')
 
 # the transports a case is played over, each by the name a row gives it
-TRANSPORT_NAMES = {'http': 'HTTP', 'websocket': 'WebSocket', 'broker': 'the in-memory broker', 'mqtt': 'MQTT 5'}
+TRANSPORT_NAMES = {'http': 'HTTP', 'websocket': 'WebSocket', 'broker': 'the in-memory broker', 'mqtt': 'MQTT 5',
+                   'amqp': 'AMQP 1.0'}
+# the real brokers a binding's cases play over, by their transport, each counted by its roles
+REAL_BROKERS = {transport: TRANSPORT_NAMES[transport] for transport in ('mqtt', 'amqp')}
 
 
 def number_of(written):
@@ -1574,13 +1578,15 @@ COUNTS = {
             *[(1, rf'\b{{n}} over {name}\b', transport_counts.get(transport, 0), f'cases over {name}')
               for transport, name in TRANSPORT_NAMES.items()],
             # over a broker, the cases of each role, the server's unless a case says client, in memory
-            # and over MQTT 5
+            # and over each real broker
             *[(1, rf'\b{{n}} of a {role}\b', sum(case['transport'] == 'broker' and case.get('role', 'server') == role
                                               for case in named['transports']), f'broker cases of the {role} role')
               for role in ('server', 'client')],
-            *[(1, pattern, sum(case['transport'] == 'mqtt' and case.get('role', 'server') == role
-                               for case in named['transports']), f'cases of the {role} role over MQTT 5')
-              for role, pattern in (('server', r'over MQTT 5 \({n} and'), ('client', r'over MQTT 5 \([\d,]+ and {n}\)'))],
+            *[(1, pattern.replace('{name}', re.escape(name)),
+               sum(case['transport'] == transport and case.get('role', 'server') == role for case in named['transports']),
+               f'cases of the {role} role over {name}')
+              for transport, name in REAL_BROKERS.items()
+              for role, pattern in (('server', r'over {name} \({n} and'), ('client', r'over {name} \([\d,]+ and {n}\)'))],
             (1, r'\b{n} of them on the real clock', sum(bool(case.get('realTime')) for case in named['transports']),
              'cases marked realTime'),
             (1, r'\b{n} on the clock the server is given, advanced',

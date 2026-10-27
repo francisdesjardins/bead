@@ -251,7 +251,7 @@ export interface IBrokerAdapter {
   readonly id: string;
   /** Its leg under TLS, its broker on the loopback, or in memory (spec 15.22). */
   readonly isSecure: boolean;
-  /** Its connections' handles' type: `BROKER` in memory, `MQTT` over MQTT 5. */
+  /** Its connections' handles' type: `BROKER` in memory, `MQTT` over MQTT 5, `AMQP` over AMQP 1.0. */
   readonly type: TRANSPORTS;
   /** The largest payload a message it publishes to `topic` carries, its own bytes deducted. */
   maximumPayloadBytes(topic: BrokerTopic): number;

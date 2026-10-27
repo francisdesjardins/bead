@@ -15,7 +15,7 @@ internal sealed record BrokerCaseSetup(JsonElement Entry, SteppingClock Clock, S
 
 /// <summary>
 /// The broker a case of <c>spec/transports.json</c> over a broker plays against: the in-memory one
-/// of the core (transport <c>broker</c>), or a real one (transport <c>mqtt</c>). It makes the adapter
+/// of the core (transport <c>broker</c>), or a real one (transport <c>mqtt</c> or <c>amqp</c>). It makes the adapter
 /// of each participant a case names, the one under test among them, and does to a link what a step
 /// asks; the player does the rest alike over every broker.
 /// </summary>
@@ -48,6 +48,17 @@ internal interface IBrokerCaseBroker : IAsyncDisposable
 
     /// <summary>How long a copy of what was read may take to come after it: none in memory, where what is idle came.</summary>
     TimeSpan Settling { get; }
+
+    /// <summary>
+    /// Subscribes a peer of the client role to the server's name, so that it reads every OPEN to
+    /// it, as each subscriber of a topic does over a broker: the name itself, unless a broker's
+    /// name is a queue its consumers compete on, as AMQP 1.0's is, and then through a queue of the
+    /// peer's own, bound by the name.
+    /// </summary>
+    Task SubscribeName((IBrokerAdapter Peer, string Id, IReadOnlyList<string> Name) subscribing)
+    {
+        return subscribing.Peer.Subscribe(subscribing.Name);
+    }
 }
 
 /// <summary>
@@ -481,8 +492,13 @@ internal sealed class BrokerCasePlayer : IAsyncDisposable
 
                 if (player._isClient)
                 {
-                    await peer.Adapter.Subscribe([RootToken, "s", player.ServedName]);
-                    await peer.Adapter.Subscribe([RootToken, "d", "client"]);
+                    await player._broker.SubscribeName((peer.Adapter, id, [RootToken, "s", player.ServedName]));
+
+                    // * a departure where its broker leaves a will: AMQP 1.0's leaves none
+                    if ((peer.Adapter.Capabilities & BrokerCapabilities.Will) != 0)
+                    {
+                        await peer.Adapter.Subscribe([RootToken, "d", "client"]);
+                    }
                 }
             }
 

@@ -1,6 +1,11 @@
 <Project>
   <!-- One version per package, for every project, as `yarn constraints` holds one per dependency. -->
   <ItemGroup>
+    <!-- AMQP 1.0's client beneath Bead.Transport.Amqp, its automation turned off by its adapter (0043): its
+         netstandard package, Apache-2.0, on which RabbitMQ's own .NET client builds; pinned, since the
+         bytes of each message are its encoders', which spec/vectors.json's amqpMessages holds to the
+         profile at this version, and an upgrade that writes another encoding fails it -->
+    <PackageVersion Include="AMQPNetLite.Core" Version="2.5.4" />
     <PackageVersion Include="Google.Protobuf" Version="3.36.2" />
     <PackageVersion Include="Grpc.Tools" Version="2.84.0" />
     <PackageVersion Include="Microsoft.CodeAnalysis.BannedApiAnalyzers" Version="5.6.0" />

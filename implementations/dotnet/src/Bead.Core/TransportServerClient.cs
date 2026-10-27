@@ -30,6 +30,12 @@ public static class TransportTypes
     /// its third leg proved, by its peer participant's id and its rank.
     /// </summary>
     public const string Mqtt = "MQTT";
+
+    /// <summary>
+    /// Over a broker of AMQP 1.0 that is RabbitMQ 4 (spec 15.32): <c>type=AMQP;participant=…;ordinal=…</c>,
+    /// a connection its third leg proved, by its peer participant's id and its rank.
+    /// </summary>
+    public const string Amqp = "AMQP";
 }
 
 /// <summary>

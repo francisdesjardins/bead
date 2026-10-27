@@ -3820,6 +3820,253 @@
       ]
     },
     {
+      "id": "amqpBrokerAdapter.idleTimeout",
+      "name": "an AMQP 1.0 adapter's idle-time-out, which it counts its link lost by twice over",
+      "clauses": [
+        "1.4",
+        "15.37"
+      ],
+      "kind": "timeout",
+      "never": "refused",
+      "neverClause": "15.37",
+      "ways": [
+        {
+          "id": "options",
+          "name": "the adapter's options, as it is built"
+        }
+      ],
+      "observed": "refusal",
+      "outcomes": [
+        {
+          "input": "0",
+          "outcome": "refused",
+          "reason": "0 refused"
+        },
+        {
+          "input": "0.00001 ms, under a tick",
+          "outcome": "refused",
+          "reason": "under the floor",
+          "differs": [
+            {
+              "row": "A duration finer than a tick",
+              "language": "C#"
+            }
+          ]
+        },
+        {
+          "input": "half a millisecond",
+          "outcome": "refused",
+          "reason": "under the floor"
+        },
+        {
+          "input": "a millisecond",
+          "outcome": "taken"
+        },
+        {
+          "input": "1.4 ms",
+          "outcome": "taken"
+        },
+        {
+          "input": "1.5 ms",
+          "outcome": "taken"
+        },
+        {
+          "input": "2.5 ms",
+          "outcome": "taken"
+        },
+        {
+          "input": "0.41 s, as written",
+          "outcome": "taken"
+        },
+        {
+          "input": "2.01 s, as written",
+          "outcome": "taken"
+        },
+        {
+          "input": "the ceiling",
+          "outcome": "refused",
+          "reason": "past the ceiling"
+        },
+        {
+          "input": "0.00001 ms past the ceiling",
+          "outcome": "refused",
+          "reason": "past the ceiling"
+        },
+        {
+          "input": "0.4 ms past the ceiling",
+          "outcome": "refused",
+          "reason": "past the ceiling"
+        },
+        {
+          "input": "half a millisecond past the ceiling",
+          "outcome": "refused",
+          "reason": "past the ceiling"
+        },
+        {
+          "input": "never",
+          "outcome": "refused",
+          "reason": "never refused"
+        },
+        {
+          "input": "-2 ms",
+          "outcome": "refused",
+          "reason": "under the floor"
+        },
+        {
+          "input": "-1 ms",
+          "outcome": "refused",
+          "reason": "under the floor",
+          "differs": [
+            {
+              "row": "A duration of -1 ms",
+              "language": "C#"
+            }
+          ]
+        },
+        {
+          "input": "NaN",
+          "outcome": "refused",
+          "reason": "not a number"
+        },
+        {
+          "input": "\"1000\"",
+          "outcome": "refused",
+          "reason": "not a number"
+        },
+        {
+          "input": "true",
+          "outcome": "refused",
+          "reason": "not a number"
+        }
+      ]
+    },
+    {
+      "id": "amqpBrokerAdapter.connectTimeout",
+      "name": "how long an AMQP 1.0 adapter waits on its broker: its start, for its OPEN, its sessions and its inbox; its inbox's deletion; a name let go; and its stop",
+      "clauses": [
+        "1.4",
+        "15.37"
+      ],
+      "kind": "timeout",
+      "never": "refused",
+      "neverClause": "15.37",
+      "ways": [
+        {
+          "id": "options",
+          "name": "the adapter's options, as it is built"
+        }
+      ],
+      "observed": "refusal",
+      "outcomes": [
+        {
+          "input": "0",
+          "outcome": "refused",
+          "reason": "0 refused"
+        },
+        {
+          "input": "0.00001 ms, under a tick",
+          "outcome": "refused",
+          "reason": "under the floor",
+          "differs": [
+            {
+              "row": "A duration finer than a tick",
+              "language": "C#"
+            }
+          ]
+        },
+        {
+          "input": "half a millisecond",
+          "outcome": "refused",
+          "reason": "under the floor"
+        },
+        {
+          "input": "a millisecond",
+          "outcome": "taken"
+        },
+        {
+          "input": "1.4 ms",
+          "outcome": "taken"
+        },
+        {
+          "input": "1.5 ms",
+          "outcome": "taken"
+        },
+        {
+          "input": "2.5 ms",
+          "outcome": "taken"
+        },
+        {
+          "input": "0.41 s, as written",
+          "outcome": "taken"
+        },
+        {
+          "input": "2.01 s, as written",
+          "outcome": "taken"
+        },
+        {
+          "input": "the ceiling",
+          "outcome": "taken"
+        },
+        {
+          "input": "0.00001 ms past the ceiling",
+          "outcome": "refused",
+          "reason": "past the ceiling",
+          "differs": [
+            {
+              "row": "A duration finer than a tick",
+              "language": "C#"
+            }
+          ]
+        },
+        {
+          "input": "0.4 ms past the ceiling",
+          "outcome": "refused",
+          "reason": "past the ceiling"
+        },
+        {
+          "input": "half a millisecond past the ceiling",
+          "outcome": "refused",
+          "reason": "past the ceiling"
+        },
+        {
+          "input": "never",
+          "outcome": "refused",
+          "reason": "never refused"
+        },
+        {
+          "input": "-2 ms",
+          "outcome": "refused",
+          "reason": "under the floor"
+        },
+        {
+          "input": "-1 ms",
+          "outcome": "refused",
+          "reason": "under the floor",
+          "differs": [
+            {
+              "row": "A duration of -1 ms",
+              "language": "C#"
+            }
+          ]
+        },
+        {
+          "input": "NaN",
+          "outcome": "refused",
+          "reason": "not a number"
+        },
+        {
+          "input": "\"1000\"",
+          "outcome": "refused",
+          "reason": "not a number"
+        },
+        {
+          "input": "true",
+          "outcome": "refused",
+          "reason": "not a number"
+        }
+      ]
+    },
+    {
       "id": "transportClient.reconnectionDelay",
       "name": "a reconnection's delay",
       "clauses": [

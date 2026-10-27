@@ -1,0 +1,28 @@
+{
+  "version": 2,
+  "dependencies": {
+    "net10.0": {
+      "AMQPNetLite.Core": {
+        "type": "Direct",
+        "requested": "[2.5.4, )",
+        "resolved": "2.5.4",
+        "contentHash": "KWrULsIa7+1Dq8g8ULhQk/pyC916tqLTRTLOfVsjftD2k7WjUvGzgfut5u12u00a2k+FFo8nPnCLEEZpRYK2yA=="
+      },
+      "Microsoft.CodeAnalysis.BannedApiAnalyzers": {
+        "type": "Direct",
+        "requested": "[5.6.0, )",
+        "resolved": "5.6.0",
+        "contentHash": "Kcobt3pnOdO0A+6CKiMHZdTEluJpsfxiV20axtZdmfBQnDmiWTKPJADlgAfdTuKNAnVarrkJa0UEGwuOo91muw=="
+      },
+      "Microsoft.VisualStudio.Threading.Analyzers": {
+        "type": "Direct",
+        "requested": "[18.12.1, )",
+        "resolved": "18.12.1",
+        "contentHash": "sQt7NpnselT1gP1a7bTfhmfHYV0jbavst/8mOoWTMSjXhXzWPssqgBoIwrxNsgJUa7XQzD2raSRMAFfmlepxNw=="
+      },
+      "bead.core": {
+        "type": "Project"
+      }
+    }
+  }
+}

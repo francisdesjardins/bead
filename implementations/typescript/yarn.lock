@@ -337,11 +337,13 @@ __metadata:
     oxfmt: "npm:0.74.0"
     oxlint: "npm:^1.89.0"
     oxlint-tsgolint: "npm:7.0.2005"
+    rhea: "npm:3.0.5"
     typescript-7: "npm:typescript@7.0.2"
     ws: "npm:^8.22.0"
   peerDependencies:
     "@bufbuild/protobuf": ^2.13.0
     mqtt: ^5.16.1
+    rhea: ^3.0.5
   dependenciesMeta:
     "@bufbuild/buf":
       built: true
@@ -351,6 +353,8 @@ __metadata:
     "@bufbuild/protobuf":
       optional: true
     mqtt:
+      optional: true
+    rhea:
       optional: true
   languageName: unknown
   linkType: soft
@@ -1078,7 +1082,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"debug@npm:^4.3.4, debug@npm:^4.4.1, debug@npm:^4.4.3":
+"debug@npm:^4.3.3, debug@npm:^4.3.4, debug@npm:^4.4.1, debug@npm:^4.4.3":
   version: 4.4.3
   resolution: "debug@npm:4.4.3"
   dependencies:
@@ -1728,6 +1732,15 @@ __metadata:
   version: 1.4.1
   resolution: "rfdc@npm:1.4.1"
   checksum: 10c0/4614e4292356cafade0b6031527eea9bc90f2372a22c012313be1dcc69a3b90c7338158b414539be863fa95bfcb2ddcd0587be696841af4e6679d85e62c060c7
+  languageName: node
+  linkType: hard
+
+"rhea@npm:3.0.5":
+  version: 3.0.5
+  resolution: "rhea@npm:3.0.5"
+  dependencies:
+    debug: "npm:^4.3.3"
+  checksum: 10c0/7f53d68c239220992be393ce0a132668a39e34fce97bc4f9bf151e4a3e75c4b782bd7afb45a382bea1bc6897e1a6e883fa498f9b419a153ca0d8c4d19a8176d6
   languageName: node
   linkType: hard
 

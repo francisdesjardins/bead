@@ -3,11 +3,11 @@
 Bead is a binary wire protocol: the envelopes of a request, its result or failure, the notifications
 of a subscription and the commands a server sends back, written at fixed offsets. This project is
 its TypeScript implementation — a WebSocket, an HTTP, a Web Worker and an in-memory transport, each
-a client and a server, a broker's core over an in-memory broker and over MQTT 5, a server's
-transports joined into one, a client and a server router over
-them, the service, session and notification managers, the client and server that put the three
-layers together, the service layer a service is served and called through, and a gateway that
-answers its procedures over HTTP and JSON, beside the caller of the HTTP client beadc generates.
+a client and a server, a broker's core over an in-memory broker, over MQTT 5 and over AMQP 1.0,
+a server's transports joined into one, a client and a server router over them, the service,
+session and notification managers, the client and server that put the three layers together, the
+service layer a service is served and called through, and a gateway that answers its procedures
+over HTTP and JSON, beside the caller of the HTTP client beadc generates.
 Nothing in it imports a framework at run time. The specification and the conformance files both
 sides play are in [`spec/`](../../spec/).
 
@@ -1335,6 +1335,66 @@ name, loopback ports and a password drawn for the run: `node ../../tools/mqtt-br
 test:mqtt` runs the cases, the adapter's link over a WebSocket and the interop over MQTT 5 against
 it. Where `BEAD_MQTT_URL` names no broker, each is skipped, saying so; `BEAD_MQTT_REQUIRED=1` fails
 it instead. The adapter's own tests play a scripted MQTT 5 peer, and need none.
+
+#### AMQP 1.0 on RabbitMQ 4
+
+`amqp-broker-adapter`'s `createAmqpBrokerAdapter` binds a participant to a RabbitMQ 4 over AMQP 1.0
+(spec 15.32 to 15.38, decision 0043), over [rhea](https://github.com/amqp/rhea), which the package
+takes as an optional peer, `rhea@^3.0.5`: over TCP (`amqp://`) or TLS (`amqps://`), in Node alone,
+since no open-source RabbitMQ 4 carries AMQP 1.0 over a WebSocket; it refuses a `ws`/`wss` URL and a
+page, naming why.
+
+```ts
+const adapter = createAmqpBrokerAdapter({
+  id: 'server',
+  password: () => readPassword(),
+  url: 'amqps://broker.example:5671',
+});
+const participant = createBrokerParticipant({ adapter });
+const transport = participant.transportServer({ group: true, names: ['interop'] });
+
+await transport.start();
+```
+
+Each link is one fresh network connection, its OPEN's container-id the participant's id, its
+`hostname` `vhost:` and its `virtualHost` where one is given, its idle-time-out its `idleTimeout`, 30
+s by default, its link counted lost silent for twice it; authenticated by SASL PLAIN under its id, a
+password a string or asked at each link's start, or by SASL EXTERNAL under a TLS client certificate,
+`tls: { cert, key }`, over `amqps`. Its start waits `connectTimeout`, 30 s by default, for its
+broker's OPEN and its sessions, and its inbox's subscription as long for its declaration, its
+binding and its receiver. On it a session holds its inbox's receiver, one each name it serves, one
+sends to inboxes and one to names, each sender to the anonymous terminus; a name past what its
+broker's channel-max leaves is refused. Its inbox is a queue `<root>.i.<id>` declared exclusive,
+classic and not durable through RabbitMQ's management on that connection (`amqp-management`), then
+bound to its root's topic exchange by its name, so that it ends with the connection; a second link
+of its id is refused it while the first holds it. rhea reconnects nothing, recovers nothing and
+holds nothing while down: what is asked of a link that is down is refused at once.
+
+A name is its queue `<root>.s.<name>`, which the deployment provisions and every participant serving
+it consumes, the queue its group. Each receiver is unsettled, first, of no max-message-size, its
+credit its own: as it attaches, its inbox's `linkCredit`, 1,000 by default, and a name's 1, so that
+the name's queue hands each member one OPEN at a time; one more as each message is settled
+`accepted` once the core took it, never released nor modified. A name is let go within
+`connectTimeout`, what it handed on settled and its DETACH answered, or its link is lost; one asked
+again while its subscription is under way waits for it. A parcel is one message of
+the profile (`amqp-messages`, spec 15.35), written to its byte and sent pre-encoded through
+`/exchanges/<root>/<topic>`: a header only where the core asks a life, its ttl in milliseconds, its
+`to`, one Data section; refused past its sender's ATTACH max-message-size before it goes; held to its
+sender's credit, later ones waiting in their order. `accepted` is taken, `released` no subscriber,
+any other outcome refuses it. A message that is not one Data section, or whose payload passes its
+receive bound, the largest within `maximumMessageSize`, 16,777,216 bytes by default, is handed on as
+no parcel. The end of its connection, of its inbox's session or of its receiver is its link lost; a
+name's receiver its broker ends is attached again once, on a session of its own, and that refused,
+or the name lost again, is its link lost; a sending session that ends refuses what it held, its link
+kept. The deployment's half — its users, its topic exchange and names' queues, its permissions, its
+queues' bounds and its heartbeat — is spec 15.38's.
+
+`spec/transports.json`'s cases over AMQP 1.0 play against a RabbitMQ 4.4.0 of the run's own, which
+the root's [`tools/amqp-broker.mjs`](../../tools/amqp-broker.mjs) starts by its digest:
+`node ../../tools/amqp-broker.mjs run -- yarn test:amqp` runs the cases, the adapter's twins against
+it and the interop over AMQP 1.0. Where `BEAD_AMQP_URL` names no broker, each is skipped, saying
+so; `BEAD_AMQP_REQUIRED=1` fails it instead. The adapter's own tests play a scripted AMQP 1.0 peer
+over rhea's `container.listen`, and need none.
 
 ### HTTP/JSON transcoding, a gateway
 

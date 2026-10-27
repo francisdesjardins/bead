@@ -39,5 +39,7 @@
     <Compile Include="../Bead.Core.Tests/Vectors.cs" Link="Vectors.cs" />
     <!-- the clock the conformance files' harnesses give the side under test -->
     <Compile Include="../Shared/SteppingClock.cs" Link="SteppingClock.cs" />
+    <!-- the relay a case's lose cuts, as AMQP 1.0's cases take it -->
+    <Compile Include="../Shared/LinkRelay.cs" Link="LinkRelay.cs" />
   </ItemGroup>
 </Project>

@@ -48,6 +48,7 @@ import {
   createMemoryBroker,
   type IMemoryBrokerAdapter,
 } from '../../transport/shared/memory-broker';
+import { createAmqpBrokerAdapter } from '../../transport/shared/amqp-broker-adapter';
 import { createMqttBrokerAdapter } from '../../transport/shared/mqtt-broker-adapter';
 import { createFakeFetch } from '../../transport/client/__tests__/fake-fetch';
 import { createFakeWebSocket } from '../../transport/client/__tests__/fake-websocket';
@@ -1257,6 +1258,21 @@ const ofMqttAdapter = (name: 'connectTimeout' | 'keepAlive'): Way => {
   };
 };
 
+// an AMQP 1.0 adapter built with `name`: on its library's timers, so held to its refusal alone
+const ofAmqpAdapter = (name: 'connectTimeout' | 'idleTimeout'): Way => {
+  return (given) => {
+    const building = attempt(() => {
+      return createAmqpBrokerAdapter({
+        id: 'ada',
+        url: 'amqp://127.0.0.1:5672',
+        ...optionOf(name, given),
+      });
+    });
+
+    return Promise.resolve('refusal' in building ? { moved: [], refusal: building.refusal } : {});
+  };
+};
+
 // a broker server's half-open connection, its third leg never come: the due of its accept's timer
 const acceptTimeoutOfServer: Way = async (given) => {
   const clock = createTestClock();
@@ -1821,6 +1837,16 @@ const PLAYED: Readonly<Record<string, IPlayed>> = Object.freeze({
   'mqttBrokerAdapter.connectTimeout': {
     phrase: 'connectTimeout',
     ways: { options: ofMqttAdapter('connectTimeout') },
+  },
+  // ! an idle-time-out its library counts its link lost by twice over: its ceiling half a timer's
+  'amqpBrokerAdapter.idleTimeout': {
+    ceiling: 1_073_741_823,
+    phrase: 'idleTimeout',
+    ways: { options: ofAmqpAdapter('idleTimeout') },
+  },
+  'amqpBrokerAdapter.connectTimeout': {
+    phrase: 'connectTimeout',
+    ways: { options: ofAmqpAdapter('connectTimeout') },
   },
 });
 

@@ -451,6 +451,29 @@ places = [
         'ways': [way('options', "the adapter's options, as it is built")],
         'observed': 'refusal',
     },
+    # AMQP 1.0's adapter (spec 15.33, 15.37): its OPEN's idle-time-out and the wait for its broker's
+    # OPEN, its sessions and its inbox, each on its library's timer, so observed by its refusal alone;
+    # an idle-time-out is held to 1,073,741,823 ms, a ceiling of its own below 1.4's, since its library
+    # counts its link lost by twice it, which 2³¹ − 1 then still holds
+    {
+        'id': 'amqpBrokerAdapter.idleTimeout',
+        'name': "an AMQP 1.0 adapter's idle-time-out, which it counts its link lost by twice over",
+        'kind': 'timeout',
+        'never': 'refused',
+        'neverClause': '15.37',
+        'ways': [way('options', "the adapter's options, as it is built")],
+        'ceiling': {'milliseconds': 1_073_741_823, 'clause': '15.37'},
+        'observed': 'refusal',
+    },
+    {
+        'id': 'amqpBrokerAdapter.connectTimeout',
+        'name': "how long an AMQP 1.0 adapter waits on its broker: its start, for its OPEN, its sessions and its inbox; its inbox's deletion; a name let go; and its stop",
+        'kind': 'timeout',
+        'never': 'refused',
+        'neverClause': '15.37',
+        'ways': [way('options', "the adapter's options, as it is built")],
+        'observed': 'refusal',
+    },
     {
         'id': 'transportClient.reconnectionDelay',
         'name': "a reconnection's delay",

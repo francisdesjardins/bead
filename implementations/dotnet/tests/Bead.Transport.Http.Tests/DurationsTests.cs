@@ -1,5 +1,6 @@
 using Bead.Tests;
 using Bead.Transcoding.Http;
+using Bead.Transport.Amqp;
 using Bead.Transport.Mqtt;
 using Bead.Transport.WebSockets;
 
@@ -176,6 +177,14 @@ public sealed partial class DurationsTests
         ["mqttBrokerAdapter.connectTimeout"] = (nameof(MqttBrokerAdapterOptions.ConnectTimeout), new()
         {
             ["options"] = new(nameof(MqttBrokerAdapterOptions.ConnectTimeout), MqttConnectTimeoutByOptions),
+        }),
+        ["amqpBrokerAdapter.idleTimeout"] = (nameof(AmqpBrokerAdapterOptions.IdleTimeout), new()
+        {
+            ["options"] = new(nameof(AmqpBrokerAdapterOptions.IdleTimeout), IdleTimeoutByOptions),
+        }),
+        ["amqpBrokerAdapter.connectTimeout"] = (nameof(AmqpBrokerAdapterOptions.ConnectTimeout), new()
+        {
+            ["options"] = new(nameof(AmqpBrokerAdapterOptions.ConnectTimeout), AmqpConnectTimeoutByOptions),
         }),
     };
 

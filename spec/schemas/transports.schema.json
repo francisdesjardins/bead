@@ -51,9 +51,12 @@
     "brokers": {
       "description": "The real brokers the cases of a binding play against, by their transport.",
       "type": "object",
-      "required": ["mqtt"],
+      "required": ["mqtt", "amqp"],
       "additionalProperties": false,
-      "properties": { "mqtt": { "$ref": "#/$defs/mqttBroker" } }
+      "properties": {
+        "mqtt": { "$ref": "#/$defs/mqttBroker" },
+        "amqp": { "$ref": "#/$defs/amqpBroker" }
+      }
     }
   },
   "$defs": {
@@ -124,6 +127,33 @@
         "maximumPacketSize": { "type": "integer", "minimum": 1024, "maximum": 268435460 },
         "retainAvailable": { "type": "boolean" },
         "sharedSubscriptions": { "type": "boolean" },
+        "users": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/participant" }
+        }
+      }
+    },
+    "amqpBroker": {
+      "description": "The RabbitMQ the cases over AMQP 1.0 play against, which tools/amqp-broker.mjs starts for a run (spec 15.38): its max_message_size, the topic exchange named the root, the names whose queues it provisions, and the users every case names, each authenticated by the run's password, its user name its id.",
+      "type": "object",
+      "required": ["$comment", "maximumMessageSize", "exchange", "names", "users"],
+      "additionalProperties": false,
+      "properties": {
+        "$comment": { "$ref": "common.schema.json#/$defs/comment" },
+        "maximumMessageSize": { "type": "integer", "minimum": 1024, "maximum": 536870912 },
+        "exchange": {
+          "description": "The root, which names its topic exchange (spec 15.32).",
+          "$ref": "#/$defs/token"
+        },
+        "names": {
+          "description": "The server's names whose queues it provisions, each bound to the exchange by its own name.",
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/token" }
+        },
         "users": {
           "type": "array",
           "minItems": 1,
@@ -207,7 +237,7 @@
       "properties": {
         "name": { "$ref": "common.schema.json#/$defs/name" },
         "clauses": { "$ref": "common.schema.json#/$defs/clauses" },
-        "transport": { "enum": ["http", "websocket", "broker", "mqtt"] },
+        "transport": { "enum": ["http", "websocket", "broker", "mqtt", "amqp"] },
         "limits": { "$ref": "conversations.schema.json#/$defs/limits" },
         "answersPings": {
           "description": "false for a peer that leaves the server's pings unanswered; its pings are answered otherwise.",
@@ -239,7 +269,7 @@
         {
           "if": {
             "required": ["transport"],
-            "properties": { "transport": { "enum": ["broker", "mqtt"] } }
+            "properties": { "transport": { "enum": ["broker", "mqtt", "amqp"] } }
           },
           "then": { "properties": { "steps": { "items": { "$ref": "#/$defs/brokerStep" } } } },
           "else": {

@@ -2,20 +2,23 @@ using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Text.Json;
 using Bead.Tests;
+using Bead.Transport.Amqp;
+using Bead.Transport.Amqp.Tests;
 using Bead.Transport.Http;
 using Bead.Transport.Mqtt;
 using Bead.Transport.Mqtt.Tests;
 using Bead.Transport.WebSockets;
 
 // ! one TypeScript server for every class: two would each link as ts-server over MQTT 5, and the
-// later would take the former over, which then connects no more (spec 15.21)
+// later would take the former over, which then connects no more (spec 15.21); over AMQP 1.0 the
+// later would be refused while the former holds its inbox (spec 15.33)
 [assembly: AssemblyFixture(typeof(Bead.Interop.Tests.InteropTests.TypeScriptServer))]
 
 namespace Bead.Interop.Tests;
 
 /// <summary>
 /// Bead's C# client against the TypeScript server of the interop service, over WebSocket, over
-/// HTTP and over MQTT 5: the same procedures, the same failures, the same cancel, and a command the
+/// HTTP, over MQTT 5 and over AMQP 1.0: the same procedures, the same failures, the same cancel, and a command the
 /// server asks. It starts the TypeScript server with Node: it runs wherever Node and the TypeScript
 /// side are installed, and is skipped, saying so, where they are not — unless
 /// <c>BEAD_INTEROP_REQUIRED=1</c> asks for it, and then it fails, saying so: a path to the other side
@@ -23,9 +26,10 @@ namespace Bead.Interop.Tests;
 /// tools/mqtt-broker.mjs run -- dotnet test</c>), its participant <c>cs-client</c> calls
 /// <c>interop-ts</c>, and <c>interop-both</c>, which a C# server of its own serves in one group with
 /// the TypeScript one; where none is given, those cases are skipped, saying so, or fail where
-/// <c>BEAD_MQTT_REQUIRED=1</c>.
+/// <c>BEAD_MQTT_REQUIRED=1</c>. Over AMQP 1.0 alike, where <c>BEAD_AMQP_URL</c> names a RabbitMQ
+/// (<c>node tools/amqp-broker.mjs run -- dotnet test</c>), or fail where <c>BEAD_AMQP_REQUIRED=1</c>.
 /// </summary>
-public sealed class InteropTests(InteropTests.TypeScriptServer server, InteropTests.MqttSide mqtt) : IClassFixture<InteropTests.MqttSide>
+public sealed class InteropTests(InteropTests.TypeScriptServer server, InteropTests.MqttSide mqtt, InteropTests.AmqpSide amqp) : IClassFixture<InteropTests.MqttSide>, IClassFixture<InteropTests.AmqpSide>
 {
     // constants
 
@@ -37,8 +41,10 @@ public sealed class InteropTests(InteropTests.TypeScriptServer server, InteropTe
     private const string WebSocket = "WebSocket";
     private const string Http = "HTTP";
     private const string Mqtt = "MQTT";
+    private const string Amqp = "AMQP";
 
     private const string NoBroker = MqttFixture.Reason;
+    private const string NoAmqpBroker = AmqpFixture.Reason;
 
     // asked once: whether Node answers, and the TypeScript side it starts the server from is installed
     private static readonly Lazy<bool> CanStartTypeScript = new(() =>
@@ -88,6 +94,15 @@ public sealed class InteropTests(InteropTests.TypeScriptServer server, InteropTe
         get
         {
             return IsInterop && MqttFixture.IsGiven;
+        }
+    }
+
+    /// <summary>Whether the interop runs over AMQP 1.0: it runs, and a RabbitMQ is given, or asked for.</summary>
+    public static bool IsAmqpInterop
+    {
+        get
+        {
+            return IsInterop && AmqpFixture.IsGiven;
         }
     }
 
@@ -167,9 +182,9 @@ public sealed class InteropTests(InteropTests.TypeScriptServer server, InteropTe
     {
         var (port, httpPort, _) = await server.Ports();
 
-        if (transport == Mqtt)
+        if (transport is Mqtt or Amqp)
         {
-            var link = await mqtt.Linked();
+            var link = await LinkedOver(transport);
             var broker = new BrokerClient(link.Participant.Client());
 
             await broker.Transport.Connect(new BrokerConnectOptions { Server = "interop-ts" }, Cancelled);
@@ -204,6 +219,7 @@ public sealed class InteropTests(InteropTests.TypeScriptServer server, InteropTe
     [InlineData(WebSocket)]
     [InlineData(Http)]
     [InlineData(Mqtt, Skip = NoBroker, SkipUnless = nameof(IsMqttInterop), Traits = ["transport", "MQTT"])]
+    [InlineData(Amqp, Skip = NoAmqpBroker, SkipUnless = nameof(IsAmqpInterop), Traits = ["transport", "AMQP"])]
     public async Task Echo_and_bytes_answer_as_the_service_says(string transport)
     {
         await using var client = await ConnectedOver(transport);
@@ -217,6 +233,7 @@ public sealed class InteropTests(InteropTests.TypeScriptServer server, InteropTe
     [InlineData(WebSocket)]
     [InlineData(Http)]
     [InlineData(Mqtt, Skip = NoBroker, SkipUnless = nameof(IsMqttInterop), Traits = ["transport", "MQTT"])]
+    [InlineData(Amqp, Skip = NoAmqpBroker, SkipUnless = nameof(IsAmqpInterop), Traits = ["transport", "AMQP"])]
     public async Task A_value_outside_ASCII_its_members_in_another_order_echoed_equal(string transport)
     {
         await using var client = await ConnectedOver(transport);
@@ -231,6 +248,7 @@ public sealed class InteropTests(InteropTests.TypeScriptServer server, InteropTe
     [Theory(Skip = Reason, SkipUnless = nameof(IsInterop))]
     [InlineData(WebSocket)]
     [InlineData(Mqtt, Skip = NoBroker, SkipUnless = nameof(IsMqttInterop), Traits = ["transport", "MQTT"])]
+    [InlineData(Amqp, Skip = NoAmqpBroker, SkipUnless = nameof(IsAmqpInterop), Traits = ["transport", "AMQP"])]
     public async Task A_payload_that_goes_as_a_transfer_comes_back_as_one_and_so_does_a_result_too_large_for_one_envelope(string transport)
     {
         await using var client = await ConnectedOver(transport);
@@ -248,6 +266,7 @@ public sealed class InteropTests(InteropTests.TypeScriptServer server, InteropTe
     [InlineData(WebSocket)]
     [InlineData(Http)]
     [InlineData(Mqtt, Skip = NoBroker, SkipUnless = nameof(IsMqttInterop), Traits = ["transport", "MQTT"])]
+    [InlineData(Amqp, Skip = NoAmqpBroker, SkipUnless = nameof(IsAmqpInterop), Traits = ["transport", "AMQP"])]
     public async Task Fail_answers_with_its_own_failure_raised_by_the_server(string transport)
     {
         await using var client = await ConnectedOver(transport);
@@ -268,6 +287,7 @@ public sealed class InteropTests(InteropTests.TypeScriptServer server, InteropTe
     [InlineData(WebSocket)]
     [InlineData(Http)]
     [InlineData(Mqtt, Skip = NoBroker, SkipUnless = nameof(IsMqttInterop), Traits = ["transport", "MQTT"])]
+    [InlineData(Amqp, Skip = NoAmqpBroker, SkipUnless = nameof(IsAmqpInterop), Traits = ["transport", "AMQP"])]
     public async Task Refuses_what_the_protocol_refuses(string transport)
     {
         await using var client = await ConnectedOver(transport);
@@ -298,6 +318,7 @@ public sealed class InteropTests(InteropTests.TypeScriptServer server, InteropTe
     [InlineData(WebSocket)]
     [InlineData(Http)]
     [InlineData(Mqtt, Skip = NoBroker, SkipUnless = nameof(IsMqttInterop), Traits = ["transport", "MQTT"])]
+    [InlineData(Amqp, Skip = NoAmqpBroker, SkipUnless = nameof(IsAmqpInterop), Traits = ["transport", "AMQP"])]
     public async Task A_request_its_rules_refuse_is_answered_PAYLOAD_INVALID_its_violations_in_its_detail(string transport)
     {
         await using var client = await ConnectedOver(transport);
@@ -322,6 +343,7 @@ public sealed class InteropTests(InteropTests.TypeScriptServer server, InteropTe
     [InlineData(WebSocket)]
     [InlineData(Http)]
     [InlineData(Mqtt, Skip = NoBroker, SkipUnless = nameof(IsMqttInterop), Traits = ["transport", "MQTT"])]
+    [InlineData(Amqp, Skip = NoAmqpBroker, SkipUnless = nameof(IsAmqpInterop), Traits = ["transport", "AMQP"])]
     public async Task Checked_answers_the_count_of_the_names_its_rules_take(string transport)
     {
         await using var client = await ConnectedOver(transport);
@@ -333,6 +355,7 @@ public sealed class InteropTests(InteropTests.TypeScriptServer server, InteropTe
     [InlineData(WebSocket)]
     [InlineData(Http)]
     [InlineData(Mqtt, Skip = NoBroker, SkipUnless = nameof(IsMqttInterop), Traits = ["transport", "MQTT"])]
+    [InlineData(Amqp, Skip = NoAmqpBroker, SkipUnless = nameof(IsAmqpInterop), Traits = ["transport", "AMQP"])]
     public async Task A_call_cancelled_by_its_token_is_cancelled_at_the_server_too(string transport)
     {
         await using var client = await ConnectedOver(transport);
@@ -354,6 +377,7 @@ public sealed class InteropTests(InteropTests.TypeScriptServer server, InteropTe
     [InlineData(WebSocket)]
     [InlineData(Http)]
     [InlineData(Mqtt, Skip = NoBroker, SkipUnless = nameof(IsMqttInterop), Traits = ["transport", "MQTT"])]
+    [InlineData(Amqp, Skip = NoAmqpBroker, SkipUnless = nameof(IsAmqpInterop), Traits = ["transport", "AMQP"])]
     public async Task A_call_past_its_timeout_is_cancelled_at_the_server_too(string transport)
     {
         await using var client = await ConnectedOver(transport);
@@ -370,6 +394,7 @@ public sealed class InteropTests(InteropTests.TypeScriptServer server, InteropTe
     [InlineData(WebSocket)]
     [InlineData(Http)]
     [InlineData(Mqtt, Skip = NoBroker, SkipUnless = nameof(IsMqttInterop), Traits = ["transport", "MQTT"])]
+    [InlineData(Amqp, Skip = NoAmqpBroker, SkipUnless = nameof(IsAmqpInterop), Traits = ["transport", "AMQP"])]
     public async Task Answers_the_command_the_server_asks(string transport)
     {
         await using var client = await ConnectedOver(transport);
@@ -383,6 +408,7 @@ public sealed class InteropTests(InteropTests.TypeScriptServer server, InteropTe
     [InlineData(WebSocket)]
     [InlineData(Http)]
     [InlineData(Mqtt, Skip = NoBroker, SkipUnless = nameof(IsMqttInterop), Traits = ["transport", "MQTT"])]
+    [InlineData(Amqp, Skip = NoAmqpBroker, SkipUnless = nameof(IsAmqpInterop), Traits = ["transport", "AMQP"])]
     public async Task An_unpaced_subscription_hears_each_tick(string transport)
     {
         await using var client = await ConnectedOver(transport);
@@ -408,6 +434,7 @@ public sealed class InteropTests(InteropTests.TypeScriptServer server, InteropTe
     [InlineData(WebSocket)]
     [InlineData(Http)]
     [InlineData(Mqtt, Skip = NoBroker, SkipUnless = nameof(IsMqttInterop), Traits = ["transport", "MQTT"])]
+    [InlineData(Amqp, Skip = NoAmqpBroker, SkipUnless = nameof(IsAmqpInterop), Traits = ["transport", "AMQP"])]
     public async Task A_paced_subscription_waits_for_its_callback_to_settle_before_the_next_comes(string transport)
     {
         await using var client = await ConnectedOver(transport);
@@ -440,6 +467,7 @@ public sealed class InteropTests(InteropTests.TypeScriptServer server, InteropTe
     [InlineData(WebSocket)]
     [InlineData(Http)]
     [InlineData(Mqtt, Skip = NoBroker, SkipUnless = nameof(IsMqttInterop), Traits = ["transport", "MQTT"])]
+    [InlineData(Amqp, Skip = NoAmqpBroker, SkipUnless = nameof(IsAmqpInterop), Traits = ["transport", "AMQP"])]
     public async Task Learns_a_session_opened_from_its_answer_and_its_end_too(string transport)
     {
         await using var client = await ConnectedOver(transport);
@@ -461,6 +489,7 @@ public sealed class InteropTests(InteropTests.TypeScriptServer server, InteropTe
     [InlineData(WebSocket)]
     [InlineData(Http)]
     [InlineData(Mqtt, Skip = NoBroker, SkipUnless = nameof(IsMqttInterop), Traits = ["transport", "MQTT"])]
+    [InlineData(Amqp, Skip = NoAmqpBroker, SkipUnless = nameof(IsAmqpInterop), Traits = ["transport", "AMQP"])]
     public async Task A_call_presenting_the_session_it_learned_runs_in_it_the_session_opened_anew_presented_anew_and_none_presented_once_it_ended(string transport)
     {
         await using var client = await ConnectedOver(transport);
@@ -498,6 +527,7 @@ public sealed class InteropTests(InteropTests.TypeScriptServer server, InteropTe
     [InlineData(WebSocket)]
     [InlineData(Http)]
     [InlineData(Mqtt, Skip = NoBroker, SkipUnless = nameof(IsMqttInterop), Traits = ["transport", "MQTT"])]
+    [InlineData(Amqp, Skip = NoAmqpBroker, SkipUnless = nameof(IsAmqpInterop), Traits = ["transport", "AMQP"])]
     public async Task Login_and_register_hold_a_duration_as_section_1_4_does_a_fraction_rounded_one_under_a_millisecond_or_past_2_31_minus_1_refused_with_PROCEDURE_FAILED_nothing_opened_or_registered(string transport)
     {
         await using var client = await ConnectedOver(transport);
@@ -547,6 +577,7 @@ public sealed class InteropTests(InteropTests.TypeScriptServer server, InteropTe
     [InlineData(WebSocket)]
     [InlineData(Http)]
     [InlineData(Mqtt, Skip = NoBroker, SkipUnless = nameof(IsMqttInterop), Traits = ["transport", "MQTT"])]
+    [InlineData(Amqp, Skip = NoAmqpBroker, SkipUnless = nameof(IsAmqpInterop), Traits = ["transport", "AMQP"])]
     public async Task A_JWT_presented_by_default_runs_in_its_credential_s_session_whoami_answers_its_sub_and_logout_is_refused_ACCESS_DENIED(string transport)
     {
         await using var client = await ConnectedOver(transport);
@@ -599,6 +630,7 @@ public sealed class InteropTests(InteropTests.TypeScriptServer server, InteropTe
     [InlineData(WebSocket)]
     [InlineData(Http)]
     [InlineData(Mqtt, Skip = NoBroker, SkipUnless = nameof(IsMqttInterop), Traits = ["transport", "MQTT"])]
+    [InlineData(Amqp, Skip = NoAmqpBroker, SkipUnless = nameof(IsAmqpInterop), Traits = ["transport", "AMQP"])]
     public async Task An_ELSEWHERE_goes_in_each_POST_s_Authorization_over_HTTP_and_in_its_upgrade_s_over_a_WebSocket_whoami_answers_the_sub_it_names(string transport)
     {
         if (transport == WebSocket)
@@ -637,13 +669,14 @@ public sealed class InteropTests(InteropTests.TypeScriptServer server, InteropTe
 
     // * what a broker alone has (spec 15.18 to 15.21, 15.25 to 15.31)
 
-    [Fact(Skip = NoBroker, SkipUnless = nameof(IsMqttInterop))]
-    [Trait("transport", "MQTT")]
-    public async Task A_name_served_by_two_in_one_group_answers_each_of_sixteen_connections_and_no_OPEN_reaches_both()
+    [Theory]
+    [InlineData(Mqtt, Skip = NoBroker, SkipUnless = nameof(IsMqttInterop), Traits = ["transport", "MQTT"])]
+    [InlineData(Amqp, Skip = NoAmqpBroker, SkipUnless = nameof(IsAmqpInterop), Traits = ["transport", "AMQP"])]
+    public async Task A_name_served_by_two_in_one_group_answers_each_of_sixteen_connections_and_no_OPEN_reaches_both(string transport)
     {
         await server.Ports();
 
-        var link = await mqtt.Linked();
+        var link = await LinkedOver(transport);
         var before = link.Adapter.AcceptedTwice;
 
         for (var index = 0; index < 16; index += 1)
@@ -659,12 +692,13 @@ public sealed class InteropTests(InteropTests.TypeScriptServer server, InteropTe
         Assert.Equal(0, link.Adapter.AcceptedTwice - before);
     }
 
-    [Fact(Skip = NoBroker, SkipUnless = nameof(IsMqttInterop))]
-    [Trait("transport", "MQTT")]
-    public async Task A_parcel_its_broker_delivers_twice_is_answered_once()
+    [Theory]
+    [InlineData(Mqtt, Skip = NoBroker, SkipUnless = nameof(IsMqttInterop), Traits = ["transport", "MQTT"])]
+    [InlineData(Amqp, Skip = NoAmqpBroker, SkipUnless = nameof(IsAmqpInterop), Traits = ["transport", "AMQP"])]
+    public async Task A_parcel_its_broker_delivers_twice_is_answered_once(string transport)
     {
-        await using var client = await ConnectedOver(Mqtt);
-        var link = await mqtt.Linked();
+        await using var client = await ConnectedOver(transport);
+        var link = await LinkedOver(transport);
 
         link.Adapter.IsCopying = true;
 
@@ -690,13 +724,14 @@ public sealed class InteropTests(InteropTests.TypeScriptServer server, InteropTe
         Assert.True((await client.Interop.Echo(JsonOf($"\"{text}\""))().WaitAsync(Patience, Cancelled)).GetString() == text);
     }
 
-    [Fact(Skip = NoBroker, SkipUnless = nameof(IsMqttInterop))]
-    [Trait("transport", "MQTT")]
-    public async Task A_link_cut_at_its_relay_closes_its_connection_unclean_as_a_dropped_socket_does()
+    [Theory]
+    [InlineData(Mqtt, Skip = NoBroker, SkipUnless = nameof(IsMqttInterop), Traits = ["transport", "MQTT"])]
+    [InlineData(Amqp, Skip = NoAmqpBroker, SkipUnless = nameof(IsAmqpInterop), Traits = ["transport", "AMQP"])]
+    public async Task A_link_cut_at_its_relay_closes_its_connection_unclean_as_a_dropped_socket_does(string transport)
     {
         await server.Ports();
 
-        var link = await mqtt.Linked();
+        var link = await LinkedOver(transport);
         await using var client = new BrokerClient(link.Participant.Client());
         var closes = new ConcurrentQueue<bool>();
 
@@ -721,13 +756,14 @@ public sealed class InteropTests(InteropTests.TypeScriptServer server, InteropTe
         Assert.True(link.Participant.IsLinked);
     }
 
-    [Fact(Skip = NoBroker, SkipUnless = nameof(IsMqttInterop))]
-    [Trait("transport", "MQTT")]
-    public async Task A_link_lost_connects_anew_and_the_next_connection_through_the_name_is_answered()
+    [Theory]
+    [InlineData(Mqtt, Skip = NoBroker, SkipUnless = nameof(IsMqttInterop), Traits = ["transport", "MQTT"])]
+    [InlineData(Amqp, Skip = NoAmqpBroker, SkipUnless = nameof(IsAmqpInterop), Traits = ["transport", "AMQP"])]
+    public async Task A_link_lost_connects_anew_and_the_next_connection_through_the_name_is_answered(string transport)
     {
         await server.Ports();
 
-        var link = await mqtt.Linked();
+        var link = await LinkedOver(transport);
         var former = link.Participant.Incarnation;
 
         link.Relay.Cut();
@@ -741,6 +777,12 @@ public sealed class InteropTests(InteropTests.TypeScriptServer server, InteropTe
 
         await next.Transport.Connect(new BrokerConnectOptions { Server = "interop-ts" }, Cancelled);
         Assert.Equal("\"after\"", (await new InteropClient(next).Echo(JsonOf("\"after\""))().WaitAsync(Patience, Cancelled)).GetRawText());
+    }
+
+    // the C# client's link over a broker, MQTT 5's or AMQP 1.0's
+    private Task<Linked> LinkedOver(string transport)
+    {
+        return transport == Amqp ? amqp.Linked() : mqtt.Linked();
     }
 
     // waits, a while at most, until it holds
@@ -890,17 +932,17 @@ public sealed class InteropTests(InteropTests.TypeScriptServer server, InteropTe
     }
 
     /// <summary>
-    /// The C# client's adapter over MQTT 5, wrapped so that a test has it publish each parcel twice,
-    /// and counting each ACCEPT it read for an opener's half it read one for already: a second member
-    /// of a group, or a second group, handed the OPEN.
+    /// The C# client's adapter over a broker, MQTT 5's or AMQP 1.0's, wrapped so that a test has it
+    /// publish each parcel twice, and counting each ACCEPT it read for an opener's half it read one
+    /// for already: a second member of a group, or a second group, handed the OPEN.
     /// </summary>
     public sealed class CopyingAdapter : IBrokerAdapter
     {
-        private readonly MqttBrokerAdapter _inner;
+        private readonly IBrokerAdapter _inner;
         private readonly ConcurrentDictionary<ulong, int> _answered = new();
         private int _acceptedTwice;
 
-        public CopyingAdapter(MqttBrokerAdapter inner)
+        public CopyingAdapter(IBrokerAdapter inner)
         {
             ArgumentNullException.ThrowIfNull(inner);
 
@@ -1063,13 +1105,73 @@ public sealed class InteropTests(InteropTests.TypeScriptServer server, InteropTe
     /// </summary>
     public sealed class MqttSide : IAsyncDisposable
     {
+        private readonly BrokerSide _side = new((
+            () =>
+            {
+                return MqttFixture.Url;
+            },
+            (linked) =>
+            {
+                return new MqttBrokerAdapter(new MqttBrokerAdapterOptions { Id = linked.Id, Password = MqttFixture.Password, Uri = linked.Uri });
+            }
+        ));
+
+        /// <summary>Its link and its servers, started once.</summary>
+        internal Task<Linked> Linked()
+        {
+            return _side.Linked();
+        }
+
+        public ValueTask DisposeAsync()
+        {
+            return _side.DisposeAsync();
+        }
+    }
+
+    /// <summary>
+    /// The C# side over AMQP 1.0, alike: <c>cs-client</c> through a relay of its own, and
+    /// <c>cs-server</c> serving <c>interop-cs</c> alone and <c>interop-both</c> in one group, a name's
+    /// queue its participants compete on, with the TypeScript server.
+    /// </summary>
+    public sealed class AmqpSide : IAsyncDisposable
+    {
+        private readonly BrokerSide _side = new((
+            () =>
+            {
+                return AmqpFixture.Url;
+            },
+            (linked) =>
+            {
+                return new AmqpBrokerAdapter(new AmqpBrokerAdapterOptions { Id = linked.Id, Password = AmqpFixture.Password, Uri = linked.Uri });
+            }
+        ));
+
+        /// <summary>Its link and its servers, started once.</summary>
+        internal Task<Linked> Linked()
+        {
+            return _side.Linked();
+        }
+
+        public ValueTask DisposeAsync()
+        {
+            return _side.DisposeAsync();
+        }
+    }
+
+    /// <summary>
+    /// The C# side over one broker, linked once, on the first test that asks it: its client's
+    /// participant <c>cs-client</c>, through a relay of the test's own that a cut ends, linking anew
+    /// a tenth of a second after a loss; and its server's participant <c>cs-server</c>.
+    /// </summary>
+    internal sealed class BrokerSide((Func<Uri> Broker, Func<(string Id, Uri Uri), IBrokerAdapter> AdapterOf) linking) : IAsyncDisposable
+    {
         private readonly SemaphoreSlim _starting = new(1, 1);
         private Linked? _linked;
         private BrokerParticipant? _serving;
         private List<Server<string>> _servers = [];
 
         /// <summary>Its link and its servers, started once.</summary>
-        internal async Task<Linked> Linked()
+        public async Task<Linked> Linked()
         {
             await _starting.WaitAsync(TestContext.Current.CancellationToken);
 
@@ -1077,7 +1179,7 @@ public sealed class InteropTests(InteropTests.TypeScriptServer server, InteropTe
             {
                 if (_linked is null)
                 {
-                    _serving = new BrokerParticipant(new MqttBrokerAdapter(new MqttBrokerAdapterOptions { Id = "cs-server", Password = MqttFixture.Password, Uri = MqttFixture.Url }));
+                    _serving = new BrokerParticipant(linking.AdapterOf(("cs-server", linking.Broker())));
 
                     BrokerTransportServer[] transports =
                     [
@@ -1099,8 +1201,8 @@ public sealed class InteropTests(InteropTests.TypeScriptServer server, InteropTe
                         await transport.Start();
                     }
 
-                    var relay = LinkRelay.To(MqttFixture.Url);
-                    var adapter = new CopyingAdapter(new MqttBrokerAdapter(new MqttBrokerAdapterOptions { Id = "cs-client", Password = MqttFixture.Password, Uri = relay.Uri }));
+                    var relay = LinkRelay.To(linking.Broker());
+                    var adapter = new CopyingAdapter(linking.AdapterOf(("cs-client", relay.Uri)));
                     var participant = new BrokerParticipant(adapter, new BrokerParticipantOptions
                     {
                         Reconnect = new TransportReconnectOptions
@@ -1147,7 +1249,7 @@ public sealed class InteropTests(InteropTests.TypeScriptServer server, InteropTe
         }
     }
 
-    /// <summary>The C# client's link over MQTT 5: its participant, its adapter, and the relay a cut ends.</summary>
+    /// <summary>The C# client's link over a broker: its participant, its adapter, and the relay a cut ends.</summary>
     internal sealed record Linked(BrokerParticipant Participant, CopyingAdapter Adapter, LinkRelay Relay);
 
     /// <summary>
