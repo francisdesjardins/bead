@@ -83,8 +83,10 @@ its own, one port for both coming from a proxy in front, never from a server the
 touched from its scheduler alone, one task at a time, and a task that awaits comes back to it, so
 what a router does in one turn of JavaScript happens in C# without another task between: no lock,
 and the same order. Its public methods post to it from any thread. Resolvers run on the thread pool,
-and a call's signal is cancelled there too, so code of the application's never runs on the
-scheduler; only a test runs them on the router's own scheduler, to know when everything settled. A
+and a call's signal is cancelled there too, so no resolver runs on the scheduler, nor a signal's
+listener; only a test runs them on the router's own scheduler, to know when everything settled. An
+event a router raises, an error or a trace, runs on it, as a listener runs in JavaScript's turn, and
+what that listener hands its router is posted behind that turn, never taken within it (spec 9.0). A
 notification's callbacks run on a serial scheduler of their own, in the order the notifications
 came, as they run in JavaScript's turn; a test holds it. A resolver that blocks its thread stalls no
 other call. A router that lets go of what waits on a connection cancels its calls' signals before it

@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Diagnostics;
 
 namespace Bead.Tests;
@@ -86,6 +87,39 @@ public sealed class HeartbeatTests
         talking.Stop();
         Assert.Equal(0, heard);
 
+        // anything heard answers the ping, and none beats once stopped
+        var (answeredPings, answeredDrops) = (0, 0);
+        var answered = new Heartbeat(TimeSpan.FromSeconds(1), new HeartbeatHooks
+        {
+            Ping = () =>
+            {
+                Interlocked.Increment(ref answeredPings);
+            },
+            Drop = () =>
+            {
+                Interlocked.Increment(ref answeredDrops);
+            },
+        });
+
+        try
+        {
+            await Until(() =>
+            {
+                return Volatile.Read(ref answeredPings) == 1;
+            });
+            Assert.Equal((1, 0), (Volatile.Read(ref answeredPings), Volatile.Read(ref answeredDrops)));
+            answered.Heard();
+            await Task.Delay(100, Cancelled);
+            Assert.Equal((1, 0), (Volatile.Read(ref answeredPings), Volatile.Read(ref answeredDrops)));
+            answered.Stop();
+            await Task.Delay(300, Cancelled);
+            Assert.Equal((1, 0), (Volatile.Read(ref answeredPings), Volatile.Read(ref answeredDrops)));
+        }
+        finally
+        {
+            answered.Stop();
+        }
+
         // without end, it arms nothing
         var never = new Heartbeat(Timeout.InfiniteTimeSpan, new HeartbeatHooks
         {
@@ -102,6 +136,42 @@ public sealed class HeartbeatTests
         await Task.Delay(beat * 2, Cancelled);
         never.Stop();
         Assert.Equal(0, heard);
+    }
+
+    [Fact]
+    public async Task Starts_a_fresh_silence_after_anything_heard_answers_its_ping_then_drops_a_ping_left_unanswered()
+    {
+        var heard = new ConcurrentQueue<string>();
+        var heartbeat = new Heartbeat(TimeSpan.FromMilliseconds(100), new HeartbeatHooks
+        {
+            Ping = () =>
+            {
+                heard.Enqueue("ping");
+            },
+            Drop = () =>
+            {
+                heard.Enqueue("drop");
+            },
+        });
+
+        try
+        {
+            await Until(() =>
+            {
+                return !heard.IsEmpty;
+            });
+            Assert.Equal(["ping"], heard.ToArray());
+            heartbeat.Heard();
+            await Until(() =>
+            {
+                return heard.Count >= 3;
+            });
+            Assert.Equal(["ping", "ping", "drop"], heard.ToArray());
+        }
+        finally
+        {
+            heartbeat.Stop();
+        }
     }
 
     [Fact]

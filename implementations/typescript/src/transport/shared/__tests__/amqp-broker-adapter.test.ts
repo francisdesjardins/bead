@@ -324,6 +324,280 @@ test.describe('createAmqpBrokerAdapter', () => {
     }).toThrow('a TLS client certificate is carried over amqps');
   });
 
+  test('refuses its inbox when either management link is refused and closes its connection without telling a loss', async () => {
+    for (const refused of ['sender', 'receiver'] as const) {
+      const adapter = adapterOf(script);
+      const { downs } = heardOf(adapter);
+      const link = await linkUp({ adapter, script });
+
+      script.policy.attach = ({ address, role }) => {
+        return address === '/management' && role === refused
+          ? { refuse: { condition: 'amqp:not-allowed', description: 'management denied' } }
+          : 'take';
+      };
+
+      try {
+        await expect(adapter.subscribe(INBOX)).rejects.toThrow(
+          'amqp:not-allowed, management denied'
+        );
+        await link.closed;
+        expect([adapter.isLinked, downs]).toEqual([false, []]);
+        expect(
+          link.requests.map(({ method }) => {
+            return method;
+          })
+        ).not.toContain('PUT');
+      } finally {
+        await adapter.stop();
+      }
+    }
+  });
+
+  test('fails its queued publications and pending name subscription when stopped and lets none reach its next link', async () => {
+    script.policy.credit = 1;
+
+    const adapter = adapterOf(script);
+    const { downs } = heardOf(adapter);
+    const link = await inboxUp({ adapter, script });
+    expect(await adapter.publish({ payload: Uint8Array.of(1), topic: INBOX })).toBe(
+      BROKER_PUBLISHED.TAKEN
+    );
+    const waiting = settledOf(adapter.publish({ payload: Uint8Array.of(2), topic: INBOX }));
+
+    script.policy.attach = ({ address }) => {
+      return address === NAME_QUEUE ? 'hold' : 'take';
+    };
+
+    const begun = link.sessions.length;
+    const subscribing = settledOf(adapter.subscribe(NAME));
+
+    await link.until(() => {
+      return link.deliveries.length === 1 && link.sessions.length === begun + 1;
+    });
+    expect(link.deliveries).toHaveLength(1);
+    await adapter.stop();
+
+    for (const pending of [waiting, subscribing]) {
+      expect(await pending).toBeInstanceOf(Error);
+      expect(((await pending) as Error).message).toBe('the link of ada stopped');
+    }
+
+    await link.closed;
+    expect([downs, adapter.isLinked, adapter.unsettled]).toEqual([[], false, 0]);
+    expect(link.deliveries).toHaveLength(1);
+    script.policy.attach = () => {
+      return 'take';
+    };
+    script.policy.settle = () => {
+      return 'accepted';
+    };
+
+    const next = await inboxUp({ adapter, script });
+
+    expect(await adapter.publish({ payload: Uint8Array.of(3), topic: INBOX })).toBe(
+      BROKER_PUBLISHED.TAKEN
+    );
+    expect(
+      next.deliveries.map(({ message }) => {
+        return [...(message.body as { content: Uint8Array }).content];
+      })
+    ).toEqual([[3]]);
+    expect([downs, adapter.isLinked]).toEqual([[], true]);
+    await adapter.stop();
+  });
+
+  test('fails a transmitted publication without an outcome, a queued publication and a pending name subscription alike when stopped, none NoSubscriber', async () => {
+    script.policy.credit = 1;
+    script.policy.settle = () => {
+      return 'hold';
+    };
+
+    const adapter = adapterOf(script);
+    const { downs } = heardOf(adapter);
+    const link = await inboxUp({ adapter, script });
+    const sent = settledOf(adapter.publish({ payload: Uint8Array.of(1), topic: INBOX }));
+    const waiting = settledOf(adapter.publish({ payload: Uint8Array.of(2), topic: INBOX }));
+
+    script.policy.attach = ({ address }) => {
+      return address === NAME_QUEUE ? 'hold' : 'take';
+    };
+
+    const begun = link.sessions.length;
+    const subscribing = settledOf(adapter.subscribe(NAME));
+
+    await link.until(() => {
+      return link.deliveries.length === 1 && link.sessions.length === begun + 1;
+    });
+    await adapter.stop();
+
+    // * what an ending session held is never its broker's released
+    for (const pending of [sent, waiting, subscribing]) {
+      expect(await pending).toBeInstanceOf(Error);
+      expect(((await pending) as Error).message).toBe('the link of ada stopped');
+    }
+
+    await link.closed;
+    expect([downs, adapter.isLinked, adapter.unsettled]).toEqual([[], false, 0]);
+    expect(link.deliveries).toHaveLength(1);
+  });
+
+  test('fails an inbox subscription awaiting its ATTACH with its stop and tells no loss (spec 15.33)', async () => {
+    const adapter = adapterOf(script);
+    const { downs } = heardOf(adapter);
+    const link = await linkUp({ adapter, script });
+
+    let isAttaching = false;
+
+    script.policy.attach = ({ address }) => {
+      isAttaching ||= address === INBOX_QUEUE;
+
+      return address === INBOX_QUEUE ? 'hold' : 'take';
+    };
+
+    const subscribing = settledOf(adapter.subscribe(INBOX));
+
+    await link.until(() => {
+      return isAttaching;
+    });
+    await adapter.stop();
+    expect(await subscribing).toBeInstanceOf(Error);
+    expect(((await subscribing) as Error).message).toBe('the link of ada stopped');
+    await link.closed;
+    expect([downs, adapter.isLinked]).toEqual([[], false]);
+  });
+
+  test('refuses its start when a sending link is refused, and a publication whose fresh sending link is refused, sending nothing on it and keeping its link (spec 15.33)', async () => {
+    const refusing = (): void => {
+      script.policy.attach = ({ address, role }) => {
+        return address === undefined && role === 'sender'
+          ? { refuse: { condition: 'amqp:not-allowed', description: 'sender denied' } }
+          : 'take';
+      };
+    };
+
+    refusing();
+
+    const adapter = adapterOf(script);
+    const { downs } = heardOf(adapter);
+    const starting = settledOf(adapter.start());
+    const first = await script.link();
+
+    expect(String(await starting)).toContain('amqp:not-allowed, sender denied');
+    await first.closed;
+    expect([downs, adapter.isLinked]).toEqual([[], false]);
+    script.policy.attach = () => {
+      return 'take';
+    };
+
+    // * the inboxes' sending session ended: the next publication begins another, refused
+    const link = await inboxUp({ adapter, script });
+
+    expect(await adapter.publish({ payload: Uint8Array.of(1), topic: INBOX })).toBe(
+      BROKER_PUBLISHED.TAKEN
+    );
+
+    const ended = link.deliveries[0]?.receiver.session;
+
+    ended?.close();
+    await link.until(() => {
+      return ended?.is_closed() === true;
+    });
+    refusing();
+    expect(
+      String(await settledOf(adapter.publish({ payload: Uint8Array.of(2), topic: INBOX })))
+    ).toContain('amqp:not-allowed, sender denied');
+    expect([link.deliveries.length, downs, adapter.isLinked]).toEqual([1, [], true]);
+    script.policy.attach = () => {
+      return 'take';
+    };
+    expect(await adapter.publish({ payload: Uint8Array.of(3), topic: INBOX })).toBe(
+      BROKER_PUBLISHED.TAKEN
+    );
+    expect(link.deliveries).toHaveLength(2);
+    await adapter.stop();
+  });
+
+  test('refuses a publication and a subscription whose signal is aborted without sending either or losing its link', async () => {
+    const adapter = adapterOf(script);
+    const { downs } = heardOf(adapter);
+    const link = await inboxUp({ adapter, script });
+    const begun = link.sessions.length;
+    const declared = link.requests.length;
+
+    try {
+      for (const topic of [INBOX, NAME]) {
+        await expect(
+          adapter.publish({ payload: Uint8Array.of(1), signal: AbortSignal.abort(), topic })
+        ).rejects.toThrow();
+        await expect(adapter.subscribe(topic, { signal: AbortSignal.abort() })).rejects.toThrow();
+      }
+
+      expect([link.deliveries, link.sessions.length, link.requests.length]).toEqual([
+        [],
+        begun,
+        declared,
+      ]);
+      expect([downs, adapter.isLinked]).toEqual([[], true]);
+      expect(await adapter.publish({ payload: Uint8Array.of(2), topic: INBOX })).toBe(
+        BROKER_PUBLISHED.TAKEN
+      );
+    } finally {
+      await adapter.stop();
+    }
+  });
+
+  test('fails a start whose sending links remain unanswered within connectTimeout and starts a fresh link afterwards', async () => {
+    script.policy.attach = ({ address }) => {
+      return address === undefined ? 'hold' : 'take';
+    };
+
+    const adapter = adapterOf(script, { connectTimeout: 1_000 });
+    const { downs } = heardOf(adapter);
+    const starting = settledOf(adapter.start());
+    const link = await script.link();
+
+    await link.until(() => {
+      return link.sessions.length === 3;
+    });
+    expect(String(await starting)).toContain('within 1000 ms');
+    await link.closed;
+    expect([downs, adapter.isLinked]).toEqual([[], false]);
+    script.policy.attach = () => {
+      return 'take';
+    };
+
+    const next = await inboxUp({ adapter, script });
+
+    expect(next.connection).not.toBe(link.connection);
+    expect(adapter.isLinked).toBe(true);
+    await adapter.stop();
+  });
+
+  test('fails an inbox declaration left unanswered within connectTimeout and closes its connection without telling a loss', async () => {
+    const adapter = adapterOf(script, { connectTimeout: 1_000 });
+    const { downs } = heardOf(adapter);
+    const link = await linkUp({ adapter, script });
+
+    script.policy.answer = () => {
+      return 'hold';
+    };
+
+    const subscribing = settledOf(adapter.subscribe(INBOX));
+
+    await link.until(() => {
+      return link.requests.length === 1;
+    });
+    expect(String(await subscribing)).toContain('within 1000 ms');
+    await link.closed;
+    expect(
+      link.requests.map(({ method }) => {
+        return method;
+      })
+    ).toEqual(['PUT']);
+    expect([downs, adapter.isLinked, adapter.unsettled]).toEqual([[], false, 0]);
+    await adapter.stop();
+  });
+
   test('declares its inbox exclusive, classic and not durable through management on its own connection, binds it to its root’s exchange, and is up once its receiver attached (spec 15.33)', async () => {
     const adapter = adapterOf(script);
     const link = await linkUp({ adapter, script });

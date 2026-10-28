@@ -786,8 +786,14 @@ test.describe('createRouterCore', () => {
       expect(calls).toBe(3);
     });
 
-    test('keeps the replacement call when its report listener cancels a failed resolver’s call', async () => {
-      const { port, reported, sent } = createPort();
+    // spec 9.0
+    test('answers a failed resolver’s call PROCEDURE_FAILED before what its report listener hands its router, whose cancel crosses that answer and whose replacement opens the call id again', async () => {
+      const cancels: [number, Handle][] = [];
+      const { port, reported, sent } = createPort({
+        onCancel: (callId, connectionHandle) => {
+          cancels.push([callId, connectionHandle]);
+        },
+      });
       using core = createRouterCore(port);
       const requests: IRequestResolverProps<Handle>[] = [];
       const failure = new Error('the resolver failed');
@@ -810,21 +816,129 @@ test.describe('createRouterCore', () => {
         core.receive(requestOf(5), 'a');
       };
       core.receive(requestOf(5), 'a');
+      await sleep(0);
 
       expect(reported).toEqual([[failure, 'a']]);
+      expect(answersOf(sent)).toEqual([['a', 'failure', 5, ProtocolCode.PROCEDURE_FAILED]]);
       expect(requests).toHaveLength(2);
-      expect(requests[0]?.signal.aborted).toBe(true);
-      expect(requests[1]?.signal.aborted).toBe(false);
+      // the cancel crossed that answer: it found no call, and aborted nothing
+      expect(
+        requests.map(({ signal }) => {
+          return signal.aborted;
+        })
+      ).toEqual([false, false]);
+      expect(cancels).toEqual([[5, 'a']]);
       expect(core.gauges().counts['answeringCalls']).toBe(1);
-      expect(sent).toEqual([]);
 
       await core.respond({ payload: Uint8Array.of(1) }, requests[0]!);
-      expect(sent).toEqual([]);
+      expect(answersOf(sent)).toEqual([['a', 'failure', 5, ProtocolCode.PROCEDURE_FAILED]]);
       await core.respond({ payload: Uint8Array.of(2) }, requests[1]!);
 
-      expect(answersOf(sent)).toEqual([['a', 'result', 5, [2]]]);
+      expect(answersOf(sent)).toEqual([
+        ['a', 'failure', 5, ProtocolCode.PROCEDURE_FAILED],
+        ['a', 'result', 5, [2]],
+      ]);
       expect(core.gauges().counts['answeringCalls']).toBe(0);
       expect(reported).toEqual([[failure, 'a']]);
+    });
+
+    // spec 9.0
+    test('answers a failed admission’s call PROCEDURE_FAILED before what its report listener hands its router, and the replacement opens the call id again', async () => {
+      const { port, reported, sent } = createPort();
+      using core = createRouterCore(port);
+      const requests: IRequestResolverProps<Handle>[] = [];
+      const failure = new Error('the admission failed');
+      const report = port.report;
+      let admitted = 0;
+
+      core.registerResolver(
+        Object.assign(
+          (props: IRequestResolverProps<Handle>) => {
+            requests.push(props);
+
+            return Promise.resolve();
+          },
+          echo,
+          {
+            admit: () => {
+              admitted += 1;
+
+              if (admitted === 1) {
+                throw failure;
+              }
+
+              return undefined;
+            },
+          }
+        )
+      );
+      port.report = (reason, connectionHandle) => {
+        report(reason, connectionHandle);
+        core.receive(cancelOf(5), 'a');
+        core.receive(requestOf(5), 'a');
+      };
+      core.receive(requestOf(5), 'a');
+      await sleep(0);
+
+      expect(reported).toEqual([[failure, 'a']]);
+      expect(answersOf(sent)).toEqual([['a', 'failure', 5, ProtocolCode.PROCEDURE_FAILED]]);
+      expect(admitted).toBe(2);
+      expect(requests).toHaveLength(1);
+      expect(core.gauges().counts['answeringCalls']).toBe(1);
+
+      await core.respond({ payload: Uint8Array.of(2) }, requests[0]!);
+
+      expect(answersOf(sent)).toEqual([
+        ['a', 'failure', 5, ProtocolCode.PROCEDURE_FAILED],
+        ['a', 'result', 5, [2]],
+      ]);
+      expect(core.gauges().counts['answeringCalls']).toBe(0);
+      expect(reported).toEqual([[failure, 'a']]);
+    });
+
+    // spec 9.0
+    test('lets its connections go after the turn its report listener disposes it in, the failed resolver’s answer refused as disposed and reported', async () => {
+      const { port, reported, sent } = createPort();
+      const core = createRouterCore(port);
+      const failure = new Error('the resolver failed');
+      const report = port.report;
+      // what the core holds as its report listener disposes it
+      const disposed: { answering?: number | undefined; isDisposed: boolean }[] = [];
+
+      const requests: IRequestResolverProps<Handle>[] = [];
+
+      core.registerResolver(
+        Object.assign((props: IRequestResolverProps<Handle>) => {
+          requests.push(props);
+
+          throw failure;
+        }, echo)
+      );
+      port.report = (reason, connectionHandle) => {
+        report(reason, connectionHandle);
+
+        if (reason === failure) {
+          core[Symbol.dispose]();
+          disposed.push({
+            answering: core.gauges().counts['answeringCalls'],
+            isDisposed: core.isDisposed,
+          });
+        }
+      };
+      core.receive(requestOf(5), 'a');
+      await sleep(0);
+
+      // disposed at once, what it holds let go in a later turn
+      expect(disposed).toEqual([{ answering: 1, isDisposed: true }]);
+      expect(sent).toEqual([]);
+      expect(reported).toEqual([
+        [failure, 'a'],
+        [new DisconnectError('the router was disposed'), 'a'],
+      ]);
+      expect(core.gauges().counts['answeringCalls']).toBe(0);
+      // its call closed as its answer failed, before what the dispose lets go: nothing aborted
+      expect(requests).toHaveLength(1);
+      expect(requests[0]?.signal.aborted).toBe(false);
     });
 
     test('lets go of the call id of a resolver that fails without answering, and of that one alone', async () => {

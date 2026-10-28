@@ -350,6 +350,10 @@ carry any detail of that error, an exception's message least of all: the error i
 call went (section 8.1), as a generic message is all an unexpected error returns to its consumer in
 OWASP's Application Security Verification Standard
 ([ASVS 5.0 §16.5.1](https://github.com/OWASP/ASVS/blob/v5.0.0/5.0/en/0x25-V16-Security-Logging-and-Error-Handling.md)).
+A side tells its application what it reports in the turn that raised it; what that application
+hands the side from within the telling — an envelope its transport carries, a connection let go —
+the side takes in a later turn, behind what came before it, never within that one, as section 15.13
+hands an envelope on: a report never changes what its turn answers.
 
 9.1. A call is a request and its answer, under one call id on one connection. Either side opens
 calls: a client its requests, a server its commands to a client. A requester draws its call ids in
@@ -2112,8 +2116,15 @@ closes its connection, and its inbox is never attached again in place, since a r
 hands its unsettled messages back on the same connection. A name's receiver its broker ends is
 attached again once, on a session of its own; that refused, or the name lost again on the same
 link, is its link lost. A sending session that ends refuses each publication it held, its link
-kept, and the next publication begins another. A participant's stop detaches its receivers and
-closes its connection with no error. No link of an id takes another over. Nothing of a link reaches
+kept, and the next publication begins another. A link of its own, its management's or a sending
+one, whose ATTACH is answered with no terminus of its own, no target to a sender and no source to a
+receiver, is refused, its DETACH to follow, and nothing is sent on it (AMQP 1.0 §2.6.3,
+[attach](https://docs.oasis-open.org/amqp/core/v1.0/os/amqp-core-transport-v1.0-os.html#type-attach)):
+a sending link refused as it starts fails its start, and one begun later refuses each publication
+it held, its link kept. A participant's stop detaches its receivers and closes its connection with
+no error; each publication without an outcome, sent or waiting for credit, and each subscription
+awaiting its ATTACH fail with its stop, none of them a no subscriber, which `released` alone tells
+(section 15.35). No link of an id takes another over. Nothing of a link reaches
 another: no library reconnects it, recovers it, or holds what it publishes while it is down, and
 what is asked of a link that is down is refused at once.
 
