@@ -589,10 +589,7 @@ async fn lets_its_connections_go_after_the_turn_its_report_listener_disposes_it_
     assert!(served.sent_since().is_empty(), "nothing sent once disposed");
     assert_eq!(
         served.reported(),
-        [
-            "the resolver failed first",
-            "the connection closed: the router was disposed first"
-        ],
+        ["the resolver failed first", "the router was disposed first"],
         "the failure reported, then its answer refused as disposed"
     );
     assert_eq!(answering_of(&served).await, Some(0), "nothing answering");

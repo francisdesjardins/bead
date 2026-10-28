@@ -29,10 +29,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
-- A router is never entered again from its own turn, on both sides: what a listener it calls hands
-  it back, an envelope received or a connection let go, a dispose among them, is taken in a later
-  turn, behind what came before it: a failed resolver or admission is answered `PROCEDURE_FAILED`
-  whatever its report listener submits, on the TypeScript side as on the C# side (spec 9.0).
+- A router is never entered again from its own turn, on the TypeScript and C# sides as on the Rust
+  side's core: what a listener it calls hands it back, an envelope received or a connection let go,
+  a dispose among them, is taken in a later turn, behind what came before it, and a failed resolver
+  or admission is answered `PROCEDURE_FAILED` whatever its report listener submits (spec 9.0).
 - An AMQP 1.0 management link whose ATTACH is answered with no source or target is refused on the
   TypeScript side as on the C# side: its DETACH's condition fails the request, and no request goes
   on its pair (AMQP 1.0 §2.6.3, spec 15.33).
