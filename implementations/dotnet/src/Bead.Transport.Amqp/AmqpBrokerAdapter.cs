@@ -212,8 +212,8 @@ public sealed class AmqpBrokerAdapter : IBrokerAdapter, IAsyncDisposable
     /// EXTERNAL under its client certificate, its OPEN of its id as its container-id, its virtual
     /// host as its hostname where it has one and its idle-time-out; then its two sending sessions,
     /// each a sender to the anonymous terminus, whose ATTACH names what it may publish. A will is an
-    /// <see cref="ArgumentException"/>: AMQP 1.0 has none. A connection refused or ended before then
-    /// fails it naming why, an <see cref="IOException"/>; none of it within its connect timeout, a
+    /// <see cref="ArgumentException"/>: AMQP 1.0 has none. A connection refused or ended, or a sender
+    /// refused, before then fails it naming why, an <see cref="IOException"/>; none of it within its connect timeout, a
     /// <see cref="TimeoutException"/>; a link up already, an <see cref="InvalidOperationException"/>.
     /// </summary>
     public async Task Start(BrokerStart? start = null)
@@ -258,8 +258,20 @@ public sealed class AmqpBrokerAdapter : IBrokerAdapter, IAsyncDisposable
                 Watch(link);
                 link.Parcels = SenderOf((link, true));
                 link.Opens = SenderOf((link, false));
-                parcels = await link.Parcels.WaitAsync(linked.Token);
-                opens = await link.Opens.WaitAsync(linked.Token);
+
+                // * either sender refused fails it at once, whether the other was answered or not
+                List<Task<Sending>> attaching = [link.Parcels, link.Opens];
+
+                while (attaching.Count > 0)
+                {
+                    var answered = await Task.WhenAny(attaching).WaitAsync(linked.Token);
+
+                    attaching.Remove(answered);
+                    await answered;
+                }
+
+                parcels = await link.Parcels;
+                opens = await link.Opens;
             }
             // * the timeout's, whatever its cancel ended after it
             catch (Exception reason) when (timeout.IsCancellationRequested && !token.IsCancellationRequested && !link.IsEnded)
@@ -619,9 +631,9 @@ public sealed class AmqpBrokerAdapter : IBrokerAdapter, IAsyncDisposable
     /// inboxes, to a name on its sender to names; unsettled at least once, held to its sender's
     /// credit, later ones waiting in their order, <see cref="BrokerPublished.Taken"/> once
     /// <c>accepted</c>, <see cref="BrokerPublished.NoSubscriber"/> on <c>released</c>, an
-    /// <see cref="IOException"/> on <c>rejected</c>, any other outcome or its session's end; settled
-    /// at most once, taken as it goes; its life, in whole milliseconds rounded up, its header's ttl
-    /// where one is asked. One past its sender ATTACH's max-message-size is an
+    /// <see cref="IOException"/> on <c>rejected</c>, any other outcome, its session's end or its
+    /// stop; settled at most once, taken as it goes; its life, in whole milliseconds rounded up, its
+    /// header's ttl where one is asked. One past its sender ATTACH's max-message-size is an
     /// <see cref="ArgumentException"/>, nothing sent; a link down, an
     /// <see cref="InvalidOperationException"/>. Given up while it waits for credit, it leaves unsent;
     /// given up once sent, its outcome is not read; either way its link is kept.
@@ -656,7 +668,7 @@ public sealed class AmqpBrokerAdapter : IBrokerAdapter, IAsyncDisposable
         {
             sender.Send(message, null, (ended, _, outcome, _) =>
             {
-                Read((sending, (global::Amqp.Link)ended, address), (outcome, published));
+                Read((link, (global::Amqp.Link)ended, address), (outcome, published));
             }, null);
         }
         catch (AmqpException reason)
@@ -679,7 +691,9 @@ public sealed class AmqpBrokerAdapter : IBrokerAdapter, IAsyncDisposable
     /// <summary>
     /// Ends its link with no error (spec 15.33): each receiver detached and its DETACH awaited, each
     /// session ended, then its CLOSE and its broker's, all within its connect timeout; its inbox ends
-    /// with its connection. Nothing where it has none.
+    /// with its connection. Each publication without an outcome, sent or waiting for credit, and each
+    /// subscription awaiting its ATTACH fail with its stop, an <see cref="IOException"/>. Nothing
+    /// where it has none.
     /// </summary>
     public async Task Stop()
     {
@@ -823,10 +837,19 @@ public sealed class AmqpBrokerAdapter : IBrokerAdapter, IAsyncDisposable
 
     // a publication's outcome (spec 15.35): accepted taken, released no subscriber, every other
     // refused; one its library gave as its link ended, the end's refusal
-    private static void Read((Sending Sending, global::Amqp.Link Sender, string Address) sent, (Outcome? Outcome, TaskCompletionSource<BrokerPublished> Published) read)
+    private static void Read((Incarnation Link, global::Amqp.Link Sender, string Address) sent, (Outcome? Outcome, TaskCompletionSource<BrokerPublished> Published) read)
     {
-        var (_, sender, address) = sent;
+        var (link, sender, address) = sent;
         var (outcome, published) = read;
+
+        // ! none read once its stop began: its library releases what its sessions held as they end,
+        // a release no broker gave, so that every publication without an outcome fails with the stop
+        if (link.IsStopping)
+        {
+            published.TrySetException(new IOException(link.Ended?.Message));
+
+            return;
+        }
 
         if (sender.IsClosed)
         {
@@ -901,8 +924,9 @@ public sealed class AmqpBrokerAdapter : IBrokerAdapter, IAsyncDisposable
         {
             throw new OperationCanceledException($"what the link of {Id} was asked was given up", reason, asked.Token);
         }
-        catch (Exception reason) when (asked.Link.IsEnded)
+        catch (Exception reason) when (asked.Link.IsEnded || asked.Link.IsStopping)
         {
+            // * its stop's failure, whichever of its ends came first
             throw new IOException(asked.Link.Ended?.Message ?? $"the link of {Id} went down", reason);
         }
         catch (AmqpException reason)
@@ -1179,6 +1203,11 @@ public sealed class AmqpBrokerAdapter : IBrokerAdapter, IAsyncDisposable
             }
 
             return await ReceiverOf((link, topic, queue), linked.Token);
+        }
+        catch (Exception reason) when (link.IsStopping)
+        {
+            // * its stop's failure, whichever of its ends came first
+            throw new IOException(link.Ended?.Message, reason);
         }
         catch (Exception reason) when (timeout.IsCancellationRequested && !token.IsCancellationRequested && !link.IsEnded)
         {
