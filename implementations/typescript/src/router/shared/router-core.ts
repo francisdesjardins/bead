@@ -238,13 +238,53 @@ export const createRouterCore = <Handle extends string>(
       receivings.close(transfer);
     },
   });
-  const writer = createRouterWriter(port, {
-    isDisposed: () => {
-      return isDisposed;
+  // ! its port's listeners this core calls, counted while one runs: what one hands this core back
+  // is taken in a later turn, behind what came before it (spec 9.0)
+  let listening = 0;
+  const heard = <Value>(listener: () => Value): Value => {
+    listening += 1;
+
+    try {
+      return listener();
+    } finally {
+      listening -= 1;
+    }
+  };
+  // what the writer tells the side, heard as this core's listeners are; the rest asked of the
+  // port as it stands
+  const writer = createRouterWriter<Handle>(
+    {
+      failures,
+
+      isTracing: () => {
+        return port.isTracing();
+      },
+      report: (error, connectionHandle) => {
+        heard(() => {
+          port.report(error, connectionHandle);
+        });
+      },
+      send: (message, connectionHandle) => {
+        return port.send(message, connectionHandle);
+      },
+      // none given, none announced: a side without it announces no session
+      sessionTokenOf: (connectionHandle) => {
+        return port.sessionTokenOf?.(connectionHandle);
+      },
+      trace: (direction, envelope) => {
+        heard(() => {
+          port.trace(direction, envelope);
+        });
+      },
     },
-    limits,
-    tooLargeOf,
-  });
+    {
+      isDisposed: () => {
+        return isDisposed;
+      },
+      limits,
+      tooLargeOf,
+    }
+  );
   const { deliver, sendReporting } = writer;
   // the credential schemes this side takes, OPAQUE always, and the detail that names them
   const schemesTaken: ReadonlySet<number> = new Set([
@@ -296,19 +336,23 @@ export const createRouterCore = <Handle extends string>(
       envelope: Envelope;
     }
   ): void => {
-    port.report(
-      new FailureError(
-        { ...failure, ...(detail === undefined ? {} : { detail }) },
-        { cause, header: envelope.header }
-      ),
-      connectionHandle
-    );
+    heard(() => {
+      port.report(
+        new FailureError(
+          { ...failure, ...(detail === undefined ? {} : { detail }) },
+          { cause, header: envelope.header }
+        ),
+        connectionHandle
+      );
+    });
   };
 
   const requester = createRouterRequester(
     {
       activity: (kind, connectionHandle) => {
-        port.activity(kind, connectionHandle);
+        heard(() => {
+          port.activity(kind, connectionHandle);
+        });
       },
       failures,
       isCallIdInUse: (callId, connectionHandle) => {
@@ -318,16 +362,22 @@ export const createRouterCore = <Handle extends string>(
         return isDisposed;
       },
       onAnswerReceived: (header, connectionHandle) => {
-        port.onAnswerReceived?.(header, connectionHandle);
+        heard(() => {
+          port.onAnswerReceived?.(header, connectionHandle);
+        });
       },
       onUnpairedFailure: (envelope, connectionHandle) => {
-        return port.onUnpairedFailure?.(envelope, connectionHandle) === true;
+        return heard(() => {
+          return port.onUnpairedFailure?.(envelope, connectionHandle) === true;
+        });
       },
       receiveUnplaced: (envelope, unplaced) => {
         receiveUnplaced(envelope, unplaced);
       },
       report: (error, connectionHandle) => {
-        port.report(error, connectionHandle);
+        heard(() => {
+          port.report(error, connectionHandle);
+        });
       },
       reportFailure: (failure, details) => {
         report(failure, details);
@@ -384,7 +434,9 @@ export const createRouterCore = <Handle extends string>(
       },
     }).catch((reason: unknown) => {
       end(CallEnding.ERROR);
-      port.report(toError(reason), connectionHandle);
+      heard(() => {
+        port.report(toError(reason), connectionHandle);
+      });
     });
   };
 
@@ -586,12 +638,14 @@ export const createRouterCore = <Handle extends string>(
             request: header,
           })
         : undefined;
-    const undo = port.beforeAnswer?.({
-      connectionHandle,
-      header,
-      isFailure: response.failure !== undefined,
-      resolver,
-      session: callSessions.get(header),
+    const undo = heard(() => {
+      return port.beforeAnswer?.({
+        connectionHandle,
+        header,
+        isFailure: response.failure !== undefined,
+        resolver,
+        session: callSessions.get(header),
+      });
     });
 
     // its answer going out: a second goes nowhere, and this one closes the call once done
@@ -608,6 +662,12 @@ export const createRouterCore = <Handle extends string>(
         : endingOf(response.failure);
 
     try {
+      // ! disposed, it fails in this turn, its call closed before what the dispose lets go in a
+      // later one finds it (spec 9.0)
+      if (isDisposed) {
+        throw new DisconnectError(DISPOSED);
+      }
+
       await (transfer === undefined
         ? deliver(
             response.failure === undefined
@@ -668,20 +728,22 @@ export const createRouterCore = <Handle extends string>(
     const { address, port: from } = origins.get(header) ?? {};
     const { credential, destinationId, procedureId, serviceId } = header;
 
-    port.tellRefusal(
-      Object.freeze({
-        ...(address === undefined ? {} : { address }),
-        code,
-        connectionHandle,
-        ...(credential === undefined ? {} : { credentialScheme: credential.scheme }),
-        ...(destinationId === undefined ? {} : { destinationId }),
-        ...(from === undefined ? {} : { port: from }),
-        procedureId,
-        ...(reason === undefined ? {} : { reason }),
-        serviceId,
-        stage,
-      })
-    );
+    const refusal = Object.freeze({
+      ...(address === undefined ? {} : { address }),
+      code,
+      connectionHandle,
+      ...(credential === undefined ? {} : { credentialScheme: credential.scheme }),
+      ...(destinationId === undefined ? {} : { destinationId }),
+      ...(from === undefined ? {} : { port: from }),
+      procedureId,
+      ...(reason === undefined ? {} : { reason }),
+      serviceId,
+      stage,
+    });
+
+    heard(() => {
+      port.tellRefusal?.(refusal);
+    });
   };
 
   // a refusal answers a request of the peer's; the answer that cannot go out is reported
@@ -693,7 +755,9 @@ export const createRouterCore = <Handle extends string>(
       // a refusal that never reached the transport — its failure unwritable, say — leaves no call
       // open behind it
       answeringCalls.close({ callId: header.callId, connectionHandle }, controller);
-      port.report(toError(reason), connectionHandle);
+      heard(() => {
+        port.report(toError(reason), connectionHandle);
+      });
     });
   };
 
@@ -705,21 +769,17 @@ export const createRouterCore = <Handle extends string>(
   ): void => {
     const { connectionHandle, controller, header, payload, session } = dispatched;
     const fail = (reason: unknown): void => {
-      const isAnswering = answeringCalls.isAnswering({ connectionHandle, header });
-
       if (!controller.signal.aborted) {
-        port.report(toError(reason), connectionHandle);
+        heard(() => {
+          port.report(toError(reason), connectionHandle);
+        });
       }
 
       // ! a resolver that fails before it answers is answered PROCEDURE_FAILED, so its requester
       // does not wait out its timeout (spec 9.5); a call cancelled, or gone with its connection, is
       // answered nothing, and one answered keeps its answer
-      if (isAnswering && !controller.signal.aborted) {
-        return (refuse(failures.procedureFailed, dispatched), undefined);
-      }
-
-      if (isAnswering) {
-        answeringCalls.close({ callId: header.callId, connectionHandle }, controller);
+      if (answeringCalls.isAnswering({ connectionHandle, header })) {
+        refuse(failures.procedureFailed, dispatched);
       }
     };
 
@@ -769,7 +829,9 @@ export const createRouterCore = <Handle extends string>(
     try {
       refusal = resolver.admit?.(request);
     } catch (reason) {
-      port.report(toError(reason), request.connectionHandle);
+      heard(() => {
+        port.report(toError(reason), request.connectionHandle);
+      });
 
       return { failure: failures.procedureFailed };
     }
@@ -815,7 +877,9 @@ export const createRouterCore = <Handle extends string>(
     }
 
     if (!isReported) {
-      port.report(failure, connectionHandle);
+      heard(() => {
+        port.report(failure, connectionHandle);
+      });
     }
   };
 
@@ -858,7 +922,9 @@ export const createRouterCore = <Handle extends string>(
     }
 
     if (!isReported) {
-      port.report(failure, connectionHandle);
+      heard(() => {
+        port.report(failure, connectionHandle);
+      });
     }
   };
 
@@ -880,7 +946,9 @@ export const createRouterCore = <Handle extends string>(
 
     const controller = answeringCalls.take({ callId, connectionHandle });
 
-    port.onCancel?.(callId, connectionHandle);
+    heard(() => {
+      port.onCancel?.(callId, connectionHandle);
+    });
     controller?.abort(new CancelError(`call ${String(callId)} was cancelled by its requester`));
   };
 
@@ -1006,7 +1074,9 @@ export const createRouterCore = <Handle extends string>(
         return (refuse({ ...failures.capacityExceeded, detail }, dispatched), undefined);
       }
 
-      port.report(toError(reason), connectionHandle);
+      heard(() => {
+        port.report(toError(reason), connectionHandle);
+      });
       refuse(failures.procedureFailed, dispatched);
     };
 
@@ -1331,7 +1401,12 @@ export const createRouterCore = <Handle extends string>(
       return;
     }
 
-    return (port.onNotification(header, { connectionHandle, payload }), undefined);
+    return (
+      heard(() => {
+        port.onNotification?.(header, { connectionHandle, payload });
+      }),
+      undefined
+    );
   };
 
   const receiveSubscriptionCredit = (
@@ -1344,10 +1419,26 @@ export const createRouterCore = <Handle extends string>(
       return (report(failures.kindUnsupported, { connectionHandle, detail, envelope }), undefined);
     }
 
-    return (port.onSubscriptionCredit(envelope.header, connectionHandle), undefined);
+    return (
+      heard(() => {
+        port.onSubscriptionCredit?.(envelope.header, connectionHandle);
+      }),
+      undefined
+    );
   };
 
   const receive = (message: Data | ITransportMessage, connectionHandle: Handle): void => {
+    // ! handed within a listener of this core's turn, it is taken in a later turn, behind what
+    // came before it (spec 9.0)
+    if (listening > 0) {
+      return (
+        queueMicrotask(() => {
+          receive(message, connectionHandle);
+        }),
+        undefined
+      );
+    }
+
     const {
       address,
       credential: transportCredential,
@@ -1363,7 +1454,12 @@ export const createRouterCore = <Handle extends string>(
       prefix = readPrefix(bytes, failures);
     } catch (reason) {
       // what is not an envelope's prefix has no call to answer: it is reported
-      return (port.report(failureOf(reason, failures), connectionHandle), undefined);
+      return (
+        heard(() => {
+          port.report(failureOf(reason, failures), connectionHandle);
+        }),
+        undefined
+      );
     }
 
     let envelope: Envelope | undefined;
@@ -1383,7 +1479,9 @@ export const createRouterCore = <Handle extends string>(
       // ! a codec that throws other than a refusal throws an error of this side's own: reported, its
       // words with it, while what answers or ends a call for it is ENVELOPE_MALFORMED with none of
       // them, which a peer's bytes could reach (spec 9.0)
-      port.report(failureOf(reason, failures), connectionHandle);
+      heard(() => {
+        port.report(failureOf(reason, failures), connectionHandle);
+      });
 
       const failure = new FailureError(failures.envelopeMalformed, { cause: reason });
 
@@ -1396,7 +1494,9 @@ export const createRouterCore = <Handle extends string>(
     }
 
     if (port.isTracing()) {
-      port.trace('rx', { connectionHandle, header: redactHeader(envelope.header) });
+      heard(() => {
+        port.trace('rx', { connectionHandle, header: redactHeader(envelope.header) });
+      });
     }
 
     switch (envelope.kind) {
@@ -1428,6 +1528,17 @@ export const createRouterCore = <Handle extends string>(
   };
 
   const rejectPending = (reason: string, connectionHandle?: Handle): void => {
+    // ! asked within a listener of this core's turn, it is done in a later turn, behind what came
+    // before it (spec 9.0)
+    if (listening > 0) {
+      return (
+        queueMicrotask(() => {
+          rejectPending(reason, connectionHandle);
+        }),
+        undefined
+      );
+    }
+
     // what the connection receives and sends, what it opened, its call ids reserved and what it was
     // told of its session go with it, before anything hears of it; its transfers first, so the
     // budget the received give back grants no credit to one about to go
@@ -1546,8 +1657,8 @@ export const createRouterCore = <Handle extends string>(
     },
     [Symbol.dispose]: () => {
       isDisposed = true;
-      // every connection's: each call answering aborted too, so what a resolution settles after
-      // dispatches nothing
+      // every connection's — in a later turn, disposed by a listener of this core's — each call
+      // answering aborted too, so what a resolution settles after dispatches nothing
       rejectPending(`${DISPOSED} before the answer`);
     },
   };
