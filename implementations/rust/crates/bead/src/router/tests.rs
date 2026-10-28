@@ -29,6 +29,7 @@ mod calls;
 mod client;
 mod metrics;
 mod parts;
+mod router_core;
 mod server;
 mod transfer;
 
