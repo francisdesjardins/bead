@@ -10,11 +10,12 @@ use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use serde_json::{Value, json};
 
 use super::{Arming, Inactivity, Session, SessionEvent, SessionManager, SessionManagerOptions};
-use crate::clock::Timer;
+use crate::clock::{SharedClock, Timer};
 use crate::duration::{LONGEST_TIMER, NEVER};
 use crate::errors::CallError;
 use crate::router::types::ConnectionHandle;
 use crate::session_token::SessionToken;
+use crate::testing::SteppingClock;
 use crate::testing::pair::{Pair, PairOptions};
 
 const FIRST: &str = "type=WS;ip=127.0.0.1;port=50001;ordinal=1";
@@ -38,6 +39,11 @@ fn token_of(byte: u8) -> SessionToken {
 
 fn milliseconds(count: u64) -> Duration {
     Duration::from_millis(count)
+}
+
+// a clock stepped by hand, at 2026-01-01T00:00:00Z
+fn stepping() -> SharedClock {
+    SteppingClock::new(crate::testing::instants::new_year())
 }
 
 // a timer the arming made: its due, which of a session's timers it is, and whether it was stopped
@@ -114,9 +120,16 @@ impl Sessions {
         Self::of(&SessionManagerOptions::default())
     }
 
+    // a manager on a clock stepped by hand, unless its options give one
     fn of(options: &SessionManagerOptions) -> Self {
+        let clock = options.clock.clone().unwrap_or_else(stepping);
+
         Self {
-            manager: SessionManager::new(options).expect("a manager"),
+            manager: SessionManager::new(&SessionManagerOptions {
+                clock: Some(clock),
+                ..options.clone()
+            })
+            .expect("a manager"),
             arming: Recorder::default(),
             told: Vec::new(),
         }
@@ -137,10 +150,7 @@ impl Sessions {
     // the session of a connection, stored once when it has none
     fn get_or_else_set(&mut self, connection: &str) -> Session {
         self.manager
-            .get_or_else_set(
-                (&handle(connection), NEW_YEAR),
-                (&self.arming, &mut self.told),
-            )
+            .get_or_else_set(&handle(connection), (&self.arming, &mut self.told))
             .expect("stored")
     }
 
@@ -535,12 +545,41 @@ fn says_nothing_of_a_session_timeout_given_the_one_it_has() {
     assert!(sessions.taken().is_empty(), "nothing told");
 }
 
+#[tokio::test]
+async fn runs_on_the_clock_its_options_give_the_system_s_when_none() {
+    let clock = stepping();
+    let given = SessionManager::new(&SessionManagerOptions {
+        clock: Some(Arc::clone(&clock)),
+        ..SessionManagerOptions::default()
+    })
+    .expect("a manager on the clock given");
+    let none = SessionManager::new(&SessionManagerOptions::default()).expect("a manager");
+    let system = std::time::SystemTime::now();
+    let read = none.clock().wall();
+    let apart = read
+        .duration_since(system)
+        .or_else(|_| system.duration_since(read))
+        .unwrap_or(Duration::MAX);
+
+    assert!(Arc::ptr_eq(given.clock(), &clock), "the clock given");
+    assert!(
+        apart < Duration::from_secs(5),
+        "the system's when none: {apart:?} apart"
+    );
+    assert_eq!(
+        given.create(handle(FIRST)).last_activity,
+        NEW_YEAR,
+        "its activity read on the clock given"
+    );
+}
+
 #[test]
 fn a_timeout_left_out_takes_the_default_the_manager_s_own_or_its_options() {
     let mut sessions = Sessions::new();
     let mut tuned = Sessions::of(&SessionManagerOptions {
         connection_inactivity_timeout: Some(milliseconds(1_000)),
         session_inactivity_timeout: Some(milliseconds(2_000)),
+        ..SessionManagerOptions::default()
     });
 
     sessions.get_or_else_set(FIRST);
@@ -1111,10 +1150,12 @@ fn a_timeout_past_the_longest_a_timer_waits_is_refused_by_a_reset_a_store_an_upd
 
     for options in [
         SessionManagerOptions {
+            clock: Some(stepping()),
             connection_inactivity_timeout: Some(past),
             ..SessionManagerOptions::default()
         },
         SessionManagerOptions {
+            clock: Some(stepping()),
             session_inactivity_timeout: Some(past),
             ..SessionManagerOptions::default()
         },

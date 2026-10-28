@@ -8,7 +8,7 @@ use std::sync::Arc;
 
 use serde_json::Value;
 
-use crate::clock::Timer;
+use crate::clock::{SharedClock, SystemClock, Timer};
 use crate::duration::{NEVER, hold};
 use crate::errors::{CallError, ProgrammerError};
 use crate::ordered::Ordered;
@@ -111,6 +111,9 @@ pub enum SessionEvent {
 #[derive(Debug, Clone, Default)]
 #[non_exhaustive]
 pub struct SessionManagerOptions {
+    /// The clock it runs on, which reads its sessions' activity: its server's, which one given
+    /// must be; the platform's, [`SystemClock`], when none.
+    pub clock: Option<SharedClock>,
     /// A session's connection's timeout when it names none: [`NEVER`] by default.
     pub connection_inactivity_timeout: Option<Duration>,
     /// A session's own timeout when it names none: [`NEVER`] by default.
@@ -179,6 +182,7 @@ impl Stored {
 /// A server's sessions, held in its owner.
 #[derive(Debug)]
 pub(crate) struct SessionManager {
+    clock: SharedClock,
     default_connection_inactivity_timeout: Duration,
     default_session_inactivity_timeout: Duration,
     // by token, in the order stored; by connection through the token each holds
@@ -199,17 +203,32 @@ impl SessionManager {
     ///
     /// # Errors
     ///
-    /// A [`ProgrammerError`] for a default timeout spec 1.4 does not hold.
+    /// A [`ProgrammerError`] for a default timeout spec 1.4 does not hold, or, given no clock,
+    /// outside a tokio runtime.
     pub(crate) fn new(options: &SessionManagerOptions) -> Result<Self, ProgrammerError> {
+        let default_connection_inactivity_timeout = hold(
+            "connectionInactivityTimeout",
+            options.connection_inactivity_timeout.unwrap_or(NEVER),
+        )?;
+        let default_session_inactivity_timeout = hold(
+            "sessionInactivityTimeout",
+            options.session_inactivity_timeout.unwrap_or(NEVER),
+        )?;
+        let clock = options.clock.as_ref().map_or_else(
+            || {
+                SystemClock::current().map(|platform| {
+                    let platform: SharedClock = Arc::new(platform);
+
+                    platform
+                })
+            },
+            |clock| Ok(Arc::clone(clock)),
+        )?;
+
         Ok(Self {
-            default_connection_inactivity_timeout: hold(
-                "connectionInactivityTimeout",
-                options.connection_inactivity_timeout.unwrap_or(NEVER),
-            )?,
-            default_session_inactivity_timeout: hold(
-                "sessionInactivityTimeout",
-                options.session_inactivity_timeout.unwrap_or(NEVER),
-            )?,
+            clock,
+            default_connection_inactivity_timeout,
+            default_session_inactivity_timeout,
             sessions: Ordered::new(),
             tokens: Ordered::new(),
             timers: Ordered::new(),
@@ -227,6 +246,25 @@ impl SessionManager {
         let token = *self.tokens.get(connection_handle)?;
 
         self.sessions.get_mut(&token)
+    }
+
+    /// The clock it runs on.
+    pub(crate) const fn clock(&self) -> &SharedClock {
+        &self.clock
+    }
+
+    /// A session of `connection_handle`, not stored: holding nothing, never timed out, its
+    /// activity its clock's wall reading now.
+    pub(crate) fn create(&self, connection_handle: ConnectionHandle) -> Session {
+        let now = self
+            .clock
+            .wall()
+            .duration_since(std::time::SystemTime::UNIX_EPOCH)
+            .map_or(0, |since| {
+                i64::try_from(since.as_millis()).unwrap_or(i64::MAX)
+            });
+
+        Session::new(connection_handle, now)
     }
 
     /// The connections that hold a session.
@@ -385,23 +423,18 @@ impl SessionManager {
         Some(copy)
     }
 
-    /// The session of `connection_handle`, stored first, its activity `now`, when it has none.
+    /// The session of `connection_handle`, stored first, its activity now, when it has none.
     ///
     /// # Errors
     ///
     /// A [`CallError`] as [`Self::set`] refuses the session it stores.
     pub(crate) fn get_or_else_set(
         &mut self,
-        (connection_handle, now): (&ConnectionHandle, i64),
+        connection_handle: &ConnectionHandle,
         (arming, told): (&dyn Arming, &mut Vec<SessionEvent>),
     ) -> Result<Session, CallError> {
         self.get(connection_handle).map_or_else(
-            || {
-                self.set(
-                    Session::new(Arc::clone(connection_handle), now),
-                    (arming, told),
-                )
-            },
+            || self.set(self.create(Arc::clone(connection_handle)), (arming, told)),
             Ok,
         )
     }
