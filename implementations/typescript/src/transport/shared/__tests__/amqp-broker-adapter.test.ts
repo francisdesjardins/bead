@@ -379,7 +379,7 @@ test.describe('createAmqpBrokerAdapter', () => {
 
     for (const pending of [waiting, subscribing]) {
       expect(await pending).toBeInstanceOf(Error);
-      expect(String(await pending)).toContain('stopped');
+      expect(((await pending) as Error).message).toBe('the link of ada stopped');
     }
 
     await link.closed;
@@ -404,6 +404,41 @@ test.describe('createAmqpBrokerAdapter', () => {
     ).toEqual([[3]]);
     expect([downs, adapter.isLinked]).toEqual([[], true]);
     await adapter.stop();
+  });
+
+  test('fails a transmitted publication without an outcome, a queued publication and a pending name subscription alike when stopped, none NoSubscriber', async () => {
+    script.policy.credit = 1;
+    script.policy.settle = () => {
+      return 'hold';
+    };
+
+    const adapter = adapterOf(script);
+    const { downs } = heardOf(adapter);
+    const link = await inboxUp({ adapter, script });
+    const sent = settledOf(adapter.publish({ payload: Uint8Array.of(1), topic: INBOX }));
+    const waiting = settledOf(adapter.publish({ payload: Uint8Array.of(2), topic: INBOX }));
+
+    script.policy.attach = ({ address }) => {
+      return address === NAME_QUEUE ? 'hold' : 'take';
+    };
+
+    const begun = link.sessions.length;
+    const subscribing = settledOf(adapter.subscribe(NAME));
+
+    await link.until(() => {
+      return link.deliveries.length === 1 && link.sessions.length === begun + 1;
+    });
+    await adapter.stop();
+
+    // * what an ending session held is never its broker's released
+    for (const pending of [sent, waiting, subscribing]) {
+      expect(await pending).toBeInstanceOf(Error);
+      expect(((await pending) as Error).message).toBe('the link of ada stopped');
+    }
+
+    await link.closed;
+    expect([downs, adapter.isLinked, adapter.unsettled]).toEqual([[], false, 0]);
+    expect(link.deliveries).toHaveLength(1);
   });
 
   test('refuses a publication and a subscription whose signal is aborted without sending either or losing its link', async () => {

@@ -271,11 +271,7 @@ public sealed class AmqpBrokerAdapterTests : IAsyncLifetime
             });
 
             Assert.IsType<IOException>(failure);
-            var context = pending == waiting
-                ? "the session of the publication to /exchanges/bead/bead.i.ada ended:"
-                : "its broker refused the subscription of ada to /queues/bead.s.interop:";
-
-            Assert.True(failure.Message == "the link of ada stopped" || failure.Message.StartsWith(context, StringComparison.Ordinal), failure.Message);
+            Assert.Equal("the link of ada stopped", failure.Message);
         }
 
         await connection.Closed.WaitAsync(Patience, Cancelled);
@@ -297,6 +293,54 @@ public sealed class AmqpBrokerAdapterTests : IAsyncLifetime
         }).Message.BodySection).Binary);
         Assert.Empty(downs);
         Assert.True(adapter.IsLinked);
+    }
+
+    [Fact]
+    public async Task Fails_a_transmitted_publication_without_an_outcome_a_queued_publication_and_a_pending_name_subscription_alike_when_stopped_none_NoSubscriber()
+    {
+        _script.SenderCredit = 1;
+        _script.Holding = (frame) =>
+        {
+            return (frame.Performative is AmqpTransfer && !IsRequestOf(frame, "PUT") && !IsRequestOf(frame, "POST")) || IsAttachOf(frame, NameQueue);
+        };
+
+        await using var adapter = AdapterOf();
+        var (_, downs) = HeardOf(adapter);
+        var connection = await LinkUp((adapter, _script));
+        var sent = adapter.Publish(new BrokerPublication { Payload = (byte[])[1], Topic = Inbox });
+        var waiting = adapter.Publish(new BrokerPublication { Payload = (byte[])[2], Topic = Inbox });
+        var subscribing = adapter.Subscribe(Name);
+
+        await connection.Next((frame) =>
+        {
+            return frame.Performative is AmqpTransfer && !IsRequestOf(frame, "PUT") && !IsRequestOf(frame, "POST");
+        });
+        await connection.Next((frame) =>
+        {
+            return IsAttachOf(frame, NameQueue);
+        });
+        await adapter.Stop();
+
+        // * its library releases what an ending session held: none of it is the broker's released
+        foreach (var pending in new Task[] { sent, waiting, subscribing })
+        {
+            var failure = await FailureOf(() =>
+            {
+                return pending;
+            });
+
+            Assert.IsType<IOException>(failure);
+            Assert.Equal("the link of ada stopped", failure.Message);
+        }
+
+        await connection.Closed.WaitAsync(Patience, Cancelled);
+        Assert.Empty(downs);
+        Assert.False(adapter.IsLinked);
+        Assert.Equal(0, adapter.Unsettled);
+        Assert.Equal(1, connection.Frames.Count((frame) =>
+        {
+            return frame.Performative is AmqpTransfer && !IsRequestOf(frame, "PUT") && !IsRequestOf(frame, "POST");
+        }));
     }
 
     [Fact]
