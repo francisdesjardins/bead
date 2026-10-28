@@ -11,7 +11,14 @@ import rhea, {
   type Sender,
   type Session,
 } from 'rhea';
-import { answerDetach, bindInbox, declareInbox, deleteInbox, endSession } from './amqp-management';
+import {
+  answerDetach,
+  bindInbox,
+  declareInbox,
+  deleteInbox,
+  endSession,
+  isNone,
+} from './amqp-management';
 import {
   encodeMessage,
   exchangeAddressOf,
@@ -246,15 +253,6 @@ const payloadOf = (message: unknown): Uint8Array | undefined => {
   const { content } = body as { content?: unknown };
 
   return content instanceof Uint8Array ? content : undefined;
-};
-
-// ! a terminus an ATTACH left null, which rhea reads back as a typed null rather than as none
-const isNone = (terminus: unknown): boolean => {
-  return (
-    terminus === undefined ||
-    terminus === null ||
-    (typeof terminus === 'object' && 'value' in terminus && terminus.value === null)
-  );
 };
 
 // a max-message-size an ATTACH named: none, or 0, is no maximum (AMQP 1.0 §2.7.3)

@@ -7,6 +7,12 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+
+- An AMQP 1.0 management link whose ATTACH is answered with no source or target is refused on the
+  TypeScript side as on the C# side: its DETACH's condition fails the request, and no request goes
+  on its pair (AMQP 1.0 §2.6.3, spec 15.33).
+
 ## [0.8.0] - 2026-10-28
 
 ### Added

@@ -342,6 +342,11 @@ test.describe('createAmqpBrokerAdapter', () => {
         );
         await link.closed;
         expect([adapter.isLinked, downs]).toEqual([false, []]);
+        expect(
+          link.requests.map(({ method }) => {
+            return method;
+          })
+        ).not.toContain('PUT');
       } finally {
         await adapter.stop();
       }
