@@ -1,5 +1,6 @@
 using System.Text;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using Bead.Transcoding.V1;
 using Google.Protobuf;
 using Google.Protobuf.Reflection;
@@ -76,6 +77,17 @@ internal static class TranscodingFile
     public static IMessage Answered(MessageDescriptor descriptor, byte[] payload)
     {
         return Bead.Protobuf.ProtoCodecs.Read(descriptor, payload);
+    }
+
+    /// <summary>The companion's version, as <c>spec/transcoding.md</c> states it.</summary>
+    public static string CompanionVersion
+    {
+        get
+        {
+            var text = File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "transcoding.md"));
+
+            return Regex.Match(text, @"\*\*Version: ([0-9]+\.[0-9]+\.[0-9]+)\*\*").Groups[1].Value;
+        }
     }
 
     private static JsonElement Load()

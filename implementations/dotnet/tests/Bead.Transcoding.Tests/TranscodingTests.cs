@@ -78,7 +78,7 @@ public sealed class TranscodingTests
     {
         var parted = new List<string>();
 
-        Assert.Equal("0.1.0", Root.GetProperty("transcodingVersion").GetString());
+        Assert.Equal(CompanionVersion, Root.GetProperty("transcodingVersion").GetString());
 
         PlayTemplates(parted);
         PlayReadings(parted);

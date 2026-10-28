@@ -166,6 +166,11 @@ const FILE = JSON.parse(
   readFileSync(new URL('../../../../../spec/transcoding.json', import.meta.url), 'utf8')
 ) as ITranscodingFile;
 
+/** The companion's version, as `spec/transcoding.md` states it. */
+const COMPANION_VERSION = /\*\*Version: ([0-9]+\.[0-9]+\.[0-9]+)\*\*/.exec(
+  readFileSync(new URL('../../../../../spec/transcoding.md', import.meta.url), 'utf8')
+)?.[1];
+
 const MESSAGES: Readonly<Record<string, DescMessage>> = Object.freeze({
   [EdgesSchema.typeName]: EdgesSchema,
   [EverythingSchema.typeName]: EverythingSchema,
@@ -593,7 +598,7 @@ test('reads consecutive responses from their own bytes', async () => {
 
 test.describe('plays transcoding.json', () => {
   test('its version is the companion’s', () => {
-    expect(FILE.transcodingVersion).toBe('0.1.0');
+    expect(FILE.transcodingVersion).toBe(COMPANION_VERSION);
   });
 
   for (const entry of FILE.templates) {
