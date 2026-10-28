@@ -632,11 +632,12 @@ public sealed class AmqpBrokerAdapter : IBrokerAdapter, IAsyncDisposable
     /// credit, later ones waiting in their order, <see cref="BrokerPublished.Taken"/> once
     /// <c>accepted</c>, <see cref="BrokerPublished.NoSubscriber"/> on <c>released</c>, an
     /// <see cref="IOException"/> on <c>rejected</c>, any other outcome, its session's end or its
-    /// stop; settled at most once, taken as it goes; its life, in whole milliseconds rounded up, its
-    /// header's ttl where one is asked. One past its sender ATTACH's max-message-size is an
-    /// <see cref="ArgumentException"/>, nothing sent; a link down, an
-    /// <see cref="InvalidOperationException"/>. Given up while it waits for credit, it leaves unsent;
-    /// given up once sent, its outcome is not read; either way its link is kept.
+    /// stop, one asked as its session ends going on the next; settled at most once, taken as it
+    /// goes; its life, in whole milliseconds rounded up, its header's ttl where one is asked. One
+    /// past its sender ATTACH's max-message-size is an <see cref="ArgumentException"/>, nothing
+    /// sent; a link down, an <see cref="InvalidOperationException"/>. Given up while it waits for
+    /// credit, it leaves unsent; given up once sent, its outcome is not read; either way its link is
+    /// kept.
     /// </summary>
     public async Task<BrokerPublished> Publish(BrokerPublication publication)
     {
@@ -651,29 +652,47 @@ public sealed class AmqpBrokerAdapter : IBrokerAdapter, IAsyncDisposable
         var address = AmqpMessages.AddressOf(publication.Topic);
         var ttl = MillisecondsOf(publication.ExpiresAfter);
         var bytes = AmqpMessages.MessageBytes((Encoding.UTF8.GetByteCount(address), publication.Payload.Length), ttl is not null);
-        var sending = await Asked((link, token), SendingOf((link, isInbox)));
-
-        // ! counted before it goes: its broker ends the whole session on a message past its bound,
-        // every publication on it with it
-        if (bytes > sending.Bound)
-        {
-            throw new ArgumentException(string.Create(CultureInfo.InvariantCulture, $"a message of {bytes} bytes to {address}, past its sender's max-message-size, {sending.Bound} bytes"), nameof(publication));
-        }
-
-        var message = AmqpMessages.MessageOf((address, publication.Payload), ttl);
         var published = new TaskCompletionSource<BrokerPublished>(TaskCreationOptions.RunContinuationsAsynchronously);
-        var sender = sending.Sender!;
+        var sending = await Asked((link, token), SendingOf((link, isInbox)));
+        var isBegunAgain = false;
+        Message message;
+        SenderLink sender;
 
-        try
+        while (true)
         {
-            sender.Send(message, null, (ended, _, outcome, _) =>
+            // ! counted before it goes: its broker ends the whole session on a message past its bound,
+            // every publication on it with it
+            if (bytes > sending.Bound)
             {
-                Read((link, (global::Amqp.Link)ended, address), (outcome, published));
-            }, null);
-        }
-        catch (AmqpException reason)
-        {
-            throw new IOException($"its broker ended the session of the publications of {Id}: {AmqpEndpoints.ReasonOf(reason.Error)}", reason);
+                throw new ArgumentException(string.Create(CultureInfo.InvariantCulture, $"a message of {bytes} bytes to {address}, past its sender's max-message-size, {sending.Bound} bytes"), nameof(publication));
+            }
+
+            message = AmqpMessages.MessageOf((address, publication.Payload), ttl);
+            sender = sending.Sender!;
+
+            try
+            {
+                sender.Send(message, null, (ended, _, outcome, _) =>
+                {
+                    Read((link, (global::Amqp.Link)ended, address), (outcome, published));
+                }, null);
+
+                break;
+            }
+            // ! its library answers its broker's END before it marks the session ended, under the
+            // lock its Send waits on: a publication asked in between finds the session still held,
+            // and its Send refuses it with nothing sent. It came after the end, so the next session
+            // carries it (spec 15.33), once; never on a link stopping or lost, whose end is its own
+            catch (AmqpException) when (!isBegunAgain && sending.IsEnded && !link.IsStopping && !link.IsEnded)
+            {
+                isBegunAgain = true;
+            }
+            catch (AmqpException reason)
+            {
+                throw new IOException($"its broker ended the session of the publications of {Id}: {AmqpEndpoints.ReasonOf(reason.Error)}", reason);
+            }
+
+            sending = await Asked((link, token), SendingOf((link, isInbox)));
         }
 
         try
