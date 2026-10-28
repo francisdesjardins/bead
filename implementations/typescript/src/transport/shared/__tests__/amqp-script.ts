@@ -306,7 +306,7 @@ export const createAmqpScript = async (options?: {
         role,
         session: context.session as Session,
       };
-      const decided = address === '/management' ? 'take' : policy.attach({ address, role });
+      const decided = policy.attach({ address, role });
 
       if (decided === 'take' || decided === 'hold') {
         taken(attach);
@@ -351,7 +351,7 @@ export const createAmqpScript = async (options?: {
           delete links[name];
         }
 
-        if (address !== '/management' && policy.attach({ address, role }) === 'hold') {
+        if (policy.attach({ address, role }) === 'hold') {
           held.push(() => {
             onAttach.call(session, frame);
           });

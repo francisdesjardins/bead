@@ -237,6 +237,215 @@ public sealed class AmqpBrokerAdapterTests : IAsyncLifetime
     // definition
 
     [Fact]
+    public async Task Fails_its_queued_publications_and_pending_name_subscription_when_stopped_and_lets_none_reach_its_next_link()
+    {
+        _script.SenderCredit = 1;
+        _script.Holding = (frame) =>
+        {
+            return IsAttachOf(frame, NameQueue);
+        };
+
+        await using var adapter = AdapterOf();
+        var (_, downs) = HeardOf(adapter);
+        var connection = await LinkUp((adapter, _script));
+        Assert.Equal(BrokerPublished.Taken, await adapter.Publish(new BrokerPublication { Payload = (byte[])[1], Topic = Inbox }));
+        var waiting = adapter.Publish(new BrokerPublication { Payload = (byte[])[2], Topic = Inbox });
+        var subscribing = adapter.Subscribe(Name);
+
+        await connection.Next((frame) =>
+        {
+            return frame.Performative is AmqpTransfer && !IsRequestOf(frame, "PUT") && !IsRequestOf(frame, "POST");
+        });
+        await connection.Next((frame) =>
+        {
+            return IsAttachOf(frame, NameQueue);
+        });
+        Assert.Single(TransfersTo((connection, "/exchanges/bead/bead.i.ada")));
+        await adapter.Stop();
+
+        foreach (var pending in new Task[] { waiting, subscribing })
+        {
+            var failure = await FailureOf(() =>
+            {
+                return pending;
+            });
+
+            Assert.IsType<IOException>(failure);
+            var context = pending == waiting
+                ? "the session of the publication to /exchanges/bead/bead.i.ada ended:"
+                : "its broker refused the subscription of ada to /queues/bead.s.interop:";
+
+            Assert.True(failure.Message == "the link of ada stopped" || failure.Message.StartsWith(context, StringComparison.Ordinal), failure.Message);
+        }
+
+        await connection.Closed.WaitAsync(Patience, Cancelled);
+        Assert.Empty(downs);
+        Assert.False(adapter.IsLinked);
+        Assert.Equal(0, adapter.Unsettled);
+        Assert.Single(TransfersTo((connection, "/exchanges/bead/bead.i.ada")));
+        _script.Holding = (_) =>
+        {
+            return false;
+        };
+
+        var next = await LinkUp((adapter, _script));
+
+        Assert.Equal(BrokerPublished.Taken, await adapter.Publish(new BrokerPublication { Payload = (byte[])[3], Topic = Inbox }));
+        Assert.Equal((byte[])[3], ((Data)Assert.Single(next.Transfers, (transfer) =>
+        {
+            return transfer.Message.Properties?.To == "/exchanges/bead/bead.i.ada";
+        }).Message.BodySection).Binary);
+        Assert.Empty(downs);
+        Assert.True(adapter.IsLinked);
+    }
+
+    [Fact]
+    public async Task Refuses_a_publication_and_a_subscription_whose_signal_is_aborted_without_sending_either_or_losing_its_link()
+    {
+        await using var adapter = AdapterOf();
+        var (_, downs) = HeardOf(adapter);
+        var connection = await LinkUp((adapter, _script));
+        var begun = connection.Frames.Count((frame) =>
+        {
+            return frame.Performative is Begin;
+        });
+        var declared = connection.Transfers.Count;
+
+        using var gone = new CancellationTokenSource();
+
+        await gone.CancelAsync();
+
+        foreach (var topic in new[] { Inbox, Name })
+        {
+            Assert.IsAssignableFrom<OperationCanceledException>(await FailureOf(() =>
+            {
+                return adapter.Publish(new BrokerPublication { Payload = (byte[])[1], Topic = topic, CancellationToken = gone.Token });
+            }));
+            Assert.IsAssignableFrom<OperationCanceledException>(await FailureOf(() =>
+            {
+                return adapter.Subscribe(topic, new BrokerSubscription { CancellationToken = gone.Token });
+            }));
+        }
+
+        Assert.Equal(begun, connection.Frames.Count((frame) =>
+        {
+            return frame.Performative is Begin;
+        }));
+        Assert.Equal(declared, connection.Transfers.Count);
+        Assert.Empty(downs);
+        Assert.True(adapter.IsLinked);
+        Assert.Equal(BrokerPublished.Taken, await adapter.Publish(new BrokerPublication { Payload = (byte[])[2], Topic = Inbox }));
+    }
+
+    [Fact]
+    public async Task Fails_a_start_whose_sending_links_remain_unanswered_within_connectTimeout_and_starts_a_fresh_link_afterwards()
+    {
+        _script.Holding = (frame) =>
+        {
+            return frame.Performative is Attach attach && !attach.Role;
+        };
+
+        await using var adapter = AdapterOf((options) =>
+        {
+            return options with { ConnectTimeout = TimeSpan.FromSeconds(1) };
+        });
+        var (_, downs) = HeardOf(adapter);
+        var starting = adapter.Start();
+        var connection = await _script.Connection();
+
+        await connection.Next<Attach>();
+        var failure = await FailureOf(() =>
+        {
+            return starting;
+        });
+
+        Assert.IsType<TimeoutException>(failure);
+        Assert.Contains("within 1000 ms", failure.Message, StringComparison.Ordinal);
+        await connection.Closed.WaitAsync(Patience, Cancelled);
+        Assert.Empty(downs);
+        Assert.False(adapter.IsLinked);
+        _script.Holding = (_) =>
+        {
+            return false;
+        };
+
+        var next = await LinkUp((adapter, _script));
+
+        Assert.NotSame(connection, next);
+        Assert.True(adapter.IsLinked);
+    }
+
+    [Fact]
+    public async Task Fails_an_inbox_declaration_left_unanswered_within_connectTimeout_and_closes_its_connection_without_telling_a_loss()
+    {
+        await using var adapter = AdapterOf((options) =>
+        {
+            return options with { ConnectTimeout = TimeSpan.FromSeconds(1) };
+        });
+        var (_, downs) = HeardOf(adapter);
+        var connection = await Started((adapter, _script));
+
+        _script.Holding = (frame) =>
+        {
+            return IsRequestOf(frame, "PUT");
+        };
+
+        var subscribing = adapter.Subscribe(Inbox);
+
+        await connection.NextRequest();
+        var failure = await FailureOf(() =>
+        {
+            return subscribing;
+        });
+
+        Assert.IsType<TimeoutException>(failure);
+        Assert.Contains("within 1000 ms", failure.Message, StringComparison.Ordinal);
+        await connection.Closed.WaitAsync(Patience, Cancelled);
+        Assert.Equal("PUT", Assert.Single(connection.Transfers).Message.Properties.Subject);
+        Assert.Empty(downs);
+        Assert.False(adapter.IsLinked);
+        Assert.Equal(0, adapter.Unsettled);
+    }
+
+    [Fact]
+    public async Task Refuses_its_inbox_when_either_management_link_is_refused_and_closes_its_connection_without_telling_a_loss()
+    {
+        foreach (var isReceiver in new[] { false, true })
+        {
+            await using var adapter = AdapterOf();
+            var (_, downs) = HeardOf(adapter);
+            var connection = await Started((adapter, _script));
+
+            _script.Holding = (frame) =>
+            {
+                return IsAttachOf(frame, AmqpManagement.Node) && ((Attach)frame.Performative!).Role == isReceiver;
+            };
+
+            var subscribing = adapter.Subscribe(Inbox);
+            var attaching = await connection.Next((frame) =>
+            {
+                return IsAttachOf(frame, AmqpManagement.Node) && ((Attach)frame.Performative!).Role == isReceiver;
+            });
+
+            await connection.AnswerAttach(attaching, new Error(new Symbol("amqp:not-allowed")) { Description = "management denied" });
+            var failure = await FailureOf(() =>
+            {
+                return subscribing;
+            });
+
+            Assert.IsType<IOException>(failure);
+            Assert.Contains("amqp:not-allowed, management denied", failure.Message, StringComparison.Ordinal);
+            await connection.Closed.WaitAsync(Patience, Cancelled);
+            Assert.False(adapter.IsLinked);
+            Assert.Empty(downs);
+            Assert.DoesNotContain(connection.Transfers, (transfer) =>
+            {
+                return transfer.Message.Properties?.Subject == "PUT";
+            });
+        }
+    }
+
+    [Fact]
     public async Task Opens_a_fresh_connection_each_start_its_container_id_its_id_SASL_PLAIN_as_its_id_or_EXTERNAL_under_a_certificate_its_idle_time_out_its_own_and_leaves_no_library_to_reconnect_or_recover_it_spec_15_33()
     {
         var asked = 0;
