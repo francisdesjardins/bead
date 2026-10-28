@@ -26,6 +26,16 @@ public sealed partial class RouterCoreTests
         return Assert.IsType<FailureException>(reason).Code;
     }
 
+    // each answer a peer was sent, in order: its kind, its call id, and its failure's code or its
+    // payload's first byte
+    private static List<(EnvelopeKind Kind, uint CallId, ushort Value)> AnswersOf(Peer peer)
+    {
+        return [.. peer.Sent.Select((envelope) =>
+        {
+            return (envelope.Kind, envelope.Header.CallId, envelope.Failure is { } failure ? failure.Code : envelope.Payload.Span[0]);
+        })];
+    }
+
     // a server's port that says its side, reports, and sends nowhere: nothing more
     private sealed class Plain : IRouterCorePort
     {
@@ -672,8 +682,9 @@ public sealed partial class RouterCoreTests
         Assert.Equal(3, resolver.Requests.Count);
     }
 
+    // spec 9.0
     [Fact]
-    public async Task Keeps_the_replacement_call_when_its_report_listener_cancels_a_failed_resolver_s_call()
+    public async Task Answers_a_failed_resolver_s_call_PROCEDURE_FAILED_before_what_its_report_listener_hands_its_router_whose_cancel_crosses_that_answer_and_whose_replacement_opens_the_call_id_again()
     {
         var server = new Peer(RouterSide.Server);
         using var core = server.Core;
@@ -699,22 +710,108 @@ public sealed partial class RouterCoreTests
 
         Assert.Equal([failure], server.Reports);
         Assert.Equal(["a"], server.ReportedOn);
+        Assert.Equal([(EnvelopeKind.Failure, 5u, (ushort)ProtocolCode.ProcedureFailed)], AnswersOf(server));
         Assert.Equal(2, resolver.Requests.Count);
-        Assert.Empty(server.Sent);
-        Assert.True(resolver.Requests[0].Signal.IsCancellationRequested);
-        Assert.False(resolver.Requests[1].Signal.IsCancellationRequested);
+
+        // the cancel crossed that answer: it found no call, and cancelled nothing
+        Assert.Equal(
+            [false, false],
+            resolver.Requests.Select((props) =>
+            {
+                return props.Signal.IsCancellationRequested;
+            }));
+        Assert.Equal([(5u, "a")], server.Cancels);
         Assert.Equal(1, (await GaugesOf(server)).Counts["answeringCalls"]);
 
         await resolver.Answer(0, new byte[] { 1 });
-        Assert.Empty(server.Sent);
+        Assert.Single(server.Sent);
         await resolver.Answer(1, new byte[] { 2 });
 
-        var answer = Assert.Single(server.Sent);
-
-        Assert.Equal(("a", EnvelopeKind.Result, 5u), (Assert.Single(server.SentOn), answer.Kind, answer.Header.CallId));
-        Assert.Equal(new byte[] { 2 }, answer.Payload.ToArray());
+        Assert.Equal(
+            [(EnvelopeKind.Failure, 5u, (ushort)ProtocolCode.ProcedureFailed), (EnvelopeKind.Result, 5u, (ushort)2)],
+            AnswersOf(server));
+        Assert.Equal(["a", "a"], server.SentOn);
         Assert.Equal(0, (await GaugesOf(server)).Counts["answeringCalls"]);
         Assert.Equal([failure], server.Reports);
+    }
+
+    // spec 9.0
+    [Fact]
+    public async Task Answers_a_failed_admission_s_call_PROCEDURE_FAILED_before_what_its_report_listener_hands_its_router_and_the_replacement_opens_the_call_id_again()
+    {
+        var server = new Peer(RouterSide.Server);
+        using var core = server.Core;
+        var resolver = server.Resolve();
+        var failure = new InvalidOperationException("the admission failed");
+
+        resolver.Admission = (_) =>
+        {
+            if (resolver.Admitted == 1)
+            {
+                throw failure;
+            }
+
+            return null;
+        };
+        server.OnReport = (_, _) =>
+        {
+            core.Receive(EnvelopeCodec.WriteEnvelope(new Envelope { Header = new CancelHeader { CallId = 5 } }), "a");
+            core.Receive(EnvelopeCodec.WriteEnvelope(new Envelope { Header = RequestOf(5) }), "a");
+        };
+
+        await server.Deliver(new Envelope { Header = RequestOf(5) }, "a");
+
+        Assert.Equal([failure], server.Reports);
+        Assert.Equal(["a"], server.ReportedOn);
+        Assert.Equal([(EnvelopeKind.Failure, 5u, (ushort)ProtocolCode.ProcedureFailed)], AnswersOf(server));
+        Assert.Equal(2, resolver.Admitted);
+        Assert.Single(resolver.Requests);
+        Assert.Equal(1, (await GaugesOf(server)).Counts["answeringCalls"]);
+
+        await resolver.Answer(0, new byte[] { 2 });
+
+        Assert.Equal(
+            [(EnvelopeKind.Failure, 5u, (ushort)ProtocolCode.ProcedureFailed), (EnvelopeKind.Result, 5u, (ushort)2)],
+            AnswersOf(server));
+        Assert.Equal(0, (await GaugesOf(server)).Counts["answeringCalls"]);
+        Assert.Equal([failure], server.Reports);
+    }
+
+    // spec 9.0
+    [Fact]
+    public async Task Lets_its_connections_go_after_the_turn_its_report_listener_disposes_it_in_the_failed_resolver_s_answer_refused_as_disposed_and_reported()
+    {
+        var server = new Peer(RouterSide.Server);
+        var core = server.Core;
+        var resolver = server.Resolve();
+        var failure = new InvalidOperationException("the resolver failed");
+
+        // what the core holds as its report listener disposes it
+        var disposed = new List<(long Answering, bool IsDisposed)>();
+
+        resolver.Handling = (_) =>
+        {
+            throw failure;
+        };
+        server.OnReport = (reason, _) =>
+        {
+            if (ReferenceEquals(reason, failure))
+            {
+                core.Dispose();
+                disposed.Add((core.Gauges().Counts["answeringCalls"], core.IsDisposed));
+            }
+        };
+
+        await server.Deliver(new Envelope { Header = RequestOf(5) }, "a");
+
+        // disposed at once, what it holds let go in a later turn
+        Assert.Equal([(1L, true)], disposed);
+        Assert.Empty(server.Sent);
+        Assert.Equal(2, server.Reports.Count);
+        Assert.Same(failure, server.Reports[0]);
+        Assert.Equal("the router was disposed", Assert.IsType<DisconnectException>(server.Reports[1]).Message);
+        Assert.Equal(["a", "a"], server.ReportedOn);
+        Assert.Equal(0, (await GaugesOf(server)).Counts["answeringCalls"]);
     }
 
     [Fact]
