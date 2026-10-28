@@ -349,6 +349,10 @@ carry any detail of that error, an exception's message least of all: the error i
 call went (section 8.1), as a generic message is all an unexpected error returns to its consumer in
 OWASP's Application Security Verification Standard
 ([ASVS 5.0 §16.5.1](https://github.com/OWASP/ASVS/blob/v5.0.0/5.0/en/0x25-V16-Security-Logging-and-Error-Handling.md)).
+A side tells its application what it reports in the turn that raised it; what that application
+hands the side from within the telling — an envelope its transport carries, a connection let go —
+the side takes in a later turn, behind what came before it, never within that one, as section 15.13
+hands an envelope on: a report never changes what its turn answers.
 
 9.1. A call is a request and its answer, under one call id on one connection. Either side opens
 calls: a client its requests, a server its commands to a client. A requester draws its call ids in
