@@ -1249,9 +1249,10 @@ public sealed class AmqpBrokerAdapterTests : IAsyncLifetime
             return IsAttachOf(frame, NameQueue);
         });
         var attach = (Attach)attaching.Performative!;
+        // ! the links still attached: a channel its management's session ended on is its to begin again
         var others = connection.Links.Where((link) =>
         {
-            return link.Address != NameQueue;
+            return link.Address != NameQueue && !link.IsDetached;
         }).Select((link) =>
         {
             return link.Channel;
