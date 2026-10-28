@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { collect, merge, parse } from '../bench-release.mjs';
+import { collect, level, merge, parse } from '../bench-release.mjs';
 import { validate } from '../bench-compare.mjs';
 
 const report = (values = [100, 90, 110], options = {}) => {
@@ -135,7 +135,7 @@ test('refuses processes differing in side, commit, runtimes, environment, method
   }, /fresh process/);
 });
 
-test('runs baseline and candidate in alternating fresh processes and drops the first run alike', async () => {
+test('runs baseline and candidate in alternating fresh processes, in ABBA order, and drops the first run alike', async () => {
   const order = [];
   const values = await collect(['baseline', 'candidate'], {
     processes: 5,
@@ -149,7 +149,9 @@ test('runs baseline and candidate in alternating fresh processes and drops the f
   assert.deepEqual(
     order,
     Array.from({ length: 5 }, (_, index) => {
-      return [`baseline:${index}`, `candidate:${index}`];
+      return index % 2 === 0
+        ? [`baseline:${index}`, `candidate:${index}`]
+        : [`candidate:${index}`, `baseline:${index}`];
     }).flat()
   );
   assert.equal(values.length, 2);
@@ -197,6 +199,16 @@ test('selects a legacy whole bench by exact ID or name, and refuses an unmatched
     }),
     /matches no/
   );
+});
+
+test('passes a filter to the benches only when every one takes it, so a measure meets the same phases in each', () => {
+  const options = { side: 'csharp', filter: 'call.throughput' };
+  assert.equal(level([true, true], options), options);
+  assert.equal(level([false, true], options).filter, undefined);
+  assert.equal(level([true, false], options).side, 'csharp');
+  assert.equal(options.filter, 'call.throughput');
+  const whole = { side: 'csharp' };
+  assert.equal(level([false, true], whole), whole);
 });
 
 test('defaults to five processes and two recorded runs and validates CLI options', () => {

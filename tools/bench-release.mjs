@@ -187,12 +187,27 @@ const execute = (command, args, options) => {
   });
 };
 
+const sourceOf = (tree, side) => {
+  return side === 'typescript'
+    ? join(tree, 'implementations/typescript/tools/bench.mjs')
+    : join(tree, 'implementations/dotnet/tools/Bead.Benchmarks/Program.cs');
+};
+
+// ! A filter reaches the benches only when every one takes it, so that a measure meets the same
+// phases before it in each tree, its warm-up among them: a bench run whole against one that ran
+// its measure cold compares the warm-up, not the code. Otherwise every tree runs whole, and the
+// collection selects the filter's measures in each report.
+export const level = (filters, options) => {
+  if (!options.filter || filters.every(Boolean)) {
+    return options;
+  }
+  console.error(`a bench has no --filter; every tree runs whole, then selects ${options.filter}`);
+  return { ...options, filter: undefined };
+};
+
 const prepare = async (tree, options) => {
   const dotnet = join(tree, 'implementations/dotnet');
-  const source =
-    options.side === 'typescript'
-      ? join(tree, 'implementations/typescript/tools/bench.mjs')
-      : join(dotnet, 'tools/Bead.Benchmarks/Program.cs');
+  const source = sourceOf(tree, options.side);
   const filtered = readFileSync(source, 'utf8').includes('--filter');
   let command = process.execPath;
   let args = ['--expose-gc', source];
@@ -229,21 +244,21 @@ const prepare = async (tree, options) => {
   if (options.filter && filtered) {
     args.push('--filter', options.filter);
   }
-  if (options.filter && !filtered) {
-    console.error(
-      `${tree}: bench has no --filter; runs whole, then selects ${options.filter} in the report`
-    );
-  }
   return { tree, command, args };
 };
 
-// * Alternate baseline then candidate, process by process. No report is published on a failure.
+// * Alternate the trees process by process, in ABBA order: baseline then candidate, then candidate
+// then baseline, so neither always runs second, after the other has warmed the machine. No report
+// is published on a failure.
 export const collect = async (trees, options) => {
   const reports = trees.map(() => {
     return [];
   });
   for (let processIndex = 0; processIndex < options.processes; processIndex++) {
-    for (let treeIndex = 0; treeIndex < trees.length; treeIndex++) {
+    const order = trees.map((_, treeIndex) => {
+      return processIndex % 2 === 0 ? treeIndex : trees.length - 1 - treeIndex;
+    });
+    for (const treeIndex of order) {
       const tree = trees[treeIndex];
       const report = await options.run(tree, processIndex);
       validate(report);
@@ -279,11 +294,17 @@ export const main = async (args) => {
         mkdirSync(dirname(resolve(output)), { recursive: true });
       }
     }
+    const roots = options.tree ? [resolve(options.tree), ROOT] : [ROOT];
+    const leveled = level(
+      roots.map((root) => {
+        return readFileSync(sourceOf(root, options.side), 'utf8').includes('--filter');
+      }),
+      options
+    );
     const trees = [];
-    if (options.tree) {
-      trees.push(await prepare(resolve(options.tree), options));
+    for (const root of roots) {
+      trees.push(await prepare(root, leveled));
     }
-    trees.push(await prepare(ROOT, options));
     const reports = await collect(trees, {
       ...options,
       run: async (tree) => {

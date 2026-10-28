@@ -593,9 +593,13 @@ guard: its `dotnet` job builds the C# bench in Release, so that a release's meas
 and measures nothing.
 
 Confirm every `regression` and `inconclusive` on a quiet machine against a checkout of the previous
-tag. `--tree` builds and runs that baseline, alternating baseline then candidate process by
-process. Both trees need their TypeScript dependencies installed. A bench without `--filter` runs
-whole; its report is then selected by the same ID or name. For example, from the candidate tree:
+tag. `--tree` builds and runs that baseline, alternating the trees process by process in ABBA
+order, baseline then candidate, then candidate then baseline. Both trees need their TypeScript
+dependencies installed. `--filter` reaches the benches only when both take it; when one has none,
+both run whole and their reports are selected by the same ID or name, so that a measure meets the
+same phases before it, and the same warm-up, in each tree. The C# side's in-memory call throughput
+settles each process in one of a few modes, from one version to the next alike; its confirmation
+takes eight processes or more a tree. For example, from the candidate tree:
 
 ```sh
 git worktree add --detach ../bench-baseline v0.7.0
