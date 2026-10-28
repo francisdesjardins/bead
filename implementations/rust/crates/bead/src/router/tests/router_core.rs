@@ -629,10 +629,10 @@ async fn forgets_a_call_its_requester_cancels_then_cancels_its_signal_nothing_an
     assert_eq!(
         locked(&handed)
             .iter()
-            .map(|props| props.signal.is_aborted())
+            .map(|props| props.signal.reason())
             .collect::<Vec<_>>(),
-        [true, false],
-        "the first one's signal cancelled"
+        [Some(crate::router::types::SignalReason::Cancelled), None],
+        "the first one's signal cancelled, as its requester cancelled it"
     );
     assert!(served.transport.take().is_empty(), "nothing answers it");
     assert!(served.reported().is_empty(), "nothing reported");
