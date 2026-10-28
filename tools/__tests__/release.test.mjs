@@ -15,6 +15,8 @@ import {
   resolveMove,
   tag,
   versionOf,
+  withCargoLockMembers,
+  withCargoVersion,
   withChangelogRelease,
   withGeneratedHeader,
   withLockRanges,
@@ -124,6 +126,60 @@ describe('texts', () => {
       lock(3)
         .replaceAll('"[0.1.0, )"', '"[0.2.0, )"')
         .replace('"Other": "[0.2.0, )"', '"Other": "[0.1.0, )"')
+    );
+  });
+
+  test('moves the Rust workspace’s version and its lock’s members with the product’s', () => {
+    const manifest = [
+      '[workspace]',
+      'resolver = "3"',
+      '',
+      '[workspace.package]',
+      'version = "0.1.0"',
+      'edition = "2024"',
+      '',
+      '[workspace.dependencies.tokio]',
+      'version = "1.54.1"',
+      '',
+    ].join('\n');
+    assert.equal(
+      withCargoVersion(manifest, '0.2.0'),
+      manifest.replace('version = "0.1.0"', 'version = "0.2.0"')
+    );
+    assert.throws(() => withCargoVersion('[workspace]\n', '0.2.0'), /no \[workspace\.package\]/);
+    const lock = [
+      'version = 4',
+      '',
+      '[[package]]',
+      'name = "bytes"',
+      'version = "0.1.0"',
+      'source = "registry+https://github.com/rust-lang/crates.io-index"',
+      '',
+      '[[package]]',
+      'name = "francisdesjardins-bead"',
+      'version = "0.1.0"',
+      'dependencies = [',
+      ' "bytes",',
+      ']',
+      '',
+      '[[package]]',
+      'name = "francisdesjardins-bead-interop"',
+      'version = "0.1.0"',
+      '',
+    ].join('\n');
+    const moved = withCargoLockMembers(lock, '0.2.0');
+    assert.equal(moved.count, 2);
+    assert.equal(
+      moved.text,
+      lock
+        .replace(
+          'name = "francisdesjardins-bead"\nversion = "0.1.0"',
+          'name = "francisdesjardins-bead"\nversion = "0.2.0"'
+        )
+        .replace(
+          'name = "francisdesjardins-bead-interop"\nversion = "0.1.0"',
+          'name = "francisdesjardins-bead-interop"\nversion = "0.2.0"'
+        )
     );
   });
 
