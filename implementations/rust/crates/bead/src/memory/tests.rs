@@ -18,7 +18,9 @@ use crate::managers::service::{
     RequestDependencies, RequestOptions, ResolverDependencies, Response,
 };
 use crate::payloads::RawCodec;
-use crate::router::types::{ConnectionHandle, RouterLimitsOptions, TransportMessage};
+use crate::router::types::{
+    BoxFuture, ConnectionHandle, RouterError, RouterLimitsOptions, TransportMessage,
+};
 use crate::server::ServerOptions;
 use crate::testing::SteppingClock;
 use crate::testing::hexadecimal;
@@ -57,6 +59,10 @@ impl ServerListener for AtServer {
     fn on_close(&self, was_clean: bool, connection_handle: &ConnectionHandle) {
         locked(&self.told).push(format!("closed {connection_handle} {was_clean}"));
     }
+
+    fn on_error(&self, error: &RouterError, connection_handle: Option<&ConnectionHandle>) {
+        locked(&self.told).push(format!("error {error} on {connection_handle:?}"));
+    }
 }
 
 // what a client's listener hears, each told as a line
@@ -76,6 +82,41 @@ impl ClientListener for AtClient {
     fn on_close(&self, was_clean: bool, is_quick: bool) {
         locked(&self.told).push(format!("closed {was_clean} {is_quick}"));
     }
+
+    fn on_reconnect(&self) {
+        locked(&self.told).push("reconnect".to_owned());
+    }
+
+    fn on_error(&self, error: &RouterError) {
+        locked(&self.told).push(format!("error {error}"));
+    }
+}
+
+// a server's listener that runs what a test gives it as each connection is drawn
+struct OnConnection<F>(F);
+
+impl<F: Fn(&ConnectionHandle) + Send + Sync> ServerListener for OnConnection<F> {
+    fn on_connection(&self, connection_handle: &ConnectionHandle) {
+        (self.0)(connection_handle);
+    }
+}
+
+// a client's listener that runs what a test gives it as each message comes
+struct OnMessage<F>(F);
+
+impl<F: Fn(&TransportMessage) + Send + Sync> ClientListener for OnMessage<F> {
+    fn on_message(&self, message: TransportMessage) {
+        (self.0)(&message);
+    }
+}
+
+// a client's listener that runs what a test gives it as each reconnection starts
+struct OnReconnect<F>(F);
+
+impl<F: Fn() + Send + Sync> ClientListener for OnReconnect<F> {
+    fn on_reconnect(&self) {
+        (self.0)();
+    }
 }
 
 /// A server started and a client of it, on one stepping clock, each told to a list of its own.
@@ -88,6 +129,15 @@ struct Ends {
 
 impl Ends {
     async fn started() -> Self {
+        let ends = Self::unstarted();
+
+        ends.server.start().await.expect("started");
+
+        ends
+    }
+
+    // a server not started yet, its listener told
+    fn unstarted() -> Self {
         let clock = SteppingClock::new(crate::testing::instants::new_year());
         let shared: SharedClock = Arc::<SteppingClock>::clone(&clock);
         let server = MemoryServer::new(&MemoryServerOptions {
@@ -100,7 +150,6 @@ impl Ends {
         server.listen(Arc::new(AtServer {
             told: Arc::clone(&at_server),
         }));
-        server.start().await.expect("started");
 
         Self {
             clock,
@@ -848,5 +897,837 @@ async fn refuses_a_second_reconnection_leaving_the_first_alone() {
             Err(TransportError::Reconnect(_))
         ),
         "the first ran its course"
+    );
+}
+
+// a listener that panics at each event it is told, at either end
+struct Breaking;
+
+impl ServerListener for Breaking {
+    fn on_connection(&self, _connection_handle: &ConnectionHandle) {
+        panic!("a listener broke");
+    }
+
+    fn on_message(&self, _message: TransportMessage, _connection_handle: &ConnectionHandle) {
+        panic!("a listener broke");
+    }
+
+    fn on_close(&self, _was_clean: bool, _connection_handle: &ConnectionHandle) {
+        panic!("a listener broke");
+    }
+}
+
+impl ClientListener for Breaking {
+    fn on_close(&self, _was_clean: bool, _is_quick: bool) {
+        panic!("a listener broke");
+    }
+
+    fn on_reconnect(&self) {
+        panic!("a listener broke");
+    }
+}
+
+const SECOND: &str = "type=MEMORY;ip=local;ordinal=2";
+
+const BROKE: &str = "error a listener panicked: a listener broke";
+
+type Reconnection = Result<BoxFuture<Result<(), TransportError>>, TransportError>;
+
+// what a reconnection's refusal says, or none when it was made
+fn refusal_of(reconnection: Reconnection) -> Option<String> {
+    reconnection.err().map(|refused| refused.to_string())
+}
+
+// spec 15.13
+#[tokio::test]
+async fn hears_what_its_server_sent_before_the_connection_opened_once_it_has_in_its_order() {
+    let ends = Ends::started().await;
+    let server = ends.server.clone();
+
+    // * sent in the turn its server draws it, before its client opened: heard once it has, in
+    // order
+    ends.server
+        .listen(Arc::new(OnConnection(move |handle: &ConnectionHandle| {
+            server.send(message_of(&[1], None), handle).expect("sent");
+            server.send(message_of(&[2], None), handle).expect("sent");
+        })));
+
+    let (client, at_client) = ends.connected((None, None)).await;
+
+    ends.clock.settle().await;
+
+    assert_eq!(
+        taken(&at_client),
+        ["heard 01 carrying None", "heard 02 carrying None"],
+        "heard once open, in its order"
+    );
+    assert_eq!(client.ready_state(), ReadyState::Open, "open");
+}
+
+// spec 15.13, 15.15
+#[tokio::test]
+async fn fails_a_connect_its_server_closed_as_it_opened_what_it_sent_before_unheard() {
+    let ends = Ends::started().await;
+    let server = ends.server.clone();
+
+    // * sent and closed in the turn its server draws it, before its client opened
+    ends.server
+        .listen(Arc::new(OnConnection(move |handle: &ConnectionHandle| {
+            server.send(message_of(&[1], None), handle).expect("sent");
+            drop(server.close(handle));
+        })));
+
+    let (client, at_client) = ends.client();
+    let connecting = client.connect(MemoryConnectOptions::default());
+
+    ends.clock.settle().await;
+
+    let refused = connecting.await.expect_err("closed as it opened");
+
+    assert!(
+        matches!(refused, TransportError::Connect(_)),
+        "a connect's error: {refused:?}"
+    );
+    assert_eq!(
+        refused.to_string(),
+        "the in-memory transport server closed the connection as it opened",
+        "said why"
+    );
+
+    ends.clock.settle().await;
+
+    assert!(taken(&at_client).is_empty(), "nothing heard, no close told");
+    assert_eq!(client.ready_state(), ReadyState::Closed, "closed");
+    assert!(ends.server.clients().is_empty(), "no connection held");
+}
+
+// spec 15.13, 15.15
+#[tokio::test]
+async fn closes_at_once_unclean_a_connection_its_server_draws_once_a_dispose_gave_up_on_its_connect()
+ {
+    let ends = Ends::started().await;
+    let (client, at_client) = ends.client();
+    let (server, disposed) = (ends.server.clone(), client.clone());
+
+    // * its dispose in the turn its server draws the connection, before its client opened; what
+    // its server sends after goes unheard
+    ends.server
+        .listen(Arc::new(OnConnection(move |handle: &ConnectionHandle| {
+            disposed.dispose();
+            server.send(message_of(&[1], None), handle).expect("sent");
+        })));
+
+    let connecting = client.connect(MemoryConnectOptions::default());
+
+    ends.clock.settle().await;
+
+    let refused = connecting.await.expect_err("disposed as it connected");
+
+    assert_eq!(
+        refused.to_string(),
+        "the transport client was disposed as it connected",
+        "said why"
+    );
+
+    ends.clock.settle().await;
+
+    assert_eq!(client.ready_state(), ReadyState::Closed, "closed");
+    assert_eq!(
+        ends.server_told(),
+        [
+            format!("connection {FIRST}"),
+            format!("closed {FIRST} false")
+        ],
+        "closed at once, unclean"
+    );
+    assert!(taken(&at_client).is_empty(), "nothing heard");
+    assert!(ends.server.clients().is_empty(), "no connection held");
+}
+
+// a platform's shape: a message's data is bytes, so what is no bytes is no message to send
+#[tokio::test]
+async fn refuses_a_send_or_a_disconnect_unless_open_and_a_send_of_what_is_no_bytes() {
+    let ends = Ends::started().await;
+    let (client, _) = ends.client();
+
+    // * never connected: nothing to send on, nor to close
+    let unsent = client
+        .send(message_of(&[1], None))
+        .expect_err("never connected");
+
+    assert_eq!(
+        unsent.to_string(),
+        "the transport client is uninitialized, not open",
+        "said why"
+    );
+
+    let unclosed = client
+        .disconnect(DisconnectOptions::default())
+        .expect_err("never connected");
+
+    assert!(
+        matches!(unclosed, TransportError::ReadyState(_)),
+        "a ready state's error: {unclosed:?}"
+    );
+    assert_eq!(
+        unclosed.to_string(),
+        "the transport client is uninitialized, not open",
+        "said why"
+    );
+
+    ends.clock.settle().await;
+
+    assert!(ends.server_told().is_empty(), "nothing reached its server");
+    assert_eq!(
+        client.ready_state(),
+        ReadyState::Uninitialized,
+        "nothing moved"
+    );
+}
+
+// spec 15.13
+#[tokio::test]
+async fn refuses_a_reconnect_never_connected_and_a_connect_unless_closed_nothing_changed() {
+    let ends = Ends::unstarted();
+    let (client, _) = ends.client();
+    let cancelled = CancellationToken::new();
+
+    cancelled.cancel();
+
+    // * never connected: nothing to connect again to
+    assert_eq!(
+        refusal_of(client.reconnect(ReconnectOptions::default())).as_deref(),
+        Some("the transport client was never connected"),
+        "said why"
+    );
+
+    // its token cancelled already, and a server not started: refused, the first leaving its state
+    // as it was
+    let refused = client
+        .connect(MemoryConnectOptions {
+            signal: Some(cancelled.clone()),
+            ..MemoryConnectOptions::default()
+        })
+        .await
+        .expect_err("cancelled already");
+
+    assert!(
+        matches!(refused, TransportError::Cancelled(_)),
+        "cancelled: {refused:?}"
+    );
+    assert_eq!(client.ready_state(), ReadyState::Uninitialized, "as it was");
+
+    let refused = client
+        .connect(MemoryConnectOptions::default())
+        .await
+        .expect_err("its server not started");
+
+    assert_eq!(
+        refused.to_string(),
+        "the in-memory transport server is uninitialized, not open",
+        "said why"
+    );
+    assert_eq!(client.ready_state(), ReadyState::Closed, "closed");
+
+    // open: a second connect refused, and a reconnection whose token is cancelled already leaves
+    // it open
+    ends.server.start().await.expect("started");
+
+    let connecting = client.connect(MemoryConnectOptions::default());
+
+    ends.clock.settle().await;
+    connecting.await.expect("connected");
+
+    let again = client
+        .connect(MemoryConnectOptions::default())
+        .await
+        .expect_err("open already");
+
+    assert_eq!(
+        again.to_string(),
+        "the transport client is already open",
+        "said why"
+    );
+    assert!(
+        matches!(
+            client
+                .reconnect(ReconnectOptions {
+                    signal: Some(cancelled),
+                    ..ReconnectOptions::default()
+                })
+                .err(),
+            Some(TransportError::Cancelled(_))
+        ),
+        "a reconnection cancelled already refused"
+    );
+    assert_eq!(client.ready_state(), ReadyState::Open, "still open");
+    assert_eq!(ends.server.clients().len(), 1, "one connection held");
+}
+
+// pending from its call to a later turn: what the other sides hold behind an accept, this side
+// asks within the call's own turn, before any later one runs
+#[tokio::test]
+async fn refuses_a_second_connect_or_reconnect_while_one_is_pending() {
+    for is_reconnect in [false, true] {
+        let ends = Ends::started().await;
+        let (client, at_client) = ends.client();
+
+        if is_reconnect {
+            let connecting = client.connect(MemoryConnectOptions::default());
+
+            ends.clock.settle().await;
+            connecting.await.expect("connected");
+            ends.server_told();
+        }
+
+        let pending: BoxFuture<Result<(), TransportError>> = if is_reconnect {
+            client
+                .reconnect(ReconnectOptions {
+                    maximum_attempts: Some(1),
+                    ..ReconnectOptions::default()
+                })
+                .expect("a reconnection")
+        } else {
+            Box::pin(client.connect(MemoryConnectOptions::default()))
+        };
+        let state = if is_reconnect {
+            "reconnecting"
+        } else {
+            "connecting"
+        };
+
+        assert_eq!(
+            client
+                .connect(MemoryConnectOptions::default())
+                .await
+                .err()
+                .map(|refused| refused.to_string()),
+            Some(format!("the transport client is already {state}")),
+            "a second connect refused"
+        );
+        assert_eq!(
+            refusal_of(client.reconnect(ReconnectOptions::default())).as_deref(),
+            Some(if is_reconnect {
+                "the transport client is already reconnecting"
+            } else {
+                "the transport client cannot reconnect while connecting"
+            }),
+            "a reconnection refused"
+        );
+        assert_eq!(
+            client.ready_state(),
+            if is_reconnect {
+                ReadyState::Reconnecting
+            } else {
+                ReadyState::Connecting
+            },
+            "still pending"
+        );
+        assert_eq!(
+            taken(&at_client),
+            if is_reconnect {
+                vec!["reconnect"]
+            } else {
+                vec![]
+            },
+            "its one start told, no close, no error"
+        );
+        assert!(
+            ends.server_told().is_empty(),
+            "nothing drawn nor closed within it"
+        );
+
+        ends.clock.settle().await;
+        pending.await.expect("the first goes on");
+
+        assert_eq!(client.ready_state(), ReadyState::Open, "open");
+        assert_eq!(ends.server.clients().len(), 1, "one connection held");
+
+        client
+            .disconnect(DisconnectOptions::default())
+            .expect("closed");
+        ends.clock.settle().await;
+
+        assert_eq!(client.ready_state(), ReadyState::Closed, "closed");
+        assert!(ends.server.clients().is_empty(), "none held");
+        assert_eq!(
+            taken(&at_client),
+            ["closed true false"],
+            "its own close alone"
+        );
+        assert_eq!(
+            ends.server_told(),
+            if is_reconnect {
+                vec![
+                    format!("closed {FIRST} false"),
+                    format!("connection {SECOND}"),
+                    format!("closed {SECOND} true"),
+                ]
+            } else {
+                vec![
+                    format!("connection {FIRST}"),
+                    format!("closed {FIRST} true"),
+                ]
+            },
+            "the one it replaced dropped, its own closed clean"
+        );
+    }
+}
+
+// spec 15.13
+#[tokio::test]
+async fn reconnects_with_its_last_connect_s_options_replacing_its_connection_without_a_close() {
+    const ONE: &str = "type=MEMORY;ip=10.0.0.1;ordinal=1";
+    const TWO: &str = "type=MEMORY;ip=10.0.0.1;ordinal=2";
+
+    let ends = Ends::started().await;
+    let (client, at_client) = ends.client();
+
+    // * each listener of its start told, the one that panics reported, and the reconnection goes on
+    client.listen(Arc::new(Breaking));
+
+    let connecting = client.connect(MemoryConnectOptions {
+        address: Some("10.0.0.1".to_owned()),
+        port: Some(4_000),
+        ..MemoryConnectOptions::default()
+    });
+
+    ends.clock.settle().await;
+    connecting.await.expect("connected");
+
+    let reconnection = client
+        .reconnect(ReconnectOptions::default())
+        .expect("a reconnection");
+
+    ends.clock.settle().await;
+    reconnection.await.expect("reconnected");
+
+    assert_eq!(client.ready_state(), ReadyState::Open, "open");
+    assert_eq!(
+        ends.server_told(),
+        [
+            format!("connection {ONE}"),
+            format!("closed {ONE} false"),
+            format!("connection {TWO}"),
+        ],
+        "drawn again with its last connect's options, the one it replaced dropped"
+    );
+    assert_eq!(
+        taken(&at_client),
+        ["reconnect", BROKE],
+        "its start told once, the listener that broke reported, no close"
+    );
+
+    // its server gone: each attempt refused until they run out, closed with no close of its own
+    ends.server.stop().await;
+    ends.clock.settle().await;
+
+    assert_eq!(
+        taken(&at_client),
+        ["closed false false", BROKE],
+        "its server's close"
+    );
+
+    let reconnection = client
+        .reconnect(ReconnectOptions {
+            maximum_attempts: Some(1),
+            ..ReconnectOptions::default()
+        })
+        .expect("a reconnection");
+
+    ends.clock.settle().await;
+
+    let gave_up = reconnection.await;
+
+    assert!(
+        matches!(
+            &gave_up,
+            Err(TransportError::Reconnect(error)) if std::error::Error::source(error)
+                .and_then(|cause| cause.downcast_ref::<TransportError>())
+                .is_some_and(|cause| matches!(cause, TransportError::Connect(_)))
+        ),
+        "a reconnection's error, its connect's its cause: {gave_up:?}"
+    );
+    assert_eq!(client.ready_state(), ReadyState::Closed, "closed");
+    assert_eq!(
+        taken(&at_client),
+        ["reconnect", BROKE],
+        "no close of its own"
+    );
+}
+
+#[tokio::test]
+async fn cancels_a_reconnection_before_its_first_attempt_when_its_start_listener_cancels() {
+    let ends = Ends::started().await;
+    let (client, at_client) = ends.connected((None, None)).await;
+    let cancelling = CancellationToken::new();
+    let cancel = cancelling.clone();
+
+    client.listen(Arc::new(OnReconnect(move || cancel.cancel())));
+    ends.server_told();
+
+    let reconnection = client
+        .reconnect(ReconnectOptions {
+            maximum_attempts: Some(1),
+            signal: Some(cancelling),
+            ..ReconnectOptions::default()
+        })
+        .expect("a reconnection");
+
+    ends.clock.settle().await;
+
+    let cancelled = reconnection.await.expect_err("cancelled");
+
+    ends.clock.settle().await;
+
+    assert!(
+        matches!(cancelled, TransportError::Cancelled(_)),
+        "cancelled: {cancelled:?}"
+    );
+    assert_eq!(
+        cancelled.to_string(),
+        "the reconnection was cancelled",
+        "said why"
+    );
+    assert_eq!(client.ready_state(), ReadyState::Closed, "closed");
+    assert!(ends.server.clients().is_empty(), "none held");
+    assert_eq!(
+        ends.server_told(),
+        [format!("closed {FIRST} false")],
+        "the one it replaced dropped, none drawn"
+    );
+    assert_eq!(
+        taken(&at_client),
+        ["reconnect"],
+        "its start told, no close, no error"
+    );
+}
+
+// the seam after its attempt opened and before its reconnection hears so, as the C# side's
+// timeout's release is: a message its server sent as it drew the connection, told as it opens
+// spec 15.13
+#[tokio::test]
+async fn closes_a_successful_last_attempt_when_its_reconnection_is_cancelled_after_it_opens() {
+    for is_closed_before_cancel in [false, true] {
+        let ends = Ends::started().await;
+        let (client, at_client) = ends.connected((None, None)).await;
+        let cancelling = CancellationToken::new();
+        let opened: Arc<Mutex<Vec<ReadyState>>> = Arc::default();
+        let server = ends.server.clone();
+        let (seam, cancel, seen) = (client.clone(), cancelling.clone(), Arc::clone(&opened));
+
+        ends.server
+            .listen(Arc::new(OnConnection(move |handle: &ConnectionHandle| {
+                server.send(message_of(&[1], None), handle).expect("sent");
+            })));
+        client.listen(Arc::new(OnMessage(move |_: &TransportMessage| {
+            locked(&seen).push(seam.ready_state());
+
+            if is_closed_before_cancel {
+                seam.disconnect(DisconnectOptions::default())
+                    .expect("closed");
+            }
+
+            cancel.cancel();
+        })));
+        ends.server_told();
+
+        let reconnection = client
+            .reconnect(ReconnectOptions {
+                maximum_attempts: Some(1),
+                signal: Some(cancelling),
+                ..ReconnectOptions::default()
+            })
+            .expect("a reconnection");
+
+        ends.clock.settle().await;
+
+        let cancelled = reconnection.await.expect_err("cancelled");
+
+        ends.clock.settle().await;
+
+        assert_eq!(
+            cancelled.to_string(),
+            "the reconnection was cancelled",
+            "said why"
+        );
+        assert_eq!(
+            *locked(&opened),
+            [ReadyState::Open],
+            "open as it was cancelled"
+        );
+        assert_eq!(client.ready_state(), ReadyState::Closed, "closed");
+        assert_eq!(
+            taken(&at_client),
+            ["reconnect", "heard 01 carrying None", "closed true false"],
+            "one close, clean, and no error"
+        );
+        assert_eq!(
+            ends.server_told(),
+            [
+                format!("closed {FIRST} false"),
+                format!("connection {SECOND}"),
+                format!("closed {SECOND} true"),
+            ],
+            "what its last attempt opened closed clean"
+        );
+        assert!(ends.server.clients().is_empty(), "none held");
+    }
+}
+
+#[tokio::test]
+#[ignore = "divergence: a signal cancelled in the turn its server draws the connection loses to the accept, the attempt opens and is closed clean, where the other sides fail it and close what was drawn unclean"]
+async fn closes_what_its_last_attempt_opened_as_its_reconnection_was_cancelled() {
+    let ends = Ends::started().await;
+    let (client, at_client) = ends.connected((None, None)).await;
+    let cancelling = CancellationToken::new();
+    let cancel = cancelling.clone();
+
+    // * the reconnection cancelled in the very turn its server draws the connection: the cancel
+    // holds until its attempt's connect settles, which fails, what was drawn closed unclean and no
+    // close told here
+    ends.server
+        .listen(Arc::new(OnConnection(move |_: &ConnectionHandle| {
+            cancel.cancel();
+        })));
+    ends.server_told();
+
+    let reconnection = client
+        .reconnect(ReconnectOptions {
+            signal: Some(cancelling),
+            ..ReconnectOptions::default()
+        })
+        .expect("a reconnection");
+
+    ends.clock.settle().await;
+
+    let cancelled = reconnection.await.expect_err("cancelled");
+
+    ends.clock.settle().await;
+
+    assert_eq!(
+        cancelled.to_string(),
+        "the reconnection was cancelled",
+        "said why"
+    );
+    assert_eq!(client.ready_state(), ReadyState::Closed, "closed");
+    assert_eq!(taken(&at_client), ["reconnect"], "no close told here");
+    assert_eq!(
+        ends.server_told(),
+        [
+            format!("closed {FIRST} false"),
+            format!("connection {SECOND}"),
+            format!("closed {SECOND} false"),
+        ],
+        "what was drawn closed unclean"
+    );
+    assert!(ends.server.clients().is_empty(), "none held");
+}
+
+// spec 15.13
+#[tokio::test]
+async fn hears_nothing_once_it_let_go_of_its_connection_and_tells_one_close_at_each_end() {
+    let ends = Ends::started().await;
+    let (client, at_client) = ends.connected((None, None)).await;
+    let handle: ConnectionHandle = Arc::from(FIRST);
+
+    ends.server_told();
+
+    // * its server sends and ends it as its client closes it, in one turn: none of it heard, one
+    // close told at each end
+    ends.server
+        .send(message_of(&[8], None), &handle)
+        .expect("sent");
+
+    let ending = ends.server.close(&handle);
+
+    client
+        .disconnect(DisconnectOptions::default())
+        .expect("closed");
+    ends.clock.settle().await;
+
+    assert!(ending.await, "it held the connection");
+    assert_eq!(
+        taken(&at_client),
+        ["closed true false"],
+        "its own close alone"
+    );
+    assert_eq!(
+        ends.server_told(),
+        [format!("closed {FIRST} true")],
+        "its server's close alone"
+    );
+}
+
+// a platform's shape: a message's data is bytes, so what is no bytes is no message to send
+// spec 15.13
+#[tokio::test]
+async fn drops_what_an_end_it_no_longer_holds_receives_and_refuses_to_send_what_is_no_bytes() {
+    let ends = Ends::started().await;
+    let (client, at_client) = ends.connected((None, None)).await;
+    let handle: ConnectionHandle = Arc::from(FIRST);
+
+    client.send(message_of(&[1], None)).expect("sent");
+    ends.clock.settle().await;
+
+    assert_eq!(
+        ends.server_told(),
+        [
+            format!("connection {FIRST}"),
+            format!("heard 01 on {FIRST} carrying None from Some(\"local\") None"),
+        ],
+        "heard while held"
+    );
+
+    // * ended twice, then a send its client made before it heard so, in one turn: neither heard
+    // nor ended again
+    let ending = ends.server.close(&handle);
+    let again = ends.server.close(&handle);
+
+    client.send(message_of(&[2], None)).expect("sent");
+    ends.clock.settle().await;
+
+    assert_eq!((ending.await, again.await), (true, true), "both held it");
+    assert_eq!(
+        ends.server_told(),
+        [format!("closed {FIRST} true")],
+        "ended once, nothing heard after"
+    );
+    assert_eq!(
+        taken(&at_client),
+        ["closed false false"],
+        "its client told once"
+    );
+    assert_eq!(client.ready_state(), ReadyState::Closed, "closed");
+    assert!(ends.server.clients().is_empty(), "none held");
+}
+
+// spec 15.13
+#[tokio::test]
+async fn draws_no_connection_for_a_connect_cancelled_as_it_held_it_and_reports_what_a_listener_throws()
+ {
+    let ends = Ends::started().await;
+    let (client, _) = ends.client();
+
+    ends.server.listen(Arc::new(Breaking));
+
+    // * a connect whose token is cancelled as its server holds it, before the turn it would be
+    // drawn in: no connection drawn
+    let cancelling = CancellationToken::new();
+    let connecting = client.connect(MemoryConnectOptions {
+        signal: Some(cancelling.clone()),
+        ..MemoryConnectOptions::default()
+    });
+
+    cancelling.cancel();
+
+    let refused = connecting.await.expect_err("cancelled");
+
+    ends.clock.settle().await;
+
+    assert!(
+        matches!(refused, TransportError::Cancelled(_)),
+        "cancelled: {refused:?}"
+    );
+    assert!(ends.server_told().is_empty(), "none drawn");
+    assert!(ends.server.clients().is_empty(), "none held");
+
+    // a listener's panic reported with its connection, the transport going on
+    let connecting = client.connect(MemoryConnectOptions::default());
+
+    ends.clock.settle().await;
+    connecting.await.expect("connected");
+    client.send(message_of(&[1], None)).expect("sent");
+    client.send(message_of(&[2], None)).expect("sent");
+    ends.clock.settle().await;
+
+    let on = format!("on Some({FIRST:?})");
+
+    assert_eq!(
+        ends.server_told(),
+        [
+            format!("connection {FIRST}"),
+            format!("{BROKE} {on}"),
+            format!("heard 01 on {FIRST} carrying None from Some(\"local\") None"),
+            format!("{BROKE} {on}"),
+            format!("heard 02 on {FIRST} carrying None from Some(\"local\") None"),
+            format!("{BROKE} {on}"),
+        ],
+        "each panic reported with its connection"
+    );
+}
+
+#[tokio::test]
+async fn calls_each_listener_though_one_throws_reporting_the_throw_with_its_connection() {
+    let clock = SteppingClock::new(crate::testing::instants::new_year());
+    let shared: SharedClock = Arc::<SteppingClock>::clone(&clock);
+    let server = MemoryServer::new(&MemoryServerOptions {
+        clock: Some(Arc::clone(&shared)),
+        runtime: None,
+    })
+    .expect("a server");
+    let client = MemoryClient::new(&MemoryClientOptions {
+        clock: Some(shared),
+        server: server.clone(),
+    })
+    .expect("a client");
+    let told: Told = Arc::default();
+
+    // * the one that panics first: each after it told all the same
+    server.listen(Arc::new(Breaking));
+    server.listen(Arc::new(AtServer {
+        told: Arc::clone(&told),
+    }));
+    client.listen(Arc::new(Breaking));
+    client.listen(Arc::new(AtClient {
+        told: Arc::clone(&told),
+    }));
+    server.start().await.expect("started");
+
+    let connecting = client.connect(MemoryConnectOptions::default());
+
+    clock.settle().await;
+    connecting.await.expect("connected");
+    client.send(message_of(&[1], None)).expect("sent");
+    clock.settle().await;
+
+    // a client's events carry no connection: its panics are reported with none
+    let reconnection = client
+        .reconnect(ReconnectOptions::default())
+        .expect("a reconnection");
+
+    clock.settle().await;
+    reconnection.await.expect("reconnected");
+
+    let closing = server.close(&Arc::from(SECOND));
+
+    clock.settle().await;
+
+    assert!(closing.await, "it held the connection");
+
+    let (first, second) = (
+        format!("on Some({FIRST:?})"),
+        format!("on Some({SECOND:?})"),
+    );
+
+    assert_eq!(
+        taken(&told),
+        [
+            format!("{BROKE} {first}"),
+            format!("connection {FIRST}"),
+            format!("{BROKE} {first}"),
+            format!("heard 01 on {FIRST} carrying None from Some(\"local\") None"),
+            BROKE.to_owned(),
+            "reconnect".to_owned(),
+            format!("{BROKE} {first}"),
+            format!("closed {FIRST} false"),
+            format!("{BROKE} {second}"),
+            format!("connection {SECOND}"),
+            format!("{BROKE} {second}"),
+            format!("closed {SECOND} true"),
+            BROKE.to_owned(),
+            "closed false false".to_owned(),
+        ],
+        "every listener told, each panic reported, with its connection where there is one"
     );
 }
