@@ -292,6 +292,8 @@ jobs:
       # the unit tests, a module's tests.rs and its tests/ folder, and the test kit left out; then
       # what they ran held to the Rust side's floor
       - if: matrix.os == 'ubuntu-26.04'
+        run: mkdir -p coverage
+      - if: matrix.os == 'ubuntu-26.04'
         run: >-
           cargo llvm-cov --workspace --all-features --locked --json --summary-only
           --ignore-filename-regex '(/tests\.rs|/tests/.*|/testing\.rs|/testing/.*)$'
