@@ -64,13 +64,17 @@ each step's due, and again when a renewal moves it. Section 15.10 times a client
 timer of the client's, never on a reading of its wall clock".
 
 **A stack has one clock, set where it starts and read upward.** The transports, the session manager
-and a router built alone take one — `clock` on the TypeScript side, `Clock` on the C# side — and
+and a router built alone take one — `clock` on the TypeScript side, `Clock` on the C# side,
+`clock` on the Rust side — and
 each layer exposes the clock it runs on. A layer built on another runs on that layer's clock, and
 refuses one that differs; a facade given a transport already built takes that transport's clock, and
 the builder of its sessions receives the clock to use. The code the builder generates adds none: it
 runs on its transport's clock.
 
-**The clock has each platform's shape.** On the C# side it is a `TimeProvider`. On the TypeScript
+**The clock has each platform's shape.** On the C# side it is a `TimeProvider`. On the Rust side
+it is a `Clock` trait, its monotonic reading, its wall clock and a timer armed, `SystemClock` the
+platform's on tokio's timers, and a router built on a runtime without tokio's time driver refused as
+it is built, never failing at its first timer ([0044](0044-rust-one-owner-per-router-traits-no-unsafe-two-parameters-no-warning.md)). On the TypeScript
 side it is the part of the globals Bead calls — `setTimeout`, `clearTimeout`, `setInterval`,
 `clearInterval`, `Date.now` and `performance.now` — which `globalThis` is by default, so its timers
 keep the platform's handle, `unref` included where it has one. The pair is a row of each side's list
@@ -83,7 +87,8 @@ start on the wall clock, a duration on the monotonic one.
 **One ceiling, JavaScript's: 2³¹ − 1 milliseconds**, which the C# side keeps for parity, though its
 timers reach twice as far. Every option and method that takes a timeout refuses a longer one — a
 session manager's reset and a server's connection timeout among them — and _never_ is `Infinity` and
-`Timeout.InfiniteTimeSpan`, which arm nothing. One constant a side, beside its clock. **And one
+`Timeout.InfiniteTimeSpan` and `Duration::MAX`, which arm nothing. One constant a side, beside
+its clock. **And one
 floor: a millisecond, counted whole.** Bead arms no timer for less on the clock it is given, where
 Node waits a millisecond at least and .NET fires at once, nor for a fraction, which both drop. How a
 side holds a duration an application gives it, between that floor and that ceiling, is
@@ -96,7 +101,10 @@ fires once for each period crossed, each at its own due. The C# harnesses' test 
 timers armed on it and fires them from due to due, a `FakeTimeProvider` giving its readings alone:
 the fake fires a timer due within an advance with its readings at the end already, and timers due at
 once in no order of its own. The TypeScript side's test clock is `@sinonjs/fake-timers`'
-`createClock()`, never installed on the globals, and its `tickAsync` steps. Both pass one shared
+`createClock()`, never installed on the globals, and its `tickAsync` steps. The Rust side's is
+the core's own `SteppingClock`, in its test kit, the C# one's twin, its own timers in armed order:
+tokio's paused time is not it, since it moves no wall clock, fires every timer due at once in its
+own order and settles nothing between them. Each passes one shared
 table of clock cases, `spec/clocks.json`: two timers chained in one advance, a periodic timer across
 three periods, timers due at once, the wall clock moved alone. A periodic timer is armed again as it
 is taken, before its callback runs: it fires after every timer armed before it fired, and before any
