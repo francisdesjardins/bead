@@ -11,4 +11,10 @@ public sealed class ConnectException : Exception
         : base(message)
     {
     }
+
+    /// <summary>A connect refused, saying why, and its protocol's own reason: a broker's refusal among them.</summary>
+    public ConnectException(string message, Exception innerException)
+        : base(message, innerException)
+    {
+    }
 }

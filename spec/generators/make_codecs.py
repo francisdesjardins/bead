@@ -7,8 +7,10 @@ reader that refuses as 17.5 says, in the order the TypeScript reader checks, the
 text before it is parsed; and a writer of RFC 8785's canonical form, ECMAScript's Number::toString from
 repr's shortest digits, its strings as JSON.stringify writes a well-formed one, its names sorted by their
 UTF-16 code units. A proto payload is read by a reader of Probe, spec/codecs.proto, written from
-protobuf's Encoding guide and 17.9.2 to 17.9.6, its packed records, its map's entries and its group
-among them, and a proto value written one field at a time. A row that would be refused for two
+protobuf's Encoding guide and 17.9.2 to 17.9.8, its packed records, its map's entries and its group
+among them, its required fields judged once the whole is read and a closed enum's undeclared number
+setting nothing, and a proto value written one field at a time, refused where it leaves a required
+field unset. A row that would be refused for two
 reasons fails here, as does a written form that does not read back to itself. A backslash is chr(92),
 so that no escape this file builds is read before it is built."""
 import json
@@ -37,6 +39,7 @@ NOT_UTF8, A_BYTE_ORDER_MARK, NOT_JSON, A_NAME_TWICE = 'not UTF-8', 'a byte order
 A_SURROGATE_ALONE, PAST_A_DOUBLE, NESTED_PAST = 'a surrogate alone', 'a number past a double', 'nested past 64'
 NOT_FINITE, NO_JSON_VALUE = 'not a finite number', 'no JSON value'
 NOT_ITS_MESSAGE, PROTO_NESTED_PAST = 'not its message', 'nested past 100'
+REQUIRED_UNSET = 'a required field unset'
 
 # 17.9.3: a proto message nested more than this below the top one is refused, a group and a map's
 # entry each counting as a message
@@ -294,11 +297,19 @@ FIELDS = {
     1: ('text', 'string', (LEN,)),
     2: ('number', 'uint32', (VARINT,)),
     3: ('child', 'Probe', (LEN,)),
+    7: ('needs', 'Needs', (LEN,)),
+    8: ('needs_items', 'repeated Needs', (LEN,)),
     10: ('counts', 'repeated uint32', (VARINT, LEN)),
     11: ('stamps', 'repeated fixed32', (I32, LEN)),
     12: ('children', 'map<string, Probe>', (LEN,)),
     13: ('delimited', 'Probe', (SGROUP,)),
+    14: ('shade', 'Shade', (VARINT,)),
 }
+
+# Needs' fields by number, each of LEGACY_REQUIRED presence (17.9.7), and the numbers Shade, a closed
+# enum, declares (17.9.8)
+NEEDS = {1: ('must', 'uint32', (VARINT,)), 2: ('shade', 'Shade', (VARINT,))}
+SHADES = {0: 'SHADE_DARK', 1: 'SHADE_LIGHT'}
 
 # a map's entry, as it is on the wire: a message of its key at 1 and its value at 2 (Encoding, "Maps")
 ENTRY = {1: ('key', 'string', (LEN,)), 2: ('value', 'Probe', (LEN,))}
@@ -317,15 +328,26 @@ class NestedPast(Exception):
     as a message (17.9.3)."""
 
 
-def declared_fields():
-    """Probe's fields as spec/codecs.proto declares them, each by its number: its name, its type, and
-    whether it is delimited, a group on the wire."""
+def declared(kind, name):
+    """The body of a message or an enum spec/codecs.proto declares."""
     with open(ROOT + 'codecs.proto', encoding='utf-8') as file:
-        found = re.search(r'^message Probe \{\n(.*?)^\}', file.read(), re.MULTILINE | re.DOTALL)
+        return re.search(rf'^{kind} {name} \{{\n(.*?)^\}}', file.read(), re.MULTILINE | re.DOTALL).group(1)
 
-    return {int(number): (name, kind, bool(delimited)) for kind, name, number, delimited in re.findall(
-        r'^ +((?:repeated )?(?:map<\w+, \w+>|\w+)) (\w+) = (\d+)( \[features\.message_encoding = DELIMITED\])?;$',
-        found.group(1), re.MULTILINE)}
+
+def declared_fields(name='Probe'):
+    """A message's fields as spec/codecs.proto declares them, each by its number: its name, its type,
+    whether it is delimited, a group on the wire, and whether it is of LEGACY_REQUIRED presence."""
+    return {int(number): (field, kind, 'DELIMITED' in options, 'LEGACY_REQUIRED' in options)
+            for kind, field, number, options in re.findall(
+                r'^ +((?:repeated )?(?:map<\w+, \w+>|\w+)) (\w+) = (\d+)((?: \[[^\]]*\])?);$',
+                declared('message', name), re.MULTILINE)}
+
+
+def declared_values(name):
+    """An enum's values as spec/codecs.proto declares them, by number, and whether it is closed."""
+    body = declared('enum', name)
+    return ({int(number): value for value, number in re.findall(r'^ +(\w+) = (\d+);$', body, re.MULTILINE)},
+            'option features.enum_type = CLOSED;' in body)
 
 
 def proto_varint(data, at):
@@ -428,8 +450,57 @@ def proto_skip(data, at, number, wire, depth):
 
 
 def probe_of():
-    """A Probe with no field set: its defaults, and its fields of messages not set."""
-    return {'text': '', 'number': 0, 'child': None, 'counts': [], 'stamps': [], 'children': {}, 'delimited': None}
+    """A Probe with no field set: its defaults, its fields of messages not set, and its shade unset, its
+    presence explicit."""
+    return {'text': '', 'number': 0, 'child': None, 'needs': None, 'needs_items': [], 'counts': [], 'stamps': [],
+            'children': {}, 'delimited': None, 'shade': None}
+
+
+def needs_of():
+    """A Needs with no field set: each of its fields, of LEGACY_REQUIRED presence, unset."""
+    return {'must': None, 'shade': None}
+
+
+def closed_enum(value):
+    """A closed enum's record, its varint read as an int32, as protobuf reads an enum: the number, where
+    Shade declares it, or None where it does not, a record that sets nothing (17.9.8)."""
+    number = value & UINT32
+    number = number - (1 << 32) if number >= 1 << 31 else number
+    return number if number in SHADES else None
+
+
+def needs_at(needs, data, at, depth):
+    """Reads the length-delimited Needs at `at` into `needs`, `depth` messages below the top, and where its
+    record ends: a field given twice its last, an unknown field skipped, and a closed enum's undeclared
+    number setting nothing, its field keeping what it held (17.9.8)."""
+    field, at = proto_length(data, at)
+
+    if depth > PROTO_DEPTH:
+        raise NestedPast()
+
+    fields = proto_fields(field, 0, None)
+    number, wire, within = next(fields)
+
+    while number is not None:
+        if number not in NEEDS:
+            number, wire, within = fields.send(proto_skip(field, within, number, wire, depth))
+            continue
+
+        name, _, wires = NEEDS[number]
+
+        if wire not in wires:
+            raise NotItsMessage('a field at a wire type its type does not take')
+
+        value, within = proto_varint(field, within)
+
+        if name == 'must':
+            needs['must'] = value & UINT32
+        elif closed_enum(value) is not None:
+            needs['shade'] = closed_enum(value)
+
+        number, wire, within = fields.send(within)
+
+    return at
 
 
 def text_at(data, at):
@@ -547,6 +618,16 @@ def proto_read_into(probe, data, at, depth, group):
         elif name == 'children':
             key, value, at = entry_at(data, at, depth + 1)
             probe['children'][key] = value
+        elif name == 'needs':
+            probe['needs'] = probe['needs'] or needs_of()
+            at = needs_at(probe['needs'], data, at, depth + 1)
+        elif name == 'needs_items':
+            probe['needs_items'].append(needs_of())
+            at = needs_at(probe['needs_items'][-1], data, at, depth + 1)
+        elif name == 'shade':
+            # * 17.9.8: a closed enum's undeclared number sets nothing, the field keeping its last declared
+            value, at = proto_varint(data, at)
+            probe['shade'] = closed_enum(value) if closed_enum(value) is not None else probe['shade']
         elif name == 'child':
             probe['child'] = probe['child'] or probe_of()
             at = message_at(probe['child'], data, at, depth + 1)
@@ -588,6 +669,25 @@ def nested_below(probe):
     return deepest
 
 
+def unset(needs):
+    """Whether a Needs leaves a field it requires unset (17.9.7): one no record set, or a closed enum's
+    number Shade does not declare, which only a value given a writer holds."""
+    return needs['must'] is None or needs['shade'] not in SHADES
+
+
+def leaves_unset(probe):
+    """Whether a Probe holds, at any depth, a message that leaves a required field unset (17.9.7): its
+    needs, each of its needs_items, then what child, each map's value and delimited hold, in turn."""
+    if probe['needs'] is not None and unset(probe['needs']):
+        return True
+
+    if any(unset(item) for item in probe['needs_items']):
+        return True
+
+    below = [probe['child'], *(probe['children'][key] for key in sorted(probe['children'])), probe['delimited']]
+    return any(each is not None and leaves_unset(each) for each in below)
+
+
 def held(probe):
     """What was read of a Probe: its text, as UTF-16 code units, its number, and how deep messages nest
     below it."""
@@ -597,8 +697,9 @@ def held(probe):
 def proto_read(data):
     """The one reason 17.9 refuses the bytes for, or what was read of them: the top Probe's text, its
     number and how deep messages nest below it; counts and stamps, where it holds any; children, where
-    it holds any, each key's code units to what was read of its value; and what was read of delimited,
-    where it is set."""
+    it holds any, each key's code units to what was read of its value; what was read of delimited,
+    where it is set; and shade, where a record set it. Its required fields are judged once the whole is
+    read, since a message given twice may set them in either of its records (17.9.7)."""
     probe = probe_of()
 
     try:
@@ -607,6 +708,9 @@ def proto_read(data):
         return [NOT_ITS_MESSAGE], None
     except NestedPast:
         return [PROTO_NESTED_PAST], None
+
+    if leaves_unset(probe):
+        return [REQUIRED_UNSET], None
 
     read = held(probe)
 
@@ -619,6 +723,9 @@ def proto_read(data):
 
     if probe['delimited'] is not None:
         read['delimited'] = held(probe['delimited'])
+
+    if probe['shade'] is not None:
+        read['shade'] = probe['shade']
 
     return [], read
 
@@ -639,10 +746,24 @@ def proto_record(number, wire, value):
     return proto_varint_of(number << 3 | wire) + (proto_varint_of(len(value)) + value if wire == LEN else value)
 
 
+def needs_write(needs):
+    """The bytes of a Needs, each field written where it is set, at its default too, its presence
+    explicit."""
+    written = b''
+
+    if needs['must'] is not None:
+        written += proto_record(1, VARINT, proto_varint_of(needs['must']))
+
+    if needs['shade'] is not None:
+        written += proto_record(2, VARINT, proto_varint_of(needs['shade']))
+
+    return written
+
+
 def proto_write(probe):
     """The bytes of a Probe given one field or none, its fields in their numbers' order: a scalar at its
-    default not written, its presence implicit, and child written where it is set, an empty message
-    included."""
+    default not written, its presence implicit, and child and needs written where they are set, an
+    empty message included."""
     written = b''
 
     if probe['text']:
@@ -653,6 +774,9 @@ def proto_write(probe):
 
     if probe['child'] is not None:
         written += proto_record(3, LEN, proto_write(probe['child']))
+
+    if probe['needs'] is not None:
+        written += proto_record(7, LEN, needs_write(probe['needs']))
 
     return written
 
@@ -886,6 +1010,31 @@ PAYLOADS = [
      map_chain(PROTO_DEPTH // 2)),
     ('51 maps deep, 102 messages below the top, each entry counted', 'proto', ['17.9.3'],
      map_chain(PROTO_DEPTH // 2 + 1)),
+    # a message that leaves a required field unset, at any depth, judged once the whole is read (17.9.7)
+    ('a required field unset, one below the top', 'proto', ['17.9.7'], bytes.fromhex('3A 02 10 00')),
+    ('required fields set at their defaults', 'proto', ['17.9.7'], bytes.fromhex('3A 04 08 00 10 00')),
+    ('required fields none of which is given', 'proto', ['17.9.7'], bytes.fromhex('3A 00')),
+    ('a message given twice, its required fields in its first record', 'proto', ['17.9.7'],
+     bytes.fromhex('3A 04 08 01 10 00 3A 00')),
+    ('a message given twice, its required fields in its second record', 'proto', ['17.9.7'],
+     bytes.fromhex('3A 00 3A 04 08 01 10 00')),
+    ('a message given twice, its required fields split between its records', 'proto', ['17.9.7'],
+     bytes.fromhex('3A 02 08 01 3A 02 10 00')),
+    ('an item that leaves a required field unset', 'proto', ['17.9.7'], bytes.fromhex('42 04 08 00 10 00 42 02 08 00')),
+    ("a map's value whose message leaves a required field unset", 'proto', ['17.9.7'], bytes.fromhex('62 04 12 02 3A 00')),
+    ("a map's key given twice, its last value whole", 'proto', ['17.9.7'],
+     bytes.fromhex('62 04 12 02 3A 00 62 08 12 06 3A 04 08 00 10 00')),
+    ("a map's key given twice, its first value whole", 'proto', ['17.9.7'],
+     bytes.fromhex('62 08 12 06 3A 04 08 00 10 00 62 04 12 02 3A 00')),
+    ('a group that leaves a required field unset', 'proto', ['17.9.7'], bytes.fromhex('6B 3A 00 6C')),
+    ('a child that leaves a required field unset', 'proto', ['17.9.7'], bytes.fromhex('1A 02 3A 00')),
+    ("a required closed enum's number its enum does not declare", 'proto', ['17.9.7'],
+     bytes.fromhex('3A 04 08 00 10 05')),
+    ('a required closed enum given a declared number, then one it does not declare', 'proto', ['17.9.7'],
+     bytes.fromhex('3A 06 08 00 10 01 10 05')),
+    # a closed enum's undeclared number sets nothing on a singular field (17.9.8)
+    ("a closed enum's number its enum does not declare, which sets nothing", 'proto', ['17.9.8'], bytes.fromhex('70 05')),
+    ("a closed enum's declared number, then one it does not declare", 'proto', ['17.9.8'], bytes.fromhex('70 01 70 05')),
 ]
 
 # the payloads a stock library reads otherwise than 17.9 says, each by the rows it crosses and the
@@ -1011,6 +1160,10 @@ VALUES = [
     ('child set to the empty message', 'proto', ['17.9'], {'probe': {'child': {}}}, None),
     ('text set to a leading U+FEFF and a', 'proto', ['17.9.4'], {'probe': {'text': code_units(chr(0xFEFF) + 'a')}},
      None),
+    ('needs set to no field', 'proto', ['17.9.7'], {'probe': {'needs': {}}}, None),
+    ('needs set at its defaults', 'proto', ['17.9.7'], {'probe': {'needs': {'must': 0, 'shade': 0}}}, None),
+    ('needs with a shade its enum does not declare', 'proto', ['17.9.7'], {'probe': {'needs': {'must': 0, 'shade': 5}}},
+     None),
 ]
 
 
@@ -1036,14 +1189,15 @@ def given(value):
         assert len(given_probe) <= 1, given_probe
         return {**probe_of(), **({'text': text_of(given_probe['text'])} if 'text' in given_probe else {}),
                 **({'number': given_probe['number']} if 'number' in given_probe else {}),
-                **({'child': probe_of()} if 'child' in given_probe else {})}
+                **({'child': probe_of()} if 'child' in given_probe else {}),
+                **({'needs': {**needs_of(), **given_probe['needs']}} if 'needs' in given_probe else {})}
 
     return value['text'] if 'text' in value else bytes.fromhex(value['bytes'])
 
 
 def value_outcome(encoding, value):
     """The bytes written of a value, or the one reason it is refused for: a proto value, one field or
-    none, is never refused."""
+    none, refused where it leaves a required field unset (17.9.7), as a reader refuses its bytes."""
     if encoding == 'raw':
         return {'written': hexadecimal(value)}
 
@@ -1051,6 +1205,9 @@ def value_outcome(encoding, value):
         return {'refused': A_SURROGATE_ALONE} if has_surrogate(value) else {'written': hexadecimal(utf8(value))}
 
     if encoding == 'proto':
+        if leaves_unset(value):
+            return {'refused': REQUIRED_UNSET}
+
         written = proto_write(value)
 
         # what is written reads back to the value given: its text, its number, and its child's presence
@@ -1089,13 +1246,18 @@ for bits, name, written in APPENDIX_B:
 assert bits_of(float(tie())) == TIE_LOW and bits_of(float(past_the_tie())) == TIE_HIGH
 assert len(utf8(tie())) == 774
 
-# the reader's fields are the ones spec/codecs.proto declares, its delimited one alone a group on the wire
-assert declared_fields() == {number: (name, kind, wires == (SGROUP,)) for number, (name, kind, wires) in FIELDS.items()},     declared_fields()
+# the reader's fields are the ones spec/codecs.proto declares, its delimited one alone a group on the wire,
+# Needs' all of LEGACY_REQUIRED presence and none of Probe's, and Shade's values a closed enum's
+assert declared_fields() == {number: (name, kind, wires == (SGROUP,), False)
+                             for number, (name, kind, wires) in FIELDS.items()}, declared_fields()
+assert declared_fields('Needs') == {number: (name, kind, False, True) for number, (name, kind, _) in NEEDS.items()}, \
+    declared_fields('Needs')
+assert declared_values('Shade') == (SHADES, True), declared_values('Shade')
 
 payloads = [payload_entry(*entry) for entry in PAYLOADS]
 values = [value_entry(*entry) for entry in VALUES]
 
-assert len(payloads) == 132 and len(values) == 44
+assert len(payloads) == 148 and len(values) == 47
 
 
 
@@ -1146,23 +1308,40 @@ PROTO_RECORD = {
     "a group closed by another number's end group": NOT_ITS_MESSAGE, 'a group never closed': NOT_ITS_MESSAGE,
     '50 maps deep, 100 messages below the top, each entry counted': taken('', 0, 100, children={'': taken('', 0, 98)}),
     '51 maps deep, 102 messages below the top, each entry counted': PROTO_NESTED_PAST,
+    'a required field unset, one below the top': REQUIRED_UNSET, 'required fields set at their defaults': ('', 0, 0),
+    'required fields none of which is given': REQUIRED_UNSET,
+    'a message given twice, its required fields in its first record': ('', 0, 0),
+    'a message given twice, its required fields in its second record': ('', 0, 0),
+    'a message given twice, its required fields split between its records': ('', 0, 0),
+    'an item that leaves a required field unset': REQUIRED_UNSET,
+    "a map's value whose message leaves a required field unset": REQUIRED_UNSET,
+    "a map's key given twice, its last value whole": taken('', 0, 2, children={'': taken('', 0, 0)}),
+    "a map's key given twice, its first value whole": REQUIRED_UNSET,
+    'a group that leaves a required field unset': REQUIRED_UNSET, 'a child that leaves a required field unset': REQUIRED_UNSET,
+    "a required closed enum's number its enum does not declare": REQUIRED_UNSET,
+    'a required closed enum given a declared number, then one it does not declare': ('', 0, 0),
+    "a closed enum's number its enum does not declare, which sets nothing": ('', 0, 0),
+    "a closed enum's declared number, then one it does not declare": taken('', 0, 0, shade=1),
 }
 PROTO_RECORD = {name: taken(*outcome) if isinstance(outcome, tuple) else outcome for name, outcome in PROTO_RECORD.items()}
 outcomes = {entry['name']: entry.get('refused') or entry['read'] for entry in payloads if entry['encoding'] == 'proto'}
 
 assert outcomes == PROTO_RECORD, {name: outcome for name, outcome in outcomes.items() if PROTO_RECORD.get(name) != outcome}
-assert [entry['bytes'][:8] for entry in payloads if entry['name'].endswith('below the top')] == [
+assert [entry['bytes'][:8] for entry in payloads if entry['name'].endswith('messages below the top')] == [
     '1A E6 01', '1A E9 01', '1A EC 01']
-assert {entry['name']: entry['written'] for entry in values if entry['encoding'] == 'proto'} == {
+assert {entry['name']: entry['written'] for entry in values if entry['encoding'] == 'proto' and 'written' in entry} == {
     'text set to a': '0A 01 61', 'number set to 7': '10 07', 'number set to 0, its default': '', 'no field set': '',
-    'child set to the empty message': '1A 00', 'text set to a leading U+FEFF and a': '0A 04 EF BB BF 61'}
+    'child set to the empty message': '1A 00', 'text set to a leading U+FEFF and a': '0A 04 EF BB BF 61',
+    'needs set at its defaults': '3A 04 08 00 10 00'}
+assert {entry['name']: entry['refused'] for entry in values if entry['encoding'] == 'proto' and 'refused' in entry} == {
+    'needs set to no field': REQUIRED_UNSET, 'needs with a shade its enum does not declare': REQUIRED_UNSET}
 
 document = {
     '$schema': 'schemas/codecs.schema.json',
     '$comment': [
         "Bead's codecs: what each encoding of spec section 17 reads and writes, raw, text and json (decision 0016) and proto (decision 0031), which every implementation's harness plays through its side's codecs.",
         'payloads are bytes read, in an encoding: written is the bytes its writer writes back of the value its reader read, the same bytes where they are canonical already; read, of a proto payload, what its reader read of them; refused, the reason its reader refuses them for. A harness checks the refusal, or that the bytes written are those given and that the value read equals the value its reader reads of them, or that what it read is read.',
-        "proto: a Probe, the message of spec/codecs.proto, read and written through the code each side's stock generator writes for it over its stock library, as generated code reads one: its records checked against Probe's descriptor before the library reads them (decision 0028), and the bound of 17.9.3 set in the call. read is what was read of the top Probe: text, its string as UTF-16 code units in hexadecimal, four capital digits each and a space between; number; nested, how deep messages nest below it, through child, delimited and children, a map's entry counting as a message and its value as another; counts and stamps, where it holds any, their values in their order; children, where it holds any, each key, its code units as text gives them, to what was read of its value, its text, number and nested; and delimited, where it is set, what was read of it, its text, number and nested. A harness checks these and nothing else, since protobuf fixes no message's bytes whole.",
+        "proto: a Probe, the message of spec/codecs.proto, read and written through the code each side's stock generator writes for it over its stock library, as generated code reads one: its records checked against Probe's descriptor before the library reads them (decision 0028), the bound of 17.9.3 set in the call, a closed enum's record of a number it does not declare set aside before the library reads it where the library would take it (17.9.8), and each message it holds judged by its required fields once it is read (17.9.7, decision 0042), as the runtime's codec reads one. read is what was read of the top Probe: text, its string as UTF-16 code units in hexadecimal, four capital digits each and a space between; number; nested, how deep messages nest below it, through child, delimited and children, a map's entry counting as a message and its value as another; counts and stamps, where it holds any, their values in their order; children, where it holds any, each key, its code units as text gives them, to what was read of its value, its text, number and nested; delimited, where it is set, what was read of it, its text, number and nested; and shade, where a record set it, its number. A harness checks these and nothing else, since protobuf fixes no message's bytes whole: needs and needs_items, of Needs, whose fields protobuf requires, are judged and not read back.",
         'values are a value given to a writer, in an encoding: written is the bytes it writes; refused, the reason it refuses the value for. A value is given in one of eight forms.',
         'json: a JSON value, as the file holds it: on the TypeScript side JSON.parse of the file, so that a member named __proto__ is a member; on the C# side a JsonElement of the file.',
         'double: a double by its 64 bits, in hexadecimal: on the TypeScript side read through a DataView; on the C# side a JsonElement of JsonSerializer.SerializeToElement(BitConverter.Int64BitsToDouble(bits)), which holds no NaN and no infinity.',
@@ -1170,8 +1349,8 @@ document = {
         'text: a string, given to a text writer. bytes: bytes in hexadecimal, given to a raw writer.',
         'form: a value no JSON text holds. loneSurrogate is the string a, U+D800, b, which the C# side gives a json writer as a JsonElement of the bytes of its escape, and a text writer as a string; loneSurrogateName, an object whose one member is named so, its value 1; nameTwice, an object of two members both named a, 1 then 2, which the C# side parses with JsonElement.Parse\'s defaults and the TypeScript side cannot hold; undefined, JavaScript\'s undefined on the TypeScript side, default(JsonElement), of kind Undefined, on the C# side.',
         'nested: that many arrays, one in another, the innermost empty, which the C# side parses into a JsonElement with a MaxDepth as deep, since 64, its default, refuses a 65th.',
-        'probe: a Probe given to a proto writer, one field set or none, so that protobuf fixes the bytes it writes: text, its string as UTF-16 code units, as read gives one; number; or child, set to the empty message, {}.',
-        'A reason is derived, and held by the regeneration alone: not UTF-8, a byte order mark, not JSON, a name twice, a surrogate alone, a number past a double and nested past 64 of a reader; not its message and nested past 100 of a proto reader; a surrogate alone, a name twice, nested past 64, not a finite number and no JSON value of a writer. No harness reads it: a refusal answers PAYLOAD_UNDECODABLE whatever its reason, and its words are each side\'s.',
+        'probe: a Probe given to a proto writer, one field set or none, so that protobuf fixes the bytes it writes: text, its string as UTF-16 code units, as read gives one; number; child, set to the empty message, {}; or needs, set to a Needs of the fields it gives, must and shade, each a number, none of them set where it gives none.',
+        'A reason is derived, and held by the regeneration alone: not UTF-8, a byte order mark, not JSON, a name twice, a surrogate alone, a number past a double and nested past 64 of a reader; not its message, nested past 100 and a required field unset of a proto reader; a surrogate alone, a name twice, nested past 64, not a finite number and no JSON value of a writer, and a required field unset of a proto writer. No harness reads it: a refusal answers PAYLOAD_UNDECODABLE whatever its reason, and its words are each side\'s.',
         "Each item of differs names a row of docs/support.md an entry crosses, which names this file and the entry, and the language it excuses: a value that language's type cannot hold, or a payload its stock protobuf library reads otherwise than 17.9 says. A harness plays every entry but those a differs excuses its language from.",
         'clauses are the units of spec.md an entry checks: a clause, 17.6; an item of its numbered list, 17.5.7.',
     ],

@@ -64,6 +64,17 @@ internal static class ServerBounds
     }
 
     /// <summary>
+    /// What a peer that keeps every rule can be owed at once on a connection under
+    /// <paramref name="limits"/> (spec 15.12): the answers to the calls it has answered, each of a
+    /// chunk, the server's own commands to it, as many, the transfers it receives, each a window, and
+    /// two envelopes of the server's own besides, as an HTTP outbox holds.
+    /// </summary>
+    public static long UnsentBytesOf(RouterLimits limits)
+    {
+        return (2L * limits.MaximumAnsweringCalls * limits.ChunkBytes) + ((long)limits.MaximumTransfers * limits.WindowBytes) + (2L * limits.MaximumEnvelopeBytes);
+    }
+
+    /// <summary>
     /// A connection dropped behind a bound, as its server reports it through its <c>Error</c> (spec
     /// 15.1, 15.12): its handle, then <paramref name="why"/>, which names the bound in the spec's
     /// spelling and its value; its I/O cut short.

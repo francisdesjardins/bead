@@ -17,6 +17,25 @@ public static class TransportTypes
     /// client gave, or <c>local</c>, and its rank (spec 15.13).
     /// </summary>
     public const string Memory = "MEMORY";
+
+    /// <summary>
+    /// Over the in-memory broker (spec 15.24): <c>type=BROKER;participant=…;ordinal=…</c>, a
+    /// connection its third leg proved, by its peer participant's id and its rank; a broker's
+    /// adapter of another names its own type, which its handles begin with.
+    /// </summary>
+    public const string Broker = "BROKER";
+
+    /// <summary>
+    /// Over a broker of MQTT 5 (spec 15.25): <c>type=MQTT;participant=…;ordinal=…</c>, a connection
+    /// its third leg proved, by its peer participant's id and its rank.
+    /// </summary>
+    public const string Mqtt = "MQTT";
+
+    /// <summary>
+    /// Over a broker of AMQP 1.0 that is RabbitMQ 4 (spec 15.32): <c>type=AMQP;participant=…;ordinal=…</c>,
+    /// a connection its third leg proved, by its peer participant's id and its rank.
+    /// </summary>
+    public const string Amqp = "AMQP";
 }
 
 /// <summary>

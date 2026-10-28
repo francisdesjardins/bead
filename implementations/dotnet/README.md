@@ -26,6 +26,28 @@ alone. With `CI=true`, a restore that would change a `packages.lock.json` fails.
 the TypeScript server needs that side installed; with `BEAD_INTEROP_REQUIRED=1`, an interop that
 would skip fails instead.
 
+What plays against a real broker of MQTT 5 — the cases over MQTT 5, the adapter's link over a
+WebSocket, the interop over MQTT 5 — needs one given by `BEAD_MQTT_URL`, and is skipped, saying so,
+where none is; `BEAD_MQTT_REQUIRED=1` fails it instead. [`tools/mqtt-broker.mjs`](../../tools/mqtt-broker.mjs)
+starts a Mosquitto of the run's own, under Docker or a native one, with a password drawn for the
+run, and stops it whatever the command's end:
+
+```sh
+node ../../tools/mqtt-broker.mjs run -- dotnet test --project tests/Bead.Transport.Mqtt.Tests
+node ../../tools/mqtt-broker.mjs run -- dotnet test --project tests/Bead.Interop.Tests --filter-trait "transport=MQTT"
+```
+
+What plays against a RabbitMQ 4, AMQP 1.0's broker — the cases over AMQP 1.0, what of its adapter
+only a real broker shows, the interop over AMQP 1.0 — needs one given by `BEAD_AMQP_URL` alike,
+`BEAD_AMQP_REQUIRED=1` failing it where none is. [`tools/amqp-broker.mjs`](../../tools/amqp-broker.mjs)
+starts a RabbitMQ of the run's own under Docker, its exchange, its names' queues and its
+permissions provisioned, its `heartbeat` lowered to 10 s:
+
+```sh
+node ../../tools/amqp-broker.mjs run -- dotnet test --project tests/Bead.Transport.Amqp.Tests
+node ../../tools/amqp-broker.mjs run -- dotnet test --project tests/Bead.Interop.Tests --filter-trait "transport=AMQP"
+```
+
 ## Layout
 
 One solution, `Bead.slnx`:
@@ -35,14 +57,20 @@ src/
   Bead.Core/                    the codec, the router's core, both sides' routers, the service,
                                 session and notification managers, the relay, the server over
                                 them, the service layer a service is served and called through,
-                                the in-memory transport and the joined server transport
-  Bead.Protobuf/                the check of a proto payload's records against its message's
-                                descriptor, which a generated proto codec calls before
-                                Google.Protobuf reads them, and what the validators beadc generates
-                                are made of: Bead.Core references no Google.Protobuf
+                                the in-memory transport, the joined server transport, and a
+                                broker's core over an in-memory broker
+  Bead.Protobuf/                the runtime codec of a proto message, which a generated binding
+                                names: its records checked against its descriptor before
+                                Google.Protobuf reads them, its required fields judged both ways;
+                                and what the validators beadc generates are made of: Bead.Core
+                                references no Google.Protobuf
   Bead.Transport.WebSockets/    the server on Kestrel and the client on ClientWebSocket, one
                                 connection class for both
   Bead.Transport.Http/          the server on Kestrel and the client on HttpClient
+  Bead.Transport.Mqtt/          a broker's adapter over MQTTnet, MQTT 5's binding (spec 15.25 to
+                                15.31, decision 0041)
+  Bead.Transport.Amqp/          a broker's adapter over AMQPNetLite, AMQP 1.0's binding on
+                                RabbitMQ 4 (spec 15.32 to 15.38, decision 0043)
   Bead.Transcoding/             the transcoding layer, pure, no socket: a route table's types, its
                                 templates matched raw, a request bound from its route, Bead's own
                                 mapping of protobuf's JSON over a message's descriptor, a
@@ -67,6 +95,9 @@ tests/
   Shared/                       what several test projects link: the test clock, the durations'
                                 helper, the JSON payloads, the addresses a server listens on
 tools/
+  Bead.Benchmarks/              the bench, outside the solution: the seven layers on the loopback,
+                                in the TypeScript bench's units (README, Measurement); CI's dotnet
+                                job builds it in Release
   Bead.Fuzz/                    the fuzz targets, the TypeScript side's one for one, which
                                 tools/fuzz.mjs runs under libFuzzer (README, Fuzzing)
   Bead.ProtobufConformance/     protobuf's conformance testee, outside the solution: its
@@ -78,14 +109,107 @@ tools/
                                 at run time (decision 0035)
 ```
 
-A transport that needs a framework has a project of its own. Each transport server is a Kestrel
-application of its own: one port for both comes from a proxy in front, never from a server they
-share. The in-memory transport needs none, and lives in `Bead.Core`: `MemoryTransportClient` and
-`MemoryTransportServer`, two routers of one process, each envelope copied and handed on in a later
-turn, a credential and the client's address beside each request (spec 15.13). One server takes
-its connections from several transports through `JoinedServerTransport`, each handle its own
-transport's, two of one type refused (spec 15.14): an in-memory transport beside a WebSocket one,
-say, its service offered once.
+A transport that needs a framework has a project of its own. Each transport server over HTTP or a
+WebSocket is a Kestrel application of its own: one port for both comes from a proxy in front, never
+from a server they share. The in-memory transport needs none, and lives in `Bead.Core`:
+`MemoryTransportClient` and `MemoryTransportServer`, two routers of one process, each envelope
+copied and handed on in a later turn, a credential and the client's address beside each request
+(spec 15.13). One server takes its connections from several transports through
+`JoinedServerTransport`, each handle its own transport's, two of one type refused (spec 15.14): an
+in-memory transport beside a WebSocket one, say, its service offered once.
+
+A broker's core lives in `Bead.Core` too, needing no framework (spec 15.16 to 15.24, decisions 0038
+to 0040): a broker is a transport, and Bead is never a network of its own. A `BrokerParticipant` is
+one link of a side to its broker, through an `IBrokerAdapter` of that broker's client, its id the
+identity the broker authenticates the link by and its inbox, `bead/i/<id>`, every parcel of its
+connections' topic. `participant.Server(new BrokerTransportServerOptions { Names = ["interop"] })`
+serves names, alone or, with `IsInGroup`, in a group its broker places each OPEN with;
+`participant.Client()` holds one connection at a time, `Connect(new BrokerConnectOptions { Server =
+"interop" })` opening it through a name.
+
+```csharp
+var broker = new MemoryBroker();
+await using var serving = new BrokerParticipant(broker.Adapter(new MemoryBrokerAdapterOptions { Id = "server" }));
+await using var calling = new BrokerParticipant(broker.Adapter(new MemoryBrokerAdapterOptions { Id = "client" }));
+await using var transport = serving.Server(new BrokerTransportServerOptions { Names = ["interop"] });
+var client = calling.Client();
+
+await transport.Start();
+await client.Connect(new BrokerConnectOptions { Server = "interop" });
+```
+
+A connection is placed once, at its open, and named by both its ends: the client's OPEN to the name,
+the ACCEPT its server answers to the client's inbox, and the client's PING naming both halves, the
+third leg, which draws the server's handle, `type=BROKER;participant=<id>;ordinal=n`. A REFUSE, or a
+broker that says nothing serves the name, fails the connect with a `ConnectException` whose
+`InnerException` is a `BrokerRefusedException`, its `Refusal` naming the status and the reason.
+Each parcel is numbered, a copy dropped before the router and a gap the connection's loss; an
+envelope past the peer's receive bound goes in parts under `MaximumEnvelopePartsBytes`,
+`HeldBytesBudget` and the body's rate; `Heartbeat.cs` pings a silent connection on
+`TimeProvider.System`'s timer, as the TypeScript side's heartbeat does on its platform's; a
+request's credential crosses in its DATA, toward the server alone. Every link is a new incarnation
+that keeps no broker session, its connections lost with it and its peers reset once it is back.
+A link another of its id takes over (the adapter's `Down` telling `BrokerDown.IsTakenOver`) closes
+each connection alike, is reported, and connects no more until the application starts its
+participant again, or a server's transport over it: two holders of one id never take each other
+over without end. An OPEN lives in its broker its connect's time left, and a DATA that carries a
+credential twice the heartbeat, where the adapter offers a message's life. A server's transport
+starts once its broker holds each name it serves and stops once it let each go, its gauge `names`
+its broker's word. `MemoryBroker` offers every capability an adapter may, and copies, holds, drops
+and redelivers a message as a test asks (`Fault`), bounds each subscriber's queue, and loses a link
+with its will (`Lose`) or has it taken over (`TakeOver`): the broker cases of
+[`spec/transports.json`](../../spec/transports.json), in both roles, play over it in
+`BrokerTransportsTests`, and the conversations through a broker pair. `BrokerCasePlayer` plays them,
+over whatever broker it is given.
+
+A binding to a real broker is a project of its own, beside its adapter. `Bead.Transport.Mqtt`'s
+`MqttBrokerAdapter` links a participant to a broker of MQTT 5 over MQTTnet (spec 15.25 to 15.31,
+decision 0041): `mqtt://`, `mqtts://`, or a WebSocket of subprotocol `mqtt`, `ws://` or `wss://`;
+one network connection that keeps no session, its Client Identifier the participant's id,
+authenticated by a `Password` under its id, or a `PasswordProvider` asked at each link's start, or a
+TLS client certificate (`Tls`); a subscription of QoS 1 and Retain Handling 2 for each topic, a
+name in a group as its shared subscription `$share/<name>/<root>/s/<name>`; each publication of QoS 1
+counted to its byte by `MqttPackets` before it goes and held to its CONNACK's Receive Maximum,
+PUBACK 0x10 read as no subscriber; each message handed on before its PUBACK, which goes once the
+core settled it; a will of the participant's GONE; a DISCONNECT of 0x00 at a stop, one of 0x8E read
+as the link taken over. MQTTnet's automation is off: no reconnection, resubscription, offline queue
+or alias, each incarnation a client of its own. Its handles' type is `MQTT`.
+
+```csharp
+await using var participant = new BrokerParticipant(new MqttBrokerAdapter(new MqttBrokerAdapterOptions
+{
+    Id = "server",
+    Password = password,
+    Uri = new Uri("mqtt://127.0.0.1:1883"),
+}));
+await using var transport = participant.Server(new BrokerTransportServerOptions { Names = ["interop"], IsInGroup = true });
+
+await transport.Start();
+```
+
+`MqttBrokerAdapterTests` play its every packet against a scripted MQTT 5 peer, `MqttScript`, and
+`MqttTransportsTests` the cases over MQTT 5 against the broker a run gives, each participant through
+a relay of its own that a case's `lose` cuts.
+
+`Bead.Transport.Amqp`'s `AmqpBrokerAdapter` links a participant to a RabbitMQ 4 over AMQP 1.0, on
+AMQPNetLite (spec 15.32 to 15.38, decision 0043): `amqp://` or `amqps://`; one network connection
+opened anew at each start, its container-id the participant's id, authenticated by SASL PLAIN under
+its id, its `Password` or `PasswordProvider`, or by EXTERNAL under a TLS client certificate
+(`Tls`), its idle-time-out its `IdleTimeout`; its inbox an exclusive queue declared through
+RabbitMQ's management on that connection, so that it ends with it (`AmqpManagement`); a session for
+its inbox's receiver, one for each name, a name's queue its members compete on, and one for each of
+its two senders, to inboxes and to names, each to the anonymous terminus, through the topic
+exchange named the root; each publication one message of the profile `AmqpMessages` counts to its
+byte, held to its sender's credit, `released` read as no subscriber; each message handed on before
+its `accepted`, which goes once the core settled it, with one more credit, its inbox's
+`LinkCredit` and a name's 1, so that the name's queue hands each member one OPEN at a time; a name
+let go within its `ConnectTimeout`, what it handed on settled and its DETACH answered, or its link
+lost; no receiver naming a max-message-size, a message past its `MaximumMessageSize` handed on as no parcel; a held
+name's receiver its broker ends attached again once. AMQPNetLite's automation is off: it reconnects
+nothing, and no message goes already written, its encoders' bytes held to the profile by
+`amqpMessages`. Its handles' type is `AMQP`. `AmqpBrokerAdapterTests` and `AmqpManagementTests` play
+its every frame against a scripted AMQP 1.0 peer, `AmqpScript`, and against the broker a run gives
+what only it shows; `AmqpTransportsTests` the cases over AMQP 1.0.
 
 ### HTTP/JSON transcoding, a gateway
 
@@ -314,13 +438,15 @@ the listens, the outboxes and the server's life, under one lock on the C# side.
   0032](../../docs/decisions/0032-a-websocket-upgrade-from-no-page-carries-its-credential-beside-every-envelope.md)).
   `WebSocketConnectOptions` takes it as `Credential`, a string, or as `CredentialProvider`, whose
   value each attempt awaits, a reconnection's included, with the attempt's token, as SignalR's
-  `AccessTokenProvider` is: where a credential past its end is renewed. A client has one call of its
-  provider under way at a time, published under the client's lock and made once it is released: an
-  attempt that comes while one is waits for its outcome, and one that meets a call no attempt waits
-  on any more lets it settle before it calls again, each within its own bounds, its token, its
-  timeout and the client's dispose, which end it at once whatever the provider does. A value that
-  comes late is handed only to an attempt still waiting for it, and a failure that comes late is
-  observed, never left unobserved. The provider's token is cancelled once its attempt is over, its
+  `AccessTokenProvider` is: where a credential past its end is renewed. A client asks one credential
+  at a time of each provider, identified by its delegate's reference identity. Its attempts are
+  sequential: an attempt using the same provider waits for its earlier
+  call to settle, then asks anew; a different provider asks at once. An answer from an earlier
+  attempt serves none after it, and a late failure is observed, never left unobserved. A provider
+  that ignores its token and never settles holds every later attempt that would ask it; those
+  attempts end within their own cancellation, timeout and dispose bounds (spec 15.15). A provider
+  honours its token so that later attempts can ask it again. The provider's token is cancelled once
+  its attempt is over, its
   callbacks run apart from the connect's ending, so none takes the place of its outcome; a provider
   that cancels itself while that attempt's token is still live fails it as any failure of its does.
   What else a connect awaits, the WebSocket's invoker and an HTTP client's `Handler`, is bounded
@@ -370,13 +496,20 @@ the listens, the outboxes and the server's life, under one lock on the C# side.
   none or `OPAQUE`, is handed a `SessionRequest` of its connection and its header, which carries no
   transport credential.
 
-- **A `proto` payload** is read by the codec beadc generates over Google.Protobuf, which calls
-  `ProtoRecords.Check`, of `Bead.Protobuf`, first: it walks the payload's records by the message's
-  own descriptor, its shape built once and cached by it, and refuses what protobuf refuses where a
-  stock library reads on, a field at a wire type its type does not take and a map's entry with a
-  field it does not declare among them (spec 17.9, [decision
-  0028](../../docs/decisions/0028-a-proto-payloads-records-are-read-against-its-message-before-its-library-reads-them.md)).
-  A project that binds `proto` references `Bead.Protobuf`, which carries Google.Protobuf with it.
+- **A `proto` payload** is read and written by `ProtoCodecs.Of<T>()`, of `Bead.Protobuf`, which
+  the code beadc generates names, and which holds spec 17.9 once over Google.Protobuf.
+  `ProtoRecords.Check` walks the payload's records by the message's own descriptor first, its
+  shape built once and cached by it, and refuses what protobuf refuses where a stock library reads
+  on, a field at a wire type its type does not take and a map's entry with a field it does not
+  declare among them ([decision
+  0028](../../docs/decisions/0028-a-proto-payloads-records-are-read-against-its-message-before-its-library-reads-them.md));
+  a singular closed enum's record of a number its enum does not declare is dropped before the
+  library reads (17.9.8). `ProtoRequired.Check` then refuses a message that leaves a field of
+  `LEGACY_REQUIRED` presence unset, at any depth but inside an extension or an `Any`, reading and
+  writing, with a `FormatException` in the same words (17.9.7, [decision
+  0042](../../docs/decisions/0042-a-proto-message-that-leaves-a-required-field-unset-neither-reads-nor-writes-and-a-gateway-refuses-it-where-its-server-would.md)).
+  `ProtoCodecs.Read` reads a message by its descriptor so, as a gateway reads a result. A project
+  that binds `proto` references `Bead.Protobuf`, which carries Google.Protobuf with it.
 - **A `proto` request's rules** are protovalidate's options on its message, which beadc compiles
   into each side's validator ([decision
   0035](../../docs/decisions/0035-a-payload-that-reads-is-held-to-its-messages-rules-before-its-resolver-sees-it.md)):

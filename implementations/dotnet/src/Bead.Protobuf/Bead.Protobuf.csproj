@@ -1,8 +1,9 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <!--
-    A proto payload's records, read against its message's descriptor before Google.Protobuf reads
-    them (0028), and the validators of its message's rules (0035): what the code beadc generates
-    for a proto binding calls, so that Bead.Core still references no Google.Protobuf. It builds on
+    The runtime codec of a proto message, which holds spec 17.9 once: its records read against its
+    message's descriptor before Google.Protobuf reads them (0028), and its required fields (0042);
+    and the validators of its message's rules (0035): what the code beadc generates for a proto
+    binding calls, so that Bead.Core still references no Google.Protobuf. It builds on
     Bead.Core, whose violations and validators it makes. The TypeScript side's twin is
     @francisdesjardins/bead/proto.
   -->
@@ -22,5 +23,8 @@
   <ItemGroup>
     <!-- the tests hold a message's shape, built once from its descriptor -->
     <InternalsVisibleTo Include="Bead.Protobuf.Tests" />
+    <!-- the mapping places a required field left unset by the walk's way to it, and reads an Any's
+         message unjudged (transcoding 5.2, step 4, and 5.7) -->
+    <InternalsVisibleTo Include="Bead.Transcoding" />
   </ItemGroup>
 </Project>

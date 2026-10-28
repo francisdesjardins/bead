@@ -7,7 +7,7 @@ using Google.Protobuf.WellKnownTypes;
 namespace Bead.Interop.Tests;
 
 /// <summary>The generated C# HTTP client against the TypeScript gateway, twins of interop.test.ts.</summary>
-public sealed class HttpInteropTests(InteropTests.TypeScriptServer server) : IClassFixture<InteropTests.TypeScriptServer>
+public sealed class HttpInteropTests(InteropTests.TypeScriptServer server)
 {
     private const string Reason = "it starts the TypeScript server, and Node or the TypeScript side are not installed";
 

@@ -13,6 +13,7 @@ import { isDeepStrictEqual } from 'node:util';
 import { type DescMessage, fromBinary, type Message } from '@bufbuild/protobuf';
 import { reflect, type ReflectMessage } from '@bufbuild/protobuf/reflect';
 import { expect, test } from '@playwright/test';
+import { protoCodecOf } from '../../proto/codec';
 import { fromHexadecimal } from '../../router/shared/__tests__/vectors';
 import { createTestClock } from '../../transport/shared/__tests__/fixtures';
 import { HEARTBEAT } from '../events';
@@ -39,7 +40,8 @@ import {
   writeProtoJson,
 } from '../transcoding';
 import { HTTP_ROUTES, OPENAPI_DOCUMENT } from './generated/bead_http';
-import { EdgesSchema, EverythingSchema } from './generated/transcoding_pb';
+import { EdgesSchema, EverythingSchema, RequiringSchema } from './generated/transcoding_pb';
+import { NeedsSchema } from './generated/transcoding-required_pb';
 import { startTranscoding } from './transcoding-service';
 
 // interfaces
@@ -164,9 +166,16 @@ const FILE = JSON.parse(
   readFileSync(new URL('../../../../../spec/transcoding.json', import.meta.url), 'utf8')
 ) as ITranscodingFile;
 
+/** The companion's version, as `spec/transcoding.md` states it. */
+const COMPANION_VERSION = /\*\*Version: ([0-9]+\.[0-9]+\.[0-9]+)\*\*/.exec(
+  readFileSync(new URL('../../../../../spec/transcoding.md', import.meta.url), 'utf8')
+)?.[1];
+
 const MESSAGES: Readonly<Record<string, DescMessage>> = Object.freeze({
   [EdgesSchema.typeName]: EdgesSchema,
   [EverythingSchema.typeName]: EverythingSchema,
+  [NeedsSchema.typeName]: NeedsSchema,
+  [RequiringSchema.typeName]: RequiringSchema,
 });
 
 const REGISTRY = typeRegistryOf([
@@ -589,7 +598,7 @@ test('reads consecutive responses from their own bytes', async () => {
 
 test.describe('plays transcoding.json', () => {
   test('its version is the companion’s', () => {
-    expect(FILE.transcodingVersion).toBe('0.1.0');
+    expect(FILE.transcodingVersion).toBe(COMPANION_VERSION);
   });
 
   for (const entry of FILE.templates) {
@@ -875,7 +884,8 @@ test.describe('plays transcoding.json', () => {
   for (const entry of FILE.writings) {
     test(`writings: ${entry.name}`, () => {
       const schema = messageOf(entry.message);
-      const message = fromBinary(schema, fromHexadecimal(entry.payload), { recursionLimit: 101 });
+      // * read through the runtime's reader, as the gateway reads a result
+      const message = protoCodecOf(schema).decode(fromHexadecimal(entry.payload));
       const write = (): string => {
         return writeProtoJson(schema, { message, registry: REGISTRY });
       };

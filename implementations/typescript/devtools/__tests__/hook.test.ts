@@ -1,5 +1,9 @@
 import { expect, test, type BrowserContext, type Page, type Worker } from '@playwright/test';
-import { assertBuilt, launchExtension, PLAYGROUND, serveFolder } from './fixtures';
+import { readFile } from 'node:fs/promises';
+import { EnvelopeKind } from '../../src/router/shared/constants';
+import type { ICallRecord, IEnvelopeRecord } from '../messages';
+import type { ILog } from '../model/log';
+import { assertBuilt, launchExtension, PLAYGROUND, serveFolder, serveMqttDemo } from './fixtures';
 
 // helpers
 
@@ -80,6 +84,151 @@ const countRecords = async (page: Page): Promise<() => Promise<number>> => {
 // definition
 
 test.describe('the hook, the bridge and the background', () => {
+  test('follows the page’s calls, each service debug step and its envelopes to the panel over MQTT 5', async () => {
+    const noBroker =
+      'no broker: BEAD_MQTT_URL or BEAD_MQTT_WS_URL is not set (node tools/mqtt-broker.mjs start)';
+    const hasBroker =
+      process.env['BEAD_MQTT_URL'] !== undefined && process.env['BEAD_MQTT_WS_URL'] !== undefined;
+
+    test.skip(!hasBroker && process.env['BEAD_MQTT_REQUIRED'] !== '1', noBroker);
+    expect(hasBroker, noBroker).toBe(true);
+    await assertBuilt();
+
+    await using served = await serveMqttDemo();
+    const { context, extensionId, worker } = await launchExtension();
+
+    try {
+      const page = await context.newPage();
+      const links: string[] = [];
+
+      page.on('websocket', (socket) => {
+        links.push(socket.url());
+      });
+      await page.goto(`${served.url}?transport=mqtt`);
+      await expect(page.locator('#connection')).toHaveAttribute('data-state', 'open');
+      expect(links).toEqual([process.env['BEAD_MQTT_WS_URL']]);
+      const panel = await openPanel(context, { extensionId, tabId: await tabIdOf(worker) });
+
+      await expect(panel.locator('#source option')).toHaveText(['All clients', 'Client 1']);
+      await panel.fill('#filter', '-stats, -metrics');
+
+      for (const [action, result] of [
+        ['read', /SESSION_REQUIRED/u],
+        ['reader', /logged in as/u],
+        ['read', /counter at 0/u],
+        ['fail', /procedure/u],
+        ['ask', /the server asked the client its time/u],
+      ] as const) {
+        await page.click(`button[data-action="${action}"]`);
+        await expect(page.locator('#result')).toContainText(result);
+      }
+
+      await expect(panel.locator('#calls tr.call')).toHaveCount(6);
+      await expect(panel.locator('#calls tr.call', { hasText: 'SESSION_REQUIRED' })).toHaveCount(1);
+      await expect(panel.locator('#calls tr.call', { hasText: 'clock' })).toContainText(
+        'command, in'
+      );
+      const whoami = panel.locator('#calls tr.call', { hasText: 'whoami' });
+
+      await whoami.click();
+      await panel.click('[data-detail="payload"]');
+      await expect(panel.locator('#detail')).toContainText('reader');
+      await panel.click('[data-detail="exchange"]');
+      await expect(panel.locator('#detail .thread circle')).toHaveCount(2);
+      await whoami.locator('[data-twist]').click();
+      await expect(panel.locator('#calls tr.envelope')).toHaveText([
+        /→ REQUEST.*credential JWT/u,
+        /← RESULT/u,
+      ]);
+
+      // * Export reads what the panel holds, beyond what its rows summarize.
+      const [download] = await Promise.all([
+        panel.waitForEvent('download'),
+        panel.click('#export'),
+      ]);
+      const saved = await download.path();
+      const log = JSON.parse(await readFile(saved, 'utf8')) as ILog;
+
+      await test.info().attach('mqtt-panel-log', { contentType: 'application/json', path: saved });
+
+      const steps = log.records.filter((record): record is ICallRecord => {
+        return record.kind === 'call' && !['stats', 'metrics'].includes(record.procedureName);
+      });
+      const words = steps.map((record) => {
+        return `${record.direction === 'tx' ? '→' : '←'} ${record.type} ${record.procedureName}`;
+      });
+      const pageSteps = (await page.locator('#calls-log li').allTextContents())
+        .reverse()
+        .map((line) => {
+          return line.match(/[→←] \w+ \w+/u)?.[0];
+        });
+
+      expect(words).toEqual(pageSteps);
+      expect(words).toEqual([
+        '→ request read',
+        '← request read',
+        '→ request whoami',
+        '← request whoami',
+        '→ request read',
+        '← request read',
+        '→ request fail',
+        '← request fail',
+        '→ request ask',
+        '← command clock',
+        '→ command clock',
+        '← request ask',
+      ]);
+      expect(log.sources).toEqual([{ id: 1, protocol: 1, side: 'client' }]);
+      expect(log.dropped).toBe(0);
+
+      const envelopes = log.records.filter((record): record is IEnvelopeRecord => {
+        return (
+          record.kind === 'envelope' &&
+          steps.some((step) => {
+            return (
+              step.callId === record.header['callId'] &&
+              step.connectionHandle === record.connectionHandle
+            );
+          })
+        );
+      });
+
+      expect(envelopes).toHaveLength(12);
+      const kindNameOf = new Map<number, string>(
+        Object.entries(EnvelopeKind).map(([name, kind]) => {
+          return [kind, name];
+        })
+      );
+      const envelopeWords = envelopes.map((record) => {
+        return `${record.direction === 'tx' ? '→' : '←'} ${kindNameOf.get(Number(record.header['kind']))} #${String(record.header['callId'])}`;
+      });
+      const callIds = new Set(
+        steps.map((step) => {
+          return step.callId;
+        })
+      );
+      const pageEnvelopes = (await page.locator('#envelopes-log li').allTextContents())
+        .reverse()
+        .flatMap((line) => {
+          const found = line.match(/[→←] \w+ #(\d+)/u);
+
+          return found !== null && callIds.has(Number(found[1])) ? [found[0]] : [];
+        });
+
+      expect(envelopeWords).toEqual(pageEnvelopes);
+      expect(
+        envelopes.filter((record) => {
+          return record.header['kind'] === EnvelopeKind.FAILURE;
+        })
+      ).toHaveLength(2);
+      await panel.click('[data-mode="envelopes"]');
+      await expect(panel.locator('#envelopes tr')).toHaveCount(envelopes.length);
+      expect(await panel.locator('#envelopes').textContent()).not.toContain('eyJ');
+    } finally {
+      await context.close();
+    }
+  });
+
   test('defines the hook in the page’s world before its scripts run, under the package’s key, unlisted', async () => {
     const { context, page, served } = await openPlayground();
 

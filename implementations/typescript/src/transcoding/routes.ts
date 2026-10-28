@@ -51,7 +51,8 @@ export interface IHttpRouteInit {
 
 /**
  * The contract 5 (decision 0037): a route table's, `routeOf` and the transcoding layer that reads it,
- * beside the contract 4 of `./service`, which a project that generates no route table keeps.
+ * beside the contract 6 of `./service`, which a project that generates no route table keeps; a
+ * route table holds descriptors and calls no codec, so it stays at 5.
  *
  * @example
  * import { GENERATED_CODE_SUPPORTS_VERSION_5 } from '@francisdesjardins/bead/transcoding';

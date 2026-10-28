@@ -108,6 +108,48 @@
       }
     }
   },
+  "allOf": [
+    {
+      "if": {
+        "description": "A message field of LEGACY_REQUIRED presence requires the feature legacy-required (decision 0042), as JOSE's crit names a member a reader must know.",
+        "type": "object",
+        "required": ["proto"],
+        "properties": {
+          "proto": {
+            "type": "object",
+            "properties": {
+              "messages": {
+                "type": "array",
+                "contains": {
+                  "type": "object",
+                  "required": ["fields"],
+                  "properties": {
+                    "fields": {
+                      "type": "array",
+                      "contains": {
+                        "type": "object",
+                        "required": ["legacyRequired"]
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "requires": {
+            "type": "array",
+            "contains": {
+              "const": "legacy-required"
+            }
+          }
+        }
+      }
+    }
+  ],
   "$defs": {
     "file": {
       "type": "object",
@@ -1497,7 +1539,7 @@
       }
     },
     "fieldEntry": {
-      "description": "A field of a message: its name, number and JSON name, its type, its label, a map's key's scalar beside it, whether it tracks presence, its oneof, and what its leading comment and its deprecated option say.",
+      "description": "A field of a message: its name, number and JSON name, its type, its label, a map's key's scalar beside it, whether it tracks presence and whether protobuf requires it, its oneof, and what its leading comment and its deprecated option say.",
       "type": "object",
       "required": ["fieldName", "fieldNumber", "jsonName", "type", "presence"],
       "additionalProperties": false,
@@ -1527,6 +1569,10 @@
         "presence": {
           "enum": ["explicit", "implicit"]
         },
+        "legacyRequired": {
+          "description": "Under the feature legacy-required: its presence is LEGACY_REQUIRED, proto2's required, and a message that leaves it unset neither reads nor writes (spec 17.9.7, decision 0042). Absent otherwise.",
+          "const": true
+        },
         "oneof": {
           "description": "The oneof it is a member of, a synthetic one never.",
           "$ref": "#/$defs/protoName"
@@ -1554,7 +1600,24 @@
         "not": {
           "required": ["key"]
         }
-      }
+      },
+      "allOf": [
+        {
+          "if": {
+            "description": "A field protobuf requires is singular, tracks presence and is no oneof's member, as protoc holds a required field.",
+            "required": ["legacyRequired"]
+          },
+          "then": {
+            "properties": {
+              "presence": {
+                "const": "explicit"
+              },
+              "label": false,
+              "oneof": false
+            }
+          }
+        }
+      ]
     },
     "messageRules": {
       "description": "Under the feature validate (decision 0035): its fields' rules, by number; its own (buf.validate.message); each oneof's (buf.validate.oneof), by its index.",

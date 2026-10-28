@@ -7,8 +7,9 @@
 // dependencies
 
 import {
+  clone,
   create,
-  fromBinary,
+  createFileRegistry,
   isFieldSet,
   type DescEnum,
   type DescField,
@@ -21,6 +22,9 @@ import {
   toBinary,
 } from '@bufbuild/protobuf';
 import {
+  type DescriptorProto,
+  FieldDescriptorProto_Label,
+  FileDescriptorProtoSchema,
   isWrapperDesc,
   AnySchema,
   FeatureSet_FieldPresence,
@@ -41,6 +45,9 @@ import {
   UInt64ValueSchema,
   ValueSchema,
 } from '@bufbuild/protobuf/wkt';
+import { readProtoBytes } from '../proto/codec';
+import { requiredShapeOf } from '../proto/records';
+import { unsetPathOf } from '../proto/required';
 import { STRICT_UTF8 } from '../router/shared/payloads';
 import { ProgrammerError } from '../transport/shared/errors';
 
@@ -279,15 +286,26 @@ export class JsonFormError extends Error {
   readonly at: readonly IJsonToken[] | undefined;
   /** Where its request carried it, a parameter or a pointer of 7.4; none where nothing places it. */
   readonly place: RequestPlace | undefined;
+  /** Whether it is step 4's, a required field unset, which a binding places as a violation's field. */
+  readonly isUnset: boolean;
 
   constructor(
     reason: string,
-    { at, place }: { at?: IJsonPlace | undefined; place?: RequestPlace | undefined } = {}
+    {
+      at,
+      isUnset = false,
+      place,
+    }: {
+      at?: IJsonPlace | undefined;
+      isUnset?: boolean | undefined;
+      place?: RequestPlace | undefined;
+    } = {}
   ) {
     super(reason);
     this.name = 'JsonFormError';
     this.reason = reason;
     this.at = at === undefined ? undefined : tokensOf(at);
+    this.isUnset = isUnset;
     this.place = place;
   }
 
@@ -1323,6 +1341,77 @@ const readListValue = (node: JsonNode, reading: IReadingOptions) => {
   return list;
 };
 
+// each message reaching a required field, as a twin of its file closure whose such fields read
+// EXPLICIT: protobuf-es's writer refuses one unset, and gives no option to write it partial
+const PARTIALS = new WeakMap<DescMessage, DescMessage>();
+
+/** Each of `messages`' fields of `LEGACY_REQUIRED` presence, nested messages' too, made explicit. */
+const relabel = (messages: readonly DescriptorProto[]): void => {
+  for (const message of messages) {
+    for (const field of message.field) {
+      if (field.label === FieldDescriptorProto_Label.REQUIRED) {
+        field.label = FieldDescriptorProto_Label.OPTIONAL;
+      }
+
+      const features = field.options?.features;
+
+      if (features?.fieldPresence === FeatureSet_FieldPresence.LEGACY_REQUIRED) {
+        features.fieldPresence = FeatureSet_FieldPresence.EXPLICIT;
+      }
+    }
+
+    relabel(message.nestedType);
+  }
+};
+
+/**
+ * The descriptor `schema`'s message is packed by: its own where it reaches no required field, else
+ * its twin's, of the same fields and bytes, built once from its file closure, each file relabelled.
+ */
+const partialOf = (schema: DescMessage): DescMessage => {
+  if (requiredShapeOf(schema) === undefined) {
+    return schema;
+  }
+
+  const known = PARTIALS.get(schema);
+
+  if (known !== undefined) {
+    return known;
+  }
+
+  const files = new Map<string, DescFile>();
+  const pending = [schema.file];
+
+  // ! by the name an import gives, the `.proto`'s, which a `DescFile`'s own name leaves out
+  for (let file = pending.pop(); file !== undefined; file = pending.pop()) {
+    if (!files.has(file.proto.name)) {
+      files.set(file.proto.name, file);
+      pending.push(...file.dependencies);
+    }
+  }
+
+  const twins = new Map(
+    [...files].map(([name, file]) => {
+      const proto = clone(FileDescriptorProtoSchema, file.proto);
+
+      relabel(proto.messageType);
+
+      return [name, proto] as const;
+    })
+  );
+  const registry = createFileRegistry(
+    twins.get(schema.file.proto.name) ?? schema.file.proto,
+    (name) => {
+      return twins.get(name);
+    }
+  );
+  const twin = registry.getMessage(schema.typeName) ?? schema;
+
+  PARTIALS.set(schema, twin);
+
+  return twin;
+};
+
 /** An `Any` of `node`: its `@type`, a message of the registry, then that message's members (5.4.6). */
 const readAny = (node: JsonNode, reading: IReadingOptions): Message => {
   const { at, registry } = reading;
@@ -1379,7 +1468,8 @@ const readAny = (node: JsonNode, reading: IReadingOptions): Message => {
   }
 
   any.typeUrl = typeNode.value;
-  any.value = toBinary(schema, message);
+  // * written as it holds it, a required field unset among it: 17.9.7 does not look into an Any
+  any.value = toBinary(partialOf(schema), message);
 
   return any;
 };
@@ -1556,18 +1646,60 @@ const readMessageAt = (schema: DescMessage, node: JsonNode, reading: IReadingOpt
   return message;
 };
 
+/** The reason of step 4 (transcoding 5.2), which names no member or key of the request. */
+const UNSET = 'a required field unset';
+
 /**
- * A message of `schema` of `node`, read by Bead's mapping (transcoding 5.2, items 2 and 3): its
- * members by its fields, each by its JSON name or its proto name and never by both; `null` its
- * field unset but where it is a value of its own; each scalar and well-known type in its one form;
- * a message nested more than 100 deep refused before it is built. A refusal is a
- * {@link JsonFormError}.
+ * Step 4 of transcoding 5.2, spec 17.9.7's walk over `message` of `schema`, a message read whole:
+ * the first field of `LEGACY_REQUIRED` presence it leaves unset is a {@link JsonFormError} marked
+ * `isUnset`, at the member its object lacks, by JSON names, an item by its index and a map's value
+ * by its key. An `Any`'s message is not looked into.
  */
-export const readMessage = (
+export const judgeUnset = (schema: DescMessage, message: Message): void => {
+  const path = unsetPathOf(schema, message);
+
+  if (path === undefined) {
+    return;
+  }
+
+  let at = ROOT;
+
+  for (const step of path) {
+    if (typeof step === 'object') {
+      at = fieldAt(at, step.jsonName);
+    } else {
+      at = typeof step === 'number' ? itemAt(at, step) : givenAt(at, step);
+    }
+  }
+
+  throw new JsonFormError(UNSET, { at, isUnset: true });
+};
+
+/** A message of `schema` of `node`, read by steps 2 and 3 alone: a binding sets its mask before step 4. */
+export const readDraft = (
   schema: DescMessage,
   { node, registry }: IJsonFormOptions & { node: JsonNode }
 ): Message => {
   return readMessageAt(schema, node, { at: ROOT, depth: 0, registry });
+};
+
+/**
+ * A message of `schema` of `node`, read by Bead's mapping (transcoding 5.2, items 2 to 4): its
+ * members by its fields, each by its JSON name or its proto name and never by both; `null` its
+ * field unset but where it is a value of its own; each scalar and well-known type in its one form;
+ * a message nested more than 100 deep refused before it is built; then, once read whole, a field of
+ * `LEGACY_REQUIRED` presence left unset, at any depth but in an `Any`. A refusal is a
+ * {@link JsonFormError}.
+ */
+export const readMessage = (
+  schema: DescMessage,
+  options: IJsonFormOptions & { node: JsonNode }
+): Message => {
+  const message = readDraft(schema, options);
+
+  judgeUnset(schema, message);
+
+  return message;
 };
 
 /** A `proto` request's body read by Bead's mapping, its text then its message (transcoding 5.2). */
@@ -1816,8 +1948,12 @@ const anyJsonOf = (any: Message, writing: IWritingOptions): string => {
 
   let message: Message;
 
+  // * read as 17.9 reads a payload, its records checked, but for 17.9.7, which looks into no Any
   try {
-    message = fromBinary(schema, value, { recursionLimit: MAXIMUM_DEPTH + 1 - writing.depth });
+    message = readProtoBytes(schema, {
+      bytes: value,
+      recursionLimit: MAXIMUM_DEPTH + 1 - writing.depth,
+    });
   } catch {
     throw new JsonFormError('an Any whose bytes do not read as its type');
   }

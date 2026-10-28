@@ -2413,9 +2413,6 @@ test.describe('createRouterRequester', () => {
           return false;
         },
         onAnswerReceived: noop,
-        onUnpairedFailure: () => {
-          return false;
-        },
         receiveUnplaced: noop,
         report: port.report,
         reportFailure: (failure) => {
@@ -2467,11 +2464,39 @@ test.describe('createRouterRequester', () => {
     expect(callId % 2).toBe(0);
     expect(requester.gauges().counts).toEqual(expect.objectContaining({ pendingCalls: 1 }));
 
+    const unpaired = readEnvelope(
+      envelopeOf({
+        failure: SERVER_FAILURES.procedureFailed,
+        header: { callId: callId + 2, kind: EnvelopeKind.FAILURE },
+        kind: EnvelopeKind.FAILURE,
+      }),
+      { failures: SERVER_FAILURES, maximumEnvelopeBytes: routerLimits.maximumEnvelopeBytes }
+    );
+
+    if (unpaired?.kind !== EnvelopeKind.FAILURE) {
+      throw new Error('a failure reads as one');
+    }
+
+    requester.receiveAnswer(unpaired, { connectionHandle: 'a', mayOvertake: false });
+
+    expect(raised).toEqual([SERVER_FAILURES.callUnknown]);
+    expect(requester.gauges().counts).toEqual(expect.objectContaining({ pendingCalls: 1 }));
+
+    requester.reserve({ callId: callId + 2, connectionHandle: 'a', timeout: 30 });
+    requester.receiveAnswer(unpaired, { connectionHandle: 'a', mayOvertake: false });
+
+    expect(raised).toEqual([SERVER_FAILURES.callUnknown]);
+
+    clock.tick(30);
+
+    expect(requester.isReserved(callId + 2, 'a')).toBe(false);
+
     requester.receiveAnswer(answerFor(callId), { connectionHandle: 'a', mayOvertake: false });
     expect((await called).payload).toEqual(new Uint8Array([7]));
 
     requester.receiveAnswer(answerFor(callId), { connectionHandle: 'a', mayOvertake: false });
-    expect(raised).toEqual([SERVER_FAILURES.callUnknown]);
+    expect(raised).toEqual([SERVER_FAILURES.callUnknown, SERVER_FAILURES.callUnknown]);
+    expect(requester.gauges().counts).toEqual(expect.objectContaining({ pendingCalls: 0 }));
     expect(reported).toEqual([]);
   });
 });

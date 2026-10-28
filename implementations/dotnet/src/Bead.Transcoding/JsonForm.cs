@@ -5,6 +5,7 @@ using System.Globalization;
 using System.Numerics;
 using System.Text;
 using System.Text.RegularExpressions;
+using Bead.Protobuf;
 using Google.Protobuf;
 using Google.Protobuf.Reflection;
 using Google.Protobuf.WellKnownTypes;
@@ -16,14 +17,19 @@ namespace Bead.Transcoding;
 /// over a message's descriptor and Google.Protobuf's reflection: a <c>proto</c> request's body read
 /// as 5.2 to 5.4 read one, the message built through <see cref="FieldDescriptor.Accessor"/>, whose
 /// bytes the stock library writes; a result the stock library read, written in Bead's proto JSON
-/// form (5.6), one sequence of bytes on every side, or refused (5.7). <c>JsonParser</c> and
-/// <c>JsonFormatter</c> are never called. An <c>Any</c> holds a message of the definitions it was
-/// built over, or a well-known type.
+/// form (5.6), one sequence of bytes on every side, or refused (5.7). A message read is judged last
+/// by its required fields, as spec 17.9.7 judges a payload (5.2, step 4), an <c>Any</c>'s message
+/// never looked into, and an <c>Any</c>'s bytes are read as 17.9 reads a payload but for 17.9.7.
+/// <c>JsonParser</c> and <c>JsonFormatter</c> are never called. An <c>Any</c> holds a message of the
+/// definitions it was built over, or a well-known type.
 /// </summary>
 public sealed partial class JsonForm
 {
     // how deep a message nests below the request or the result, as spec 17.9.3 counts one
     private const int Depth = 100;
+
+    // ! the words of 5.2's step 4, which name no member or key of the request (7.4)
+    private const string Unset = "a required field unset";
 
     // a JSON number's value past this magnitude, or under its inverse, is no integer of any type's
     // range, and is never built: an exponent alone builds no number of its own
@@ -101,13 +107,18 @@ public sealed partial class JsonForm
     /// <summary>
     /// <paramref name="body"/> read as transcoding 5.2 reads a <c>proto</c> request's: the message,
     /// or a <see cref="JsonFormException"/> saying why it is refused, which a gateway answers 400
-    /// <c>PAYLOAD_UNDECODABLE</c>.
+    /// <c>PAYLOAD_UNDECODABLE</c>; one that leaves a required field unset last, by step 4,
+    /// <see cref="JsonFormException.IsUnset"/>, at the member its object lacks.
     /// </summary>
     public IMessage Read(MessageDescriptor descriptor, ReadOnlySpan<byte> body)
     {
         ArgumentNullException.ThrowIfNull(descriptor);
 
-        return ReadMessage(descriptor, (JsonText.Read(body), 0, JsonPlace.Root));
+        var message = ReadMessage(descriptor, (JsonText.Read(body), 0, JsonPlace.Root));
+
+        Judge(message);
+
+        return message;
     }
 
     /// <summary>
@@ -139,7 +150,7 @@ public sealed partial class JsonForm
             ?? throw new ArgumentException($"{message.Descriptor.FullName} has no field {fieldName}", nameof(fieldName));
         var writer = new Writer();
 
-        if (field.IsMap || field.IsRepeated || field.FieldType != FieldType.Message || field.Accessor.HasValue(message))
+        if (field.IsMap || field.IsRepeated || !field.IsMessage() || field.Accessor.HasValue(message))
         {
             WriteField(writer, (field, field.Accessor.GetValue(message), 0));
         }
@@ -151,10 +162,45 @@ public sealed partial class JsonForm
         return writer.Bytes;
     }
 
-    /// <summary>The JSON a request's message is read from, built by its binding: its node read as 5.2's steps 2 to 4.</summary>
+    /// <summary>
+    /// The JSON a request's message is read from, built by its binding: its node read as 5.2's steps
+    /// 2 and 3, step 4 left to <see cref="Judge"/>, which the binding calls once its derived mask is set.
+    /// </summary>
     internal IMessage ReadNode(MessageDescriptor descriptor, JsonNode node)
     {
         return ReadMessage(descriptor, (node, 0, JsonPlace.Root));
+    }
+
+    /// <summary>
+    /// 5.2's step 4: <paramref name="message"/> judged as spec 17.9.7 judges a payload, refused at
+    /// the first field of <c>LEGACY_REQUIRED</c> presence its walk finds unset, placed at the member
+    /// its object lacks by JSON names, an item by its index and a map's value by its key, an
+    /// <c>Any</c>'s message never looked into.
+    /// </summary>
+    internal static void Judge(IMessage message)
+    {
+        if (ProtoRequired.UnsetOf(message) is not { } unset)
+        {
+            return;
+        }
+
+        var place = JsonPlace.Root;
+
+        foreach (var step in unset.Steps)
+        {
+            place = place.Field(step.Field.JsonName);
+
+            if (step.Index is { } index)
+            {
+                place = place.Item(index);
+            }
+            else if (step.Key is { } key)
+            {
+                place = place.Given(KeyTextOf(key));
+            }
+        }
+
+        throw new JsonFormException(Unset, new JsonFormExceptionOptions { At = place.Field(unset.Field.JsonName).Tokens(), IsUnset = true });
     }
 
     /// <summary>A field of <paramref name="descriptor"/> by its JSON name or its proto name; none where none is named so.</summary>
@@ -247,21 +293,10 @@ public sealed partial class JsonForm
         return new JsonFormException(reason, new JsonFormExceptionOptions { At = at.Tokens() });
     }
 
-    // whether an enum is closed, a proto2 file's, which takes no number its values do not number
-    private static bool IsClosed(EnumDescriptor descriptor)
-    {
-        return ClosedFiles.GetOrAdd(descriptor.File, (file) =>
-        {
-            return file.ToProto().Syntax is "" or "proto2";
-        });
-    }
-
-    private static readonly ConcurrentDictionary<FileDescriptor, bool> ClosedFiles = new();
-
     // whether a field's null is a value of its own: a google.protobuf.Value's, or a NullValue's
     private static bool IsNullable(FieldDescriptor field)
     {
-        return (field.FieldType == FieldType.Message && field.MessageType.FullName == Value.Descriptor.FullName)
+        return (field.IsMessage() && field.MessageType.FullName == Value.Descriptor.FullName)
             || (field.FieldType == FieldType.Enum && field.EnumType.FullName == NullValueName);
     }
 
@@ -357,7 +392,7 @@ public sealed partial class JsonForm
     {
         var (value, depth, place) = at;
 
-        if (field.FieldType == FieldType.Message)
+        if (field.IsMessage())
         {
             var message = ReadMessage(field.MessageType, (value, depth + 1, place));
 
@@ -404,8 +439,9 @@ public sealed partial class JsonForm
                 throw new JsonFormException("an enum number past its range");
             }
 
-            // * an open enum takes a number no value numbers, as every enum of proto3 is
-            if (IsClosed(descriptor) && descriptor.FindValueByNumber((int)exact) is null)
+            // * an open enum takes a number no value numbers, as every enum of proto3 is; a closed one,
+            // proto2's or an edition's, does not
+            if (ProtoEnums.IsClosed(descriptor) && descriptor.FindValueByNumber((int)exact) is null)
             {
                 throw new JsonFormException($"no value of {descriptor.Name} of that number");
             }
@@ -1191,7 +1227,7 @@ public sealed partial class JsonForm
 
             foreach (DictionaryEntry entry in (IDictionary)value!)
             {
-                entries.Add((KeyTextOf(keyField, entry.Key), entry.Value));
+                entries.Add((KeyTextOf(entry.Key), entry.Value));
             }
 
             // * sorted by their keys' UTF-16 code units, as 17.7.6 sorts an object's members
@@ -1243,7 +1279,8 @@ public sealed partial class JsonForm
         WriteSingle(writer, (field, value, depth));
     }
 
-    private static string KeyTextOf(FieldDescriptor field, object key)
+    // a map's key as its JSON writes it (5.3, item 8)
+    private static string KeyTextOf(object key)
     {
         return key switch
         {
@@ -1264,6 +1301,7 @@ public sealed partial class JsonForm
                 WriteScalar(writer, (field.MessageType.FindFieldByNumber(1).FieldType, value));
                 break;
             case FieldType.Message:
+            case FieldType.Group:
                 WriteMessage(writer, ((IMessage)value!, depth + 1));
                 break;
             case FieldType.Enum:
@@ -1493,11 +1531,13 @@ public sealed partial class JsonForm
 
         IMessage inner;
 
+        // * read as spec 17.9 reads a payload, its records checked, a closed enum's undeclared number
+        // set aside, within the depth left below it, but for 17.9.7, which looks into no Any
         try
         {
-            inner = held.Parser.ParseFrom(any.Value);
+            inner = ProtoCodecs.Unjudged(held, (any.Value.Memory, Depth + 1 - depth));
         }
-        catch (InvalidProtocolBufferException reason)
+        catch (Exception reason) when (reason is FormatException or InvalidProtocolBufferException)
         {
             throw new JsonFormException("an Any whose bytes do not read as its type", reason);
         }
@@ -1610,7 +1650,7 @@ public sealed partial class JsonForm
     // a field's value where it is not set: its type's zero, an empty message's, for a response body
     private static object? DefaultOf(FieldDescriptor field)
     {
-        return field.FieldType == FieldType.Message && !field.MessageType.IsWrapper()
+        return field.IsMessage() && !field.MessageType.IsWrapper()
             ? field.MessageType.Parser.ParseFrom(ByteString.Empty)
             : null;
     }
@@ -1680,6 +1720,15 @@ public sealed partial class JsonForm
 /// <summary>What the mapping asks of a message's descriptor that Google.Protobuf keeps to itself.</summary>
 internal static class Descriptors
 {
+    /// <summary>
+    /// Whether a field holds a message: of a message's type, or a group's, an edition's delimited
+    /// field among them, which the mapping reads and writes as any message (5.2 to 5.6).
+    /// </summary>
+    public static bool IsMessage(this FieldDescriptor field)
+    {
+        return field.FieldType is FieldType.Message or FieldType.Group;
+    }
+
     /// <summary>Whether a message is one of <c>wrappers.proto</c>'s, which a field of holds its value alone.</summary>
     public static bool IsWrapper(this MessageDescriptor descriptor)
     {

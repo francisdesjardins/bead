@@ -9,14 +9,33 @@ option features.field_presence = IMPLICIT;
 
 // A string, a number and a message of its own kind: what a proto row reads, refuses, or writes,
 // and how deep it nests. Then the records protobuf frames otherwise: a packed run, a repeated
-// fixed32, a map's entries, and a group. Their numbers start at 10, leaving 4 to 6, 9 and 15 to the
-// rows that read a field Probe does not declare.
+// fixed32, a map's entries, and a group, at 10 to 13. Then a message of fields protobuf requires,
+// alone and repeated, at 7 and 8, and a closed enum at 14, its presence explicit, since a closed
+// enum's field cannot be implicit. That leaves 4 to 6, 9 and 15 to the rows that read a field Probe
+// does not declare.
 message Probe {
   string text = 1;
   uint32 number = 2;
   Probe child = 3;
+  Needs needs = 7;
+  repeated Needs needs_items = 8;
   repeated uint32 counts = 10;
   repeated fixed32 stamps = 11;
   map<string, Probe> children = 12;
   Probe delimited = 13 [features.message_encoding = DELIMITED];
+  Shade shade = 14 [features.field_presence = EXPLICIT];
+}
+
+// A closed enum: a record of a number it declares no value of sets nothing (spec 17.9.8).
+enum Shade {
+  option features.enum_type = CLOSED;
+  SHADE_DARK = 0;
+  SHADE_LIGHT = 1;
+}
+
+// Two fields protobuf requires: a proto row refuses a message that leaves one unset, at any depth
+// (spec 17.9.7).
+message Needs {
+  uint32 must = 1 [features.field_presence = LEGACY_REQUIRED];
+  Shade shade = 2 [features.field_presence = LEGACY_REQUIRED];
 }

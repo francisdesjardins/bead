@@ -185,15 +185,20 @@ export const placeHolding = ({ kind, never }: DurationPolicy): IDurationPlace =>
 /**
  * This side's one sentence for a duration refused, from its place's `phrase`, its kind, its never and
  * the duration `given`: what it offers besides — 0 for at once at a delay, `Infinity` where never is
- * not refused — and the value written, a string in its quotes.
+ * not refused — its ceiling, a timer's unless its place holds a narrower one, and the value written,
+ * a string in its quotes.
  */
 export const refusalOf = (
   { kind, never }: DurationPolicy,
-  { given, phrase }: { given: unknown; phrase: string }
+  {
+    ceiling = 2_147_483_647,
+    given,
+    phrase,
+  }: { ceiling?: number | undefined; given: unknown; phrase: string }
 ): string => {
   const zero = kind === 'delay' ? '0 for at once, or ' : '';
   const infinity = never === 'refused' ? '' : ', or Infinity for never';
   const written = typeof given === 'string' ? JSON.stringify(given) : String(given);
 
-  return `${phrase} is ${zero}a number of milliseconds from 1 to 2147483647${infinity}, not ${written}`;
+  return `${phrase} is ${zero}a number of milliseconds from 1 to ${String(ceiling)}${infinity}, not ${written}`;
 };

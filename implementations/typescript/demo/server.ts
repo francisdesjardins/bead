@@ -14,6 +14,7 @@ import { createHTTPGateway } from '../src/transcoding/http-gateway';
 import { createMemoryTransportServer } from '../src/transport/server/memory-transport-server';
 import { HTTP_PROBLEM_TYPES, HTTP_ROUTES, OPENAPI_DOCUMENT } from './gen/typescript/bead_http';
 import { isRole, offer, SILENCE_MILLISECONDS } from './offer';
+import { serverOverMqtt } from './over-mqtt';
 import { pathOf, relayExchanges, relayUpgrades } from './relay';
 import { credentialsOf, issueToken, keyOf, secretOf } from './token';
 
@@ -33,6 +34,22 @@ const HEALTH_PATHNAME = '/health';
 
 /** Where a scraper reads both Bead servers' metrics, on this machine alone. */
 const METRICS_PATHNAME = '/metrics';
+
+/** Where the page reads how it links over MQTT 5: the broker's WebSocket, and the run's password. */
+const MQTT_PATHNAME = '/mqtt';
+
+/**
+ * The broker the demo runs beside, where one is given (`node tools/mqtt-broker.mjs run -- yarn
+ * demo`): its TCP listener for the server, its WebSocket for the page, and the run's password.
+ */
+const MQTT = ((): { password: string; url: string; webSocketUrl: string } | undefined => {
+  const url = process.env['BEAD_MQTT_URL'];
+  const webSocketUrl = process.env['BEAD_MQTT_WS_URL'];
+
+  return url === undefined || webSocketUrl === undefined
+    ? undefined
+    : { password: process.env['BEAD_MQTT_PASSWORD'] ?? '', url, webSocketUrl };
+})();
 
 /** What both Bead servers count into, summed: what `stats` and a scrape read. */
 const METRICS_REGISTRY = createMetricsRegistry();
@@ -57,6 +74,7 @@ const CREDENTIALS = credentialsOf(SECRET);
 const FILES = Object.freeze({
   '/': { path: new URL('../index.html', import.meta.url), type: 'text/html; charset=utf-8' },
   '/page.js': { path: new URL('./page.js', import.meta.url), type: 'text/javascript' },
+  '/over-mqtt.js': { path: new URL('./over-mqtt.js', import.meta.url), type: 'text/javascript' },
   '/worker.js': { path: new URL('./worker.js', import.meta.url), type: 'text/javascript' },
   // penumbra's two sheets, the DevTools panel's copy, under the page's skin
   '/penumbra/tokens.skin.base.css': {
@@ -80,6 +98,15 @@ const serve = async (request: IncomingMessage, reply: ServerResponse): Promise<v
     reply.writeHead(200, { 'content-type': 'application/json' });
 
     return (reply.end(JSON.stringify({ token: await issueToken(role, await KEY) })), undefined);
+  }
+
+  // ! the run's password goes to a page of this machine alone, which the demo serves on its loopback
+  if (pathname === MQTT_PATHNAME && MQTT !== undefined) {
+    reply.writeHead(200, { 'cache-control': 'no-store', 'content-type': 'application/json' });
+
+    return (
+      reply.end(JSON.stringify({ password: MQTT.password, url: MQTT.webSocketUrl })), undefined
+    );
   }
 
   const file = FILES[pathname as keyof typeof FILES] as (typeof FILES)['/'] | undefined;
@@ -143,9 +170,24 @@ gateway.on('error', (reason) => {
   process.stderr.write(`gateway: ${reason.message}\n`);
 });
 
+// * over MQTT 5 where the demo runs beside a broker: a participant of its own, serving `demo`
+const overMqtt =
+  MQTT === undefined
+    ? undefined
+    : serverOverMqtt(MQTT, {
+        connectionInactivityTimeout: SILENCE_MILLISECONDS,
+        credentials: CREDENTIALS,
+        metricsRegistry: METRICS_REGISTRY,
+      });
+
 offer(overWebSocket, METRICS_REGISTRY);
 offer(overHTTP, METRICS_REGISTRY);
 offer(overMemory, METRICS_REGISTRY);
+
+if (overMqtt !== undefined) {
+  offer(overMqtt.server, METRICS_REGISTRY);
+  await overMqtt.server.transport.start();
+}
 
 // each Bead server on a local port the system picks, reached through the public one alone
 const [wsTarget, httpTarget] = await Promise.all([
@@ -217,7 +259,7 @@ pages.requestTimeout = 60_000;
 pages.on('upgrade', relayUpgrades({ pathname: BEAD_PATHNAME, target: wsTarget }));
 pages.listen(HTTP_PORT, HTTP_ADDRESS);
 process.stdout.write(
-  `Bead, a demo: http://localhost:${String(HTTP_PORT)}, its sign-up over HTTP at /api/SignUp/signUp (Ctrl+C to stop)
+  `Bead, a demo: http://localhost:${String(HTTP_PORT)}, its sign-up over HTTP at /api/SignUp/signUp${MQTT === undefined ? '' : `, over MQTT 5 at ?transport=mqtt`} (Ctrl+C to stop)
 `
 );
 
@@ -227,4 +269,5 @@ process.once('SIGINT', () => {
   void overHTTP[Symbol.asyncDispose]();
   void gateway[Symbol.asyncDispose]();
   void overMemory[Symbol.asyncDispose]();
+  void overMqtt?.[Symbol.asyncDispose]();
 });

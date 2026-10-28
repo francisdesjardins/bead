@@ -91,7 +91,77 @@ export interface ICredentialRefusalVector {
     | 'verifier-makes-none';
 }
 
+/**
+ * A parcel as the vectors write it (spec 15.17): its prefix, its flags but where it is read without
+ * them, and its body's fields, its halves, its incarnation and what a DATA carries in hexadecimal.
+ */
+export interface IParcelVectorFields {
+  acceptor: string;
+  answers?: number;
+  bound?: number;
+  carried?: string;
+  code?: number;
+  credential?: string;
+  flags?: number;
+  id?: string;
+  incarnation?: string;
+  kind: number;
+  layout: number;
+  layouts?: number[];
+  opener: string;
+  sequence: number;
+  status?: number;
+}
+
+/** A parcel's bytes and what they say; `written` false where no writer writes it. */
+export interface IParcelVector extends INamed {
+  clauses: string[];
+  parcel: IParcelVectorFields;
+  written?: false;
+}
+
+/** An MQTT 5 PUBLISH under a Maximum Packet Size: its largest payload and the packet it makes. */
+/** A message of AMQP 1.0's profile written to its every byte (spec 15.35). */
+export interface IAmqpMessageVector {
+  bytes: string;
+  clauses: string[];
+  name: string;
+  payloadByte: number;
+  payloadLength: number;
+  to: string;
+  ttl?: number;
+}
+
+/** The largest payload of a message to an address within a bound, and that message's bytes (spec 15.37). */
+export interface IAmqpPublishBoundVector {
+  address: string;
+  clauses: string[];
+  largestPayload: number | null;
+  maximumMessageSize: number;
+  messageBytes: number | null;
+  name: string;
+}
+
+export interface IMqttPublishBoundVector {
+  clauses: string[];
+  expiry: boolean;
+  largestPayload: number | null;
+  maximumPacketSize: number;
+  name: string;
+  packetBytes: number | null;
+  qos: 0 | 1;
+  topic: string;
+}
+
+/** Bytes that read as no parcel, or as a parcel that does not read. */
+export interface IParcelRefusalVector extends INamed {
+  clauses: string[];
+  refused: 'does-not-read' | 'no-parcel';
+}
+
 export interface IVectors {
+  amqpMessages: IAmqpMessageVector[];
+  amqpPublishBounds: IAmqpPublishBoundVector[];
   credentialRefusals: ICredentialRefusalVector[];
   envelopeRefusals: IRefusalVector[];
   envelopes: (INamed & { envelope: IEnvelopeVector })[];
@@ -105,6 +175,9 @@ export interface IVectors {
   headerRefusals: IRefusalVector[];
   headers: (INamed & { header: EnvelopeHeader })[];
   jwtVerdicts: IJwtVerdictVector[];
+  mqttPublishBounds: IMqttPublishBoundVector[];
+  parcelRefusals: IParcelRefusalVector[];
+  parcels: IParcelVector[];
   prefixRefusals: IRefusalVector[];
   prefixes: (INamed & { prefix: { callId: number; kind: number; layout: number } })[];
   reads: (INamed & { header: EnvelopeHeader | null; side: RouterSide })[];

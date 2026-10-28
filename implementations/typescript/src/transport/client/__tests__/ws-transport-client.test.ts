@@ -228,6 +228,7 @@ for (const [label, TrackedWebSocket] of IMPLEMENTATIONS satisfies readonly (read
     });
 
     test.describe('WSTransportClient #connect', () => {
+      // spec 15.15
       test('resolves when connecting to a valid endpoint', async () => {
         await client.connect({ host, port });
         expect(client.isOpen()).toBe(true);
@@ -364,6 +365,7 @@ for (const [label, TrackedWebSocket] of IMPLEMENTATIONS satisfies readonly (read
         await disconnecting;
       });
 
+      // spec 15.15
       test('rejects with a TimeoutError, then drops a socket that never finished its handshake', async () => {
         const pendingHandshakes: ((result: boolean) => void)[] = [];
         const gatedServer = await startServer({
@@ -445,6 +447,7 @@ for (const [label, TrackedWebSocket] of IMPLEMENTATIONS satisfies readonly (read
         }
       });
 
+      // spec 15.15
       test('rejects with a CancelError, CLOSED, when its signal aborts during the handshake', async () => {
         const pendingHandshakes: ((result: boolean) => void)[] = [];
         const gatedServer = await startServer({
@@ -476,6 +479,7 @@ for (const [label, TrackedWebSocket] of IMPLEMENTATIONS satisfies readonly (read
         }
       });
 
+      // spec 15.15
       test('"[dispose]" while connecting rejects the connect with a ConnectError', async () => {
         const pendingHandshakes: ((result: boolean) => void)[] = [];
         const gatedServer = await startServer({
@@ -1254,6 +1258,7 @@ test.describe('WSTransportClient, what it carries', () => {
     return heard;
   };
 
+  // spec 15.15
   test('bounds an unresponsive WebSocket handshake by cancellation timeout and disposal', async () => {
     for (const ending of ['cancel', 'timeout', 'dispose']) {
       const clock = createTestClock();
@@ -1299,6 +1304,7 @@ test.describe('WSTransportClient, what it carries', () => {
     }
   });
 
+  // spec 15.15
   test('finishes a connect whose provider completion callback throws', async () => {
     using trapped = trapUncaught();
     const server = await startServer();
@@ -1336,6 +1342,129 @@ test.describe('WSTransportClient, what it carries', () => {
     }
   });
 
+  // spec 15.15
+  test('defers its credential provider until after connect returns', async () => {
+    const server = await startServer();
+    await using client = createWSTransportClient({ WebSocket: Ws });
+    let called = false;
+    try {
+      const connecting = client.connect({
+        host,
+        port: portOf(server),
+        credentialProvider: () => {
+          called = true;
+          return BEARER;
+        },
+      });
+      expect(called).toBe(false);
+      await connecting;
+      expect(called).toBe(true);
+      expect(client.isOpen()).toBe(true);
+      await client.disconnect({ isQuick: true });
+    } finally {
+      drop(client);
+      await allClosed();
+      await stopServer(server);
+    }
+  });
+
+  // spec 15.15
+  test('writes no credential that settles in the turn its client is disposed', async () => {
+    const server = await startServer();
+    await using client = createWSTransportClient({ WebSocket: Ws });
+    let upgrades = 0;
+    const messages: unknown[] = [];
+    server.on('connection', () => {
+      upgrades += 1;
+    });
+    client.on('message', (message) => {
+      messages.push(message);
+    });
+    try {
+      await expect(
+        client.connect({
+          host,
+          port: portOf(server),
+          credentialProvider: () => {
+            drop(client);
+            return BEARER;
+          },
+        })
+      ).rejects.toMatchObject({
+        name: 'ConnectError',
+        message: 'the transport client was disposed as it connected',
+      });
+      expect(client.socket).toBeNull();
+      // a round trip lets an upgrade built in the ending turn reach the server
+      await using probe = createWSTransportClient({ WebSocket: Ws });
+      await probe.connect({ host, port: portOf(server) });
+      await probe.disconnect({ isQuick: true });
+      await allClosed();
+      expect(upgrades).toBe(1);
+      expect(client.isClosed()).toBe(true);
+      expect(client.socket).toBeNull();
+      expect(client.carries(BEARER)).toBe(false);
+      expect(messages).toEqual([]);
+    } finally {
+      drop(client);
+      await allClosed();
+      await stopServer(server);
+    }
+  });
+
+  // spec 15.15
+  test('writes no credential that settles in the turn its attempt ends', async () => {
+    for (const ending of ['cancel', 'timeout', 'dispose']) {
+      const clock = createTestClock();
+      const answer = Promise.withResolvers<string>();
+      const entered = Promise.withResolvers<void>();
+      const cancelling = new AbortController();
+      let constructed = 0;
+      type SocketOptions = ConstructorParameters<IWebSocketConstructor>[2];
+      class Counting extends Ws {
+        constructor(url: string, protocols?: string | string[], options?: SocketOptions) {
+          super(url, protocols, options);
+          constructed += 1;
+        }
+      }
+      await using client = createWSTransportClient({ clock, WebSocket: Counting });
+      const before = sockets.size;
+      const outcome = client
+        .connect({
+          host,
+          port: 8080,
+          timeout: 100,
+          signal: cancelling.signal,
+          credentialProvider: () => {
+            entered.resolve();
+            return answer.promise;
+          },
+        })
+        .catch((reason: unknown) => {
+          return reason;
+        });
+      await entered.promise;
+      if (ending === 'cancel') {
+        cancelling.abort();
+      } else if (ending === 'timeout') {
+        clock.tick(100);
+      } else {
+        drop(client);
+      }
+      answer.resolve(BEARER);
+      expect(await outcome).toBeInstanceOf(
+        ending === 'cancel' ? CancelError : ending === 'timeout' ? TimeoutError : ConnectError
+      );
+      await new Promise(setImmediate);
+      expect(constructed).toBe(0);
+      expect(sockets.size).toBe(before);
+      expect(client.socket).toBeNull();
+      expect(client.isClosed()).toBe(true);
+      expect(client.carries(BEARER)).toBe(false);
+    }
+  });
+
+  // spec 15.15
   test('bounds a pending credential provider by cancellation timeout and disposal', async () => {
     for (const ending of ['cancel', 'timeout', 'dispose']) {
       for (const late of ['value', 'failure']) {
@@ -1395,6 +1524,78 @@ test.describe('WSTransportClient, what it carries', () => {
     }
   });
 
+  // spec 15.2, spec 15.15
+  test('asks another provider while an earlier source stays pending and holds only its own later attempts', async () => {
+    for (const late of ['value', 'failure']) {
+      const server = await startServer();
+      const clock = createTestClock();
+      await using client = createWSTransportClient({ clock, WebSocket: Ws });
+      const entered = Promise.withResolvers<void>();
+      const answer = Promise.withResolvers<string>();
+      const cancelling = new AbortController();
+      let calls = 0;
+      let otherCalls = 0;
+      const provider = () => {
+        calls += 1;
+        entered.resolve();
+        return calls === 1 ? answer.promise : 'Bearer renewed';
+      };
+      const target = { host, port: portOf(server) };
+      try {
+        const first = client.connect({
+          ...target,
+          credentialProvider: provider,
+          signal: cancelling.signal,
+        });
+        const failed = first.catch((reason: unknown) => {
+          return reason;
+        });
+        await entered.promise;
+        cancelling.abort();
+        expect(await failed).toBeInstanceOf(CancelError);
+        await client.connect({
+          ...target,
+          credentialProvider: () => {
+            otherCalls += 1;
+            return BEARER;
+          },
+        });
+        expect(otherCalls).toBe(1);
+        expect(calls).toBe(1);
+        expect(client.isOpen()).toBe(true);
+        expect(client.carries(BEARER)).toBe(true);
+        await client.disconnect({ isQuick: true });
+        const held = client.connect({ ...target, credentialProvider: provider, timeout: 100 });
+        const refused = held.catch((reason: unknown) => {
+          return reason;
+        });
+        await clock.tickAsync(100);
+        expect(await refused).toBeInstanceOf(TimeoutError);
+        expect(client.isClosed()).toBe(true);
+        expect(calls).toBe(1);
+        if (late === 'failure') {
+          answer.reject(new Error('abandoned provider failure'));
+        } else {
+          answer.resolve('Bearer abandoned');
+        }
+        await client.connect({ ...target, credentialProvider: provider });
+        expect(calls).toBe(2);
+        expect(otherCalls).toBe(1);
+        expect(client.isOpen()).toBe(true);
+        expect(client.carries('Bearer renewed')).toBe(true);
+        expect(client.carries('Bearer abandoned')).toBe(false);
+        expect(client.carries(BEARER)).toBe(false);
+        await client.disconnect({ isQuick: true });
+      } finally {
+        answer.resolve('');
+        drop(client);
+        await allClosed();
+        await stopServer(server);
+      }
+    }
+  });
+
+  // spec 15.2
   test('waits for an abandoned provider call to settle before invoking the provider anew', async () => {
     for (const late of ['value', 'failure']) {
       for (const next of ['value', 'failure']) {
@@ -1498,6 +1699,7 @@ test.describe('WSTransportClient, what it carries', () => {
     }
   });
 
+  // spec 15.2, 15.15
   test('bounds the wait for an abandoned provider call by cancellation, timeout and disposal', async () => {
     for (const ending of ['cancel', 'timeout', 'dispose']) {
       for (const late of ['value', 'failure']) {
@@ -1744,6 +1946,7 @@ test.describe('WSTransportClient, what it carries', () => {
   });
 
   // spec 15.2
+  // spec 15.2, 15.15
   test('calls its credential provider at each attempt, a reconnection’s included, and carries the bytes it handed', async () => {
     await using hearing = await startRefusing();
     const heard = upgradesOf(hearing);
@@ -1897,6 +2100,7 @@ test.describe('WSTransportClient, what it carries', () => {
     expect([called, provided.isClosed(), heard]).toEqual([2, true, [[BEARER]]]);
   });
 
+  // spec 15.15
   test('opens no connection when its credential provider settles after cancellation', async () => {
     await using hearing = await startRefusing();
     const heard = upgradesOf(hearing);

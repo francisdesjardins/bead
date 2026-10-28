@@ -1,0 +1,46 @@
+// What neither Probe, of spec/codecs.proto, nor Requiring, of spec/transcoding.proto, holds, for
+// ProtoCodecsTests: a oneof of a closed enum, an extension of a message that requires a field, and
+// a cycle through a message that reaches one (Loop holds Back, which holds Loop and Must), beside
+// one that reaches none (Alone). The TypeScript side's codec.test.ts builds the same file.
+syntax = "proto2";
+
+package bead.test;
+
+option csharp_namespace = "Bead.Protobuf.Tests.Codec";
+
+enum Tone {
+  TONE_LOW = 0;
+  TONE_HIGH = 1;
+}
+
+message Toned {
+  oneof pick {
+    Tone tone = 1;
+    string word = 2;
+  }
+}
+
+message Holder {
+  extensions 100 to 200;
+}
+
+extend Holder {
+  optional Must inner = 100;
+}
+
+message Must {
+  required int32 must = 1;
+}
+
+message Loop {
+  optional Back back = 1;
+}
+
+message Back {
+  optional Loop loop = 1;
+  optional Must must = 2;
+}
+
+message Alone {
+  optional Alone alone = 1;
+}

@@ -35,6 +35,8 @@ import { createQuietCalls, watchDebug } from './debug';
 import { SignUpProcedures } from './gen/typescript/demo/v1/sign_up_bead';
 import { mountScenes } from './scenes';
 import { mountSides } from './sides';
+// ! types alone: the module itself is loaded apart, over MQTT 5 alone
+import type { clientOverMqtt, IMqttReach } from './over-mqtt';
 import { mountSignUp } from './sign-up';
 import {
   answeredOf,
@@ -345,9 +347,10 @@ const digestOf = async (bytes: Uint8Array): Promise<string> => {
 
 // definition
 
-// the transport the page's address asks for — `?transport=http`, or `?transport=worker` for a server
-// of the page's own in a Web Worker, with no backend — else the page's own, which a page served as
-// files alone says is its worker; WebSocket otherwise
+// the transport the page's address asks for — `?transport=http`, `?transport=mqtt` over the broker the
+// demo runs beside, or `?transport=worker` for a server of the page's own in a Web Worker, with no
+// backend — else the page's own, which a page served as files alone says is its worker; WebSocket
+// otherwise
 const transport =
   new URLSearchParams(location.search).get('transport') ?? document.body.dataset['beadTransport'];
 // beside the page's script, wherever the page is served, under the name its HTML gives — a build
@@ -391,8 +394,28 @@ const workerClient =
   transport === 'worker'
     ? createWorkerClient({ limits, metricsRegistry, transport: { worker: workerOf() } })
     : undefined;
+// * over MQTT 5, a module of its own, loaded only then, and how the demo's broker is reached; none
+// where the demo runs beside no broker
+const overMqtt =
+  transport === 'mqtt'
+    ? await (async () => {
+        const answer = await fetch('./mqtt');
+
+        if (!answer.ok) {
+          return undefined;
+        }
+
+        const reach = (await answer.json()) as IMqttReach;
+        const loaded = (await import(new URL('./over-mqtt.js', import.meta.url).href)) as {
+          clientOverMqtt: typeof clientOverMqtt;
+        };
+
+        return loaded.clientOverMqtt(reach, { limits, metricsRegistry });
+      })()
+    : undefined;
 const client: IClient =
   workerClient ??
+  overMqtt?.client ??
   (transport === 'http'
     ? createHTTPClient({ limits, metricsRegistry })
     : createWSClient({ limits, metricsRegistry }));
@@ -926,15 +949,21 @@ for (const button of document.querySelectorAll<HTMLButtonElement>('button[data-a
   });
 }
 
-// a worker is reached where it runs; a server, at the page's own address
-(workerClient === undefined
-  ? client.connect({
-      host: location.hostname,
-      pathname,
-      port,
-      secured: location.protocol === 'https:',
-    })
-  : workerClient.connect({})
+// a worker is reached where it runs; a broker's server, through its name; a server, at the page's
+// own address
+(workerClient !== undefined
+  ? workerClient.connect({})
+  : transport === 'mqtt'
+    ? (overMqtt?.connect() ??
+      Promise.reject(
+        new Error('the demo runs beside no broker: node tools/mqtt-broker.mjs run -- yarn demo')
+      ))
+    : client.connect({
+        host: location.hostname,
+        pathname,
+        port,
+        secured: location.protocol === 'https:',
+      })
 ).then(
   () => {
     // the server's statistics and both registries, each second the page is seen
@@ -954,11 +983,13 @@ for (const button of document.querySelectorAll<HTMLButtonElement>('button[data-a
     // a second tab is a second client of the same server
     shown.tabs.hidden = workerClient === undefined || !isShared;
     shown.connection.textContent =
-      workerClient === undefined
-        ? `connected, ${transport === 'http' ? 'HTTP' : 'WebSocket'} on ${location.host}${pathname}`
-        : isShared
-          ? 'connected, in a Web Worker the tabs share'
-          : 'connected, in a Web Worker of the page';
+      overMqtt !== undefined
+        ? `connected, MQTT 5 through the name ${overMqtt.name}`
+        : workerClient === undefined
+          ? `connected, ${transport === 'http' ? 'HTTP' : 'WebSocket'} on ${location.host}${pathname}`
+          : isShared
+            ? 'connected, in a Web Worker the tabs share'
+            : 'connected, in a Web Worker of the page';
   },
   (reason: unknown) => {
     shown.connection.dataset['state'] = 'closed';

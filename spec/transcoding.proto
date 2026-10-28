@@ -14,6 +14,7 @@ import "google/protobuf/field_mask.proto";
 import "google/protobuf/struct.proto";
 import "google/protobuf/timestamp.proto";
 import "google/protobuf/wrappers.proto";
+import "transcoding-required.proto";
 
 option (bead.file) = {
   admission: {
@@ -204,6 +205,37 @@ service TranscodingService {
     option idempotency_level = NO_SIDE_EFFECTS;
     option (bead.procedure) = {
       id: 20
+    };
+  }
+
+  // Answers its request's needs, or a Needs of no field where none is set.
+  rpc Require(Requiring) returns (Needs) {
+    option (bead.procedure) = {
+      id: 21
+    };
+  }
+
+  // Answers its request.
+  rpc GetNeeds(Needs) returns (Needs) {
+    option (bead.procedure) = {
+      id: 22
+    };
+    option (google.api.http) = {
+      get: "/v1/needs/{name}"
+      additional_bindings {
+        get: "/v1/children/{child.name}"
+      }
+    };
+  }
+
+  // Answers its request's needs.
+  rpc UpdateNeeds(NeedsUpdate) returns (Needs) {
+    option (bead.procedure) = {
+      id: 23
+    };
+    option (google.api.http) = {
+      patch: "/v1/needs/{needs.name}"
+      body: "needs"
     };
   }
 }
@@ -417,4 +449,13 @@ message CancelsRequest {
 // How many calls of hang ended cancelled.
 message CancelsResponse {
   int32 count = 1;
+}
+
+// Needs at every depth a request holds them, and in an Any.
+message Requiring {
+  Needs needs = 1;
+  repeated Needs many = 2;
+  map<string, Needs> by_key = 3;
+  google.protobuf.Any any = 4;
+  int32 an_int32 = 5;
 }

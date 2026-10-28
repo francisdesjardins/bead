@@ -34,32 +34,40 @@ owes by hand.
 Bead is typed two-way RPC with client-paced notifications, transfers under credit and sessions,
 alike in a tab, a Web Worker, a server and over a topic-based publish/subscribe broker used as a
 transport, never a network of its own
-([0021](0021-a-broker-is-a-transport-and-bead-is-never-a-network.md)), and proven byte for byte by
-the conformance files and the interop. The records bind, in the present, parts the repository does
-not hold:
+([0021](0021-a-broker-is-a-transport-and-bead-is-never-a-network.md)) — MQTT 5's
+([0041](0041-over-mqtt-5-a-participant-is-one-clean-link-and-a-parcel-one-publish-each-counted-to-its-byte.md))
+and AMQP 1.0's on RabbitMQ 4
+([0043](0043-over-amqp-1-0-a-participant-is-one-connection-whose-exclusive-inbox-ends-with-it-and-a-parcel-one-message-of-one-profile-each-counted-to-its-byte.md))
+— and proven byte for byte by the conformance files and the interop. Ahead, in this order:
 
-- **a topic-based publish/subscribe broker's transport**
-  ([0021](0021-a-broker-is-a-transport-and-bead-is-never-a-network.md)), one core and one adapter a
-  broker: what stands for a connection there
-  ([0020](0020-http-draws-a-connection-by-a-token-and-a-listen-holds-it.md)), what carries
-  `ELSEWHERE` ([0010](0010-a-request-presents-a-credential-of-a-scheme.md)), what silence is
-  ([0012](0012-a-listen-held-is-not-silence.md)), a relay as its bridge to another transport, and a
-  relay that carries a subscription, which a page across a broker needs
-  ([0019](0019-a-relay-terminates-each-leg-and-routes-nothing-past-it.md)); and a broker in memory,
-  which repeats, reorders and delays on purpose, sharing the in-memory transport's delivery and
-  never its guarantees
-  ([0036](0036-an-in-memory-transport-joins-two-routers-of-one-process-and-a-server-takes-several-transports-through-one.md));
-- **a third language's core**, its router, its service layer and its sessions before it has a
-  socket, playing its conformance over the in-memory transport it carries first
+- **Rust, the third language**: its core first — its router, its service layer and its sessions —
+  playing its conformance over the in-memory transport before it has a socket
   ([0036](0036-an-in-memory-transport-joins-two-routers-of-one-process-and-a-server-takes-several-transports-through-one.md)),
-  under a toolchain and a CI job of its own ([0005](0005-a-toolchain-per-language.md)), the
-  validators of a blueprint's rules generated for it by beadc, or beadc refusing to generate it
-  ([0035](0035-a-payload-that-reads-is-held-to-its-messages-rules-before-its-resolver-sees-it.md)),
+  under a toolchain and a CI job of its own ([0005](0005-a-toolchain-per-language.md)), held to
+  clippy's pedantic lints under `-D warnings` and to the newest Rust norms; the validators of a
+  blueprint's rules generated for it by beadc, or beadc refusing to generate it
+  ([0035](0035-a-payload-that-reads-is-held-to-its-messages-rules-before-its-resolver-sees-it.md));
   and each part it lacks, its transports among them, a row of the support matrix
   ([0004](0004-one-behaviour-in-every-language.md));
-- **the transports' client part** of the conformance, with the outcomes the spec names for a
-  client's call ([0004](0004-one-behaviour-in-every-language.md)) and the defaults of a client's
-  durations ([0014](0014-every-place-that-takes-a-duration-is-a-row-of-one-file.md));
+- **a payload's rules written in CEL**, a total subset beadc compiles into each side beside the rules
+  it compiles already, and then the rules
+  [0035](0035-a-payload-that-reads-is-held-to-its-messages-rules-before-its-resolver-sees-it.md)
+  refuses: the well-known string formats, `bytes.pattern`, `bytes.in`, `any`, `duration`,
+  `timestamp`, `field_mask` and `predefined` rules;
+- **a connection's close code carried on `close`**, what its peer said — 1000, 1001 or a 4xxx — on
+  every transport ([RFC 6455 §7.1.5](https://www.rfc-editor.org/rfc/rfc6455#section-7.1.5),
+  [§7.4.1](https://www.rfc-editor.org/rfc/rfc6455#section-7.4.1)), `error` keeping what a side ends a
+  connection for of its own ([0033](0033-a-side-bounds-what-a-peer-holds-of-it.md));
+- **a relay that carries a subscription**, which a page across a broker needs
+  ([0019](0019-a-relay-terminates-each-leg-and-routes-nothing-past-it.md)).
+
+Ahead besides: each a record binds, as it names; each no record decides, by a decision of its own
+that meets the Tenth Man:
+
+- **the transports' client part** of the conformance over HTTP and a WebSocket, as the broker's
+  cases have one, with the outcomes the spec names for a client's call
+  ([0004](0004-one-behaviour-in-every-language.md)) and the defaults of a client's durations
+  ([0014](0014-every-place-that-takes-a-duration-is-a-row-of-one-file.md));
 - **a relay across languages in the interop**, one side's relay in front of the other's
   destination, in the twin tests' place for a relay's two legs' limits and the session its
   requesters share ([0004](0004-one-behaviour-in-every-language.md),
@@ -68,24 +76,31 @@ not hold:
   ([0015](0015-a-pages-client-announces-itself-to-a-devtools-hook.md));
 - **a counted call's cost, measured**: a call counted against one not counted, on each side, a
   measure beside those the benches take
-  ([0013](0013-every-language-debugs-alike-at-no-cost-when-off.md));
+  ([0013](0013-every-language-debugs-alike-at-no-cost-when-off.md)), and a guard in CI against a
+  gross regression of the benches ([the root README](../../README.md#measurement));
 - **a constrained C side**, which builds debugging by its switches
   ([0013](0013-every-language-debugs-alike-at-no-cost-when-off.md)), refuses a declaration out of
   its range alone ([0017](0017-ids-are-for-life-and-a-procedures-name-takes-one-ascii-form.md))
   and polls deadlines on a 1 kHz loop
-  ([0011](0011-every-side-takes-its-time-from-a-clock-it-is-given.md)).
-
-Ahead besides, each by a decision of its own that meets the Tenth Man:
-
-- **a payload's rules written in CEL**, a total subset beadc compiles into each side beside the
-  rules it compiles already, and then the rules
-  [0035](0035-a-payload-that-reads-is-held-to-its-messages-rules-before-its-resolver-sees-it.md)
-  refuses until they land: the well-known string formats, `bytes.pattern`, `bytes.in`, `any`,
-  `duration`, `timestamp`, `field_mask` and `predefined` rules;
-- **a connection's close code carried on `close`**, what its peer said — 1000, 1001 or a 4xxx —
-  on every transport ([RFC 6455 §7.1.5](https://www.rfc-editor.org/rfc/rfc6455#section-7.1.5),
-  [§7.4.1](https://www.rfc-editor.org/rfc/rfc6455#section-7.4.1)), `error` keeping what a side
-  ends a connection for of its own ([0033](0033-a-side-bounds-what-a-peer-holds-of-it.md));
+  ([0011](0011-every-side-takes-its-time-from-a-clock-it-is-given.md));
+- **a connection's age and a graceful drain**, for every long-lived transport at once, a
+  WebSocket's and a broker's, as HTTP/2's `GOAWAY` drains one
+  ([RFC 9113 §6.8](https://www.rfc-editor.org/rfc/rfc9113#section-6.8)) and gRPC's
+  `MAX_CONNECTION_AGE` re-spreads them
+  ([0038](0038-over-a-broker-a-connection-is-placed-once-at-its-open-named-by-both-its-ends.md));
+- what
+  [0040](0040-a-brokers-adapter-offers-bytes-at-topics-and-bead-keeps-its-own-credit-credential-and-heartbeat.md)
+  keeps ahead of a broker: an acceptor that proves itself to its opener, and a publisher's identity
+  a broker vouches for standing for an `ELSEWHERE`, RabbitMQ's validated `user-id` its way over
+  AMQP 1.0
+  ([0043](0043-over-amqp-1-0-a-participant-is-one-connection-whose-exclusive-inbox-ends-with-it-and-a-parcel-one-message-of-one-profile-each-counted-to-its-byte.md));
+- what
+  [0041](0041-over-mqtt-5-a-participant-is-one-clean-link-and-a-parcel-one-publish-each-counted-to-its-byte.md)
+  keeps ahead over MQTT 5: an Authentication Method, MQTT 5's enhanced authentication (§4.12), and
+  EMQX played beside Mosquitto; and **the brokers' TLS played**, the fixtures' Mosquitto and
+  RabbitMQ under TLS, a client certificate and SASL EXTERNAL among it, where the matrix holds rows
+  "not tested"
+  ([0043](0043-over-amqp-1-0-a-participant-is-one-connection-whose-exclusive-inbox-ends-with-it-and-a-parcel-one-message-of-one-profile-each-counted-to-its-byte.md));
 - what [0033](0033-a-side-bounds-what-a-peer-holds-of-it.md) keeps ahead of the bounds a side
   keeps against a peer that holds it: a bound on the payload bytes of the calls a connection has
   answered, as HTTP/2's connection window; a raise of `maximumAnsweringCalls` for one trusted
@@ -97,8 +112,8 @@ Ahead besides, each by a decision of its own that meets the Tenth Man:
   beside the six targets both sides fuzz by hand, guided by coverage
   ([the root README](../../README.md#fuzzing)), and a short run of them in CI;
 - what [0030](0030-a-server-believes-x-forwarded-for-from-the-proxies-it-names-and-counts.md)
-  names: `Forwarded`, once a proxy that writes it alone is met, an IPv6 client keyed by its prefix,
-  and a per-address value fit for a NAT, for an HTTP server and a WebSocket server at once;
+  names: `Forwarded`, an IPv6 client keyed by its prefix, and a per-address value fit for a NAT,
+  for an HTTP server and a WebSocket server at once;
 - a hook that verifies a WebSocket's credential at its upgrade, refusing before the 101, and a
   credential replaced in place on a live connection
   ([0032](0032-a-websocket-upgrade-from-no-page-carries-its-credential-beside-every-envelope.md));
@@ -106,18 +121,28 @@ Ahead besides, each by a decision of its own that meets the Tenth Man:
   transport carried beside an `ELSEWHERE`, both schemes at once, to the procedure that asks alone,
   as RFC 8693's token exchange or a call on its user's behalf needs
   ([0010](0010-a-request-presents-a-credential-of-a-scheme.md));
+- a bound that tells an event iterator's loop of a lag and lets it go on, as tokio's `broadcast`
+  tells `Lagged`, for both sides at once with an iterator on the C# side
+  ([0023](0023-a-transport-goes-on-through-its-listeners-throw-and-takes-nothing-new-as-it-stops.md));
+- **the options of `bead/options.proto` frozen at their v1**, after an adversarial review: a
+  failure's deprecation message, an extension on `EnumValueOptions`; an application failure's own
+  status, an option of its enum value's; and one public copy of the options' C#
+  ([0022](0022-a-proto-becomes-one-checked-blueprint-and-each-language-is-generated-from-it.md),
+  [0037](0037-a-procedure-is-also-an-http-route-which-a-gateway-answers-as-one-more-client-of-its-server.md));
 - what
   [0037](0037-a-procedure-is-also-an-http-route-which-a-gateway-answers-as-one-more-client-of-its-server.md)
   keeps ahead of HTTP/JSON transcoding: a gateway apart from its server, over a real transport,
   which a pool of connections would spare a handshake an exchange; a `raw` body streamed as a
-  transfer as it comes; OpenAPI 3.2.0, whose `itemSchema` describes a stream's events;
-  `google.api.field_behavior` read into `readOnly`, `writeOnly` and `required`; and an application
-  failure's own status, an option of its enum value's, at the options' v1 freeze;
+  transfer as it comes; OpenAPI 3.2.0, whose `itemSchema` describes a stream's events; and
+  `google.api.field_behavior` read into `readOnly`, `writeOnly` and `required`;
 - what
   [0037](0037-a-procedure-is-also-an-http-route-which-a-gateway-answers-as-one-more-client-of-its-server.md)
   keeps ahead of a gateway's problems, each a round of its own: a report's context, the exchange and
   the route it came of; an event for each refusal of the gateway's own; and an occurrence's id in a
-  problem, [RFC 9457 §3.1.5](https://www.rfc-editor.org/rfc/rfc9457#section-3.1.5)'s `instance`.
+  problem, [RFC 9457 §3.1.5](https://www.rfc-editor.org/rfc/rfc9457#section-3.1.5)'s `instance`;
+- **publication**: the packages on npm and NuGet, beadc's image on a registry, and the options'
+  number of protobuf's global registry
+  ([0008](0008-three-version-axes-and-names-qualified-by-their-owner.md)).
 
 A part that lands leaves this list, and brings its gates to [0006](0006-a-rule-has-its-gate.md)'s
 table.
@@ -134,12 +159,13 @@ table.
 
 ### Payloads
 
-| #                                                                                                   | Decision                                                                                                                                | Status   |
-| --------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- | -------- |
-| [0016](0016-a-json-payload-has-one-form-whichever-side-writes-it.md)                                | A JSON payload is read as I-JSON, its noncharacters aside, and written in RFC 8785's canonical form, the same bytes from every language | accepted |
-| [0028](0028-a-proto-payloads-records-are-read-against-its-message-before-its-library-reads-them.md) | A `proto` payload's records are read against its message before its library reads them                                                  | accepted |
-| [0031](0031-a-proto-payload-is-protobufs-format-and-bead-states-only-its-own.md)                    | A `proto` payload is protobuf's binary format, read and written through each side's stock library, and Bead states only what is its own | accepted |
-| [0035](0035-a-payload-that-reads-is-held-to-its-messages-rules-before-its-resolver-sees-it.md)      | A payload that reads is held to its message's rules before its resolver sees it                                                         | accepted |
+| #                                                                                                                                           | Decision                                                                                                                                | Status   |
+| ------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- | -------- |
+| [0016](0016-a-json-payload-has-one-form-whichever-side-writes-it.md)                                                                        | A JSON payload is read as I-JSON, its noncharacters aside, and written in RFC 8785's canonical form, the same bytes from every language | accepted |
+| [0028](0028-a-proto-payloads-records-are-read-against-its-message-before-its-library-reads-them.md)                                         | A `proto` payload's records are read against its message before its library reads them                                                  | accepted |
+| [0031](0031-a-proto-payload-is-protobufs-format-and-bead-states-only-its-own.md)                                                            | A `proto` payload is protobuf's binary format, read and written through each side's stock library, and Bead states only what is its own | accepted |
+| [0035](0035-a-payload-that-reads-is-held-to-its-messages-rules-before-its-resolver-sees-it.md)                                              | A payload that reads is held to its message's rules before its resolver sees it                                                         | accepted |
+| [0042](0042-a-proto-message-that-leaves-a-required-field-unset-neither-reads-nor-writes-and-a-gateway-refuses-it-where-its-server-would.md) | A `proto` message that leaves a required field unset neither reads nor writes, and a gateway refuses it where its server would          | accepted |
 
 ### Services and their names
 
@@ -157,12 +183,22 @@ table.
 | [0012](0012-a-listen-held-is-not-silence.md)                                                                              | A listen held is not silence, and a connection without a session is its server's                                                                                   | accepted |
 | [0019](0019-a-relay-terminates-each-leg-and-routes-nothing-past-it.md)                                                    | A relay terminates each leg between two transports, and routes nothing past it                                                                                     | accepted |
 | [0020](0020-http-draws-a-connection-by-a-token-and-a-listen-holds-it.md)                                                  | HTTP draws a connection by a token, and a listen holds it                                                                                                          | accepted |
-| [0021](0021-a-broker-is-a-transport-and-bead-is-never-a-network.md)                                                       | A topic-based publish/subscribe broker is one more transport, and Bead is never a network of its own                                                               | accepted |
 | [0023](0023-a-transport-goes-on-through-its-listeners-throw-and-takes-nothing-new-as-it-stops.md)                         | A transport goes on through its listener's throw, and takes nothing new once its stop began                                                                        | accepted |
 | [0025](0025-a-transport-draws-each-connections-handle-and-gives-none-twice.md)                                            | A transport draws each connection's handle, and gives none twice                                                                                                   | accepted |
 | [0029](0029-a-listen-names-its-cursor-and-its-wait-in-fields-of-its-own.md)                                               | A listen names its cursor and its wait in fields of its own, at the connection's one URL                                                                           | accepted |
 | [0032](0032-a-websocket-upgrade-from-no-page-carries-its-credential-beside-every-envelope.md)                             | A WebSocket upgrade from no page carries its credential beside every envelope of its connection, a client follows no redirect, and a connect bounds what it awaits | accepted |
 | [0036](0036-an-in-memory-transport-joins-two-routers-of-one-process-and-a-server-takes-several-transports-through-one.md) | An in-memory transport joins two routers of one process, and a server takes several transports through one                                                         | accepted |
+
+### Over a broker
+
+| #                                                                                                                                                                 | Decision                                                                                                                                             | Status   |
+| ----------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- | -------- |
+| [0021](0021-a-broker-is-a-transport-and-bead-is-never-a-network.md)                                                                                               | A topic-based publish/subscribe broker is one more transport, and Bead is never a network of its own                                                 | accepted |
+| [0038](0038-over-a-broker-a-connection-is-placed-once-at-its-open-named-by-both-its-ends.md)                                                                      | Over a broker, a connection is placed once at its open, and named by both its ends                                                                   | accepted |
+| [0039](0039-a-brokers-transport-numbers-its-parcels-and-sends-an-envelope-in-parts-under-its-peers-bound.md)                                                      | A broker's transport numbers its parcels, and sends an envelope in parts under its peer's bound                                                      | accepted |
+| [0040](0040-a-brokers-adapter-offers-bytes-at-topics-and-bead-keeps-its-own-credit-credential-and-heartbeat.md)                                                   | A broker's adapter offers bytes at topics, and Bead keeps its own credit, credential and heartbeat                                                   | accepted |
+| [0041](0041-over-mqtt-5-a-participant-is-one-clean-link-and-a-parcel-one-publish-each-counted-to-its-byte.md)                                                     | Over MQTT 5, a participant is one clean link and a parcel one PUBLISH, each counted to its byte                                                      | accepted |
+| [0043](0043-over-amqp-1-0-a-participant-is-one-connection-whose-exclusive-inbox-ends-with-it-and-a-parcel-one-message-of-one-profile-each-counted-to-its-byte.md) | Over AMQP 1.0, a participant is one connection whose exclusive inbox ends with it, and a parcel one message of one profile, each counted to its byte | accepted |
 
 ### A server's edge
 
@@ -208,7 +244,7 @@ table.
 
 ## Writing one
 
-The next decision is 0038. Its file is `NNNN-the-decision-in-a-few-words.md`, and its title states
+The next decision is 0044. Its file is `NNNN-the-decision-in-a-few-words.md`, and its title states
 the decision, not its subject. The title may grow with the record; the file's name stays, unless it
 would mislead.
 
@@ -228,10 +264,12 @@ which. Then Nygard's shape, trimmed to what gets read:
   holds, accepted or refused with its reason. A row a later row replaced is dropped. A record
   without the section meets the Tenth Man at the next change of its decision.
 
-Three things keep these worth reading. **State the cost**: a decision with no consequence is a
+Four things keep these worth reading. **State the cost**: a decision with no consequence is a
 preference. **Give the number** where there is one: the sentence that survives a year is the one
 with a measurement in it. **Keep history out**: no list of what lands, no column of how things
-stood, no "today" and no "yet"; the CHANGELOG says what changed, and the commits how.
+stood, no "today" and no "yet"; the CHANGELOG says what changed, and the commits how. **Say what is
+ahead plainly**: no date, condition or version it waits on, in the same words in every document
+that names it; a version's semantics, what a minor may remove before 1.0.0, stays.
 
 A record cites what a reader of the repository can open: the spec, the conformance files, the code,
 the other records. A part the repository does not hold is bound by constraint, in the present, and

@@ -19,6 +19,16 @@
     <!-- Probe, the message of the codecs' proto rows: a packed run, a repeated fixed32, a map of
          messages, a group, and a message of its own kind, generated as each build runs -->
     <Protobuf Include="../../../../spec/codecs.proto" ProtoRoot="../../../../spec" GrpcServices="None" />
+    <!-- what neither Probe nor Requiring holds, for the runtime codec's tests: a oneof of a closed
+         enum, an extension, a cycle that reaches a required field and one that reaches none -->
+    <Protobuf Include="Protos/codec.proto" ProtoRoot="Protos" GrpcServices="None" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Requiring and Needs, of spec/transcoding.proto and spec/transcoding-required.proto, compiled
+         from the transcoding tests' generated messages without a second copy -->
+    <Compile Include="../Bead.Transcoding.Tests/Generated/Bead/Transcoding/V1/Transcoding.cs" Link="Generated/Transcoding.cs" />
+    <Compile Include="../Bead.Transcoding.Tests/Generated/Bead/Transcoding/V1/TranscodingRequired.cs" Link="Generated/TranscodingRequired.cs" />
   </ItemGroup>
 
   <ItemGroup>

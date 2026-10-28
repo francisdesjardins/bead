@@ -21,14 +21,18 @@ promise to be decided at once, on the day of the first release.
 
 **Versions run on three axes, each moving alone.**
 
-1. **The layout**, the first byte of every envelope: `0xA1` is the layout `spec/spec.md` describes,
-   and `0xA2` to `0xAF` are the layouts to come, each keeping the 8-byte prefix
-   ([0001](0001-the-envelope-sits-at-fixed-offsets.md)). A reader refuses a layout it does not read
-   with `LAYOUT_UNSUPPORTED`, and should name the layouts it reads in the detail, on the call it can
-   still answer. **Until the wire is first published, it is revised in place:** a change decided
-   here rewrites `0xA1`, its spec, its vectors and both implementations at once, and no reader of an
-   earlier `0xA1` is kept. From the first publication on, a change that a reader of the layout
-   before it cannot read takes the next layout byte.
+1. **The layout**, the first byte of every envelope, `0xA1`, and of every parcel a broker carries,
+   `0xB1` (spec 15.17), each with its layouts to come and the prefix they keep: `0xA2` to `0xAF`
+   keep an envelope's 8 bytes ([0001](0001-the-envelope-sits-at-fixed-offsets.md)), and `0xB2` to
+   `0xBF` a parcel's 28, an OPEN's id and a REFUSE whole
+   ([0039](0039-a-brokers-transport-numbers-its-parcels-and-sends-an-envelope-in-parts-under-its-peers-bound.md)).
+   A reader refuses an envelope of a layout it does not read with `LAYOUT_UNSUPPORTED`, and should
+   name the layouts it reads in the detail, on the call it can still answer; an acceptor refuses an
+   OPEN of a parcel's layout it does not read 426 `layout-refused`, naming those it reads. **Until
+   the wire is first published, each is revised in place:** a change decided here rewrites `0xA1` or
+   `0xB1`, its spec, its vectors and both implementations at once, and no reader of an earlier one
+   is kept. From the first publication on, a change that a reader of the layout before it cannot
+   read takes the next layout byte.
 2. **The spec**: its text and every conformance file move together, and are tagged `spec-v*`.
    `spec/spec.md` states their version, which each conformance file repeats as its `specVersion`, as
    CloudEvents names its own `specversion`. It follows Semantic Versioning at `0.x`, without
@@ -98,8 +102,9 @@ Versions stay at `0.x`, and the CHANGELOG is kept current. The TypeScript manife
 
 ## Consequences
 
-- **Fifteen layouts before the byte runs out**, `0xA1` to `0xAF`; anything else in byte 0 is no
-  envelope. Each new layout is a decision of its own, and the prefix is never one to change.
+- **Fifteen layouts each before the byte runs out**, `0xA1` to `0xAF` an envelope's and `0xB1` to
+  `0xBF` a parcel's (spec 15.17); a first byte outside them is no envelope and no parcel. Each new
+  layout is a decision of its own, and neither prefix is one to change.
 - A fix in one implementation moves its `v*` and nothing else; a clarification of the spec moves
   `spec-v*` and no layout. A reader learns the layout from the envelope itself, so no peer asks
   another for its version.
@@ -115,6 +120,9 @@ Versions stay at `0.x`, and the CHANGELOG is kept current. The TypeScript manife
 - The C# the builder generates is longer for its `global::` prefixes, and never ambiguous.
 
 ## The Tenth Man
+
+Its parcel's layout, `0xB1`, beside the envelope's met the round of the broker's core, which
+[0038](0038-over-a-broker-a-connection-is-placed-once-at-its-open-named-by-both-its-ends.md) keeps.
 
 The names this record settles, and the gate that holds its versions, met the Tenth Man
 ([0009](0009-conventional-commits-git-flow-and-the-tenth-man.md)). Each round's objections, each

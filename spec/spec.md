@@ -67,13 +67,29 @@ to one meaning of `advance`. The why of each rule is in the decisions:
 - [0035](../docs/decisions/0035-a-payload-that-reads-is-held-to-its-messages-rules-before-its-resolver-sees-it.md):
   payload rules, section 18;
 - [0036](../docs/decisions/0036-an-in-memory-transport-joins-two-routers-of-one-process-and-a-server-takes-several-transports-through-one.md):
-  the in-memory transport and the joined transport, section 15.
+  the in-memory transport and the joined transport, section 15;
 - [0037](../docs/decisions/0037-a-procedure-is-also-an-http-route-which-a-gateway-answers-as-one-more-client-of-its-server.md):
   a procedure also an HTTP route, its gateway one more client of its server, stated in the
-  companion `transcoding.md`.
+  companion `transcoding.md`;
+- [0038](../docs/decisions/0038-over-a-broker-a-connection-is-placed-once-at-its-open-named-by-both-its-ends.md):
+  a broker's participants, a connection placed once at its open and named by both its ends, its
+  three legs and its end, section 15;
+- [0039](../docs/decisions/0039-a-brokers-transport-numbers-its-parcels-and-sends-an-envelope-in-parts-under-its-peers-bound.md):
+  a broker's parcels, their sequences, copies and losses, and an envelope in parts, section 15;
+- [0040](../docs/decisions/0040-a-brokers-adapter-offers-bytes-at-topics-and-bead-keeps-its-own-credit-credential-and-heartbeat.md):
+  a broker's adapter and the in-memory broker, and the credit, the credential and the heartbeat
+  Bead keeps over a broker, section 15;
+- [0041](../docs/decisions/0041-over-mqtt-5-a-participant-is-one-clean-link-and-a-parcel-one-publish-each-counted-to-its-byte.md):
+  MQTT 5's binding of a broker, section 15;
+- [0042](../docs/decisions/0042-a-proto-message-that-leaves-a-required-field-unset-neither-reads-nor-writes-and-a-gateway-refuses-it-where-its-server-would.md):
+  a `proto` message that leaves a required field unset, and a closed enum's undeclared number,
+  section 17.9;
+- [0043](../docs/decisions/0043-over-amqp-1-0-a-participant-is-one-connection-whose-exclusive-inbox-ends-with-it-and-a-parcel-one-message-of-one-profile-each-counted-to-its-byte.md):
+  AMQP 1.0's binding of a broker, on RabbitMQ 4, section 15.
 
-**Version: 0.8.0**, of layout `0xA1`. Each of its conformance files repeats it as its
-`specVersion`, and follows its schema in [`schemas/`](schemas/). The interop's blueprint,
+**Version: 0.9.0**, of layout `0xA1`, its broker parcels of layout `0xB1`. Each of its
+conformance files repeats it as its `specVersion`, and follows its schema in
+[`schemas/`](schemas/). The interop's blueprint,
 [`interop-blueprint.json`](interop-blueprint.json), and what its service does,
 [`interop-service.json`](interop-service.json), are files of this version, which the conversations
 play. **Status: every section is written.**
@@ -82,10 +98,11 @@ What a side traces, filters and counts beside the wire is stated apart, under a 
 in its companion [`debugging.md`](debugging.md), whether a side builds those or leaves them out.
 What a side's gateway answers over HTTP of its procedures is stated apart, under a version of its
 own, in its companion [`transcoding.md`](transcoding.md), whether a side offers one or not. A
-side conforms to the wire by sections 1 to 15, to what it declares by section 16, to what its
-codecs write and read by section 17, for each encoding it offers, and to its procedures' rules by
-section 18: a relay, which reads no payload, offers none. A side does what each entry of the files
-that play those sections says, the clock cases holding `advance` to one meaning, but an entry whose
+side conforms to the wire by sections 1 to 15, a broker's binding among them, to what it declares
+by section 16, to what its codecs write and read by section 17, for each encoding it offers, and
+to its procedures' rules by section 18: a relay, which reads no payload, offers none. A side does
+what each entry of the files that play those sections says, the clock cases holding `advance` to one
+meaning, but an entry whose
 `differs` names a row of the support matrix, [`docs/support.md`](../docs/support.md), and the
 side's language. A unit no entry cites binds it all the same.
 
@@ -745,9 +762,10 @@ A client fails a call before it goes, and a server a command alike, with `DESTIN
 as a relay refuses a call its leg B cannot carry (section 14.3): nothing was tried, and its
 credential stays. It does so for a call that presents `ELSEWHERE` over a transport that cannot carry
 the credential it presents — a WebSocket whose upgrade carried other bytes, or none (section 15.2),
-a Web Worker, whose messages carry an envelope alone, a server's over HTTP, over a WebSocket or in
-memory (sections 15.9, 15.2, 15.13) — and for one that presents a `JWT` or an `ELSEWHERE` over a
-transport that leaves the machine in the clear, since a bearer credential crosses only TLS off the
+a Web Worker, whose messages carry an envelope alone, a server's over HTTP, over a WebSocket, in
+memory or over a broker (sections 15.9, 15.2, 15.13, 15.22) — and for one that presents a `JWT` or
+an `ELSEWHERE` over a transport that leaves the machine in the clear, since a bearer credential
+crosses only TLS off the
 machine ([RFC 6750 §5.3](https://www.rfc-editor.org/rfc/rfc6750#section-5.3)). A transport is judged
 by what it is given, never by what a name resolves to. It is secure under TLS, its scheme `wss` or
 `https`; on the loopback: a client by the host it names in its URL — `localhost` or a name that ends
@@ -758,7 +776,8 @@ the W3C's Secure Contexts reads an origin, and as
 [Secure Contexts](https://www.w3.org/TR/secure-contexts/#is-origin-trustworthy) judges an origin
 potentially trustworthy; a server by the address it listens on (section 15.12), in 127.0.0.0/8,
 `::1`, or `localhost`, both; or when it never leaves the machine, a Web Worker, an in-memory
-transport or a router called in process. Every client reads a host alike: `127.0.0.1.` and `127.1`,
+transport or a router called in process. A broker's transport is secure while its own leg and its
+peer's are (section 15.22). Every client reads a host alike: `127.0.0.1.` and `127.1`,
 which the parser reads as 127.0.0.1, are on the loopback; a host it fails on, one followed by a
 space among them, is not, nor is `localhost.`, which it keeps as given. A client takes a `localhost`
 name on the loopback without resolving it, as Secure Contexts does where the platform resolves such
@@ -797,10 +816,10 @@ session's end for one that had one. Each of these timeouts may be without end, a
 the application nor its transport gives one: an HTTP server gives its own connection timeout, 30 s
 (section 15.12). A message of its connection starts every one anew, whatever session its call runs
 in; a session timeout counts messages alone. Over HTTP, a listen held is not silence: while one is
-held, no connection timeout runs, and silence counts anew from its end (section 15.9). Over
-WebSocket, a peer that only hears is silent: it speaks now and then, or is given a connection
-timeout without end. A connection that closes takes its sessions; a session opened for a connection
-already closed ends at once.
+held, no connection timeout runs, and silence counts anew from its end (section 15.9). Over a
+WebSocket and over a broker, a peer that only hears is silent: it speaks now and then, or is given
+a connection timeout without end. A connection that closes takes its sessions; a session opened for
+a connection already closed ends at once.
 
 13.8. A side verifies a `JWT` one way, as an access token of RFC 9068's profile in JWS Compact
 Serialization (RFC 7515), as RFC 8725 recommends. The application gives its keys, each a JWK
@@ -930,10 +949,10 @@ step, on the clock its side runs on (decision 0011):
    dropped, so no fraction reaches a timer;
 3. as its session comes to be kept, by a reading of its own apart from the one its verdict took, as
    a renewal moves _E_, and at its timer's due, the side reads _W_ again, never counting down, and
-   takes _R_ = _E_ − _W_: at _R_ ≤ 0 the session ends in a turn of its own, past the answer that kept
-   it, with no timer armed; otherwise it arms a timer of min(_R_, 2³¹ − 1) ms in place of the one
-   before, so an end is never refused for its distance, and a wall clock set by hand takes effect at
-   the next due;
+   takes _R_ = _E_ − _W_: at _R_ ≤ 0 the session ends in a turn of its own, past the answer that
+   kept it, with no timer armed; otherwise it arms a timer of min(_R_, 2³¹ − 1) ms in place of the
+   one before, so an end is never refused for its distance, and a wall clock set by hand takes
+   effect at the next due;
 4. an `ELSEWHERE` whose end _W_ has reached when its verification settles does not hold:
    `SESSION_REQUIRED` (section 13.11).
 
@@ -1081,9 +1100,9 @@ resolving as section 9.2 says:
    none; an `ELSEWHERE` to a destination registered with no audience, or over a leg B whose
    transport cannot carry it (section 13.4): a WebSocket's, whose upgrade carried the relay's own
    credential or none, never leg A's; a `JWT` or an `ELSEWHERE` over a leg B that reaches off the
-   machine in the clear, neither over TLS — `wss`, `https` — nor within the machine — the loopback,
-   a Web Worker, an in-memory transport, a router called in process — since a bearer credential
-   crosses only TLS off the machine
+   machine in the clear, neither over TLS — `wss`, `https`, a broker's legs under TLS
+   (section 15.22) — nor within the machine — the loopback, a Web Worker, an in-memory transport,
+   a router called in process — since a bearer credential crosses only TLS off the machine
    ([RFC 6750 §5.3](https://www.rfc-editor.org/rfc/rfc6750#section-5.3)), which its sender holds:
    `DESTINATION_UNREACHABLE`, since nothing was tried;
 6. a payload, or a transfer's total, past the smaller of the two legs' limits, leg B's header
@@ -1136,16 +1155,17 @@ _Transports: `spec/transports.json`._
 
 15.1. A transport carries envelopes between two sides, each whole, and tells when a connection opens
 and when it closes, and, over HTTP, when a listen is held and when it ends (section 13.7). On a
-connection, it hands each envelope on once, in the order its side sent it, unless its section says
-otherwise: HTTP keeps the outbox's order for what the server sends of its own (section 15.9), and
-none between a client's exchanges, so that a CANCEL may come before its REQUEST (section 15.5). A
-transport that keeps no order states what may overtake, and one that may hand an envelope on twice
-states what a copy is, each with what the side that receives it does of it. A server's transport
-names each connection it holds by a handle, which its router, its sessions and its relays name the
-connection by, and what it reports (`debugging.md` 4.1, 5.1). It draws the handle as it takes the
-connection, never from the peer's address alone, which another connection may share
-([RFC 9293 §3.4.1](https://www.rfc-editor.org/rfc/rfc9293#section-3.4.1)), and gives none twice:
-no two connections it holds are one, and its bounds, its gauges and its stop reach each. A server's
+connection, it hands each envelope on once, in the order its side sent it — over a broker by the
+sequence of its parcels (section 15.19) — unless its section says otherwise: HTTP keeps the outbox's
+order for what the server sends of its own (section 15.9), and none between a client's exchanges, so
+that a CANCEL may come before its REQUEST (section 15.5). A transport that keeps no order states
+what may overtake, and one that may hand an envelope on twice states what a copy is, each with what
+the side that receives it does of it. A server's transport names each connection it holds by a
+handle, which its router, its sessions and its relays name the connection by, and what it reports
+(`debugging.md` 4.1, 5.1). It draws the handle as it takes the connection, never from the peer's
+address alone, which another connection may share
+([RFC 9293 §3.4.1](https://www.rfc-editor.org/rfc/rfc9293#section-3.4.1)), and gives none twice: no
+two connections it holds are one, and its bounds, its gauges and its stop reach each. A server's
 transport stops when its application stops it: from then on it takes nothing new (sections 15.2,
 15.7) and it closes each connection it holds (sections 15.3, 15.7). A handle is no secret, and
 carries none (section 15.4); its form is its implementation's, written for a reader of a trace, and
@@ -1161,16 +1181,19 @@ fails no exchange and closes nothing. What a side's transport reports on its `er
 a server's, is what it ends a connection for of its own — a protocol error on it; a message it fails
 with 1009, or over HTTP an envelope past its `maximumBodyBytes`, an answer's or a batch's, and a
 connection a server drops behind a bound, each naming the bound and its value (sections 15.3,
-15.12); a batch that does not read, saying what of it does not (section 15.9); a Web Worker
-client's worker that errs, an exception its script did not catch, which ends no worker, named by its
-message and where its script threw it, its server told the close unclean — and what a listener
-throws, as it throws: a connection's own once, as it ends, its close or its drop begun, so that no
-listener's throw keeps it open, and before its close, which is then unclean. It reports no peer that
-drops without its closing handshake, its TCP connection ended or reset, nor one its heartbeat drops,
+15.12); a batch that does not read, saying what of it does not (section 15.9); a Web Worker client's
+worker that errs, an exception its script did not catch, which ends no worker, named by its message
+and where its script threw it, its server told the close unclean; a broker connection lost to a gap,
+a bound or a parcel that does not read, naming it, and a message a broker's participant takes that
+is no parcel, which it drops and which ends no connection (sections 15.17, 15.19, 15.20) — and what
+a listener throws, as it throws: a connection's own once, as it ends, its close or its drop begun,
+so that no listener's throw keeps it open, and before its close, which is then unclean. It reports
+no peer that drops without its closing handshake, its TCP connection ended or reset, nor, over a
+broker, a RESET, a GONE or its participant's link lost (section 15.21), nor one its heartbeat drops,
 nor its own drop of a peer that never answered a close within its close timeout, nor, over HTTP, a
 server gone, a refusal of its own, an answer of another type, an exchange lost or a listen given up
-past its inactivity timeout: each one's close tells it, unclean, but for a client's own
-`disconnect` left unanswered, whose close is told as the `disconnect` asked.
+past its inactivity timeout: each one's close tells it, unclean, but for a client's own `disconnect`
+left unanswered, whose close is told as the `disconnect` asked.
 A server's transport tells each refusal it judges of its own: a request it refuses as it arrives,
 in section 15.6's order, or whose body it refuses as it comes, marked in `bead-refusal`. It never
 tells the 404 that ends an exchange or a listen it had taken as their connection closes (section
@@ -1183,8 +1206,9 @@ a listener's throw is reported with none. A connection that closes ends what was
 (sections 9.4, 9.10, 12.10, 13.7). A server's transport hands the router each envelope it took with
 the address and port of what brought it — over HTTP its exchange's, read as section 15.12 reads it,
 whichever socket or proxy brought its connect; over a WebSocket its connection's; over an in-memory
-transport those its client gave as it connected (section 15.13); none over a Web Worker — which an
-access refused names (section 13.12). A transport may carry a credential beside an envelope, both
+transport those its client gave as it connected (section 15.13); over a broker its peer
+participant's id, proven as it opened, and no port (section 15.18); none over a Web Worker — which
+an access refused names (section 13.12). A transport may carry a credential beside an envelope, both
 ways: it hands the router what it carried with an envelope it took, and carries what the router
 gives it with one it sends. That credential is what a request presenting `ELSEWHERE` stands for
 (section 9.2, step 6), and nothing else: a request that presents none, `OPAQUE` or a `JWT` resolves
@@ -1192,13 +1216,14 @@ as its header says, whatever its transport carried. Over HTTP, it is the `Author
 request's `POST` (section 15.5), each request's own; over a WebSocket, the `Authorization` field of
 an upgrade that carries no `Origin`, one for every envelope of the connection, toward its server
 alone (section 15.2); over an in-memory transport, what its client hands with each request (section
-15.13). A transport says whether it carries the credential a call presents beside an envelope it
-sends — a client's over HTTP or in memory any field value, over a WebSocket the one its upgrade
-carried, compared in constant time; a Web Worker's none, nor a server's toward its client (sections
-15.2, 15.9, 15.13) — and whether it is secure — under TLS, on the loopback, or never leaving the
-machine — so that a side fails before it goes a call whose credential it cannot carry (section
-13.4). No failure's detail, event, trace or log carries that credential, nor a header's: only its
-credential scheme.
+15.13); over a broker, what its client's transport carries in the DATA beside a request (section
+15.22). A transport says whether it carries the credential a call presents beside an envelope it
+sends — a client's over HTTP, in memory or over a broker any field value, over a WebSocket the one
+its upgrade carried, compared in constant time; a Web Worker's none, nor a server's toward its
+client (sections 15.2, 15.9, 15.13, 15.22) — and whether it is secure — under TLS, on the loopback,
+or never leaving the machine — so that a side fails before it goes a call whose credential it cannot
+carry (section 13.4). No failure's detail, event, trace or log carries that credential, nor a
+header's: only its credential scheme.
 
 ### WebSocket
 
@@ -1224,13 +1249,18 @@ HTTP connection carries a credential per `POST`, so its connect's is read by no 
 a WebSocket carries one per connection, so its upgrade's is the one read. Nothing is carried toward
 a client: a server's command that presents `ELSEWHERE` over a WebSocket fails before it goes,
 `DESTINATION_UNREACHABLE`. A client writes on each upgrade the credential it is given for it, as
-given, and none otherwise; it fails that upgrade before it goes for one that is no field value, as
-section 15.5 says, and for one over a WebSocket that leaves the machine in the clear (section
-13.4), its upgrade being where it would cross. No server reads a credential from its target's
-query, which logs keep ([RFC 6750 §2.3](https://www.rfc-editor.org/rfc/rfc6750#section-2.3)), from
-a cookie, which a page's browser sends on its own, or from a subprotocol. A client writes no
-`Origin` on its upgrade: a page's browser writes its own, which the server judges (step 7). A server
-judges a request at its WebSocket's address in this order, and answers the first that applies:
+given, and none otherwise. It asks for one credential at a time of each source, a provider known
+by its reference: an attempt whose source's earlier ask is unsettled waits for it, within its own
+time (section 15.15), then asks anew, that earlier answer serving no later attempt; another source
+is asked at once; an ask that never settles holds every later attempt that would ask its source,
+so a provider honours the signal it is asked with; it fails that upgrade before it goes for one that
+is no field value, as section 15.5 says, and for one over a WebSocket that leaves the machine in the
+clear (section 13.4), its upgrade being where it would cross. No server reads a credential from its
+target's query, which logs keep
+([RFC 6750 §2.3](https://www.rfc-editor.org/rfc/rfc6750#section-2.3)), from a cookie, which a page's
+browser sends on its own, or from a subprotocol. A client writes no `Origin` on its upgrade: a
+page's browser writes its own, which the server judges (step 7). A server judges a request at its
+WebSocket's address in this order, and answers the first that applies:
 
 1. What HTTP refuses of its own, a `Host` missing or repeated, a target in absolute-form it does not
    read, an authority that is no host, a target that holds an octet other than visible ASCII or a
@@ -1470,24 +1500,24 @@ bounds what it reads, an answer or an envelope a batch brings, by `maximumBodyBy
 alike, and times its own inactivity by `inactivityTimeout`, its default and whether it may be
 without end alike (section 15.10):
 
-| Bound                          | By default                                                                                                     | Bounds                                                                               | Transports      |
-| ------------------------------ | -------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------ | --------------- |
-| `maximumConnections`           | 10,000                                                                                                         | the connections a server holds, all of them                                          | HTTP, WebSocket |
-| `maximumConnectionsPerAddress` | 64                                                                                                             | the connections one address holds                                                    | HTTP, WebSocket |
-| `maximumWaitingExchanges`      | `maximumAnsweringCalls`                                                                                        | the requests waiting on one connection; the exchanges under way on it, twice that    | HTTP            |
-| `bodyBytesBudget`              | 268,435,456                                                                                                    | the bytes of body a server reads at once, across its exchanges                       | HTTP            |
-| `maximumBodyBytes`             | `maximumEnvelopeBytes`                                                                                         | a body                                                                               | HTTP            |
-| `maximumOutboxBytes`           | twice `maximumEnvelopeBytes`                                                                                   | what one connection's outbox holds                                                   | HTTP            |
-| `maximumWait`                  | 30 s                                                                                                           | the longest a server holds a listen                                                  | HTTP            |
-| `exchangeTimeout`              | 5 min                                                                                                          | how long an exchange handed on waits for its answer, at both ends                    | HTTP            |
-| `inactivityTimeout`            | 5 min                                                                                                          | how long a connection with no exchange under way stays                               | HTTP            |
-| `connectionInactivityTimeout`  | 30 s                                                                                                           | the server's own connection timeout (section 13.7)                                   | HTTP            |
-| `minimumSendBytesPerSecond`    | 240                                                                                                            | the slowest a socket may take what waits for it, once its grace passed; 0 holds none | HTTP, WebSocket |
-| `sendGracePeriod`              | 5 s                                                                                                            | the least time an envelope is given to be taken                                      | HTTP, WebSocket |
-| `maximumUnsentBytes`           | 2 × `maximumAnsweringCalls` × `chunkBytes` + `maximumTransfers` × `windowBytes` + twice `maximumEnvelopeBytes` | what waits for a WebSocket's socket                                                  | WebSocket       |
-| `headersTimeout`               | 30 s                                                                                                           | how long a request's head may take to come whole                                     | HTTP, WebSocket |
-| `minimumBodyBytesPerSecond`    | 240                                                                                                            | the slowest a body may come, once its grace passed                                   | HTTP            |
-| `bodyGracePeriod`              | 5 s                                                                                                            | how long a body comes before its rate is held                                        | HTTP            |
+| Bound                          | By default                                                                                                     | Bounds                                                                                   | Transports              |
+| ------------------------------ | -------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------- | ----------------------- |
+| `maximumConnections`           | 10,000                                                                                                         | the connections a server holds, all of them                                              | HTTP, WebSocket, broker |
+| `maximumConnectionsPerAddress` | 64                                                                                                             | the connections one address holds, over a broker one participant's id                    | HTTP, WebSocket, broker |
+| `maximumWaitingExchanges`      | `maximumAnsweringCalls`                                                                                        | the requests waiting on one connection; the exchanges under way on it, twice that        | HTTP                    |
+| `bodyBytesBudget`              | 268,435,456                                                                                                    | the bytes of body a server reads at once, across its exchanges                           | HTTP                    |
+| `maximumBodyBytes`             | `maximumEnvelopeBytes`                                                                                         | a body                                                                                   | HTTP                    |
+| `maximumOutboxBytes`           | twice `maximumEnvelopeBytes`                                                                                   | what one connection's outbox holds                                                       | HTTP                    |
+| `maximumWait`                  | 30 s                                                                                                           | the longest a server holds a listen                                                      | HTTP                    |
+| `exchangeTimeout`              | 5 min                                                                                                          | how long an exchange handed on waits for its answer, at both ends                        | HTTP                    |
+| `inactivityTimeout`            | 5 min                                                                                                          | how long a connection with no exchange under way stays                                   | HTTP                    |
+| `connectionInactivityTimeout`  | 30 s                                                                                                           | the server's own connection timeout (section 13.7)                                       | HTTP                    |
+| `minimumSendBytesPerSecond`    | 240                                                                                                            | the slowest a socket may take what waits for it, once its grace passed; 0 holds none     | HTTP, WebSocket         |
+| `sendGracePeriod`              | 5 s                                                                                                            | the least time an envelope is given to be taken                                          | HTTP, WebSocket         |
+| `maximumUnsentBytes`           | 2 × `maximumAnsweringCalls` × `chunkBytes` + `maximumTransfers` × `windowBytes` + twice `maximumEnvelopeBytes` | what waits for a WebSocket's socket, or for a broker at both ends                        | WebSocket, broker       |
+| `headersTimeout`               | 30 s                                                                                                           | how long a request's head may take to come whole                                         | HTTP, WebSocket         |
+| `minimumBodyBytesPerSecond`    | 240                                                                                                            | the slowest a body may come, or an envelope's parts over a broker, once its grace passed | HTTP, broker            |
+| `bodyGracePeriod`              | 5 s                                                                                                            | how long a body comes, or an envelope's parts over a broker, before its rate is held     | HTTP, broker            |
 
 `exchangeTimeout`, `inactivityTimeout` and `connectionInactivityTimeout` may be without end;
 `maximumWait`, `sendGracePeriod`, `headersTimeout` and `bodyGracePeriod` are never without end.
@@ -1725,6 +1755,448 @@ join two transports whose handles might be one. Its stop stops each, and its bou
 reach each, as section 15.1 has a transport's. It serves no port of its own: one port for two
 transports comes from a proxy in front of them.
 
+### A connect
+
+15.15. A client's connect ends in one of four ways: its connection opens; it is cancelled; its
+time, `transportClient.connectTimeout`, runs out; or its application disposes of its client,
+ending the attempt under way. Each of the last three ends what it awaits at once: its credential,
+its server's answer, what sends its requests or its upgrade, its own or one its application
+supplies. The connect fails, told apart as cancelled, timed out or disposed, and its client is
+closed; a reconnection's attempt so ended leaves the reconnection to go on, unless the
+reconnection's own signal ends it. The attempt's end is told to what it awaits: its credential's
+ask hears it by the signal it is asked with, whether the attempt opened or not, and what that
+telling throws or holds reaches neither the connect nor its refusal. What the connect draws as it
+ends, or after it ends, is let go, and its server told where the transport can tell it: over HTTP a
+`DELETE` of the connection drawn (section 15.4), over a WebSocket a close of the socket, in memory
+the close of its connection, over a Web Worker its `bead-close`. A credential that settles after
+the attempt ends is never written, and a late failure is dropped. These bounds hold what the
+connect awaits; work its application's code does before it returns is its platform's.
+
+### Broker
+
+_Vectors: `parcels`, `parcelRefusals`._
+
+15.16. A broker joins a server and its clients through their participants. A participant is one
+link of a side to a broker — its adapter's client (section 15.24) — and holds an inbox, the topic
+every parcel of its connections reaches, which it subscribes as its link starts, before anything of
+it goes. A server's transport over a participant serves names, each the topic of a server, which
+every participant serving it shares in a group. A connection is placed once, as it opens: a
+client's OPEN goes to a server's name, the broker hands it to one participant serving it — the one
+its shared subscription, its queue's competing consumers or its queue group picks, as a listening
+socket's accept takes one connection — and every parcel of the connection after it goes from one
+participant's inbox to the other's. A request never goes to a server's name, so a call, its cancel,
+its chunks, its credits, its notifications and its server's commands reach the participant that
+accepted its connection, and no other: its session stays one connection's (sections 13.3, 13.4),
+and its calls spread across a name's participants by connection, as HTTP/2's do across servers
+([RFC 9113 §5.1](https://www.rfc-editor.org/rfc/rfc9113#section-5.1)). A topic is a sequence of
+tokens, each 1 to 64 characters of base64url's alphabet
+([RFC 4648 §5](https://www.rfc-editor.org/rfc/rfc4648#section-5)): a participant's inbox, its root,
+`i` and its id; a server's name, its root, `s` and the name; a participant's departure (section
+15.21), its root, `d` and its id. The root is `bead` unless its application gives another, one for
+every participant of a deployment. A participant's id is the identity its broker authenticates its
+link by, a token, never one a side draws; a side refuses to build a participant whose id is no
+token. Each broker writes a topic as its binding says.
+
+15.17. A parcel is one message of the broker, and each message one parcel, its bytes the message's
+payload: its layout on a byte, `0xB1`, `0xB2` to `0xBF` the layouts to come; its kind on a byte;
+its flags on a byte; a byte kept, 0; its opener's half on 8 bytes and its acceptor's half on 8,
+each drawn by its end from a cryptographic source, never all zero, the acceptor's zero on an OPEN
+and a REFUSE, both zero on a GONE; its sequence on 8 bytes, at most 2⁵³ − 1 (section 1.2), 0 on a
+RESET and a GONE; then its body:
+
+| Kind     | Byte | Sent by                           | Its body                                                                                                                                                       |
+| -------- | ---- | --------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `OPEN`   | 0x01 | a client, to a server's name      | its id's length on 1 byte and its id, its incarnation on 16 bytes, its receive bound on 4                                                                      |
+| `ACCEPT` | 0x02 | a server, to the client's inbox   | the same, of the server's participant                                                                                                                          |
+| `REFUSE` | 0x03 | a server, to the client's inbox   | a status on 2 bytes: 400 `malformed`, 426 `layout-refused` then the layouts it reads, a byte each, or 503 `busy`                                               |
+| `DATA`   | 0x04 | either end                        | with `CREDENTIAL`, its length on 2 bytes and its credential; an envelope, or a part of one                                                                     |
+| `PING`   | 0x05 | either end                        | none                                                                                                                                                           |
+| `PONG`   | 0x06 | either end                        | the sequence of the PING it answers, on 8 bytes                                                                                                                |
+| `CLOSE`  | 0x07 | either end                        | a code on 2 bytes, a WebSocket's ([RFC 6455 §7.4.1](https://www.rfc-editor.org/rfc/rfc6455#section-7.4.1)): 1000, 1001, 1002, 1009, 4000 lost, 4001 unanswered |
+| `RESET`  | 0x08 | either end                        | none                                                                                                                                                           |
+| `GONE`   | 0x09 | a broker, as a participant's will | its incarnation on 16 bytes, its id's length on 1 byte and its id                                                                                              |
+
+The flags are `MORE` 0x01 and `CREDENTIAL` 0x02, on a DATA, and `SECURE` 0x04, on an OPEN and an
+ACCEPT. Every layout keeps a parcel's first 28 bytes, an OPEN's id at the head of its body, and a
+REFUSE whole, so a side reads the prefix of a layout to come. 0x00 is never a kind; 0x0A to 0x7F
+are the kinds to come, and a parcel of one, taken in its order, closes its connection with 1002;
+0x80 to 0xFF are advisory, taken in their order and skipped, whatever their flags, their kept byte
+and their body. A side drops in silence, and reports, a message that is no parcel — under 28 bytes,
+or whose first byte is outside 0xB1–0xBF — and closes with 1002, reporting it, a connection whose
+parcel does not read: a kind to come, a parcel of a layout to come on a connection open, a flag its
+kind does not take, a byte kept that is not 0, a half zero where it may not be or not zero where it
+must be, a body not its kind's, an ACCEPT's or a GONE's id that is no token, an ACCEPT's receive
+bound under 1,024, a GONE or a RESET with a sequence, any other with none; an OPEN's id that is no
+token, or its receive bound under 1,024, is its acceptor's to refuse (section 15.18). No parcel is
+written that a side refuses. An envelope is no parcel, and a parcel no envelope: their first bytes
+never meet.
+
+15.18. A client opens a connection by an OPEN to a server's name, its sequence 1, naming its half,
+its id, its incarnation (section 15.21) and its receive bound — the largest parcel its inbox takes
+whole, 1,024 bytes at least — marked `SECURE` when its own leg is (section 15.22). It sends nothing
+else on that connection until it is answered. A participant serving the name that takes an OPEN
+answers it from its own inbox to the one the OPEN names, its sequence 1, judging in this order: an
+OPEN of a layout to come is refused 426 `layout-refused`, naming the layouts it reads; one whose id
+is no token or whose receive bound is under 1,024, 400 `malformed`; past `maximumConnections`, or
+past `maximumConnectionsPerAddress` (section 15.12), counting the connections of the OPEN's id, or
+once its stop began, 503 `busy`. A refusal is told as section 15.1 tells one, the client's id its
+address and no port, and ends the connection at both ends. Any other OPEN it answers with an
+ACCEPT, naming its own half, id, incarnation and receive bound, marked `SECURE` when its own leg
+is: the connection is then half-open, takes its place in those bounds, and carries nothing else
+from it. An OPEN whose id and half name a connection it holds is a copy, dropped in silence. The
+client's connect takes the first ACCEPT or REFUSE naming its half, within its time (section
+15.15): on a REFUSE it fails naming its status and reason (section 15.6); on an ACCEPT it opens,
+its connection named by both halves, and its client sends at once a PING of sequence 2 naming
+them. A broker that says nothing serves the name fails it at once. Where its adapter offers a
+message's life, the OPEN lives in its broker its connect's time left (section 15.15), none when its
+time is without end, so that one no participant took in time is deleted there rather than taken
+late. The server tells its router the connection, drawing its handle (section 15.1), as it takes the
+client's first parcel naming both halves, which proves the client reads the inbox it named, and
+forgets a half-open connection, telling nothing, once `acceptTimeout` passes without it or a RESET
+names it. An ACCEPT of a connect that took another, ended or never was — a second participant's, to
+which its broker handed the OPEN again, one past its connect's end, each of several serving a name
+with no group — is answered with a RESET of its pair, to the inbox it names. A name served by
+several participants is served in a group; a participant serving one in a group unsubscribes it
+while it holds `maximumConnections`, and subscribes it again once it holds fewer.
+
+15.19. Each end numbers the parcels it sends on a connection, from 1, one more each, but a RESET
+and a GONE, and its receiver hands them on in that order, each once. A parcel below the next one
+awaited is a copy, and dropped in silence: what its broker delivered again; so a request's copy
+never reaches the router, whether its call is open, ended or its call id drawn again (sections
+9.1, 9.2). A parcel past the next one awaited is a loss, since a broker keeps one publisher's order
+on one topic ([MQTT 5.0 §4.6](https://docs.oasis-open.org/mqtt/mqtt/v5.0/os/mqtt-v5.0-os.html))
+and resends nothing into a link that kept no session: its connection is lost, a CLOSE of 4000
+sent, its close unclean, and the side reports it, naming the sequence awaited and the one that
+came (section 15.1). So nothing overtakes on a connection: a cancel never comes before its
+request. An adapter delivers at least once, its broker acknowledging each publication it took and
+its adapter holding what it publishes to the quota its broker gives, or at most once, acknowledging
+none; either holds within its broker's queue
+alone, and a message its broker drops leaves a loss. A participant takes a message — hands it on,
+or drops it as a copy — before it acknowledges it to its broker, and acknowledges it then, never
+once its router is done with it. A participant whose application requires delivery at least once
+of an adapter that gives it at most once is refused as it is built.
+
+15.20. A parcel toward a peer never passes the smaller of that peer's receive bound and the largest
+its own adapter publishes to the peer's inbox. A DATA whose envelope would pass it goes in parts:
+DATA parcels one after the other, nothing else of that direction between them, each as large as
+that bound lets it but the last, which takes what is left, of one byte at least, `MORE` on each but
+the last, a credential on the first alone. The receiver hands the envelope on once its last part
+came, whole, as a WebSocket's message in fragments is one
+([RFC 6455 §5.4](https://www.rfc-editor.org/rfc/rfc6455#section-5.4)), and as a TCP segment is
+held to the MSS its peer announced
+([RFC 9293 §3.7.1](https://www.rfc-editor.org/rfc/rfc9293#section-3.7.1)). It takes an envelope of
+`maximumEnvelopeBytes` at least in parts; past its own `maximumEnvelopePartsBytes` —
+`maximumEnvelopeBytes` by default — it closes the connection with a CLOSE of 1009; a part that
+would take what its participant holds in parts past `heldBytesBudget`, or parts that come slower
+than `minimumBodyBytesPerSecond` once `bodyGracePeriod` passed since an envelope's first part, on
+its clock, as section 15.12 holds a body, lose their connection, a CLOSE of 4000; each reported,
+naming the bound and its value. A broker's bound so bounds a parcel, never an envelope, and a
+router's limits are the same over every broker (section 12.2).
+
+15.21. A connection ends by a CLOSE, sequenced, once all before it was handed on, clean when its
+code is 1000 and unclean otherwise, its sender forgetting the connection as it sends it; or by a
+RESET, at once, unclean, whatever its order. A parcel of a pair its receiver does not hold is
+dropped in silence, but an ACCEPT, answered as section 15.18 says. A parcel its broker refuses, or
+says no subscriber takes, ends its connection, unclean, as a dropped socket does: its peer's inbox
+is gone. Each end PINGs a connection once
+nothing of it has come for `heartbeat` — 30 seconds by default, or never — and closes it with 4001
+when nothing of it has come by `heartbeat` after that PING; any parcel answers, and a PING waits
+behind what was sent before it. The heartbeat runs on the platform's clock, as a WebSocket's does
+(section 15.3). A participant's link keeps no broker session, and each time it connects the
+participant draws an incarnation, 16 bytes from a cryptographic source; each connection is bound
+to its peer's. A participant whose link goes down closes each of its connections, unclean, and
+connects anew as another incarnation, its inbox and its names subscribed again before anything
+goes, then sends a RESET to each peer it held a connection with. A participant whose link its broker
+ends for another link of its id, a takeover, closes each of its connections, unclean, reports it,
+and connects no more until its application starts it again: its server's transports take no OPEN
+and its clients' connects fail, naming it, so that two holders of one id never take each other over
+without end; the later link keeps the id. A participant whose adapter leaves
+a will has its broker publish, once it loses the link without a clean end, a GONE of its
+incarnation to its departure; it subscribes the departure of each peer it holds a connection with
+while it holds one, and closes, unclean, each connection bound to the id and incarnation a GONE
+names, never another. A server's transport that stops takes no OPEN, a REFUSE 503 answering one
+that comes, and closes each connection with a CLOSE of 1001; its participant then ends its link so
+that its broker publishes no will.
+
+15.22. A client's transport over a broker carries the credential a request presents, any field
+value (section 15.5), on the first part of the DATA that carries the request, toward its server
+alone; where its adapter offers a message's life, that part lives in its broker twice `heartbeat`,
+none when `heartbeat` is without end, so that a credential waits there no longer than a live
+connection may be silent; a server's carries none, and a client closes with 1002 a connection whose
+server's DATA carries one. A request presenting `ELSEWHERE` stands for what its DATA carried
+(section 9.2, step 6), never for its broker's authentication of the participant that published it,
+which stands for no request. A broker's transport is secure while its own leg and its peer's are:
+its adapter's connection under TLS, its broker on the loopback, judged as section 13.4 judges a
+client's URL, or in memory, each end saying so of its own by the `SECURE` of its OPEN or ACCEPT; a
+server's application may say otherwise of its own (section 13.4). A deployment's broker lets a
+participant alone subscribe its inbox and its will alone publish to its departure, by the id it
+authenticates, and lets serve a name only the participants its server's application runs: a
+participant serving a name receives the credentials its clients present.
+
+15.23. A broker paces no call: a subscription's notifications go to its subscriber's inbox, each on
+its own connection and call id, at its own credit (sections 11.8 to 11.11), a transfer at its own
+(section 12.4), and no notification goes once to a topic many read. What waits for its broker on a
+connection — parcels its adapter has not had taken — is bounded at both ends by
+`maximumUnsentBytes` (section 15.12): a parcel that would pass it loses the connection, a CLOSE of
+4000, reported naming the bound. No parcel is retained: a side subscribes so its broker hands it
+nothing retained, and drops in silence a retained message that comes all the same. A participant
+and its server's transport hold these bounds, besides those of section 15.12 they name:
+
+| Bound                       | By default             | Bounds                                                               |
+| --------------------------- | ---------------------- | -------------------------------------------------------------------- |
+| `heartbeat`                 | 30 s                   | how long a connection is silent before a PING, and a PING unanswered |
+| `acceptTimeout`             | 30 s                   | how long a half-open connection waits for its client's first parcel  |
+| `maximumEnvelopePartsBytes` | `maximumEnvelopeBytes` | one envelope's parts together                                        |
+| `heldBytesBudget`           | 268,435,456            | what a participant holds in parts, across its connections            |
+
+`heartbeat` may be without end; `acceptTimeout` never is.
+
+15.24. An adapter brings one broker's client, and offers its participant: the identity its broker
+authenticates its link by; to start a link that keeps no broker session; to publish a payload to a
+topic, said taken or refused by its broker; to subscribe a topic, said held by its broker; each
+message it receives, with the topic it came to, and its acknowledgement; its link lost, and whether
+another link of its identity took it over; the largest payload a message to a topic carries, its
+inbox among them; the delivery it gives, at least once or at
+most once; whether its leg is secure. It may offer besides a subscription in a group, its broker
+handing each message to one member; a will; a publication refused when no subscriber takes it; a
+message's life in its broker. A name served by several participants needs groups. Each side's core
+holds an in-memory broker that offers each of these: each message copied as it is published and
+handed on whole in a later turn than its publish, in the order its publisher published it to that
+topic, once, or, as a test asks, again, behind the next, never, or to another member of its group;
+a queue per subscriber bounded as it is given, past which a message is dropped; a link lost or
+taken over, its will published. Its handles' type is `BROKER`, and it never leaves the process, so
+it is secure.
+
+### MQTT 5
+
+_Vectors: `mqttPublishBounds`._
+
+15.25. A broker of MQTT 5.0
+([OASIS MQTT 5.0](https://docs.oasis-open.org/mqtt/mqtt/v5.0/os/mqtt-v5.0-os.html)) carries a
+participant's link over TCP, over TLS, or over a WebSocket whose subprotocol is `mqtt`
+([MQTT 5.0 §6](https://docs.oasis-open.org/mqtt/mqtt/v5.0/os/mqtt-v5.0-os.html);
+[RFC 6455 §1.9](https://www.rfc-editor.org/rfc/rfc6455#section-1.9)); no other version of MQTT
+carries one. Over a WebSocket, a participant sends each message to its broker as one binary frame,
+never fragmented ([RFC 6455 §5.4](https://www.rfc-editor.org/rfc/rfc6455#section-5.4)), whatever
+packets it holds ([MQTT 5.0 §6](https://docs.oasis-open.org/mqtt/mqtt/v5.0/os/mqtt-v5.0-os.html)).
+A parcel is the payload of one PUBLISH, and a topic its tokens joined by `/`: an inbox
+`<root>/i/<id>`, a server's name `<root>/s/<name>`, a departure `<root>/d/<id>`. A name served in a
+group is subscribed as the shared subscription `$share/<name>/<root>/s/<name>`, its share name the
+server's name, so that every participant serving it, whatever its side, joins one group. A broker
+whose CONNACK says Shared Subscription Available 0, or that answers a shared subscription with
+0x9E, offers no group: its adapter refuses one, and a name over it is served by one participant
+alone (section 15.18). Its connections' handles' type is `MQTT` (section 15.1).
+
+15.26. A participant's link is one network connection. Its CONNECT carries Protocol Version 5;
+Clean Start 1 and a Session Expiry Interval of 0, so that its broker keeps no session past it and
+each link is a new incarnation (section 15.21); its participant's id as its Client Identifier; the
+deployment's authentication, a User Name, the id, with a Password, or none where its TLS client
+certificate authenticates it; a Receive Maximum of 65,535; a Topic Alias Maximum of 0, so that its
+broker sends no alias; its `maximumPacketSize` as its Maximum Packet Size; its `keepAlive`, in whole
+seconds rounded up, as its Keep Alive. Where its adapter leaves a will, the will is its
+participant's GONE to its departure, of QoS 1, RETAIN 0 and a Will Delay Interval of 0, so that its
+broker publishes it as it sees the link close without a clean end, a takeover by another link of
+its Client Identifier among them. A link is up once its CONNACK's Reason Code is 0x00; any other
+fails its start, as do a Maximum QoS of 0 and no CONNACK within `connectTimeout`. It sends a packet
+within each Keep Alive in force, the Server Keep Alive its CONNACK names where it names one. A
+participant's stop ends its link with a DISCONNECT of Reason Code 0x00, so that no will goes. A
+DISCONNECT its broker sends of Reason Code 0x8E is its link taken over (section 15.21); any other
+end of its network connection is its link lost. Nothing of a link reaches another: no library
+reconnects it, subscribes again for it, holds what it publishes while it is down, or keeps its
+aliases, and what is asked of a link that is down is refused at once.
+
+15.27. A participant subscribes each topic in a SUBSCRIBE of its own, at QoS 1, No Local 0, Retain
+As Published 0 and Retain Handling 2, with no Subscription Identifier. A subscription is held once
+its SUBACK grants QoS 1, and refused on any other code, QoS 0 granted among them. A SUBACK says a
+subscription is installed, never that its subscriber may read what it matches: its broker's access
+control decides what it delivers (section 15.31). An UNSUBSCRIBE names the filter its SUBSCRIBE
+named, and a subscription is let go once its UNSUBACK came.
+
+15.28. A participant publishes each parcel in a PUBLISH of QoS 1 where its adapter delivers at least
+once, of QoS 0 where at most once, never of QoS 2; of RETAIN 0; with no Topic Alias, Response Topic,
+Correlation Data, User Property, Subscription Identifier, Payload Format Indicator or Content Type;
+and with a Message Expiry Interval on an OPEN and on a DATA that carries a credential alone, the
+life sections 15.18 and 15.22 give each, in whole seconds rounded up, 1 at least. It holds at most
+its CONNACK's Receive Maximum, 65,535 where it names none, of its PUBLISH packets of QoS 1
+unacknowledged, later ones waiting in their order, and delays no other packet for them
+([MQTT 5.0 §4.9](https://docs.oasis-open.org/mqtt/mqtt/v5.0/os/mqtt-v5.0-os.html)). A PUBLISH of
+QoS 1 is taken once its PUBACK came with a Reason Code under 0x80 but 0x10; 0x10, No matching
+subscribers, says no subscriber takes it; 0x80 or more refuses it. A publication whose packet,
+counted as section 15.30 counts it, would pass its CONNACK's Maximum Packet Size is refused as it is
+asked, and never sent.
+
+15.29. A participant acknowledges a PUBLISH of QoS 1 with a PUBACK of Reason Code 0x00 once its core
+took its parcel (section 15.19), never with one of 0x80 or more. It drops in silence, and
+acknowledges, a PUBLISH whose RETAIN is 1. A packet past its own Maximum Packet Size is a Protocol
+Error: it closes its network connection, its link lost
+([MQTT 5.0 §4.13.1](https://docs.oasis-open.org/mqtt/mqtt/v5.0/os/mqtt-v5.0-os.html)).
+
+15.30. A PUBLISH of N bytes of payload to a topic of T bytes in UTF-8 counts S = 1 + v(R) + R bytes,
+where R = 2 + T + Q + v(P) + P + N, Q is 2 at QoS 1 and 0 at QoS 0, P is 5 with a Message Expiry
+Interval and 0 without, and v(n), the bytes of a Variable Byte Integer, is 1 under 128, 2 under
+16,384, 3 under 2,097,152 and 4 otherwise
+([MQTT 5.0 §2.1.4, §3.3.2](https://docs.oasis-open.org/mqtt/mqtt/v5.0/os/mqtt-v5.0-os.html)). The
+largest payload a message to a topic carries within a Maximum Packet Size is the largest N whose S
+is within it and whose R is at most 268,435,455, counted with a Message Expiry Interval whatever the
+message. A participant's receive bound (section 15.18) is the largest payload of a message to its
+inbox within its own Maximum Packet Size; what its adapter publishes to a topic is held within its
+CONNACK's, or within 268,435,460 bytes where its CONNACK names none. Under its default
+`maximumPacketSize`, an inbox `bead/i/server` takes a payload of 16,777,188 bytes; under a Maximum
+Packet Size of 4,096, a message to `bead/i/peer` carries 4,072.
+
+| Bound               | By default | Bounds                                                                                                       |
+| ------------------- | ---------- | ------------------------------------------------------------------------------------------------------------ |
+| `maximumPacketSize` | 16,777,216 | its CONNECT's Maximum Packet Size, the largest packet its broker sends it                                    |
+| `keepAlive`         | 30 s       | its CONNECT's Keep Alive, 1 to 65,535 seconds: its broker counts its link lost silent for half again as long |
+| `connectTimeout`    | 30 s       | how long its start waits for its CONNACK                                                                     |
+
+Neither `keepAlive` nor `connectTimeout` is ever without end or 0, and a `keepAlive` past 65,535
+seconds is refused.
+
+15.31. A deployment's broker authenticates each participant's link, by a User Name and a Password or
+by a TLS client certificate, and MUST tie its Client Identifier to the identity it authenticated, so
+that no participant links as another, takes its link over and has its broker publish its will; it
+takes ids past the 1 to 23 characters of `0-9 a-z A-Z` every broker of MQTT 5.0 takes. Its access
+control, by that id, lets a participant alone read its inbox and its will alone write its
+departure; lets every participant write any inbox and read any departure; lets read a server's name
+only the participants its server's application runs, granted on the name's own topic
+`<root>/s/<name>`, through which its broker delivers the name's shared subscription; and lets write
+it only its clients. A publication to a topic whose every subscriber its access control forbids is
+taken all the same, its PUBACK 0x00, so a connect to a name no participant may read waits its time
+(section 15.15). A server's participant's queues in its broker are lifted, or hold
+`maximumConnections` × `maximumUnsentBytes` at least: a queue that overruns drops, and loses
+connections by their gaps (section 15.19). Its receive maximum toward a server's participant bounds
+what that participant publishes a round trip (section 15.28), and is sized for it. No participant
+writes a retained message and none reaches one: one left on a Bead topic is the deployment's to
+clear, and a broker that serves Bead alone MAY refuse them. A broker that persists what it holds may
+keep at rest, for its life, a credential a DATA carries (section 15.22).
+
+### AMQP 1.0 on RabbitMQ 4
+
+_Vectors: `amqpMessages`, `amqpPublishBounds`._
+
+15.32. A broker of AMQP 1.0
+([OASIS AMQP 1.0](https://docs.oasis-open.org/amqp/core/v1.0/os/amqp-core-overview-v1.0-os.html))
+that is RabbitMQ 4 carries a participant's link over TCP or over TLS; no other version of AMQP
+carries one, and its management, its addresses and its permissions are RabbitMQ 4's. A parcel is
+the Data section of one message, and a topic its tokens joined by `.`: an inbox `<root>.i.<id>`, a
+server's name `<root>.s.<name>`. A participant reads a topic from the queue of its name, at the
+address `/queues/<topic>`, and writes one through the topic exchange named its root, at
+`/exchanges/<root>/<topic>`
+([RabbitMQ 4, AMQP 1.0 addresses v2](https://www.rabbitmq.com/docs/amqp#address-v2)). A server's
+name is its queue, and every participant serving it, alone or in a group, whatever its side,
+consumes it, its broker handing each message to one. Its adapter leaves no will and writes no
+departure. Its connections' handles' type is `AMQP` (section 15.1).
+
+15.33. A participant's link is one network connection, opened anew each time it links. Its OPEN
+carries its id as its container-id, `vhost:` and its virtual host as its hostname where it is given
+one, and its `idleTimeout` as its idle-time-out; it counts its link lost once nothing came for twice
+that ([AMQP 1.0 §2.4.5](https://docs.oasis-open.org/amqp/core/v1.0/os/amqp-core-transport-v1.0-os.html#doc-doc-idle-time-out)).
+Its SASL is PLAIN, its id the user, with a password, or EXTERNAL where its TLS client certificate
+authenticates it. On it a participant holds a session for its inbox's receiver, one for each name
+it serves, holding that name's receiver, one sending to inboxes and one sending to names, each
+sending one to the anonymous terminus
+([Anonymous Terminus v1.0](https://docs.oasis-open.org/amqp/anonterm/v1.0/anonterm-v1.0.html)); a
+name past what its broker's channel-max leaves is refused. It declares its inbox through its
+broker's management on that connection
+([Link Pairing v1.0](https://docs.oasis-open.org/amqp/linkpair/v1.0/linkpair-v1.0.html)), so that
+it ends with it: a queue of its name, exclusive, classic and not durable, declared once answered 200
+or 201, then bound to its root's exchange by its own name, once answered 204. Any other answer, or
+the end of its management's links, of their session or of its connection meanwhile, fails its
+start and closes its connection, its inbox ending with it; while another connection of its id holds
+the inbox, its broker answers 400, so that the earlier link keeps the id, and its participant's
+reconnection tries again. A link is up once its OPEN came and its inbox's receiver attached. The end
+of its connection that it did not ask, or of its inbox's session or receiver, is its link lost: it
+closes its connection, and its inbox is never attached again in place, since a receiver detached
+hands its unsettled messages back on the same connection. A name's receiver its broker ends is
+attached again once, on a session of its own; that refused, or the name lost again on the same
+link, is its link lost. A sending session that ends refuses each publication it held, its link
+kept, and the next publication begins another. A participant's stop detaches its receivers and
+closes its connection with no error. No link of an id takes another over. Nothing of a link reaches
+another: no library reconnects it, recovers it, or holds what it publishes while it is down, and
+what is asked of a link that is down is refused at once.
+
+15.34. A participant subscribes a topic by a receiver of its queue, on the session 15.33 gives it,
+its sender settle mode unsettled where its adapter delivers at least once and settled where at most
+once, its receiver settle mode first, no max-message-size, and its credit its own
+([AMQP 1.0 §2.6.7](https://docs.oasis-open.org/amqp/core/v1.0/os/amqp-core-transport-v1.0-os.html#doc-flow-control)):
+its inbox's receiver `linkCredit` as it attaches and a name's 1, each one more as each message is
+settled, so that a name's queue hands each of its members one OPEN at a time, the others waiting
+there for whichever member reads next, as RabbitMQ's fair dispatch at a prefetch of 1 does
+([RabbitMQ 4, consumer prefetch](https://www.rabbitmq.com/docs/consumer-prefetch)). A subscription
+is held once its ATTACH named its source, and refused when its ATTACH names none and a DETACH
+follows it, or when its broker ends its session: a name its broker's access control denies ends
+that name's session alone. A subscription asked again while it is under way waits for it. A name
+is let go once each message its receiver handed on was settled and then its DETACH came, none
+handed on after it is asked, all within one `connectTimeout`, past which its link is lost: a
+message detached unsettled goes back to its queue, and an OPEN whose connection its server took and
+has since closed would be answered anew, its pair gone. A name whose subscription is under way as it
+is let go is never held, and is let go once its ATTACH is answered. An inbox is let go once its
+broker's management deleted it, answered within `connectTimeout`, what comes to it meanwhile handed
+on and credited.
+
+15.35. A participant publishes each parcel as one message of format 0, unsettled where its adapter
+delivers at least once and settled where at most once, within its sender's credit, later ones
+waiting in their order: a header only where 15.18 or 15.22 gives the parcel a life, its ttl alone,
+that life in whole milliseconds rounded up, 1 at least and 4,294,967,295 at most; properties whose
+`to` alone is set; one Data section, the parcel; no other section or field. Each section is a
+described list of its fields up to the last set, those before it null, each value in the smallest
+of its encodings ([AMQP 1.0 §1.6](https://docs.oasis-open.org/amqp/core/v1.0/os/amqp-core-types-v1.0-os.html#section-encodings)).
+A message settled `accepted` is taken; `released`, no subscriber takes it — its exchange routes its
+topic to no queue: an inbox its broker ended, or a name no deployment provisioned; `rejected`, or
+any other outcome, refuses it
+([AMQP 1.0 §3.4](https://docs.oasis-open.org/amqp/core/v1.0/os/amqp-core-messaging-v1.0-os.html#section-delivery-state)).
+A publication whose message, counted as section 15.37 counts it, would pass its sender's ATTACH
+max-message-size is refused as it is asked, and never sent.
+
+15.36. A participant settles a message `accepted` once its core took its parcel (section 15.19),
+and never `released` or `modified`, which its broker answers by handing it again behind later
+ones. A message whose body is other than one Data section, or whose payload passes the receive
+bound of the topic it came to, is no parcel (section 15.17), and its link is kept.
+
+15.37. A message of N bytes of payload to an address of D bytes in UTF-8 counts
+S = L + 10 + D + 3 + w(N) + N bytes, where L is 13 with a life and 0 without, and w(N) is 2 under 256
+and 5 otherwise. The largest payload a message to a topic carries within a bound is the largest N,
+at most 4,294,967,295, whose S is within it, counted with a life whatever the message. What a
+participant publishes to a topic is held within its sender's ATTACH max-message-size, or within
+4,294,967,295 bytes where it names none; its receive bound of a topic (section 15.18) is the largest
+payload of a message to that topic within its own `maximumMessageSize`. Under its default, an inbox
+`bead.i.server` takes a payload of 16,777,156 bytes; under a max-message-size of 4,096, a message to
+`bead.i.peer` carries 4,038.
+
+| Bound                | By default | Bounds                                                                                                                                                                                            |
+| -------------------- | ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `maximumMessageSize` | 16,777,216 | the largest message, as its publisher writes it, whose payload it takes, 1 to 4,294,967,295 bytes: its receive bound                                                                              |
+| `linkCredit`         | 1,000      | the messages its broker may deliver its inbox's receiver before it settles one, 1 to 2,147,483,647                                                                                                |
+| `idleTimeout`        | 30 s       | its OPEN's idle-time-out, 1 ms to 1,073,741,823 ms: it counts its link lost silent for twice it                                                                                                   |
+| `connectTimeout`     | 30 s       | how long its start waits for its broker's OPEN, its sessions and its inbox; its inbox's deletion, for its answer; a name let go, for what it handed on to be settled and its DETACH; and its stop |
+
+None of them is ever without end or 0. A Data section's payload is a `vbin32` of 4,294,967,295 bytes
+at most ([AMQP 1.0 §1.6.19](https://docs.oasis-open.org/amqp/core/v1.0/os/amqp-core-types-v1.0-os.html#type-binary)),
+and an OPEN names a receive bound on 4 bytes (section 15.17): `maximumMessageSize` reaches
+4,294,967,295 at most. A FLOW's `link-credit` is a uint, and `linkCredit` reaches 2,147,483,647 at
+most, every side keeping to what one library takes ([`docs/support.md`](../docs/support.md),
+"Leveled down").
+
+15.38. A deployment's broker authenticates each participant's link, by a user name and a password
+or by a TLS client certificate it maps to a user, and that user is its id. It provisions its root's
+topic exchange, and for each server's name a queue of that name bound to it by that name; no
+participant declares either. Its permissions, by user: a participant alone configures, writes the
+bindings of and reads its inbox; every participant writes its root's exchange and, by its topic
+permissions, any inbox; a server's participants alone read its name's queue, and its clients alone
+write its name; no participant writes the default exchange, configures another queue or binds
+another key. A publication to a name that no participant consumes waits in its queue for its life,
+so a connect to it waits its time (section 15.15). Its queues hold `maximumConnections` ×
+`maximumUnsentBytes` at least, or are unbounded: one that drops loses connections by their gaps
+(section 15.19), one that rejects ends them (section 15.21). Its max_message_size bounds the largest
+message a participant publishes and the largest its library holds, `linkCredit` of them at most on
+their way to its inbox's receiver, and is sized for its participants; its
+session_max_per_connection bounds the names a participant serves. It ends an inbox once it ends the
+connection that held it: at once on a close or a reset, and after three of its heartbeat and its
+close for a connection gone silent, which is how long an inbox outlives a process that held it, a
+parcel to it taken meanwhile, and how long its id's next link is refused. A broker that writes what
+it holds to disk may keep at rest, for its life, a credential a DATA carries (section 15.22).
+
 ## 16. Services and procedures
 
 _Identities: `spec/identities.json`._
@@ -1927,6 +2399,33 @@ generator writes for the message. What is Bead's:
 6. A map's entry with a field other than its key and its value does not read (section 17.2), where
    protobuf's reference parsers skip it: one stock library reads such an entry apart, so every side
    refuses it.
+7. A message that leaves a field of `LEGACY_REQUIRED` presence unset — proto2's `required`, an
+   edition's `features.field_presence = LEGACY_REQUIRED` — does not read (section 17.2), and a
+   writer MUST refuse to write it. protobuf has such a field "required for parsing and
+   serialization" ([Feature Settings](https://protobuf.dev/editions/features/#field_presence)).
+   Its C++, Java and Go parsers refuse one, and so do Go's writer, upb's and protobuf-es's, while
+   C++ checks only in a debug build and Google.Protobuf reads and writes it.
+
+   Every message the payload holds is looked into, of any syntax: a singular field's, a repeated
+   field's items, a map's values, a group and a delimited field. An extension, which every side
+   reads as an unknown field, is not looked into. Neither is an `Any`'s message, which the payload
+   holds as bytes, as C++ and Go hold it in their JSON mapping too.
+
+   The walk takes a message's own fields first, by their numbers. It then takes each message it
+   holds, depth first, by field number: a repeated field's items by index, a map's entries by key
+   in section 18.5's order. The first field it finds unset is the one refused.
+
+   A field is unset where the message, once read, holds no value of it. A field that one of a
+   message's records sets, where the message is given twice, is set. A map's value is the last
+   its key was given. A closed enum's field is unset where item 8 leaves it so.
+
+8. A singular field of a closed enum — proto2's, an edition's `features.enum_type = CLOSED` —
+   takes no record whose number its enum declares no value of. Such a record sets nothing, as
+   protobuf keeps it among the unknown fields
+   ([Enum Behavior](https://protobuf.dev/programming-guides/enum/)). The field holds the last
+   declared number its records give, or none, and a `oneof` it is a member of holds what its
+   other records give it. A repeated field's items and a map's values keep such a number, as both
+   stock libraries read them.
 
 Where two stock libraries part on what protobuf states no rule of, the support matrix says what
 each does. The `proto` rows of `spec/codecs.json` read and write `Probe`, the message of

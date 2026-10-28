@@ -6,21 +6,23 @@
 // option features.field_presence = IMPLICIT;
 /* eslint-disable */
 
-import type { GenFile, GenMessage } from "@bufbuild/protobuf/codegenv2";
-import { fileDesc, messageDesc } from "@bufbuild/protobuf/codegenv2";
+import type { GenEnum, GenFile, GenMessage } from "@bufbuild/protobuf/codegenv2";
+import { enumDesc, fileDesc, messageDesc } from "@bufbuild/protobuf/codegenv2";
 import type { Message } from "@bufbuild/protobuf";
 
 /**
  * Describes the file codecs.proto.
  */
 export const file_codecs: GenFile = /*@__PURE__*/
-  fileDesc("Cgxjb2RlY3MucHJvdG8SDmJlYWQuY29kZWNzLnYxIpsCCgVQcm9iZRIMCgR0ZXh0GAEgASgJEg4KBm51bWJlchgCIAEoDRIkCgVjaGlsZBgDIAEoCzIVLmJlYWQuY29kZWNzLnYxLlByb2JlEg4KBmNvdW50cxgKIAMoDRIOCgZzdGFtcHMYCyADKAcSNQoIY2hpbGRyZW4YDCADKAsyIy5iZWFkLmNvZGVjcy52MS5Qcm9iZS5DaGlsZHJlbkVudHJ5Ei8KCWRlbGltaXRlZBgNIAEoCzIVLmJlYWQuY29kZWNzLnYxLlByb2JlQgWqAQIoAhpGCg1DaGlsZHJlbkVudHJ5EgsKA2tleRgBIAEoCRIkCgV2YWx1ZRgCIAEoCzIVLmJlYWQuY29kZWNzLnYxLlByb2JlOgI4AUIFkgMCCAJiCGVkaXRpb25zcOgH");
+  fileDesc("Cgxjb2RlY3MucHJvdG8SDmJlYWQuY29kZWNzLnYxIpoDCgVQcm9iZRIMCgR0ZXh0GAEgASgJEg4KBm51bWJlchgCIAEoDRIkCgVjaGlsZBgDIAEoCzIVLmJlYWQuY29kZWNzLnYxLlByb2JlEiQKBW5lZWRzGAcgASgLMhUuYmVhZC5jb2RlY3MudjEuTmVlZHMSKgoLbmVlZHNfaXRlbXMYCCADKAsyFS5iZWFkLmNvZGVjcy52MS5OZWVkcxIOCgZjb3VudHMYCiADKA0SDgoGc3RhbXBzGAsgAygHEjUKCGNoaWxkcmVuGAwgAygLMiMuYmVhZC5jb2RlY3MudjEuUHJvYmUuQ2hpbGRyZW5FbnRyeRIvCglkZWxpbWl0ZWQYDSABKAsyFS5iZWFkLmNvZGVjcy52MS5Qcm9iZUIFqgECKAISKwoFc2hhZGUYDiABKA4yFS5iZWFkLmNvZGVjcy52MS5TaGFkZUIFqgECCAEaRgoNQ2hpbGRyZW5FbnRyeRILCgNrZXkYASABKAkSJAoFdmFsdWUYAiABKAsyFS5iZWFkLmNvZGVjcy52MS5Qcm9iZToCOAEiSQoFTmVlZHMSEwoEbXVzdBgBIAEoDUIFqgECCAMSKwoFc2hhZGUYAiABKA4yFS5iZWFkLmNvZGVjcy52MS5TaGFkZUIFqgECCAMqLgoFU2hhZGUSDgoKU0hBREVfREFSSxAAEg8KC1NIQURFX0xJR0hUEAEaBDoCEAJCBZIDAggCYghlZGl0aW9uc3DoBw");
 
 /**
  * A string, a number and a message of its own kind: what a proto row reads, refuses, or writes,
  * and how deep it nests. Then the records protobuf frames otherwise: a packed run, a repeated
- * fixed32, a map's entries, and a group. Their numbers start at 10, leaving 4 to 6, 9 and 15 to the
- * rows that read a field Probe does not declare.
+ * fixed32, a map's entries, and a group, at 10 to 13. Then a message of fields protobuf requires,
+ * alone and repeated, at 7 and 8, and a closed enum at 14, its presence explicit, since a closed
+ * enum's field cannot be implicit. That leaves 4 to 6, 9 and 15 to the rows that read a field Probe
+ * does not declare.
  *
  * @generated from message bead.codecs.v1.Probe
  */
@@ -41,6 +43,16 @@ export type Probe = Message<"bead.codecs.v1.Probe"> & {
   child?: Probe | undefined;
 
   /**
+   * @generated from field: bead.codecs.v1.Needs needs = 7;
+   */
+  needs?: Needs | undefined;
+
+  /**
+   * @generated from field: repeated bead.codecs.v1.Needs needs_items = 8;
+   */
+  needsItems: Needs[];
+
+  /**
    * @generated from field: repeated uint32 counts = 10;
    */
   counts: number[];
@@ -59,6 +71,11 @@ export type Probe = Message<"bead.codecs.v1.Probe"> & {
    * @generated from field: bead.codecs.v1.Probe delimited = 13 [features.message_encoding = DELIMITED];
    */
   delimited?: Probe | undefined;
+
+  /**
+   * @generated from field: bead.codecs.v1.Shade shade = 14 [features.field_presence = EXPLICIT];
+   */
+  shade: Shade;
 };
 
 /**
@@ -67,4 +84,53 @@ export type Probe = Message<"bead.codecs.v1.Probe"> & {
  */
 export const ProbeSchema: GenMessage<Probe> = /*@__PURE__*/
   messageDesc(file_codecs, 0);
+
+/**
+ * Two fields protobuf requires: a proto row refuses a message that leaves one unset, at any depth
+ * (spec 17.9.7).
+ *
+ * @generated from message bead.codecs.v1.Needs
+ */
+export type Needs = Message<"bead.codecs.v1.Needs"> & {
+  /**
+   * @generated from field: uint32 must = 1 [features.field_presence = LEGACY_REQUIRED];
+   */
+  must: number;
+
+  /**
+   * @generated from field: bead.codecs.v1.Shade shade = 2 [features.field_presence = LEGACY_REQUIRED];
+   */
+  shade: Shade;
+};
+
+/**
+ * Describes the message bead.codecs.v1.Needs.
+ * Use `create(NeedsSchema)` to create a new message.
+ */
+export const NeedsSchema: GenMessage<Needs> = /*@__PURE__*/
+  messageDesc(file_codecs, 1);
+
+/**
+ * A closed enum: a record of a number it declares no value of sets nothing (spec 17.9.8).
+ *
+ * @generated from enum bead.codecs.v1.Shade
+ * @generated with option features.enum_type = CLOSED
+ */
+export enum Shade {
+  /**
+   * @generated from enum value: SHADE_DARK = 0;
+   */
+  DARK = 0,
+
+  /**
+   * @generated from enum value: SHADE_LIGHT = 1;
+   */
+  LIGHT = 1,
+}
+
+/**
+ * Describes the enum bead.codecs.v1.Shade.
+ */
+export const ShadeSchema: GenEnum<Shade> = /*@__PURE__*/
+  enumDesc(file_codecs, 0);
 

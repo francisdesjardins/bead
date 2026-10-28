@@ -257,6 +257,81 @@ export const fieldSchemaOf = (field: IFieldEntry, keywords?: IFieldKeywords): Sc
   };
 };
 
+/** A message's rules as its schema takes them: its plan, and its fields' keywords by number. */
+export interface IMessageKeywords {
+  readonly plan?: IMessagePlan;
+  readonly keywords?: ReadonlyMap<number, IFieldKeywords>;
+}
+
+/** The rules of a message, by its full name: none where it holds none. */
+export type KeywordsOf = (fullName: string) => IMessageKeywords;
+
+/** The rules of each of `blueprint`'s messages, by full name, as their schemas take them. */
+export const keywordsOfBlueprint = (blueprint: IBlueprint): KeywordsOf => {
+  const enums = new Map(
+    (blueprint.proto?.enums ?? []).map((entry) => {
+      return [entry.fullName, entry] as const;
+    })
+  );
+  const rules = judgedMessagesOf(blueprint);
+  const judged = new Set(rules.keys());
+  const enumOf = (name: string): IEnumEntry | undefined => {
+    return enums.get(name);
+  };
+  const known = new Map<string, IMessageKeywords>();
+
+  return (fullName) => {
+    const cached = known.get(fullName);
+
+    if (cached !== undefined) {
+      return cached;
+    }
+
+    const own = rules.get(fullName);
+    const plan = own === undefined ? undefined : messagePlanOf(fullName, { rules: own, judged });
+    const found = plan === undefined ? {} : { plan, keywords: fieldKeywordsOf(plan, enumOf) };
+
+    known.set(fullName, found);
+
+    return found;
+  };
+};
+
+// the paths `bound` names under a field, behind its name and a `.`
+const innerOf = (field: IFieldEntry, bound: ReadonlySet<string>): string[] => {
+  return [...bound]
+    .filter((path) => {
+      return path.startsWith(`${field.fieldName}.`);
+    })
+    .map((path) => {
+      return path.slice(field.fieldName.length + 1);
+    });
+};
+
+// whether a message whose fields `bound` names by their proto paths keeps, left to the body, a
+// field of LEGACY_REQUIRED presence: one no path names, or one whose own fields a path names and
+// whose message keeps one in turn (transcoding 11.5)
+const keepsRequired = (
+  entry: IMessageEntry,
+  details: {
+    readonly bound: ReadonlySet<string>;
+    readonly messages: ReadonlyMap<string, IMessageEntry>;
+  }
+): boolean => {
+  return (entry.fields ?? []).some((field) => {
+    if (details.bound.has(field.fieldName)) {
+      return false;
+    }
+
+    const inner = innerOf(field, details.bound);
+    const held = 'message' in field.type ? details.messages.get(field.type.message) : undefined;
+
+    return inner.length > 0 && held?.fields !== undefined
+      ? keepsRequired(held, { bound: new Set(inner), messages: details.messages })
+      : field.legacyRequired === true;
+  });
+};
+
 // a message's own rules in JSON Schema's words: a oneof required, one of its members there; a
 // message's oneof rule, at most one of the fields it names, and one where it is required
 const messageKeywordsOf = (entry: IMessageEntry, plan: IMessagePlan | undefined): Schema[] => {
@@ -314,39 +389,47 @@ const messageKeywordsOf = (entry: IMessageEntry, plan: IMessagePlan | undefined)
 
 /**
  * A message's schema, closed: its fields by JSON name, each `oneof`'s members never two together,
- * what its rules require required and its own rules beside them; `bound`, the fields by their proto
- * paths a route binds elsewhere, left out, a message whose own fields it binds there written inline.
+ * what its rules require and each field of `LEGACY_REQUIRED` presence required, by number, and its
+ * own rules beside them; `bound`, the fields by their proto paths a route binds elsewhere, left out,
+ * a message whose own fields it binds there written inline, its rules by `keywordsOf` kept, and
+ * required where it keeps a field of `LEGACY_REQUIRED` presence left to the body.
  */
 export const objectSchemaOf = (
   entry: IMessageEntry,
-  details: {
-    readonly keywords?: ReadonlyMap<number, IFieldKeywords>;
-    readonly plan?: IMessagePlan;
+  details: IMessageKeywords & {
     readonly messages: ReadonlyMap<string, IMessageEntry>;
     readonly bound?: ReadonlySet<string>;
+    readonly keywordsOf?: KeywordsOf;
   }
 ): Schema => {
   const bound = details.bound ?? new Set<string>();
   const fields = (entry.fields ?? []).filter((field) => {
     return !bound.has(field.fieldName);
   });
+  const inline = new Set<number>();
   const properties = Object.fromEntries(
     fields.map((field) => {
       const keywords = details.keywords?.get(field.fieldNumber);
-      const inner = [...bound]
-        .filter((path) => {
-          return path.startsWith(`${field.fieldName}.`);
-        })
-        .map((path) => {
-          return path.slice(field.fieldName.length + 1);
-        });
+      const inner = innerOf(field, bound);
       const held = 'message' in field.type ? details.messages.get(field.type.message) : undefined;
 
-      // * a field whose own fields a route binds elsewhere is its message's schema less them, inline
+      // * a field whose own fields a route binds elsewhere is its message's schema less them, inline,
+      // its message's rules and its own kept
       if (inner.length > 0 && held?.fields !== undefined) {
+        inline.add(field.fieldNumber);
+
         return [
           field.jsonName,
-          objectSchemaOf(held, { messages: details.messages, bound: new Set(inner) }),
+          allOf(
+            objectSchemaOf(held, {
+              messages: details.messages,
+              bound: new Set(inner),
+              ...(details.keywordsOf === undefined
+                ? {}
+                : { keywordsOf: details.keywordsOf, ...details.keywordsOf(held.fullName) }),
+            }),
+            keywords?.value ?? []
+          ),
         ];
       }
 
@@ -386,9 +469,22 @@ export const objectSchemaOf = (
         });
       })
   );
+  // * what its rules require, and what protobuf requires (transcoding 11.7); a field a variable binds
+  // into, which that variable holds present, where its message keeps one left to the body (11.5)
   const required = fields
     .filter((field) => {
-      return details.keywords?.get(field.fieldNumber)?.required === true;
+      const held = 'message' in field.type ? details.messages.get(field.type.message) : undefined;
+
+      if (inline.has(field.fieldNumber) && held !== undefined) {
+        return keepsRequired(held, {
+          bound: new Set(innerOf(field, bound)),
+          messages: details.messages,
+        });
+      }
+
+      return (
+        details.keywords?.get(field.fieldNumber)?.required === true || field.legacyRequired === true
+      );
     })
     .map((field) => {
       return field.jsonName;
@@ -436,16 +532,7 @@ export const componentSchemasOf = (blueprint: IBlueprint): Record<string, Schema
       return [message.fullName, message] as const;
     })
   );
-  const enums = new Map(
-    (blueprint.proto?.enums ?? []).map((entry) => {
-      return [entry.fullName, entry] as const;
-    })
-  );
-  const rules = judgedMessagesOf(blueprint);
-  const judged = new Set(rules.keys());
-  const enumOf = (name: string): IEnumEntry | undefined => {
-    return enums.get(name);
-  };
+  const keywordsOf = keywordsOfBlueprint(blueprint);
 
   return {
     ...Object.fromEntries(
@@ -454,21 +541,14 @@ export const componentSchemasOf = (blueprint: IBlueprint): Record<string, Schema
           return message.fields !== undefined;
         })
         .map((message) => {
-          const own = rules.get(message.fullName);
-          const plan =
-            own === undefined ? undefined : messagePlanOf(message.fullName, { rules: own, judged });
-
           return [
             message.fullName,
-            objectSchemaOf(message, {
-              messages,
-              ...(plan === undefined ? {} : { plan, keywords: fieldKeywordsOf(plan, enumOf) }),
-            }),
+            objectSchemaOf(message, { messages, ...keywordsOf(message.fullName) }),
           ];
         })
     ),
     ...Object.fromEntries(
-      [...enums.values()].map((entry) => {
+      (blueprint.proto?.enums ?? []).map((entry) => {
         return [entry.fullName, enumSchemaOf(entry)];
       })
     ),

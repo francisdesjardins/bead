@@ -13,12 +13,15 @@ less than a millisecond nor past 2³¹ − 1, and none for a fraction
 ([0011](0011-every-side-takes-its-time-from-a-clock-it-is-given.md)). The values users write do not
 reach a timer alike: 0.41 s is 410 ms in JavaScript and 409.9999 ms in .NET.
 
-Twenty-seven places take such a duration, by 43 ways, from a call's timeout to a gateway's
-heartbeat. Some are reached more than one way: a reserve and a cancel, a relay's own timeout and a
-destination's, every transport's connect, the in-memory client's among them, a client and its server
-over HTTP and over WebSocket, and an HTTP server and a gateway at three of 15.12's places. Few
-inputs tell two readings of 1.4 apart — a half up from a half to the even, a value as given from as
-rounded at the ceiling, −1 ms, NaN — and a table of inputs that misses them proves neither reading.
+Thirty-four places take such a duration, by 51 ways, from a call's timeout to a gateway's heartbeat
+and a broker's: its participant's heartbeat and `bodyGracePeriod`, its server transport's
+`acceptTimeout`, and its MQTT 5 and AMQP 1.0 adapters' keep-alive, idle-time-out and connect
+timeout. Some are reached more than one way: a reserve and a cancel, a relay's own timeout and a
+destination's, every transport's connect, the in-memory client's and the broker client's among them,
+a client and its server over HTTP and over WebSocket, and an HTTP server and a gateway at three of
+15.12's places. Few inputs tell two readings of 1.4 apart — a half up from a half to the even, a
+value as given from as rounded at the ceiling, −1 ms, NaN — and a table of inputs that misses them
+proves neither reading.
 
 A file must not pin what the spec leaves to each side. A refusal's words are each side's: the C#
 side's message carries .NET's ` (Parameter '…')`, which its tests skip; each side names an option in
@@ -36,8 +39,8 @@ Four ways were weighed:
 
 - **Twin tables of inputs, one a side**: free, and every gap held alike by two hands.
 - **A file keyed by each refusal's words, the words pinned, every default the code has**: its keys
-  change with a phrase, it pins English no clause states, and it states client defaults ahead of the
-  client part.
+  change with a phrase, it pins English no clause states, and it states client defaults that no
+  client part over HTTP and a WebSocket holds.
 - **A file of policies alone**, each place's kind, 0 and never, from which each harness derives
   every outcome: shorter, and every language then checks its own reading of 1.4 against itself.
 - **A file of places keyed by a stable id, each with its ways, one table of inputs, and every
@@ -83,8 +86,10 @@ and the key stays. A place carries besides:
   `refusal`, whether it refuses alone, at those on the real clock (0011), whose timers no test clock
   reaches: a WebSocket's heartbeat and its close timeout, its client's and its server's, and each
   server's `sendGracePeriod` and `headersTimeout`, a gateway's among them
-  ([0033](0033-a-side-bounds-what-a-peer-holds-of-it.md)); and at a gateway's heartbeat. A place
-  observed by its refusal has no default in the file, since nothing would read it;
+  ([0033](0033-a-side-bounds-what-a-peer-holds-of-it.md)); at a gateway's heartbeat; and over a
+  broker, at its participant's heartbeat and at each adapter's keep-alive or idle-time-out and
+  connect timeout. A place observed by its refusal has no default in the file, since nothing would
+  read it;
 - `clauses`, the units of the spec it checks, each for what it observes of it, and nothing else:
   1.4, which holds and refuses its durations; its `neverClause`; and its default's clause.
 
@@ -274,6 +279,6 @@ holds:
 | The C# client's twin promised a rounding it did not check                                                         | Accepted: it reads the close timeout its connections are built with, as the TypeScript twin reads what `ws` is handed.                                                                  |
 | The clients' never differed unseen: the TypeScript client hands `ws` 2³¹ − 1 ms, the C# client waits without end  | Accepted: a twin pair waits on a server without end for an infinite close timeout, and the matrix states the TypeScript side's cap.                                                     |
 | No rule said when two owners share a place                                                                        | Accepted: when the spec names one option for both and every column the file holds agrees; `httpTransport.inactivityTimeout` is the HTTP client's and server's, whose columns all agree. |
-| A place renamed changes what a conforming harness answers to, and was told as a test                              | Accepted: the HTTP place shared is a feature of the spec; no alias and no version, with no third language before 1.0.                                                                   |
+| A place renamed changes what a conforming harness answers to, and was told as a test                              | Accepted: the HTTP place shared is a feature of the spec; no alias and no version: both sides' harnesses read the file in the repository, and move with the name.                       |
 | The C# twin played every input of a place, whichever way it plays                                                 | Accepted: `Durations.Played(place, way)` plays nothing of a way this side is excused from, as the TypeScript twin skips it.                                                             |
 | The close timeout's place sat apart from the heartbeat's, its twin in shape                                       | Accepted: beside it, in the generator, the file and both harnesses.                                                                                                                     |

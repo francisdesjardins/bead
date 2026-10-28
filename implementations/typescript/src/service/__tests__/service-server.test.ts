@@ -1,7 +1,9 @@
+import { UninterpretedOption_NamePartSchema } from '@bufbuild/protobuf/wkt';
 import { expect, test } from '@playwright/test';
+import { protoCodecOf } from '../../proto/codec';
 import { FailureScope, ProtocolCode } from '../../router/shared/constants';
 import { FailureError } from '../../router/shared/errors';
-import { PAYLOAD_CODECS } from '../../router/shared/payloads';
+import { type IPayloadCodec, PAYLOAD_CODECS } from '../../router/shared/payloads';
 import type { IProcedure, IRequestResolver } from '../../router/shared/types';
 import { violationsOf } from '../../router/shared/violations';
 import { ProgrammerError } from '../../transport/shared/errors';
@@ -26,6 +28,35 @@ const loud = {
     return true;
   },
 };
+
+/**
+ * A procedure of service 8 whose request and result are a proto2 `NamePart`, which requires both
+ * its fields, each side's codec `proto` or `raw` as given: a peer that reads its payload as `raw`
+ * sends what a Bead writer of the message never writes.
+ */
+const namePartOf = ({ request, result }: { request: 'proto' | 'raw'; result: 'proto' | 'raw' }) => {
+  const codecOf = (encoding: 'proto' | 'raw') => {
+    return encoding === 'proto'
+      ? (protoCodecOf(UninterpretedOption_NamePartSchema) as IPayloadCodec<unknown>)
+      : (PAYLOAD_CODECS.raw as IPayloadCodec<unknown>);
+  };
+
+  return Object.freeze({
+    part: requestOf({
+      admission: 'none',
+      failures: {},
+      procedure: { procedureId: 1, procedureName: 'part', serviceId: 8, serviceRevision: 1 },
+      request: codecOf(request),
+      result: codecOf(result),
+    }),
+  });
+};
+
+// a NamePart that leaves is_extension unset, `name_part` "a" alone
+const PARTIAL = Uint8Array.of(0x0a, 0x01, 0x61);
+
+const UNSET =
+  'a proto message leaves google.protobuf.UninterpretedOption.NamePart.is_extension unset';
 
 /** The greeter's server side, its hook admitting every call unless one is given. */
 const greeterOf = (hook: IAdmissionHook = loud) => {
@@ -528,6 +559,67 @@ test.describe('createServiceServer', () => {
       validating.command.shout('hi')({ connectionHandle: CONNECTION, timeout: 1_000 })
     ).resolves.toBe('HI');
     expect(heard).toEqual(['hi']);
+  });
+
+  // spec 17.2.5, 17.9.7
+  test('answers PAYLOAD_UNDECODABLE to a request that leaves a required field unset, before its resolver', async () => {
+    await using connected = await connectWorker();
+    const server = createServiceServer(namePartOf({ request: 'proto', result: 'raw' }));
+    const client = createServiceClient(
+      namePartOf({ request: 'raw', result: 'raw' }),
+      connected.client
+    );
+    const reported: unknown[] = [];
+    const seen: unknown[] = [];
+
+    connected.server.router.on('error', (error) => {
+      reported.push(error);
+    });
+    server.on('part', (request, response) => {
+      seen.push(request.payload);
+
+      return response(new Uint8Array());
+    });
+    server.offer(connected.server);
+
+    const refused = await client.request
+      .part(PARTIAL)()
+      .catch((error: unknown) => {
+        return error as FailureError;
+      });
+
+    expect(refused).toBeInstanceOf(FailureError);
+    expect(refused).toMatchObject({
+      code: ProtocolCode.PAYLOAD_UNDECODABLE,
+      origin: 'peer',
+      scope: FailureScope.PROTOCOL,
+    });
+    // * the protocol's answer, never its resolver's: nothing ran, nothing to report
+    expect(seen).toEqual([]);
+    expect(reported).toEqual([]);
+  });
+
+  test('answers PROCEDURE_FAILED to a result that leaves a required field unset, and reports it', async () => {
+    await using connected = await connectWorker();
+    const server = createServiceServer(namePartOf({ request: 'raw', result: 'proto' }));
+    const client = createServiceClient(
+      namePartOf({ request: 'raw', result: 'raw' }),
+      connected.client
+    );
+    const reported: unknown[] = [];
+
+    connected.server.router.on('error', (error) => {
+      reported.push(error);
+    });
+    server.on('part', (_request, response) => {
+      return response({ namePart: 'a' });
+    });
+    server.offer(connected.server);
+
+    expect(await codeOf(client.request.part(new Uint8Array())())).toBe(
+      ProtocolCode.PROCEDURE_FAILED
+    );
+    expect(reported).toEqual([new TypeError(UNSET)]);
   });
 
   test("a mapped member keeps its descriptor's @deprecated", async () => {

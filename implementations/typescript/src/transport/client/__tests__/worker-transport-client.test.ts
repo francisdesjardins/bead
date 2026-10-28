@@ -2,6 +2,7 @@ import { expect, test } from '@playwright/test';
 import { createWorkerTransportServer } from '../../server/worker-transport-server';
 import { createTestClock, delaysOn } from '../../shared/__tests__/fixtures';
 import {
+  CancelError,
   ConnectError,
   GenericError,
   ProgrammerError,
@@ -105,6 +106,7 @@ const nextEvent = (client: WorkerTransportClient, event: 'close' | 'message') =>
 // definition
 
 test.describe('createWorkerTransportClient', () => {
+  // spec 15.15
   test('connects through a channel of its own, carries bytes both ways, and disconnects, the server told', async () => {
     await using started = await startWorker();
     const { server, serverEvents, worker } = started;
@@ -265,6 +267,7 @@ test.describe('createWorkerTransportClient', () => {
       ]);
   });
 
+  // spec 15.15
   test('fails its connect at once as its worker errs before the connection opens, telling a server that takes the port later', async () => {
     // a clock that never moves: no timeout fails the connect
     const clock = createTestClock(Date.UTC(2026, 0, 1));
@@ -332,43 +335,64 @@ test.describe('createWorkerTransportClient', () => {
     }
   });
 
+  // spec 15.15
   test('gives up on a worker that never answers, telling a server that takes the port later', async () => {
-    const held: MessagePort[] = [];
-    const silent: IWorkerLike = {
-      postMessage: (_, transfer) => {
-        held.push(transfer[0] as MessagePort);
-      },
-    };
-    const client = createWorkerTransportClient({ worker: silent });
-
-    await expect(client.connect({ timeout: 30 })).rejects.toBeInstanceOf(TimeoutError);
-    expect(client.isClosed()).toBe(true);
-
-    const heard: unknown[] = [];
-    const [late] = held;
-
-    late?.addEventListener('message', ({ data }) => {
-      heard.push(data);
-    });
-    late?.start();
-    await expect
-      .poll(() => {
-        return heard;
-      })
-      .toEqual([WORKER_MESSAGES.CLOSE]);
-    late?.close();
-
-    // a dispose while it connects rejects the connect
-    const disposed = client.connect({});
-
-    (client as ITransportClientInternal<object, never>)[dispose]();
-
-    await expect(disposed).rejects.toThrow(
-      new ConnectError('the transport client was disposed as it connected')
-    );
-
-    for (const port of held) {
-      port.close();
+    for (const ending of ['cancel', 'timeout', 'dispose']) {
+      const held: MessagePort[] = [];
+      const clock = createTestClock();
+      const cancelling = new AbortController();
+      const silent: IWorkerLike = {
+        postMessage: (_, transfer) => {
+          held.push(transfer[0] as MessagePort);
+        },
+      };
+      await using client = createWorkerTransportClient({ clock, worker: silent });
+      const told = recordEnds(client);
+      const connecting = client.connect({ timeout: 100, signal: cancelling.signal });
+      const outcome = connecting.catch((reason: unknown) => {
+        return reason;
+      });
+      try {
+        if (ending === 'cancel') {
+          cancelling.abort();
+        } else if (ending === 'timeout') {
+          await clock.tickAsync(100);
+        } else {
+          (client as ITransportClientInternal<object, never>)[dispose]();
+        }
+        const failure = await outcome;
+        expect(failure).toBeInstanceOf(
+          ending === 'cancel' ? CancelError : ending === 'timeout' ? TimeoutError : ConnectError
+        );
+        if (ending === 'dispose') {
+          expect(failure).toMatchObject({
+            message: 'the transport client was disposed as it connected',
+          });
+        }
+        expect(client.isClosed()).toBe(true);
+        expect(delaysOn(clock)).toEqual([]);
+        const heard: unknown[] = [];
+        const [late] = held;
+        late?.addEventListener('message', ({ data }) => {
+          heard.push(data);
+        });
+        late?.start();
+        await expect
+          .poll(() => {
+            return heard;
+          })
+          .toEqual([WORKER_MESSAGES.CLOSE]);
+        // a server that takes the port after the attempt ended cannot reopen it
+        late?.postMessage(WORKER_MESSAGES.OPEN);
+        late?.postMessage(Uint8Array.of(1).buffer);
+        await new Promise(setImmediate);
+        expect(client.isClosed()).toBe(true);
+        expect(told).toEqual([]);
+      } finally {
+        for (const port of held) {
+          port.close();
+        }
+      }
     }
   });
 

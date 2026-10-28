@@ -9,6 +9,72 @@ namespace Bead.Tests;
 /// </summary>
 public sealed class TrustedProxiesTests
 {
+    [Fact]
+    public void Reads_one_to_five_ASCII_port_digits_and_stops_forwarding_at_any_other_port()
+    {
+        var trust = TrustOf(["127.0.0.1", "10.0.0.0/8"], 0);
+        foreach (var (node, address) in new[] { ("192.0.2.7", "192.0.2.7"), ("[2001:db8::1]", "2001:db8::1") })
+        {
+            foreach (var port in new[] { "0", "9", "00000", "65535", "99999" })
+            {
+                var entry = $"{node}:{port}";
+                Assert.Equal(address, TrustedProxies.AddressOfEntry(entry));
+                Assert.Equal(address, TrustedProxies.ClientAddressOf(Loopback, ($"203.0.113.9, {entry}", trust)));
+            }
+            foreach (var port in new[] { "", "123456", "x", "1x", "１２", "١" })
+            {
+                var entry = $"{node}:{port}";
+                Assert.Null(TrustedProxies.AddressOfEntry(entry));
+                Assert.Equal("127.0.0.1", TrustedProxies.ClientAddressOf(Loopback, ($"203.0.113.9, {entry}", trust)));
+                Assert.Equal("10.0.0.1", TrustedProxies.ClientAddressOf(Loopback, ($"203.0.113.9, {entry}, 10.0.0.1", trust)));
+            }
+        }
+    }
+
+    [Fact]
+    public void Keeps_a_direct_client_address_when_no_forwarding_policy_is_supplied()
+    {
+        var trust = TrustedProxies.TrustOf((null, "TrustedProxies"), (0, "UnnamedProxies"));
+        string[] addresses = ["192.0.2.7", "::ffff:192.0.2.7", "2001:DB8::1", "fe80::1%3"];
+        Assert.Equal(["192.0.2.7", "192.0.2.7", "2001:db8::1", "fe80::1"], addresses.Select((address) =>
+        {
+            return TrustedProxies.ClientAddressOf(IPAddress.Parse(address), (null, trust));
+        }));
+    }
+
+    [Fact]
+    public void Stops_at_a_malformed_bracketed_forwarding_entry_before_reading_a_claimed_client()
+    {
+        var trust = TrustOf(["127.0.0.1", "10.0.0.0/8"], 0);
+        foreach (var entry in new[] { "[", "[::1", "[2001:db8::1", "[::1]extra", "[::1]:x" })
+        {
+            Assert.Null(TrustedProxies.AddressOfEntry(entry));
+            Assert.Equal("127.0.0.1", TrustedProxies.ClientAddressOf(Loopback, ($"203.0.113.9, {entry}", trust)));
+            Assert.Equal("10.0.0.1", TrustedProxies.ClientAddressOf(Loopback, ($"203.0.113.9, {entry}, 10.0.0.1", trust)));
+        }
+    }
+
+    [Fact]
+    public void Trusts_only_the_two_addresses_of_an_uncompressed_IPv6_prefix_of_127_bits()
+    {
+        const string network = "2001:db8:1:2:3:4:5:6/127";
+        var trust = TrustOf([network], 0);
+        string[] addresses = ["2001:db8:1:2:3:4:5:5", "2001:db8:1:2:3:4:5:6", "2001:db8:1:2:3:4:5:7", "2001:db8:1:2:3:4:5:8"];
+
+        Assert.Equal(
+            ["2001:db8:1:2:3:4:5:5", "203.0.113.9", "203.0.113.9", "2001:db8:1:2:3:4:5:8"],
+            addresses.Select((address) =>
+            {
+                return TrustedProxies.ClientAddressOf(IPAddress.Parse(address), ("203.0.113.9", trust));
+            }));
+        var refused = Assert.Throws<ArgumentException>(() =>
+        {
+            TrustedProxies.Assert(["2001:db8:1:2:3:4:5:7/127"], "trustedProxies");
+        });
+        Assert.Equal($"trustedProxies cannot hold \"2001:db8:1:2:3:4:5:7/127\": its bits past the prefix are set: write {network}, not 2001:db8:1:2:3:4:5:7/127 (Parameter 'trustedProxies')", refused.Message);
+        Assert.Equal("trustedProxies", refused.ParamName);
+    }
+
     // constants
 
     private static readonly IPAddress Loopback = IPAddress.Loopback;

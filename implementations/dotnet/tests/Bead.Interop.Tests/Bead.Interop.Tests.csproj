@@ -22,11 +22,19 @@
     <ProjectReference Include="../../src/Bead.Transport.WebSockets/Bead.Transport.WebSockets.csproj" />
     <ProjectReference Include="../../interop/Bead.Interop/Bead.Interop.csproj" />
     <ProjectReference Include="../../src/Bead.Transcoding.Http/Bead.Transcoding.Http.csproj" />
+    <!-- the C# client over MQTT 5, and a C# server of its own in the group both sides serve -->
+    <ProjectReference Include="../../src/Bead.Transport.Mqtt/Bead.Transport.Mqtt.csproj" />
+    <!-- the C# client over AMQP 1.0, and a C# server of its own in the group both sides serve -->
+    <ProjectReference Include="../../src/Bead.Transport.Amqp/Bead.Transport.Amqp.csproj" />
   </ItemGroup>
 
   <ItemGroup>
     <!-- JSON as a service manager's accessor takes it, for the calls no generated client makes -->
     <Compile Include="../Shared/JsonPayloads.cs" Link="JsonPayloads.cs" />
+    <!-- the brokers a run gives, and the relay a cut ends, as the brokers' adapters' tests take them -->
+    <Compile Include="../Bead.Transport.Mqtt.Tests/MqttFixture.cs" Link="MqttFixture.cs" />
+    <Compile Include="../Bead.Transport.Amqp.Tests/AmqpFixture.cs" Link="AmqpFixture.cs" />
+    <Compile Include="../Shared/LinkRelay.cs" Link="LinkRelay.cs" />
     <!-- the HTTP client's generated messages and descriptors, in this test assembly alone -->
     <Compile Include="../Bead.Transcoding.Tests/Generated/**/*.cs" Link="Transcoding/%(RecursiveDir)%(Filename)%(Extension)" />
   </ItemGroup>

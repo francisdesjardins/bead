@@ -15,8 +15,9 @@
 
 A call reaches sides that never drew its session. A relay passes it to a destination behind it;
 HTTP/JSON transcoding takes it from a client whose `Authorization` field holds its credential; a
-broker hands it to a server that takes its procedure
-([0021](0021-a-broker-is-a-transport-and-bead-is-never-a-network.md)); a server that never issued
+broker carries it to the server whose participant accepted its connection
+([0038](0038-over-a-broker-a-connection-is-placed-once-at-its-open-named-by-both-its-ends.md)); a
+server that never issued
 its token runs it on a token it verifies alone. Each of them has to know from the header whether the
 call presents a credential and of what kind, since admission reads the header and never the payload
 (spec, section 9.2, step 6), and a relay passes the payload on undecoded (section 14.2).
@@ -309,19 +310,26 @@ nor a WebSocket toward its client, and a request that presents `ELSEWHERE` on th
 any field value, and none toward its client, so a server's command that presents `ELSEWHERE` over it
 fails before it goes (spec 13.4, 15.13;
 [0036](0036-an-in-memory-transport-joins-two-routers-of-one-process-and-a-server-takes-several-transports-through-one.md)).
-On a broker
-([0021](0021-a-broker-is-a-transport-and-bead-is-never-a-network.md)), `ELSEWHERE` is the case it is
-made for: a client authenticates to the broker, the server never sees that client's
-connection, and each message reaches it on the broker's word. What carries that word, the
-authentication of the connection its client publishes on or a property of the message, is open, and
-is decided with the broker's transport. A relay that publishes for many requesters carries each
-one's credential with that requester's message, never in its own connection's authentication, which
-is the relay's, as a relay's leg B over a WebSocket never presents its own upgrade's credential for
-a requester's.
+Over a broker
+([0040](0040-a-brokers-adapter-offers-bytes-at-topics-and-bead-keeps-its-own-credit-credential-and-heartbeat.md)),
+`ELSEWHERE` stands for the bearer credential its DATA carries, toward its server alone: a client's
+transport carries the credential a call presents, any field value, on the first part of the DATA
+that carries its request, and a server's command that presents `ELSEWHERE` over a broker fails
+before it goes (spec 15.22). A broker authenticates a participant to itself and tells no subscriber
+who published a message, so its authentication stands for no request: a publisher's identity a
+broker vouches for, the broker's word, is no capability MQTT 5 or core NATS gives; over AMQP 1.0
+RabbitMQ validates `user-id`, properties' second field, which changes the binding's profile and its
+count and gives the core a use of its own under 15.18 and 15.22
+([0043](0043-over-amqp-1-0-a-participant-is-one-connection-whose-exclusive-inbox-ends-with-it-and-a-parcel-one-message-of-one-profile-each-counted-to-its-byte.md)):
+it is ahead, by a decision of its own. A relay that publishes for many requesters carries each
+one's credential in that requester's DATA, never in its own participant's authentication, which is
+the relay's, as a relay's leg B over a WebSocket never presents its own upgrade's credential for a
+requester's.
 
 **A bearer credential crosses only TLS off the machine.** A side presents a `JWT`, and carries an
-`ELSEWHERE`, only over TLS — `wss`, `https` — or within the machine: the loopback, a Web Worker, an
-in-memory transport, a router called in process, as RFC 6750 §5.3 requires of every bearer token.
+`ELSEWHERE`, only over TLS — `wss`, `https`, a broker's legs under TLS, its own and its peer's —
+or within the machine: the loopback, a Web Worker, an in-memory transport, a router called in
+process, as RFC 6750 §5.3 requires of every bearer token.
 The sender holds it, the client and a relay's leg B alike, since a server behind a terminator of TLS
 cannot tell. A server's transport judges a connection by what it listens on, unless its application
 says what stands in front of it, `secure`, `Secure`: TLS terminated before it, or a proxy that
@@ -470,8 +478,10 @@ session and, of a `JWT`, its scheme alone, while what a transport carried beside
 a `JWT`'s token reach the side's verifier and a relay alone, by least privilege (Saltzer and
 Schroeder): an `ELSEWHERE`'s verifier puts in the session's data what a procedure needs of its
 credential, and a `JWT`'s claims are that data already. A procedure that needs the bytes themselves,
-to exchange them as RFC 8693's `subject_token` or to call on its user's behalf, waits for an opt-in
-for both schemes at once, kept for the procedure that asks, a decision of its own.
+to exchange them as RFC 8693's `subject_token` or to call on its user's behalf, reads none: an
+opt-in that hands a procedure its call's bearer credential, a `JWT`'s token or what its transport
+carried beside an `ELSEWHERE`, both schemes at once, to the procedure that asks alone, is ahead, by
+a decision of its own.
 
 **A relay's default admission lets any `JWT`, and any `ELSEWHERE` its transport carried, past its
 first step.** It reads the header's scheme, never the credential, so a requester that writes any
@@ -525,6 +535,9 @@ nor its thumbprint (RFC 7638): `spec/check.py` refuses one, over the files git l
 verifier refuses one ([0006](0006-a-rule-has-its-gate.md)).
 
 ## The Tenth Man
+
+What carries `ELSEWHERE` over a broker met the round of the broker's core, which
+[0038](0038-over-a-broker-a-connection-is-placed-once-at-its-open-named-by-both-its-ends.md) keeps.
 
 The decision met the Tenth Man ([0009](0009-conventional-commits-git-flow-and-the-tenth-man.md)) in
 ten rounds, a later one answering an earlier one's answers, the seventh and the eighth also rounds

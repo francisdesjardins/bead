@@ -2,10 +2,10 @@
   "$schema": "schemas/transcoding.schema.json",
   "$comment": [
     "Bead's HTTP/JSON transcoding: what a gateway answers over HTTP of a service's procedures (spec/transcoding.md, decision 0037), which every implementation that offers a gateway plays through its own modules and its gateway: templates and bindings through its routes, readings and writings through its mapping of protobuf's JSON, failures through its problems, events through its streams, and exchanges through its gateway over a real socket.",
-    "Every message is spec/transcoding.proto's, by its full name, and its service TranscodingService, named Transcoding, each procedure by its name; each side's tests take their code of it from beadc, an output with http: true, whose route table and document they read, which tools/check-transcoding.mjs holds to what beadc writes.",
+    "Every message is spec/transcoding.proto's, or spec/transcoding-required.proto's, which it imports, by its full name, and its service TranscodingService, named Transcoding, each procedure by its name; each side's tests take their code of it from beadc, an output with http: true, whose route table and document they read, which tools/check-transcoding.mjs holds to what beadc writes.",
     "templates are templates and raw paths: route, the index of the template that answers a path by 3.5's precedence, null where none matches; variables, each variable's value by its field path, decoded as 3.8 decodes one; verb, the path's, where it has one; refused, where a variable's value does not decode, which a gateway answers 400 PAYLOAD_UNDECODABLE. An entry of one template and refused is a template refused as it is parsed; one of two templates and tie says whether they tie (3.9).",
-    "readings are bodies read as 5.2 reads a proto request's: body, its text, or bodyBytes, its bytes in hexadecimal where they are no UTF-8; then payload, the message read, as its binary payload in hexadecimal, which a harness reads through its stock library and compares with the message its mapping read, as messages, since protobuf fixes no message's bytes whole; or refused, the reason it is refused for, the mapping's own words, and pointer, where it met it as 7.4 places it, the body the request whole, none for the text's own.",
-    "writings are results written as 5.6 writes one: payload, the result's bytes, which a harness reads through its stock library; then body, the text Bead's proto JSON form writes of it, byte for byte, or refused, the reason 5.7 refuses it for, which a gateway answers 500 (7.6).",
+    "readings are bodies read as 5.2 reads a proto request's: body, its text, or bodyBytes, its bytes in hexadecimal where they are no UTF-8; then payload, the message read, as its binary payload in hexadecimal, which a harness reads through its stock library and compares with the message its mapping read, as messages, since protobuf fixes no message's bytes whole; or refused, the reason it is refused for, the mapping's own words, and pointer, where it met it as 7.4 places it, the body the request whole, none for the text's own: a required field left unset, step 4, by the member its object lacks.",
+    "writings are results written as 5.6 writes one: payload, the result's bytes, which a harness reads through its side's runtime reader, as a gateway reads a result (spec 17.9); then body, the text Bead's proto JSON form writes of it, byte for byte, or refused, the reason 5.7 refuses it for, which a gateway answers 500 (7.6).",
     "upb, on a reading or a writing, is how protobuf's own Python library, which the generator runs beside its own reading and writing, parts from it, D and its number where a row of decision 0037's table says the stock libraries part there too: informative, read by no harness.",
     "bindings are requests bound by section 4: procedure, its procedure; route, its method, its template and its body as its rule gives them; target, the request's target, raw; body, its body's text where it has one; then payload, the request's message as its binary payload, compared as a reading's is, or refused, the reason, which a gateway answers 400 PAYLOAD_UNDECODABLE, and pointer or parameter, where the request carried it, as 7.4 places it, none for its text or its query whole.",
     "failures are a call's failure as a gateway answers it (section 7). failure is its code; its scope, protocol where none is given; its detail as the gateway's client read it; where it arose, arose: server, its server answered it of the request; client, its client raised it before the call went; answer, its client raised it of a result or a notification; gateway, the gateway's own reading of the request; encoding, of a request its server could not read, proto where none is given; credential, true where its call presented one; challenge, where the gateway is given one, Bearer otherwise; pointer or parameter, where the gateway's reading met what it refuses. Or own, a failure of the gateway's own — timeout, closed, unwritable, jwt, scheme or failed — with its detail, its words, empty for none. procedure and route, for PAYLOAD_INVALID, its procedure and the route its request came by; problemTypes, the problem types its definitions give, https://example.com/problems/ where none is given, null for none. status, fields beside it, and problem, the body's text, byte for byte.",
@@ -14,7 +14,7 @@
     "defaults are the gateway's options where a case gives none, by the names of transcoding 2.4, 7.6, 8.7, 8.8, 9.2, 10.3 and 11.1, and of spec 15.12, in milliseconds for a time; options, where given, are a case's beside them. service is what each procedure's resolver does, by its name, what its server verifies, and the counts an exchange waits on. A case marked realTime plays on the real clock.",
     "clauses are the units of transcoding.md an entry checks: a clause, 5.2; an item of its numbered list, 5.2.1; a row of its table, counted from 1, 7.6.8; and a unit of spec.md behind spec:, spec:9.2.5, after them."
   ],
-  "transcodingVersion": "0.1.0",
+  "transcodingVersion": "0.2.0",
   "defaults": {
     "hosts": [],
     "origins": [
@@ -64,11 +64,16 @@
       "ask": "Commands its caller, by answer, and answers the code the command failed with, or 0.",
       "answer": "A command its caller answers.",
       "hang": "Answers never, and counts each of its calls that ends cancelled.",
-      "cancels": "Answers how many of hang's calls ended cancelled, once they are at least its atLeast, or 1 second passed."
+      "cancels": "Answers how many of hang's calls ended cancelled, once they are at least its atLeast, or 1 second passed.",
+      "require": "Answers its request's needs, or a Needs of no field where none is set.",
+      "getNeeds": "Answers its request.",
+      "updateNeeds": "Answers its request's needs."
     },
     "verifier": "ELSEWHERE: the value Bearer good resolves to a credential's session of the identifier ada; any other does not hold. The server is given no JWT verifier.",
     "counts": {
-      "hanging": "the calls of hang its resolver took, which an exchange's until waits on"
+      "hanging": "the calls of hang its resolver took, which an exchange's until waits on",
+      "requires": "the calls of require its resolver took",
+      "reported": "the failures its server reported on its error (spec 9.0)"
     }
   },
   "templates": [
@@ -2836,13 +2841,208 @@
         "5.2.1",
         "5.2.2",
         "5.2.3",
-        "5.2.4",
+        "5.2.5",
         "5.3",
         "5.4"
       ],
       "message": "bead.transcoding.v1.Everything",
       "body": "{\"aDouble\":1.5,\"aFloat\":0.1,\"anInt64\":\"-5\",\"aUint64\":\"18446744073709551615\",\"anInt32\":-2,\"aFixed64\":\"7\",\"aBool\":true,\"aString\":\"café\",\"someBytes\":\"3q2+7w==\",\"aUint32\":4294967295,\"aSint64\":\"-9223372036854775808\",\"color\":\"COLOR_GREEN\",\"inner\":{\"name\":\"n\",\"count\":3},\"int64s\":[\"1\",2,\"-3\"],\"inners\":[{\"name\":\"a\"},{}],\"labels\":{\"b\":2,\"a\":1},\"byId\":{\"10\":\"x\",\"-1\":\"y\"},\"flags\":{\"true\":\"t\"},\"maybe\":0,\"choiceText\":\"\",\"at\":\"2026-10-21T12:00:00.5Z\",\"took\":\"-1.5s\",\"mask\":\"fooBar,baz\",\"extra\":{\"k\":[1,null]},\"anyValue\":\"v\",\"wrappedInt64\":\"0\",\"wrappedString\":\"\",\"nothing\":{},\"renamed\":\"r\",\"list\":[true],\"wrappedBool\":false}",
       "payload": "09 00 00 00 00 00 00 F8 3F 15 CD CC CC 3D 18 FB FF FF FF FF FF FF FF FF 01 20 FF FF FF FF FF FF FF FF FF 01 28 FE FF FF FF FF FF FF FF FF 01 31 07 00 00 00 00 00 00 00 38 01 42 05 63 61 66 C3 A9 4A 04 DE AD BE EF 50 FF FF FF FF 0F 58 FF FF FF FF FF FF FF FF FF 01 60 02 6A 05 0A 01 6E 10 03 72 0C 01 02 FD FF FF FF FF FF FF FF FF 01 7A 03 0A 01 61 7A 00 82 01 05 0A 01 62 10 02 82 01 05 0A 01 61 10 01 8A 01 05 08 0A 12 01 78 8A 01 0E 08 FF FF FF FF FF FF FF FF FF 01 12 01 79 92 01 05 08 01 12 01 74 98 01 00 A2 01 00 B2 01 0C 08 C0 D2 E2 D6 06 10 80 CA B5 EE 01 BA 01 16 08 FF FF FF FF FF FF FF FF FF 01 10 80 B6 CA 91 FE FF FF FF FF 01 C2 01 0E 0A 07 66 6F 6F 5F 62 61 72 0A 03 62 61 7A CA 01 18 0A 16 0A 01 6B 12 11 32 0F 0A 09 11 00 00 00 00 00 00 F0 3F 0A 02 08 00 D2 01 03 1A 01 76 DA 01 00 E2 01 00 EA 01 00 F2 01 01 72 FA 01 04 0A 02 20 01 82 02 00"
+    },
+    {
+      "name": "a required field unset, one below the request",
+      "clauses": [
+        "5.2",
+        "5.2.4",
+        "7.4"
+      ],
+      "message": "bead.transcoding.v1.Requiring",
+      "body": "{\"needs\":{\"count\":1}}",
+      "refused": "a required field unset",
+      "pointer": "#/needs/name",
+      "upb": "D28: it reads a message that leaves a required field unset"
+    },
+    {
+      "name": "required fields set at their defaults",
+      "clauses": [
+        "5.2",
+        "5.2.4",
+        "7.4"
+      ],
+      "message": "bead.transcoding.v1.Requiring",
+      "body": "{\"needs\":{\"name\":\"\",\"count\":0}}",
+      "payload": "0A 04 0A 00 10 00"
+    },
+    {
+      "name": "a required field null",
+      "clauses": [
+        "5.2",
+        "5.2.2",
+        "5.2.4",
+        "7.4"
+      ],
+      "message": "bead.transcoding.v1.Requiring",
+      "body": "{\"needs\":{\"name\":null,\"count\":1}}",
+      "refused": "a required field unset",
+      "pointer": "#/needs/name",
+      "upb": "D28: it reads a message that leaves a required field unset"
+    },
+    {
+      "name": "two required fields unset, the first by its number",
+      "clauses": [
+        "5.2",
+        "5.2.4",
+        "7.4"
+      ],
+      "message": "bead.transcoding.v1.Requiring",
+      "body": "{\"needs\":{}}",
+      "refused": "a required field unset",
+      "pointer": "#/needs/name",
+      "upb": "D28: it reads a message that leaves a required field unset"
+    },
+    {
+      "name": "an item that leaves a required field unset",
+      "clauses": [
+        "5.2",
+        "5.2.4",
+        "7.4"
+      ],
+      "message": "bead.transcoding.v1.Requiring",
+      "body": "{\"many\":[{\"name\":\"a\",\"count\":1},{\"name\":\"b\"}]}",
+      "refused": "a required field unset",
+      "pointer": "#/many/1/count",
+      "upb": "D28: it reads a message that leaves a required field unset"
+    },
+    {
+      "name": "a map's value that leaves a required field unset",
+      "clauses": [
+        "5.2",
+        "5.2.4",
+        "7.4"
+      ],
+      "message": "bead.transcoding.v1.Requiring",
+      "body": "{\"byKey\":{\"k\":{\"name\":\"a\"}}}",
+      "refused": "a required field unset",
+      "pointer": "#/byKey/k/count",
+      "upb": "D28: it reads a message that leaves a required field unset"
+    },
+    {
+      "name": "map values judged by their keys' order, not the body's",
+      "clauses": [
+        "5.2",
+        "5.2.4",
+        "7.4"
+      ],
+      "message": "bead.transcoding.v1.Requiring",
+      "body": "{\"byKey\":{\"b\":{\"name\":\"x\"},\"a\":{\"name\":\"y\"}}}",
+      "refused": "a required field unset",
+      "pointer": "#/byKey/a/count",
+      "upb": "D28: it reads a message that leaves a required field unset"
+    },
+    {
+      "name": "a delimited field that leaves a required field unset",
+      "clauses": [
+        "5.2",
+        "5.2.4",
+        "7.4"
+      ],
+      "message": "bead.transcoding.v1.Requiring",
+      "body": "{\"needs\":{\"name\":\"a\",\"count\":1,\"delimited\":{\"name\":\"b\"}}}",
+      "refused": "a required field unset",
+      "pointer": "#/needs/delimited/count",
+      "upb": "D28: it reads a message that leaves a required field unset"
+    },
+    {
+      "name": "a holder's own unset field before a nested message's",
+      "clauses": [
+        "5.2",
+        "5.2.4",
+        "7.4"
+      ],
+      "message": "bead.transcoding.v1.Requiring",
+      "body": "{\"needs\":{\"name\":\"a\",\"child\":{\"name\":\"b\"}}}",
+      "refused": "a required field unset",
+      "pointer": "#/needs/count",
+      "upb": "D28: it reads a message that leaves a required field unset"
+    },
+    {
+      "name": "a nested message's unset field before a later field's",
+      "clauses": [
+        "5.2",
+        "5.2.4",
+        "7.4"
+      ],
+      "message": "bead.transcoding.v1.Requiring",
+      "body": "{\"needs\":{\"name\":\"a\",\"count\":1,\"child\":{\"name\":\"b\"}},\"many\":[{\"name\":\"c\"}]}",
+      "refused": "a required field unset",
+      "pointer": "#/needs/child/count",
+      "upb": "D28: it reads a message that leaves a required field unset"
+    },
+    {
+      "name": "an Any's message that leaves a required field unset, read",
+      "clauses": [
+        "5.2",
+        "5.2.4",
+        "5.4",
+        "5.4.6",
+        "7.4"
+      ],
+      "message": "bead.transcoding.v1.Requiring",
+      "body": "{\"any\":{\"@type\":\"type.googleapis.com/bead.transcoding.v1.Needs\",\"name\":\"a\"}}",
+      "payload": "22 34 0A 2D 74 79 70 65 2E 67 6F 6F 67 6C 65 61 70 69 73 2E 63 6F 6D 2F 62 65 61 64 2E 74 72 61 6E 73 63 6F 64 69 6E 67 2E 76 31 2E 4E 65 65 64 73 12 03 0A 01 61",
+      "upb": "D28: it refuses an Any's message that leaves a required field unset"
+    },
+    {
+      "name": "a member refused before a required field unset beside it",
+      "clauses": [
+        "5.2",
+        "5.2.3",
+        "5.2.4",
+        "7.4"
+      ],
+      "message": "bead.transcoding.v1.Requiring",
+      "body": "{\"needs\":{\"count\":\"x\"}}",
+      "refused": "no int32",
+      "pointer": "#/needs/count"
+    },
+    {
+      "name": "a scalar refused after a required field unset",
+      "clauses": [
+        "5.2",
+        "5.2.3",
+        "5.2.4",
+        "7.4"
+      ],
+      "message": "bead.transcoding.v1.Requiring",
+      "body": "{\"needs\":{\"count\":1},\"anInt32\":\"x\"}",
+      "refused": "no int32",
+      "pointer": "#/anInt32"
+    },
+    {
+      "name": "a request whose own required field is unset",
+      "clauses": [
+        "5.2",
+        "5.2.4",
+        "7.4"
+      ],
+      "message": "bead.transcoding.v1.Needs",
+      "body": "{}",
+      "refused": "a required field unset",
+      "pointer": "#/name",
+      "upb": "D28: it reads a message that leaves a required field unset"
+    },
+    {
+      "name": "a closed enum's undeclared number refused",
+      "clauses": [
+        "5.2",
+        "5.2.3",
+        "5.3",
+        "5.3.7"
+      ],
+      "message": "bead.transcoding.v1.Needs",
+      "body": "{\"name\":\"a\",\"count\":1,\"shade\":5}",
+      "refused": "no value of Shade of that number",
+      "pointer": "#/shade"
     }
   ],
   "writings": [
@@ -3583,6 +3783,59 @@
       "message": "bead.transcoding.v1.Edges",
       "payload": "AA 01 00",
       "body": "{\"nothing\":{}}"
+    },
+    {
+      "name": "required fields at their defaults, written",
+      "clauses": [
+        "5.6",
+        "5.6.3"
+      ],
+      "message": "bead.transcoding.v1.Requiring",
+      "payload": "0A 04 0A 00 10 00",
+      "body": "{\"needs\":{\"name\":\"\",\"count\":0}}"
+    },
+    {
+      "name": "an Any whose message leaves a required field unset, written as it holds it",
+      "clauses": [
+        "5.6",
+        "5.6.2"
+      ],
+      "message": "bead.transcoding.v1.Requiring",
+      "payload": "22 33 0A 2D 74 79 70 65 2E 67 6F 6F 67 6C 65 61 70 69 73 2E 63 6F 6D 2F 62 65 61 64 2E 74 72 61 6E 73 63 6F 64 69 6E 67 2E 76 31 2E 4E 65 65 64 73 12 02 10 01",
+      "body": "{\"any\":{\"@type\":\"type.googleapis.com/bead.transcoding.v1.Needs\",\"count\":1}}",
+      "upb": "D28: it refuses an Any's message that leaves a required field unset"
+    },
+    {
+      "name": "a closed enum's undeclared number, left out",
+      "clauses": [
+        "5.6",
+        "spec:17.9.8"
+      ],
+      "message": "bead.transcoding.v1.Needs",
+      "payload": "0A 00 10 00 28 05",
+      "body": "{\"name\":\"\",\"count\":0}"
+    },
+    {
+      "name": "a closed enum's declared number, then one it does not declare",
+      "clauses": [
+        "5.6",
+        "5.6.5",
+        "spec:17.9.8"
+      ],
+      "message": "bead.transcoding.v1.Needs",
+      "payload": "0A 00 10 00 28 01 28 05",
+      "body": "{\"name\":\"\",\"count\":0,\"shade\":\"SHADE_LIGHT\"}"
+    },
+    {
+      "name": "an Any whose bytes hold a field at a wire type it does not take",
+      "clauses": [
+        "5.7",
+        "spec:17.9.5"
+      ],
+      "message": "bead.transcoding.v1.Requiring",
+      "payload": "22 33 0A 2D 74 79 70 65 2E 67 6F 6F 67 6C 65 61 70 69 73 2E 63 6F 6D 2F 62 65 61 64 2E 74 72 61 6E 73 63 6F 64 69 6E 67 2E 76 31 2E 4E 65 65 64 73 12 02 12 00",
+      "refused": "an Any whose bytes do not read as its type",
+      "upb": "it reads an Any's field at a wire type its type does not take as an unknown field"
     }
   ],
   "bindings": [
@@ -4486,6 +4739,162 @@
       "body": "{\"kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkéé\":1}",
       "refused": "a key no field names",
       "pointer": "#"
+    },
+    {
+      "name": "a required field the query leaves unset",
+      "clauses": [
+        "4.3",
+        "5.2",
+        "5.2.4",
+        "7.4"
+      ],
+      "procedure": "getNeeds",
+      "route": {
+        "method": "GET",
+        "template": "/v1/needs/{name}"
+      },
+      "target": "/v1/needs/a",
+      "refused": "a required field unset",
+      "parameter": "count"
+    },
+    {
+      "name": "a required field the query sets, at its default",
+      "clauses": [
+        "4.3",
+        "5.2",
+        "5.2.4",
+        "7.4"
+      ],
+      "procedure": "getNeeds",
+      "route": {
+        "method": "GET",
+        "template": "/v1/needs/{name}"
+      },
+      "target": "/v1/needs/a?count=0",
+      "payload": "0A 01 61 10 00"
+    },
+    {
+      "name": "a required field below a message the query makes",
+      "clauses": [
+        "4.3",
+        "5.2",
+        "5.2.4",
+        "7.4"
+      ],
+      "procedure": "getNeeds",
+      "route": {
+        "method": "GET",
+        "template": "/v1/needs/{name}"
+      },
+      "target": "/v1/needs/a?count=1&child.name=b",
+      "refused": "a required field unset",
+      "parameter": "child.count"
+    },
+    {
+      "name": "a parameter that names no field, before a required field unset",
+      "clauses": [
+        "4.3",
+        "4.3.3",
+        "5.2",
+        "5.2.4",
+        "7.4"
+      ],
+      "procedure": "getNeeds",
+      "route": {
+        "method": "GET",
+        "template": "/v1/needs/{name}"
+      },
+      "target": "/v1/needs/a?nope=1",
+      "refused": "a parameter no field path names",
+      "parameter": "nope"
+    },
+    {
+      "name": "a query scalar refused, a required field unset beside it",
+      "clauses": [
+        "4.3",
+        "5.2",
+        "5.2.3",
+        "5.2.4",
+        "7.4"
+      ],
+      "procedure": "getNeeds",
+      "route": {
+        "method": "GET",
+        "template": "/v1/needs/{name}"
+      },
+      "target": "/v1/needs/a?child.name=b&count=x",
+      "refused": "no int32",
+      "parameter": "count"
+    },
+    {
+      "name": "a required field below a message a variable holds present",
+      "clauses": [
+        "4.2",
+        "4.3",
+        "5.2",
+        "5.2.4",
+        "7.4"
+      ],
+      "procedure": "getNeeds",
+      "route": {
+        "method": "GET",
+        "template": "/v1/children/{child.name}"
+      },
+      "target": "/v1/children/b?name=a&count=1",
+      "refused": "a required field unset",
+      "parameter": "child.count"
+    },
+    {
+      "name": "a PATCH whose derived mask sets its required update_mask",
+      "clauses": [
+        "4.5",
+        "5.2",
+        "5.2.4",
+        "7.4"
+      ],
+      "procedure": "updateNeeds",
+      "route": {
+        "method": "PATCH",
+        "template": "/v1/needs/{needs.name}",
+        "body": "needs"
+      },
+      "target": "/v1/needs/a",
+      "body": "{\"count\":1}",
+      "payload": "0A 05 0A 01 61 10 01 12 07 0A 05 63 6F 75 6E 74"
+    },
+    {
+      "name": "a PATCH body that leaves a required field unset",
+      "clauses": [
+        "4.5",
+        "5.2",
+        "5.2.4",
+        "7.4"
+      ],
+      "procedure": "updateNeeds",
+      "route": {
+        "method": "PATCH",
+        "template": "/v1/needs/{needs.name}",
+        "body": "needs"
+      },
+      "target": "/v1/needs/a",
+      "body": "{\"line1\":\"x\"}",
+      "refused": "a required field unset",
+      "pointer": "#/count"
+    },
+    {
+      "name": "a PATCH body naming a field whose proto name holds an underscore before a digit",
+      "clauses": [
+        "4.5"
+      ],
+      "procedure": "updateNeeds",
+      "route": {
+        "method": "PATCH",
+        "template": "/v1/needs/{needs.name}",
+        "body": "needs"
+      },
+      "target": "/v1/needs/a",
+      "body": "{\"count\":1,\"line1\":\"x\"}",
+      "payload": "0A 08 0A 01 61 10 01 32 01 78 12 0F 0A 05 63 6F 75 6E 74 0A 06 6C 69 6E 65 5F 31"
     }
   ],
   "failures": [
@@ -8499,6 +8908,150 @@
             "body": "{}"
           },
           "on": "c"
+        }
+      ]
+    },
+    {
+      "name": "a request that leaves a required field unset is refused before its call",
+      "clauses": [
+        "5.2",
+        "5.2.4",
+        "7.4",
+        "7.6",
+        "7.6.12",
+        "spec:17.9.7"
+      ],
+      "steps": [
+        {
+          "send": {
+            "head": "POST /api/Transcoding/require HTTP/1.1\r\nhost: {host}\r\ncontent-type: application/json\r\ncontent-length: 21\r\nconnection: close\r\n\r\n",
+            "body": "7B 22 6E 65 65 64 73 22 3A 7B 22 63 6F 75 6E 74 22 3A 31 7D 7D"
+          },
+          "on": "a"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "vary": "Origin",
+              "content-type": "application/problem+json",
+              "bead-refusal": null
+            },
+            "body": "{\"code\":50,\"detail\":\"a required field unset\",\"pointer\":\"#/needs/name\",\"scope\":\"protocol\",\"status\":400,\"title\":\"PAYLOAD_UNDECODABLE\",\"type\":\"tag:francisdesjardins.ca,2026:bead/PAYLOAD_UNDECODABLE\"}"
+          },
+          "on": "a"
+        },
+        {
+          "until": {
+            "requires": 0
+          }
+        }
+      ]
+    },
+    {
+      "name": "a result its server cannot write is PROCEDURE_FAILED",
+      "clauses": [
+        "7.5",
+        "7.6",
+        "7.6.18",
+        "spec:17.2.5",
+        "spec:17.9.7"
+      ],
+      "steps": [
+        {
+          "send": {
+            "head": "POST /api/Transcoding/require HTTP/1.1\r\nhost: {host}\r\ncontent-type: application/json\r\ncontent-length: 2\r\nconnection: close\r\n\r\n",
+            "body": "7B 7D"
+          },
+          "on": "a"
+        },
+        {
+          "expect": {
+            "status": 500,
+            "fields": {
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "vary": "Origin",
+              "content-type": "application/problem+json",
+              "bead-refusal": null
+            },
+            "body": "{\"code\":64,\"scope\":\"protocol\",\"status\":500,\"title\":\"PROCEDURE_FAILED\",\"type\":\"tag:francisdesjardins.ca,2026:bead/PROCEDURE_FAILED\"}"
+          },
+          "on": "a"
+        },
+        {
+          "until": {
+            "requires": 1,
+            "reported": 1
+          }
+        }
+      ]
+    },
+    {
+      "name": "a required field a GET's query leaves unset is refused",
+      "clauses": [
+        "4.3",
+        "5.2.4",
+        "7.4",
+        "7.6",
+        "7.6.12"
+      ],
+      "steps": [
+        {
+          "send": {
+            "head": "GET /v1/needs/a HTTP/1.1\r\nhost: {host}\r\nconnection: close\r\n\r\n"
+          },
+          "on": "a"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "vary": "Origin",
+              "content-type": "application/problem+json",
+              "bead-refusal": null
+            },
+            "body": "{\"code\":50,\"detail\":\"a required field unset\",\"parameter\":\"count\",\"scope\":\"protocol\",\"status\":400,\"title\":\"PAYLOAD_UNDECODABLE\",\"type\":\"tag:francisdesjardins.ca,2026:bead/PAYLOAD_UNDECODABLE\"}"
+          },
+          "on": "a"
+        }
+      ]
+    },
+    {
+      "name": "an Any's message that leaves a required field unset reaches its server",
+      "clauses": [
+        "5.2",
+        "5.2.4",
+        "5.4",
+        "5.4.6",
+        "spec:17.9.7"
+      ],
+      "steps": [
+        {
+          "send": {
+            "head": "POST /api/Transcoding/require HTTP/1.1\r\nhost: {host}\r\ncontent-type: application/json\r\ncontent-length: 107\r\nconnection: close\r\n\r\n",
+            "body": "7B 22 6E 65 65 64 73 22 3A 7B 22 6E 61 6D 65 22 3A 22 61 22 2C 22 63 6F 75 6E 74 22 3A 31 7D 2C 22 61 6E 79 22 3A 7B 22 40 74 79 70 65 22 3A 22 74 79 70 65 2E 67 6F 6F 67 6C 65 61 70 69 73 2E 63 6F 6D 2F 62 65 61 64 2E 74 72 61 6E 73 63 6F 64 69 6E 67 2E 76 31 2E 4E 65 65 64 73 22 2C 22 6E 61 6D 65 22 3A 22 62 22 7D 7D"
+          },
+          "on": "a"
+        },
+        {
+          "expect": {
+            "status": 200,
+            "fields": {
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "vary": "Origin",
+              "content-type": "application/json",
+              "content-length": "22",
+              "bead-refusal": null
+            },
+            "body": "{\"name\":\"a\",\"count\":1}"
+          },
+          "on": "a"
         }
       ]
     }

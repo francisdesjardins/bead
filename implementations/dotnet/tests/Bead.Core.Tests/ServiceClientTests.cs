@@ -1,3 +1,6 @@
+using Bead.Codecs.V1;
+using Google.Protobuf;
+
 namespace Bead.Tests;
 
 /// <summary>
@@ -276,6 +279,69 @@ public sealed class ServiceClientTests
         // a value its rules take goes as ever
         Assert.Equal("hi", await validating.RequesterOf(CheckedProcedures.Echo)("hi")().WaitAsync(Patience, Cancelled));
         Assert.Equal(["hi"], sent);
+    }
+
+    [Fact]
+    public async Task Fails_a_call_whose_request_leaves_a_required_field_unset_before_anything_goes_and_sends_nothing()
+    {
+        await using var link = await ServiceLink.Open();
+        var server = new ServiceServer<RequiredProcedures, string>([RequiredProcedures.RawEcho]);
+        var client = new ServiceClient<RequiredProcedures>([RequiredProcedures.Echo], link.Client);
+        var sent = new List<byte[]>();
+        var steps = new List<DebugEvent>();
+
+        server.On(RequiredProcedures.RawEcho, (request, response) =>
+        {
+            sent.Add(request.Payload.ToArray());
+
+            return response.Answer(request.Payload);
+        });
+        server.Offer(link.Server);
+        link.Client.Services.Debug += (_, step) =>
+        {
+            steps.Add(step);
+        };
+
+        // * the codec's own refusal, its writer's, thrown as the value is written (spec 17.2, item 4)
+        var refused = await Assert.ThrowsAsync<FormatException>(() =>
+        {
+            return client.RequesterOf(RequiredProcedures.Echo)(RequiredProcedures.Unset)().WaitAsync(Patience, Cancelled);
+        });
+
+        Assert.Equal(RequiredProcedures.Words, refused.Message);
+
+        // no call is made: no step told, nothing sent
+        Assert.Empty(steps);
+        Assert.Empty(sent);
+
+        // a Probe whose needs is whole goes as ever
+        var whole = new Probe { Needs = new Needs { Must = 1, Shade = Shade.Light } };
+
+        Assert.Equal(whole, await client.RequesterOf(RequiredProcedures.Echo)(whole)().WaitAsync(Patience, Cancelled));
+        Assert.Equal([whole.ToByteArray()], sent);
+    }
+
+    [Fact]
+    public async Task Fails_a_call_whose_result_leaves_a_required_field_unset_with_PAYLOAD_UNDECODABLE()
+    {
+        await using var link = await ServiceLink.Open();
+        var server = new ServiceServer<RequiredProcedures, string>([RequiredProcedures.RawEcho]);
+        var client = new ServiceClient<RequiredProcedures>([RequiredProcedures.Echo], link.Client);
+
+        // * a peer of no such codec answers what the codec refuses to read (spec 17.9.7)
+        server.On(RequiredProcedures.RawEcho, (_, response) =>
+        {
+            return response.Answer(RequiredProcedures.Unset.ToByteArray());
+        });
+        server.Offer(link.Server);
+
+        var refused = await Assert.ThrowsAsync<FailureException>(() =>
+        {
+            return client.RequesterOf(RequiredProcedures.Echo)(new Probe())().WaitAsync(Patience, Cancelled);
+        });
+
+        Assert.Equal(((ushort)ProtocolCode.PayloadUndecodable, FailureScope.Protocol), (refused.Code, refused.Scope));
+        Assert.Equal((FailureOrigin.Local, RouterSide.Client), (refused.Origin, refused.Side));
     }
 
     [Fact]

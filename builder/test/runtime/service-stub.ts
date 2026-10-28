@@ -6,13 +6,9 @@
 
 // definition
 
-export const GENERATED_CODE_SUPPORTS_VERSION_4 = true;
+export const GENERATED_CODE_SUPPORTS_VERSION_6 = true;
 
 export const PAYLOAD_CODECS = Object.freeze({ raw: {}, text: {}, json: {} });
-
-export const payloadCodecOf = <Codec>(codec: Codec): Codec => {
-  return codec;
-};
 
 export const requestOf = <Init>(init: Init): Init => {
   return init;

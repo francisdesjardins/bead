@@ -1,8 +1,8 @@
 import { defineConfig } from '@playwright/test';
 import { COMPONENT_TIMEOUT, playwrightBase } from './tools/playwright-base.mjs';
 
-/** The tests that load the demo's page, each of a module the page mounts. */
-const PAGE_TESTS = ['scenes', 'sides', 'sign-up', 'tabs'].map((name) => {
+/** The tests that load the demo's page: the page's own, and each of a module it mounts. */
+const PAGE_TESTS = ['page', 'scenes', 'sides', 'sign-up', 'tabs'].map((name) => {
   return `**/__tests__/${name}.test.ts`;
 });
 
@@ -11,8 +11,8 @@ const PAGE_TESTS = ['scenes', 'sides', 'sign-up', 'tabs'].map((name) => {
  * needs a page they would break.
  *
  * Two projects: `unit`, its procedures in Node, offered on a server joined in memory to a client;
- * and `page`, the demo's static build in Chromium, its server the page's worker.
- * `yarn playground:build:file` makes what the second loads.
+ * and `page`, the demo's page in Chromium: its static build, its server the page's worker, which
+ * `yarn playground:build:file` makes; or, over MQTT 5, as its launcher serves it beside a broker.
  */
 export default defineConfig({
   ...playwrightBase(),

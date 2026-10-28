@@ -76,8 +76,8 @@ off, each with its reason, in `.editorconfig`.
 
 **One solution, `Bead.slnx`**, laid out as the C# side's
 [README](../../implementations/dotnet/README.md) says: a transport that needs a framework has a
-project of its own, and each transport server is a Kestrel application of its own, one port for both
-coming from a proxy in front, never from a server they share.
+project of its own, and each transport server over HTTP or a WebSocket is a Kestrel application of
+its own, one port for both coming from a proxy in front, never from a server they share.
 
 **A router runs on one serial scheduler, as JavaScript runs on one thread.** What a router holds is
 touched from its scheduler alone, one task at a time, and a task that awaits comes back to it, so
@@ -137,13 +137,14 @@ held to the side's floor, then the interop ([0006](0006-a-rule-has-its-gate.md))
   core and four types of its own stay out of it, the transport's credential out of what an
   admission, a resolver and a session's resolution are handed, and a credential's forwarding out of
   a handler's and a resolver's interfaces; the whole surface's gate, its parameters among it, is
-  still owed. Past the rule, each work to do: seven functions of `src/` take three — two private
+  still owed. Past the rule, each work to do: eight functions of `src/` take three — two private
   static methods, a private class's constructor, an internal class's constructor (`Notification`'s),
+  an internal class's method, `AmqpManagement.Request`, whose third is its `CancellationToken`,
   `FailureException.OfProtocol`, whose third, its detail, is a positional optional, and the
-  gateway's two `Refuse`, whose third, its fields, is one too; the transports' `Connect` and
-  `Start`, and the gateway's `Start`, take their `CancellationToken` after their options; the
-  session manager's four events of a change carry three values; and twenty-three positional
-  records take more than two members, `TransportServerRefusal` six.
+  gateway's two `Refuse`, whose third, its fields, is one too; the transports' `Connect`, the
+  broker's among them, and `Start`, and the gateway's `Start`, take their `CancellationToken` after
+  their options; the session manager's four events of a change carry three values; and twenty-five
+  positional records take more than two members, `TransportServerRefusal` six.
 - Nothing in the build forbids a base class either; review holds that too, and every class and
   record of `src/` and `interop/` is sealed or static.
 - An event a router raises, an error or a trace, runs on its scheduler, as a listener runs in

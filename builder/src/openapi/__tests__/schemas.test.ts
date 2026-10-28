@@ -3,7 +3,9 @@ import { fileURLToPath } from 'node:url';
 import { expect, test } from '@playwright/test';
 
 import { checkRoots } from '../../check.ts';
-import type { IFieldEntry } from '../../model/blueprint.ts';
+import { hasError } from '../../diagnostics.ts';
+import { editionRoot } from '../../front-end/__tests__/derive.ts';
+import type { IBlueprint, IFieldEntry } from '../../model/blueprint.ts';
 import {
   BASE64_PATTERN,
   componentSchemasOf,
@@ -11,12 +13,14 @@ import {
   enumSchemaOf,
   FIELD_MASK_PATTERN,
   fieldSchemaOf,
+  objectSchemaOf,
   scalarSchemaOf,
   TIMESTAMP_PATTERN,
   typeSchemaOf,
 } from '../schemas.ts';
 
 const MESSAGES = fileURLToPath(new URL('../../../test/messages/', import.meta.url));
+const SPEC = fileURLToPath(new URL('../../../../spec/', import.meta.url));
 
 const takes = (pattern: string, values: readonly string[]): boolean[] => {
   const compiled = new RegExp(pattern, 'u');
@@ -166,4 +170,79 @@ test("a message's rules in JSON Schema's words, and what no keyword holds in its
   expect(member.allOf).toContainEqual({
     anyOf: [{ required: ['card'] }, { required: ['account'] }],
   });
+});
+
+// the blueprint of a root, which no error refuses
+const blueprintOf = (root: string): IBlueprint => {
+  const checked = checkRoots([root]);
+
+  expect(hasError(checked.diagnostics), JSON.stringify(checked.diagnostics)).toBe(false);
+
+  if (checked.blueprint === undefined) {
+    throw new Error(`${root}: no blueprint`);
+  }
+
+  return checked.blueprint;
+};
+
+const REQUIRED = 'features.field_presence = LEGACY_REQUIRED';
+
+// transcoding 11.7 and 11.5: what protobuf requires, required, beside what the rules require
+test('requires each field of LEGACY_REQUIRED presence in its message’s schema, beside its rules’ required', () => {
+  const root = editionRoot('required-fields', {
+    imports: ['buf/validate/validate.proto'],
+    messages: [
+      '// A card.',
+      'message Card {',
+      `  string number = 1 [${REQUIRED}];`,
+      '  string holder = 2;',
+      '}',
+      '',
+      '// A member.',
+      'message Member {',
+      `  string name = 1 [${REQUIRED}];`,
+      `  string address = 2 [${REQUIRED}, (buf.validate.field).required = true];`,
+      '  string note = 3 [(buf.validate.field).required = true];',
+      '  int32 age = 4;',
+      '  Card card = 5;',
+      '}',
+    ],
+    rpcs: [['Join', 'Member', 'post: "/v1/members/{card.holder}:join" body: "*"']],
+  });
+  const blueprint = blueprintOf(root);
+  const schemas = componentSchemasOf(blueprint) as Record<string, { required?: string[] }>;
+  const messages = new Map(
+    (blueprint.proto?.messages ?? []).map((message) => {
+      return [message.fullName, message] as const;
+    })
+  );
+  const member = messages.get('x.v1.Member');
+
+  if (member === undefined) {
+    throw new Error('x.v1.Member: no entry');
+  }
+
+  // * by number, each once: address protobuf's and its rules' both
+  expect(schemas['x.v1.Member']?.required).toEqual(['name', 'address', 'note']);
+  expect(schemas['x.v1.Card']?.required).toEqual(['number']);
+
+  // * a field a variable binds into, held present by it, required where its message keeps a field
+  // protobuf requires left to the body
+  expect(objectSchemaOf(member, { messages, bound: new Set(['card.holder']) })['required']).toEqual(
+    ['name', 'address', 'card']
+  );
+  expect(objectSchemaOf(member, { messages, bound: new Set(['card.number']) })['required']).toEqual(
+    ['name', 'address']
+  );
+
+  // * spec/transcoding.proto's own
+  const transcoding = checkRoots([SPEC], { files: ['transcoding.proto'] }).blueprint;
+  const spec = (transcoding === undefined ? {} : componentSchemasOf(transcoding)) as Record<
+    string,
+    { required?: string[] }
+  >;
+
+  expect(spec['bead.transcoding.v1.Needs']?.required).toEqual(['name', 'count']);
+  expect(spec['bead.transcoding.v1.NeedsUpdate']?.required).toEqual(['updateMask']);
+  expect(spec['bead.transcoding.v1.Requiring']?.required).toBeUndefined();
 });

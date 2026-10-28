@@ -132,6 +132,56 @@ public sealed class CheckedProcedures
     }
 }
 
+/// <summary>
+/// The required service, 9, whose one request takes and answers a <c>Probe</c>, of
+/// <c>spec/codecs.proto</c>, through the runtime codec generated code names: a <c>Probe</c> whose
+/// <c>needs</c> leaves a required field unset neither reads nor writes (spec 17.9.7). Its twin at
+/// the same address reads and writes raw bytes, which a peer sends and answers as they are.
+/// </summary>
+public sealed class RequiredProcedures
+{
+    private RequiredProcedures()
+    {
+    }
+
+    /// <summary>A request, a Probe both ways.</summary>
+    public static RequestProcedure<RequiredProcedures, Bead.Codecs.V1.Probe, Bead.Codecs.V1.Probe, NoFailure> Echo { get; } = new(
+        ProcedureOf(1, "echo"),
+        new ProcedureBindings<Bead.Codecs.V1.Probe, Bead.Codecs.V1.Probe>
+        {
+            Admission = AdmissionRule.None,
+            Request = Bead.Protobuf.ProtoCodecs.Of<Bead.Codecs.V1.Probe>(),
+            Result = Bead.Protobuf.ProtoCodecs.Of<Bead.Codecs.V1.Probe>(),
+        });
+
+    /// <summary>The same request, its bytes raw both ways: what a peer of no such codec sends and answers.</summary>
+    public static RequestProcedure<RequiredProcedures, ReadOnlyMemory<byte>, ReadOnlyMemory<byte>, NoFailure> RawEcho { get; } = new(
+        ProcedureOf(1, "echo"),
+        new ProcedureBindings<ReadOnlyMemory<byte>, ReadOnlyMemory<byte>>
+        {
+            Admission = AdmissionRule.None,
+            Request = PayloadCodecs.Raw,
+            Result = PayloadCodecs.Raw,
+        });
+
+    /// <summary>A Probe whose needs leaves its shade unset, and its bytes: <c>3A 02 08 01</c>.</summary>
+    public static Bead.Codecs.V1.Probe Unset
+    {
+        get
+        {
+            return new Bead.Codecs.V1.Probe { Needs = new Bead.Codecs.V1.Needs { Must = 1 } };
+        }
+    }
+
+    /// <summary>The words its codec refuses <see cref="Unset"/> in, reading and writing.</summary>
+    public const string Words = "a proto message leaves bead.codecs.v1.Needs.shade unset";
+
+    private static Procedure ProcedureOf(ushort procedureId, string procedureName)
+    {
+        return new Procedure { ServiceId = 9, ProcedureId = procedureId, ProcedureName = procedureName, ServiceRevision = 1 };
+    }
+}
+
 /// <summary>The checked service's hooks: none, its options' record.</summary>
 public sealed class CheckedAdmissions : IServiceAdmissions<CheckedProcedures>
 {

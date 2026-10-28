@@ -14,7 +14,9 @@
   [0018](0018-a-services-procedures-are-typed-descriptors-served-and-called-through-one-layer.md)'s;
   the generated codec, and what a target writes beside what a runtime does,
   [0022](0022-a-proto-becomes-one-checked-blueprint-and-each-language-is-generated-from-it.md)'s;
-  the root's tools, [0005](0005-a-toolchain-per-language.md)'s.
+  the runtime codec of a schema that calls the check, its required walk and, on the C# side, its
+  filter of a closed enum's record, and generated code's contract 6, [0042](0042-a-proto-message-that-leaves-a-required-field-unset-neither-reads-nor-writes-and-a-gateway-refuses-it-where-its-server-would.md)'s; the root's
+  tools, [0005](0005-a-toolchain-per-language.md)'s.
 
 ## Context
 
@@ -99,7 +101,11 @@ each side against its library regressing on what the other's gets right.
 **A side narrows what reads; it never changes what its stock library reads or writes.** The check
 refuses a payload before the library sees it, as 17.9.1 has it of bytes that are no encoding of the
 message; where protobuf states no rule and the libraries read apart, a refusal is a
-leveling, put to the user. It never reads in the library's place, and nothing writes in its place:
+leveling, put to the user. On the C# side, a record of a singular closed enum whose number its enum
+declares no value of is dropped before Google.Protobuf reads, which treats every enum as open, so
+that it reads what protobuf-es reads and what protobuf keeps among the unknown fields (spec 17.9.8,
+[0042](0042-a-proto-message-that-leaves-a-required-field-unset-neither-reads-nor-writes-and-a-gateway-refuses-it-where-its-server-would.md)): a record set aside, never a value read. It never reads in the library's place, and
+nothing writes in its place:
 a difference in what a library writes, the order of unknown fields and a map's entry's key at its
 default among them, is a platform row.
 
@@ -168,19 +174,17 @@ an entry with an undeclared field apart. `WIRE` makes the first break no evoluti
 **17.9.3 counts a group and a map's entry as a message**, as each is one on the wire ("Maps"), and
 as Google.Protobuf counts them.
 
-**The generated codec calls the check, from generated code's contract 3 on.** TypeScript:
-`decode: (bytes) => { checkProtoRecords(bytes, FooSchema); return fromBinary(…); }`,
-`checkProtoRecords` imported from `@francisdesjardins/bead/proto`. C#:
-`global::Bead.Protobuf.ProtoRecords.Check(bytes.Span, global::Foo.Descriptor);` before the framing.
-3 is the contract whose code first calls it, since generated code that calls the check needs an
-export a runtime without it lacks, which is what moves the counter. **The runtimes hold 4 and 5**,
-on both sides, 4 since a request's rules are generated
-([0035](0035-a-payload-that-reads-is-held-to-its-messages-rules-before-its-resolver-sees-it.md))
-and 5 for a route table
-([0037](0037-a-procedure-is-also-an-http-route-which-a-gateway-answers-as-one-more-client-of-its-server.md)),
-and none older: they hold no `GENERATED_CODE_SUPPORTS_VERSION_2` or `_3` and no
-`GeneratedCode.SupportsVersion2` or `SupportsVersion3`, so code that names 2 or 3, an earlier
-beadc's, fails its type-check and its build until it is regenerated.
+**The runtime codec calls the check, for generated code.** A generated codec is the runtime's
+codec of its message's schema, `protoCodecOf(FooSchema)` of `@francisdesjardins/bead/proto` and
+`global::Bead.Protobuf.ProtoCodecs.Of<global::Foo>()`, whose read checks the records before the
+library reads them, then reads at 17.9.3's bound and judges the message's required fields
+([0042](0042-a-proto-message-that-leaves-a-required-field-unset-neither-reads-nor-writes-and-a-gateway-refuses-it-where-its-server-would.md)). 3 is the contract whose code first called the check, since generated code that
+calls it needs an export a runtime without it lacks, which is what moves the counter. **The runtimes
+hold 5 and 6**, on both sides, 5 for a route table ([0037](0037-a-procedure-is-also-an-http-route-which-a-gateway-answers-as-one-more-client-of-its-server.md)) and 6 since a service's
+generated file calls the runtime codec ([0042](0042-a-proto-message-that-leaves-a-required-field-unset-neither-reads-nor-writes-and-a-gateway-refuses-it-where-its-server-would.md)), and none older: they hold no
+`GENERATED_CODE_SUPPORTS_VERSION_2`, `_3` or `_4` and no `GeneratedCode.SupportsVersion2`,
+`SupportsVersion3` or `SupportsVersion4`, so code that names 2, 3 or 4, an earlier beadc's, fails its
+type-check and its build until it is regenerated.
 A runtime keeps a constant while it still serves the code that names it, and one that would run
 version-2 code unchecked no longer serves it as Bead conforms: before 1.0.0, an older constant goes
 once the code that names it no longer conforms through the runtime; from 1.0.0, it stays for the
@@ -261,7 +265,7 @@ codec, the check in front:
   ([0037](0037-a-procedure-is-also-an-http-route-which-a-gateway-answers-as-one-more-client-of-its-server.md));
   the runner closes a text-format suite after it, whose 909 tests a testee skips, since Bead's
   `proto` carries no text form. Each count moves only with the pin, or with a form the testees
-  answer. A third language adds its testee's command.
+  answer. Rust, and each language after it, adds its testee's command.
 - **The testees**, `implementations/typescript/tools/protobuf-conformance/` on the TypeScript side's
   own install, type-checked by its own `tsconfig.json` once its code is generated, since the side's
   type-check and lint cannot read it without that code, and `implementations/dotnet/tools/Bead.ProtobufConformance/`, outside `Bead.slnx`
@@ -310,8 +314,8 @@ U+FEFF in a proto payload" is open, as it says why, and "A proto string no strin
 writer" is a platform row
 ([0031](0031-a-proto-payload-is-protobufs-format-and-bead-states-only-its-own.md)).
 
-**Code that names contract 2 or 3 is regenerated**, on both sides, before it builds against the
-runtime.
+**Code that names contract 2, 3 or 4 is regenerated**, on both sides, before it builds against
+the runtime.
 A C# project that binds `proto` references `Bead.Protobuf`; a TypeScript one carries
 `@bufbuild/protobuf` for its messages, which `./proto` takes as a peer.
 
@@ -342,8 +346,8 @@ v36.2 does not reach; each side's twin tests of the check, `src/proto/__tests__/
 `tests/Bead.Protobuf.Tests/ProtoRecordsTests.cs`, one sentence each pair, hold what no entry of
 `Probe` reaches.
 
-**A third language** checks a payload's records by its own library's descriptor, plays the entries,
-and adds its testee to the suite.
+**Rust, and each language after it,** checks a payload's records by its own library's descriptor,
+plays the entries, and adds its testee to the suite.
 
 **Out of scope**: the U+FEFF row, which stays open; the writer's surrogate; and the upstream
 reports, protobuf-es's points, its packed reading, its map entries, its depth count and its wire

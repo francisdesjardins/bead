@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Compare bead-bench/1 reports. Exit 0 for a comparison within its thresholds, 1 for a regression,
+// Compare bead-bench/1 and /2 reports. Exit 0 for a comparison, 1 for an advisory regression,
 // and 2 for invalid input. The README defines the format and the threshold selectors.
 
 import { readFileSync } from 'node:fs';
@@ -16,9 +16,135 @@ const positiveInteger = (value) => {
   return Number.isSafeInteger(value) && value > 0;
 };
 
+export const medianOf = (values) => {
+  const sorted = values.toSorted((a, b) => {
+    return a - b;
+  });
+  const middle = Math.floor(sorted.length / 2);
+  return sorted.length % 2 === 0 ? (sorted[middle - 1] + sorted[middle]) / 2 : sorted[middle];
+};
+
+const close = (a, b) => {
+  return Number.isFinite(a) && Math.abs(a - b) <= Math.max(1, Math.abs(b)) * 1e-12;
+};
+
+export const mediansOf = (report, row) => {
+  return report.schema === 'bead-bench/2' ? row.medians : [row.median];
+};
+
+// * Each labeling of the pooled observations has equal probability. Doubled midranks keep
+// ties exact; dynamic enumeration counts every split, including equal-valued observations.
+const distributions = new Map();
+export const mannWhitney = (baseline, candidate, { direction = 'lower' } = {}) => {
+  const pooled = [...baseline, ...candidate].toSorted((a, b) => {
+    return a - b;
+  });
+  const ranks = [];
+  for (let at = 0; at < pooled.length;) {
+    let end = at + 1;
+    while (end < pooled.length && pooled[end] === pooled[at]) {
+      end++;
+    }
+    ranks.push(...Array(end - at).fill(at + 1 + end));
+    at = end;
+  }
+  const count = candidate.length;
+  const key = `${count}:${ranks.join(',')}`;
+  let distribution = distributions.get(key);
+  if (!distribution) {
+    const sums = Array.from({ length: count + 1 }, () => {
+      return new Map();
+    });
+    sums[0].set(0, 1n);
+    for (const rank of ranks) {
+      for (let chosen = count; chosen > 0; chosen--) {
+        for (const [sum, ways] of sums[chosen - 1]) {
+          sums[chosen].set(sum + rank, (sums[chosen].get(sum + rank) ?? 0n) + ways);
+        }
+      }
+    }
+    distribution = sums[count];
+    distributions.set(key, distribution);
+  }
+  let u = 0;
+  for (const next of candidate) {
+    for (const before of baseline) {
+      u += next === before ? 0.5 : (direction === 'lower' ? next > before : next < before) ? 1 : 0;
+    }
+  }
+  let tail = 0n;
+  let total = 0n;
+  for (const [sum, ways] of distribution) {
+    const highU = (sum - count * (count + 1)) / 2;
+    const rankedU = direction === 'lower' ? highU : baseline.length * count - highU;
+    total += ways;
+    if (rankedU >= u) {
+      tail += ways;
+    }
+  }
+  return { u, p: Number(tail) / Number(total) };
+};
+
+export const hodgesLehmann = (baseline, candidate) => {
+  const changes = candidate.flatMap((next) => {
+    return baseline.map((before) => {
+      return before === 0 ? (next === 0 ? 0 : Infinity) : ((next - before) / before) * 100;
+    });
+  });
+  return medianOf(changes);
+};
+
+// The infimum rank-significant effect under a multiplicative shift of the observed spreads.
+// It describes resolution at these samples, not power under an assumed population model.
+export const smallestDetectableChange = (baseline, candidate, { direction = 'lower' } = {}) => {
+  if (
+    [...baseline, ...candidate].some((value) => {
+      return value <= 0;
+    })
+  ) {
+    return null;
+  }
+  const ratio = 1 + hodgesLehmann(baseline, candidate) / 100;
+  const normalized = candidate.map((value) => {
+    return value / ratio;
+  });
+  const boundaries = [
+    ...new Set([
+      1,
+      ...baseline.flatMap((before) => {
+        return normalized.map((next) => {
+          return before / next;
+        });
+      }),
+    ]),
+  ]
+    .filter((value) => {
+      return direction === 'lower' ? value >= 1 : value <= 1;
+    })
+    .sort((a, b) => {
+      return direction === 'lower' ? a - b : b - a;
+    });
+  for (let at = 0; at < boundaries.length; at++) {
+    const boundary = boundaries[at];
+    const beyond = boundaries[at + 1] ?? (direction === 'lower' ? boundary * 2 : boundary / 2);
+    for (const multiplier of [boundary, (boundary + beyond) / 2]) {
+      const shifted = normalized.map((value) => {
+        return value * multiplier;
+      });
+      if (mannWhitney(baseline, shifted, { direction }).p <= 0.05) {
+        return Math.abs(boundary - 1) * 100;
+      }
+    }
+  }
+  return null;
+};
+
 export const validate = (report) => {
-  if (report?.schema !== 'bead-bench/1' || !['typescript', 'csharp'].includes(report.side)) {
-    fail('expected bead-bench/1 and a typescript or csharp side');
+  if (
+    !['bead-bench/1', 'bead-bench/2'].includes(report?.schema) ||
+    !['typescript', 'csharp'].includes(report.side)
+  ) {
+    fail('expected bead-bench/1 or /2 and a typescript or csharp side');
   }
   const { environment: env, method } = report;
   if (
@@ -53,6 +179,15 @@ export const validate = (report) => {
   ) {
     fail('report requires its run and measurement methods');
   }
+  const merged = report.schema === 'bead-bench/2';
+  if (
+    merged &&
+    (!positiveInteger(method.processes) ||
+      !Number.isSafeInteger(method.warmup) ||
+      method.warmup < 0)
+  ) {
+    fail('merged report requires processes and warmup');
+  }
   if (!Array.isArray(report.measures) || report.measures.length === 0) {
     fail('report requires measurements');
   }
@@ -83,23 +218,55 @@ export const validate = (report) => {
     if (rows.has(row.id)) {
       fail(`duplicate measurement: ${row.id}`);
     }
+    const samples = merged ? row.medians : row.samples;
     if (
-      !Array.isArray(row.samples) ||
-      row.samples.length !== method.runs ||
-      !row.samples.every(Number.isFinite) ||
+      merged &&
+      (!Array.isArray(row.processes) ||
+        row.processes.length !== method.processes ||
+        !row.processes.every((runs, index) => {
+          return (
+            Array.isArray(runs) &&
+            runs.length === method.runs &&
+            runs.every((value) => {
+              return Number.isFinite(value) && value >= 0;
+            }) &&
+            close(row.medians?.[index], medianOf(runs))
+          );
+        }))
+    ) {
+      fail(`invalid processes or medians: ${row.id}`);
+    }
+    if (
+      merged &&
+      row.warmups !== undefined &&
+      (!Array.isArray(row.warmups) ||
+        row.warmups.length !== method.processes ||
+        !row.warmups.every((runs) => {
+          return (
+            Array.isArray(runs) &&
+            runs.length === method.warmup &&
+            runs.every((value) => {
+              return Number.isFinite(value) && value >= 0;
+            })
+          );
+        }))
+    ) {
+      fail(`invalid warmups: ${row.id}`);
+    }
+    if (
+      !Array.isArray(samples) ||
+      samples.length !== (merged ? method.processes : method.runs) ||
+      !samples.every(Number.isFinite) ||
       ![row.min, row.median, row.max].every(Number.isFinite)
     ) {
       fail(`invalid samples or statistics: ${row.id}`);
     }
-    const sorted = row.samples.toSorted((a, b) => {
+    const sorted = samples.toSorted((a, b) => {
       return a - b;
     });
     const middle = Math.floor(sorted.length / 2);
     const median =
       sorted.length % 2 === 0 ? (sorted[middle - 1] + sorted[middle]) / 2 : sorted[middle];
-    const close = (a, b) => {
-      return Math.abs(a - b) <= Math.max(1, Math.abs(b)) * 1e-12;
-    };
     if (
       !close(row.min, sorted[0]) ||
       !close(row.max, sorted.at(-1)) ||
@@ -132,6 +299,14 @@ export const thresholdsOf = (values) => {
 export const compare = (baseline, candidate, thresholds = new Map()) => {
   const before = validate(baseline);
   const after = validate(candidate);
+  if (
+    thresholds.size > 0 &&
+    [baseline, candidate].some((report) => {
+      return (report.schema === 'bead-bench/2' ? report.method.processes : 1) < 5;
+    })
+  ) {
+    fail('a threshold verdict requires at least 5 processes per side; re-bench the baseline');
+  }
   const selectors = new Set(['*']);
   const rows = [];
   for (const [id, row] of before) {
@@ -141,16 +316,18 @@ export const compare = (baseline, candidate, thresholds = new Map()) => {
     }
     selectors.add(id);
     selectors.add(row.name);
-    const delta = next.median - row.median;
-    // Zero baselines have an unbounded relative change, except when both values are zero.
-    const change =
-      row.median === 0
-        ? delta === 0
-          ? 0
-          : Math.sign(delta) * Infinity
-        : (delta / Math.abs(row.median)) * 100;
+    const baseMedians = mediansOf(baseline, row);
+    const nextMedians = mediansOf(candidate, next);
+    const change = hodgesLehmann(baseMedians, nextMedians);
     const regression = row.direction === 'higher' ? -change : change;
     const threshold = thresholds.get(id) ?? thresholds.get(row.name) ?? thresholds.get('*');
+    const { u, p } = mannWhitney(baseMedians, nextMedians, { direction: row.direction });
+    const verdict =
+      threshold !== undefined && regression > threshold
+        ? p <= 0.05
+          ? 'regression'
+          : 'inconclusive'
+        : 'ok';
     rows.push({
       id,
       unit: row.unit,
@@ -159,7 +336,15 @@ export const compare = (baseline, candidate, thresholds = new Map()) => {
       change,
       regression,
       threshold,
-      failed: threshold !== undefined && regression > threshold,
+      u,
+      p,
+      baseMedians,
+      nextMedians,
+      smallestDetectableChange: smallestDetectableChange(baseMedians, nextMedians, {
+        direction: row.direction,
+      }),
+      verdict,
+      failed: verdict === 'regression',
     });
   }
   // a measure the candidate adds has no baseline yet: listed, never judged; one it drops is an error
@@ -207,13 +392,21 @@ export const main = (args) => {
       );
     }
     console.log(
-      '| measure | unit | baseline | candidate | change | threshold | result |\n| --- | --- | --- | --- | --- | --- | --- |'
+      '| measure | unit | baseline | candidate | HL change | U | one-sided p | smallest detectable change | threshold | result |\n| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |'
     );
     for (const row of rows) {
       console.log(
         row.added
-          ? `| ${row.id} | ${row.unit} | | ${row.after.toFixed(3)} | | | new |`
-          : `| ${row.id} | ${row.unit} | ${row.before.toFixed(3)} | ${row.after.toFixed(3)} | ${row.change.toFixed(2)}% | ${row.threshold === undefined ? '' : `${row.threshold}%`} | ${row.failed ? 'regression' : 'ok'} |`
+          ? `| ${row.id} | ${row.unit} | | ${row.after.toFixed(3)} | | | | | | new |`
+          : `| ${row.id} | ${row.unit} | ${row.before.toFixed(3)} | ${row.after.toFixed(3)} | ${row.change.toFixed(2)}% | ${row.u} | ${row.p.toPrecision(4)} | ${row.smallestDetectableChange === null ? 'unavailable' : `${row.smallestDetectableChange.toFixed(2)}%`} | ${row.threshold === undefined ? '' : `${row.threshold}%`} | ${row.verdict} |`
+      );
+    }
+    for (const row of rows) {
+      if (row.added) {
+        continue;
+      }
+      console.log(
+        `${row.id} process medians: baseline [${row.baseMedians.join(', ')}]; candidate [${row.nextMedians.join(', ')}]`
       );
     }
     return rows.some((row) => {

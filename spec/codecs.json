@@ -3,7 +3,7 @@
   "$comment": [
     "Bead's codecs: what each encoding of spec section 17 reads and writes, raw, text and json (decision 0016) and proto (decision 0031), which every implementation's harness plays through its side's codecs.",
     "payloads are bytes read, in an encoding: written is the bytes its writer writes back of the value its reader read, the same bytes where they are canonical already; read, of a proto payload, what its reader read of them; refused, the reason its reader refuses them for. A harness checks the refusal, or that the bytes written are those given and that the value read equals the value its reader reads of them, or that what it read is read.",
-    "proto: a Probe, the message of spec/codecs.proto, read and written through the code each side's stock generator writes for it over its stock library, as generated code reads one: its records checked against Probe's descriptor before the library reads them (decision 0028), and the bound of 17.9.3 set in the call. read is what was read of the top Probe: text, its string as UTF-16 code units in hexadecimal, four capital digits each and a space between; number; nested, how deep messages nest below it, through child, delimited and children, a map's entry counting as a message and its value as another; counts and stamps, where it holds any, their values in their order; children, where it holds any, each key, its code units as text gives them, to what was read of its value, its text, number and nested; and delimited, where it is set, what was read of it, its text, number and nested. A harness checks these and nothing else, since protobuf fixes no message's bytes whole.",
+    "proto: a Probe, the message of spec/codecs.proto, read and written through the code each side's stock generator writes for it over its stock library, as generated code reads one: its records checked against Probe's descriptor before the library reads them (decision 0028), the bound of 17.9.3 set in the call, a closed enum's record of a number it does not declare set aside before the library reads it where the library would take it (17.9.8), and each message it holds judged by its required fields once it is read (17.9.7, decision 0042), as the runtime's codec reads one. read is what was read of the top Probe: text, its string as UTF-16 code units in hexadecimal, four capital digits each and a space between; number; nested, how deep messages nest below it, through child, delimited and children, a map's entry counting as a message and its value as another; counts and stamps, where it holds any, their values in their order; children, where it holds any, each key, its code units as text gives them, to what was read of its value, its text, number and nested; delimited, where it is set, what was read of it, its text, number and nested; and shade, where a record set it, its number. A harness checks these and nothing else, since protobuf fixes no message's bytes whole: needs and needs_items, of Needs, whose fields protobuf requires, are judged and not read back.",
     "values are a value given to a writer, in an encoding: written is the bytes it writes; refused, the reason it refuses the value for. A value is given in one of eight forms.",
     "json: a JSON value, as the file holds it: on the TypeScript side JSON.parse of the file, so that a member named __proto__ is a member; on the C# side a JsonElement of the file.",
     "double: a double by its 64 bits, in hexadecimal: on the TypeScript side read through a DataView; on the C# side a JsonElement of JsonSerializer.SerializeToElement(BitConverter.Int64BitsToDouble(bits)), which holds no NaN and no infinity.",
@@ -11,12 +11,12 @@
     "text: a string, given to a text writer. bytes: bytes in hexadecimal, given to a raw writer.",
     "form: a value no JSON text holds. loneSurrogate is the string a, U+D800, b, which the C# side gives a json writer as a JsonElement of the bytes of its escape, and a text writer as a string; loneSurrogateName, an object whose one member is named so, its value 1; nameTwice, an object of two members both named a, 1 then 2, which the C# side parses with JsonElement.Parse's defaults and the TypeScript side cannot hold; undefined, JavaScript's undefined on the TypeScript side, default(JsonElement), of kind Undefined, on the C# side.",
     "nested: that many arrays, one in another, the innermost empty, which the C# side parses into a JsonElement with a MaxDepth as deep, since 64, its default, refuses a 65th.",
-    "probe: a Probe given to a proto writer, one field set or none, so that protobuf fixes the bytes it writes: text, its string as UTF-16 code units, as read gives one; number; or child, set to the empty message, {}.",
-    "A reason is derived, and held by the regeneration alone: not UTF-8, a byte order mark, not JSON, a name twice, a surrogate alone, a number past a double and nested past 64 of a reader; not its message and nested past 100 of a proto reader; a surrogate alone, a name twice, nested past 64, not a finite number and no JSON value of a writer. No harness reads it: a refusal answers PAYLOAD_UNDECODABLE whatever its reason, and its words are each side's.",
+    "probe: a Probe given to a proto writer, one field set or none, so that protobuf fixes the bytes it writes: text, its string as UTF-16 code units, as read gives one; number; child, set to the empty message, {}; or needs, set to a Needs of the fields it gives, must and shade, each a number, none of them set where it gives none.",
+    "A reason is derived, and held by the regeneration alone: not UTF-8, a byte order mark, not JSON, a name twice, a surrogate alone, a number past a double and nested past 64 of a reader; not its message, nested past 100 and a required field unset of a proto reader; a surrogate alone, a name twice, nested past 64, not a finite number and no JSON value of a writer, and a required field unset of a proto writer. No harness reads it: a refusal answers PAYLOAD_UNDECODABLE whatever its reason, and its words are each side's.",
     "Each item of differs names a row of docs/support.md an entry crosses, which names this file and the entry, and the language it excuses: a value that language's type cannot hold, or a payload its stock protobuf library reads otherwise than 17.9 says. A harness plays every entry but those a differs excuses its language from.",
     "clauses are the units of spec.md an entry checks: a clause, 17.6; an item of its numbered list, 17.5.7."
   ],
-  "specVersion": "0.8.0",
+  "specVersion": "0.9.0",
   "payloads": [
     {
       "name": "a string outside ASCII, written as it is",
@@ -1357,6 +1357,190 @@
       ],
       "bytes": "62 EF 01 12 EC 01 62 E9 01 12 E6 01 62 E3 01 12 E0 01 62 DD 01 12 DA 01 62 D7 01 12 D4 01 62 D1 01 12 CE 01 62 CB 01 12 C8 01 62 C5 01 12 C2 01 62 BF 01 12 BC 01 62 B9 01 12 B6 01 62 B3 01 12 B0 01 62 AD 01 12 AA 01 62 A7 01 12 A4 01 62 A1 01 12 9E 01 62 9B 01 12 98 01 62 95 01 12 92 01 62 8F 01 12 8C 01 62 89 01 12 86 01 62 83 01 12 80 01 62 7E 12 7C 62 7A 12 78 62 76 12 74 62 72 12 70 62 6E 12 6C 62 6A 12 68 62 66 12 64 62 62 12 60 62 5E 12 5C 62 5A 12 58 62 56 12 54 62 52 12 50 62 4E 12 4C 62 4A 12 48 62 46 12 44 62 42 12 40 62 3E 12 3C 62 3A 12 38 62 36 12 34 62 32 12 30 62 2E 12 2C 62 2A 12 28 62 26 12 24 62 22 12 20 62 1E 12 1C 62 1A 12 18 62 16 12 14 62 12 12 10 62 0E 12 0C 62 0A 12 08 62 06 12 04 62 02 12 00",
       "refused": "nested past 100"
+    },
+    {
+      "name": "a required field unset, one below the top",
+      "encoding": "proto",
+      "clauses": [
+        "17.9.7"
+      ],
+      "bytes": "3A 02 10 00",
+      "refused": "a required field unset"
+    },
+    {
+      "name": "required fields set at their defaults",
+      "encoding": "proto",
+      "clauses": [
+        "17.9.7"
+      ],
+      "bytes": "3A 04 08 00 10 00",
+      "read": {
+        "text": "",
+        "number": 0,
+        "nested": 0
+      }
+    },
+    {
+      "name": "required fields none of which is given",
+      "encoding": "proto",
+      "clauses": [
+        "17.9.7"
+      ],
+      "bytes": "3A 00",
+      "refused": "a required field unset"
+    },
+    {
+      "name": "a message given twice, its required fields in its first record",
+      "encoding": "proto",
+      "clauses": [
+        "17.9.7"
+      ],
+      "bytes": "3A 04 08 01 10 00 3A 00",
+      "read": {
+        "text": "",
+        "number": 0,
+        "nested": 0
+      }
+    },
+    {
+      "name": "a message given twice, its required fields in its second record",
+      "encoding": "proto",
+      "clauses": [
+        "17.9.7"
+      ],
+      "bytes": "3A 00 3A 04 08 01 10 00",
+      "read": {
+        "text": "",
+        "number": 0,
+        "nested": 0
+      }
+    },
+    {
+      "name": "a message given twice, its required fields split between its records",
+      "encoding": "proto",
+      "clauses": [
+        "17.9.7"
+      ],
+      "bytes": "3A 02 08 01 3A 02 10 00",
+      "read": {
+        "text": "",
+        "number": 0,
+        "nested": 0
+      }
+    },
+    {
+      "name": "an item that leaves a required field unset",
+      "encoding": "proto",
+      "clauses": [
+        "17.9.7"
+      ],
+      "bytes": "42 04 08 00 10 00 42 02 08 00",
+      "refused": "a required field unset"
+    },
+    {
+      "name": "a map's value whose message leaves a required field unset",
+      "encoding": "proto",
+      "clauses": [
+        "17.9.7"
+      ],
+      "bytes": "62 04 12 02 3A 00",
+      "refused": "a required field unset"
+    },
+    {
+      "name": "a map's key given twice, its last value whole",
+      "encoding": "proto",
+      "clauses": [
+        "17.9.7"
+      ],
+      "bytes": "62 04 12 02 3A 00 62 08 12 06 3A 04 08 00 10 00",
+      "read": {
+        "text": "",
+        "number": 0,
+        "nested": 2,
+        "children": {
+          "": {
+            "text": "",
+            "number": 0,
+            "nested": 0
+          }
+        }
+      }
+    },
+    {
+      "name": "a map's key given twice, its first value whole",
+      "encoding": "proto",
+      "clauses": [
+        "17.9.7"
+      ],
+      "bytes": "62 08 12 06 3A 04 08 00 10 00 62 04 12 02 3A 00",
+      "refused": "a required field unset"
+    },
+    {
+      "name": "a group that leaves a required field unset",
+      "encoding": "proto",
+      "clauses": [
+        "17.9.7"
+      ],
+      "bytes": "6B 3A 00 6C",
+      "refused": "a required field unset"
+    },
+    {
+      "name": "a child that leaves a required field unset",
+      "encoding": "proto",
+      "clauses": [
+        "17.9.7"
+      ],
+      "bytes": "1A 02 3A 00",
+      "refused": "a required field unset"
+    },
+    {
+      "name": "a required closed enum's number its enum does not declare",
+      "encoding": "proto",
+      "clauses": [
+        "17.9.7"
+      ],
+      "bytes": "3A 04 08 00 10 05",
+      "refused": "a required field unset"
+    },
+    {
+      "name": "a required closed enum given a declared number, then one it does not declare",
+      "encoding": "proto",
+      "clauses": [
+        "17.9.7"
+      ],
+      "bytes": "3A 06 08 00 10 01 10 05",
+      "read": {
+        "text": "",
+        "number": 0,
+        "nested": 0
+      }
+    },
+    {
+      "name": "a closed enum's number its enum does not declare, which sets nothing",
+      "encoding": "proto",
+      "clauses": [
+        "17.9.8"
+      ],
+      "bytes": "70 05",
+      "read": {
+        "text": "",
+        "number": 0,
+        "nested": 0
+      }
+    },
+    {
+      "name": "a closed enum's declared number, then one it does not declare",
+      "encoding": "proto",
+      "clauses": [
+        "17.9.8"
+      ],
+      "bytes": "70 01 70 05",
+      "read": {
+        "text": "",
+        "number": 0,
+        "nested": 0,
+        "shade": 1
+      }
     }
   ],
   "values": [
@@ -1889,6 +2073,53 @@
         }
       },
       "written": "0A 04 EF BB BF 61"
+    },
+    {
+      "name": "needs set to no field",
+      "encoding": "proto",
+      "clauses": [
+        "17.2",
+        "17.9.7"
+      ],
+      "value": {
+        "probe": {
+          "needs": {}
+        }
+      },
+      "refused": "a required field unset"
+    },
+    {
+      "name": "needs set at its defaults",
+      "encoding": "proto",
+      "clauses": [
+        "17.9.7"
+      ],
+      "value": {
+        "probe": {
+          "needs": {
+            "must": 0,
+            "shade": 0
+          }
+        }
+      },
+      "written": "3A 04 08 00 10 00"
+    },
+    {
+      "name": "needs with a shade its enum does not declare",
+      "encoding": "proto",
+      "clauses": [
+        "17.2",
+        "17.9.7"
+      ],
+      "value": {
+        "probe": {
+          "needs": {
+            "must": 0,
+            "shade": 5
+          }
+        }
+      },
+      "refused": "a required field unset"
     }
   ]
 }

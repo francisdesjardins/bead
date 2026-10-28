@@ -1,0 +1,31 @@
+// The messages spec/transcoding.json plays a gateway against that a proto3 file cannot declare, written with
+// its entries by spec/generators/make_transcoding.py: regenerate, never edit (spec/transcoding.md, decision
+// 0042).
+edition = "2023";
+
+package bead.transcoding.v1;
+
+import "google/protobuf/field_mask.proto";
+
+// A closed enum, whose undeclared number sets nothing (spec 17.9.8).
+enum Shade {
+  option features.enum_type = CLOSED;
+  SHADE_DARK = 0;
+  SHADE_LIGHT = 1;
+}
+
+// Two fields protobuf requires, which a proto3 file cannot declare.
+message Needs {
+  string name = 1 [features.field_presence = LEGACY_REQUIRED];
+  int32 count = 2 [features.field_presence = LEGACY_REQUIRED];
+  Needs child = 3;
+  Needs delimited = 4 [features.message_encoding = DELIMITED];
+  Shade shade = 5;
+  string line_1 = 6;
+}
+
+// A PATCH of a Needs, its mask itself required.
+message NeedsUpdate {
+  Needs needs = 1;
+  google.protobuf.FieldMask update_mask = 2 [features.field_presence = LEGACY_REQUIRED];
+}

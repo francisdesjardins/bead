@@ -142,6 +142,90 @@ public sealed class RelayTests
     // definition
 
     [Fact]
+    public async Task Keeps_the_first_response_error_when_its_detail_free_fallback_succeeds_or_fails()
+    {
+        foreach (var fallbackFails in new[] { false, true })
+        {
+            var firstError = new InvalidOperationException("private response failure");
+            var fallbackError = new InvalidOperationException("private fallback failure");
+            var fallback = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var responding = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var attempts = new List<(RouterAnswer Answer, AnswerTarget Target)>();
+            var reports = new List<Exception>();
+            var relay = new Relay(new RelayRouter
+            {
+                IsTwoWay = (_) =>
+                {
+                    return true;
+                },
+                Limits = RouterLimits.Default,
+                Report = (error, _) =>
+                {
+                    reports.Add(error);
+                },
+                Request = (_, _) =>
+                {
+                    throw new InvalidOperationException("no connection target");
+                },
+                Respond = (answer, target) =>
+                {
+                    attempts.Add((answer, target));
+
+                    if (attempts.Count == 1)
+                    {
+                        return Task.FromException(firstError);
+                    }
+
+                    responding.SetResult();
+
+                    return fallback.Task;
+                },
+            }, null);
+            var target = new RecordingTarget();
+            var header = HeaderOf(1);
+
+            relay.Register(target, Seven);
+
+            var handling = Handled(relay.HandlerOf(7), PropsOf(header));
+            var ended = Assert.ThrowsAsync<InvalidOperationException>(() =>
+            {
+                return handling;
+            });
+
+            await responding.Task.WaitAsync(Patience, Cancelled);
+
+            Assert.False(handling.IsCompleted);
+
+            if (fallbackFails)
+            {
+                fallback.SetException(fallbackError);
+            }
+            else
+            {
+                fallback.SetResult();
+            }
+
+            var caught = await ended;
+
+            Assert.Same(firstError, caught);
+            Assert.Single(target.Asked);
+            Assert.Equal(2, attempts.Count);
+            Assert.Null(attempts[0].Answer.Failure);
+            Assert.Equal(new byte[] { 9 }, attempts[0].Answer.Payload.ToArray());
+            Assert.Equal(Failure.OfProtocol(ProtocolCode.ProcedureFailed), attempts[1].Answer.Failure);
+            Assert.True(attempts[1].Answer.Payload.IsEmpty);
+
+            foreach (var attempt in attempts)
+            {
+                Assert.Equal(First, attempt.Target.ConnectionHandle);
+                Assert.Same(header, attempt.Target.Header);
+            }
+
+            Assert.Empty(reports);
+        }
+    }
+
+    [Fact]
     public async Task Refuses_bearer_credentials_when_a_destination_supplies_no_carriage_metadata_and_still_forwards_none_or_OPAQUE()
     {
         var test = new TestRelay();
@@ -393,6 +477,65 @@ public sealed class RelayTests
             FailuresOf(test.Answers));
         Assert.Empty(test.Reports);
         Assert.Equal(0, transport.Sent);
+    }
+
+    [Fact]
+    public async Task Counts_ELSEWHERE_in_leg_B_s_payload_bound_and_forwards_its_carried_credential_at_the_boundary()
+    {
+        const string carried = "Bearer mF_9.B5f-4.1JqM";
+        await using var server = new MemoryTransportServer();
+        await using var transport = new MemoryTransportClient();
+        using var relay = new RouterServer(server, new RouterServerOptions { Relay = Admitting });
+        using var client = new RouterClient(transport);
+        var reports = new List<Exception>();
+        var target = new RecordingTarget(new RouterLimits
+        {
+            ChunkBytes = 1_024,
+            MaximumEnvelopeBytes = 1_024,
+            MaximumTransfers = 0,
+            WindowBytes = 2_048,
+        })
+        {
+            CarriedByUpgrade = carried,
+        };
+
+        relay.Error += (error, _) =>
+        {
+            reports.Add(error);
+        };
+        relay.RegisterDestination(target, Seven with { Audience = "bead-interop" });
+
+        await server.Start();
+        await transport.Connect(new MemoryConnectOptions { Server = server }, Cancelled);
+
+        var request = new RouterRequest(
+            new Procedure { ProcedureId = 1, ProcedureName = "echo", ServiceId = 2, ServiceRevision = 3 },
+            new ResolvedRequestOptions
+            {
+                CancellationToken = Cancelled,
+                Credential = Credential.Elsewhere(carried),
+                DestinationId = 7,
+                Timeout = TimeSpan.FromSeconds(5),
+            });
+        var payload = Enumerable.Repeat((byte)42, 1_008).ToArray();
+
+        var refusal = await Assert.ThrowsAsync<FailureException>(() =>
+        {
+            return client.Request(new byte[1_009], request);
+        });
+
+        Assert.Equal((ushort)ProtocolCode.PayloadTooLarge, refusal.Code);
+        Assert.Equal("a payload is 1008 bytes at most, not 1009", refusal.Detail);
+        Assert.Equal(FailureOrigin.Peer, refusal.Origin);
+        Assert.Empty(target.Asked);
+
+        Assert.Equal(new byte[] { 9 }, (await client.Request(payload, request)).Payload.ToArray());
+
+        var asked = Assert.Single(target.Asked);
+
+        Assert.Equal(payload, asked.Payload.ToArray());
+        Assert.Equal(Credential.Elsewhere(carried), asked.Options.Credential);
+        Assert.Empty(reports);
     }
 
     [Fact]

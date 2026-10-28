@@ -8,7 +8,7 @@ schema, which follows JSON Schema 2020-12, and holds no key twice (RFC 7493); ea
 version of the document it belongs to, spec/spec.md's as its specVersion, spec/debugging.md's, the
 companion's, as its debuggingVersion, or spec/transcoding.md's, the transcoding's, as its
 transcodingVersion; no group holds two entries of one name, which a reader looking one up by name
-would never reach; each group of vectors.json is named by a section of the spec, which names no
+would never reach, a transports' case looked up by its transport and its name; each group of vectors.json is named by a section of the spec, which names no
 other, and each of a companion's files by a line of its own; every unit an entry cites is one of its
 document's — a clause, an item of its numbered list, a row of its table — and spec/units.txt,
 spec/debugging-units.txt and spec/transcoding-units.txt list every unit of each, its front matter and each
@@ -485,9 +485,13 @@ for group, entries in named.items():
     seen = set()
 
     for entry in entries:
-        if entry['name'] in seen:
+        # a transports' case is looked up by its transport and its name: a broker case plays over the
+        # in-memory broker and over MQTT 5 under one name
+        key = (entry['transport'], entry['name']) if group == 'transports' else entry['name']
+
+        if key in seen:
             problems.append(f'{group}: two entries named {entry["name"]!r}')
-        seen.add(entry['name'])
+        seen.add(key)
 
 responses = set()
 
@@ -602,7 +606,7 @@ for group in ('conversations', 'transports', 'exits'):
 
             if 'until' in step and 'timer' in step['until']:
                 armed = step['until']['timer']
-            elif {'send', 'expect', 'advance'} & set(step):
+            elif {'send', 'expect', 'advance', 'publish', 'connect', 'transportSend'} & set(step):
                 armed = None
 
 # a conversation that opens its connections names one, opened already, on every other step but those
@@ -1449,11 +1453,16 @@ NUMBER_WORDS = ('one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 
                 'thirteen', 'fourteen', 'fifteen', 'sixteen', 'seventeen', 'eighteen', 'nineteen', 'twenty')
 NUMBER = rf'\b(\d{{1,3}}(?:,\d{{3}})+|\d+|{"|".join(NUMBER_WORDS)})\b'
 
-# what a row cites, which counts nothing: a code span, a link's target, a unit of the spec or the companion
-CITED = re.compile(r'`[^`]*`|\]\([^)]*\)|§\s*[\d.]+(?:[–-][\d.]+)?|\b(?:spec|debugging) \d+(?:\.\d+)+')
+# what a row cites, which counts nothing: a code span, a link's target, a unit of the spec or the companion,
+# or a protocol named by its version, MQTT 5 or AMQP 1.0
+CITED = re.compile(r'`[^`]*`|\]\([^)]*\)|§\s*[\d.]+(?:[–-][\d.]+)?|\b(?:spec|debugging) \d+(?:\.\d+)+|\bMQTT 5\b'
+                   r'|\bAMQP 1\.0\b')
 
 # the transports a case is played over, each by the name a row gives it
-TRANSPORT_NAMES = {'http': 'HTTP', 'websocket': 'WebSocket'}
+TRANSPORT_NAMES = {'http': 'HTTP', 'websocket': 'WebSocket', 'broker': 'the in-memory broker', 'mqtt': 'MQTT 5',
+                   'amqp': 'AMQP 1.0'}
+# the real brokers a binding's cases play over, by their transport, each counted by its roles
+REAL_BROKERS = {transport: TRANSPORT_NAMES[transport] for transport in ('mqtt', 'amqp')}
 
 
 def number_of(written):
@@ -1568,6 +1577,16 @@ COUNTS = {
             (1, r'^{n} cases', len(named['transports']), "transports' cases"),
             *[(1, rf'\b{{n}} over {name}\b', transport_counts.get(transport, 0), f'cases over {name}')
               for transport, name in TRANSPORT_NAMES.items()],
+            # over a broker, the cases of each role, the server's unless a case says client, in memory
+            # and over each real broker
+            *[(1, rf'\b{{n}} of a {role}\b', sum(case['transport'] == 'broker' and case.get('role', 'server') == role
+                                              for case in named['transports']), f'broker cases of the {role} role')
+              for role in ('server', 'client')],
+            *[(1, pattern.replace('{name}', re.escape(name)),
+               sum(case['transport'] == transport and case.get('role', 'server') == role for case in named['transports']),
+               f'cases of the {role} role over {name}')
+              for transport, name in REAL_BROKERS.items()
+              for role, pattern in (('server', r'over {name} \({n} and'), ('client', r'over {name} \([\d,]+ and {n}\)'))],
             (1, r'\b{n} of them on the real clock', sum(bool(case.get('realTime')) for case in named['transports']),
              'cases marked realTime'),
             (1, r'\b{n} on the clock the server is given, advanced',

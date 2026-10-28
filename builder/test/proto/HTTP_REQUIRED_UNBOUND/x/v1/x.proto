@@ -1,0 +1,42 @@
+edition = "2023";
+
+package x.v1;
+
+import "bead/options.proto";
+import "google/api/annotations.proto";
+import "google/protobuf/struct.proto";
+
+option (bead.file) = {
+  admission: {
+    none: {}
+  }
+};
+
+// A request whose filter protobuf requires, a Struct only a body carries.
+message FindRequest {
+  string name = 1;
+  string note = 2;
+  google.protobuf.Struct filter = 3 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// A result.
+message FindResponse {
+  string name = 1;
+}
+
+// A rule no call satisfies: its body is the note, and its query sets no Struct.
+service XService {
+  option (bead.service) = {
+    id: 1
+    revision: 1
+  };
+
+  // Finds.
+  rpc Find(FindRequest) returns (FindResponse) {
+    option (bead.procedure) = {id: 1};
+    option (google.api.http) = {
+      post: "/v1/{name}:find"
+      body: "note"
+    };
+  }
+}

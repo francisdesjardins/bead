@@ -44,6 +44,8 @@ import type { Schema } from './rules.ts';
 import {
   componentSchemasOf,
   fieldSchemaOf,
+  type KeywordsOf,
+  keywordsOfBlueprint,
   messageSchemaOf,
   objectSchemaOf,
   refOf,
@@ -246,19 +248,28 @@ const pathOf = (
 };
 
 // the query's parameters: every field the path and the body leave that the query carries, by JSON
-// paths, through message fields, a message never entered twice down one path
+// paths, through message fields, a message never entered twice down one path; one required where
+// protobuf requires its field and each message field on its path is required too or held present by
+// a variable, but a mask section 4.5 derives (transcoding 11.4)
 const queryOf = (
   request: IMessageEntry,
   details: {
     readonly bound: ReadonlySet<string>;
     readonly body?: string;
+    readonly derivesMask: boolean;
     readonly messages: ReadonlyMap<string, IMessageEntry>;
   }
 ): Schema[] => {
   const parameters: Schema[] = [];
+  const variables = [...details.bound];
   const walk = (
     message: IMessageEntry,
-    at: { readonly proto: string; readonly json: string; readonly seen: ReadonlySet<string> }
+    at: {
+      readonly proto: string;
+      readonly json: string;
+      readonly seen: ReadonlySet<string>;
+      readonly present: boolean;
+    }
   ): void => {
     for (const field of message.fields ?? []) {
       const proto = `${at.proto}${field.fieldName}`;
@@ -274,9 +285,18 @@ const queryOf = (
       }
 
       if (held === undefined || STRING_FORMS.has(held)) {
+        const derived = details.derivesMask && at.proto === '' && proto === UPDATE_MASK;
+        const required = at.present && field.legacyRequired === true && !derived;
+
         parameters.push({
           name: json,
           in: 'query',
+          ...(required
+            ? {
+                required: true,
+                description: `Its field, ${proto}, is of LEGACY_REQUIRED presence: a request that leaves it unset is refused. Bead's mapping reads it by this proto name too.`,
+              }
+            : {}),
           ...(field.label === 'repeated' ? { explode: true, style: 'form' } : {}),
           schema: fieldSchemaOf(field),
           ...(field.deprecated === true ? { deprecated: true } : {}),
@@ -291,14 +311,51 @@ const queryOf = (
           proto: `${proto}.`,
           json: `${json}.`,
           seen: new Set([...at.seen, held]),
+          present:
+            at.present &&
+            (field.legacyRequired === true ||
+              variables.some((variable) => {
+                return variable.startsWith(`${proto}.`);
+              })),
         });
       }
     }
   };
 
-  walk(request, { proto: '', json: '', seen: new Set([request.fullName]) });
+  walk(request, { proto: '', json: '', seen: new Set([request.fullName]), present: true });
 
   return parameters;
+};
+
+// a request's field section 4.5 sets from a PATCH's body, by its proto name
+const UPDATE_MASK = 'update_mask';
+
+// whether a route's PATCH sets its request's update_mask from its body (transcoding 4.5): its body a
+// message field of its request, which holds a google.protobuf.FieldMask named update_mask
+const derivesMaskOf = (
+  route: IRoute,
+  details: {
+    readonly request: IMessageEntry;
+    readonly messages: ReadonlyMap<string, IMessageEntry>;
+  }
+): boolean => {
+  const body = details.request.fields?.find((field) => {
+    return field.fieldName === route.body;
+  });
+  const mask = details.request.fields?.find((field) => {
+    return field.fieldName === UPDATE_MASK;
+  });
+  const held = body === undefined ? undefined : messageTypeOf(body.type);
+
+  return (
+    route.method === 'PATCH' &&
+    body?.label === undefined &&
+    held !== undefined &&
+    details.messages.get(held)?.fields !== undefined &&
+    mask?.label === undefined &&
+    mask !== undefined &&
+    messageTypeOf(mask.type) === 'google.protobuf.FieldMask'
+  );
 };
 
 // a native binding's schema and its media type
@@ -332,6 +389,7 @@ const mediaOf = (media: { readonly type: string; readonly schema?: Schema }): Sc
 export const documentValueOf = (blueprint: IBlueprint, options: IDocumentOptions = {}): Schema => {
   const messages = messagesOf(blueprint);
   const judged = judgedMessagesOf(blueprint);
+  const keywordsOf: KeywordsOf = keywordsOfBlueprint(blueprint);
   const paths: Record<string, Record<string, Schema>> = {};
   const prefix = options.prefix ?? DEFAULT_PREFIX;
   const schemaOfBinding = (
@@ -363,6 +421,7 @@ export const documentValueOf = (blueprint: IBlueprint, options: IDocumentOptions
         ? queryOf(request, {
             bound,
             ...(route.body === undefined ? {} : { body: route.body }),
+            derivesMask: derivesMaskOf(route, { request, messages }),
             messages,
           })
         : [];
@@ -387,7 +446,12 @@ export const documentValueOf = (blueprint: IBlueprint, options: IDocumentOptions
             schema:
               bound.size === 0 || request.fields === undefined
                 ? messageSchemaOf(request.fullName)
-                : objectSchemaOf(request, { messages, bound }),
+                : objectSchemaOf(request, {
+                    messages,
+                    bound,
+                    keywordsOf,
+                    ...keywordsOf(request.fullName),
+                  }),
           },
         };
       }
@@ -411,7 +475,12 @@ export const documentValueOf = (blueprint: IBlueprint, options: IDocumentOptions
             field === undefined
               ? {}
               : inner.length > 0 && heldEntry?.fields !== undefined && field.label === undefined
-                ? objectSchemaOf(heldEntry, { messages, bound: new Set(inner) })
+                ? objectSchemaOf(heldEntry, {
+                    messages,
+                    bound: new Set(inner),
+                    keywordsOf,
+                    ...keywordsOf(heldEntry.fullName),
+                  })
                 : fieldSchemaOf(field),
         },
       };

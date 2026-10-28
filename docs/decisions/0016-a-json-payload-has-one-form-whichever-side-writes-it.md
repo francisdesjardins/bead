@@ -47,8 +47,8 @@ Four inputs reach another outcome, not only other bytes: a byte order mark, a su
 arrays nested, and `1E400`.
 
 Bead asks one behaviour of every language ([0004](0004-one-behaviour-in-every-language.md)): the
-codecs agree, so that the clients the builder generates send one form, and a third language copies
-one form, not one of two.
+codecs agree, so that the clients the builder generates send one form, and Rust, and each language
+after it, copies one form, not one of two.
 
 What had to be settled, and the ways weighed for each:
 
@@ -73,12 +73,12 @@ What had to be settled, and the ways weighed for each:
   `{b, a}` by the other are two forms; and RFC 8785's conformance, to anyone who checks it.
 - **RFC 8785 whole, the JSON Canonicalization Scheme**: each object's members sorted by their names'
   UTF-16 code units (RFC 8785 §3.2.3). One value has one form, built in whatever order; the scheme
-  is a standard with test data (its Appendix B) and implementations in many languages, which a third
-  language takes as it is, where the third way has every language copy an engine's rule for its
-  objects. What it gives up: the author's order on the wire, which RFC 8259 §4 and RFC 7493 §2.3 say
-  carries no meaning; and `JSON.stringify` on the TypeScript writer, since every ordinary object
-  holds its array-index names first again: the writer writes such an object by hand, and is 7.7 to
-  12.5 ms on the payload as tuned (below), against 3.0 to 4.2 for the third way.
+  is a standard with test data (its Appendix B) and implementations in many languages, which Rust,
+  and each language after it, takes as it is, where the third way has every language copy an
+  engine's rule for its objects. What it gives up: the author's order on the wire, which RFC 8259 §4
+  and RFC 7493 §2.3 say carries no meaning; and `JSON.stringify` on the TypeScript writer, since
+  every ordinary object holds its array-index names first again: the writer writes such an object by
+  hand, and is 7.7 to 12.5 ms on the payload as tuned (below), against 3.0 to 4.2 for the third way.
 - **Chosen: RFC 8785 whole.**
 
 **A string.** RFC 8785 §3.2.2.2 writes a string as ECMAScript's `JSON.stringify` writes a
@@ -377,12 +377,12 @@ lets a claim's string hold a surrogate alone that "names nothing"; a payload is 
 The two share the strict decoder and the scan for names given twice; making 13.8 read as 17 does is
 a decision of its own.
 
-**A third language pays for two algorithms**: the shortest digits of a double, laid out as
-ECMAScript lays them out — Ryū, or Grisu with a fallback, as RFC 8785 §3.2.2.3 points to — and the
-nearest double of a number's text, a tie to the even, which its platform's JSON reader may not give,
-as .NET's does not; and names compared by UTF-16 code units, which a C side with UTF-8 strings
-converts, or compares in UTF-8 where no name holds a character past U+FFFF together with one from
-U+E000 to U+FFFF (RFC 8785 §3.2.3's note).
+**Rust, and each language after it, pays for two algorithms**: the shortest digits of a double,
+laid out as ECMAScript lays them out — Ryū, or Grisu with a fallback, as RFC 8785 §3.2.2.3 points
+to — and the nearest double of a number's text, a tie to the even, which its platform's JSON reader
+may not give, as .NET's does not; and names compared by UTF-16 code units, which a side whose
+strings are UTF-8 converts, or compares in UTF-8 where no name holds a character past U+FFFF
+together with one from U+E000 to U+FFFF (RFC 8785 §3.2.3's note).
 
 **A value a side's type cannot hold** is a platform row of the matrix.
 
@@ -404,7 +404,7 @@ the answer that holds:
 | 17.2.4 says a notification's value that does not write fails the code that notifies, and a request's fails before anything goes; on both sides the first is dropped, neither reported nor counted, and the second is traced and deprecated before the encode     | Accepted: both sides settle one behaviour, chosen in the Context: a request's value written before its trace and its deprecation, so no call is made and nothing is traced (debugging 4.3 says so); a notification's reported as its router reports one that does not go, and counted `failed` for each subscription it was for (10.1 has the case); twin tests on both sides                                                                                                                         |
 | Three outcomes that change on the wire have no conversation: a surrogate alone, 65 arrays nested and `1E400`; `codecs.json` cannot hold which code a server answers, nor that the refusal comes at the read                                                      | Accepted: three echo conversations, each answered `PAYLOAD_UNDECODABLE`; the interop's comments say what its codec does                                                                                                                                                                                                                                                                                                                                                                               |
 | "Three to four times" is false for the TypeScript side, and the price of sorted members on the TypeScript writer goes unstated: a sorted object cannot be handed to `JSON.stringify`                                                                             | Accepted: each side's ratio as measured, by its parts; the tuned writer the objection names was measured and held byte-equal to the hand writer, `__proto__` and array-index names among the rows: 7.8 to 12.5 ms, against 3.0 to 4.2 for ECMA-262's order and 1.3 to 1.7 for `JSON.stringify` alone. The Context states it                                                                                                                                                                           |
-| The third way of ordering members is dismissed as no standard, yet ECMA-262's order is the standard RFC 8785 copies for strings and numbers, the closest way to the builder's design as first taken and the cheapest; what it gives up is a goal the draft added | Accepted in part: the third way is described as ECMA-262's order, its cost measured on each side, and what each way gives up stated in the Context. The recommendation stays RFC 8785 whole, and the user takes it: one value one form, built in whatever order, is what "canonical" means and what a third language takes ready-made, where ECMA-262's order has every language copy one engine's rule for its objects                                                                               |
+| The third way of ordering members is dismissed as no standard, yet ECMA-262's order is the standard RFC 8785 copies for strings and numbers, the closest way to the builder's design as first taken and the cheapest; what it gives up is a goal the draft added | Accepted in part: the third way is described as ECMA-262's order, its cost measured on each side, and what each way gives up stated in the Context. The recommendation stays RFC 8785 whole, and the user takes it: one value one form, built in whatever order, is what "canonical" means and what Rust, and each language after it, takes ready-made, where ECMA-262's order has every language copy one engine's rule for its objects                                                              |
 | `JsonElement.DeepEquals` tells neither `1.0` from `1` nor `-0` from `0`, so the C# harness barely holds the canonical form's value                                                                                                                               | Accepted: the C# harness also holds the handed-on element's `GetRawText()` to the bytes its writer writes of it, which an element read as it came fails                                                                                                                                                                                                                                                                                                                                               |
 | The preamble goes from "1 to 15" to "1 to 17" against the builder's design, which the user took, and would stop a relay or a side with `raw` alone from conforming to the wire                                                                                   | Accepted: the preamble keeps "1 to 15", and adds that a side conforms to section 17 for each encoding it offers; sections 16 and 17 land in one release of the spec, neither depending on the other                                                                                                                                                                                                                                                                                                   |
 | The reasons to take a noncharacter do not hold: both sides check every character of every string already, and "no platform's reader refuses it" is not held elsewhere                                                                                            | Accepted in part: the choice is put as RFC 7493 §2.1 against Corrigendum #9, the cost measured where it falls — a test against `\p{Noncharacter_Code_Point}` on the TypeScript side, where `isWellFormed` runs natively and no character loop runs in JavaScript; a comparison a unit in the C# writer's loop — and the title says "its noncharacters aside". The recommendation stays, and the user takes it: taken, so that a string is any sequence of scalar values in every encoding Bead states |

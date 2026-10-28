@@ -206,6 +206,11 @@ export interface IFieldEntry {
   readonly key?: ScalarName;
   /** Whether it tracks presence: a repeated field and a map never do. */
   readonly presence: 'explicit' | 'implicit';
+  /**
+   * Under the feature `legacy-required`: a field of `LEGACY_REQUIRED` presence, proto2's `required`,
+   * which a message that leaves it unset neither reads nor writes (spec 17.9.7, decision 0042).
+   */
+  readonly legacyRequired?: true;
   /** The `oneof` it is a member of, by its name; a synthetic one never. */
   readonly oneof?: string;
   readonly description?: string;
@@ -268,8 +273,18 @@ export interface IReading {
  */
 export const VALIDATE_FEATURE = 'validate';
 
+/**
+ * The feature a blueprint requires where a message's field is of `LEGACY_REQUIRED` presence: a
+ * reader that does not know it refuses the blueprint, and never generates a side or a document that
+ * takes a message its server refuses (decision 0042).
+ */
+export const LEGACY_REQUIRED_FEATURE = 'legacy-required';
+
 /** The features of `requires` this beadc knows. */
-export const KNOWN_FEATURES: ReadonlySet<string> = new Set<string>([VALIDATE_FEATURE]);
+export const KNOWN_FEATURES: ReadonlySet<string> = new Set<string>([
+  LEGACY_REQUIRED_FEATURE,
+  VALIDATE_FEATURE,
+]);
 
 const BYTE_ORDER_MARK = '\uFEFF';
 

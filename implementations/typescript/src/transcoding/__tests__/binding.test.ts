@@ -1,8 +1,15 @@
-import { create } from '@bufbuild/protobuf';
+import { create, fromJsonString } from '@bufbuild/protobuf';
+import { AnySchema, FieldMaskSchema } from '@bufbuild/protobuf/wkt';
 import { expect, test } from '@playwright/test';
 import { ProgrammerError } from '../../transport/shared/errors';
 import { bindRequest, type IBindingOptions } from '../binding';
 import { JsonFormError, typeRegistryOf } from '../json-form';
+import {
+  PatchRequestSchema,
+  PatchStructRequestSchema,
+  type PatchRequest,
+  type PatchStructRequest,
+} from './binding-fixtures/generated/patch_binding_pb';
 import {
   EverythingSchema,
   GetBookRequestSchema,
@@ -62,6 +69,43 @@ const refusalOf = (query: string): string | undefined => {
 };
 
 // tests
+
+test('reads raw Unicode query values and keeps malformed percent escapes literal', () => {
+  for (const [text, value] of [
+    ['é', 'é'],
+    ['😀', '😀'],
+    ['A😀Z', 'A😀Z'],
+    ['%C3%A9', 'é'],
+    ['%F0%9F%98%80', '😀'],
+    ['%', '%'],
+    ['%F', '%F'],
+    ['%G0', '%G0'],
+    ['%0G', '%0G'],
+    ['100%done', '100%done'],
+  ]) {
+    expect(getBook({ query: `tags=${text}`, variables: { name: '2' } })).toEqual(
+      create(GetBookRequestSchema, { name: '2', tags: [value!] })
+    );
+  }
+});
+
+test('keeps arbitrary Struct members out of an inferred PATCH mask', () => {
+  const registry = typeRegistryOf([PatchStructRequestSchema]);
+  for (const body of ['{}', '{"customKey":1}', '{"customKey":1,"other_key":{"nested":false}}']) {
+    const read = bindRequest(PatchStructRequestSchema, {
+      body: ENCODER.encode(body),
+      isPatch: true,
+      registry,
+      routeBody: 'profile',
+      variables: {},
+    }) as PatchStructRequest;
+
+    expect(read.profile).toEqual(
+      fromJsonString(PatchStructRequestSchema, `{"profile":${body}}`).profile
+    );
+    expect(read.updateMask).toEqual(create(FieldMaskSchema));
+  }
+});
 
 test('binds a path variable, the query and the body into one request, as http.proto’s rules state', () => {
   const read = getBook({
@@ -240,8 +284,69 @@ test('fills no update_mask path of a PATCH’s body that is no object, and refus
   ).toBe('a key no field names');
 });
 
+test('fills a PATCH mask from snake-case fields through nested and empty message bodies', () => {
+  for (const body of [
+    '{"displayName":"Ada","nestedProfile":{"displayName":"Grace"},"emptyProfile":{}}',
+    '{"display_name":"Ada","nested_profile":{"display_name":"Grace"},"empty_profile":{}}',
+  ]) {
+    const read = bindRequest(PatchRequestSchema, {
+      body: ENCODER.encode(body),
+      isPatch: true,
+      registry: typeRegistryOf([PatchRequestSchema]),
+      routeBody: 'profile',
+      variables: {},
+    }) as PatchRequest;
+
+    expect(read).toEqual(
+      create(PatchRequestSchema, {
+        profile: {
+          displayName: 'Ada',
+          nestedProfile: { displayName: 'Grace' },
+          emptyProfile: {},
+        },
+        updateMask: { paths: ['display_name', 'nested_profile.display_name', 'empty_profile'] },
+      })
+    );
+  }
+});
+
 test('throws a programmer’s error for a variable that names no field', () => {
   expect(() => {
     return getBook({ variables: { 'sub.nope': 'x' } });
   }).toThrow(ProgrammerError);
+});
+
+test('propagates a supplied type registry’s error without placing it in the request', () => {
+  for (const failure of [
+    new Error('the type registry failed'),
+    new JsonFormError('the registry refuses'),
+  ]) {
+    const lookedUp: string[] = [];
+    let caught: unknown;
+
+    try {
+      bindRequest(AnySchema, {
+        body: ENCODER.encode(
+          '{"@type":"type.example/bead.transcoding.GetBookRequest","name":"books/1"}'
+        ),
+        registry: {
+          messageOf: (name) => {
+            lookedUp.push(name);
+            throw failure;
+          },
+        },
+        routeBody: '*',
+        variables: {},
+      });
+    } catch (error) {
+      caught = error;
+    }
+
+    expect(lookedUp).toEqual(['bead.transcoding.GetBookRequest']);
+    expect(caught).toBe(failure);
+    if (caught instanceof JsonFormError) {
+      expect(caught.at).toBeUndefined();
+      expect(caught.place).toBeUndefined();
+    }
+  }
 });

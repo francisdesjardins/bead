@@ -7,6 +7,111 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-10-28
+
+### Added
+
+- A broker as a transport, its core on both sides: a participant's client and server transports
+  over a broker's adapter, a connection placed once through a server's name, opened in three legs
+  and named by both its ends, its parcels numbered so that a copy never reaches the router and
+  nothing overtakes, an envelope sent in parts under its peer's bound, a heartbeat and a will of
+  Bead's own, a participant whose link another of its id takes over fenced until it is started
+  again, an OPEN and a DATA that carries a credential given a life in their broker where the adapter
+  offers one, a server's names served by its broker's word, and the credential a request presents
+  carried beside it (spec 15.16 to 15.24, decisions 0038 to 0040).
+- MQTT 5 as a broker's first binding, on both sides: an adapter over MQTT.js (an optional peer
+  dependency, in Node and in a page over WebSocket) and a `Bead.Transport.Mqtt` package over MQTTnet,
+  each a link that keeps no session, authenticated by a password or a client certificate, a parcel
+  one PUBLISH of QoS 1 counted to its byte under both ends' Maximum Packet Size and held to its
+  broker's Receive Maximum, its PUBACK once taken, 0x10 as no subscriber, a subscription let go once
+  its UNSUBACK came under 0x80 and refused on 0x80 or more, and a will of Bead's GONE (spec 15.25 to
+  15.31, decision 0041).
+- AMQP 1.0 on RabbitMQ 4 as a broker's second binding, on both sides: an adapter over rhea (an
+  optional peer dependency, in Node) and a `Bead.Transport.Amqp` package over AMQPNetLite, each link
+  one fresh connection whose exclusive inbox, declared through RabbitMQ's management on it, ends with
+  it, each served name a provisioned queue its participants consume in turn, a session of its own
+  for each name and for what goes to names and to inboxes, a parcel one message of one profile counted
+  to its byte under the broker's max-message-size and the participant's own, sent through the root's
+  topic exchange, accepted, released as no subscriber or rejected, settled once taken under credit of
+  its own, a name's 1 so that its queue hands each member one OPEN at a time, a name let go within
+  `connectTimeout` or its link lost, and a life as its header's ttl (spec 15.32 to 15.38, decision
+  0043).
+- An in-memory broker on both sides, which copies, reorders, drops and overruns as a test asks: the
+  broker cases of `spec/transports.json`, both roles, and the conversations play over it.
+- `spec/vectors.json`'s `parcels` and `parcelRefusals`, a broker's parcels read and written back and
+  the messages refused as parcels; `spec/transports.json`'s 44 broker cases, a client role among
+  them; and `spec/durations.json`'s broker places, `brokerParticipant.heartbeat`,
+  `brokerTransportServer.acceptTimeout` and `brokerParticipant.bodyGracePeriod`, and the way
+  `broker` of `transportClient.connectTimeout`.
+- `spec/transports.json`'s 43 cases over MQTT 5, played against Mosquitto 2.1.2 by
+  `tools/mqtt-broker.mjs`, a broker of its own per run with a password drawn for it;
+  `spec/vectors.json`'s `mqttPublishBounds`; `spec/durations.json`'s `mqttBrokerAdapter.keepAlive`
+  and `mqttBrokerAdapter.connectTimeout`; the interop over MQTT 5, both ways, in CI's job `mqtt`.
+- `spec/transports.json`'s 39 cases over AMQP 1.0 and its `brokers.amqp`, played against RabbitMQ
+  4.4.0 by `tools/amqp-broker.mjs`, a broker of its own per run on the fixture it shares with
+  `tools/mqtt-broker.mjs`; `spec/vectors.json`'s `amqpMessages`, the profile written to its every
+  byte by the spec's own writer, and `amqpPublishBounds`; `spec/durations.json`'s
+  `amqpBrokerAdapter.idleTimeout` and `amqpBrokerAdapter.connectTimeout`; the interop over AMQP 1.0,
+  both ways, in CI's job `amqp`.
+- The internal demo over MQTT 5, `?transport=mqtt`: its page a client participant over the broker's
+  WebSocket, served where a broker is given (`node tools/mqtt-broker.mjs run -- yarn demo`), and
+  `yarn test:demo`'s leg over it, which skips, saying so, where none is.
+- The DevTools panel followed over MQTT 5: a test of the extension that runs the demo's page over
+  the broker and finds its calls, each step and its envelopes in the panel, in CI's job `mqtt`.
+
+### Changed
+
+- The spec moves to 0.9.0 (`spec-v0.9.0`), its companion, `spec/debugging.md`, to 0.4.1
+  (`debugging-v0.4.1`), and the transcoding's companion, `spec/transcoding.md`, to 0.2.0
+  (`transcoding-v0.2.0`).
+- The documents are brought to 0.8.0: the records, the spec and its companions in form alone, the
+  READMEs and the matrix; no record moves, the index gathers the broker's records under a theme of
+  their own, and Rust as the third language, a payload's rules in CEL, the close code carried on
+  `close` and a relay that carries a subscription stay ahead.
+- A connection over a broker is placed at its open, and nothing overtakes on it, where decision
+  0021 had a request published to its procedure's topic and a cancel overtake it; 15.15, how a
+  connect ends, stands under a heading of its own, `### A connect`.
+- A WebSocket client asks one credential at a time of each provider by its identity: a different
+  provider can answer while an earlier source stays pending; a later attempt using that source
+  waits for it to settle within its own bounds, then asks anew.
+- A proto message that leaves a required field unset — proto2's `required`, an edition's
+  `LEGACY_REQUIRED` — at any depth but inside an `Any`, neither reads nor writes on either side
+  (spec 17.9.7, decision 0042). A request is answered `PAYLOAD_UNDECODABLE`, a result fails its
+  call, and a value fails before it goes. A gateway refuses one 400 `PAYLOAD_UNDECODABLE` after its
+  reading, placed as a violation's field is (transcoding 5.2.4, 7.4). Both sides and every gateway
+  must change.
+- A closed enum's undeclared number sets nothing on a singular field, on both sides (spec 17.9.8).
+- Generated code names `GENERATED_CODE_SUPPORTS_VERSION_6`, `GeneratedCode.SupportsVersion6`, and
+  calls `protoCodecOf` / `ProtoCodecs`. The runtimes no longer carry version 4, so code generated
+  before this change must be regenerated.
+- beadc's document requires each field of `LEGACY_REQUIRED` presence (transcoding 11.4, 11.5,
+  11.7). The blueprint marks one `legacyRequired`, under the feature `legacy-required`.
+  `HTTP_REQUIRED_UNBOUND` refuses a route no call can satisfy, and `HTTP_PATCH_REQUIRED` warns.
+- `spec/codecs.json`'s rows of 17.9.7 and 17.9.8 over `Probe`'s `needs`, `needs_items` and `shade`,
+  and `spec/transcoding.json`'s readings, bindings, writings and exchanges of a required field,
+  over `spec/transcoding-required.proto`, of edition 2023, and the procedures `require`,
+  `getNeeds` and `updateNeeds`.
+
+### Fixed
+
+- Over MQTT 5 on a WebSocket, each side sends every message to its broker as one binary frame, and
+  a page cuts its messages to 16 KiB at most, which Chromium sends whole: Mosquitto 2.1.2's WebSocket
+  listener frames what it sends amid a fragmented message as a continuation, which ends the link. A
+  page's burst keeps its link, the demo's glyph among them.
+- A WebSocket connect lets go of its socket on every failure and writes no credential that settles
+  in the turn its attempt is disposed or times out.
+- A C# WebSocket connect disposed as its credential arrives reports the attempt's end, with
+  cancellation and timeout taking precedence, even when its aborted socket fails first.
+- A PATCH body naming a field whose proto name holds an underscore before a digit binds on the
+  TypeScript side, its derived mask set by proto names (transcoding 4.5).
+- `HttpEvents.DataOf`, and an `Any`'s bytes on writing, read as 17.9 reads a payload, its records
+  checked and its depth bounded.
+- beadc keeps the rules of a body that a variable binds into.
+- The C# side's JSON mapping reads and writes a delimited field and a group as the message it
+  holds, as the TypeScript side does, where it refused one with `no form for a Group`.
+- The C# bench builds whole, `spec/transcoding-required.proto`'s messages compiled beside
+  `spec/transcoding.proto`'s, and CI's .NET job builds it.
+
 ## [0.7.0] - 2026-10-26
 
 ### Added
@@ -1917,7 +2022,8 @@ duration }`: on the C# side `StartedAt`, a `DateTimeOffset`, and `Duration`, a `
   workflows.
 - The licence, Apache-2.0.
 
-[Unreleased]: https://github.com/francisdesjardins/bead/compare/v0.7.0...develop
+[Unreleased]: https://github.com/francisdesjardins/bead/compare/v0.8.0...develop
+[0.8.0]: https://github.com/francisdesjardins/bead/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/francisdesjardins/bead/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/francisdesjardins/bead/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/francisdesjardins/bead/compare/v0.4.1...v0.5.0

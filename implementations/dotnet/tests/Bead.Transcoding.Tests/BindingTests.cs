@@ -1,4 +1,5 @@
 using System.Text;
+using Bead.Transcoding.Tests.BindingFixtures;
 using Bead.Transcoding.V1;
 using Google.Protobuf.WellKnownTypes;
 using static Bead.Transcoding.Tests.TranscodingFile;
@@ -12,6 +13,61 @@ namespace Bead.Transcoding.Tests;
 /// </summary>
 public sealed class BindingTests
 {
+    [Fact]
+    public void Reads_raw_Unicode_query_values_and_keeps_malformed_percent_escapes_literal()
+    {
+        foreach (var (text, value) in new[]
+        {
+            ("é", "é"), ("😀", "😀"), ("A😀Z", "A😀Z"), ("%C3%A9", "é"), ("%F0%9F%98%80", "😀"),
+            ("%", "%"), ("%F", "%F"), ("%G0", "%G0"), ("%0G", "%0G"), ("100%done", "100%done"),
+        })
+        {
+            Assert.Equal(new GetBookRequest { Name = "2", Tags = { value } }, Bind(
+                ("getBook", new HttpRouteTemplate { Method = "GET", Template = "/v1/books/{name}" }),
+                ($"/v1/books/2?tags={text}", null)));
+        }
+    }
+
+    [Fact]
+    public void Keeps_arbitrary_Struct_members_out_of_an_inferred_PATCH_mask()
+    {
+        foreach (var body in new[] { "{}", "{\"customKey\":1}", "{\"customKey\":1,\"other_key\":{\"nested\":false}}" })
+        {
+            var read = Assert.IsType<PatchStructRequest>(BindOf(
+                (PatchStructRequest.Descriptor, new HttpRouteTemplate { Method = "PATCH", Template = "/v1/profile", Body = "profile" }),
+                ("/v1/profile", body)));
+
+            Assert.Equal(Struct.Parser.ParseJson(body), read.Profile);
+            Assert.Equal(new FieldMask(), read.UpdateMask);
+        }
+    }
+
+    [Fact]
+    public void Fills_a_PATCH_mask_from_snake_case_fields_through_nested_and_empty_message_bodies()
+    {
+        foreach (var body in new[]
+        {
+            "{\"displayName\":\"Ada\",\"nestedProfile\":{\"displayName\":\"Grace\"},\"emptyProfile\":{}}",
+            "{\"display_name\":\"Ada\",\"nested_profile\":{\"display_name\":\"Grace\"},\"empty_profile\":{}}",
+        })
+        {
+            var read = BindOf(
+                (PatchRequest.Descriptor, new HttpRouteTemplate { Method = "PATCH", Template = "/v1/profile", Body = "profile" }),
+                ("/v1/profile", body));
+
+            Assert.Equal(new PatchRequest
+            {
+                Profile = new PatchProfile
+                {
+                    DisplayName = "Ada",
+                    NestedProfile = new PatchProfile { DisplayName = "Grace" },
+                    EmptyProfile = new PatchProfile(),
+                },
+                UpdateMask = new FieldMask { Paths = { "display_name", "nested_profile.display_name", "empty_profile" } },
+            }, read);
+        }
+    }
+
     private static readonly HttpBinding Binding = new(Form);
 
     private static Google.Protobuf.IMessage Bind((string Procedure, HttpRouteTemplate Rule) route, (string Target, string? Body) request)

@@ -8,6 +8,37 @@ namespace Bead.Tests;
 public sealed class FailureExceptionTests
 {
     [Fact]
+    public void Matches_failure_code_sets_by_scope_code_and_the_known_side()
+    {
+        var protocol = FailureException.OfReceived(Failure.OfProtocol(ProtocolCode.SubscriptionUnknown), RouterSide.Client);
+        var application = FailureException.OfReceived(Failure.OfApplication(21), RouterSide.Client);
+        var relayed = FailureException.OfReceived(Failure.OfProtocol(ProtocolCode.SubscriptionUnknown) with { Relays = 1 }, RouterSide.Client);
+
+        foreach (var error in new[] { protocol, application, relayed })
+        {
+            var isProtocol = error.Scope == FailureScope.Protocol;
+
+            Assert.Equal(isProtocol, error.IsProtocol([ProtocolCode.SubscriptionUnknown]));
+            Assert.Equal(isProtocol && error.Side == RouterSide.Server, error.IsProtocol([ProtocolCode.SubscriptionUnknown], RouterSide.Server));
+            Assert.False(error.IsProtocol([ProtocolCode.SubscriptionUnknown], RouterSide.Client));
+            Assert.False(error.IsProtocol([ProtocolCode.ServiceUnknown]));
+            Assert.False(error.IsProtocol(Array.Empty<ProtocolCode>()));
+            Assert.Equal(!isProtocol, error.IsApplication([(ushort)21]));
+            Assert.False(error.IsApplication([(ushort)7]));
+            Assert.False(error.IsApplication(Array.Empty<ushort>()));
+        }
+    }
+
+    [Fact]
+    public void Carries_no_header_when_none_is_supplied_explicitly()
+    {
+        var error = new FailureException(Failure.OfApplication(21), new FailureException.Raised(FailureOrigin.Peer, RouterSide.Server)) { Header = null };
+
+        Assert.Null(error.Header);
+        Assert.Equal("server application failure 21", error.Message);
+    }
+
+    [Fact]
     public void Carries_the_failure_and_where_it_belongs_and_keeps_a_redacted_copy_of_the_header()
     {
         var token = SessionToken.FromBytes(Enumerable.Repeat((byte)7, 16).ToArray());

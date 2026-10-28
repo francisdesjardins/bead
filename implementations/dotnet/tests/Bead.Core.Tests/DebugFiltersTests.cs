@@ -7,6 +7,7 @@ namespace Bead.Tests;
 /// and envelopes it keeps, or why it is refused, and what a filter given as a function does from
 /// event to event. The TypeScript side plays the same file.
 /// </summary>
+// debugging 1.1
 public sealed class DebugFiltersTests
 {
     // constants

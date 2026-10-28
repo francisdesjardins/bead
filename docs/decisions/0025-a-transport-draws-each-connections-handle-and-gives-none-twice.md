@@ -66,9 +66,14 @@ socket's peer port, kept for a reader of a trace, and the rank the transport too
 counted per transport from 1 and never reset, a stop and a start included. It is drawn once the
 connection is taken, after the check for a socket already gone and, on the C# side, after the
 accept, so ranks run in the order connections were taken; the C# side's count of arrivals is its
-rank. Every handle reads `type=…;ip=…;` and ends `ordinal=n`, a socket's carrying `port=…` between,
-which tells a reader of a trace which socket, and one without it, `type=HTTP` and `type=MEMORY`
-among them, none. A handle tells two types apart, never two transports of one type, which may draw
+rank. Every handle of an address reads `type=…;ip=…;` and ends `ordinal=n`, a socket's carrying
+`port=…` between, which tells a reader of a trace which socket, and one without it, `type=HTTP` and
+`type=MEMORY` among them, none. A broker's reads `type=…;participant=…;ordinal=n`, its type its
+adapter's, `BROKER` in memory, `MQTT` over MQTT 5 and `AMQP` over AMQP 1.0 (spec 15.25, 15.32), and
+its peer's id, the address its envelopes are handed with, drawn at the connection's third leg,
+once that id is proven, never at its OPEN, so a second acceptor of one OPEN draws none (spec 15.18;
+[0038](0038-over-a-broker-a-connection-is-placed-once-at-its-open-named-by-both-its-ends.md)). A
+handle tells two types apart, never two transports of one type, which may draw
 one handle for two sockets from one address and port at the same rank, so two transports of one type
 are never joined
 ([0036](0036-an-in-memory-transport-joins-two-routers-of-one-process-and-a-server-takes-several-transports-through-one.md)).
@@ -106,6 +111,9 @@ one on Linux alone; and each transport server's
 `names a client that comes over IPv4 to a dual-stack listener by its IPv4 address`.
 
 ## The Tenth Man
+
+A broker's handle, drawn at its connection's third leg, met the round of the broker's core, which
+[0038](0038-over-a-broker-a-connection-is-placed-once-at-its-open-named-by-both-its-ends.md) keeps.
 
 The decision met the Tenth Man ([0009](0009-conventional-commits-git-flow-and-the-tenth-man.md)) in
 the round [0024](0024-a-server-takes-the-loopbacks-names-ip-literals-and-the-hosts-it-is-told.md)

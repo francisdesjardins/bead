@@ -441,6 +441,65 @@ test.describe('createRouterCore', () => {
       expect(told).toEqual([undefined, refusing, handler, undefined]);
     });
 
+    test('takes a destination’s admission at its deferred turn, including one removed while its credential waits', async () => {
+      const handled: IRequestResolverProps<Handle>[] = [];
+      const asked: number[] = [];
+      const handler: IDestinationHandler<Handle> = Object.assign(
+        (props: IRequestResolverProps<Handle>) => {
+          handled.push(props);
+
+          return Promise.resolve();
+        },
+        {
+          admit: () => {
+            throw new Error('the withdrawn admission is not asked');
+          },
+          forwardsCredentials: true,
+        }
+      );
+      const { port, reported, sent } = createPort({
+        handlerOfDestination: () => {
+          return handler;
+        },
+      });
+      using core = createRouterCore(port);
+      const credential = { scheme: CredentialScheme.JWT, token: 'a.b.c' } as const;
+
+      core.receive(requestOf(1, { credential, destinationId: 5 }), 'a');
+      expect(handled).toEqual([]);
+      delete handler.admit;
+      await Promise.resolve();
+
+      expect(handled).toHaveLength(1);
+      expect(handled[0]).toMatchObject({
+        connectionHandle: 'a',
+        header: { callId: 1, credential, destinationId: 5 },
+        isAdmitted: true,
+      });
+      await core.respond({ payload: Uint8Array.of(7) }, handled[0]!);
+      expect(core.gauges().counts).toMatchObject({ answeringCalls: 0 });
+
+      handler.admit = () => {
+        throw new Error('the replaced admission is not asked');
+      };
+      core.receive(requestOf(3, { credential, destinationId: 5 }), 'a');
+      handler.admit = ({ header }) => {
+        asked.push(header.callId);
+
+        return SERVER_FAILURES.accessDenied;
+      };
+      await Promise.resolve();
+
+      expect(asked).toEqual([3]);
+      expect(handled).toHaveLength(1);
+      expect(answersOf(sent)).toEqual([
+        ['a', 'result', 1, [7]],
+        ['a', 'failure', 3, ProtocolCode.ACCESS_DENIED],
+      ]);
+      expect(core.gauges().counts).toMatchObject({ answeringCalls: 0, receivingTransfers: 0 });
+      expect(reported).toEqual([]);
+    });
+
     test('refuses a request that opens a subscription on a connection that carries one way, once admitted, and asks nothing of another', async () => {
       const asked: string[] = [];
       const { port, sent } = createPort({
@@ -4202,7 +4261,7 @@ test.describe('createRouterCore', () => {
       ]);
     });
 
-    // debugging 3.3 and 3.4
+    // debugging 3.3, 3.4 and 3.5
     test('read the monotonic clock twice more for a counted call than for one counted nothing, once at each of its gates, and the wall clock never', async () => {
       // the readings of each kind a call answered, then a call made, take
       const readingsOf = async (isCounted: boolean): Promise<number[][]> => {

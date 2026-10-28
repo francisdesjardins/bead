@@ -210,6 +210,85 @@ const delaysArmed = (clock: ReturnType<typeof createTestClock>) => {
 // definition
 
 test.describe('createServer', () => {
+  test('takes a supplied manager’s token and data in separate expiry-aware reads', async () => {
+    const { ask, open, sent, transport } = createScriptedTransport();
+    const inner = createSessionManager();
+    const reads: [string, number][] = [];
+    let nextRead = 999;
+    let expires = false;
+    const expireOnRead = (member: string, connectionHandle: Handle) => {
+      if (expires) {
+        const now = nextRead++;
+
+        reads.push([member, now]);
+
+        if (now >= 1000) {
+          inner.delete(connectionHandle);
+        }
+      }
+    };
+    const sessions: typeof inner = {
+      ...inner,
+      get: (connectionHandle) => {
+        expireOnRead('get', connectionHandle);
+
+        return inner.get(connectionHandle);
+      },
+      sessionTokenOf: (connectionHandle) => {
+        expireOnRead('sessionTokenOf', connectionHandle);
+
+        return inner.sessionTokenOf(connectionHandle);
+      },
+    };
+    await using server = createServer({
+      sessions: () => {
+        return sessions;
+      },
+      transport,
+    });
+    const seen: unknown[] = [];
+    const answered = Promise.withResolvers<void>();
+
+    server.services.getRequestResolver(echo, {
+      beforeRequest: server.requireSession,
+      serializer: text,
+    })((request, response) => {
+      seen.push(request.session);
+      answered.resolve();
+
+      return response(request.payload);
+    });
+    open(first);
+    inner.set({ ...inner.create(first), data: { role: 'member' } });
+    expires = true;
+    ask(first, { procedure: echo });
+    await answered.promise;
+    await expect
+      .poll(() => {
+        return sent.length;
+      })
+      .toBe(1);
+
+    expect(reads.slice(0, 2)).toEqual([
+      ['sessionTokenOf', 999],
+      ['get', 1000],
+    ]);
+    expect(seen).toEqual([{ data: undefined }]);
+    expect(inner.get(first)).toBeUndefined();
+    expect(sent[0]?.envelope?.kind).toBe(EnvelopeKind.RESULT);
+    ask(first, { procedure: echo });
+    await expect
+      .poll(() => {
+        return sent.length;
+      })
+      .toBe(2);
+    expect(seen).toHaveLength(1);
+    expect(sent[1]?.envelope).toMatchObject({
+      kind: EnvelopeKind.FAILURE,
+      failure: { code: ProtocolCode.SESSION_REQUIRED },
+    });
+  });
+
   test('builds each layer on the one under it, the router with the sessions’ tokens', async () => {
     const { open, transport } = createScriptedTransport();
     const built: unknown[] = [];
@@ -722,6 +801,60 @@ test.describe('createServer', () => {
 
       expect([timeout, scripted.closed, server.sessions.getAll()]).toEqual([timeout, [first], []]);
     }
+  });
+
+  test('ignores listens outside a connection and unmatched endings without changing its inactivity deadline', async () => {
+    const clock = createTestClock();
+    const second: Handle = 'type=WS;ip=127.0.0.1;port=50002;ordinal=2';
+    const { closed, emitter, listen, open, transport } = createScriptedTransport();
+
+    await using server = createServer({ transport }, { clock, connectionInactivityTimeout: 60 });
+
+    listen(first, true);
+    listen(first, false);
+    await clock.tickAsync(100);
+
+    expect(server.gauges().server.counts).toMatchObject({ connections: 0, listening: 0 });
+    expect(closed).toEqual([]);
+    expect(delaysOn(clock)).toEqual([]);
+
+    open(first);
+    await clock.tickAsync(40);
+    listen(first, false);
+
+    expect(server.gauges().server.counts).toMatchObject({ connections: 1, idle: 1, listening: 0 });
+
+    await clock.tickAsync(19);
+
+    expect(closed).toEqual([]);
+
+    await clock.tickAsync(1);
+
+    expect(closed).toEqual([first]);
+
+    emitter.emit('close', true, first);
+    listen(first, true);
+    listen(first, false);
+
+    expect(server.gauges().server.counts).toMatchObject({ connections: 0, listening: 0 });
+    expect(delaysOn(clock)).toEqual([]);
+
+    open(second);
+    listen(second, true);
+    await clock.tickAsync(1_000);
+
+    expect(closed).toEqual([first]);
+    expect(server.gauges().server.counts).toMatchObject({ connections: 1, listening: 1 });
+
+    listen(second, false);
+    await clock.tickAsync(59);
+
+    expect(closed).toEqual([first]);
+
+    await clock.tickAsync(1);
+
+    expect(closed).toEqual([first, second]);
+    expect(server.gauges().server.counts['listening']).toBe(0);
   });
 
   test('a listen held is no silence: a connection with no session is not closed while one is, and is closed the server’s own timeout after the last ends', async () => {

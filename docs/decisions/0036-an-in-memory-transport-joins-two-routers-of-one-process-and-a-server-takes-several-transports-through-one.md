@@ -19,9 +19,9 @@
 **Three parts call a router of the same process, and a test is a fourth.** HTTP/JSON
 transcoding's gateway calls each procedure as one more client of the application's own server, its
 admission, sessions, service manager, metrics and trace the server's, one Bead connection per HTTP
-exchange, each with its caller's credential and address. A third language's core plays its
-conformance before it has a socket. A side's tests link a server and a client in memory, a
-service's and a conversation's.
+exchange, each with its caller's credential and address. Rust's core plays its conformance before
+it has a socket. A side's tests link a server and a client in memory, a service's and a
+conversation's.
 
 **What carries an envelope in a process is a Web Worker's port alone**, on the TypeScript side: a
 `MessagePort` carries an envelope and nothing beside it, so no credential and no address
@@ -52,7 +52,7 @@ The options weighed:
 - **A pool of ports**: the same two lacks.
 - **Test doubles**, each side's own, a link between a service's server and client or a scripted
   transport under a conversation: no behaviour the spec states, none the other side shares, and
-  nothing a gateway or a third language's core can run on.
+  nothing a gateway or Rust's core can run on.
 - **A server of its own for the gateway**: two offers of each service, two session managers, two
   sets of gauges, which the application keeps in step by hand.
 - **The gateway mounted on the HTTP transport's listener**: a transport coupled to a gateway,
@@ -158,14 +158,20 @@ tell names, a transfer — and the C# side's service tests link a server and a c
 `ServiceLink.cs` built on it. Its connect's timeout is a way of `spec/durations.json`, played by
 each side's harness.
 
-**A third language's core carries the in-memory transport first**, and plays its conformance over it
-before it has a socket; the join comes with a gateway, if ever.
+**Rust's core carries the in-memory transport first**, and plays its conformance over it before it
+has a socket; the joined transport is a gateway's, and its core needs none.
 
 **A broker in memory is a broker**, which repeats, reorders and delays on purpose
-([0021](0021-a-broker-is-a-transport-and-bead-is-never-a-network.md)): it may share this
-transport's delivery, never its guarantees.
+([0021](0021-a-broker-is-a-transport-and-bead-is-never-a-network.md)): it shares this transport's
+delivery, a message copied and handed on in a later turn than its publish, never its guarantees,
+copying, holding back, dropping and handing again to another member of a group as a test asks, and
+past a subscriber's queue bound dropping as a broker whose queue is full does (spec 15.24;
+[0040](0040-a-brokers-adapter-offers-bytes-at-topics-and-bead-keeps-its-own-credit-credential-and-heartbeat.md)).
 
 ## The Tenth Man
+
+The in-memory broker met the round of the broker's core, which
+[0038](0038-over-a-broker-a-connection-is-placed-once-at-its-open-named-by-both-its-ends.md) keeps.
 
 The decision met the Tenth Man ([0009](0009-conventional-commits-git-flow-and-the-tenth-man.md)) at
 xhigh effort, in the round of HTTP/JSON transcoding, whose draft held the in-memory transport and

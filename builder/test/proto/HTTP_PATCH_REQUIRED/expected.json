@@ -1,0 +1,7 @@
+[
+  {
+    "rule": "HTTP_PATCH_REQUIRED",
+    "line": 40,
+    "column": 7
+  }
+]

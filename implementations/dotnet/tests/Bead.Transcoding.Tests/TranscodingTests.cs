@@ -78,7 +78,7 @@ public sealed class TranscodingTests
     {
         var parted = new List<string>();
 
-        Assert.Equal("0.1.0", Root.GetProperty("transcodingVersion").GetString());
+        Assert.Equal(CompanionVersion, Root.GetProperty("transcodingVersion").GetString());
 
         PlayTemplates(parted);
         PlayReadings(parted);
@@ -243,7 +243,9 @@ public sealed class TranscodingTests
         {
             var name = entry.GetProperty("name").GetString()!;
             var descriptor = MessageOf(entry.GetProperty("message").GetString()!);
-            var message = Parsed(descriptor, Hex(entry.GetProperty("payload").GetString()!));
+
+            // * read as the gateway reads a result, through the runtime reader
+            var message = Answered(descriptor, Hex(entry.GetProperty("payload").GetString()!));
 
             if (StringOf(entry, "refused") is { } reason)
             {

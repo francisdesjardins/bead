@@ -16,6 +16,7 @@ import {
   Int64ValueSchema,
   ListValueSchema,
   StringValueSchema,
+  UninterpretedOption_NamePartSchema,
   ValueSchema,
   type FieldOptions,
 } from '@bufbuild/protobuf/wkt';
@@ -26,6 +27,7 @@ import {
   type Maps,
 } from '../../proto/__tests__/generated/validations_pb';
 import { ProgrammerError } from '../../transport/shared/errors';
+import { PatchProfileSchema } from './binding-fixtures/generated/patch_binding_pb';
 import {
   base64Of,
   JsonFormError,
@@ -54,6 +56,62 @@ const INT32_VALUE_URL = 'type.googleapis.com/google.protobuf.Int32Value';
 const INT64_VALUE_URL = 'type.googleapis.com/google.protobuf.Int64Value';
 
 const ENCODER = new TextEncoder();
+
+test('refuses empty and trailing JSON texts through the public message reader', () => {
+  for (const text of ['', ' \t\r\n', '{} {}', '{} true', '[] 0', 'null false', '{}x']) {
+    expect(() => {
+      return readProtoJson(EmptySchema, { bytes: ENCODER.encode(text), registry: REGISTRY });
+    }).toThrow('not JSON');
+  }
+});
+
+test('bounds JSON arrays and objects before reading a message', () => {
+  for (const text of [
+    '['.repeat(203) + ']'.repeat(203),
+    '{"a":'.repeat(203) + '0' + '}'.repeat(203),
+  ]) {
+    expect(() => {
+      return readProtoJson(EmptySchema, { bytes: ENCODER.encode(text), registry: REGISTRY });
+    }).toThrow('nested past 100');
+  }
+});
+
+test('packs an Any with unset proto2 required fields and keeps explicit defaults on repeated reads', () => {
+  const registry = typeRegistryOf([UninterpretedOption_NamePartSchema]);
+  const typeUrl = 'type.googleapis.com/google.protobuf.UninterpretedOption.NamePart';
+  const cases = [
+    { members: '', bytes: [] },
+    { members: ',"namePart":"Ada"', bytes: [10, 3, 65, 100, 97] },
+    { members: ',"namePart":"","isExtension":false', bytes: [10, 0, 16, 0] },
+  ];
+
+  for (const { members, bytes } of cases) {
+    const text = `{"@type":"${typeUrl}"${members}}`;
+    for (let pass = 0; pass < 2; pass += 1) {
+      const any = readProtoJson(AnySchema, { bytes: ENCODER.encode(text), registry });
+
+      expect(any).toEqual(create(AnySchema, { typeUrl, value: Uint8Array.from(bytes) }));
+      expect(writeProtoJson(AnySchema, { message: any, registry })).toBe(text);
+    }
+  }
+});
+
+test('reads and writes signed infinities and NaN in double and float fields', () => {
+  for (const [word, value] of [
+    ['Infinity', Infinity],
+    ['-Infinity', -Infinity],
+    ['NaN', NaN],
+  ] as const) {
+    const text = `{"aDouble":"${word}","aFloat":"${word}"}`;
+    const message = readEdges(text);
+    expect(message.aDouble).toBe(value);
+    expect(message.aFloat).toBe(value);
+    expect(writeProtoJson(EdgesSchema, { message, registry: REGISTRY })).toBe(
+      `{"aFloat":"${word}","aDouble":"${word}"}`
+    );
+    expect(fromBinary(EdgesSchema, toBinary(EdgesSchema, message))).toEqual(message);
+  }
+});
 
 // helpers
 
@@ -731,6 +789,17 @@ test('writes a message nested 100 deep, and refuses one nested past 100', () => 
       registry: REGISTRY,
     });
   }).toThrow('a message nested past 100');
+});
+
+test('writes an unset 64-bit oneof field as zero in a response body', () => {
+  for (const message of [
+    create(PatchProfileSchema),
+    create(PatchProfileSchema, { selection: { case: 'label', value: 'Ada' } }),
+  ]) {
+    for (const name of ['count', 'string_count']) {
+      expect(writeFieldJson(PatchProfileSchema, { message, name, registry: REGISTRY })).toBe('"0"');
+    }
+  }
 });
 
 test('writes a response body’s field at its default where its oneof holds another member or none', () => {

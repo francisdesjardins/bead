@@ -1,0 +1,27 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- Bead over a broker of MQTT 5, on MQTTnet: what Bead's mqtt-broker-adapter is, on .NET (0041). -->
+  <PropertyGroup>
+    <RootNamespace>Bead.Transport.Mqtt</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../Bead.Core/Bead.Core.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="MQTTnet" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- the tests count a PUBLISH with no broker, and read the quota of one link -->
+    <InternalsVisibleTo Include="Bead.Transport.Mqtt.Tests" />
+    <!-- the durations' harness builds its adapter by the places the file names -->
+    <InternalsVisibleTo Include="Bead.Transport.Http.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- what Bead times takes the clock it is given, never the platform's own: 0011 -->
+    <PackageReference Include="Microsoft.CodeAnalysis.BannedApiAnalyzers" PrivateAssets="all" />
+    <AdditionalFiles Include="../BannedSymbols.txt" />
+  </ItemGroup>
+</Project>

@@ -4,6 +4,7 @@ import {
   assertHosts,
   assertListeningAddress,
   assertOrigins,
+  credentialOf,
   hasVisibleFields,
   HOST_REFUSAL,
   isIPAddress,
@@ -20,6 +21,23 @@ import {
   requestTargetOf,
 } from '../hosts-and-origins';
 import { LISTENING_ADDRESSES, LISTENING_NAMES, NO_LISTENING_ADDRESSES } from './addresses';
+
+test('takes custom origin schemes with digits and punctuation and refuses invalid scheme characters', () => {
+  for (const scheme of ['demo+1', 'demo-1', 'demo.1', 'a0+-.']) {
+    const origin = `${scheme}://Example.COM:80`;
+    expect(() => {
+      assertOrigins([origin]);
+    }).not.toThrow();
+    expect(isTakenOrigin(origin, { host: 'localhost', origins: [origin] })).toBe(true);
+    expect(isTakenOrigin(origin, { host: 'localhost', origins: [] })).toBe(false);
+    expect(requestTargetOf(`${scheme}://bead.example/path`)).toBeUndefined();
+  }
+  for (const scheme of ['1demo', 'Demo', 'demo_1', 'demo^1']) {
+    expect(() => {
+      assertOrigins([`${scheme}://bead.example`]);
+    }).toThrow(ProgrammerError);
+  }
+});
 
 // constants
 
@@ -315,6 +333,21 @@ const NOT_OWN: [origin: string, host: string | undefined][] = [
 ];
 
 // definition
+
+// spec 15.1
+test('trims only spaces and tabs around a carried credential and keeps its scheme and inner whitespace', () => {
+  for (const [lines, carried] of [
+    [[], undefined],
+    [[''], undefined],
+    [[' \t \t'], undefined],
+    [['Bearer token'], 'Bearer token'],
+    [[' \tBearer token\t '], 'Bearer token'],
+    [['\tBasic a \t b\t'], 'Basic a \t b'],
+    [['\u00a0Bearer token\u00a0'], '\u00a0Bearer token\u00a0'],
+  ] as const) {
+    expect(credentialOf(lines)).toBe(carried);
+  }
+});
 
 test.describe('hosts and origins', () => {
   test('takes a Host HTTP takes: one line, none in a request that needs none, its value uri-host and an optional port without the whitespace around it, and none of a percent-encoded octet, *+,;= in a name, an IPvFuture literal or a colon with no port', () => {

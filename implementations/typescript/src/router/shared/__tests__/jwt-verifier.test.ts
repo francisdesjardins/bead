@@ -79,6 +79,27 @@ const readingOf = (instant: number | string): (() => number) => {
 test.describe.configure({ retries: 0 });
 
 test.describe('verifyJwt', () => {
+  test('throws for a key without a string issuer before reading the clock', async () => {
+    const { audience, keys, now, token } = HOLDING;
+    const key = { ...keys[0], issuer: null } as unknown as IJwtKey;
+    let reads = 0;
+    const reading = (): number => {
+      reads += 1;
+
+      return readingOf(now)();
+    };
+
+    for (const presented of ['', token]) {
+      await expect(
+        verifyJwt(presented, { audience, keys: [...keys, key], now: reading })
+      ).rejects.toThrow(ProgrammerError);
+      expect(reads).toBe(0);
+    }
+
+    expect(await verifyJwt(token, { audience, keys, now: reading })).toMatchObject({ holds: true });
+    expect(reads).toBe(1);
+  });
+
   test('refuses an HS256 signature of the wrong byte length before reading the clock', async () => {
     const { audience, keys, now, token } = HOLDING;
     const [header = '', claims = '', encoded = ''] = token.split('.');

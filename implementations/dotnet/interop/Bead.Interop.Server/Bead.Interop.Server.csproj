@@ -1,5 +1,5 @@
 <Project Sdk="Microsoft.NET.Sdk">
-  <!-- The C# server of Bead's interop service, over WebSocket and HTTP: what a client of any implementation calls. -->
+  <!-- The C# server of Bead's interop service, over WebSocket, HTTP, MQTT 5 and AMQP 1.0: what a client of any implementation calls. -->
   <PropertyGroup>
     <OutputType>Exe</OutputType>
     <RootNamespace>Bead.Interop.Server</RootNamespace>
@@ -10,6 +10,8 @@
     <ProjectReference Include="../Bead.Interop/Bead.Interop.csproj" />
     <ProjectReference Include="../../src/Bead.Transport.Http/Bead.Transport.Http.csproj" />
     <ProjectReference Include="../../src/Bead.Transport.WebSockets/Bead.Transport.WebSockets.csproj" />
+    <ProjectReference Include="../../src/Bead.Transport.Mqtt/Bead.Transport.Mqtt.csproj" />
+    <ProjectReference Include="../../src/Bead.Transport.Amqp/Bead.Transport.Amqp.csproj" />
     <ProjectReference Include="../../src/Bead.Transcoding.Http/Bead.Transcoding.Http.csproj" />
   </ItemGroup>
 

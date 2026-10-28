@@ -8,7 +8,8 @@
   timeout, the pace and the bound beside 15.3's heartbeat, 15.6's 408 and 503, 15.7's answer that
   could not be written, an HTTP exchange whose outcome is unknown, lost as 15.7 has an exchange
   lost, 15.9's outbox reported, and 15.12's bounds, the transports each holds on, its pace and its
-  head and body, and what a client reads, by `maximumBodyBytes`; in
+  head and body, and what a client reads, by `maximumBodyBytes`; over a broker, 15.18's half-open
+  place, 15.20's parts and 15.23's bounds; in
   [`spec/debugging.md`](../../spec/debugging.md), 9.4's call past those its connection has it answer
   and 9.6's requester; the conversations of 9.2's step 3, the transports' cases of a WebSocket
   server's connections, a body's rate and a head's time, and the durations of the bounds it adds.
@@ -187,6 +188,20 @@ place. **Every answer written before its body is whole closes its socket in stag
 reading on and dropping what comes until the client closes or 2 seconds pass, never by a reset, so
 its client reads the answer and its Bead connection stands.
 
+**Over a broker, the family gains its own** (spec 15.18, 15.20, 15.23;
+[0039](0039-a-brokers-transport-numbers-its-parcels-and-sends-an-envelope-in-parts-under-its-peers-bound.md)):
+a half-open connection's `acceptTimeout`, 30 s, never without end, on the clock given, past which
+it is forgotten and its place freed; one envelope's parts together, `maximumEnvelopePartsBytes`,
+`maximumEnvelopeBytes` by default and never less, past which its connection closes with 1009; what a
+participant holds in parts across its connections, `heldBytesBudget`, 268,435,456 as
+`bodyBytesBudget` is, a part that would pass it losing its own connection with 4000; and an
+envelope's parts held to a body's rate, `minimumBodyBytesPerSecond` past `bodyGracePeriod` since
+its first part, on the clock given, at both ends, so an envelope begun and never finished frees what
+it held. `maximumConnections` and `maximumConnectionsPerAddress` count a broker server's connections,
+its half-open ones among them, by a participant's id, and `maximumUnsentBytes` bounds what waits for
+a broker at both ends of a connection. Each loss is reported, naming the bound and its value, as
+below.
+
 **A side fails a connection with 1009 past its `maximumMessageBytes`** (spec 15.3,
 [RFC 6455 §7.1.7](https://www.rfc-editor.org/rfc/rfc6455#section-7.1.7)): it sends its close,
 drains what still comes until the peer's close or its close timeout, then ends the connection, its
@@ -196,20 +211,25 @@ close unclean whatever code the peer answers with, and reports it, naming the bo
 `ws` and .NET included, the TypeScript client giving `ws` its `closeTimeout`: a peer that has not
 answered by then is dropped; a client over the global `WebSocket` leaves its close to its platform.
 
-**A transport tells on its `error` what it ends a connection for of its own** (spec 15.1), a
-client's as a server's: a protocol error on it; a message it fails with 1009, or over HTTP an
-envelope past its `maximumBodyBytes`, an answer's or a batch's, and a connection a server drops
+**A transport tells on its `error` what it ends a connection for of its own**, a client's as a
+server's, as spec 15.1 lists it: a protocol error on it; a message it fails with 1009, or over HTTP
+an envelope past its `maximumBodyBytes`, an answer's or a batch's, and a connection a server drops
 behind a bound, each naming the bound in the spec's spelling and its value, the same words on both
-sides; and a batch that does not read, saying what of it does not. It tells it once, as the
-connection ends, its close or its drop begun, and before its close, which is then unclean; its close
-is told in a `finally`, so a listener's throw keeps nothing open. It never tells a peer that drops
-without its closing handshake, its TCP connection ended or reset, nor one its heartbeat drops, nor
-its own drop of a peer that never answered a close within its close timeout, nor, over HTTP, a
-server gone, a refusal of its own, an answer of another type, an exchange lost or a listen given up
-past its inactivity timeout: each one's close tells it. A client over the global `WebSocket`, whose
-bare `error` cannot be told from a drop, tells none, a platform row of `docs/support.md`, "A
-WebSocket client's error once open". `close` stays its pair of booleans, and **a connection's close
-code carried on `close`**, what its peer said, is ahead, by a round of its own.
+sides; a batch that does not read, saying what of it does not; a Web Worker client's worker that
+errs, named by its message and where its script threw it; and a broker connection lost to a gap, a
+bound or a parcel that does not read, naming it, and a message a broker's participant takes that is
+no parcel, which it drops and which ends no connection (spec 15.17, 15.19, 15.20). It tells a
+connection's own once, as the connection ends, its close or its drop begun, and before its close,
+which is then unclean; its close is told in a `finally`, so a listener's throw keeps nothing open.
+It never tells a peer that drops without its closing handshake, its TCP connection ended or reset,
+nor, over a broker, a RESET, a GONE or its participant's link lost (spec 15.21), nor one its
+heartbeat drops, nor its own drop of a peer that never answered a close within its close timeout,
+nor, over HTTP, a server gone, a refusal of its own, an answer of another type, an exchange lost or
+a listen given up past its inactivity timeout: each one's close tells it. A client over the global
+`WebSocket`, whose bare `error` cannot be told from a drop, tells none, a platform row of
+`docs/support.md`, "A WebSocket client's error once open". `close` stays its pair of booleans, and
+**a connection's close code carried on `close`**, what its peer said, is ahead, by a round of its
+own.
 
 **An HTTP exchange whose executor was called and failed is of unknown outcome**: its envelopes count
 as handed over, its send resolves as a lost exchange's does (spec 15.7), and its connection is lost;
@@ -248,8 +268,7 @@ and no test holds.
 the calls a connection has answered, as HTTP/2's connection window; a raise of
 `maximumAnsweringCalls` for one trusted connection; a requester's queue past it; a budget of what
 waits for every socket together, as `bodyBytesBudget` is for bodies; and 0030's fit of the bound per
-address, an IPv6 client keyed by its prefix and a value fit for a NAT, landing for both transports
-at once.
+address, an IPv6 client keyed by its prefix and a value fit for a NAT, for both transports at once.
 
 **The gate.** `spec/conversations.json`, played by both sides: a request past the calls its
 connection has its side answer refused while the others go on, and one taken once a call ends; a
@@ -296,6 +315,9 @@ of its time`, beside the C# side's
 platform's fails a test. `docs/support.md` names them.
 
 ## The Tenth Man
+
+The bounds a broker's transport adds met the round of the broker's core, which
+[0038](0038-over-a-broker-a-connection-is-placed-once-at-its-open-named-by-both-its-ends.md) keeps.
 
 The decision met the Tenth Man ([0009](0009-conventional-commits-git-flow-and-the-tenth-man.md)) at
 xhigh effort, in one round with

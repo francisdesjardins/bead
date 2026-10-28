@@ -213,6 +213,24 @@ describe('texts', () => {
     assert.match(without, /check --except SPEC_VERSION_NEWER/);
     assert.equal(withoutWaivers(CI_STEP, ['buf:FIELD_SAME_TYPE@hello']), CI_STEP);
   });
+
+  test('a waiver alone on its line goes with its line, and the command ends where its arguments do', () => {
+    const step = [
+      '          git archive --format=tar "$tag" | node ../../builder/src/cli.ts breaking --against - --fail-on-warning \\',
+      '            --except PROCEDURE_RULES_TIGHTENED@service:1/procedure:2 \\',
+      '            --except buf:ENUM_VALUE_NO_DELETE@hello/v1/hello.proto',
+      '',
+      '  # the next job',
+    ].join('\n');
+    assert.equal(
+      withoutWaivers(step, breakingWaivers(step)),
+      [
+        '          git archive --format=tar "$tag" | node ../../builder/src/cli.ts breaking --against - --fail-on-warning',
+        '',
+        '  # the next job',
+      ].join('\n')
+    );
+  });
 });
 
 // ── Moves ─────────────────────────────────────────────────────────────────────
@@ -772,7 +790,7 @@ console.log(localDay(new Date('2026-10-08T01:30:00Z')));`;
       });
     };
     assert.deepEqual(owing(kept), [
-      `owed by hand: both benches run, their reports kept as .bench/v0.2.0-typescript.json and -csharp.json, each compared with v0.1.0's on the machine that made them (README.md, "Measurement")`,
+      `owed by hand: both benches run through tools/bench-release.mjs, their reports kept as .bench/v0.2.0-typescript.json and -csharp.json, each compared with v0.1.0's on the machine that made them; regression and inconclusive measures confirmed by interleaving before the finish (README.md, "Measurement")`,
     ]);
     assert.deepEqual(owing(releasing()), []);
   });

@@ -254,6 +254,59 @@ public sealed class ServerTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Ignores_listens_outside_a_connection_and_unmatched_endings_without_changing_its_inactivity_deadline()
+    {
+        const string second = "type=WS;ip=127.0.0.1;port=50002;ordinal=2";
+
+        Start(TimeSpan.FromMilliseconds(60));
+        _transport.Listening(true);
+        _transport.Listening(false);
+        await Advance(TimeSpan.FromMilliseconds(100));
+
+        var counts = (await Server.Gauges()).Server.Counts;
+
+        Assert.Equal((0L, 0L), (counts["connections"], counts["listening"]));
+        Assert.Empty(_transport.Closed);
+
+        _transport.Open(Handle);
+        await Advance(TimeSpan.FromMilliseconds(40));
+        _transport.Listening(false);
+
+        counts = (await Server.Gauges()).Server.Counts;
+
+        Assert.Equal((1L, 1L, 0L), (counts["connections"], counts["idle"], counts["listening"]));
+        await Advance(TimeSpan.FromMilliseconds(19));
+        Assert.Empty(_transport.Closed);
+        await Advance(TimeSpan.FromMilliseconds(1));
+        Assert.Equal([Handle], _transport.Closed);
+
+        _transport.CloseFromPeer(Handle);
+        _transport.Listening(true);
+        _transport.Listening(false);
+        await _scheduler.WhenIdle();
+
+        counts = (await Server.Gauges()).Server.Counts;
+
+        Assert.Equal((0L, 0L), (counts["connections"], counts["listening"]));
+
+        _transport.Open(second);
+        _transport.Listening(true, second);
+        await Advance(TimeSpan.FromSeconds(1));
+        Assert.Equal([Handle], _transport.Closed);
+
+        counts = (await Server.Gauges()).Server.Counts;
+
+        Assert.Equal((1L, 1L), (counts["connections"], counts["listening"]));
+
+        _transport.Listening(false, second);
+        await Advance(TimeSpan.FromMilliseconds(59));
+        Assert.Equal([Handle], _transport.Closed);
+        await Advance(TimeSpan.FromMilliseconds(1));
+        Assert.Equal([Handle, second], _transport.Closed);
+        Assert.Equal(0, (await Server.Gauges()).Server.Counts["listening"]);
+    }
+
+    [Fact]
     public async Task A_listen_held_is_no_silence_a_connection_with_no_session_is_not_closed_while_one_is_and_is_closed_the_server_s_own_timeout_after_the_last_ends()
     {
         Start(TimeSpan.FromMilliseconds(60));
@@ -1316,9 +1369,9 @@ public sealed class ServerTests : IAsyncLifetime
         }
 
         // a listen held on the connection, as an HTTP transport tells it, or its end
-        public void Listening(bool isHeld)
+        public void Listening(bool isHeld, string connectionHandle = Handle)
         {
-            Listen?.Invoke(isHeld, Handle);
+            Listen?.Invoke(isHeld, connectionHandle);
         }
 
         // what a listener of its events threw, as a transport reports it

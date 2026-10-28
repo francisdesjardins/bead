@@ -1,11 +1,13 @@
-"""Writes spec/transcoding.proto and spec/transcoding.json: the messages and the service a gateway is
-played against, and what a gateway answers of them (spec/transcoding.md, decision 0037).
+"""Writes spec/transcoding.proto, spec/transcoding-required.proto and spec/transcoding.json: the messages
+and the service a gateway is played against, and what a gateway answers of them (spec/transcoding.md,
+decisions 0037 and 0042).
 
 The proto and the entries come from one table of messages and procedures, so what the file declares
 and what the entries play never part. Each entry is transcoding.md played here a third time, beside
 the two sides: the generator parses and matches its own templates by 3.5's precedence, binds a
 request by section 4, reads each body by its own reading of protobuf's JSON mapping, sections 5.2 to
-5.4, and encodes the message it builds as protobuf's Encoding guide writes one; it writes each
+5.4, judges the message it builds by its required fields, 5.2's step 4, and encodes it as protobuf's
+Encoding guide writes one; it writes each
 result in Bead's proto JSON form, 5.6, its tokens details.py's, each problem by section 7, and each
 stream by section 8. protobuf's own Python library, upb, which spec/requirements.txt pins, reads
 every body this reading takes or refuses, and reads back every body it writes: where upb parts from
@@ -69,8 +71,9 @@ def json_name_of(name):
 
 
 class Enum:
-    def __init__(self, full_name, note, values, *, alias=False):
+    def __init__(self, full_name, note, values, *, alias=False, closed=False, required_file=False):
         self.full_name, self.note, self.values, self.alias = full_name, note, values, alias
+        self.closed, self.required_file = closed, required_file
         self.name = full_name.rsplit('.', 1)[1]
 
     def number_of(self, name):
@@ -83,11 +86,14 @@ class Enum:
 
 class Field:
     def __init__(self, name, number, kind, *, label=None, key=None, optional=False, oneof=None, json=None,
-                 rules=None):
+                 rules=None, required=False, delimited=False):
         self.name, self.number, self.kind, self.label, self.key = name, number, kind, label, key
         self.optional, self.oneof, self.rules = optional, oneof, rules
+        self.required, self.delimited = required, delimited
         self.json_name = json or json_name_of(name)
         self.custom_json = json is not None
+        # set by its message: whether its file is of edition 2023, whose singular fields have presence
+        self.in_edition = False
 
     @property
     def is_message(self):
@@ -100,14 +106,20 @@ class Field:
     @property
     def explicit(self):
         """Whether a singular field has presence of its own, as proto3 gives it: a message, a member of
-        a oneof, or one marked optional."""
-        return self.label is None and (self.is_message or self.oneof is not None or self.optional)
+        a oneof, or one marked optional; and every singular field of an edition 2023 file, a field of
+        LEGACY_REQUIRED presence among them."""
+        return self.label is None and (self.is_message or self.oneof is not None or self.optional or self.required
+                                       or self.in_edition)
 
 
 class Message:
-    def __init__(self, full_name, note, fields, *, oneofs=()):
+    def __init__(self, full_name, note, fields, *, oneofs=(), required_file=False):
         self.full_name, self.note, self.fields, self.oneofs = full_name, note, fields, list(oneofs)
+        self.required_file = required_file
         self.name = full_name.rsplit('.', 1)[1]
+
+        for field in fields:
+            field.in_edition = required_file
         self.by_name = {field.name: field for field in fields}
         self.by_json = {field.json_name: field for field in fields}
 
@@ -292,6 +304,30 @@ ASK = message('AskResponse', 'The code a command failed with, 0 where it was ans
 CANCELS_REQUEST = message('CancelsRequest', 'How many cancels to wait for.', [Field('at_least', 1, 'int32')])
 CANCELS = message('CancelsResponse', 'How many calls of hang ended cancelled.', [Field('count', 1, 'int32')])
 
+# the messages of spec/transcoding-required.proto, of edition 2023, since a proto3 file declares no field
+# of LEGACY_REQUIRED presence and no closed enum (decision 0042)
+SHADE = declare(Enum(f'{PACKAGE}.Shade', 'A closed enum, whose undeclared number sets nothing (spec 17.9.8).',
+                     [('SHADE_DARK', 0), ('SHADE_LIGHT', 1)], closed=True, required_file=True))
+NEEDS = message('Needs', 'Two fields protobuf requires, which a proto3 file cannot declare.', [
+    Field('name', 1, 'string', required=True),
+    Field('count', 2, 'int32', required=True),
+    Field('child', 3, ref('Needs')),
+    Field('delimited', 4, ref('Needs'), delimited=True),
+    Field('shade', 5, f'enum:{PACKAGE}.Shade'),
+    Field('line_1', 6, 'string'),
+], required_file=True)
+NEEDS_UPDATE = message('NeedsUpdate', 'A PATCH of a Needs, its mask itself required.', [
+    Field('needs', 1, ref('Needs')),
+    Field('update_mask', 2, wkt('FieldMask'), required=True),
+], required_file=True)
+REQUIRING = message('Requiring', 'Needs at every depth a request holds them, and in an Any.', [
+    Field('needs', 1, ref('Needs')),
+    Field('many', 2, ref('Needs'), label='repeated'),
+    Field('by_key', 3, ref('Needs'), label='map', key='string'),
+    Field('any', 4, wkt('Any')),
+    Field('an_int32', 5, 'int32'),
+])
+
 # the native payload types of bead/options.proto, whose bytes are the payload (5.1)
 NATIVE = {'bead.Raw': 'raw', 'bead.Text': 'text', 'bead.Json': 'json'}
 
@@ -354,6 +390,12 @@ PROCEDURES = [
     Procedure(20, 'cancels', CANCELS_REQUEST.full_name, CANCELS.full_name,
               "Answers how many of hang's calls ended cancelled, once they are at least its atLeast, or 1 second "
               'passed.', reads=True),
+    Procedure(21, 'require', REQUIRING.full_name, NEEDS.full_name,
+              "Answers its request's needs, or a Needs of no field where none is set."),
+    Procedure(22, 'getNeeds', NEEDS.full_name, NEEDS.full_name, 'Answers its request.',
+              rules=[Rule('get', '/v1/needs/{name}'), Rule('get', '/v1/children/{child.name}')]),
+    Procedure(23, 'updateNeeds', NEEDS_UPDATE.full_name, NEEDS.full_name, "Answers its request's needs.",
+              rules=[Rule('patch', '/v1/needs/{needs.name}', body='needs')]),
 ]
 BY_PROCEDURE = {procedure.name: procedure for procedure in PROCEDURES}
 SERVICE = 'Transcoding'
@@ -420,7 +462,9 @@ def declaration(field, indent):
         head = f'{prefix}{proto_type(field)} {field.name} = {field.number}'
 
     options = [*([f'json_name = "{field.json_name}"'] if field.custom_json else []),
-               *([field.rules] if field.rules else [])]
+               *([field.rules] if field.rules else []),
+               *(['features.field_presence = LEGACY_REQUIRED'] if field.required else []),
+               *(['features.message_encoding = DELIMITED'] if field.delimited else [])]
 
     return indent + head + (f' [{", ".join(options)}]' if options else '') + ';'
 
@@ -444,6 +488,7 @@ def message_text(each):
 
 def enum_text(each):
     return '\n'.join([f'// {each.note}', f'enum {each.name} {{', *(['  option allow_alias = true;'] if each.alias else []),
+                      *(['  option features.enum_type = CLOSED;'] if each.closed else []),
                       *[f'  {value} = {number};' for value, number in each.values], '}'])
 
 
@@ -497,8 +542,31 @@ def rule_lines(rule):
             *([f'response_body: "{rule.response_body}"'] if rule.response_body else [])]
 
 
+def own_types(required_file):
+    """The types this file declares in its package, those of spec/transcoding-required.proto or the others."""
+    return [each for name, each in TYPES.items() if name.startswith(PACKAGE + '.') and each.required_file == required_file]
+
+
+def required_proto_file():
+    """spec/transcoding-required.proto: the messages of fields protobuf requires, and a closed enum, which
+    spec/transcoding.proto, proto3, imports."""
+    return '\n'.join([
+        '// The messages spec/transcoding.json plays a gateway against that a proto3 file cannot declare, written with',
+        '// its entries by spec/generators/make_transcoding.py: regenerate, never edit (spec/transcoding.md, decision',
+        '// 0042).',
+        'edition = "2023";',
+        '',
+        'package bead.transcoding.v1;',
+        '',
+        'import "google/protobuf/field_mask.proto";',
+        '',
+        '\n\n'.join(enum_text(each) if isinstance(each, Enum) else message_text(each) for each in own_types(True)),
+        '',
+    ])
+
+
 def proto_file():
-    own = [each for name, each in TYPES.items() if name.startswith(PACKAGE + '.')]
+    own = own_types(False)
 
     return '\n'.join([
         '// The messages and the service spec/transcoding.json plays a gateway against, written with its entries by',
@@ -517,6 +585,7 @@ def proto_file():
         'import "google/protobuf/struct.proto";',
         'import "google/protobuf/timestamp.proto";',
         'import "google/protobuf/wrappers.proto";',
+        'import "transcoding-required.proto";',
         '',
         'option (bead.file) = {',
         '  admission: {',
@@ -542,7 +611,7 @@ def proto_file():
 
 # ── The encoder, protobuf's Encoding guide ──────────────────────────────────────────────────────
 
-VARINT, I64, LEN, I32 = 0, 1, 2, 5
+VARINT, I64, LEN, SGROUP, EGROUP, I32 = 0, 1, 2, 3, 4, 5
 
 
 def varint(value):
@@ -614,7 +683,11 @@ def value_bytes(kind, value):
     return scalar_bytes(kind, value)
 
 
-def record(number, kind, value):
+def record(number, kind, value, *, delimited=False):
+    """A field's record: a delimited message as a group, between its start and its end group."""
+    if delimited:
+        return tag(number, SGROUP) + encode(TYPES[kind.split(':', 1)[1]], value) + tag(number, EGROUP)
+
     body, wire = value_bytes(kind, value)
     return tag(number, wire) + body
 
@@ -646,7 +719,7 @@ def encode(each, value):
             for key, item in given:
                 out += tag(field.number, LEN) + length_delimited(record(1, field.key, key) + record(2, field.kind, item))
         elif field.explicit or on_the_wire(field.kind, given):
-            out += record(field.number, field.kind, given)
+            out += record(field.number, field.kind, given, delimited=field.delimited)
 
     return out
 
@@ -946,6 +1019,10 @@ def read_enum(each, value):
 
         if not -2 ** 31 <= exact < 2 ** 31:
             raise Refused('an enum number past its range', 3)
+
+        # * a closed enum takes only the numbers its values number; every enum of proto3 is open (5.3.7)
+        if each.closed and each.name_of(int(exact)) is None:
+            raise Refused(f'no value of {each.name} of that number', 3)
 
         return int(exact)
 
@@ -1267,9 +1344,73 @@ def read_form(each, value, depth, at):
     return {'type_url': url, 'message': inner}
 
 
+# the words of a field of LEGACY_REQUIRED presence left unset, 5.2's step 4, which name no member
+UNSET = 'a required field unset'
+
+
+def map_order(key):
+    """A map's key in spec 18.5's order: integers ascending, false before true, strings by code points."""
+    return key
+
+
+def first_unset(each, value, at=(), path=()):
+    """The first field of LEGACY_REQUIRED presence a message leaves unset, as spec 17.9.7 walks one, its
+    place and its field path by JSON names, or None: the message's own fields by their numbers, then each
+    message it holds, depth first, by field number, a repeated field's items by index and a map's entries
+    by key; never a well-known type's, an Any's message among them."""
+    if each.full_name.startswith(WKT + '.'):
+        return None
+
+    fields = sorted(each.fields, key=lambda one: one.number)
+
+    for field in fields:
+        if field.required and field.name not in value:
+            return field_at(at, field), (*path, field.json_name)
+
+    for field in fields:
+        if not field.is_message or field.name not in value:
+            continue
+
+        held, here, below = TYPES[field.type_name], field_at(at, field), (*path, field.json_name)
+
+        if field.label == 'repeated':
+            found = next((unset for index, item in enumerate(value[field.name])
+                          if (unset := first_unset(held, item, index_at(here, index), below))), None)
+        elif field.label == 'map':
+            found = next((unset for key, item in sorted(value[field.name], key=lambda entry: map_order(entry[0]))
+                          if (unset := first_unset(held, item, given_at(here, key_text(field.key, key)), below))),
+                         None)
+        else:
+            found = first_unset(held, value[field.name], here, below)
+
+        if found:
+            return found
+
+    return None
+
+
+class Unset(Refused):
+    """A field of LEGACY_REQUIRED presence left unset (5.2, step 4): its place in the value read, and its
+    field path by JSON names, which 7.4 places as a violation's field."""
+
+    def __init__(self, at, path):
+        super().__init__(UNSET, 4, at)
+        self.path = path
+
+
+def judged(each, value):
+    """The message so built, judged by its required fields (5.2, step 4)."""
+    found = first_unset(each, value)
+
+    if found:
+        raise Unset(*found)
+
+    return value
+
+
 def read_body(each, data):
-    """A proto request's body, read as 5.2 reads one: the message's value."""
-    return read_message(each, read_text(data), 0)
+    """A proto request's body, read as 5.2 reads one: the message's value, judged by step 4."""
+    return judged(each, read_message(each, read_text(data), 0))
 
 
 # ── Writing a proto result, Bead's proto JSON form, transcoding 5.6 and 5.7 ─────────────────────
@@ -2089,7 +2230,25 @@ def bind(procedure, rule, target, body):
         if body_field.is_message and sent is not None:
             value['update_mask'] = {'paths': mask_of(sent, TYPES[body_field.type_name])}
 
-    return value
+    # * step 4 once the value is read and its derived mask set, so a required update_mask binds
+    try:
+        return judged(each, value)
+    except Unset as refusal:
+        refusal.place = unset_place(refusal, each=each, rule=rule)
+        raise
+
+
+def unset_place(refusal, *, each, rule):
+    """Where a field left unset lies (7.4), as a violation's field is placed: parameter, its field path by
+    JSON names, where the route's query would bind it, the route having no body or a body that names
+    another top-level field; pointer otherwise, into the body, the field a body names its root."""
+    if rule.body == '*':
+        return 'pointer', pointer_text(refusal.at)
+
+    if rule.body is None or refusal.path[0] != each.by_name[rule.body].json_name:
+        return 'parameter', '.'.join(refusal.path)
+
+    return 'pointer', pointer_text(refusal.at[1:])
 
 
 def place_of(at, *, rule, sources):
@@ -2533,6 +2692,9 @@ def chain(depth, inner):
 
 TEXT = ['5.2', '5.2.1']
 FIELDS = ['5.2', '5.2.2']
+UNSET_READ = ['5.2', '5.2.4', '7.4']
+# * upb reads a message that leaves a required field unset, where step 4 refuses it, as Google.Protobuf does
+READS_UNSET = 'D28: it reads a message that leaves a required field unset'
 SCALAR = ['5.2', '5.2.3']
 FORM = ['5.2', '5.2.3']
 
@@ -2740,7 +2902,7 @@ READINGS = [
             '{"any":{"@type":"type.googleapis.com/google.protobuf.Duration"}}'),
     reading('an Empty', FORM + ['5.4', '5.4.7'], '{"nothing":{}}'),
     reading('an Empty with a member', FORM + ['5.4', '5.4.7'], '{"nothing":{"x":1}}'),
-    reading('a body of every kind of field', ['5.2', '5.2.1', '5.2.2', '5.2.3', '5.2.4', '5.3', '5.4'], json.dumps({
+    reading('a body of every kind of field', ['5.2', '5.2.1', '5.2.2', '5.2.3', '5.2.5', '5.3', '5.4'], json.dumps({
         'aDouble': 1.5, 'aFloat': 0.1, 'anInt64': '-5', 'aUint64': '18446744073709551615', 'anInt32': -2,
         'aFixed64': '7', 'aBool': True, 'aString': 'caf' + chr(0xE9), 'someBytes': '3q2+7w==', 'aUint32': 4294967295,
         'aSint64': '-9223372036854775808', 'color': 'COLOR_GREEN', 'inner': {'name': 'n', 'count': 3},
@@ -2749,6 +2911,38 @@ READINGS = [
         'mask': 'fooBar,baz', 'extra': {'k': [1, None]}, 'anyValue': 'v', 'wrappedInt64': '0', 'wrappedString': '',
         'nothing': {}, 'renamed': 'r', 'list': [True], 'wrappedBool': False,
     }, ensure_ascii=False, separators=(',', ':')), message=EVERYTHING),
+    # a field of LEGACY_REQUIRED presence left unset, judged once the value is read (5.2, step 4), placed
+    # as the member its object lacks (7.4)
+    reading('a required field unset, one below the request', UNSET_READ, '{"needs":{"count":1}}', message=REQUIRING,
+            parts=READS_UNSET),
+    reading('required fields set at their defaults', UNSET_READ, '{"needs":{"name":"","count":0}}', message=REQUIRING),
+    reading('a required field null', UNSET_READ + ['5.2.2'], '{"needs":{"name":null,"count":1}}', message=REQUIRING,
+            parts=READS_UNSET),
+    reading('two required fields unset, the first by its number', UNSET_READ, '{"needs":{}}', message=REQUIRING,
+            parts=READS_UNSET),
+    reading('an item that leaves a required field unset', UNSET_READ,
+            '{"many":[{"name":"a","count":1},{"name":"b"}]}', message=REQUIRING, parts=READS_UNSET),
+    reading("a map's value that leaves a required field unset", UNSET_READ, '{"byKey":{"k":{"name":"a"}}}',
+            message=REQUIRING, parts=READS_UNSET),
+    reading("map values judged by their keys' order, not the body's", UNSET_READ,
+            '{"byKey":{"b":{"name":"x"},"a":{"name":"y"}}}', message=REQUIRING, parts=READS_UNSET),
+    reading('a delimited field that leaves a required field unset', UNSET_READ,
+            '{"needs":{"name":"a","count":1,"delimited":{"name":"b"}}}', message=REQUIRING, parts=READS_UNSET),
+    reading("a holder's own unset field before a nested message's", UNSET_READ,
+            '{"needs":{"name":"a","child":{"name":"b"}}}', message=REQUIRING, parts=READS_UNSET),
+    reading("a nested message's unset field before a later field's", UNSET_READ,
+            '{"needs":{"name":"a","count":1,"child":{"name":"b"}},"many":[{"name":"c"}]}', message=REQUIRING,
+            parts=READS_UNSET),
+    reading("an Any's message that leaves a required field unset, read", UNSET_READ + ['5.4', '5.4.6'],
+            '{"any":{"@type":"type.googleapis.com/bead.transcoding.v1.Needs","name":"a"}}', message=REQUIRING,
+            parts="D28: it refuses an Any's message that leaves a required field unset"),
+    reading('a member refused before a required field unset beside it', UNSET_READ + ['5.2.3'], '{"needs":{"count":"x"}}',
+            message=REQUIRING),
+    reading('a scalar refused after a required field unset', UNSET_READ + ['5.2.3'], '{"needs":{"count":1},"anInt32":"x"}',
+            message=REQUIRING),
+    reading('a request whose own required field is unset', UNSET_READ, '{}', message=NEEDS, parts=READS_UNSET),
+    reading("a closed enum's undeclared number refused", SCALAR + ['5.3', '5.3.7'], '{"name":"a","count":1,"shade":5}',
+            message=NEEDS),
 ]
 
 
@@ -2764,10 +2958,13 @@ FLOAT_TRUE_MIN = struct.unpack('<f', struct.pack('<I', 1))[0]
 FLOAT_MIN_NORMAL = struct.unpack('<f', struct.pack('<I', 0x00800000))[0]
 
 
-def writing(name, clauses, value, *, message=EDGES, parts=None):
-    """A result's payload, and the body 5.6 writes of it, or the reason 5.7 refuses it for."""
+def writing(name, clauses, value, *, message=EDGES, parts=None, payload=None):
+    """A result's payload, and the body 5.6 writes of it, or the reason 5.7 refuses it for; `payload`, where
+    given, the bytes whose reading is `value`, as 17.9 reads them. A result reads only where it leaves no
+    required field unset but in an Any (spec 17.9.7)."""
+    assert first_unset(message, value) is None, name
     entry = {'name': name, 'clauses': clauses, 'message': message.full_name,
-             'payload': hexadecimal(encode(message, value))}
+             'payload': hexadecimal(payload if payload is not None else encode(message, value))}
 
     try:
         entry['body'] = write_result(message, value).decode('utf-8')
@@ -2892,6 +3089,21 @@ WRITINGS = [
     writing('a ListValue of lists', FORM_7, {'value': {'list_value': {'values': [
         {'list_value': {}}, {'list_value': {'values': [{'number_value': 1.0}]}}]}}}),
     writing('an Empty', FORM_7, {'nothing': {}}),
+    # a field of LEGACY_REQUIRED presence, written where it is set, at its default too (5.6), and an Any's
+    # message as it holds it
+    writing('required fields at their defaults, written', ['5.6', '5.6.3'], {'needs': {'name': '', 'count': 0}},
+            message=REQUIRING),
+    writing('an Any whose message leaves a required field unset, written as it holds it', ['5.6', '5.6.2'],
+            {'any': {'type_url': ANY_URL + 'bead.transcoding.v1.Needs', 'message': {'count': 1}}}, message=REQUIRING,
+            parts="D28: it refuses an Any's message that leaves a required field unset"),
+    # a closed enum's undeclared number sets nothing on a singular field (spec 17.9.8)
+    writing("a closed enum's undeclared number, left out", ['5.6', 'spec:17.9.8'], {'name': '', 'count': 0},
+            message=NEEDS, payload=bytes.fromhex('0A 00 10 00 28 05')),
+    writing("a closed enum's declared number, then one it does not declare", ['5.6', '5.6.5', 'spec:17.9.8'],
+            {'name': '', 'count': 0, 'shade': 1}, message=NEEDS, payload=bytes.fromhex('0A 00 10 00 28 01 28 05')),
+    writing('an Any whose bytes hold a field at a wire type it does not take', REFUSED + ['spec:17.9.5'],
+            {'any': {'type_url': ANY_URL + 'bead.transcoding.v1.Needs', 'value': b'\x12\x00'}}, message=REQUIRING,
+            parts="it reads an Any's field at a wire type its type does not take as an unknown field"),
 ]
 
 # ── The entries: bindings ───────────────────────────────────────────────────────────────────────
@@ -2930,6 +3142,10 @@ OPERATION_GET = default_routes(GET_OPERATION_PROCEDURE)[1]
 ECHO_POST = default_routes(ECHO)[0]
 EVERY = Rule('get', '/v1/every')
 QUERY = ['4.1', '4.3']
+GET_NEEDS, UPDATE_NEEDS = BY_PROCEDURE['getNeeds'], BY_PROCEDURE['updateNeeds']
+NEEDS_RULE, CHILDREN_RULE = GET_NEEDS.rules
+UNSET_QUERY = ['4.3', '5.2', '5.2.4', '7.4']
+UNSET_PATCH = ['4.5', '5.2', '5.2.4', '7.4']
 
 BINDINGS = [
     binding('a variable of several segments', ['4.1', '4.2', '4.2.1', '3.8'], GET_BOOK_PROCEDURE, BOOK_RULE,
@@ -3038,6 +3254,23 @@ BINDINGS = [
             GET_BOOK_PROCEDURE, BOOK_RULE, '/v1/shelves/1/books/2?sub.count=x'),
     binding("a key the body holds no field of past 64 bytes, its pointer the value that holds it", ['5.2.2', '7.4', '7.4.2'], ECHO, ECHO_POST,
             '/api/Transcoding/echo', '{"' + 'k' * 63 + chr(0xE9) + chr(0xE9) + '":1}'),
+    # a field of LEGACY_REQUIRED presence the request leaves unset (5.2, step 4), placed as a violation's field
+    binding('a required field the query leaves unset', UNSET_QUERY, GET_NEEDS, NEEDS_RULE, '/v1/needs/a'),
+    binding('a required field the query sets, at its default', UNSET_QUERY, GET_NEEDS, NEEDS_RULE, '/v1/needs/a?count=0'),
+    binding('a required field below a message the query makes', UNSET_QUERY, GET_NEEDS, NEEDS_RULE,
+            '/v1/needs/a?count=1&child.name=b'),
+    binding('a parameter that names no field, before a required field unset', UNSET_QUERY + ['4.3.3'], GET_NEEDS,
+            NEEDS_RULE, '/v1/needs/a?nope=1'),
+    binding('a query scalar refused, a required field unset beside it', UNSET_QUERY + ['5.2.3'], GET_NEEDS, NEEDS_RULE,
+            '/v1/needs/a?child.name=b&count=x'),
+    binding('a required field below a message a variable holds present', UNSET_QUERY + ['4.2'], GET_NEEDS,
+            CHILDREN_RULE, '/v1/children/b?name=a&count=1'),
+    binding('a PATCH whose derived mask sets its required update_mask', UNSET_PATCH, UPDATE_NEEDS, UPDATE_NEEDS.rules[0],
+            '/v1/needs/a', '{"count":1}'),
+    binding('a PATCH body that leaves a required field unset', UNSET_PATCH, UPDATE_NEEDS, UPDATE_NEEDS.rules[0],
+            '/v1/needs/a', '{"line1":"x"}'),
+    binding('a PATCH body naming a field whose proto name holds an underscore before a digit', ['4.5'], UPDATE_NEEDS,
+            UPDATE_NEEDS.rules[0], '/v1/needs/a', '{"count":1,"line1":"x"}'),
 ]
 
 
@@ -3064,20 +3297,31 @@ def typed(proto, kind):
         proto.type, proto.type_name = descriptor_pb2.FieldDescriptorProto.TYPE_MESSAGE, '.' + kind.split(':', 1)[1]
 
 
-def file_descriptor():
-    """transcoding.proto's descriptor, as protoc would give it, its options aside."""
-    proto = descriptor_pb2.FileDescriptorProto(name='bead/transcoding/v1/transcoding.proto', package=PACKAGE,
-                                               syntax='proto3')
-    proto.dependency.extend(f'google/protobuf/{name}.proto' for name in ('any', 'duration', 'empty', 'field_mask',
-                                                                          'struct', 'timestamp', 'wrappers'))
+REQUIRED_DESCRIPTOR = 'bead/transcoding/v1/required.proto'
+FEATURES = descriptor_pb2.FeatureSet
 
-    for name, each in TYPES.items():
-        if not name.startswith(PACKAGE + '.'):
-            continue
 
+def file_descriptor(required_file=False):
+    """transcoding.proto's descriptor, or transcoding-required.proto's, edition 2023, as protoc would give
+    it, its options aside but the features."""
+    if required_file:
+        proto = descriptor_pb2.FileDescriptorProto(name=REQUIRED_DESCRIPTOR, package=PACKAGE, syntax='editions',
+                                                   edition=descriptor_pb2.EDITION_2023)
+        proto.dependency.append('google/protobuf/field_mask.proto')
+    else:
+        proto = descriptor_pb2.FileDescriptorProto(name='bead/transcoding/v1/transcoding.proto', package=PACKAGE,
+                                                   syntax='proto3')
+        proto.dependency.extend(f'google/protobuf/{name}.proto' for name in ('any', 'duration', 'empty', 'field_mask',
+                                                                              'struct', 'timestamp', 'wrappers'))
+        proto.dependency.append(REQUIRED_DESCRIPTOR)
+
+    for each in own_types(required_file):
         if isinstance(each, Enum):
             declared = proto.enum_type.add(name=each.name)
             declared.options.allow_alias = each.alias
+
+            if each.closed:
+                declared.options.features.enum_type = FEATURES.CLOSED
             declared.value.extend(descriptor_pb2.EnumValueDescriptorProto(name=value, number=number)
                                   for value, number in each.values)
             continue
@@ -3107,6 +3351,12 @@ def file_descriptor():
             else:
                 typed(added, field.kind)
 
+            if field.required:
+                added.options.features.field_presence = FEATURES.LEGACY_REQUIRED
+
+            if field.delimited:
+                added.options.features.message_encoding = FEATURES.DELIMITED
+
             if field.oneof is not None:
                 added.oneof_index = oneofs.index(field.oneof)
 
@@ -3120,6 +3370,7 @@ def file_descriptor():
 
 
 POOL = descriptor_pool.Default()
+POOL.AddSerializedFile(file_descriptor(required_file=True).SerializeToString())
 POOL.AddSerializedFile(file_descriptor().SerializeToString())
 
 
@@ -3128,7 +3379,12 @@ def upb_class(name):
 
 
 def same(one, other):
-    return one.SerializeToString(deterministic=True) == other.SerializeToString(deterministic=True)
+    """Whether two messages are one, each written partially, since upb's writer refuses a message that
+    leaves a required field unset, and their unknown fields aside, which no JSON carries."""
+    one, other = type(one).FromString(one.SerializePartialToString()), type(other).FromString(other.SerializePartialToString())
+    one.DiscardUnknownFields()
+    other.DiscardUnknownFields()
+    return one.SerializePartialToString(deterministic=True) == other.SerializePartialToString(deterministic=True)
 
 
 def upb_parts_reading(entry):
@@ -3793,6 +4049,23 @@ EXCHANGES = [
                           fields={'retry-after': '1'}, on='b'),
               json_post('/api/Transcoding/echo', '{}', on='c'), answered('{}', on='c')],
              options={'maximumConnectionsPerAddress': 1}, real_time=True),
+    # a field of LEGACY_REQUIRED presence left unset (5.2, step 4; spec 17.9.7)
+    exchange('a request that leaves a required field unset is refused before its call',
+             ['5.2', '5.2.4', '7.4', '7.6', '7.6.12', 'spec:17.9.7'],
+             [json_post('/api/Transcoding/require', '{"needs":{"count":1}}'),
+              call_failed({'code': 50, 'arose': 'gateway', 'detail': UNSET, 'pointer': '#/needs/name'}),
+              {'until': {'requires': 0}}]),
+    exchange('a result its server cannot write is PROCEDURE_FAILED', ['7.5', '7.6', '7.6.18', 'spec:17.2.5', 'spec:17.9.7'],
+             [json_post('/api/Transcoding/require', '{}'), call_failed({'code': 64, 'arose': 'server'}),
+              {'until': {'requires': 1, 'reported': 1}}]),
+    exchange("a required field a GET's query leaves unset is refused", ['4.3', '5.2.4', '7.4', '7.6', '7.6.12'],
+             [send('GET', '/v1/needs/a'),
+              call_failed({'code': 50, 'arose': 'gateway', 'detail': UNSET, 'parameter': 'count'})]),
+    exchange("an Any's message that leaves a required field unset reaches its server",
+             ['5.2', '5.2.4', '5.4', '5.4.6', 'spec:17.9.7'],
+             [json_post('/api/Transcoding/require', '{"needs":{"name":"a","count":1},"any":{"@type":'
+                                                    '"type.googleapis.com/bead.transcoding.v1.Needs","name":"b"}}'),
+              answered(result('Needs', {'name': 'a', 'count': 1}))]),
 ]
 
 
@@ -3814,7 +4087,9 @@ SERVICE_TEXT = {
     'procedures': {procedure.name: procedure.note for procedure in PROCEDURES},
     'verifier': "ELSEWHERE: the value Bearer good resolves to a credential's session of the identifier ada; any "
                 'other does not hold. The server is given no JWT verifier.',
-    'counts': {'hanging': "the calls of hang its resolver took, which an exchange's until waits on"},
+    'counts': {'hanging': "the calls of hang its resolver took, which an exchange's until waits on",
+               'requires': "the calls of require its resolver took",
+               'reported': "the failures its server reported on its error (spec 9.0)"},
 }
 
 
@@ -3845,10 +4120,10 @@ DOCUMENT_JSON = {
     '$schema': 'schemas/transcoding.schema.json',
     '$comment': [
         "Bead's HTTP/JSON transcoding: what a gateway answers over HTTP of a service's procedures (spec/transcoding.md, decision 0037), which every implementation that offers a gateway plays through its own modules and its gateway: templates and bindings through its routes, readings and writings through its mapping of protobuf's JSON, failures through its problems, events through its streams, and exchanges through its gateway over a real socket.",
-        "Every message is spec/transcoding.proto's, by its full name, and its service TranscodingService, named Transcoding, each procedure by its name; each side's tests take their code of it from beadc, an output with http: true, whose route table and document they read, which tools/check-transcoding.mjs holds to what beadc writes.",
+        "Every message is spec/transcoding.proto's, or spec/transcoding-required.proto's, which it imports, by its full name, and its service TranscodingService, named Transcoding, each procedure by its name; each side's tests take their code of it from beadc, an output with http: true, whose route table and document they read, which tools/check-transcoding.mjs holds to what beadc writes.",
         "templates are templates and raw paths: route, the index of the template that answers a path by 3.5's precedence, null where none matches; variables, each variable's value by its field path, decoded as 3.8 decodes one; verb, the path's, where it has one; refused, where a variable's value does not decode, which a gateway answers 400 PAYLOAD_UNDECODABLE. An entry of one template and refused is a template refused as it is parsed; one of two templates and tie says whether they tie (3.9).",
-        "readings are bodies read as 5.2 reads a proto request's: body, its text, or bodyBytes, its bytes in hexadecimal where they are no UTF-8; then payload, the message read, as its binary payload in hexadecimal, which a harness reads through its stock library and compares with the message its mapping read, as messages, since protobuf fixes no message's bytes whole; or refused, the reason it is refused for, the mapping's own words, and pointer, where it met it as 7.4 places it, the body the request whole, none for the text's own.",
-        "writings are results written as 5.6 writes one: payload, the result's bytes, which a harness reads through its stock library; then body, the text Bead's proto JSON form writes of it, byte for byte, or refused, the reason 5.7 refuses it for, which a gateway answers 500 (7.6).",
+        "readings are bodies read as 5.2 reads a proto request's: body, its text, or bodyBytes, its bytes in hexadecimal where they are no UTF-8; then payload, the message read, as its binary payload in hexadecimal, which a harness reads through its stock library and compares with the message its mapping read, as messages, since protobuf fixes no message's bytes whole; or refused, the reason it is refused for, the mapping's own words, and pointer, where it met it as 7.4 places it, the body the request whole, none for the text's own: a required field left unset, step 4, by the member its object lacks.",
+        "writings are results written as 5.6 writes one: payload, the result's bytes, which a harness reads through its side's runtime reader, as a gateway reads a result (spec 17.9); then body, the text Bead's proto JSON form writes of it, byte for byte, or refused, the reason 5.7 refuses it for, which a gateway answers 500 (7.6).",
         "upb, on a reading or a writing, is how protobuf's own Python library, which the generator runs beside its own reading and writing, parts from it, D and its number where a row of decision 0037's table says the stock libraries part there too: informative, read by no harness.",
         "bindings are requests bound by section 4: procedure, its procedure; route, its method, its template and its body as its rule gives them; target, the request's target, raw; body, its body's text where it has one; then payload, the request's message as its binary payload, compared as a reading's is, or refused, the reason, which a gateway answers 400 PAYLOAD_UNDECODABLE, and pointer or parameter, where the request carried it, as 7.4 places it, none for its text or its query whole.",
         "failures are a call's failure as a gateway answers it (section 7). failure is its code; its scope, protocol where none is given; its detail as the gateway's client read it; where it arose, arose: server, its server answered it of the request; client, its client raised it before the call went; answer, its client raised it of a result or a notification; gateway, the gateway's own reading of the request; encoding, of a request its server could not read, proto where none is given; credential, true where its call presented one; challenge, where the gateway is given one, Bearer otherwise; pointer or parameter, where the gateway's reading met what it refuses. Or own, a failure of the gateway's own — timeout, closed, unwritable, jwt, scheme or failed — with its detail, its words, empty for none. procedure and route, for PAYLOAD_INVALID, its procedure and the route its request came by; problemTypes, the problem types its definitions give, https://example.com/problems/ where none is given, null for none. status, fields beside it, and problem, the body's text, byte for byte.",
@@ -3872,6 +4147,9 @@ DOCUMENT_JSON = {
 if __name__ == '__main__':
     with open(ROOT + 'transcoding.proto', 'w', encoding='utf-8', newline='\n') as file:
         file.write(proto_file())
+
+    with open(ROOT + 'transcoding-required.proto', 'w', encoding='utf-8', newline='\n') as file:
+        file.write(required_proto_file())
 
     with open(ROOT + 'transcoding.json', 'w', encoding='utf-8', newline='\n') as file:
         json.dump(DOCUMENT_JSON, file, ensure_ascii=False, indent=2)

@@ -5,6 +5,7 @@ import type { CLOSE_EVENT, ERROR_EVENT, MESSAGE_EVENT } from '../shared/constant
 import type {
   Data,
   EmitterListener,
+  IBrokerPeer,
   IEventIteratorOptions,
   IMemoryEndLike,
   IMemoryTransportServerLike,
@@ -355,8 +356,9 @@ export interface IWSTransportClientConnectOptions extends ITransportClientAddres
    * beside it. What it throws fails that attempt, its cause, which a reconnection counts as a refused
    * connect; a value it hands that is no field value fails it with a {@link ProgrammerError}, which
    * a reconnection does not try again.
-   * Only one call is pending per client; an attempt joins a live call. A call abandoned by its last
-   * waiter is cancelled in a later turn; another attempt waits for it to settle, then calls anew.
+   * Only one call is pending per provider identity. Attempts are sequential: another attempt using
+   * the same provider waits for its earlier call to settle, then calls anew; another provider asks
+   * at once. The attempt's signal is aborted in a later turn once it ends, opened or not.
    * Cancellation, timeout and disposal bound each wait. The provider's own cancellation is its
    * failure while the attempt's signal stays live.
    */
@@ -509,6 +511,33 @@ export type FetchLike = (url: string, init: IFetchInit) => Promise<IFetchRespons
 export type HTTPTransportClient = ITransportClient<
   IHTTPClientConnection,
   IHTTPTransportClientConnectOptions
+>;
+
+// ── Broker ────────────────────────────────────────────────────────────────────
+
+// interfaces
+
+/** What a broker connect takes besides: the server it opens a connection to, by its name. */
+export interface IBrokerTransportClientConnectOptions extends ITransportClientConnectOptions {
+  /** The server's name, a token (spec 15.16): its OPEN goes there, to one participant serving it. */
+  server: string;
+}
+
+export interface IBrokerTransportClientOptions {
+  /**
+   * What may wait on its connection for its broker, handed to its adapter and not yet taken; a
+   * parcel past it loses the connection, 4000, told on `error` (spec 15.23). A whole number above
+   * 0. Defaults to {@link MAXIMUM_UNSENT_BYTES}.
+   */
+  maximumUnsentBytes?: number | undefined;
+}
+
+// types
+
+/** A client of a broker's transport: its socket is its connection's peer, the server's participant. */
+export type BrokerTransportClient = ITransportClient<
+  IBrokerPeer,
+  IBrokerTransportClientConnectOptions
 >;
 
 // ── Memory ────────────────────────────────────────────────────────────────────
