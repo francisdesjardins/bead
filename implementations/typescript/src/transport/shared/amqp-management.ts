@@ -67,7 +67,7 @@ export const isNone = (terminus: unknown): boolean => {
 };
 
 // the terminus its peer's ATTACH named for `link`: its source, or its target
-const terminusOf = (link: Receiver | Sender, end: 'source' | 'target'): unknown => {
+export const terminusOf = (link: Receiver | Sender, end: 'source' | 'target'): unknown => {
   return (link as unknown as { remote: { attach: Record<string, unknown> } }).remote.attach[end];
 };
 

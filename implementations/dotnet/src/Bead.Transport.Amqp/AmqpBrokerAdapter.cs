@@ -212,8 +212,8 @@ public sealed class AmqpBrokerAdapter : IBrokerAdapter, IAsyncDisposable
     /// EXTERNAL under its client certificate, its OPEN of its id as its container-id, its virtual
     /// host as its hostname where it has one and its idle-time-out; then its two sending sessions,
     /// each a sender to the anonymous terminus, whose ATTACH names what it may publish. A will is an
-    /// <see cref="ArgumentException"/>: AMQP 1.0 has none. A connection refused or ended before then
-    /// fails it naming why, an <see cref="IOException"/>; none of it within its connect timeout, a
+    /// <see cref="ArgumentException"/>: AMQP 1.0 has none. A connection refused or ended, or a sender
+    /// refused, before then fails it naming why, an <see cref="IOException"/>; none of it within its connect timeout, a
     /// <see cref="TimeoutException"/>; a link up already, an <see cref="InvalidOperationException"/>.
     /// </summary>
     public async Task Start(BrokerStart? start = null)
@@ -258,8 +258,20 @@ public sealed class AmqpBrokerAdapter : IBrokerAdapter, IAsyncDisposable
                 Watch(link);
                 link.Parcels = SenderOf((link, true));
                 link.Opens = SenderOf((link, false));
-                parcels = await link.Parcels.WaitAsync(linked.Token);
-                opens = await link.Opens.WaitAsync(linked.Token);
+
+                // * either sender refused fails it at once, whether the other was answered or not
+                List<Task<Sending>> attaching = [link.Parcels, link.Opens];
+
+                while (attaching.Count > 0)
+                {
+                    var answered = await Task.WhenAny(attaching).WaitAsync(linked.Token);
+
+                    attaching.Remove(answered);
+                    await answered;
+                }
+
+                parcels = await link.Parcels;
+                opens = await link.Opens;
             }
             // * the timeout's, whatever its cancel ended after it
             catch (Exception reason) when (timeout.IsCancellationRequested && !token.IsCancellationRequested && !link.IsEnded)

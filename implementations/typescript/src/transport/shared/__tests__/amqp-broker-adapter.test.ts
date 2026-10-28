@@ -441,6 +441,57 @@ test.describe('createAmqpBrokerAdapter', () => {
     expect(link.deliveries).toHaveLength(1);
   });
 
+  test('refuses its start when a sending link is refused, and a publication whose fresh sending link is refused, sending nothing on it and keeping its link (spec 15.33)', async () => {
+    const refusing = (): void => {
+      script.policy.attach = ({ address, role }) => {
+        return address === undefined && role === 'sender'
+          ? { refuse: { condition: 'amqp:not-allowed', description: 'sender denied' } }
+          : 'take';
+      };
+    };
+
+    refusing();
+
+    const adapter = adapterOf(script);
+    const { downs } = heardOf(adapter);
+    const starting = settledOf(adapter.start());
+    const first = await script.link();
+
+    expect(String(await starting)).toContain('amqp:not-allowed, sender denied');
+    await first.closed;
+    expect([downs, adapter.isLinked]).toEqual([[], false]);
+    script.policy.attach = () => {
+      return 'take';
+    };
+
+    // * the inboxes' sending session ended: the next publication begins another, refused
+    const link = await inboxUp({ adapter, script });
+
+    expect(await adapter.publish({ payload: Uint8Array.of(1), topic: INBOX })).toBe(
+      BROKER_PUBLISHED.TAKEN
+    );
+
+    const ended = link.deliveries[0]?.receiver.session;
+
+    ended?.close();
+    await link.until(() => {
+      return ended?.is_closed() === true;
+    });
+    refusing();
+    expect(
+      String(await settledOf(adapter.publish({ payload: Uint8Array.of(2), topic: INBOX })))
+    ).toContain('amqp:not-allowed, sender denied');
+    expect([link.deliveries.length, downs, adapter.isLinked]).toEqual([1, [], true]);
+    script.policy.attach = () => {
+      return 'take';
+    };
+    expect(await adapter.publish({ payload: Uint8Array.of(3), topic: INBOX })).toBe(
+      BROKER_PUBLISHED.TAKEN
+    );
+    expect(link.deliveries).toHaveLength(2);
+    await adapter.stop();
+  });
+
   test('refuses a publication and a subscription whose signal is aborted without sending either or losing its link', async () => {
     const adapter = adapterOf(script);
     const { downs } = heardOf(adapter);

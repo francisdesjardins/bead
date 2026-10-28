@@ -344,6 +344,78 @@ public sealed class AmqpBrokerAdapterTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Refuses_its_start_when_a_sending_link_is_refused_and_a_publication_whose_fresh_sending_link_is_refused_sending_nothing_on_it_and_keeping_its_link_spec_15_33()
+    {
+        var refusal = new Error(new Symbol("amqp:not-allowed")) { Description = "sender denied" };
+        Func<ScriptedFrame, bool> isSending = (frame) =>
+        {
+            return frame.Performative is Attach { Role: false } attach && (attach.Target as Target)?.Address is null;
+        };
+
+        _script.Holding = isSending;
+
+        await using var adapter = AdapterOf();
+        var (_, downs) = HeardOf(adapter);
+        var starting = adapter.Start();
+        var first = await _script.Connection();
+
+        await first.AnswerAttach(await first.Next(isSending), refusal);
+        var failure = await FailureOf(() =>
+        {
+            return starting;
+        });
+
+        Assert.IsType<IOException>(failure);
+        Assert.Contains("amqp:not-allowed, sender denied", failure.Message, StringComparison.Ordinal);
+        await first.Closed.WaitAsync(Patience, Cancelled);
+        Assert.Empty(downs);
+        Assert.False(adapter.IsLinked);
+        _script.Holding = (_) =>
+        {
+            return false;
+        };
+
+        // * the inboxes' sending session ended: the next publication begins another, refused
+        var connection = await LinkUp((adapter, _script));
+
+        Assert.Equal(BrokerPublished.Taken, await adapter.Publish(new BrokerPublication { Payload = (byte[])[1], Topic = Inbox }));
+        var parcels = connection.Links.First((link) =>
+        {
+            return !link.IsReceiver && link.Name.StartsWith("parcels", StringComparison.Ordinal);
+        });
+        var ending = connection.Frames.Count;
+
+        await connection.End(parcels.Channel);
+        await connection.Next(
+            (frame) =>
+            {
+                return frame.Performative is AmqpEnd && frame.Channel == parcels.Channel;
+            },
+            from: ending);
+        _script.Holding = isSending;
+        var sending = connection.Frames.Count;
+        var publishing = adapter.Publish(new BrokerPublication { Payload = (byte[])[2], Topic = Inbox });
+
+        await connection.AnswerAttach(await connection.Next(isSending, from: sending), refusal);
+        var refused = await FailureOf(() =>
+        {
+            return publishing;
+        });
+
+        Assert.IsType<IOException>(refused);
+        Assert.Contains("amqp:not-allowed, sender denied", refused.Message, StringComparison.Ordinal);
+        Assert.Single(TransfersTo((connection, "/exchanges/bead/bead.i.ada")));
+        Assert.Empty(downs);
+        Assert.True(adapter.IsLinked);
+        _script.Holding = (_) =>
+        {
+            return false;
+        };
+        Assert.Equal(BrokerPublished.Taken, await adapter.Publish(new BrokerPublication { Payload = (byte[])[3], Topic = Inbox }));
+        Assert.Equal(2, TransfersTo((connection, "/exchanges/bead/bead.i.ada")).Count);
+    }
+
+    [Fact]
     public async Task Refuses_a_publication_and_a_subscription_whose_signal_is_aborted_without_sending_either_or_losing_its_link()
     {
         await using var adapter = AdapterOf();
