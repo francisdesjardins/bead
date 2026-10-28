@@ -1,0 +1,32 @@
+# What the Rust side's dependencies are held to (decision 0044), by cargo-deny: RustSec's advisories,
+# a yanked crate refused; the licences allowed, each one a crate of the graph holds, an expression's
+# branch taken as it reads; crates.io alone as a source; and one version of each crate, a duplicate
+# a listed exception with its reason.
+
+[graph]
+all-features = true
+
+[advisories]
+version = 2
+yanked = "deny"
+
+[licenses]
+version = 2
+allow = ["Apache-2.0", "MIT", "BSD-3-Clause", "Unicode-3.0", "BSL-1.0"]
+confidence-threshold = 0.93
+
+# the workspace's own crates, published nowhere, hold its licence
+[licenses.private]
+ignore = true
+
+[bans]
+multiple-versions = "deny"
+wildcards = "deny"
+# a member's path to another member names no version, which no registry reads
+allow-wildcard-paths = true
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+allow-git = []
