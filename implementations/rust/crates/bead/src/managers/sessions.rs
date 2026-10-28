@@ -15,6 +15,9 @@ use crate::ordered::Ordered;
 use crate::router::types::{ConnectionHandle, Gauges};
 use crate::session_token::SessionToken;
 
+#[cfg(test)]
+mod tests;
+
 /// A connection's session.
 #[derive(Clone, PartialEq, Eq)]
 #[non_exhaustive]
