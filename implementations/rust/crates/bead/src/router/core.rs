@@ -12,6 +12,7 @@ use core::fmt;
 use core::time::Duration;
 use std::collections::{BTreeMap, BTreeSet};
 use std::error::Error;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 
 use bytes::Bytes;
@@ -377,6 +378,23 @@ pub(crate) struct Registered {
     pub(crate) series: Option<ResolverSeries>,
 }
 
+/// Whether a router was disposed, which its handle and its owner's state share: set at once by its
+/// dispose, what it holds let go in a later turn, behind what came before it (spec 9.0).
+#[derive(Debug, Clone, Default)]
+pub(crate) struct Disposal(Arc<AtomicBool>);
+
+impl Disposal {
+    /// Marks it disposed.
+    pub(crate) fn set(&self) {
+        self.0.store(true, Ordering::Release);
+    }
+
+    /// Whether it was disposed.
+    pub(crate) fn is_set(&self) -> bool {
+        self.0.load(Ordering::Acquire)
+    }
+}
+
 /// What both sides of a router hold alike, in their owner's state.
 pub(crate) struct Core<S> {
     pub(crate) side: RouterSide,
@@ -391,7 +409,7 @@ pub(crate) struct Core<S> {
     pub(crate) pending: PendingCalls,
     pub(crate) announcements: Announcements,
     pub(crate) resolvers: Resolvers,
-    pub(crate) is_disposed: bool,
+    pub(crate) disposal: Disposal,
     // the receiving transfers of requests, by their transfer's id: the request as it waits, and
     // its handler
     pub(crate) receiving_requests: BTreeMap<u64, (Arc<Dispatch>, Arc<Handler>)>,
@@ -406,7 +424,7 @@ impl<S> fmt::Debug for Core<S> {
         formatter
             .debug_struct("Core")
             .field("side", &self.side)
-            .field("is_disposed", &self.is_disposed)
+            .field("is_disposed", &self.disposal.is_set())
             .finish_non_exhaustive()
     }
 }
@@ -439,12 +457,17 @@ impl<S: Side> Core<S> {
             pending: PendingCalls::new(side, None),
             announcements: Announcements::default(),
             resolvers: Resolvers::default(),
-            is_disposed: false,
+            disposal: Disposal::default(),
             receiving_requests: BTreeMap::new(),
             results: BTreeMap::new(),
             settled: BTreeMap::new(),
             next_id: 1,
         }
+    }
+
+    /// Whether its router was disposed.
+    pub(crate) fn is_disposed(&self) -> bool {
+        self.disposal.is_set()
     }
 
     /// A number never given before, which tells one thing from another of the same place.
@@ -624,7 +647,7 @@ pub(crate) fn deliver<S: Side>(state: &mut S, (envelope, options): (Envelope, De
     let core = state.core();
 
     // a disposed router is done with its transport: nothing more goes out on it
-    if core.is_disposed {
+    if core.is_disposed() {
         return settle(
             state,
             Err(CallError::Disconnected(DISPOSED.to_owned())),
@@ -1339,7 +1362,7 @@ pub(crate) fn respond<S: Side>(
 
     // a call its requester cancelled, its connection took away, or whose call id another request
     // opened since, is answered by nothing; once disposed, the answer goes on, to reject
-    if !core.is_disposed && !is_answering(state, &dispatch) {
+    if !core.is_disposed() && !is_answering(state, &dispatch) {
         return finish(state, Ok(()), done);
     }
 
@@ -1646,42 +1669,33 @@ fn dispatch_to<S: Side>(
     });
 }
 
-// a resolver that failed: reported unless its call was cancelled or went with its connection, and
-// answered PROCEDURE_FAILED while it still answers
+// a resolver that failed: reported unless its call was cancelled or went with its connection, then
+// answered PROCEDURE_FAILED while it still answers, as the other sides' order has it
 fn resolver_failed<S: Side>(
     state: &mut S,
     (dispatch, signal, error): (&Arc<Dispatch>, &Signal, ResolverError),
 ) {
-    let still = is_answering(state, dispatch);
     let handle = Arc::clone(&dispatch.connection_handle);
-
-    match error {
+    let error = match error {
         // ! a resolver's own failure is answered as it is, as a thrown FailureError is
-        ResolverError::Failure(failure) if still && !signal.is_aborted() => {
+        ResolverError::Failure(failure) if is_answering(state, dispatch) => {
             return respond_failure_as_is(state, (failure, dispatch));
         }
-        ResolverError::Failure(failure) => {
-            if !signal.is_aborted() {
-                state.report(reported(failure), &handle);
-            }
-        }
-        ResolverError::Other(error) => {
-            if !signal.is_aborted() {
-                state.report(reported_error_of(error), &handle);
-            }
-        }
+        ResolverError::Failure(failure) => reported(failure),
+        ResolverError::Other(error) => reported_error_of(error),
+    };
+
+    if !signal.is_aborted() {
+        state.report(error, &handle);
     }
 
     // ! a resolver that fails before it answers is answered PROCEDURE_FAILED (spec 9.5); a call
-    // cancelled, or gone with its connection, is answered nothing, and one answered keeps its answer
-    if still && !signal.is_aborted() {
+    // cancelled, or gone with its connection, is answered nothing, and one answered keeps its
+    // answer. What its report listener handed its router comes in a later turn (spec 9.0)
+    if is_answering(state, dispatch) {
         let failure = state.core().failure(ProtocolCode::PROCEDURE_FAILED);
 
-        return refuse(state, (failure, dispatch));
-    }
-
-    if still {
-        close_answering(state, dispatch);
+        refuse(state, (failure, dispatch));
     }
 }
 
@@ -2503,7 +2517,7 @@ pub(crate) fn reject_pending<S: Side>(
 /// Rejects what still waits, aborts the signal of each call it still answers, and sends nothing
 /// more: no cancel either.
 pub(crate) fn dispose<S: Side>(state: &mut S) {
-    state.core().is_disposed = true;
+    state.core().disposal.set();
     reject_pending(state, (&format!("{DISPOSED} before the answer"), None));
 }
 

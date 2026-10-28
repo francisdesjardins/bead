@@ -37,7 +37,7 @@ use crate::metrics::{MetricsRegistry, NotificationSeries, ProcedureSeries, Route
 use crate::ordered::Ordered;
 use crate::owner::{Owner, WeakOwner};
 use crate::router::core::{
-    BeforeAnswer, Core, Dispatch, Handler, Resolution, Resolved, Resolvers, Responded,
+    BeforeAnswer, Core, Dispatch, Disposal, Handler, Resolution, Resolved, Resolvers, Responded,
     SessionRequest, Side, Undo, Unresolved, is_answering, reported, reported_call, respond,
 };
 use crate::router::requester::CoreRequest;
@@ -1383,8 +1383,9 @@ pub(crate) fn dispose(state: &mut ServerState) {
     }
 }
 
-// what posts a transport's events to the router's owner, in the order the transport tells them:
-// ! a handle to the owner, so a router lives as long as its transport holds it (decision 0044)
+// what posts a transport's events to the router's owner, in the order the transport tells them,
+// behind every job queued, one told from within its router's turn too (spec 9.0): ! a handle to
+// the owner, so a router lives as long as its transport holds it (decision 0044)
 struct Bridge {
     owner: Owner<ServerState>,
 }
@@ -1392,41 +1393,46 @@ struct Bridge {
 impl ServerListener for Bridge {
     fn on_connection(&self, connection_handle: &ConnectionHandle) {
         let handle = Arc::clone(connection_handle);
-        self.owner.offer(Box::new(move |state: &mut ServerState| {
-            crate::server::on_connection(state, &handle);
-            on_connection(state, &handle);
-        }));
+        self.owner
+            .offer_behind(Box::new(move |state: &mut ServerState| {
+                crate::server::on_connection(state, &handle);
+                on_connection(state, &handle);
+            }));
     }
 
     fn on_message(&self, message: TransportMessage, connection_handle: &ConnectionHandle) {
         let handle = Arc::clone(connection_handle);
-        self.owner.offer(Box::new(move |state: &mut ServerState| {
-            crate::server::on_message(state, &handle);
-            on_message(state, (message, &handle));
-        }));
+        self.owner
+            .offer_behind(Box::new(move |state: &mut ServerState| {
+                crate::server::on_message(state, &handle);
+                on_message(state, (message, &handle));
+            }));
     }
 
     fn on_close(&self, _was_clean: bool, connection_handle: &ConnectionHandle) {
         let handle = Arc::clone(connection_handle);
-        self.owner.offer(Box::new(move |state: &mut ServerState| {
-            crate::server::on_close(state, &handle);
-            on_close(state, &handle);
-        }));
+        self.owner
+            .offer_behind(Box::new(move |state: &mut ServerState| {
+                crate::server::on_close(state, &handle);
+                on_close(state, &handle);
+            }));
     }
 
     fn on_listen(&self, is_held: bool, connection_handle: &ConnectionHandle) {
         let handle = Arc::clone(connection_handle);
-        self.owner.offer(Box::new(move |state: &mut ServerState| {
-            crate::server::on_listen(state, (is_held, &handle));
-        }));
+        self.owner
+            .offer_behind(Box::new(move |state: &mut ServerState| {
+                crate::server::on_listen(state, (is_held, &handle));
+            }));
     }
 
     fn on_error(&self, error: &RouterError, connection_handle: Option<&ConnectionHandle>) {
         let error = error.clone();
         let handle = connection_handle.cloned();
-        self.owner.offer(Box::new(move |state: &mut ServerState| {
-            state.listeners.report(&error, handle.as_ref());
-        }));
+        self.owner
+            .offer_behind(Box::new(move |state: &mut ServerState| {
+                state.listeners.report(&error, handle.as_ref());
+            }));
     }
 }
 
@@ -1511,6 +1517,7 @@ impl fmt::Debug for CallHooks {
 
 struct Shared {
     owner: Owner<ServerState>,
+    disposal: Disposal,
     clock: SharedClock,
     limits: RouterLimits,
     metrics: Option<RouterMetrics>,
@@ -1614,10 +1621,12 @@ impl RouterServer {
         let listeners = Arc::new(ServerListeners::default());
         let notifyings = Arc::new(Mutex::new(BTreeMap::new()));
         let resolvers = Resolvers::default();
+        let disposal = Disposal::default();
         let owner = Owner::spawn((&runtime, &clock), |weak: WeakOwner<ServerState>| {
             ServerState {
                 core: Core {
                     resolvers: Arc::clone(&resolvers),
+                    disposal: disposal.clone(),
                     ..Core::new(
                         weak,
                         (
@@ -1656,6 +1665,7 @@ impl RouterServer {
         Ok(Self {
             shared: Arc::new(Shared {
                 owner,
+                disposal,
                 clock,
                 limits,
                 metrics,
@@ -1670,6 +1680,11 @@ impl RouterServer {
 
     pub(crate) fn owner(&self) -> &Owner<ServerState> {
         &self.shared.owner
+    }
+
+    // marks it disposed at once, before what it holds is let go in a later turn (spec 9.0)
+    pub(crate) fn mark_disposed(&self) {
+        self.shared.disposal.set();
     }
 
     /// The clock it runs on, its transport's.
@@ -1891,9 +1906,13 @@ impl RouterServer {
         Box::pin(async move { gauged.await.unwrap_or_default() })
     }
 
-    /// Disposes of it: every call ends, and nothing more goes out.
+    /// Disposes of it: every call ends, and nothing more goes out. Disposed at once, it lets go of
+    /// what it holds in a later turn, behind what came before it, a listener's dispose too (spec
+    /// 9.0).
     pub fn dispose(&self) -> BoxFuture<()> {
-        let disposed = self.shared.owner.run(dispose);
+        self.shared.disposal.set();
+
+        let disposed = self.shared.owner.run_behind(dispose);
 
         Box::pin(async move {
             disposed.await.ok();

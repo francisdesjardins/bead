@@ -27,7 +27,9 @@ use crate::failure::{Failure, FailureOrigin};
 use crate::identity::{DeclarationWay, Procedure, check_declaration, check_procedure_kind};
 use crate::metrics::{MetricsRegistry, NotificationSeries, ProcedureSeries, RouterMetrics};
 use crate::owner::{Owner, WeakOwner};
-use crate::router::core::{Core, Handler, Resolution, Resolved, Resolvers, SessionRequest, Side};
+use crate::router::core::{
+    Core, Disposal, Handler, Resolution, Resolved, Resolvers, SessionRequest, Side,
+};
 use crate::router::relay::{RelayLeg, RelayRouter};
 use crate::router::requester::CoreRequest;
 use crate::router::server::{Call, CallHooks, runtime_of};
@@ -565,7 +567,8 @@ impl Side for ClientState {
     }
 }
 
-// what posts a transport's events to the router's owner: ! a handle to the owner, so a router
+// what posts a transport's events to the router's owner, behind every job queued, a transport that
+// tells one from within its router's turn too (spec 9.0): ! a handle to the owner, so a router
 // lives as long as its transport holds it
 struct Bridge {
     owner: Owner<ClientState>,
@@ -573,36 +576,39 @@ struct Bridge {
 
 impl ClientListener for Bridge {
     fn on_message(&self, message: TransportMessage) {
-        self.owner.offer(Box::new(move |state: &mut ClientState| {
-            let handle = server_handle();
+        self.owner
+            .offer_behind(Box::new(move |state: &mut ClientState| {
+                let handle = server_handle();
 
-            crate::router::core::receive(state, (message, &handle));
-        }));
+                crate::router::core::receive(state, (message, &handle));
+            }));
     }
 
     fn on_close(&self, _was_clean: bool, _is_quick: bool) {
-        self.owner.offer(Box::new(|state: &mut ClientState| {
+        self.owner.offer_behind(Box::new(|state: &mut ClientState| {
             state.on_close("the connection closed before the answer");
         }));
     }
 
     // a connection replaced emits no close, but nothing sent on it will be answered either
     fn on_reconnect(&self) {
-        self.owner.offer(Box::new(|state: &mut ClientState| {
+        self.owner.offer_behind(Box::new(|state: &mut ClientState| {
             state.on_close("the connection was replaced before the answer");
         }));
     }
 
     fn on_error(&self, error: &RouterError) {
         let error = error.clone();
-        self.owner.offer(Box::new(move |state: &mut ClientState| {
-            state.report_error(&error);
-        }));
+        self.owner
+            .offer_behind(Box::new(move |state: &mut ClientState| {
+                state.report_error(&error);
+            }));
     }
 }
 
 struct Shared {
     owner: Owner<ClientState>,
+    disposal: Disposal,
     clock: SharedClock,
     limits: RouterLimits,
     metrics: Option<RouterMetrics>,
@@ -702,10 +708,12 @@ impl RouterClient {
         let notifications = Arc::new(Mutex::new(BTreeMap::new()));
         let hearings = Arc::new(Mutex::new(BTreeMap::new()));
         let session_token = Arc::new(Mutex::new(None));
+        let disposal = Disposal::default();
         let owner = Owner::spawn((&runtime, &clock), |weak: WeakOwner<ClientState>| {
             ClientState {
                 core: Core {
                     resolvers: Arc::clone(&resolvers),
+                    disposal: disposal.clone(),
                     ..Core::new(
                         weak,
                         (
@@ -740,6 +748,7 @@ impl RouterClient {
         Ok(Self {
             shared: Arc::new(Shared {
                 owner,
+                disposal,
                 clock,
                 limits,
                 metrics,
@@ -1159,9 +1168,13 @@ impl RouterClient {
         Box::pin(async move { gauged.await.unwrap_or_default() })
     }
 
-    /// Disposes of it: every call ends, and nothing more goes out.
+    /// Disposes of it: every call ends, and nothing more goes out. Disposed at once, it lets go of
+    /// what it holds in a later turn, behind what came before it, a listener's dispose too (spec
+    /// 9.0).
     pub fn dispose(&self) -> BoxFuture<()> {
-        let disposed = self.shared.owner.run(|state: &mut ClientState| {
+        self.shared.disposal.set();
+
+        let disposed = self.shared.owner.run_behind(|state: &mut ClientState| {
             if let Some(listener) = state.listener.take() {
                 state.transport.unlisten(&listener);
             }

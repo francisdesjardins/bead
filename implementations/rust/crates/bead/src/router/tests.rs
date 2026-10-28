@@ -1,7 +1,8 @@
 //! The routers' tests: a client's against bytes a test writes as a server would, a server's against
-//! bytes a test writes as its clients would, the core both share, the relay, and what a resolver or
-//! a listener that fails changes.
+//! bytes a test writes as its clients would, the core both share, the relay, what a resolver or a
+//! listener that fails changes, and what a report listener hands its router back.
 
+use core::sync::atomic::{AtomicUsize, Ordering};
 use core::time::Duration;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::SystemTime;
@@ -236,21 +237,23 @@ impl Scripted {
 // connection open: a resolver's errors as its router takes them, beneath a service manager, which
 // answers whatever its callback fails with PROCEDURE_FAILED, as the other sides' managers do
 fn resolving(resolve: crate::router::core::ResolveFn) -> server::Served {
+    serving(crate::router::core::Handler {
+        resolve,
+        admit: None,
+        maximum_payload_bytes: None,
+        forwards_credentials: false,
+        notifies: false,
+    })
+}
+
+// a server answering echo at its router by `handler`, as `resolving` does
+fn serving(handler: crate::router::core::Handler) -> server::Served {
     let served = server::Served::new(&crate::router::server::RouterServerOptions::default());
 
     served.transport.open(&server::first(), true);
     served
         .router
-        .register_resolver((
-            &echo(),
-            crate::router::core::Handler {
-                resolve,
-                admit: None,
-                maximum_payload_bytes: None,
-                forwards_credentials: false,
-                notifies: false,
-            },
-        ))
+        .register_resolver((&echo(), handler))
         .expect("echo registered");
 
     served
@@ -340,6 +343,266 @@ async fn answers_a_resolver_that_panics_procedure_failed_with_no_detail_and_repo
     assert!(
         matches!(reported.as_slice(), [only] if only.contains("panicked") && only.ends_with(" first")),
         "its panic reported, with its connection: {reported:?}"
+    );
+}
+
+// what a resolver was handed, each request in turn
+type Handed = Arc<Mutex<Vec<crate::router::core::ResolverProps>>>;
+
+// a resolver that keeps what it is handed and answers nothing itself, failing the first request
+// with `failure` when given one
+fn keeping((handed, failure): (&Handed, Option<&'static str>)) -> crate::router::core::ResolveFn {
+    let handed = Arc::clone(handed);
+
+    Arc::new(move |props: crate::router::core::ResolverProps| {
+        let handed = Arc::clone(&handed);
+
+        Box::pin(async move {
+            let count = {
+                let mut handed = locked(&handed);
+
+                handed.push(props);
+                handed.len()
+            };
+
+            match failure {
+                Some(failure) if count == 1 => Err(crate::errors::ResolverError::other(
+                    std::io::Error::other(failure),
+                )),
+                Some(_) | None => Ok(()),
+            }
+        })
+    })
+}
+
+// a cancel of `call_id`, as a client writes it
+fn cancel_of(call_id: u32) -> Envelope {
+    Envelope::Cancel {
+        header: crate::envelope::CancelHeader { call_id },
+    }
+}
+
+// the calls the server answers right now
+async fn answering_of(served: &server::Served) -> Option<u64> {
+    served
+        .router
+        .gauges()
+        .await
+        .counts
+        .get("answeringCalls")
+        .copied()
+}
+
+// answers the request `handed` was handed `index`th with `payload`, as its resolver would
+async fn answer(handed: &Handed, (index, payload): (usize, &'static [u8])) {
+    let answerer = locked(handed)
+        .get(index)
+        .map(|props| Arc::clone(&props.answerer))
+        .expect("a request handed");
+
+    answerer
+        .respond(crate::router::types::RouterAnswer::Result(
+            Bytes::from_static(payload),
+        ))
+        .await
+        .expect("an answer taken");
+}
+
+// as its report listener hears `failure`, a cancel of call 5 and a request on it again handed to
+// its router, from within that listener
+fn handing_back(served: &server::Served, failure: &'static str) {
+    let transport = Arc::clone(&served.transport);
+
+    served.router.on_error(Arc::new(
+        move |error: &RouterError, _handle: Option<&crate::router::types::ConnectionHandle>| {
+            if error.to_string() == failure {
+                transport.deliver(&cancel_of(5), &server::first());
+                transport.deliver(&server::request_of((5, &echo(), "again")), &server::first());
+            }
+        },
+    ));
+}
+
+// spec 9.0
+#[tokio::test]
+async fn answers_a_failed_resolver_s_call_procedure_failed_before_what_its_report_listener_hands_its_router_whose_cancel_crosses_that_answer_and_whose_replacement_opens_the_call_id_again()
+ {
+    let handed: Handed = Arc::default();
+    let served = resolving(keeping((&handed, Some("the resolver failed"))));
+    let cancels: Arc<Mutex<Vec<String>>> = Arc::default();
+    let hearing = Arc::clone(&cancels);
+
+    handing_back(&served, "the resolver failed");
+    served.router.on_debug(Arc::new(
+        move |direction: crate::debug::DebugDirection, traced: &crate::debug::TracedEnvelope| {
+            if direction == crate::debug::DebugDirection::Rx
+                && traced.header.kind() == crate::constants::EnvelopeKind::Cancel
+            {
+                locked(&hearing).push(format!(
+                    "{} {}",
+                    traced.header.call_id(),
+                    server::name_of(Some(&traced.connection_handle))
+                ));
+            }
+        },
+    ));
+    served
+        .transport
+        .deliver(&server::request_of((5, &echo(), "hi")), &server::first());
+    served.settle().await;
+
+    assert_eq!(
+        served.reported(),
+        ["the resolver failed first"],
+        "the failure reported"
+    );
+    assert_eq!(
+        served.sent_since(),
+        ["first failure 5 PROCEDURE_FAILED"],
+        "answered before what its listener handed back"
+    );
+    assert_eq!(
+        locked(&handed)
+            .iter()
+            .map(|props| props.signal.is_aborted())
+            .collect::<Vec<_>>(),
+        [false, false],
+        "the cancel crossed that answer: it found no call, and aborted nothing"
+    );
+    assert_eq!(*locked(&cancels), ["5 first"], "the cancel taken");
+    assert_eq!(
+        answering_of(&served).await,
+        Some(1),
+        "the replacement opens the call id again"
+    );
+
+    answer(&handed, (0, b"1")).await;
+    served.settle().await;
+
+    assert!(
+        served.sent_since().is_empty(),
+        "the failed resolver's answer goes nowhere"
+    );
+
+    answer(&handed, (1, b"2")).await;
+    served.settle().await;
+
+    assert_eq!(
+        served.sent_since(),
+        ["first result 5 2"],
+        "the replacement answered"
+    );
+    assert_eq!(answering_of(&served).await, Some(0), "nothing answering");
+    assert_eq!(
+        served.reported(),
+        ["the resolver failed first"],
+        "nothing more reported"
+    );
+}
+
+// spec 9.0
+#[tokio::test]
+async fn answers_a_failed_admission_s_call_procedure_failed_before_what_its_report_listener_hands_its_router_and_the_replacement_opens_the_call_id_again()
+ {
+    let handed: Handed = Arc::default();
+    let admitted = Arc::new(AtomicUsize::new(0));
+    let admitting = Arc::clone(&admitted);
+    let served = serving(crate::router::core::Handler {
+        resolve: keeping((&handed, None)),
+        admit: Some(Arc::new(
+            move |_request: &crate::router::core::AdmissionRequest| {
+                if admitting.fetch_add(1, Ordering::SeqCst) == 0 {
+                    return Err(crate::errors::ResolverError::other(std::io::Error::other(
+                        "the admission failed",
+                    )));
+                }
+
+                Ok(None)
+            },
+        )),
+        maximum_payload_bytes: None,
+        forwards_credentials: false,
+        notifies: false,
+    });
+
+    handing_back(&served, "the admission failed");
+    served
+        .transport
+        .deliver(&server::request_of((5, &echo(), "hi")), &server::first());
+    served.settle().await;
+
+    assert_eq!(
+        served.reported(),
+        ["the admission failed first"],
+        "the failure reported"
+    );
+    assert_eq!(
+        served.sent_since(),
+        ["first failure 5 PROCEDURE_FAILED"],
+        "answered before what its listener handed back"
+    );
+    assert_eq!(admitted.load(Ordering::SeqCst), 2, "both admissions asked");
+    assert_eq!(locked(&handed).len(), 1, "the replacement handed on");
+    assert_eq!(
+        answering_of(&served).await,
+        Some(1),
+        "the replacement opens the call id again"
+    );
+
+    answer(&handed, (0, b"2")).await;
+    served.settle().await;
+
+    assert_eq!(
+        served.sent_since(),
+        ["first result 5 2"],
+        "the replacement answered"
+    );
+    assert_eq!(answering_of(&served).await, Some(0), "nothing answering");
+    assert_eq!(
+        served.reported(),
+        ["the admission failed first"],
+        "nothing more reported"
+    );
+}
+
+// spec 9.0
+#[tokio::test]
+async fn lets_its_connections_go_after_the_turn_its_report_listener_disposes_it_in_the_failed_resolver_s_answer_refused_as_disposed_and_reported()
+ {
+    let handed: Handed = Arc::default();
+    let served = resolving(keeping((&handed, Some("the resolver failed"))));
+    let router = served.router.clone();
+
+    served.router.on_error(Arc::new(
+        move |error: &RouterError, _handle: Option<&crate::router::types::ConnectionHandle>| {
+            if error.to_string() == "the resolver failed" {
+                // disposed at once, what it holds let go in a later turn
+                drop(router.dispose());
+            }
+        },
+    ));
+    served
+        .transport
+        .deliver(&server::request_of((5, &echo(), "hi")), &server::first());
+    served.settle().await;
+
+    assert!(served.sent_since().is_empty(), "nothing sent once disposed");
+    assert_eq!(
+        served.reported(),
+        [
+            "the resolver failed first",
+            "the connection closed: the router was disposed first"
+        ],
+        "the failure reported, then its answer refused as disposed"
+    );
+    assert_eq!(answering_of(&served).await, Some(0), "nothing answering");
+    assert_eq!(
+        locked(&handed)
+            .iter()
+            .map(|props| props.signal.is_aborted())
+            .collect::<Vec<_>>(),
+        [false],
+        "its call closed as its answer failed, before what the dispose lets go: nothing aborted"
     );
 }
 

@@ -1232,16 +1232,24 @@ impl Server {
         Box::pin(async move { health_of(&gauges.await) })
     }
 
-    /// Disposes of it: its router, its sessions, then its transport, stopped.
+    /// Disposes of it: its router, its sessions, then its transport, stopped. Its router disposed
+    /// at once, what it holds is let go in a later turn, behind what came before it, a listener's
+    /// dispose too (spec 9.0).
     pub fn dispose(&self) -> BoxFuture<()> {
-        let disposed = self.shared.router.owner().run(|state: &mut ServerState| {
-            dispose_facade(state);
-            crate::router::server::dispose(state);
+        self.shared.router.mark_disposed();
 
-            if let Some(facade) = state.facade.as_mut() {
-                facade.sessions.dispose();
-            }
-        });
+        let disposed = self
+            .shared
+            .router
+            .owner()
+            .run_behind(|state: &mut ServerState| {
+                dispose_facade(state);
+                crate::router::server::dispose(state);
+
+                if let Some(facade) = state.facade.as_mut() {
+                    facade.sessions.dispose();
+                }
+            });
         let transport = Arc::clone(&self.shared.transport);
 
         Box::pin(async move {

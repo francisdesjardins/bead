@@ -1,6 +1,7 @@
 //! The owner's tests (decision 0044): calls sent in the order they are made, whatever becomes of
-//! their futures; a call a listener makes within a turn; a router kept by its transport; and a
-//! router refused off a runtime, or on one without its time driver.
+//! their futures; a call a listener makes within a turn, and an envelope a listener hands its
+//! router within one; a router kept by its transport; and a router refused off a runtime, or on
+//! one without its time driver.
 
 use core::time::Duration;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
@@ -213,6 +214,59 @@ async fn a_call_a_listener_makes_within_a_turn_goes_as_that_turn_ends_before_any
         payloads_of(&transport),
         [vec![1], vec![2]],
         "both sent, in order"
+    );
+}
+
+#[tokio::test]
+async fn an_envelope_a_listener_hands_its_router_within_a_turn_is_taken_behind_what_came_before_it()
+{
+    let (clock, transport, router) = scripted();
+    let heard: Arc<Mutex<Vec<u32>>> = Arc::default();
+    let (hearing, carried) = (Arc::clone(&heard), Arc::clone(&transport));
+
+    router.on_debug(Arc::new(
+        move |direction: DebugDirection, traced: &TracedEnvelope| {
+            if direction != DebugDirection::Rx || traced.header.kind() != EnvelopeKind::Result {
+                return;
+            }
+
+            let call_id = traced.header.call_id();
+
+            locked(&hearing).push(call_id);
+
+            // within its router's turn, its transport hands it the third answer
+            if call_id == 1 {
+                carried.deliver(&result_of(5, b"c"));
+            }
+        },
+    ));
+
+    let calls: Vec<_> = [&[1_u8][..], &[2], &[3]]
+        .into_iter()
+        .map(|payload| {
+            router
+                .request(
+                    Bytes::copy_from_slice(payload),
+                    (request(), CallHooks::default()),
+                )
+                .expect("a call")
+        })
+        .collect();
+
+    clock.settle().await;
+
+    // the first two answers queued before the first is taken
+    transport.deliver(&result_of(1, b"a"));
+    transport.deliver(&result_of(3, b"b"));
+
+    for call in calls {
+        call.await.expect("answered");
+    }
+
+    assert_eq!(
+        *locked(&heard),
+        [1, 3, 5],
+        "the answer handed within a turn taken behind the one queued before it"
     );
 }
 

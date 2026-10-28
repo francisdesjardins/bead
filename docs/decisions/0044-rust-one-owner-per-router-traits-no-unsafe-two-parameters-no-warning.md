@@ -282,6 +282,15 @@ Two differences from the C# scheduler, each held by a twin:
   owner drains first, where both other sides run it at once. Should a conversation or a case tell
   the two orders apart, the difference is put to the user as a divergence.
 
+**What a listener hands its router back** from within a turn — an envelope its transport carries,
+a connection let go, a dispose — never takes the turn-end queue: it goes behind every job queued,
+taken in a later turn, never within that one, as spec 9.0 has it and both other sides do. A
+transport's events reach the owner through `offer_behind`, whatever turn tells them; a dispose
+marks its router disposed at once, a flag its handle and its state share, so the rest of its turn
+sends nothing, and lets go of what the router holds through `run_behind`. Twins:
+`an_envelope_a_listener_hands_its_router_within_a_turn_is_taken_behind_what_came_before_it`, and
+spec 9.0's three, a failed resolver's, a failed admission's and a dispose from the report listener.
+
 Beside them: **the queue is unbounded**, as JavaScript's microtasks and the C# scheduler's are;
 **resolvers run off the owner**, spawned on the runtime, the router awaiting each one's
 `JoinHandle`, so its panic is seen; **the public handles are `Clone + Send + Sync`**, an `Arc` to
@@ -468,7 +477,9 @@ transports. **Bench**: `bead-bench`, the in-memory bench, writing `bead-bench/2`
   number, and the matrix's row `Rust counts regions where the others count branches` says so.
 - **No cancel on drop**, unlike much of Rust's ecosystem: a user who drops a call's future and
   expects a CANCEL gets none; the README and `request`'s doc comment say so.
-- **A call within a turn** goes as the turn ends, where the other sides run it at once.
+- **A call within a turn** goes as the turn ends, where the other sides run it at once; what a
+  listener hands its router back goes behind every job queued, as on the other sides, so the owner
+  posts two ways and each caller names its way.
 - **Bead's own JSON stack**, a reader, a writer and a serializer, where most crates take
   `serde_json` whole: the price of RFC 8785, spec 17.5's checks and a NaN refused.
 - **Options by assignment**: a line more than a literal, for options that never break a caller.

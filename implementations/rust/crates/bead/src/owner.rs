@@ -2,7 +2,9 @@
 //! state and runs its jobs one at a time, in the order they came. A job is synchronous, so a turn
 //! awaits nothing and no other job runs within it; what waits runs off the owner and posts its
 //! outcome as a job of its own. A job posted within a turn of the same owner goes as that turn
-//! ends, before any job queued after it.
+//! ends, before any job queued after it: a call a listener makes. What a listener hands its router
+//! back from within the turn that told it — an envelope its transport carries, a connection let go,
+//! a dispose — goes behind every job queued, in a later turn, never within that one (spec 9.0).
 
 use core::cell::Cell;
 use core::fmt;
@@ -131,6 +133,32 @@ impl<S: Send + 'static> Owner<S> {
         self.post(job).ok();
     }
 
+    /// Posts `job` behind every job queued, within a turn of this owner's too: what a listener
+    /// hands its router back is taken in a later turn, never within the one that told it (spec
+    /// 9.0); an owner gone takes nothing, and the job goes with it.
+    pub(crate) fn offer_behind(&self, job: Job<S>) {
+        queue(&self.shared, job).ok();
+    }
+
+    /// Runs `job` on the owner behind every job queued, as [`Owner::offer_behind`] posts it, and
+    /// gives what it gives.
+    pub(crate) fn run_behind<T: Send + 'static, J: FnOnce(&mut S) -> T + Send + 'static>(
+        &self,
+        job: J,
+    ) -> Pending<T> {
+        let (reply, answer) = oneshot::channel();
+        let posted = queue(
+            &self.shared,
+            Box::new(move |state| {
+                reply.send(job(state)).ok();
+            }),
+        );
+
+        Pending {
+            answer: posted.ok().map(|()| answer),
+        }
+    }
+
     /// Runs `job` on the owner, after what came before it, and gives what it gives.
     pub(crate) fn run<T: Send + 'static, J: FnOnce(&mut S) -> T + Send + 'static>(
         &self,
@@ -219,20 +247,31 @@ pub(crate) fn spawn_counted<F: Future<Output = ()> + Send + 'static>(
     runtime.spawn(future);
 }
 
+// within a turn of this owner's, the job goes as that turn ends; else after every job queued
 fn post<S>(shared: &Arc<Shared<S>>, job: Job<S>) -> Result<(), Disposed> {
+    if CURRENT.with(Cell::get) != shared.id {
+        return queue(shared, job);
+    }
+
     #[cfg(any(test, feature = "testing"))]
     if let Some(activity) = &shared.activity {
         activity.begin();
     }
 
-    if CURRENT.with(Cell::get) == shared.id {
-        shared
-            .turn
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .push_back(job);
+    shared
+        .turn
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .push_back(job);
 
-        return Ok(());
+    Ok(())
+}
+
+// the job goes after every job queued, in a turn of its own
+fn queue<S>(shared: &Arc<Shared<S>>, job: Job<S>) -> Result<(), Disposed> {
+    #[cfg(any(test, feature = "testing"))]
+    if let Some(activity) = &shared.activity {
+        activity.begin();
     }
 
     shared.jobs.send(job).map_err(|_closed| {

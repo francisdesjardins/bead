@@ -161,7 +161,7 @@ fn send_cancel<S: Side>(state: &mut S, (call, timeout): (&CallAddress, Option<Du
     let core = state.core();
 
     // a disposed router sends nothing; a call id reserved already had its cancel
-    if core.is_disposed
+    if core.is_disposed()
         || core
             .pending
             .is_reserved(call.call_id, &call.connection_handle)
