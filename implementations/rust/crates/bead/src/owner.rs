@@ -33,6 +33,13 @@ static OWNERS: AtomicUsize = AtomicUsize::new(1);
 
 thread_local! {
     // the owner whose turn the current thread runs, 0 for none
+    #[cfg_attr(
+        all(windows, target_env = "gnu"),
+        expect(
+            clippy::missing_const_for_thread_local,
+            reason = "the initializer is const; clippy misreads thread_local!'s expansion on windows-gnu"
+        )
+    )]
     static CURRENT: Cell<usize> = const { Cell::new(0) };
 }
 

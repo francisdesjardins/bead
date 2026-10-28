@@ -17,7 +17,8 @@ then an options struct, every warning an error — are [decision
 
 Rust 1.99.1 and edition 2024, as `rust-toolchain.toml` pins them, which rustup installs with clippy,
 rustfmt and llvm-tools. On Windows, the MSVC build tools' C++ linker, and no C compiler beyond it,
-the core being pure Rust. From this folder:
+the core being pure Rust; or the GNU host, with a MinGW-w64's `dlltool` on the `PATH`, which
+`windows-sys` asks of it. From this folder:
 
 ```sh
 cargo fmt --all -- --check
