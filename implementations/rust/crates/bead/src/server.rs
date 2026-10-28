@@ -835,6 +835,37 @@ impl Sessions {
         )
     }
 
+    /// The session of `connection_handle`, stored first, its activity now, when it has none.
+    pub fn get_or_else_set(
+        &self,
+        connection_handle: ConnectionHandle,
+    ) -> BoxFuture<Result<Session, CallError>> {
+        on_owner(
+            &self.router,
+            (
+                move |state: &mut ServerState| {
+                    let (now, arming) = (wall_of(state), arming_of(state));
+                    let mut events = Vec::new();
+                    let session = match state.facade.as_mut() {
+                        Some(facade) => facade
+                            .sessions
+                            .get_or_else_set((&connection_handle, now), (&arming, &mut events)),
+                        None => Err(CallError::Disconnected(
+                            "the sessions were disposed".to_owned(),
+                        )),
+                    };
+
+                    told(state, events);
+
+                    session
+                },
+                Err(CallError::Disconnected(
+                    "the sessions were disposed".to_owned(),
+                )),
+            ),
+        )
+    }
+
     /// Deletes the session of `connection_handle`; whether there was one.
     pub fn delete(&self, connection_handle: ConnectionHandle) -> BoxFuture<bool> {
         on_owner(

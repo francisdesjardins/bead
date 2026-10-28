@@ -136,9 +136,12 @@ impl Sessions {
 
     // the session of a connection, stored once when it has none
     fn get_or_else_set(&mut self, connection: &str) -> Session {
-        let held = self.manager.get(&handle(connection));
-
-        held.unwrap_or_else(|| self.stored(Self::create(connection)))
+        self.manager
+            .get_or_else_set(
+                (&handle(connection), NEW_YEAR),
+                (&self.arming, &mut self.told),
+            )
+            .expect("stored")
     }
 
     fn connection_timeout(&mut self, (connection, timeout): (&str, Option<Duration>)) -> Session {
@@ -402,6 +405,37 @@ fn keeps_each_connection_to_its_token_through_every_change_and_no_update_changes
         [Some(token_of(2)), Some(token_of(1))],
         "free for another"
     );
+}
+
+#[tokio::test]
+async fn get_or_else_set_stores_a_session_once_then_returns_it() {
+    let pair = Pair::connected((crate::testing::instants::new_year(), PairOptions::default()))
+        .await
+        .expect("a pair connected");
+    let sessions = pair.server.sessions();
+    let created = Arc::new(Mutex::new(0_usize));
+    let hearing = Arc::clone(&created);
+
+    sessions.on(Arc::new(move |event: &SessionEvent| {
+        if matches!(event, SessionEvent::Created(_)) {
+            *locked(&hearing) += 1;
+        }
+    }));
+
+    let session = sessions
+        .get_or_else_set(Arc::clone(&pair.connection_handle))
+        .await
+        .expect("stored");
+    let again = sessions
+        .get_or_else_set(Arc::clone(&pair.connection_handle))
+        .await
+        .expect("returned");
+
+    pair.settle().await;
+
+    assert!(session.session_token.is_some(), "its token drawn");
+    assert_eq!(again.session_token, session.session_token, "the same one");
+    assert_eq!(*locked(&created), 1, "created once");
 }
 
 #[test]

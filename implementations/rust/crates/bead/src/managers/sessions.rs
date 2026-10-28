@@ -385,6 +385,27 @@ impl SessionManager {
         Some(copy)
     }
 
+    /// The session of `connection_handle`, stored first, its activity `now`, when it has none.
+    ///
+    /// # Errors
+    ///
+    /// A [`CallError`] as [`Self::set`] refuses the session it stores.
+    pub(crate) fn get_or_else_set(
+        &mut self,
+        (connection_handle, now): (&ConnectionHandle, i64),
+        (arming, told): (&dyn Arming, &mut Vec<SessionEvent>),
+    ) -> Result<Session, CallError> {
+        self.get(connection_handle).map_or_else(
+            || {
+                self.set(
+                    Session::new(Arc::clone(connection_handle), now),
+                    (arming, told),
+                )
+            },
+            Ok,
+        )
+    }
+
     /// Stores `session`, its token drawn when it has none.
     ///
     /// # Errors
