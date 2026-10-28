@@ -125,3 +125,30 @@ fn holds_by_the_defaults_both_ends_set_alike() {
         "a payload within the budget"
     );
 }
+
+// spec 3.5
+#[test]
+fn is_the_client_for_an_odd_call_id_and_the_server_for_an_even_one() {
+    for call_id in [1, 3, (1 << 31) + 1, u32::MAX] {
+        assert_eq!(
+            RouterSide::of_call_id(call_id),
+            Some(RouterSide::Client),
+            "{call_id}"
+        );
+    }
+
+    for call_id in [2, 1 << 31, u32::MAX - 1] {
+        assert_eq!(
+            RouterSide::of_call_id(call_id),
+            Some(RouterSide::Server),
+            "{call_id}"
+        );
+    }
+}
+
+// a u32 holds no negative, no fraction, nothing past 2³² − 1: 0 alone is no call id
+// spec 3.5
+#[test]
+fn is_no_side_for_0_which_is_no_call_id() {
+    assert_eq!(RouterSide::of_call_id(0), None, "no side");
+}
