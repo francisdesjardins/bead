@@ -29,6 +29,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- A connect over the Rust side's in-memory transport whose signal is cancelled in the turn its
+  server draws the connection fails cancelled, what was drawn closed at once, unclean, as on the
+  TypeScript and C# sides; a reconnection cancelled there no longer opens its last attempt to close
+  it clean (spec 15.13).
 - A router is never entered again from its own turn, on the TypeScript and C# sides as on the Rust
   side's core: what a listener it calls hands it back, an envelope received or a connection let go,
   a dispose among them, is taken in a later turn, behind what came before it, and a failed resolver

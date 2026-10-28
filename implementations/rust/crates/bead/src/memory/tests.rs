@@ -1476,7 +1476,6 @@ async fn closes_a_successful_last_attempt_when_its_reconnection_is_cancelled_aft
 }
 
 #[tokio::test]
-#[ignore = "divergence: a signal cancelled in the turn its server draws the connection loses to the accept, the attempt opens and is closed clean, where the other sides fail it and close what was drawn unclean"]
 async fn closes_what_its_last_attempt_opened_as_its_reconnection_was_cancelled() {
     let ends = Ends::started().await;
     let (client, at_client) = ends.connected((None, None)).await;

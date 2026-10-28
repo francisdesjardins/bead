@@ -746,6 +746,11 @@ impl ClientInner {
                 Ok(_) if held.is_closed_early => Err(TransportError::Connect(ConnectError::new(
                     "the in-memory transport server closed the connection as it opened",
                 ))),
+                // its signal cancelled in the turn its server drew it, before it settled: the
+                // cancel holds, and what was drawn is closed at once, unclean
+                Ok(_) if attempt.given_up.is_cancelled() => Err(TransportError::Cancelled(
+                    "the connect was cancelled".to_owned(),
+                )),
                 outcome => outcome,
             };
 
