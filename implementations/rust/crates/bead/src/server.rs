@@ -10,7 +10,7 @@ use std::sync::{Arc, Mutex, PoisonError};
 use serde_json::Value;
 use tokio::runtime::Handle;
 
-use crate::clock::{Schedule, SharedClock, Timer};
+use crate::clock::{Schedule, SharedClock, SystemClock, Timer, clock_of};
 use crate::constants::ProtocolCode;
 use crate::credentials::Credentials;
 use crate::duration::{NEVER, hold};
@@ -60,7 +60,7 @@ pub struct ServerOptions {
     pub pacing: Option<PacingLimitsOptions>,
     /// Its router's relay's options: its admission, `require_credential` when none.
     pub relay: Option<RelayOptions>,
-    /// Its sessions' defaults.
+    /// Its sessions' defaults, and their clock, which must be its own.
     pub sessions: Option<SessionManagerOptions>,
 }
 
@@ -129,15 +129,23 @@ impl Arming for SessionArming {
     }
 }
 
+// the clock the sessions run on: the router's, which the server handed them
+fn sessions_clock_of(state: &ServerState) -> &SharedClock {
+    state
+        .facade
+        .as_ref()
+        .map_or(&state.core.clock, |facade| facade.sessions.clock())
+}
+
 fn arming_of(state: &ServerState) -> SessionArming {
     SessionArming {
         owner: state.core.owner.clone(),
-        clock: Arc::clone(&state.core.clock),
+        clock: Arc::clone(sessions_clock_of(state)),
     }
 }
 
 fn wall_of(state: &ServerState) -> i64 {
-    wall_milliseconds(&state.core.clock)
+    wall_milliseconds(sessions_clock_of(state))
 }
 
 fn wall_milliseconds(clock: &SharedClock) -> i64 {
@@ -835,6 +843,37 @@ impl Sessions {
         )
     }
 
+    /// The session of `connection_handle`, stored first, its activity now, when it has none.
+    pub fn get_or_else_set(
+        &self,
+        connection_handle: ConnectionHandle,
+    ) -> BoxFuture<Result<Session, CallError>> {
+        on_owner(
+            &self.router,
+            (
+                move |state: &mut ServerState| {
+                    let arming = arming_of(state);
+                    let mut events = Vec::new();
+                    let session = match state.facade.as_mut() {
+                        Some(facade) => facade
+                            .sessions
+                            .get_or_else_set(&connection_handle, (&arming, &mut events)),
+                        None => Err(CallError::Disconnected(
+                            "the sessions were disposed".to_owned(),
+                        )),
+                    };
+
+                    told(state, events);
+
+                    session
+                },
+                Err(CallError::Disconnected(
+                    "the sessions were disposed".to_owned(),
+                )),
+            ),
+        )
+    }
+
     /// Deletes the session of `connection_handle`; whether there was one.
     pub fn delete(&self, connection_handle: ConnectionHandle) -> BoxFuture<bool> {
         on_owner(
@@ -1098,7 +1137,26 @@ impl Server {
             "a connection's inactivity timeout",
             options.connection_inactivity_timeout.unwrap_or(NEVER),
         )?;
-        let sessions = SessionManager::new(&options.sessions.clone().unwrap_or_default())?;
+        // * one clock for every layer: the transport's, or the one given, which the sessions and
+        // the router are both handed
+        let runtime = crate::router::server::runtime_of(options.runtime.as_ref())?;
+        let clock = clock_of(
+            (transport.clock().as_ref(), options.clock.as_ref()),
+            ("a server's router", "its transport"),
+        )?
+        .unwrap_or_else(|| {
+            let platform: SharedClock = Arc::new(SystemClock::new(runtime.clone()));
+
+            platform
+        });
+        let sessions_options = options.sessions.clone().unwrap_or_default();
+        let sessions = SessionManager::new(&SessionManagerOptions {
+            clock: clock_of(
+                (Some(&clock), sessions_options.clock.as_ref()),
+                ("a server's sessions", "its server"),
+            )?,
+            ..sessions_options
+        })?;
         let listeners: Arc<Mutex<Vec<SessionListener>>> = Arc::new(Mutex::new(Vec::new()));
         let facade = Facade {
             sessions,
@@ -1121,8 +1179,8 @@ impl Server {
             Arc::clone(&transport),
             (
                 &RouterServerOptions {
-                    clock: options.clock.clone(),
-                    runtime: options.runtime.clone(),
+                    clock: Some(clock),
+                    runtime: Some(runtime),
                     limits: options.limits.clone(),
                     metrics_registry: options.metrics_registry.clone(),
                     pacing: options.pacing.clone(),

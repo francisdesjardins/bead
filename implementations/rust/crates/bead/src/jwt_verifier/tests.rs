@@ -103,3 +103,184 @@ fn refuses_what_is_no_token_before_any_key_is_tried() {
         "a reason by its name"
     );
 }
+
+const HOLDING: &str = "sub alone, named by sub";
+
+// the verdict vector that holds: its token, its keys, its audiences and its wall clock's reading
+fn holding() -> (String, Vec<JwtKey>, Vec<String>, SystemTime) {
+    let vectors: Vec<Value> = crate::testing::vectors::of("jwtVerdicts").expect("the vectors");
+    let vector = vectors
+        .into_iter()
+        .find(|vector| vector.get("name") == Some(&Value::from(HOLDING)))
+        .expect("the vector that holds");
+    let text = |name: &str| {
+        vector
+            .get(name)
+            .and_then(Value::as_str)
+            .expect("a string")
+            .to_owned()
+    };
+    let keys = vector
+        .get("keys")
+        .and_then(Value::as_array)
+        .expect("its keys")
+        .iter()
+        .map(|key| JwtKey {
+            algorithm: key
+                .get("algorithm")
+                .and_then(Value::as_str)
+                .and_then(JwtAlgorithm::named)
+                .expect("an algorithm"),
+            issuer: key
+                .get("issuer")
+                .and_then(Value::as_str)
+                .expect("an issuer")
+                .to_owned(),
+            jwk: key
+                .get("jwk")
+                .and_then(Value::as_object)
+                .cloned()
+                .expect("a jwk"),
+        })
+        .collect();
+    let audiences = audiences_of(vector.get("audience"));
+    let now = crate::testing::instants::instant_of(&text("now")).expect("an instant");
+
+    (text("token"), keys, audiences, now)
+}
+
+#[test]
+fn refuses_an_hs256_signature_of_the_wrong_byte_length_before_reading_the_clock() {
+    let (token, keys, audiences, now) = holding();
+    let reads = core::sync::atomic::AtomicUsize::new(0);
+    let reading = || {
+        reads.fetch_add(1, core::sync::atomic::Ordering::SeqCst);
+
+        now
+    };
+    let against = JwtAgainst {
+        audiences: &audiences,
+        keys: &keys,
+        now: &reading,
+    };
+    let (signed, signature) = token.rsplit_once('.').expect("three parts");
+    let signature = base64url::decode(signature.as_bytes()).expect("a signature");
+
+    assert_eq!(signature.len(), 32, "an HS256 signature");
+
+    for length in [31_usize, 33] {
+        let mut bytes = vec![0_u8; length];
+
+        for (to, from) in bytes.iter_mut().zip(&signature) {
+            *to = *from;
+        }
+
+        let malformed = format!("{signed}.{}", base64url::encode(&bytes));
+
+        assert_eq!(
+            verify_jwt(malformed.as_bytes(), &against).expect("judged"),
+            JwtVerdict::Refused(JwtRefusal::Signature),
+            "{length} bytes refused at signature"
+        );
+        assert_eq!(
+            reads.load(core::sync::atomic::Ordering::SeqCst),
+            0,
+            "no clock read"
+        );
+    }
+
+    assert!(
+        matches!(
+            verify_jwt(token.as_bytes(), &against).expect("judged"),
+            JwtVerdict::Holds { .. }
+        ),
+        "its own holds"
+    );
+    assert_eq!(
+        reads.load(core::sync::atomic::Ordering::SeqCst),
+        1,
+        "the clock read once"
+    );
+}
+
+#[test]
+fn reads_unverified_jwts_only_when_all_three_parts_decode() {
+    let (token, ..) = holding();
+    let mut parts = token.split('.');
+    let (header, claims) = (
+        parts.next().expect("a header"),
+        parts.next().expect("claims"),
+    );
+    let encode = |text: &str| base64url::encode(text.as_bytes());
+
+    for refused in [
+        String::new(),
+        "a.b".to_owned(),
+        format!("{header}.{claims}.AA.extra"),
+        format!("{}.{claims}.AA", encode("[]")),
+        format!("{}.{claims}.AA", encode("no JSON")),
+        format!("{header}.{}.AA", encode("[]")),
+        format!("{header}.{}.AA", encode("no JSON")),
+        format!("{header}.{claims}.*"),
+    ] {
+        assert!(
+            read_jwt(refused.as_bytes()).is_none(),
+            "{refused:?} not read"
+        );
+    }
+
+    // * a one-byte signature is readable here: only the verifier judges its signature
+    let (read_header, read_claims) =
+        read_jwt(format!("{header}.{claims}.AA").as_bytes()).expect("read");
+    let object = |part: &str| {
+        serde_json::from_slice::<Value>(&base64url::decode(part.as_bytes()).expect("a part"))
+            .expect("JSON")
+    };
+
+    assert_eq!(Value::Object(read_header), object(header), "its header");
+    assert_eq!(Value::Object(read_claims), object(claims), "its claims");
+}
+
+#[test]
+fn reads_the_wall_clock_once_the_signature_verifies_so_a_verification_that_waits_past_a_token_s_end_refuses_it_at_exp()
+ {
+    let (token, keys, audiences, _) = holding();
+    let claims = read_jwt(token.as_bytes()).expect("read").1;
+    let exp = claims.get("exp").and_then(Value::as_u64).expect("its exp");
+    let reads = core::sync::atomic::AtomicUsize::new(0);
+    // the reading taken as the signature verified stands for a wall clock that went past the
+    // token's end meanwhile
+    let reading = || {
+        reads.fetch_add(1, core::sync::atomic::Ordering::SeqCst);
+
+        // its end, exp plus 60 s, as its verdict gives it
+        SystemTime::UNIX_EPOCH + core::time::Duration::from_secs(exp.saturating_add(60))
+    };
+    let against = JwtAgainst {
+        audiences: &audiences,
+        keys: &keys,
+        now: &reading,
+    };
+
+    assert_eq!(
+        (
+            verify_jwt(token.as_bytes(), &against).expect("judged"),
+            reads.load(core::sync::atomic::Ordering::SeqCst)
+        ),
+        (JwtVerdict::Refused(JwtRefusal::Exp), 1),
+        "refused at exp, the clock read once"
+    );
+
+    // one refused before its signature verified reads none
+    let (signed, _) = token.rsplit_once('.').expect("three parts");
+    let forged = format!("{signed}.{}", "A".repeat(43));
+
+    assert_eq!(
+        (
+            verify_jwt(forged.as_bytes(), &against).expect("judged"),
+            reads.load(core::sync::atomic::Ordering::SeqCst)
+        ),
+        (JwtVerdict::Refused(JwtRefusal::Signature), 1),
+        "refused at signature, no clock read"
+    );
+}

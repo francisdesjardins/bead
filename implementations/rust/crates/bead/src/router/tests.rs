@@ -27,7 +27,11 @@ use crate::testing::scripted::ScriptedClient;
 
 mod calls;
 mod client;
+mod limits;
 mod metrics;
+mod parts;
+mod requester;
+mod router_core;
 mod server;
 mod transfer;
 

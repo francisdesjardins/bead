@@ -12,6 +12,9 @@ use crate::metrics::NotificationSeries;
 use crate::ordered::Ordered;
 use crate::router::types::{ConnectionHandle, Gauges, SessionIdentifier, session_key_of};
 
+#[cfg(test)]
+mod tests;
+
 /// What a paced subscription queues at most.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct PacingLimits {
