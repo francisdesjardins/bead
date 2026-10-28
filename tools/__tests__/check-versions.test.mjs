@@ -8,6 +8,8 @@ import { fileURLToPath } from 'node:url';
 
 import {
   BUILDER,
+  CARGO,
+  CARGO_LOCK,
   MODES,
   PACKAGE,
   PROPS,
@@ -356,6 +358,25 @@ describe('every ref: each version agrees with itself, and a released section sta
     const { write, problems } = repository(released());
     write({ [BUILDER]: json({ name: 'beadc', version: '0.1.0', private: true }) });
     assert.deepEqual(problems(), []);
+  });
+
+  test('holds the Rust workspace’s version and its lock’s members to the product’s', () => {
+    const { write, problems } = repository(released());
+    const manifest = (version) => {
+      return `[workspace]\nresolver = "3"\nmembers = ["crates/*"]\n\n[workspace.package]\nversion = "${version}"\nedition = "2024"\n`;
+    };
+    const lockOf = (version) => {
+      return `version = 4\n\n[[package]]\nname = "bytes"\nversion = "1.12.1"\nsource = "registry+https://github.com/rust-lang/crates.io-index"\n\n[[package]]\nname = "francisdesjardins-bead"\nversion = "${version}"\n`;
+    };
+    write({ [CARGO]: manifest('0.1.0'), [CARGO_LOCK]: lockOf('0.1.0') });
+    assert.deepEqual(problems(), []);
+    write({ [CARGO_LOCK]: lockOf('0.2.0') });
+    assert.match(problems().join('\n'), /Cargo\.lock: francisdesjardins-bead at 0\.2\.0, where/);
+    write({ [CARGO]: manifest('0.2.0') });
+    assert.match(
+      problems().join('\n'),
+      /Cargo\.toml: \[workspace\.package\] version 0\.2\.0, where/
+    );
   });
 
   test('the props apart from the package fail', () => {

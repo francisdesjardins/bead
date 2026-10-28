@@ -1134,36 +1134,37 @@ def nested(depth):
     return value
 
 
-# each value: its name, its encoding, its units, the value as the file gives it, and the language that
-# cannot be given it
+# each value: its name, its encoding, its units, the value as the file gives it, and the languages
+# that cannot be given it. A Rust String holds no surrogate alone, a serde_json Map no name twice, and
+# Rust has no undefined
 VALUES = [
-    *[(name, 'json', ['17.7.4'], {'double': bits}, None) if written is not None
-      else (name, 'json', ['17.7'], {'double': bits}, 'C#') for bits, name, written in APPENDIX_B],
-    ('a surrogate alone', 'json', ['17.7'], {'form': 'loneSurrogate'}, None),
-    ('a surrogate alone in a name', 'json', ['17.7'], {'form': 'loneSurrogateName'}, None),
-    ('an object naming a member twice', 'json', ['17.7'], {'form': 'nameTwice'}, 'TypeScript'),
-    ('64 arrays nested', 'json', ['17.7'], {'nested': DEPTH}, None),
-    ('65 arrays nested', 'json', ['17.7'], {'nested': DEPTH + 1}, None),
-    ('undefined', 'json', ['17.7'], {'form': 'undefined'}, None),
+    *[(name, 'json', ['17.7.4'], {'double': bits}, ()) if written is not None
+      else (name, 'json', ['17.7'], {'double': bits}, ('C#',)) for bits, name, written in APPENDIX_B],
+    ('a surrogate alone', 'json', ['17.7'], {'form': 'loneSurrogate'}, ('Rust',)),
+    ('a surrogate alone in a name', 'json', ['17.7'], {'form': 'loneSurrogateName'}, ('Rust',)),
+    ('an object naming a member twice', 'json', ['17.7'], {'form': 'nameTwice'}, ('TypeScript', 'Rust')),
+    ('64 arrays nested', 'json', ['17.7'], {'nested': DEPTH}, ()),
+    ('65 arrays nested', 'json', ['17.7'], {'nested': DEPTH + 1}, ()),
+    ('undefined', 'json', ['17.7'], {'form': 'undefined'}, ('Rust',)),
     ('names an ECMAScript object holds first, sorted as any other', 'json', ['17.7.6'],
-     {'json': {'b': 1, '10': 2, '9': 3}}, None),
+     {'json': {'b': 1, '10': 2, '9': 3}}, ()),
     ('a member named __proto__, written as any other', 'json', ['17.7.6'],
-     {'json': {'__proto__': {'a': 1}, 'b': 2}}, None),
-    ('a tie given as its digits, written as the even neighbour', 'json', ['17.6', '17.7.4'], {'number': tie()}, None),
-    ('a string outside ASCII', 'text', ['17.4'], {'text': 'Jos' + chr(0xE9)}, None),
-    ('a surrogate alone in a text', 'text', ['17.4.3'], {'form': 'loneSurrogate'}, None),
-    ('bytes no text holds', 'raw', ['17.3'], {'bytes': hexadecimal(bytes([0xFF, 0x00]))}, None),
-    ('text set to a', 'proto', ['17.9'], {'probe': {'text': code_units('a')}}, None),
-    ('number set to 7', 'proto', ['17.9'], {'probe': {'number': 7}}, None),
-    ('number set to 0, its default', 'proto', ['17.9'], {'probe': {'number': 0}}, None),
-    ('no field set', 'proto', ['17.9.2'], {'probe': {}}, None),
-    ('child set to the empty message', 'proto', ['17.9'], {'probe': {'child': {}}}, None),
+     {'json': {'__proto__': {'a': 1}, 'b': 2}}, ()),
+    ('a tie given as its digits, written as the even neighbour', 'json', ['17.6', '17.7.4'], {'number': tie()}, ()),
+    ('a string outside ASCII', 'text', ['17.4'], {'text': 'Jos' + chr(0xE9)}, ()),
+    ('a surrogate alone in a text', 'text', ['17.4.3'], {'form': 'loneSurrogate'}, ('Rust',)),
+    ('bytes no text holds', 'raw', ['17.3'], {'bytes': hexadecimal(bytes([0xFF, 0x00]))}, ()),
+    ('text set to a', 'proto', ['17.9'], {'probe': {'text': code_units('a')}}, ()),
+    ('number set to 7', 'proto', ['17.9'], {'probe': {'number': 7}}, ()),
+    ('number set to 0, its default', 'proto', ['17.9'], {'probe': {'number': 0}}, ()),
+    ('no field set', 'proto', ['17.9.2'], {'probe': {}}, ()),
+    ('child set to the empty message', 'proto', ['17.9'], {'probe': {'child': {}}}, ()),
     ('text set to a leading U+FEFF and a', 'proto', ['17.9.4'], {'probe': {'text': code_units(chr(0xFEFF) + 'a')}},
-     None),
-    ('needs set to no field', 'proto', ['17.9.7'], {'probe': {'needs': {}}}, None),
-    ('needs set at its defaults', 'proto', ['17.9.7'], {'probe': {'needs': {'must': 0, 'shade': 0}}}, None),
+     ()),
+    ('needs set to no field', 'proto', ['17.9.7'], {'probe': {'needs': {}}}, ()),
+    ('needs set at its defaults', 'proto', ['17.9.7'], {'probe': {'needs': {'must': 0, 'shade': 0}}}, ()),
     ('needs with a shade its enum does not declare', 'proto', ['17.9.7'], {'probe': {'needs': {'must': 0, 'shade': 5}}},
-     None),
+     ()),
 ]
 
 
@@ -1236,7 +1237,7 @@ def value_entry(name, encoding, clauses, value, excused):
     # a value refused plays 17.2 besides its own clause: a writer never writes what a reader refuses
     cited = ['17.2', *clauses] if 'refused' in outcome else clauses
     return {'name': name, 'encoding': encoding, 'clauses': cited, 'value': value, **outcome,
-            **({'differs': [{'row': NOT_HELD, 'language': excused}]} if excused else {})}
+            **({'differs': [{'row': NOT_HELD, 'language': language} for language in excused]} if excused else {})}
 
 
 # what the record states, held here against a slip in the rules above: Appendix B's numbers, and the tie
@@ -1343,12 +1344,12 @@ document = {
         'payloads are bytes read, in an encoding: written is the bytes its writer writes back of the value its reader read, the same bytes where they are canonical already; read, of a proto payload, what its reader read of them; refused, the reason its reader refuses them for. A harness checks the refusal, or that the bytes written are those given and that the value read equals the value its reader reads of them, or that what it read is read.',
         "proto: a Probe, the message of spec/codecs.proto, read and written through the code each side's stock generator writes for it over its stock library, as generated code reads one: its records checked against Probe's descriptor before the library reads them (decision 0028), the bound of 17.9.3 set in the call, a closed enum's record of a number it does not declare set aside before the library reads it where the library would take it (17.9.8), and each message it holds judged by its required fields once it is read (17.9.7, decision 0042), as the runtime's codec reads one. read is what was read of the top Probe: text, its string as UTF-16 code units in hexadecimal, four capital digits each and a space between; number; nested, how deep messages nest below it, through child, delimited and children, a map's entry counting as a message and its value as another; counts and stamps, where it holds any, their values in their order; children, where it holds any, each key, its code units as text gives them, to what was read of its value, its text, number and nested; delimited, where it is set, what was read of it, its text, number and nested; and shade, where a record set it, its number. A harness checks these and nothing else, since protobuf fixes no message's bytes whole: needs and needs_items, of Needs, whose fields protobuf requires, are judged and not read back.",
         'values are a value given to a writer, in an encoding: written is the bytes it writes; refused, the reason it refuses the value for. A value is given in one of eight forms.',
-        'json: a JSON value, as the file holds it: on the TypeScript side JSON.parse of the file, so that a member named __proto__ is a member; on the C# side a JsonElement of the file.',
-        'double: a double by its 64 bits, in hexadecimal: on the TypeScript side read through a DataView; on the C# side a JsonElement of JsonSerializer.SerializeToElement(BitConverter.Int64BitsToDouble(bits)), which holds no NaN and no infinity.',
-        'number: a JSON number\'s text, parsed as JSON: a double on the TypeScript side, its digits as they are written on the C# side, which its writer reads to the double nearest them.',
-        'text: a string, given to a text writer. bytes: bytes in hexadecimal, given to a raw writer.',
-        'form: a value no JSON text holds. loneSurrogate is the string a, U+D800, b, which the C# side gives a json writer as a JsonElement of the bytes of its escape, and a text writer as a string; loneSurrogateName, an object whose one member is named so, its value 1; nameTwice, an object of two members both named a, 1 then 2, which the C# side parses with JsonElement.Parse\'s defaults and the TypeScript side cannot hold; undefined, JavaScript\'s undefined on the TypeScript side, default(JsonElement), of kind Undefined, on the C# side.',
-        'nested: that many arrays, one in another, the innermost empty, which the C# side parses into a JsonElement with a MaxDepth as deep, since 64, its default, refuses a 65th.',
+        'json: a JSON value, as the file holds it: on the TypeScript side JSON.parse of the file, so that a member named __proto__ is a member; on the C# side a JsonElement of the file; on the Rust side a serde_json::Value that Bead\'s own reader reads of the file\'s text.',
+        'double: a double by its 64 bits, in hexadecimal: on the TypeScript side read through a DataView; on the C# side a JsonElement of JsonSerializer.SerializeToElement(BitConverter.Int64BitsToDouble(bits)), which holds no NaN and no infinity; on the Rust side f64::from_bits(bits) given through bead::json::to_value, which refuses a double that is not finite.',
+        'number: a JSON number\'s text, parsed as JSON: a double on the TypeScript side, its digits as they are written on the C# side, which its writer reads to the double nearest them, and on the Rust side its digits read by Bead\'s own reader, a whole number within 64 bits an integer and any other the nearest double.',
+        'text: a string, given to a text writer, a String on the Rust side. bytes: bytes in hexadecimal, given to a raw writer, a Vec<u8> on the Rust side.',
+        'form: a value no JSON text holds. loneSurrogate is the string a, U+D800, b, which the C# side gives a json writer as a JsonElement of the bytes of its escape, and a text writer as a string; loneSurrogateName, an object whose one member is named so, its value 1; nameTwice, an object of two members both named a, 1 then 2, which the C# side parses with JsonElement.Parse\'s defaults and the TypeScript side cannot hold; undefined, JavaScript\'s undefined on the TypeScript side, default(JsonElement), of kind Undefined, on the C# side. The Rust side holds none of the four: a String holds no surrogate alone, a serde_json Map no name twice, and Rust has no undefined.',
+        'nested: that many arrays, one in another, the innermost empty, which the C# side parses into a JsonElement with a MaxDepth as deep, since 64, its default, refuses a 65th, and the Rust side builds as a serde_json::Value.',
         'probe: a Probe given to a proto writer, one field set or none, so that protobuf fixes the bytes it writes: text, its string as UTF-16 code units, as read gives one; number; child, set to the empty message, {}; or needs, set to a Needs of the fields it gives, must and shade, each a number, none of them set where it gives none.',
         'A reason is derived, and held by the regeneration alone: not UTF-8, a byte order mark, not JSON, a name twice, a surrogate alone, a number past a double and nested past 64 of a reader; not its message, nested past 100 and a required field unset of a proto reader; a surrogate alone, a name twice, nested past 64, not a finite number and no JSON value of a writer, and a required field unset of a proto writer. No harness reads it: a refusal answers PAYLOAD_UNDECODABLE whatever its reason, and its words are each side\'s.',
         "Each item of differs names a row of docs/support.md an entry crosses, which names this file and the entry, and the language it excuses: a value that language's type cannot hold, or a payload its stock protobuf library reads otherwise than 17.9 says. A harness plays every entry but those a differs excuses its language from.",

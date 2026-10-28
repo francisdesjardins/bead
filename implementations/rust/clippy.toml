@@ -1,0 +1,14 @@
+# clippy's configuration (decision 0044)
+
+# the receiver counted: the house's rule, two parameters beside it then one options struct, is
+# bead-house's
+too-many-arguments-threshold = 4
+allow-unwrap-in-tests = true
+allow-expect-in-tests = true
+allow-panic-in-tests = true
+allow-indexing-slicing-in-tests = true
+allow-print-in-tests = true
+# the API-shape lints (wrong_self_convention, enum_variant_names, upper_case_acronyms, …) judge the
+# public surface too, while 0.y lets it break; missing_const_for_fn, which would push const onto it,
+# is allowed in the lints table instead
+avoid-breaking-exported-api = false

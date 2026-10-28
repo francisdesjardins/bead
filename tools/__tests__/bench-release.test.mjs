@@ -211,6 +211,16 @@ test('passes a filter to the benches only when every one takes it, so a measure 
   assert.equal(level([false, true], whole), whole);
 });
 
+test('takes the Rust side as it takes the others', () => {
+  assert.deepEqual(parse(['rust']), {
+    side: 'rust',
+    processes: 5,
+    runs: 2,
+    seconds: 3,
+    transcoding: false,
+  });
+});
+
 test('defaults to five processes and two recorded runs and validates CLI options', () => {
   assert.deepEqual(parse(['typescript']), {
     side: 'typescript',

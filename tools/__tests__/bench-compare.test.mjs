@@ -132,6 +132,24 @@ test('compares reports from either side by measure identity and median', () => {
   assert.ok(Math.abs(compare(next, base)[0].change + 100 / 6) < 1e-12);
 });
 
+test('compares a report of the Rust side, which names the runtime it ran on', () => {
+  const rust = report([110, 100, 90], { side: 'rust' });
+
+  rust.environment.runtimes = { rustc: '1.99.1' };
+
+  assert.doesNotThrow(() => {
+    validate(rust);
+  });
+
+  assert.equal(compare(rust, rust)[0].change, 0);
+
+  rust.environment.runtimes = { node: '24.9.0' };
+
+  assert.throws(() => {
+    validate(rust);
+  }, /CPU, OS, runtime versions/);
+});
+
 test('fails only regressions strictly beyond the threshold in each direction', () => {
   const thresholds = thresholdsOf(['25%']);
 

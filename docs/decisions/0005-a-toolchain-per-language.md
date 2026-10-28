@@ -42,6 +42,14 @@ judges every file, and a version is held once.
   restore that would change one fails, as Yarn's immutable install does; `nuget.config` clears every
   source but nuget.org and maps every package to it, so every package comes from where CI takes it,
   whatever the machine's own configuration adds.
+- **Rust**, in `implementations/rust`: Rust 1.99.1 and edition 2024, as `rust-toolchain.toml` pins
+  them with clippy, rustfmt and llvm-tools, the toolchain's own components, and `rust-version` the
+  floor at the pin; a virtual workspace of crates, one `Cargo.lock`, every build `--locked`; clippy
+  and rustc's lints in the workspace's `[lints]` table, every crate inheriting it, and Cargo's own
+  `[build] warnings = "deny"` in the folder's `.cargo/config.toml`, so a warning of rustc, clippy
+  or rustdoc is an error, locally as in CI; rustfmt; cargo-deny for advisories, licences, bans and
+  sources; Cargo's own test runner; and coverage of lines and regions, from LLVM's JSON export on
+  the pinned stable ([0044](0044-rust-one-owner-per-router-traits-no-unsafe-two-parameters-no-warning.md)).
 
 **The root has no manifest and no task runner.** It holds what every implementation shares: `spec/`
 and its generators, the builder, `builder/`, the examples, `examples/`, `docs/`, `tools/`,
@@ -65,11 +73,11 @@ generators a library each, `make_validations.py` `google-re2`, RE2 itself, and
 three and `spec/requirements.txt` locks them with every hash, installed with
 `--require-hashes --only-binary=:all:`; the other generators use the standard library alone.
 
-**Rust, the next, comes the same way, and so does each language after it**: a folder under
-`implementations/`, its own native toolchain, and a CI job of its own; Rust's held to clippy's
-pedantic lints under `-D warnings` and to the newest Rust norms. A part every language uses that is
-neither an implementation nor the spec is placed by a decision of its own, as the builder and the
-examples are by
+**Each language after Rust comes the same way**: a folder under `implementations/`, its own
+native toolchain, and a CI job of its own, as Rust's is held to clippy's pedantic, nursery and cargo
+groups denied and to the newest Rust norms ([0044](0044-rust-one-owner-per-router-traits-no-unsafe-two-parameters-no-warning.md)). A part every
+language uses that is neither an implementation nor the spec is placed by a decision of its own, as
+the builder and the examples are by
 [0022](0022-a-proto-becomes-one-checked-blueprint-and-each-language-is-generated-from-it.md).
 
 ## Consequences
@@ -89,11 +97,15 @@ examples are by
   pre-commit hook), so formatting them needs that side installed. The conformance files are left
   to their generators, and the interop's blueprint to `spec/check.py`, which holds its form
   ([0022](0022-a-proto-becomes-one-checked-blueprint-and-each-language-is-generated-from-it.md)).
-- Coverage is measured by each side's own tool, c8's istanbul report and `dotnet test --coverage`'s
-  cobertura, and read by one root script, `tools/coverage-report.mjs`, which merges either. CI's
-  `typescript` and `dotnet` jobs run it after their tests, each side held to its floor
-  ([0006](0006-a-rule-has-its-gate.md)), and a clone runs the same commands.
-- Three lockfile formats: a `yarn.lock` for the TypeScript side, one for the builder, one for each
+- Coverage is measured by each side's own tool, c8's istanbul report, `dotnet test --coverage`'s
+  cobertura and `cargo llvm-cov`'s LLVM JSON export, and read by one root script,
+  `tools/coverage-report.mjs`, which merges the first two by line and reads the third's summary of
+  lines and regions, an LLVM export told from istanbul's JSON by its `type`. CI's `typescript`,
+  `dotnet` and `rust` jobs run it after their tests, each side held to its floor, which names its
+  measures, and a floor on a measure no report measured fails ([0006](0006-a-rule-has-its-gate.md));
+  a clone runs the same commands.
+- Four lockfile formats: a `yarn.lock` for the TypeScript side, one for the builder, one for each
   example's TypeScript half and one for each fuzz project, at the TypeScript side's pins and locked
   versions where they share a package, a `packages.lock.json` per C# project, an example's among
-  them, and `spec/requirements.txt`, so an upgrade is made side by side, never by one command.
+  them, a `Cargo.lock` for the Rust workspace and one for its fuzz project, and
+  `spec/requirements.txt`, so an upgrade is made side by side, never by one command.

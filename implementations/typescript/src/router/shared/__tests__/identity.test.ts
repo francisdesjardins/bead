@@ -65,7 +65,7 @@ test.describe('checkDeclaration', () => {
     }
   });
 
-  // * the twin of the row "An id or a revision no C# type holds": inputs a C# id never is
+  // * the twin of the row "An id or a revision no typed side holds": inputs a C# id never is
   test('refuses an id or a revision no C# type holds, out of its range', () => {
     const inputs = {
       procedureId: [65_536, -1, 1.5, '1', true, null],

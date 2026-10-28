@@ -5,7 +5,7 @@ namespace Bead.Tests;
 /// sentences, a name holding a surrogate alone, which no JSON text holds, the order of its reasons
 /// against the router's, the registry's and the manager's own, a refused declaration declaring
 /// nothing — and the types that hold an id and a revision, which the support matrix's row "An id
-/// or a revision no C# type holds" names.
+/// or a revision no typed side holds" names.
 /// </summary>
 public sealed class IdentityTests
 {
@@ -33,7 +33,7 @@ public sealed class IdentityTests
     [Fact]
     public void Refuses_an_id_or_a_revision_out_of_its_range_service_0_and_revision_0_among_them()
     {
-        // * what no C# type holds is never given (docs/support.md, "An id or a revision no C# type holds")
+        // * what no C# type holds is never given (docs/support.md, "An id or a revision no typed side holds")
         foreach (var procedure in new[]
         {
             Echo with { ServiceId = 0 },
@@ -239,7 +239,7 @@ public sealed class IdentityTests
     public void Holds_an_id_in_a_ushort_and_a_revision_in_an_int_their_largest_values_taken()
     {
         // * what no C# type holds is never given: 65536, -1 as an id, 2³¹, a fraction, a string, a
-        // boolean, null (docs/support.md, "An id or a revision no C# type holds")
+        // boolean, null (docs/support.md, "An id or a revision no typed side holds")
         Assert.Equal(typeof(ushort), typeof(Procedure).GetProperty(nameof(Procedure.ServiceId))!.PropertyType);
         Assert.Equal(typeof(ushort), typeof(Procedure).GetProperty(nameof(Procedure.ProcedureId))!.PropertyType);
         Assert.Equal(typeof(int), typeof(Procedure).GetProperty(nameof(Procedure.ServiceRevision))!.PropertyType);

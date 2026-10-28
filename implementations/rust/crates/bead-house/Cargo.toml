@@ -1,0 +1,22 @@
+[package]
+name = "francisdesjardins-bead-house"
+description = "The Rust side's own checks that no lint holds: the parameter rule, the comment tags, and every crate under the workspace's lints."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+readme.workspace = true
+keywords.workspace = true
+categories.workspace = true
+publish.workspace = true
+
+[lib]
+name = "bead_house"
+
+[dependencies]
+syn = { workspace = true }
+proc-macro2 = { workspace = true }
+
+[lints]
+workspace = true

@@ -8,7 +8,8 @@
 //   node tools/check-versions.mjs --base <branch>   a pull request's base: one into main is a release
 //
 // On every ref: the TypeScript package's `version`, the builder's where the tree has one, the C#
-// side's `<Version>` and every project range of its lock files and of an example's agree; each
+// side's `<Version>` and every project range of its lock files and of an example's, and the Rust
+// workspace's `[workspace.package] version` and its lock's members where the tree has them agree; each
 // conformance file repeats its document's version; and each `## [x.y.z]` section of the CHANGELOG
 // is the one its `vx.y.z` shipped. On a release branch, a pull request into main and main,
 // besides: the product and each document whose files changed move one step past their last
@@ -139,6 +140,10 @@ export const PACKAGE = 'implementations/typescript/package.json';
 export const PROPS = 'implementations/dotnet/Directory.Build.props';
 // the builder's package, which ships with the product's releases at its version (decision 0008)
 export const BUILDER = 'builder/package.json';
+// the Rust workspace, whose `[workspace.package] version` is the product's, and its lock, whose
+// members, the packages of no source, stand at it (decisions 0008 and 0044)
+export const CARGO = 'implementations/rust/Cargo.toml';
+export const CARGO_LOCK = 'implementations/rust/Cargo.lock';
 export const CHANGELOG = 'CHANGELOG.md';
 
 // the C# lock files that take the side's projects: every packages.lock.json git lists under
@@ -237,6 +242,29 @@ const projectRangesOf = (text) => {
   return ranges;
 };
 
+// the version of a Cargo manifest's `[workspace.package]`, as TOML writes a basic string, or null
+export const cargoVersionOf = (text) => {
+  const table = /^\[workspace\.package\][ \t]*$([\s\S]*?)(?=^\[|(?![\s\S]))/m.exec(text ?? '');
+  return table === null ? null : (/^version[ \t]*=[ \t]*"([^"]*)"/m.exec(table[1])?.[1] ?? null);
+};
+
+// the members of a Cargo lock: each `[[package]]` of no `source`, a path's, by its name and version
+export const cargoMembersOf = (text) => {
+  return (text ?? '')
+    .split(/^\[\[package\]\][ \t]*$/m)
+    .slice(1)
+    .map((block) => {
+      const table = block.split(/^\[/m)[0];
+      return {
+        name: /^name[ \t]*=[ \t]*"([^"]*)"/m.exec(table)?.[1] ?? null,
+        version: /^version[ \t]*=[ \t]*"([^"]*)"/m.exec(table)?.[1] ?? null,
+        source: /^source[ \t]*=/m.test(table),
+      };
+    })
+    .filter((member) => !member.source)
+    .map(({ name, version }) => ({ name, version }));
+};
+
 // the versions a tree states, read through `read(path)` from the paths it lists
 export const readVersions = (read, paths) => {
   const props = read(PROPS);
@@ -245,6 +273,10 @@ export const readVersions = (read, paths) => {
     builder: parseJson(read(BUILDER))?.version ?? null,
     hasBuilder: read(BUILDER) !== null,
     props: props === null ? null : (/<Version>([^<]*)<\/Version>/.exec(props)?.[1] ?? null),
+    hasCargo: read(CARGO) !== null,
+    cargo: cargoVersionOf(read(CARGO)),
+    cargoMembers: cargoMembersOf(read(CARGO_LOCK)),
+    hasCargoLock: read(CARGO_LOCK) !== null,
     locks: {},
     documents: {},
   };
@@ -372,6 +404,23 @@ const judgeAxes = (versions) => {
     problems.push(
       `${PROPS}: <Version> ${versions.props}, where ${PACKAGE} states ${versions.package}`
     );
+  }
+  // a tree from before the Rust side holds no workspace, and owes none; one that holds it holds its
+  // lock beside it, every member at the product's version
+  if (versions.hasCargo && versions.cargo !== versions.package) {
+    problems.push(
+      `${CARGO}: [workspace.package] version ${versions.cargo}, where ${PACKAGE} states ${versions.package}`
+    );
+  }
+  if (versions.hasCargo && !versions.hasCargoLock) {
+    problems.push(`${CARGO_LOCK}: missing, where ${CARGO} is: every build is --locked`);
+  }
+  for (const { name, version } of versions.hasCargo ? versions.cargoMembers : []) {
+    if (version !== versions.cargo) {
+      problems.push(
+        `${CARGO_LOCK}: ${name} at ${version}, where ${CARGO} states ${versions.cargo}`
+      );
+    }
   }
   // ! NuGet writes a project's range from the other's <Version>, and a locked restore accepts a
   // stale one: only a later restore would move it, in a commit about something else
@@ -670,7 +719,7 @@ const treeOf = (root, commit) => {
       return (
         path.startsWith('spec/') ||
         LOCKS.test(path) ||
-        [PACKAGE, BUILDER, PROPS, CHANGELOG].includes(path)
+        [PACKAGE, BUILDER, PROPS, CARGO, CARGO_LOCK, CHANGELOG].includes(path)
       );
     })
   );

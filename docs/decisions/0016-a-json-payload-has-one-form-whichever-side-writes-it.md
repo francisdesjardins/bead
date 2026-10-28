@@ -2,8 +2,8 @@
 
 - **Status**: accepted
 - **Scope**: spec section 17, and the lines that point to it; debugging 4.3 and 10.1;
-  `spec/codecs.json`, its gate, and nine conversations of `spec/conversations.json`; both runtimes'
-  payload codecs, public
+  `spec/codecs.json`, its gate, and nine conversations of `spec/conversations.json`; every
+  runtime's payload codecs, public
   ([0018](0018-a-services-procedures-are-typed-descriptors-served-and-called-through-one-layer.md)),
   and the interop's serializers, which use them; both service managers, where a value does not
   write; the support matrix
@@ -383,6 +383,20 @@ to — and the nearest double of a number's text, a tie to the even, which its p
 may not give, as .NET's does not; and names compared by UTF-16 code units, which a side whose
 strings are UTF-8 converts, or compares in UTF-8 where no name holds a character past U+FFFF
 together with one from U+E000 to U+FFFF (RFC 8785 §3.2.3's note).
+
+**The Rust side reads, holds and writes a `json` payload by its own parts**
+([0044](0044-rust-one-owner-per-router-traits-no-unsafe-two-parameters-no-warning.md)): **its reader is Bead's own**, a strict RFC 8259 tokenizer
+with 17.5's checks in the TypeScript reader's order, since `serde_json` refuses a surrogate alone
+outright, keeps the last of a name given twice and caps its depth at 128; a number whose value is a
+whole number within 64 bits is read as an integer, any other as the nearest double, `-0` as the
+double `-0.0`, both written back through the double; **its value is `serde_json::Value`**, the
+ecosystem's, re-sorted by UTF-16 code units as it is written; **its writer is Bead's own**, its
+numbers spelled by `ryu-js`, which spells every double of `spec/codecs.json` as RFC 8785 does; and
+**`bead::json::to_value`**, a `serde::Serializer` of Bead's own, is a resolver's road from its type
+to a value, refusing a double that is not finite at any depth, `not a finite number`, where
+`serde_json::to_value`, `Value::from` and `json!` write `null`. A `String` holds no surrogate alone,
+a `serde_json` map no name twice, and Rust has no `undefined`: five entries of `spec/codecs.json`
+are excused from it, each by the platform row; NaN and Infinity are played.
 
 **A value a side's type cannot hold** is a platform row of the matrix.
 

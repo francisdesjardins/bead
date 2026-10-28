@@ -4,8 +4,8 @@
 [![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 
 Bead is an exploration: how far one `.proto` file, a generator and a hybrid binary protocol can go —
-a specification with its conformance files, two implementations at parity, and the tools around
-them. It is a personal project, kept at its author's pace.
+a specification with its conformance files, two implementations at parity and the core of a
+third, and the tools around them. It is a personal project, kept at its author's pace.
 
 Bead is a binary wire protocol for calls between a client and a server: a request and its result or
 failure, a subscription and its notifications, the commands a server sends back, cancels, sessions,
@@ -25,8 +25,13 @@ This repository holds the protocol and its implementations, side by side:
   WebSocket, HTTP and in-memory transports, the broker's core over an in-memory broker, over MQTT 5
   and over AMQP 1.0, its adapters over MQTTnet and AMQPNetLite, the joined one, and the same
   gateway;
-- **an interop service** each side offers, which the other side's client calls over WebSocket, HTTP,
-  MQTT 5 and AMQP 1.0, beside a gateway whose routes the other side's generated HTTP client calls.
+- **a Rust implementation**, its core: the same envelope, the same routers and managers, sessions
+  and credentials, the trace, the filter and the registry, and the in-memory transport, playing the
+  conformance files its core reaches, each part it lacks a row of the support matrix ahead
+  ([0044](docs/decisions/0044-rust-one-owner-per-router-traits-no-unsafe-two-parameters-no-warning.md));
+- **an interop service** the TypeScript and C# sides offer, which the other side's client calls over
+  WebSocket, HTTP, MQTT 5 and AMQP 1.0, beside a gateway whose routes the other side's generated
+  HTTP client calls.
 
 **Nothing is published.** No package goes to npm or NuGet, and no image to a registry: build on a
 commit, pinned. Publication is ahead.
@@ -118,12 +123,11 @@ envelopes.
 
 ## Where Bead goes
 
-- **Next**: Rust, the third language, its core first — its router, its service layer and its
-  sessions — playing the conformance files over the in-memory transport before it has a socket
-  ([0036](docs/decisions/0036-an-in-memory-transport-joins-two-routers-of-one-process-and-a-server-takes-several-transports-through-one.md)),
-  under its own toolchain and a CI job of its own
-  ([0005](docs/decisions/0005-a-toolchain-per-language.md)), held to clippy's pedantic lints under
-  `-D warnings` and to the newest Rust norms.
+- **Next**: Rust's core whole, its broker's core, the in-memory broker and the joined transport,
+  then its `proto` codec, its library chosen by a spike
+  ([0044](docs/decisions/0044-rust-one-owner-per-router-traits-no-unsafe-two-parameters-no-warning.md)); then its transports over sockets with the
+  interop both ways, its broker bindings, its gateway and beadc's Rust target, each a record of its
+  own, each a row of the [support matrix](docs/support.md#differences) until it lands.
 - **Then**: a payload's rules written in CEL, a total subset beadc compiles into each side beside
   the rules it compiles already
   ([0035](docs/decisions/0035-a-payload-that-reads-is-held-to-its-messages-rules-before-its-resolver-sees-it.md));
@@ -149,6 +153,7 @@ spec/                         spec.md, debugging.md, transcoding.md, the conform
 implementations/
   typescript/                 a Yarn project of its own: src/, interop/, demo/, devtools/, browser/, tools/
   dotnet/                     Bead.slnx: src/, interop/, tests/, tools/Bead.Fuzz; and the other tools/, outside it
+  rust/                       a Cargo workspace of its own: crates/bead, crates/bead-interop, crates/bead-house; fuzz/, benches/
 builder/                      beadc, the builder: a Yarn project of its own: src/, proto/, test/, tools/
   Dockerfile                  beadc's image, built from the root, its tests run on the image itself
   wrappers/                   beadc.sh and beadc.ps1, which run the image, as templates beadc fills
@@ -169,8 +174,8 @@ CLAUDE.md, .claude/workflows/ the standing instructions for Claude sessions, and
 ```
 
 Each implementation has its own toolchain, lockfile, linter, formatter and test runner, and runs
-from its own folder. The root has no `package.json` and no task runner; it holds what both sides
-share, above all `spec/`, which both read in their tests.
+from its own folder. The root has no `package.json` and no task runner; it holds what every side
+shares, above all `spec/`, which each reads in its tests.
 
 ## The specification and its conformance files
 
@@ -202,7 +207,7 @@ procedures, each under a version of its own. Beside them:
 | [`interop-blueprint.json`](spec/interop-blueprint.json)         | the interop service's API: its one service, its 19 procedures, each with its kind, its bindings, its admission and its failures, in the builder's blueprint's form                                                                                                                                                                                                                 |
 | [`interop-service.json`](spec/interop-service.json)             | what each procedure of the interop service takes, answers, admits and notifies, by its name; what its relay admits and forwards; and the credentials it verifies                                                                                                                                                                                                                   |
 
-Both implementations read these files from `spec/` in their tests; neither keeps a copy. Eleven
+Every implementation reads these files from `spec/` in its tests; none keeps a copy. Eleven
 generators write them, and regenerating must give the same bytes:
 
 ```sh
@@ -279,6 +284,28 @@ dotnet test --solution Bead.slnx
 With `CI=true`, a restore that would change a `packages.lock.json` fails. The core's test project
 generates `Probe` from `spec/codecs.proto` at each build, with Grpc.Tools, beside Google.Protobuf;
 nothing it generates is committed.
+
+## Rust
+
+In `implementations/rust`. Rust 1.99.1 and edition 2024, as `rust-toolchain.toml` pins them, which
+rustup installs with clippy, rustfmt and llvm-tools; on Windows, the MSVC build tools' C++ linker,
+and no C compiler beyond it, the core being pure Rust. Clippy's `pedantic`, `nursery` and `cargo`
+groups and chosen restriction lints are denied, `unsafe_code` forbidden, and every warning of rustc,
+clippy and rustdoc an error by its `.cargo/config.toml`
+([0044](docs/decisions/0044-rust-one-owner-per-router-traits-no-unsafe-two-parameters-no-warning.md)).
+Its [README](implementations/rust/README.md) describes its crates and its modules.
+
+```sh
+cd implementations/rust
+cargo fmt --all -- --check
+cargo clippy --workspace --all-targets --all-features --locked
+cargo test --workspace --all-features --locked
+cargo deny --locked check
+```
+
+The packages are `francisdesjardins-bead*`, their libraries `bead*`, `publish = false`. Bead takes
+the application's tokio runtime, which enables its time driver, `enable_all` or `enable_time`, and
+starts none of its own; an operation goes as it is made, and dropping its future cancels nothing.
 
 ## The builder
 
@@ -426,16 +453,18 @@ MQTT 5"`); where none is, that test skips, saying so.
 ## Coverage
 
 Each side's tests run under coverage in CI, and what they run is held to the side's floor in
-[`tools/coverage-floors.json`](tools/coverage-floors.json), lines and branches each. Each side
+[`tools/coverage-floors.json`](tools/coverage-floors.json), each measure it names: lines and
+branches, or lines and regions on the Rust side, whose stable compiler counts no branch. Each side
 writes its own report — c8 an istanbul `coverage-final.json`, `dotnet test --coverage` one cobertura
-XML per test project — and `tools/coverage-report.mjs` reads either, merges what they say of the
-same file, and prints each file's lines and branches run, then the lines no report ran; with
-`--floor`, it fails under the side's floor, or when it measured nothing, and with `--summary`, it
-writes the report into the run's summary. A floor sits half a point under what was measured, and
+XML per test project, `cargo llvm-cov` one LLVM JSON export — and `tools/coverage-report.mjs`
+reads each, merges what the first two say of the same file, and prints each file's lines and
+branches or regions run, then the lines no report ran; with `--floor`, it fails under the side's
+floor, when it measured nothing, or on a measure the floor names and no report measured, and with
+`--summary`, it writes the report into the run's summary. A floor sits half a point under what was measured, and
 rises with `--raise`, never down but by a decision
 ([0006](docs/decisions/0006-a-rule-has-its-gate.md)). Each run keeps its reports 14 days, among its
-artifacts: `coverage-typescript`, c8's HTML to browse and its lcov, and `coverage-csharp`, the
-cobertura files. Locally, the same commands as CI's:
+artifacts: `coverage-typescript`, c8's HTML to browse and its lcov, `coverage-csharp`, the
+cobertura files, and `coverage-rust`, the LLVM export. Locally, the same commands as CI's:
 
 ```sh
 cd implementations/typescript
@@ -448,6 +477,12 @@ cd implementations/dotnet
 rm -rf TestResults/coverage  # every report in the folder is merged: a stale one counts too
 dotnet test --solution Bead.slnx --coverage --coverage-output-format cobertura --results-directory TestResults/coverage
 node ../../tools/coverage-report.mjs TestResults/coverage/*.cobertura.xml --under implementations/dotnet/src --floor csharp
+```
+
+```sh
+cd implementations/rust
+cargo llvm-cov --workspace --all-features --locked --json --summary-only --ignore-filename-regex '(/tests\.rs|/tests/.*|/testing\.rs|/testing/.*)$' --output-path coverage/rust.json
+node ../../tools/coverage-report.mjs coverage/rust.json --under implementations/rust/crates/bead/src --under implementations/rust/crates/bead-protobuf/src --floor rust
 ```
 
 ## Measurement
@@ -628,7 +663,10 @@ token one octet a character, as the header carries it, verified as it came and a
 the HS256 key it may name, under the keys, audiences and clock of `spec/vectors.json`'s verdicts;
 `ws-handshake`, the WebSocket transport's judgement of an upgrade before its 101 (spec 15.2), the
 first byte picking the whole head, its request line or one field of RFC 6455's handshake that the
-rest replaces. The TypeScript side fuzzes a seventh, `blueprint`, beadc's blueprint reader, its
+rest replaces. The Rust side fuzzes four of them, those its core holds, `envelope`,
+`payload-codecs`, `debug-filter` and `jwt`, with cargo-fuzz on the nightly `tools/fuzz.mjs` pins by
+its date, on Linux or WSL, from `implementations/rust/fuzz/`, `http-fields` and `ws-handshake`
+coming with its transports. The TypeScript side fuzzes a seventh, `blueprint`, beadc's blueprint reader, its
 JSON, its schema and its rules, and its form written back and read again; beadc has no C# side, so
 it has no twin. A target lets its parser's documented refusal pass; any other exception, an input
 past 1 s, or memory past 256 MiB of its own is a finding. The TypeScript side runs
@@ -840,7 +878,10 @@ it, a page's client in Chromium, and the DevTools extension following the demo's
 `amqp` (on the runner's host, a RabbitMQ 4.4.0 by its digest, its heartbeat lowered, and a password
 drawn for the run, with `BEAD_AMQP_REQUIRED=1` and `BEAD_INTEROP_REQUIRED=1`: the cases over AMQP
 1.0 on both sides, each adapter against it, and the interop over AMQP 1.0 both ways, with no page
-leg, since no page reaches an AMQP 1.0 broker); `builder` (install,
+leg, since no page reaches an AMQP 1.0 broker); `rust` on Linux and Windows (on Linux, the
+toolchain its file pins, format, clippy, the documentation, a build on the default features alone,
+cargo-deny, the tests under coverage, lines and regions held to the side's floor, and the fuzz
+targets built on the nightly pinned by its date; on Windows, the tests); `builder` (install,
 protoc by its pin's sha256, test with `BEADC_PROTOC_REQUIRED=1` and `BEADC_WRAPPERS_REQUIRED=1`,
 the wrappers held to one contract against a stand-in engine, then beadc over the interop's
 blueprint, its rules and its form, `beadc generate --check` over the root's `beadc.yaml`, each

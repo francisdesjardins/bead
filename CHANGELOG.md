@@ -7,12 +7,32 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- Rust, the third language, its core: the envelope's codec, the client and server routers with
+  their service, session and notification managers and the service layer, sessions and credentials
+  with a JWT's verification, the clock it is given and every duration held as spec 1.4 holds it,
+  the trace, the filter and the registry, and the in-memory transport, playing every conformance
+  file its core reaches; its own toolchain, Rust 1.99.1 and edition 2024, clippy's pedantic, nursery
+  and cargo groups and chosen restriction lints denied, a warning an error, unsafe code forbidden,
+  and a CI job of its own on Linux and Windows held to its coverage floor of lines and regions
+  (decision 0044).
+
+### Changed
+
+- `spec/check.py` holds a side that plays part of the corpus to what its steps and stages name
+  ahead, each a row of the support matrix; `tools/coverage-report.mjs` reads LLVM's coverage
+  export, and fails a floor on a measure that no report measured. The spec's front matter says a
+  side conforms to section 15 for each transport it offers.
+- The support matrix's row "An id or a revision no C# type holds" is "An id or a revision no typed
+  side holds", the Rust side's `u16` and `u32` beside the C# side's `ushort` and `int`.
+
 ### Fixed
 
-- A router is never entered again from its own turn, on both sides: what a listener it calls hands
-  it back, an envelope received or a connection let go, a dispose among them, is taken in a later
-  turn, behind what came before it: a failed resolver or admission is answered `PROCEDURE_FAILED`
-  whatever its report listener submits, on the TypeScript side as on the C# side (spec 9.0).
+- A router is never entered again from its own turn, on the TypeScript and C# sides as on the Rust
+  side's core: what a listener it calls hands it back, an envelope received or a connection let go,
+  a dispose among them, is taken in a later turn, behind what came before it, and a failed resolver
+  or admission is answered `PROCEDURE_FAILED` whatever its report listener submits (spec 9.0).
 - An AMQP 1.0 management link whose ATTACH is answered with no source or target is refused on the
   TypeScript side as on the C# side: its DETACH's condition fails the request, and no request goes
   on its pair (AMQP 1.0 §2.6.3, spec 15.33).
