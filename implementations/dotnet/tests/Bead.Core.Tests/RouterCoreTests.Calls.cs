@@ -673,6 +673,51 @@ public sealed partial class RouterCoreTests
     }
 
     [Fact]
+    public async Task Keeps_the_replacement_call_when_its_report_listener_cancels_a_failed_resolver_s_call()
+    {
+        var server = new Peer(RouterSide.Server);
+        using var core = server.Core;
+        var resolver = server.Resolve();
+        var failure = new InvalidOperationException("the resolver failed");
+
+        resolver.Handling = (_) =>
+        {
+            if (resolver.Requests.Count == 1)
+            {
+                throw failure;
+            }
+
+            return Task.CompletedTask;
+        };
+        server.OnReport = (_, _) =>
+        {
+            core.Receive(EnvelopeCodec.WriteEnvelope(new Envelope { Header = new CancelHeader { CallId = 5 } }), "a");
+            core.Receive(EnvelopeCodec.WriteEnvelope(new Envelope { Header = RequestOf(5) }), "a");
+        };
+
+        await server.Deliver(new Envelope { Header = RequestOf(5) }, "a");
+
+        Assert.Equal([failure], server.Reports);
+        Assert.Equal(["a"], server.ReportedOn);
+        Assert.Equal(2, resolver.Requests.Count);
+        Assert.Empty(server.Sent);
+        Assert.True(resolver.Requests[0].Signal.IsCancellationRequested);
+        Assert.False(resolver.Requests[1].Signal.IsCancellationRequested);
+        Assert.Equal(1, (await GaugesOf(server)).Counts["answeringCalls"]);
+
+        await resolver.Answer(0, new byte[] { 1 });
+        Assert.Empty(server.Sent);
+        await resolver.Answer(1, new byte[] { 2 });
+
+        var answer = Assert.Single(server.Sent);
+
+        Assert.Equal(("a", EnvelopeKind.Result, 5u), (Assert.Single(server.SentOn), answer.Kind, answer.Header.CallId));
+        Assert.Equal(new byte[] { 2 }, answer.Payload.ToArray());
+        Assert.Equal(0, (await GaugesOf(server)).Counts["answeringCalls"]);
+        Assert.Equal([failure], server.Reports);
+    }
+
+    [Fact]
     public async Task Lets_go_of_the_call_id_of_a_resolver_that_fails_without_answering_and_of_that_one_alone()
     {
         var server = new Peer(RouterSide.Server);

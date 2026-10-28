@@ -1358,6 +1358,8 @@ public sealed partial class RouterCoreTests
         // the connection each report came with, in order
         public List<string?> ReportedOn { get; } = [];
 
+        public Action<Exception, string?>? OnReport { get; set; }
+
         public List<RouterActivity> Activities { get; } = [];
 
         public int BeforeAnswers { get; private set; }
@@ -1523,6 +1525,7 @@ public sealed partial class RouterCoreTests
         {
             Reports.Add(reason);
             ReportedOn.Add(connectionHandle);
+            OnReport?.Invoke(reason, connectionHandle);
         }
 
         public bool Carries(string credential, string connectionHandle)
