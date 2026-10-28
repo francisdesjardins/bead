@@ -7,6 +7,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-10-28
+
 ### Added
 
 - A broker as a transport, its core on both sides: a participant's client and server transports
@@ -54,9 +56,18 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - The internal demo over MQTT 5, `?transport=mqtt`: its page a client participant over the broker's
   WebSocket, served where a broker is given (`node tools/mqtt-broker.mjs run -- yarn demo`), and
   `yarn test:demo`'s leg over it, which skips, saying so, where none is.
+- The DevTools panel followed over MQTT 5: a test of the extension that runs the demo's page over
+  the broker and finds its calls, each step and its envelopes in the panel, in CI's job `mqtt`.
 
 ### Changed
 
+- The spec moves to 0.9.0 (`spec-v0.9.0`), its companion, `spec/debugging.md`, to 0.4.1
+  (`debugging-v0.4.1`), and the transcoding's companion, `spec/transcoding.md`, to 0.2.0
+  (`transcoding-v0.2.0`).
+- The documents are brought to 0.8.0: the records, the spec and its companions in form alone, the
+  READMEs and the matrix; no record moves, the index gathers the broker's records under a theme of
+  their own, and Rust as the third language, a payload's rules in CEL, the close code carried on
+  `close` and a relay that carries a subscription stay ahead.
 - A connection over a broker is placed at its open, and nothing overtakes on it, where decision
   0021 had a request published to its procedure's topic and a cancel overtake it; 15.15, how a
   connect ends, stands under a heading of its own, `### A connect`.
@@ -83,6 +94,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- Over MQTT 5 on a WebSocket, each side sends every message to its broker as one binary frame, and
+  a page cuts its messages to 16 KiB at most, which Chromium sends whole: Mosquitto 2.1.2's WebSocket
+  listener frames what it sends amid a fragmented message as a continuation, which ends the link. A
+  page's burst keeps its link, the demo's glyph among them.
 - A WebSocket connect lets go of its socket on every failure and writes no credential that settles
   in the turn its attempt is disposed or times out.
 - A C# WebSocket connect disposed as its credential arrives reports the attempt's end, with
@@ -94,6 +109,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - beadc keeps the rules of a body that a variable binds into.
 - The C# side's JSON mapping reads and writes a delimited field and a group as the message it
   holds, as the TypeScript side does, where it refused one with `no form for a Group`.
+- The C# bench builds whole, `spec/transcoding-required.proto`'s messages compiled beside
+  `spec/transcoding.proto`'s, and CI's .NET job builds it.
 
 ## [0.7.0] - 2026-10-26
 
@@ -2005,7 +2022,8 @@ duration }`: on the C# side `StartedAt`, a `DateTimeOffset`, and `Duration`, a `
   workflows.
 - The licence, Apache-2.0.
 
-[Unreleased]: https://github.com/francisdesjardins/bead/compare/v0.7.0...develop
+[Unreleased]: https://github.com/francisdesjardins/bead/compare/v0.8.0...develop
+[0.8.0]: https://github.com/francisdesjardins/bead/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/francisdesjardins/bead/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/francisdesjardins/bead/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/francisdesjardins/bead/compare/v0.4.1...v0.5.0

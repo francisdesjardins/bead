@@ -53,9 +53,9 @@ request that opens a subscription, and on a CREDIT; on anything else, the envelo
   application's, around `notify`. So is choosing the key: it is what the notification means.
 - A signal with no data, "it changed", needs no pacing to be cheap: the client merges it around its
   own handler, one fetch at a time and one more if something came meanwhile.
-- A relay carries no subscription, paced or not
-  ([0019](0019-a-relay-terminates-each-leg-and-routes-nothing-past-it.md)), which is open work, and
-  neither does an HTTP connection whose client does not listen
+- A relay carries no subscription, paced or not; one that does is ahead, by a decision of its own
+  ([0019](0019-a-relay-terminates-each-leg-and-routes-nothing-past-it.md)); and an HTTP connection
+  whose client does not listen carries none
   ([0020](0020-http-draws-a-connection-by-a-token-and-a-listen-holds-it.md)).
 - The rule is section 11 of [`spec/spec.md`](../../spec/spec.md), and `spec/conversations.json`
   plays it step by step against every implementation's server.

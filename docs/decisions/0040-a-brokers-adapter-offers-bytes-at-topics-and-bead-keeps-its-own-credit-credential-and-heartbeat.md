@@ -6,7 +6,8 @@
   broker that paces no call, what waits for it, nothing retained, and the bounds of a participant and
   its server's transport, in 15.23; the adapter's contract and the in-memory broker, in 15.24; the
   heartbeat of 15.21, and its participant fenced once its link is taken over; the life the core
-  gives an OPEN, in 15.18, and a DATA that carries a credential, in 15.22; what 13.4, 13.7 and 14.3's step 5 count of a broker; the broker cases of
+  gives an OPEN, in 15.18, and a DATA that carries a credential, in 15.22; what 13.4, 13.7 and
+  14.3's step 5 count of a broker; the broker cases of
   [`spec/transports.json`](../../spec/transports.json) of a credential, security, notifications, a
   transfer, a retained message, the heartbeat, a queue's overrun, the lives a client asks and a
   link taken over; the place
@@ -86,8 +87,8 @@ it is given, at least once by default; `noSubscriber` refusals; expiry on its cl
 as a link is lost, never at a stop; and, on a test's word, the next message copied, held behind the
 one after it, dropped, or handed again to another member of its group, and a participant's link
 lost, or taken over by another of its id, its subscriptions dropped and its will published as a
-real takeover's are. It never leaves the process, so it is secure. A broker in memory is a broker, which repeats,
-reorders and drops on purpose, and plays the conformance before any broker's binding.
+real takeover's are. It never leaves the process, so it is secure. A broker in memory is a broker,
+which repeats, reorders and drops on purpose, and plays the conformance with no broker's binding.
 
 **Bead keeps its own credit, end to end** (spec 15.23): a paced subscription's notifications by
 their count (11.8 to 11.11), a transfer's chunks by their bytes (12.4), over the connection like any
@@ -124,7 +125,8 @@ being a loss the heartbeat finds.
 **A server's transport serves by its broker's word**: it starts once its broker holds each name
 it serves, a name refused failing its start, and stops once it let each go; its gauge `names`
 counts a name from its broker's acknowledgement of the subscription to its acknowledgement of the
-unsubscription, MQTT's SUBACK and UNSUBACK.
+unsubscription, MQTT's SUBACK and UNSUBACK, AMQP 1.0's ATTACH that names its source and its
+DETACH.
 
 **A participant whose link is taken over is fenced** (spec 15.21): its adapter says its link went
 down for another link of its id, and the participant closes each connection, unclean, reports it,
@@ -164,9 +166,12 @@ slow call never stalls the others on its link; what paces a call is Bead's credi
 **A server's bearer credentials are its broker's to read**, and its persistence's to hold for a
 message's life: the deployment's to weigh, each binding stating it.
 
-**What stays open**: an acceptor that proves itself to its opener; a publisher identity a broker
-vouches for, standing for an `ELSEWHERE`, which RabbitMQ's validated `user-id` would give the AMQP
-1.0 binding, weighed by [0043](0043-over-amqp-1-0-a-participant-is-one-connection-whose-exclusive-inbox-ends-with-it-and-a-parcel-one-message-of-one-profile-each-counted-to-its-byte.md) and left open; and a relay that carries a subscription
+**Ahead**: an acceptor that proves itself to its opener
+([0038](0038-over-a-broker-a-connection-is-placed-once-at-its-open-named-by-both-its-ends.md)); a
+publisher's identity a broker vouches for, standing for an `ELSEWHERE`, RabbitMQ's validated
+`user-id` its way over AMQP 1.0
+([0043](0043-over-amqp-1-0-a-participant-is-one-connection-whose-exclusive-inbox-ends-with-it-and-a-parcel-one-message-of-one-profile-each-counted-to-its-byte.md));
+and a relay that carries a subscription, which a page across a broker needs
 ([0019](0019-a-relay-terminates-each-leg-and-routes-nothing-past-it.md)).
 
 **No interop over the in-memory broker**: it joins no two processes, so the interop over a broker

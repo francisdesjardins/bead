@@ -102,8 +102,9 @@ Versions stay at `0.x`, and the CHANGELOG is kept current. The TypeScript manife
 
 ## Consequences
 
-- **Fifteen layouts before the byte runs out**, `0xA1` to `0xAF`; anything else in byte 0 is no
-  envelope. Each new layout is a decision of its own, and the prefix is never one to change.
+- **Fifteen layouts each before the byte runs out**, `0xA1` to `0xAF` an envelope's and `0xB1` to
+  `0xBF` a parcel's (spec 15.17); a first byte outside them is no envelope and no parcel. Each new
+  layout is a decision of its own, and neither prefix is one to change.
 - A fix in one implementation moves its `v*` and nothing else; a clarification of the spec moves
   `spec-v*` and no layout. A reader learns the layout from the envelope itself, so no peer asks
   another for its version.

@@ -20,55 +20,55 @@
       "bead.interop": {
         "type": "Project",
         "dependencies": {
-          "Bead.Core": "[0.7.0, )",
-          "Bead.Protobuf": "[0.7.0, )"
+          "Bead.Core": "[0.8.0, )",
+          "Bead.Protobuf": "[0.8.0, )"
         }
       },
       "bead.protobuf": {
         "type": "Project",
         "dependencies": {
-          "Bead.Core": "[0.7.0, )",
+          "Bead.Core": "[0.8.0, )",
           "Google.Protobuf": "[3.36.2, )"
         }
       },
       "bead.transcoding": {
         "type": "Project",
         "dependencies": {
-          "Bead.Core": "[0.7.0, )",
-          "Bead.Protobuf": "[0.7.0, )",
+          "Bead.Core": "[0.8.0, )",
+          "Bead.Protobuf": "[0.8.0, )",
           "Google.Protobuf": "[3.36.2, )"
         }
       },
       "bead.transcoding.http": {
         "type": "Project",
         "dependencies": {
-          "Bead.Transcoding": "[0.7.0, )"
+          "Bead.Transcoding": "[0.8.0, )"
         }
       },
       "bead.transport.amqp": {
         "type": "Project",
         "dependencies": {
           "AMQPNetLite.Core": "[2.5.4, )",
-          "Bead.Core": "[0.7.0, )"
+          "Bead.Core": "[0.8.0, )"
         }
       },
       "bead.transport.http": {
         "type": "Project",
         "dependencies": {
-          "Bead.Core": "[0.7.0, )"
+          "Bead.Core": "[0.8.0, )"
         }
       },
       "bead.transport.mqtt": {
         "type": "Project",
         "dependencies": {
-          "Bead.Core": "[0.7.0, )",
+          "Bead.Core": "[0.8.0, )",
           "MQTTnet": "[5.2.0.1603, )"
         }
       },
       "bead.transport.websockets": {
         "type": "Project",
         "dependencies": {
-          "Bead.Core": "[0.7.0, )"
+          "Bead.Core": "[0.8.0, )"
         }
       },
       "AMQPNetLite.Core": {

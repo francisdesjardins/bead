@@ -8,6 +8,10 @@
   [0039](0039-a-brokers-transport-numbers-its-parcels-and-sends-an-envelope-in-parts-under-its-peers-bound.md)'s;
   its adapter, its pace, its credential and its heartbeat,
   [0040](0040-a-brokers-adapter-offers-bytes-at-topics-and-bead-keeps-its-own-credit-credential-and-heartbeat.md)'s;
+  its bindings, MQTT 5's
+  [0041](0041-over-mqtt-5-a-participant-is-one-clean-link-and-a-parcel-one-publish-each-counted-to-its-byte.md)
+  and AMQP 1.0's
+  [0043](0043-over-amqp-1-0-a-participant-is-one-connection-whose-exclusive-inbox-ends-with-it-and-a-parcel-one-message-of-one-profile-each-counted-to-its-byte.md);
   a relay is [0019](0019-a-relay-terminates-each-leg-and-routes-nothing-past-it.md)'s.
 
 ## Context
@@ -63,7 +67,11 @@ reaches a participant behind a broker through one.
 
 **One core, and one adapter a broker.** What a broker's transport does that depends on no broker is
 one core in each implementation; an adapter brings one broker's client, and names the capabilities
-it has, some of them optional. What the core holds, point by point, is decided with the transport.
+it has, some of them optional. What the core holds, point by point, is
+[0038](0038-over-a-broker-a-connection-is-placed-once-at-its-open-named-by-both-its-ends.md)'s,
+[0039](0039-a-brokers-transport-numbers-its-parcels-and-sends-an-envelope-in-parts-under-its-peers-bound.md)'s
+and
+[0040](0040-a-brokers-adapter-offers-bytes-at-topics-and-bead-keeps-its-own-credit-credential-and-heartbeat.md)'s.
 
 **What a broker's transport owes is decided by records of its own**: what stands for a connection,
 placed once at its open through a server's name, its session one connection's, and its end, and
@@ -91,7 +99,7 @@ the support matrix says which broker leaves which out, and why
 difference of the protocol.
 
 **A relay bridges calls, not subscriptions.** A page behind a relay to a broker subscribes to
-nothing while a relay carries no subscription, which is open
+nothing: a relay carries no subscription, and one that does is ahead, by a decision of its own
 ([0019](0019-a-relay-terminates-each-leg-and-routes-nothing-past-it.md)); and a participant behind a
 second relay, past the broker, is out of its reach, since leg B names no destination.
 
@@ -109,7 +117,9 @@ the transport drops a parcel below the next one awaited, and hands its router ea
 **The broker's transport plays the conformance files and the interop**, as HTTP's and the
 WebSocket's do ([0004](0004-one-behaviour-in-every-language.md)): its parcels in `spec/vectors.json`,
 its cases of both roles in `spec/transports.json` over each side's in-memory broker, and the interop
-over a broker of the binding that brings one ([0040](0040-a-brokers-adapter-offers-bytes-at-topics-and-bead-keeps-its-own-credit-credential-and-heartbeat.md)).
+over MQTT 5 and over AMQP 1.0 against a real broker
+([0041](0041-over-mqtt-5-a-participant-is-one-clean-link-and-a-parcel-one-publish-each-counted-to-its-byte.md),
+[0043](0043-over-amqp-1-0-a-participant-is-one-connection-whose-exclusive-inbox-ends-with-it-and-a-parcel-one-message-of-one-profile-each-counted-to-its-byte.md)).
 
 **One word keeps one meaning** ([0003](0003-one-word-one-meaning.md)): "federation" names the network
 this record refuses, and nothing else; services that trust one issuer are named so
@@ -117,8 +127,7 @@ this record refuses, and nothing else; services that trust one issuer are named 
 
 ## The Tenth Man
 
-Placement at a connection's open, which revises the picture of a request published to its
-procedure's topic, met the round of the broker's core, which
+Placement at a connection's open met the round of the broker's core, which
 [0038](0038-over-a-broker-a-connection-is-placed-once-at-its-open-named-by-both-its-ends.md) keeps.
 
 The course met the Tenth Man ([0009](0009-conventional-commits-git-flow-and-the-tenth-man.md)) in
@@ -131,9 +140,9 @@ two rounds, the second on this record. Its objections, each with the answer that
 | Sessions shared across servers, a direction the course withdrew, are stated as live in [0010](0010-a-request-presents-a-credential-of-a-scheme.md)                                                                           | Accepted: 0010 holds no such clause, and this record refuses it: no session's state is shared between servers.                                                                                                                                                                                                                              |
 | The record cites 15.1 as asking what a broker does, while 15.1 asks "in order on each connection", which a broker does not keep                                                                                              | Accepted: 15.1 states it, its round in [0001](0001-the-envelope-sits-at-fixed-offsets.md): order and a single copy are a connection's default, which a transport's section may lift, stating what may overtake and what a copy is.                                                                                                          |
 | A request's copy: a subscription's call stays open once answered, so its copy is reported; and one that comes once its call id is drawn again answers the new call with another's result, which no dedupe by call id catches | Accepted in part: the Consequences name each case, the wrong answer among them, and the Decision has the transport hand its router each request once, as 15.1 asks of every transport. Refused: deciding here how, by the identity a broker gives a message: that is the delivery record's.                                                 |
-| "Carries envelopes between two sides" decides a pacing mode left open, a notification published once to a topic many read                                                                                                    | Accepted: the Decision says "as a transport does (section 15.1)", and the pacing point names both modes open. One published once would meet 11.1, which binds a notification to one call id, and is the pacing record's to weigh.                                                                                                           |
-| The relay the record names as the bridge carries no subscription and forms no chain, and the record states neither cost                                                                                                      | Accepted: **A relay bridges calls, not subscriptions** states both, and the decisions' README names a relay that carries a subscription, open, under the broker's transport.                                                                                                                                                                |
-| One core and one adapter a broker were taken with the course, yet the record leaves them out while it lists the adapter's contract as open                                                                                   | Accepted in part: the record states the split in one paragraph, as the user chose. What the core holds, point by point, stays the transport's records', since the topics and the reply channel wait on them.                                                                                                                                |
+| "Carries envelopes between two sides" decides a pacing mode left open, a notification published once to a topic many read                                                                                                    | Accepted: the Decision says "as a transport does (section 15.1)". One published once would meet 11.1, which binds a notification to one call id, and 0040 refuses it.                                                                                                                                                                       |
+| The relay the record names as the bridge carries no subscription and forms no chain, and the record states neither cost                                                                                                      | Accepted: **A relay bridges calls, not subscriptions** states both, and the decisions' README names a relay that carries a subscription ahead.                                                                                                                                                                                              |
+| One core and one adapter a broker were taken with the course, yet the record leaves them out while it lists the adapter's contract as open                                                                                   | Accepted in part: the record states the split in one paragraph, as the user chose. What the core holds, point by point, is 0038's, 0039's and 0040's.                                                                                                                                                                                       |
 | "Routes nothing between nodes" is false of a relay, and "keeps no session across servers" reads against a credential's session, one identifier across servers                                                                | Accepted: Bead routes nothing past one relay, finds no peer, and shares no session's state between servers, a credential's session resolved where its call runs.                                                                                                                                                                            |
 | "As every transport does" is false of the Web Worker, which plays neither the transports' cases nor the interop                                                                                                              | Accepted: the broker's transport plays them as HTTP's and the WebSocket's do.                                                                                                                                                                                                                                                               |
 | `Via` is a list, not a count, `Max-Forwards` is HTTP's count, and "pub/sub" is an abbreviation                                                                                                                               | Accepted in part: IP's TTL counts and `Via` lists, here and in [0019](0019-a-relay-terminates-each-leg-and-routes-nothing-past-it.md); "publish/subscribe" is written whole ([0003](0003-one-word-one-meaning.md)). Refused: `Max-Forwards`, defined for TRACE and OPTIONS alone (RFC 9110 §7.6.2), which guards no request against a loop. |

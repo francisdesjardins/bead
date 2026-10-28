@@ -122,10 +122,10 @@ A request to a procedure that notifies, by a `client-requester`, is taken: it op
 Where it is stated: each router's own, with twin tests; or **a third reason of spec 16.10's table,
 `against its kind`, after `out of its range` and `off its form`, with `spec/identities.json` holding
 a group of declarations played per way, as [0006](0006-a-rule-has-its-gate.md) asks a rule's gate
-and as 0017 pinned there refusals no peer sees. Chosen**, the user's choice: a third language takes
-the rule from the file, where twin tests hold two sides alone. Section 16.11 says what each way
-takes. A side built without the trace and the metrics, which never refuses `off its form`, still
-refuses `against its kind`, which needs no name.
+and as 0017 pinned there refusals no peer sees. Chosen**, the user's choice: Rust, and each
+language after it, takes the rule from the file, where twin tests hold two sides alone. Section
+16.11 says what each way takes. A side built without the trace and the metrics, which never refuses
+`off its form`, still refuses `against its kind`, which needs no name.
 
 _Conformance:_ 16.10, 16.11 and `spec/identities.json`'s `procedureKinds`, six declarations each
 played the six ways. _Matrix:_ the feature row "The identity rules" counts the procedure's kind.
@@ -151,8 +151,7 @@ A protobuf message. Four ways:
 
 - The runtime depends on each language's protobuf library, as Connect-ES does (`@connectrpc/connect`
   2.2.0 has `@bufbuild/protobuf` `^2.7.0` for a peer dependency): every user of `raw`, `text` or
-  `json` alone carries a library it never calls, and the constrained profile of a third language has
-  none to carry.
+  `json` alone carries a library it never calls, and the constrained C side has none to carry.
 - An optional module of its own, a `./protobuf` entry with a peer dependency and a C# project
   referencing Google.Protobuf: one more package on each side to version with the stock library's
   releases, and the C# name `Bead.Protobuf` is the builder's options' namespace already.
@@ -1120,8 +1119,9 @@ window's key, a command's requester, a notifier and a resolver's key, each repor
 by `no-deprecated`, typescript-eslint's and oxlint's; a test of `service-client.test.ts` and one of
 `service-server.test.ts`, named alike, hold it.
 
-**A third language** plays the `procedureKinds` group the six ways, and the `proto` rows as
-[0031](0031-a-proto-payload-is-protobufs-format-and-bead-states-only-its-own.md) says.
+**Rust, and each language after it,** plays the `procedureKinds` group the six ways, and the
+`proto` rows as [0031](0031-a-proto-payload-is-protobufs-format-and-bead-states-only-its-own.md)
+says.
 
 ## The Tenth Man
 

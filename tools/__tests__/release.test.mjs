@@ -790,7 +790,7 @@ console.log(localDay(new Date('2026-10-08T01:30:00Z')));`;
       });
     };
     assert.deepEqual(owing(kept), [
-      `owed by hand: both benches run, their reports kept as .bench/v0.2.0-typescript.json and -csharp.json, each compared with v0.1.0's on the machine that made them (README.md, "Measurement")`,
+      `owed by hand: both benches run through tools/bench-release.mjs, their reports kept as .bench/v0.2.0-typescript.json and -csharp.json, each compared with v0.1.0's on the machine that made them; regression and inconclusive measures confirmed by interleaving before the finish (README.md, "Measurement")`,
     ]);
     assert.deepEqual(owing(releasing()), []);
   });

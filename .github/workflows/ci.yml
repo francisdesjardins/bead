@@ -1,9 +1,7 @@
 name: CI
 
 # Every job on every push and pull request: the spec is shared, so a change anywhere can break
-# either side. `ci-ok` stands for every job; it fails when any other job did not pass. Branch
-# protection, which would make it the one check a branch requires, waits on GitHub Pro or a public
-# repository.
+# either side. `ci-ok` stands for every job; it fails when any other job did not pass.
 on:
   # Branches only: a tag pushed by a release points at a commit its branch's run already checked.
   push:
@@ -210,6 +208,8 @@ jobs:
       - run: dotnet format Bead.slnx --verify-no-changes --exclude ../../builder/test/golden/csharp interop/Bead.Interop/Generated tests/Bead.Protobuf.Tests/Generated
       # every project, which `dotnet test` does not: it builds the test projects alone
       - run: dotnet build Bead.slnx
+      # the bench, outside Bead.slnx, built so that a release's measure finds it whole
+      - run: dotnet build -c Release tools/Bead.Benchmarks
       # the tests under coverage, one cobertura report per test project, then what they ran held to
       # the C# side's floor in tools/coverage-floors.json, the report in the run's summary
       - run: >-
@@ -286,6 +286,9 @@ jobs:
           # the page's leg installs its Chromium, which no image of this job holds
           PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: 0
       - run: $YARN devtools:build && $YARN playground:build:file && $YARN test:devtools --grep "over MQTT 5"
+        working-directory: implementations/typescript
+      # the demo's page over MQTT 5 in Chromium, a glyph sent and one received
+      - run: $YARN test:demo --project page --grep "over MQTT 5"
         working-directory: implementations/typescript
       # the broker start left, which a start that failed left none of
       - name: The broker stopped

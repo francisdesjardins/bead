@@ -9,7 +9,7 @@
     "clauses are the units of spec/debugging.md an entry checks: a clause, 6.7; a row of its table, counted from 1, 6.7.3.",
     "Every character outside printable ASCII is written as its JSON escape."
   ],
-  "debuggingVersion": "0.4.0",
+  "debuggingVersion": "0.4.1",
   "calls": [
     {
       "direction": "tx",

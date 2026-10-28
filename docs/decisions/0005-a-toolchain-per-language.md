@@ -65,16 +65,19 @@ generators a library each, `make_validations.py` `google-re2`, RE2 itself, and
 three and `spec/requirements.txt` locks them with every hash, installed with
 `--require-hashes --only-binary=:all:`; the other generators use the standard library alone.
 
-**A language that joins comes the same way**: a folder under `implementations/`, its own native
-toolchain, and a CI job of its own. A part every language uses that is neither an implementation nor
-the spec is placed by a decision of its own, as the builder and the examples are by
+**Rust, the next, comes the same way, and so does each language after it**: a folder under
+`implementations/`, its own native toolchain, and a CI job of its own; Rust's held to clippy's
+pedantic lints under `-D warnings` and to the newest Rust norms. A part every language uses that is
+neither an implementation nor the spec is placed by a decision of its own, as the builder and the
+examples are by
 [0022](0022-a-proto-becomes-one-checked-blueprint-and-each-language-is-generated-from-it.md).
 
 ## Consequences
 
 - A contributor installs the toolchains of the languages they touch, Node for the root's tools, and
   Python for the spec's. The interop asks for both runtimes
-  ([0004](0004-one-behaviour-in-every-language.md)), and so does CI's `dotnet` job.
+  ([0004](0004-one-behaviour-in-every-language.md)), and so do CI's `dotnet`, `mqtt` and `amqp`
+  jobs.
 - The house style is stated once per language, in that language's own terms: the TypeScript side's
   `curly` and `arrow-body-style` are oxlint rules whose C# counterparts are `.editorconfig` rules
   the build holds; the parameter rule is `max-params` and `bead/options-last` on one side and

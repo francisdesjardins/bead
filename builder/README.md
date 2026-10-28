@@ -721,10 +721,10 @@ engine of its platform's.
   `max_items`, `unique` and `items`; `map`'s `min_pairs`, `max_pairs`, `keys` and `values`;
   `(buf.validate.oneof).required`; `(buf.validate.message).oneof`; a wrapper's scalar's rules,
   judged on its value once set. `example` is carried, never judged. Every other member is
-  `VALIDATE_RULE_UNSUPPORTED`: `cel` and `cel_expression`, which a later step compiles, the
-  well-known string formats, `bytes.pattern`, `bytes.in` and `bytes.not_in`, `any`, `duration`,
-  `timestamp`, `field_mask`, predefined rules, and the rules of a repeated wrapper's items or of
-  a map's wrapper values, which both libraries keep as messages.
+  `VALIDATE_RULE_UNSUPPORTED`: `cel` and `cel_expression`, whose rules in CEL are ahead (decision
+  0035), the well-known string formats, `bytes.pattern`, `bytes.in` and `bytes.not_in`, `any`,
+  `duration`, `timestamp`, `field_mask`, predefined rules, and the rules of a repeated wrapper's
+  items or of a map's wrapper values, which both libraries keep as messages.
 - **What is judged**: a request's message, and every message its fields reach that holds a rule or
   leads to one; a result and a notification never, so rules no request reaches are
   `VALIDATE_RULES_UNPLAYED`. Each such message is listed in `proto.messages` with its `rules`: its

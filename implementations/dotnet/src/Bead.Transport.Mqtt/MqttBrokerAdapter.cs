@@ -631,6 +631,9 @@ public sealed class MqttBrokerAdapter : IBrokerAdapter, IAsyncDisposable
                 // * offered and chosen ([MQTT-6.0.0-3], [-4]), set here rather than trusting a default
                 webSocket.WithUri(uri.AbsoluteUri).WithSubProtocols(["mqtt"]);
             })
+                // ! each message one binary frame (spec 15.25): MQTTnet sends a payload as a
+                // continuation by default, and Mosquitto 2.1.2 frames what it writes amid one as one
+                .WithoutPacketFragmentation()
             : builder.WithTcpServer(host, uri.IsDefaultPort || uri.Port < 0 ? (isTls ? 8883 : 1883) : uri.Port);
 
         if (isTls)

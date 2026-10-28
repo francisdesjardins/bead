@@ -69,9 +69,9 @@ accept, so ranks run in the order connections were taken; the C# side's count of
 rank. Every handle of an address reads `type=…;ip=…;` and ends `ordinal=n`, a socket's carrying
 `port=…` between, which tells a reader of a trace which socket, and one without it, `type=HTTP` and
 `type=MEMORY` among them, none. A broker's reads `type=…;participant=…;ordinal=n`, its type its
-adapter's, `BROKER` in memory, and its peer's id, the address its envelopes are handed with, drawn
-at the connection's third leg, once that id is proven, never at its OPEN, so a second acceptor of
-one OPEN draws none (spec 15.18;
+adapter's, `BROKER` in memory, `MQTT` over MQTT 5 and `AMQP` over AMQP 1.0 (spec 15.25, 15.32), and
+its peer's id, the address its envelopes are handed with, drawn at the connection's third leg,
+once that id is proven, never at its OPEN, so a second acceptor of one OPEN draws none (spec 15.18;
 [0038](0038-over-a-broker-a-connection-is-placed-once-at-its-open-named-by-both-its-ends.md)). A
 handle tells two types apart, never two transports of one type, which may draw
 one handle for two sockets from one address and port at the same rank, so two transports of one type

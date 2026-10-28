@@ -4,10 +4,10 @@ using System.Runtime.InteropServices;
 using System.Text.Json;
 using Bead.Interop;
 using Bead.Tests;
-using Bead.Transport.Http;
 using Bead.Transcoding.V1;
-using Google.Protobuf;
+using Bead.Transport.Http;
 using Bead.Transport.WebSockets;
+using Google.Protobuf;
 
 namespace Bead.Benchmarks;
 
@@ -17,6 +17,7 @@ internal static class Program
     private const int Concurrency = 32;
     private const int MemoryCalls = 2_000;
     private const int TransferSize = 20 * 1_048_576;
+    private static readonly string[] NetworkTransports = ["http", "websocket"];
     private static readonly int[] Sizes = [0, 1_024, 65_536];
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
@@ -30,6 +31,7 @@ internal static class Program
         public int Seconds { get; init; } = 3;
         public bool Json { get; init; }
         public bool TranscodingOnly { get; init; }
+        public string? Filter { get; init; }
     }
 
     private sealed record Dimensions
@@ -55,12 +57,46 @@ internal static class Program
         public double Max { get; init; }
     }
 
-    private sealed class Measurements
+    private sealed class Measurements(string? filter)
     {
         private readonly Dictionary<(string Name, Dimensions Dimensions), List<double>> _values = [];
 
+        public bool Wants(string name, Dimensions? dimensions = null)
+        {
+            var row = dimensions ?? new Dimensions();
+            return filter is null || filter == name || filter == $"{row.Scenario}.{row.Transport}.{row.SizeBytes}.{name}";
+        }
+
+        public bool WantsAny(string[] names, Dimensions? dimensions = null)
+        {
+            return names.Any((name) => { return Wants(name, dimensions); });
+        }
+
+        public bool WantsCalls(Dimensions dimensions, string measure = "call")
+        {
+            return Sizes.Any((size) =>
+            {
+                return WantsAny([$"{measure}.p50", $"{measure}.p95", $"{measure}.p99", $"{measure}.memory", $"{measure}.throughput"], dimensions with { SizeBytes = size });
+            });
+        }
+
+        public bool WantsNotifications(string transport)
+        {
+            return WantsAny(["notification.p50", "notification.p95", "notification.p99", "notification.throughput"], new Dimensions { Transport = transport });
+        }
+
+        public bool WantsTransfer(string transport)
+        {
+            return WantsAny(["transfer.echo", "transfer.throughput"], new Dimensions { Transport = transport, SizeBytes = TransferSize });
+        }
+
         public void Record(string name, double value, Dimensions? dimensions = null)
         {
+            if (!Wants(name, dimensions))
+            {
+                return;
+            }
+
             if (!double.IsFinite(value) || value < 0)
             {
                 throw new InvalidOperationException($"non-finite or negative measurement: {name}");
@@ -115,6 +151,15 @@ internal static class Program
             else if (flag == "--json")
             {
                 options = options with { Json = true };
+            }
+            else if (flag == "--filter")
+            {
+                if (++at >= args.Length || string.IsNullOrEmpty(args[at]) || args[at].StartsWith("--", StringComparison.Ordinal) || options.Filter is not null)
+                {
+                    throw new ArgumentException("--filter requires one id or name");
+                }
+
+                options = options with { Filter = args[at] };
             }
             else if (flag is "--runs" or "--seconds")
             {
@@ -176,22 +221,34 @@ internal static class Program
         var body = form.Write(Everything.Parser.ParseFrom(payload));
         var row = new Dimensions { SizeBytes = body.Length, Unit = "ns" };
 
-        results.Record("transcoding.read.bead", Codec(() =>
+        if (results.Wants("transcoding.read.bead", row))
         {
-            _ = form.Read(Everything.Descriptor, body).ToByteArray();
-        }, (100, seconds)), row);
-        results.Record("transcoding.read.stock", Codec(() =>
+            results.Record("transcoding.read.bead", Codec(() =>
+            {
+                _ = form.Read(Everything.Descriptor, body).ToByteArray();
+            }, (100, seconds)), row);
+        }
+        if (results.Wants("transcoding.read.stock", row))
         {
-            _ = JsonParser.Default.Parse<Everything>(System.Text.Encoding.UTF8.GetString(body)).ToByteArray();
-        }, (100, seconds)), row);
-        results.Record("transcoding.write.bead", Codec(() =>
+            results.Record("transcoding.read.stock", Codec(() =>
+            {
+                _ = JsonParser.Default.Parse<Everything>(System.Text.Encoding.UTF8.GetString(body)).ToByteArray();
+            }, (100, seconds)), row);
+        }
+        if (results.Wants("transcoding.write.bead", row))
         {
-            _ = form.Write(Everything.Parser.ParseFrom(payload));
-        }, (100, seconds)), row);
-        results.Record("transcoding.write.stock", Codec(() =>
+            results.Record("transcoding.write.bead", Codec(() =>
+            {
+                _ = form.Write(Everything.Parser.ParseFrom(payload));
+            }, (100, seconds)), row);
+        }
+        if (results.Wants("transcoding.write.stock", row))
         {
-            _ = System.Text.Encoding.UTF8.GetBytes(JsonFormatter.Default.Format(Everything.Parser.ParseFrom(payload)));
-        }, (100, seconds)), row);
+            results.Record("transcoding.write.stock", Codec(() =>
+            {
+                _ = System.Text.Encoding.UTF8.GetBytes(JsonFormatter.Default.Format(Everything.Parser.ParseFrom(payload)));
+            }, (100, seconds)), row);
+        }
 
     }
 
@@ -206,15 +263,21 @@ internal static class Program
             };
             var limits = new EnvelopeReadOptions { Side = RouterSide.Server, MaximumEnvelopeBytes = LimitDefaults.MaximumEnvelopeBytes };
             var row = new Dimensions { SizeBytes = size, Unit = "ns" };
-            results.Record("codec.roundTrip", Codec(() =>
+            if (results.Wants("codec.roundTrip", row))
             {
-                _ = EnvelopeCodec.ReadEnvelope(EnvelopeCodec.WriteEnvelope(envelope), limits);
-            }, (1_000, seconds)), row);
+                results.Record("codec.roundTrip", Codec(() =>
+                {
+                    _ = EnvelopeCodec.ReadEnvelope(EnvelopeCodec.WriteEnvelope(envelope), limits);
+                }, (1_000, seconds)), row);
+            }
             var body = JsonSerializer.SerializeToElement(new string('x', size));
-            results.Record("json.roundTrip", Codec(() =>
+            if (results.Wants("json.roundTrip", row))
             {
-                _ = PayloadCodecs.Json.Decode(PayloadCodecs.Json.Encode(body));
-            }, (100, seconds)), row);
+                results.Record("json.roundTrip", Codec(() =>
+                {
+                    _ = PayloadCodecs.Json.Decode(PayloadCodecs.Json.Encode(body));
+                }, (100, seconds)), row);
+            }
         }
     }
 
@@ -368,6 +431,11 @@ internal static class Program
         {
             var body = JsonSerializer.SerializeToElement(new string('x', size));
             var row = options.Row with { SizeBytes = size };
+            if (!options.Results.WantsAny(["call.p50", "call.p95", "call.p99", "call.memory", "call.throughput"], row))
+            {
+                continue;
+            }
+
             Task<JsonElement> Call()
             {
                 return connection.Interop.Echo(body)();
@@ -379,39 +447,49 @@ internal static class Program
             }
 
             await Console.Error.WriteLineAsync($"calls {row.Scenario}/{row.Transport}/{size}");
-            var durations = new List<double>();
-            var clock = Stopwatch.StartNew();
-            while (clock.Elapsed.TotalSeconds < options.Seconds)
+            if (options.Results.WantsAny(["call.p50", "call.p95", "call.p99"], row))
             {
-                var before = Stopwatch.GetTimestamp();
-                _ = await Call();
-                durations.Add(Stopwatch.GetElapsedTime(before).TotalMicroseconds);
+                var durations = new List<double>();
+                var clock = Stopwatch.StartNew();
+                while (clock.Elapsed.TotalSeconds < options.Seconds)
+                {
+                    var before = Stopwatch.GetTimestamp();
+                    _ = await Call();
+                    durations.Add(Stopwatch.GetElapsedTime(before).TotalMicroseconds);
+                }
+
+                durations.Sort();
+                foreach (var share in new[] { 0.5, 0.95, 0.99 })
+                {
+                    options.Results.Record($"call.p{share * 100}", Percentile(durations, share), row);
+                }
             }
 
-            durations.Sort();
-            foreach (var share in new[] { 0.5, 0.95, 0.99 })
+            if (options.Results.Wants("call.memory", row))
             {
-                options.Results.Record($"call.p{share * 100}", Percentile(durations, share), row);
+                // Process-wide managed allocations include both endpoints only in the local scenario.
+                var allocatedBefore = GC.GetTotalAllocatedBytes(true);
+                for (var index = 0; index < MemoryCalls; index++)
+                {
+                    _ = await Call();
+                }
+
+                var allocated = (GC.GetTotalAllocatedBytes(true) - allocatedBefore) / (double)MemoryCalls;
+                options.Results.Record("call.memory", allocated, row with { Unit = "B/call" });
             }
 
-            // Process-wide managed allocations include both endpoints only in the local scenario.
-            var allocatedBefore = GC.GetTotalAllocatedBytes(true);
-            for (var index = 0; index < MemoryCalls; index++)
+            if (options.Results.Wants("call.throughput", row))
             {
-                _ = await Call();
-            }
+                var done = 0L;
+                var clock = Stopwatch.StartNew();
+                while (clock.Elapsed.TotalSeconds < options.Seconds)
+                {
+                    await Task.WhenAll(Enumerable.Range(0, Concurrency).Select((_) => { return Call(); }));
+                    done += Concurrency;
+                }
 
-            var allocated = (GC.GetTotalAllocatedBytes(true) - allocatedBefore) / (double)MemoryCalls;
-            options.Results.Record("call.memory", allocated, row with { Unit = "B/call" });
-            var done = 0L;
-            clock.Restart();
-            while (clock.Elapsed.TotalSeconds < options.Seconds)
-            {
-                await Task.WhenAll(Enumerable.Range(0, Concurrency).Select((_) => { return Call(); }));
-                done += Concurrency;
+                options.Results.Record("call.throughput", done / clock.Elapsed.TotalSeconds, row with { Unit = "calls/s" });
             }
-
-            options.Results.Record("call.throughput", done / clock.Elapsed.TotalSeconds, row with { Unit = "calls/s" });
         }
     }
 
@@ -426,6 +504,11 @@ internal static class Program
         {
             var body = JsonSerializer.SerializeToElement(new string('x', size));
             var row = new Dimensions { Transport = "memory", SizeBytes = size };
+            if (!options.Results.WantsAny(["exchange.p50", "exchange.p95", "exchange.p99", "exchange.memory", "exchange.throughput"], row))
+            {
+                continue;
+            }
+
             async Task Exchange()
             {
                 await using var client = new MemoryClient();
@@ -440,38 +523,48 @@ internal static class Program
             }
 
             await Console.Error.WriteLineAsync($"exchanges local/memory/{size}");
-            var durations = new List<double>();
-            var clock = Stopwatch.StartNew();
-            while (clock.Elapsed.TotalSeconds < options.Seconds)
+            if (options.Results.WantsAny(["exchange.p50", "exchange.p95", "exchange.p99"], row))
             {
-                var before = Stopwatch.GetTimestamp();
-                await Exchange();
-                durations.Add(Stopwatch.GetElapsedTime(before).TotalMicroseconds);
+                var durations = new List<double>();
+                var clock = Stopwatch.StartNew();
+                while (clock.Elapsed.TotalSeconds < options.Seconds)
+                {
+                    var before = Stopwatch.GetTimestamp();
+                    await Exchange();
+                    durations.Add(Stopwatch.GetElapsedTime(before).TotalMicroseconds);
+                }
+
+                durations.Sort();
+                foreach (var share in new[] { 0.5, 0.95, 0.99 })
+                {
+                    options.Results.Record($"exchange.p{share * 100}", Percentile(durations, share), row);
+                }
             }
 
-            durations.Sort();
-            foreach (var share in new[] { 0.5, 0.95, 0.99 })
+            if (options.Results.Wants("exchange.memory", row))
             {
-                options.Results.Record($"exchange.p{share * 100}", Percentile(durations, share), row);
+                var allocatedBefore = GC.GetTotalAllocatedBytes(true);
+                for (var index = 0; index < MemoryCalls; index++)
+                {
+                    await Exchange();
+                }
+
+                var allocated = (GC.GetTotalAllocatedBytes(true) - allocatedBefore) / (double)MemoryCalls;
+                options.Results.Record("exchange.memory", allocated, row with { Unit = "B/exchange" });
             }
 
-            var allocatedBefore = GC.GetTotalAllocatedBytes(true);
-            for (var index = 0; index < MemoryCalls; index++)
+            if (options.Results.Wants("exchange.throughput", row))
             {
-                await Exchange();
-            }
+                var done = 0L;
+                var clock = Stopwatch.StartNew();
+                while (clock.Elapsed.TotalSeconds < options.Seconds)
+                {
+                    await Task.WhenAll(Enumerable.Range(0, Concurrency).Select((_) => { return Exchange(); }));
+                    done += Concurrency;
+                }
 
-            var allocated = (GC.GetTotalAllocatedBytes(true) - allocatedBefore) / (double)MemoryCalls;
-            options.Results.Record("exchange.memory", allocated, row with { Unit = "B/exchange" });
-            var done = 0L;
-            clock.Restart();
-            while (clock.Elapsed.TotalSeconds < options.Seconds)
-            {
-                await Task.WhenAll(Enumerable.Range(0, Concurrency).Select((_) => { return Exchange(); }));
-                done += Concurrency;
+                options.Results.Record("exchange.throughput", done / clock.Elapsed.TotalSeconds, row with { Unit = "exchanges/s" });
             }
-
-            options.Results.Record("exchange.throughput", done / clock.Elapsed.TotalSeconds, row with { Unit = "exchanges/s" });
         }
     }
 
@@ -702,8 +795,12 @@ internal static class Program
     private static async Task Main(string[] args)
     {
         var options = Parse(args);
-        var results = new Measurements();
-        await using var remote = options.TranscodingOnly ? null : await InteropProcess.Create();
+        var results = new Measurements(options.Filter);
+        var needsInterop = !options.TranscodingOnly && NetworkTransports.Any((transport) =>
+        {
+            return results.WantsCalls(new Dimensions { Scenario = "interop", Transport = transport });
+        });
+        await using var remote = needsInterop ? await InteropProcess.Create() : null;
         for (var run = 0; run < options.Runs; run++)
         {
             await Console.Error.WriteLineAsync($"run {run + 1}/{options.Runs}");
@@ -719,29 +816,45 @@ internal static class Program
             {
                 foreach (var scenario in new[] { "local", "interop" })
                 {
+                    if (!results.WantsCalls(new Dimensions { Scenario = scenario, Transport = transport }) && !(scenario == "local" && results.WantsNotifications(transport)))
+                    {
+                        continue;
+                    }
+
                     var port = scenario == "interop" ? (int?)(transport == "http" ? remote!.Ports.HttpPort : remote!.Ports.Port) : null;
                     await using var connection = await Connect(transport, new ConnectOptions(Port: port));
                     await Calls(connection, (results, new Dimensions { Scenario = scenario, Transport = transport }, options.Seconds));
-                    if (scenario == "local")
+                    if (scenario == "local" && results.WantsNotifications(transport))
                     {
                         await Notifications(connection, (results, transport, options.Seconds));
                     }
                 }
 
-                await using var large = await Connect(transport, new ConnectOptions(Large: true));
-                await Transfer(large, (results, transport, options.Seconds));
+                if (results.WantsTransfer(transport))
+                {
+                    await using var large = await Connect(transport, new ConnectOptions(Large: true));
+                    await Transfer(large, (results, transport, options.Seconds));
+                }
             }
 
-            await using (var memory = await Connect("memory"))
+            if (results.WantsCalls(new Dimensions { Transport = "memory" }))
             {
+                await using var memory = await Connect("memory");
                 await Calls(memory, (results, new Dimensions { Transport = "memory" }, options.Seconds));
             }
 
-            await Exchanges((results, options.Seconds));
+            if (results.WantsCalls(new Dimensions { Transport = "memory" }, "exchange"))
+            {
+                await Exchanges((results, options.Seconds));
+            }
         }
 
         var node = JsonSerializer.Deserialize<JsonElement>(await Output("node", ["-p", "JSON.stringify({node:process.versions.node,v8:process.versions.v8,cpu:require('node:os').cpus()[0].model.trim(),count:require('node:os').cpus().length,platform:require('node:os').platform(),release:require('node:os').release(),architecture:require('node:os').arch()})"]));
         var measures = results.Summarize();
+        if (measures.Length == 0)
+        {
+            throw new ArgumentException($"filter matches no measurement: {options.Filter}");
+        }
         var report = new
         {
             Schema = "bead-bench/1",
@@ -756,6 +869,7 @@ internal static class Program
             Method = new
             {
                 options.Runs,
+                options.Filter,
                 options.Seconds,
                 Concurrency,
                 NotificationIntervalMs = 1,

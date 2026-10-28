@@ -10,13 +10,12 @@ capitals, as shown here.
 This document is a companion of [`spec.md`](spec.md), which states the wire, as
 [`debugging.md`](debugging.md) is: a gateway is beside the wire, never in place of it, one more
 client of a server, and a side may offer none. Sections 2 to 10 each name the conformance file that
-checks them, [`transcoding.json`](transcoding.json), whose entries play the messages and the
-service of `spec/transcoding.proto`, and the messages it imports from
-`spec/transcoding-required.proto`, of edition 2023, whose fields protobuf requires; sections 11 and
-12 name none: the builder's tests hold the
-document it writes, and each side's twin tests its client. Each entry cites the units it checks, which
-[`transcoding-units.txt`](transcoding-units.txt) lists, each cited or why no entry cites it, with the
-hash of its text. The why of each rule is in the decisions:
+checks them, [`transcoding.json`](transcoding.json), whose entries play the messages and the service
+of `spec/transcoding.proto`, and the messages it imports from `spec/transcoding-required.proto`, of
+edition 2023, whose fields protobuf requires; sections 11 and 12 name none: the builder's tests hold
+the document it writes, and each side's twin tests its client. Each entry cites the units it checks,
+which [`transcoding-units.txt`](transcoding-units.txt) lists, each cited or why no entry cites it,
+with the hash of its text. The why of each rule is in the decisions:
 
 - [0037](../docs/decisions/0037-a-procedure-is-also-an-http-route-which-a-gateway-answers-as-one-more-client-of-its-server.md):
   the whole of it;
@@ -42,7 +41,7 @@ hash of its text. The why of each rule is in the decisions:
 - [0022](../docs/decisions/0022-a-proto-becomes-one-checked-blueprint-and-each-language-is-generated-from-it.md):
   the blueprint its routes come from, and the document its builder writes (3.9, 11).
 
-**Version: 0.1.0**. Its conformance file repeats it as its `transcodingVersion`, and follows its
+**Version: 0.2.0**. Its conformance file repeats it as its `transcodingVersion`, and follows its
 schema in [`schemas/`](schemas/). It moves by `spec.md`'s rule, under a version of its own
 ([0008](../docs/decisions/0008-three-version-axes-and-names-qualified-by-their-owner.md)): the minor
 when a gateway that conforms to its last version must change to conform to this one, the patch when
@@ -487,10 +486,10 @@ it, by the JSON name of each field ([RFC 6901 §6](https://www.rfc-editor.org/rf
 It resolves there ([RFC 6901 §4](https://www.rfc-editor.org/rfc/rfc6901#section-4)) where the
 body names each field on its way by its JSON name and holds it. It names a field left unset (step
 4 of section 5.2) as the member its object lacks, an evaluation RFC 6901 makes an error, which is
-its meaning here. A name or a key past 64 bytes of UTF-8 is never written into it, and it points at the value that
-holds that name or key, a violation's key cut short (section 18.4 of `spec.md`) alike. A
-`parameter`, which is no pointer, writes such a name as section 18.4 cuts a key, its first 64 bytes,
-back to the start of the character the cut fell in, then `...`.
+its meaning here. A name or a key past 64 bytes of UTF-8 is never written into it, and it points at
+the value that holds that name or key, a violation's key cut short (section 18.4 of `spec.md`)
+alike. A `parameter`, which is no pointer, writes such a name as section 18.4 cuts a key, its first
+64 bytes, back to the start of the character the cut fell in, then `...`.
 
 7.5. A gateway answers each failure by where it arose, since it is a requester, and raises some
 codes of its server's answer, which its HTTP client cannot mend:
