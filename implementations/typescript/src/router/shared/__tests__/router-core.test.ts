@@ -905,8 +905,12 @@ test.describe('createRouterCore', () => {
       // what the core holds as its report listener disposes it
       const disposed: { answering?: number | undefined; isDisposed: boolean }[] = [];
 
+      const requests: IRequestResolverProps<Handle>[] = [];
+
       core.registerResolver(
-        Object.assign(() => {
+        Object.assign((props: IRequestResolverProps<Handle>) => {
+          requests.push(props);
+
           throw failure;
         }, echo)
       );
@@ -932,6 +936,9 @@ test.describe('createRouterCore', () => {
         [new DisconnectError('the router was disposed'), 'a'],
       ]);
       expect(core.gauges().counts['answeringCalls']).toBe(0);
+      // its call closed as its answer failed, before what the dispose lets go: nothing aborted
+      expect(requests).toHaveLength(1);
+      expect(requests[0]?.signal.aborted).toBe(false);
     });
 
     test('lets go of the call id of a resolver that fails without answering, and of that one alone', async () => {

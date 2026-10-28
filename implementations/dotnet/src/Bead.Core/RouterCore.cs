@@ -582,23 +582,13 @@ internal sealed partial class RouterCore : IDisposable
                         _port.Report(reason, target.ConnectionHandle);
                     }
 
-                    if (!_answeringCalls.IsAnswering(target))
-                    {
-                        return;
-                    }
-
                     // ! a resolver that fails before it answers is answered PROCEDURE_FAILED, so its
                     // requester does not wait out its timeout (spec 9.5); a call cancelled, or gone
-                    // with its connection, is answered nothing
-                    if (answering.IsAborted)
+                    // with its connection, is answered nothing, and one answered keeps its answer
+                    if (_answeringCalls.IsAnswering(target))
                     {
-                        EndAnswered(answering, (CallOutcome.Error, null));
-                        _answeringCalls.Close(new CallAddress(target.Header.CallId, target.ConnectionHandle), answering);
-
-                        return;
+                        Refuse(ProtocolFailureOf(ProtocolCode.ProcedureFailed), (target, answering));
                     }
-
-                    Refuse(ProtocolFailureOf(ProtocolCode.ProcedureFailed), (target, answering));
                 },
                 CancellationToken.None,
                 TaskContinuationOptions.DenyChildAttach,

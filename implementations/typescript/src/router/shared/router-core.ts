@@ -662,6 +662,12 @@ export const createRouterCore = <Handle extends string>(
         : endingOf(response.failure);
 
     try {
+      // ! disposed, it fails in this turn, its call closed before what the dispose lets go in a
+      // later one finds it (spec 9.0)
+      if (isDisposed) {
+        throw new DisconnectError(DISPOSED);
+      }
+
       await (transfer === undefined
         ? deliver(
             response.failure === undefined
@@ -769,21 +775,12 @@ export const createRouterCore = <Handle extends string>(
         });
       }
 
-      // one answered keeps its answer
-      if (!answeringCalls.isAnswering({ connectionHandle, header })) {
-        return;
-      }
-
       // ! a resolver that fails before it answers is answered PROCEDURE_FAILED, so its requester
       // does not wait out its timeout (spec 9.5); a call cancelled, or gone with its connection, is
-      // answered nothing
-      if (controller.signal.aborted) {
-        return (
-          answeringCalls.close({ callId: header.callId, connectionHandle }, controller), undefined
-        );
+      // answered nothing, and one answered keeps its answer
+      if (answeringCalls.isAnswering({ connectionHandle, header })) {
+        refuse(failures.procedureFailed, dispatched);
       }
-
-      refuse(failures.procedureFailed, dispatched);
     };
 
     // admitted already, before its payload was read: the resolver asks nothing again

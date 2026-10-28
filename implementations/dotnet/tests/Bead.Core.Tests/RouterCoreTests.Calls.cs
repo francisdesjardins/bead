@@ -812,6 +812,9 @@ public sealed partial class RouterCoreTests
         Assert.Equal("the router was disposed", Assert.IsType<DisconnectException>(server.Reports[1]).Message);
         Assert.Equal(["a", "a"], server.ReportedOn);
         Assert.Equal(0, (await GaugesOf(server)).Counts["answeringCalls"]);
+
+        // its call closed as its answer failed, before what the dispose lets go: nothing cancelled
+        Assert.False(Assert.Single(resolver.Requests).Signal.IsCancellationRequested);
     }
 
     [Fact]
