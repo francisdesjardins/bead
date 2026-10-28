@@ -43,6 +43,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - An AMQP 1.0 sending link whose ATTACH is answered with no target is refused on the TypeScript side
   as on the C# side: nothing is sent on it, its start fails, and a later one refuses what it held,
   its link kept; on the C# side a start fails at once on either sender's refusal (spec 15.33).
+- An AMQP 1.0 publication on the C# side asked as its broker ends the sending session, its END
+  answered before AMQPNetLite marks the session ended, goes on the next session, as the TypeScript
+  side's does, rather than being refused with nothing sent (spec 15.33).
 
 ## [0.8.0] - 2026-10-28
 
