@@ -441,6 +441,31 @@ test.describe('createAmqpBrokerAdapter', () => {
     expect(link.deliveries).toHaveLength(1);
   });
 
+  test('fails an inbox subscription awaiting its ATTACH with its stop and tells no loss (spec 15.33)', async () => {
+    const adapter = adapterOf(script);
+    const { downs } = heardOf(adapter);
+    const link = await linkUp({ adapter, script });
+
+    let isAttaching = false;
+
+    script.policy.attach = ({ address }) => {
+      isAttaching ||= address === INBOX_QUEUE;
+
+      return address === INBOX_QUEUE ? 'hold' : 'take';
+    };
+
+    const subscribing = settledOf(adapter.subscribe(INBOX));
+
+    await link.until(() => {
+      return isAttaching;
+    });
+    await adapter.stop();
+    expect(await subscribing).toBeInstanceOf(Error);
+    expect(((await subscribing) as Error).message).toBe('the link of ada stopped');
+    await link.closed;
+    expect([downs, adapter.isLinked]).toEqual([[], false]);
+  });
+
   test('refuses its start when a sending link is refused, and a publication whose fresh sending link is refused, sending nothing on it and keeping its link (spec 15.33)', async () => {
     const refusing = (): void => {
       script.policy.attach = ({ address, role }) => {

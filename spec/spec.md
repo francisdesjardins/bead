@@ -2111,8 +2111,15 @@ closes its connection, and its inbox is never attached again in place, since a r
 hands its unsettled messages back on the same connection. A name's receiver its broker ends is
 attached again once, on a session of its own; that refused, or the name lost again on the same
 link, is its link lost. A sending session that ends refuses each publication it held, its link
-kept, and the next publication begins another. A participant's stop detaches its receivers and
-closes its connection with no error. No link of an id takes another over. Nothing of a link reaches
+kept, and the next publication begins another. A link of its own, its management's or a sending
+one, whose ATTACH is answered with no terminus of its own, no target to a sender and no source to a
+receiver, is refused, its DETACH to follow, and nothing is sent on it (AMQP 1.0 §2.6.3,
+[attach](https://docs.oasis-open.org/amqp/core/v1.0/os/amqp-core-transport-v1.0-os.html#type-attach)):
+a sending link refused as it starts fails its start, and one begun later refuses each publication
+it held, its link kept. A participant's stop detaches its receivers and closes its connection with
+no error; each publication without an outcome, sent or waiting for credit, and each subscription
+awaiting its ATTACH fail with its stop, none of them a no subscriber, which `released` alone tells
+(section 15.35). No link of an id takes another over. Nothing of a link reaches
 another: no library reconnects it, recovers it, or holds what it publishes while it is down, and
 what is asked of a link that is down is refused at once.
 

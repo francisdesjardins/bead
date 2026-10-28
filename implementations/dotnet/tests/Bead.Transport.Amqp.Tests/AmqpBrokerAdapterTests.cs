@@ -344,6 +344,37 @@ public sealed class AmqpBrokerAdapterTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Fails_an_inbox_subscription_awaiting_its_ATTACH_with_its_stop_and_tells_no_loss_spec_15_33()
+    {
+        await using var adapter = AdapterOf();
+        var (_, downs) = HeardOf(adapter);
+        var connection = await Started((adapter, _script));
+
+        _script.Holding = (frame) =>
+        {
+            return IsAttachOf(frame, InboxQueue);
+        };
+
+        var subscribing = adapter.Subscribe(Inbox);
+
+        await connection.Next((frame) =>
+        {
+            return IsAttachOf(frame, InboxQueue);
+        });
+        await adapter.Stop();
+        var failure = await FailureOf(() =>
+        {
+            return subscribing;
+        });
+
+        Assert.IsType<IOException>(failure);
+        Assert.Equal("the link of ada stopped", failure.Message);
+        await connection.Closed.WaitAsync(Patience, Cancelled);
+        Assert.Empty(downs);
+        Assert.False(adapter.IsLinked);
+    }
+
+    [Fact]
     public async Task Refuses_its_start_when_a_sending_link_is_refused_and_a_publication_whose_fresh_sending_link_is_refused_sending_nothing_on_it_and_keeping_its_link_spec_15_33()
     {
         var refusal = new Error(new Symbol("amqp:not-allowed")) { Description = "sender denied" };

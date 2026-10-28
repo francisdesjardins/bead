@@ -13,9 +13,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   TypeScript side as on the C# side: its DETACH's condition fails the request, and no request goes
   on its pair (AMQP 1.0 §2.6.3, spec 15.33).
 - An AMQP 1.0 stop on the C# side fails each publication without an outcome, sent or waiting for
-  credit, and each name's subscription awaiting its ATTACH with the stop's error, as the TypeScript
-  side does: a publication its library releases as its session ends is never told no subscriber
-  (spec 15.35).
+  credit, and each subscription awaiting its ATTACH, its inbox's or a name's, with the stop's error,
+  as the TypeScript side does: a publication its library releases as its session ends is never told
+  no subscriber (spec 15.33, 15.35).
 - An AMQP 1.0 sending link whose ATTACH is answered with no target is refused on the TypeScript side
   as on the C# side: nothing is sent on it, its start fails, and a later one refuses what it held,
   its link kept; on the C# side a start fails at once on either sender's refusal (spec 15.33).

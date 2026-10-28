@@ -692,8 +692,8 @@ public sealed class AmqpBrokerAdapter : IBrokerAdapter, IAsyncDisposable
     /// Ends its link with no error (spec 15.33): each receiver detached and its DETACH awaited, each
     /// session ended, then its CLOSE and its broker's, all within its connect timeout; its inbox ends
     /// with its connection. Each publication without an outcome, sent or waiting for credit, and each
-    /// name's subscription awaiting its ATTACH fail with its stop, an <see cref="IOException"/>.
-    /// Nothing where it has none.
+    /// subscription awaiting its ATTACH fail with its stop, an <see cref="IOException"/>. Nothing
+    /// where it has none.
     /// </summary>
     public async Task Stop()
     {
@@ -1203,6 +1203,11 @@ public sealed class AmqpBrokerAdapter : IBrokerAdapter, IAsyncDisposable
             }
 
             return await ReceiverOf((link, topic, queue), linked.Token);
+        }
+        catch (Exception reason) when (link.IsStopping)
+        {
+            // * its stop's failure, whichever of its ends came first
+            throw new IOException(link.Ended?.Message, reason);
         }
         catch (Exception reason) when (timeout.IsCancellationRequested && !token.IsCancellationRequested && !link.IsEnded)
         {
