@@ -2280,6 +2280,23 @@ public sealed class AmqpBrokerAdapterTests : IAsyncLifetime
         });
     }
 
+    [Fact]
+    public void Refuses_a_WebSocket_URL_and_a_page_naming_why()
+    {
+        foreach (var uri in new[] { "ws://broker.example/amqp", "wss://broker.example/amqp" })
+        {
+            var refused = Assert.Throws<ArgumentException>(() =>
+            {
+                return new AmqpBrokerAdapter(new AmqpBrokerAdapterOptions { Id = Id, Uri = new Uri(uri) });
+            });
+
+            Assert.StartsWith("AMQP 1.0 is carried over TCP or TLS alone: no open-source RabbitMQ 4 carries it over a WebSocket", refused.Message, StringComparison.Ordinal);
+            Assert.Equal("options", refused.ParamName);
+        }
+
+        // a page has no C# adapter: the TypeScript twin also refuses a runtime without Node
+    }
+
     [Fact(Skip = AmqpFixture.Reason, SkipUnless = nameof(IsBroker))]
     public async Task Carries_a_link_through_RabbitMQ_s_topic_exchange_a_name_s_queue_consumed_by_two_in_turn_spec_15_32()
     {

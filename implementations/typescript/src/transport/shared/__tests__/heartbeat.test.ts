@@ -145,6 +145,32 @@ test.describe('heartbeat', () => {
     expect(heard).toEqual(['ping']);
   });
 
+  test('starts a fresh silence after anything heard answers its ping, then drops a ping left unanswered', async () => {
+    const heard: string[] = [];
+    const heartbeat = createSilenceHeartbeat(100, {
+      drop: () => {
+        heard.push('drop');
+      },
+      ping: () => {
+        heard.push('ping');
+      },
+    });
+
+    try {
+      await until(() => {
+        return heard.length >= 1;
+      });
+      expect(heard).toEqual(['ping']);
+      heartbeat.heard();
+      await until(() => {
+        return heard.length >= 3;
+      });
+      expect(heard).toEqual(['ping', 'ping', 'drop']);
+    } finally {
+      heartbeat.stop();
+    }
+  });
+
   test('beats no more once its own ping stopped it', async () => {
     const heard: string[] = [];
     // * a ping that ends its connection, as one past what may wait for its broker does
