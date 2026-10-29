@@ -12,7 +12,9 @@ yanked = "deny"
 
 [licenses]
 version = 2
-allow = ["Apache-2.0", "MIT", "BSD-3-Clause", "Unicode-3.0", "BSL-1.0"]
+# Zlib, a permissive licence the OSI approves: foldhash's, which Buffa's runtime takes through
+# hashbrown
+allow = ["Apache-2.0", "MIT", "BSD-3-Clause", "Unicode-3.0", "BSL-1.0", "Zlib"]
 confidence-threshold = 0.93
 
 # the workspace's own crates, published nowhere, hold its licence
@@ -24,6 +26,11 @@ multiple-versions = "deny"
 wildcards = "deny"
 # a member's path to another member names no version, which no registry reads
 allow-wildcard-paths = true
+skip = [
+    # syn 2 beside bead-house's syn 3: buffa-codegen and prettyplease alone bring it, at build time,
+    # through bead-protobuf-build, the generator of the proto payload's messages; no runtime holds it
+    { crate = "syn@2", reason = "Buffa's generator alone brings it, at build time, beside bead-house's syn 3" },
+]
 
 [sources]
 unknown-registry = "deny"

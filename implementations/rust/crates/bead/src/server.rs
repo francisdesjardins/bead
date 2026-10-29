@@ -1139,7 +1139,7 @@ impl Server {
         )?;
         // * one clock for every layer: the transport's, or the one given, which the sessions and
         // the router are both handed
-        let runtime = crate::router::server::runtime_of(options.runtime.as_ref())?;
+        let runtime = crate::platform::runtime_of(options.runtime.as_ref(), "a router")?;
         let clock = clock_of(
             (transport.clock().as_ref(), options.clock.as_ref()),
             ("a server's router", "its transport"),

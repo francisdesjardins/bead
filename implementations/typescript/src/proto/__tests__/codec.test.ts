@@ -27,7 +27,10 @@ import {
 import { expect, test } from '@playwright/test';
 import { ProbeSchema, type Shade } from '../../router/shared/__tests__/codecs_pb';
 import { EdgesSchema, RequiringSchema } from '../../transcoding/__tests__/generated/transcoding_pb';
-import { NeedsSchema } from '../../transcoding/__tests__/generated/transcoding-required_pb';
+import {
+  NeedsSchema,
+  NeedsUpdateSchema,
+} from '../../transcoding/__tests__/generated/transcoding-required_pb';
 import { protoCodecOf } from '../codec';
 import { requiredShapeOf } from '../records';
 import { unsetPathOf } from '../required';
@@ -449,5 +452,23 @@ test.describe("a proto payload's codec of its schema", () => {
         return typeof step === 'object' ? step.name : step;
       })
     ).toEqual(['back', 'loop', 'back', 'must', 'must']);
+  });
+
+  test('refuses a message that leaves an edition’s required message field unset, reading and writing', () => {
+    const update = protoCodecOf(NeedsUpdateSchema);
+    const words = wordsOf('bead.transcoding.v1.NeedsUpdate.update_mask');
+    const read = thrownBy(() => {
+      return update.decode(bytesOf(''));
+    });
+    const written = thrownBy(() => {
+      return update.encode({});
+    });
+
+    expect(read).toBeInstanceOf(SyntaxError);
+    expect((read as Error).message).toBe(words);
+    expect(written).toBeInstanceOf(TypeError);
+    expect((written as Error).message).toBe(words);
+    // its mask given, empty
+    expect(hexOf(update.encode(update.decode(bytesOf('12 00'))))).toBe('12 00');
   });
 });

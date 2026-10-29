@@ -1,0 +1,56 @@
+// What neither Probe, of spec/codecs.proto, nor Requiring holds, for the runtime codec's tests: a
+// oneof of a closed enum, an extension of a message that requires a field, and a cycle through a
+// message that reaches one (Loop holds Back, which holds Loop and Must), beside one that reaches
+// none (Alone); then a closed enum held three ways a singular field is not, which the generator
+// opens. The C# side's Protos/codec.proto holds the same messages, and the TypeScript side's
+// codec.test.ts builds them.
+syntax = "proto2";
+
+package bead.test;
+
+enum Tone {
+  TONE_LOW = 0;
+  TONE_HIGH = 1;
+}
+
+message Toned {
+  oneof pick {
+    Tone tone = 1;
+    string word = 2;
+  }
+}
+
+message Holder {
+  extensions 100 to 200;
+}
+
+extend Holder {
+  optional Must inner = 100;
+}
+
+message Must {
+  required int32 must = 1;
+}
+
+message Loop {
+  optional Back back = 1;
+}
+
+message Back {
+  optional Loop loop = 1;
+  optional Must must = 2;
+}
+
+message Alone {
+  optional Alone alone = 1;
+}
+
+// A closed enum as a repeated field's item, expanded and packed, and as a map's value, each kept
+// as the item or the value it is (the leveled row of docs/support.md), and a singular one, set
+// aside (spec 17.9.8).
+message Leveled {
+  repeated Tone tones = 1;
+  repeated Tone packed = 2 [packed = true];
+  map<string, Tone> by_name = 3;
+  optional Tone one = 4;
+}

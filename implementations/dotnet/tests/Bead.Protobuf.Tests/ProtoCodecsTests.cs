@@ -316,4 +316,23 @@ public sealed class ProtoCodecsTests
             return step.Field.Name;
         }), unset.Field.Name]);
     }
+
+    [Fact]
+    public void Refuses_a_message_that_leaves_an_edition_s_required_message_field_unset_reading_and_writing()
+    {
+        var update = ProtoCodecs.Of<NeedsUpdate>();
+        var words = WordsOf("bead.transcoding.v1.NeedsUpdate.update_mask");
+
+        Assert.Equal(words, Assert.Throws<FormatException>(() =>
+        {
+            return update.Decode(BytesOf(""));
+        }).Message);
+        Assert.Equal(words, Assert.Throws<FormatException>(() =>
+        {
+            return update.Encode(new NeedsUpdate());
+        }).Message);
+
+        // its mask given, empty
+        Assert.Equal("12 00", HexOf(update.Encode(update.Decode(BytesOf("12 00")))));
+    }
 }

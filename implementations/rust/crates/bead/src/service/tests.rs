@@ -149,7 +149,7 @@ async fn counts_a_call_its_rules_refuse_before_it_goes_as_payload_invalid_starte
         .run(move |_state| reading.exposition().text)
         .await
         .expect("read on its owner");
-    let refused = tokio::time::timeout(Duration::from_secs(10), refusing)
+    let refused = crate::testing::patience(Duration::from_secs(10), refusing)
         .await
         .expect("refused at once");
 

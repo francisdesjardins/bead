@@ -395,7 +395,8 @@ impl MemoryBroker {
     ///
     /// # Errors
     ///
-    /// A [`ProgrammerError`] outside a tokio runtime, given none, or for a bound under 1.
+    /// A [`ProgrammerError`] outside a tokio runtime, given none, on one without its time driver,
+    /// or for a bound under 1.
     pub fn new(options: &MemoryBrokerOptions) -> Result<Self, ProgrammerError> {
         for (name, bound) in [
             ("maximumMessageBytes", options.maximum_message_bytes),
@@ -408,14 +409,7 @@ impl MemoryBroker {
             }
         }
 
-        let runtime = match &options.runtime {
-            Some(runtime) => runtime.clone(),
-            None => Handle::try_current().map_err(|_none| {
-                ProgrammerError::new(
-                    "an in-memory broker is built within a tokio runtime, or given its handle",
-                )
-            })?,
-        };
+        let runtime = crate::platform::runtime_of(options.runtime.as_ref(), "an in-memory broker")?;
         let clock: SharedClock = match &options.clock {
             Some(clock) => Arc::clone(clock),
             None => Arc::new(SystemClock::new(runtime.clone())),

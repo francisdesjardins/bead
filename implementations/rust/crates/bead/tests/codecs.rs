@@ -1,6 +1,7 @@
 //! `spec/codecs.json` played against the Rust side's codecs: each payload read, and written back or
 //! refused, and each value written or refused, through its encoding's codec. The `proto` entries
-//! are ahead with `Rust's proto codec`; an entry whose `differs` excuses Rust is not played.
+//! are `bead-protobuf`'s player's, `crates/bead-protobuf/tests/codecs.rs`, since the core never
+//! depends on protobuf; an entry whose `differs` excuses Rust is not played.
 
 use std::process::ExitCode;
 

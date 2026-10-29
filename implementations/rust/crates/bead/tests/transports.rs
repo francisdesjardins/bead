@@ -5,6 +5,12 @@
 //! broker, publishing parcels and reading their inboxes. A trial a case; the cases over HTTP,
 //! WebSocket, MQTT 5 and AMQP 1.0 are ahead, with the stages that bring their transports.
 
+#![expect(
+    clippy::disallowed_methods,
+    clippy::disallowed_types,
+    reason = "a native target: its trials run on tokio's timers and measure on std's instant"
+)]
+
 #[expect(
     dead_code,
     reason = "the cases read envelopes and limits as the conversations do, and play none"

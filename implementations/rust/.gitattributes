@@ -1,0 +1,2 @@
+# A descriptor set protoc writes is its bytes as they are: no normalisation may touch them.
+*.binpb binary

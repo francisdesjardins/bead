@@ -32,7 +32,7 @@ use crate::router::core::{
 };
 use crate::router::relay::{RelayLeg, RelayRouter};
 use crate::router::requester::CoreRequest;
-use crate::router::server::{Call, CallHooks, runtime_of};
+use crate::router::server::{Call, CallHooks};
 use crate::router::types::{
     BoxFuture, CallAddress, ConnectionHandle, Gauges, RequestCredential, ResolvedRequestOptions,
     RouterActivity, RouterError, RouterLimits, RouterLimitsOptions, RouterResult, Signal,
@@ -672,7 +672,7 @@ impl RouterClient {
         transport: Arc<dyn ClientTransport>,
         options: &RouterClientOptions,
     ) -> Result<Self, ProgrammerError> {
-        let runtime = runtime_of(options.runtime.as_ref())?;
+        let runtime = crate::platform::runtime_of(options.runtime.as_ref(), "a router")?;
         let clock = crate::clock::clock_of(
             (transport.clock().as_ref(), options.clock.as_ref()),
             ("a client's router", "its transport"),

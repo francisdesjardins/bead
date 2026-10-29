@@ -40,7 +40,6 @@ impl Sequence {
     }
 
     /// The next sequence awaited.
-    #[cfg(test)]
     pub(crate) const fn awaited(&self) -> u64 {
         self.awaited
     }

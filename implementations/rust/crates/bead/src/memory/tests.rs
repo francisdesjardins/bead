@@ -728,7 +728,7 @@ async fn carries_a_transfer_under_its_routers_credit() {
 
     pair.settle().await;
 
-    let echoed = tokio::time::timeout(Duration::from_secs(10), call)
+    let echoed = crate::testing::patience(Duration::from_secs(10), call)
         .await
         .expect("answered within its patience")
         .expect("echo answered");
@@ -847,7 +847,7 @@ async fn rejects_with_a_reconnect_error_carrying_the_last_failure_as_cause_endin
         "reconnecting as it is asked"
     );
 
-    let reconnected = tokio::spawn(reconnection);
+    let reconnected = crate::testing::spawn(reconnection);
 
     clock.settle().await;
     clock.advance(Duration::from_secs(1)).await;
@@ -868,7 +868,7 @@ async fn rejects_with_a_reconnect_error_carrying_the_last_failure_as_cause_endin
 #[tokio::test]
 async fn refuses_a_second_reconnection_leaving_the_first_alone() {
     let (clock, client) = never_started().await;
-    let first = tokio::spawn(
+    let first = crate::testing::spawn(
         client
             .reconnect(reconnecting((Duration::from_secs(1), 2)))
             .expect("a reconnection"),
