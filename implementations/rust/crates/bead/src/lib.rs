@@ -69,6 +69,7 @@ pub use credentials::{
     Credentials, ElsewhereSession, ElsewhereVerdict, ElsewhereVerifier, JWT_LIMIT_BYTES, JwtKeySet,
     JwtSetKey, KeySetAnswer, KeySetAsk, assert_limits_hold_jwt,
 };
+pub use debug::participant::{ParcelVerdict, ParticipantDebugEvent, ParticipantDebugListener};
 pub use debug::{
     CallAsked, DebugDirection, DebugFilter, DebugFilterSource, DebugType, EnvelopeAsked,
     FilterGiven, FilterKeeper, FilterRefusal, GivenFilter, TracedEnvelope, parse_debug_filter,
