@@ -54,6 +54,7 @@ mod router_core_token_provider;
 mod router_core_writer;
 mod server;
 mod server_commands;
+mod server_edges;
 mod server_filter;
 mod server_notifications;
 mod server_pacing;
