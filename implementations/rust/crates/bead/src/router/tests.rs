@@ -42,6 +42,8 @@ mod router_core_outcomes;
 mod router_core_requester;
 mod router_core_rest;
 mod router_core_session_errors;
+mod router_core_session_handoff;
+mod router_core_session_refusals;
 mod router_core_sessions;
 mod router_core_writer;
 mod server;
