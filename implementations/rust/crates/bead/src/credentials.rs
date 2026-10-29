@@ -25,6 +25,7 @@ use crate::jwt_verifier::{
 };
 use crate::router::core::{Resolved, Unresolved};
 use crate::router::types::{BoxFuture, CallSession, RouterLimits, SessionIdentifier};
+use crate::transport::{caught, caught_future};
 
 #[cfg(test)]
 mod tests;
@@ -539,10 +540,17 @@ fn ask_now(
     let issuer = issuer.to_owned();
 
     if let Some(ask) = inner.ask.clone() {
-        let asking = ask(issuer.clone(), signal);
+        // ! the key set's ask is the application's: what it panics, as it is asked or as its
+        // answer is awaited, is its throw, failing its ask at once (decision 0044)
+        let asking = caught(("a key set's ask", || ask(issuer.clone(), signal)));
 
         crate::owner::spawn_counted((&inner.runtime, &inner.clock), async move {
-            let answered = asking.await;
+            let answered: KeySetAnswer = match asking {
+                Ok(asking) => caught_future(("a key set's ask", asking))
+                    .await
+                    .unwrap_or_else(|panicked| Err(Box::new(panicked))),
+                Err(panicked) => Err(Box::new(panicked)),
+            };
 
             answer(&weak, (&issuer, id, answered));
         });
@@ -862,8 +870,13 @@ async fn resolve_elsewhere(
     let Some(verify) = inner.verify.clone() else {
         return Ok(Resolved::None);
     };
-    let session = verify(carried, signal)
+    // ! the verifier is the application's: what it panics, as it is called or as it is awaited, is
+    // its throw (decision 0044)
+    let verifying = caught(("a verifier", || verify(carried, signal)))
+        .map_err(|panicked| Unresolved::Other(Arc::new(panicked)))?;
+    let session = caught_future(("a verifier", verifying))
         .await
+        .map_err(|panicked| Unresolved::Other(Arc::new(panicked)))?
         .map_err(|error| Unresolved::Other(Arc::from(error)))?;
     let Some(session) = session else {
         return Ok(Resolved::Refused("verifier".to_owned()));

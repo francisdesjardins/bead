@@ -183,10 +183,10 @@ impl ServerTransport for Paired {
         Box::pin(async { Ok(()) })
     }
 
-    fn stop(&self) -> BoxFuture<()> {
+    fn stop(&self) -> BoxFuture<Result<(), RouterError>> {
         locked(&self.calls).push("shutdown".to_owned());
 
-        Box::pin(async {})
+        Box::pin(async { Ok(()) })
     }
 
     fn gauges(&self) -> Option<Gauges> {
@@ -238,8 +238,8 @@ impl ServerTransport for Silent {
         Box::pin(async { Ok(()) })
     }
 
-    fn stop(&self) -> BoxFuture<()> {
-        Box::pin(async {})
+    fn stop(&self) -> BoxFuture<Result<(), RouterError>> {
+        Box::pin(async { Ok(()) })
     }
 
     fn transport_type(&self) -> Option<&str> {
@@ -816,7 +816,7 @@ async fn stops_every_transport_it_joined_and_sums_their_gauges() {
         "one closed, counted by its events"
     );
 
-    joined.stop().await;
+    joined.stop().await.expect("stopped");
     clock.settle().await;
 
     assert_eq!(

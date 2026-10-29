@@ -28,7 +28,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   that keep selection, focus and scroll across readings.
 - The builder's image runs Node 26.13.0, Node 26's first LTS release.
 - `spec/check.py` holds a side that plays part of the corpus to what its steps and stages name
-  ahead, each a row of the support matrix; `tools/coverage-report.mjs` reads LLVM's coverage
+  ahead, each a row of the support matrix, and fails a row of its differences that has not one cell
+  for each column of its header; `tools/coverage-report.mjs` reads LLVM's coverage
   export, and fails a floor on a measure that no report measured; `tools/protobuf-conformance.mjs`
   runs protobuf's conformance suite through the Rust side's codec too, its differential kept to the
   TypeScript and C# sides. The spec's front matter says a side conforms to section 15 for each

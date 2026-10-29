@@ -8,8 +8,20 @@ use std::sync::Arc;
 use std::time::SystemTime;
 
 use crate::errors::ProgrammerError;
+use crate::platform::Handle;
 
 pub use native::SystemClock;
+
+#[cfg(test)]
+mod tests;
+
+/// How the platform's clock is built.
+#[derive(Debug, Clone, Default)]
+#[non_exhaustive]
+pub struct SystemClockOptions {
+    /// The runtime its timers run on: the current one when none.
+    pub runtime: Option<Handle>,
+}
 
 /// When a timer fires: once, after its due, or every period, its first after one.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -66,7 +78,7 @@ mod native {
 
     use tokio::task::AbortHandle;
 
-    use super::{Clock, Schedule, Timer, TimerCallback};
+    use super::{Clock, Schedule, SystemClockOptions, Timer, TimerCallback};
     use crate::errors::ProgrammerError;
     use crate::platform::{self, Handle};
 
@@ -78,13 +90,15 @@ mod native {
     }
 
     impl SystemClock {
-        /// The platform's clock, on the runtime `handle`.
-        #[must_use]
-        pub fn new(handle: Handle) -> Self {
-            Self {
-                handle,
-                origin: Instant::now(),
-            }
+        /// The platform's clock, on the runtime its options give, or the current one, its time
+        /// driver checked as it is built.
+        ///
+        /// # Errors
+        ///
+        /// A [`ProgrammerError`] outside a tokio runtime, given none, or on one without its time
+        /// driver.
+        pub fn new(options: &SystemClockOptions) -> Result<Self, ProgrammerError> {
+            platform::runtime_of(options.runtime.as_ref(), "a clock").map(Self::on)
         }
 
         /// The platform's clock, on the current runtime.
@@ -93,7 +107,15 @@ mod native {
         ///
         /// A [`ProgrammerError`] outside a tokio runtime, or on one without its time driver.
         pub fn current() -> Result<Self, ProgrammerError> {
-            platform::runtime_of(None, "a clock").map(Self::new)
+            Self::new(&SystemClockOptions::default())
+        }
+
+        // the platform's clock on `handle`, a runtime its part checked as it was built
+        pub(crate) fn on(handle: Handle) -> Self {
+            Self {
+                handle,
+                origin: Instant::now(),
+            }
         }
     }
 

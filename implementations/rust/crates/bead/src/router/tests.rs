@@ -27,8 +27,10 @@ use crate::testing::scripted::ScriptedClient;
 
 mod calls;
 mod client;
+mod disposal;
 mod limits;
 mod metrics;
+mod panics;
 mod parts;
 mod requester;
 mod router_core;
@@ -57,6 +59,7 @@ mod server_pacing;
 mod server_requests;
 mod server_unsubscribe;
 mod server_waiting;
+mod timers;
 mod transfer;
 
 // the timeout of a call that sets none of its own

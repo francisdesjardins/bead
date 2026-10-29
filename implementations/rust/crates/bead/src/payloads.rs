@@ -11,6 +11,7 @@ use serde::de::DeserializeOwned;
 use serde_json::Value;
 
 use crate::json::{self, JsonRefusal};
+use crate::transport::caught;
 
 #[cfg(test)]
 mod tests;
@@ -72,6 +73,20 @@ pub trait PayloadCodec: Send + Sync + fmt::Debug + 'static {
 
     /// The encoding's name, as a blueprint names it.
     fn encoding(&self) -> &'static str;
+}
+
+/// What `codec` reads `bytes` to, within a guard: a codec is the application's code, and what it
+/// panics is its throw, a refusal saying it, as both other sides take any throw of a decode
+/// (decision 0044).
+pub(crate) fn decoded<C: PayloadCodec>(codec: &C, bytes: &Bytes) -> Result<C::Value, CodecRefusal> {
+    caught(("a codec", || codec.decode(bytes)))
+        .unwrap_or_else(|panicked| Err(CodecRefusal::new(panicked.to_string())))
+}
+
+/// The bytes `codec` writes `value` to, within a guard, as [`decoded`] reads.
+pub(crate) fn encoded<C: PayloadCodec>(codec: &C, value: &C::Value) -> Result<Bytes, CodecRefusal> {
+    caught(("a codec", || codec.encode(value)))
+        .unwrap_or_else(|panicked| Err(CodecRefusal::new(panicked.to_string())))
 }
 
 /// `raw`: a payload's bytes as they are, any of them, none included (spec 17.3).

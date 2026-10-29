@@ -172,8 +172,8 @@ impl ServerTransport for Scripted {
         Box::pin(async { Ok(()) })
     }
 
-    fn stop(&self) -> BoxFuture<()> {
-        Box::pin(async {})
+    fn stop(&self) -> BoxFuture<Result<(), RouterError>> {
+        Box::pin(async { Ok(()) })
     }
 }
 
@@ -1026,10 +1026,11 @@ pub(crate) async fn play(conversation: &Value, options: PlayOptions) -> Result<(
 
     connections.close_all();
     clock.settle().await;
-    server.dispose().await;
+    let disposed = server.dispose().await.map_err(|error| error.to_string());
+
     clock.settle().await;
 
-    played
+    played.and(disposed)
 }
 
 // what the server did that its conversation did not expect, once it settled: nothing, between

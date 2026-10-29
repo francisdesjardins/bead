@@ -6,7 +6,7 @@ use core::fmt;
 use core::time::Duration;
 use std::collections::BTreeMap;
 use std::error::Error;
-use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
+use std::sync::{Arc, Mutex, MutexGuard, PoisonError, Weak};
 
 use bytes::Bytes;
 use tokio::runtime::Handle;
@@ -39,7 +39,9 @@ use crate::router::types::{
     TransportMessage, limits_of,
 };
 use crate::session_token::SessionToken;
-use crate::transport::{ClientListener, ClientTransport, Sent};
+use crate::transport::{
+    ClientListener, ClientTransport, Listened, ListenerId, Panicked, Sent, caught,
+};
 
 /// A notification a client's router hears: its procedure, its window, and what hears each payload
 /// and its drop.
@@ -166,10 +168,10 @@ struct Bound {
 
 #[derive(Default)]
 struct ClientListeners {
-    error: Mutex<Vec<ClientErrorListener>>,
-    debug: Mutex<Vec<ClientEnvelopeListener>>,
-    activity: Mutex<Vec<ClientActivityListener>>,
-    withdrawn: Mutex<Vec<WithdrawnListener>>,
+    error: Listened<ClientErrorListener>,
+    debug: Listened<ClientEnvelopeListener>,
+    activity: Listened<ClientActivityListener>,
+    withdrawn: Listened<WithdrawnListener>,
 }
 
 fn locked<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -178,9 +180,7 @@ fn locked<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
 
 impl ClientListeners {
     fn report(&self, error: &RouterError) {
-        let listeners = locked(&self.error).clone();
-
-        for listener in listeners {
+        for listener in self.error.all() {
             // ! a listener of errors that panics would loop: its panic is dropped
             let called = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| listener(error)));
 
@@ -189,10 +189,8 @@ impl ClientListeners {
     }
 
     // each listener within a guard: what one panics is reported, and the others heard
-    fn guarded<T: Clone, C: Fn(&T)>(&self, (listeners, call): (&Mutex<Vec<T>>, C)) {
-        let listening = locked(listeners).clone();
-
-        for listener in listening {
+    fn guarded<T: Clone, C: Fn(&T)>(&self, (listeners, call): (&Listened<T>, C)) {
+        for listener in listeners.all() {
             let called = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| call(&listener)));
 
             if let Err(panicked) = called {
@@ -219,8 +217,11 @@ fn key_of(notification: &dyn NotificationLike) -> (u16, u16) {
 /// What a client's router holds, in its owner.
 pub(crate) struct ClientState {
     core: Core<Self>,
-    transport: Arc<dyn ClientTransport>,
-    listener: Option<Arc<dyn ClientListener>>,
+    // ! its transport and its bridge held weakly: the transport holds the bridge, which holds the
+    // owner, so a strong edge back would keep the owner of its own (decision 0044); the handle holds
+    // the transport strongly, so it goes only once nothing holds the router
+    transport: Weak<dyn ClientTransport>,
+    listener: Option<Weak<dyn ClientListener>>,
     credentials: CredentialResolver,
     notifications: Registered,
     hearings: Arc<Mutex<BTreeMap<(u16, u16), NotificationSeries>>>,
@@ -249,6 +250,19 @@ fn server_handle() -> ConnectionHandle {
 impl ClientState {
     fn report_error(&self, error: &RouterError) {
         self.listeners.report(error);
+    }
+
+    // lets go of what it holds: its transport's events, its session, every call
+    fn dispose(&mut self) {
+        if let Some(listener) = self.listener.take().and_then(|listener| listener.upgrade())
+            && let Some(transport) = self.transport.upgrade()
+        {
+            transport.unlisten(&listener);
+        }
+
+        *locked(&self.session_token) = None;
+        crate::router::core::dispose(self);
+        self.drop_notifications();
     }
 
     // a paced subscription credits as far as its window reaches past what settled, once that is
@@ -507,7 +521,7 @@ impl Side for ClientState {
     }
 
     fn is_tracing(&self) -> bool {
-        !locked(&self.listeners.debug).is_empty()
+        !self.listeners.debug.is_empty()
     }
 
     fn trace(
@@ -527,12 +541,27 @@ impl Side for ClientState {
         self.report_error(&error);
     }
 
+    // ! the application's transport, called within the turn: what it panics is its throw, the
+    // transport's error, as the other sides' writers take a send that throws (spec 15.1)
     fn transmit(
         &mut self,
         message: TransportMessage,
         _connection_handle: &ConnectionHandle,
     ) -> Result<Sent, RouterError> {
-        self.transport.send(message)
+        let transport = self
+            .transport
+            .upgrade()
+            .ok_or_else(crate::router::core::transport_gone)?;
+
+        caught(("a transport", || transport.send(message)))
+            .unwrap_or_else(|panicked| Err(panicked.into()))
+    }
+
+    // its calls failed with the panic, then let go of as its dispose does, the panic reported
+    fn ended(&mut self, panicked: &Panicked) {
+        crate::router::core::end(self, panicked);
+        self.dispose();
+        self.report_error(&panicked.clone().into());
     }
 
     // a command runs in the session this client learned; one presenting a JWT or an ELSEWHERE, in
@@ -569,30 +598,42 @@ impl Side for ClientState {
 
 // what posts a transport's events to the router's owner, behind every job queued, a transport that
 // tells one from within its router's turn too (spec 9.0): ! a handle to the owner, so a router
-// lives as long as its transport holds it
+// lives as long as its transport holds it; its state holds the bridge and its transport weakly, so
+// neither keeps it of its own
 struct Bridge {
     owner: Owner<ClientState>,
+    disposal: Disposal,
+}
+
+impl Bridge {
+    // ! what its transport tells once its router is disposed is dropped, as both other sides stop
+    // listening within their dispose: the rest of the dispose, its unlisten among it, comes in a
+    // later turn
+    fn offer(&self, job: Box<dyn FnOnce(&mut ClientState) + Send>) {
+        if !self.disposal.is_set() {
+            self.owner.offer_behind(job);
+        }
+    }
 }
 
 impl ClientListener for Bridge {
     fn on_message(&self, message: TransportMessage) {
-        self.owner
-            .offer_behind(Box::new(move |state: &mut ClientState| {
-                let handle = server_handle();
+        self.offer(Box::new(move |state: &mut ClientState| {
+            let handle = server_handle();
 
-                crate::router::core::receive(state, (message, &handle));
-            }));
+            crate::router::core::receive(state, (message, &handle));
+        }));
     }
 
     fn on_close(&self, _was_clean: bool, _is_quick: bool) {
-        self.owner.offer_behind(Box::new(|state: &mut ClientState| {
+        self.offer(Box::new(|state: &mut ClientState| {
             state.on_close("the connection closed before the answer");
         }));
     }
 
     // a connection replaced emits no close, but nothing sent on it will be answered either
     fn on_reconnect(&self) {
-        self.owner.offer_behind(Box::new(|state: &mut ClientState| {
+        self.offer(Box::new(|state: &mut ClientState| {
             state.on_close("the connection was replaced before the answer");
         }));
     }
@@ -678,7 +719,7 @@ impl RouterClient {
             ("a client's router", "its transport"),
         )?
         .unwrap_or_else(|| {
-            let platform: SharedClock = Arc::new(crate::clock::SystemClock::new(runtime.clone()));
+            let platform: SharedClock = Arc::new(crate::clock::SystemClock::on(runtime.clone()));
 
             platform
         });
@@ -719,7 +760,7 @@ impl RouterClient {
                         ),
                     )
                 },
-                transport: Arc::clone(&transport),
+                transport: Arc::downgrade(&transport),
                 listener: None,
                 credentials,
                 notifications: Arc::clone(&notifications),
@@ -732,12 +773,15 @@ impl RouterClient {
         });
         let listener: Arc<dyn ClientListener> = Arc::new(Bridge {
             owner: owner.clone(),
+            disposal: disposal.clone(),
         });
 
-        transport.listen(Arc::clone(&listener));
+        let held = Arc::downgrade(&listener);
+
+        transport.listen(listener);
 
         owner.offer(Box::new(move |state: &mut ClientState| {
-            state.listener = Some(listener);
+            state.listener = Some(held);
         }));
 
         Ok(Self {
@@ -826,24 +870,39 @@ impl RouterClient {
         *locked(&self.shared.session_token)
     }
 
-    /// Hears what it reports from now on.
-    pub fn on_error(&self, listener: ClientErrorListener) {
-        locked(&self.shared.listeners.error).push(listener);
+    /// Hears what it reports from now on; the id given takes it off again, with
+    /// [`RouterClient::off`].
+    pub fn on_error(&self, listener: ClientErrorListener) -> ListenerId {
+        self.shared.listeners.error.add(listener)
     }
 
-    /// Hears each envelope it sends or takes from now on.
-    pub fn on_debug(&self, listener: ClientEnvelopeListener) {
-        locked(&self.shared.listeners.debug).push(listener);
+    /// Hears each envelope it sends or takes from now on; the id given takes it off again, with
+    /// [`RouterClient::off`].
+    pub fn on_debug(&self, listener: ClientEnvelopeListener) -> ListenerId {
+        self.shared.listeners.debug.add(listener)
     }
 
-    /// Hears what it did from now on.
-    pub fn on_activity(&self, listener: ClientActivityListener) {
-        locked(&self.shared.listeners.activity).push(listener);
+    /// Hears what it did from now on; the id given takes it off again, with
+    /// [`RouterClient::off`].
+    pub fn on_activity(&self, listener: ClientActivityListener) -> ListenerId {
+        self.shared.listeners.activity.add(listener)
     }
 
-    /// Hears the scheme of each default credential it withdraws from now on.
-    pub fn on_credential_withdrawn(&self, listener: WithdrawnListener) {
-        locked(&self.shared.listeners.withdrawn).push(listener);
+    /// Hears the scheme of each default credential it withdraws from now on; the id given takes it
+    /// off again, with [`RouterClient::off`].
+    pub fn on_credential_withdrawn(&self, listener: WithdrawnListener) -> ListenerId {
+        self.shared.listeners.withdrawn.add(listener)
+    }
+
+    /// Hears no more with the listener `listener` names, whichever of its events it heard: one
+    /// taken off already, or of another part, changes nothing.
+    pub fn off(&self, listener: ListenerId) {
+        let listeners = &self.shared.listeners;
+
+        listeners.error.off(listener);
+        listeners.debug.off(listener);
+        listeners.activity.off(listener);
+        listeners.withdrawn.off(listener);
     }
 
     /// Reports what went wrong that no call waits on.
@@ -1169,15 +1228,10 @@ impl RouterClient {
     pub fn dispose(&self) -> BoxFuture<()> {
         self.shared.disposal.set();
 
-        let disposed = self.shared.owner.run_behind(|state: &mut ClientState| {
-            if let Some(listener) = state.listener.take() {
-                state.transport.unlisten(&listener);
-            }
-
-            *locked(&state.session_token) = None;
-            crate::router::core::dispose(state);
-            state.drop_notifications();
-        });
+        let disposed = self
+            .shared
+            .owner
+            .run_behind(|state: &mut ClientState| state.dispose());
 
         Box::pin(async move {
             disposed.await.ok();

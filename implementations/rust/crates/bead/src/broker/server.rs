@@ -969,8 +969,9 @@ impl ServerTransport for BrokerServer {
     }
 
     // no OPEN taken from now, one that comes refused 503; each connection closed with a CLOSE of
-    // 1001, its close told unclean, and its names let go; its participant's link kept (spec 15.21)
-    fn stop(&self) -> BoxFuture<()> {
+    // 1001, its close told unclean, and its names let go; its participant's link kept (spec 15.21).
+    // A stop while it starts is refused, as the other sides' transport server life refuses one
+    fn stop(&self) -> BoxFuture<Result<(), RouterError>> {
         let (stopping, stopped) = {
             let mut state = locked(&self.inner.state);
 
@@ -979,14 +980,23 @@ impl ServerTransport for BrokerServer {
 
                 return Box::pin(async move {
                     stopped.wait_for(|is_stopped| *is_stopped).await.ok();
+
+                    Ok(())
                 });
             }
 
-            if matches!(
-                state.ready,
-                ReadyState::Uninitialized | ReadyState::Closed | ReadyState::Connecting
-            ) {
-                return Box::pin(async {});
+            match state.ready {
+                ReadyState::Uninitialized | ReadyState::Closed => {
+                    return Box::pin(async { Ok(()) });
+                }
+                ReadyState::Connecting => {
+                    return Box::pin(async {
+                        Err(RouterError::Other(Arc::new(ProgrammerError::new(
+                            "the transport server is starting",
+                        ))))
+                    });
+                }
+                ReadyState::Open | ReadyState::Closing | ReadyState::Reconnecting => {}
             }
 
             state.ready = ReadyState::Closing;
@@ -1040,6 +1050,8 @@ impl ServerTransport for BrokerServer {
 
         Box::pin(async move {
             stopped.wait_for(|is_stopped| *is_stopped).await.ok();
+
+            Ok(())
         })
     }
 

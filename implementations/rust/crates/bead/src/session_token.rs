@@ -94,8 +94,10 @@ impl fmt::Display for SessionToken {
 }
 
 impl fmt::Debug for SessionToken {
+    // ! none of its bytes: a bearer's token, which no string a side writes carries (spec 15.1), an
+    // application's derived Debug of what holds it included; Display alone spells it (spec 13.2)
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(formatter, "SessionToken({self})")
+        formatter.write_str("SessionToken(…)")
     }
 }
 

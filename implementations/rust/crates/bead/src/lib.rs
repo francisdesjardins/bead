@@ -61,7 +61,9 @@ pub use call_session::{
     Carriage, Presented, connection_session_of, presented_credential_of, uncarried_of,
 };
 pub use client::{Client, ClientOptions};
-pub use clock::{Clock, Schedule, SharedClock, SystemClock, Timer, TimerCallback, clock_of};
+pub use clock::{
+    Clock, Schedule, SharedClock, SystemClock, SystemClockOptions, Timer, TimerCallback, clock_of,
+};
 pub use constants::{
     CredentialScheme, EnvelopeFlag, EnvelopeKind, EnvelopeLayout, FailureScope, ProcedureKind,
     ProtocolCode, RESERVATION, RouterSide, SERVER_CONNECTION_HANDLE, SESSION_TOKEN_BYTES,
@@ -155,7 +157,7 @@ pub use service::{
 };
 pub use session_token::SessionToken;
 pub use transport::{
-    CONNECT_TIMEOUT, ClientListener, ClientTransport, Connect, DisconnectOptions,
+    CONNECT_TIMEOUT, ClientListener, ClientTransport, Connect, DisconnectOptions, ListenerId,
     RECONNECT_ATTEMPTS, RECONNECT_DELAY, ReadyState, ReconnectDelay, ReconnectOptions, Sent,
     ServerListener, ServerTransport, TransportServerRefusal, is_field_value,
 };

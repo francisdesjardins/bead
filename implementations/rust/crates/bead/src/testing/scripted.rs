@@ -33,8 +33,16 @@ pub enum Sending {
     Thrown(String),
     /// Taken, then refused, saying why.
     Rejected(String),
+    /// Panicking as it is handed over, saying why: an application's transport that breaks.
+    Panicked(String),
+    /// Taken, then panicking as its sending is awaited, saying why.
+    PanickedLater(String),
 }
 
+#[expect(
+    clippy::panic,
+    reason = "a test's transport that breaks, on purpose, as an application's might"
+)]
 fn sent_of(sending: &Sending) -> Result<Sent, RouterError> {
     match sending {
         Sending::Taken => Ok(Sent::Done),
@@ -45,6 +53,12 @@ fn sent_of(sending: &Sending) -> Result<Sent, RouterError> {
             let error = RouterError::Other(Arc::new(std::io::Error::other(message.clone())));
 
             Ok(Sent::Later(Box::pin(async move { Err(error) })))
+        }
+        Sending::Panicked(message) => panic!("{message}"),
+        Sending::PanickedLater(message) => {
+            let message = message.clone();
+
+            Ok(Sent::Later(Box::pin(async move { panic!("{message}") })))
         }
     }
 }
@@ -385,7 +399,7 @@ impl ServerTransport for ScriptedServer {
         Box::pin(async { Ok(()) })
     }
 
-    fn stop(&self) -> BoxFuture<()> {
-        Box::pin(async {})
+    fn stop(&self) -> BoxFuture<Result<(), RouterError>> {
+        Box::pin(async { Ok(()) })
     }
 }

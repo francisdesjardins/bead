@@ -435,7 +435,7 @@ async fn refuses_400_malformed_an_open_whose_id_is_empty_or_no_token_and_tells_i
         ],
         "refused at the inbox each names"
     );
-    server.stop().await;
+    server.stop().await.expect("stopped");
     participant.stop().await;
 }
 
@@ -496,7 +496,7 @@ async fn reports_a_half_open_connection_it_lost_of_its_own_by_its_opener_s_id_wi
         Some((Some(0), Some(0))),
         "none held"
     );
-    server.stop().await;
+    server.stop().await.expect("stopped");
     participant.stop().await;
 }
 
@@ -586,7 +586,7 @@ async fn reports_what_a_listener_of_its_events_threw_with_its_connection_s_handl
         "each reported"
     );
     assert_eq!(first.ready_state(), ReadyState::Open, "kept");
-    server.stop().await;
+    server.stop().await.expect("stopped");
     ada.stop().await;
     participant.stop().await;
 }
@@ -649,7 +649,7 @@ async fn refuses_to_send_what_is_no_envelope_keeping_the_connection_and_holds_a_
         (ReadyState::Open, false, false),
         "not secure"
     );
-    server.stop().await;
+    server.stop().await.expect("stopped");
     ada.stop().await;
     participant.stop().await;
 }
@@ -752,7 +752,7 @@ async fn starts_once_its_broker_holds_each_name_it_serves_fails_its_start_on_a_n
             "its broker refused to let bead/s/echo go: 0x80",
         )),
     );
-    stopping.await.expect("joined");
+    stopping.await.expect("joined").expect("stopped");
     assert_eq!(
         (server.ready_state(), names_of(&server)),
         (ReadyState::Closed, Some(0)),
@@ -798,6 +798,61 @@ async fn starts_once_its_broker_holds_each_name_it_serves_fails_its_start_on_a_n
     super::settle().await;
     assert_eq!(names_of(&server), Some(0), "none held");
     assert_eq!(locked(&told.errors).len(), 1, "nothing more reported");
+    participant.stop().await;
+}
+
+// spec 15.1: a stop while it starts is refused, as the other sides' transport server life refuses
+// one; the start goes on, and a stop once it opened stops it
+#[tokio::test]
+async fn rejects_a_stop_while_starting() {
+    let broker = broker();
+    let holding = Arc::new(Holding::of(adapter_of(&broker, "server")));
+    let adapter: Arc<dyn BrokerAdapter> = Arc::<Holding>::clone(&holding);
+    let participant = BrokerParticipant::new(adapter, &BrokerParticipantOptions::default())
+        .expect("a participant");
+    let server = participant
+        .server(&BrokerServerOptions::of(["echo"]))
+        .expect("a server");
+    let starting = crate::testing::spawn(server.start());
+
+    until(
+        || locked(&holding.subscribing).len() == 1,
+        "its name asked of its broker",
+    )
+    .await;
+
+    let refused = server.stop().await;
+
+    assert_eq!(
+        refused
+            .map_err(|error: RouterError| error.to_string())
+            .expect_err("refused while it starts"),
+        "the transport server is starting",
+        "said why"
+    );
+    assert_eq!(
+        server.ready_state(),
+        ReadyState::Connecting,
+        "starting still"
+    );
+
+    Holding::settle(&holding.subscribing, Ok(()));
+    starting.await.expect("joined").expect("started");
+    assert_eq!(server.ready_state(), ReadyState::Open, "opened");
+
+    let stopping = crate::testing::spawn(server.stop());
+
+    until(
+        || locked(&holding.unsubscribing).len() == 1,
+        "its name let go of",
+    )
+    .await;
+    Holding::settle(&holding.unsubscribing, Ok(()));
+    stopping
+        .await
+        .expect("joined")
+        .expect("stopped once it opened");
+    assert_eq!(server.ready_state(), ReadyState::Closed, "closed");
     participant.stop().await;
 }
 

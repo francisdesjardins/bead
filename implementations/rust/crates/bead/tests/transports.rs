@@ -1031,14 +1031,17 @@ impl Case {
             .and_then(|gauges| gauges.counts.get(name).copied())
     }
 
-    async fn stop(&self) {
+    // everything let go, failing as the first stop that refused
+    async fn stop(&self) -> Result<(), String> {
+        let mut stopped = Ok(());
+
         for peer in self.peers.values().chain(self.twin.as_ref()) {
             peer.adapter.stop().await;
         }
 
         if let Some((facade, transport)) = &self.server {
-            transport.stop().await;
-            facade.dispose().await;
+            stopped = stopped.and(transport.stop().await.map_err(|error| error.to_string()));
+            stopped = stopped.and(facade.dispose().await.map_err(|error| error.to_string()));
         }
 
         if let Some(client) = &self.client {
@@ -1046,6 +1049,8 @@ impl Case {
         }
 
         self.participant.stop().await;
+
+        stopped
     }
 }
 
@@ -1191,7 +1196,7 @@ async fn play_steps(case: &mut Case, steps: &[Value]) -> Result<(), String> {
             }
 
             if let Some(stopping) = stopping {
-                stopping.await;
+                stopping.await.map_err(|error| error.to_string())?;
             }
         }
 
@@ -1482,9 +1487,9 @@ async fn play((case, wall): (&Value, SystemTime)) -> Result<(), String> {
     let mut played = case_of((case, wall)).await?;
     let outcome = play_steps(&mut played, steps).await;
 
-    played.stop().await;
+    let stopped = played.stop().await;
 
-    outcome
+    outcome.and(stopped)
 }
 
 fn trials() -> Result<Vec<Trial>, String> {

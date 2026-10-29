@@ -265,3 +265,246 @@ fn a_session_writes_whether_it_holds_a_token_never_the_token() {
         "none there"
     );
 }
+
+// ── A callback that panics: its throw (decision 0044) ─────────────────────────────────────────
+
+const SET_ISSUER: &str = "https://set.example";
+const AUDIENCE: &str = "https://bead.example";
+const SET_KEY_BYTES: [u8; 32] = [9; 32];
+
+// a resolver of `credentials` on a stepping clock
+fn resolver_of(credentials: &Credentials) -> (Arc<SteppingClock>, super::CredentialResolver) {
+    let clock = SteppingClock::new(crate::testing::instants::new_year());
+    let shared: SharedClock = Arc::<SteppingClock>::clone(&clock);
+    let runtime = crate::platform::runtime_of(None, "a test's resolver").expect("a runtime");
+    let resolver =
+        super::CredentialResolver::new(credentials, (shared, runtime)).expect("a resolver");
+
+    (clock, resolver)
+}
+
+fn elsewhere_of(carried: &str) -> super::CredentialRequest {
+    super::CredentialRequest {
+        audiences: None,
+        credential: Credential::Elsewhere,
+        transport_credential: Some(carried.to_owned()),
+    }
+}
+
+// what a resolution failed with, by its words
+fn failed_with(
+    resolved: Result<crate::router::core::Resolved, crate::router::core::Unresolved>,
+) -> String {
+    match resolved {
+        Err(crate::router::core::Unresolved::Other(error)) => error.to_string(),
+        Err(crate::router::core::Unresolved::Capacity(error)) => format!("capacity: {error}"),
+        Ok(resolved) => format!("resolved: {resolved:?}"),
+    }
+}
+
+// spec 13.11; decision 0044: a verifier's panic as it is called is its throw at once, which fails
+// its call as one whose future fails, and so is one its future panics with
+#[tokio::test]
+async fn fails_a_verifier_that_throws_at_once_as_one_that_rejects() {
+    let (_clock, resolver) = resolver_of(&Credentials {
+        verify: Some(Arc::new(|carried: String, _signal| {
+            assert!(carried != "throws", "this verifier fails, on purpose");
+
+            Box::pin(async move {
+                assert!(carried != "panics", "this verifier fails, on purpose");
+
+                Err::<Option<super::ElsewhereSession>, _>("this verifier fails, on purpose".into())
+            })
+        })),
+        ..Credentials::default()
+    });
+
+    for (carried, said) in [
+        (
+            "throws",
+            "a verifier panicked: this verifier fails, on purpose",
+        ),
+        (
+            "panics",
+            "a verifier panicked: this verifier fails, on purpose",
+        ),
+        ("rejects", "this verifier fails, on purpose"),
+    ] {
+        let settled = crate::testing::patience(
+            core::time::Duration::from_secs(10),
+            resolver.resolve((
+                elsewhere_of(carried),
+                tokio_util::sync::CancellationToken::new(),
+            )),
+        )
+        .await
+        .expect("resolved within its patience");
+
+        assert_eq!(failed_with(settled), said, "{carried}: failed alike");
+    }
+}
+
+// a token of SET_ISSUER's, for AUDIENCE, signed with SET_KEY_BYTES under `set-1`, its subject
+// `grace`, its end an hour past the stepping clock's start
+fn set_token() -> Bytes {
+    use hmac::{Hmac, KeyInit, Mac};
+
+    let part_of = |value: &Value| crate::base64url::encode(value.to_string().as_bytes());
+    let now = crate::testing::instants::new_year()
+        .duration_since(UNIX_EPOCH)
+        .expect("after the epoch")
+        .as_secs();
+    let signed = format!(
+        "{}.{}",
+        part_of(&json!({ "alg": "HS256", "typ": "at+jwt", "kid": "set-1" })),
+        part_of(&json!({
+            "iss": SET_ISSUER,
+            "aud": AUDIENCE,
+            "sub": "grace",
+            "exp": now.saturating_add(3_600),
+        }))
+    );
+    let mut mac = Hmac::<sha2::Sha256>::new_from_slice(&SET_KEY_BYTES).expect("a secret");
+
+    mac.update(signed.as_bytes());
+
+    let signature = crate::base64url::encode(&mac.finalize().into_bytes());
+
+    Bytes::from(format!("{signed}.{signature}"))
+}
+
+fn set_key() -> JwtSetKey {
+    let mut jwk = Map::new();
+
+    jwk.insert("kty".to_owned(), Value::from("oct"));
+    jwk.insert("kid".to_owned(), Value::from("set-1"));
+    jwk.insert(
+        "k".to_owned(),
+        Value::from(crate::base64url::encode(&SET_KEY_BYTES)),
+    );
+
+    JwtSetKey {
+        algorithm: JwtAlgorithm::Hs256,
+        jwk,
+    }
+}
+
+fn named() -> super::CredentialRequest {
+    super::CredentialRequest {
+        audiences: None,
+        credential: Credential::Jwt(set_token()),
+        transport_credential: None,
+    }
+}
+
+type Asked = Arc<core::sync::atomic::AtomicUsize>;
+
+// a key set whose first ask breaks as `breaks` says, and whose next answers its key
+fn breaking(breaks: &'static str) -> (Asked, super::JwtKeySet) {
+    let asked = Asked::default();
+    let counting = Arc::clone(&asked);
+
+    (
+        asked,
+        super::JwtKeySet {
+            ask: Arc::new(move |_issuer: String, _signal| {
+                let first = counting.fetch_add(1, core::sync::atomic::Ordering::SeqCst) == 0;
+
+                assert!(
+                    !(first && breaks == "as it is asked"),
+                    "the key set cannot be reached"
+                );
+
+                Box::pin(async move {
+                    assert!(
+                        !(first && breaks == "as it is awaited"),
+                        "the key set cannot be reached"
+                    );
+
+                    Ok(vec![set_key()])
+                })
+            }),
+            issuers: vec![SET_ISSUER.to_owned()],
+            maximum_waiting_calls: None,
+        },
+    )
+}
+
+// spec 13.9; decision 0044: a key set's panic, as it is asked or as its answer is awaited, is its
+// throw: the call that waits on it fails at once, and the next within the minute waits for the
+// deadline and the ask then
+#[tokio::test]
+async fn fails_a_call_alike_when_its_key_set_throws_as_it_is_asked_and_has_the_next_within_the_minute_wait_for_the_deadline_and_the_ask_then()
+ {
+    for breaks in ["as it is asked", "as it is awaited"] {
+        let (asked, key_set) = breaking(breaks);
+        let (clock, resolver) = resolver_of(&Credentials {
+            audience: Some(AUDIENCE.to_owned()),
+            key_set: Some(key_set),
+            ..Credentials::default()
+        });
+        let resolving = crate::testing::spawn(
+            resolver.resolve((named(), tokio_util::sync::CancellationToken::new())),
+        );
+
+        clock.settle().await;
+
+        let refused = crate::testing::patience(core::time::Duration::from_secs(10), resolving)
+            .await
+            .expect("failed at once, not at its deadline")
+            .expect("joined");
+
+        assert_eq!(
+            failed_with(refused),
+            format!(
+                "the key set's ask for {SET_ISSUER} failed: a key set's ask panicked: the key set cannot be reached"
+            ),
+            "{breaks}: failed with its throw"
+        );
+
+        // within the minute, the next waits for the deadline, asking nothing before it
+        let next = crate::testing::spawn(
+            resolver.resolve((named(), tokio_util::sync::CancellationToken::new())),
+        );
+
+        clock.settle().await;
+
+        assert_eq!(
+            clock.dues(),
+            [core::time::Duration::from_secs(60)],
+            "{breaks}: its deadline armed"
+        );
+
+        clock
+            .advance(core::time::Duration::from_millis(59_999))
+            .await;
+
+        assert!(!next.is_finished(), "{breaks}: waiting");
+        assert_eq!(
+            asked.load(core::sync::atomic::Ordering::SeqCst),
+            1,
+            "{breaks}: asked once"
+        );
+
+        clock.advance(core::time::Duration::from_millis(1)).await;
+
+        let held = crate::testing::patience(core::time::Duration::from_secs(10), next)
+            .await
+            .expect("resolved within its patience")
+            .expect("joined");
+
+        assert!(
+            matches!(&held, Ok(crate::router::core::Resolved::Session(session))
+            if session.identifier == Some(crate::router::types::SessionIdentifier::JwtSub {
+                issuer: SET_ISSUER.to_owned(),
+                sub: "grace".to_owned(),
+            })),
+            "{breaks}: the next held by the ask then: {held:?}"
+        );
+        assert_eq!(
+            asked.load(core::sync::atomic::Ordering::SeqCst),
+            2,
+            "{breaks}: asked again at the deadline"
+        );
+    }
+}

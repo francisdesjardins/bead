@@ -39,8 +39,15 @@ pub const MEMORY_ADDRESS: &str = "local";
 // the later turns a server and its clients share: each job in the order it came, off the caller
 struct Pipe;
 
+// * a job of the pipe's that panics, a listener's being guarded, ends it: its connections' later
+// turns refused from then on
+impl crate::owner::Owned for Pipe {}
+
+// ! behind every job queued, one posted from within a turn of the pipe's too, as both other sides
+// queue a later turn at the tail: what a listener sends or closes within it comes after what was
+// sent before it (spec 15.13)
 fn later_on<J: FnOnce() + Send + 'static>(pipe: &WeakOwner<Pipe>, job: J) {
-    pipe.offer(Box::new(move |_: &mut Pipe| job()));
+    pipe.offer_behind(Box::new(move |_: &mut Pipe| job()));
 }
 
 fn locked<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -258,7 +265,7 @@ impl MemoryServer {
         let runtime = runtime_of(options.runtime.as_ref(), "an in-memory transport")?;
         let clock: SharedClock = match &options.clock {
             Some(clock) => Arc::clone(clock),
-            None => Arc::new(SystemClock::new(runtime.clone())),
+            None => Arc::new(SystemClock::on(runtime.clone())),
         };
         let pipe = Owner::spawn((&runtime, &clock), |_: WeakOwner<Pipe>| Pipe);
 
@@ -396,13 +403,14 @@ impl ServerTransport for MemoryServer {
     }
 
     // every connection ended in one later turn, in the order they came: none drawn in a turn
-    // before it is left open, and none is drawn after it
-    fn stop(&self) -> BoxFuture<()> {
+    // before it is left open, and none is drawn after it; it opens within its start's call, so no
+    // stop finds it starting
+    fn stop(&self) -> BoxFuture<Result<(), RouterError>> {
         {
             let mut state = locked(&self.inner.state);
 
             if matches!(state.ready, ReadyState::Uninitialized | ReadyState::Closed) {
-                return Box::pin(async {});
+                return Box::pin(async { Ok(()) });
             }
 
             state.ready = ReadyState::Closing;
@@ -434,6 +442,8 @@ impl ServerTransport for MemoryServer {
 
         Box::pin(async move {
             drop(stopped.await);
+
+            Ok(())
         })
     }
 
@@ -839,7 +849,7 @@ impl MemoryClient {
         let runtime = runtime_of(None, "an in-memory transport")?;
         let clock: SharedClock = match &options.clock {
             Some(clock) => Arc::clone(clock),
-            None => Arc::new(SystemClock::new(runtime.clone())),
+            None => Arc::new(SystemClock::on(runtime.clone())),
         };
 
         Ok(Self {
@@ -997,6 +1007,7 @@ impl MemoryClient {
         });
         let accepting = inner.server.inner.accept(peer, attempt.given_up.clone());
         let client = Arc::downgrade(inner);
+        let pipe = inner.server.inner.pipe.downgrade();
 
         crate::owner::spawn_counted((&inner.runtime, &inner.clock), async move {
             let accepted = accepting.await.unwrap_or_else(|_dropped| {
@@ -1005,6 +1016,12 @@ impl MemoryClient {
                 )))
             });
             let Some(client) = client.upgrade() else {
+                // ! a connection drawn for a client let go meanwhile is closed at once, unclean,
+                // its server told (spec 15.15): its end reaches its server alone
+                if let Ok(end) = accepted {
+                    later_on(&pipe, move || end.close(false));
+                }
+
                 return;
             };
 

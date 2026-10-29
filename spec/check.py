@@ -30,8 +30,8 @@ name, give every place an outcome for every input in their order, cite at each p
 observes, and name, where they cross a row of docs/support.md, a row that names the file and them;
 each implementation plays them in one harness, which names every place, through one helper, which
 alone reads the file; what a side does not play yet, AHEAD, each part a row of docs/support.md's
-differences, open, which its steps and stages delete as they land, never a part the side plays;
-and no file git lists outside spec/, the tests and the interop service names a
+differences, open, which its steps and stages delete as they land, never a part the side plays, each
+row of those differences holding as many cells as their header; and no file git lists outside spec/, the tests and the interop service names a
 published test key; each blueprint of spec/ is in its form, RFC 8785's member order and string escapes,
 integers alone, laid out two spaces with a final newline; and interop-service.json states the
 interop blueprint's procedures, by name and in their order, what each admits where its admission is not
@@ -1479,6 +1479,11 @@ def differences_table():
         if header is None:
             header = cells
         else:
+            # ! a row short of a cell would zip silently, its last column read as empty
+            if len(cells) != len(header):
+                problems.append(f'docs/support.md\'s differences: the row {cells[0]!r} has {len(cells)} cells, '
+                                f'where its header has {len(header)}')
+
             table[cells[0]] = dict(zip(header, cells))
 
     return table

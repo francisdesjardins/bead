@@ -629,7 +629,11 @@ pub fn offer_interop(server: &Server) -> Result<ServiceServer, ProgrammerError> 
                     session.connection_inactivity_timeout = connection_timeout;
                     session.session_inactivity_timeout = session_timeout;
                     session.data = Some(name.clone());
-                    sessions.set(session).await.map_err(ResolverError::other)?;
+                    sessions
+                        .set(session)
+                        .map_err(ResolverError::other)?
+                        .await
+                        .map_err(ResolverError::other)?;
 
                     response.result(name).await
                 })

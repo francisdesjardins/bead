@@ -675,7 +675,7 @@ async fn refuses_a_reconnection_never_connected_under_way_while_it_connects_or_g
 
     // * nothing serves the name any more: a reconnection under way refuses another, and ends
     // closed once its attempts run out
-    pair.server.stop().await;
+    pair.server.stop().await.expect("stopped");
     until(
         || client.ready_state() == ReadyState::Closed,
         "its server's stop closes its connection",

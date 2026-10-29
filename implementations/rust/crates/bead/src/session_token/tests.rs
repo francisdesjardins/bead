@@ -1,5 +1,5 @@
 //! A session's token: 16 bytes, never all zero, drawn anew while one is in use, compared in
-//! constant time.
+//! constant time, and written in no `Debug`.
 
 use super::SessionToken;
 
@@ -143,4 +143,22 @@ fn throws_parsing_text_that_spells_no_token() {
         Err("\"AAECAwQFBgcICQoLDA0ODx\" is not a session token".to_owned()),
         "refused, naming it"
     );
+}
+
+// spec 15.1: a bearer's token, which no string a side writes carries; Display alone spells it, the
+// application's way to read it (spec 13.2)
+#[test]
+fn writes_none_of_its_bytes_in_its_debug_nor_in_a_debug_that_holds_it() {
+    let token = SessionToken::new(BYTES).expect("a token");
+
+    assert_eq!(format!("{token:?}"), "SessionToken(…)", "its Debug");
+    assert!(
+        !format!("{:?}", Some(token)).contains(TEXT),
+        "an application's Debug of an Option holds none of it"
+    );
+    assert!(
+        !format!("{:#?}", [token]).contains(TEXT),
+        "nor a pretty Debug of a list"
+    );
+    assert_eq!(token.to_string(), TEXT, "its Display spells it still");
 }

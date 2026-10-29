@@ -751,7 +751,11 @@ async fn the_activity_it_reports_reads_the_wall_clock_which_a_clock_set_by_hand_
     let mut session = sessions.create(Arc::clone(&pair.connection_handle));
 
     session.session_inactivity_timeout = Some(milliseconds(200));
-    sessions.set(session).await.expect("stored");
+    sessions
+        .set(session)
+        .expect("taken as it is made")
+        .await
+        .expect("stored");
 
     // back a day, the instant reported with it; the timer counts its 200 ms all the same
     pair.clock.wall_by(-DAY);

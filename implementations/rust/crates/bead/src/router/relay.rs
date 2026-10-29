@@ -28,6 +28,7 @@ use crate::router::types::{
     BoxFuture, ConnectionHandle, Gauges, RequestCredential, ResolvedRequestOptions, RouterAnswer,
     RouterError, RouterLimits,
 };
+use crate::transport::ServerTransport;
 
 /// How a server's router relays the requests that name a destination.
 #[derive(Debug, Clone)]
@@ -563,10 +564,17 @@ impl Carriage {
 
 fn carriage_of(state: &ServerState, target: &RelayTarget) -> Carriage {
     match target {
+        // a transport gone, or one that panics as it is asked, carries nothing
         RelayTarget::Connection(handle) => Carriage::Connection {
-            carries_credential: state.transport.carries_credential(handle),
-            is_secure: state.transport.is_secure(handle),
-            is_two_way: state.transport.is_two_way(handle),
+            carries_credential: state.asked((handle, |transport: &dyn ServerTransport| {
+                transport.carries_credential(handle)
+            })),
+            is_secure: state.asked((handle, |transport: &dyn ServerTransport| {
+                transport.is_secure(handle)
+            })),
+            is_two_way: state.asked((handle, |transport: &dyn ServerTransport| {
+                transport.is_two_way(handle)
+            })),
         },
         RelayTarget::Router(router) => Carriage::Router(Arc::clone(router)),
     }

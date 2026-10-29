@@ -284,7 +284,7 @@ where
             state.callbacks.clear();
         }
 
-        let listeners = locked(&self.manager.dropped).clone();
+        let listeners = self.manager.dropped.all();
 
         for listener in listeners {
             let called = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
@@ -314,7 +314,7 @@ where
         }
 
         // a notification that does not decode fails here, for the router to report
-        let value = match self.codec.decode(&payload) {
+        let value = match crate::payloads::decoded(&self.codec, &payload) {
             Ok(value) => value,
             Err(refused) => {
                 let failure = Failure::protocol(
