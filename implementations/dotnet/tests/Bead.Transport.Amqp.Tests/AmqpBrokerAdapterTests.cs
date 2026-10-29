@@ -2114,6 +2114,135 @@ public sealed class AmqpBrokerAdapterTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Checks_a_replacement_sender_s_smaller_bound_before_queued_publications_go_and_keeps_its_other_sender_and_link()
+    {
+        foreach (var topic in new[] { Inbox, Name })
+        {
+            _script.MaxMessageSize = 4_096;
+
+            await using var adapter = AdapterOf();
+            var (_, downs) = HeardOf(adapter);
+            var connection = await LinkUp((adapter, _script));
+            var room = adapter.MaximumPayloadBytes(topic);
+            var other = topic == Inbox ? Name : Inbox;
+            var otherRoom = adapter.MaximumPayloadBytes(other);
+
+            await adapter.Publish(new BrokerPublication { Payload = (byte[])[1], Topic = topic }).WaitAsync(Patience, Cancelled);
+            var transfer = Assert.Single(TransfersTo((connection, AmqpMessages.AddressOf(topic))));
+            var ending = connection.Frames.Count;
+
+            await connection.End(transfer.Channel);
+            await connection.Next(
+                (frame) =>
+                {
+                    return frame.Performative is AmqpEnd && frame.Channel == transfer.Channel;
+                },
+                from: ending);
+
+            Func<ScriptedFrame, bool> isSending = (frame) =>
+            {
+                return frame.Performative is Attach { Role: false } attach && (attach.Target as Target)?.Address is null;
+            };
+
+            _script.Holding = isSending;
+            var sending = connection.Frames.Count;
+            var oversized = adapter.Publish(new BrokerPublication { ExpiresAfter = TimeSpan.FromSeconds(1), Payload = new byte[room], Topic = topic });
+            var fitting = adapter.Publish(new BrokerPublication { Payload = (byte[])[2], Topic = topic });
+            var attaching = await connection.Next(isSending, from: sending);
+
+            Assert.Single(TransfersTo((connection, AmqpMessages.AddressOf(topic))));
+            Assert.Equal(room, adapter.MaximumPayloadBytes(topic));
+            _script.MaxMessageSize = 1_024;
+            _script.Holding = (_) =>
+            {
+                return false;
+            };
+            await connection.AnswerAttach(attaching);
+            var refused = await FailureOf(() =>
+            {
+                return oversized;
+            });
+
+            Assert.IsType<ArgumentException>(refused);
+            Assert.Contains("past its sender's max-message-size, 1024 bytes", refused.Message, StringComparison.Ordinal);
+            Assert.Equal(BrokerPublished.Taken, await fitting.WaitAsync(Patience, Cancelled));
+            Assert.Equal(otherRoom, adapter.MaximumPayloadBytes(other));
+            Assert.Equal(BrokerPublished.Taken, await adapter.Publish(new BrokerPublication { Payload = (byte[])[3], Topic = other }).WaitAsync(Patience, Cancelled));
+            Assert.Equal(
+                ["01", "02", "03"],
+                connection.Transfers.Where((each) =>
+                {
+                    return each.Message.Properties?.To?.StartsWith("/exchanges/bead/", StringComparison.Ordinal) == true;
+                }).Select((each) =>
+                {
+                    return Convert.ToHexString((byte[])each.Message.Body);
+                }));
+            Assert.True(adapter.IsLinked);
+            Assert.Empty(downs);
+            await adapter.Stop();
+        }
+    }
+
+    [Fact]
+    public async Task Cancels_a_publication_awaiting_its_replacement_sender_and_sends_only_its_successor_when_the_late_ATTACH_comes()
+    {
+        foreach (var topic in new[] { Inbox, Name })
+        {
+            await using var adapter = AdapterOf();
+            var (_, downs) = HeardOf(adapter);
+            var connection = await LinkUp((adapter, _script));
+
+            await adapter.Publish(new BrokerPublication { Payload = (byte[])[1], Topic = topic }).WaitAsync(Patience, Cancelled);
+            var transfer = Assert.Single(TransfersTo((connection, AmqpMessages.AddressOf(topic))));
+            var ending = connection.Frames.Count;
+
+            await connection.End(transfer.Channel);
+            await connection.Next(
+                (frame) =>
+                {
+                    return frame.Performative is AmqpEnd && frame.Channel == transfer.Channel;
+                },
+                from: ending);
+
+            Func<ScriptedFrame, bool> isSending = (frame) =>
+            {
+                return frame.Performative is Attach { Role: false } attach && (attach.Target as Target)?.Address is null;
+            };
+
+            _script.Holding = isSending;
+            using var given = new CancellationTokenSource();
+            var sending = connection.Frames.Count;
+            var publishing = adapter.Publish(new BrokerPublication { Payload = (byte[])[2], Topic = topic, CancellationToken = given.Token });
+            var attaching = await connection.Next(isSending, from: sending);
+
+            await given.CancelAsync();
+            Assert.IsAssignableFrom<OperationCanceledException>(await FailureOf(() =>
+            {
+                return publishing;
+            }));
+            Assert.Single(TransfersTo((connection, AmqpMessages.AddressOf(topic))));
+
+            var successor = adapter.Publish(new BrokerPublication { Payload = (byte[])[3], Topic = topic });
+
+            _script.Holding = (_) =>
+            {
+                return false;
+            };
+            await connection.AnswerAttach(attaching);
+            Assert.Equal(BrokerPublished.Taken, await successor.WaitAsync(Patience, Cancelled));
+            Assert.Equal(
+                ["01", "03"],
+                TransfersTo((connection, AmqpMessages.AddressOf(topic))).Select((each) =>
+                {
+                    return Convert.ToHexString((byte[])each.Message.Body);
+                }));
+            Assert.True(adapter.IsLinked);
+            Assert.Empty(downs);
+            await adapter.Stop();
+        }
+    }
+
+    [Fact]
     public async Task Hands_each_message_on_before_its_accepted_which_goes_once_it_is_settled_on_the_receiver_it_came_on_and_once_never_released_or_modified_spec_15_36()
     {
         await using var adapter = AdapterOf();
