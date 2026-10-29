@@ -7,6 +7,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-10-29
+
 ### Added
 
 - The trace of a participant's parcels on the TypeScript and C# sides, with guarded listeners,
@@ -24,6 +26,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- The spec moves to 0.10.0 (`spec-v0.10.0`), its companion, `spec/debugging.md`, to 0.5.0
+  (`debugging-v0.5.0`), and the transcoding's companion, `spec/transcoding.md`, to 0.2.1
+  (`transcoding-v0.2.1`).
 - The DevTools filter covers every view, with hidden counts, a stale-hook notice, and Broker panes
   that keep selection, focus and scroll across readings.
 - The builder's image runs Node 26.13.0, Node 26's first LTS release.
@@ -2076,7 +2081,8 @@ duration }`: on the C# side `StartedAt`, a `DateTimeOffset`, and `Duration`, a `
   workflows.
 - The licence, Apache-2.0.
 
-[Unreleased]: https://github.com/francisdesjardins/bead/compare/v0.8.0...develop
+[Unreleased]: https://github.com/francisdesjardins/bead/compare/v0.9.0...develop
+[0.9.0]: https://github.com/francisdesjardins/bead/compare/v0.8.0...v0.9.0
 [0.8.0]: https://github.com/francisdesjardins/bead/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/francisdesjardins/bead/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/francisdesjardins/bead/compare/v0.5.0...v0.6.0

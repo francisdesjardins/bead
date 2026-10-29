@@ -26,7 +26,7 @@ hold what of them a test can. The why of each rule is in the decisions:
 - [0035](../docs/decisions/0035-a-payload-that-reads-is-held-to-its-messages-rules-before-its-resolver-sees-it.md):
   a request its rules refuse, traced and counted (4.3, 4.4, 9.4, 9.6).
 
-**Version: 0.4.1**. Each of its conformance files repeats it as its `debuggingVersion`, and follows
+**Version: 0.5.0**. Each of its conformance files repeats it as its `debuggingVersion`, and follows
 its schema in [`schemas/`](schemas/). It moves by `spec.md`'s rule, under a version of its own
 ([0008](../docs/decisions/0008-three-version-axes-and-names-qualified-by-their-owner.md)): the minor
 when an implementation that conforms to its last version must change to conform to this one, the

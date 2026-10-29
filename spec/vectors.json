@@ -18,7 +18,7 @@
     "An AMQP 1.0 message is section 15.35's profile: a message to the address to, its UTF-8 bytes, of payloadLength bytes each payloadByte, with a header whose ttl is ttl, in milliseconds, where ttl is given, and none where it is not; bytes is the whole message, which a side's writer writes to its every byte.",
     "An AMQP 1.0 publish bound is section 15.37's count with no broker: a message to address, its UTF-8 bytes, a life counted whatever the message; largestPayload, the largest payload whose message is within maximumMessageSize, at most 4,294,967,295, null where an empty one does not fit; and messageBytes, that message's every byte, null alike."
   ],
-  "specVersion": "0.9.0",
+  "specVersion": "0.10.0",
   "headers": [
     {
       "name": "a request",
