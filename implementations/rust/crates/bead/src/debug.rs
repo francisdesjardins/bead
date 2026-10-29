@@ -12,6 +12,8 @@ use crate::router::types::ConnectionHandle;
 #[cfg(test)]
 mod tests;
 
+pub(crate) mod participant;
+
 /// Which way a step or an envelope went: in, or out.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[non_exhaustive]

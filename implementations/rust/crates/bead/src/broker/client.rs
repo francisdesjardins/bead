@@ -384,8 +384,11 @@ async fn opening(
                     .max(Duration::from_millis(1))
             });
             let payload = write_parcel(&open).ok()?;
+            let topic = config.name_of(&server);
 
-            Some(config.publish((config.name_of(&server), payload, left)))
+            config.trace_tx((&topic, &payload, &open), || None);
+
+            Some(config.publish((topic, payload, left)))
         })
         .await;
     let Ok(Some(published)) = opened else {

@@ -431,7 +431,19 @@ impl ServerInner {
         Box::pin(async move {
             match subscribing.await {
                 Ok(()) => {
-                    locked(&server.state).subscribed.insert(name);
+                    let participant = server.participant.clone();
+
+                    participant
+                        .run(move |state| {
+                            locked(&server.state).subscribed.insert(name.clone());
+                            state.config.name_changed((
+                                &name,
+                                true,
+                                server.is_in_group.then_some(name.as_str()),
+                            ));
+                        })
+                        .await
+                        .ok();
 
                     Ok(())
                 }
@@ -443,7 +455,15 @@ impl ServerInner {
                         "the name {name} is not served: its broker refused its subscription, {reason}"
                     ));
 
-                    server.report((&error, None));
+                    let participant = server.participant.clone();
+
+                    participant
+                        .run(move |state| {
+                            state.config.trace_report(&error, || None);
+                            server.report((&error, None));
+                        })
+                        .await
+                        .ok();
 
                     Ok(())
                 }
@@ -509,6 +529,8 @@ impl ServerInner {
             !state.is_full && state.ready == ReadyState::Open && config.is_linked()
         };
 
+        config.name_changed((&name, false, self.is_in_group.then_some(name.as_str())));
+
         if is_asked_anew {
             let joining = self.join_one(name);
 
@@ -551,15 +573,28 @@ impl ServerInner {
         let server = Arc::clone(self);
 
         Box::pin(async move {
-            if let Err(reason) = leaving.await
-                && !matches!(reason, BrokerError::Refused(_))
-                && config.is_linked()
-                && !config.is_down_as_it_links()
-            {
-                config.report(&RouterError::Other(Arc::new(reason)));
-            }
+            let left = leaving.await;
+            let participant = server.participant.clone();
 
-            locked(&server.state).subscribed.remove(&name);
+            participant
+                .run(move |state| {
+                    if let Err(reason) = left
+                        && !matches!(reason, BrokerError::Refused(_))
+                        && config.is_linked()
+                        && !config.is_down_as_it_links()
+                    {
+                        config.report(&RouterError::Other(Arc::new(reason)));
+                    }
+
+                    locked(&server.state).subscribed.remove(&name);
+                    state.config.name_changed((
+                        &name,
+                        false,
+                        server.is_in_group.then_some(name.as_str()),
+                    ));
+                })
+                .await
+                .ok();
         })
     }
 }

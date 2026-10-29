@@ -17,7 +17,7 @@ use core::fmt;
 use core::future::Future;
 use core::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use core::time::Duration;
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError, Weak};
 
 use bytes::Bytes;
@@ -39,6 +39,8 @@ use crate::broker::parcel::{
 use crate::broker::sequence::{Budget, PartTaking, Parts, PartsBounds, Sequence, Taking, cut};
 use crate::broker::server::{BrokerServer, BrokerServerOptions, ServerInner};
 use crate::clock::{SharedClock, SystemClock};
+use crate::debug::DebugDirection;
+use crate::debug::participant::{ParcelVerdict, ParticipantDebugEvent, ParticipantDebugListener};
 use crate::duration::{NEVER, hold, hold_finite};
 use crate::errors::{ConnectError, ProgrammerError, TransportError};
 use crate::owner::{Owner, WeakOwner};
@@ -189,6 +191,16 @@ struct Connection {
     state: State,
     counters: Arc<Counters>,
     handle: Option<ConnectionHandle>,
+}
+
+impl Connection {
+    fn trace_handle(&self) -> Option<ConnectionHandle> {
+        if self.owner.is_opener() {
+            Some(Arc::from("server"))
+        } else {
+            self.handle.clone()
+        }
+    }
 }
 
 /// What a connection is, as it is made.
@@ -348,9 +360,101 @@ pub(crate) struct Config {
     names: Mutex<HashMap<String, Weak<ServerInner>>>,
     servers: Mutex<Vec<Weak<ServerInner>>>,
     listeners: Listeners<dyn Fn(&RouterError) + Send + Sync>,
+    debug_listeners: Listeners<dyn Fn(&ParticipantDebugEvent) + Send + Sync>,
+    held_names: Mutex<BTreeSet<String>>,
 }
 
 impl Config {
+    /// Builds and tells a trace only while watched, with no clock reading (debugging 13.10).
+    pub(crate) fn debug<F: FnOnce() -> ParticipantDebugEvent>(&self, event: F) {
+        if self.debug_listeners.is_empty() {
+            return;
+        }
+
+        let event = event();
+
+        self.debug_listeners.each((
+            |listener: &(dyn Fn(&ParticipantDebugEvent) + Send + Sync + 'static)| listener(&event),
+            |error| self.tell_error(&error),
+        ));
+    }
+
+    /// A name held by its broker's word, after its acknowledgement (debugging 13.5).
+    pub(crate) fn name_changed(&self, (name, is_held, group): (&str, bool, Option<&str>)) {
+        {
+            let mut names = locked(&self.held_names);
+
+            if is_held {
+                names.insert(name.to_owned());
+            } else {
+                names.remove(name);
+            }
+        }
+
+        self.debug(|| ParticipantDebugEvent {
+            event: "names",
+            name: Some(name.to_owned()),
+            is_held: Some(is_held),
+            group: group.map(str::to_owned),
+            ..ParticipantDebugEvent::default()
+        });
+    }
+
+    fn transition(&self, state: &'static str, ended: Option<Vec<u64>>) {
+        self.debug(|| ParticipantDebugEvent {
+            event: "link",
+            state: Some(state),
+            incarnation: Some(format!("{:032x}", self.incarnation())),
+            ended,
+            ..ParticipantDebugEvent::default()
+        });
+    }
+
+    /// A parcel attempted, before the adapter takes it, without reading its bytes again.
+    pub(crate) fn trace_tx<F: FnOnce() -> Option<(u64, Option<ConnectionHandle>)>>(
+        &self,
+        (topic, payload, parcel): (&[String], &Bytes, &Parcel),
+        connection: F,
+    ) {
+        self.debug(|| {
+            let connection = connection();
+
+            ParticipantDebugEvent {
+                direction: Some(DebugDirection::Tx),
+                flags: payload.get(2).copied(),
+                has_credential: (parcel.kind == kinds::DATA).then(|| {
+                    payload
+                        .get(2)
+                        .is_some_and(|flags| flags & flags::CREDENTIAL != 0)
+                }),
+                topic: Some(topic.to_vec()),
+                bytes: Some(payload.len()),
+                connection: connection.as_ref().map(|(serial, _)| *serial),
+                connection_handle: connection.and_then(|(_, handle)| handle),
+                ..ParticipantDebugEvent::parcel(parcel)
+            }
+        });
+    }
+
+    /// What the participant or a transport reports in its own words.
+    pub(crate) fn trace_report<F: FnOnce() -> Option<(u64, Option<ConnectionHandle>)>>(
+        &self,
+        error: &RouterError,
+        connection: F,
+    ) {
+        self.debug(|| {
+            let connection = connection();
+
+            ParticipantDebugEvent {
+                event: "report",
+                report: Some(error.to_string()),
+                connection: connection.as_ref().map(|(serial, _)| *serial),
+                connection_handle: connection.and_then(|(_, handle)| handle),
+                ..ParticipantDebugEvent::default()
+            }
+        });
+    }
+
     /// A participant's inbox: its root, `i` and its id (spec 15.16).
     pub(crate) fn inbox_of(&self, id: &str) -> Vec<String> {
         vec![self.root.clone(), "i".to_owned(), id.to_owned()]
@@ -425,6 +529,16 @@ impl Config {
     /// with no handle: a message that is no parcel, or an OPEN that does not read, which it drops
     /// (spec 15.1, 15.17).
     pub(crate) fn report(&self, error: &RouterError) {
+        self.trace_report(error, || None);
+        self.tell_error(error);
+
+        for server in self.servers() {
+            server.report((error, None));
+        }
+    }
+
+    // ! a debug listener's panic reaches errors alone, so it cannot trace itself recursively
+    fn tell_error(&self, error: &RouterError) {
         let heard = self.listeners.all();
 
         self.listeners.each((
@@ -437,10 +551,6 @@ impl Config {
                 }
             },
         ));
-
-        for server in self.servers() {
-            server.report((error, None));
-        }
     }
 
     /// The server transports over it, while they stand.
@@ -471,6 +581,51 @@ pub(crate) struct ParticipantState {
 }
 
 impl ParticipantState {
+    fn trace_rx(
+        &self,
+        (message, parcel): (&BrokerMessage, Option<&Parcel>),
+        (verdict, pair): (ParcelVerdict, Option<Pair>),
+    ) {
+        self.config.debug(|| {
+            let connection = pair.and_then(|pair| self.connections.get(&pair));
+            let mut event = parcel.map_or_else(
+                || ParticipantDebugEvent {
+                    event: "parcel",
+                    ..ParticipantDebugEvent::default()
+                },
+                ParticipantDebugEvent::parcel,
+            );
+
+            event.direction = Some(DebugDirection::Rx);
+            event.topic = Some(message.topic().to_vec());
+            event.bytes = Some(message.payload().len());
+            event.verdict = Some(verdict);
+            event.flags = parcel.and_then(|_| message.payload().get(2).copied());
+            event.connection = connection.map(|connection| connection.serial);
+            event.connection_handle = connection.and_then(Connection::trace_handle);
+
+            if verdict == ParcelVerdict::Loss {
+                event.awaited = connection.map(|connection| connection.sequence.awaited());
+                event.came = parcel.map(|parcel| parcel.sequence);
+            }
+
+            event
+        });
+    }
+
+    fn ordinals(&self) -> Option<Vec<u64>> {
+        (!self.config.debug_listeners.is_empty()).then(|| {
+            let mut ended: Vec<_> = self
+                .connections
+                .values()
+                .map(|connection| connection.serial)
+                .collect();
+
+            ended.sort_unstable();
+            ended
+        })
+    }
+
     /// A half drawn from a cryptographic source, never all zero, none it holds already (spec
     /// 15.17); none when the system's source gives nothing.
     pub(crate) fn draw_half(&self) -> Option<u64> {
@@ -547,6 +702,7 @@ impl ParticipantState {
         let Ok(payload) = write_parcel(parcel) else {
             return;
         };
+        self.config.trace_tx((&topic, &payload, parcel), || None);
         let published = self.config.publish((topic, payload, None));
 
         self.owner.cover(async move {
@@ -729,12 +885,13 @@ impl ParticipantState {
         } else {
             connection.sent.saturating_add(1)
         };
-        let Ok(bytes) = write_parcel(&Parcel {
+        let parcel = Parcel {
             opener: pair.0,
             acceptor: pair.1,
             sequence,
             ..parcel
-        }) else {
+        };
+        let Ok(bytes) = write_parcel(&parcel) else {
             return;
         };
         let length = u64::try_from(bytes.len()).unwrap_or(u64::MAX);
@@ -764,11 +921,13 @@ impl ParticipantState {
 
         let serial = connection.serial;
         let counters = Arc::clone(&connection.counters);
-        let published = self.config.publish((
-            self.config.inbox_of(&connection.peer.id),
-            bytes,
-            expires_after,
-        ));
+        let topic = self.config.inbox_of(&connection.peer.id);
+
+        self.config.trace_tx((&topic, &bytes, &parcel), || {
+            Some((serial, connection.trace_handle()))
+        });
+
+        let published = self.config.publish((topic, bytes, expires_after));
         let owner = self.owner.clone();
 
         self.owner.cover(async move {
@@ -902,6 +1061,12 @@ impl ParticipantState {
 
         connection.parts.stop();
 
+        if let Some(error) = &end.1 {
+            self.config.trace_report(error, || {
+                Some((connection.serial, connection.trace_handle()))
+            });
+        }
+
         if connection.state == State::Open {
             self.depart((&connection.peer.id, false));
         }
@@ -931,16 +1096,21 @@ impl ParticipantState {
     }
 
     // whether a sequence is the next awaited; a copy dropped, a gap a loss
-    fn is_next(&mut self, (pair, sequence): (Pair, u64)) -> bool {
+    fn is_next(&mut self, pair: Pair, (parcel, message): (&Parcel, &BrokerMessage)) -> bool {
         let Some(connection) = self.connections.get_mut(&pair) else {
             return false;
         };
 
-        match connection.sequence.take(sequence) {
+        match connection.sequence.take(parcel.sequence) {
             Taking::Next => true,
-            Taking::Copy => false,
+            Taking::Copy => {
+                self.trace_rx((message, Some(parcel)), (ParcelVerdict::Copy, Some(pair)));
+                false
+            }
             Taking::Gap => {
-                let why = connection.sequence.gap_of(sequence);
+                let why = connection.sequence.gap_of(parcel.sequence);
+
+                self.trace_rx((message, Some(parcel)), (ParcelVerdict::Loss, Some(pair)));
 
                 self.lose(pair, (codes::LOST, why));
 
@@ -953,7 +1123,7 @@ impl ParticipantState {
     // come closes it with 1002; any other is taken in its sequence, a copy dropped, a gap a loss,
     // and the next handed on by its kind, an advisory one skipped, and an OPEN, an ACCEPT, a
     // REFUSE, a GONE, or anything but a DATA between an envelope's parts, closing it with 1002
-    fn take_on(&mut self, pair: Pair, parcel: Parcel) {
+    fn take_on(&mut self, pair: Pair, (parcel, message): (Parcel, &BrokerMessage)) {
         let Some(connection) = self.connections.get(&pair) else {
             return;
         };
@@ -963,12 +1133,14 @@ impl ParticipantState {
         }
 
         if parcel.kind == kinds::RESET {
+            self.trace_rx((message, Some(&parcel)), (ParcelVerdict::Taken, Some(pair)));
             self.ended(pair, (false, None));
 
             return;
         }
 
         if parcel.layout != LAYOUT {
+            self.trace_rx((message, Some(&parcel)), (ParcelVerdict::Taken, Some(pair)));
             let why = format!(
                 "a parcel of a layout to come, {}",
                 hex_of_byte(parcel.layout)
@@ -979,7 +1151,7 @@ impl ParticipantState {
             return;
         }
 
-        if !self.is_next((pair, parcel.sequence)) {
+        if !self.is_next(pair, (&parcel, message)) {
             return;
         }
 
@@ -1004,6 +1176,18 @@ impl ParticipantState {
                 return;
             }
         }
+
+        self.trace_rx(
+            (message, Some(&parcel)),
+            (
+                if is_advisory(parcel.kind) {
+                    ParcelVerdict::Advisory
+                } else {
+                    ParcelVerdict::Taken
+                },
+                Some(pair),
+            ),
+        );
 
         if is_advisory(parcel.kind) {
             return;
@@ -1046,7 +1230,11 @@ impl ParticipantState {
     // a parcel naming a pair it holds that does not read: a kind to come taken in its order, a copy
     // dropped and a gap a loss (spec 15.17); then the connection closed with 1002, reported naming
     // it
-    fn take_unread(&mut self, pair: Pair, (prefix, why): (Parcel, String)) {
+    fn take_unread(
+        &mut self,
+        pair: Pair,
+        (prefix, why, message): (Parcel, String, &BrokerMessage),
+    ) {
         let Some(connection) = self.connections.get(&pair) else {
             return;
         };
@@ -1059,11 +1247,15 @@ impl ParticipantState {
         // at once
         if is_kind_to_come(prefix.kind)
             && prefix.sequence <= LARGEST_SEQUENCE
-            && !self.is_next((pair, prefix.sequence))
+            && !self.is_next(pair, (&prefix, message))
         {
             return;
         }
 
+        self.trace_rx(
+            (message, Some(&prefix)),
+            (ParcelVerdict::DoesNotRead, Some(pair)),
+        );
         self.lose(
             pair,
             (
@@ -1124,25 +1316,47 @@ impl ParticipantState {
     // with it (spec 15.19)
     fn take(&mut self, message: &BrokerMessage) {
         // ! no parcel is retained: one that comes so is dropped in silence (spec 15.23)
-        if !message.is_retained()
-            && let [root, place, name] = message.topic()
-            && *root == self.config.root
-        {
+        let is_held = match message.topic() {
+            [root, place, name] if !message.is_retained() && *root == self.config.root => {
+                match place.as_str() {
+                    "i" => *name == self.config.id,
+                    "s" => locked(&self.config.names).contains_key(name),
+                    "d" => self.departures.contains_key(name),
+                    _ => false,
+                }
+            }
+            _ => false,
+        };
+
+        if is_held && let [_, place, name] = message.topic() {
             match place.as_str() {
-                "i" if *name == self.config.id => self.take_inbox(message.payload()),
-                "s" => self.take_name(name, message.payload()),
-                "d" => self.take_gone(message.payload()),
+                "i" => self.take_inbox(message),
+                "s" => self.take_name(name, message),
+                "d" => self.take_gone(message),
                 _ => {}
             }
+        } else {
+            self.trace_rx(
+                (message, None),
+                (
+                    if message.is_retained() {
+                        ParcelVerdict::Retained
+                    } else {
+                        ParcelVerdict::OffTopic
+                    },
+                    None,
+                ),
+            );
         }
 
         message.settle();
     }
 
     // what reaches its inbox: each parcel of its connections, an ACCEPT or a REFUSE among them
-    fn take_inbox(&mut self, payload: &Bytes) {
-        match read_parcel(payload) {
+    fn take_inbox(&mut self, message: &BrokerMessage) {
+        match read_parcel(message.payload()) {
             ParcelRead::NoParcel(why) => {
+                self.trace_rx((message, None), (ParcelVerdict::NoParcel, None));
                 let error = reported(format!(
                     "a message to the inbox of {} is no parcel: {why}",
                     self.config.id
@@ -1153,16 +1367,30 @@ impl ParticipantState {
             ParcelRead::DoesNotRead(prefix, why) => {
                 let pair = (prefix.opener, prefix.acceptor);
 
-                self.take_unread(pair, (prefix, why));
+                if self.connections.contains_key(&pair) {
+                    self.take_unread(pair, (prefix, why, message));
+                } else {
+                    self.trace_rx((message, Some(&prefix)), (ParcelVerdict::DoesNotRead, None));
+                }
             }
             ParcelRead::Parcel(parcel) => {
                 let pair = (parcel.opener, parcel.acceptor);
 
                 if self.connections.contains_key(&pair) {
-                    self.take_on(pair, parcel);
+                    self.take_on(pair, (parcel, message));
 
                     return;
                 }
+
+                let verdict = if self.connects.contains_key(&parcel.opener)
+                    && matches!(parcel.kind, kinds::ACCEPT | kinds::REFUSE)
+                {
+                    ParcelVerdict::Taken
+                } else {
+                    ParcelVerdict::PairNotHeld
+                };
+
+                self.trace_rx((message, Some(&parcel)), (verdict, None));
 
                 match parcel.kind {
                     kinds::ACCEPT if parcel.layout == LAYOUT => {
@@ -1201,9 +1429,11 @@ impl ParticipantState {
 
     // what reaches a server's name: an OPEN, for the server transport serving it, or refused 503
     // when none does
-    fn take_name(&mut self, name: &str, payload: &Bytes) {
+    fn take_name(&mut self, name: &str, message: &BrokerMessage) {
         let server = locked(&self.config.names).get(name).and_then(Weak::upgrade);
-        let read = read_parcel(payload);
+        let read = read_parcel(message.payload());
+
+        self.trace_read(message, &read);
 
         match server {
             Some(server) => server.take_open(self, (name, read)),
@@ -1219,8 +1449,12 @@ impl ParticipantState {
 
     // a GONE to a peer's departure: each connection bound to the id and the incarnation it names
     // closed, unclean, never one bound to another (spec 15.21)
-    fn take_gone(&mut self, payload: &Bytes) {
-        let ParcelRead::Parcel(gone) = read_parcel(payload) else {
+    fn take_gone(&mut self, message: &BrokerMessage) {
+        let read = read_parcel(message.payload());
+
+        self.trace_read(message, &read);
+
+        let ParcelRead::Parcel(gone) = read else {
             return;
         };
 
@@ -1243,16 +1477,34 @@ impl ParticipantState {
         }
     }
 
+    fn trace_read(&self, message: &BrokerMessage, read: &ParcelRead) {
+        let (parcel, verdict) = match read {
+            ParcelRead::NoParcel(_) => (None, ParcelVerdict::NoParcel),
+            ParcelRead::DoesNotRead(prefix, _) => (Some(prefix), ParcelVerdict::DoesNotRead),
+            ParcelRead::Parcel(parcel) => (
+                Some(parcel),
+                if is_advisory(parcel.kind) {
+                    ParcelVerdict::Advisory
+                } else {
+                    ParcelVerdict::Taken
+                },
+            ),
+        };
+
+        self.trace_rx((message, parcel), (verdict, None));
+    }
+
     // its link lost: each connection closed, unclean, each connect failed, then its link connected
     // again as another incarnation, and each peer it held a connection with reset; or taken over:
     // each connection closed alike, reported, and fenced
     fn link_down(&mut self, (down, participant): (BrokerDown, Weak<ParticipantInner>)) {
         let config = Arc::clone(&self.config);
+        let ended = self.ordinals();
 
         {
             let mut status = locked(&config.status);
 
-            if status.is_stopped {
+            if status.is_stopped || status.is_taken_over {
                 return;
             }
 
@@ -1262,7 +1514,8 @@ impl ParticipantState {
 
                 if down.is_taken_over {
                     drop(status);
-                    self.fence();
+                    locked(&config.held_names).clear();
+                    self.fence(ended);
                 }
 
                 return;
@@ -1301,13 +1554,17 @@ impl ParticipantState {
             server.unlinked();
         }
 
+        locked(&config.held_names).clear();
+
         // * taken over: it connects no more, its server's transports taking no OPEN and its
         // clients' connects failing, until its application starts it again (spec 15.21)
         if down.is_taken_over {
-            self.fence();
+            self.fence(ended);
 
             return;
         }
+
+        config.transition("down", ended);
 
         // * no reconnection: it stays down, said so, and the next start or connect links it anew
         if !config.is_reconnecting {
@@ -1329,7 +1586,7 @@ impl ParticipantState {
 
     // its link taken over, reported once, its reconnection under way given up and its next start a
     // link anew
-    fn fence(&self) {
+    fn fence(&self, ended: Option<Vec<u64>>) {
         {
             let mut status = locked(&self.config.status);
 
@@ -1344,6 +1601,8 @@ impl ParticipantState {
                 relinking.cancel();
             }
         }
+
+        self.config.transition("taken-over", ended);
 
         self.owner.offer(Box::new(|state: &mut Self| {
             let error = reported(state.config.taken_over());
@@ -1446,7 +1705,11 @@ async fn relinking(
         ),
     };
 
-    config.report(&reported(ended));
+    inner
+        .owner
+        .offer(Box::new(move |state: &mut ParticipantState| {
+            state.config.report(&reported(ended));
+        }));
 }
 
 // in its turn's stead: its link connected, a new incarnation, its inbox and its names subscribed
@@ -1503,9 +1766,28 @@ async fn link(inner: &Arc<ParticipantInner>) -> Result<(), BrokerError> {
         )));
     }
 
-    config.live.send_replace(true);
+    inner
+        .owner
+        .run(|state| {
+            let is_down = {
+                let status = locked(&state.config.status);
 
-    Ok(())
+                status.is_down_as_it_links || status.is_stopped || status.is_taken_over
+            };
+
+            if is_down {
+                return Err(BrokerError::failed(format!(
+                    "the link of {} went down as it connected",
+                    state.config.id
+                )));
+            }
+
+            state.config.live.send_replace(true);
+            state.config.transition("up", None);
+            Ok(())
+        })
+        .await
+        .map_err(|_gone| BrokerError::failed("the participant is gone"))?
 }
 
 // what its adapter hands it, each taken in its turn
@@ -1686,6 +1968,8 @@ impl BrokerParticipant {
             names: Mutex::new(HashMap::new()),
             servers: Mutex::new(Vec::new()),
             listeners: Listeners::default(),
+            debug_listeners: Listeners::default(),
+            held_names: Mutex::default(),
         });
         let held_config = Arc::clone(&config);
         let owner = Owner::spawn((&runtime, &clock), move |owner| ParticipantState {
@@ -1734,6 +2018,34 @@ impl BrokerParticipant {
     #[must_use]
     pub fn is_linked(&self) -> bool {
         self.inner.config.is_linked()
+    }
+
+    /// Whether somebody watches its trace of parcels (debugging 13.10).
+    #[must_use]
+    pub fn is_debugging(&self) -> bool {
+        !self.inner.config.debug_listeners.is_empty()
+    }
+
+    /// Hears each parcel's verdict, completed link transition, held name and report.
+    pub fn on_debug(&self, listener: ParticipantDebugListener) {
+        self.inner.config.debug_listeners.add(listener);
+    }
+
+    /// Hears its trace no more.
+    pub fn off_debug(&self, listener: &ParticipantDebugListener) {
+        self.inner.config.debug_listeners.remove(listener);
+    }
+
+    /// The names acknowledged held on this link, read by pull (debugging 13.8).
+    #[must_use]
+    pub fn names(&self) -> BTreeSet<String> {
+        locked(&self.inner.config.held_names).clone()
+    }
+
+    /// Its logical inbox's topic tokens, read by pull.
+    #[must_use]
+    pub fn inbox(&self) -> Vec<String> {
+        self.inner.config.inbox_of(self.id())
     }
 
     /// Hears what it reports of its own: a message to it that is no parcel, which it drops, its link
@@ -1952,13 +2264,31 @@ impl BrokerParticipant {
             status.is_stopped = true;
         }
 
-        let closing = self.inner.owner.run(ParticipantState::stopping);
+        let closing = self.inner.owner.run(|state| {
+            let ended = state.ordinals();
+
+            state.stopping();
+            ended
+        });
         let adapter = Arc::clone(&self.inner.config.adapter);
+        let inner = Arc::clone(&self.inner);
         let (reply, stopped) = oneshot::channel::<()>();
 
         self.inner.owner.cover(async move {
-            closing.await.ok();
+            let ended = closing.await.ok().flatten();
+
             adapter.stop().await;
+            inner
+                .owner
+                .run(move |state| {
+                    locked(&state.config.held_names).clear();
+
+                    if !locked(&state.config.status).is_taken_over {
+                        state.config.transition("stopped", ended);
+                    }
+                })
+                .await
+                .ok();
             reply.send(()).ok();
         });
 
@@ -1968,8 +2298,8 @@ impl BrokerParticipant {
     }
 
     /// Its incarnation, drawn as its link last connected.
-    #[cfg(test)]
-    pub(crate) fn incarnation(&self) -> u128 {
+    #[must_use]
+    pub fn incarnation(&self) -> u128 {
         self.inner.config.incarnation()
     }
 
