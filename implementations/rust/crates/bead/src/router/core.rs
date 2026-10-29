@@ -48,6 +48,23 @@ use crate::violations::detail_bound_of;
 /// What a router's handlers are told the router was disposed with.
 pub(crate) const DISPOSED: &str = "the router was disposed";
 
+/// What a router's send meets once nothing holds its transport any more: its owner is ending.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct TransportGone;
+
+impl fmt::Display for TransportGone {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str("the router's transport is gone")
+    }
+}
+
+impl Error for TransportGone {}
+
+/// The error a send meets once nothing holds its router's transport.
+pub(crate) fn transport_gone() -> RouterError {
+    RouterError::Other(Arc::new(TransportGone))
+}
+
 // SESSION_REQUIRED's details at a credential's resolution: one came and did not hold, or none came
 const CREDENTIAL_NOT_HELD: &str = "the credential does not hold";
 const NO_CREDENTIAL: &str = "no credential came";

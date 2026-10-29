@@ -6,7 +6,7 @@ use core::fmt;
 use core::time::Duration;
 use std::collections::BTreeMap;
 use std::error::Error;
-use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
+use std::sync::{Arc, Mutex, MutexGuard, PoisonError, Weak};
 
 use bytes::Bytes;
 use tokio::runtime::Handle;
@@ -219,8 +219,11 @@ fn key_of(notification: &dyn NotificationLike) -> (u16, u16) {
 /// What a client's router holds, in its owner.
 pub(crate) struct ClientState {
     core: Core<Self>,
-    transport: Arc<dyn ClientTransport>,
-    listener: Option<Arc<dyn ClientListener>>,
+    // ! its transport and its bridge held weakly: the transport holds the bridge, which holds the
+    // owner, so a strong edge back would keep the owner of its own (decision 0044); the handle holds
+    // the transport strongly, so it goes only once nothing holds the router
+    transport: Weak<dyn ClientTransport>,
+    listener: Option<Weak<dyn ClientListener>>,
     credentials: CredentialResolver,
     notifications: Registered,
     hearings: Arc<Mutex<BTreeMap<(u16, u16), NotificationSeries>>>,
@@ -253,8 +256,10 @@ impl ClientState {
 
     // lets go of what it holds: its transport's events, its session, every call
     fn dispose(&mut self) {
-        if let Some(listener) = self.listener.take() {
-            self.transport.unlisten(&listener);
+        if let Some(listener) = self.listener.take().and_then(|listener| listener.upgrade())
+            && let Some(transport) = self.transport.upgrade()
+        {
+            transport.unlisten(&listener);
         }
 
         *locked(&self.session_token) = None;
@@ -545,7 +550,12 @@ impl Side for ClientState {
         message: TransportMessage,
         _connection_handle: &ConnectionHandle,
     ) -> Result<Sent, RouterError> {
-        caught(("a transport", || self.transport.send(message)))
+        let transport = self
+            .transport
+            .upgrade()
+            .ok_or_else(crate::router::core::transport_gone)?;
+
+        caught(("a transport", || transport.send(message)))
             .unwrap_or_else(|panicked| Err(panicked.into()))
     }
 
@@ -590,30 +600,42 @@ impl Side for ClientState {
 
 // what posts a transport's events to the router's owner, behind every job queued, a transport that
 // tells one from within its router's turn too (spec 9.0): ! a handle to the owner, so a router
-// lives as long as its transport holds it
+// lives as long as its transport holds it; its state holds the bridge and its transport weakly, so
+// neither keeps it of its own
 struct Bridge {
     owner: Owner<ClientState>,
+    disposal: Disposal,
+}
+
+impl Bridge {
+    // ! what its transport tells once its router is disposed is dropped, as both other sides stop
+    // listening within their dispose: the rest of the dispose, its unlisten among it, comes in a
+    // later turn
+    fn offer(&self, job: Box<dyn FnOnce(&mut ClientState) + Send>) {
+        if !self.disposal.is_set() {
+            self.owner.offer_behind(job);
+        }
+    }
 }
 
 impl ClientListener for Bridge {
     fn on_message(&self, message: TransportMessage) {
-        self.owner
-            .offer_behind(Box::new(move |state: &mut ClientState| {
-                let handle = server_handle();
+        self.offer(Box::new(move |state: &mut ClientState| {
+            let handle = server_handle();
 
-                crate::router::core::receive(state, (message, &handle));
-            }));
+            crate::router::core::receive(state, (message, &handle));
+        }));
     }
 
     fn on_close(&self, _was_clean: bool, _is_quick: bool) {
-        self.owner.offer_behind(Box::new(|state: &mut ClientState| {
+        self.offer(Box::new(|state: &mut ClientState| {
             state.on_close("the connection closed before the answer");
         }));
     }
 
     // a connection replaced emits no close, but nothing sent on it will be answered either
     fn on_reconnect(&self) {
-        self.owner.offer_behind(Box::new(|state: &mut ClientState| {
+        self.offer(Box::new(|state: &mut ClientState| {
             state.on_close("the connection was replaced before the answer");
         }));
     }
@@ -740,7 +762,7 @@ impl RouterClient {
                         ),
                     )
                 },
-                transport: Arc::clone(&transport),
+                transport: Arc::downgrade(&transport),
                 listener: None,
                 credentials,
                 notifications: Arc::clone(&notifications),
@@ -753,12 +775,15 @@ impl RouterClient {
         });
         let listener: Arc<dyn ClientListener> = Arc::new(Bridge {
             owner: owner.clone(),
+            disposal: disposal.clone(),
         });
 
-        transport.listen(Arc::clone(&listener));
+        let held = Arc::downgrade(&listener);
+
+        transport.listen(listener);
 
         owner.offer(Box::new(move |state: &mut ClientState| {
-            state.listener = Some(listener);
+            state.listener = Some(held);
         }));
 
         Ok(Self {

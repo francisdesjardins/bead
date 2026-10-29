@@ -65,7 +65,8 @@ struct Shared<S> {
     activity: Option<Arc<crate::testing::Activity>>,
 }
 
-/// A handle to an owner: what posts its jobs. Every handle dropped, its task ends.
+/// A handle to an owner: what posts its jobs. Every handle dropped, its task ends: a router's state
+/// holds none of its own, its transport and its transport's bridge held weakly.
 pub(crate) struct Owner<S> {
     shared: Arc<Shared<S>>,
 }

@@ -27,6 +27,7 @@ use crate::testing::scripted::ScriptedClient;
 
 mod calls;
 mod client;
+mod disposal;
 mod limits;
 mod metrics;
 mod panics;

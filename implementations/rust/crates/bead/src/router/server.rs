@@ -9,7 +9,7 @@ use core::pin::Pin;
 use core::task::{Context, Poll};
 use core::time::Duration;
 use std::collections::BTreeMap;
-use std::sync::{Arc, Mutex, PoisonError};
+use std::sync::{Arc, Mutex, PoisonError, Weak};
 
 use bytes::Bytes;
 use tokio::runtime::Handle;
@@ -118,8 +118,11 @@ pub(crate) struct Waiting {
 /// What a server's router holds, in its owner.
 pub(crate) struct ServerState {
     pub(crate) core: Core<Self>,
-    pub(crate) transport: Arc<dyn ServerTransport>,
-    pub(crate) listener: Option<Arc<dyn ServerListener>>,
+    // ! its transport and its bridge held weakly: the transport holds the bridge, which holds the
+    // owner, so a strong edge back would keep the owner of its own (decision 0044); the handle holds
+    // the transport strongly, so it goes only once nothing holds the router
+    transport: Weak<dyn ServerTransport>,
+    pub(crate) listener: Option<Weak<dyn ServerListener>>,
     // the connections it follows, in the order it heard of them
     pub(crate) connections: Ordered<ConnectionHandle, ()>,
     pub(crate) credentials: CredentialResolver,
@@ -352,10 +355,12 @@ impl Side for ServerState {
         message: TransportMessage,
         connection_handle: &ConnectionHandle,
     ) -> Result<Sent, RouterError> {
-        caught(("a transport", || {
-            self.transport.send(message, connection_handle)
-        }))
-        .unwrap_or_else(|panicked| Err(panicked.into()))
+        let transport = self
+            .transport()
+            .ok_or_else(crate::router::core::transport_gone)?;
+
+        caught(("a transport", || transport.send(message, connection_handle)))
+            .unwrap_or_else(|panicked| Err(panicked.into()))
     }
 
     // its calls failed with the panic, then let go of as its dispose does, the panic reported
@@ -439,17 +444,24 @@ impl Side for ServerState {
 }
 
 impl ServerState {
+    /// Its transport, while something holds it: its handle, or the application.
+    pub(crate) fn transport(&self) -> Option<Arc<dyn ServerTransport>> {
+        self.transport.upgrade()
+    }
+
     /// What its transport says of `connection_handle`, asked within the turn: ! the application's
-    /// transport, whose panic is reported with the connection and answers no.
+    /// transport, whose panic is reported with the connection and answers no, as one gone does.
     pub(crate) fn asked<A: FnOnce(&dyn ServerTransport) -> bool>(
         &self,
         (connection_handle, ask): (&ConnectionHandle, A),
     ) -> bool {
-        caught(("a transport", || ask(&*self.transport))).unwrap_or_else(|panicked| {
-            self.listeners
-                .report(&panicked.into(), Some(connection_handle));
+        self.transport().is_some_and(|transport| {
+            caught(("a transport", || ask(&*transport))).unwrap_or_else(|panicked| {
+                self.listeners
+                    .report(&panicked.into(), Some(connection_handle));
 
-            false
+                false
+            })
         })
     }
 
@@ -1388,8 +1400,13 @@ pub(crate) fn dispose(state: &mut ServerState) {
         drop_with(state, handle);
     }
 
-    if let Some(listener) = state.listener.take() {
-        state.transport.unlisten(&listener);
+    if let Some(listener) = state
+        .listener
+        .take()
+        .and_then(|listener| listener.upgrade())
+        && let Some(transport) = state.transport()
+    {
+        transport.unlisten(&listener);
     }
 
     state.connections.clear();
@@ -1413,45 +1430,54 @@ pub(crate) fn dispose(state: &mut ServerState) {
 
 // what posts a transport's events to the router's owner, in the order the transport tells them,
 // behind every job queued, one told from within its router's turn too (spec 9.0): ! a handle to
-// the owner, so a router lives as long as its transport holds it (decision 0044)
+// the owner, so a router lives as long as its transport holds it (decision 0044); its state holds
+// the bridge and its transport weakly, so neither keeps it of its own
 struct Bridge {
     owner: Owner<ServerState>,
+    disposal: Disposal,
+}
+
+impl Bridge {
+    // ! what its transport tells once its router is disposed is dropped, as both other sides stop
+    // listening within their dispose: the rest of the dispose, its unlisten among it, comes in a
+    // later turn
+    fn offer(&self, job: Box<dyn FnOnce(&mut ServerState) + Send>) {
+        if !self.disposal.is_set() {
+            self.owner.offer_behind(job);
+        }
+    }
 }
 
 impl ServerListener for Bridge {
     fn on_connection(&self, connection_handle: &ConnectionHandle) {
         let handle = Arc::clone(connection_handle);
-        self.owner
-            .offer_behind(Box::new(move |state: &mut ServerState| {
-                crate::server::on_connection(state, &handle);
-                on_connection(state, &handle);
-            }));
+        self.offer(Box::new(move |state: &mut ServerState| {
+            crate::server::on_connection(state, &handle);
+            on_connection(state, &handle);
+        }));
     }
 
     fn on_message(&self, message: TransportMessage, connection_handle: &ConnectionHandle) {
         let handle = Arc::clone(connection_handle);
-        self.owner
-            .offer_behind(Box::new(move |state: &mut ServerState| {
-                crate::server::on_message(state, &handle);
-                on_message(state, (message, &handle));
-            }));
+        self.offer(Box::new(move |state: &mut ServerState| {
+            crate::server::on_message(state, &handle);
+            on_message(state, (message, &handle));
+        }));
     }
 
     fn on_close(&self, _was_clean: bool, connection_handle: &ConnectionHandle) {
         let handle = Arc::clone(connection_handle);
-        self.owner
-            .offer_behind(Box::new(move |state: &mut ServerState| {
-                crate::server::on_close(state, &handle);
-                on_close(state, &handle);
-            }));
+        self.offer(Box::new(move |state: &mut ServerState| {
+            crate::server::on_close(state, &handle);
+            on_close(state, &handle);
+        }));
     }
 
     fn on_listen(&self, is_held: bool, connection_handle: &ConnectionHandle) {
         let handle = Arc::clone(connection_handle);
-        self.owner
-            .offer_behind(Box::new(move |state: &mut ServerState| {
-                crate::server::on_listen(state, (is_held, &handle));
-            }));
+        self.offer(Box::new(move |state: &mut ServerState| {
+            crate::server::on_listen(state, (is_held, &handle));
+        }));
     }
 
     // * what its transport reports is its transport's: an application hears it there, whichever
@@ -1633,7 +1659,7 @@ impl RouterServer {
                         ),
                     )
                 },
-                transport: Arc::clone(&transport),
+                transport: Arc::downgrade(&transport),
                 listener: None,
                 connections: Ordered::new(),
                 credentials,
@@ -1650,12 +1676,15 @@ impl RouterServer {
         });
         let listener: Arc<dyn ServerListener> = Arc::new(Bridge {
             owner: owner.clone(),
+            disposal: disposal.clone(),
         });
 
-        transport.listen(Arc::clone(&listener));
+        let held = Arc::downgrade(&listener);
+
+        transport.listen(listener);
 
         owner.offer(Box::new(move |state: &mut ServerState| {
-            state.listener = Some(listener);
+            state.listener = Some(held);
         }));
 
         Ok(Self {

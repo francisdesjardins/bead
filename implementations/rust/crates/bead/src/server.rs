@@ -298,6 +298,10 @@ fn forget_connection(state: &mut ServerState, handle: &ConnectionHandle) {
 
 // a close asked once; one the transport no longer holds tells no close, so what it left goes now
 fn close(state: &mut ServerState, handle: &ConnectionHandle) {
+    // a transport gone holds no connection: its owner is ending
+    let Some(transport) = state.transport() else {
+        return;
+    };
     let Some(facade) = state.facade.as_mut() else {
         return;
     };
@@ -306,7 +310,7 @@ fn close(state: &mut ServerState, handle: &ConnectionHandle) {
         return;
     }
 
-    let closing = state.transport.close(handle);
+    let closing = transport.close(handle);
     let owner = state.core.owner.clone();
     let handle = Arc::clone(handle);
 
