@@ -2,7 +2,7 @@
 
 // dependencies
 
-import { assertHeld, PLATFORM_CLOCK, type TimeoutId } from './clock';
+import { assertHeld, type IClock, PLATFORM_CLOCK, type TimeoutId } from './clock';
 
 // interfaces
 
@@ -97,6 +97,7 @@ export const createHeartbeat = (
  * only when nothing came within its interval (RFC 9293 §3.8.4): a broker's connection, whose
  * parcels each tell it alive (spec 15.21). Nothing at all for `Infinity`. It runs on the platform's
  * timer, never a clock given, as the WebSocket's does (decision 0011), and keeps no process alive.
+ * Its unit tests may replace the platform clock through `clock`.
  *
  * @example
  * const heartbeat = createSilenceHeartbeat(30_000, {
@@ -107,10 +108,11 @@ export const createHeartbeat = (
  */
 export const createSilenceHeartbeat = (
   heartbeat: number,
-  { drop, ping }: { drop: () => void; ping: () => void }
+  { drop, ping }: { drop: () => void; ping: () => void },
+  { clock = PLATFORM_CLOCK }: { clock?: IClock } = {}
 ): ISilenceHeartbeat => {
   const now = (): number => {
-    return PLATFORM_CLOCK.performance.now();
+    return clock.performance.now();
   };
   let lastHeard = now();
   let pingedAt: number | undefined;
@@ -119,7 +121,7 @@ export const createSilenceHeartbeat = (
 
   const stop = (): void => {
     isStopped = true;
-    PLATFORM_CLOCK.clearTimeout(timer);
+    clock.clearTimeout(timer);
     timer = undefined;
   };
   // * silent since what was heard last, or since its ping: due at `heartbeat` past it, or rearmed
@@ -152,7 +154,7 @@ export const createSilenceHeartbeat = (
     }
 
     // ! a millisecond at least, counted whole: no timer is armed for less (decision 0011)
-    timer = PLATFORM_CLOCK.setTimeout(check, Math.max(1, Math.ceil(delay)));
+    timer = clock.setTimeout(check, Math.max(1, Math.ceil(delay)));
     // a browser's timer has no `unref`
     (timer as { unref?: () => unknown }).unref?.();
   };
