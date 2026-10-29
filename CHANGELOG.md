@@ -9,9 +9,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
-- The trace of a participant's parcels on the TypeScript and C# sides, with guarded listeners, incoming verdicts,
-  link and name transitions, reports and no acceptor's half; its own DevTools source and a Broker
-  view with pulled levels, column filters and recorded detail.
+- The trace of a participant's parcels on the TypeScript and C# sides, with guarded listeners,
+  incoming verdicts, link and name transitions, reports and no acceptor's half; its own DevTools
+  source and a Broker view with pulled levels, column filters and recorded detail.
 - Rust, the third language, its core: the envelope's codec, the client and server routers with
   their service, session and notification managers and the service layer, sessions and credentials
   with a JWT's verification, the clock it is given and every duration held as spec 1.4 holds it,
@@ -1143,7 +1143,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - beadc makes its temporary folders, `breaking`'s and protoc's, under the project's `.beadc/` where a
   `beadc.yaml` is read, which `init`'s `.gitignore` and the repository's ignore.
 - An earlier's root that holds no `.proto` is refused, named as its `beadc.yaml` names it, `git
-  archive` writing a submodule as an empty folder.
+archive` writing a submodule as an empty folder.
 - An archive's pax `size` overrides its ustar size, as GNU tar and bsdtar read it; an empty or NUL
   path, and an entry over an earlier one, are refused.
 - buf's finding on a deleted file is placed at the earlier's path, and a `buf:` waiver is held to the
@@ -1801,7 +1801,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   and `LastActivityChanged`, and a session manager's update `updateLastActivity` and
   `UpdateLastActivity`. The TypeScript side's `timestamp()` and `ITimestamp` go.
 - A trace tells `startedAt` and `duration`, flat on its event, where it told `timestamp: { event,
-  duration }`: on the C# side `StartedAt`, a `DateTimeOffset`, and `Duration`, a `TimeSpan?` in
+duration }`: on the C# side `StartedAt`, a `DateTimeOffset`, and `Duration`, a `TimeSpan?` in
   whole milliseconds, and `DebugTimestamp` goes. A notification's one step starts as it is sent or
   heard, and a failed notify tells its failure at that same start.
 - The banned-API analyzer (RS0030) on the C# side, and oxlint's `no-restricted-globals` and
