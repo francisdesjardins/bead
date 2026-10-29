@@ -2,7 +2,7 @@ import { setTimeout as sleep } from 'node:timers/promises';
 import { expect, test } from '@playwright/test';
 import { ProgrammerError } from '../errors';
 import { assertHeartbeat, createHeartbeat, createSilenceHeartbeat, HEARTBEAT } from '../heartbeat';
-import { spyIntervals } from './fixtures';
+import { createTestClock, spyIntervals } from './fixtures';
 
 // helpers
 
@@ -19,6 +19,77 @@ const until = async (holds: () => boolean): Promise<void> => {
 // definition
 
 test.describe('heartbeat', () => {
+  test('drops an unanswered ping after a delayed beat without arming a timer for less than nothing', () => {
+    for (const crossesDeadline of [false, true]) {
+      const heard: string[] = [];
+      const dues: number[] = [];
+      let readings: number[] = [];
+      let now = 0;
+      let pending: (() => void) | undefined;
+      const clock = {
+        ...createTestClock(),
+        performance: {
+          now: () => {
+            now = readings.shift() ?? now;
+
+            return now;
+          },
+        },
+        setTimeout: (callback: () => void, due: number) => {
+          expect(due).toBeGreaterThanOrEqual(1);
+          dues.push(due);
+          pending = callback;
+
+          return {};
+        },
+        clearTimeout: () => {
+          pending = undefined;
+        },
+      };
+      const fire = (next: number[]) => {
+        const callback = pending;
+
+        expect(callback).toBeDefined();
+        pending = undefined;
+        readings = next;
+        callback?.();
+      };
+      const heartbeat = createSilenceHeartbeat(
+        100,
+        {
+          ping: () => {
+            heard.push('ping');
+          },
+          drop: () => {
+            heard.push('drop');
+          },
+        },
+        { clock }
+      );
+
+      try {
+        fire([100, 100]);
+        expect(heard).toEqual(['ping']);
+        expect(dues).toEqual([100, 100]);
+
+        if (crossesDeadline) {
+          // * the ping's age reads 199; a second age read sees 201
+          fire([199, 201]);
+          expect(heard).toEqual(['ping']);
+          expect(dues).toEqual([100, 100, 1]);
+        }
+
+        // * the timer due at 200 runs at 201: the unanswered ping is dropped at once
+        fire([201]);
+        expect(heard).toEqual(['ping', 'drop']);
+        expect(dues).toEqual(crossesDeadline ? [100, 100, 1] : [100, 100]);
+        expect(pending).toBeUndefined();
+      } finally {
+        heartbeat.stop();
+      }
+    }
+  });
+
   test('takes a number of milliseconds a timer holds, rounded to the nearest whole one, or Infinity for none, and refuses -Infinity, which the durations file holds no input of', () => {
     for (const [heartbeat, held] of [
       [1, 1],

@@ -1,15 +1,17 @@
 //! A broker connection's heartbeat (spec 15.21), the twin of the other sides': on the platform's
 //! timer, in real time, whatever clock the side is given (decision 0011).
 
-use core::sync::atomic::{AtomicUsize, Ordering};
+use core::fmt;
+use core::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use core::time::Duration;
+use std::collections::VecDeque;
 use std::sync::{Arc, Mutex, Weak};
-use std::time::Instant;
+use std::time::{Instant, SystemTime};
 
 use super::{locked, until};
 use crate::broker::heartbeat::{Heartbeat, HeartbeatHooks};
-use crate::clock::{SharedClock, SystemClock};
-use crate::duration::NEVER;
+use crate::clock::{Clock, Schedule, SharedClock, SystemClock, Timer, TimerCallback};
+use crate::duration::{LONGEST_TIMER, NEVER};
 
 fn platform() -> SharedClock {
     Arc::new(SystemClock::current().expect("a runtime"))
@@ -37,6 +39,144 @@ fn heartbeat_of(
             },
         ),
     )
+}
+
+#[test]
+fn drops_an_unanswered_ping_after_a_delayed_beat_without_arming_a_timer_for_less_than_nothing() {
+    for crosses_deadline in [false, true] {
+        let clock = Arc::new(DelayedClock::default());
+        let (pings, drops) = (Arc::new(AtomicUsize::new(0)), Arc::new(AtomicUsize::new(0)));
+        let shared: SharedClock = Arc::<DelayedClock>::clone(&clock);
+        let heartbeat = Heartbeat::start(
+            Duration::from_millis(100),
+            (
+                shared,
+                HeartbeatHooks {
+                    ping: counting(&pings),
+                    drop: counting(&drops),
+                },
+            ),
+        );
+        let counts = || (pings.load(Ordering::SeqCst), drops.load(Ordering::SeqCst));
+        let dues = || {
+            locked(&clock.state)
+                .dues
+                .iter()
+                .map(Duration::as_millis)
+                .collect::<Vec<_>>()
+        };
+
+        clock.fire(&[100]);
+        assert_eq!(counts(), (1, 0), "pinged once");
+        assert_eq!(dues(), [100, 100], "due at the ping's next heartbeat");
+
+        if crosses_deadline {
+            // * the ping's age reads 199; a second age read sees 201
+            clock.fire(&[199, 201]);
+            assert_eq!(counts(), (1, 0), "the ping has a millisecond left");
+            assert_eq!(dues(), [100, 100, 1], "rearmed for that millisecond");
+        }
+
+        // * the timer due at 200 runs at 201: the unanswered ping is dropped at once
+        clock.fire(&[201]);
+        assert_eq!(counts(), (1, 1), "dropped once");
+        assert_eq!(
+            dues(),
+            if crosses_deadline {
+                vec![100, 100, 1]
+            } else {
+                vec![100, 100]
+            },
+            "nothing armed on dropping"
+        );
+        assert!(locked(&clock.state).pending.is_none(), "no timer remains");
+        heartbeat.stop();
+    }
+}
+
+// * a timer fired by hand: its readings can pass a deadline within one callback
+#[derive(Default)]
+struct DelayedState {
+    now: Duration,
+    readings: VecDeque<Duration>,
+    dues: Vec<Duration>,
+    pending: Option<(Arc<DelayedTimer>, TimerCallback)>,
+}
+
+#[derive(Default)]
+struct DelayedClock {
+    state: Mutex<DelayedState>,
+}
+
+impl fmt::Debug for DelayedClock {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("DelayedClock")
+            .finish_non_exhaustive()
+    }
+}
+
+impl DelayedClock {
+    fn fire(&self, readings: &[u64]) {
+        let (timer, mut callback) = {
+            let mut state = locked(&self.state);
+
+            state.readings = readings
+                .iter()
+                .copied()
+                .map(Duration::from_millis)
+                .collect();
+            state.pending.take().expect("an armed timer")
+        };
+
+        assert!(!timer.cancelled.load(Ordering::SeqCst), "a live timer");
+        callback();
+    }
+}
+
+#[derive(Debug, Default)]
+struct DelayedTimer {
+    cancelled: AtomicBool,
+}
+
+impl Timer for DelayedTimer {
+    fn cancel(&self) {
+        self.cancelled.store(true, Ordering::SeqCst);
+    }
+}
+
+impl Clock for DelayedClock {
+    fn monotonic(&self) -> Duration {
+        let mut state = locked(&self.state);
+
+        if let Some(next) = state.readings.pop_front() {
+            state.now = next;
+        }
+
+        state.now
+    }
+
+    fn wall(&self) -> SystemTime {
+        SystemTime::UNIX_EPOCH
+    }
+
+    fn arm(&self, schedule: Schedule, callback: TimerCallback) -> Arc<dyn Timer> {
+        let Schedule::Once(due) = schedule else {
+            panic!("a heartbeat arms a timer once");
+        };
+
+        assert!(
+            (Duration::from_millis(1)..=LONGEST_TIMER).contains(&due),
+            "a positive timer due, not {due:?}"
+        );
+
+        let timer = Arc::new(DelayedTimer::default());
+        let mut state = locked(&self.state);
+
+        state.dues.push(due);
+        state.pending = Some((Arc::clone(&timer), callback));
+        timer
+    }
 }
 
 #[tokio::test]
