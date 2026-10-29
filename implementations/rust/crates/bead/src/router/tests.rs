@@ -41,6 +41,7 @@ mod router_core_lifecycle;
 mod router_core_outcomes;
 mod router_core_requester;
 mod router_core_rest;
+mod router_core_sessions;
 mod router_core_writer;
 mod server;
 mod transfer;
