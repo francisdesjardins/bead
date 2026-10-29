@@ -284,6 +284,63 @@ async fn hands_each_envelope_on_whole_once_and_in_order_in_a_later_turn_than_its
     );
 }
 
+// a server's listener that runs what a test gives it as each message comes
+struct OnServerMessage<F>(F);
+
+impl<F: Fn(&TransportMessage, &ConnectionHandle) + Send + Sync> ServerListener
+    for OnServerMessage<F>
+{
+    fn on_message(&self, message: TransportMessage, connection_handle: &ConnectionHandle) {
+        (self.0)(&message, connection_handle);
+    }
+}
+
+// spec 15.13: in the order it was sent, its close after what it sent before, whatever turn sends
+// it; both other sides queue a later turn at the tail
+#[tokio::test]
+async fn an_envelope_or_a_close_a_listener_of_the_transport_sends_within_its_turn_comes_behind_what_was_sent_before_it()
+ {
+    for closes in [false, true] {
+        let ends = Ends::started().await;
+        let server = ends.server.clone();
+
+        ends.server.listen(Arc::new(OnServerMessage(
+            move |message: &TransportMessage, handle: &ConnectionHandle| {
+                if message.data.as_ref() != [0xFF] {
+                    return;
+                }
+
+                // * within the turn that hands the server its client's trigger
+                if closes {
+                    drop(server.close(handle));
+                } else {
+                    server.send(message_of(&[2], None), handle).expect("sent");
+                }
+            },
+        )));
+
+        let (client, at_client) = ends.connected((None, None)).await;
+        let handle: ConnectionHandle = Arc::from(FIRST);
+
+        // the trigger, then the server's first: both queued before either is handed on
+        client.send(message_of(&[0xFF], None)).expect("sent");
+        ends.server
+            .send(message_of(&[1], None), &handle)
+            .expect("sent");
+        ends.clock.settle().await;
+
+        assert_eq!(
+            taken(&at_client),
+            if closes {
+                ["heard 01 carrying None", "closed false false"]
+            } else {
+                ["heard 01 carrying None", "heard 02 carrying None"]
+            },
+            "what was sent first heard first, closes {closes}"
+        );
+    }
+}
+
 // the ELSEWHERE that stands for it, through both routers, the conversations play in memory
 // spec 15.13
 #[tokio::test]

@@ -43,8 +43,11 @@ struct Pipe;
 // turns refused from then on
 impl crate::owner::Owned for Pipe {}
 
+// ! behind every job queued, one posted from within a turn of the pipe's too, as both other sides
+// queue a later turn at the tail: what a listener sends or closes within it comes after what was
+// sent before it (spec 15.13)
 fn later_on<J: FnOnce() + Send + 'static>(pipe: &WeakOwner<Pipe>, job: J) {
-    pipe.offer(Box::new(move |_: &mut Pipe| job()));
+    pipe.offer_behind(Box::new(move |_: &mut Pipe| job()));
 }
 
 fn locked<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
