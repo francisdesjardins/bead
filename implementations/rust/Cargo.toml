@@ -4,7 +4,9 @@
 [workspace]
 resolver = "3"
 members = ["crates/*", "benches"]
-exclude = ["fuzz"]
+# the fuzz targets and the testee of protobuf's conformance suite, each a project of its own, built
+# with what this workspace does not hold: the nightly, and a descriptor set the suite's tool writes
+exclude = ["fuzz", "tools/protobuf-conformance"]
 
 [workspace.package]
 # the product's one version, which tools/release.mjs moves with the TypeScript manifest and the
@@ -25,6 +27,8 @@ publish = false
 [workspace.dependencies]
 bead = { package = "francisdesjardins-bead", path = "crates/bead" }
 bead-interop = { package = "francisdesjardins-bead-interop", path = "crates/bead-interop" }
+bead-protobuf = { package = "francisdesjardins-bead-protobuf", path = "crates/bead-protobuf" }
+bead-protobuf-build = { package = "francisdesjardins-bead-protobuf-build", path = "crates/bead-protobuf-build" }
 tokio = { version = "1.54.1", default-features = false }
 tokio-util = { version = "0.7.20", default-features = false }
 bytes = { version = "1.12.1", default-features = false, features = ["std"] }
@@ -38,6 +42,12 @@ getrandom = { version = "0.4.3", default-features = false }
 libtest-mimic = { version = "0.8.2" }
 syn = { version = "3.0.9", default-features = false, features = ["full", "parsing", "visit"] }
 proc-macro2 = { version = "1.0.107", default-features = false, features = ["span-locations"] }
+# the proto payload's codec: Buffa's runtime, its descriptors and dynamic message, its well-known
+# types, and its generator, fed the set protoc writes at builder/protoc.json's pin
+buffa = { version = "0.9.2", default-features = false, features = ["std"] }
+buffa-descriptor = { version = "0.9.2", default-features = false, features = ["std", "reflect"] }
+buffa-types = { version = "0.9.2", default-features = false, features = ["std", "reflect"] }
+buffa-build = { version = "0.9.2" }
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

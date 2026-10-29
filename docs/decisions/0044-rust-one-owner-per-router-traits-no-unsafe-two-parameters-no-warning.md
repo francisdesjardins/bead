@@ -7,7 +7,7 @@
   managers and the service layer, sessions and credentials with a `JWT`'s verification, the clock
   and the durations, the trace, the filter and the registry, the transports' generic part, the
   in-memory transport and the interop service; **1b**, the broker's core, the in-memory broker and
-  the joined transport; **1c**, the `proto` payload's codec, under its spike; and every conformance
+  the joined transport; **1c**, the `proto` payload's codec, on Buffa; and every conformance
   file the core plays over them; the workspace, its toolchain, its lints, its gates, its CI job and
   its coverage floor. Beside it, **the partial side**: a side that plays part of the corpus while
   its steps and stages land, each part ahead a row of [the support matrix](../support.md) that
@@ -96,17 +96,17 @@ driver passes `Handle::try_current()`, and tokio panics as a timer is armed. Cli
 | ------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **1a** | `bead`: the envelope's codec, the routers, the service layer and its managers, sessions, credentials and a `JWT`'s verification, the clock and the durations, the trace, the filter and the registry, the transports' generic part, the in-memory transport, the client and server facades, `bead::json`, and the test kit `bead::testing` behind the feature `testing`; `bead-interop`, the interop service | `spec/vectors.json` but its broker's groups; `spec/conversations.json` through a scripted transport and through the in-memory pair; `spec/clocks.json`; `spec/durations.json` but its transports' places; `spec/identities.json` but the ids no `u16` and no `u32` holds; `spec/codecs.json`'s `raw`, `text` and `json` entries; `spec/debug-filters.json` and `spec/metrics.json` whole; `spec/validations.json`'s details; the spec's and the companion's twins but those of its transports |
 | **1b** | in `bead`: the broker's core, its participant, its parcel, its sequence, its heartbeat and its transports, the in-memory broker, the joined transport                                                                                                                                                                                                                                                        | `parcels` and `parcelRefusals`; the cases over the in-memory broker of `spec/transports.json`; the conversations through a broker pair; the broker's places of `spec/durations.json`; spec 15.14's twins                                                                                                                                                                                                                                                                                      |
-| **1c** | `bead-protobuf`, after its spike                                                                                                                                                                                                                                                                                                                                                                             | `spec/codecs.json`'s `proto` entries; protobuf's conformance suite through a Rust testee of `tools/protobuf-conformance.mjs`                                                                                                                                                                                                                                                                                                                                                                  |
+| **1c** | `bead-protobuf`, on Buffa 0.9.2                                                                                                                                                                                                                                                                                                                                                                              | `spec/codecs.json`'s `proto` entries, the two values a typed message cannot hold through the dynamic message; protobuf's conformance suite through a Rust testee of `tools/protobuf-conformance.mjs`                                                                                                                                                                                                                                                                                          |
 
 1b sits in the core because the C# side's `Bead.Core` holds the broker's core and the in-memory
-broker, and its cases need no socket; 1c apart, because the router never depends on protobuf and
-the codec's library is a spike's to choose. **Each step merges once it plays**: 1a reaches
+broker, and its cases need no socket; 1c apart, because the router never depends on protobuf, as
+`Bead.Core` never references `Bead.Protobuf`. **Each step merges once it plays**: 1a reaches
 `develop` with Rust's row of `spec/check.py`'s `SIDES`, so the twins, the reads and the counts hold
 it from then on, and a change that reaches across the languages lands on three sides from then on.
-The core holds 1a and 1b; 1c is ahead, the matrix's row `Rust's proto codec`. After the core, each
-a record of its own: the transports over sockets, WebSocket (RFC 6455) and HTTP/1.1 and HTTP/2 (RFC
-9110, 9112, 9113), with the interop both ways; the broker bindings, MQTT 5 and AMQP 1.0; the
-gateway; and beadc's Rust target with `examples/hello`'s Rust half.
+The core holds the three. After the core, each a record of its own: the transports over sockets,
+WebSocket (RFC 6455) and HTTP/1.1 and HTTP/2 (RFC 9110, 9112, 9113), with the interop both ways;
+the broker bindings, MQTT 5 and AMQP 1.0; the gateway; and beadc's Rust target with
+`examples/hello`'s Rust half.
 
 ### The partial side
 
@@ -239,8 +239,8 @@ allowances of `unwrap`, `expect`, `panic`, indexing and printing, and
 lets it break. `rustfmt.toml`, stable options only: `edition` and `style_edition` 2024 (RFC 3338),
 `max_width = 100`, `newline_style = "Unix"`, the field-init and `?` shorthands. `deny.toml`
 (cargo-deny 0.20.2): RustSec's advisories and `yanked = "deny"`; the licences `Apache-2.0`, `MIT`,
-`BSD-3-Clause`, `ISC`, `Unicode-3.0` and `BSL-1.0`; crates.io alone as a source, no git; and
-`multiple-versions = "deny"`, each duplicate a listed exception with its reason.
+`BSD-3-Clause`, `Unicode-3.0`, `BSL-1.0` and `Zlib`; crates.io alone as a source, no git;
+and `multiple-versions = "deny"`, each duplicate a listed exception with its reason.
 
 **`bead-house`**, a dev-only crate whose test reads every crate's source with `syn`, holds what no
 lint does, as `tools/oxlint-plugin.mjs` holds the TypeScript side's: the parameter rule below, its
@@ -400,21 +400,74 @@ credential in a string** (spec 15.1): a type that holds a credential, a session'
 transport carries or a key writes its `Debug` by hand, a credential by its scheme, a token or a
 carried value by whether it is there, a key by its issuer and its algorithm, and never derives it.
 
-### Protobuf, the gate of 1c
+### Protobuf, on Buffa
 
-`bead-protobuf`'s library is chosen by a spike whose acceptance is the corpus, not a library's
-claim, over five criteria: `spec/codecs.proto`, of edition 2023, generated at the pinned protoc;
-**all of `spec/codecs.json`'s `proto` entries** pass through Bead's records check, the required walk
-and the closed enum's normalization
+`bead-protobuf`, `Bead.Protobuf`'s twin, is built on **Buffa 0.9.2**, Apache-2.0: `buffa`, the
+runtime; `buffa-descriptor` with `reflect`, the runtime descriptors and the dynamic message;
+`buffa-types`, the well-known types; and `buffa-build`, the generator, fed the `FileDescriptorSet`
+that protoc writes at its pin (`builder/protoc.json`), never calling protoc itself. Buffa meets the
+five criteria the choice is held to, each run against the corpus, none read from a library's claim:
+`spec/codecs.proto`, of edition 2023, generated at the pinned protoc, its `IMPLICIT`, `DELIMITED`,
+`CLOSED` and `LEGACY_REQUIRED` honoured; **all of `spec/codecs.json`'s `proto` entries** through
+Bead's records check, the required walk and the closed enum's normalization
 ([0028](0028-a-proto-payloads-records-are-read-against-its-message-before-its-library-reads-them.md),
 [0042](0042-a-proto-message-that-leaves-a-required-field-unset-neither-reads-nor-writes-and-a-gateway-refuses-it-where-its-server-would.md)),
-a written value able to leave a required field unset and refused when it does, no entry excused by
-a library's representation; protobuf's conformance suite at the floor the other sides keep; the
-leveled rows kept; and **the runtime descriptors** the records check and the required walk read,
-with a dynamic message the gateway's ProtoJSON reads by descriptor, from the library or a facade of
-Bead's that the spike measures. Buffa is tried first, then Google's official v4 with a descriptor
-facade, then prost with prost-reflect; **no common restriction is added to fit a library**, and
-should none meet the five, 1c stays ahead and the finding comes back as a decision.
+no entry excused by a library's representation; protobuf's conformance suite at the floor the other
+sides keep, its failure list one test, an extension's string, which both other sides list beside
+their JSON's; the leveled
+rows kept; and **the runtime descriptors and a dynamic message from the library itself**, with no
+facade of Bead's. The order stops at the first library that meets the five, so Google's official v4
+and prost with prost-reflect, after it, are not taken; v4's published runtime holds no descriptor
+pool, no reflection, no dynamic message and no JSON, and builds a C kernel. **No common restriction
+is added to fit a library.**
+
+- **The read path: Bead's records check, Buffa's view, the required walk, then the owned message.**
+  The records check (spec 17.9.1 to 17.9.6) reads a pool decoded from protoc's set,
+  `buffa_descriptor::DescriptorPool`, and Buffa needs it: alone, it takes a tag of more than five
+  bytes and a map's entry with a field it does not declare, and counts no map's entry toward depth.
+  The view decodes at `DecodeOptions::with_recursion_limit(100)`: Buffa counts the messages below
+  the top, so 100 is 17.9.3's bound through children and groups, and the check holds a map's
+  entries. The walk (17.9.7) reads the view's `ReflectMessage::has()`, which the wire decoder's
+  presence answers, merged as protobuf merges a message given twice, and never the owned message's
+  reflection, whose `has()` of a required field compares its value with its default. The walk
+  takes a field as required by its presence, and an edition's singular message field by its own
+  `features.field_presence`, since buffa-descriptor reads such a field as of explicit presence
+  whatever its feature says. The view and the dynamic message decode with Buffa's own budgets of
+  unknown fields and of element memory lifted, as neither other side's library holds one: the
+  procedure's payload limit bounds a payload. `to_owned_message()` then gives the application its
+  value.
+- **A singular closed enum's undeclared number** Buffa sets aside among the unknown fields itself,
+  the last declared number kept (17.9.8), so no filter of Bead's runs before it, where the C# side
+  drops such a record; the walk checks that a required closed enum's number is declared, since the
+  dynamic message takes any.
+- **The generator** opens each repeated and map field of a closed enum by Buffa's `open_enums_in`,
+  the fields read from the descriptors, so such an item or value is kept as the leveled row has it;
+  views and vtable reflection are on, and `allow_message_set(true)` takes the suite's messages. The
+  dynamic message the gateway reads by descriptor reads by a pool that carries the same opening.
+- **The writer.** The typed codec writes Buffa's owned message, which holds a `LEGACY_REQUIRED`
+  field bare and a closed enum as its Rust enum, so no typed value leaves a required field unset or
+  holds an undeclared number: the type makes the fault impossible rather than hiding it. The write
+  form that tracks presence is the dynamic message, Buffa's `DynamicMessage`, Bead's walk before
+  its `encode_to_vec`. `spec/codecs.json`'s values `needs set to no field` and `needs with a shade
+  its enum does not declare` are played through it, each refused `a required field unset`, and the
+  matrix's platform row `A proto value that leaves a required field unset or holds a closed enum's
+  undeclared number, given to a typed writer` says so; every other `proto` value is written
+  through the generated code, as spec 17.9 has it, and the dynamic message writes the same bytes.
+- **Its gates.** The generated code is included under one `#[expect(clippy::all, clippy::pedantic,
+  clippy::nursery, clippy::restriction, missing_docs, reason = "…")]` on the module that includes
+  it, the exception's form this record names, which fails once it stops matching; Bead's own code
+  beside it keeps the table whole. `deny.toml` allows `Zlib`, the licence of `foldhash`, which
+  Buffa's runtime takes through `hashbrown`, a permissive licence the OSI approves; and it skips
+  `syn` 2, which `buffa-codegen` and `prettyplease` alone bring, at build time, beside Bead's `syn`
+  3, with its reason. Buffa's runtime holds `unsafe` code of its own, as a dependency may; the
+  generated code holds none, and `bead-protobuf` forbids it.
+- **The testee** of `tools/protobuf-conformance.mjs` reads binary through the read path above and
+  writes from the owned message. Its JSON goes through Buffa's `DynamicMessage` and its ProtoJSON,
+  `serde_json` reading with `float_roundtrip`, until Bead's own mapping of protobuf's JSON comes
+  with the gateway
+  ([0037](0037-a-procedure-is-also-an-http-route-which-a-gateway-answers-as-one-more-client-of-its-server.md)),
+  when the two `FieldNameExtension.Validator` tests join its failure list, as they stand on both
+  other sides'. The runner's binary asks glibc 2.38 or later, Debian 13's.
 
 ### Debugging and metrics
 
@@ -487,7 +540,12 @@ transports. **Bench**: `bead-bench`, the in-memory bench, writing `bead-bench/2`
 - **The time driver's check**: one caught panic at a misbuilt router's construction, through the
   application's panic hook, and under `panic = "abort"` an abort there.
 - **Types that hold less**: values of `spec/codecs.json`, inputs of `spec/durations.json` and ids no
-  `u16` or `u32` holds are excused from Rust, each by its row; no `proto` entry is.
+  `u16` or `u32` holds are excused from Rust, each by its row; no `proto` entry is, the two values a
+  typed message cannot hold being played through the dynamic message, a platform row of the matrix.
+- **A dependency that holds more than Bead's own code**: Buffa's runtime holds `unsafe` code, as a
+  library may, and brings a licence, `Zlib`, and a second `syn` at build time, each a line of
+  `deny.toml`; its generated code lives under one `#[expect]` of the whole table, so a lint the
+  pinned compiler adds is judged on Bead's own code alone.
 - **The interop service's descriptors written by hand** until beadc's Rust target, held by a test
   against `spec/interop-blueprint.json`, an open row of the matrix.
 - **Impossible**: a `!Send` resolver; a router without a tokio runtime and its time driver; a
@@ -507,7 +565,7 @@ in part, none refused; the form of a module's documentation was the user's to ch
 | Objection                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           | Answer                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
 | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | A call written as an `async fn` takes effect when first polled: calls go in await order, a future dropped unpolled sends nothing, and "dropping a call's future cancels nothing, as a promise or a `Task` not awaited does" is false; TypeScript and C# draw ids and send in call order.                                                                                                                                                                                                                                                                                            | **Accepted.** Every operation the other sides start as it is called is a plain `fn` that checks its arguments, posts its job to the owner, which draws the id and sends in call order, and returns a named `#[must_use]` future that only waits; a refusal as it is made is its `Err` at once, as both sides throw it synchronously. "An operation takes effect when it is made; its future only waits". Twins `sends_each_call_in_the_order_it_is_made_whatever_order_it_is_awaited_in` (probed: `[1, 2, 3]`, the third dropped unawaited) and `a_call_s_future_dropped_unpolled_still_sends_its_call`.                                                                                                                                                                                                                                                                            |
-| The spike's criteria leave out the runtime descriptors that [0028](0028-a-proto-payloads-records-are-read-against-its-message-before-its-library-reads-them.md) requires of Rust and that the gateway and beadc's target build on; criterion 2 says every entry and then excuses two by a library's type, which would write `needs set to no field` as the bytes of `needs set at its defaults`, where both sides refuse it, reopening [0042](0042-a-proto-message-that-leaves-a-required-field-unset-neither-reads-nor-writes-and-a-gateway-refuses-it-where-its-server-would.md). | **Accepted.** Criterion 5: the runtime descriptors the records check and the required walk read, and a dynamic message for the gateway's ProtoJSON, from the codec's library or a facade of Bead's that the spike measures. Criterion 2 passes or fails over every `proto` entry; a written value can leave a required field unset and is refused when it does; Buffa passes only through a write form that tracks presence, else the spike moves on. No entry excuses a library's representation.                                                                                                                                                                                                                                                                                                                                                                                  |
+| The spike's criteria leave out the runtime descriptors that [0028](0028-a-proto-payloads-records-are-read-against-its-message-before-its-library-reads-them.md) requires of Rust and that the gateway and beadc's target build on; criterion 2 says every entry and then excuses two by a library's type, which would write `needs set to no field` as the bytes of `needs set at its defaults`, where both sides refuse it, reopening [0042](0042-a-proto-message-that-leaves-a-required-field-unset-neither-reads-nor-writes-and-a-gateway-refuses-it-where-its-server-would.md). | **Accepted.** Criterion 5: the runtime descriptors the records check and the required walk read, and a dynamic message for the gateway's ProtoJSON, from the codec's library or a facade of Bead's that the spike measures. Criterion 2 passes or fails over every `proto` entry; a written value can leave a required field unset and is refused when it does; Buffa passes only through a write form that tracks presence, else the spike moves on. No entry excuses a library's representation. Run, Buffa's write form that tracks presence is its `DynamicMessage`, its views recording presence from the wire alone: the two values that leave a required field unset go through it, a platform row of the matrix, **the user's choice**, 2026-10-28.                                                                                                                         |
 | A unit test beside its module cannot use a separate test crate's clock, that crate depending on `bead` (two copies, `E0277`); `cargo build --workspace` builds `bead` with the feature on; the feature's name fails `redundant_feature_names`.                                                                                                                                                                                                                                                                                                                                      | **Accepted.** The kit is inside the core, as tokio's `test-util`: `#[cfg(any(test, feature = "testing"))] #[doc(hidden)] pub mod testing`, `bead` its own dev-dependency with the feature (probed: one copy, a plain build on the default features). An item of the core that the kit alone reaches carries the kit's `cfg`, or `build.warnings` fails a build without the feature on its dead code; CI builds the default features and documents with all of them. `spec/check.py`'s Rust tests name `src/testing`.                                                                                                                                                                                                                                                                                                                                                                |
 | `unreachable_pub` and the nursery's `redundant_pub_crate` refuse every visibility of an item in a private module; the draft passed only because every probed module was public. `missing_const_for_fn` with `avoid-breaking-exported-api = false` pushes `const` onto public functions; `single_use_lifetimes` has known false positives.                                                                                                                                                                                                                                           | **Accepted.** `redundant_pub_crate` and `missing_const_for_fn` allowed at priority 1, each with its reason in the table; `single_use_lifetimes` off; `avoid-breaking-exported-api = false` kept, so the other API-shape lints judge the public surface while `0.y` lets it break. The table was run over a tree shaped like the core and passes whole; every other nursery lint stays denied, one allowed later a line of the table with its reason.                                                                                                                                                                                                                                                                                                                                                                                                                                |
 | The nightly's branch coverage counts no `match` arm and no `?`, which is how a codec and a router decide, while stable's regions see every way not taken; the nightly leg costs a hand-moved pin and an unstable flag, and its figure is not what cobertura or istanbul count.                                                                                                                                                                                                                                                                                                      | **Accepted.** Lines and regions on the pinned stable, read from `llvm-cov`'s JSON export (probed: its `type`, its version 3.1.0, each file's `summary.lines` and `summary.regions`); `tools/coverage-report.mjs` reads it, told from istanbul's JSON by its `type`; Rust's floor names `lines` and `regions`; a floor on a measure no report measured fails, for every side. The matrix's row reads `Rust counts regions where the others count branches`; the nightly serves the fuzz build alone.                                                                                                                                                                                                                                                                                                                                                                                 |

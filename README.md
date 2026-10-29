@@ -25,10 +25,10 @@ This repository holds the protocol and its implementations, side by side:
   WebSocket, HTTP and in-memory transports, the broker's core over an in-memory broker, over MQTT 5
   and over AMQP 1.0, its adapters over MQTTnet and AMQPNetLite, the joined one, and the same
   gateway;
-- **a Rust implementation**, its core: the same envelope, the same routers and managers, sessions
-  and credentials, the trace, the filter and the registry, the in-memory transport, the broker's
-  core over an in-memory broker, and the joined one, playing the conformance files its core
-  reaches, each part it lacks a row of the support matrix ahead
+- **a Rust implementation**, its core whole: the same envelope, the same routers and managers,
+  sessions and credentials, the trace, the filter and the registry, the in-memory transport, the
+  broker's core over an in-memory broker, the joined one, and the `proto` codec on Buffa, playing
+  the conformance files its core reaches, each part it lacks a row of the support matrix ahead
   ([0044](docs/decisions/0044-rust-one-owner-per-router-traits-no-unsafe-two-parameters-no-warning.md));
 - **an interop service** the TypeScript and C# sides offer, which the other side's client calls over
   WebSocket, HTTP, MQTT 5 and AMQP 1.0, beside a gateway whose routes the other side's generated
@@ -124,10 +124,10 @@ envelopes.
 
 ## Where Bead goes
 
-- **Next**: Rust's `proto` codec, the last of its core, its library chosen by a spike
-  ([0044](docs/decisions/0044-rust-one-owner-per-router-traits-no-unsafe-two-parameters-no-warning.md));
-  then its transports over sockets with the interop both ways, its broker bindings, its gateway and
-  beadc's Rust target, each a record of its own, each a row of the
+- **Next**: Rust's transports over sockets with the interop both ways, then its broker bindings,
+  its gateway and beadc's Rust target, each a record of its own after its core
+  ([0044](docs/decisions/0044-rust-one-owner-per-router-traits-no-unsafe-two-parameters-no-warning.md)),
+  each a row of the
   [support matrix](docs/support.md#differences) until it lands.
 - **Then**: a payload's rules written in CEL, a total subset beadc compiles into each side beside
   the rules it compiles already
@@ -307,6 +307,8 @@ cargo deny --locked check
 The packages are `francisdesjardins-bead*`, their libraries `bead*`, `publish = false`. Bead takes
 the application's tokio runtime, which enables its time driver, `enable_all` or `enable_time`, and
 starts none of its own; an operation goes as it is made, and dropping its future cancels nothing.
+Its `proto` codec, `bead-protobuf`, is built on Buffa 0.9.2, whose generated code its tests include
+under one `#[expect]` of the workspace's lints.
 
 ## The builder
 
@@ -759,12 +761,13 @@ against each server.
   half's oxfmt options and its packages' descriptors — and its wrappers, its `buf.yaml` and its git
   lines as `beadc wrapper` and `beadc init` write them, under a name `init` takes. It needs the
   builder installed.
-- `node tools/protobuf-conformance.mjs typescript|csharp|differential`: protobuf's conformance
+- `node tools/protobuf-conformance.mjs typescript|csharp|rust|differential`: protobuf's conformance
   suite through one side's generated `proto` codec, its failure list held both ways and its count
   of tests to the floor `tools/protobuf-conformance/runner.json` pins with the runner, fetched by
-  its sha512; or one corpus of `Probe` through both sides, read alike. The suite runs on Linux or
-  macOS, where the runner has a binary; it needs the TypeScript side and the builder installed,
-  and .NET for the C# side.
+  its sha512; or one corpus of `Probe` through the TypeScript and C# sides, read alike. The suite
+  runs on Linux or macOS, where the runner has a binary, on Linux one of glibc 2.38 or later; it
+  needs the TypeScript side and the builder installed, .NET for the C# side, and Rust's toolchain
+  for the Rust side.
 - `node tools/protovalidate-differential.mjs oracle|typescript|csharp`: protovalidate-es, at the pin
   `tools/protovalidate-differential/pin.json` holds and fetched by its sha512, over the verdicts of
   `spec/validations.json`; or those verdicts and a corpus mutated from them through one side's
@@ -900,9 +903,9 @@ wrapper and init, held to its source; beadc on Node holding `examples/hello`'s g
 buf's lint and layout over its `.proto`; each half's gates and both its builds; then each client
 against each server, both modes of each half, sixteen pairs, each server's gateway asked after its
 client); `protobuf-conformance` (protobuf's conformance suite, its runner by its pin's sha512,
-through each side's generated `proto` codec and its mapping of protobuf's JSON, each held to its
-failure list and the floor, the C# testee's format, then one corpus of `Probe` through both
-sides); `protovalidate-differential` (protovalidate-es, by its pin's sha512, over the verdicts of
+through each side's generated `proto` codec and its JSON, each held to its failure list and the
+floor, the C# testee's format, then one corpus of `Probe` through the TypeScript and C# sides);
+`protovalidate-differential` (protovalidate-es, by its pin's sha512, over the verdicts of
 `spec/validations.json`, then those verdicts and a corpus mutated from them through each side's
 generated validators and through protovalidate-es, the violations compared, and the C# testee's
 format); and `commits` (the subjects, the links, the details, the versions, the root's tools' own
