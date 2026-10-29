@@ -4,3 +4,5 @@
 channel = "1.99.1"
 profile = "minimal"
 components = ["clippy", "rustfmt", "llvm-tools"]
+# the browser's WebAssembly, which the core is checked for, never run
+targets = ["wasm32-unknown-unknown"]

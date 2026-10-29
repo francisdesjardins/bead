@@ -1,6 +1,7 @@
 //! The test kit (decision 0044): what the unit tests and the conformance players reach that the
-//! API does not — the stepping clock, the activity it settles on, the files' typed readers. No API:
-//! it is built under the feature `testing` alone, for the tests.
+//! API does not — the stepping clock, the activity it settles on, the files' typed readers, what a
+//! test takes from its platform. No API: it is built under the feature `testing` alone, for the
+//! tests.
 
 use core::future::Future;
 use core::pin::Pin;
@@ -22,9 +23,12 @@ pub mod hexadecimal;
 pub mod instants;
 pub mod pair;
 pub mod parcels;
+mod platform;
 pub mod scripted;
 pub mod validations;
 pub mod vectors;
+
+pub use platform::{Instant, patience, rest, spawn, wall_now};
 
 /// What a side does on a test's clock: the jobs its owners hold queued or run, and the work they
 /// cover while it can run. The side is settled once it is none.

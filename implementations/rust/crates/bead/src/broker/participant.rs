@@ -1858,7 +1858,8 @@ impl BrokerParticipant {
     ///
     /// A [`ProgrammerError`] for an adapter whose id is no token, a root that is none, an adapter
     /// that delivers at most once where at least once is required, an inbox that takes a parcel
-    /// under 1,024 bytes, a bound out of its range, or outside a tokio runtime, given none.
+    /// under 1,024 bytes, a bound out of its range, outside a tokio runtime, given none, or on one
+    /// without its time driver.
     #[expect(
         clippy::too_many_lines,
         reason = "each option held and refused in the order the other sides hold them, then the participant built"
@@ -1923,14 +1924,8 @@ impl BrokerParticipant {
             )));
         }
 
-        let runtime = match &options.runtime {
-            Some(runtime) => runtime.clone(),
-            None => Handle::try_current().map_err(|_none| {
-                ProgrammerError::new(
-                    "a broker's participant is built within a tokio runtime, or given its handle",
-                )
-            })?,
-        };
+        let runtime =
+            crate::platform::runtime_of(options.runtime.as_ref(), "a broker's participant")?;
         let platform: SharedClock = Arc::new(SystemClock::new(runtime.clone()));
         let clock = options
             .clock

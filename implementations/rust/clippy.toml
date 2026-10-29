@@ -12,3 +12,34 @@ allow-print-in-tests = true
 # public surface too, while 0.y lets it break; missing_const_for_fn, which would push const onto it,
 # is allowed in the lints table instead
 avoid-breaking-exported-api = false
+# The core spawns and keeps time through one private module, `platform`, and the clock (decisions
+# 0044 and 0011), so that it compiles for a browser's WebAssembly as natively; what a test or a
+# native target takes from its platform goes through the test kit, or is exempted once, with its
+# reason, at its root
+disallowed-methods = [
+  { path = "tokio::runtime::Handle::spawn", reason = "spawn through crate::platform" },
+  { path = "tokio::runtime::Handle::spawn_blocking", reason = "spawn through crate::platform" },
+  { path = "tokio::runtime::Handle::try_current", reason = "the runtime through crate::platform" },
+  { path = "tokio::runtime::Handle::current", reason = "the runtime through crate::platform" },
+  { path = "tokio::runtime::Handle::block_on", reason = "a turn awaits nothing" },
+  { path = "tokio::task::spawn", reason = "spawn through crate::platform" },
+  { path = "tokio::task::spawn_blocking", reason = "spawn through crate::platform" },
+  { path = "tokio::task::spawn_local", reason = "spawn through crate::platform" },
+  # reachable where tokio's rt-multi-thread is on, in a test, the benches or the interop; never in
+  # the library, nor on the browser's target
+  { path = "tokio::task::block_in_place", reason = "a turn awaits nothing", allow-invalid = true },
+  { path = "tokio::task::JoinSet::spawn", reason = "spawn through crate::platform" },
+  { path = "tokio::time::sleep", reason = "time through the clock" },
+  { path = "tokio::time::sleep_until", reason = "time through the clock" },
+  { path = "tokio::time::interval", reason = "time through the clock" },
+  { path = "tokio::time::interval_at", reason = "time through the clock" },
+  { path = "tokio::time::timeout", reason = "time through the clock" },
+  { path = "tokio::time::timeout_at", reason = "time through the clock" },
+  { path = "std::time::SystemTime::now", reason = "time through the clock" },
+  { path = "std::thread::spawn", reason = "no thread of Bead's own" },
+  { path = "std::thread::sleep", reason = "a turn awaits nothing" },
+]
+disallowed-types = [
+  { path = "std::time::Instant", reason = "time through the clock" },
+  { path = "tokio::time::Instant", reason = "time through the clock" },
+]

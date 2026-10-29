@@ -172,7 +172,7 @@ async fn closes_each_connection_as_its_link_goes_down_and_connects_anew_as_anoth
         .client_participant
         .client(&BrokerClientOptions::default())
         .expect("a client");
-    let pending = tokio::spawn(waiting.connect(BrokerConnectOptions::of("quiet")));
+    let pending = crate::testing::spawn(waiting.connect(BrokerConnectOptions::of("quiet")));
 
     until(
         || heard.parcels().len() == 1,
@@ -1004,7 +1004,7 @@ async fn lets_a_listener_go_fails_a_connect_awaiting_its_answer_as_it_stops_refu
     let waiting = participant
         .client(&BrokerClientOptions::default())
         .expect("a client");
-    let pending = tokio::spawn(waiting.connect(BrokerConnectOptions::of("interop")));
+    let pending = crate::testing::spawn(waiting.connect(BrokerConnectOptions::of("interop")));
 
     until(|| heard.parcels().len() == 1, "its OPEN reaches the name").await;
 
@@ -1652,7 +1652,7 @@ async fn a_participant_taken_over_reports_it_connects_no_more_and_fails_each_con
         .client_participant
         .client(&BrokerClientOptions::default())
         .expect("a client");
-    let pending = tokio::spawn(waiting.connect(BrokerConnectOptions::of("silent")));
+    let pending = crate::testing::spawn(waiting.connect(BrokerConnectOptions::of("silent")));
 
     until(|| heard.parcels().len() == 1, "its OPEN reaches the name").await;
     pair.client_adapter.take_over();

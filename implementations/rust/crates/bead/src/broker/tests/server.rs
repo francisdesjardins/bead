@@ -714,7 +714,7 @@ async fn starts_once_its_broker_holds_each_name_it_serves_fails_its_start_on_a_n
 
     // * its start asks each name at once and waits on each one's SUBACK, the gauge counting none
     // until its broker holds it
-    let starting = tokio::spawn(server.start());
+    let starting = crate::testing::spawn(server.start());
 
     until(
         || locked(&holding.subscribing).len() == 2,
@@ -732,7 +732,7 @@ async fn starts_once_its_broker_holds_each_name_it_serves_fails_its_start_on_a_n
 
     // * its stop lets each go at once and waits on each one's UNSUBACK, the gauge counting it until
     // its broker let it go
-    let stopping = tokio::spawn(server.stop());
+    let stopping = crate::testing::spawn(server.stop());
 
     until(
         || locked(&holding.unsubscribing).len() == 2,
@@ -768,7 +768,7 @@ async fn starts_once_its_broker_holds_each_name_it_serves_fails_its_start_on_a_n
     );
 
     // * a name its broker refuses fails its start as it is refused, and is counted none
-    let refusing = tokio::spawn(server.start());
+    let refusing = crate::testing::spawn(server.start());
 
     until(
         || locked(&holding.subscribing).len() == 2,
@@ -830,7 +830,7 @@ async fn serves_its_name_again_in_its_group_once_a_connection_closes_as_its_brok
 
     server.listen(Arc::new(AtServer(Arc::clone(&told))));
 
-    let starting = tokio::spawn(server.start());
+    let starting = crate::testing::spawn(server.start());
 
     until(
         || locked(&holding.subscribing).len() == 1,
