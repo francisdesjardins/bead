@@ -19,8 +19,8 @@
 **Three parts call a router of the same process, and a test is a fourth.** HTTP/JSON
 transcoding's gateway calls each procedure as one more client of the application's own server, its
 admission, sessions, service manager, metrics and trace the server's, one Bead connection per HTTP
-exchange, each with its caller's credential and address. Rust's core plays its conformance before
-it has a socket. A side's tests link a server and a client in memory, a service's and a
+exchange, each with its caller's credential and address. Rust's core plays its conformance over it
+before it has a socket. A side's tests link a server and a client in memory, a service's and a
 conversation's.
 
 **What carries an envelope in a process is a Web Worker's port alone**, on the TypeScript side: a
@@ -158,8 +158,12 @@ tell names, a transfer — and the C# side's service tests link a server and a c
 `ServiceLink.cs` built on it. Its connect's timeout is a way of `spec/durations.json`, played by
 each side's harness.
 
-**Rust's core carries the in-memory transport first**, and plays its conformance over it before it
-has a socket; the joined transport is a gateway's, and its core needs none.
+**Rust's core carries the in-memory transport**, and plays its conformance over it before it has a
+socket: the conversations through a scripted transport and through a pair of it, its twins of 15.13
+beside the other sides'
+([0044](0044-rust-one-owner-per-router-traits-no-unsafe-two-parameters-no-warning.md)). It carries
+the joined transport, a gateway's, with its broker's core, since 15.14's twins join two transports
+of two types, the in-memory one and a broker's.
 
 **A broker in memory is a broker**, which repeats, reorders and delays on purpose
 ([0021](0021-a-broker-is-a-transport-and-bead-is-never-a-network.md)): it shares this transport's

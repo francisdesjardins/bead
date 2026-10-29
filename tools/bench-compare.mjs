@@ -139,12 +139,20 @@ export const smallestDetectableChange = (baseline, candidate, { direction = 'low
   return null;
 };
 
+// each side a bench reports, and the runtimes its report names: the TypeScript and C# benches run
+// the interop against each other, the Rust side's its in-memory bench alone (decision 0036)
+export const RUNTIMES = Object.freeze({
+  typescript: Object.freeze(['node', 'v8', 'dotnet']),
+  csharp: Object.freeze(['node', 'v8', 'dotnet']),
+  rust: Object.freeze(['rustc']),
+});
+
 export const validate = (report) => {
   if (
     !['bead-bench/1', 'bead-bench/2'].includes(report?.schema) ||
-    !['typescript', 'csharp'].includes(report.side)
+    !Object.hasOwn(RUNTIMES, report.side ?? '')
   ) {
-    fail('expected bead-bench/1 or /2 and a typescript or csharp side');
+    fail('expected bead-bench/1 or /2 and a typescript, csharp or rust side');
   }
   const { environment: env, method } = report;
   if (
@@ -153,7 +161,7 @@ export const validate = (report) => {
     !['platform', 'release', 'architecture'].every((key) => {
       return text(env?.os?.[key]);
     }) ||
-    !['node', 'v8', 'dotnet'].every((key) => {
+    !RUNTIMES[report.side].every((key) => {
       return text(env?.runtimes?.[key]);
     }) ||
     !/^[a-f\d]{40,64}$/u.test(env?.commit ?? '')

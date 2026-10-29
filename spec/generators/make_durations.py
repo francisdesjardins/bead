@@ -2,9 +2,10 @@
 of every input, and why it refuses one (spec 1.4, decision 0014).
 
 Each outcome is spec 1.4 over the input's value as written. Beside it, the generator plays each
-platform's own conversion — JavaScript's arithmetic on a double, and .NET's TimeSpan, truncated to its
-ticks — and fails on any outcome either reaches otherwise, unless that outcome, or its input, crosses
-a row of docs/support.md for that language; and on any input in seconds within a tick of a half."""
+platform's own conversion — JavaScript's arithmetic on a double, .NET's TimeSpan, truncated to its
+ticks, and Rust's Duration, rounded to the nanosecond — and fails on any outcome one reaches
+otherwise, unless that outcome, or its input, crosses a row of docs/support.md for that language;
+and on any input in seconds within a platform's error of a half: a tick, or half a nanosecond."""
 import json
 import math
 import os
@@ -28,10 +29,16 @@ INFINITE_TICKS = -TICKS_PER_MILLISECOND
 # a tick, in milliseconds: no input in seconds comes within it of a half
 TICK = Fraction(1, TICKS_PER_MILLISECOND)
 
+# Rust counts a Duration in nanoseconds, Duration::from_secs_f64 rounding the double to the nearest:
+# its error is half a nanosecond, in milliseconds
+NANOSECONDS_PER_MILLISECOND = 1_000_000
+HALF_A_NANOSECOND = Fraction(1, 2 * NANOSECONDS_PER_MILLISECOND)
+
 # the rows of docs/support.md the inputs and the ways cross
 FINER_THAN_A_TICK = 'A duration finer than a tick'
 MINUS_ONE = 'A duration of -1 ms'
 NOT_A_NUMBER = 'A duration that is not a number'
+UNDER_ZERO = 'A duration under zero'
 WEB_WORKER = 'The Web Worker transport'
 DELAY_AS_A_NUMBER = "A reconnection's delay given as a number"
 
@@ -60,11 +67,11 @@ inputs = [
     ('0.4 ms past the ceiling', 'milliseconds', 2147483647.4, {}),
     ('half a millisecond past the ceiling', 'milliseconds', 2147483647.5, {}),
     ('never', 'never', True, {}),
-    ('-2 ms', 'milliseconds', -2, {}),
-    ('-1 ms', 'milliseconds', -1, {'C#': MINUS_ONE}),
-    ('NaN', 'nan', True, {'C#': NOT_A_NUMBER}),
-    ('"1000"', 'json', '1000', {'C#': NOT_A_NUMBER}),
-    ('true', 'json', True, {'C#': NOT_A_NUMBER}),
+    ('-2 ms', 'milliseconds', -2, {'Rust': UNDER_ZERO}),
+    ('-1 ms', 'milliseconds', -1, {'C#': MINUS_ONE, 'Rust': UNDER_ZERO}),
+    ('NaN', 'nan', True, {'C#': NOT_A_NUMBER, 'Rust': NOT_A_NUMBER}),
+    ('"1000"', 'json', '1000', {'C#': NOT_A_NUMBER, 'Rust': NOT_A_NUMBER}),
+    ('true', 'json', True, {'C#': NOT_A_NUMBER, 'Rust': NOT_A_NUMBER}),
 ]
 
 
@@ -112,6 +119,30 @@ def in_dotnet(form, value):
     return NEVER if ticks == INFINITE_TICKS else Fraction(ticks / TICKS_PER_MILLISECOND)
 
 
+def in_rust(form, value):
+    """The input as the Rust side is given it: Duration::from_secs_f64 of a double, ms / 1000.0 for
+    milliseconds and the seconds themselves for seconds, its exact value rounded to the nearest
+    nanosecond; Duration::MAX for never; and no Duration for a value under zero, NaN or what is no
+    number, which the type cannot hold."""
+    if form == 'never':
+        return NEVER
+
+    if form not in ('milliseconds', 'seconds') or value < 0:
+        return UNPLAYABLE
+
+    seconds = Fraction(float(value) / 1000.0 if form == 'milliseconds' else float(value))
+    nanoseconds = math.floor(seconds * 1_000_000_000 + Fraction(1, 2))
+
+    return Fraction(nanoseconds, NANOSECONDS_PER_MILLISECOND)
+
+
+# each side by its language, its platform, how it is given an input, and its error near a half, in
+# milliseconds
+PLATFORMS = (('TypeScript', 'JavaScript', in_javascript, TICK), ('C#', '.NET', in_dotnet, TICK),
+             ('Rust', 'Rust', in_rust, HALF_A_NANOSECOND))
+GIVEN = {language: given for language, _, given, _ in PLATFORMS}
+
+
 def nearest(milliseconds):
     """The nearest whole millisecond, a half away from zero (IEEE 754's roundTiesToAway), as
     Math.round and MidpointRounding.AwayFromZero hold a positive value: never Python's round, which
@@ -125,20 +156,22 @@ for name, form, value, _ in inputs:
     if form != 'seconds':
         continue
 
-    # ! a value within a tick of a half rounds one way or the other with its platform's error
-    for platform, milliseconds in (('as written', as_given(form, value)), ('JavaScript', in_javascript(form, value)),
-                                   ('.NET', in_dotnet(form, value))):
-        if abs(milliseconds - math.floor(milliseconds) - Fraction(1, 2)) < TICK:
-            raise SystemExit(f'{name}: {platform}, {float(milliseconds)!r} ms lies within a tick of a half')
+    # ! a value within a platform's error of a half rounds one way or the other with that error: a
+    # tick as written and on the platforms that count one, half a nanosecond on Rust's
+    for platform, milliseconds, error in (('as written', as_given(form, value), TICK),
+                                          *((label, given(form, value), near)
+                                            for _, label, given, near in PLATFORMS)):
+        if abs(milliseconds - math.floor(milliseconds) - Fraction(1, 2)) < error:
+            raise SystemExit(f'{name}: {platform}, {float(milliseconds)!r} ms lies within its error of a half')
 
 # ── The places ────────────────────────────────────────────────────────────────────────────────────
 
 
-def way(key, name, *, required=False, differs=None):
+def way(key, name, *, required=False, differs=()):
     """A way the surface takes a place's duration, by an id stable in its place; required, its
-    duration cannot be left out; differs, the language that lacks it and the row that says so."""
+    duration cannot be left out; differs, each language that lacks it and the row that says so."""
     return {'id': key, 'name': name, **({'required': True} if required else {}),
-            **({'differs': [{'row': differs[1], 'language': differs[0]}]} if differs else {})}
+            **({'differs': [{'row': row, 'language': language} for language, row in differs]} if differs else {})}
 
 
 def default(clause, *, milliseconds=None, ways, state=None):
@@ -391,7 +424,7 @@ places = [
             way('http', "an HTTP client's connect"),
             way('webSocket', "a WebSocket client's connect"),
             way('memory', "an in-memory client's connect"),
-            way('worker', "a Web Worker client's connect", differs=('C#', WEB_WORKER)),
+            way('worker', "a Web Worker client's connect", differs=(('C#', WEB_WORKER), ('Rust', WEB_WORKER))),
             way('broker', "a broker client's connect"),
         ],
         'observed': 'held',
@@ -481,7 +514,7 @@ places = [
         'never': 'refused',
         'ways': [
             way('function', 'a function of the previous delay and the attempt, its answer'),
-            way('number', 'a number', differs=('C#', DELAY_AS_A_NUMBER)),
+            way('number', 'a number', differs=(('C#', DELAY_AS_A_NUMBER),)),
         ],
         'observed': 'held',
     },
@@ -592,7 +625,9 @@ for place in places:
         met = outcome_of(as_given(form, value), place)
         differs = []
 
-        for language, reached in (('TypeScript', in_javascript(form, value)), ('C#', in_dotnet(form, value))):
+        for language, _, given, _ in PLATFORMS:
+            reached = given(form, value)
+
             if reached == UNPLAYABLE or outcome_of(reached, place) == met:
                 continue
 
@@ -607,7 +642,7 @@ for place in places:
 
 for name, form, value, rows in inputs:
     for language in rows:
-        if (name, language) not in crossed and not (language == 'C#' and in_dotnet(form, value) == UNPLAYABLE):
+        if (name, language) not in crossed and GIVEN[language](form, value) != UNPLAYABLE:
             raise SystemExit(f'{name}: names the row {rows[language]!r} for the {language} side, which reaches '
                              "1.4's outcome at every place")
 
@@ -615,7 +650,8 @@ for name, form, value, rows in inputs:
 def entry_of(name, form, value, rows):
     """An input as the file writes it: its form, and the rows of the languages that cannot be given
     it at all."""
-    unplayable = [{'row': rows['C#'], 'language': 'C#'}] if in_dotnet(form, value) == UNPLAYABLE else []
+    unplayable = [{'row': rows[language], 'language': language} for language, _, given, _ in PLATFORMS
+                  if given(form, value) == UNPLAYABLE]
 
     return {'name': name, form: value, **({'differs': unplayable} if unplayable else {})}
 
@@ -624,7 +660,7 @@ document = {
     '$schema': 'schemas/durations.schema.json',
     '$comment': [
         "Bead's durations: what every place that takes a duration an application gives a side makes of every input (spec 1.4, decision 0014), which every implementation's harness plays at every place, by every way its surface takes that duration.",
-        'inputs is one table, each input named, in one of five forms: milliseconds, a JSON number, given as it is on the TypeScript side and through TimeSpan.FromMilliseconds on the C# side; seconds, a JSON number as a user writes seconds, seconds * 1000 and TimeSpan.FromSeconds, each platform\'s arithmetic; never, Infinity and Timeout.InfiniteTimeSpan, which JSON has no number for; nan, IEEE 754\'s NaN, which JSON has none for either; json, a value that is no number, a string or a boolean, as a limit read from JSON may be.',
+        'inputs is one table, each input named, in one of five forms: milliseconds, a JSON number, given as it is on the TypeScript side, through TimeSpan.FromMilliseconds on the C# side and through Duration::from_secs_f64 of ms / 1000.0 on the Rust side; seconds, a JSON number as a user writes seconds, seconds * 1000, TimeSpan.FromSeconds and Duration::from_secs_f64, each platform\'s arithmetic; never, Infinity, Timeout.InfiniteTimeSpan and Duration::MAX, which JSON has no number for; nan, IEEE 754\'s NaN, which JSON has none for either; json, a value that is no number, a string or a boolean, as a limit read from JSON may be. A Duration holds no value under zero, no NaN and nothing that is no number, so the Rust side is given none of them.',
         'A place is keyed by its id, its owner and its duration, which nothing but a decision changes. name says what it is, for a reader. kind is delay, a wait before an act, which takes 0 as at once, or timeout, any other, which is never 0. never is taken, held without end, arming nothing; refused; or default, held as the place\'s default; neverClause is the clause that says so, where 1.4 does not alone.',
         'clauses are the units of spec.md a place checks, each for what the place observes of it, and nothing else: 1.4, which holds and refuses its durations; its neverClause; and its default\'s clause. A unit is a clause, 9.2; an item of its numbered list, 9.2.5; or a row of its table, counted from 1, 15.12.8. A gateway\'s place cites the units of transcoding.md behind transcoding:, transcoding:9.2.',
         'ways are each way the surface takes that duration, by an id stable in its place: each harness keeps a table from each place and way to a function that builds the place on its side\'s test clock, given one input or none, and fails when that table and this file differ by one. required marks a way whose duration cannot be left out.',

@@ -4,6 +4,11 @@
     "branches": 94.9,
     "lines": 97.7
   },
+  "rust": {
+    "title": "the Rust side",
+    "lines": 87.7,
+    "regions": 88
+  },
   "typescript": {
     "title": "the TypeScript side",
     "branches": 97.8,

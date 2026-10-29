@@ -5,11 +5,12 @@
 
 ## Context
 
-Bead is a protocol before it is a package. It has a TypeScript implementation and a C# one, a
-builder generates servers and clients in each from the same definitions
+Bead is a protocol before it is a package. It has a TypeScript implementation and a C# one, and a
+Rust one whose core lands step by step ([0044](0044-rust-one-owner-per-router-traits-no-unsafe-two-parameters-no-warning.md)); a
+builder generates servers and clients in the first two from the same definitions
 ([0022](0022-a-proto-becomes-one-checked-blueprint-and-each-language-is-generated-from-it.md)), and
-Rust, the third language, and a constrained C side besides are where Bead goes. Two implementations
-of the same bytes drift unless something holds them to those bytes, and only a test both run does.
+a constrained C side besides is where Bead goes. Implementations of the same bytes drift unless
+something holds them to those bytes, and only a test every one runs does.
 
 Three ways were weighed. One core shared by every language, compiled once and bound in each, holds
 the behaviour by construction, but costs each platform its idioms and its debugging, and makes every
@@ -325,6 +326,14 @@ another's server in any language.
 that shows it, and it stays a row until it closes. Normalising is always the aim: a difference that
 can close is work to do, and one only a platform imposes says which platform, and why.
 
+**A side may play part of the corpus while its steps and stages land**, as Rust's core does
+([0044](0044-rust-one-owner-per-router-traits-no-unsafe-two-parameters-no-warning.md)): what it does not play yet is a row of the matrix's
+differences, of kind open, whose cell for that side says it is ahead, and a row of
+`spec/check.py`'s `AHEAD`, each part a transport, a group, a file, an encoding, a unit or a
+document, a durations place's owner or a way. Each step merges once it plays, with its side's row
+of `SIDES`, so the twins, the reads and the counts hold it from then on; a part ahead that the side
+plays fails, so the rows only shrink, and a step or a stage lands by deleting its own.
+
 **No implementation is the reference: the set evolves together**, wherever it can. Where one
 implementation does Y and another can do Y and Z, every implementation does Y: the second keeps to
 Y, or comes back to it, and Z comes to all of them at once, by a decision that meets the Tenth Man
@@ -384,9 +393,10 @@ both sides' HTTP servers in Chromium. The `typescript` job leaves out the tests 
 Over MQTT 5 and over AMQP 1.0, the jobs `mqtt` and `amqp` run it both ways, each against a broker
 of the run's own, on the runner's host.
 
-**A language joins with every vector, conversation and transport case passing, and with interop
-against every language already here**: a client of each against a server of each other, N × (N − 1)
-pairs, two with two languages and six with three.
+**A language is whole with every vector, conversation and transport case passing, and with
+interop against every language already here**: a client of each against a server of each other,
+N × (N − 1) pairs, two with two languages and six with three. Until it is, it plays the part its
+steps and stages have landed, every other part a row ahead, and its interop is one of them.
 
 **No side decides by default.** What one language could add on its own waits for the others, or for
 a decision that brings it to all of them; what a platform cannot do at all stays a row of the
@@ -397,7 +407,8 @@ to lift when the platform can.
 ## The Tenth Man
 
 The decision met the Tenth Man ([0009](0009-conventional-commits-git-flow-and-the-tenth-man.md))
-in seven rounds. Its objections, each with its answer:
+in seven rounds. Its objections, each with its answer, beside which the partial side's, a side that
+plays part of the corpus while its steps land, are [0044](0044-rust-one-owner-per-router-traits-no-unsafe-two-parameters-no-warning.md)'s, the round of Rust's core:
 
 ### On the files' schemas, their version and their check
 

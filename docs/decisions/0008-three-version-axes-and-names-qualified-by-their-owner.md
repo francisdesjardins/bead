@@ -70,8 +70,9 @@ promise to be decided at once, on the day of the first release.
    and one whose files did not keeps it.
 
 3. **The product**: each implementation's releases and the builder's, under Semantic Versioning, at
-   `0.x`, tagged `v*`, one version in the TypeScript side's and the builder's `package.json` and in
-   `Directory.Build.props`, cut from a `release/*` branch
+   `0.x`, tagged `v*`, one version in the TypeScript side's and the builder's `package.json`, in
+   `Directory.Build.props` and in the Rust workspace's `[workspace.package]`, its lock's members at
+   it, cut from a `release/*` branch
    ([0009](0009-conventional-commits-git-flow-and-the-tenth-man.md)). While its major is 0, a
    release that breaks what a consumer calls, reads or builds moves the minor, and a release of
    fixes alone the patch. npm's caret range and NuGet's floating minor read a `0.y` version as they
@@ -82,7 +83,10 @@ promise to be decided at once, on the day of the first release.
 
 **A name is qualified by its owner.** The TypeScript package is `@francisdesjardins/bead` on npm.
 The C# packages are `FrancisDesjardins.Bead.*` on NuGet, which has no scopes, while their assemblies
-are `Bead.*` and their namespaces `Bead` and `Bead.*`. Over HTTP, the media types are
+are `Bead.*` and their namespaces `Bead` and `Bead.*`. The Rust packages are
+`francisdesjardins-bead*`, as crates.io has no namespace and `bead` is another's there, while their
+libraries are `bead*`, so code reads `use bead::RouterClient`
+([0044](0044-rust-one-owner-per-router-traits-no-unsafe-two-parameters-no-warning.md)). Over HTTP, the media types are
 `application/prs.bead` and `application/prs.bead-batch`, in the personal tree of RFC 6838, and the
 headers are `bead-*`. The builder's command is `beadc`, as `protoc` and `flatc` are named, since a
 bare `bead` is not Bead's to take; the C# it generates qualifies every type as `global::Bead.`, so a
@@ -98,7 +102,8 @@ spec's axis.
 **The repository is kept as if it were published.** The wire changes only by decision: a record
 here, and the Tenth Man before it ([0009](0009-conventional-commits-git-flow-and-the-tenth-man.md)).
 Versions stay at `0.x`, and the CHANGELOG is kept current. The TypeScript manifest stays
-`private: true`, and the C# projects carry no package id, until a first publication sets them.
+`private: true`, the C# projects carry no package id, and the Rust workspace holds
+`publish = false`, until a first publication sets them.
 
 ## Consequences
 

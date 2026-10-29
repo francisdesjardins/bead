@@ -1,0 +1,51 @@
+# The Rust side's fuzz targets (decision 0044), cargo-fuzz's libFuzzer on the nightly its sanitizer
+# needs, outside the side's workspace: `node tools/fuzz.mjs build rust`, then `run rust <target>`,
+# on Linux or WSL. Each target lets the refusal its parser is designed to give pass; a panic, an
+# input past a second, or memory past its bound is a finding.
+[package]
+name = "francisdesjardins-bead-fuzz"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[package.metadata]
+cargo-fuzz = true
+
+[workspace]
+members = ["."]
+
+[dependencies]
+bead = { package = "francisdesjardins-bead", path = "../crates/bead" }
+bytes = { version = "1.12.1", default-features = false, features = ["std"] }
+hmac = { version = "0.13.0", default-features = false }
+libfuzzer-sys = "0.4.10"
+serde_json = { version = "1.0.154", default-features = false, features = ["std"] }
+sha2 = { version = "0.11.1", default-features = false }
+
+[[bin]]
+name = "envelope"
+path = "fuzz_targets/envelope.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "payload-codecs"
+path = "fuzz_targets/payload_codecs.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "debug-filter"
+path = "fuzz_targets/debug_filter.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "jwt"
+path = "fuzz_targets/jwt.rs"
+test = false
+doc = false
+bench = false

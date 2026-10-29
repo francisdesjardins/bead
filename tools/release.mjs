@@ -9,7 +9,8 @@
 //
 // `prepare`, on a release/* or hotfix/* branch, the product's <version> defaulting to the branch's:
 // moves the TypeScript package's version and the builder's where the tree has one, the C# side's
-// <Version> and the project ranges of its lock files and of an example's, each document's line and
+// <Version> and the project ranges of its lock files and of an example's, the Rust workspace's
+// version and its lock's members where the tree has them, each document's line and
 // every conformance file's repeat of it, the two versions beadc's header names in each file it
 // generated, the image each committed wrapper of beadc's names and the spec's version in each
 // blueprint beadc wrote outside spec/, every text changed before any is written; runs the
@@ -34,6 +35,8 @@ import { parseArgs } from 'node:util';
 
 import {
   BUILDER,
+  CARGO,
+  CARGO_LOCK,
   CHANGELOG,
   DOCUMENTS,
   LOCKS,
@@ -97,6 +100,41 @@ export const withRepeatedVersion = (text, { key, version }) => {
     pattern: new RegExp(`"${key}": "\\d+\\.\\d+\\.\\d+"`),
     replacement: `"${key}": "${version}"`,
   });
+};
+
+// the Rust workspace's version, its `[workspace.package]` table's alone: a dependency's version is
+// another table's
+export const withCargoVersion = (text, version) => {
+  const table = /^\[workspace\.package\][ \t]*$[\s\S]*?(?=^\[|(?![\s\S]))/m.exec(text);
+  if (table === null) {
+    throw new Error("no [workspace.package] table, where the product's version is due");
+  }
+  const moved = replaceOnce(table[0], {
+    pattern: /^version[ \t]*=[ \t]*"[^"]*"/m,
+    replacement: `version = "${version}"`,
+  });
+  return `${text.slice(0, table.index)}${moved}${text.slice(table.index + table[0].length)}`;
+};
+
+// ! a text replacement, not `cargo update --workspace`: the root's tools run no third toolchain
+// (decision 0005). Each member of a Cargo lock, a `[[package]]` of no `source`, at the version: the
+// text, and how many members it holds
+export const withCargoLockMembers = (text, version) => {
+  let count = 0;
+  const blocks = text.split(/(?=^\[\[package\]\][ \t]*$)/m).map((block) => {
+    if (
+      !/^\[\[package\]\]/.test(block) ||
+      /^source[ \t]*=/m.test(block.split(/^\[(?!\[package\]\])/m)[0])
+    ) {
+      return block;
+    }
+    count += 1;
+    return replaceOnce(block, {
+      pattern: /^version[ \t]*=[ \t]*"[^"]*"/m,
+      replacement: `version = "${version}"`,
+    });
+  });
+  return { text: blocks.join(''), count };
 };
 
 // every project range of a lock file, as NuGet writes it from <Version>, at the version: the text,
@@ -470,6 +508,11 @@ export const prepare = (root, options = {}) => {
     stage(BUILDER, (text) => withPackageVersion(text, product));
   }
   stage(PROPS, (text) => withPropsVersion(text, product));
+  // a tree from before the Rust side holds no workspace; one that does moves its lock beside it
+  if (readText(join(root, CARGO)) !== null) {
+    stage(CARGO, (text) => withCargoVersion(text, product));
+    stage(CARGO_LOCK, (text) => withCargoLockMembers(text, product).text);
+  }
   // * a hotfix starts from main, whose CI keeps the waivers of the release it tags, all moot: the
   // branch compares against that release, where none waives anything
   const moot = kind === 'hotfix' ? breakingWaivers(readText(join(root, CI)) ?? '') : [];

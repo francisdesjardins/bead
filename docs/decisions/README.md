@@ -38,17 +38,23 @@ transport, never a network of its own
 ([0041](0041-over-mqtt-5-a-participant-is-one-clean-link-and-a-parcel-one-publish-each-counted-to-its-byte.md))
 and AMQP 1.0's on RabbitMQ 4
 ([0043](0043-over-amqp-1-0-a-participant-is-one-connection-whose-exclusive-inbox-ends-with-it-and-a-parcel-one-message-of-one-profile-each-counted-to-its-byte.md))
-— and proven byte for byte by the conformance files and the interop. Ahead, in this order:
+— and proven byte for byte by the conformance files and the interop. Its third language, Rust,
+has its core: its router, its service layer, its sessions, the in-memory transport, and the broker's
+core over an in-memory broker with the joined transport, playing the conformance files its core
+reaches before it has a socket, under a toolchain, lints denied whole and a CI job of its own,
+each part it lacks a row of the support matrix ahead
+([0044](0044-rust-one-owner-per-router-traits-no-unsafe-two-parameters-no-warning.md),
+[0004](0004-one-behaviour-in-every-language.md)). Ahead, in this order:
 
-- **Rust, the third language**: its core first — its router, its service layer and its sessions —
-  playing its conformance over the in-memory transport before it has a socket
-  ([0036](0036-an-in-memory-transport-joins-two-routers-of-one-process-and-a-server-takes-several-transports-through-one.md)),
-  under a toolchain and a CI job of its own ([0005](0005-a-toolchain-per-language.md)), held to
-  clippy's pedantic lints under `-D warnings` and to the newest Rust norms; the validators of a
-  blueprint's rules generated for it by beadc, or beadc refusing to generate it
-  ([0035](0035-a-payload-that-reads-is-held-to-its-messages-rules-before-its-resolver-sees-it.md));
-  and each part it lacks, its transports among them, a row of the support matrix
-  ([0004](0004-one-behaviour-in-every-language.md));
+- **Rust's core, whole**: its `proto` codec, the last of it, its library chosen by a spike that
+  meets five criteria
+  ([0044](0044-rust-one-owner-per-router-traits-no-unsafe-two-parameters-no-warning.md));
+- **Rust's transports and its interop**: WebSocket and HTTP over sockets, and the interop both ways
+  with the TypeScript and C# sides; then its broker bindings, MQTT 5 and AMQP 1.0; its gateway; and
+  beadc's Rust target, the validators of a blueprint's rules generated for it, or beadc refusing to
+  generate them
+  ([0035](0035-a-payload-that-reads-is-held-to-its-messages-rules-before-its-resolver-sees-it.md)),
+  each a record of its own;
 - **a payload's rules written in CEL**, a total subset beadc compiles into each side beside the rules
   it compiles already, and then the rules
   [0035](0035-a-payload-that-reads-is-held-to-its-messages-rules-before-its-resolver-sees-it.md)
@@ -227,13 +233,14 @@ table.
 
 ### One behaviour in every language
 
-| #                                                                     | Decision                                                                                                                                | Status   |
-| --------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- | -------- |
-| [0003](0003-one-word-one-meaning.md)                                  | One word means one thing, and there are no abbreviations                                                                                | accepted |
-| [0004](0004-one-behaviour-in-every-language.md)                       | Every language plays one behaviour, held by the conformance files and the interop                                                       | accepted |
-| [0005](0005-a-toolchain-per-language.md)                              | Each language keeps its own toolchain, and the root holds only what all share                                                           | accepted |
-| [0007](0007-csharp-interfaces-blocks-two-parameters-no-warning.md)    | The C# side composes interfaces, writes every body as a block, takes two parameters and an options record, and builds without a warning | accepted |
-| [0008](0008-three-version-axes-and-names-qualified-by-their-owner.md) | Versions run on three axes, and names are qualified by their owner                                                                      | accepted |
+| #                                                                                    | Decision                                                                                                                                                                                                | Status   |
+| ------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------- |
+| [0003](0003-one-word-one-meaning.md)                                                 | One word means one thing, and there are no abbreviations                                                                                                                                                | accepted |
+| [0004](0004-one-behaviour-in-every-language.md)                                      | Every language plays one behaviour, held by the conformance files and the interop                                                                                                                       | accepted |
+| [0005](0005-a-toolchain-per-language.md)                                             | Each language keeps its own toolchain, and the root holds only what all share                                                                                                                           | accepted |
+| [0007](0007-csharp-interfaces-blocks-two-parameters-no-warning.md)                   | The C# side composes interfaces, writes every body as a block, takes two parameters and an options record, and builds without a warning                                                                 | accepted |
+| [0008](0008-three-version-axes-and-names-qualified-by-their-owner.md)                | Versions run on three axes, and names are qualified by their owner                                                                                                                                      | accepted |
+| [0044](0044-rust-one-owner-per-router-traits-no-unsafe-two-parameters-no-warning.md) | The Rust side owns each router's state in one task, starts each operation as it is made, composes traits, forbids unsafe code, takes two parameters and an options struct, and builds without a warning | accepted |
 
 ### How the repository decides
 
@@ -244,7 +251,7 @@ table.
 
 ## Writing one
 
-The next decision is 0044. Its file is `NNNN-the-decision-in-a-few-words.md`, and its title states
+The next decision is 0045. Its file is `NNNN-the-decision-in-a-few-words.md`, and its title states
 the decision, not its subject. The title may grow with the record; the file's name stays, unless it
 would mislead.
 

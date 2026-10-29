@@ -1,0 +1,5 @@
+# A warning of rustc, clippy or rustdoc fails the build, here as in CI, as TreatWarningsAsErrors does
+# on the C# side (decision 0044); CARGO_BUILD_WARNINGS=warn releases one run, the nightly's fuzz
+# build among them
+[build]
+warnings = "deny"

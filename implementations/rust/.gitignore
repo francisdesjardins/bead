@@ -1,0 +1,7 @@
+# What Cargo, cargo-fuzz and cargo-llvm-cov write
+/target/
+/fuzz/target/
+/fuzz/corpus/
+/fuzz/artifacts/
+/fuzz/coverage/
+/coverage/

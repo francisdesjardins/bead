@@ -1,6 +1,7 @@
 #!/usr/bin/env node
-// Coverage-guided fuzzing of Bead's own parsers, on both sides, by hand: never in CI. Six targets,
-// the same on each side and named alike, and one of beadc's, each fed raw bytes:
+// Coverage-guided fuzzing of Bead's own parsers, on every side, by hand: never in CI. Six targets,
+// the same on each side and named alike, four of them on the Rust side until its transports land,
+// and one of beadc's, each fed raw bytes:
 //
 // - `envelope`: the envelope reader, its header then its body, and a failure's record;
 // - `payload-codecs`: the `json` and `text` codecs' readers, and the writers behind them;
@@ -25,6 +26,12 @@
 //   limit on the process is 512 MiB; `blueprint`'s, which loads beadc's descriptors and schemas
 //   before it, about 170 MiB more, is 768 MiB. Node holds its heap to 256 MiB, as the C# side's
 //   runtime does: what a run keeps past it fails as a finding, never as a slow climb to the limit.
+// - Rust: cargo-fuzz's libFuzzer, over `implementations/rust/fuzz/`, a project outside the side's
+//   workspace, on the nightly its `-Z sanitizer` needs, pinned by its date as CI's fuzz build is,
+//   on Linux or WSL; `envelope`, `payload-codecs`, `debug-filter` and `jwt`, the twins its core
+//   holds, `http-fields` and `ws-handshake` coming with its transports (decision 0044). Its runs
+//   read the folder's `.cargo/config.toml`, and set `CARGO_BUILD_WARNINGS=warn`: a newer compiler's
+//   warnings are no gate of the pinned one's.
 // - C#: libFuzzer as libfuzzer-dotnet builds it for Windows, over
 //   `implementations/dotnet/tools/Bead.Fuzz/`, which it runs as its child, once SharpFuzz has
 //   instrumented Bead.Core and Bead.Transport.WebSockets in a copy of its build.
@@ -35,7 +42,8 @@
 //
 //   node tools/fuzz.mjs seed                     every target's corpora, from the conformance files
 //   node tools/fuzz.mjs fetch                    the C# side's fuzzer and instrumenter, by the pin
-//   node tools/fuzz.mjs build <side>             typescript: the bundles; csharp: the instrumented build
+//   node tools/fuzz.mjs build <side>             typescript: the bundles; csharp: the instrumented build;
+//                                                rust: cargo-fuzz's targets
 //   node tools/fuzz.mjs run <side> <target> [input...] [-- libFuzzer flags...]
 //
 // `run` fuzzes from the target's `corpus/<target>/`, where it keeps what it finds new, and writes a
@@ -71,17 +79,26 @@ export const TWINS = Object.freeze([
   'ws-handshake',
 ]);
 
-/** Each side's targets, by their names: the twins, and on the TypeScript side beadc's `blueprint`. */
+/**
+ * Each side's targets, by their names: the twins, on the TypeScript side beadc's `blueprint`
+ * beside them, and on the Rust side those its core holds, ahead of its transports.
+ */
 export const TARGETS = Object.freeze({
   typescript: Object.freeze([...TWINS, 'blueprint']),
   csharp: TWINS,
+  rust: Object.freeze(['envelope', 'payload-codecs', 'debug-filter', 'jwt']),
 });
 
 /** Each side's folder, where its targets, its corpora and its findings are. */
 export const SIDES = Object.freeze({
   typescript: join(TYPESCRIPT, 'tools', 'fuzz'),
   csharp: join(ROOT, 'implementations', 'dotnet', 'tools', 'Bead.Fuzz'),
+  rust: join(ROOT, 'implementations', 'rust', 'fuzz'),
 });
+
+// ! the nightly cargo-fuzz builds on, by its date: CI's `rust` job builds the targets on the same,
+// its NIGHTLY, and both move together, by hand
+export const RUST_NIGHTLY = 'nightly-2026-10-27';
 
 // the targets of a folder of their own, the side's aside: beadc's, beside the code it reads
 const OWN_FOLDERS = Object.freeze({ blueprint: join(BUILDER, 'tools', 'fuzz') });
@@ -484,9 +501,10 @@ const readPins = () => {
 const USAGE = [
   'usage: node tools/fuzz.mjs seed',
   '       node tools/fuzz.mjs fetch',
-  '       node tools/fuzz.mjs build typescript|csharp',
+  '       node tools/fuzz.mjs build typescript|csharp|rust',
   `       node tools/fuzz.mjs run typescript ${TARGETS.typescript.join('|')} [input...] [-- libFuzzer flags...]`,
   `       node tools/fuzz.mjs run csharp ${TARGETS.csharp.join('|')} [input...] [-- libFuzzer flags...]`,
+  `       node tools/fuzz.mjs run rust ${TARGETS.rust.join('|')} [input...] [-- libFuzzer flags...]`,
 ].join('\n');
 
 /** A command line read: the command, its side and target, its inputs, and libFuzzer's flags. */
@@ -662,6 +680,24 @@ const buildCSharp = () => {
   }
 };
 
+// cargo-fuzz's arguments run on the nightly the Rust side's fuzz build takes, from its folder, its
+// warnings no gate of the pinned compiler's
+const cargoFuzzOf = (args) => {
+  if (process.platform === 'win32') {
+    throw new Error("the Rust side's fuzzer is cargo-fuzz's libFuzzer: fuzz it on Linux or WSL");
+  }
+
+  return [
+    'cargo',
+    [`+${RUST_NIGHTLY}`, 'fuzz', ...args],
+    { cwd: SIDES.rust, env: { CARGO_BUILD_WARNINGS: 'warn' } },
+  ];
+};
+
+const buildRust = () => {
+  runOrThrow(...cargoFuzzOf(['build']));
+};
+
 // the flags every run takes: an input past a second hangs, and a finding goes to its folder
 const flagsOf = ({ side, target }) => {
   const findings = join(folderOf(side, target), 'findings', target);
@@ -751,6 +787,19 @@ const runCSharp = ({ target, inputs, flags }) => {
 
 // ── Main ──────────────────────────────────────────────────────────────────────
 
+const runRust = ({ target, inputs, flags }) => {
+  return run(
+    ...cargoFuzzOf([
+      'run',
+      target,
+      ...corpusOf({ side: 'rust', target, inputs }),
+      '--',
+      ...flagsOf({ side: 'rust', target }),
+      ...flags,
+    ])
+  );
+};
+
 const main = async (argv) => {
   const given = argumentsOf(argv);
 
@@ -768,12 +817,18 @@ const main = async (argv) => {
     case 'build':
       if (given.side === 'typescript') {
         buildTypeScript();
+      } else if (given.side === 'rust') {
+        buildRust();
       } else {
         buildCSharp();
       }
 
       return 0;
     default:
+      if (given.side === 'rust') {
+        return runRust(given);
+      }
+
       return given.side === 'typescript' ? runTypeScript(given) : runCSharp(given);
   }
 };

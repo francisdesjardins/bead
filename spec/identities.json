@@ -331,8 +331,12 @@
       "refused": "out of its range",
       "differs": [
         {
-          "row": "An id or a revision no C# type holds",
+          "row": "An id or a revision no typed side holds",
           "language": "C#"
+        },
+        {
+          "row": "An id or a revision no typed side holds",
+          "language": "Rust"
         }
       ]
     },
@@ -348,8 +352,12 @@
       "refused": "out of its range",
       "differs": [
         {
-          "row": "An id or a revision no C# type holds",
+          "row": "An id or a revision no typed side holds",
           "language": "C#"
+        },
+        {
+          "row": "An id or a revision no typed side holds",
+          "language": "Rust"
         }
       ]
     },
@@ -366,8 +374,12 @@
       "refused": "out of its range",
       "differs": [
         {
-          "row": "An id or a revision no C# type holds",
+          "row": "An id or a revision no typed side holds",
           "language": "C#"
+        },
+        {
+          "row": "An id or a revision no typed side holds",
+          "language": "Rust"
         }
       ]
     },
@@ -384,8 +396,12 @@
       "refused": "out of its range",
       "differs": [
         {
-          "row": "An id or a revision no C# type holds",
+          "row": "An id or a revision no typed side holds",
           "language": "C#"
+        },
+        {
+          "row": "An id or a revision no typed side holds",
+          "language": "Rust"
         }
       ]
     },
@@ -402,8 +418,12 @@
       "refused": "out of its range",
       "differs": [
         {
-          "row": "An id or a revision no C# type holds",
+          "row": "An id or a revision no typed side holds",
           "language": "C#"
+        },
+        {
+          "row": "An id or a revision no typed side holds",
+          "language": "Rust"
         }
       ]
     },
@@ -420,8 +440,12 @@
       "refused": "out of its range",
       "differs": [
         {
-          "row": "An id or a revision no C# type holds",
+          "row": "An id or a revision no typed side holds",
           "language": "C#"
+        },
+        {
+          "row": "An id or a revision no typed side holds",
+          "language": "Rust"
         }
       ]
     },
@@ -466,8 +490,12 @@
       "refused": "out of its range",
       "differs": [
         {
-          "row": "An id or a revision no C# type holds",
+          "row": "An id or a revision no typed side holds",
           "language": "C#"
+        },
+        {
+          "row": "An id or a revision no typed side holds",
+          "language": "Rust"
         }
       ]
     },
@@ -483,8 +511,12 @@
       "refused": "out of its range",
       "differs": [
         {
-          "row": "An id or a revision no C# type holds",
+          "row": "An id or a revision no typed side holds",
           "language": "C#"
+        },
+        {
+          "row": "An id or a revision no typed side holds",
+          "language": "Rust"
         }
       ]
     },
@@ -501,8 +533,12 @@
       "refused": "out of its range",
       "differs": [
         {
-          "row": "An id or a revision no C# type holds",
+          "row": "An id or a revision no typed side holds",
           "language": "C#"
+        },
+        {
+          "row": "An id or a revision no typed side holds",
+          "language": "Rust"
         }
       ]
     },
@@ -519,8 +555,12 @@
       "refused": "out of its range",
       "differs": [
         {
-          "row": "An id or a revision no C# type holds",
+          "row": "An id or a revision no typed side holds",
           "language": "C#"
+        },
+        {
+          "row": "An id or a revision no typed side holds",
+          "language": "Rust"
         }
       ]
     },
@@ -537,8 +577,12 @@
       "refused": "out of its range",
       "differs": [
         {
-          "row": "An id or a revision no C# type holds",
+          "row": "An id or a revision no typed side holds",
           "language": "C#"
+        },
+        {
+          "row": "An id or a revision no typed side holds",
+          "language": "Rust"
         }
       ]
     },
@@ -555,8 +599,12 @@
       "refused": "out of its range",
       "differs": [
         {
-          "row": "An id or a revision no C# type holds",
+          "row": "An id or a revision no typed side holds",
           "language": "C#"
+        },
+        {
+          "row": "An id or a revision no typed side holds",
+          "language": "Rust"
         }
       ]
     },
@@ -581,7 +629,13 @@
       "serviceId": 1,
       "procedureId": 1,
       "serviceRevision": -1,
-      "refused": "out of its range"
+      "refused": "out of its range",
+      "differs": [
+        {
+          "row": "An id or a revision no typed side holds",
+          "language": "Rust"
+        }
+      ]
     },
     {
       "name": "revision 1",
@@ -613,7 +667,7 @@
       "refused": "out of its range",
       "differs": [
         {
-          "row": "An id or a revision no C# type holds",
+          "row": "An id or a revision no typed side holds",
           "language": "C#"
         }
       ]
@@ -631,8 +685,12 @@
       "refused": "out of its range",
       "differs": [
         {
-          "row": "An id or a revision no C# type holds",
+          "row": "An id or a revision no typed side holds",
           "language": "C#"
+        },
+        {
+          "row": "An id or a revision no typed side holds",
+          "language": "Rust"
         }
       ]
     },
@@ -649,8 +707,12 @@
       "refused": "out of its range",
       "differs": [
         {
-          "row": "An id or a revision no C# type holds",
+          "row": "An id or a revision no typed side holds",
           "language": "C#"
+        },
+        {
+          "row": "An id or a revision no typed side holds",
+          "language": "Rust"
         }
       ]
     },
@@ -667,8 +729,12 @@
       "refused": "out of its range",
       "differs": [
         {
-          "row": "An id or a revision no C# type holds",
+          "row": "An id or a revision no typed side holds",
           "language": "C#"
+        },
+        {
+          "row": "An id or a revision no typed side holds",
+          "language": "Rust"
         }
       ]
     },
@@ -685,8 +751,12 @@
       "refused": "out of its range",
       "differs": [
         {
-          "row": "An id or a revision no C# type holds",
+          "row": "An id or a revision no typed side holds",
           "language": "C#"
+        },
+        {
+          "row": "An id or a revision no typed side holds",
+          "language": "Rust"
         }
       ]
     },

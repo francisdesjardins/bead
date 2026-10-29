@@ -9,16 +9,33 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
-- The trace of a participant's parcels on both sides, with guarded listeners, incoming verdicts,
+- The trace of a participant's parcels on the TypeScript and C# sides, with guarded listeners, incoming verdicts,
   link and name transitions, reports and no acceptor's half; its own DevTools source and a Broker
   view with pulled levels, column filters and recorded detail.
+- Rust, the third language, its core: the envelope's codec, the client and server routers with
+  their service, session and notification managers and the service layer, sessions and credentials
+  with a JWT's verification, the clock it is given and every duration held as spec 1.4 holds it,
+  the trace, the filter and the registry, the in-memory transport, the broker's core over an
+  in-memory broker, and the joined transport, playing every conformance file its core reaches; its
+  own toolchain, Rust 1.99.1 and edition 2024, clippy's pedantic, nursery and cargo groups and
+  chosen restriction lints denied, a warning an error, unsafe code forbidden, and a CI job of its
+  own on Linux and Windows held to its coverage floor of lines and regions (decision 0044).
+
+### Changed
+
+- `spec/check.py` holds a side that plays part of the corpus to what its steps and stages name
+  ahead, each a row of the support matrix; `tools/coverage-report.mjs` reads LLVM's coverage
+  export, and fails a floor on a measure that no report measured. The spec's front matter says a
+  side conforms to section 15 for each transport it offers.
+- The support matrix's row "An id or a revision no C# type holds" is "An id or a revision no typed
+  side holds", the Rust side's `u16` and `u32` beside the C# side's `ushort` and `int`.
 
 ### Fixed
 
-- A router is never entered again from its own turn, on both sides: what a listener it calls hands
-  it back, an envelope received or a connection let go, a dispose among them, is taken in a later
-  turn, behind what came before it: a failed resolver or admission is answered `PROCEDURE_FAILED`
-  whatever its report listener submits, on the TypeScript side as on the C# side (spec 9.0).
+- A router is never entered again from its own turn, on the TypeScript and C# sides as on the Rust
+  side's core: what a listener it calls hands it back, an envelope received or a connection let go,
+  a dispose among them, is taken in a later turn, behind what came before it, and a failed resolver
+  or admission is answered `PROCEDURE_FAILED` whatever its report listener submits (spec 9.0).
 - An AMQP 1.0 management link whose ATTACH is answered with no source or target is refused on the
   TypeScript side as on the C# side: its DETACH's condition fails the request, and no request goes
   on its pair (AMQP 1.0 §2.6.3, spec 15.33).
@@ -29,6 +46,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - An AMQP 1.0 sending link whose ATTACH is answered with no target is refused on the TypeScript side
   as on the C# side: nothing is sent on it, its start fails, and a later one refuses what it held,
   its link kept; on the C# side a start fails at once on either sender's refusal (spec 15.33).
+- An AMQP 1.0 publication on the C# side asked as its broker ends the sending session, its END
+  answered before AMQPNetLite marks the session ended, goes on the next session, as the TypeScript
+  side's does, rather than being refused with nothing sent (spec 15.33).
 
 ## [0.8.0] - 2026-10-28
 
@@ -1123,7 +1143,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - beadc makes its temporary folders, `breaking`'s and protoc's, under the project's `.beadc/` where a
   `beadc.yaml` is read, which `init`'s `.gitignore` and the repository's ignore.
 - An earlier's root that holds no `.proto` is refused, named as its `beadc.yaml` names it, `git
-archive` writing a submodule as an empty folder.
+  archive` writing a submodule as an empty folder.
 - An archive's pax `size` overrides its ustar size, as GNU tar and bsdtar read it; an empty or NUL
   path, and an entry over an earlier one, are refused.
 - buf's finding on a deleted file is placed at the earlier's path, and a `buf:` waiver is held to the
@@ -1781,7 +1801,7 @@ archive` writing a submodule as an empty folder.
   and `LastActivityChanged`, and a session manager's update `updateLastActivity` and
   `UpdateLastActivity`. The TypeScript side's `timestamp()` and `ITimestamp` go.
 - A trace tells `startedAt` and `duration`, flat on its event, where it told `timestamp: { event,
-duration }`: on the C# side `StartedAt`, a `DateTimeOffset`, and `Duration`, a `TimeSpan?` in
+  duration }`: on the C# side `StartedAt`, a `DateTimeOffset`, and `Duration`, a `TimeSpan?` in
   whole milliseconds, and `DebugTimestamp` goes. A notification's one step starts as it is sent or
   heard, and a failed notify tells its failure at that same start.
 - The banned-API analyzer (RS0030) on the C# side, and oxlint's `no-restricted-globals` and
