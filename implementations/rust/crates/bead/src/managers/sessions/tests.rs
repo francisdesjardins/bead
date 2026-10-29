@@ -554,7 +554,7 @@ async fn runs_on_the_clock_its_options_give_the_system_s_when_none() {
     })
     .expect("a manager on the clock given");
     let none = SessionManager::new(&SessionManagerOptions::default()).expect("a manager");
-    let system = std::time::SystemTime::now();
+    let system = crate::testing::wall_now();
     let read = none.clock().wall();
     let apart = read
         .duration_since(system)

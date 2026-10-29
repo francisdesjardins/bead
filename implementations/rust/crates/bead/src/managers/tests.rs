@@ -99,7 +99,7 @@ async fn an_answer_that_does_not_decode_fails_the_call_here_with_its_header_and_
 
     pair.settle().await;
 
-    let failed = tokio::time::timeout(Duration::from_secs(10), call)
+    let failed = crate::testing::patience(Duration::from_secs(10), call)
         .await
         .expect("answered within its patience");
     let Err(CallError::Failure(failure)) = failed else {
@@ -257,7 +257,7 @@ async fn a_call_whose_value_does_not_write_fails_before_anything_goes_nothing_re
     let refused = requester
         .call(Value::from("x"), RequestOptions::default())
         .expect("a call");
-    let refused = tokio::time::timeout(Duration::from_secs(10), refused)
+    let refused = crate::testing::patience(Duration::from_secs(10), refused)
         .await
         .expect("failed at once");
 
@@ -311,7 +311,7 @@ async fn a_notification_whose_value_does_not_write_goes_to_its_router_in_its_pay
     let seen = recorded(pair.server.services());
 
     // resolves all the same
-    tokio::time::timeout(
+    crate::testing::patience(
         Duration::from_secs(10),
         notifier.notify(Value::from("news"), &NotifyOptions::default()),
     )

@@ -118,7 +118,7 @@ fn codes_of(errors: &[RouterError]) -> Vec<String> {
 
 // the outcome of a call that has its answer already
 async fn answered(call: Call) -> Result<RouterResult, CallError> {
-    tokio::time::timeout(PATIENCE, call)
+    crate::testing::patience(PATIENCE, call)
         .await
         .expect("a call answered within its patience")
 }
@@ -686,7 +686,7 @@ async fn a_listener_s_panic_is_reported_and_the_transport_goes_on() {
     pair.settle().await;
 
     assert_eq!(
-        tokio::time::timeout(PATIENCE, call)
+        crate::testing::patience(PATIENCE, call)
             .await
             .expect("answered within its patience")
             .expect("echo answered"),

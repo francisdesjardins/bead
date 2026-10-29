@@ -3,6 +3,11 @@
 //! input the file holds or none, and what it holds read back — an option, the due of the timer it
 //! arms — or its refusal, by its reason's code; the words stay Rust's. A trial a place.
 
+#![expect(
+    clippy::disallowed_methods,
+    reason = "a native target: its calls wait on tokio's tasks while the stepping clock settles"
+)]
+
 use core::time::Duration;
 use std::collections::BTreeMap;
 use std::process::ExitCode;

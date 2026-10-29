@@ -307,7 +307,7 @@ async fn counts_exactly_under_calls_made_at_once_from_many_threads() {
         .map(|thread| {
             let asking = asking.clone();
 
-            tokio::spawn(async move {
+            crate::testing::spawn(async move {
                 for _ in 0..CALLS {
                     asking
                         .call(json!(thread.to_string()), RequestOptions::default())

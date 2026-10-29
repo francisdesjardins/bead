@@ -4,12 +4,12 @@
 use core::sync::atomic::{AtomicUsize, Ordering};
 use core::time::Duration;
 use std::sync::{Arc, Mutex, Weak};
-use std::time::Instant;
 
 use super::{locked, until};
 use crate::broker::heartbeat::{Heartbeat, HeartbeatHooks};
 use crate::clock::{SharedClock, SystemClock};
 use crate::duration::NEVER;
+use crate::testing::Instant;
 
 fn platform() -> SharedClock {
     Arc::new(SystemClock::current().expect("a runtime"))
@@ -57,7 +57,7 @@ async fn pings_a_connection_silent_for_its_heartbeat_on_the_platform_s_timer_and
 
     // answered nothing by the next: dropped, and beats no more
     until(|| drops.load(Ordering::SeqCst) == 1, "dropped").await;
-    tokio::time::sleep(beat * 3).await;
+    crate::testing::rest(beat * 3).await;
     assert_eq!(
         (pings.load(Ordering::SeqCst), drops.load(Ordering::SeqCst)),
         (1, 1),
@@ -70,7 +70,7 @@ async fn pings_a_connection_silent_for_its_heartbeat_on_the_platform_s_timer_and
     let talking = heartbeat_of(beat * 10, (&heard, &heard));
 
     for _ in 0..10 {
-        tokio::time::sleep(beat).await;
+        crate::testing::rest(beat).await;
         talking.heard();
     }
 
@@ -91,16 +91,16 @@ async fn pings_a_connection_silent_for_its_heartbeat_on_the_platform_s_timer_and
     until(|| answered_pings.load(Ordering::SeqCst) == 1, "pinged").await;
     assert_eq!(told(), (1, 0), "pinged, not dropped");
     answered.heard();
-    tokio::time::sleep(Duration::from_millis(100)).await;
+    crate::testing::rest(Duration::from_millis(100)).await;
     assert_eq!(told(), (1, 0), "answered");
     answered.stop();
-    tokio::time::sleep(Duration::from_millis(300)).await;
+    crate::testing::rest(Duration::from_millis(300)).await;
     assert_eq!(told(), (1, 0), "stopped");
 
     // without end, it arms nothing
     let never = heartbeat_of(NEVER, (&heard, &heard));
 
-    tokio::time::sleep(beat * 2).await;
+    crate::testing::rest(beat * 2).await;
     never.stop();
     assert_eq!(heard.load(Ordering::SeqCst), 0, "nothing beaten");
 }
@@ -157,7 +157,7 @@ async fn beats_no_more_once_its_own_ping_stopped_it() {
 
     *locked(&beating) = Arc::downgrade(&heartbeat);
     until(|| pings.load(Ordering::SeqCst) == 1, "pinged").await;
-    tokio::time::sleep(Duration::from_millis(300)).await;
+    crate::testing::rest(Duration::from_millis(300)).await;
     assert_eq!(
         (pings.load(Ordering::SeqCst), drops.load(Ordering::SeqCst)),
         (1, 0),

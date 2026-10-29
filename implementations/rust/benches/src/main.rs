@@ -11,6 +11,11 @@
     clippy::print_stderr,
     reason = "a bench writes its report, and its progress beside it"
 )]
+#![expect(
+    clippy::disallowed_methods,
+    clippy::disallowed_types,
+    reason = "a native bench: its clients run on tokio's tasks, timed by std's instant"
+)]
 
 use std::collections::BTreeMap;
 use std::process::Command;

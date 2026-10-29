@@ -17,6 +17,7 @@ use crate::duration::hold;
 use crate::errors::{ConnectError, ProgrammerError, ReadyStateError, TransportError};
 use crate::ordered::Ordered;
 use crate::owner::{Owner, WeakOwner};
+use crate::platform::runtime_of;
 use crate::router::types::{BoxFuture, ConnectionHandle, Gauges, RouterError, TransportMessage};
 use crate::transport::{
     CONNECT_TIMEOUT, ClientListener, ClientTransport, Connect, DisconnectOptions, Listeners,
@@ -53,19 +54,6 @@ fn wall_of(clock: &SharedClock) -> i64 {
         .map_or(0, |since| {
             i64::try_from(since.as_millis()).unwrap_or(i64::MAX)
         })
-}
-
-fn runtime_of(given: Option<&Handle>) -> Result<Handle, ProgrammerError> {
-    given.map_or_else(
-        || {
-            Handle::try_current().map_err(|_none| {
-                ProgrammerError::new(
-                    "an in-memory transport is built within a tokio runtime, or given its handle",
-                )
-            })
-        },
-        |runtime| Ok(runtime.clone()),
-    )
 }
 
 // ── The server ───────────────────────────────────────────────────────────────────────────────
@@ -265,9 +253,9 @@ impl MemoryServer {
     ///
     /// # Errors
     ///
-    /// A [`ProgrammerError`] outside a tokio runtime, given none.
+    /// A [`ProgrammerError`] outside a tokio runtime, given none, or on one without its time driver.
     pub fn new(options: &MemoryServerOptions) -> Result<Self, ProgrammerError> {
-        let runtime = runtime_of(options.runtime.as_ref())?;
+        let runtime = runtime_of(options.runtime.as_ref(), "an in-memory transport")?;
         let clock: SharedClock = match &options.clock {
             Some(clock) => Arc::clone(clock),
             None => Arc::new(SystemClock::new(runtime.clone())),
@@ -846,9 +834,9 @@ impl MemoryClient {
     ///
     /// # Errors
     ///
-    /// A [`ProgrammerError`] outside a tokio runtime.
+    /// A [`ProgrammerError`] outside a tokio runtime, or on one without its time driver.
     pub fn new(options: &MemoryClientOptions) -> Result<Self, ProgrammerError> {
-        let runtime = runtime_of(None)?;
+        let runtime = runtime_of(None, "an in-memory transport")?;
         let clock: SharedClock = match &options.clock {
             Some(clock) => Arc::clone(clock),
             None => Arc::new(SystemClock::new(runtime.clone())),
