@@ -1934,6 +1934,19 @@ fn resolve_session<S: Side>(
         carried,
     };
     let resolution = state.session_of(&request, &signal);
+    // NONE and OPAQUE resolve in the receive turn. A future violates that contract; its eventual
+    // outcome is consumed off the owner and never admits the call (spec 13.1).
+    let resolution = match resolution {
+        Resolution::Later(resolving) if !is_later => {
+            state.core().owner.cover(async move {
+                let _outcome = resolving.await;
+            });
+            Resolution::Now(Err(Unresolved::Other(Arc::new(ProgrammerError::new(
+                "session_of resolves a request presenting none or OPAQUE in the turn it came, never by a future",
+            )))))
+        }
+        resolution @ (Resolution::Now(_) | Resolution::Later(_)) => resolution,
+    };
     let settle = move |state: &mut S, resolved: Result<Resolved, Unresolved>| {
         match resolved {
             Ok(resolved) => {
