@@ -1,0 +1,23 @@
+[package]
+name = "francisdesjardins-bead-protobuf-build"
+description = "Bead's setting of Buffa's generator on the Rust side, for a build script: the code of a proto file as the proto payload's codec reads it, from the set protoc writes."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+readme.workspace = true
+keywords.workspace = true
+categories.workspace = true
+publish.workspace = true
+
+[lib]
+name = "bead_protobuf_build"
+
+[dependencies]
+buffa = { workspace = true }
+buffa-descriptor = { workspace = true }
+buffa-build = { workspace = true }
+
+[lints]
+workspace = true

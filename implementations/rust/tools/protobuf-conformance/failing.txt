@@ -1,0 +1,9 @@
+# The tests protobuf's conformance suite fails through the Rust side's generated codec, each with
+# the runner's message, its reason on the comment line above (decisions 0028 and 0044). The runner
+# fails a listed test that passes, so the list is held both ways. Its JSON goes through Buffa's
+# dynamic message until Rust's gateway brings Bead's mapping of protobuf's JSON, whose refusal of an
+# extension's JSON name lists the two `FieldNameExtension.Validator` tests here then, as on both
+# other sides.
+
+# an extension is read as an unknown field: the generated codec gives no registry
+Recommended.Editions.ProtobufInput.RejectInvalidUtf8.String.Extension # Should have failed to parse, but didn't.
