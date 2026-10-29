@@ -481,7 +481,7 @@ async fn draws_a_handle_of_type_memory_for_each_connect_and_gives_none_twice() {
 
     ends.clock.settle().await;
     again.await.expect("connected again");
-    ends.server.stop().await;
+    ends.server.stop().await.expect("stopped");
     ends.clock.settle().await;
     ends.server.start().await.expect("started again");
 
@@ -691,7 +691,7 @@ async fn closes_each_connection_as_it_stops_and_takes_no_connect_after() {
     }
 
     locked(&told).clear();
-    server.stop().await;
+    server.stop().await.expect("stopped");
     clock.settle().await;
 
     assert_eq!(
@@ -1424,7 +1424,7 @@ async fn reconnects_with_its_last_connect_s_options_replacing_its_connection_wit
     );
 
     // its server gone: each attempt refused until they run out, closed with no close of its own
-    ends.server.stop().await;
+    ends.server.stop().await.expect("stopped");
     ends.clock.settle().await;
 
     assert_eq!(

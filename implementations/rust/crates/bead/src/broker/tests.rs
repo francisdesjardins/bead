@@ -550,7 +550,7 @@ impl BrokerPair {
 
     /// Stops what it built.
     pub(super) async fn stop(&self) {
-        self.server.stop().await;
+        self.server.stop().await.expect("stopped");
         self.client_participant.stop().await;
         self.server_participant.stop().await;
     }

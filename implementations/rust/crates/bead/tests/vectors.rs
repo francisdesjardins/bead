@@ -455,8 +455,8 @@ impl ServerTransport for Recording {
         Box::pin(async { Ok(()) })
     }
 
-    fn stop(&self) -> BoxFuture<()> {
-        Box::pin(async {})
+    fn stop(&self) -> BoxFuture<Result<(), RouterError>> {
+        Box::pin(async { Ok(()) })
     }
 }
 
@@ -625,7 +625,7 @@ async fn refused_credential(vector: &CredentialRefusalVector) -> Result<(), Fail
         .collect();
     let told = locked(&told).clone();
 
-    server.dispose().await;
+    server.dispose().await?;
 
     hold(
         answers == vec![(Arc::clone(&first), 1, Some(vector.code))],

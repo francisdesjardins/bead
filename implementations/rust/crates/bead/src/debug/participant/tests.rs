@@ -542,7 +542,7 @@ async fn tells_completed_link_transitions_and_held_names_by_push_and_keeps_level
         "ordinals never repeat"
     );
     pair.client_participant.stop().await;
-    pair.server.stop().await;
+    pair.server.stop().await.expect("stopped");
     assert!(
         pair.server_participant.names().is_empty(),
         "the name let go"

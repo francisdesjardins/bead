@@ -403,13 +403,14 @@ impl ServerTransport for MemoryServer {
     }
 
     // every connection ended in one later turn, in the order they came: none drawn in a turn
-    // before it is left open, and none is drawn after it
-    fn stop(&self) -> BoxFuture<()> {
+    // before it is left open, and none is drawn after it; it opens within its start's call, so no
+    // stop finds it starting
+    fn stop(&self) -> BoxFuture<Result<(), RouterError>> {
         {
             let mut state = locked(&self.inner.state);
 
             if matches!(state.ready, ReadyState::Uninitialized | ReadyState::Closed) {
-                return Box::pin(async {});
+                return Box::pin(async { Ok(()) });
             }
 
             state.ready = ReadyState::Closing;
@@ -441,6 +442,8 @@ impl ServerTransport for MemoryServer {
 
         Box::pin(async move {
             drop(stopped.await);
+
+            Ok(())
         })
     }
 

@@ -238,8 +238,8 @@ impl ServerTransport for Pipe {
         Box::pin(async { Ok(()) })
     }
 
-    fn stop(&self) -> BoxFuture<()> {
-        Box::pin(async {})
+    fn stop(&self) -> BoxFuture<Result<(), RouterError>> {
+        Box::pin(async { Ok(()) })
     }
 }
 
@@ -1242,9 +1242,12 @@ impl BrokerDrive {
         }
     }
 
-    async fn stop(&self) {
-        self.server.stop().await;
+    async fn stop(&self) -> Result<(), String> {
+        let stopped = self.server.stop().await.map_err(|error| error.to_string());
+
         self.participant.stop().await;
+
+        stopped
     }
 }
 
@@ -1282,7 +1285,7 @@ async fn accept_timeout_by_options(given: Option<Duration>) -> Played {
 
     let due = due_of(&drive.clock.dues());
 
-    drive.stop().await;
+    drive.stop().await?;
 
     Ok(Observed::Held(due?))
 }
@@ -1321,7 +1324,7 @@ async fn broker_body_grace_period_by_options(given: Option<Duration>) -> Played 
 
     let due = due_of(&drive.clock.dues());
 
-    drive.stop().await;
+    drive.stop().await?;
 
     Ok(Observed::Held(due?))
 }

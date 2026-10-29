@@ -1289,7 +1289,12 @@ impl Server {
     /// Disposes of it: its router, its sessions, then its transport, stopped. Its router disposed
     /// at once, what it holds is let go in a later turn, behind what came before it, a listener's
     /// dispose too (spec 9.0).
-    pub fn dispose(&self) -> BoxFuture<()> {
+    ///
+    /// # Errors
+    ///
+    /// What its transport refuses its stop with, its router and its sessions disposed all the same:
+    /// a transport still starting, say.
+    pub fn dispose(&self) -> BoxFuture<Result<(), RouterError>> {
         self.shared.router.mark_disposed();
 
         let disposed = self
@@ -1308,7 +1313,7 @@ impl Server {
 
         Box::pin(async move {
             disposed.await.ok();
-            transport.stop().await;
+            transport.stop().await
         })
     }
 

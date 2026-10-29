@@ -486,8 +486,16 @@ async fn main() -> Result<(), String> {
     }
 
     stand.client.dispose().await;
-    stand.server.dispose().await;
-    stand.memory.stop().await;
+    stand
+        .server
+        .dispose()
+        .await
+        .map_err(|error| error.to_string())?;
+    stand
+        .memory
+        .stop()
+        .await
+        .map_err(|error| error.to_string())?;
 
     Ok(())
 }

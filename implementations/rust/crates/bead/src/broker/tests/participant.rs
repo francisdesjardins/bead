@@ -434,7 +434,7 @@ async fn refuses_a_send_whose_room_fits_no_part_and_keeps_the_connection_on_the_
         (ReadyState::Open, Some(1)),
         "the connection kept"
     );
-    server.stop().await;
+    server.stop().await.expect("stopped");
     connecting.stop().await;
     serving.stop().await;
 }
@@ -764,7 +764,7 @@ async fn holds_a_connection_secure_only_while_both_its_legs_are() {
             (ReadyState::Open, false, false),
             "{insecure}'s leg not secure"
         );
-        server.stop().await;
+        server.stop().await.expect("stopped");
         connecting.stop().await;
         serving.stop().await;
     }
@@ -937,7 +937,7 @@ async fn counts_its_connections_half_open_among_them_what_they_hold_in_parts_and
         .collect(),
         "its server's ceilings"
     );
-    server.stop().await;
+    server.stop().await.expect("stopped");
     participant.stop().await;
 }
 
@@ -1629,7 +1629,7 @@ async fn gives_no_life_to_a_publication_of_an_adapter_that_offers_none() {
             .all(|(_, life)| life.is_none()),
         "no life asked"
     );
-    transport.stop().await;
+    transport.stop().await.expect("stopped");
     participant.stop().await;
     server.stop().await;
 }

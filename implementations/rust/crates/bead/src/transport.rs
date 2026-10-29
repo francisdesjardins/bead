@@ -191,8 +191,14 @@ pub trait ServerTransport: Send + Sync + fmt::Debug {
     /// Starts it.
     fn start(&self) -> BoxFuture<Result<(), RouterError>>;
 
-    /// Stops it, closing every connection.
-    fn stop(&self) -> BoxFuture<()>;
+    /// Stops it, closing every connection; settles at once when it never started or stopped
+    /// already, and shares a stop under way.
+    ///
+    /// # Errors
+    ///
+    /// A stop while it starts, refused as the other sides' transport server refuses it: `the
+    /// transport server is starting`.
+    fn stop(&self) -> BoxFuture<Result<(), RouterError>>;
 
     /// What it holds, counted.
     fn gauges(&self) -> Option<Gauges> {
