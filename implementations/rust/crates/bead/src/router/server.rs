@@ -1252,24 +1252,30 @@ pub type NotifyFilter =
 pub(crate) fn notify(
     state: &mut ServerState,
     (payload, procedure, (filter, key)): (Result<Bytes, RouterError>, ProcedureAddress, Notifying),
-) {
+) -> Result<(), RouterError> {
     // who gets it is settled before any is sent
-    let targets: Vec<_> = state
-        .notifications
-        .candidates(procedure)
-        .into_iter()
-        .filter(|subscription| {
-            filter.as_ref().is_none_or(|filter| {
-                std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                    filter(
-                        &subscription.connection_handle,
-                        subscription.identifier.as_ref(),
-                    )
-                }))
-                .unwrap_or(false)
+    let mut targets = Vec::new();
+
+    for subscription in state.notifications.candidates(procedure) {
+        let kept = filter.as_ref().map_or(Ok(true), |filter| {
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                filter(
+                    &subscription.connection_handle,
+                    subscription.identifier.as_ref(),
+                )
+            }))
+            .map_err(|panicked| {
+                RouterError::Other(Arc::new(crate::transport::panicked_of((
+                    "a notification filter",
+                    &*panicked,
+                ))))
             })
-        })
-        .collect();
+        })?;
+
+        if kept {
+            targets.push(subscription);
+        }
+    }
     let payload = match payload {
         Ok(payload) => payload,
         // a value that does not write goes to none: each subscription it was for counts it failed,
@@ -1286,7 +1292,7 @@ pub(crate) fn notify(
 
             state.listeners.report(&error, None);
 
-            return;
+            return Ok(());
         }
     };
 
@@ -1307,6 +1313,8 @@ pub(crate) fn notify(
             Some(PacingOutcome::Exceeded) => exceed(state, call),
         }
     }
+
+    Ok(())
 }
 
 // ── Transport events ─────────────────────────────────────────────────────────────────────────
@@ -1790,6 +1798,10 @@ impl RouterServer {
     /// Sends a notification's payload to each subscription its procedure holds that `filter`
     /// keeps; or, given why its value does not write, to none. Its future gives the outcome of
     /// choosing its subscribers; each transport's send failure is reported with its connection.
+    ///
+    /// # Errors
+    ///
+    /// A filter that panics fails the notification before any subscriber is sent it.
     pub fn notify(
         &self,
         payload: Result<Bytes, RouterError>,
@@ -1799,10 +1811,10 @@ impl RouterServer {
             Option<NotificationKey>,
         ),
     ) -> BoxFuture<Result<(), RouterError>> {
-        let posted = self.shared.owner.run(move |state: &mut ServerState| {
-            notify(state, (payload, procedure, (filter, key)));
-            Ok(())
-        });
+        let posted = self
+            .shared
+            .owner
+            .run(move |state: &mut ServerState| notify(state, (payload, procedure, (filter, key))));
 
         Box::pin(async move { posted.await.unwrap_or(Ok(())) })
     }
