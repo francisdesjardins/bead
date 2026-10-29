@@ -342,6 +342,24 @@ test.describe('the hook, the bridge and the background', () => {
         /← RESULT/u,
       ]);
 
+      // * The participant's DATA follows the router's procedure, joined only by the panel.
+      await panel.click('[data-tab="broker"]');
+      await expect(panel.locator('#broker .filter-count')).toContainText(
+        /^[1-9]\d* hidden by the filter/u
+      );
+      await expect(panel.locator('#broker tr[data-procedure="metrics"]')).toHaveCount(0);
+      await expect(panel.locator('#broker tr[data-procedure="stats"]')).toHaveCount(0);
+      await expect(panel.locator('#broker tr[data-procedure="whoami"]')).toHaveCount(2);
+      const filteredParcels = await panel.locator('#broker tbody tr[data-event="parcel"]').count();
+      await panel.fill('#filter', '');
+      await expect
+        .poll(async () => {
+          return panel.locator('#broker tbody tr[data-event="parcel"]').count();
+        })
+        .toBeGreaterThan(filteredParcels);
+      await panel.fill('#filter', '-stats, -metrics');
+      await panel.click('[data-tab="calls"]');
+
       // * Export reads what the panel holds, beyond what its rows summarize.
       const [download] = await Promise.all([
         panel.waitForEvent('download'),

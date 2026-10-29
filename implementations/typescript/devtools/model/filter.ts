@@ -22,6 +22,7 @@ import type { ICall } from './calls';
 
 /** A filter, read: what it keeps of a step and of an envelope. */
 export interface IKeeper {
+  keepsProcedure(name: string | undefined): boolean;
   keepsEnvelope(record: IEnvelopeRecord): boolean;
   keepsStep(record: ICallRecord): boolean;
 }
@@ -33,6 +34,9 @@ const SEPARATORS = /[,\t\n\v\f\r ]+/;
 
 /** A keeper that keeps everything, as an empty filter does. */
 export const KEEP_ALL: IKeeper = Object.freeze({
+  keepsProcedure: () => {
+    return true;
+  },
   keepsEnvelope: () => {
     return true;
   },
@@ -58,8 +62,18 @@ export const keeperOf = (spec: string): IKeeper => {
 
   const steps = filterDebug(keep, spec);
   const envelopes = filterEnvelopeDebug(keep, spec);
+  const { include, exclude } = parseDebugFilter(spec);
+  const procedures = filterDebug(keep, { include, exclude });
 
   return {
+    keepsProcedure: (name) => {
+      if (name === undefined) {
+        return true;
+      }
+      isKept = false;
+      procedures(null, { procedureName: name } as IDebugEvent);
+      return isKept;
+    },
     keepsEnvelope: (record) => {
       isKept = false;
       envelopes({

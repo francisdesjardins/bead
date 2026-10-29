@@ -32,6 +32,7 @@ import {
 } from './model/facts';
 import { hasWord, KEEP_ALL, keeperOf, keepsCall, toggleWord } from './model/filter';
 import { type IReading, withReading } from './model/history';
+import { keepsParcel, parcelCallsOf } from './model/parcels';
 import { logOf, readLog } from './model/log';
 import type { ISpan } from './model/scale';
 import { codeOfCall } from './model/snippets';
@@ -219,6 +220,8 @@ export const startPanel = (host: IPanelHost): void => {
     sources: [] as ISourceRecord[],
     view: 'calls' as View,
     wasGone: false,
+    participantReadAt: undefined as number | undefined,
+    participantAnswered: false,
   };
   let port: IHostPort | undefined;
   let isDrawing = false;
@@ -557,9 +560,16 @@ export const startPanel = (host: IPanelHost): void => {
       );
       const first = visible[0]?.key ?? 0;
 
-      shown.calls.replaceChildren(
+      replaceKeeping(shown.calls, [
         ...callRowsOf({
-          calls: visible,
+          calls: visible.map((call) => {
+            return {
+              ...call,
+              envelopes: call.envelopes.filter((envelope) => {
+                return state.keeper.keepsEnvelope(envelope);
+              }),
+            };
+          }),
           expanded: state.expanded,
           isAllClients,
           markers: state.book.markers.filter(({ key }) => {
@@ -569,10 +579,10 @@ export const startPanel = (host: IPanelHost): void => {
           now,
           selected: state.selected,
           span: state.range ?? spanOfCalls(visible),
-        })
-      );
+        }),
+      ]);
     } else {
-      shown.envelopes.replaceChildren(
+      replaceKeeping(shown.envelopes, [
         ...envelopeListRowsOf({
           envelopes: visible
             .flatMap((call) => {
@@ -590,8 +600,8 @@ export const startPanel = (host: IPanelHost): void => {
           isAllClients,
           nameOf,
           selected: state.selected,
-        })
-      );
+        }),
+      ]);
     }
 
     const range = state.range;
@@ -680,8 +690,26 @@ export const startPanel = (host: IPanelHost): void => {
       return make('span', { children: [make('b', { text: numberOf(value) }), ` ${words}`] });
     };
 
+    const hidden = calls.reduce((sum, call) => {
+      const kept = keepsCall(call, state.keeper);
+      const hiddenEnvelopes = call.envelopes.filter((envelope) => {
+        return !kept || !state.keeper.keepsEnvelope(envelope);
+      }).length;
+      if (state.mode === 'envelopes') {
+        return sum + hiddenEnvelopes;
+      }
+      return sum + (kept ? 0 : 1) + (state.expanded.has(call.key) ? hiddenEnvelopes : 0);
+    }, 0);
     shown.footer.replaceChildren(
       part(calls.length, calls.length === 1 ? 'call' : 'calls'),
+      ...(state.view === 'calls'
+        ? [
+            make('span', {
+              className: 'filter-count',
+              text: `${String(hidden)} hidden by the filter`,
+            }),
+          ]
+        : []),
       part(count('failed'), 'failed'),
       part(count('flight'), 'in flight'),
       part(subscriptions.length, `subscriptions, ${numberOf(count('open'))} open`),
@@ -696,6 +724,17 @@ export const startPanel = (host: IPanelHost): void => {
         ? []
         : [make('span', { text: `paused: ${numberOf(state.pausedLetGo)} records not recorded` })])
     );
+  };
+
+  const requestParticipants = (): void => {
+    if (state.isImported) {
+      return;
+    }
+    if (state.participantReadAt === undefined) {
+      state.participantReadAt = Date.now();
+      setTimeout(draw, 2 * TICK_MILLISECONDS);
+    }
+    tell({ type: 'read-participants' });
   };
 
   const draw = (): void => {
@@ -733,11 +772,41 @@ export const startPanel = (host: IPanelHost): void => {
         );
       }
 
+      const stale =
+        !state.isImported &&
+        (state.sources.some((source) => {
+          return !PROTOCOLS.includes(source.protocol);
+        }) ||
+          (state.participantReadAt !== undefined &&
+            Date.now() - state.participantReadAt >= 2 * TICK_MILLISECONDS &&
+            !state.participantAnswered &&
+            state.sources.some((source) => {
+              return (
+                source.side === 'participant' &&
+                source.inspection === undefined &&
+                !state.inspections.has(source.id) &&
+                !state.participants.some((record) => {
+                  return record.source === source.id;
+                })
+              );
+            })));
+      const notice = elementOf('hook-notice');
+      notice.hidden = !stale;
       drawFooter();
 
       const calls = state.book.calls.filter(({ source }) => {
         return isShownSource(source);
       });
+      const keptCalls = calls.filter((call) => {
+        return keepsCall(call, state.keeper);
+      });
+      const hidden = calls.length - keptCalls.length;
+      const count = (): HTMLElement => {
+        return make('p', {
+          className: 'note filter-count',
+          text: `${String(hidden)} hidden by the filter`,
+        });
+      };
 
       if (state.view === 'calls') {
         layOut();
@@ -752,6 +821,7 @@ export const startPanel = (host: IPanelHost): void => {
           ...stateViewOf({
             at: state.at,
             calls,
+            keeper: state.keeper,
             callsLetGo: state.book.callsLetGo,
             nameOf,
             now: Date.now(),
@@ -763,9 +833,20 @@ export const startPanel = (host: IPanelHost): void => {
           }),
         ]);
       } else if (state.view === 'timeline') {
+        if (shown.timeline.querySelector('[data-dragging="true"]') !== null) {
+          return;
+        }
         replaceKeeping(shown.timeline, [
+          count(),
           ...timelineViewOf({
-            calls: visibleCalls(),
+            calls: visibleCalls().map((call) => {
+              return {
+                ...call,
+                envelopes: call.envelopes.filter((envelope) => {
+                  return state.keeper.keepsEnvelope(envelope);
+                }),
+              };
+            }),
             isAllClients: isEveryClient(),
             nameOf,
             now: Date.now(),
@@ -778,19 +859,45 @@ export const startPanel = (host: IPanelHost): void => {
           }),
         ]);
       } else if (state.view === 'broker') {
+        const records = state.participants.filter(({ source }) => {
+          return isShownSource(source);
+        });
+        const joined = parcelCallsOf(state.participants, {
+          calls: state.book.calls,
+          hasGap:
+            state.participantDropped > 0 ||
+            state.dropped > 0 ||
+            state.skipped > 0 ||
+            state.pausedLetGo > 0 ||
+            state.book.callsLetGo > 0,
+        });
+        const kept = records.filter((record) => {
+          return keepsParcel(record, { joined, keeper: state.keeper });
+        });
+        const pane = shown.broker.querySelector('.participant-table');
+        const follow =
+          state.participantSelected === undefined &&
+          (pane === null || pane.scrollHeight - pane.scrollTop - pane.clientHeight <= 2);
         replaceKeeping(
           shown.broker,
           brokerViewOf({
-            records: state.participants.filter(({ source }) => {
-              return isShownSource(source);
-            }),
+            records: kept,
             sources: [...state.sourceArchive.values()].filter(({ id }) => {
               return isShownSource(id);
             }),
             inspections: state.inspections,
             letGo: state.participantDropped,
+            hidden: records.length - kept.length,
+            procedures: new Map(
+              [...joined].map(([record, carried]) => {
+                return [record, carried.call.procedureName];
+              })
+            ),
             filters: state.participantFilters,
-            selected: state.participantSelected,
+            selected:
+              state.participantSelected !== undefined && kept.includes(state.participantSelected)
+                ? state.participantSelected
+                : undefined,
             onFilter: (filters) => {
               state.participantFilters = filters;
               draw();
@@ -805,12 +912,19 @@ export const startPanel = (host: IPanelHost): void => {
             },
           })
         );
+        if (follow) {
+          const table = shown.broker.querySelector('.participant-table');
+          if (table !== null) {
+            table.scrollTop = table.scrollHeight;
+          }
+        }
       } else if (state.view === 'metrics') {
         replaceKeeping(shown.metrics, metricsOfView());
       } else {
         replaceKeeping(shown.wire, [
           ...wireViewOf({
             copy,
+            keeper: state.keeper,
             exchanges: state.exchanges,
             isAvailable: host.onExchange !== undefined,
             nameOf: (address) => {
@@ -825,6 +939,7 @@ export const startPanel = (host: IPanelHost): void => {
   const metricsOfView = (): Node[] => {
     return metricsViewOf({
       expositions: state.expositions,
+      keeper: state.keeper,
       history: state.history,
       onProcedure: (procedure) => {
         shown.filter.value = procedure;
@@ -913,6 +1028,7 @@ export const startPanel = (host: IPanelHost): void => {
   const hear = (message: BackgroundMessage): void => {
     switch (message.type) {
       case 'participants':
+        state.participantAnswered = true;
         if (state.isImported || !state.isRecording) {
           break;
         }
@@ -945,10 +1061,13 @@ export const startPanel = (host: IPanelHost): void => {
           }
         }
 
+        state.participantReadAt = undefined;
+        state.participantAnswered = false;
         state.wasGone = false;
         state.isGone = false;
         setStatus('connected to the page', true);
         tell({ type: 'read-expositions' });
+        requestParticipants();
         break;
       case 'page-gone':
         state.wasGone = true;
@@ -1419,7 +1538,7 @@ export const startPanel = (host: IPanelHost): void => {
       if (state.view === 'metrics') {
         tell({ type: 'read-expositions' });
       } else if (state.view === 'broker' && !state.isImported) {
-        tell({ type: 'read-participants' });
+        requestParticipants();
       }
 
       draw();
@@ -1564,6 +1683,13 @@ export const startPanel = (host: IPanelHost): void => {
             ?.scrollIntoView({ block: 'nearest' });
         });
       }
+    } else if (event.key === 'Home' || event.key === 'End') {
+      event.preventDefault();
+      const row = event.key === 'Home' ? rows[0] : rows.at(-1);
+      if (row !== undefined) {
+        select(Number(row.dataset['key']));
+        row.scrollIntoView({ block: 'nearest' });
+      }
     } else if ((event.key === 'ArrowRight' || event.key === 'ArrowLeft') && call !== undefined) {
       event.preventDefault();
       toggleExpanded(call.key, event.key === 'ArrowRight');
@@ -1653,7 +1779,7 @@ export const startPanel = (host: IPanelHost): void => {
     if (state.view === 'metrics') {
       tell({ type: 'read-expositions' });
     } else if (state.view === 'broker' && !state.isImported) {
-      tell({ type: 'read-participants' });
+      requestParticipants();
     } else if (
       state.book.calls.some((call) => {
         return statusOf(call) === 'flight';

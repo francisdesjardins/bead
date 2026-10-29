@@ -24,6 +24,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- The DevTools filter covers every view, with hidden counts, a stale-hook notice, and Broker panes
+  that keep selection, focus and scroll across readings.
 - The builder's image runs Node 26.13.0, Node 26's first LTS release.
 - `spec/check.py` holds a side that plays part of the corpus to what its steps and stages name
   ahead, each a row of the support matrix; `tools/coverage-report.mjs` reads LLVM's coverage
