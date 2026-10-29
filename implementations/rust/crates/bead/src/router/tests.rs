@@ -54,6 +54,7 @@ mod server_commands;
 mod server_filter;
 mod server_notifications;
 mod server_requests;
+mod server_unsubscribe;
 mod transfer;
 
 // the timeout of a call that sets none of its own

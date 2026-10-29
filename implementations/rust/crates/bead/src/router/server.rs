@@ -1841,6 +1841,17 @@ impl RouterServer {
         })
     }
 
+    /// Takes away the subscription of `call`, or its wait for a place. Gives whether the
+    /// connection held that subscription; a waiting call holds none.
+    pub fn unsubscribe(&self, call: CallAddress) -> BoxFuture<bool> {
+        let posted = self.shared.owner.run(move |state: &mut ServerState| {
+            leave_waiting(state, &call);
+            unregister_tracked(state, (call.call_id, &call.connection_handle)).is_some()
+        });
+
+        Box::pin(async move { posted.await.unwrap_or(false) })
+    }
+
     /// Ends the subscriptions of a connection's session, with `failure`.
     pub fn drop_subscriptions(
         &self,
