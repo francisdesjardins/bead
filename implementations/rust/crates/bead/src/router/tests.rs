@@ -33,6 +33,7 @@ mod parts;
 mod requester;
 mod router_core;
 mod router_core_answering;
+mod router_core_credentials;
 mod router_core_hooks;
 mod router_core_incoming;
 mod router_core_lifecycle;
