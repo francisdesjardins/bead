@@ -4,8 +4,8 @@
 use std::sync::Arc;
 
 use super::{
-    RouterServer, RouterServerOptions, ServerState, cancel_place, drop_places, settle_place,
-    subscribe_place,
+    RouterServer, RouterServerOptions, ServerState, cancel_place, clear_places, drop_places,
+    place_gauges, settle_place, subscribe_place,
 };
 use crate::failure::ProcedureAddress;
 use crate::managers::notification::SubscribingCall;
@@ -346,4 +346,60 @@ async fn unsubscribe_takes_a_subscription_away_and_says_whether_the_connection_h
         .await
         .expect("the subscription is removed");
     router.dispose().await;
+}
+
+#[tokio::test]
+async fn clear_forgets_the_calls_in_flight_and_waiting_of_a_connection_or_of_every_one() {
+    places(|state| {
+        for handle in [first(), second()] {
+            subscribe_place(state, (&call((3, Arc::clone(&handle), false)), news()))
+                .expect("a holder");
+            assert!(success(state, call((5, handle, false))).is_none());
+        }
+        clear_places(state, Some(&first()));
+        assert!(settle_place(state, (call((3, first(), false)), (true, true, news()))).is_none());
+        assert_eq!(held(state, &first()), [3]);
+        clear_places(state, None);
+        assert!(settle_place(state, (call((3, second(), false)), (true, true, news()))).is_none());
+        assert_eq!(held(state, &second()), [3]);
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn counts_the_subscribing_calls_in_flight_and_those_waiting_for_a_place_and_their_connections()
+ {
+    places(|state| {
+        subscribe_place(state, (&call((3, first(), false)), news())).expect("a holder");
+        assert_eq!(
+            place_gauges(state).connection_handles,
+            std::iter::once(first()).collect()
+        );
+        subscribe_place(state, (&call((5, first(), false)), news())).expect("the holder's place");
+        assert!(success(state, call((5, first(), false))).is_none());
+        let gauges = place_gauges(state);
+        assert_eq!(
+            gauges.connection_handles,
+            std::iter::once(first()).collect()
+        );
+        assert_eq!(
+            gauges.counts,
+            [("subscriptionsInFlight", 1), ("subscriptionsWaiting", 1)]
+                .into_iter()
+                .collect()
+        );
+        clear_places(state, Some(&first()));
+        let cleared = place_gauges(state);
+        assert_eq!(
+            cleared.connection_handles,
+            std::collections::BTreeSet::new()
+        );
+        assert_eq!(
+            cleared.counts,
+            [("subscriptionsInFlight", 0), ("subscriptionsWaiting", 0)]
+                .into_iter()
+                .collect()
+        );
+    })
+    .await;
 }

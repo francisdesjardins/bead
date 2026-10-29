@@ -1404,8 +1404,7 @@ pub(crate) fn on_close(state: &mut ServerState, handle: &ConnectionHandle) {
     state.connections.remove(handle);
     // its destinations stay unreachable until each is registered anew, on another connection
     crate::router::relay::close_connection(&state.relay, handle);
-    state.in_flight.remove(handle);
-    state.waiting.remove(handle);
+    clear_places(state, Some(handle));
     clean_tracked(state, handle);
     state.requests.retain(|(held, _), _| held != handle);
     crate::router::core::reject_pending(
@@ -1432,8 +1431,7 @@ pub(crate) fn dispose(state: &mut ServerState) {
     }
 
     state.connections.clear();
-    state.in_flight.clear();
-    state.waiting.clear();
+    clear_places(state, None);
 
     for (_, sessions) in state.kept.drain() {
         for (_, mut session) in sessions.into_iter_entries() {
@@ -1987,17 +1985,8 @@ impl RouterServer {
     }
 }
 
-/// What a server's router holds, merged.
-pub(crate) fn gauges(state: &ServerState) -> Gauges {
-    let mut own = Gauges::default();
-
-    own.counts.insert(
-        "connections",
-        u64::try_from(state.connections.len()).unwrap_or(u64::MAX),
-    );
-    own.connection_handles
-        .extend(state.connections.keys().cloned());
-
+// What the subscription places hold, apart from notifications already established.
+fn place_gauges(state: &ServerState) -> Gauges {
     let mut places = Gauges::default();
 
     places.counts.insert(
@@ -2019,6 +2008,33 @@ pub(crate) fn gauges(state: &ServerState) -> Gauges {
     places
         .connection_handles
         .extend(state.in_flight.keys().cloned());
+
+    places
+}
+
+// Forgets the in-flight holders and their waiters; established subscriptions stay held.
+fn clear_places(state: &mut ServerState, handle: Option<&ConnectionHandle>) {
+    if let Some(handle) = handle {
+        state.in_flight.remove(handle);
+        state.waiting.remove(handle);
+    } else {
+        state.in_flight.clear();
+        state.waiting.clear();
+    }
+}
+
+/// What a server's router holds, merged.
+pub(crate) fn gauges(state: &ServerState) -> Gauges {
+    let mut own = Gauges::default();
+
+    own.counts.insert(
+        "connections",
+        u64::try_from(state.connections.len()).unwrap_or(u64::MAX),
+    );
+    own.connection_handles
+        .extend(state.connections.keys().cloned());
+
+    let places = place_gauges(state);
 
     let mut sessions = Gauges::default();
     let timed: u64 = state
