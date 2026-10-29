@@ -50,6 +50,10 @@ use crate::router::types::{
 use crate::session_token::SessionToken;
 use crate::transport::{Sent, ServerListener, ServerTransport};
 
+#[cfg(test)]
+#[path = "tests/server_places.rs"]
+mod tests;
+
 /// What hears what a server's router reports: an error, and the connection it came with.
 pub type ErrorListener = Arc<dyn Fn(&RouterError, Option<&ConnectionHandle>) + Send + Sync>;
 
