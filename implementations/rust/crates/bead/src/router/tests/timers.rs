@@ -362,7 +362,11 @@ async fn a_session_s_timer_that_fired_behind_the_touch_that_restarted_it_reaches
     let mut session = sessions.create(first());
 
     session.session_inactivity_timeout = Some(TIMEOUT);
-    sessions.set(session).await.expect("stored");
+    sessions
+        .set(session)
+        .expect("taken as it is made")
+        .await
+        .expect("stored");
 
     // * the touch came, then the timer's due: both queued before the owner takes either
     let touched = sessions.touch(first());

@@ -702,6 +702,7 @@ async fn manager_default_of((is_connection, given): (bool, Option<Duration>)) ->
 
     let stored = sessions
         .set(created)
+        .map_err(|error| error.to_string())?
         .await
         .map_err(|error| error.to_string())?;
     let held = if is_connection {
@@ -760,6 +761,7 @@ async fn session_timeout_of((way, given): (SessionWay, Option<Duration>)) -> Pla
 
     let session = sessions
         .set(created)
+        .map_err(|error| error.to_string())?
         .await
         .map_err(|error| error.to_string())?;
 
@@ -776,10 +778,10 @@ async fn session_timeout_of((way, given): (SessionWay, Option<Duration>)) -> Pla
                 other.session_inactivity_timeout = given;
             }
 
-            let stored = match sessions.set(other).await {
-                Ok(stored) => Ok(stored),
-                Err(CallError::Refused(refused)) => Err(refused),
-                Err(error) => return Err(error.to_string()),
+            // * a timeout refused as the store is made, before anything is stored
+            let stored = match sessions.set(other) {
+                Ok(storing) => Ok(storing.await.map_err(|error| error.to_string())?),
+                Err(refused) => Err(refused),
             };
 
             (
@@ -887,6 +889,7 @@ async fn reset_of((is_connection, given): (bool, Option<Duration>)) -> Played {
 
     sessions
         .set(created)
+        .map_err(|error| error.to_string())?
         .await
         .map_err(|error| error.to_string())?;
     serving.clock.settle().await;

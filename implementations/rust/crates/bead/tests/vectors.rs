@@ -581,7 +581,7 @@ async fn refused_credential(vector: &CredentialRefusalVector) -> Result<(), Fail
     // an OPAQUE holds on the connection whose session its token is: second's here
     let stored = server
         .sessions()
-        .set(server.sessions().create(Arc::clone(&second)))
+        .set(server.sessions().create(Arc::clone(&second)))?
         .await?;
     let token = stored
         .session_token

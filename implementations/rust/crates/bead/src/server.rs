@@ -813,9 +813,32 @@ impl Sessions {
         )
     }
 
-    /// Stores `session`, its token drawn when it has none: stored as it is called.
-    pub fn set(&self, session: Session) -> BoxFuture<Result<Session, CallError>> {
-        on_owner(
+    /// Stores `session`, its token drawn when it has none: stored as it is called, its timeouts
+    /// judged first, as both other sides judge them; its future gives the session stored.
+    ///
+    /// # Errors
+    ///
+    /// A [`ProgrammerError`] at once for a timeout spec 1.4 does not hold, before anything is
+    /// stored. Its future fails [`CallError::Refused`] for a token another connection's session
+    /// holds, which only the sessions held can tell, and [`CallError::Disconnected`] once its
+    /// server is disposed.
+    pub fn set(
+        &self,
+        session: Session,
+    ) -> Result<BoxFuture<Result<Session, CallError>>, ProgrammerError> {
+        // * what needs no session held is refused as it is made; a timeout left out takes the
+        // default its manager held as it was built
+        for timeout in [
+            session.connection_inactivity_timeout,
+            session.session_inactivity_timeout,
+        ]
+        .into_iter()
+        .flatten()
+        {
+            hold("an inactivity timeout", timeout)?;
+        }
+
+        Ok(on_owner(
             &self.router,
             (
                 move |state: &mut ServerState| {
@@ -836,7 +859,7 @@ impl Sessions {
                     "the sessions were disposed".to_owned(),
                 )),
             ),
-        )
+        ))
     }
 
     /// The session of `connection_handle`, stored first, its activity now, when it has none.

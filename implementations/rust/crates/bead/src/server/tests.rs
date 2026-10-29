@@ -32,7 +32,11 @@ async fn keeps_a_session_per_connection_its_token_drawn_as_it_is_first_stored() 
 
     session.data = Some(json!({ "name": "ada" }));
 
-    let stored = sessions.set(session).await.expect("stored");
+    let stored = sessions
+        .set(session)
+        .expect("taken as it is made")
+        .await
+        .expect("stored");
 
     assert!(
         stored.session_token.is_some(),
@@ -166,6 +170,7 @@ async fn update_data_emits_nothing_for_equal_data() {
     }));
     sessions
         .set(sessions.create(Arc::clone(&pair.connection_handle)))
+        .expect("taken as it is made")
         .await
         .expect("stored");
 
@@ -206,7 +211,11 @@ async fn count_the_sessions_and_the_connections_timed() {
     let mut timed = sessions.create(Arc::clone(&handle));
 
     timed.session_inactivity_timeout = Some(Duration::from_secs(1));
-    sessions.set(timed).await.expect("stored");
+    sessions
+        .set(timed)
+        .expect("taken as it is made")
+        .await
+        .expect("stored");
 
     let gauges = sessions.gauges().await;
 
@@ -232,11 +241,58 @@ async fn count_the_sessions_and_the_connections_timed() {
         SessionToken::new([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 7])
             .expect("a token of no zero alone"),
     );
-    sessions.set(owning).await.expect("stored");
+    sessions
+        .set(owning)
+        .expect("taken as it is made")
+        .await
+        .expect("stored");
 
     assert_eq!(
         counts_of(&sessions.gauges().await),
         (Some(1), Some(1)),
         "one, timed"
     );
+}
+
+// decision 0044: what an operation refuses as it is made is its Err at once, as both other sides
+// throw it as `set` is called, before anything is stored
+#[tokio::test]
+async fn set_refuses_a_timeout_spec_1_4_does_not_hold_as_it_is_made_and_stores_nothing() {
+    let pair = pair().await;
+    let sessions = pair.server.sessions();
+    let handle = Arc::clone(&pair.connection_handle);
+
+    for (connection, session) in [
+        (Some(Duration::ZERO), None),
+        (None, Some(Duration::from_millis(2_147_483_648))),
+    ] {
+        let mut refused = sessions.create(Arc::clone(&handle));
+
+        refused.connection_inactivity_timeout = connection;
+        refused.session_inactivity_timeout = session;
+
+        let Err(error) = sessions.set(refused) else {
+            panic!("refused as it is made: {connection:?} {session:?}");
+        };
+
+        assert!(
+            error
+                .message()
+                .starts_with("an inactivity timeout is a duration of whole milliseconds"),
+            "said why: {error}"
+        );
+    }
+
+    pair.settle().await;
+
+    assert!(
+        !sessions.has(Arc::clone(&handle)).await,
+        "nothing stored, its future never made"
+    );
+    sessions
+        .set(sessions.create(Arc::clone(&handle)))
+        .expect("a sound session taken as it is made")
+        .await
+        .expect("stored");
+    assert!(sessions.has(handle).await, "a sound one stored");
 }
