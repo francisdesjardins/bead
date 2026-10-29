@@ -68,6 +68,10 @@ pub type RefusalListener = Arc<dyn Fn(&AccessRefusal) + Send + Sync>;
 /// What hears what a server's router did on a connection.
 pub type ActivityListener = Arc<dyn Fn(RouterActivity, &ConnectionHandle) + Send + Sync>;
 
+/// What supplies a connection's current token for an answer or an OPAQUE command.
+pub type SessionTokenProvider =
+    Arc<dyn Fn(&ConnectionHandle) -> Result<Option<SessionToken>, RouterError> + Send + Sync>;
+
 /// How a server's router is built, beyond its transport.
 #[derive(Clone, Default)]
 #[non_exhaustive]
@@ -84,6 +88,8 @@ pub struct RouterServerOptions {
     pub pacing: Option<PacingLimitsOptions>,
     /// What resolves a `JWT` and an `ELSEWHERE`.
     pub credentials: Option<Credentials>,
+    /// The connection's token: the server's session manager supplies it when none is given.
+    pub session_token_of: Option<SessionTokenProvider>,
     /// Its relay's options.
     pub relay: Option<crate::router::relay::RelayOptions>,
 }
@@ -145,6 +151,7 @@ pub(crate) struct ServerState {
     pub(crate) relay: crate::router::relay::Relay,
     pub(crate) listeners: Arc<ServerListeners>,
     pub(crate) facade: Option<crate::server::Facade>,
+    session_token_of: Option<SessionTokenProvider>,
 }
 
 impl fmt::Debug for ServerState {
@@ -425,8 +432,16 @@ impl Side for ServerState {
         }))
     }
 
-    fn session_token_of(&mut self, connection_handle: &ConnectionHandle) -> Option<SessionToken> {
-        crate::server::sessions_of(self).and_then(|sessions| sessions.token_of(connection_handle))
+    fn session_token_of(
+        &mut self,
+        connection_handle: &ConnectionHandle,
+    ) -> Result<Option<SessionToken>, RouterError> {
+        if let Some(provider) = &self.session_token_of {
+            return caught(("a session token provider", || provider(connection_handle)))
+                .unwrap_or_else(|panicked| Err(panicked.into()));
+        }
+        Ok(crate::server::sessions_of(self)
+            .and_then(|sessions| sessions.token_of(connection_handle)))
     }
 
     fn subscribe(&mut self, dispatch: &Arc<Dispatch>) -> Result<u32, CallError> {
@@ -1679,6 +1694,7 @@ impl RouterServer {
                 relay: relay.clone(),
                 listeners: Arc::clone(&listeners),
                 facade,
+                session_token_of: options.session_token_of.clone(),
             }
         });
         let listener: Arc<dyn ServerListener> = Arc::new(Bridge {
@@ -2068,16 +2084,17 @@ pub(crate) fn request_on(
         let is_open = state.connections.contains_key(&named);
         // OPAQUE, the connection's session, as its answers announce it; a JWT, or an ELSEWHERE
         // beside it; OPAQUE with no session refuses the call once it started
-        let token =
-            crate::server::sessions_of(state).and_then(|sessions| sessions.token_of(&named));
-        let mut own_refusal: Option<CallError> = None;
+        let (token, mut own_refusal) = match state.session_token_of(&named) {
+            Ok(token) => (token, None),
+            Err(error) => (None, Some(crate::router::core::call_error_of(error))),
+        };
         let (credential, carried) = match presented_credential_of(
             options.credential.as_ref(),
             (RouterSide::Server, token.as_ref()),
         ) {
             Ok(presented) => (presented.credential, presented.carried),
             Err(error) => {
-                own_refusal = Some(error);
+                own_refusal = own_refusal.or(Some(error));
 
                 (None, None)
             }

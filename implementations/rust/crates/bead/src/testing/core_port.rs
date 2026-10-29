@@ -32,6 +32,8 @@ use crate::transport::Sent;
 
 pub(crate) type Completion<T> = oneshot::Receiver<Result<T, CallError>>;
 pub(crate) type TransmitHook = Box<dyn FnMut(&mut State, &Envelope) + Send>;
+pub(crate) type TokenHook =
+    Box<dyn FnMut(&ConnectionHandle) -> Result<Option<SessionToken>, RouterError> + Send>;
 pub(crate) type SessionHook = Box<dyn FnMut(&SessionRequest, &Signal) -> Resolution + Send>;
 
 #[expect(
@@ -41,6 +43,7 @@ pub(crate) type SessionHook = Box<dyn FnMut(&SessionRequest, &Signal) -> Resolut
 pub(crate) struct State {
     pub(crate) core: Core<Self>,
     pub(crate) tokens: BTreeMap<ConnectionHandle, SessionToken>,
+    pub(crate) token: Option<TokenHook>,
     pub(crate) sending: VecDeque<Result<Sent, RouterError>>,
     pub(crate) on_transmit: Option<TransmitHook>,
     pub(crate) session: Option<SessionHook>,
@@ -182,8 +185,14 @@ impl Side for State {
         sent
     }
 
-    fn session_token_of(&mut self, handle: &ConnectionHandle) -> Option<SessionToken> {
-        self.tokens.get(handle).copied()
+    fn session_token_of(
+        &mut self,
+        handle: &ConnectionHandle,
+    ) -> Result<Option<SessionToken>, RouterError> {
+        if let Some(token) = &mut self.token {
+            return token(handle);
+        }
+        Ok(self.tokens.get(handle).copied())
     }
 }
 
@@ -234,6 +243,7 @@ impl Peer {
         let owner = Owner::spawn((&runtime, &shared), |owner| State {
             core: Core::new(owner, (side, limits, Arc::clone(&shared), None)),
             tokens: BTreeMap::new(),
+            token: None,
             sending: VecDeque::new(),
             on_transmit: None,
             session: None,

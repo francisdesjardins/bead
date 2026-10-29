@@ -1203,6 +1203,7 @@ impl Server {
                     pacing: options.pacing.clone(),
                     credentials: options.credentials.clone(),
                     relay: Some(relay),
+                    session_token_of: None,
                 },
                 Some(facade),
             ),

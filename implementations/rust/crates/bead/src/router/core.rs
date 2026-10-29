@@ -370,8 +370,11 @@ pub(crate) trait Side: Sized + Send + 'static {
     }
 
     /// The session of `connection_handle`, which its next answer announces when it changed.
-    fn session_token_of(&mut self, _connection_handle: &ConnectionHandle) -> Option<SessionToken> {
-        None
+    fn session_token_of(
+        &mut self,
+        _connection_handle: &ConnectionHandle,
+    ) -> Result<Option<SessionToken>, RouterError> {
+        Ok(None)
     }
 
     /// The session a credential resolved to, as the side keeps it: a credential's session a
@@ -605,15 +608,15 @@ impl<S> Deliver<S> {
 fn announce<S: Side>(
     state: &mut S,
     (envelope, handle): (Envelope, &ConnectionHandle),
-) -> (Envelope, Option<crate::router::parts::Announced>) {
+) -> Result<(Envelope, Option<crate::router::parts::Announced>), RouterError> {
     if !matches!(envelope, Envelope::Result { .. } | Envelope::Failure { .. }) {
-        return (envelope, None);
+        return Ok((envelope, None));
     }
 
-    let current = state.session_token_of(handle);
+    let current = state.session_token_of(handle)?;
     let Some((credential, announced)) = state.core().announcements.announce((handle, current))
     else {
-        return (envelope, None);
+        return Ok((envelope, None));
     };
 
     let envelope = match envelope {
@@ -638,7 +641,7 @@ fn announce<S: Side>(
         | Envelope::Cancel { .. }) => other,
     };
 
-    (envelope, Some(announced))
+    Ok((envelope, Some(announced)))
 }
 
 /// Sends an envelope, within its limits, announced, traced and handed to the transport; `then`
@@ -689,7 +692,10 @@ pub(crate) fn deliver<S: Side>(state: &mut S, (envelope, options): (Envelope, De
         return settle(state, Err(CallError::Failure(failure)), then);
     }
 
-    let (envelope, announced) = announce(state, (envelope, &connection_handle));
+    let (envelope, announced) = match announce(state, (envelope, &connection_handle)) {
+        Ok(announced) => announced,
+        Err(error) => return settle(state, Err(call_error_of(error)), then),
+    };
     let detail_bytes = detail_bound_of(
         usize::try_from(limits.maximum_detail_bytes).unwrap_or(usize::MAX),
         usize::try_from(limits.maximum_envelope_bytes).unwrap_or(usize::MAX),
