@@ -157,7 +157,7 @@ pub use service::{
 };
 pub use session_token::SessionToken;
 pub use transport::{
-    CONNECT_TIMEOUT, ClientListener, ClientTransport, Connect, DisconnectOptions,
+    CONNECT_TIMEOUT, ClientListener, ClientTransport, Connect, DisconnectOptions, ListenerId,
     RECONNECT_ATTEMPTS, RECONNECT_DELAY, ReadyState, ReconnectDelay, ReconnectOptions, Sent,
     ServerListener, ServerTransport, TransportServerRefusal, is_field_value,
 };

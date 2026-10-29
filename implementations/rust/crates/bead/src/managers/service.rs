@@ -10,7 +10,7 @@ use core::sync::atomic::{AtomicBool, Ordering};
 use core::task::{Context, Poll};
 use core::time::Duration;
 use std::error::Error;
-use std::sync::{Arc, Mutex, PoisonError};
+use std::sync::{Arc, Mutex};
 
 use bytes::Bytes;
 use tokio::sync::oneshot;
@@ -35,6 +35,7 @@ use crate::router::types::{
     BoxFuture, CallSession, ConnectionHandle, RequestCredential, ResolvedRequestOptions,
     RouterAnswer, RouterError, RouterLimits, SessionIdentifier, Signal,
 };
+use crate::transport::{Listened, ListenerId};
 use crate::violations::{Judged, detail_bound_of, is_refused, violations_detail_of};
 
 mod notification;
@@ -338,9 +339,9 @@ struct Inner {
     close_connection: Option<CloseConnection>,
     timeout: Duration,
     close_on_timeout: Option<bool>,
-    debug: Mutex<Vec<DebugListener>>,
-    deprecated: Mutex<Vec<DeprecatedListener>>,
-    dropped: Mutex<Vec<DroppedListener>>,
+    debug: Listened<DebugListener>,
+    deprecated: Listened<DeprecatedListener>,
+    dropped: Listened<DroppedListener>,
     // the notifications this manager made, one per procedure, kept for its life
     notifications: Mutex<std::collections::BTreeMap<(u16, u16), notification::Known>>,
 }
@@ -395,11 +396,7 @@ struct Step {
 
 impl Inner {
     fn is_debugging(&self) -> bool {
-        !self
-            .debug
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .is_empty()
+        !self.debug.is_empty()
     }
 
     // now, for a call starting, traced: the wall clock for its start, the monotonic for its
@@ -422,11 +419,7 @@ impl Inner {
     // tells debug about one step of a call, each listener within a guard: what one panics is
     // reported through the router with the call's connection, and changes nothing of the call
     fn trace(&self, procedure: &Procedure, step: Step) {
-        let listeners = self
-            .debug
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .clone();
+        let listeners = self.debug.all();
 
         if listeners.is_empty() {
             return;
@@ -483,11 +476,7 @@ impl Inner {
     }
 
     fn deprecated(&self, procedure: &Procedure) {
-        let listeners = self
-            .deprecated
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .clone();
+        let listeners = self.deprecated.all();
 
         for listener in listeners {
             let called =
@@ -547,39 +536,41 @@ impl ServiceManager {
                 close_connection: options.close_connection.clone(),
                 timeout,
                 close_on_timeout: defaults.close_on_timeout,
-                debug: Mutex::new(Vec::new()),
-                deprecated: Mutex::new(Vec::new()),
-                dropped: Mutex::new(Vec::new()),
+                debug: Listened::default(),
+                deprecated: Listened::default(),
+                dropped: Listened::default(),
                 notifications: Mutex::new(std::collections::BTreeMap::new()),
             }),
         })
     }
 
-    /// Hears each step of each call from now on.
-    pub fn on_debug(&self, listener: DebugListener) {
-        self.inner
-            .debug
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .push(listener);
+    /// Hears each step of each call from now on, debugging on while someone listens; the id given
+    /// takes it off again, with [`ServiceManager::off`].
+    pub fn on_debug(&self, listener: DebugListener) -> ListenerId {
+        self.inner.debug.add(listener)
     }
 
-    /// Hears each call of a procedure deprecated from now on.
-    pub fn on_deprecated(&self, listener: DeprecatedListener) {
-        self.inner
-            .deprecated
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .push(listener);
+    /// Hears each call of a procedure deprecated from now on; the id given takes it off again, with
+    /// [`ServiceManager::off`].
+    pub fn on_deprecated(&self, listener: DeprecatedListener) -> ListenerId {
+        self.inner.deprecated.add(listener)
     }
 
-    /// Hears each subscription of a notification dropped from now on.
-    pub fn on_dropped(&self, listener: DroppedListener) {
-        self.inner
-            .dropped
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .push(listener);
+    /// Hears each subscription of a notification dropped from now on; the id given takes it off
+    /// again, with [`ServiceManager::off`].
+    pub fn on_dropped(&self, listener: DroppedListener) -> ListenerId {
+        self.inner.dropped.add(listener)
+    }
+
+    /// Hears no more with the listener `listener` names, whichever of its events it heard: one
+    /// taken off already, or of another part, changes nothing. The last debug listener gone,
+    /// debugging is off.
+    pub fn off(&self, listener: ListenerId) {
+        let inner = &self.inner;
+
+        inner.debug.off(listener);
+        inner.deprecated.off(listener);
+        inner.dropped.off(listener);
     }
 
     /// The notification of `procedure`, one per procedure: asked for again, the same is given.

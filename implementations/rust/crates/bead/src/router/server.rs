@@ -48,7 +48,9 @@ use crate::router::types::{
     limits_of, session_key_of,
 };
 use crate::session_token::SessionToken;
-use crate::transport::{Panicked, Sent, ServerListener, ServerTransport, caught};
+use crate::transport::{
+    Listened, ListenerId, Panicked, Sent, ServerListener, ServerTransport, caught,
+};
 
 /// What hears what a server's router reports: an error, and the connection it came with.
 pub type ErrorListener = Arc<dyn Fn(&RouterError, Option<&ConnectionHandle>) + Send + Sync>;
@@ -153,10 +155,10 @@ impl fmt::Debug for ServerState {
 /// The listeners of a server's router.
 #[derive(Default)]
 pub(crate) struct ServerListeners {
-    pub(crate) error: Mutex<Vec<ErrorListener>>,
-    pub(crate) debug: Mutex<Vec<EnvelopeListener>>,
-    pub(crate) access_refused: Mutex<Vec<RefusalListener>>,
-    pub(crate) activity: Mutex<Vec<ActivityListener>>,
+    pub(crate) error: Listened<ErrorListener>,
+    pub(crate) debug: Listened<EnvelopeListener>,
+    pub(crate) access_refused: Listened<RefusalListener>,
+    pub(crate) activity: Listened<ActivityListener>,
 }
 
 impl fmt::Debug for ServerListeners {
@@ -167,21 +169,14 @@ impl fmt::Debug for ServerListeners {
     }
 }
 
-fn all<T: Clone>(listeners: &Mutex<Vec<T>>) -> Vec<T> {
-    listeners
-        .lock()
-        .unwrap_or_else(PoisonError::into_inner)
-        .clone()
-}
-
 impl ServerListeners {
     // each listener within a guard (spec 15.1): what one panics is reported, and the others heard
     fn guarded<T: Clone, C: Fn(&T)>(
         &self,
-        (listeners, call): (&Mutex<Vec<T>>, C),
+        (listeners, call): (&Listened<T>, C),
         handle: Option<&ConnectionHandle>,
     ) {
-        for listener in all(listeners) {
+        for listener in listeners.all() {
             let called = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| call(&listener)));
 
             if let Err(panicked) = called {
@@ -191,7 +186,7 @@ impl ServerListeners {
     }
 
     pub(crate) fn report(&self, error: &RouterError, handle: Option<&ConnectionHandle>) {
-        for listener in all(&self.error) {
+        for listener in self.error.all() {
             // ! a listener of errors that panics would loop: its panic is dropped
             let called =
                 std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| listener(error, handle)));
@@ -325,7 +320,7 @@ impl Side for ServerState {
     }
 
     fn is_tracing(&self) -> bool {
-        !all(&self.listeners.debug).is_empty()
+        !self.listeners.debug.is_empty()
     }
 
     fn trace(
@@ -371,7 +366,7 @@ impl Side for ServerState {
     }
 
     fn is_telling_refusals(&self) -> bool {
-        !all(&self.listeners.access_refused).is_empty()
+        !self.listeners.access_refused.is_empty()
     }
 
     // * told within a guard (spec 15.1): what a listener panics is reported with the connection
@@ -1730,44 +1725,39 @@ impl RouterServer {
         Arc::clone(&self.shared.transport)
     }
 
-    /// Hears what it reports from now on: an error, and the connection it came with.
-    pub fn on_error(&self, listener: ErrorListener) {
-        self.shared
-            .listeners
-            .error
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .push(listener);
+    /// Hears what it reports from now on: an error, and the connection it came with; the id given
+    /// takes it off again, with [`RouterServer::off`].
+    pub fn on_error(&self, listener: ErrorListener) -> ListenerId {
+        self.shared.listeners.error.add(listener)
     }
 
-    /// Hears each envelope it sends or takes from now on.
-    pub fn on_debug(&self, listener: EnvelopeListener) {
-        self.shared
-            .listeners
-            .debug
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .push(listener);
+    /// Hears each envelope it sends or takes from now on; the id given takes it off again, with
+    /// [`RouterServer::off`].
+    pub fn on_debug(&self, listener: EnvelopeListener) -> ListenerId {
+        self.shared.listeners.debug.add(listener)
     }
 
-    /// Hears each access it refuses from now on (spec 13.12).
-    pub fn on_access_refused(&self, listener: RefusalListener) {
-        self.shared
-            .listeners
-            .access_refused
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .push(listener);
+    /// Hears each access it refuses from now on (spec 13.12); the id given takes it off again, with
+    /// [`RouterServer::off`].
+    pub fn on_access_refused(&self, listener: RefusalListener) -> ListenerId {
+        self.shared.listeners.access_refused.add(listener)
     }
 
-    /// Hears what it did on a connection from now on.
-    pub fn on_activity(&self, listener: ActivityListener) {
-        self.shared
-            .listeners
-            .activity
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .push(listener);
+    /// Hears what it did on a connection from now on; the id given takes it off again, with
+    /// [`RouterServer::off`].
+    pub fn on_activity(&self, listener: ActivityListener) -> ListenerId {
+        self.shared.listeners.activity.add(listener)
+    }
+
+    /// Hears no more with the listener `listener` names, whichever of its events it heard: one
+    /// taken off already, or of another part, changes nothing.
+    pub fn off(&self, listener: ListenerId) {
+        let listeners = &self.shared.listeners;
+
+        listeners.error.off(listener);
+        listeners.debug.off(listener);
+        listeners.access_refused.off(listener);
+        listeners.activity.off(listener);
     }
 
     /// Reports what went wrong that no call waits on, with the connection it came with.

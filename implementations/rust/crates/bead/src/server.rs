@@ -5,7 +5,7 @@
 use core::fmt;
 use core::time::Duration;
 use std::collections::{BTreeMap, BTreeSet};
-use std::sync::{Arc, Mutex, PoisonError};
+use std::sync::Arc;
 
 use serde_json::Value;
 use tokio::runtime::Handle;
@@ -30,7 +30,7 @@ use crate::router::relay::RelayOptions;
 use crate::router::server::{RouterServer, RouterServerOptions, ServerState, end_session};
 use crate::router::types::{BoxFuture, ConnectionHandle, Gauges, RouterError, RouterLimitsOptions};
 use crate::session_token::SessionToken;
-use crate::transport::ServerTransport;
+use crate::transport::{Listened, ListenerId, ServerTransport};
 
 #[cfg(test)]
 mod tests;
@@ -89,7 +89,7 @@ pub(crate) struct Facade {
     // the listens each connection holds
     listens: Ordered<ConnectionHandle, u32>,
     connection_inactivity_timeout: Duration,
-    listeners: Arc<Mutex<Vec<SessionListener>>>,
+    listeners: Arc<Listened<SessionListener>>,
 }
 
 impl fmt::Debug for Facade {
@@ -158,13 +158,7 @@ fn told(state: &mut ServerState, events: Vec<SessionEvent>) {
         let Some(facade) = state.facade.as_ref() else {
             continue;
         };
-        let listeners = facade
-            .listeners
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .clone();
-
-        for listener in listeners {
+        for listener in facade.listeners.all() {
             let called =
                 std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| listener(&event)));
 
@@ -694,7 +688,7 @@ pub fn health_of(gauges: &ServerGauges) -> Health {
 #[derive(Clone)]
 pub struct Sessions {
     router: RouterServer,
-    listeners: Arc<Mutex<Vec<SessionListener>>>,
+    listeners: Arc<Listened<SessionListener>>,
 }
 
 impl fmt::Debug for Sessions {
@@ -720,12 +714,16 @@ impl Sessions {
         Session::new(connection_handle, wall_milliseconds(&self.router.clock()))
     }
 
-    /// Hears what happens to its sessions from now on.
-    pub fn on(&self, listener: SessionListener) {
-        self.listeners
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .push(listener);
+    /// Hears what happens to its sessions from now on; the id given takes it off again, with
+    /// [`Sessions::off`].
+    pub fn on(&self, listener: SessionListener) -> ListenerId {
+        self.listeners.add(listener)
+    }
+
+    /// Hears no more with the listener `listener` names: one taken off already, or of another
+    /// part, changes nothing.
+    pub fn off(&self, listener: ListenerId) {
+        self.listeners.off(listener);
     }
 
     /// A copy of the session of `connection_handle`.
@@ -1176,7 +1174,7 @@ impl Server {
             )?,
             ..sessions_options
         })?;
-        let listeners: Arc<Mutex<Vec<SessionListener>>> = Arc::new(Mutex::new(Vec::new()));
+        let listeners: Arc<Listened<SessionListener>> = Arc::default();
         let facade = Facade {
             sessions,
             connections: Ordered::new(),

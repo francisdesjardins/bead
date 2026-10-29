@@ -104,6 +104,69 @@ fn asking(manager: &ServiceManager) -> crate::managers::service::Request<JsonCod
         .expect("echo asked")
 }
 
+// debugging 3.1, 3.4
+#[tokio::test]
+async fn is_on_only_while_someone_listens() {
+    let pair = pair().await;
+    let manager = pair.client.services();
+
+    assert!(!manager.is_debugging(), "off while nobody listens");
+
+    let listening = manager.on_debug(Arc::new(|_error, _event| {}));
+
+    assert!(manager.is_debugging(), "on while someone listens");
+
+    manager.off(listening);
+
+    assert!(!manager.is_debugging(), "off once its listener went");
+}
+
+// debugging 3.1: a call reads no clock for debugging once its last listener went, whoever listened
+// before
+#[tokio::test]
+async fn reads_no_clock_for_a_call_once_its_last_debug_listener_went() {
+    async fn readings_of(
+        pair: &Pair,
+        ask: &crate::managers::service::Request<JsonCodec, JsonCodec>,
+    ) -> (usize, usize) {
+        let (walls, monotonics) = pair.clock.readings();
+        let call = ask
+            .call(json!({ "text": "x" }), RequestOptions::default())
+            .expect("a call");
+
+        pair.settle().await;
+        call.await.expect("an answer");
+
+        let (called_walls, called_monotonics) = pair.clock.readings();
+
+        (called_walls - walls, called_monotonics - monotonics)
+    }
+
+    let pair = pair().await;
+
+    serve_echo(&pair, None);
+
+    let ask = asking(pair.client.services());
+    let unheard = readings_of(&pair, &ask).await;
+    let listening = [pair.client.services(), pair.server.services()]
+        .map(|manager| manager.on_debug(Arc::new(|_error, _event| {})));
+    let heard = readings_of(&pair, &ask).await;
+
+    for (manager, listener) in [pair.client.services(), pair.server.services()]
+        .into_iter()
+        .zip(listening)
+    {
+        manager.off(listener);
+    }
+
+    assert_ne!(heard, unheard, "read while someone listened");
+    assert_eq!(
+        readings_of(&pair, &ask).await,
+        unheard,
+        "as it read while nobody listened, once each listener went"
+    );
+}
+
 // debugging 1.1, 4.1, 4.1.1, 4.1.2, 4.1.3, 4.1.4, 4.1.6, 4.1.8
 #[tokio::test]
 async fn tells_each_step_of_a_request_and_once_answered_its_duration() {

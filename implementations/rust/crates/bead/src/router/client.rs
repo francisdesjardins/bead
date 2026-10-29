@@ -39,7 +39,9 @@ use crate::router::types::{
     TransportMessage, limits_of,
 };
 use crate::session_token::SessionToken;
-use crate::transport::{ClientListener, ClientTransport, Panicked, Sent, caught};
+use crate::transport::{
+    ClientListener, ClientTransport, Listened, ListenerId, Panicked, Sent, caught,
+};
 
 /// A notification a client's router hears: its procedure, its window, and what hears each payload
 /// and its drop.
@@ -166,10 +168,10 @@ struct Bound {
 
 #[derive(Default)]
 struct ClientListeners {
-    error: Mutex<Vec<ClientErrorListener>>,
-    debug: Mutex<Vec<ClientEnvelopeListener>>,
-    activity: Mutex<Vec<ClientActivityListener>>,
-    withdrawn: Mutex<Vec<WithdrawnListener>>,
+    error: Listened<ClientErrorListener>,
+    debug: Listened<ClientEnvelopeListener>,
+    activity: Listened<ClientActivityListener>,
+    withdrawn: Listened<WithdrawnListener>,
 }
 
 fn locked<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -178,9 +180,7 @@ fn locked<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
 
 impl ClientListeners {
     fn report(&self, error: &RouterError) {
-        let listeners = locked(&self.error).clone();
-
-        for listener in listeners {
+        for listener in self.error.all() {
             // ! a listener of errors that panics would loop: its panic is dropped
             let called = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| listener(error)));
 
@@ -189,10 +189,8 @@ impl ClientListeners {
     }
 
     // each listener within a guard: what one panics is reported, and the others heard
-    fn guarded<T: Clone, C: Fn(&T)>(&self, (listeners, call): (&Mutex<Vec<T>>, C)) {
-        let listening = locked(listeners).clone();
-
-        for listener in listening {
+    fn guarded<T: Clone, C: Fn(&T)>(&self, (listeners, call): (&Listened<T>, C)) {
+        for listener in listeners.all() {
             let called = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| call(&listener)));
 
             if let Err(panicked) = called {
@@ -523,7 +521,7 @@ impl Side for ClientState {
     }
 
     fn is_tracing(&self) -> bool {
-        !locked(&self.listeners.debug).is_empty()
+        !self.listeners.debug.is_empty()
     }
 
     fn trace(
@@ -872,24 +870,39 @@ impl RouterClient {
         *locked(&self.shared.session_token)
     }
 
-    /// Hears what it reports from now on.
-    pub fn on_error(&self, listener: ClientErrorListener) {
-        locked(&self.shared.listeners.error).push(listener);
+    /// Hears what it reports from now on; the id given takes it off again, with
+    /// [`RouterClient::off`].
+    pub fn on_error(&self, listener: ClientErrorListener) -> ListenerId {
+        self.shared.listeners.error.add(listener)
     }
 
-    /// Hears each envelope it sends or takes from now on.
-    pub fn on_debug(&self, listener: ClientEnvelopeListener) {
-        locked(&self.shared.listeners.debug).push(listener);
+    /// Hears each envelope it sends or takes from now on; the id given takes it off again, with
+    /// [`RouterClient::off`].
+    pub fn on_debug(&self, listener: ClientEnvelopeListener) -> ListenerId {
+        self.shared.listeners.debug.add(listener)
     }
 
-    /// Hears what it did from now on.
-    pub fn on_activity(&self, listener: ClientActivityListener) {
-        locked(&self.shared.listeners.activity).push(listener);
+    /// Hears what it did from now on; the id given takes it off again, with
+    /// [`RouterClient::off`].
+    pub fn on_activity(&self, listener: ClientActivityListener) -> ListenerId {
+        self.shared.listeners.activity.add(listener)
     }
 
-    /// Hears the scheme of each default credential it withdraws from now on.
-    pub fn on_credential_withdrawn(&self, listener: WithdrawnListener) {
-        locked(&self.shared.listeners.withdrawn).push(listener);
+    /// Hears the scheme of each default credential it withdraws from now on; the id given takes it
+    /// off again, with [`RouterClient::off`].
+    pub fn on_credential_withdrawn(&self, listener: WithdrawnListener) -> ListenerId {
+        self.shared.listeners.withdrawn.add(listener)
+    }
+
+    /// Hears no more with the listener `listener` names, whichever of its events it heard: one
+    /// taken off already, or of another part, changes nothing.
+    pub fn off(&self, listener: ListenerId) {
+        let listeners = &self.shared.listeners;
+
+        listeners.error.off(listener);
+        listeners.debug.off(listener);
+        listeners.activity.off(listener);
+        listeners.withdrawn.off(listener);
     }
 
     /// Reports what went wrong that no call waits on.

@@ -998,7 +998,7 @@ async fn lets_a_listener_go_fails_a_connect_awaiting_its_answer_as_it_stops_refu
         });
     let inbox = ["bead", "i", "ada"];
 
-    participant.on_error(Arc::clone(&listener));
+    let listening = participant.on_error(Arc::clone(&listener));
 
     // a connect whose OPEN reached a name nobody answers
     let waiting = participant
@@ -1011,7 +1011,7 @@ async fn lets_a_listener_go_fails_a_connect_awaiting_its_answer_as_it_stops_refu
     // a listener let go of hears no more
     publish_to(&silent, (inbox, vec![0xB1])).await;
     settle().await;
-    participant.off_error(&listener);
+    participant.off(listening);
     publish_to(&silent, (inbox, vec![0xB1])).await;
     settle().await;
     assert_eq!(

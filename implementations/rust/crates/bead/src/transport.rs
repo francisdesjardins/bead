@@ -6,6 +6,7 @@
 use core::fmt;
 use core::future::Future;
 use core::pin::Pin;
+use core::sync::atomic::{AtomicU64, Ordering};
 use core::task::{Context, Poll};
 use core::time::Duration;
 use std::panic::{AssertUnwindSafe, catch_unwind};
@@ -349,12 +350,21 @@ pub fn is_field_value(value: &str) -> bool {
     }
 }
 
-/// The listeners of one end, each called within a guard (spec 15.1).
-pub(crate) struct Listeners<L: ?Sized> {
-    listeners: Mutex<Vec<Arc<L>>>,
+/// What a listener's registration gives: the id its part's `off` takes it off again by, as the
+/// other sides' `off` and `-=` take a listener off. Dropped, the listener stays.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct ListenerId(u64);
+
+// each registration's own id, never given twice in a process
+static LISTENER_IDS: AtomicU64 = AtomicU64::new(1);
+
+/// The listeners of one event, each under the id its registration gave, called in the order they
+/// came.
+pub(crate) struct Listened<T> {
+    listeners: Mutex<Vec<(ListenerId, T)>>,
 }
 
-impl<L: ?Sized> Default for Listeners<L> {
+impl<T> Default for Listened<T> {
     fn default() -> Self {
         Self {
             listeners: Mutex::new(Vec::new()),
@@ -362,13 +372,13 @@ impl<L: ?Sized> Default for Listeners<L> {
     }
 }
 
-impl<L: ?Sized> fmt::Debug for Listeners<L> {
+impl<T> fmt::Debug for Listened<T> {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter.debug_struct("Listeners").finish_non_exhaustive()
+        formatter.debug_struct("Listened").finish_non_exhaustive()
     }
 }
 
-impl<L: ?Sized> Listeners<L> {
+impl<T: Clone> Listened<T> {
     /// Whether nobody listens, without copying the listener list.
     pub(crate) fn is_empty(&self) -> bool {
         self.listeners
@@ -377,25 +387,48 @@ impl<L: ?Sized> Listeners<L> {
             .is_empty()
     }
 
-    pub(crate) fn add(&self, listener: Arc<L>) {
+    /// Hears from now on, under the id it gives.
+    pub(crate) fn add(&self, listener: T) -> ListenerId {
+        let id = ListenerId(LISTENER_IDS.fetch_add(1, Ordering::Relaxed));
+
         self.listeners
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
-            .push(listener);
+            .push((id, listener));
+
+        id
     }
 
+    /// Takes off the listener `id` names, if it listens here.
+    pub(crate) fn off(&self, id: ListenerId) {
+        self.listeners
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .retain(|(held, _)| *held != id);
+    }
+
+    /// Each listener, in the order they came: a copy, so one added or taken off meanwhile changes
+    /// the next telling, not this one.
+    pub(crate) fn all(&self) -> Vec<T> {
+        self.listeners
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .iter()
+            .map(|(_, listener)| listener.clone())
+            .collect()
+    }
+}
+
+/// The listeners of one end, each called within a guard (spec 15.1).
+pub(crate) type Listeners<L> = Listened<Arc<L>>;
+
+impl<L: ?Sized> Listened<Arc<L>> {
+    /// Takes `listener` off, as the one given: a transport's `unlisten`.
     pub(crate) fn remove(&self, listener: &Arc<L>) {
         self.listeners
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
-            .retain(|held| !Arc::ptr_eq(held, listener));
-    }
-
-    pub(crate) fn all(&self) -> Vec<Arc<L>> {
-        self.listeners
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .clone()
+            .retain(|(_, held)| !Arc::ptr_eq(held, listener));
     }
 
     /// Calls each listener within a guard: what one panics is given to `on_error`, and the

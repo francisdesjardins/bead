@@ -197,6 +197,59 @@ async fn update_data_emits_nothing_for_equal_data() {
     );
 }
 
+// the Rust side's own: a listener taken off by the id its `on` gave hears nothing more, the others
+// still hear, and an id taken off already changes nothing
+#[tokio::test]
+async fn off_takes_off_the_listener_its_id_names_and_no_other() {
+    let pair = pair().await;
+    let sessions = pair.server.sessions();
+    let handle = Arc::clone(&pair.connection_handle);
+    let heard: Arc<Mutex<Vec<&'static str>>> = Arc::default();
+    let listener_of = |name: &'static str| {
+        let hearing = Arc::clone(&heard);
+
+        Arc::new(move |event: &SessionEvent| {
+            if matches!(event, SessionEvent::DataChanged(..)) {
+                hearing
+                    .lock()
+                    .unwrap_or_else(PoisonError::into_inner)
+                    .push(name);
+            }
+        })
+    };
+    let taken = sessions.on(listener_of("taken"));
+
+    sessions.on(listener_of("kept"));
+    sessions
+        .set(sessions.create(Arc::clone(&handle)))
+        .expect("taken as it is made")
+        .await
+        .expect("stored");
+    sessions
+        .update_data((Arc::clone(&handle), Some(json!({ "step": 1 }))))
+        .await;
+    pair.settle().await;
+
+    assert_eq!(
+        *heard.lock().unwrap_or_else(PoisonError::into_inner),
+        ["taken", "kept"],
+        "both heard"
+    );
+
+    sessions.off(taken);
+    sessions.off(taken);
+    sessions
+        .update_data((Arc::clone(&handle), Some(json!({ "step": 2 }))))
+        .await;
+    pair.settle().await;
+
+    assert_eq!(
+        *heard.lock().unwrap_or_else(PoisonError::into_inner),
+        ["taken", "kept", "kept"],
+        "the one taken off hears nothing more, the other still hears"
+    );
+}
+
 #[tokio::test]
 async fn count_the_sessions_and_the_connections_timed() {
     let pair = pair().await;
