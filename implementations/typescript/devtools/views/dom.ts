@@ -19,14 +19,6 @@ export interface IMade {
   text?: string | undefined;
 }
 
-/** Where a reader left an element: how far it scrolled, and whether it was opened, a details. */
-interface IPlace {
-  left: number;
-  open: boolean | undefined;
-  path: readonly string[];
-  top: number;
-}
-
 // constants
 
 const SVG = 'http://www.w3.org/2000/svg';
@@ -34,6 +26,7 @@ const SVG = 'http://www.w3.org/2000/svg';
 /** What names an element among its siblings, first found first, before its tag and its rank. */
 const KEYS: readonly string[] = Object.freeze([
   'id',
+  'data-row',
   'data-key',
   'data-source',
   'data-procedure',
@@ -54,56 +47,119 @@ const keyOf = (element: Element): string | undefined => {
   return undefined;
 };
 
-// an element's step from its parent: its key where it has one, else its tag and its rank among the
-// siblings of its tag that have none
-const stepOf = (element: Element): string => {
-  const key = keyOf(element);
+const recordKeys = new WeakMap<object, string>();
+let nextRecordKey = 0;
 
-  if (key !== undefined) {
-    return key;
+/** A captured object's stable row identity, including records with equal timestamps. */
+export const keyOfRecord = (record: object): string => {
+  let key = recordKeys.get(record);
+  if (key === undefined) {
+    key = String(nextRecordKey++);
+    recordKeys.set(record, key);
   }
+  return key;
+};
 
-  let rank = 0;
+/** Listeners follow the element that a redraw retains. */
+const listeners = new WeakMap<Element, Map<string, EventListener>>();
+const retained = new WeakMap<Element, Element>();
 
-  for (
-    let sibling = element.previousElementSibling;
-    sibling !== null;
-    sibling = sibling.previousElementSibling
+/** The element in the document that a view's freshly drawn element addresses. */
+export const currentOf = <T extends Element>(element: T): T => {
+  return (retained.get(element) ?? element) as T;
+};
+
+/** A view listener whose next drawing supplies its current callback. */
+export const listen = <K extends keyof HTMLElementEventMap>(
+  element: Element,
+  options: { type: K; handle: (event: HTMLElementEventMap[K]) => void }
+): void => {
+  const held = listeners.get(element) ?? new Map<string, EventListener>();
+  const callback = options.handle as EventListener;
+  held.set(options.type, callback);
+  listeners.set(element, held);
+  element.addEventListener(options.type, callback);
+};
+
+const patch = (element: Element, fresh: Element): void => {
+  retained.set(fresh, element);
+  for (const name of element.getAttributeNames()) {
+    if (!fresh.hasAttribute(name) && name !== 'open') {
+      element.removeAttribute(name);
+    }
+  }
+  for (const attribute of fresh.attributes) {
+    if (attribute.name === 'open' && element instanceof HTMLDetailsElement) {
+      continue;
+    }
+    if (element.getAttribute(attribute.name) !== attribute.value) {
+      element.setAttribute(attribute.name, attribute.value);
+    }
+  }
+  for (const [type, callback] of listeners.get(element) ?? []) {
+    element.removeEventListener(type, callback);
+  }
+  const callbacks = listeners.get(fresh);
+  for (const [type, callback] of callbacks ?? []) {
+    element.addEventListener(type, callback);
+  }
+  if (callbacks !== undefined) {
+    listeners.set(element, callbacks);
+  } else {
+    listeners.delete(element);
+  }
+  reconcile(element, [...fresh.childNodes]);
+  if (element instanceof HTMLSelectElement && fresh instanceof HTMLSelectElement) {
+    element.value = fresh.value;
+  }
+  if (
+    element instanceof HTMLInputElement &&
+    fresh instanceof HTMLInputElement &&
+    element !== document.activeElement
   ) {
-    if (sibling.tagName === element.tagName && keyOf(sibling) === undefined) {
-      rank += 1;
-    }
+    element.value = fresh.value;
   }
-
-  return `${element.tagName}:${String(rank)}`;
 };
 
-const pathOf = (element: Element, root: Element): string[] => {
-  const path: string[] = [];
-
-  for (let at: Element | null = element; at !== null && at !== root; at = at.parentElement) {
-    path.unshift(stepOf(at));
-  }
-
-  return path;
-};
-
-const elementAt = (root: Element, path: readonly string[]): Element | undefined => {
-  let at = root;
-
-  for (const step of path) {
-    const next = [...at.children].find((child) => {
-      return stepOf(child) === step;
-    });
-
-    if (next === undefined) {
-      return undefined;
+const reconcile = (parent: Element, nodes: readonly Node[]): void => {
+  const prior = [...parent.childNodes];
+  const keyed = new Map(
+    prior.flatMap((node) => {
+      const key = node instanceof Element ? keyOf(node) : undefined;
+      return key === undefined ? [] : [[key, node] as const];
+    })
+  );
+  const used = new Set<Node>();
+  let cursor = parent.firstChild;
+  nodes.forEach((fresh, index) => {
+    const key = fresh instanceof Element ? keyOf(fresh) : undefined;
+    const candidate = key === undefined ? prior[index] : keyed.get(key);
+    const node =
+      candidate !== undefined &&
+      !used.has(candidate) &&
+      candidate.nodeType === fresh.nodeType &&
+      candidate.nodeName === fresh.nodeName &&
+      (key !== undefined || !(candidate instanceof Element) || keyOf(candidate) === undefined)
+        ? candidate
+        : fresh;
+    used.add(node);
+    if (node !== fresh) {
+      if (node instanceof Element && fresh instanceof Element) {
+        patch(node, fresh);
+      } else if (node.nodeValue !== fresh.nodeValue) {
+        node.nodeValue = fresh.nodeValue;
+      }
     }
-
-    at = next;
+    if (node !== cursor) {
+      parent.insertBefore(node, cursor);
+    }
+    cursor = node.nextSibling;
+  });
+  for (const node of prior) {
+    if (!used.has(node)) {
+      node.parentNode?.removeChild(node);
+    }
   }
-
-  return at;
 };
 
 // definition
@@ -160,57 +216,36 @@ export const svgOf = (
   return element;
 };
 
-/**
- * Replaces what `parent` holds with `nodes`, each element that scrolled scrolled as far and each
- * details opened or closed as its reader left it, where the redraw holds the same element: one of
- * the same key, or of the same tag and rank, on the same path. A redraw of what a second's reading
- * changes leaves alone what its reader did.
- */
+/** Reconciles keyed elements in place, keeping focus, disclosures and every pane's scroll. */
 export const replaceKeeping = (parent: Element, nodes: readonly Node[]): void => {
-  const places: IPlace[] = [];
-
-  for (const element of parent.querySelectorAll('*')) {
-    const open = element instanceof HTMLDetailsElement ? element.open : undefined;
-
-    if (element.scrollTop !== 0 || element.scrollLeft !== 0 || open !== undefined) {
-      places.push({
-        left: element.scrollLeft,
-        open,
-        path: pathOf(element, parent),
-        top: element.scrollTop,
-      });
-    }
-  }
-
-  const { scrollLeft, scrollTop } = parent;
-
-  parent.replaceChildren(...nodes);
-
-  const found = places.flatMap((place) => {
-    const element = elementAt(parent, place.path);
-
-    return element === undefined ? [] : [{ element, place }];
+  const places = [parent, ...parent.querySelectorAll('*')].map((element) => {
+    return { element, top: element.scrollTop, left: element.scrollLeft };
   });
-
-  // * a details opens first: what it holds scrolls only once it is laid out
-  for (const { element, place } of found) {
-    if (element instanceof HTMLDetailsElement && place.open !== undefined) {
-      element.open = place.open;
-    }
+  const focus = document.activeElement;
+  reconcile(parent, nodes);
+  if (focus instanceof HTMLElement && focus.isConnected && document.activeElement !== focus) {
+    focus.focus({ preventScroll: true });
   }
-
-  parent.scrollTop = scrollTop;
-  parent.scrollLeft = scrollLeft;
-
-  for (const { element, place } of found) {
-    element.scrollTop = place.top;
-    element.scrollLeft = place.left;
+  for (const { element, top, left } of places) {
+    if (element.isConnected) {
+      element.scrollTop = top;
+      element.scrollLeft = left;
+    }
   }
 };
 
 /** A paragraph of a note. */
 export const noteOf = (text: string): HTMLElement => {
   return make('p', { className: 'note', text });
+};
+
+/** The rows a view's filter leaves out, including an empty view's zero. */
+export const filterCountOf = (hidden: number): HTMLElement => {
+  return make('p', {
+    className: 'note filter-count',
+    attributes: { 'aria-live': 'polite' },
+    text: `${String(hidden)} hidden by the filter`,
+  });
 };
 
 /** A list of facts, each a name and its value, those without a value left out. */

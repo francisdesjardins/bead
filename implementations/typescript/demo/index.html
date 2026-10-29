@@ -1267,7 +1267,9 @@ What it answers shows once the sign-up is sent.</pre>
             <p class="note">
               → goes out, ← comes in. In the console too, with no reload:
               <code>localStorage.setItem('bead:debug', '*')</code>, or a filter such as
-              <code>d(rx), -token</code>, and <code>e(notification)</code> for the envelopes.
+              <code>d(rx), -token</code>, and <code>e(notification)</code> for the envelopes. The
+              Bead DevTools panel filters every view; <code>-metrics, -stats</code> leaves polling
+              out of its Broker view where DATA joins its call. Uncertain captures stay visible.
             </p>
             <ol id="calls-log"></ol>
           </section>

@@ -3,7 +3,7 @@
 import type { IParticipantInspection } from '../../src/transport/shared/participant-debug';
 import type { IParticipantRecord, ISourceRecord } from '../messages';
 import { bytesOf, clockOf } from '../model/words';
-import { factsOf, make } from './dom';
+import { keyOfRecord, currentOf, listen, factsOf, make } from './dom';
 
 // interfaces
 
@@ -85,6 +85,8 @@ export const brokerViewOf = (options: {
   onFilter: (filters: IParcelFilters) => void;
   onSelect: (record: IParticipantRecord) => void;
   onState: () => void;
+  hidden?: number;
+  procedures?: ReadonlyMap<IParticipantRecord, string | undefined>;
 }): HTMLElement[] => {
   const { records, sources, inspections, letGo, filters, selected, onFilter, onSelect, onState } =
     options;
@@ -130,12 +132,18 @@ export const brokerViewOf = (options: {
         attributes: { 'data-source': String(source.id) },
         children: [
           title,
-          factsOf([
-            ['Inbox', reading.inbox.join('/')],
-            ['Incarnation', reading.incarnation ?? 'not linked'],
-            ['Names held', reading.names.join(', ') || 'none'],
-          ]),
-          make('div', { className: 'participant-gauges', children: gauges }),
+          make('details', {
+            className: 'participant-levels',
+            children: [
+              make('summary', { text: 'Participant levels' }),
+              factsOf([
+                ['Inbox', reading.inbox.join('/')],
+                ['Incarnation', reading.incarnation ?? 'not linked'],
+                ['Names held', reading.names.join(', ') || 'none'],
+              ]),
+              make('div', { className: 'participant-gauges', children: gauges }),
+            ],
+          }),
         ],
       });
     });
@@ -174,14 +182,17 @@ export const brokerViewOf = (options: {
         }),
       ],
     }) as HTMLSelectElement;
-    select.value = filters[field];
-    select.addEventListener('change', () => {
-      onFilter({ ...filters, [field]: select.value });
+    currentOf(select).value = filters[field];
+    listen(select, {
+      type: 'change',
+      handle: () => {
+        onFilter({ ...filters, [field]: currentOf(select).value });
+      },
     });
     return make('label', { children: [field, select] });
   });
   const state = make('button', { text: 'Envelope credit → State' });
-  state.addEventListener('click', onState);
+  listen(state, { type: 'click', handle: onState });
   const parts = partsOf(records, letGo > 0);
   const heads = [
     'Time',
@@ -232,7 +243,9 @@ export const brokerViewOf = (options: {
               ? ''
               : 'participant-transition',
         attributes: {
-          tabindex: '0',
+          'data-row': keyOfRecord(record),
+          'data-procedure': options.procedures?.get(record),
+          role: 'row',
           'aria-selected': String(record === selected),
           'data-event': record.event,
         },
@@ -248,20 +261,92 @@ export const brokerViewOf = (options: {
                 return make('td', { text });
               }),
       });
-      row.addEventListener('click', () => {
-        onSelect(record);
-      });
-      row.addEventListener('keydown', (event) => {
-        if (event.key === 'Enter' || event.key === ' ') {
-          event.preventDefault();
+      listen(row, {
+        type: 'click',
+        handle: () => {
           onSelect(record);
-        }
+          currentOf(row).closest<HTMLElement>('.participant-table')?.focus({ preventScroll: true });
+        },
       });
       return row;
     });
+  const detail = make('aside', {
+    className: 'participant-detail',
+    attributes: { 'aria-label': 'Parcel detail', tabindex: '0', role: 'region' },
+    children: [
+      make('h2', { text: 'Recorded fields' }),
+      selected === undefined
+        ? make('p', { text: 'Select a row to inspect its recorded fields.' })
+        : make('pre', { text: JSON.stringify(selected, null, 2) }),
+    ],
+  });
+  const table = make('div', {
+    className: 'participant-table rows',
+    attributes: { tabindex: '0', 'aria-label': 'Parcels, oldest first', role: 'region' },
+    children: [
+      make('table', {
+        className: 'plain',
+        attributes: { 'aria-label': 'Recorded parcels' },
+        children: [
+          make('thead', {
+            children: [
+              make('tr', {
+                children: heads.map((text) => {
+                  return make('th', { attributes: { scope: 'col' }, text });
+                }),
+              }),
+            ],
+          }),
+          make('tbody', { children: rows }),
+        ],
+      }),
+    ],
+  });
+  listen(table, {
+    type: 'keydown',
+    handle: (event) => {
+      const pane = currentOf(table);
+      const visible = [...pane.querySelectorAll<HTMLElement>('tr[data-row]')];
+      const index = visible.findIndex((row) => {
+        return row.getAttribute('aria-selected') === 'true';
+      });
+      const next =
+        event.key === 'ArrowDown'
+          ? Math.min(visible.length - 1, index + 1)
+          : event.key === 'ArrowUp'
+            ? Math.max(0, index - 1)
+            : event.key === 'Home'
+              ? 0
+              : event.key === 'End'
+                ? visible.length - 1
+                : undefined;
+      if (next !== undefined) {
+        event.preventDefault();
+        visible[next]?.click();
+        visible[next]?.scrollIntoView({ block: 'nearest' });
+      } else if (event.key === 'Enter' && selected !== undefined) {
+        event.preventDefault();
+        currentOf(detail).focus();
+      }
+    },
+  });
+  listen(detail, {
+    type: 'keydown',
+    handle: (event) => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        currentOf(table).focus({ preventScroll: true });
+      }
+    },
+  });
   return [
-    ...headers,
+    make('div', { className: 'participant-headers', children: headers }),
     make('div', { className: 'participant-controls', children: [...controls, state] }),
+    make('p', {
+      className: 'note filter-count',
+      attributes: { 'aria-live': 'polite' },
+      text: `${String(options.hidden ?? 0)} hidden by the filter`,
+    }),
     make('p', {
       className: 'note',
       text: `Last 1,000 participant records · ${String(letGo)} let go. A publication is an attempt. Payloads, credentials and the acceptor’s half are omitted.`,
@@ -276,38 +361,7 @@ export const brokerViewOf = (options: {
       : []),
     make('div', {
       className: 'participant-split',
-      children: [
-        make('div', {
-          className: 'participant-table',
-          children: [
-            make('table', {
-              className: 'plain',
-              children: [
-                make('thead', {
-                  children: [
-                    make('tr', {
-                      children: heads.map((text) => {
-                        return make('th', { attributes: { scope: 'col' }, text });
-                      }),
-                    }),
-                  ],
-                }),
-                make('tbody', { children: rows }),
-              ],
-            }),
-          ],
-        }),
-        make('aside', {
-          className: 'participant-detail',
-          attributes: { 'aria-label': 'Parcel detail' },
-          children: [
-            make('h2', { text: 'Recorded fields' }),
-            selected === undefined
-              ? make('p', { text: 'Select a row to inspect its recorded fields.' })
-              : make('pre', { text: JSON.stringify(selected, null, 2) }),
-          ],
-        }),
-      ],
+      children: [table, detail],
     }),
   ];
 };

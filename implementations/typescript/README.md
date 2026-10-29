@@ -2094,3 +2094,17 @@ Set `devtools: false` on `createBrokerParticipant` as well as on each client to 
 shows parcel metadata, never carried bytes, credentials or the acceptor's half; its gauges are
 read while the Broker tab is shown. `participant.on('debug', listener)` and
 `participant.isDebugging` expose the trace of parcels (debugging 13) to an application's own tool.
+
+The panel's filter covers every view. Metrics series follow their `procedure` label; unlabelled
+series stay. State follows each call's procedure. Broker joins DATA parts to router envelopes on
+their connection, direction and order, inside the panel: names, `d(…)` and `e(…)` apply to a
+proved join. Connection traffic and parcels whose capture cannot prove a join stay visible. Each
+view counts its rows hidden by the filter; export writes every retained record. Broker keeps its
+selection, keyboard focus and pane scroll across readings, and follows new parcels only at the
+list's end with no selection. Its levels fold into a disclosure; the list and recorded fields
+scroll in their own panes.
+
+When a participant has no reading or records and its hook leaves `read-participants` unanswered,
+or a source speaks a protocol the panel does not read, the panel asks for the extension to reload
+in `chrome://extensions`, then the page. The panel reads its bundle when DevTools opens; the
+page's hook reads its bundle when the extension reloads.

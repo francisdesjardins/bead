@@ -8,15 +8,17 @@
 
 // dependencies
 
-import { type IProcedureMetrics, metricsOf, quantileOf } from '../exposition';
+import { type IProcedureMetrics, metricsOf, quantileOf, samplesOf } from '../exposition';
 import { type IReading, lineKeyOf, ratesOf } from '../model/history';
+import { KEEP_ALL, type IKeeper } from '../model/filter';
 import { numberOf, spanOf } from '../model/words';
-import { make, svgOf } from './dom';
+import { filterCountOf, listen, make, svgOf } from './dom';
 
 // interfaces
 
 /** What the Metrics view draws. */
 export interface IMetricsView {
+  keeper?: IKeeper;
   /** Each client's last exposition: `null` for a client given no registry, none while unread. */
   expositions: ReadonlyMap<number, string | null>;
   /** Each client's readings, kept. */
@@ -88,12 +90,18 @@ const rowOf = (
     text: procedure,
   });
 
-  name.addEventListener('click', () => {
-    onProcedure(procedure);
+  listen(name, {
+    type: 'click',
+    handle: () => {
+      onProcedure(procedure);
+    },
   });
 
   return make('tr', {
-    attributes: { 'data-procedure': procedure },
+    attributes: {
+      'data-row': `${role}/${type}/${row.service}/${procedure}`,
+      'data-procedure': procedure,
+    },
     children: [
       make('td', { children: [name] }),
       make('td', { text: `${role}${type === 'request' ? '' : `, ${type}`}` }),
@@ -123,11 +131,15 @@ const rowOf = (
 /** The Metrics view, a section a client. */
 export const metricsViewOf = (view: IMetricsView): Node[] => {
   if (view.sources.length === 0) {
-    return [make('p', { className: 'note', text: 'No client announced itself yet.' })];
+    return [
+      filterCountOf(0),
+      make('p', { className: 'note', text: 'No client announced itself yet.' }),
+    ];
   }
 
   return view.sources.map((source) => {
     const text = view.expositions.get(source);
+    const count = filterCountOf(0);
     const section = make('section', {
       attributes: { 'data-source': String(source) },
       children: [
@@ -137,6 +149,7 @@ export const metricsViewOf = (view: IMetricsView): Node[] => {
             make('span', { className: 'count', text: 'read each second while shown' }),
           ],
         }),
+        count,
       ],
       className: 'sect registry',
     });
@@ -158,8 +171,21 @@ export const metricsViewOf = (view: IMetricsView): Node[] => {
       return section;
     }
 
+    const keeper = view.keeper ?? KEEP_ALL;
     const readings = view.history.get(source) ?? [];
-    const rows = metricsOf(text, []).flatMap((row) => {
+    const all = metricsOf(text, []);
+    const kept = all.filter((row) => {
+      return keeper.keepsProcedure(row.procedure);
+    });
+    count.textContent = `${String(all.length - kept.length)} hidden by the filter`;
+    const filteredText = text
+      .split('\n')
+      .filter((line) => {
+        const sample = samplesOf(line)[0];
+        return keeper.keepsProcedure(sample?.labels['procedure']);
+      })
+      .join('\n');
+    const rows = kept.flatMap((row) => {
       const drawn = rowOf(row, { onProcedure: view.onProcedure, readings });
 
       return drawn === undefined ? [] : [drawn];
@@ -200,7 +226,7 @@ export const metricsViewOf = (view: IMetricsView): Node[] => {
       make('details', {
         children: [
           make('summary', { text: 'Its exposition, as a scrape reads it' }),
-          make('pre', { text }),
+          make('pre', { text: filteredText }),
         ],
         className: 'raw',
       })
