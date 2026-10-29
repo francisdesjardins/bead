@@ -571,11 +571,11 @@ pub(crate) fn reported_error_of(error: Box<dyn Error + Send + Sync>) -> RouterEr
 pub(crate) fn reported_call(error: CallError) -> RouterError {
     match error {
         CallError::Failure(failure) => RouterError::Failure(failure),
+        CallError::Other(error) => RouterError::Other(error),
         other @ (CallError::Cancelled
         | CallError::Disconnected(_)
         | CallError::TimedOut(_)
-        | CallError::Refused(_)
-        | CallError::Other(_)) => RouterError::Other(Arc::new(other)),
+        | CallError::Refused(_)) => RouterError::Other(Arc::new(other)),
     }
 }
 

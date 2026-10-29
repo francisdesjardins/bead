@@ -14,7 +14,8 @@ use crate::failure::FailureOrigin;
 use crate::managers::service::{ResolverDependencies, Response};
 use crate::payloads::TextCodec;
 use crate::router::server::{CallHooks, RouterServerOptions, ServerRequest};
-use crate::router::types::RequestCredential;
+use crate::router::types::{RequestCredential, RouterError};
+use crate::testing::core_port::error_of;
 use crate::testing::pair::echo;
 
 fn resolve(served: &Served) {
@@ -85,6 +86,28 @@ async fn requests_go_to_the_resolver_registered_which_answers_on_their_call_id_a
         ]
     );
     assert_eq!(served.reported(), Vec::<String>::new());
+}
+
+#[tokio::test]
+async fn requests_whose_answers_session_cannot_be_told_are_answered_by_nothing_and_reported() {
+    let error = error_of("no session");
+    let failed = error.clone();
+    let served = Served::new(&RouterServerOptions {
+        session_token_of: Some(Arc::new(move |_| Err(failed.clone()))),
+        ..RouterServerOptions::default()
+    });
+    resolve(&served);
+    served
+        .transport
+        .deliver(&request_of((1, &echo(), "")), &first());
+    served.settle().await;
+    assert_eq!(served.transport.take(), Vec::new());
+    assert_eq!(served.reported(), ["no session first"]);
+    let reports = locked(&served.reports);
+    assert!(
+        matches!((&error, &reports[0].0), (RouterError::Other(expected),RouterError::Other(actual)) if Arc::ptr_eq(expected, actual))
+    );
+    drop(reports);
 }
 
 #[tokio::test]
