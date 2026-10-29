@@ -6,8 +6,8 @@
   },
   "rust": {
     "title": "the Rust side",
-    "lines": 88.9,
-    "regions": 89.2
+    "lines": 89,
+    "regions": 89.3
   },
   "typescript": {
     "title": "the TypeScript side",
