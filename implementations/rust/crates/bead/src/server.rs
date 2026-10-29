@@ -10,7 +10,7 @@ use std::sync::{Arc, Mutex, PoisonError};
 use serde_json::Value;
 use tokio::runtime::Handle;
 
-use crate::clock::{Schedule, SharedClock, SystemClock, Timer, clock_of};
+use crate::clock::{SharedClock, SystemClock, Timer, clock_of};
 use crate::constants::ProtocolCode;
 use crate::credentials::Credentials;
 use crate::duration::{NEVER, hold};
@@ -113,19 +113,11 @@ impl Arming for SessionArming {
         due: Duration,
         (inactivity, connection_handle): (Inactivity, ConnectionHandle),
     ) -> Arc<dyn Timer> {
-        let owner = self.owner.clone();
-        let mut job = Some((inactivity, connection_handle));
-
-        self.clock.arm(
-            Schedule::Once(due),
-            Box::new(move || {
-                if let Some((inactivity, connection_handle)) = job.take() {
-                    owner.offer(Box::new(move |state: &mut ServerState| {
-                        reached(state, (inactivity, &connection_handle));
-                    }));
-                }
-            }),
-        )
+        // * cancelled once it fired, as a touch restarts it, its job does nothing
+        self.owner
+            .after((&self.clock, due), move |state: &mut ServerState| {
+                reached(state, (inactivity, &connection_handle));
+            })
     }
 }
 

@@ -13,15 +13,16 @@ use core::cell::Cell;
 use core::fmt;
 use core::future::Future;
 use core::pin::Pin;
-use core::sync::atomic::{AtomicUsize, Ordering};
+use core::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use core::task::{Context, Poll};
+use core::time::Duration;
 use std::collections::VecDeque;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::{Arc, Mutex, PoisonError, Weak};
 
 use tokio::sync::{mpsc, oneshot};
 
-use crate::clock::Clock;
+use crate::clock::{Clock, Schedule, SharedClock, Timer};
 use crate::errors::Disposed;
 use crate::platform::{self, Handle, JoinHandle};
 
@@ -224,6 +225,38 @@ impl<S: Send + 'static> WeakOwner<S> {
         }
     }
 
+    /// Arms a timer on `clock` that runs `job` on the owner after `due`, behind what came before
+    /// its due. Cancelled, its job does nothing, though its timer fired and posted it already: what
+    /// re-arms a timer came before that job, as the other sides' generations and cleared timeouts
+    /// hold it. Cancel and job both run on the owner, so the mark needs no lock.
+    pub(crate) fn after<J: FnOnce(&mut S) + Send + 'static>(
+        &self,
+        (clock, due): (&SharedClock, Duration),
+        job: J,
+    ) -> Arc<dyn Timer> {
+        let owner = self.clone();
+        let cancelled = Arc::new(AtomicBool::new(false));
+        let is_cancelled = Arc::clone(&cancelled);
+        let mut job = Some(job);
+        let timer = clock.arm(
+            Schedule::Once(due),
+            Box::new(move || {
+                if let Some(job) = job.take() {
+                    let is_cancelled = Arc::clone(&is_cancelled);
+
+                    owner.offer(Box::new(move |state: &mut S| {
+                        // ! a timer cancelled once it fired: its job, queued already, does nothing
+                        if !is_cancelled.load(Ordering::Acquire) {
+                            job(state);
+                        }
+                    }));
+                }
+            }),
+        );
+
+        Arc::new(OwnedTimer { timer, cancelled })
+    }
+
     /// Spawns `future`, as [`Owner::cover`] does, for an owner not gone.
     pub(crate) fn cover<F: Future<Output = ()> + Send + 'static>(&self, future: F) {
         if let Some(shared) = self.shared.upgrade() {
@@ -251,6 +284,20 @@ impl<S: Send + 'static> WeakOwner<S> {
         }
 
         Some(platform::spawn(&shared.runtime, future))
+    }
+}
+
+// a timer armed for an owner's job: cancelled, its job does nothing, though it fired already
+#[derive(Debug)]
+struct OwnedTimer {
+    timer: Arc<dyn Timer>,
+    cancelled: Arc<AtomicBool>,
+}
+
+impl Timer for OwnedTimer {
+    fn cancel(&self) {
+        self.cancelled.store(true, Ordering::Release);
+        self.timer.cancel();
     }
 }
 

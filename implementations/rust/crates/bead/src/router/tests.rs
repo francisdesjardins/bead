@@ -44,6 +44,7 @@ mod router_core_requester;
 mod router_core_rest;
 mod router_core_writer;
 mod server;
+mod timers;
 mod transfer;
 
 // the timeout of a call that sets none of its own

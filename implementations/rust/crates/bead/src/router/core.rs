@@ -17,7 +17,7 @@ use std::sync::{Arc, Mutex, PoisonError};
 
 use bytes::Bytes;
 
-use crate::clock::{Schedule, SharedClock, Timer};
+use crate::clock::{SharedClock, Timer};
 use crate::constants::{
     CredentialScheme, EnvelopeKind, EnvelopeLayout, FailureScope, ProtocolCode, RouterSide,
 };
@@ -491,23 +491,14 @@ impl<S: Side> Core<S> {
         Failure::protocol(code, self.side)
     }
 
-    /// Arms a timer that runs `job` on the owner after `due`.
+    /// Arms a timer that runs `job` on the owner after `due`; cancelled, its job does nothing,
+    /// though it fired already.
     pub(crate) fn after<J: FnOnce(&mut S) + Send + 'static>(
         &self,
         due: Duration,
         job: J,
     ) -> Arc<dyn Timer> {
-        let owner = self.owner.clone();
-        let mut job = Some(job);
-
-        self.clock.arm(
-            Schedule::Once(due),
-            Box::new(move || {
-                if let Some(job) = job.take() {
-                    owner.offer(Box::new(job));
-                }
-            }),
-        )
+        self.owner.after((&self.clock, due), job)
     }
 
     /// Posts `job` to the owner, to run in a later turn: as this one ends, when posted within it.
