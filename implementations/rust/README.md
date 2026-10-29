@@ -6,12 +6,13 @@ its Rust implementation, at parity with the TypeScript and C# sides: the same be
 the same conformance files in [`spec/`](../../spec/). It holds the core today — the envelope's codec,
 the client's and the server's routers with their service, session and notification managers and the
 service layer, sessions and credentials with a `JWT`'s verification, the clock it is given and every
-duration held as spec 1.4 holds it, the trace, the filter and the metrics registry, and the in-memory
-transport — and plays every conformance file the core reaches; what it does not play yet is a row of
-[`docs/support.md`](../../docs/support.md)'s differences, each ahead with the step that brings it. The
-rules its code keeps — one owner per router, traits and composition, no unsafe code, two parameters
-then an options struct, every warning an error — are [decision
-0044](../../docs/decisions/0044-rust-one-owner-per-router-traits-no-unsafe-two-parameters-no-warning.md)'s.
+duration held as spec 1.4 holds it, the trace, the filter and the metrics registry, the in-memory
+transport, the broker's core over an in-memory broker, and the joined transport — and plays every
+conformance file the core reaches; what it does not play yet is a row of
+[`docs/support.md`](../../docs/support.md)'s differences, each ahead with the step or the stage that
+brings it, its `proto` codec the last step of its core. The rules its code keeps — one owner per
+router, traits and composition, no unsafe code, two parameters then an options struct, every
+warning an error — are [decision 0044](../../docs/decisions/0044-rust-one-owner-per-router-traits-no-unsafe-two-parameters-no-warning.md)'s.
 
 ## Build and test
 
@@ -84,6 +85,8 @@ transport holds it, so it lives as long as its connection does, its last handle 
 | `server`, `client`                                             | a server, and a client: a transport, its router and its services, built together                                          |
 | `credentials`, `jwt_verifier`, `session_token`, `call_session` | what resolves a `JWT` and an `ELSEWHERE`, a `JWT`'s verification (spec 13.8), a session's token, a call's session         |
 | `transport`, `memory`                                          | what a router takes its envelopes from and hands them to, and the in-memory transport (spec 15.13)                        |
+| `broker`                                                       | the broker's core: its participant, its parcel, its sequence, its heartbeat, its transports and the in-memory broker      |
+| `joined`                                                       | the joined transport, a server's transports through one (spec 15.14)                                                      |
 | `debug`, `metrics`                                             | the trace and the `debug` filter, and the metrics registry (`spec/debugging.md`)                                          |
 | `testing`                                                      | the test kit, behind the feature `testing`: no API                                                                        |
 

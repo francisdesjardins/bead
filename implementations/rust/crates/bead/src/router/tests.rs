@@ -610,6 +610,19 @@ async fn lets_its_connections_go_after_the_turn_its_report_listener_disposes_it_
 // a listener of a transport's that panics on each message it hears
 struct Panicking;
 
+// what a transport reports, each as its words
+struct Reporting(Arc<Mutex<Vec<String>>>);
+
+impl crate::transport::ServerListener for Reporting {
+    fn on_error(
+        &self,
+        error: &RouterError,
+        _connection_handle: Option<&crate::router::types::ConnectionHandle>,
+    ) {
+        locked(&self.0).push(error.to_string());
+    }
+}
+
 impl crate::transport::ServerListener for Panicking {
     fn on_message(
         &self,
@@ -645,7 +658,13 @@ async fn a_listener_s_panic_is_reported_and_the_transport_goes_on() {
             },
         ))
         .expect("echo registered");
+    let reports: Arc<Mutex<Vec<String>>> = Arc::default();
+
     crate::transport::ServerTransport::listen(&pair.memory, Arc::new(Panicking));
+    crate::transport::ServerTransport::listen(
+        &pair.memory,
+        Arc::new(Reporting(Arc::clone(&reports))),
+    );
 
     let call = pair
         .client
@@ -675,15 +694,19 @@ async fn a_listener_s_panic_is_reported_and_the_transport_goes_on() {
         "the transport goes on"
     );
 
-    let reported: Vec<String> = locked(&pair.server_reports)
-        .iter()
-        .map(|(error, _handle)| error.to_string())
-        .collect();
+    // * reported by its transport, with the connection it was told of; its router reports none
+    // of it, as on the other sides (spec 15.1)
+    let reported = locked(&reports).clone();
 
     assert!(
         reported
             .iter()
             .any(|error| error == "a listener panicked: this listener breaks, on purpose"),
         "its panic reported: {reported:?}"
+    );
+    assert!(
+        locked(&pair.server_reports).is_empty(),
+        "its router reports none of it: {:?}",
+        locked(&pair.server_reports)
     );
 }

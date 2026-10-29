@@ -285,6 +285,7 @@ fn exited(exit: &Value, wall_clock: std::time::SystemTime) -> Result<(), Failed>
             exit,
             conversation::PlayOptions {
                 in_memory: false,
+                over_broker: false,
                 metrics_registry: Some(registry),
                 wall_clock,
             },

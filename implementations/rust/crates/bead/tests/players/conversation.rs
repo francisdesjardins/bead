@@ -10,12 +10,15 @@ use std::time::SystemTime;
 
 use bead::testing::{SteppingClock, hexadecimal};
 use bead::{
-    BoxFuture, ClientListener, ClientTransport, ConnectionHandle, Credential, CredentialScheme,
-    DisconnectOptions, Envelope, EnvelopeKind, MemoryClient, MemoryClientOptions,
-    MemoryConnectOptions, MemoryServer, MemoryServerOptions, MetricsRegistry, PacingLimitsOptions,
-    ReadEnvelopeOptions, RelayOptions, RouterError, RouterLimitsOptions, RouterSide, Sent, Server,
-    ServerListener, ServerOptions, ServerTransport, SharedClock, TransportMessage, read_envelope,
-    require_credential, require_session, share_leg_b_session,
+    BoxFuture, BrokerAdapter, BrokerClient, BrokerClientOptions, BrokerConnectOptions,
+    BrokerParticipant, BrokerParticipantOptions, BrokerServer, BrokerServerOptions, ClientListener,
+    ClientTransport, ConnectionHandle, Credential, CredentialScheme, DisconnectOptions, Envelope,
+    EnvelopeKind, MemoryBroker, MemoryBrokerAdapterOptions, MemoryBrokerOptions, MemoryClient,
+    MemoryClientOptions, MemoryConnectOptions, MemoryServer, MemoryServerOptions, MetricsRegistry,
+    NEVER, PacingLimitsOptions, ReadEnvelopeOptions, RelayOptions, RouterError,
+    RouterLimitsOptions, RouterSide, Sent, Server, ServerListener, ServerOptions, ServerTransport,
+    SharedClock, TransportMessage, read_envelope, require_credential, require_session,
+    share_leg_b_session,
 };
 use bytes::Bytes;
 use serde_json::{Map, Value, json};
@@ -41,6 +44,8 @@ fn locked<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
 pub(crate) struct PlayOptions {
     /// Through a pair of the in-memory transport, rather than a transport the player scripts.
     pub(crate) in_memory: bool,
+    /// Through a broker pair over the in-memory broker, as through an in-memory pair.
+    pub(crate) over_broker: bool,
     /// The registry its server is given, which each counted step reads.
     pub(crate) metrics_registry: Option<MetricsRegistry>,
     /// The instant its file starts every case at.
@@ -212,9 +217,116 @@ struct InMemory {
     drawn: Arc<Mutex<Option<ConnectionHandle>>>,
 }
 
+/// The connections a conversation names over a broker pair (spec 15.16 to 15.24): a broker server
+/// transport over the in-memory broker, serving `interop`, and for each name a participant of its
+/// own, its id the name, a broker client transport over it. The whole router runs over parcels,
+/// sequences and parts.
+struct OverBroker {
+    broker: MemoryBroker,
+    clock: SharedClock,
+    server: BrokerParticipant,
+    transport: BrokerServer,
+    participants: HashMap<String, BrokerParticipant>,
+    clients: HashMap<String, BrokerClient>,
+    handles: HashMap<String, ConnectionHandle>,
+    heard: Arc<Mutex<HashMap<String, VecDeque<SentEnvelope>>>>,
+    drawn: Arc<Mutex<Option<ConnectionHandle>>>,
+}
+
+// ! no heartbeat: its PINGs, on the platform's timer, would cross what a step counts
+fn participant_options(clock: &SharedClock) -> BrokerParticipantOptions {
+    let mut options = BrokerParticipantOptions::default();
+
+    options.clock = Some(Arc::clone(clock));
+    options.heartbeat = Some(NEVER);
+
+    options
+}
+
+impl OverBroker {
+    fn of(clock: &SharedClock) -> Result<Self, String> {
+        let mut options = MemoryBrokerOptions::default();
+
+        options.clock = Some(Arc::clone(clock));
+
+        let broker = MemoryBroker::new(&options).map_err(|error| error.to_string())?;
+        let adapter: Arc<dyn BrokerAdapter> = Arc::new(
+            broker
+                .adapter(&MemoryBrokerAdapterOptions::of("server"))
+                .map_err(|error| error.to_string())?,
+        );
+        let server = BrokerParticipant::new(adapter, &participant_options(clock))
+            .map_err(|error| error.to_string())?;
+        let transport = server
+            .server(&BrokerServerOptions::of(["interop"]))
+            .map_err(|error| error.to_string())?;
+        let drawn = Arc::new(Mutex::new(None));
+
+        transport.listen(Arc::new(Drawing {
+            last: Arc::clone(&drawn),
+        }));
+
+        Ok(Self {
+            broker,
+            clock: Arc::clone(clock),
+            server,
+            transport,
+            participants: HashMap::new(),
+            clients: HashMap::new(),
+            handles: HashMap::new(),
+            heard: Arc::new(Mutex::new(HashMap::new())),
+            drawn,
+        })
+    }
+
+    // a broker pair stands for a connection secure and two-way alone, which carries no credential
+    // toward its client; its server told once its third leg came
+    async fn open(&mut self, (name, clock): (&str, &SteppingClock)) -> Result<(), String> {
+        if !self.clients.contains_key(name) {
+            let adapter: Arc<dyn BrokerAdapter> = Arc::new(
+                self.broker
+                    .adapter(&MemoryBrokerAdapterOptions::of(name))
+                    .map_err(|error| error.to_string())?,
+            );
+            let participant = BrokerParticipant::new(adapter, &participant_options(&self.clock))
+                .map_err(|error| error.to_string())?;
+            let client = participant
+                .client(&BrokerClientOptions::default())
+                .map_err(|error| error.to_string())?;
+
+            client.listen(Arc::new(Hearing {
+                name: name.to_owned(),
+                heard: Arc::clone(&self.heard),
+            }));
+            self.participants.insert(name.to_owned(), participant);
+            self.clients.insert(name.to_owned(), client);
+        }
+
+        let client = self
+            .clients
+            .get(name)
+            .ok_or_else(|| format!("no client for {name}"))?;
+
+        client
+            .connect(BrokerConnectOptions::of("interop"))
+            .await
+            .map_err(|error| format!("{name} did not connect: {error}"))?;
+        clock.settle().await;
+
+        let drawn = locked(&self.drawn).clone();
+
+        if let Some(handle) = drawn {
+            self.handles.insert(name.to_owned(), handle);
+        }
+
+        Ok(())
+    }
+}
+
 enum Connections {
     Scripted(Arc<Scripted>),
     InMemory(Box<InMemory>),
+    OverBroker(Box<OverBroker>),
 }
 
 impl Connections {
@@ -226,15 +338,17 @@ impl Connections {
                 transport
             }
             Self::InMemory(memory) => Arc::new(memory.server.clone()),
+            Self::OverBroker(broker) => Arc::new(broker.transport.clone()),
         }
     }
 
     async fn open(
         &mut self,
-        name: &str,
+        (name, clock): (&str, &SteppingClock),
         (carries_credential, is_secure, is_two_way): (bool, bool, bool),
     ) -> Result<(), String> {
         match self {
+            Self::OverBroker(broker) => broker.open((name, clock)).await,
             Self::Scripted(scripted) => {
                 let handle = {
                     let mut script = locked(&scripted.script);
@@ -364,6 +478,21 @@ impl Connections {
                     .map(drop)
                     .map_err(|error| error.to_string())
             }
+            Self::OverBroker(broker) => {
+                let client = broker
+                    .clients
+                    .get(name)
+                    .ok_or_else(|| format!("no step opened {name}"))?;
+
+                client
+                    .send(TransportMessage {
+                        data,
+                        credential,
+                        ..TransportMessage::default()
+                    })
+                    .map(drop)
+                    .map_err(|error| error.to_string())
+            }
         }
     }
 
@@ -396,6 +525,20 @@ impl Connections {
                     .disconnect(options)
                     .map_err(|error| error.to_string())
             }
+            // unclean, as the scripted connections close
+            Self::OverBroker(broker) => {
+                let client = broker
+                    .clients
+                    .get(name)
+                    .ok_or_else(|| format!("no step opened {name}"))?;
+                let mut options = DisconnectOptions::default();
+
+                options.is_clean = Some(false);
+
+                client
+                    .disconnect(options)
+                    .map_err(|error| error.to_string())
+            }
         }
     }
 
@@ -413,6 +556,18 @@ impl Connections {
                     client.close();
                 }
             }
+            // * each stop takes effect as it is made: its future only waits
+            Self::OverBroker(broker) => {
+                for client in broker.clients.values() {
+                    client.close();
+                }
+
+                for participant in broker.participants.values() {
+                    drop(participant.stop());
+                }
+
+                drop(broker.server.stop());
+            }
         }
     }
 
@@ -420,6 +575,7 @@ impl Connections {
         match self {
             Self::Scripted(scripted) => Some(locked(&scripted.script).handle_of(name)),
             Self::InMemory(memory) => memory.handles.get(name).cloned(),
+            Self::OverBroker(broker) => broker.handles.get(name).cloned(),
         }
     }
 
@@ -432,6 +588,9 @@ impl Connections {
                 script.sent.get_mut(&handle).and_then(VecDeque::pop_front)
             }
             Self::InMemory(memory) => locked(&memory.heard)
+                .get_mut(name)
+                .and_then(VecDeque::pop_front),
+            Self::OverBroker(broker) => locked(&broker.heard)
                 .get_mut(name)
                 .and_then(VecDeque::pop_front),
         }
@@ -458,6 +617,16 @@ impl Connections {
             }
             Self::InMemory(memory) => {
                 for (name, queue) in locked(&memory.heard).iter() {
+                    if !queue.is_empty() {
+                        untaken.insert(
+                            name.clone(),
+                            queue.iter().map(|(bytes, _)| expected_of(bytes)).collect(),
+                        );
+                    }
+                }
+            }
+            Self::OverBroker(broker) => {
+                for (name, queue) in locked(&broker.heard).iter() {
                     if !queue.is_empty() {
                         untaken.insert(
                             name.clone(),
@@ -601,7 +770,7 @@ fn announced_token_of(bytes: &Bytes) -> Option<Vec<u8>> {
 }
 
 // the envelope sent, as `expected` writes it: its failure's detail only where `expected` gives one
-fn actual_of(bytes: Option<&Bytes>, expected: &Value) -> Option<Value> {
+pub(crate) fn actual_of(bytes: Option<&Bytes>, expected: &Value) -> Option<Value> {
     let bytes = bytes?;
     let mut actual = expected_of(bytes)?;
     let wants_detail = expected
@@ -621,7 +790,7 @@ fn actual_of(bytes: Option<&Bytes>, expected: &Value) -> Option<Value> {
 
 // ── Building the server ──────────────────────────────────────────────────────────────────────
 
-fn limits_of(conversation: &Value) -> Result<RouterLimitsOptions, String> {
+pub(crate) fn limits_of(conversation: &Value) -> Result<RouterLimitsOptions, String> {
     let mut limits = RouterLimitsOptions::default();
     let Some(given) = conversation.get("limits").and_then(Value::as_object) else {
         return Ok(limits);
@@ -783,11 +952,13 @@ pub(crate) async fn play(conversation: &Value, options: PlayOptions) -> Result<(
     let clock = SteppingClock::new(options.wall_clock);
     let shared: SharedClock = Arc::<SteppingClock>::clone(&clock);
 
-    if options.in_memory && !is_played_in_memory(conversation) {
+    if (options.in_memory || options.over_broker) && !is_played_in_memory(conversation) {
         return Err("a pair stands for no connection of this conversation".to_owned());
     }
 
-    let mut connections = if options.in_memory {
+    let mut connections = if options.over_broker {
+        Connections::OverBroker(Box::new(OverBroker::of(&shared)?))
+    } else if options.in_memory {
         let mut server_options = MemoryServerOptions::default();
 
         server_options.clock = Some(Arc::clone(&shared));
@@ -895,7 +1066,7 @@ async fn play_steps(
 
     if steps.iter().all(|step| step.get("open").is_none()) {
         connections
-            .open(ONLY_CONNECTION, (true, true, true))
+            .open((ONLY_CONNECTION, clock), (true, true, true))
             .await?;
     }
 
@@ -932,7 +1103,7 @@ async fn play_steps(
                 step.get("twoWay") != Some(&Value::Bool(false)),
             );
 
-            connections.open(name, flags).await?;
+            connections.open((name, clock), flags).await?;
             clock.settle().await;
         }
 

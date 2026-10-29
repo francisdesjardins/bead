@@ -21,6 +21,7 @@ pub mod files;
 pub mod hexadecimal;
 pub mod instants;
 pub mod pair;
+pub mod parcels;
 pub mod scripted;
 pub mod validations;
 pub mod vectors;

@@ -216,15 +216,6 @@ SIDES = {
 # the side plays fails, so the table only shrinks
 AHEAD = {
     'Rust': {
-        # 1b deletes it as it lands
-        "Rust's broker core": {
-            'transports': ('broker',),
-            'groups': ('parcels', 'parcelRefusals'),
-            'units': (('spec', '15.14'), ('spec', '15.16'), ('spec', '15.17'), ('spec', '15.18'), ('spec', '15.19'),
-                      ('spec', '15.20'), ('spec', '15.21'), ('spec', '15.22'), ('spec', '15.23'), ('spec', '15.24')),
-            'places': ('brokerParticipant', 'brokerTransportServer'),
-            'ways': (('transportClient.connectTimeout', 'broker'),),
-        },
         # 1c deletes it as it lands
         "Rust's proto codec": {'encodings': ('proto',)},
         "Rust's transports over HTTP and WebSocket": {

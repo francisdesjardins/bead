@@ -597,13 +597,8 @@ impl ClientListener for Bridge {
         }));
     }
 
-    fn on_error(&self, error: &RouterError) {
-        let error = error.clone();
-        self.owner
-            .offer_behind(Box::new(move |state: &mut ClientState| {
-                state.report_error(&error);
-            }));
-    }
+    // * what its transport reports is its transport's: an application hears it there, whichever
+    // transport it built, as on the other sides (spec 15.1)
 }
 
 struct Shared {

@@ -4,9 +4,6 @@
 //! server and none toward its client.
 
 use core::fmt;
-use core::future::Future;
-use core::pin::Pin;
-use core::task::{Context, Poll};
 use core::time::Duration;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError, Weak};
 
@@ -16,17 +13,15 @@ use tokio::sync::oneshot;
 use tokio_util::sync::CancellationToken;
 
 use crate::clock::{Schedule, SharedClock, SystemClock, Timer};
-use crate::duration::{hold, hold_delay};
-use crate::errors::{
-    ConnectError, ProgrammerError, ReadyStateError, ReconnectError, TransportError,
-};
+use crate::duration::hold;
+use crate::errors::{ConnectError, ProgrammerError, ReadyStateError, TransportError};
 use crate::ordered::Ordered;
 use crate::owner::{Owner, WeakOwner};
 use crate::router::types::{BoxFuture, ConnectionHandle, Gauges, RouterError, TransportMessage};
 use crate::transport::{
-    ClientListener, ClientTransport, DisconnectOptions, Listeners, RECONNECT_ATTEMPTS,
-    RECONNECT_DELAY, ReadyState, ReconnectDelay, ReconnectOptions, Sent, ServerListener,
-    ServerTransport, is_field_value,
+    CONNECT_TIMEOUT, ClientListener, ClientTransport, Connect, DisconnectOptions, Listeners,
+    RECONNECTION_CANCELLED, ReadyState, ReconnectOptions, Sent, ServerListener, ServerTransport,
+    attempting, first_of, is_field_value,
 };
 
 #[cfg(test)]
@@ -38,11 +33,6 @@ pub const TRANSPORT_MEMORY: &str = "MEMORY";
 /// The address a connect gives when it names none.
 pub const MEMORY_ADDRESS: &str = "local";
 
-/// How long a connect waits for its server when it names no timeout.
-pub const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
-
-const RECONNECTION_CANCELLED: &str = "the reconnection was cancelled";
-
 // ── The loop ─────────────────────────────────────────────────────────────────────────────────
 
 // the later turns a server and its clients share: each job in the order it came, off the caller
@@ -50,25 +40,6 @@ struct Pipe;
 
 fn later_on<J: FnOnce() + Send + 'static>(pipe: &WeakOwner<Pipe>, job: J) {
     pipe.offer(Box::new(move |_: &mut Pipe| job()));
-}
-
-// whether `first` settles before `second`
-async fn first_of<A: Future, B: Future>((first, second): (A, B)) -> bool {
-    let mut first = core::pin::pin!(first);
-    let mut second = core::pin::pin!(second);
-
-    core::future::poll_fn(|context| {
-        if first.as_mut().poll(context).is_ready() {
-            return Poll::Ready(true);
-        }
-
-        if second.as_mut().poll(context).is_ready() {
-            return Poll::Ready(false);
-        }
-
-        Poll::Pending
-    })
-    .await
 }
 
 fn locked<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -407,6 +378,10 @@ impl ServerTransport for MemoryServer {
 
     fn is_secure(&self, _connection_handle: &ConnectionHandle) -> bool {
         true
+    }
+
+    fn transport_type(&self) -> Option<&str> {
+        Some(TRANSPORT_MEMORY)
     }
 
     fn start(&self) -> BoxFuture<Result<(), RouterError>> {
@@ -858,47 +833,6 @@ impl fmt::Debug for MemoryClient {
     }
 }
 
-/// A connect's outcome, to wait for: it started when it was made.
-#[must_use = "the connect started already; its future only waits for its outcome"]
-#[derive(Debug)]
-pub struct Connect {
-    outcome: Option<oneshot::Receiver<Result<(), TransportError>>>,
-    refused: Option<TransportError>,
-}
-
-impl Connect {
-    const fn refused(error: TransportError) -> Self {
-        Self {
-            outcome: None,
-            refused: Some(error),
-        }
-    }
-}
-
-impl Future for Connect {
-    type Output = Result<(), TransportError>;
-
-    fn poll(mut self: Pin<&mut Self>, context: &mut Context<'_>) -> Poll<Self::Output> {
-        if let Some(refused) = self.refused.take() {
-            return Poll::Ready(Err(refused));
-        }
-
-        let Some(outcome) = self.outcome.as_mut() else {
-            return Poll::Ready(Err(TransportError::Connect(ConnectError::new(
-                "the connect was polled after it settled",
-            ))));
-        };
-
-        Pin::new(outcome).poll(context).map(|outcome| {
-            outcome.unwrap_or_else(|_dropped| {
-                Err(TransportError::Connect(ConnectError::new(
-                    "the transport client was disposed as it connected",
-                )))
-            })
-        })
-    }
-}
-
 // an address a handle can name: visible ASCII but `;`, which ends a handle's part
 fn is_address(address: &str) -> bool {
     !address.is_empty()
@@ -942,10 +876,7 @@ impl MemoryClient {
     /// Connects to its server, started as it is called: open once its server drew the connection.
     pub fn connect(&self, options: MemoryConnectOptions) -> Connect {
         match self.start_connect(options) {
-            Ok(outcome) => Connect {
-                outcome: Some(outcome),
-                refused: None,
-            },
+            Ok(outcome) => Connect::of(outcome),
             Err(error) => Connect::refused(error),
         }
     }
@@ -1258,119 +1189,26 @@ impl MemoryClient {
         (target, options): (MemoryConnectOptions, ReconnectOptions),
     ) -> Result<(), TransportError> {
         let inner = &self.inner;
-        let delay = options
-            .delay
-            .unwrap_or(ReconnectDelay::Fixed(RECONNECT_DELAY));
-        let maximum_attempts = options.maximum_attempts.unwrap_or(RECONNECT_ATTEMPTS);
-        let signal = options.signal;
-        let is_cancelled = || signal.as_ref().is_some_and(CancellationToken::is_cancelled);
-        let mut previous: Option<Duration> = None;
 
-        for attempt in 1_u32.. {
-            let connecting = {
-                locked(&inner.state).is_attempting = true;
+        attempting((&inner.clock, &options), |signal| {
+            locked(&inner.state).is_attempting = true;
 
-                let connecting = self.connect(MemoryConnectOptions {
-                    signal: signal.clone(),
-                    ..target.clone()
-                });
+            let connecting = self.connect(MemoryConnectOptions {
+                signal,
+                ..target.clone()
+            });
 
-                locked(&inner.state).is_attempting = false;
+            locked(&inner.state).is_attempting = false;
 
-                connecting
-            };
+            connecting
+        })
+        .await?;
 
-            match connecting.await {
-                Ok(()) => break,
-                Err(reason) => {
-                    if is_cancelled() {
-                        return Err(TransportError::Cancelled(RECONNECTION_CANCELLED.to_owned()));
-                    }
-
-                    // a misuse an attempt met, the next would meet again
-                    if matches!(reason, TransportError::Refused(_)) {
-                        return Err(reason);
-                    }
-
-                    if attempt >= maximum_attempts {
-                        return Err(TransportError::Reconnect(ReconnectError::new(
-                            maximum_attempts,
-                            Some(Arc::new(reason)),
-                        )));
-                    }
-                }
-            }
-
-            let next = match &delay {
-                ReconnectDelay::Fixed(delay) => *delay,
-                ReconnectDelay::Computed(delay_of) => {
-                    let computed = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                        delay_of(previous, attempt)
-                    }));
-
-                    computed.map_err(|_panicked| {
-                        TransportError::Refused(ProgrammerError::new(
-                            "a reconnection's delay panicked",
-                        ))
-                    })?
-                }
-            };
-            // held before tap hears it: 0 waits none, and never would wait for ever
-            let next = hold_delay("a delay", next)?;
-            // armed before tap is told, so whoever moves the clock once told moves it past the wait;
-            // none armed for at once
-            let (woken, wait) = oneshot::channel::<()>();
-            let mut woken = Some(woken);
-            let timer = if next.is_zero() {
-                if let Some(woken) = woken.take() {
-                    woken.send(()).ok();
-                }
-
-                None
-            } else {
-                Some(inner.clock.arm(
-                    Schedule::Once(next),
-                    Box::new(move || {
-                        if let Some(woken) = woken.take() {
-                            woken.send(()).ok();
-                        }
-                    }),
-                ))
-            };
-            let cancel_timer = || {
-                if let Some(timer) = &timer {
-                    timer.cancel();
-                }
-            };
-
-            if let Some(tap) = &options.tap {
-                let tapped =
-                    std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| tap(next, attempt)));
-
-                if tapped.is_err() {
-                    cancel_timer();
-
-                    return Err(TransportError::Refused(ProgrammerError::new(
-                        "a reconnection's tap panicked",
-                    )));
-                }
-            }
-
-            previous = Some(next);
-
-            let is_woken = match &signal {
-                Some(signal) => !first_of((signal.cancelled(), wait)).await,
-                None => wait.await.is_ok(),
-            };
-
-            if !is_woken {
-                cancel_timer();
-
-                return Err(TransportError::Cancelled(RECONNECTION_CANCELLED.to_owned()));
-            }
-        }
-
-        if is_cancelled() {
+        if options
+            .signal
+            .as_ref()
+            .is_some_and(CancellationToken::is_cancelled)
+        {
             drop(self.disconnect(DisconnectOptions::default()));
 
             return Err(TransportError::Cancelled(RECONNECTION_CANCELLED.to_owned()));

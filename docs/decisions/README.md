@@ -39,14 +39,15 @@ transport, never a network of its own
 and AMQP 1.0's on RabbitMQ 4
 ([0043](0043-over-amqp-1-0-a-participant-is-one-connection-whose-exclusive-inbox-ends-with-it-and-a-parcel-one-message-of-one-profile-each-counted-to-its-byte.md))
 — and proven byte for byte by the conformance files and the interop. Its third language, Rust,
-has its core: its router, its service layer, its sessions and the in-memory transport, playing the
-conformance files its core reaches before it has a socket, under a toolchain, lints denied whole and
-a CI job of its own, each part it lacks a row of the support matrix ahead
+has its core: its router, its service layer, its sessions, the in-memory transport, and the broker's
+core over an in-memory broker with the joined transport, playing the conformance files its core
+reaches before it has a socket, under a toolchain, lints denied whole and a CI job of its own,
+each part it lacks a row of the support matrix ahead
 ([0044](0044-rust-one-owner-per-router-traits-no-unsafe-two-parameters-no-warning.md),
 [0004](0004-one-behaviour-in-every-language.md)). Ahead, in this order:
 
-- **Rust's core, whole**: its broker's core, the in-memory broker and the joined transport; then its
-  `proto` codec, its library chosen by a spike that meets five criteria
+- **Rust's core, whole**: its `proto` codec, the last of it, its library chosen by a spike that
+  meets five criteria
   ([0044](0044-rust-one-owner-per-router-traits-no-unsafe-two-parameters-no-warning.md));
 - **Rust's transports and its interop**: WebSocket and HTTP over sockets, and the interop both ways
   with the TypeScript and C# sides; then its broker bindings, MQTT 5 and AMQP 1.0; its gateway; and

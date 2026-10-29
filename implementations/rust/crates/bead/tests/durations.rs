@@ -11,17 +11,22 @@ use std::time::SystemTime;
 
 use bead::testing::SteppingClock;
 use bead::testing::durations::{DurationInput, DurationPlace, Durations, PlaceOutcome};
+use bead::testing::parcels::{self, ParcelFields, ParcelReading};
 use bead::{
-    BeforeRequest, BoxFuture, Call, CallError, CallHooks, ClientListener, ClientRequest,
-    ClientTransport, ConnectionHandle, DebugEvent, DestinationOptions, DurationRefusal, Envelope,
-    LIMIT_DEFAULTS, MAXIMUM_DETAIL_BYTES, MemoryClient, MemoryClientOptions, MemoryConnectOptions,
-    MemoryServer, MemoryServerOptions, NEVER, Procedure, ProgrammerError, RawCodec, ReadyState,
-    ReconnectDelay, ReconnectOptions, Refusal, RelayLeg, RelayOptions, RelayRouter, RelayTarget,
-    RequestDefaults, RequestDependencies, RequestHeader, RequestOptions, ResolvedRequestOptions,
-    RouterClient, RouterClientOptions, RouterError, RouterLimits, RouterLimitsOptions,
-    RouterServer, RouterServerOptions, Sent, Server, ServerListener, ServerOptions,
-    ServerTransport, ServiceManager, ServiceManagerOptions, ServiceRouter, SessionManagerOptions,
-    SharedClock, TransportError, TransportMessage, limits_of, write_envelope,
+    BeforeRequest, BoxFuture, BrokerAdapter, BrokerClientOptions, BrokerConnectOptions,
+    BrokerListener, BrokerMessage, BrokerParticipant, BrokerParticipantOptions, BrokerPublication,
+    BrokerServer, BrokerServerOptions, BrokerStart, BrokerSubscription, Call, CallError, CallHooks,
+    ClientListener, ClientRequest, ClientTransport, ConnectionHandle, DebugEvent,
+    DestinationOptions, DurationRefusal, Envelope, LIMIT_DEFAULTS, MAXIMUM_DETAIL_BYTES,
+    MemoryBroker, MemoryBrokerAdapter, MemoryBrokerAdapterOptions, MemoryBrokerOptions,
+    MemoryClient, MemoryClientOptions, MemoryConnectOptions, MemoryServer, MemoryServerOptions,
+    NEVER, Procedure, ProgrammerError, RawCodec, ReadyState, ReconnectDelay, ReconnectOptions,
+    Refusal, RelayLeg, RelayOptions, RelayRouter, RelayTarget, RequestDefaults,
+    RequestDependencies, RequestHeader, RequestOptions, ResolvedRequestOptions, RouterClient,
+    RouterClientOptions, RouterError, RouterLimits, RouterLimitsOptions, RouterServer,
+    RouterServerOptions, Sent, Server, ServerListener, ServerOptions, ServerTransport,
+    ServiceManager, ServiceManagerOptions, ServiceRouter, SessionManagerOptions, SharedClock,
+    TransportError, TransportMessage, limits_of, write_envelope,
 };
 use bytes::Bytes;
 use libtest_mimic::{Arguments, Failed, Trial};
@@ -35,9 +40,8 @@ const MILLISECOND: Duration = Duration::from_millis(1);
 const OTHER_TIMEOUT: Duration = Duration::from_secs(1);
 
 // the places this side plays, by the id the file keys them by; every other is ahead, with the
-// stage that brings it: its transports over HTTP and WebSocket, its broker core and bindings, its
-// gateway
-const PLACES: [&str; 13] = [
+// stage that brings it: its transports over HTTP and WebSocket, its broker bindings, its gateway
+const PLACES: [&str; 16] = [
     "call.timeout",
     "serviceManager.defaultTimeout",
     "router.reservation",
@@ -51,6 +55,9 @@ const PLACES: [&str; 13] = [
     "server.connectionInactivityTimeout",
     "transportClient.connectTimeout",
     "transportClient.reconnectionDelay",
+    "brokerParticipant.heartbeat",
+    "brokerTransportServer.acceptTimeout",
+    "brokerParticipant.bodyGracePeriod",
 ];
 
 // the ways of each place this side has, the others its rows excuse it from
@@ -61,7 +68,10 @@ fn ways_of(place: &str) -> &'static [&'static str] {
         "serviceManager.defaultTimeout"
         | "sessionManager.connectionInactivityTimeout"
         | "sessionManager.sessionInactivityTimeout"
-        | "server.connectionInactivityTimeout" => &["options"],
+        | "server.connectionInactivityTimeout"
+        | "brokerParticipant.heartbeat"
+        | "brokerTransportServer.acceptTimeout"
+        | "brokerParticipant.bodyGracePeriod" => &["options"],
         "router.reservation" => &["reserve", "cancel"],
         "relay.timeout" => &["relay", "register"],
         "session.inactivityTimeouts" => &[
@@ -72,18 +82,17 @@ fn ways_of(place: &str) -> &'static [&'static str] {
         ],
         "sessionManager.resetConnectionInactivityTimeout"
         | "sessionManager.resetSessionInactivityTimeout" => &["reset"],
-        "transportClient.connectTimeout" => &["memory"],
+        "transportClient.connectTimeout" => &["memory", "broker"],
         "transportClient.reconnectionDelay" => &["function", "number"],
         _ => &[],
     }
 }
 
 // the ways of a place played that are ahead, each with the stage that brings it: a connect's
-// timeout over HTTP and WebSocket with Rust's transports over them, and over a broker with its
-// broker core
+// timeout over HTTP and WebSocket with Rust's transports over them
 fn ahead_of(place: &str) -> &'static [&'static str] {
     match place {
-        "transportClient.connectTimeout" => &["http", "webSocket", "broker"],
+        "transportClient.connectTimeout" => &["http", "webSocket"],
         _ => &[],
     }
 }
@@ -92,6 +101,8 @@ fn ahead_of(place: &str) -> &'static [&'static str] {
 #[derive(Debug)]
 enum Observed {
     Held(Duration),
+    // taken, where a place's refusal alone is observed
+    Taken,
     Refused(ProgrammerError),
 }
 
@@ -1071,6 +1082,294 @@ async fn reconnection_delay_by_number(given: Option<Duration>) -> Played {
     reconnection_delay_of(ReconnectDelay::Fixed(given)).await
 }
 
+// ── The broker's places ──────────────────────────────────────────────────────────────────────
+
+// what reaches a peer of the tests' own, in order
+struct PeerHearing(Arc<Mutex<Vec<Bytes>>>);
+
+impl BrokerListener for PeerHearing {
+    fn on_message(&self, message: &BrokerMessage) {
+        message.settle();
+        locked(&self.0).push(message.payload().clone());
+    }
+}
+
+fn topic_of(tokens: [&str; 3]) -> Vec<String> {
+    tokens.iter().map(|token| (*token).to_owned()).collect()
+}
+
+fn parcel_fields(kind: u8, (opener, acceptor, sequence): (&str, &str, u64)) -> ParcelFields {
+    ParcelFields {
+        layout: 0xB1,
+        kind,
+        flags: Some(0),
+        opener: opener.to_owned(),
+        acceptor: acceptor.to_owned(),
+        sequence,
+        id: None,
+        incarnation: None,
+        bound: None,
+        status: None,
+        layouts: None,
+        credential: None,
+        carried: None,
+        answers: None,
+        code: None,
+    }
+}
+
+// a peer of `broker`, started, its inbox and `topic` subscribed, what reaches it kept
+async fn peer_of(
+    broker: &MemoryBroker,
+    (id, topic): (&str, [&str; 3]),
+) -> Result<(MemoryBrokerAdapter, Arc<Mutex<Vec<Bytes>>>), String> {
+    let peer = broker
+        .adapter(&MemoryBrokerAdapterOptions::of(id))
+        .map_err(|error| error.to_string())?;
+    let heard: Arc<Mutex<Vec<Bytes>>> = Arc::default();
+
+    peer.listen(Arc::new(PeerHearing(Arc::clone(&heard))));
+    peer.start(BrokerStart::default())
+        .await
+        .map_err(|error| error.to_string())?;
+
+    for topic in [topic_of(["bead", "i", id]), topic_of(topic)] {
+        peer.subscribe(&topic, BrokerSubscription::default())
+            .await
+            .map_err(|error| error.to_string())?;
+    }
+
+    Ok((peer, heard))
+}
+
+fn broker_on(clock: &Arc<SteppingClock>) -> Result<MemoryBroker, String> {
+    let mut options = MemoryBrokerOptions::default();
+
+    options.clock = Some(shared_of(clock));
+
+    MemoryBroker::new(&options).map_err(|error| error.to_string())
+}
+
+fn participant_on(
+    (broker, id): (&MemoryBroker, &str),
+    options: &BrokerParticipantOptions,
+) -> Result<Result<BrokerParticipant, ProgrammerError>, String> {
+    let adapter: Arc<dyn BrokerAdapter> = Arc::new(
+        broker
+            .adapter(&MemoryBrokerAdapterOptions::of(id))
+            .map_err(|error| error.to_string())?,
+    );
+
+    Ok(BrokerParticipant::new(adapter, options))
+}
+
+// a broker's server serving interop on a stepping clock, and a peer of the same broker whose inbox is
+// subscribed: what the peer's OPEN draws, and what reaches the peer
+struct BrokerDrive {
+    clock: Arc<SteppingClock>,
+    participant: BrokerParticipant,
+    server: BrokerServer,
+    peer: MemoryBrokerAdapter,
+    heard: Arc<Mutex<Vec<Bytes>>>,
+}
+
+impl BrokerDrive {
+    async fn of(
+        (participant, server): (BrokerParticipantOptions, BrokerServerOptions),
+    ) -> Result<Result<Self, ProgrammerError>, String> {
+        let clock = SteppingClock::new(epoch());
+        let broker = broker_on(&clock)?;
+        let mut participant_options = participant;
+
+        participant_options.clock = Some(shared_of(&clock));
+
+        let participant = match participant_on((&broker, "server"), &participant_options)? {
+            Ok(participant) => participant,
+            Err(refused) => return Ok(Err(refused)),
+        };
+        let server = match participant.server(&server) {
+            Ok(server) => server,
+            Err(refused) => return Ok(Err(refused)),
+        };
+
+        server.start().await.map_err(|error| error.to_string())?;
+
+        let (peer, heard) = peer_of(&broker, ("peer", ["bead", "i", "peer"])).await?;
+
+        Ok(Ok(Self {
+            clock,
+            participant,
+            server,
+            peer,
+            heard,
+        }))
+    }
+
+    async fn publish(&self, (topic, fields): ([&str; 3], &ParcelFields)) -> Result<(), String> {
+        let payload = parcels::write(fields)?;
+
+        self.peer
+            .publish(BrokerPublication::of(topic, Bytes::from(payload)))
+            .await
+            .map(drop)
+            .map_err(|error| error.to_string())?;
+        self.clock.settle().await;
+
+        Ok(())
+    }
+
+    // the peer's OPEN, and the acceptor's half its ACCEPT drew
+    async fn open(&self) -> Result<String, String> {
+        let mut open = parcel_fields(1, ("00 00 00 00 00 00 00 01", "00 00 00 00 00 00 00 00", 1));
+
+        open.id = Some("peer".to_owned());
+        open.incarnation = Some("00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 07".to_owned());
+        open.bound = Some(65_536);
+        self.publish((["bead", "s", "interop"], &open)).await?;
+
+        let accept = locked(&self.heard).first().cloned().ok_or("no ACCEPT")?;
+
+        match parcels::read(&accept) {
+            ParcelReading::Parcel(accept) if accept.kind == 2 => Ok(accept.acceptor),
+            other @ (ParcelReading::Parcel(_)
+            | ParcelReading::NoParcel(_)
+            | ParcelReading::DoesNotRead(..)) => Err(format!("read {other:?}, no ACCEPT")),
+        }
+    }
+
+    async fn stop(&self) {
+        self.server.stop().await;
+        self.participant.stop().await;
+    }
+}
+
+// the participant's options, as it is built: taken or refused
+async fn broker_heartbeat_by_options(given: Option<Duration>) -> Played {
+    let clock = SteppingClock::new(epoch());
+    let broker = broker_on(&clock)?;
+    let mut options = BrokerParticipantOptions::default();
+
+    options.heartbeat = Some(given.ok_or("a heartbeat is given")?);
+
+    match participant_on((&broker, "server"), &options)? {
+        Ok(participant) => {
+            participant.stop().await;
+
+            Ok(Observed::Taken)
+        }
+        Err(refused) => Ok(Observed::Refused(refused)),
+    }
+}
+
+// the transport server's options, as it is built: the due of the timer an ACCEPT arms for its third
+// leg; refused, no server built
+async fn accept_timeout_by_options(given: Option<Duration>) -> Played {
+    let mut server = BrokerServerOptions::of(["interop"]);
+
+    server.accept_timeout = given;
+
+    let drive = match BrokerDrive::of((BrokerParticipantOptions::default(), server)).await? {
+        Ok(drive) => drive,
+        Err(refused) => return Ok(Observed::Refused(refused)),
+    };
+
+    drive.open().await?;
+
+    let due = due_of(&drive.clock.dues());
+
+    drive.stop().await;
+
+    Ok(Observed::Held(due?))
+}
+
+// the participant's options, as it is built: the due of the timer an envelope's first part arms,
+// its connection proven; refused, no participant built
+async fn broker_body_grace_period_by_options(given: Option<Duration>) -> Played {
+    let mut participant = BrokerParticipantOptions::default();
+
+    participant.body_grace_period = given;
+
+    let drive = match BrokerDrive::of((participant, BrokerServerOptions::of(["interop"]))).await? {
+        Ok(drive) => drive,
+        Err(refused) => return Ok(Observed::Refused(refused)),
+    };
+    let acceptor = drive.open().await?;
+    let opener = "00 00 00 00 00 00 00 01";
+
+    drive
+        .publish((
+            ["bead", "i", "server"],
+            &parcel_fields(5, (opener, &acceptor, 2)),
+        ))
+        .await?;
+
+    // * its accept timeout cleared at the third leg: what is armed after is the parts' own
+    hold(drive.clock.dues().is_empty(), || {
+        format!("armed {:?} at the third leg", drive.clock.dues())
+    })?;
+
+    let mut part = parcel_fields(4, (opener, &acceptor, 3));
+
+    part.flags = Some(1);
+    part.carried = Some("A1 10".to_owned());
+    drive.publish((["bead", "i", "server"], &part)).await?;
+
+    let due = due_of(&drive.clock.dues());
+
+    drive.stop().await;
+
+    Ok(Observed::Held(due?))
+}
+
+// a client of a participant over the in-memory broker, whose server's name a peer subscribes and
+// answers nothing: its timeout's due, armed as the connect is made; refused, at once
+async fn connect_timeout_by_broker(given: Option<Duration>) -> Played {
+    let clock = SteppingClock::new(epoch());
+    // ! on the connect's clock: its OPEN lives the connect's time left, which a broker on the real
+    // clock sees pass before it hands the OPEN on
+    let broker = broker_on(&clock)?;
+    let (_peer, _heard) = peer_of(&broker, ("peer", ["bead", "s", "interop"])).await?;
+    let mut options = BrokerParticipantOptions::default();
+
+    options.clock = Some(shared_of(&clock));
+
+    let participant =
+        participant_on((&broker, "client"), &options)?.map_err(|error| error.to_string())?;
+
+    participant
+        .start()
+        .await
+        .map_err(|error| error.to_string())?;
+
+    let client = participant
+        .client(&BrokerClientOptions::default())
+        .map_err(|error| error.to_string())?;
+    let mut connect = BrokerConnectOptions::of("interop");
+
+    connect.timeout = given;
+
+    let connecting = client.connect(connect);
+    let dues = clock.dues();
+
+    // * no answer comes: let go of it, the connect failing
+    client.dispose();
+
+    let observed = match connecting.await {
+        Err(TransportError::Refused(refused)) => {
+            hold(dues.is_empty(), || {
+                "a refused connect armed a timer".to_owned()
+            })?;
+
+            Ok(Observed::Refused(refused))
+        }
+        _ => Ok(Observed::Held(due_of(&dues)?)),
+    };
+
+    participant.stop().await;
+
+    observed
+}
+
 // ── The table ────────────────────────────────────────────────────────────────────────────────
 
 async fn play_way((place, way): (&str, &str), given: Option<Duration>) -> Played {
@@ -1111,6 +1410,14 @@ async fn play_way((place, way): (&str, &str), given: Option<Duration>) -> Played
             server_inactivity_by_options(given).await
         }
         ("transportClient.connectTimeout", "memory") => connect_timeout_by_memory(given).await,
+        ("transportClient.connectTimeout", "broker") => connect_timeout_by_broker(given).await,
+        ("brokerParticipant.heartbeat", "options") => broker_heartbeat_by_options(given).await,
+        ("brokerTransportServer.acceptTimeout", "options") => {
+            accept_timeout_by_options(given).await
+        }
+        ("brokerParticipant.bodyGracePeriod", "options") => {
+            broker_body_grace_period_by_options(given).await
+        }
         ("transportClient.reconnectionDelay", "function") => {
             reconnection_delay_by_function(given).await
         }
@@ -1159,15 +1466,25 @@ fn check(
             Observed::Refused(refused) if refused.reason() == Some(Refusal::Duration(reason)) => {
                 Ok(())
             }
-            other @ (Observed::Refused(_) | Observed::Held(_)) => {
+            other @ (Observed::Refused(_) | Observed::Held(_) | Observed::Taken) => {
                 Err(format!("{at}: {other:?}, not refused for {reason}"))
+            }
+        };
+    }
+
+    // * where its refusal alone is observed, what it takes is taken
+    if outcome.outcome == "taken" {
+        return match observed {
+            Observed::Taken => Ok(()),
+            other @ (Observed::Refused(_) | Observed::Held(_)) => {
+                Err(format!("{at}: {other:?}, not taken"))
             }
         };
     }
 
     match observed {
         Observed::Held(held) if Some(*held) == held_of(outcome) => Ok(()),
-        other @ (Observed::Held(_) | Observed::Refused(_)) => {
+        other @ (Observed::Held(_) | Observed::Refused(_) | Observed::Taken) => {
             Err(format!("{at}: {other:?}, not {:?}", held_of(outcome)))
         }
     }
@@ -1197,7 +1514,7 @@ async fn plays(durations: &Durations, place: &DurationPlace) -> Result<(), Strin
         {
             match play_way((&place.id, &way.id), None).await? {
                 Observed::Held(held) if held == stated.held => {}
-                other @ (Observed::Held(_) | Observed::Refused(_)) => {
+                other @ (Observed::Held(_) | Observed::Refused(_) | Observed::Taken) => {
                     return Err(format!(
                         "{}, nothing given: {other:?}, not {:?}",
                         way.id, stated.held
