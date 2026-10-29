@@ -60,7 +60,15 @@ driver passes `Handle::try_current()`, and tokio panics as a timer is armed. Cli
 **The options weighed, and not taken**:
 
 - **An executor abstraction** over several runtimes: a second way to spawn, time and cancel, for
-  runtimes no side's user asked for; tokio, the ecosystem's, is the application's runtime.
+  runtimes no side's user asked for; tokio, the ecosystem's, is the application's runtime. As a
+  public trait it costs a box and a virtual call per spawn, 60 to 84 ns measured, and its future's
+  `Send` is a promise to freeze.
+- **The browser platform now**, the core's executor, clock and tests in a page, its shape designed
+  (Consequences, Ahead) and not built: no consumer asks for it, and nothing on the native surface
+  waits on it. The funnel, its gate and the browser target's check keep the door open, while the
+  platform would bring a test host's dependencies into every native test build, a second body of
+  `SystemClock`, a test job and its driver, and rows of the matrix stating a platform no application
+  uses.
 - **A bounded queue** per router: a backpressure of Rust's alone, where JavaScript's microtasks and
   the C# scheduler are unbounded and what bounds work is Bead's own, `maximumAnsweringCalls`,
   credit and the limits of spec 12.2.
@@ -147,7 +155,8 @@ doc comment on a source's item never stands for a twin.
 ### The toolchain
 
 `rust-toolchain.toml` pins `channel = "1.99.1"`, `profile = "minimal"`, its components `clippy`,
-`rustfmt` and `llvm-tools`, which come with the toolchain and never from the registry. `edition =
+`rustfmt` and `llvm-tools`, which come with the toolchain and never from the registry, and its
+target `wasm32-unknown-unknown`, for which the browser target's check builds. `edition =
 "2024"`, `resolver = "3"`, and **the floor is the pin**: `rust-version = "1.99.1"`, as the
 TypeScript side declares the floor it runs on and the C# side pins its SDK; a lower floor is a
 support promise nobody asked for. The pin moves by a commit of its own, its new lints reviewed.
@@ -303,6 +312,34 @@ once under the handle's `enter()`, within `catch_unwind`, and what tokio panics 
 call; Bead starts no runtime and no thread of its own. **The owner lives** until `dispose().await`
 or its transport's close, the transport holding a handle to its queue, as a router lives on the
 other sides as long as its transport holds it.
+
+**The core spawns through one private module, `platform`, and reads time through its clock alone,
+as clippy's `disallowed-methods` and `disallowed-types` hold it.** `platform::spawn` is the one
+call of tokio's spawn, and `platform::runtime_of` the one reading of the current runtime and of its
+time driver, which every part of the core that takes a runtime calls with its own refusal;
+`SystemClock`'s body is the one reader of std's `Instant`, of `SystemTime::now()` and of tokio's
+timers. Each of the two funnels sits under one `#[expect]`, and the public surface names tokio's
+`Handle`, the application's runtime being tokio's. The lists refuse every other path in every
+target clippy sees, as CI runs it: tokio's spawns, `try_current` and `current` ("spawn through
+`crate::platform`"); `block_on`, `block_in_place` and `std::thread::sleep` ("a turn awaits
+nothing"); tokio's `sleep`, `sleep_until`, `interval`, `interval_at`, `timeout` and `timeout_at`,
+`SystemTime::now`, and the types `std::time::Instant` and `tokio::time::Instant`, so that every
+`elapsed()` is held too ("time through the clock"); `std::thread::spawn` ("no thread of Bead's
+own"). `SystemTime` stays allowed as a type, `Clock::wall` returning it. A test takes its spawn,
+its rest, its patience, its `Instant` and its wall clock from the kit; a target that stays native,
+the players over sockets, the durations' harness, the protobuf service's tests and the bench,
+carries one `#[expect]` at its root with its reason.
+
+**The core compiles for the browser's target**, `wasm32-unknown-unknown`: CI runs clippy over its
+library there, so a dependency or an API that does not build in a page (tokio's `net` or
+`rt-multi-thread`, a native TLS stack, `std::os`) fails the change that brings it, and the socket
+transports and the broker bindings sit in crates or features that the check leaves out by name. The
+target is checked, never run: the folder's `.cargo/config.toml` gives getrandom its `unsupported`
+backend on it, `--cfg getrandom_backend="unsupported"`, the backend getrandom names for this case,
+which adds no dependency and no lock entry, keeps `wasm_js` out of the library as getrandom asks,
+and has no effect on a crate that depends on Bead. A draw there is an error, which each of Bead's
+draws already takes as a `Result`. What would trap there at run time, a clock or a thread, the
+disallowed lists hold.
 
 ### The clock and the durations
 
@@ -482,11 +519,14 @@ byte, and **always built**: no Cargo feature leaves debugging out, which would b
 - **The test kit is inside the core**, as tokio keeps its `test-util`: `#[cfg(any(test, feature =
   "testing"))] #[doc(hidden)] pub mod testing`, holding the stepping clock, each conformance file's
   typed reader, `deny_unknown_fields` and never by index, the durations' helper and what the players
-  reach that the public API does not, as the C# players reach it by `InternalsVisibleTo`. The core
-  takes itself as a dev-dependency with the feature, so a unit test and a player share one copy of
-  it; resolver 3 keeps the feature out of every build that is not a test's. Every item of the core
-  that the kit alone reaches carries the kit's `cfg`, or it is dead code in a build without it,
-  which `build.warnings` fails.
+  reach that the public API does not, as the C# players reach it by `InternalsVisibleTo`; and what
+  a test takes from its platform, each the kit's own funnel under one `#[expect]`: `spawn`, `rest`
+  (tokio's sleep), `patience` (tokio's timeout, its `Result` the same), `Instant`, a newtype of the
+  kit's over std's, never a re-export, which the gate would flag at each `Instant::now()`, and
+  `wall_now`. The core takes itself as a dev-dependency with the feature, so a unit test and a
+  player share one copy of it; resolver 3 keeps the feature out of every build that is not a
+  test's. Every item of the core that the kit alone reaches carries the kit's `cfg`, or it is dead
+  code in a build without it, which `build.warnings` fails.
 - **The conformance players** in `crates/bead/tests/`, one file a conformance file, `harness =
   false` under `libtest-mimic`, a trial per entry named by its own name.
 - **Twin tests** carry the other sides' sentence in snake case, the unit named in a comment just
@@ -503,12 +543,13 @@ byte, and **always built**: no Cargo feature leaves debugging out, which would b
 ### The CI job, fuzz and bench
 
 CI's `rust` job ([0006](0006-a-rule-has-its-gate.md)), on Linux: `cargo fmt --check`, `cargo
-clippy --workspace --all-targets --all-features --locked`, `cargo doc`, a build on the default
-features alone, `cargo deny --locked check`, the tests under coverage held to the floor, and the
-fuzz targets built on the dated nightly, never run; on Windows, `cargo test --workspace
---all-features --locked`, as the user's MSVC toolchain builds it. The registry and the target are
-cached by the lock and the toolchain, cargo-deny and cargo-llvm-cov installed prebuilt, each checked
-by its SHA-256, and `ci-ok` needs the job. **Fuzz**: cargo-fuzz on the nightly, on Linux or WSL, by
+clippy --workspace --all-targets --all-features --locked`, the browser target's `cargo clippy -p
+francisdesjardins-bead --lib --all-features --locked --target wasm32-unknown-unknown`, `cargo doc`,
+a build on the default features alone, `cargo deny --locked check`, the tests under coverage held
+to the floor, and the fuzz targets built on the dated nightly, never run; on Windows, `cargo test
+--workspace --all-features --locked`, as the user's MSVC toolchain builds it. The registry and the
+target are cached by the lock and the toolchain, cargo-deny and cargo-llvm-cov installed prebuilt,
+each checked by its SHA-256, and `ci-ok` needs the job. **Fuzz**: cargo-fuzz on the nightly, on Linux or WSL, by
 hand through `tools/fuzz.mjs`, its four targets the twins the core holds, `envelope`,
 `payload-codecs`, `debug-filter` and `jwt`, `http-fields` and `ws-handshake` coming with the
 transports. **Bench**: `bead-bench`, the in-memory bench, writing `bead-bench/2` for
@@ -537,8 +578,9 @@ transports. **Bench**: `bead-bench`, the in-memory bench, writing `bead-bench/2`
 - **Bead's own JSON stack**, a reader, a writer and a serializer, where most crates take
   `serde_json` whole: the price of RFC 8785, spec 17.5's checks and a NaN refused.
 - **Options by assignment**: a line more than a literal, for options that never break a caller.
-- **The time driver's check**: one caught panic at a misbuilt router's construction, through the
-  application's panic hook, and under `panic = "abort"` an abort there.
+- **The time driver's check**: one caught panic at the construction of a part built on a misbuilt
+  runtime, a router, the in-memory transport or broker, a broker's participant or a clock, through
+  the application's panic hook, and under `panic = "abort"` an abort there.
 - **Types that hold less**: values of `spec/codecs.json`, inputs of `spec/durations.json` and ids no
   `u16` or `u32` holds are excused from Rust, each by its row; no `proto` entry is, the two values a
   typed message cannot hold being played through the dynamic message, a platform row of the matrix.
@@ -548,13 +590,77 @@ transports. **Bench**: `bead-bench`, the in-memory bench, writing `bead-bench/2`
   pinned compiler adds is judged on Bead's own code alone.
 - **The interop service's descriptors written by hand** until beadc's Rust target, held by a test
   against `spec/interop-blueprint.json`, an open row of the matrix.
-- **Impossible**: a `!Send` resolver; a router without a tokio runtime and its time driver; a
-  duration under zero; a call that waits to be polled before it goes.
+- **The funnel, a rule to keep**: a change that spawns or reads time goes through `platform` or
+  the clock, or fails clippy; a test reaches them through the kit; a target that stays native names
+  its exemption and its reason. A core dependency that does not build for the browser's target
+  fails its check, which costs one clippy run in CI, 11.5 s from a cold target directory, and no
+  dependency, no lock entry and no change of the surface.
+- **Impossible**: a `!Send` resolver; a router without a tokio runtime and its time driver,
+  natively; a runtime other than tokio's natively; a spawn or a reading of time outside the funnel;
+  a core dependency that does not build for `wasm32-unknown-unknown`; a duration under zero; a call
+  that waits to be polled before it goes.
 
-**Its gates**: clippy's denied table and `build.warnings`; rustfmt; cargo-deny; `bead-house`'s
-parameter rule, comment tags and lints' inheritance; the players of every conformance file the core
-reaches and the twins, which `spec/check.py` holds by Rust's row of `SIDES` and its `AHEAD`; the
-coverage floor of lines and regions; and CI's `rust` job, on Linux and on Windows.
+**Ahead: the core in a page and in a worker**, with its executor, its clock and its tests, then
+what it serves there: Rust's transports in a page, the Web Worker transport, the DevTools hook from
+a Rust client, and a Rust worker for the demo. The C# side comes into a page in the same stage,
+`Bead.Core` built for .NET's `browser-wasm`, where the platform analyzer flags 22 sites in four
+files, its TCP helpers (`HappyEyeballs.cs`, `Loopbacks.cs`, `HttpRedirects.cs`) and
+`ECDsa.Create(ECParameters)` in `JwtVerifier.cs`, none in the router, the scheduler, the clocks,
+the codec, the in-memory transport or the broker: the matrix's row
+`The core in a page and in a worker`. Its shape:
+
+- **The switch** is a Cargo feature, `web`, never the target alone: `wasm32-unknown-unknown` names
+  no JavaScript host, as getrandom states, and a JavaScript import fails a host without one as its
+  module is instantiated. The feature turns on `wasm-bindgen`, `wasm-bindgen-futures`, `web-time`
+  and getrandom's `wasm_js`, within getrandom's own exception, a crate that depends on
+  `wasm-bindgen` on that target, and does nothing natively. Without it, the core on that target
+  refuses through a `ProgrammerError` of `runtime_of`, never a panic, and never a `compile_error!`,
+  which would break the browser target's check.
+- **The executor** is `platform`'s browser half: `Handle` a unit type, `spawn` over
+  `wasm_bindgen_futures::spawn_local`, its `JoinHandle` Bead's own over a oneshot channel. The
+  native half stays as it is.
+- **The clock** is `SystemClock`'s browser body: its readings from `web-time`, the wall clock std's
+  `SystemTime`, its timers the global `setTimeout` and `setInterval`, whose closures live in a table
+  of the thread's own under a key, so that `Timer: Send + Sync` holds. The delay is bound as an
+  `i32`, HTML's `long`; every due is clamped to `LONGEST_TIMER` and rounded up to its next whole
+  millisecond, as tokio rounds a deadline natively, so a due past the longest waits the longest
+  instead of firing at once, as Chromium and Node fire a delay past 2³¹ − 1 ms, and a timer fires no
+  earlier on either of Rust's platforms. A test of the browser clock holds that a due past the
+  longest waits the longest; how the rounding meets the TypeScript side's arm in a page is weighed
+  there.
+- **The tests** run under Node in the `rust` job, wasm-bindgen-test-runner's default host, which
+  has the clock's four APIs; Chromium runs what only a page has, a `web-sys` WebSocket or a
+  `MessagePort`. A test that panics on purpose runs under `#[cfg(panic = "unwind")]`, unwinding
+  being impossible in a browser on the pinned stable, and `vectors.json` is embedded in a browser
+  build. The conformance players play on the browser's executor, as scenario functions independent
+  of the runner, before the matrix states the platform as running, its row saying "unit tests
+  alone" short of that.
+- **`Send` for what a page holds `!Send`** has two candidates, chosen on a probe of the first
+  transport that holds one. `MaybeSend` and `MaybeSync` (wgpu, matrix-sdk): the supertraits
+  replaced, an alias per target for each boxed `dyn` (E0225), `arc_with_non_send_sync` firing in a
+  browser. A thread-bound handle (leptos' `SendWrapper`, the browser clock's own table): every bound
+  stays `Send`, at a lookup per access and a `Result` refused on the wrong thread, and it survives
+  WebAssembly's threads, where `MaybeSend` does not. Past 1.0.0, only the thread-bound handle stays
+  open without a major release (`trait_removed_supertrait`).
+- **The runtime fields in a browser** have two candidates: absent, both targets named in
+  `[package.metadata.docs.rs] targets`; or matrix-sdk's drop-in, a public unit `Handle` documented
+  as nothing to give in a page, so that a crate built for both targets sets the field without a
+  `cfg`. Neither moves a native caller's surface.
+- **The evidence it starts from**: the owner's twins pass on `spawn_local`, in Chromium 156 in a
+  page and in a dedicated worker, and under Node 26.10.0:
+  `sends_each_call_in_the_order_it_is_made_whatever_order_it_is_awaited_in`,
+  `a_call_s_future_dropped_unpolled_still_sends_its_call`,
+  `a_call_a_listener_makes_within_a_turn_goes_as_that_turn_ends_before_any_job_queued_after_it`,
+  `an_envelope_a_listener_hands_its_router_within_a_turn_is_taken_behind_what_came_before_it` and
+  `keeps_its_connection_when_the_application_drops_its_last_handle`, with spec 9.0's three pairs,
+  among 298 of 314 tests.
+
+**Its gates**: clippy's denied table and `build.warnings`; clippy's `disallowed-methods` and
+`disallowed-types`, which hold every spawn and every reading of time to the funnel; the core's
+clippy for `wasm32-unknown-unknown`; rustfmt; cargo-deny; `bead-house`'s parameter rule, comment
+tags and lints' inheritance; the players of every conformance file the core reaches and the twins,
+which `spec/check.py` holds by Rust's row of `SIDES` and its `AHEAD`; the coverage floor of lines
+and regions; and CI's `rust` job, on Linux and on Windows.
 
 ## The Tenth Man
 
@@ -581,3 +687,20 @@ in part, none refused; the form of a module's documentation was the user's to ch
 | The draft moves the spec to 0.9.1 and every file's `specVersion` on the feature branch; [0008](0008-three-version-axes-and-names-qualified-by-their-owner.md) moves the spec's version in the release commit, its minor or patch the maintainer's to say, and history agrees.                                                                                                                                                                                                                                                                                                       | **Accepted.** The branch leaves `specVersion` at 0.9.0; the change is a patch-sized clarification by 0008's rule — `$comment`s, `differs` items and an enum value of a schema, no file, top-level key or property added — for the maintainer to confirm at release, and `tools/release.mjs prepare` moves the version then.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
 | Better Comments builds its pattern from the language's line comment, `//` for Rust, so every `//!` line, Rust's inner doc comment, which the draft requires on every crate and module, renders as the `!` alert; `bead-house` must tell `//!` from `// !`.                                                                                                                                                                                                                                                                                                                          | **In part.** The facts hold, and `bead-house` tells them by rustc's own tokens, a doc comment never being a tag. The form was the user's, two of their own rules meeting here, Rust's newest norms and `CLAUDE.md`'s tags as the extension shows them: (a) no `//!` anywhere, a module's docs as `///` on its `mod` item, a crate's from its README, `bead-house` refusing `//!`; (b) `//!` kept, the language's and std's form, `CLAUDE.md` naming it Rust's one exception. **The user chose (b)**, 2026-10-28.                                                                                                                                                                                                                                                                                                                                                                    |
 | The draft's notes on Rust's idioms say `Sync` is "read from several threads at once", too narrow, since a `Mutex<T>` is `Sync` and written through, and credit cargo-deny with answering for `unsafe`, which it never checks; `'static`, `dyn` and Cargo features are missing.                                                                                                                                                                                                                                                                                                      | **Accepted.** `Sync` is "`&T` can be shared between threads", a `Mutex` the example; cargo-deny's four checks named and its silence on `unsafe` said; notes added on `'static`, on `dyn` against generics and on Cargo features, the kit's `testing` the example; the note on `async` rewritten by the first objection's answer.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+
+### The runtime seam
+
+A second round met a draft that built the browser platform whole: eight objections, each checked
+against its probe before it was answered, six accepted, two in part, none refused; no point was left
+to the user.
+
+| Objection                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   | Answer                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| The gate as specified fails CI. Run as CI runs it (`--workspace --all-targets`, the cap lifted so no crate hides its dependents), the disallowed list flags 42 sites in the seamed copy, not the 22 of `--lib`. Those include targets kept native, and tests that go through a kit that re-exports std's `Instant`. The list misses `Instant::elapsed`, `tokio::time::{timeout, sleep_until, interval}`, `Handle::current`, `JoinSet::spawn`, `block_in_place` and `std::thread::sleep`.                                                                                                    | **Accepted.** Rerun on the repository with the list completed and `disallowed-types` added for std's and tokio's `Instant`, which holds every `elapsed` (`clock.rs`'s among them): 92 sites. 23 are in the library and collapse into two funnels, `platform` and `SystemClock`'s native body, each with one `#[expect]`; spawning becomes a function there, since a re-exported `Handle`'s `spawn` is still flagged. 42 are in 13 unit-test files and move to the kit, whose `Instant` becomes a newtype. 27 are in five native-only targets, each exempted once with its reason. The count is stated from the CI command. |
+| The C# side can run in a page: .NET 10's `browser-wasm` runs a `net10.0` library, and the platform analyzer finds 22 CA1416 sites in `Bead.Core`, all in four files (TCP helpers and `ECDsa.Create`), none in the router, the scheduler, the clock or the codec. Recording "not available" makes a gap that can close an impossibility, against Parity, and the choice is the user's.                                                                                                                                                                                                       | **In part.** The evidence holds (22 sites, deduplicated by position), and the matrix is corrected: `The Web Worker transport` becomes open, its C# and Rust cells ahead, and a new open row, `The core in a page and in a worker`, names what stands in the way on each side. No point goes to the user: no side gains a page in this round, and Parity settles that the two sides come into a page together, in the stage that takes Rust there.                                                                                                                                                                          |
+| A simpler option was passed over. No surface freezes on this choice, so the only reason for now is drift, which the gate alone stops natively. The option is the native funnel, the gate, and a compile-only clippy run for the browser's target, with the platform waiting for a consumer; none exists, and the measure in a worker is a workload hypothesis to test. The draft understates its costs: `wasm-bindgen-test`'s unconditional dependencies built into every native test, 41 files rewritten, a job and its driver, two clocks, a CLI pin, rows that state an unused platform. | **Accepted, and taken as the decision.** It is verified: `wasm-bindgen-test` 0.3.79's dependencies are unconditional, and the measure's own report disowns its ratio. The browser target's check runs on the repository as it stands, clean, with getrandom's `unsupported` backend given per target in `.cargo/config.toml`: no dependency, no lock entry, 11.5 s. The browser half is designed and recorded ahead, and the owner's twins on `spawn_local` are its evidence.                                                                                                                                              |
+| `target_os = "unknown"` names no browser. getrandom, on which the draft relies, refuses to infer JavaScript from that target and recommends against `wasm_js` in a library. A `#[wasm_bindgen] extern` import fails a host without JavaScript when the module is instantiated. The remedy is a `web` feature with a `compile_error!` without it, or the target alone with its reason recorded.                                                                                                                                                                                              | **In part.** The library enables nothing for the target, and the check gives getrandom its `unsupported` backend, as getrandom asks. The browser half sits behind a `web` feature that turns on `wasm-bindgen`, `web-time` and getrandom's `wasm_js`, within getrandom's own exception. The `compile_error!` is not taken: it would break the browser target's check. Without the feature, the core refuses through a `Result`.                                                                                                                                                                                            |
+| The browser clock fires at once past 2³¹ − 1 ms: HTML's `setTimeout` takes a signed 32-bit `long`, and the draft binds a `u32` and falls back to `u32::MAX`. Chromium and Node fire those dues at once, while tokio waits. `as_millis()` truncates where tokio rounds a deadline up.                                                                                                                                                                                                                                                                                                        | **Accepted**, verified on Chromium 156, Node 26.10.0 and tokio's source. The delay is bound as an `i32`, each due clamped to `LONGEST_TIMER` and rounded up to its next whole millisecond, as tokio does natively, and a test of the browser clock holds that a due past the longest waits the longest.                                                                                                                                                                                                                                                                                                                    |
+| Chromium adds nothing that Node does not catch (298 of 314 on each, the same 16 left). It needs a Playwright job and a driver of Bead's own, and it is a Z for one side, since the TypeScript side's unit tests run under Node alone. The conformance corpus never plays on the browser's executor.                                                                                                                                                                                                                                                                                         | **Accepted.** The browser half's tests run under Node, in the `rust` job, and Chromium runs what only a page has. The corpus plays on the browser's executor (scenario functions independent of the runner, the vectors embedded) before the matrix states the platform as running, the row saying "unit tests alone" short of that. No browser test job is added in this round.                                                                                                                                                                                                                                           |
+| `MaybeSend` is decided too early: it fixes the public supertraits of 13 traits and the boxed aliases before the transport it serves exists. The draft's own browser clock shows the alternative, a `Send` handle over a thread-bound value, as leptos' `SendWrapper` does, which has none of `MaybeSend`'s costs and survives atomics.                                                                                                                                                                                                                                                      | **Accepted.** The record states the question with both candidates, `MaybeSend` (wgpu, matrix-sdk) and the thread-bound handle (leptos, the browser clock's table), chosen on a probe of the first transport that holds a `!Send` value. Past 1.0.0 only the thread-bound handle stays open without a major release. "Impossible: a browser build with threads while `Send` is kept" is withdrawn, since a key crosses threads where a `JsValue` cannot.                                                                                                                                                                    |
+| Aliasing tokio's `Handle` as `Runtime` inverts tokio's vocabulary (a `Runtime` owns the workers, a `Handle` refers to one), and matrix-sdk keeps tokio's names. Absent fields in a browser force a `cfg` per assignment and leave the browser surface undocumented on docs.rs.                                                                                                                                                                                                                                                                                                              | **Accepted.** The funnel's type is `Handle`, tokio's own natively. The fields in a browser keep both candidates: absent, with both targets in `[package.metadata.docs.rs] targets`, or matrix-sdk's drop-in, a public unit `Handle` documented as nothing to give in a page. Neither moves a native caller.                                                                                                                                                                                                                                                                                                                |

@@ -289,10 +289,11 @@ nothing it generates is committed.
 ## Rust
 
 In `implementations/rust`. Rust 1.99.1 and edition 2024, as `rust-toolchain.toml` pins them, which
-rustup installs with clippy, rustfmt and llvm-tools; on Windows, the MSVC build tools' C++ linker,
-and no C compiler beyond it, the core being pure Rust. Clippy's `pedantic`, `nursery` and `cargo`
-groups and chosen restriction lints are denied, `unsafe_code` forbidden, and every warning of rustc,
-clippy and rustdoc an error by its `.cargo/config.toml`
+rustup installs with clippy, rustfmt, llvm-tools and the browser's target, `wasm32-unknown-unknown`;
+on Windows, the MSVC build tools' C++ linker, and no C compiler beyond it, the core being pure Rust.
+Clippy's `pedantic`, `nursery` and `cargo` groups and chosen restriction lints are denied,
+`unsafe_code` forbidden, and every warning of rustc, clippy and rustdoc an error by its
+`.cargo/config.toml`
 ([0044](docs/decisions/0044-rust-one-owner-per-router-traits-no-unsafe-two-parameters-no-warning.md)).
 Its [README](implementations/rust/README.md) describes its crates and its modules.
 
@@ -300,6 +301,7 @@ Its [README](implementations/rust/README.md) describes its crates and its module
 cd implementations/rust
 cargo fmt --all -- --check
 cargo clippy --workspace --all-targets --all-features --locked
+cargo clippy -p francisdesjardins-bead --lib --all-features --locked --target wasm32-unknown-unknown
 cargo test --workspace --all-features --locked
 cargo deny --locked check
 ```
@@ -307,8 +309,11 @@ cargo deny --locked check
 The packages are `francisdesjardins-bead*`, their libraries `bead*`, `publish = false`. Bead takes
 the application's tokio runtime, which enables its time driver, `enable_all` or `enable_time`, and
 starts none of its own; an operation goes as it is made, and dropping its future cancels nothing.
-Its `proto` codec, `bead-protobuf`, is built on Buffa 0.9.2, whose generated code its tests include
-under one `#[expect]` of the workspace's lints.
+The core spawns and reads time through one module and its clock alone, clippy's
+`disallowed-methods` and `disallowed-types` holding every other path, and the second clippy run
+checks that it compiles for the browser's target, which is checked, never run. Its `proto` codec,
+`bead-protobuf`, is built on Buffa 0.9.2, whose generated code its tests include under one
+`#[expect]` of the workspace's lints.
 
 ## The builder
 
@@ -883,11 +888,12 @@ it, a page's client in Chromium, and the DevTools extension following the demo's
 drawn for the run, with `BEAD_AMQP_REQUIRED=1` and `BEAD_INTEROP_REQUIRED=1`: the cases over AMQP
 1.0 on both sides, each adapter against it, and the interop over AMQP 1.0 both ways, with no page
 leg, since no page reaches an AMQP 1.0 broker); `rust` on Linux and Windows (on Linux, the
-toolchain its file pins, format, clippy, the documentation, a build on the default features alone,
-cargo-deny, the tests under coverage, lines and regions held to the side's floor, and the fuzz
-targets built on the nightly pinned by its date; on Windows, the tests); `builder` (install,
-protoc by its pin's sha256, test with `BEADC_PROTOC_REQUIRED=1` and `BEADC_WRAPPERS_REQUIRED=1`,
-the wrappers held to one contract against a stand-in engine, then beadc over the interop's
+toolchain its file pins, format, clippy, the core's clippy for the browser's target, the
+documentation, a build on the default features alone, cargo-deny, the tests under coverage, lines
+and regions held to the side's floor, and the fuzz targets built on the nightly pinned by its date;
+on Windows, the tests); `builder` (install, protoc by its pin's sha256, test with
+`BEADC_PROTOC_REQUIRED=1` and `BEADC_WRAPPERS_REQUIRED=1`, the wrappers held to one contract
+against a stand-in engine, then beadc over the interop's
 blueprint, its rules and its form, `beadc generate --check` over the root's `beadc.yaml`, each
 side's interop, and over the demo's, and `tools/check-validations.mjs` and
 `tools/check-transcoding.mjs`, each side's validators of `spec/validations.proto` and its route
