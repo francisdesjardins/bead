@@ -51,3 +51,17 @@ test.describe('toggleWord and hasWord', () => {
     expect(hasWord('d(rx),t(Request)', 't(request)')).toBe(true);
   });
 });
+
+test('keeps procedures by name alone, leaving unlabelled series and selectors without names alone', () => {
+  for (const [spec, kept] of [
+    ['-metrics', false],
+    ['metrics', true],
+    ['reader', false],
+    ['d(rx)', true],
+    ['e(result)', true],
+  ] as const) {
+    const keeper = keeperOf(spec);
+    expect(keeper.keepsProcedure('metrics')).toBe(kept);
+    expect(keeper.keepsProcedure(undefined)).toBe(true);
+  }
+});

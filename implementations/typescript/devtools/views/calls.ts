@@ -22,7 +22,7 @@ import {
 } from '../model/facts';
 import type { ISpan } from '../model/scale';
 import { bytesOf, clockOf, envelopeLineOf, numberOf, spanOf } from '../model/words';
-import { make, statusIconOf } from './dom';
+import { keyOfRecord, make, statusIconOf } from './dom';
 
 // interfaces
 
@@ -149,7 +149,11 @@ const envelopeRowsOf = (
   );
   const rows = call.envelopes.map((envelope) => {
     return make('tr', {
-      attributes: { 'data-direction': envelope.direction, 'data-envelope-of': String(call.key) },
+      attributes: {
+        'data-row': keyOfRecord(envelope),
+        'data-direction': envelope.direction,
+        'data-envelope-of': String(call.key),
+      },
       children: [
         make('td'),
         make('td'),
@@ -293,6 +297,7 @@ export const envelopeListRowsOf = (list: IEnvelopeList): HTMLElement[] => {
     return make('tr', {
       attributes: {
         'aria-selected': String(call.key === list.selected),
+        'data-row': keyOfRecord(envelope),
         'data-direction': envelope.direction,
         'data-key': String(call.key),
       },

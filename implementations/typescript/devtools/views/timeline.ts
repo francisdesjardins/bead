@@ -13,7 +13,7 @@ import { endOf, outcomeOf, startOf, statusOf } from '../model/facts';
 import { type ISpan, scaleOf, ticksOf } from '../model/scale';
 import { clockOf, spanOf } from '../model/words';
 import { callLabelOf, durationWordsOf, typeWordsOf } from './calls';
-import { make, svgOf } from './dom';
+import { currentOf, listen, make, svgOf } from './dom';
 
 // interfaces
 
@@ -185,40 +185,60 @@ export const timelineViewOf = (view: ITimelineView): Node[] => {
   // where a drag started, in the drawing's own units
   let from: number | undefined;
   const xOfEvent = (event: PointerEvent): number => {
-    const box = svg.getBoundingClientRect();
+    const box = currentOf(svg).getBoundingClientRect();
 
     return ((event.clientX - box.left) / Math.max(box.width, 1)) * WIDTH;
   };
 
-  svg.addEventListener('pointerdown', (event) => {
-    from = xOfEvent(event);
-    svg.setPointerCapture(event.pointerId);
+  listen(svg, {
+    type: 'pointerdown',
+    handle: (event) => {
+      from = xOfEvent(event);
+      currentOf(svg).dataset['dragging'] = 'true';
+      currentOf(svg).setPointerCapture(event.pointerId);
+    },
   });
-  svg.addEventListener('pointermove', (event) => {
-    if (from === undefined) {
-      return;
-    }
+  listen(svg, {
+    type: 'pointermove',
+    handle: (event) => {
+      if (from === undefined) {
+        return;
+      }
 
-    const x = xOfEvent(event);
+      const x = xOfEvent(event);
 
-    brush.setAttribute('x', String(Math.min(from, x)));
-    brush.setAttribute('width', String(Math.abs(x - from)));
-    brush.setAttribute('visibility', 'visible');
+      currentOf(brush).setAttribute('x', String(Math.min(from, x)));
+      currentOf(brush).setAttribute('width', String(Math.abs(x - from)));
+      currentOf(brush).setAttribute('visibility', 'visible');
+    },
   });
-  svg.addEventListener('pointerup', (event) => {
-    const x = xOfEvent(event);
-    const started = from;
+  listen(svg, {
+    type: 'pointerup',
+    handle: (event) => {
+      const x = xOfEvent(event);
+      const started = from;
 
-    from = undefined;
-    brush.setAttribute('visibility', 'hidden');
+      from = undefined;
+      delete currentOf(svg).dataset['dragging'];
+      currentOf(brush).setAttribute('visibility', 'hidden');
 
-    // a click is no span
-    if (started !== undefined && Math.abs(x - started) > 4) {
-      view.onRange({
-        from: scale.timeOf(Math.min(started, x)),
-        to: scale.timeOf(Math.max(started, x)),
-      });
-    }
+      // a click is no span
+      if (started !== undefined && Math.abs(x - started) > 4) {
+        view.onRange({
+          from: scale.timeOf(Math.min(started, x)),
+          to: scale.timeOf(Math.max(started, x)),
+        });
+      }
+    },
+  });
+
+  listen(svg, {
+    type: 'pointercancel',
+    handle: () => {
+      from = undefined;
+      delete currentOf(svg).dataset['dragging'];
+      currentOf(brush).setAttribute('visibility', 'hidden');
+    },
   });
 
   const whole = make('button', {
@@ -226,8 +246,11 @@ export const timelineViewOf = (view: ITimelineView): Node[] => {
     text: 'All',
   });
 
-  whole.addEventListener('click', () => {
-    view.onRange(undefined);
+  listen(whole, {
+    type: 'click',
+    handle: () => {
+      view.onRange(undefined);
+    },
   });
 
   return [

@@ -512,6 +512,56 @@ const finish = (root) => {
 // ── Prepare ───────────────────────────────────────────────────────────────────
 
 describe('prepare', () => {
+  for (const [lock, own] of [
+    ['implementations/rust/fuzz/Cargo.lock', 'bead-fuzz'],
+    ['implementations/rust/tools/protobuf-conformance/Cargo.lock', 'bead-protobuf-conformance'],
+  ]) {
+    test(`moves the Rust workspace members in ${lock} and keeps its own package and registry versions`, () => {
+      const root = releasing();
+      const workspace = '[workspace.package]\nversion = "0.1.0"\n';
+      const member = '[[package]]\nname = "bead-core"\nversion = "0.1.0"\n';
+      const registry =
+        '[[package]]\nname = "bead-core"\nversion = "1.0.0"\nsource = "registry+https://github.com/rust-lang/crates.io-index"\n';
+      const fuzz = `[[package]]\nname = "${own}"\nversion = "0.0.0"\n`;
+      write(root, {
+        'implementations/rust/Cargo.toml': workspace,
+        'implementations/rust/Cargo.lock': member,
+        [lock]: `${fuzz}\n${member}\n${registry}`,
+      });
+      git(root, 'add', 'implementations/rust');
+
+      const dry = prepared(root, { moves: { spec: 'minor' }, dryRun: true });
+      assert.deepEqual(dry.plan.written, []);
+      assert.equal(read(root, lock), `${fuzz}\n${member}\n${registry}`);
+
+      const { plan } = prepared(root, { moves: { spec: 'minor' } });
+      const moved = member.replace('"0.1.0"', '"0.2.0"');
+      assert.equal(
+        read(root, 'implementations/rust/Cargo.toml'),
+        workspace.replace('0.1.0', '0.2.0')
+      );
+      assert.equal(read(root, 'implementations/rust/Cargo.lock'), moved);
+      assert.equal(read(root, lock), `${fuzz}\n${moved}\n${registry}`);
+      assert.ok(plan.written.includes(lock));
+
+      const again = prepared(root);
+      assert.deepEqual(again.plan.written, []);
+      assert.equal(read(root, lock), `${fuzz}\n${moved}\n${registry}`);
+    });
+  }
+
+  test('prepares a Rust workspace with no fuzz lock', () => {
+    const root = releasing();
+    write(root, {
+      'implementations/rust/Cargo.toml': '[workspace.package]\nversion = "0.1.0"\n',
+      'implementations/rust/Cargo.lock': '[[package]]\nname = "bead-core"\nversion = "0.1.0"\n',
+    });
+    git(root, 'add', 'implementations/rust');
+    const { plan } = prepared(root, { moves: { spec: 'minor' } });
+    assert.ok(!plan.written.includes('implementations/rust/fuzz/Cargo.lock'));
+    assert.match(read(root, 'implementations/rust/Cargo.lock'), /version = "0.2.0"/);
+  });
+
   test('refused off a release branch, and for a changed document with no move', () => {
     const root = releasing();
     assert.throws(

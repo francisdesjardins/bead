@@ -1053,11 +1053,10 @@ const testeeCommandOf = ({ side, work }) => {
 
   if (side.language === 'rust') {
     // ! its own target folder, whatever CARGO_TARGET_DIR says, so the binary is where it is run from;
-    // not --locked: its lock holds the side's crates at the product's version, which a release moves
-    // in the workspace's lock alone, as it does the fuzz targets', and the rest it keeps as they are
+    // --locked, as a release moves the side's crates in its lock beside the workspace's
     const target = join(folder, 'target');
 
-    run('cargo', ['build', '--release', '--target-dir', target], { cwd: folder });
+    run('cargo', ['build', '--release', '--locked', '--target-dir', target], { cwd: folder });
 
     return {
       command: join(target, 'release', process.platform === 'win32' ? 'testee.exe' : 'testee'),
