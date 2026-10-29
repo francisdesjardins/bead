@@ -15,12 +15,11 @@ use core::task::{Context, Poll};
 use std::collections::VecDeque;
 use std::sync::{Arc, Mutex, PoisonError, Weak};
 
-use tokio::runtime::Handle;
 use tokio::sync::{mpsc, oneshot};
-use tokio::task::JoinHandle;
 
 use crate::clock::Clock;
 use crate::errors::Disposed;
+use crate::platform::{self, Handle, JoinHandle};
 
 #[cfg(test)]
 mod tests;
@@ -118,7 +117,7 @@ impl<S: Send + 'static> Owner<S> {
             shared: Arc::downgrade(&shared),
         });
 
-        runtime.spawn(run(state, (queue, Arc::downgrade(&shared))));
+        platform::spawn(runtime, run(state, (queue, Arc::downgrade(&shared))));
 
         Self { shared }
     }
@@ -230,14 +229,13 @@ impl<S: Send + 'static> WeakOwner<S> {
 
         #[cfg(any(test, feature = "testing"))]
         if let Some(activity) = &shared.activity {
-            return Some(
-                shared
-                    .runtime
-                    .spawn(crate::testing::Tracked::new(future, Arc::clone(activity))),
-            );
+            return Some(platform::spawn(
+                &shared.runtime,
+                crate::testing::Tracked::new(future, Arc::clone(activity)),
+            ));
         }
 
-        Some(shared.runtime.spawn(future))
+        Some(platform::spawn(&shared.runtime, future))
     }
 }
 
@@ -249,7 +247,7 @@ pub(crate) fn spawn_counted<F: Future<Output = ()> + Send + 'static>(
 ) {
     #[cfg(any(test, feature = "testing"))]
     if let Some(activity) = clock.activity() {
-        runtime.spawn(crate::testing::Tracked::new(future, activity));
+        platform::spawn(runtime, crate::testing::Tracked::new(future, activity));
 
         return;
     }
@@ -258,7 +256,7 @@ pub(crate) fn spawn_counted<F: Future<Output = ()> + Send + 'static>(
     #[cfg(not(any(test, feature = "testing")))]
     let _: &Arc<dyn Clock> = clock;
 
-    runtime.spawn(future);
+    platform::spawn(runtime, future);
 }
 
 // within a turn of this owner's, the job goes as that turn ends; else after every job queued
@@ -301,14 +299,15 @@ fn queue<S>(shared: &Arc<Shared<S>>, job: Job<S>) -> Result<(), Disposed> {
 fn cover<S, F: Future<Output = ()> + Send + 'static>(shared: &Arc<Shared<S>>, future: F) {
     #[cfg(any(test, feature = "testing"))]
     if let Some(activity) = &shared.activity {
-        shared
-            .runtime
-            .spawn(crate::testing::Tracked::new(future, Arc::clone(activity)));
+        platform::spawn(
+            &shared.runtime,
+            crate::testing::Tracked::new(future, Arc::clone(activity)),
+        );
 
         return;
     }
 
-    shared.runtime.spawn(future);
+    platform::spawn(&shared.runtime, future);
 }
 
 // the owner's task: each job in its turn, then the jobs posted within it, until every handle is gone

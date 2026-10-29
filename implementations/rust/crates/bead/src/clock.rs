@@ -4,13 +4,12 @@
 
 use core::fmt;
 use core::time::Duration;
-use std::sync::{Arc, Mutex, PoisonError};
-use std::time::{Instant, SystemTime};
-
-use tokio::runtime::Handle;
-use tokio::task::AbortHandle;
+use std::sync::Arc;
+use std::time::SystemTime;
 
 use crate::errors::ProgrammerError;
+
+pub use native::SystemClock;
 
 /// When a timer fires: once, after its due, or every period, its first after one.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -54,88 +53,104 @@ pub trait Clock: Send + Sync + fmt::Debug {
 /// A clock as a stack shares it.
 pub type SharedClock = Arc<dyn Clock>;
 
-/// The platform's clock, on tokio's timers and the system's wall clock.
-#[derive(Debug, Clone)]
-pub struct SystemClock {
-    handle: Handle,
-    origin: Instant,
-}
+// * the platform's clock natively: the one place the core reads std's and tokio's time
+#[expect(
+    clippy::disallowed_methods,
+    clippy::disallowed_types,
+    reason = "the platform's clock: the one place the core reads std's and tokio's time"
+)]
+mod native {
+    use core::time::Duration;
+    use std::sync::{Arc, Mutex, PoisonError};
+    use std::time::{Instant, SystemTime};
 
-impl SystemClock {
-    /// The platform's clock, on the runtime `handle`.
-    #[must_use]
-    pub fn new(handle: Handle) -> Self {
-        Self {
-            handle,
-            origin: Instant::now(),
+    use tokio::task::AbortHandle;
+
+    use super::{Clock, Schedule, Timer, TimerCallback};
+    use crate::errors::ProgrammerError;
+    use crate::platform::{self, Handle};
+
+    /// The platform's clock, on tokio's timers and the system's wall clock.
+    #[derive(Debug, Clone)]
+    pub struct SystemClock {
+        handle: Handle,
+        origin: Instant,
+    }
+
+    impl SystemClock {
+        /// The platform's clock, on the runtime `handle`.
+        #[must_use]
+        pub fn new(handle: Handle) -> Self {
+            Self {
+                handle,
+                origin: Instant::now(),
+            }
+        }
+
+        /// The platform's clock, on the current runtime.
+        ///
+        /// # Errors
+        ///
+        /// A [`ProgrammerError`] outside a tokio runtime, or on one without its time driver.
+        pub fn current() -> Result<Self, ProgrammerError> {
+            platform::runtime_of(None, "a clock").map(Self::new)
         }
     }
 
-    /// The platform's clock, on the current runtime.
-    ///
-    /// # Errors
-    ///
-    /// A [`ProgrammerError`] outside a tokio runtime.
-    pub fn current() -> Result<Self, ProgrammerError> {
-        Handle::try_current().map(Self::new).map_err(|_none| {
-            ProgrammerError::new("a clock is built within a tokio runtime, or given its handle")
-        })
+    /// A timer of [`SystemClock`]'s, a task of its runtime.
+    #[derive(Debug)]
+    struct SystemTimer {
+        task: Mutex<Option<AbortHandle>>,
     }
-}
 
-/// A timer of [`SystemClock`]'s, a task of its runtime.
-#[derive(Debug)]
-struct SystemTimer {
-    task: Mutex<Option<AbortHandle>>,
-}
+    impl Timer for SystemTimer {
+        fn cancel(&self) {
+            let task = self
+                .task
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .take();
 
-impl Timer for SystemTimer {
-    fn cancel(&self) {
-        let task = self
-            .task
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .take();
-
-        if let Some(task) = task {
-            task.abort();
+            if let Some(task) = task {
+                task.abort();
+            }
         }
     }
-}
 
-impl Clock for SystemClock {
-    fn monotonic(&self) -> Duration {
-        self.origin.elapsed()
-    }
+    impl Clock for SystemClock {
+        fn monotonic(&self) -> Duration {
+            self.origin.elapsed()
+        }
 
-    fn wall(&self) -> SystemTime {
-        SystemTime::now()
-    }
+        fn wall(&self) -> SystemTime {
+            SystemTime::now()
+        }
 
-    fn arm(&self, schedule: Schedule, mut callback: TimerCallback) -> Arc<dyn Timer> {
-        let task = match schedule {
-            Schedule::Once(due) => self.handle.spawn(async move {
-                tokio::time::sleep(due).await;
-                callback();
-            }),
-            Schedule::Every(period) => self.handle.spawn(async move {
-                let start = tokio::time::Instant::now()
-                    .checked_add(period)
-                    .unwrap_or_else(tokio::time::Instant::now);
-                let mut interval = tokio::time::interval_at(start, period);
-
-                interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
-
-                loop {
-                    interval.tick().await;
+        fn arm(&self, schedule: Schedule, mut callback: TimerCallback) -> Arc<dyn Timer> {
+            let task = match schedule {
+                Schedule::Once(due) => platform::spawn(&self.handle, async move {
+                    tokio::time::sleep(due).await;
                     callback();
-                }
-            }),
-        };
+                }),
+                Schedule::Every(period) => platform::spawn(&self.handle, async move {
+                    let start = tokio::time::Instant::now()
+                        .checked_add(period)
+                        .unwrap_or_else(tokio::time::Instant::now);
+                    let mut interval = tokio::time::interval_at(start, period);
 
-        Arc::new(SystemTimer {
-            task: Mutex::new(Some(task.abort_handle())),
-        })
+                    interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+
+                    loop {
+                        interval.tick().await;
+                        callback();
+                    }
+                }),
+            };
+
+            Arc::new(SystemTimer {
+                task: Mutex::new(Some(task.abort_handle())),
+            })
+        }
     }
 }
 

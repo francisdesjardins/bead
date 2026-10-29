@@ -6,6 +6,11 @@
 //! `service-client.test.ts` and `service-server.test.ts`, and the C# side's `ServiceClientTests`
 //! and `ServiceServerTests`.
 
+#![expect(
+    clippy::disallowed_methods,
+    reason = "a native target: its calls wait on tokio's timers"
+)]
+
 use core::time::Duration;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 

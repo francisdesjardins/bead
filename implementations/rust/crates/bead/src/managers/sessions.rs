@@ -204,7 +204,7 @@ impl SessionManager {
     /// # Errors
     ///
     /// A [`ProgrammerError`] for a default timeout spec 1.4 does not hold, or, given no clock,
-    /// outside a tokio runtime.
+    /// outside a tokio runtime or on one without its time driver.
     pub(crate) fn new(options: &SessionManagerOptions) -> Result<Self, ProgrammerError> {
         let default_connection_inactivity_timeout = hold(
             "connectionInactivityTimeout",

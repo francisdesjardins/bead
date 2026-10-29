@@ -112,7 +112,7 @@ async fn fails_a_connect_refused_or_past_its_time_or_cancelled_and_refuses_what_
 
     // one that serves it and never answers: past its time, on the clock given
     let (_silent, heard) = peer_of(&broker, ("silent", &[&["bead", "s", "interop"]])).await;
-    let timing = tokio::spawn(client.connect(BrokerConnectOptions {
+    let timing = crate::testing::spawn(client.connect(BrokerConnectOptions {
         timeout: Some(Duration::from_secs(1)),
         ..BrokerConnectOptions::of("interop")
     }));
@@ -130,7 +130,7 @@ async fn fails_a_connect_refused_or_past_its_time_or_cancelled_and_refuses_what_
 
     // then given up by its signal
     let cancelling = CancellationToken::new();
-    let cancelled = tokio::spawn(client.connect(BrokerConnectOptions {
+    let cancelled = crate::testing::spawn(client.connect(BrokerConnectOptions {
         signal: Some(cancelling.clone()),
         ..BrokerConnectOptions::of("interop")
     }));
@@ -263,7 +263,7 @@ async fn hands_on_an_envelope_its_server_sent_as_it_accepted_once_its_connect_op
         told: Arc::clone(&told),
     }));
 
-    let connecting = tokio::spawn(client.connect(BrokerConnectOptions::of("interop")));
+    let connecting = crate::testing::spawn(client.connect(BrokerConnectOptions::of("interop")));
     let opener = opener_of(&heard).await;
 
     // * its ACCEPT and an envelope after it, published in one turn: the envelope comes before its
@@ -314,7 +314,7 @@ async fn fails_a_connect_its_server_refused_as_malformed_or_closed_as_it_opened_
     client.listen(Arc::new(AtClient(Arc::clone(&told))));
 
     // refused 400: its refusal the source, named as section 15.6 names it
-    let refusing = tokio::spawn(client.connect(BrokerConnectOptions::of("interop")));
+    let refusing = crate::testing::spawn(client.connect(BrokerConnectOptions::of("interop")));
     let opener = opener_of(&heard).await;
 
     publish_to(
@@ -349,7 +349,7 @@ async fn fails_a_connect_its_server_refused_as_malformed_or_closed_as_it_opened_
     // no close is told
     locked(&heard.messages).clear();
 
-    let closing = tokio::spawn(client.connect(BrokerConnectOptions::of("interop")));
+    let closing = crate::testing::spawn(client.connect(BrokerConnectOptions::of("interop")));
     let opener = opener_of(&heard).await;
     // each publish takes effect as it is made: both go before either is awaited
     let accepting = peer.publish(BrokerPublication::of(INBOX, Bytes::from(accept_of(opener))));
@@ -383,7 +383,7 @@ async fn fails_a_connect_its_server_refused_as_malformed_or_closed_as_it_opened_
     // once it opened, its server's close is told, unclean but for 1000
     locked(&heard.messages).clear();
 
-    let opening = tokio::spawn(client.connect(BrokerConnectOptions::of("interop")));
+    let opening = crate::testing::spawn(client.connect(BrokerConnectOptions::of("interop")));
     let lasting = opener_of(&heard).await;
 
     publish_to(&peer, (INBOX, accept_of(lasting))).await;
@@ -480,7 +480,7 @@ async fn fails_a_connect_under_way_once_disposed_its_link_up_or_not_yet() {
     let client = ada
         .client(&BrokerClientOptions::default())
         .expect("a client");
-    let connecting = tokio::spawn(client.connect(BrokerConnectOptions::of("interop")));
+    let connecting = crate::testing::spawn(client.connect(BrokerConnectOptions::of("interop")));
 
     opener_of(&heard).await;
     assert_eq!(heard.parcels().len(), 1, "one OPEN went");
@@ -588,7 +588,7 @@ async fn refuses_a_connect_while_one_is_under_way_or_one_given_up_already() {
         "nothing moved"
     );
 
-    let connecting = tokio::spawn(client.connect(BrokerConnectOptions::of("interop")));
+    let connecting = crate::testing::spawn(client.connect(BrokerConnectOptions::of("interop")));
 
     // * one under way: a second is refused, and the first goes on
     assert_eq!(
@@ -632,7 +632,7 @@ async fn refuses_a_reconnection_never_connected_under_way_while_it_connects_or_g
 
     // a connect to a name nobody answers, given up once refused its reconnection
     let giving = CancellationToken::new();
-    let connecting = tokio::spawn(client.connect(BrokerConnectOptions {
+    let connecting = crate::testing::spawn(client.connect(BrokerConnectOptions {
         signal: Some(giving.clone()),
         ..BrokerConnectOptions::of("quiet")
     }));

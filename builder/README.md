@@ -202,7 +202,7 @@ docker build -f builder/Dockerfile -t beadc:local .  # the image
 BEADC_IMAGE=beadc:local yarn test                    # from builder/: each wrapper runs it besides
 ```
 
-It holds Node from `node:26.12.1-trixie-slim`, pinned by its digest; beadc as this folder holds it,
+It holds Node from `node:26.13.0-trixie-slim`, pinned by its digest; beadc as this folder holds it,
 with its production packages, run by Node as written; buf, protoc-gen-es, protoc at its pin with its
 well-known types, `bead/options.proto`, the files of `spec/` beadc reads at their places beside it;
 and under `/opt/bead/licenses/` the licence texts of what it adds to its base, which

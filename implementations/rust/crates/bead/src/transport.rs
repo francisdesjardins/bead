@@ -363,6 +363,14 @@ impl<L: ?Sized> fmt::Debug for Listeners<L> {
 }
 
 impl<L: ?Sized> Listeners<L> {
+    /// Whether nobody listens, without copying the listener list.
+    pub(crate) fn is_empty(&self) -> bool {
+        self.listeners
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .is_empty()
+    }
+
     pub(crate) fn add(&self, listener: Arc<L>) {
         self.listeners
             .lock()

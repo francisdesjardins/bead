@@ -5,7 +5,6 @@
 
 use core::time::Duration;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
-use std::time::Instant;
 
 use bytes::Bytes;
 
@@ -18,6 +17,7 @@ use super::parcel::{Parcel, ParcelRead, read_parcel};
 use super::participant::{BrokerParticipant, BrokerParticipantOptions};
 use super::server::{BrokerServer, BrokerServerOptions};
 use crate::router::types::{ConnectionHandle, RouterError, TransportMessage};
+use crate::testing::Instant;
 use crate::transport::{
     ClientListener, ReconnectDelay, ReconnectOptions, ServerListener, ServerTransport,
     TransportServerRefusal,
@@ -45,7 +45,7 @@ pub(super) async fn until<F: Fn() -> bool>(holds: F, what: &str) {
     let start = Instant::now();
 
     while !holds() && start.elapsed() < PATIENCE {
-        tokio::time::sleep(Duration::from_millis(5)).await;
+        crate::testing::rest(Duration::from_millis(5)).await;
     }
 
     assert!(holds(), "{what}");
@@ -58,7 +58,7 @@ pub(super) async fn settle() {
         tokio::task::yield_now().await;
     }
 
-    tokio::time::sleep(Duration::from_millis(20)).await;
+    crate::testing::rest(Duration::from_millis(20)).await;
 }
 
 /// A broker of the test's own, on the platform's clock.
@@ -341,7 +341,7 @@ pub(super) async fn accepted_of(
     bound: u64,
 ) -> (MemoryBrokerAdapter, Arc<Heard>, u64) {
     let (acceptor, heard) = peer_of(broker, ("acceptor", &[&["bead", "s", "interop"]])).await;
-    let connecting = tokio::spawn(client.connect(BrokerConnectOptions::of("interop")));
+    let connecting = crate::testing::spawn(client.connect(BrokerConnectOptions::of("interop")));
 
     until(|| heard.parcels().len() == 1, "its OPEN reaches the name").await;
 

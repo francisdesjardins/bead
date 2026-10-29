@@ -85,7 +85,7 @@ fn reads_a_token_s_header_and_claims_verifying_nothing_and_none_of_what_is_no_to
 
 #[test]
 fn refuses_what_is_no_token_before_any_key_is_tried() {
-    let now = SystemTime::now;
+    let now = crate::testing::wall_now;
     let against = JwtAgainst {
         audiences: &[],
         keys: &[],

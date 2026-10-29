@@ -151,11 +151,15 @@ titles that hold one write it `’`, and the citation does the same.
   library;
 - one owner per router, its state one task's, a turn awaiting nothing; an operation takes effect as
   it is made, its future only waits, and dropping it cancels nothing;
+- spawning and time through `crate::platform` and the clock alone, clippy's `disallowed-methods`
+  and `disallowed-types` holding every other path, so the core compiles for
+  `wasm32-unknown-unknown`, checked, never run;
 - a module's tests beside it (`src/envelope.rs` → `src/envelope/tests.rs`), the conformance players
   in a crate's `tests/`, the test kit in `bead::testing`, behind the feature `testing`;
 - `cargo fmt --all -- --check`, `cargo clippy --workspace --all-targets --all-features --locked`,
-  `cargo test --workspace --all-features --locked` and `cargo deny --locked check` pass, from its
-  folder.
+  `cargo clippy -p francisdesjardins-bead --lib --all-features --locked --target
+  wasm32-unknown-unknown`, `cargo test --workspace --all-features --locked` and `cargo deny
+  --locked check` pass, from its folder.
 
 ## The Bead page
 

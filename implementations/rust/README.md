@@ -16,16 +16,21 @@ no unsafe code, two parameters then an options struct, every warning an error â€
 ## Build and test
 
 Rust 1.99.1 and edition 2024, as `rust-toolchain.toml` pins them, which rustup installs with clippy,
-rustfmt and llvm-tools. On Windows, the MSVC build tools' C++ linker, and no C compiler beyond it,
-the core being pure Rust; or the GNU host, with a MinGW-w64's `dlltool` on the `PATH`, which
-`windows-sys` asks of it. From this folder:
+rustfmt and llvm-tools, and the target `wasm32-unknown-unknown`. On Windows, the MSVC build tools'
+C++ linker, and no C compiler beyond it, the core being pure Rust; or the GNU host, with a
+MinGW-w64's `dlltool` on the `PATH`, which `windows-sys` asks of it. From this folder:
 
 ```sh
 cargo fmt --all -- --check
 cargo clippy --workspace --all-targets --all-features --locked
+cargo clippy -p francisdesjardins-bead --lib --all-features --locked --target wasm32-unknown-unknown
 cargo test --workspace --all-features --locked
 cargo deny --locked check
 ```
+
+The second clippy checks the core for the browser's WebAssembly, never runs it: what the core links
+builds there, and `.cargo/config.toml` gives getrandom its `unsupported` backend on that target
+alone, so that no dependency is added for it.
 
 Every warning of rustc, clippy and rustdoc is an error, by `.cargo/config.toml`'s `[build] warnings
 = "deny"`, as `TreatWarningsAsErrors` is on the C# side; `CARGO_BUILD_WARNINGS=warn` releases one
@@ -79,10 +84,18 @@ tools/check-protobuf.mjs        the check of the tests' descriptor set, as proto
 ## The runtime
 
 Bead takes the application's tokio runtime and starts none of its own: the runtime enables its time
-driver, by `enable_all` or `enable_time`, or a router refuses to be built on it. Each router is one
-owner, a task of that runtime that holds its state and runs its jobs one at a time, in the order
-they came; an operation goes as it is made, and dropping its future cancels nothing. A router's
-transport holds it, so it lives as long as its connection does, its last handle dropped or not.
+driver, by `enable_all` or `enable_time`, or a router, the in-memory transport and broker, a
+broker's participant and `SystemClock::current` refuse to be built on it. Each router is one owner,
+a task of that runtime that holds its state and runs its jobs one at a time, in the order they came;
+an operation goes as it is made, and dropping its future cancels nothing. A router's transport holds
+it, so it lives as long as its connection does, its last handle dropped or not.
+
+The core spawns through one private module, `platform`, and reads time through its clock alone
+(decision 0011): clippy's `disallowed-methods` and `disallowed-types`, in `clippy.toml`, refuse
+tokio's spawns and timers, std's `Instant`, `SystemTime::now` and a thread of Bead's own anywhere
+else. A test takes them from the kit, `bead::testing`'s `spawn`, `rest`, `patience`, `Instant` and
+`wall_now`; a native target, the benches or a player that measures real time, is exempted once, at
+its root, with its reason.
 
 ## Modules
 
@@ -96,6 +109,7 @@ transport holds it, so it lives as long as its connection does, its last handle 
 | `payloads`, `json`, `violations`                               | the codecs of spec 17, `raw`, `text` and `json`; a `json` value's reader and writer; `PAYLOAD_INVALID`'s detail (spec 18) |
 | `router`                                                       | the core both routers share, the client's and the server's, the relay, the admissions Bead gives, and transfers           |
 | `owner`                                                        | one owner per router: its jobs in order, a call within a turn as that turn ends, a listener's hand-back behind them all   |
+| `platform`                                                     | what the core spawns on, the application's tokio runtime, its time driver checked: the one place it spawns                |
 | `managers`                                                     | the service manager, a server's notifications and their pacing, its sessions                                              |
 | `service`                                                      | a service's procedures as typed descriptors, its failures, and the service server                                         |
 | `server`, `client`                                             | a server, and a client: a transport, its router and its services, built together                                          |
@@ -136,8 +150,9 @@ entry's own name, under `libtest-mimic`; the `proto` entries of `spec/codecs.jso
 
 `bead::testing`, behind the feature `testing`, is the test kit: the stepping clock the players give
 the side, the conformance files' typed readers, the durations' helper, a pair of the in-memory
-transport, and the scripted transports the unit tests write bytes on. It is no API: an application
-never turns the feature on.
+transport, the scripted transports the unit tests write bytes on, and what a test takes from its
+platform: a task spawned, a rest, a patience, a monotonic instant and the wall clock's reading. It is
+no API: an application never turns the feature on.
 
 ## Fuzzing and the bench
 

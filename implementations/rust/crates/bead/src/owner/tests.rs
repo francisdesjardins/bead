@@ -327,7 +327,7 @@ async fn keeps_its_connection_when_the_application_drops_its_last_handle() {
     clock.settle().await;
 
     assert_eq!(
-        tokio::time::timeout(Duration::from_secs(10), asked)
+        crate::testing::patience(Duration::from_secs(10), asked)
             .await
             .expect("answered within its patience")
             .expect("answered"),

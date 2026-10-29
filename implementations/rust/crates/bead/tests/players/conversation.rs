@@ -1055,6 +1055,10 @@ async fn expect_nothing_more(
     clippy::too_many_lines,
     reason = "one branch per step's key, as the player of each side reads them"
 )]
+#[expect(
+    clippy::disallowed_methods,
+    reason = "a native player: a timer's step waits, in real milliseconds, for the side to arm it"
+)]
 async fn play_steps(
     (steps, connections): (&[Value], &mut Connections),
     (clock, reports, registry): (&SteppingClock, &Reports, Option<&MetricsRegistry>),

@@ -1536,32 +1536,6 @@ impl fmt::Debug for RouterServer {
     }
 }
 
-/// The time driver's check: a router's runtime enables tokio's time driver (decision 0044).
-pub(crate) fn runtime_of(given: Option<&Handle>) -> Result<Handle, ProgrammerError> {
-    let runtime = match given {
-        Some(runtime) => runtime.clone(),
-        None => Handle::try_current().map_err(|_none| {
-            ProgrammerError::new("a router is built within a tokio runtime, or given its handle")
-        })?,
-    };
-    let entered = runtime.enter();
-    // ! what tokio panics as a timer is armed on a runtime without its time driver is caught here,
-    // once, as the router is built, never inside a later call
-    let armed = std::panic::catch_unwind(|| {
-        drop(tokio::time::sleep(Duration::ZERO));
-    });
-
-    drop(entered);
-
-    if armed.is_err() {
-        return Err(ProgrammerError::new(
-            "a router's runtime enables tokio's time driver",
-        ));
-    }
-
-    Ok(runtime)
-}
-
 impl RouterServer {
     /// A server's router over `transport`, built before the transport starts, so it sees every
     /// connection.
@@ -1582,7 +1556,7 @@ impl RouterServer {
         transport: Arc<dyn ServerTransport>,
         (options, facade): (&RouterServerOptions, Option<crate::server::Facade>),
     ) -> Result<Self, ProgrammerError> {
-        let runtime = runtime_of(options.runtime.as_ref())?;
+        let runtime = crate::platform::runtime_of(options.runtime.as_ref(), "a router")?;
         let clock = crate::clock::clock_of(
             (transport.clock().as_ref(), options.clock.as_ref()),
             ("a server's router", "its transport"),
