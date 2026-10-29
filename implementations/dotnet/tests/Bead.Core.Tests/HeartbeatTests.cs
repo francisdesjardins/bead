@@ -29,6 +29,51 @@ public sealed class HeartbeatTests
         }
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void Drops_an_unanswered_ping_after_a_delayed_beat_without_arming_a_timer_for_less_than_nothing(bool crossesDeadline)
+    {
+        var clock = new DelayedClock();
+        var heard = new List<string>();
+        var heartbeat = new Heartbeat(TimeSpan.FromMilliseconds(100), new HeartbeatHooks
+        {
+            Ping = () =>
+            {
+                heard.Add("ping");
+            },
+            Drop = () =>
+            {
+                heard.Add("drop");
+            },
+        }, new HeartbeatOptions { Clock = clock });
+
+        try
+        {
+            clock.Fire([100, 100]);
+            Assert.Equal(["ping"], heard);
+            Assert.Equal([100, 100], clock.Dues);
+
+            if (crossesDeadline)
+            {
+                // * silence reads 199, then the ping's age reads 199; a second age read sees 201
+                clock.Fire([199, 199, 201]);
+                Assert.Equal(["ping"], heard);
+                Assert.Equal([100, 100, 1], clock.Dues);
+            }
+
+            // * the timer due at 200 runs at 201: the unanswered ping is dropped at once
+            clock.Fire([201, 201]);
+            Assert.Equal(["ping", "drop"], heard);
+            Assert.Equal(crossesDeadline ? new double[] { 100, 100, 1 } : [100, 100], clock.Dues);
+            Assert.False(clock.IsArmed);
+        }
+        finally
+        {
+            heartbeat.Stop();
+        }
+    }
+
     [Fact]
     public async Task Pings_a_connection_silent_for_its_heartbeat_on_the_platform_s_timer_and_drops_one_that_answered_nothing_by_the_next()
     {
@@ -200,5 +245,82 @@ public sealed class HeartbeatTests
         });
         await Task.Delay(TimeSpan.FromMilliseconds(300), Cancelled);
         Assert.Equal((1, 0), (pings, drops));
+    }
+
+    // * a timer fired by hand: its readings can pass a deadline within one callback
+    private sealed class DelayedClock : TimeProvider
+    {
+        private Queue<long> _readings = new();
+        private long _now;
+        private Action? _fire;
+
+        public List<double> Dues { get; } = [];
+
+        public bool IsArmed { get; set; }
+
+        public override long TimestampFrequency
+        {
+            get
+            {
+                return 1000;
+            }
+        }
+
+        public override long GetTimestamp()
+        {
+            if (_readings.TryDequeue(out var next))
+            {
+                _now = next;
+            }
+
+            return _now;
+        }
+
+        public void Fire(long[] readings)
+        {
+            Assert.True(IsArmed);
+            IsArmed = false;
+            _readings = new Queue<long>(readings);
+            _fire!();
+        }
+
+        public override ITimer CreateTimer(TimerCallback callback, object? state, TimeSpan dueTime, TimeSpan period)
+        {
+            _fire = () =>
+            {
+                callback(state);
+            };
+            var timer = new DelayedTimer(this);
+            timer.Change(dueTime, period);
+            return timer;
+        }
+
+        private sealed class DelayedTimer(DelayedClock clock) : ITimer
+        {
+            public bool Change(TimeSpan dueTime, TimeSpan period)
+            {
+                Assert.Equal(Timeout.InfiniteTimeSpan, period);
+                clock.IsArmed = dueTime != Timeout.InfiniteTimeSpan;
+
+                if (clock.IsArmed)
+                {
+                    Assert.InRange(dueTime, TimeSpan.FromMilliseconds(1), Clocks.LongestTimer);
+                    clock.Dues.Add(dueTime.TotalMilliseconds);
+                }
+
+                return true;
+            }
+
+            public void Dispose()
+            {
+                clock.IsArmed = false;
+            }
+
+            public ValueTask DisposeAsync()
+            {
+                Dispose();
+                return ValueTask.CompletedTask;
+            }
+        }
     }
 }

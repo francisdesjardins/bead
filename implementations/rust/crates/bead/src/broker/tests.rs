@@ -23,6 +23,7 @@ use crate::transport::{
     TransportServerRefusal,
 };
 
+mod adapter;
 mod client;
 mod heartbeat;
 mod memory;
