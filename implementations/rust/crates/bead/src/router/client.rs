@@ -39,7 +39,7 @@ use crate::router::types::{
     TransportMessage, limits_of,
 };
 use crate::session_token::SessionToken;
-use crate::transport::{ClientListener, ClientTransport, Sent};
+use crate::transport::{ClientListener, ClientTransport, Panicked, Sent, caught};
 
 /// A notification a client's router hears: its procedure, its window, and what hears each payload
 /// and its drop.
@@ -249,6 +249,17 @@ fn server_handle() -> ConnectionHandle {
 impl ClientState {
     fn report_error(&self, error: &RouterError) {
         self.listeners.report(error);
+    }
+
+    // lets go of what it holds: its transport's events, its session, every call
+    fn dispose(&mut self) {
+        if let Some(listener) = self.listener.take() {
+            self.transport.unlisten(&listener);
+        }
+
+        *locked(&self.session_token) = None;
+        crate::router::core::dispose(self);
+        self.drop_notifications();
     }
 
     // a paced subscription credits as far as its window reaches past what settled, once that is
@@ -527,12 +538,22 @@ impl Side for ClientState {
         self.report_error(&error);
     }
 
+    // ! the application's transport, called within the turn: what it panics is its throw, the
+    // transport's error, as the other sides' writers take a send that throws (spec 15.1)
     fn transmit(
         &mut self,
         message: TransportMessage,
         _connection_handle: &ConnectionHandle,
     ) -> Result<Sent, RouterError> {
-        self.transport.send(message)
+        caught(("a transport", || self.transport.send(message)))
+            .unwrap_or_else(|panicked| Err(panicked.into()))
+    }
+
+    // its calls failed with the panic, then let go of as its dispose does, the panic reported
+    fn ended(&mut self, panicked: &Panicked) {
+        crate::router::core::end(self, panicked);
+        self.dispose();
+        self.report_error(&panicked.clone().into());
     }
 
     // a command runs in the session this client learned; one presenting a JWT or an ELSEWHERE, in
@@ -1169,15 +1190,10 @@ impl RouterClient {
     pub fn dispose(&self) -> BoxFuture<()> {
         self.shared.disposal.set();
 
-        let disposed = self.shared.owner.run_behind(|state: &mut ClientState| {
-            if let Some(listener) = state.listener.take() {
-                state.transport.unlisten(&listener);
-            }
-
-            *locked(&state.session_token) = None;
-            crate::router::core::dispose(state);
-            state.drop_notifications();
-        });
+        let disposed = self
+            .shared
+            .owner
+            .run_behind(|state: &mut ClientState| state.dispose());
 
         Box::pin(async move {
             disposed.await.ok();

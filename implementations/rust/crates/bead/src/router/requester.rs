@@ -30,6 +30,7 @@ use crate::router::types::{
     CallAddress, ConnectionHandle, ResolvedRequestOptions, RouterActivity, RouterResult,
     reservation_of,
 };
+use crate::transport::caught;
 
 /// A call this side makes, as its router hands it to its core.
 pub(crate) struct CoreRequest {
@@ -307,33 +308,50 @@ pub(crate) fn send_request_chunk<S: Side>(
     deliver(state, (envelope, options));
 }
 
+// a hook of the application's, called within the turn: what it panics is its throw (decision 0044)
+fn hooked<C: FnOnce()>(hook: C) -> Result<(), CallError> {
+    caught(("a hook", hook)).map_err(|panicked| CallError::Other(Arc::new(panicked)))
+}
+
 // the hand-off of a request, whole or a transfer's opening: sent, heard
 fn on_request_hand_off<S: Side>(state: &mut S, (call, id): (&CallAddress, u64)) {
-    if let Some(request) = state
+    let heard = state
         .core()
         .pending
         .get_mut(call)
         .filter(|request| request.id == id)
-    {
-        request.is_sent = true;
+        .and_then(|request| {
+            request.is_sent = true;
 
-        if let Some(on_sent) = request.on_sent.as_mut() {
-            on_sent(true);
-        }
+            request
+                .on_sent
+                .as_mut()
+                .map(|on_sent| hooked(|| on_sent(true)))
+        });
+
+    // ! a hook that panics fails its own call, though it went, as one that throws rejects its call
+    // on the TypeScript side
+    if let Some(Err(error)) = heard
+        && let Some(mut request) = forget(state, (call, Some(id)))
+    {
+        settle(&mut request, Err(error));
     }
 }
 
 // a request the transport refused, after it was handed over or before: heard, the call rejected
 fn on_request_refused<S: Side>(state: &mut S, (call, id, error): (&CallAddress, u64, CallError)) {
     if let Some(mut request) = forget(state, (call, Some(id))) {
-        // handed over, then refused by the transport: nothing of it went out
-        if request.is_sent
+        // handed over, then refused by the transport: nothing of it went out; a hook that panics
+        // fails the call with its panic
+        let heard = if request.is_sent
             && let Some(on_sent) = request.on_sent.as_mut()
         {
-            on_sent(false);
-        }
+            hooked(|| on_sent(false))
+        } else {
+            Ok(())
+        };
 
-        settle(&mut request, Err(error));
+        settle(&mut request, Err(heard.err().unwrap_or(error)));
     }
 }
 
@@ -491,8 +509,16 @@ pub(crate) fn request<S: Side>(
         watch_signal(state, ((signal, watched), (call.clone(), id)));
     }
 
-    if let Some(on_call_id) = request.on_call_id {
-        on_call_id(call_id);
+    // ! a hook that panics fails its own call, and nothing of it goes out, as one that throws
+    // rejects its call on the TypeScript side
+    if let Some(on_call_id) = request.on_call_id
+        && let Err(error) = hooked(|| on_call_id(call_id))
+    {
+        if let Some(mut request) = forget(state, (&call, Some(id))) {
+            settle(&mut request, Err(error));
+        }
+
+        return;
     }
 
     let transport_credential = request.transport_credential;

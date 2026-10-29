@@ -569,6 +569,10 @@ impl Config {
     }
 }
 
+// * a job of the participant's that panics, a listener's being guarded, ends it: what waits on it
+// hears it gone
+impl crate::owner::Owned for ParticipantState {}
+
 /// What a participant's owner holds: its connections, the connects awaiting their answer, the
 /// departures it subscribes. Touched in its turn alone.
 pub(crate) struct ParticipantState {

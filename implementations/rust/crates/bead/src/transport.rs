@@ -419,9 +419,59 @@ impl fmt::Display for Panicked {
 
 impl std::error::Error for Panicked {}
 
+impl From<Panicked> for RouterError {
+    fn from(panicked: Panicked) -> Self {
+        Self::Other(Arc::new(panicked))
+    }
+}
+
 /// The error a listener's panic stands for, as its throw is reported.
 pub(crate) fn panic_error(panicked: &(dyn core::any::Any + Send)) -> RouterError {
     RouterError::Other(Arc::new(panicked_of(("a listener", panicked))))
+}
+
+/// Calls `call`, the application's code a side runs within its turn, within a guard: what it panics
+/// is its throw, the error it stands for (decision 0044), named by `what`, `a transport` say.
+pub(crate) fn caught<T, C: FnOnce() -> T>((what, call): (&'static str, C)) -> Result<T, Panicked> {
+    catch_unwind(AssertUnwindSafe(call)).map_err(|panicked| panicked_of((what, &*panicked)))
+}
+
+/// What a future of the application's gives, or what it panicked with as it was polled: its
+/// throw, named by `what`. Polled no more once it gave either.
+pub(crate) struct Caught<F> {
+    future: Pin<Box<F>>,
+    what: &'static str,
+}
+
+impl<F> fmt::Debug for Caught<F> {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("Caught")
+            .field("what", &self.what)
+            .finish_non_exhaustive()
+    }
+}
+
+impl<F: Future> Future for Caught<F> {
+    type Output = Result<F::Output, Panicked>;
+
+    fn poll(mut self: Pin<&mut Self>, context: &mut Context<'_>) -> Poll<Self::Output> {
+        let what = self.what;
+
+        match catch_unwind(AssertUnwindSafe(|| self.future.as_mut().poll(context))) {
+            Ok(Poll::Ready(output)) => Poll::Ready(Ok(output)),
+            Ok(Poll::Pending) => Poll::Pending,
+            Err(panicked) => Poll::Ready(Err(panicked_of((what, &*panicked)))),
+        }
+    }
+}
+
+/// `future`, its panic its throw, named by `what`.
+pub(crate) fn caught_future<F: Future>((what, future): (&'static str, F)) -> Caught<F> {
+    Caught {
+        future: Box::pin(future),
+        what,
+    }
 }
 
 /// What `what` panicked with, as an error.

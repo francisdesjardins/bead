@@ -48,7 +48,7 @@ use crate::router::types::{
     limits_of, session_key_of,
 };
 use crate::session_token::SessionToken;
-use crate::transport::{Sent, ServerListener, ServerTransport};
+use crate::transport::{Panicked, Sent, ServerListener, ServerTransport, caught};
 
 /// What hears what a server's router reports: an error, and the connection it came with.
 pub type ErrorListener = Arc<dyn Fn(&RouterError, Option<&ConnectionHandle>) + Send + Sync>;
@@ -228,7 +228,9 @@ impl Side for ServerState {
     }
 
     fn is_two_way(&self, connection_handle: &ConnectionHandle) -> bool {
-        self.transport.is_two_way(connection_handle)
+        self.asked((connection_handle, |transport: &dyn ServerTransport| {
+            transport.is_two_way(connection_handle)
+        }))
     }
 
     fn before_answer(&mut self, answer: BeforeAnswer) -> Option<Undo<Self>> {
@@ -343,12 +345,24 @@ impl Side for ServerState {
         self.listeners.report(&error, Some(connection_handle));
     }
 
+    // ! the application's transport, called within the turn: what it panics is its throw, the
+    // transport's error, as the other sides' writers take a send that throws (spec 15.1)
     fn transmit(
         &mut self,
         message: TransportMessage,
         connection_handle: &ConnectionHandle,
     ) -> Result<Sent, RouterError> {
-        self.transport.send(message, connection_handle)
+        caught(("a transport", || {
+            self.transport.send(message, connection_handle)
+        }))
+        .unwrap_or_else(|panicked| Err(panicked.into()))
+    }
+
+    // its calls failed with the panic, then let go of as its dispose does, the panic reported
+    fn ended(&mut self, panicked: &Panicked) {
+        crate::router::core::end(self, panicked);
+        dispose(self);
+        self.listeners.report(&panicked.clone().into(), None);
     }
 
     fn is_telling_refusals(&self) -> bool {
@@ -425,6 +439,20 @@ impl Side for ServerState {
 }
 
 impl ServerState {
+    /// What its transport says of `connection_handle`, asked within the turn: ! the application's
+    /// transport, whose panic is reported with the connection and answers no.
+    pub(crate) fn asked<A: FnOnce(&dyn ServerTransport) -> bool>(
+        &self,
+        (connection_handle, ask): (&ConnectionHandle, A),
+    ) -> bool {
+        caught(("a transport", || ask(&*self.transport))).unwrap_or_else(|panicked| {
+            self.listeners
+                .report(&panicked.into(), Some(connection_handle));
+
+            false
+        })
+    }
+
     // the series a subscription of `procedure` counts into, as it subscribes
     fn series_of_procedure(&self, procedure: ProcedureAddress) -> Option<NotificationSeries> {
         self.core.metrics.as_ref()?;
@@ -2011,15 +2039,20 @@ pub(crate) fn request_on(
         // a credential its transport cannot carry fails the call before it goes: nothing was tried
         let uncarried = is_open
             .then(|| {
-                let transport = Arc::clone(&state.transport);
+                let takes_credential = state.asked((&named, |transport: &dyn ServerTransport| {
+                    transport.carries_credential(&named)
+                }));
+                let is_secure = state.asked((&named, |transport: &dyn ServerTransport| {
+                    transport.is_secure(&named)
+                }));
 
                 uncarried_of(
                     credential.as_ref(),
                     &Carriage {
                         carried: carried.as_deref(),
-                        takes: &|_carried: &str| transport.carries_credential(&named),
+                        takes: &|_carried: &str| takes_credential,
                         side: RouterSide::Server,
-                        is_secure: transport.is_secure(&named),
+                        is_secure,
                     },
                 )
             })

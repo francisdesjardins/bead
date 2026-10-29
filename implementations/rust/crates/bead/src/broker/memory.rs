@@ -119,6 +119,10 @@ struct Link {
     will: Option<BrokerPublication>,
 }
 
+// * a job of the broker's that panics, a listener's being guarded, ends it: what waits on it hears
+// it gone
+impl crate::owner::Owned for BrokerState {}
+
 struct BrokerState {
     owner: WeakOwner<Self>,
     clock: SharedClock,

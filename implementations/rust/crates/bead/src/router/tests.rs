@@ -29,6 +29,7 @@ mod calls;
 mod client;
 mod limits;
 mod metrics;
+mod panics;
 mod parts;
 mod requester;
 mod router_core;

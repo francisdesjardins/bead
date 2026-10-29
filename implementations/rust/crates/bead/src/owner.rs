@@ -5,6 +5,9 @@
 //! ends, before any job queued after it: a call a listener makes. What a listener hands its router
 //! back from within the turn that told it — an envelope its transport carries, a connection let go,
 //! a dispose — goes behind every job queued, in a later turn, never within that one (spec 9.0).
+//! A job that panics, the last resort past the guards at the sites the spec lets throw, ends its
+//! owner at once: its state told, so what waits on it fails now with that panic for its reason, the
+//! jobs left unrun, never going on over a state half changed (decision 0044).
 
 use core::cell::Cell;
 use core::fmt;
@@ -13,6 +16,7 @@ use core::pin::Pin;
 use core::sync::atomic::{AtomicUsize, Ordering};
 use core::task::{Context, Poll};
 use std::collections::VecDeque;
+use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::{Arc, Mutex, PoisonError, Weak};
 
 use tokio::sync::{mpsc, oneshot};
@@ -26,6 +30,14 @@ mod tests;
 
 /// A job of an owner's: what it runs, in its turn, on the state it holds.
 pub(crate) type Job<S> = Box<dyn FnOnce(&mut S) + Send>;
+
+/// The state an owner holds, told as its owner ends on a job that panicked.
+pub(crate) trait Owned: Send + 'static {
+    /// Its owner ends: a job panicked with `panicked`, this state half changed with nothing to
+    /// undo it; what waits on it is failed now, with that panic for its reason, before the state
+    /// goes with its owner. Nothing, by default: what waits on it hears its owner gone.
+    fn on_panic(&mut self, _panicked: &(dyn core::any::Any + Send)) {}
+}
 
 // each owner's own number, which a turn running marks on its thread
 static OWNERS: AtomicUsize = AtomicUsize::new(1);
@@ -100,7 +112,10 @@ impl<S: Send + 'static> Owner<S> {
     pub(crate) fn spawn<M: FnOnce(WeakOwner<S>) -> S>(
         (runtime, clock): (&Handle, &Arc<dyn Clock>),
         make: M,
-    ) -> Self {
+    ) -> Self
+    where
+        S: Owned,
+    {
         let (jobs, queue) = mpsc::unbounded_channel::<Job<S>>();
         // the clock counts activity for a test's kit alone
         #[cfg(not(any(test, feature = "testing")))]
@@ -310,8 +325,27 @@ fn cover<S, F: Future<Output = ()> + Send + 'static>(shared: &Arc<Shared<S>>, fu
     platform::spawn(&shared.runtime, future);
 }
 
-// the owner's task: each job in its turn, then the jobs posted within it, until every handle is gone
-async fn run<S>(
+// the turn a thread runs, marked on it while the turn lasts: ! cleared as the turn ends, by a panic
+// too, so no later post from that thread is taken for one of a turn that is over
+struct Turn;
+
+impl Turn {
+    fn of(owner: usize) -> Self {
+        CURRENT.with(|current| current.set(owner));
+
+        Self
+    }
+}
+
+impl Drop for Turn {
+    fn drop(&mut self) {
+        CURRENT.with(|current| current.set(0));
+    }
+}
+
+// the owner's task: each job in its turn, then the jobs posted within it, until every handle is
+// gone, or a job panics
+async fn run<S: Owned>(
     mut state: S,
     (mut queue, shared): (mpsc::UnboundedReceiver<Job<S>>, Weak<Shared<S>>),
 ) {
@@ -319,13 +353,13 @@ async fn run<S>(
         let Some(owner) = shared.upgrade() else {
             break;
         };
-
-        CURRENT.with(|current| current.set(owner.id));
-        job(&mut state);
-        #[cfg(any(test, feature = "testing"))]
+        let turn = Turn::of(owner.id);
+        // ! the last resort: a job that panics leaves its state half changed, with nothing to undo
+        // it, so its owner ends here, never going on over it (decision 0044)
+        let mut panicked = catch_unwind(AssertUnwindSafe(|| job(&mut state))).err();
         let mut ran = 1_usize;
 
-        loop {
+        while panicked.is_none() {
             let next = owner
                 .turn
                 .lock()
@@ -335,21 +369,69 @@ async fn run<S>(
                 break;
             };
 
-            next(&mut state);
-            #[cfg(any(test, feature = "testing"))]
-            {
-                ran = ran.saturating_add(1);
-            }
+            panicked = catch_unwind(AssertUnwindSafe(|| next(&mut state))).err();
+            ran = ran.saturating_add(1);
         }
 
-        CURRENT.with(|current| current.set(0));
-        #[cfg(any(test, feature = "testing"))]
-        if let Some(activity) = &owner.activity {
-            for _ in 0..ran {
-                activity.end();
+        if let Some(panicked) = panicked {
+            // what the turn posted before its panic goes unrun; its state is told, once, a panic of
+            // its own dropped; what telling it posted, the outcomes of what waited on it, goes
+            // within the turn, each within a guard; and nothing queued runs
+            let unrun = owner
+                .turn
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .drain(..)
+                .count();
+
+            drop(catch_unwind(AssertUnwindSafe(|| {
+                state.on_panic(&*panicked);
+            })));
+
+            loop {
+                let next = owner
+                    .turn
+                    .lock()
+                    .unwrap_or_else(PoisonError::into_inner)
+                    .pop_front();
+                let Some(next) = next else {
+                    break;
+                };
+
+                drop(catch_unwind(AssertUnwindSafe(|| next(&mut state))));
+                ran = ran.saturating_add(1);
             }
+
+            queue.close();
+
+            let mut queued = 0_usize;
+
+            while queue.try_recv().is_ok() {
+                queued = queued.saturating_add(1);
+            }
+
+            drop(turn);
+            ended(&owner, ran.saturating_add(unrun).saturating_add(queued));
+
+            break;
+        }
+
+        drop(turn);
+        ended(&owner, ran);
+    }
+}
+
+// the jobs a turn ran, or left unrun, counted done on a test's clock
+fn ended<S>(owner: &Shared<S>, count: usize) {
+    #[cfg(any(test, feature = "testing"))]
+    if let Some(activity) = &owner.activity {
+        for _ in 0..count {
+            activity.end();
         }
     }
+
+    #[cfg(not(any(test, feature = "testing")))]
+    let _: (&Shared<S>, usize) = (owner, count);
 }
 
 /// What a job run on an owner gives, to wait for.

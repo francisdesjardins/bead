@@ -39,6 +39,10 @@ pub const MEMORY_ADDRESS: &str = "local";
 // the later turns a server and its clients share: each job in the order it came, off the caller
 struct Pipe;
 
+// * a job of the pipe's that panics, a listener's being guarded, ends it: its connections' later
+// turns refused from then on
+impl crate::owner::Owned for Pipe {}
+
 fn later_on<J: FnOnce() + Send + 'static>(pipe: &WeakOwner<Pipe>, job: J) {
     pipe.offer(Box::new(move |_: &mut Pipe| job()));
 }

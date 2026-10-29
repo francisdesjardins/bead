@@ -30,7 +30,7 @@ use crate::envelope::{
 use crate::errors::{CallError, CapacityError, ProgrammerError, ResolverError};
 use crate::failure::Failure;
 use crate::metrics::{CallEnding, ProcedureSeries, ResolverSeries, RouterMetrics};
-use crate::owner::{Job, WeakOwner};
+use crate::owner::{Job, Owned, WeakOwner};
 use crate::router::parts::{
     Announcements, Answering, AnsweringCalls, PendingCalls, Placed, Placement, ReceivingTransfers,
     RequestReceiving, SendingFor, SendingTransfers, cancel_timer,
@@ -42,7 +42,7 @@ use crate::router::types::{
     TransportMessage,
 };
 use crate::session_token::SessionToken;
-use crate::transport::Sent;
+use crate::transport::{Panicked, Sent, caught_future, panicked_of};
 use crate::violations::detail_bound_of;
 
 /// What a router's handlers are told the router was disposed with.
@@ -323,6 +323,13 @@ pub(crate) trait Side: Sized + Send + 'static {
 
     /// What went wrong that no call waits on.
     fn report(&mut self, error: RouterError, connection_handle: &ConnectionHandle);
+
+    /// Its owner ends on a job that panicked (decision 0044): each call it waits on fails now, with
+    /// that panic for its reason, and it is marked disposed; a side lets go of the rest of what it
+    /// holds as its dispose does, and reports the panic.
+    fn ended(&mut self, panicked: &Panicked) {
+        end(self, panicked);
+    }
 
     /// Hands an envelope's bytes over to the transport.
     fn transmit(
@@ -741,7 +748,10 @@ pub(crate) fn deliver<S: Side>(state: &mut S, (envelope, options): (Envelope, De
                     let owner = state.core().owner.clone();
 
                     state.core().owner.cover(async move {
-                        let outcome = sending.await;
+                        // ! the transport's future: what it panics is its throw (spec 15.1)
+                        let outcome = caught_future(("a transport", sending))
+                            .await
+                            .unwrap_or_else(|panicked| Err(panicked.into()));
                         owner.offer(Box::new(move |state: &mut S| {
                             if outcome.is_err()
                                 && let Some(announced) = announced
@@ -2517,6 +2527,20 @@ pub(crate) fn reject_pending<S: Side>(
         answering
             .signal
             .abort(SignalReason::Disconnected(reason.to_owned()));
+    }
+}
+
+/// A router whose owner ends on a job that panicked: marked disposed, each call it waits on failed
+/// now, with that panic for its reason, the signal of each it answers aborted alike.
+pub(crate) fn end<S: Side>(state: &mut S, panicked: &Panicked) {
+    state.core().disposal.set();
+    reject_pending(state, (&panicked.to_string(), None));
+}
+
+// * a router's state, as its owner ends on a job that panicked: its side's way (decision 0044)
+impl<S: Side> Owned for S {
+    fn on_panic(&mut self, panicked: &(dyn core::any::Any + Send)) {
+        self.ended(&panicked_of(("a turn of the router's", panicked)));
     }
 }
 
