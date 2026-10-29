@@ -8,11 +8,14 @@
 
 // dependencies
 
+import type { IParticipantInspection } from '../src/transport/shared/participant-debug';
+import { brokerViewOf } from './views/broker';
 import type { IHarEntry, IHostPort, IPanelHost } from './host';
 import type {
   ActivityRecord,
   BackgroundMessage,
   IPanelGreeting,
+  IParticipantRecord,
   ISourceRecord,
   PanelMessage,
 } from './messages';
@@ -46,7 +49,7 @@ import { bytesOfContent, isBeadType, readBody } from './wire';
 
 // types
 
-type View = 'calls' | 'metrics' | 'state' | 'timeline' | 'wire';
+type View = 'broker' | 'calls' | 'metrics' | 'state' | 'timeline' | 'wire';
 
 /** Where the detail sits: as the panel's shape says, right of the list, or under it. */
 type Layout = (typeof LAYOUTS)[number];
@@ -152,6 +155,7 @@ const isTyping = (target: EventTarget | null): boolean => {
 /** Starts the panel on its page, over what `host` gives it. */
 export const startPanel = (host: IPanelHost): void => {
   const shown = {
+    broker: elementOf('broker'),
     calls: elementOf('calls'),
     callsTable: elementOf('calls-table'),
     callsView: elementOf('calls-view'),
@@ -184,8 +188,18 @@ export const startPanel = (host: IPanelHost): void => {
     toast: elementOf('toast'),
     wire: elementOf('wire'),
   };
+  const recordOrder = new WeakMap<ActivityRecord, number>();
+  let nextRecord = 0;
   const state = {
     at: undefined as number | undefined,
+    participants: [] as IParticipantRecord[],
+    participantDropped: 0,
+    skipped: 0,
+    participantFilters: { kind: '', connection: '', verdict: '' },
+    participantSelected: undefined as IParticipantRecord | undefined,
+    inspections: new Map<number, IParticipantInspection>(),
+    sourceArchive: new Map<number, ISourceRecord>(),
+    isImported: false,
     book: undefined as unknown as ICallBook,
     detailTab: 'overview' as DetailTab,
     dropped: 0,
@@ -763,6 +777,34 @@ export const startPanel = (host: IPanelHost): void => {
             span: spanOfCalls(calls),
           }),
         ]);
+      } else if (state.view === 'broker') {
+        replaceKeeping(
+          shown.broker,
+          brokerViewOf({
+            records: state.participants.filter(({ source }) => {
+              return isShownSource(source);
+            }),
+            sources: [...state.sourceArchive.values()].filter(({ id }) => {
+              return isShownSource(id);
+            }),
+            inspections: state.inspections,
+            letGo: state.participantDropped,
+            filters: state.participantFilters,
+            selected: state.participantSelected,
+            onFilter: (filters) => {
+              state.participantFilters = filters;
+              draw();
+            },
+            onSelect: (record) => {
+              state.participantSelected = record;
+              draw();
+            },
+            onState: () => {
+              state.view = 'state';
+              draw();
+            },
+          })
+        );
       } else if (state.view === 'metrics') {
         replaceKeeping(shown.metrics, metricsOfView());
       } else {
@@ -802,10 +844,12 @@ export const startPanel = (host: IPanelHost): void => {
     const chosen = shown.source.value;
     const options = [
       new Option('All clients', 'all'),
-      ...state.sources.map(({ id, protocol }) => {
+      ...state.sources.map(({ id, protocol, side }) => {
         return new Option(
           PROTOCOLS.includes(protocol)
-            ? clientOf(id)
+            ? side === 'participant'
+              ? `Participant ${String(id)}`
+              : clientOf(id)
             : `${clientOf(id)}, protocol ${String(protocol)}, unknown`,
           String(id)
         );
@@ -821,6 +865,16 @@ export const startPanel = (host: IPanelHost): void => {
   };
 
   const clear = (): void => {
+    state.participants = [];
+    state.participantDropped = 0;
+    state.skipped = 0;
+    state.participantSelected = undefined;
+    state.isImported = false;
+    state.sourceArchive = new Map(
+      state.sources.map((source) => {
+        return [source.id, source];
+      })
+    );
     state.book = newBook();
     state.dropped = 0;
     state.exchanges = [];
@@ -835,7 +889,19 @@ export const startPanel = (host: IPanelHost): void => {
 
   const take = (records: readonly ActivityRecord[]): void => {
     for (const record of records) {
-      state.book.take(record);
+      recordOrder.set(record, nextRecord++);
+      if (record.kind === 'participant') {
+        state.participants.push(record);
+        if (state.participants.length > 1_000) {
+          const evicted = state.participants.shift();
+          if (state.participantSelected === evicted) {
+            state.participantSelected = undefined;
+          }
+          state.participantDropped += 1;
+        }
+      } else {
+        state.book.take(record);
+      }
     }
   };
 
@@ -846,6 +912,14 @@ export const startPanel = (host: IPanelHost): void => {
 
   const hear = (message: BackgroundMessage): void => {
     switch (message.type) {
+      case 'participants':
+        if (state.isImported || !state.isRecording) {
+          break;
+        }
+        for (const { source, inspection } of message.inspections) {
+          state.inspections.set(source, inspection);
+        }
+        break;
       case 'expositions':
         for (const { source, text } of message.expositions) {
           state.expositions.set(source, text);
@@ -882,8 +956,15 @@ export const startPanel = (host: IPanelHost): void => {
         setStatus('the page is gone: its calls stay until you clear them', false);
         break;
       case 'records':
+        if (state.isImported) {
+          break;
+        }
         if (!state.isRecording) {
-          state.pausedLetGo += message.records.length + message.dropped;
+          const participants = message.records.filter(({ kind }) => {
+            return kind === 'participant';
+          }).length;
+          state.participantDropped += participants + (message.droppedParticipants ?? 0);
+          state.pausedLetGo += message.records.length - participants + message.dropped;
           break;
         }
 
@@ -892,9 +973,20 @@ export const startPanel = (host: IPanelHost): void => {
           state.book.mark({ at: Date.now(), count: message.dropped, kind: 'gap' });
         }
 
+        state.participantDropped += message.droppedParticipants ?? 0;
         take(message.records);
         break;
       case 'sources':
+        if (state.isImported) {
+          break;
+        }
+        for (const source of message.sources) {
+          const prior = state.sourceArchive.get(source.id);
+          state.sourceArchive.set(source.id, prior?.inspection === undefined ? source : prior);
+          if (source.inspection !== undefined && !state.inspections.has(source.id)) {
+            state.inspections.set(source.id, source.inspection);
+          }
+        }
         state.sources = message.sources;
         drawSources();
         break;
@@ -1000,6 +1092,9 @@ export const startPanel = (host: IPanelHost): void => {
 
   const toggleRecording = (): void => {
     state.isRecording = !state.isRecording;
+    if (state.isRecording) {
+      state.isImported = false;
+    }
     say(
       state.isRecording
         ? 'Recording'
@@ -1109,7 +1204,15 @@ export const startPanel = (host: IPanelHost): void => {
 
   const exportLog = (): void => {
     const log = logOf(
-      { dropped: state.dropped, records: state.book.recordsOf(), sources: state.sources },
+      {
+        dropped: state.dropped,
+        droppedParticipants: state.participantDropped,
+        skipped: state.skipped,
+        records: [...state.book.recordsOf(), ...state.participants].sort((one, other) => {
+          return (recordOrder.get(one) ?? 0) - (recordOrder.get(other) ?? 0);
+        }),
+        sources: [...state.sourceArchive.values()],
+      },
       { savedAt: new Date() }
     );
     const url = URL.createObjectURL(
@@ -1132,12 +1235,23 @@ export const startPanel = (host: IPanelHost): void => {
 
       clear();
       state.sources = log.sources;
+      state.sourceArchive = new Map(
+        log.sources.map((source) => {
+          return [source.id, source];
+        })
+      );
+      state.inspections.clear();
+      state.isImported = true;
+      state.participantDropped = log.droppedParticipants;
+      state.skipped = log.skipped;
       state.dropped = log.dropped;
       // * the page's own records would mix with the file's: the panel pauses as it reads one
       state.isRecording = false;
       drawSources();
       take(log.records);
-      say(`Imported ${numberOf(log.records.length)} records from ${file.name}; recording paused`);
+      say(
+        `Imported ${numberOf(log.records.length)} records from ${file.name}; ${String(log.skipped)} unknown records skipped; recording paused`
+      );
     } catch (reason) {
       say(
         `${file.name} does not read: ${reason instanceof Error ? reason.message : String(reason)}`
@@ -1304,6 +1418,8 @@ export const startPanel = (host: IPanelHost): void => {
 
       if (state.view === 'metrics') {
         tell({ type: 'read-expositions' });
+      } else if (state.view === 'broker' && !state.isImported) {
+        tell({ type: 'read-participants' });
       }
 
       draw();
@@ -1536,6 +1652,8 @@ export const startPanel = (host: IPanelHost): void => {
 
     if (state.view === 'metrics') {
       tell({ type: 'read-expositions' });
+    } else if (state.view === 'broker' && !state.isImported) {
+      tell({ type: 'read-participants' });
     } else if (
       state.book.calls.some((call) => {
         return statusOf(call) === 'flight';

@@ -852,7 +852,7 @@ internal sealed class BrokerCasePlayer : IAsyncDisposable
 
         var reading = BrokerParcels.Read(message.Payload);
 
-        Assert.True(reading.Verdict == BrokerParcelVerdict.Parcel, $"a parcel came: {reading.Why}");
+        Assert.True(reading.Verdict == ParcelVerdict.Taken, $"a parcel came: {reading.Why}");
 
         var parcel = reading.Parcel!;
         var wanted = new List<string>();
@@ -931,7 +931,7 @@ internal sealed class BrokerCasePlayer : IAsyncDisposable
         {
             while (reading.Peer.Heard.Reader.TryRead(out var message))
             {
-                if (BrokerParcels.Read(message.Payload) is { Verdict: BrokerParcelVerdict.Parcel, Parcel: { } parcel } && parcel.Kind == reading.Kind
+                if (BrokerParcels.Read(message.Payload) is { Verdict: ParcelVerdict.Taken, Parcel: { } parcel } && parcel.Kind == reading.Kind
                     && reached.TryGetValue(HalfOf(parcel.Opener), out var places))
                 {
                     places.Add(reading.By);

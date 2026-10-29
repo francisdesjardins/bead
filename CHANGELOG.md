@@ -7,6 +7,12 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- The trace of a participant's parcels on both sides, with guarded listeners, incoming verdicts,
+  link and name transitions, reports and no acceptor's half; its own DevTools source and a Broker
+  view with pulled levels, column filters and recorded detail.
+
 ### Fixed
 
 - A router is never entered again from its own turn, on both sides: what a listener it calls hands

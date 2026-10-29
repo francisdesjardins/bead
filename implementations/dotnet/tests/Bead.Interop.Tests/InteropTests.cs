@@ -1079,7 +1079,7 @@ public sealed class InteropTests(InteropTests.TypeScriptServer server, InteropTe
         // a second group, handed the OPEN
         private void Count(BrokerMessage message)
         {
-            if (message.Topic is not [_, "i", _] || BrokerParcels.Read(message.Payload) is not { Verdict: BrokerParcelVerdict.Parcel, Parcel: { Kind: BrokerParcelKinds.Accept } accept })
+            if (message.Topic is not [_, "i", _] || BrokerParcels.Read(message.Payload) is not { Verdict: ParcelVerdict.Taken, Parcel: { Kind: BrokerParcelKinds.Accept } accept })
             {
                 return;
             }

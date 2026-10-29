@@ -5,6 +5,7 @@ import { pathToFileURL } from 'node:url';
 import { EnvelopeKind } from '../../src/router/shared/constants';
 import { writeEnvelope } from '../../src/router/shared/envelope';
 import type { BackgroundMessage } from '../messages';
+import type { ILog } from '../model/log';
 import { assertBuilt, EXTENSION } from './fixtures';
 import { IDS, REFUSED_INVALID, T0, TRAFFIC } from './traffic';
 
@@ -1517,4 +1518,70 @@ test.describe('the panel', () => {
       .click();
     await expect(page.locator('#toast')).toHaveText('Copied');
   });
+});
+
+test('round-trips participant retention and pause gaps with the initial reading and counts an imported unknown kind', async ({
+  page,
+}) => {
+  await openPanel(page);
+  const inspection = {
+    id: 'ada',
+    inbox: ['bead', 'i', 'ada'],
+    incarnation: '0102',
+    isLinked: true,
+    names: ['echo'],
+    gauges: { counts: { partsBytes: 0 }, ceilings: { partsBytes: 64 }, anomalies: [] },
+  };
+  await deliver(page, {
+    type: 'sources',
+    sources: [{ id: 5, protocol: 1, side: 'participant', inspection }],
+  });
+  const records = Array.from({ length: 1002 }, (_, index) => {
+    return {
+      kind: 'participant' as const,
+      source: 5,
+      at: 100 + index,
+      event: 'parcel' as const,
+      direction: 'rx' as const,
+      parcelKind: 'PING',
+      bytes: 28,
+      sequence: index + 1,
+      connection: 1,
+      verdict: 'taken' as const,
+    };
+  });
+  await deliver(page, { type: 'records', dropped: 0, droppedParticipants: 2, records });
+  await page.click('[data-tab="broker"]');
+  await expect(page.locator('#broker')).toContainText('4 let go');
+  await page.click('#record');
+  await deliver(page, {
+    type: 'records',
+    dropped: 0,
+    droppedParticipants: 1,
+    records: records.slice(0, 2),
+  });
+  await expect(page.locator('#broker')).toContainText('7 let go');
+  await deliver(page, { type: 'sources', sources: [] });
+  const [download] = await Promise.all([page.waitForEvent('download'), page.click('#export')]);
+  const log = JSON.parse(await readFile(await download.path(), 'utf8')) as ILog;
+  expect(log.version).toBe(2);
+  expect(log.droppedParticipants).toBe(7);
+  expect(log.records).toHaveLength(1000);
+  expect(log.sources[0]?.inspection).toEqual(inspection);
+  await page.locator('#import-file').setInputFiles({
+    name: 'participant-log.json',
+    mimeType: 'application/json',
+    buffer: Buffer.from(
+      JSON.stringify({ ...log, records: [...log.records, { kind: 'future', source: 5 }] })
+    ),
+  });
+  await expect(page.locator('#toast')).toContainText('1 unknown records skipped');
+  await expect(page.locator('#broker')).toContainText('ada · up');
+  await expect(page.locator('#broker')).toContainText('7 let go');
+  await deliver(page, {
+    type: 'participants',
+    inspections: [{ source: 5, inspection: { ...inspection, id: 'live-reading' } }],
+  });
+  await expect(page.locator('#broker')).not.toContainText('live-reading');
+  await expect(page.locator('#broker tbody tr[data-event="link"]')).toHaveCount(0);
 });

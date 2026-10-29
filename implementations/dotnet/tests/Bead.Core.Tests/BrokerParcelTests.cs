@@ -101,8 +101,8 @@ public sealed class BrokerParcelTests
 
             Assert.Equal(refused, reading.Verdict switch
             {
-                BrokerParcelVerdict.NoParcel => "no-parcel",
-                BrokerParcelVerdict.DoesNotRead => "does-not-read",
+                ParcelVerdict.NoParcel => "no-parcel",
+                ParcelVerdict.DoesNotRead => "does-not-read",
                 _ => "a parcel",
             });
             Assert.NotNull(reading.Why);
@@ -110,7 +110,7 @@ public sealed class BrokerParcelTests
             return;
         }
 
-        Assert.True(reading.Verdict == BrokerParcelVerdict.Parcel, reading.Why);
+        Assert.True(reading.Verdict == ParcelVerdict.Taken, reading.Why);
 
         var expected = vector.GetProperty("parcel").EnumerateObject().ToList();
 
@@ -178,11 +178,11 @@ public sealed class BrokerParcelTests
         // a credential that is no field value does not read (spec 15.5)
         var reading = BrokerParcels.Read(BrokerParcels.Encode(unfielded));
 
-        Assert.Equal((BrokerParcelVerdict.DoesNotRead, "a credential that is no field value"), (reading.Verdict, reading.Why));
+        Assert.Equal((ParcelVerdict.DoesNotRead, "a credential that is no field value"), (reading.Verdict, reading.Why));
 
         // what a side sends reads back as it was written
-        Assert.Equal(BrokerParcelVerdict.Parcel, BrokerParcels.Read(BrokerParcels.Write(open)).Verdict);
-        Assert.Equal(BrokerParcelVerdict.Parcel, BrokerParcels.Read(BrokerParcels.Write(ping)).Verdict);
+        Assert.Equal(ParcelVerdict.Taken, BrokerParcels.Read(BrokerParcels.Write(open)).Verdict);
+        Assert.Equal(ParcelVerdict.Taken, BrokerParcels.Read(BrokerParcels.Write(ping)).Verdict);
     }
 
     [Fact]
@@ -233,13 +233,13 @@ public sealed class BrokerParcelTests
         // * an advisory kind, whatever its flags and its body, taken in its order: a sequence it needs
         var advisory = BrokerParcels.Read(BrokerParcels.Encode(new BrokerParcel { Kind = 0x80, Flags = 0x08, Opener = Half, Acceptor = Half, Sequence = 3 }));
 
-        Assert.Equal((BrokerParcelVerdict.Parcel, (byte)0x80, 3UL), (advisory.Verdict, advisory.Parcel!.Kind, advisory.Parcel.Sequence));
+        Assert.Equal((ParcelVerdict.Taken, (byte)0x80, 3UL), (advisory.Verdict, advisory.Parcel!.Kind, advisory.Parcel.Sequence));
 
         foreach (var sequence in new[] { 0UL, 1UL << 53 })
         {
             var refused = BrokerParcels.Read(BrokerParcels.Encode(new BrokerParcel { Kind = 0x80, Opener = Half, Acceptor = Half, Sequence = sequence }));
 
-            Assert.Equal((BrokerParcelVerdict.DoesNotRead, "an advisory parcel with no sequence"), (refused.Verdict, refused.Why));
+            Assert.Equal((ParcelVerdict.DoesNotRead, "an advisory parcel with no sequence"), (refused.Verdict, refused.Why));
         }
     }
 }

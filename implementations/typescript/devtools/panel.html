@@ -1648,6 +1648,55 @@
         margin: 0;
         font-size: var(--app-text-sm);
       }
+      #broker {
+        overflow: auto;
+        padding: var(--app-space-4);
+      }
+      .participant-controls,
+      .participant-gauges {
+        display: flex;
+        flex-wrap: wrap;
+        gap: var(--app-space-3);
+        margin-block: var(--app-space-3);
+      }
+      .participant-controls label,
+      .participant-gauge {
+        display: grid;
+        gap: var(--app-space-1);
+      }
+      .participant-split {
+        display: grid;
+        grid-template-columns: minmax(0, 2fr) minmax(0, 1fr);
+        gap: var(--app-space-4);
+      }
+      .participant-table {
+        overflow: auto;
+      }
+      .participant-detail {
+        min-width: 0;
+      }
+      .participant-detail pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      .participant-transition {
+        font-weight: 600;
+      }
+      .participant-report {
+        color: var(--app-error);
+      }
+      #broker tr[aria-selected='true'] {
+        outline: 1px solid var(--app-control-border);
+      } /* a selection's hairline */
+      #broker tr[tabindex] {
+        cursor: pointer;
+      }
+      /* The table and its detail stack at the panel's measured split width. */
+      @media (max-width: 680px) {
+        .participant-split {
+          grid-template-columns: minmax(0, 1fr);
+        }
+      }
     </style>
   </head>
   <body>
@@ -1772,6 +1821,17 @@
         aria-selected="false"
       >
         Metrics
+      </button>
+      <button
+        type="button"
+        role="tab"
+        id="broker-tab"
+        aria-controls="broker"
+        tabindex="-1"
+        data-tab="broker"
+        aria-selected="false"
+      >
+        Broker
       </button>
       <button
         type="button"
@@ -1928,6 +1988,13 @@
         aria-labelledby="wire-tab"
         data-view="wire"
         id="wire"
+        hidden
+      ></section>
+      <section
+        role="tabpanel"
+        aria-labelledby="broker-tab"
+        data-view="broker"
+        id="broker"
         hidden
       ></section>
     </main>

@@ -157,6 +157,10 @@ that stops unsubscribes its names, refuses 503 an OPEN that comes, and closes ea
 
 ## Consequences
 
+The trace of parcels (debugging 13) never hands on a connection's acceptor's half: the pair is
+the connection's capability. A log names the connection by a participant's ordinal and, from
+the third leg, its server's handle, never by that pair.
+
 **Calls spread across a name's participants by connection, not by call**, as HTTP/2's behind a
 connection-level balancer: a client that wants its calls spread holds several connections. A member
 added takes none of the connections already placed, and over a broker devices and services hold
