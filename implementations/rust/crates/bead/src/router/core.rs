@@ -17,7 +17,7 @@ use std::sync::{Arc, Mutex, PoisonError};
 
 use bytes::Bytes;
 
-use crate::clock::{Schedule, SharedClock, Timer};
+use crate::clock::{SharedClock, Timer};
 use crate::constants::{
     CredentialScheme, EnvelopeKind, EnvelopeLayout, FailureScope, ProtocolCode, RouterSide,
 };
@@ -30,7 +30,7 @@ use crate::envelope::{
 use crate::errors::{CallError, CapacityError, ProgrammerError, ResolverError};
 use crate::failure::Failure;
 use crate::metrics::{CallEnding, ProcedureSeries, ResolverSeries, RouterMetrics};
-use crate::owner::{Job, WeakOwner};
+use crate::owner::{Job, Owned, WeakOwner};
 use crate::router::parts::{
     Announcements, Answering, AnsweringCalls, PendingCalls, Placed, Placement, ReceivingTransfers,
     RequestReceiving, SendingFor, SendingTransfers, cancel_timer,
@@ -42,11 +42,28 @@ use crate::router::types::{
     TransportMessage,
 };
 use crate::session_token::SessionToken;
-use crate::transport::Sent;
+use crate::transport::{Panicked, Sent, caught_future, panicked_of};
 use crate::violations::detail_bound_of;
 
 /// What a router's handlers are told the router was disposed with.
 pub(crate) const DISPOSED: &str = "the router was disposed";
+
+/// What a router's send meets once nothing holds its transport any more: its owner is ending.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct TransportGone;
+
+impl fmt::Display for TransportGone {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str("the router's transport is gone")
+    }
+}
+
+impl Error for TransportGone {}
+
+/// The error a send meets once nothing holds its router's transport.
+pub(crate) fn transport_gone() -> RouterError {
+    RouterError::Other(Arc::new(TransportGone))
+}
 
 // SESSION_REQUIRED's details at a credential's resolution: one came and did not hold, or none came
 const CREDENTIAL_NOT_HELD: &str = "the credential does not hold";
@@ -324,6 +341,13 @@ pub(crate) trait Side: Sized + Send + 'static {
     /// What went wrong that no call waits on.
     fn report(&mut self, error: RouterError, connection_handle: &ConnectionHandle);
 
+    /// Its owner ends on a job that panicked (decision 0044): each call it waits on fails now, with
+    /// that panic for its reason, and it is marked disposed; a side lets go of the rest of what it
+    /// holds as its dispose does, and reports the panic.
+    fn ended(&mut self, panicked: &Panicked) {
+        end(self, panicked);
+    }
+
     /// Hands an envelope's bytes over to the transport.
     fn transmit(
         &mut self,
@@ -484,23 +508,14 @@ impl<S: Side> Core<S> {
         Failure::protocol(code, self.side)
     }
 
-    /// Arms a timer that runs `job` on the owner after `due`.
+    /// Arms a timer that runs `job` on the owner after `due`; cancelled, its job does nothing,
+    /// though it fired already.
     pub(crate) fn after<J: FnOnce(&mut S) + Send + 'static>(
         &self,
         due: Duration,
         job: J,
     ) -> Arc<dyn Timer> {
-        let owner = self.owner.clone();
-        let mut job = Some(job);
-
-        self.clock.arm(
-            Schedule::Once(due),
-            Box::new(move || {
-                if let Some(job) = job.take() {
-                    owner.offer(Box::new(job));
-                }
-            }),
-        )
+        self.owner.after((&self.clock, due), job)
     }
 
     /// Posts `job` to the owner, to run in a later turn: as this one ends, when posted within it.
@@ -741,7 +756,10 @@ pub(crate) fn deliver<S: Side>(state: &mut S, (envelope, options): (Envelope, De
                     let owner = state.core().owner.clone();
 
                     state.core().owner.cover(async move {
-                        let outcome = sending.await;
+                        // ! the transport's future: what it panics is its throw (spec 15.1)
+                        let outcome = caught_future(("a transport", sending))
+                            .await
+                            .unwrap_or_else(|panicked| Err(panicked.into()));
                         owner.offer(Box::new(move |state: &mut S| {
                             if outcome.is_err()
                                 && let Some(announced) = announced
@@ -2002,7 +2020,11 @@ fn resolve_session<S: Side>(
             let owner = state.core().owner.clone();
 
             state.core().owner.cover(async move {
-                let resolved = resolving.await;
+                // ! what a resolution panics is its throw, as a resolver's is: the call answered
+                // PROCEDURE_FAILED and the panic reported (decision 0044)
+                let resolved = caught_future(("a credential's resolution", resolving))
+                    .await
+                    .unwrap_or_else(|panicked| Err(Unresolved::Other(Arc::new(panicked))));
                 owner.offer(Box::new(move |state: &mut S| {
                     if !signal.is_aborted() {
                         settle(state, resolved);
@@ -2517,6 +2539,20 @@ pub(crate) fn reject_pending<S: Side>(
         answering
             .signal
             .abort(SignalReason::Disconnected(reason.to_owned()));
+    }
+}
+
+/// A router whose owner ends on a job that panicked: marked disposed, each call it waits on failed
+/// now, with that panic for its reason, the signal of each it answers aborted alike.
+pub(crate) fn end<S: Side>(state: &mut S, panicked: &Panicked) {
+    state.core().disposal.set();
+    reject_pending(state, (&panicked.to_string(), None));
+}
+
+// * a router's state, as its owner ends on a job that panicked: its side's way (decision 0044)
+impl<S: Side> Owned for S {
+    fn on_panic(&mut self, panicked: &(dyn core::any::Any + Send)) {
+        self.ended(&panicked_of(("a turn of the router's", panicked)));
     }
 }
 

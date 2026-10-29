@@ -63,6 +63,7 @@ struct TracePair {
     events: Events,
     server_events: Events,
     listener: ParticipantDebugListener,
+    listening: crate::transport::ListenerId,
     accept: Parcel,
 }
 
@@ -112,7 +113,8 @@ impl TracePair {
 
         client_adapter.listen(Arc::new(Accepting(Arc::clone(&accepted))));
 
-        client_participant.on_debug(Arc::clone(&listener));
+        let listening = client_participant.on_debug(Arc::clone(&listener));
+
         server_participant.on_debug(hear(&server_events));
 
         let server = server_participant
@@ -146,6 +148,7 @@ impl TracePair {
             events,
             server_events,
             listener,
+            listening,
             accept,
         }
     }
@@ -542,7 +545,7 @@ async fn tells_completed_link_transitions_and_held_names_by_push_and_keeps_level
         "ordinals never repeat"
     );
     pair.client_participant.stop().await;
-    pair.server.stop().await;
+    pair.server.stop().await.expect("stopped");
     assert!(
         pair.server_participant.names().is_empty(),
         "the name let go"
@@ -622,7 +625,8 @@ async fn reports_a_debug_listener_s_throw_and_calls_later_listeners_while_the_pa
         locked(&heard).push(error.to_string());
     }));
     assert!(!participant.is_debugging(), "unwatched");
-    participant.on_debug(Arc::clone(&throwing));
+    let throws = participant.on_debug(Arc::clone(&throwing));
+
     participant.on_debug(hear(&events));
     assert!(participant.is_debugging(), "watched");
     participant.start().await.expect("started");
@@ -640,7 +644,7 @@ async fn reports_a_debug_listener_s_throw_and_calls_later_listeners_while_the_pa
         ["a listener panicked: debug listener"],
         "the panic reported in the Rust idiom"
     );
-    participant.off_debug(&throwing);
+    participant.off(throws);
     participant.stop().await;
     assert_eq!(
         locked(&events)
@@ -657,7 +661,7 @@ async fn reports_a_debug_listener_s_throw_and_calls_later_listeners_while_the_pa
 async fn reads_no_clock_and_builds_no_trace_while_nobody_watches_a_parcel_taken_or_sent() {
     let pair = TracePair::of().await;
 
-    pair.client_participant.off_debug(&pair.listener);
+    pair.client_participant.off(pair.listening);
     assert!(!pair.client_participant.is_debugging(), "unwatched");
     let before = pair.clock.readings();
     let held = locked(&pair.events).len();

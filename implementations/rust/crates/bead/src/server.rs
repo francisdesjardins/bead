@@ -5,12 +5,12 @@
 use core::fmt;
 use core::time::Duration;
 use std::collections::{BTreeMap, BTreeSet};
-use std::sync::{Arc, Mutex, PoisonError};
+use std::sync::Arc;
 
 use serde_json::Value;
 use tokio::runtime::Handle;
 
-use crate::clock::{Schedule, SharedClock, SystemClock, Timer, clock_of};
+use crate::clock::{SharedClock, SystemClock, Timer, clock_of};
 use crate::constants::ProtocolCode;
 use crate::credentials::Credentials;
 use crate::duration::{NEVER, hold};
@@ -30,7 +30,7 @@ use crate::router::relay::RelayOptions;
 use crate::router::server::{RouterServer, RouterServerOptions, ServerState, end_session};
 use crate::router::types::{BoxFuture, ConnectionHandle, Gauges, RouterError, RouterLimitsOptions};
 use crate::session_token::SessionToken;
-use crate::transport::ServerTransport;
+use crate::transport::{Listened, ListenerId, ServerTransport};
 
 #[cfg(test)]
 mod tests;
@@ -89,7 +89,7 @@ pub(crate) struct Facade {
     // the listens each connection holds
     listens: Ordered<ConnectionHandle, u32>,
     connection_inactivity_timeout: Duration,
-    listeners: Arc<Mutex<Vec<SessionListener>>>,
+    listeners: Arc<Listened<SessionListener>>,
 }
 
 impl fmt::Debug for Facade {
@@ -113,19 +113,11 @@ impl Arming for SessionArming {
         due: Duration,
         (inactivity, connection_handle): (Inactivity, ConnectionHandle),
     ) -> Arc<dyn Timer> {
-        let owner = self.owner.clone();
-        let mut job = Some((inactivity, connection_handle));
-
-        self.clock.arm(
-            Schedule::Once(due),
-            Box::new(move || {
-                if let Some((inactivity, connection_handle)) = job.take() {
-                    owner.offer(Box::new(move |state: &mut ServerState| {
-                        reached(state, (inactivity, &connection_handle));
-                    }));
-                }
-            }),
-        )
+        // * cancelled once it fired, as a touch restarts it, its job does nothing
+        self.owner
+            .after((&self.clock, due), move |state: &mut ServerState| {
+                reached(state, (inactivity, &connection_handle));
+            })
     }
 }
 
@@ -166,13 +158,7 @@ fn told(state: &mut ServerState, events: Vec<SessionEvent>) {
         let Some(facade) = state.facade.as_ref() else {
             continue;
         };
-        let listeners = facade
-            .listeners
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .clone();
-
-        for listener in listeners {
+        for listener in facade.listeners.all() {
             let called =
                 std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| listener(&event)));
 
@@ -306,6 +292,10 @@ fn forget_connection(state: &mut ServerState, handle: &ConnectionHandle) {
 
 // a close asked once; one the transport no longer holds tells no close, so what it left goes now
 fn close(state: &mut ServerState, handle: &ConnectionHandle) {
+    // a transport gone holds no connection: its owner is ending
+    let Some(transport) = state.transport() else {
+        return;
+    };
     let Some(facade) = state.facade.as_mut() else {
         return;
     };
@@ -314,7 +304,7 @@ fn close(state: &mut ServerState, handle: &ConnectionHandle) {
         return;
     }
 
-    let closing = state.transport.close(handle);
+    let closing = transport.close(handle);
     let owner = state.core.owner.clone();
     let handle = Arc::clone(handle);
 
@@ -698,7 +688,7 @@ pub fn health_of(gauges: &ServerGauges) -> Health {
 #[derive(Clone)]
 pub struct Sessions {
     router: RouterServer,
-    listeners: Arc<Mutex<Vec<SessionListener>>>,
+    listeners: Arc<Listened<SessionListener>>,
 }
 
 impl fmt::Debug for Sessions {
@@ -724,12 +714,16 @@ impl Sessions {
         Session::new(connection_handle, wall_milliseconds(&self.router.clock()))
     }
 
-    /// Hears what happens to its sessions from now on.
-    pub fn on(&self, listener: SessionListener) {
-        self.listeners
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .push(listener);
+    /// Hears what happens to its sessions from now on; the id given takes it off again, with
+    /// [`Sessions::off`].
+    pub fn on(&self, listener: SessionListener) -> ListenerId {
+        self.listeners.add(listener)
+    }
+
+    /// Hears no more with the listener `listener` names: one taken off already, or of another
+    /// part, changes nothing.
+    pub fn off(&self, listener: ListenerId) {
+        self.listeners.off(listener);
     }
 
     /// A copy of the session of `connection_handle`.
@@ -817,9 +811,32 @@ impl Sessions {
         )
     }
 
-    /// Stores `session`, its token drawn when it has none: stored as it is called.
-    pub fn set(&self, session: Session) -> BoxFuture<Result<Session, CallError>> {
-        on_owner(
+    /// Stores `session`, its token drawn when it has none: stored as it is called, its timeouts
+    /// judged first, as both other sides judge them; its future gives the session stored.
+    ///
+    /// # Errors
+    ///
+    /// A [`ProgrammerError`] at once for a timeout spec 1.4 does not hold, before anything is
+    /// stored. Its future fails [`CallError::Refused`] for a token another connection's session
+    /// holds, which only the sessions held can tell, and [`CallError::Disconnected`] once its
+    /// server is disposed.
+    pub fn set(
+        &self,
+        session: Session,
+    ) -> Result<BoxFuture<Result<Session, CallError>>, ProgrammerError> {
+        // * what needs no session held is refused as it is made; a timeout left out takes the
+        // default its manager held as it was built
+        for timeout in [
+            session.connection_inactivity_timeout,
+            session.session_inactivity_timeout,
+        ]
+        .into_iter()
+        .flatten()
+        {
+            hold("an inactivity timeout", timeout)?;
+        }
+
+        Ok(on_owner(
             &self.router,
             (
                 move |state: &mut ServerState| {
@@ -840,7 +857,7 @@ impl Sessions {
                     "the sessions were disposed".to_owned(),
                 )),
             ),
-        )
+        ))
     }
 
     /// The session of `connection_handle`, stored first, its activity now, when it has none.
@@ -1145,7 +1162,7 @@ impl Server {
             ("a server's router", "its transport"),
         )?
         .unwrap_or_else(|| {
-            let platform: SharedClock = Arc::new(SystemClock::new(runtime.clone()));
+            let platform: SharedClock = Arc::new(SystemClock::on(runtime.clone()));
 
             platform
         });
@@ -1157,7 +1174,7 @@ impl Server {
             )?,
             ..sessions_options
         })?;
-        let listeners: Arc<Mutex<Vec<SessionListener>>> = Arc::new(Mutex::new(Vec::new()));
+        let listeners: Arc<Listened<SessionListener>> = Arc::default();
         let facade = Facade {
             sessions,
             connections: Ordered::new(),
@@ -1293,7 +1310,12 @@ impl Server {
     /// Disposes of it: its router, its sessions, then its transport, stopped. Its router disposed
     /// at once, what it holds is let go in a later turn, behind what came before it, a listener's
     /// dispose too (spec 9.0).
-    pub fn dispose(&self) -> BoxFuture<()> {
+    ///
+    /// # Errors
+    ///
+    /// What its transport refuses its stop with, its router and its sessions disposed all the same:
+    /// a transport still starting, say.
+    pub fn dispose(&self) -> BoxFuture<Result<(), RouterError>> {
         self.shared.router.mark_disposed();
 
         let disposed = self
@@ -1312,7 +1334,7 @@ impl Server {
 
         Box::pin(async move {
             disposed.await.ok();
-            transport.stop().await;
+            transport.stop().await
         })
     }
 

@@ -9,7 +9,7 @@ use core::pin::Pin;
 use core::task::{Context, Poll};
 use core::time::Duration;
 use std::collections::BTreeMap;
-use std::sync::{Arc, Mutex, PoisonError};
+use std::sync::{Arc, Mutex, PoisonError, Weak};
 
 use bytes::Bytes;
 use tokio::runtime::Handle;
@@ -48,7 +48,9 @@ use crate::router::types::{
     limits_of, session_key_of,
 };
 use crate::session_token::SessionToken;
-use crate::transport::{Sent, ServerListener, ServerTransport};
+use crate::transport::{
+    Listened, ListenerId, Panicked, Sent, ServerListener, ServerTransport, caught,
+};
 
 /// What hears what a server's router reports: an error, and the connection it came with.
 pub type ErrorListener = Arc<dyn Fn(&RouterError, Option<&ConnectionHandle>) + Send + Sync>;
@@ -118,8 +120,11 @@ pub(crate) struct Waiting {
 /// What a server's router holds, in its owner.
 pub(crate) struct ServerState {
     pub(crate) core: Core<Self>,
-    pub(crate) transport: Arc<dyn ServerTransport>,
-    pub(crate) listener: Option<Arc<dyn ServerListener>>,
+    // ! its transport and its bridge held weakly: the transport holds the bridge, which holds the
+    // owner, so a strong edge back would keep the owner of its own (decision 0044); the handle holds
+    // the transport strongly, so it goes only once nothing holds the router
+    transport: Weak<dyn ServerTransport>,
+    pub(crate) listener: Option<Weak<dyn ServerListener>>,
     // the connections it follows, in the order it heard of them
     pub(crate) connections: Ordered<ConnectionHandle, ()>,
     pub(crate) credentials: CredentialResolver,
@@ -150,10 +155,10 @@ impl fmt::Debug for ServerState {
 /// The listeners of a server's router.
 #[derive(Default)]
 pub(crate) struct ServerListeners {
-    pub(crate) error: Mutex<Vec<ErrorListener>>,
-    pub(crate) debug: Mutex<Vec<EnvelopeListener>>,
-    pub(crate) access_refused: Mutex<Vec<RefusalListener>>,
-    pub(crate) activity: Mutex<Vec<ActivityListener>>,
+    pub(crate) error: Listened<ErrorListener>,
+    pub(crate) debug: Listened<EnvelopeListener>,
+    pub(crate) access_refused: Listened<RefusalListener>,
+    pub(crate) activity: Listened<ActivityListener>,
 }
 
 impl fmt::Debug for ServerListeners {
@@ -164,21 +169,14 @@ impl fmt::Debug for ServerListeners {
     }
 }
 
-fn all<T: Clone>(listeners: &Mutex<Vec<T>>) -> Vec<T> {
-    listeners
-        .lock()
-        .unwrap_or_else(PoisonError::into_inner)
-        .clone()
-}
-
 impl ServerListeners {
     // each listener within a guard (spec 15.1): what one panics is reported, and the others heard
     fn guarded<T: Clone, C: Fn(&T)>(
         &self,
-        (listeners, call): (&Mutex<Vec<T>>, C),
+        (listeners, call): (&Listened<T>, C),
         handle: Option<&ConnectionHandle>,
     ) {
-        for listener in all(listeners) {
+        for listener in listeners.all() {
             let called = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| call(&listener)));
 
             if let Err(panicked) = called {
@@ -188,7 +186,7 @@ impl ServerListeners {
     }
 
     pub(crate) fn report(&self, error: &RouterError, handle: Option<&ConnectionHandle>) {
-        for listener in all(&self.error) {
+        for listener in self.error.all() {
             // ! a listener of errors that panics would loop: its panic is dropped
             let called =
                 std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| listener(error, handle)));
@@ -228,7 +226,9 @@ impl Side for ServerState {
     }
 
     fn is_two_way(&self, connection_handle: &ConnectionHandle) -> bool {
-        self.transport.is_two_way(connection_handle)
+        self.asked((connection_handle, |transport: &dyn ServerTransport| {
+            transport.is_two_way(connection_handle)
+        }))
     }
 
     fn before_answer(&mut self, answer: BeforeAnswer) -> Option<Undo<Self>> {
@@ -320,7 +320,7 @@ impl Side for ServerState {
     }
 
     fn is_tracing(&self) -> bool {
-        !all(&self.listeners.debug).is_empty()
+        !self.listeners.debug.is_empty()
     }
 
     fn trace(
@@ -343,16 +343,30 @@ impl Side for ServerState {
         self.listeners.report(&error, Some(connection_handle));
     }
 
+    // ! the application's transport, called within the turn: what it panics is its throw, the
+    // transport's error, as the other sides' writers take a send that throws (spec 15.1)
     fn transmit(
         &mut self,
         message: TransportMessage,
         connection_handle: &ConnectionHandle,
     ) -> Result<Sent, RouterError> {
-        self.transport.send(message, connection_handle)
+        let transport = self
+            .transport()
+            .ok_or_else(crate::router::core::transport_gone)?;
+
+        caught(("a transport", || transport.send(message, connection_handle)))
+            .unwrap_or_else(|panicked| Err(panicked.into()))
+    }
+
+    // its calls failed with the panic, then let go of as its dispose does, the panic reported
+    fn ended(&mut self, panicked: &Panicked) {
+        crate::router::core::end(self, panicked);
+        dispose(self);
+        self.listeners.report(&panicked.clone().into(), None);
     }
 
     fn is_telling_refusals(&self) -> bool {
-        !all(&self.listeners.access_refused).is_empty()
+        !self.listeners.access_refused.is_empty()
     }
 
     // * told within a guard (spec 15.1): what a listener panics is reported with the connection
@@ -425,6 +439,27 @@ impl Side for ServerState {
 }
 
 impl ServerState {
+    /// Its transport, while something holds it: its handle, or the application.
+    pub(crate) fn transport(&self) -> Option<Arc<dyn ServerTransport>> {
+        self.transport.upgrade()
+    }
+
+    /// What its transport says of `connection_handle`, asked within the turn: ! the application's
+    /// transport, whose panic is reported with the connection and answers no, as one gone does.
+    pub(crate) fn asked<A: FnOnce(&dyn ServerTransport) -> bool>(
+        &self,
+        (connection_handle, ask): (&ConnectionHandle, A),
+    ) -> bool {
+        self.transport().is_some_and(|transport| {
+            caught(("a transport", || ask(&*transport))).unwrap_or_else(|panicked| {
+                self.listeners
+                    .report(&panicked.into(), Some(connection_handle));
+
+                false
+            })
+        })
+    }
+
     // the series a subscription of `procedure` counts into, as it subscribes
     fn series_of_procedure(&self, procedure: ProcedureAddress) -> Option<NotificationSeries> {
         self.core.metrics.as_ref()?;
@@ -1360,8 +1395,13 @@ pub(crate) fn dispose(state: &mut ServerState) {
         drop_with(state, handle);
     }
 
-    if let Some(listener) = state.listener.take() {
-        state.transport.unlisten(&listener);
+    if let Some(listener) = state
+        .listener
+        .take()
+        .and_then(|listener| listener.upgrade())
+        && let Some(transport) = state.transport()
+    {
+        transport.unlisten(&listener);
     }
 
     state.connections.clear();
@@ -1385,45 +1425,54 @@ pub(crate) fn dispose(state: &mut ServerState) {
 
 // what posts a transport's events to the router's owner, in the order the transport tells them,
 // behind every job queued, one told from within its router's turn too (spec 9.0): ! a handle to
-// the owner, so a router lives as long as its transport holds it (decision 0044)
+// the owner, so a router lives as long as its transport holds it (decision 0044); its state holds
+// the bridge and its transport weakly, so neither keeps it of its own
 struct Bridge {
     owner: Owner<ServerState>,
+    disposal: Disposal,
+}
+
+impl Bridge {
+    // ! what its transport tells once its router is disposed is dropped, as both other sides stop
+    // listening within their dispose: the rest of the dispose, its unlisten among it, comes in a
+    // later turn
+    fn offer(&self, job: Box<dyn FnOnce(&mut ServerState) + Send>) {
+        if !self.disposal.is_set() {
+            self.owner.offer_behind(job);
+        }
+    }
 }
 
 impl ServerListener for Bridge {
     fn on_connection(&self, connection_handle: &ConnectionHandle) {
         let handle = Arc::clone(connection_handle);
-        self.owner
-            .offer_behind(Box::new(move |state: &mut ServerState| {
-                crate::server::on_connection(state, &handle);
-                on_connection(state, &handle);
-            }));
+        self.offer(Box::new(move |state: &mut ServerState| {
+            crate::server::on_connection(state, &handle);
+            on_connection(state, &handle);
+        }));
     }
 
     fn on_message(&self, message: TransportMessage, connection_handle: &ConnectionHandle) {
         let handle = Arc::clone(connection_handle);
-        self.owner
-            .offer_behind(Box::new(move |state: &mut ServerState| {
-                crate::server::on_message(state, &handle);
-                on_message(state, (message, &handle));
-            }));
+        self.offer(Box::new(move |state: &mut ServerState| {
+            crate::server::on_message(state, &handle);
+            on_message(state, (message, &handle));
+        }));
     }
 
     fn on_close(&self, _was_clean: bool, connection_handle: &ConnectionHandle) {
         let handle = Arc::clone(connection_handle);
-        self.owner
-            .offer_behind(Box::new(move |state: &mut ServerState| {
-                crate::server::on_close(state, &handle);
-                on_close(state, &handle);
-            }));
+        self.offer(Box::new(move |state: &mut ServerState| {
+            crate::server::on_close(state, &handle);
+            on_close(state, &handle);
+        }));
     }
 
     fn on_listen(&self, is_held: bool, connection_handle: &ConnectionHandle) {
         let handle = Arc::clone(connection_handle);
-        self.owner
-            .offer_behind(Box::new(move |state: &mut ServerState| {
-                crate::server::on_listen(state, (is_held, &handle));
-            }));
+        self.offer(Box::new(move |state: &mut ServerState| {
+            crate::server::on_listen(state, (is_held, &handle));
+        }));
     }
 
     // * what its transport reports is its transport's: an application hears it there, whichever
@@ -1562,7 +1611,7 @@ impl RouterServer {
             ("a server's router", "its transport"),
         )?
         .unwrap_or_else(|| {
-            let platform: SharedClock = Arc::new(crate::clock::SystemClock::new(runtime.clone()));
+            let platform: SharedClock = Arc::new(crate::clock::SystemClock::on(runtime.clone()));
 
             platform
         });
@@ -1605,7 +1654,7 @@ impl RouterServer {
                         ),
                     )
                 },
-                transport: Arc::clone(&transport),
+                transport: Arc::downgrade(&transport),
                 listener: None,
                 connections: Ordered::new(),
                 credentials,
@@ -1622,12 +1671,15 @@ impl RouterServer {
         });
         let listener: Arc<dyn ServerListener> = Arc::new(Bridge {
             owner: owner.clone(),
+            disposal: disposal.clone(),
         });
 
-        transport.listen(Arc::clone(&listener));
+        let held = Arc::downgrade(&listener);
+
+        transport.listen(listener);
 
         owner.offer(Box::new(move |state: &mut ServerState| {
-            state.listener = Some(listener);
+            state.listener = Some(held);
         }));
 
         Ok(Self {
@@ -1673,44 +1725,39 @@ impl RouterServer {
         Arc::clone(&self.shared.transport)
     }
 
-    /// Hears what it reports from now on: an error, and the connection it came with.
-    pub fn on_error(&self, listener: ErrorListener) {
-        self.shared
-            .listeners
-            .error
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .push(listener);
+    /// Hears what it reports from now on: an error, and the connection it came with; the id given
+    /// takes it off again, with [`RouterServer::off`].
+    pub fn on_error(&self, listener: ErrorListener) -> ListenerId {
+        self.shared.listeners.error.add(listener)
     }
 
-    /// Hears each envelope it sends or takes from now on.
-    pub fn on_debug(&self, listener: EnvelopeListener) {
-        self.shared
-            .listeners
-            .debug
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .push(listener);
+    /// Hears each envelope it sends or takes from now on; the id given takes it off again, with
+    /// [`RouterServer::off`].
+    pub fn on_debug(&self, listener: EnvelopeListener) -> ListenerId {
+        self.shared.listeners.debug.add(listener)
     }
 
-    /// Hears each access it refuses from now on (spec 13.12).
-    pub fn on_access_refused(&self, listener: RefusalListener) {
-        self.shared
-            .listeners
-            .access_refused
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .push(listener);
+    /// Hears each access it refuses from now on (spec 13.12); the id given takes it off again, with
+    /// [`RouterServer::off`].
+    pub fn on_access_refused(&self, listener: RefusalListener) -> ListenerId {
+        self.shared.listeners.access_refused.add(listener)
     }
 
-    /// Hears what it did on a connection from now on.
-    pub fn on_activity(&self, listener: ActivityListener) {
-        self.shared
-            .listeners
-            .activity
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .push(listener);
+    /// Hears what it did on a connection from now on; the id given takes it off again, with
+    /// [`RouterServer::off`].
+    pub fn on_activity(&self, listener: ActivityListener) -> ListenerId {
+        self.shared.listeners.activity.add(listener)
+    }
+
+    /// Hears no more with the listener `listener` names, whichever of its events it heard: one
+    /// taken off already, or of another part, changes nothing.
+    pub fn off(&self, listener: ListenerId) {
+        let listeners = &self.shared.listeners;
+
+        listeners.error.off(listener);
+        listeners.debug.off(listener);
+        listeners.access_refused.off(listener);
+        listeners.activity.off(listener);
     }
 
     /// Reports what went wrong that no call waits on, with the connection it came with.
@@ -2011,15 +2058,20 @@ pub(crate) fn request_on(
         // a credential its transport cannot carry fails the call before it goes: nothing was tried
         let uncarried = is_open
             .then(|| {
-                let transport = Arc::clone(&state.transport);
+                let takes_credential = state.asked((&named, |transport: &dyn ServerTransport| {
+                    transport.carries_credential(&named)
+                }));
+                let is_secure = state.asked((&named, |transport: &dyn ServerTransport| {
+                    transport.is_secure(&named)
+                }));
 
                 uncarried_of(
                     credential.as_ref(),
                     &Carriage {
                         carried: carried.as_deref(),
-                        takes: &|_carried: &str| transport.carries_credential(&named),
+                        takes: &|_carried: &str| takes_credential,
                         side: RouterSide::Server,
-                        is_secure: transport.is_secure(&named),
+                        is_secure,
                     },
                 )
             })

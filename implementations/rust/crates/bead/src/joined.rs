@@ -333,9 +333,9 @@ impl ServerTransport for JoinedServerTransport {
         Box::pin(async { Ok(()) })
     }
 
-    // every transport it joined, settled once all have
-    fn stop(&self) -> BoxFuture<()> {
-        let stopping: Vec<BoxFuture<()>> = self
+    // every transport it joined, settled once all have, failing as the first that refused its stop
+    fn stop(&self) -> BoxFuture<Result<(), RouterError>> {
+        let stopping: Vec<BoxFuture<Result<(), RouterError>>> = self
             .inner
             .transports
             .iter()
@@ -343,9 +343,17 @@ impl ServerTransport for JoinedServerTransport {
             .collect();
 
         Box::pin(async move {
+            let mut outcome = Ok(());
+
             for stop in stopping {
-                stop.await;
+                let stopped = stop.await;
+
+                if outcome.is_ok() {
+                    outcome = stopped;
+                }
             }
+
+            outcome
         })
     }
 

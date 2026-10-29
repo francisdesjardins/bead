@@ -10,7 +10,7 @@ use core::sync::atomic::{AtomicBool, Ordering};
 use core::task::{Context, Poll};
 use core::time::Duration;
 use std::error::Error;
-use std::sync::{Arc, Mutex, PoisonError};
+use std::sync::{Arc, Mutex};
 
 use bytes::Bytes;
 use tokio::sync::oneshot;
@@ -26,7 +26,7 @@ use crate::failure::Failure;
 use crate::identity::{Procedure, check_declaration};
 use crate::managers::notification::NotificationKey;
 use crate::metrics::ProcedureSeries;
-use crate::payloads::PayloadCodec;
+use crate::payloads::{PayloadCodec, decoded, encoded};
 use crate::router::admissions::BeforeRequest;
 use crate::router::client::{ClientRequest, NotificationLike, RouterClient};
 use crate::router::core::{Answerer, Handler, ResolverProps};
@@ -35,6 +35,7 @@ use crate::router::types::{
     BoxFuture, CallSession, ConnectionHandle, RequestCredential, ResolvedRequestOptions,
     RouterAnswer, RouterError, RouterLimits, SessionIdentifier, Signal,
 };
+use crate::transport::{Listened, ListenerId};
 use crate::violations::{Judged, detail_bound_of, is_refused, violations_detail_of};
 
 mod notification;
@@ -338,9 +339,9 @@ struct Inner {
     close_connection: Option<CloseConnection>,
     timeout: Duration,
     close_on_timeout: Option<bool>,
-    debug: Mutex<Vec<DebugListener>>,
-    deprecated: Mutex<Vec<DeprecatedListener>>,
-    dropped: Mutex<Vec<DroppedListener>>,
+    debug: Listened<DebugListener>,
+    deprecated: Listened<DeprecatedListener>,
+    dropped: Listened<DroppedListener>,
     // the notifications this manager made, one per procedure, kept for its life
     notifications: Mutex<std::collections::BTreeMap<(u16, u16), notification::Known>>,
 }
@@ -395,11 +396,7 @@ struct Step {
 
 impl Inner {
     fn is_debugging(&self) -> bool {
-        !self
-            .debug
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .is_empty()
+        !self.debug.is_empty()
     }
 
     // now, for a call starting, traced: the wall clock for its start, the monotonic for its
@@ -422,11 +419,7 @@ impl Inner {
     // tells debug about one step of a call, each listener within a guard: what one panics is
     // reported through the router with the call's connection, and changes nothing of the call
     fn trace(&self, procedure: &Procedure, step: Step) {
-        let listeners = self
-            .debug
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .clone();
+        let listeners = self.debug.all();
 
         if listeners.is_empty() {
             return;
@@ -483,11 +476,7 @@ impl Inner {
     }
 
     fn deprecated(&self, procedure: &Procedure) {
-        let listeners = self
-            .deprecated
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .clone();
+        let listeners = self.deprecated.all();
 
         for listener in listeners {
             let called =
@@ -547,39 +536,41 @@ impl ServiceManager {
                 close_connection: options.close_connection.clone(),
                 timeout,
                 close_on_timeout: defaults.close_on_timeout,
-                debug: Mutex::new(Vec::new()),
-                deprecated: Mutex::new(Vec::new()),
-                dropped: Mutex::new(Vec::new()),
+                debug: Listened::default(),
+                deprecated: Listened::default(),
+                dropped: Listened::default(),
                 notifications: Mutex::new(std::collections::BTreeMap::new()),
             }),
         })
     }
 
-    /// Hears each step of each call from now on.
-    pub fn on_debug(&self, listener: DebugListener) {
-        self.inner
-            .debug
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .push(listener);
+    /// Hears each step of each call from now on, debugging on while someone listens; the id given
+    /// takes it off again, with [`ServiceManager::off`].
+    pub fn on_debug(&self, listener: DebugListener) -> ListenerId {
+        self.inner.debug.add(listener)
     }
 
-    /// Hears each call of a procedure deprecated from now on.
-    pub fn on_deprecated(&self, listener: DeprecatedListener) {
-        self.inner
-            .deprecated
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .push(listener);
+    /// Hears each call of a procedure deprecated from now on; the id given takes it off again, with
+    /// [`ServiceManager::off`].
+    pub fn on_deprecated(&self, listener: DeprecatedListener) -> ListenerId {
+        self.inner.deprecated.add(listener)
     }
 
-    /// Hears each subscription of a notification dropped from now on.
-    pub fn on_dropped(&self, listener: DroppedListener) {
-        self.inner
-            .dropped
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .push(listener);
+    /// Hears each subscription of a notification dropped from now on; the id given takes it off
+    /// again, with [`ServiceManager::off`].
+    pub fn on_dropped(&self, listener: DroppedListener) -> ListenerId {
+        self.inner.dropped.add(listener)
+    }
+
+    /// Hears no more with the listener `listener` names, whichever of its events it heard: one
+    /// taken off already, or of another part, changes nothing. The last debug listener gone,
+    /// debugging is off.
+    pub fn off(&self, listener: ListenerId) {
+        let inner = &self.inner;
+
+        inner.debug.off(listener);
+        inner.deprecated.off(listener);
+        inner.dropped.off(listener);
     }
 
     /// The notification of `procedure`, one per procedure: asked for again, the same is given.
@@ -920,7 +911,7 @@ where
         let refusal = refusal_of(shared, (&payload, resolved.destination_id));
         let encoded = match &refusal {
             Some(_) => Bytes::new(),
-            None => match shared.dependencies.request.encode(&payload) {
+            None => match encoded(&shared.dependencies.request, &payload) {
                 Ok(encoded) => encoded,
                 // a value that does not write fails before anything goes: nothing requested,
                 // traced or deprecated
@@ -949,6 +940,7 @@ where
 
         let (on_call_id, call_id) = oneshot::channel::<u32>();
         let close_on_timeout = resolved.close_on_timeout;
+        let destination_id = resolved.destination_id;
         let requested = manager.router.request(
             encoded,
             RouterCall {
@@ -1017,7 +1009,7 @@ where
                 Ok(result) => {
                     call_id = Some(result.header.call_id);
 
-                    match shared.dependencies.result.decode(&result.payload) {
+                    match decoded(&shared.dependencies.result, &result.payload) {
                         // an answer that does not decode fails here, with the result's header
                         Err(refused) => {
                             let failure = Failure::protocol(
@@ -1026,7 +1018,7 @@ where
                             )
                             .saying(refused.reason().to_owned())
                             .about(&crate::envelope::Header::Result(result.header.clone()))
-                            .of_call(Some(procedure.address()), None)
+                            .of_call(Some(procedure.address()), destination_id)
                             .caused_by(Arc::new(refused));
                             let reason = CallError::Failure(failure);
 
@@ -1221,10 +1213,7 @@ where
     /// Answers its request with `value`.
     pub fn result(&self, value: Res::Value) -> BoxFuture<Result<(), ResolverError>> {
         let told = traced(value.clone());
-        let encoded = self
-            .shared
-            .codec
-            .encode(&value)
+        let encoded = encoded(&*self.shared.codec, &value)
             .map(RouterAnswer::Result)
             .map_err(ResolverError::other);
 
@@ -1481,7 +1470,7 @@ where
         // arrives, its decoding counting in its duration
         let started = manager.is_debugging().then(|| manager.started_now());
         // a payload that does not decode never reaches the callback
-        let Ok(value) = self.request.decode(&payload) else {
+        let Ok(value) = decoded(&self.request, &payload) else {
             return answerer
                 .respond(RouterAnswer::Failure(
                     self.failure(ProtocolCode::PAYLOAD_UNDECODABLE),
@@ -1820,9 +1809,7 @@ where
 
         // a value that does not write goes to the router in its payload's place, for it to count
         // failed at each subscription it was for and report (spec 17.2, item 6)
-        let payload = shared
-            .codec
-            .encode(&notification)
+        let payload = encoded(&shared.codec, &notification)
             .map_err(|refused| RouterError::Other(Arc::new(refused)));
         let failure = payload.as_ref().err().cloned();
         let notified = match &manager.router {

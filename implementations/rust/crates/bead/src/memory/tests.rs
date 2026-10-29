@@ -284,6 +284,63 @@ async fn hands_each_envelope_on_whole_once_and_in_order_in_a_later_turn_than_its
     );
 }
 
+// a server's listener that runs what a test gives it as each message comes
+struct OnServerMessage<F>(F);
+
+impl<F: Fn(&TransportMessage, &ConnectionHandle) + Send + Sync> ServerListener
+    for OnServerMessage<F>
+{
+    fn on_message(&self, message: TransportMessage, connection_handle: &ConnectionHandle) {
+        (self.0)(&message, connection_handle);
+    }
+}
+
+// spec 15.13: in the order it was sent, its close after what it sent before, whatever turn sends
+// it; both other sides queue a later turn at the tail
+#[tokio::test]
+async fn an_envelope_or_a_close_a_listener_of_the_transport_sends_within_its_turn_comes_behind_what_was_sent_before_it()
+ {
+    for closes in [false, true] {
+        let ends = Ends::started().await;
+        let server = ends.server.clone();
+
+        ends.server.listen(Arc::new(OnServerMessage(
+            move |message: &TransportMessage, handle: &ConnectionHandle| {
+                if message.data.as_ref() != [0xFF] {
+                    return;
+                }
+
+                // * within the turn that hands the server its client's trigger
+                if closes {
+                    drop(server.close(handle));
+                } else {
+                    server.send(message_of(&[2], None), handle).expect("sent");
+                }
+            },
+        )));
+
+        let (client, at_client) = ends.connected((None, None)).await;
+        let handle: ConnectionHandle = Arc::from(FIRST);
+
+        // the trigger, then the server's first: both queued before either is handed on
+        client.send(message_of(&[0xFF], None)).expect("sent");
+        ends.server
+            .send(message_of(&[1], None), &handle)
+            .expect("sent");
+        ends.clock.settle().await;
+
+        assert_eq!(
+            taken(&at_client),
+            if closes {
+                ["heard 01 carrying None", "closed false false"]
+            } else {
+                ["heard 01 carrying None", "heard 02 carrying None"]
+            },
+            "what was sent first heard first, closes {closes}"
+        );
+    }
+}
+
 // the ELSEWHERE that stands for it, through both routers, the conversations play in memory
 // spec 15.13
 #[tokio::test]
@@ -424,7 +481,7 @@ async fn draws_a_handle_of_type_memory_for_each_connect_and_gives_none_twice() {
 
     ends.clock.settle().await;
     again.await.expect("connected again");
-    ends.server.stop().await;
+    ends.server.stop().await.expect("stopped");
     ends.clock.settle().await;
     ends.server.start().await.expect("started again");
 
@@ -634,7 +691,7 @@ async fn closes_each_connection_as_it_stops_and_takes_no_connect_after() {
     }
 
     locked(&told).clear();
-    server.stop().await;
+    server.stop().await.expect("stopped");
     clock.settle().await;
 
     assert_eq!(
@@ -1044,6 +1101,54 @@ async fn closes_at_once_unclean_a_connection_its_server_draws_once_a_dispose_gav
     assert!(ends.server.clients().is_empty(), "no connection held");
 }
 
+// spec 15.15: what a connect draws as it ends is let go, its server told the close of its
+// connection, its client's last handle let go within that turn too
+#[tokio::test]
+async fn a_connect_given_up_its_client_let_go_as_its_server_draws_it_leaves_no_connection_held() {
+    let ends = Ends::started().await;
+    let (client, at_client) = ends.client();
+    let held = Arc::new(Mutex::new(Some(client.clone())));
+    let giving_up = Arc::clone(&held);
+
+    // * its dispose in the turn its server draws the connection, then its last handle let go
+    ends.server
+        .listen(Arc::new(OnConnection(move |_handle: &ConnectionHandle| {
+            let client = locked(&giving_up).take();
+
+            if let Some(client) = client {
+                client.dispose();
+            }
+        })));
+
+    let connecting = client.connect(MemoryConnectOptions::default());
+
+    drop(client);
+    ends.clock.settle().await;
+
+    assert!(locked(&held).is_none(), "its last handle let go");
+    assert_eq!(
+        connecting
+            .await
+            .expect_err("disposed as it connected")
+            .to_string(),
+        "the transport client was disposed as it connected",
+        "said why"
+    );
+
+    ends.clock.settle().await;
+
+    assert_eq!(
+        ends.server_told(),
+        [
+            format!("connection {FIRST}"),
+            format!("closed {FIRST} false")
+        ],
+        "closed at once, unclean"
+    );
+    assert!(taken(&at_client).is_empty(), "nothing heard");
+    assert!(ends.server.clients().is_empty(), "no connection held");
+}
+
 // a platform's shape: a message's data is bytes, so what is no bytes is no message to send
 #[tokio::test]
 async fn refuses_a_send_or_a_disconnect_unless_open_and_a_send_of_what_is_no_bytes() {
@@ -1319,7 +1424,7 @@ async fn reconnects_with_its_last_connect_s_options_replacing_its_connection_wit
     );
 
     // its server gone: each attempt refused until they run out, closed with no close of its own
-    ends.server.stop().await;
+    ends.server.stop().await.expect("stopped");
     ends.clock.settle().await;
 
     assert_eq!(

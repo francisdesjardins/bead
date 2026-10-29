@@ -85,10 +85,14 @@ tools/check-protobuf.mjs        the check of the tests' descriptor set, as proto
 
 Bead takes the application's tokio runtime and starts none of its own: the runtime enables its time
 driver, by `enable_all` or `enable_time`, or a router, the in-memory transport and broker, a
-broker's participant and `SystemClock::current` refuse to be built on it. Each router is one owner,
-a task of that runtime that holds its state and runs its jobs one at a time, in the order they came;
-an operation goes as it is made, and dropping its future cancels nothing. A router's transport holds
-it, so it lives as long as its connection does, its last handle dropped or not.
+broker's participant and `SystemClock` refuse to be built on it, the runtime given or the current
+one. Each router is one owner, a task of that runtime that holds its state and runs its jobs one at
+a time, in the order they came; an operation goes as it is made, and dropping its future cancels
+nothing. A router's transport holds it, so it lives as long as its connection does, its last handle
+dropped or not; one that neither its application nor its transport holds ends with its owner, but
+a resolver a service manager registered holds that manager, and so its router, which then ends by
+its dispose. A job that panics past the guards of the sites the spec lets throw ends its router at
+once, each call it waits on failed with that panic for its reason.
 
 The core spawns through one private module, `platform`, and reads time through its clock alone
 (decision 0011): clippy's `disallowed-methods` and `disallowed-types`, in `clippy.toml`, refuse

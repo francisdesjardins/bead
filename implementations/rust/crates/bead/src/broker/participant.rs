@@ -45,7 +45,7 @@ use crate::duration::{NEVER, hold, hold_finite};
 use crate::errors::{ConnectError, ProgrammerError, TransportError};
 use crate::owner::{Owner, WeakOwner};
 use crate::router::types::{BoxFuture, ConnectionHandle, Gauges, RouterError, TransportMessage};
-use crate::transport::{Listeners, ReconnectOptions, attempting};
+use crate::transport::{ListenerId, Listeners, ReconnectOptions, attempting};
 
 /// How long a connection is silent before it is pinged, and a ping unanswered before it is closed,
 /// by default (spec 15.23): 30 seconds.
@@ -568,6 +568,10 @@ impl Config {
         )
     }
 }
+
+// * a job of the participant's that panics, a listener's being guarded, ends it: what waits on it
+// hears it gone
+impl crate::owner::Owned for ParticipantState {}
 
 /// What a participant's owner holds: its connections, the connects awaiting their answer, the
 /// departures it subscribes. Touched in its turn alone.
@@ -1926,7 +1930,7 @@ impl BrokerParticipant {
 
         let runtime =
             crate::platform::runtime_of(options.runtime.as_ref(), "a broker's participant")?;
-        let platform: SharedClock = Arc::new(SystemClock::new(runtime.clone()));
+        let platform: SharedClock = Arc::new(SystemClock::on(runtime.clone()));
         let clock = options
             .clock
             .clone()
@@ -2021,14 +2025,10 @@ impl BrokerParticipant {
         !self.inner.config.debug_listeners.is_empty()
     }
 
-    /// Hears each parcel's verdict, completed link transition, held name and report.
-    pub fn on_debug(&self, listener: ParticipantDebugListener) {
-        self.inner.config.debug_listeners.add(listener);
-    }
-
-    /// Hears its trace no more.
-    pub fn off_debug(&self, listener: &ParticipantDebugListener) {
-        self.inner.config.debug_listeners.remove(listener);
+    /// Hears each parcel's verdict, completed link transition, held name and report; the id given
+    /// takes it off again, with [`BrokerParticipant::off`].
+    pub fn on_debug(&self, listener: ParticipantDebugListener) -> ListenerId {
+        self.inner.config.debug_listeners.add(listener)
     }
 
     /// The names acknowledged held on this link, read by pull (debugging 13.8).
@@ -2044,14 +2044,19 @@ impl BrokerParticipant {
     }
 
     /// Hears what it reports of its own: a message to it that is no parcel, which it drops, its link
-    /// given up on, or its link taken over.
-    pub fn on_error(&self, listener: ParticipantErrorListener) {
-        self.inner.config.listeners.add(listener);
+    /// given up on, or its link taken over; the id given takes it off again, with
+    /// [`BrokerParticipant::off`].
+    pub fn on_error(&self, listener: ParticipantErrorListener) -> ListenerId {
+        self.inner.config.listeners.add(listener)
     }
 
-    /// Hears it no more.
-    pub fn off_error(&self, listener: &ParticipantErrorListener) {
-        self.inner.config.listeners.remove(listener);
+    /// Hears no more with the listener `listener` names, its trace's or its reports': one taken
+    /// off already, or of another part, changes nothing.
+    pub fn off(&self, listener: ListenerId) {
+        let config = &self.inner.config;
+
+        config.debug_listeners.off(listener);
+        config.listeners.off(listener);
     }
 
     /// What it holds: `connections`, those of its transports open, and `halfOpen`, those whose third

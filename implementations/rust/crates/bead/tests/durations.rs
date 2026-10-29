@@ -238,8 +238,8 @@ impl ServerTransport for Pipe {
         Box::pin(async { Ok(()) })
     }
 
-    fn stop(&self) -> BoxFuture<()> {
-        Box::pin(async {})
+    fn stop(&self) -> BoxFuture<Result<(), RouterError>> {
+        Box::pin(async { Ok(()) })
     }
 }
 
@@ -702,6 +702,7 @@ async fn manager_default_of((is_connection, given): (bool, Option<Duration>)) ->
 
     let stored = sessions
         .set(created)
+        .map_err(|error| error.to_string())?
         .await
         .map_err(|error| error.to_string())?;
     let held = if is_connection {
@@ -760,6 +761,7 @@ async fn session_timeout_of((way, given): (SessionWay, Option<Duration>)) -> Pla
 
     let session = sessions
         .set(created)
+        .map_err(|error| error.to_string())?
         .await
         .map_err(|error| error.to_string())?;
 
@@ -776,10 +778,10 @@ async fn session_timeout_of((way, given): (SessionWay, Option<Duration>)) -> Pla
                 other.session_inactivity_timeout = given;
             }
 
-            let stored = match sessions.set(other).await {
-                Ok(stored) => Ok(stored),
-                Err(CallError::Refused(refused)) => Err(refused),
-                Err(error) => return Err(error.to_string()),
+            // * a timeout refused as the store is made, before anything is stored
+            let stored = match sessions.set(other) {
+                Ok(storing) => Ok(storing.await.map_err(|error| error.to_string())?),
+                Err(refused) => Err(refused),
             };
 
             (
@@ -887,6 +889,7 @@ async fn reset_of((is_connection, given): (bool, Option<Duration>)) -> Played {
 
     sessions
         .set(created)
+        .map_err(|error| error.to_string())?
         .await
         .map_err(|error| error.to_string())?;
     serving.clock.settle().await;
@@ -1242,9 +1245,12 @@ impl BrokerDrive {
         }
     }
 
-    async fn stop(&self) {
-        self.server.stop().await;
+    async fn stop(&self) -> Result<(), String> {
+        let stopped = self.server.stop().await.map_err(|error| error.to_string());
+
         self.participant.stop().await;
+
+        stopped
     }
 }
 
@@ -1282,7 +1288,7 @@ async fn accept_timeout_by_options(given: Option<Duration>) -> Played {
 
     let due = due_of(&drive.clock.dues());
 
-    drive.stop().await;
+    drive.stop().await?;
 
     Ok(Observed::Held(due?))
 }
@@ -1321,7 +1327,7 @@ async fn broker_body_grace_period_by_options(given: Option<Duration>) -> Played 
 
     let due = due_of(&drive.clock.dues());
 
-    drive.stop().await;
+    drive.stop().await?;
 
     Ok(Observed::Held(due?))
 }

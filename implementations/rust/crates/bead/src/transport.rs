@@ -6,6 +6,7 @@
 use core::fmt;
 use core::future::Future;
 use core::pin::Pin;
+use core::sync::atomic::{AtomicU64, Ordering};
 use core::task::{Context, Poll};
 use core::time::Duration;
 use std::panic::{AssertUnwindSafe, catch_unwind};
@@ -191,8 +192,14 @@ pub trait ServerTransport: Send + Sync + fmt::Debug {
     /// Starts it.
     fn start(&self) -> BoxFuture<Result<(), RouterError>>;
 
-    /// Stops it, closing every connection.
-    fn stop(&self) -> BoxFuture<()>;
+    /// Stops it, closing every connection; settles at once when it never started or stopped
+    /// already, and shares a stop under way.
+    ///
+    /// # Errors
+    ///
+    /// A stop while it starts, refused as the other sides' transport server refuses it: `the
+    /// transport server is starting`.
+    fn stop(&self) -> BoxFuture<Result<(), RouterError>>;
 
     /// What it holds, counted.
     fn gauges(&self) -> Option<Gauges> {
@@ -343,12 +350,21 @@ pub fn is_field_value(value: &str) -> bool {
     }
 }
 
-/// The listeners of one end, each called within a guard (spec 15.1).
-pub(crate) struct Listeners<L: ?Sized> {
-    listeners: Mutex<Vec<Arc<L>>>,
+/// What a listener's registration gives: the id its part's `off` takes it off again by, as the
+/// other sides' `off` and `-=` take a listener off. Dropped, the listener stays.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct ListenerId(u64);
+
+// each registration's own id, never given twice in a process
+static LISTENER_IDS: AtomicU64 = AtomicU64::new(1);
+
+/// The listeners of one event, each under the id its registration gave, called in the order they
+/// came.
+pub(crate) struct Listened<T> {
+    listeners: Mutex<Vec<(ListenerId, T)>>,
 }
 
-impl<L: ?Sized> Default for Listeners<L> {
+impl<T> Default for Listened<T> {
     fn default() -> Self {
         Self {
             listeners: Mutex::new(Vec::new()),
@@ -356,13 +372,13 @@ impl<L: ?Sized> Default for Listeners<L> {
     }
 }
 
-impl<L: ?Sized> fmt::Debug for Listeners<L> {
+impl<T> fmt::Debug for Listened<T> {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter.debug_struct("Listeners").finish_non_exhaustive()
+        formatter.debug_struct("Listened").finish_non_exhaustive()
     }
 }
 
-impl<L: ?Sized> Listeners<L> {
+impl<T: Clone> Listened<T> {
     /// Whether nobody listens, without copying the listener list.
     pub(crate) fn is_empty(&self) -> bool {
         self.listeners
@@ -371,25 +387,48 @@ impl<L: ?Sized> Listeners<L> {
             .is_empty()
     }
 
-    pub(crate) fn add(&self, listener: Arc<L>) {
+    /// Hears from now on, under the id it gives.
+    pub(crate) fn add(&self, listener: T) -> ListenerId {
+        let id = ListenerId(LISTENER_IDS.fetch_add(1, Ordering::Relaxed));
+
         self.listeners
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
-            .push(listener);
+            .push((id, listener));
+
+        id
     }
 
+    /// Takes off the listener `id` names, if it listens here.
+    pub(crate) fn off(&self, id: ListenerId) {
+        self.listeners
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .retain(|(held, _)| *held != id);
+    }
+
+    /// Each listener, in the order they came: a copy, so one added or taken off meanwhile changes
+    /// the next telling, not this one.
+    pub(crate) fn all(&self) -> Vec<T> {
+        self.listeners
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .iter()
+            .map(|(_, listener)| listener.clone())
+            .collect()
+    }
+}
+
+/// The listeners of one end, each called within a guard (spec 15.1).
+pub(crate) type Listeners<L> = Listened<Arc<L>>;
+
+impl<L: ?Sized> Listened<Arc<L>> {
+    /// Takes `listener` off, as the one given: a transport's `unlisten`.
     pub(crate) fn remove(&self, listener: &Arc<L>) {
         self.listeners
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
-            .retain(|held| !Arc::ptr_eq(held, listener));
-    }
-
-    pub(crate) fn all(&self) -> Vec<Arc<L>> {
-        self.listeners
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .clone()
+            .retain(|(_, held)| !Arc::ptr_eq(held, listener));
     }
 
     /// Calls each listener within a guard: what one panics is given to `on_error`, and the
@@ -419,9 +458,59 @@ impl fmt::Display for Panicked {
 
 impl std::error::Error for Panicked {}
 
+impl From<Panicked> for RouterError {
+    fn from(panicked: Panicked) -> Self {
+        Self::Other(Arc::new(panicked))
+    }
+}
+
 /// The error a listener's panic stands for, as its throw is reported.
 pub(crate) fn panic_error(panicked: &(dyn core::any::Any + Send)) -> RouterError {
     RouterError::Other(Arc::new(panicked_of(("a listener", panicked))))
+}
+
+/// Calls `call`, the application's code a side runs within its turn, within a guard: what it panics
+/// is its throw, the error it stands for (decision 0044), named by `what`, `a transport` say.
+pub(crate) fn caught<T, C: FnOnce() -> T>((what, call): (&'static str, C)) -> Result<T, Panicked> {
+    catch_unwind(AssertUnwindSafe(call)).map_err(|panicked| panicked_of((what, &*panicked)))
+}
+
+/// What a future of the application's gives, or what it panicked with as it was polled: its
+/// throw, named by `what`. Polled no more once it gave either.
+pub(crate) struct Caught<F> {
+    future: Pin<Box<F>>,
+    what: &'static str,
+}
+
+impl<F> fmt::Debug for Caught<F> {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("Caught")
+            .field("what", &self.what)
+            .finish_non_exhaustive()
+    }
+}
+
+impl<F: Future> Future for Caught<F> {
+    type Output = Result<F::Output, Panicked>;
+
+    fn poll(mut self: Pin<&mut Self>, context: &mut Context<'_>) -> Poll<Self::Output> {
+        let what = self.what;
+
+        match catch_unwind(AssertUnwindSafe(|| self.future.as_mut().poll(context))) {
+            Ok(Poll::Ready(output)) => Poll::Ready(Ok(output)),
+            Ok(Poll::Pending) => Poll::Pending,
+            Err(panicked) => Poll::Ready(Err(panicked_of((what, &*panicked)))),
+        }
+    }
+}
+
+/// `future`, its panic its throw, named by `what`.
+pub(crate) fn caught_future<F: Future>((what, future): (&'static str, F)) -> Caught<F> {
+    Caught {
+        future: Box::pin(future),
+        what,
+    }
 }
 
 /// What `what` panicked with, as an error.
