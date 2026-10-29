@@ -56,6 +56,10 @@ use crate::transport::{
 #[path = "tests/server_places.rs"]
 mod tests;
 
+#[cfg(test)]
+#[path = "tests/server_credential_sessions.rs"]
+mod credential_tests;
+
 /// What hears what a server's router reports: an error, and the connection it came with.
 pub type ErrorListener = Arc<dyn Fn(&RouterError, Option<&ConnectionHandle>) + Send + Sync>;
 
