@@ -233,13 +233,14 @@ jobs:
 
   # ── Rust ─────────────────────────────────────────────────────────────────────
   # The Rust side's own gate (decision 0044): its toolchain from its rust-toolchain.toml, a warning
-  # an error by its .cargo/config.toml, `[build] warnings = "deny"`; its format, its lints, its
-  # documentation, a build on the default features alone, where what the test kit alone reaches is
-  # left out, its dependencies' advisories, licences, bans and sources, then its tests and its
-  # conformance players under coverage, lines and regions on the pinned stable, held to the side's
-  # floor in tools/coverage-floors.json; and its fuzz targets built on the nightly pinned by its date,
-  # never run. On Windows, its tests alone, as the user's MSVC toolchain builds them. The registry
-  # and the target are cached by the lock and the toolchain; every build is `--locked`.
+  # an error by its .cargo/config.toml, `[build] warnings = "deny"`; its format, its lints, the
+  # core's lints on the browser's WebAssembly target, its documentation, a build on the default
+  # features alone, where what the test kit alone reaches is left out, its dependencies' advisories,
+  # licences, bans and sources, then its tests and its conformance players under coverage, lines and
+  # regions on the pinned stable, held to the side's floor in tools/coverage-floors.json; and its
+  # fuzz targets built on the nightly pinned by its date, never run. On Windows, its tests alone, as
+  # the user's MSVC toolchain builds them. The registry and the target are cached by the lock and
+  # the toolchain; every build is `--locked`.
   rust:
     name: Rust (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
@@ -260,7 +261,8 @@ jobs:
       NIGHTLY: nightly-2026-10-27
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      # 1.99.1 and its components, clippy, rustfmt and llvm-tools, as rust-toolchain.toml names them
+      # 1.99.1, its components, clippy, rustfmt and llvm-tools, and its target
+      # wasm32-unknown-unknown, as rust-toolchain.toml names them
       - run: rustup toolchain install
       - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
@@ -281,6 +283,11 @@ jobs:
         run: cargo fmt --all -- --check
       - if: matrix.os == 'ubuntu-26.04'
         run: cargo clippy --workspace --all-targets --all-features --locked
+      # the core checked for the browser's WebAssembly, never run, the target rust-toolchain.toml's:
+      # what it links builds there, its spawning and its time through crate::platform and the clock
+      # alone; getrandom's backend for the target is .cargo/config.toml's
+      - if: matrix.os == 'ubuntu-26.04'
+        run: cargo clippy -p francisdesjardins-bead --lib --all-features --locked --target wasm32-unknown-unknown
       - if: matrix.os == 'ubuntu-26.04'
         run: cargo doc --workspace --no-deps --all-features --locked
       # the default features alone: what the test kit alone reaches is cfg'd out, or a warning
