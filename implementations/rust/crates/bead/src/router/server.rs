@@ -1788,7 +1788,8 @@ impl RouterServer {
     }
 
     /// Sends a notification's payload to each subscription its procedure holds that `filter`
-    /// keeps; or, given why its value does not write, to none.
+    /// keeps; or, given why its value does not write, to none. Its future gives the outcome of
+    /// choosing its subscribers; each transport's send failure is reported with its connection.
     pub fn notify(
         &self,
         payload: Result<Bytes, RouterError>,
@@ -1797,14 +1798,13 @@ impl RouterServer {
             Option<NotifyFilter>,
             Option<NotificationKey>,
         ),
-    ) -> BoxFuture<()> {
+    ) -> BoxFuture<Result<(), RouterError>> {
         let posted = self.shared.owner.run(move |state: &mut ServerState| {
             notify(state, (payload, procedure, (filter, key)));
+            Ok(())
         });
 
-        Box::pin(async move {
-            posted.await.ok();
-        })
+        Box::pin(async move { posted.await.unwrap_or(Ok(())) })
     }
 
     /// Ends the credential's session `identifier` names on every connection that keeps it.

@@ -1835,12 +1835,13 @@ where
                 ),
             ),
             // * only a server notifies; a client asks with a request
-            ServiceRouter::Client(_) => Box::pin(async {}),
+            ServiceRouter::Client(_) => Box::pin(async { Ok(()) }),
         };
         let shared = Arc::clone(&self.shared);
 
         Box::pin(async move {
-            notified.await;
+            let outcome = notified.await;
+            let failure = failure.or_else(|| outcome.err());
 
             // what keeps it from going out is told at the start it was sent with
             if let (Some(failure), Some(step)) = (failure, step) {
