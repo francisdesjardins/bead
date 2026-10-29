@@ -2,16 +2,18 @@
 //! to a request answered while its holder was in flight.
 
 use core::num::NonZeroU16;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use bytes::Bytes;
 use tokio_util::sync::CancellationToken;
 
 use super::server::{Served, first, news, second};
 use super::{cancel_of, locked};
+use crate::constants::{ProtocolCode, RouterSide};
+use crate::debug::DebugDirection;
 use crate::envelope::{CreditHeader, Envelope, RequestHeader};
-use crate::errors::ResolverError;
-use crate::failure::Failure;
+use crate::errors::{CallError, ResolverError};
+use crate::failure::{Failure, FailureOrigin};
 use crate::managers::notification::{NotificationKey, PacingLimitsOptions};
 use crate::managers::service::{Notifier, NotifyOptions, ResolverDependencies, Response};
 use crate::payloads::TextCodec;
@@ -315,6 +317,76 @@ async fn answers_with_the_failure_a_call_in_flight_whose_queue_goes_past_its_bou
     paced.served.transport.deliver(&credit(5, 2), &first());
     paced.served.settle().await;
     assert_eq!(paced.served.sent_since(), ["first notification 5 e"]);
+    assert_eq!(paced.served.reported(), Vec::<String>::new());
+}
+
+#[tokio::test]
+async fn tells_the_failure_its_router_answered_in_the_resolvers_place() {
+    let paced = Paced::new(Some(1));
+    let told = Arc::new(Mutex::new(Vec::new()));
+    let telling = Arc::clone(&told);
+    paced
+        .served
+        .services
+        .on_debug(Arc::new(move |error, event| {
+            if event.call_id == Some(3) {
+                let failure = error.map(|error| {
+                    let error = error.downcast_ref::<CallError>().expect("a call error");
+                    let CallError::Failure(failure) = error else {
+                        panic!("a failure")
+                    };
+                    assert_eq!(failure.origin(), FailureOrigin::Local);
+                    assert_eq!(
+                        failure.header(),
+                        Some(&crate::envelope::Header::Failure(
+                            crate::envelope::FailureHeader {
+                                call_id: 3,
+                                credential: None
+                            }
+                        ))
+                    );
+                    (failure.code(), failure.detail().to_owned(), failure.side())
+                });
+                locked(&telling).push((
+                    event.direction,
+                    event.rx.as_ref().map(|value| format!("{value:?}")),
+                    event.tx.as_ref().map(|value| format!("{value:?}")),
+                    failure,
+                ));
+            }
+        }));
+    paced
+        .served
+        .transport
+        .deliver(&request((3, true, "hold")), &first());
+    paced.served.settle().await;
+    for payload in ["a", "b", "c"] {
+        paced.notify(payload, &NotifyOptions::default()).await;
+    }
+    paced.release().await;
+    assert_eq!(
+        paced.served.sent_since(),
+        [
+            "first notification 3 a",
+            "first failure 3 CAPACITY_EXCEEDED"
+        ]
+    );
+    assert_eq!(
+        *locked(&told),
+        [
+            (DebugDirection::Rx, Some("\"hold\"".to_owned()), None, None),
+            (
+                DebugDirection::Tx,
+                Some("\"hold\"".to_owned()),
+                Some("\"ok\"".to_owned()),
+                Some((
+                    ProtocolCode::CAPACITY_EXCEEDED.get(),
+                    "the notifications queued for call 3 went past their bounds".to_owned(),
+                    Some(RouterSide::Server)
+                ))
+            ),
+        ]
+    );
     assert_eq!(paced.served.reported(), Vec::<String>::new());
 }
 

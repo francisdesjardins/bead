@@ -108,6 +108,16 @@ impl Failure {
         }
     }
 
+    // A failure the router answers in its resolver's place is raised here, on this side.
+    pub(crate) fn answered(record: &FailureRecord, side: RouterSide) -> Self {
+        let mut failure = Self::local(record.code, (record.scope, Some(side)));
+
+        failure.detail.clone_from(&record.detail);
+        failure.relays = record.relays;
+
+        failure
+    }
+
     /// The same failure, saying `detail`.
     #[must_use]
     pub fn saying<D: Into<String>>(mut self, detail: D) -> Self {

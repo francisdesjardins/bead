@@ -20,7 +20,7 @@ use crate::clock::SharedClock;
 use crate::constants::{ProtocolCode, RouterSide, SERVER_CONNECTION_HANDLE};
 use crate::debug::{DebugDirection, DebugType};
 use crate::duration::hold;
-use crate::envelope::{FailureRecord, RequestHeader};
+use crate::envelope::{FailureHeader, FailureRecord, Header, RequestHeader};
 use crate::errors::{CallError, ProgrammerError, ResolverError};
 use crate::failure::Failure;
 use crate::identity::{Procedure, check_declaration};
@@ -1025,7 +1025,7 @@ where
                                 manager.router.side(),
                             )
                             .saying(refused.reason().to_owned())
-                            .about(&crate::envelope::Header::Result(result.header.clone()))
+                            .about(&Header::Result(result.header.clone()))
                             .of_call(Some(procedure.address()), None)
                             .caused_by(Arc::new(refused));
                             let reason = CallError::Failure(failure);
@@ -1293,10 +1293,14 @@ where
                     answered.as_ref().map_or_else(
                         || step.clone(),
                         |record| Step {
-                            error: Some(Arc::new(CallError::Failure(Failure::received(
-                                record,
-                                shared.manager.router.side(),
-                            )))),
+                            error: Some(Arc::new(CallError::Failure(
+                                Failure::answered(record, shared.manager.router.side()).about(
+                                    &Header::Failure(FailureHeader {
+                                        call_id: shared.call_id,
+                                        credential: None,
+                                    }),
+                                ),
+                            ))),
                             ..step.clone()
                         },
                     ),
