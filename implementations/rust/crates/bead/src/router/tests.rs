@@ -50,6 +50,7 @@ mod router_core_session_sync;
 mod router_core_sessions;
 mod router_core_writer;
 mod server;
+mod server_commands;
 mod server_requests;
 mod transfer;
 
