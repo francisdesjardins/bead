@@ -32,6 +32,16 @@ mod metrics;
 mod parts;
 mod requester;
 mod router_core;
+mod router_core_answering;
+mod router_core_credentials;
+mod router_core_crossing;
+mod router_core_hooks;
+mod router_core_incoming;
+mod router_core_lifecycle;
+mod router_core_outcomes;
+mod router_core_requester;
+mod router_core_rest;
+mod router_core_writer;
 mod server;
 mod transfer;
 

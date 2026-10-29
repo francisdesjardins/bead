@@ -110,7 +110,11 @@ impl fmt::Display for CallError {
             Self::Cancelled => formatter.write_str("the call was cancelled"),
             Self::Disconnected(reason) => formatter.write_str(reason),
             Self::TimedOut(timeout) => {
-                write!(formatter, "no answer came within {}ms", timeout.as_millis())
+                write!(
+                    formatter,
+                    "no answer came in {} milliseconds",
+                    timeout.as_millis()
+                )
             }
             Self::Refused(error) => write!(formatter, "{error}"),
             Self::Other(error) => write!(formatter, "{error}"),

@@ -17,6 +17,8 @@ use tokio::sync::Notify;
 use crate::clock::{Clock, Schedule, Timer, TimerCallback};
 use crate::duration::LONGEST_TIMER;
 
+#[cfg(test)]
+pub(crate) mod core_port;
 pub mod durations;
 pub mod files;
 pub mod hexadecimal;

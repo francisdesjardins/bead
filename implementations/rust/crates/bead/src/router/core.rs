@@ -1191,15 +1191,21 @@ fn abandon<S: Side>(state: &mut S, (call, credit_end): (&CallAddress, u64)) {
     let core = state.core();
     let maximum = core.limits.maximum_transfers;
     let timeout = core.limits.transfer_inactivity_timeout;
-    let oldest: Vec<u32> = core
+    let mut oldest: Vec<(u64, u32)> = core
         .answering
         .abandoned
         .get(&call.connection_handle)
-        .map(|calls| calls.keys().copied().collect())
+        .map(|calls| {
+            calls
+                .iter()
+                .map(|(&call_id, abandoned)| (abandoned.id, call_id))
+                .collect()
+        })
         .unwrap_or_default();
+    oldest.sort_unstable();
     let mut count = u64::try_from(oldest.len()).unwrap_or(u64::MAX);
 
-    for call_id in oldest {
+    for (_, call_id) in oldest {
         if count < maximum {
             break;
         }
