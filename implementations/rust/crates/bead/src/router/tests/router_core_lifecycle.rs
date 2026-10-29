@@ -29,6 +29,86 @@ fn call_of(call_id: u32, handle: &str) -> CallAddress {
     }
 }
 
+// spec 10.4
+#[tokio::test]
+async fn send_no_cancel_for_a_request_the_transport_never_had_though_given_up_at_once_and_reserve_nothing()
+ {
+    for side in [RouterSide::Client, RouterSide::Server] {
+        let peer = Peer::new(side, &RouterLimitsOptions::default());
+        let first_id = if side == RouterSide::Client { 1 } else { 2 };
+        peer.owner
+            .run(|state| {
+                state.sending.push_back(Err(error_of("refused")));
+            })
+            .await
+            .expect("the transport refuses outright");
+        assert_eq!(
+            completed(peer.request((Bytes::new(), request_of("a"))))
+                .await
+                .expect_err("the refusal is heard")
+                .to_string(),
+            "refused"
+        );
+
+        // * the port gives the call up in the send's turn, before returning its refusal, as the
+        // C# twin cancels in OnCallId and the TypeScript twin aborts before its microtask hears it.
+        peer.owner
+            .run(|state| {
+                state.sending.push_back(Err(error_of("refused")));
+                state.on_transmit = Some(Box::new(|state, envelope| {
+                    requester::cancel(state, (&call_of(envelope.call_id(), "a"), None));
+                }));
+            })
+            .await
+            .expect("the caller gives up before the refusal");
+        assert!(matches!(
+            completed(peer.request((Bytes::new(), request_of("a")))).await,
+            Err(CallError::Cancelled)
+        ));
+        peer.settle().await;
+        assert_eq!(
+            pieces(&peer)
+                .await
+                .iter()
+                .map(|(kind, id, _, _)| (*kind, *id))
+                .collect::<Vec<_>>(),
+            [
+                (EnvelopeKind::Request, first_id),
+                (EnvelopeKind::Request, first_id + 2)
+            ]
+        );
+        peer.owner
+            .run(|state| {
+                assert!(state.core.pending.reservations.is_empty());
+                assert_eq!(state.core.pending.count_on(&Arc::from("a")), 0);
+                state.on_transmit = None;
+            })
+            .await
+            .expect("nothing waits or is reserved");
+        assert_eq!(peer.clock.dues(), Vec::<Duration>::new());
+        quiet(&peer).await;
+
+        for call_id in [first_id, first_id + 2] {
+            peer.receive((result_of(call_id, None), Arc::from("a")));
+        }
+        peer.settle().await;
+        peer.owner
+            .run(|state| {
+                assert_eq!(state.reports.len(), 2);
+                for (handle, error) in &state.reports {
+                    assert_eq!(handle.as_ref(), "a");
+                    assert!(matches!(
+                        error,
+                        crate::router::types::RouterError::Failure(failure)
+                            if failure.code() == ProtocolCode::CALL_UNKNOWN.get()
+                    ));
+                }
+            })
+            .await
+            .expect("neither call id hides a late result");
+    }
+}
+
 async fn cancel(peer: &Peer, call_id: u32) {
     peer.owner
         .run(move |state| {
