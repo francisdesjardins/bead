@@ -28,6 +28,7 @@ use crate::testing::{SteppingClock, instants, scripted};
 use crate::transport::Sent;
 
 pub(crate) type Completion<T> = oneshot::Receiver<Result<T, CallError>>;
+pub(crate) type TransmitHook = Box<dyn FnMut(&mut State, &Envelope) + Send>;
 
 #[expect(
     clippy::struct_excessive_bools,
@@ -37,6 +38,7 @@ pub(crate) struct State {
     pub(crate) core: Core<Self>,
     pub(crate) tokens: BTreeMap<ConnectionHandle, SessionToken>,
     pub(crate) sending: VecDeque<Result<Sent, RouterError>>,
+    pub(crate) on_transmit: Option<TransmitHook>,
     pub(crate) sent: Vec<(ConnectionHandle, Envelope)>,
     pub(crate) reports: Vec<(ConnectionHandle, RouterError)>,
     pub(crate) before: Vec<BeforeAnswer>,
@@ -137,11 +139,14 @@ impl Side for State {
         message: TransportMessage,
         handle: &ConnectionHandle,
     ) -> Result<Sent, RouterError> {
-        self.sent.push((
-            Arc::clone(handle),
-            scripted::envelope_of(&message.data, self.core.side.peer()),
-        ));
-        self.sending.pop_front().unwrap_or(Ok(Sent::Done))
+        let envelope = scripted::envelope_of(&message.data, self.core.side.peer());
+        self.sent.push((Arc::clone(handle), envelope.clone()));
+        let sent = self.sending.pop_front().unwrap_or(Ok(Sent::Done));
+        if let Some(mut hook) = self.on_transmit.take() {
+            hook(self, &envelope);
+            self.on_transmit = Some(hook);
+        }
+        sent
     }
 
     fn session_token_of(&mut self, handle: &ConnectionHandle) -> Option<SessionToken> {
@@ -197,6 +202,7 @@ impl Peer {
             core: Core::new(owner, (side, limits, Arc::clone(&shared), None)),
             tokens: BTreeMap::new(),
             sending: VecDeque::new(),
+            on_transmit: None,
             sent: Vec::new(),
             reports: Vec::new(),
             before: Vec::new(),
