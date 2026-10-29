@@ -10,7 +10,7 @@
 // `prepare`, on a release/* or hotfix/* branch, the product's <version> defaulting to the branch's:
 // moves the TypeScript package's version and the builder's where the tree has one, the C# side's
 // <Version> and the project ranges of its lock files and of an example's, the Rust workspace's
-// version and its members in the workspace and fuzz locks where the tree has them, each document's line and
+// version and its members in the workspace's lock and the locks outside it where the tree has them, each document's line and
 // every conformance file's repeat of it, the two versions beadc's header names in each file it
 // generated, the image each committed wrapper of beadc's names and the spec's version in each
 // blueprint beadc wrote outside spec/, every text changed before any is written; runs the
@@ -116,6 +116,13 @@ export const withCargoVersion = (text, version) => {
   });
   return `${text.slice(0, table.index)}${moved}${text.slice(table.index + table[0].length)}`;
 };
+
+// the locks of the packages outside the workspace that build its crates by path, the fuzz targets
+// and protobuf's conformance testee, each moving the workspace's members and keeping its own
+const OUTER_CARGO_LOCKS = [
+  'implementations/rust/fuzz/Cargo.lock',
+  'implementations/rust/tools/protobuf-conformance/Cargo.lock',
+];
 
 // ! a text replacement, not `cargo update --workspace`: the root's tools run no third toolchain
 // (decision 0005). Each member of a Cargo lock, a `[[package]]` of no `source`, at the version: the
@@ -515,14 +522,15 @@ export const prepare = (root, options = {}) => {
   if (readText(join(root, CARGO)) !== null) {
     stage(CARGO, (text) => withCargoVersion(text, product));
     stage(CARGO_LOCK, (text) => withCargoLockMembers(text, product).text);
-    const fuzzLock = 'implementations/rust/fuzz/Cargo.lock';
-    if (readText(join(root, fuzzLock)) !== null) {
-      const members = new Set(
-        cargoMembersOf(readText(join(root, CARGO_LOCK))).map(({ name }) => {
-          return name;
-        })
-      );
-      stage(fuzzLock, (text) => withCargoLockMembers(text, product, { members }).text);
+    const members = new Set(
+      cargoMembersOf(readText(join(root, CARGO_LOCK)) ?? '').map(({ name }) => {
+        return name;
+      })
+    );
+    for (const lock of OUTER_CARGO_LOCKS) {
+      if (readText(join(root, lock)) !== null) {
+        stage(lock, (text) => withCargoLockMembers(text, product, { members }).text);
+      }
     }
   }
   // * a hotfix starts from main, whose CI keeps the waivers of the release it tags, all moot: the
