@@ -416,7 +416,7 @@ impl MemoryBroker {
         let runtime = crate::platform::runtime_of(options.runtime.as_ref(), "an in-memory broker")?;
         let clock: SharedClock = match &options.clock {
             Some(clock) => Arc::clone(clock),
-            None => Arc::new(SystemClock::new(runtime.clone())),
+            None => Arc::new(SystemClock::on(runtime.clone())),
         };
         let maximum_queued_messages = options.maximum_queued_messages;
         let owner = Owner::spawn((&runtime, &clock), |owner| BrokerState {

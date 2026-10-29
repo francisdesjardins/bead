@@ -721,7 +721,7 @@ impl RouterClient {
             ("a client's router", "its transport"),
         )?
         .unwrap_or_else(|| {
-            let platform: SharedClock = Arc::new(crate::clock::SystemClock::new(runtime.clone()));
+            let platform: SharedClock = Arc::new(crate::clock::SystemClock::on(runtime.clone()));
 
             platform
         });

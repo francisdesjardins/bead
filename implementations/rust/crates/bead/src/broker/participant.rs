@@ -1930,7 +1930,7 @@ impl BrokerParticipant {
 
         let runtime =
             crate::platform::runtime_of(options.runtime.as_ref(), "a broker's participant")?;
-        let platform: SharedClock = Arc::new(SystemClock::new(runtime.clone()));
+        let platform: SharedClock = Arc::new(SystemClock::on(runtime.clone()));
         let clock = options
             .clock
             .clone()

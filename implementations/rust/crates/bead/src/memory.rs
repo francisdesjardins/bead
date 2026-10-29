@@ -265,7 +265,7 @@ impl MemoryServer {
         let runtime = runtime_of(options.runtime.as_ref(), "an in-memory transport")?;
         let clock: SharedClock = match &options.clock {
             Some(clock) => Arc::clone(clock),
-            None => Arc::new(SystemClock::new(runtime.clone())),
+            None => Arc::new(SystemClock::on(runtime.clone())),
         };
         let pipe = Owner::spawn((&runtime, &clock), |_: WeakOwner<Pipe>| Pipe);
 
@@ -849,7 +849,7 @@ impl MemoryClient {
         let runtime = runtime_of(None, "an in-memory transport")?;
         let clock: SharedClock = match &options.clock {
             Some(clock) => Arc::clone(clock),
-            None => Arc::new(SystemClock::new(runtime.clone())),
+            None => Arc::new(SystemClock::on(runtime.clone())),
         };
 
         Ok(Self {

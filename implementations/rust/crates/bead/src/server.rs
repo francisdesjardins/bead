@@ -1141,7 +1141,7 @@ impl Server {
             ("a server's router", "its transport"),
         )?
         .unwrap_or_else(|| {
-            let platform: SharedClock = Arc::new(SystemClock::new(runtime.clone()));
+            let platform: SharedClock = Arc::new(SystemClock::on(runtime.clone()));
 
             platform
         });
