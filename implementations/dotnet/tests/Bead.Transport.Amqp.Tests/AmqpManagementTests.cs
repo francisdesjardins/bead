@@ -60,6 +60,16 @@ public sealed class AmqpManagementTests : IAsyncLifetime
         throw new Xunit.Sdk.XunitException("it did not fail");
     }
 
+    // an answer's properties whose correlation-id is of another AMQP type than a string
+    private static Properties PropertiesOf(object correlation)
+    {
+        var properties = new Properties { Subject = "503" };
+
+        properties.SetCorrelationId(correlation);
+
+        return properties;
+    }
+
     // definition
 
     [Fact]
@@ -210,7 +220,7 @@ public sealed class AmqpManagementTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task Drops_management_answers_with_no_correlation_id_or_another_string_id_and_waits_for_its_matching_answer_on_the_same_pair()
+    public async Task Drops_management_answers_with_no_correlation_id_another_string_id_or_an_id_of_another_AMQP_type_and_waits_for_its_matching_answer_on_the_same_pair()
     {
         _script.Holding = (frame) =>
         {
@@ -228,6 +238,8 @@ public sealed class AmqpManagementTests : IAsyncLifetime
             new() { BodySection = new AmqpValue { Value = "unmatched" } },
             new() { Properties = new Properties { Subject = "503" }, BodySection = new AmqpValue { Value = "unmatched" } },
             new() { Properties = new Properties { CorrelationId = "another", Subject = "503" }, BodySection = new AmqpValue { Value = "unmatched" } },
+            new() { Properties = PropertiesOf(1UL), BodySection = new AmqpValue { Value = "unmatched" } },
+            new() { Properties = PropertiesOf(new Guid("01010101-0101-0101-0101-010101010101")), BodySection = new AmqpValue { Value = "unmatched" } },
         };
 
         foreach (var answer in unmatched)

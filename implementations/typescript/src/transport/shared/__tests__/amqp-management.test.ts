@@ -227,7 +227,7 @@ test.describe('the AMQP management', () => {
     ).rejects.toThrow();
   });
 
-  test('drops management answers with no correlation-id or another string id and waits for its matching answer on the same pair', async () => {
+  test('drops management answers with no correlation-id, another string id or an id of another AMQP type, and waits for its matching answer on the same pair', async () => {
     const { connection, link } = await connectionTo(script);
 
     script.policy.answer = () => {
@@ -245,6 +245,8 @@ test.describe('the AMQP management', () => {
       { body: 'unmatched' },
       { body: 'unmatched', subject: '503' },
       { body: 'unmatched', correlation_id: 'another', subject: '503' },
+      { body: 'unmatched', correlation_id: 1, subject: '503' },
+      { body: 'unmatched', correlation_id: Buffer.alloc(16, 1), subject: '503' },
     ];
     let isAnswered = false;
 
