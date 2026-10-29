@@ -5,3 +5,7 @@
 /fuzz/artifacts/
 /fuzz/coverage/
 /coverage/
+# the testee of protobuf's conformance suite: the set tools/protobuf-conformance.mjs writes into
+# it, and its build
+/tools/protobuf-conformance/generated/
+/tools/protobuf-conformance/target/

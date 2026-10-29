@@ -300,6 +300,16 @@ jobs:
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: ${{ env.NODE_VERSION }}
+      # the set the tests' proto messages are generated from, as protoc writes it at its pin, which
+      # builder/tools/fetch-protoc.mjs fetches and checks by its sha256
+      - if: matrix.os == 'ubuntu-26.04'
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: builder/.protoc
+          key: protoc-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('builder/protoc.json') }}
+      - if: matrix.os == 'ubuntu-26.04'
+        name: The tests' descriptor set
+        run: node tools/check-protobuf.mjs
       - if: matrix.os == 'ubuntu-26.04'
         name: Coverage, held to its floor
         run: >-
@@ -680,10 +690,11 @@ jobs:
   # 0037): the runner `tools/protobuf-conformance/runner.json`
   # pins, fetched and checked by its sha512 as protoc is by its sha256, against each side's testee
   # and its failure list, which the runner holds both ways, then the floor of tests run; then one
-  # corpus of Probe through both testees, read alike. A job of its own: it needs both runtimes,
-  # beadc and protoc, which no other job has together. The C# testee lies outside Bead.slnx, so its
-  # format is held here, by name, the code generated into it at run time aside; `CI=true`, the
-  # runner's own, restores it locked.
+  # corpus of Probe through the TypeScript and C# testees, read alike. A job of its own: it needs
+  # every side's runtime, beadc and protoc, which no other job has together; the Rust testee's JSON
+  # goes through Buffa's dynamic message until Rust's gateway brings Bead's mapping (decision 0044).
+  # The C# testee lies outside Bead.slnx, so its format is held here, by name, the code generated
+  # into it at run time aside; `CI=true`, the runner's own, restores it locked.
   protobuf-conformance:
     name: Protobuf conformance
     runs-on: ubuntu-26.04
@@ -735,6 +746,23 @@ jobs:
       - name: The C# testee's format
         working-directory: implementations/dotnet/tools/Bead.ProtobufConformance
         run: dotnet format Bead.ProtobufConformance.csproj --verify-no-changes --exclude Generated
+      # 1.99.1, as implementations/rust/rust-toolchain.toml names it
+      - run: rustup toolchain install
+        working-directory: implementations/rust
+      # the registry and the Rust testee's build, by its own lock and the toolchain
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cargo/registry
+            implementations/rust/tools/protobuf-conformance/target
+          key: protobuf-conformance-rust-${{ hashFiles('implementations/rust/tools/protobuf-conformance/Cargo.lock', 'implementations/rust/rust-toolchain.toml') }}
+          restore-keys: protobuf-conformance-rust-
+      - name: The suite through the Rust side's codec
+        run: node tools/protobuf-conformance.mjs rust
+      # the Rust testee lies outside the side's workspace, so its format is held here
+      - name: The Rust testee's format
+        working-directory: implementations/rust/tools/protobuf-conformance
+        run: cargo fmt --check
       - name: One corpus through both sides
         run: node tools/protobuf-conformance.mjs differential
 

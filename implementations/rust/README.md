@@ -3,16 +3,15 @@
 Bead is a binary wire protocol: the envelopes of a request, its result or failure, the notifications
 of a subscription and the commands a server sends back, written at fixed offsets. This workspace is
 its Rust implementation, at parity with the TypeScript and C# sides: the same behaviour, played from
-the same conformance files in [`spec/`](../../spec/). It holds the core today — the envelope's codec,
-the client's and the server's routers with their service, session and notification managers and the
-service layer, sessions and credentials with a `JWT`'s verification, the clock it is given and every
-duration held as spec 1.4 holds it, the trace, the filter and the metrics registry, the in-memory
-transport, the broker's core over an in-memory broker, and the joined transport — and plays every
-conformance file the core reaches; what it does not play yet is a row of
-[`docs/support.md`](../../docs/support.md)'s differences, each ahead with the step or the stage that
-brings it, its `proto` codec the last step of its core. The rules its code keeps — one owner per
-router, traits and composition, no unsafe code, two parameters then an options struct, every
-warning an error — are [decision 0044](../../docs/decisions/0044-rust-one-owner-per-router-traits-no-unsafe-two-parameters-no-warning.md)'s.
+the same conformance files in [`spec/`](../../spec/). It holds the core whole — the envelope's
+codec, the client's and the server's routers with their service, session and notification managers
+and the service layer, sessions and credentials with a `JWT`'s verification, the clock it is given
+and every duration held as spec 1.4 holds it, the trace, the filter and the metrics registry, the
+in-memory transport, the broker's core over an in-memory broker, the joined transport, and the
+`proto` payload's codec on Buffa — and plays every conformance file the core reaches; what it does
+not play yet is a row of [`docs/support.md`](../../docs/support.md)'s differences, each ahead with
+the stage that brings it. The rules its code keeps — one owner per router, traits and composition,
+no unsafe code, two parameters then an options struct, every warning an error — are [decision 0044](../../docs/decisions/0044-rust-one-owner-per-router-traits-no-unsafe-two-parameters-no-warning.md)'s.
 
 ## Build and test
 
@@ -34,6 +33,13 @@ run. `cargo build --workspace` builds the core on its default features alone, wh
 alone reaches is left out. `cargo deny` holds the dependencies to RustSec's advisories, the licences
 `deny.toml` allows, crates.io alone, and one version of each.
 
+`bead-protobuf`'s tests read and write messages Buffa generates in its build script from
+`crates/bead-protobuf/proto/tests.binpb`, the set protoc writes of their `.proto` files at
+[`builder/protoc.json`](../../builder/protoc.json)'s pin: no Rust build runs protoc. `node
+tools/check-protobuf.mjs` writes the set again, apart, and fails on a difference; `--write` writes it
+in place, after a change of a file it holds. protoc is `BEADC_PROTOC`, or the one
+`builder/tools/fetch-protoc.mjs` fetches.
+
 The coverage, as CI measures it, lines and regions, held to the side's floor in
 [`tools/coverage-floors.json`](../../tools/coverage-floors.json):
 
@@ -51,6 +57,12 @@ yet (`publish = false`):
 crates/
   bead/                         the core: the library, its unit tests beside each module, the test
                                 kit, and the conformance players under tests/
+  bead-protobuf/                the `proto` payload's codec on Buffa 0.9.2: the check of a payload's
+                                records, the required walk, the typed codec over Buffa's generated
+                                code and the dynamic one over its `DynamicMessage`; its tests'
+                                `.proto` files and their set under proto/
+  bead-protobuf-build/          Bead's setting of Buffa's generator, for a build script: views,
+                                reflection, and each repeated or map field of a closed enum opened
   bead-interop/                 the interop service: its descriptors, written by hand as beadc's Rust
                                 target will write them from spec/interop-blueprint.json, its
                                 resolvers and its credentials
@@ -58,6 +70,10 @@ crates/
                                 comment tags, every member under the workspace's lints
 benches/                        bead-bench, the in-memory bench, written as bead-bench/1
 fuzz/                           cargo-fuzz's targets, a project outside the workspace
+tools/protobuf-conformance/     the testee of protobuf's conformance suite, which
+                                tools/protobuf-conformance.mjs rust builds and runs, and its
+                                failure list, failing.txt
+tools/check-protobuf.mjs        the check of the tests' descriptor set, as protoc writes it
 ```
 
 ## The runtime
@@ -94,13 +110,29 @@ transport holds it, so it lives as long as its connection does, its last handle 
 serializer, which refuses a double that is not finite at any depth, where `serde_json`'s writes
 `null`.
 
+`crates/bead-protobuf/src`:
+
+| Module     | What it holds                                                                                                                               |
+| ---------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
+| `records`  | a message's schema, read once from its descriptors, and the check of a payload's records against it (spec 17.9.1 to 17.9.6)                 |
+| `required` | the walk of the fields protobuf requires (spec 17.9.7), over a view or a dynamic message, whose presence is the wire's or the application's |
+| `codec`    | `ProtoCodec`, the typed codec of a message Buffa generates, and `DynamicCodec`, by its descriptor alone, each a payload codec of `proto`    |
+| `testing`  | the test kit, behind the feature `testing`: the tests' messages, generated from `proto/tests.binpb`; no API                                 |
+
+A message an application binds to `proto` is generated as `bead-protobuf-build` sets Buffa's
+generator, from the set protoc writes; `ProtoCodec` reads it through its view, which tells a field
+given from one left out, and gives the owned message. An owned message holds a required scalar bare,
+so no typed value leaves one unset; `DynamicCodec`, its value Buffa's `DynamicMessage`, is the form
+that can, and refuses it.
+
 ## Tests
 
 A module's unit tests are beside it, `src/envelope.rs`'s in `src/envelope/tests.rs`; a twin test,
 one the other sides hold by the same sentence, is named by it in snake case, the unit of the spec it
 holds in a comment just above it, `// spec 15.13`, which `spec/check.py` reads. The conformance
 players are in `crates/bead/tests/`, one file a conformance file, a trial per entry named by the
-entry's own name, under `libtest-mimic`.
+entry's own name, under `libtest-mimic`; the `proto` entries of `spec/codecs.json` are played in
+`crates/bead-protobuf/tests/codecs.rs`, the same way, through both codecs.
 
 `bead::testing`, behind the feature `testing`, is the test kit: the stepping clock the players give
 the side, the conformance files' typed readers, the durations' helper, a pair of the in-memory

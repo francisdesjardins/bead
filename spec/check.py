@@ -216,8 +216,6 @@ SIDES = {
 # the side plays fails, so the table only shrinks
 AHEAD = {
     'Rust': {
-        # 1c deletes it as it lands
-        "Rust's proto codec": {'encodings': ('proto',)},
         "Rust's transports over HTTP and WebSocket": {
             'transports': ('http', 'websocket'),
             'units': (('spec', '15.10'), ('spec', '15.12.4'), ('spec', '15.12.11'), ('spec', '15.12.12'),
