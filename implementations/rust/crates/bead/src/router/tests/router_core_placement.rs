@@ -15,8 +15,8 @@ use crate::router::types::{RouterAnswer, RouterLimitsOptions};
 use crate::testing::core_port::{Peer, completed, request_of, scripted_header};
 use crate::testing::pair::echo;
 
-async fn serving(options: RouterLimitsOptions, maximum: Option<u64>) -> (Peer, Handed) {
-    let peer = Peer::new(RouterSide::Server, &options);
+async fn serving(maximum: Option<u64>, options: &RouterLimitsOptions) -> (Peer, Handed) {
+    let peer = Peer::new(RouterSide::Server, options);
     let handed = Handed::default();
     let mut handler = handler((&handed, &Arc::default()));
     handler.maximum_payload_bytes = maximum;
@@ -34,12 +34,12 @@ async fn serving(options: RouterLimitsOptions, maximum: Option<u64>) -> (Peer, H
 #[tokio::test]
 async fn holds_a_procedure_whose_own_limit_is_larger_to_the_routers_both_ways() {
     let (peer, handed) = serving(
-        RouterLimitsOptions {
+        Some(1_024),
+        &RouterLimitsOptions {
             maximum_payload_bytes: Some(40),
             chunk_bytes: Some(64),
             ..RouterLimitsOptions::default()
         },
-        Some(1_024),
     )
     .await;
     peer.receive((
@@ -135,7 +135,7 @@ async fn refuses_a_procedures_limit_that_is_not_a_whole_number_above_0_drawing_n
 )]
 async fn sends_a_payload_in_one_envelope_to_its_limit_and_one_byte_more_as_a_transfer_or_not_at_all_where_none_is_sent()
  {
-    let (peer, handed) = serving(limits(), None).await;
+    let (peer, handed) = serving(None, &limits()).await;
     let first = peer.request((Bytes::from(vec![0; 52]), request_of("a")));
     let second = peer.request((Bytes::from(vec![0; 53]), request_of("a")));
     peer.owner
@@ -199,11 +199,11 @@ async fn sends_a_payload_in_one_envelope_to_its_limit_and_one_byte_more_as_a_tra
         ]
     );
     let (none, handed) = serving(
-        RouterLimitsOptions {
+        None,
+        &RouterLimitsOptions {
             maximum_transfers: Some(0),
             ..limits()
         },
-        None,
     )
     .await;
     none.receive((
