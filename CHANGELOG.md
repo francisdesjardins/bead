@@ -12,11 +12,11 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Rust, the third language, its core: the envelope's codec, the client and server routers with
   their service, session and notification managers and the service layer, sessions and credentials
   with a JWT's verification, the clock it is given and every duration held as spec 1.4 holds it,
-  the trace, the filter and the registry, and the in-memory transport, playing every conformance
-  file its core reaches; its own toolchain, Rust 1.99.1 and edition 2024, clippy's pedantic, nursery
-  and cargo groups and chosen restriction lints denied, a warning an error, unsafe code forbidden,
-  and a CI job of its own on Linux and Windows held to its coverage floor of lines and regions
-  (decision 0044).
+  the trace, the filter and the registry, the in-memory transport, the broker's core over an
+  in-memory broker, and the joined transport, playing every conformance file its core reaches; its
+  own toolchain, Rust 1.99.1 and edition 2024, clippy's pedantic, nursery and cargo groups and
+  chosen restriction lints denied, a warning an error, unsafe code forbidden, and a CI job of its
+  own on Linux and Windows held to its coverage floor of lines and regions (decision 0044).
 
 ### Changed
 

@@ -203,6 +203,13 @@ impl<S: Send + 'static> WeakOwner<S> {
         self.post(job).ok();
     }
 
+    /// Posts `job` behind every job queued, as [`Owner::offer_behind`] does, to an owner not gone.
+    pub(crate) fn offer_behind(&self, job: Job<S>) {
+        if let Some(shared) = self.shared.upgrade() {
+            queue(&shared, job).ok();
+        }
+    }
+
     /// Spawns `future`, as [`Owner::cover`] does, for an owner not gone.
     pub(crate) fn cover<F: Future<Output = ()> + Send + 'static>(&self, future: F) {
         if let Some(shared) = self.shared.upgrade() {

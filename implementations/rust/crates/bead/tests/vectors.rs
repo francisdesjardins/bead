@@ -4,6 +4,7 @@
 use std::process::ExitCode;
 
 use bead::testing::instants;
+use bead::testing::parcels::{self, ParcelReading, ParcelRefusalVector, ParcelVector};
 use bead::testing::vectors::{
     self, EnvelopeVector, FailureRefusalVector, FailureVector, HeaderVector, PrefixVector,
     ReadVector, RefusalVector,
@@ -671,6 +672,58 @@ fn credential_refusals() -> Result<Vec<Trial>, String> {
         .collect())
 }
 
+// spec 15.17: each parcel read to its fields and written back to its bytes, but those no writer
+// writes, which the side's writer refuses
+fn parcels() -> Result<Vec<Trial>, String> {
+    let entries: Vec<ParcelVector> = vectors::of("parcels")?;
+    let refusals: Vec<ParcelRefusalVector> = vectors::of("parcelRefusals")?;
+    let mut trials: Vec<Trial> = entries
+        .into_iter()
+        .map(|vector| {
+            Trial::test(format!("reads the parcel {}", vector.name), move || {
+                let bytes = vectors::bytes_of(&vector.bytes)?;
+                let expected = parcels::normalized(&vector.parcel)?;
+                let ParcelReading::Parcel(read) = parcels::read(&bytes) else {
+                    return Err(format!("read {:?}", parcels::read(&bytes)).into());
+                };
+
+                hold(read == expected, || {
+                    format!("read {read:?}, not {expected:?}")
+                })?;
+
+                // * written back byte for byte, but what a side reads and no writer writes
+                match (vector.written, parcels::write(&read)) {
+                    (Some(false), Ok(written)) => {
+                        Err(format!("wrote {written:02X?}, which no writer writes").into())
+                    }
+                    (Some(false), Err(_)) => Ok(()),
+                    (_, Ok(written)) => hold(written == bytes.as_ref(), || {
+                        format!("wrote {written:02X?}")
+                    }),
+                    (_, Err(refused)) => Err(format!("refused to write it: {refused}").into()),
+                }
+            })
+            .with_kind("parcels")
+        })
+        .collect();
+
+    trials.extend(refusals.into_iter().map(|vector| {
+        Trial::test(format!("refuses the parcel {}", vector.name), move || {
+            let bytes = vectors::bytes_of(&vector.bytes)?;
+            let refused = match parcels::read(&bytes) {
+                ParcelReading::NoParcel(_) => "no-parcel",
+                ParcelReading::DoesNotRead(..) => "does-not-read",
+                ParcelReading::Parcel(_) => "a parcel",
+            };
+
+            hold(refused == vector.refused, || format!("read as {refused}"))
+        })
+        .with_kind("parcelRefusals")
+    }));
+
+    Ok(trials)
+}
+
 fn main() -> ExitCode {
     let arguments = Arguments::from_args();
     let mut trials = Vec::new();
@@ -684,6 +737,7 @@ fn main() -> ExitCode {
         failures(),
         jwt_verdicts(),
         credential_refusals(),
+        parcels(),
     ] {
         match group {
             Ok(group) => trials.extend(group),

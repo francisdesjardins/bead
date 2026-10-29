@@ -1,11 +1,13 @@
 //! Bead, a binary wire protocol, on the Rust side: its core — the envelope's codec, the routers
 //! and their service layer, sessions and credentials, the clock and the durations, debugging and
-//! metrics, and the in-memory transport (decision 0044).
+//! metrics, the in-memory transport, the broker's core over an in-memory broker, and the joined
+//! transport (decision 0044).
 //!
 //! Every operation takes effect as it is made, and its future only waits: a call is sent in the
 //! order it is made, whatever order it is awaited in, and dropping its future cancels nothing.
 
 mod base64url;
+mod broker;
 mod call_session;
 mod client;
 mod clock;
@@ -17,6 +19,7 @@ mod envelope;
 mod errors;
 mod failure;
 mod identity;
+mod joined;
 pub mod json;
 mod jwt_verifier;
 mod managers;
@@ -32,6 +35,27 @@ mod session_token;
 mod transport;
 mod violations;
 
+pub use broker::adapter::{
+    BrokerAdapter, BrokerCapabilities, BrokerDelivery, BrokerDown, BrokerError, BrokerListener,
+    BrokerMessage, BrokerMessageOptions, BrokerPublication, BrokerPublished, BrokerStart,
+    BrokerSubscription, Settle,
+};
+pub use broker::client::{
+    BrokerClient, BrokerClientOptions, BrokerConnectOptions, MAXIMUM_UNSENT_BYTES,
+};
+pub use broker::memory::{
+    MemoryBroker, MemoryBrokerAdapter, MemoryBrokerAdapterOptions, MemoryBrokerFault,
+    MemoryBrokerFaultOptions, MemoryBrokerOptions, TRANSPORT_BROKER,
+};
+pub use broker::participant::{
+    BODY_GRACE_PERIOD, BrokerParticipant, BrokerParticipantOptions, BrokerRefusedError, HEARTBEAT,
+    HELD_BYTES_BUDGET, MAXIMUM_ENVELOPE_PARTS_BYTES, MINIMUM_BODY_BYTES_PER_SECOND,
+    ParticipantErrorListener, ROOT,
+};
+pub use broker::server::{
+    ACCEPT_TIMEOUT, BrokerServer, BrokerServerOptions, MAXIMUM_CONNECTIONS,
+    MAXIMUM_CONNECTIONS_PER_ADDRESS,
+};
 pub use call_session::{
     Carriage, Presented, connection_session_of, presented_credential_of, uncarried_of,
 };
@@ -66,6 +90,7 @@ pub use identity::{
     DeclarationWay, Deprecation, IdentityRefusal, Procedure, are_one_name, check_declaration,
     check_procedure_kind, is_procedure_name,
 };
+pub use joined::JoinedServerTransport;
 pub use jwt_verifier::{
     JWT_LEEWAY, JwtAgainst, JwtAlgorithm, JwtKey, JwtRefusal, JwtSessionIdentifier, JwtVerdict,
     assert_jwt_key, audiences_of, read_jwt, verify_jwt,
@@ -84,8 +109,8 @@ pub use managers::service::{
 };
 pub use managers::sessions::{Session, SessionEvent, SessionManagerOptions};
 pub use memory::{
-    CONNECT_TIMEOUT, Connect, MEMORY_ADDRESS, MemoryClient, MemoryClientOptions,
-    MemoryConnectOptions, MemoryServer, MemoryServerOptions, TRANSPORT_MEMORY,
+    MEMORY_ADDRESS, MemoryClient, MemoryClientOptions, MemoryConnectOptions, MemoryServer,
+    MemoryServerOptions, TRANSPORT_MEMORY,
 };
 pub use metrics::{
     CallEnding, MAXIMUM_PROCEDURES, METRICS_CONTENT_TYPE, MetricsExposition, MetricsRegistry,
@@ -128,9 +153,9 @@ pub use service::{
 };
 pub use session_token::SessionToken;
 pub use transport::{
-    ClientListener, ClientTransport, DisconnectOptions, RECONNECT_ATTEMPTS, RECONNECT_DELAY,
-    ReadyState, ReconnectDelay, ReconnectOptions, Sent, ServerListener, ServerTransport,
-    is_field_value,
+    CONNECT_TIMEOUT, ClientListener, ClientTransport, Connect, DisconnectOptions,
+    RECONNECT_ATTEMPTS, RECONNECT_DELAY, ReadyState, ReconnectDelay, ReconnectOptions, Sent,
+    ServerListener, ServerTransport, TransportServerRefusal, is_field_value,
 };
 pub use violations::{
     CLOSING_BYTES, Judged, ReadViolations, Violation, ViolationHolder, detail_bound_of, is_refused,
