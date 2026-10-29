@@ -57,6 +57,7 @@ mod server;
 mod server_commands;
 mod server_credentials;
 mod server_edges;
+mod server_elsewhere;
 mod server_filter;
 mod server_notifications;
 mod server_pacing;
