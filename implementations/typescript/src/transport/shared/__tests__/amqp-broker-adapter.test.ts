@@ -26,7 +26,7 @@ import { encodeMessage, largestPayload, LARGEST_UINT } from '../amqp-messages';
 import { ParcelKind, writeParcel } from '../broker-parcel';
 import { createBrokerParticipant } from '../broker-participant';
 import { BROKER_DELIVERIES, BROKER_PUBLISHED } from '../constants';
-import { GenericError, ProgrammerError } from '../errors';
+import { CancelError, GenericError, ProgrammerError } from '../errors';
 import type { BrokerTopic, IBrokerDown, IBrokerMessage } from '../types';
 import {
   createAmqpScript,
@@ -1718,6 +1718,121 @@ test.describe('createAmqpBrokerAdapter', () => {
       return !adapter.isLinked;
     });
     expect(adapter.maximumPayloadBytes(INBOX)).toBe(room);
+  });
+
+  test('checks a replacement sender’s smaller bound before queued publications go and keeps its other sender and link', async () => {
+    for (const topic of [INBOX, NAME]) {
+      script.policy.maximumMessageSize = 4_096;
+
+      const adapter = adapterOf(script);
+      const { downs } = heardOf(adapter);
+      const link = await inboxUp({ adapter, script });
+      const room = adapter.maximumPayloadBytes(topic);
+      const other = topic === INBOX ? NAME : INBOX;
+      const otherRoom = adapter.maximumPayloadBytes(other);
+
+      await adapter.publish({ payload: Uint8Array.of(1), topic });
+
+      const ended = link.deliveries[0]?.receiver.session;
+
+      ended?.close();
+      await link.until(() => {
+        return ended?.is_closed() === true;
+      });
+
+      const attaching = Promise.withResolvers<void>();
+
+      script.policy.attach = ({ address, role }) => {
+        if (address === undefined && role === 'sender') {
+          attaching.resolve();
+
+          return 'hold';
+        }
+
+        return 'take';
+      };
+
+      const oversized = settledOf(
+        adapter.publish({ expiresAfter: 1_000, payload: new Uint8Array(room), topic })
+      );
+      const fitting = adapter.publish({ payload: Uint8Array.of(2), topic });
+
+      await attaching.promise;
+      expect(link.deliveries).toHaveLength(1);
+      expect(adapter.maximumPayloadBytes(topic)).toBe(room);
+      script.policy.maximumMessageSize = 1_024;
+      script.policy.attach = () => {
+        return 'take';
+      };
+      link.releaseAttaches();
+      expect(String(await oversized)).toContain("past its sender's max-message-size, 1024 bytes");
+      expect(await fitting).toBe(BROKER_PUBLISHED.TAKEN);
+      expect(adapter.maximumPayloadBytes(other)).toBe(otherRoom);
+      expect(await adapter.publish({ payload: Uint8Array.of(3), topic: other })).toBe(
+        BROKER_PUBLISHED.TAKEN
+      );
+      expect(
+        link.deliveries.map(({ message }) => {
+          return [...(message.body as { content: Uint8Array }).content];
+        })
+      ).toEqual([[1], [2], [3]]);
+      expect([adapter.isLinked, downs]).toEqual([true, []]);
+      await adapter.stop();
+    }
+  });
+
+  test('cancels a publication awaiting its replacement sender and sends only its successor when the late ATTACH comes', async () => {
+    for (const topic of [INBOX, NAME]) {
+      const adapter = adapterOf(script);
+      const { downs } = heardOf(adapter);
+      const link = await inboxUp({ adapter, script });
+
+      await adapter.publish({ payload: Uint8Array.of(1), topic });
+
+      const ended = link.deliveries[0]?.receiver.session;
+
+      ended?.close();
+      await link.until(() => {
+        return ended?.is_closed() === true;
+      });
+
+      const attaching = Promise.withResolvers<void>();
+
+      script.policy.attach = ({ address, role }) => {
+        if (address === undefined && role === 'sender') {
+          attaching.resolve();
+
+          return 'hold';
+        }
+
+        return 'take';
+      };
+
+      const given = new AbortController();
+      const publishing = settledOf(
+        adapter.publish({ payload: Uint8Array.of(2), signal: given.signal, topic })
+      );
+
+      await attaching.promise;
+      given.abort();
+      expect(await publishing).toBeInstanceOf(CancelError);
+      expect(link.deliveries).toHaveLength(1);
+
+      const successor = adapter.publish({ payload: Uint8Array.of(3), topic });
+
+      script.policy.attach = () => {
+        return 'take';
+      };
+      link.releaseAttaches();
+      expect(await successor).toBe(BROKER_PUBLISHED.TAKEN);
+      expect(
+        link.deliveries.map(({ message }) => {
+          return [...(message.body as { content: Uint8Array }).content];
+        })
+      ).toEqual([[1], [3]]);
+      expect([adapter.isLinked, downs]).toEqual([true, []]);
+      await adapter.stop();
+    }
   });
 
   test('hands each message on before its accepted, which goes once it is settled, on the receiver it came on, and once, never released or modified (spec 15.36)', async () => {

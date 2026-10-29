@@ -218,7 +218,9 @@ internal sealed class AmqpManagement
 
         lock (_gate)
         {
-            if (_ended is null && message.Properties?.CorrelationId is string correlation)
+            // ! GetCorrelationId, never CorrelationId: the typed accessor throws on an id of another
+            // AMQP type, a ulong, a uuid or a binary, which is no request of this pair's and is dropped
+            if (_ended is null && message.Properties?.GetCorrelationId() is string correlation)
             {
                 _pending.Remove(correlation, out answered);
             }

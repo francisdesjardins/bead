@@ -7,7 +7,7 @@
 
 import { once } from 'node:events';
 import { expect, test } from '@playwright/test';
-import rhea, { type Connection } from 'rhea';
+import rhea, { type Connection, type Sender } from 'rhea';
 import { GenericError } from '../errors';
 import { bindInbox, declareInbox, deleteInbox, requestOf } from '../amqp-management';
 import { createAmqpScript, type IAmqpScript, type IAmqpScriptedLink } from './amqp-script';
@@ -225,5 +225,45 @@ test.describe('the AMQP management', () => {
     await expect(
       requestOf(connection, { method: 'GET', path: '/queues/five', signal: AbortSignal.abort() })
     ).rejects.toThrow();
+  });
+
+  test('drops management answers with no correlation-id, another string id or an id of another AMQP type, and waits for its matching answer on the same pair', async () => {
+    const { connection, link } = await connectionTo(script);
+
+    script.policy.answer = () => {
+      return 'hold';
+    };
+
+    const asking = heldRequest(connection, '/queues/bead.i.ada');
+
+    await link.until(() => {
+      return link.requests.length === 1;
+    });
+
+    const receiver = (await link.attachOf('/management', { role: 'receiver' })).link as Sender;
+    const unmatched = [
+      { body: 'unmatched' },
+      { body: 'unmatched', subject: '503' },
+      { body: 'unmatched', correlation_id: 'another', subject: '503' },
+      { body: 'unmatched', correlation_id: 1, subject: '503' },
+      { body: 'unmatched', correlation_id: Buffer.alloc(16, 1), subject: '503' },
+    ];
+    let isAnswered = false;
+
+    void asking.then(() => {
+      isAnswered = true;
+    });
+
+    for (const answer of unmatched) {
+      receiver.send(answer);
+      await link.until(() => {
+        return receiver.sendable();
+      });
+      expect(isAnswered).toBe(false);
+    }
+
+    link.requests[0]?.answer(200, { body: 'matched' });
+    expect(await asking).toEqual({ answer: { body: 'matched', status: 200 } });
+    connection.close();
   });
 });
