@@ -61,6 +61,8 @@ pub(crate) struct State {
     pub(crate) sends_notifications: bool,
     pub(crate) takes_unpaired: bool,
     pub(crate) two_way: bool,
+    pub(crate) one_way: Vec<ConnectionHandle>,
+    pub(crate) two_way_asked: Mutex<Vec<ConnectionHandle>>,
 }
 
 impl core::fmt::Debug for State {
@@ -96,8 +98,12 @@ impl Side for State {
         self.held.contains(&call_id)
     }
 
-    fn is_two_way(&self, _handle: &ConnectionHandle) -> bool {
-        self.two_way
+    fn is_two_way(&self, handle: &ConnectionHandle) -> bool {
+        self.two_way_asked
+            .lock()
+            .expect("two-way questions")
+            .push(Arc::clone(handle));
+        self.two_way && !self.one_way.contains(handle)
     }
 
     fn before_answer(&mut self, answer: BeforeAnswer) -> Option<Undo<Self>> {
@@ -248,6 +254,8 @@ impl Peer {
             sends_notifications: false,
             takes_unpaired: false,
             two_way: true,
+            one_way: Vec::new(),
+            two_way_asked: Mutex::new(Vec::new()),
         });
         Self {
             clock,

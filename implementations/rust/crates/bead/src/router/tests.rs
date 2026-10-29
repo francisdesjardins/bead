@@ -39,6 +39,7 @@ mod router_core_hooks;
 mod router_core_incoming;
 mod router_core_lifecycle;
 mod router_core_outcomes;
+mod router_core_peer_calls;
 mod router_core_placement;
 mod router_core_requester;
 mod router_core_rest;
