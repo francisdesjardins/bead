@@ -1,5 +1,9 @@
 //! The core's admissions, malformed requests, and answers crossing a call's replacement.
 
+use core::future::{Future, poll_fn};
+use core::pin::Pin;
+use core::task::Poll;
+use core::time::Duration;
 use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
 
@@ -7,13 +11,13 @@ use bytes::Bytes;
 use tokio::sync::oneshot;
 
 use super::server::{Served, first, header_of, request_of, second};
-use super::{Handed, Scripted, answer, cancel_of, keeping, locked};
-use crate::constants::{ProtocolCode, RouterSide};
+use super::{Handed, Scripted, answer, answered, cancel_of, keeping, locked, options_of};
+use crate::constants::{EnvelopeKind, ProtocolCode, RouterSide};
 use crate::envelope::{ChunkHeader, Envelope, RequestHeader};
 use crate::errors::{CallError, ResolverError};
-use crate::failure::Failure;
+use crate::failure::{Failure, FailureOrigin};
 use crate::router::core::{AdmissionRefusal, Handler, ResolveFn, ResolverProps};
-use crate::router::server::RouterServerOptions;
+use crate::router::server::{Call, CallHooks, RouterServerOptions, ServerRequest};
 use crate::router::types::{RouterAnswer, RouterLimitsOptions, TransportMessage};
 use crate::testing::pair::echo;
 use crate::testing::scripted::Sending;
@@ -28,7 +32,7 @@ fn handler(resolve: ResolveFn) -> Handler {
     }
 }
 
-fn serving(resolve: ResolveFn) -> Served {
+pub(super) fn serving(resolve: ResolveFn) -> Served {
     let served = Served::new(&RouterServerOptions::default());
 
     served.transport.open(&first(), true);
@@ -41,7 +45,7 @@ fn serving(resolve: ResolveFn) -> Served {
     served
 }
 
-fn held() -> (Served, Handed) {
+pub(super) fn held() -> (Served, Handed) {
     let handed = Handed::default();
     let served = serving(keeping((&handed, None)));
 
@@ -55,7 +59,7 @@ fn call_ids(handed: &Handed) -> Vec<u32> {
         .collect()
 }
 
-fn deliver_bytes(served: &Served, hexadecimal: &str) {
+pub(super) fn deliver_bytes(served: &Served, hexadecimal: &str) {
     served.transport.deliver_message(
         &TransportMessage {
             data: Bytes::from(crate::testing::hexadecimal::bytes_of(hexadecimal).expect("bytes")),
@@ -87,10 +91,200 @@ fn gated(releases: Vec<oneshot::Receiver<ResolverEnd>>) -> (ResolveFn, Handed) {
     (resolve, handed)
 }
 
-fn failed(message: &str) -> ResolverEnd {
+pub(super) fn failed(message: &str) -> ResolverEnd {
     Err(ResolverError::other(std::io::Error::other(
         message.to_owned(),
     )))
+}
+
+pub(super) fn asking(served: &Served, timeout: Duration) -> Call {
+    let mut options = options_of(timeout);
+
+    options.connection_handle = Some(first());
+    served
+        .router
+        .request(
+            Bytes::new(),
+            (
+                ServerRequest {
+                    procedure: echo().address(),
+                    maximum_payload_bytes: None,
+                    options,
+                    series: None,
+                    refusal: None,
+                },
+                CallHooks::default(),
+            ),
+        )
+        .expect("a call made")
+}
+
+async fn is_waiting<F: Future>(mut future: Pin<&mut F>) -> bool {
+    poll_fn(|context| Poll::Ready(future.as_mut().poll(context).is_pending())).await
+}
+
+fn client_bytes(scripted: &Scripted, bytes: &str) {
+    scripted.transport.deliver_message(&TransportMessage {
+        data: Bytes::from(crate::testing::hexadecimal::bytes_of(bytes).expect("bytes")),
+        ..TransportMessage::default()
+    });
+}
+
+// spec 3.1, 5.2, 9.1
+#[tokio::test]
+#[expect(
+    clippy::too_many_lines,
+    reason = "the twin plays both sides and the layouts they trust, with each outcome and report"
+)]
+async fn settles_a_call_with_an_answer_of_this_layout_that_does_not_read_and_never_with_one_of_another()
+ {
+    let served = Served::new(&RouterServerOptions::default());
+
+    served.transport.open(&first(), true);
+    let first_call = asking(&served, Duration::from_secs(1));
+    let second_call = asking(&served, Duration::from_millis(50));
+    let mut too_large = vec![0; 16_778_241];
+
+    too_large[..8].copy_from_slice(&[0xa2, 0x11, 0, 2, 0, 0, 0, 4]);
+    served.transport.deliver_message(
+        &TransportMessage {
+            data: Bytes::from(too_large),
+            ..TransportMessage::default()
+        },
+        &first(),
+    );
+    deliver_bytes(&served, "A2 11 00 02  00 00 00 04");
+    deliver_bytes(&served, "A2 12 00 02  00 00 00 04  00 13 00 00");
+    served.transport.deliver_message(
+        &TransportMessage {
+            data: Bytes::from_static(&[0xa1, 0x12, 0, 2, 0, 0, 0, 2, 0, 0x13, 0]),
+            ..TransportMessage::default()
+        },
+        &second(),
+    );
+    deliver_bytes(&served, "A1 12 00 02  00 00 00 02  00 13 00");
+    served.settle().await;
+
+    let malformed = answered(first_call)
+        .await
+        .expect_err("malformed failure ends its call");
+
+    assert!(
+        matches!(malformed, CallError::Failure(failure)
+        if failure.code() == ProtocolCode::ENVELOPE_MALFORMED.get()
+        && failure.origin() == FailureOrigin::Local
+        && failure.side() == Some(RouterSide::Server)
+        && failure.procedure() == Some(echo().address())),
+        "local malformed failure, of the server and its procedure"
+    );
+    served.clock.advance(Duration::from_millis(50)).await;
+    let timed_out = answered(second_call)
+        .await
+        .expect_err("the other layout never answers its call");
+
+    assert!(
+        matches!(timed_out, CallError::TimedOut(timeout) if timeout == Duration::from_millis(50)),
+        "the call's own timeout fires"
+    );
+    assert_eq!(
+        timed_out.to_string(),
+        "no answer came in 50 milliseconds",
+        "the timeout names the time it was given"
+    );
+    assert_eq!(
+        served
+            .transport
+            .envelopes(&first())
+            .iter()
+            .map(|envelope| (envelope.kind(), envelope.call_id()))
+            .collect::<Vec<_>>(),
+        [
+            (EnvelopeKind::Request, 2),
+            (EnvelopeKind::Request, 4),
+            (EnvelopeKind::Cancel, 2),
+            (EnvelopeKind::Cancel, 4)
+        ],
+        "the peer told of both calls that ended here"
+    );
+    assert_eq!(
+        served.reported(),
+        [
+            "ENVELOPE_TOO_LARGE first",
+            "LAYOUT_UNSUPPORTED first",
+            "LAYOUT_UNSUPPORTED first",
+            "ENVELOPE_MALFORMED second"
+        ],
+        "only unpaired or untrusted answers reported"
+    );
+
+    let scripted = Scripted::new();
+    let call = scripted
+        .router
+        .request(
+            Bytes::from_static(&[1]),
+            (
+                super::request_of((None, Duration::from_secs(5))),
+                CallHooks::default(),
+            ),
+        )
+        .expect("client asks");
+    let mut call = Box::pin(call);
+
+    client_bytes(&scripted, "A2 11 00 02  00 00 00 01");
+    scripted.settle().await;
+    assert!(
+        is_waiting(call.as_mut()).await,
+        "the layout to come leaves the client's call waiting"
+    );
+    assert_eq!(
+        scripted.codes(),
+        ["LAYOUT_UNSUPPORTED"],
+        "the untrusted result reported"
+    );
+    client_bytes(&scripted, "A1 12 00 02  00 00 00 01  00");
+    scripted.settle().await;
+    let malformed = tokio::time::timeout(super::PATIENCE, call)
+        .await
+        .expect("the client settles")
+        .expect_err("malformed failure ends its call");
+
+    assert!(
+        matches!(malformed, CallError::Failure(failure)
+        if failure.code() == ProtocolCode::ENVELOPE_MALFORMED.get()
+        && failure.origin() == FailureOrigin::Local
+        && failure.side() == Some(RouterSide::Client)
+        && failure.procedure() == Some(echo().address())),
+        "local malformed failure, of the client and its procedure"
+    );
+    scripted
+        .router
+        .owner()
+        .run(|state| {
+            crate::router::core::receive(
+                state,
+                (
+                    TransportMessage {
+                        data: Bytes::from_static(&[0xa1, 0x12, 0, 2, 0, 0, 0, 1, 0]),
+                        ..TransportMessage::default()
+                    },
+                    &second(),
+                ),
+            );
+        })
+        .await
+        .expect("an answer on another connection");
+    scripted.settle().await;
+
+    assert_eq!(
+        scripted.codes(),
+        ["LAYOUT_UNSUPPORTED", "ENVELOPE_MALFORMED"],
+        "the malformed failure of another connection reported"
+    );
+    assert_eq!(
+        scripted.transport.calls(),
+        [(EnvelopeKind::Request, 1), (EnvelopeKind::Cancel, 1)],
+        "only its call and its cancel sent"
+    );
 }
 
 // spec 9.2, 12.2
