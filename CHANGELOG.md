@@ -32,6 +32,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- A broker participant's heartbeat on the C# side reads the time since its ping once, so a timer
+  thread held past its heartbeat drops the connection instead of failing its process.
 - An AMQP 1.0 management answer whose correlation-id is no string, a ulong or a uuid, is dropped on
   the C# side as on the TypeScript side, its credit given back, and its connection goes on.
 - A router is never entered again from its own turn, on the TypeScript and C# sides as on the Rust

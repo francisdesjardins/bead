@@ -92,7 +92,10 @@ internal sealed class Heartbeat
 
             if (_pingedAt is { } pingedAt)
             {
-                if (_clock.GetElapsedTime(pingedAt) >= _heartbeat)
+                // ! read once: a second read, past its heartbeat, arms the timer for less than nothing
+                var unanswered = _clock.GetElapsedTime(pingedAt);
+
+                if (unanswered >= _heartbeat)
                 {
                     _isStopped = true;
                     act = _hooks.Drop;
@@ -100,7 +103,7 @@ internal sealed class Heartbeat
                 }
                 else
                 {
-                    next = _heartbeat - _clock.GetElapsedTime(pingedAt);
+                    next = _heartbeat - unanswered;
                 }
             }
             else if (silent >= _heartbeat)
