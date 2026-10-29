@@ -427,6 +427,8 @@ pub(crate) struct Core<S> {
     pub(crate) side: RouterSide,
     pub(crate) limits: RouterLimits,
     pub(crate) clock: SharedClock,
+    #[cfg(test)]
+    pub(crate) observed_reads: Option<Arc<Mutex<Vec<Gauges>>>>,
     pub(crate) owner: WeakOwner<S>,
     pub(crate) metrics: Option<RouterMetrics>,
     pub(crate) placement: Placement,
@@ -472,6 +474,8 @@ impl<S: Side> Core<S> {
             side,
             limits,
             clock,
+            #[cfg(test)]
+            observed_reads: None,
             owner,
             metrics,
             placement,
@@ -528,6 +532,10 @@ impl<S: Side> Core<S> {
 
     /// The monotonic reading now.
     pub(crate) fn now(&self) -> Duration {
+        #[cfg(test)]
+        if let Some(reads) = &self.observed_reads {
+            locked(reads).push(self.gauges());
+        }
         self.clock.monotonic()
     }
 

@@ -50,6 +50,7 @@ mod router_core_session_handoff;
 mod router_core_session_refusals;
 mod router_core_session_sync;
 mod router_core_sessions;
+mod router_core_teardown;
 mod router_core_token_provider;
 mod router_core_writer;
 mod server;
