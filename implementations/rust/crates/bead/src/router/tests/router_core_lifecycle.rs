@@ -68,7 +68,7 @@ async fn times_out_and_rejects_never_throwing_what_its_payload_or_the_transport_
         .await
         .expect_err("the payload is past its limit");
     assert!(
-        matches!(too_large, CallError::Failure(failure) if failure.code() == ProtocolCode::PAYLOAD_TOO_LARGE.get())
+        matches!(too_large, CallError::Failure(failure) if failure.code() == ProtocolCode::PAYLOAD_TOO_LARGE.get() && failure.origin() == crate::failure::FailureOrigin::Local)
     );
     assert_eq!(peer.sent().await.len(), before);
     let edge = peer.request((Bytes::from(vec![0; 0x100_0000]), request_of("a")));
@@ -138,8 +138,17 @@ async fn cancels_a_request_that_timed_out_before_its_caller_hears_so_one_made_ag
                 format!("no answer came in {millis} milliseconds")
             );
             assert_eq!(
-                pieces(&peer).await.last(),
-                Some(&(EnvelopeKind::Cancel, first_id + 2, None, 0))
+                pieces(&peer)
+                    .await
+                    .iter()
+                    .map(|(kind, id, _, _)| (*kind, *id))
+                    .collect::<Vec<_>>(),
+                [
+                    (EnvelopeKind::Request, first_id),
+                    (EnvelopeKind::Cancel, first_id),
+                    (EnvelopeKind::Request, first_id + 2),
+                    (EnvelopeKind::Cancel, first_id + 2)
+                ]
             );
             quiet(&peer).await;
         }
@@ -370,10 +379,17 @@ async fn ends_nothing_more_by_a_chunk_whose_send_failed_behind_its_answer() {
             .send(Err(error_of("the transport lost the chunk")))
             .expect("the send fails");
         peer.settle().await;
-        assert_eq!(pieces(&peer).await.len(), 2);
         assert_eq!(
-            pieces(&peer).await.last(),
-            Some(&(EnvelopeKind::Chunk, call_id, Some(44), 48))
+            pieces(&peer).await,
+            [
+                (
+                    EnvelopeKind::Request,
+                    call_id,
+                    Some(if side == RouterSide::Client { 300 } else { 200 }),
+                    44
+                ),
+                (EnvelopeKind::Chunk, call_id, Some(44), 48)
+            ]
         );
         quiet(&peer).await;
     }
