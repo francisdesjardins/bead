@@ -1044,6 +1044,54 @@ async fn closes_at_once_unclean_a_connection_its_server_draws_once_a_dispose_gav
     assert!(ends.server.clients().is_empty(), "no connection held");
 }
 
+// spec 15.15: what a connect draws as it ends is let go, its server told the close of its
+// connection, its client's last handle let go within that turn too
+#[tokio::test]
+async fn a_connect_given_up_its_client_let_go_as_its_server_draws_it_leaves_no_connection_held() {
+    let ends = Ends::started().await;
+    let (client, at_client) = ends.client();
+    let held = Arc::new(Mutex::new(Some(client.clone())));
+    let giving_up = Arc::clone(&held);
+
+    // * its dispose in the turn its server draws the connection, then its last handle let go
+    ends.server
+        .listen(Arc::new(OnConnection(move |_handle: &ConnectionHandle| {
+            let client = locked(&giving_up).take();
+
+            if let Some(client) = client {
+                client.dispose();
+            }
+        })));
+
+    let connecting = client.connect(MemoryConnectOptions::default());
+
+    drop(client);
+    ends.clock.settle().await;
+
+    assert!(locked(&held).is_none(), "its last handle let go");
+    assert_eq!(
+        connecting
+            .await
+            .expect_err("disposed as it connected")
+            .to_string(),
+        "the transport client was disposed as it connected",
+        "said why"
+    );
+
+    ends.clock.settle().await;
+
+    assert_eq!(
+        ends.server_told(),
+        [
+            format!("connection {FIRST}"),
+            format!("closed {FIRST} false")
+        ],
+        "closed at once, unclean"
+    );
+    assert!(taken(&at_client).is_empty(), "nothing heard");
+    assert!(ends.server.clients().is_empty(), "no connection held");
+}
+
 // a platform's shape: a message's data is bytes, so what is no bytes is no message to send
 #[tokio::test]
 async fn refuses_a_send_or_a_disconnect_unless_open_and_a_send_of_what_is_no_bytes() {

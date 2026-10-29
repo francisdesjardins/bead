@@ -1001,6 +1001,7 @@ impl MemoryClient {
         });
         let accepting = inner.server.inner.accept(peer, attempt.given_up.clone());
         let client = Arc::downgrade(inner);
+        let pipe = inner.server.inner.pipe.downgrade();
 
         crate::owner::spawn_counted((&inner.runtime, &inner.clock), async move {
             let accepted = accepting.await.unwrap_or_else(|_dropped| {
@@ -1009,6 +1010,12 @@ impl MemoryClient {
                 )))
             });
             let Some(client) = client.upgrade() else {
+                // ! a connection drawn for a client let go meanwhile is closed at once, unclean,
+                // its server told (spec 15.15): its end reaches its server alone
+                if let Ok(end) = accepted {
+                    later_on(&pipe, move || end.close(false));
+                }
+
                 return;
             };
 
