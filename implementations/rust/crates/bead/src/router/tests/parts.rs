@@ -439,6 +439,48 @@ fn open(calls: &mut AnsweringCalls, (call_id, name): (u32, &str)) {
 }
 
 #[test]
+fn takes_out_every_call_of_a_connection_or_of_every_one_giving_them() {
+    let mut calls = AnsweringCalls::default();
+    open(&mut calls, (3, "a"));
+    open(&mut calls, (3, "b"));
+    let first = calls
+        .get(&call_of((3, "a")))
+        .expect("a's call")
+        .signal
+        .clone();
+    let second = calls
+        .get(&call_of((3, "b")))
+        .expect("b's call")
+        .signal
+        .clone();
+
+    let taken = calls.take_all(Some(&handle("a")));
+    assert_eq!(taken.len(), 1);
+    assert_eq!(taken[0].0, call_of((3, "a")));
+    assert_eq!(taken[0].1.dispatched, 3);
+    assert!(!calls.has(&call_of((3, "a"))));
+    assert!(calls.has(&call_of((3, "b"))));
+    let rest = calls.take_all(None);
+    assert_eq!(rest.len(), 1);
+    assert_eq!(rest[0].0, call_of((3, "b")));
+    assert_eq!(rest[0].1.dispatched, 3);
+    assert_eq!(calls.take_all(None).len(), 0);
+    assert_eq!([first.is_aborted(), second.is_aborted()], [false, false]);
+
+    // The caller owns the very signals returned, and ends them when it chooses.
+    taken[0]
+        .1
+        .signal
+        .abort(crate::router::types::SignalReason::Cancelled);
+    assert_eq!([first.is_aborted(), second.is_aborted()], [true, false]);
+    rest[0]
+        .1
+        .signal
+        .abort(crate::router::types::SignalReason::Cancelled);
+    assert!(second.is_aborted());
+}
+
+#[test]
 fn count_the_calls_answered_and_those_abandoned_and_the_connections_they_belong_to() {
     let mut calls = AnsweringCalls::default();
 

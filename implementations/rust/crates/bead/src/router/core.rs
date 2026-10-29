@@ -2495,37 +2495,7 @@ pub(crate) fn reject_pending<S: Side>(
     core.announcements.forget(handle);
 
     // ! the calls it answers taken last, each counted closed once all are out
-    let handles: Vec<ConnectionHandle> = handle.map_or_else(
-        || {
-            let mut handles: BTreeSet<ConnectionHandle> =
-                core.answering.answering.keys().cloned().collect();
-
-            handles.extend(core.answering.abandoned.keys().cloned());
-            handles.into_iter().collect()
-        },
-        |handle| vec![Arc::clone(handle)],
-    );
-    let mut taken: Vec<(CallAddress, Answering)> = Vec::new();
-
-    for handle in handles {
-        if let Some(calls) = core.answering.answering.remove(&handle) {
-            for (call_id, answering) in calls {
-                taken.push((
-                    CallAddress {
-                        connection_handle: Arc::clone(&handle),
-                        call_id,
-                    },
-                    answering,
-                ));
-            }
-        }
-
-        if let Some(calls) = core.answering.abandoned.remove(&handle) {
-            for (_, mut abandoned) in calls {
-                cancel_timer(&mut abandoned.timer);
-            }
-        }
-    }
+    let mut taken = core.answering.take_all(handle);
 
     // * read only when a call it takes is counted (spec/debugging.md 3.1)
     let now = if taken
