@@ -696,21 +696,22 @@ public sealed class BrokerTransportClient : IRouterClientTransport, IAsyncDispos
                 Accept = Accepted,
             };
             _participant.Await(pending);
+            var parcel = new BrokerParcel
+            {
+                Kind = BrokerParcelKinds.Open,
+                Flags = _participant.Adapter.IsSecure ? BrokerParcelFlags.Secure : (byte)0,
+                Opener = pending.Opener,
+                Sequence = 1,
+                Id = _participant.Id,
+                Incarnation = _participant.Incarnation,
+                Bound = _participant.ReceiveBound,
+            };
             published = _participant.Publish(new BrokerPublication
             {
                 Topic = _participant.NameOf(options.Server),
                 ExpiresAfter = LeftOf((options.Timeout, started)),
-                Payload = BrokerParcels.Write(new BrokerParcel
-                {
-                    Kind = BrokerParcelKinds.Open,
-                    Flags = _participant.Adapter.IsSecure ? BrokerParcelFlags.Secure : (byte)0,
-                    Opener = pending.Opener,
-                    Sequence = 1,
-                    Id = _participant.Id,
-                    Incarnation = _participant.Incarnation,
-                    Bound = _participant.ReceiveBound,
-                }),
-            });
+                Payload = BrokerParcels.Write(parcel),
+            }, parcel);
 
             return Task.CompletedTask;
         });

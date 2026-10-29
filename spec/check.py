@@ -240,6 +240,7 @@ AHEAD = {
             'places': ('mqttBrokerAdapter', 'amqpBrokerAdapter'),
         },
         "Rust's beadc target": {'groups': ('verdicts',)},
+        "Rust's parcel trace": {'units': tuple(('debugging', f'13.{number}') for number in range(1, 11))},
     },
 }
 

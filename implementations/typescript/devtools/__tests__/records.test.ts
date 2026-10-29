@@ -7,7 +7,8 @@ import {
 } from '../../src/router/client/router-client';
 import { EnvelopeKind } from '../../src/router/shared/constants';
 import type { IDebugEvent } from '../../src/router/shared/types';
-import { callRecordOf, envelopeRecordOf, plainHeaderOf } from '../records';
+import { logOf } from '../model/log';
+import { callRecordOf, envelopeRecordOf, plainHeaderOf, participantRecordOf } from '../records';
 
 // helpers
 
@@ -193,4 +194,44 @@ test.describe('plainHeaderOf', () => {
       })
     ).toEqual({ callId: 1, credentialScheme: CredentialScheme.OPAQUE, isLast: true, offset: '2' });
   });
+});
+
+test('maps the participant’s fields through an allowlist and exports no acceptor’s half or credential', () => {
+  const event = {
+    event: 'parcel' as const,
+    direction: 'rx' as const,
+    kind: 'DATA',
+    topic: ['bead', 'i', 'ada'],
+    bytes: 99,
+    carriedBytes: 4,
+    connection: 1,
+    connectionHandle: 'server',
+    verdict: 'taken' as const,
+    hasCredential: true,
+    acceptor: 'cafe1234beef5678',
+    credential: 'trace-secret',
+    carried: new Uint8Array([1, 2, 3, 4]),
+  };
+  const record = participantRecordOf({ at: 100, source: 2 }, event);
+  expect(record).toMatchObject({
+    at: 100,
+    source: 2,
+    kind: 'participant',
+    parcelKind: 'DATA',
+    carriedBytes: 4,
+    hasCredential: true,
+    verdict: 'taken',
+  });
+  event.topic[0] = 'changed';
+  expect(record.topic).toEqual(['bead', 'i', 'ada']);
+  const text = JSON.stringify(
+    logOf(
+      { dropped: 0, records: [record], sources: [{ id: 2, protocol: 1, side: 'participant' }] },
+      { savedAt: new Date(0) }
+    )
+  );
+  expect(text).not.toContain('cafe1234beef5678');
+  expect(text).not.toContain('trace-secret');
+  expect(text).not.toContain('acceptor');
+  expect(text).not.toContain('"carried"');
 });

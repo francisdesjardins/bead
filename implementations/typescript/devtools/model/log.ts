@@ -9,6 +9,7 @@
 
 import type { ActivityRecord, ISourceRecord } from '../messages';
 import { PROTOCOLS } from '../messages';
+import { participantRecordOf } from '../records';
 
 // interfaces
 
@@ -16,6 +17,10 @@ import { PROTOCOLS } from '../messages';
 export interface ILog {
   /** The records let go before the panel took them, as the hook counted them. */
   dropped: number;
+  /** Participant losses at the hook, during pause and past the panel’s retention. */
+  droppedParticipants: number;
+  /** Record kinds skipped by a reader of version 2. */
+  skipped: number;
   format: typeof LOG_FORMAT;
   /** The hook's protocols its records were made by. */
   protocols: number[];
@@ -23,7 +28,7 @@ export interface ILog {
   /** When it was saved, as RFC 3339 writes a time. */
   savedAt: string;
   sources: ISourceRecord[];
-  version: typeof LOG_VERSION;
+  version: 1 | 2;
 }
 
 // constants
@@ -43,7 +48,9 @@ const isRecord = (value: unknown): value is ActivityRecord => {
 
   const { kind, source } = value as Partial<ActivityRecord>;
 
-  return (kind === 'call' || kind === 'envelope') && typeof source === 'number';
+  return (
+    (kind === 'call' || kind === 'envelope' || kind === 'participant') && typeof source === 'number'
+  );
 };
 
 // definition
@@ -52,19 +59,33 @@ const isRecord = (value: unknown): value is ActivityRecord => {
 export const logOf = (
   {
     dropped,
+    droppedParticipants = 0,
+    skipped = 0,
     records,
     sources,
-  }: { dropped: number; records: ActivityRecord[]; sources: ISourceRecord[] },
+  }: {
+    dropped: number;
+    droppedParticipants?: number;
+    skipped?: number;
+    records: ActivityRecord[];
+    sources: ISourceRecord[];
+  },
   { savedAt }: { savedAt: Date }
 ): ILog => {
   return {
     dropped,
+    droppedParticipants,
+    skipped,
     format: LOG_FORMAT,
     protocols: [...PROTOCOLS],
     records,
     savedAt: savedAt.toISOString(),
     sources,
-    version: LOG_VERSION,
+    version: records.some((record) => {
+      return record.kind === 'participant';
+    })
+      ? 2
+      : 1,
   };
 };
 
@@ -84,10 +105,8 @@ export const readLog = (text: string): ILog => {
     throw new Error(`it is no ${LOG_FORMAT}`);
   }
 
-  if (log.version !== LOG_VERSION) {
-    throw new Error(
-      `it is version ${String(log.version)}, and this extension reads ${String(LOG_VERSION)}`
-    );
+  if (log.version !== 1 && log.version !== 2) {
+    throw new Error(`it is version ${String(log.version)}, and this extension reads 1 and 2`);
   }
 
   const unknown = (log.protocols ?? []).filter((protocol) => {
@@ -100,17 +119,46 @@ export const readLog = (text: string): ILog => {
     );
   }
 
-  if (!Array.isArray(log.records) || !log.records.every(isRecord) || !Array.isArray(log.sources)) {
+  if (!Array.isArray(log.records) || !Array.isArray(log.sources)) {
     throw new Error('its records do not read');
+  }
+  const records: ActivityRecord[] = [];
+  let skipped = log.skipped ?? 0;
+  const rawRecords: unknown[] = log.records;
+  for (const record of rawRecords) {
+    if (isRecord(record)) {
+      if (log.version === 1 && record.kind === 'participant') {
+        throw new Error('its records do not read');
+      }
+      if (record.kind === 'participant') {
+        const mapped = participantRecordOf({ at: record.at, source: record.source }, record);
+        mapped.parcelKind = record.parcelKind;
+        records.push(mapped);
+      } else {
+        records.push(record);
+      }
+    } else if (
+      log.version === 2 &&
+      typeof record === 'object' &&
+      record !== null &&
+      typeof (record as { kind?: unknown }).kind === 'string' &&
+      !['call', 'envelope', 'participant'].includes((record as { kind: string }).kind)
+    ) {
+      skipped += 1;
+    } else {
+      throw new Error('its records do not read');
+    }
   }
 
   return {
     dropped: typeof log.dropped === 'number' ? log.dropped : 0,
+    droppedParticipants: typeof log.droppedParticipants === 'number' ? log.droppedParticipants : 0,
+    skipped,
     format: LOG_FORMAT,
     protocols: log.protocols ?? [...PROTOCOLS],
-    records: log.records,
+    records,
     savedAt: typeof log.savedAt === 'string' ? log.savedAt : '',
     sources: log.sources,
-    version: LOG_VERSION,
+    version: log.version,
   };
 };

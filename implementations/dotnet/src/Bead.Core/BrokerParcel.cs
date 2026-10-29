@@ -122,24 +122,11 @@ internal sealed record BrokerParcel
     }
 }
 
-/// <summary>What a message read as a parcel is (spec 15.17).</summary>
-internal enum BrokerParcelVerdict
-{
-    /// <summary>A parcel that reads, of its layout or read to its prefix.</summary>
-    Parcel,
-
-    /// <summary>No parcel: under 28 bytes, or a first byte outside 0xB1 to 0xBF; dropped and reported.</summary>
-    NoParcel,
-
-    /// <summary>A parcel that does not read: its connection closed with 1002, reported.</summary>
-    DoesNotRead,
-}
-
 /// <summary>
 /// A message read as a parcel: what it is; its parcel, whole, or, where it does not read, its prefix
 /// alone, which names the connection it closes; and why it does not read.
 /// </summary>
-internal readonly record struct BrokerParcelReading(BrokerParcelVerdict Verdict, BrokerParcel? Parcel, string? Why);
+internal readonly record struct BrokerParcelReading(ParcelVerdict Verdict, BrokerParcel? Parcel, string? Why);
 
 /// <summary>
 /// The parcel's codec (spec 15.17): its 28 bytes of prefix, which every layout keeps, then its body
@@ -201,12 +188,12 @@ internal static class BrokerParcels
 
         if (bytes.Length < PrefixBytes)
         {
-            return new BrokerParcelReading(BrokerParcelVerdict.NoParcel, null, string.Create(CultureInfo.InvariantCulture, $"{bytes.Length} bytes, under a parcel's {PrefixBytes}"));
+            return new BrokerParcelReading(ParcelVerdict.NoParcel, null, string.Create(CultureInfo.InvariantCulture, $"{bytes.Length} bytes, under a parcel's {PrefixBytes}"));
         }
 
         if (!IsLayout(bytes[0]))
         {
-            return new BrokerParcelReading(BrokerParcelVerdict.NoParcel, null, $"a first byte of {HexOf(bytes[0])}, outside 0xB1 to 0xBF");
+            return new BrokerParcelReading(ParcelVerdict.NoParcel, null, $"a first byte of {HexOf(bytes[0])}, outside 0xB1 to 0xBF");
         }
 
         var prefix = new BrokerParcel
@@ -253,7 +240,7 @@ internal static class BrokerParcels
         // ! read back: what does not read as written is no parcel this side may send
         var reading = Read(bytes);
 
-        if (reading.Verdict != BrokerParcelVerdict.Parcel || reading.Parcel!.Layout != Layout)
+        if (reading.Verdict != ParcelVerdict.Taken || reading.Parcel!.Layout != Layout)
         {
             throw new ArgumentException($"a parcel this side refuses is never written: {reading.Why}", nameof(parcel));
         }
@@ -341,7 +328,7 @@ internal static class BrokerParcels
         {
             return prefix.Sequence is 0 or > LargestSequence
                 ? Refused(prefix, "an advisory parcel with no sequence")
-                : new BrokerParcelReading(BrokerParcelVerdict.Parcel, prefix with { Flags = 0 }, null);
+                : new BrokerParcelReading(ParcelVerdict.Taken, prefix with { Flags = 0 }, null);
         }
 
         if (prefix.Kind == 0 || BrokerParcelKinds.IsToCome(prefix.Kind))
@@ -404,7 +391,7 @@ internal static class BrokerParcels
 
     private static BrokerParcelReading Refused(BrokerParcel prefix, string why)
     {
-        return new BrokerParcelReading(BrokerParcelVerdict.DoesNotRead, prefix, why);
+        return new BrokerParcelReading(ParcelVerdict.DoesNotRead, prefix, why);
     }
 
     // a layout to come, read as every layout keeps it: its prefix; an OPEN's id at the head of its
@@ -419,7 +406,7 @@ internal static class BrokerParcels
 
             if (span.Length >= 1 && span.Length >= 1 + span[0])
             {
-                return new BrokerParcelReading(BrokerParcelVerdict.Parcel, prefix with { Flags = 0, Id = Encoding.Latin1.GetString(span.Slice(1, span[0])) }, null);
+                return new BrokerParcelReading(ParcelVerdict.Taken, prefix with { Flags = 0, Id = Encoding.Latin1.GetString(span.Slice(1, span[0])) }, null);
             }
 
             return Refused(prefix, "an OPEN whose id runs past its bytes");
@@ -427,7 +414,7 @@ internal static class BrokerParcels
 
         if (prefix.Kind != BrokerParcelKinds.Refuse)
         {
-            return new BrokerParcelReading(BrokerParcelVerdict.Parcel, prefix with { Flags = 0 }, null);
+            return new BrokerParcelReading(ParcelVerdict.Taken, prefix with { Flags = 0 }, null);
         }
 
         // * a REFUSE every layout keeps: read as its own, its layout kept
@@ -471,7 +458,7 @@ internal static class BrokerParcels
                         return Refused(prefix, Longer);
                     }
 
-                    return new BrokerParcelReading(BrokerParcelVerdict.Parcel, prefix with
+                    return new BrokerParcelReading(ParcelVerdict.Taken, prefix with
                     {
                         Id = id,
                         Incarnation = BinaryPrimitives.ReadUInt128BigEndian(span.Slice(1 + span[0], 16)),
@@ -493,12 +480,12 @@ internal static class BrokerParcels
                     if (status != 426)
                     {
                         return layouts.Length == 0
-                            ? new BrokerParcelReading(BrokerParcelVerdict.Parcel, prefix with { Status = status }, null)
+                            ? new BrokerParcelReading(ParcelVerdict.Taken, prefix with { Status = status }, null)
                             : Refused(prefix, Longer);
                     }
 
                     return layouts.Length > 0 && layouts.All(IsLayout)
-                        ? new BrokerParcelReading(BrokerParcelVerdict.Parcel, prefix with { Status = status, Layouts = layouts }, null)
+                        ? new BrokerParcelReading(ParcelVerdict.Taken, prefix with { Status = status, Layouts = layouts }, null)
                         : Refused(prefix, "a 426 that names no layout it reads");
                 }
 
@@ -527,13 +514,13 @@ internal static class BrokerParcels
                     }
 
                     return span.Length > at
-                        ? new BrokerParcelReading(BrokerParcelVerdict.Parcel, prefix with { Credential = credential, Carried = body[at..] }, null)
+                        ? new BrokerParcelReading(ParcelVerdict.Taken, prefix with { Credential = credential, Carried = body[at..] }, null)
                         : Refused(prefix, "a DATA that carries nothing");
                 }
 
             case BrokerParcelKinds.Ping:
             case BrokerParcelKinds.Reset:
-                return span.Length == 0 ? new BrokerParcelReading(BrokerParcelVerdict.Parcel, prefix, null) : Refused(prefix, Longer);
+                return span.Length == 0 ? new BrokerParcelReading(ParcelVerdict.Taken, prefix, null) : Refused(prefix, Longer);
 
             case BrokerParcelKinds.Pong:
                 {
@@ -544,7 +531,7 @@ internal static class BrokerParcels
                     }
 
                     return span.Length == 8
-                        ? new BrokerParcelReading(BrokerParcelVerdict.Parcel, prefix with { Answers = BinaryPrimitives.ReadUInt64BigEndian(span) }, null)
+                        ? new BrokerParcelReading(ParcelVerdict.Taken, prefix with { Answers = BinaryPrimitives.ReadUInt64BigEndian(span) }, null)
                         : Refused(prefix, Longer);
                 }
 
@@ -558,7 +545,7 @@ internal static class BrokerParcels
                     }
 
                     return span.Length == 2
-                        ? new BrokerParcelReading(BrokerParcelVerdict.Parcel, prefix with { Code = code }, null)
+                        ? new BrokerParcelReading(ParcelVerdict.Taken, prefix with { Code = code }, null)
                         : Refused(prefix, Longer);
                 }
 
@@ -578,7 +565,7 @@ internal static class BrokerParcels
                     }
 
                     return span.Length == 17 + span[16]
-                        ? new BrokerParcelReading(BrokerParcelVerdict.Parcel, prefix with { Incarnation = BinaryPrimitives.ReadUInt128BigEndian(span), Id = id }, null)
+                        ? new BrokerParcelReading(ParcelVerdict.Taken, prefix with { Incarnation = BinaryPrimitives.ReadUInt128BigEndian(span), Id = id }, null)
                         : Refused(prefix, Longer);
                 }
         }

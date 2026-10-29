@@ -90,6 +90,10 @@ public sealed class BrokerParticipant : IAsyncDisposable
     private CancellationTokenSource? _relinking;
     private TaskCompletionSource _live = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private bool _isStopped;
+    private long _ordinal;
+    private UInt128 _incarnation;
+    private readonly Dictionary<string, string?> _heldNames = new(StringComparer.Ordinal);
+    private long _linkEpoch;
 
     /// <summary>
     /// A participant over <paramref name="adapter"/>, not yet started. An adapter whose id is no
@@ -167,6 +171,122 @@ public sealed class BrokerParticipant : IAsyncDisposable
     /// <summary>What it reports of its own: a message to it that is no parcel, which it drops, its link given up on, or its link taken over.</summary>
     public event Action<Exception>? Error;
 
+    /// <summary>The trace of parcels (debugging 13), synchronous on its scheduler, each listener guarded.</summary>
+    public event Action<ParticipantDebugEvent>? Debug;
+
+    /// <summary>Whether anyone listens to the trace.</summary>
+    public bool IsDebugging
+    {
+        get
+        {
+            return Debug is not null;
+        }
+    }
+
+    /// <summary>The names its broker holds, read by pull.</summary>
+    public IReadOnlySet<string> Names
+    {
+        get
+        {
+            lock (_gate)
+            {
+                return new HashSet<string>(_heldNames.Keys, StringComparer.Ordinal);
+            }
+        }
+    }
+
+    // ! called only behind IsDebugging: no record or listener snapshot while nobody watches
+    internal void Trace(ParticipantDebugEvent debugEvent)
+    {
+        var listeners = Debug;
+
+        if (listeners is null)
+        {
+            return;
+        }
+
+        foreach (var listener in listeners.GetInvocationList())
+        {
+            try
+            {
+                ((Action<ParticipantDebugEvent>)listener)(debugEvent);
+            }
+            catch (Exception reason)
+            {
+                // a debug listener's own error never becomes another report event
+                TellError(reason);
+            }
+        }
+    }
+
+    private void TellError(Exception reason)
+    {
+        var listeners = Error;
+
+        if (listeners is null)
+        {
+            return;
+        }
+
+        foreach (var listener in listeners.GetInvocationList())
+        {
+            try
+            {
+                ((Action<Exception>)listener)(reason);
+            }
+            catch (Exception)
+            {
+                // an error listener cannot fail its participant
+            }
+        }
+    }
+
+    internal long DrawOrdinal()
+    {
+        return ++_ordinal;
+    }
+
+    internal void TraceParcel(BrokerParcel? parcel, ParticipantDebugEvent debugEvent)
+    {
+        if (parcel is null)
+        {
+            Trace(debugEvent);
+            return;
+        }
+
+        var kind = parcel.Kind;
+        var readsBody = debugEvent.Verdict != ParcelVerdict.DoesNotRead;
+        var isOpening = readsBody && kind is BrokerParcelKinds.Open or BrokerParcelKinds.Accept;
+        var isData = readsBody && parcel.Layout == BrokerParcels.Layout && kind == BrokerParcelKinds.Data;
+        var namesIdentity = readsBody && (isOpening || kind == BrokerParcelKinds.Gone);
+        Trace(debugEvent with
+        {
+            Layout = parcel.Layout,
+            Kind = kind >= 0x80 ? string.Create(CultureInfo.InvariantCulture, $"advisory {kind}") : BrokerParcels.NameOf(kind),
+            Flags = debugEvent.Flags ?? parcel.Flags,
+            Sequence = parcel.Sequence,
+            Opener = parcel.Opener.ToString("x16", CultureInfo.InvariantCulture),
+            Id = namesIdentity ? parcel.Id : null,
+            Incarnation = namesIdentity ? parcel.Incarnation?.ToString("x32", CultureInfo.InvariantCulture) : null,
+            Bound = isOpening ? parcel.Bound : null,
+            Secure = isOpening && parcel.Bound is not null ? parcel.Has(BrokerParcelFlags.Secure) : null,
+            Status = readsBody && kind == BrokerParcelKinds.Refuse ? parcel.Status : null,
+            CarriedBytes = isData ? parcel.Carried.Length : null,
+            More = isData ? parcel.Has(BrokerParcelFlags.More) : null,
+            HasCredential = isData ? parcel.Has(BrokerParcelFlags.Credential) : null,
+            Answers = readsBody && kind == BrokerParcelKinds.Pong ? parcel.Answers : null,
+            Code = readsBody && kind == BrokerParcelKinds.Close ? parcel.Code : null,
+        });
+    }
+
+    private void Transition(string state, IReadOnlyList<long>? ended = null)
+    {
+        if (IsDebugging)
+        {
+            Trace(new ParticipantDebugEvent { Event = "link", State = state, Ended = ended, Incarnation = Incarnation.ToString("x32", CultureInfo.InvariantCulture) });
+        }
+    }
+
     /// <summary>The identity its broker authenticates its link by: its adapter's.</summary>
     public string Id
     {
@@ -242,7 +362,17 @@ public sealed class BrokerParticipant : IAsyncDisposable
     }
 
     /// <summary>Its incarnation, drawn as its link last connected.</summary>
-    internal UInt128 Incarnation { get; private set; }
+    public UInt128 Incarnation
+    {
+        get
+        {
+            lock (_gate) { return _incarnation; }
+        }
+        private set
+        {
+            lock (_gate) { _incarnation = value; }
+        }
+    }
 
     /// <summary>The receive bound it announces: what its adapter's inbox takes whole, as its field holds it.</summary>
     internal long ReceiveBound
@@ -283,6 +413,26 @@ public sealed class BrokerParticipant : IAsyncDisposable
         lock (_gate)
         {
             var held = _connections.Values.ToList();
+            var ceilings = new Dictionary<string, long>
+            {
+                ["largestPartsBytes"] = PartsBounds.MaximumEnvelopePartsBytes,
+                ["partsBytes"] = _budget.Budget,
+            };
+            long unsentCeiling = 0;
+            BrokerConnection? largest = null;
+            foreach (var connection in held)
+            {
+                unsentCeiling = unsentCeiling > long.MaxValue - connection.MaximumUnsentBytes ? long.MaxValue : unsentCeiling + connection.MaximumUnsentBytes;
+                if (largest is null || connection.UnsentBytes >= largest.UnsentBytes)
+                {
+                    largest = connection;
+                }
+            }
+            if (largest is not null)
+            {
+                ceilings["unsentBytes"] = unsentCeiling;
+                ceilings["largestUnsentBytes"] = largest.MaximumUnsentBytes;
+            }
 
             return new Gauges
             {
@@ -311,11 +461,7 @@ public sealed class BrokerParticipant : IAsyncDisposable
                         return connection.UnsentBytes;
                     }),
                 },
-                Ceilings = new Dictionary<string, long>
-                {
-                    ["largestPartsBytes"] = PartsBounds.MaximumEnvelopePartsBytes,
-                    ["partsBytes"] = _budget.Budget,
-                },
+                Ceilings = ceilings,
             };
         }
     }
@@ -398,6 +544,7 @@ public sealed class BrokerParticipant : IAsyncDisposable
 
         await _scheduler.Run(async () =>
         {
+            _linkEpoch += 1;
             // ! unlinked first: what its connections' ends set going — a name served again among
             // them — finds no link to subscribe on
             lock (_gate)
@@ -405,6 +552,7 @@ public sealed class BrokerParticipant : IAsyncDisposable
                 _live = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
             }
 
+            var ended = IsDebugging ? _connections.Values.Select((connection) => { return connection.Ordinal; }).ToArray() : null;
             foreach (var connection in _connections.Values.ToList())
             {
                 connection.Close((1001, false));
@@ -417,6 +565,14 @@ public sealed class BrokerParticipant : IAsyncDisposable
 
             _connects.Clear();
             await _adapter.Stop();
+            lock (_gate)
+            {
+                _heldNames.Clear();
+            }
+            if (!_isTakenOver)
+            {
+                Transition("stopped", ended);
+            }
         });
     }
 
@@ -499,8 +655,13 @@ public sealed class BrokerParticipant : IAsyncDisposable
     }
 
     /// <summary>A publication of its adapter's, its parcel in its payload.</summary>
-    internal Task<BrokerPublished> Publish(BrokerPublication publication)
+    internal Task<BrokerPublished> Publish(BrokerPublication publication, BrokerParcel? parcel = null)
     {
+        if (IsDebugging && parcel is not null)
+        {
+            var connection = _connections.GetValueOrDefault((parcel.Opener, parcel.Acceptor));
+            TraceParcel(parcel, new ParticipantDebugEvent { Event = "parcel", Direction = "tx", Topic = publication.Topic, Bytes = publication.Payload.Length, Connection = connection?.Ordinal, ConnectionHandle = connection?.TraceHandle });
+        }
         var expires = publication.ExpiresAfter is { } life && (_adapter.Capabilities & BrokerCapabilities.Expiry) != 0 ? life : (TimeSpan?)null;
 
         try
@@ -555,11 +716,12 @@ public sealed class BrokerParticipant : IAsyncDisposable
     {
         var (opener, acceptor) = reset.Pair;
 
+        var parcel = new BrokerParcel { Kind = BrokerParcelKinds.Reset, Opener = opener, Acceptor = acceptor };
         _ = Publish(new BrokerPublication
         {
             Topic = InboxOf(reset.PeerId),
-            Payload = BrokerParcels.Write(new BrokerParcel { Kind = BrokerParcelKinds.Reset, Opener = opener, Acceptor = acceptor }),
-        });
+            Payload = BrokerParcels.Write(parcel),
+        }, parcel);
     }
 
     /// <summary>
@@ -593,15 +755,42 @@ public sealed class BrokerParticipant : IAsyncDisposable
     }
 
     /// <summary>Subscribes a name served, alone or in its group; settles once its broker holds it.</summary>
-    internal Task Subscribe((string Name, bool IsInGroup) name)
+    internal async Task Subscribe((string Name, bool IsInGroup) name)
     {
-        return _adapter.Subscribe(NameOf(name.Name), new BrokerSubscription { Group = name.IsInGroup ? name.Name : null });
+        var epoch = _linkEpoch;
+        await _adapter.Subscribe(NameOf(name.Name), new BrokerSubscription { Group = name.IsInGroup ? name.Name : null });
+        if (epoch != _linkEpoch || _isStopped)
+        {
+            return;
+        }
+        lock (_gate)
+        {
+            _heldNames[name.Name] = name.IsInGroup ? name.Name : null;
+        }
+        if (IsDebugging)
+        {
+            Trace(new ParticipantDebugEvent { Event = "names", Name = name.Name, IsHeld = true, Group = name.IsInGroup ? name.Name : null });
+        }
     }
 
     /// <summary>Lets a name go.</summary>
-    internal Task Unsubscribe(string name)
+    internal async Task Unsubscribe(string name)
     {
-        return _adapter.Unsubscribe(NameOf(name));
+        var group = _heldNames.GetValueOrDefault(name);
+        var epoch = _linkEpoch;
+        await _adapter.Unsubscribe(NameOf(name));
+        if (epoch != _linkEpoch)
+        {
+            return;
+        }
+        lock (_gate)
+        {
+            _heldNames.Remove(name);
+        }
+        if (IsDebugging)
+        {
+            Trace(new ParticipantDebugEvent { Event = "names", Name = name, IsHeld = false, Group = group });
+        }
     }
 
     /// <summary>
@@ -618,11 +807,15 @@ public sealed class BrokerParticipant : IAsyncDisposable
             servers = [.. _servers];
         }
 
-        Error?.Invoke(reason);
+        if (IsDebugging)
+        {
+            Trace(new ParticipantDebugEvent { Event = "report", Report = reason.Message });
+        }
+        TellError(reason);
 
         foreach (var server in servers)
         {
-            server.Report(reason);
+            server.Report(reason, isParticipantReport: true);
         }
     }
 
@@ -653,6 +846,7 @@ public sealed class BrokerParticipant : IAsyncDisposable
     private async Task Link()
     {
         _isDownAsItLinks = false;
+        _linkEpoch += 1;
 
         var bytes = new byte[16];
 
@@ -693,6 +887,7 @@ public sealed class BrokerParticipant : IAsyncDisposable
         {
             _live.TrySetResult();
         }
+        Transition("up");
     }
 
     // in its turn: its link lost: each connection closed, unclean, each connect to send its OPEN
@@ -723,6 +918,7 @@ public sealed class BrokerParticipant : IAsyncDisposable
             _live = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         }
 
+        var ended = IsDebugging ? _connections.Values.Select((connection) => { return connection.Ordinal; }).ToArray() : null;
         var peers = _connections.Values.Select((connection) =>
         {
             return (connection.PeerId, connection.Pair);
@@ -752,6 +948,13 @@ public sealed class BrokerParticipant : IAsyncDisposable
         {
             server.Unlinked();
         }
+
+        lock (_gate)
+        {
+            _heldNames.Clear();
+        }
+        _linkEpoch += 1;
+        Transition(down.IsTakenOver ? "taken-over" : "down", ended);
 
         // * taken over: it connects no more, its server's transports taking no OPEN and its
         // clients' connects failing, until its application starts it again (spec 15.21)
@@ -869,18 +1072,20 @@ public sealed class BrokerParticipant : IAsyncDisposable
             // ! no parcel is retained: one that comes so is dropped in silence (spec 15.23)
             if (message.IsRetained)
             {
+                TraceIncoming(null, (message, ParcelVerdict.Retained));
                 return;
             }
 
             // a topic of its root: an inbox, a server's name, a departure, by its second token
             if (message.Topic is not [var root, var place, var name] || root != _options.Root)
             {
+                TraceIncoming(null, (message, ParcelVerdict.OffTopic));
                 return;
             }
 
             if (place == "i" && name == Id)
             {
-                TakeInbox(message.Payload);
+                TakeInbox(message);
             }
             else if (place == "s")
             {
@@ -891,11 +1096,29 @@ public sealed class BrokerParticipant : IAsyncDisposable
                     server = _names.GetValueOrDefault(name);
                 }
 
-                server?.TakeOpen(name, BrokerParcels.Read(message.Payload));
+                if (server is null)
+                {
+                    TraceIncoming(null, (message, ParcelVerdict.OffTopic));
+                    return;
+                }
+                var read = BrokerParcels.Read(message.Payload);
+                TraceIncoming(read.Parcel, (message, read.Verdict == ParcelVerdict.Taken && read.Parcel?.Kind >= 0x80 ? ParcelVerdict.Advisory : read.Verdict));
+                server?.TakeOpen(name, read);
             }
             else if (place == "d")
             {
-                TakeGone(BrokerParcels.Read(message.Payload));
+                if (!_departures.ContainsKey(name))
+                {
+                    TraceIncoming(null, (message, ParcelVerdict.OffTopic));
+                    return;
+                }
+                var read = BrokerParcels.Read(message.Payload);
+                TraceIncoming(read.Parcel, (message, read.Verdict == ParcelVerdict.Taken && read.Parcel?.Kind >= 0x80 ? ParcelVerdict.Advisory : read.Verdict));
+                TakeGone(read);
+            }
+            else
+            {
+                TraceIncoming(null, (message, ParcelVerdict.OffTopic));
             }
         }
         finally
@@ -905,12 +1128,21 @@ public sealed class BrokerParticipant : IAsyncDisposable
     }
 
     // what reaches its inbox: each parcel of its connections, an ACCEPT or a REFUSE among them
-    private void TakeInbox(ReadOnlyMemory<byte> payload)
+    private void TraceIncoming(BrokerParcel? parcel, (BrokerMessage Message, ParcelVerdict Verdict) incoming)
     {
-        var reading = BrokerParcels.Read(payload);
-
-        if (reading.Verdict == BrokerParcelVerdict.NoParcel)
+        if (IsDebugging)
         {
+            TraceParcel(parcel, new ParticipantDebugEvent { Event = "parcel", Direction = "rx", Topic = incoming.Message.Topic, Bytes = incoming.Message.Payload.Length, Verdict = incoming.Verdict, Flags = parcel is null ? null : incoming.Message.Payload.Span[2] });
+        }
+    }
+
+    private void TakeInbox(BrokerMessage message)
+    {
+        var reading = BrokerParcels.Read(message.Payload);
+
+        if (reading.Verdict == ParcelVerdict.NoParcel)
+        {
+            TraceIncoming(null, (message, ParcelVerdict.NoParcel));
             Report(new InvalidDataException($"a message to the inbox of {Id} is no parcel: {reading.Why}"));
 
             return;
@@ -919,20 +1151,28 @@ public sealed class BrokerParticipant : IAsyncDisposable
         var parcel = reading.Parcel!;
         var held = _connections.GetValueOrDefault((parcel.Opener, parcel.Acceptor));
 
-        if (reading.Verdict == BrokerParcelVerdict.DoesNotRead)
+        if (reading.Verdict == ParcelVerdict.DoesNotRead)
         {
-            held?.TakeUnread((parcel, reading.Why!));
+            if (held is null)
+            {
+                TraceIncoming(parcel, (message, ParcelVerdict.DoesNotRead));
+            }
+            else
+            {
+                held.TakeUnread((parcel, reading.Why!), message.Payload.Length);
+            }
 
             return;
         }
 
         if (held is not null)
         {
-            held.Take(parcel);
+            held.Take(parcel, IsDebugging ? (message.Payload.Length, message.Payload.Span[2]) : default);
 
             return;
         }
 
+        TraceIncoming(parcel, (message, _connects.ContainsKey(parcel.Opener) && parcel.Kind is BrokerParcelKinds.Accept or BrokerParcelKinds.Refuse ? ParcelVerdict.Taken : ParcelVerdict.PairNotHeld));
         switch (parcel.Kind)
         {
             case BrokerParcelKinds.Accept when parcel.Layout == BrokerParcels.Layout:
@@ -968,7 +1208,7 @@ public sealed class BrokerParticipant : IAsyncDisposable
     // closed, unclean, never one bound to another (spec 15.21)
     private void TakeGone(BrokerParcelReading reading)
     {
-        if (reading is not { Verdict: BrokerParcelVerdict.Parcel, Parcel: { Kind: BrokerParcelKinds.Gone } gone })
+        if (reading is not { Verdict: ParcelVerdict.Taken, Parcel: { Kind: BrokerParcelKinds.Gone } gone })
         {
             return;
         }

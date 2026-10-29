@@ -218,6 +218,9 @@ export const createBrokerTransportServer = (
             isSecure: isOwnLegSecure,
             maximumUnsentBytes,
             owner: {
+              connectionHandle: () => {
+                return entry.handle;
+              },
               // * its third leg: the opener proved it reads the inbox it named; its handle drawn now
               opened: () => {
                 clock.clearTimeout(entry.timer);
