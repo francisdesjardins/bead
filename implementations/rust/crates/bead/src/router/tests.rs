@@ -53,6 +53,7 @@ mod server;
 mod server_commands;
 mod server_filter;
 mod server_notifications;
+mod server_pacing;
 mod server_requests;
 mod server_unsubscribe;
 mod server_waiting;
