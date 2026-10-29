@@ -32,8 +32,11 @@ mod metrics;
 mod parts;
 mod requester;
 mod router_core;
+mod router_core_hooks;
 mod router_core_incoming;
+mod router_core_requester;
 mod router_core_rest;
+mod router_core_writer;
 mod server;
 mod transfer;
 
