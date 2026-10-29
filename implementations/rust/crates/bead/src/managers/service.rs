@@ -26,7 +26,7 @@ use crate::failure::Failure;
 use crate::identity::{Procedure, check_declaration};
 use crate::managers::notification::NotificationKey;
 use crate::metrics::ProcedureSeries;
-use crate::payloads::PayloadCodec;
+use crate::payloads::{PayloadCodec, decoded, encoded};
 use crate::router::admissions::BeforeRequest;
 use crate::router::client::{ClientRequest, NotificationLike, RouterClient};
 use crate::router::core::{Answerer, Handler, ResolverProps};
@@ -920,7 +920,7 @@ where
         let refusal = refusal_of(shared, (&payload, resolved.destination_id));
         let encoded = match &refusal {
             Some(_) => Bytes::new(),
-            None => match shared.dependencies.request.encode(&payload) {
+            None => match encoded(&shared.dependencies.request, &payload) {
                 Ok(encoded) => encoded,
                 // a value that does not write fails before anything goes: nothing requested,
                 // traced or deprecated
@@ -949,6 +949,7 @@ where
 
         let (on_call_id, call_id) = oneshot::channel::<u32>();
         let close_on_timeout = resolved.close_on_timeout;
+        let destination_id = resolved.destination_id;
         let requested = manager.router.request(
             encoded,
             RouterCall {
@@ -1017,7 +1018,7 @@ where
                 Ok(result) => {
                     call_id = Some(result.header.call_id);
 
-                    match shared.dependencies.result.decode(&result.payload) {
+                    match decoded(&shared.dependencies.result, &result.payload) {
                         // an answer that does not decode fails here, with the result's header
                         Err(refused) => {
                             let failure = Failure::protocol(
@@ -1026,7 +1027,7 @@ where
                             )
                             .saying(refused.reason().to_owned())
                             .about(&crate::envelope::Header::Result(result.header.clone()))
-                            .of_call(Some(procedure.address()), None)
+                            .of_call(Some(procedure.address()), destination_id)
                             .caused_by(Arc::new(refused));
                             let reason = CallError::Failure(failure);
 
@@ -1221,10 +1222,7 @@ where
     /// Answers its request with `value`.
     pub fn result(&self, value: Res::Value) -> BoxFuture<Result<(), ResolverError>> {
         let told = traced(value.clone());
-        let encoded = self
-            .shared
-            .codec
-            .encode(&value)
+        let encoded = encoded(&*self.shared.codec, &value)
             .map(RouterAnswer::Result)
             .map_err(ResolverError::other);
 
@@ -1481,7 +1479,7 @@ where
         // arrives, its decoding counting in its duration
         let started = manager.is_debugging().then(|| manager.started_now());
         // a payload that does not decode never reaches the callback
-        let Ok(value) = self.request.decode(&payload) else {
+        let Ok(value) = decoded(&self.request, &payload) else {
             return answerer
                 .respond(RouterAnswer::Failure(
                     self.failure(ProtocolCode::PAYLOAD_UNDECODABLE),
@@ -1820,9 +1818,7 @@ where
 
         // a value that does not write goes to the router in its payload's place, for it to count
         // failed at each subscription it was for and report (spec 17.2, item 6)
-        let payload = shared
-            .codec
-            .encode(&notification)
+        let payload = encoded(&shared.codec, &notification)
             .map_err(|refused| RouterError::Other(Arc::new(refused)));
         let failure = payload.as_ref().err().cloned();
         let notified = match &manager.router {

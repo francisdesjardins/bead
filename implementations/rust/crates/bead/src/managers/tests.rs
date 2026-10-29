@@ -33,6 +33,24 @@ async fn pair() -> Pair {
         .expect("a pair connected")
 }
 
+// a client over the test kit's scripted transport, on a stepping clock: what it sends read, what it
+// hears written by the test
+fn scripted() -> (
+    Arc<crate::testing::SteppingClock>,
+    Arc<crate::testing::scripted::ScriptedClient>,
+    crate::client::Client,
+) {
+    let clock = crate::testing::SteppingClock::new(crate::testing::instants::new_year());
+    let shared: crate::clock::SharedClock = Arc::<crate::testing::SteppingClock>::clone(&clock);
+    let transport = crate::testing::scripted::ScriptedClient::new(shared);
+    let carried: Arc<dyn crate::transport::ClientTransport> =
+        Arc::<crate::testing::scripted::ScriptedClient>::clone(&transport);
+    let client = crate::client::Client::new(carried, &crate::client::ClientOptions::default())
+        .expect("a client built");
+
+    (clock, transport, client)
+}
+
 fn recorded(manager: &ServiceManager) -> Heard {
     let heard: Heard = Arc::default();
     let hearing = Arc::clone(&heard);
@@ -78,26 +96,32 @@ impl PayloadCodec for Unwritable {
 // spec 17.2.2
 #[tokio::test]
 async fn an_answer_that_does_not_decode_fails_the_call_here_with_its_header_and_its_call() {
-    let pair = pair().await;
-
-    pair.server
-        .services()
-        .get_request_resolver(&echo(), ResolverDependencies::of(RawCodec, RawCodec))
-        .expect("echo resolved")
-        .on(Arc::new(|_request, response: Response<RawCodec>| {
-            response.result(Bytes::from_static(b"{not json"))
-        }))
-        .expect("echo registered");
-
-    let manager = pair.client.services();
+    let (clock, transport, client) = scripted();
+    let manager = client.services();
     let heard = recorded(manager);
+    let options = RequestOptions {
+        destination_id: Some(4),
+        ..RequestOptions::default()
+    };
     let call = manager
         .get_request(&echo(), RequestDependencies::of(JsonCodec, JsonCodec))
         .expect("echo asked")
-        .call(Value::from("x"), RequestOptions::default())
+        .call(Value::from("x"), options)
         .expect("echo called");
 
-    pair.settle().await;
+    clock.settle().await;
+
+    let answer = crate::envelope::ResultHeader {
+        call_id: 1,
+        total: None,
+        credential: None,
+    };
+
+    transport.deliver(&crate::envelope::Envelope::Result {
+        header: answer.clone(),
+        payload: Bytes::from_static(b"{not json"),
+    });
+    clock.settle().await;
 
     let failed = crate::testing::patience(Duration::from_secs(10), call)
         .await
@@ -115,8 +139,9 @@ async fn an_answer_that_does_not_decode_fails_the_call_here_with_its_header_and_
     assert_eq!(failure.scope(), FailureScope::Protocol, "the protocol's");
     assert_eq!(failure.side(), Some(RouterSide::Client), "by the client");
     assert_eq!(failure.procedure(), Some(echo().address()), "its call");
+    assert_eq!(failure.destination_id(), Some(4), "its call's destination");
     assert!(
-        matches!(failure.header(), Some(crate::envelope::Header::Result(_))),
+        matches!(failure.header(), Some(crate::envelope::Header::Result(header)) if *header == answer),
         "its answer's header"
     );
     assert!(
@@ -351,4 +376,197 @@ async fn a_notification_whose_value_does_not_write_goes_to_its_router_in_its_pay
         1,
         "told at one start"
     );
+}
+
+// a codec of JSON that panics as it reads or as it writes, as an application's might
+#[derive(Debug)]
+struct Breaking {
+    reads: bool,
+    writes: bool,
+}
+
+impl PayloadCodec for Breaking {
+    type Value = Value;
+
+    fn decode(&self, bytes: &Bytes) -> Result<Value, CodecRefusal> {
+        assert!(!self.reads, "this codec breaks as it reads, on purpose");
+
+        JsonCodec.decode(bytes)
+    }
+
+    fn encode(&self, value: &Value) -> Result<Bytes, CodecRefusal> {
+        assert!(!self.writes, "this codec breaks as it writes, on purpose");
+
+        JsonCodec.encode(value)
+    }
+
+    fn encoding(&self) -> &'static str {
+        "json"
+    }
+}
+
+// decision 0044: a codec's panic is its throw, as both other sides answer any throw of a request's
+// decode PAYLOAD_UNDECODABLE: the twin of "a payload that does not decode is answered as
+// undecodable, with no detail, never reaching the callback", its codec panicking
+#[tokio::test]
+async fn a_request_whose_codec_panics_as_it_reads_is_answered_as_undecodable_with_no_detail_never_reaching_the_callback()
+ {
+    let pair = pair().await;
+    let reached = Arc::new(Mutex::new(0_u32));
+    let reaching = Arc::clone(&reached);
+
+    pair.server
+        .services()
+        .get_request_resolver(
+            &echo(),
+            ResolverDependencies::of(
+                Breaking {
+                    reads: true,
+                    writes: false,
+                },
+                JsonCodec,
+            ),
+        )
+        .expect("echo resolved")
+        .on(Arc::new(move |request, response: Response<JsonCodec>| {
+            *locked(&reaching) += 1;
+
+            response.result(request.payload)
+        }))
+        .expect("echo registered");
+
+    let call = pair
+        .client
+        .services()
+        .get_request(&echo(), RequestDependencies::of(JsonCodec, JsonCodec))
+        .expect("echo asked")
+        .call(Value::from("x"), RequestOptions::default())
+        .expect("echo called");
+
+    pair.settle().await;
+
+    let failed = crate::testing::patience(Duration::from_secs(10), call)
+        .await
+        .expect("answered within its patience");
+    let Err(CallError::Failure(failure)) = failed else {
+        panic!("failed: {failed:?}");
+    };
+
+    assert_eq!(
+        (failure.protocol_code(), failure.detail()),
+        (Some(ProtocolCode::PAYLOAD_UNDECODABLE), ""),
+        "undecodable, with no detail"
+    );
+    assert_eq!(*locked(&reached), 0, "never reaching the callback");
+    assert!(
+        locked(&pair.server_reports).is_empty(),
+        "nothing reported, as for a decode that refuses"
+    );
+}
+
+// decision 0044, spec 17.2.2: a result whose codec panics fails its call here, as one that refuses
+// does, and the router answers the next
+#[tokio::test]
+async fn an_answer_whose_codec_panics_as_it_reads_fails_the_call_here_undecodable_and_the_router_answers_the_next()
+ {
+    let pair = pair().await;
+
+    pair.server
+        .services()
+        .get_request_resolver(&echo(), ResolverDependencies::of(JsonCodec, JsonCodec))
+        .expect("echo resolved")
+        .on(Arc::new(|request, response: Response<JsonCodec>| {
+            response.result(request.payload)
+        }))
+        .expect("echo registered");
+
+    let manager = pair.client.services();
+    let call = manager
+        .get_request(
+            &echo(),
+            RequestDependencies::of(
+                JsonCodec,
+                Breaking {
+                    reads: true,
+                    writes: false,
+                },
+            ),
+        )
+        .expect("echo asked")
+        .call(Value::from("x"), RequestOptions::default())
+        .expect("echo called");
+
+    pair.settle().await;
+
+    let failed = crate::testing::patience(Duration::from_secs(10), call)
+        .await
+        .expect("answered within its patience");
+    let Err(CallError::Failure(failure)) = failed else {
+        panic!("failed here: {failed:?}");
+    };
+
+    assert_eq!(
+        failure.protocol_code(),
+        Some(ProtocolCode::PAYLOAD_UNDECODABLE),
+        "its code"
+    );
+    assert_eq!(failure.origin(), FailureOrigin::Local, "raised here");
+    assert_eq!(
+        failure.detail(),
+        "a codec panicked: this codec breaks as it reads, on purpose",
+        "the codec's panic in its detail"
+    );
+
+    let next = manager
+        .get_request(&echo(), RequestDependencies::of(JsonCodec, JsonCodec))
+        .expect("echo asked")
+        .call(Value::from("y"), RequestOptions::default())
+        .expect("echo called");
+
+    pair.settle().await;
+
+    assert_eq!(
+        crate::testing::patience(Duration::from_secs(10), next)
+            .await
+            .expect("answered within its patience")
+            .expect("answered"),
+        Value::from("y"),
+        "the router answers the next"
+    );
+}
+
+// decision 0044: a value whose codec panics as it writes fails its call with that throw, as the
+// TypeScript side rejects a call whose encode throws: nothing goes
+#[tokio::test]
+async fn a_call_whose_codec_panics_as_it_writes_fails_with_its_throw_and_nothing_goes() {
+    let pair = pair().await;
+    let manager = pair.client.services();
+    let heard = recorded(manager);
+    let call = manager
+        .get_request(
+            &echo(),
+            RequestDependencies::of(
+                Breaking {
+                    reads: false,
+                    writes: true,
+                },
+                JsonCodec,
+            ),
+        )
+        .expect("echo asked")
+        .call(Value::from("x"), RequestOptions::default())
+        .expect("a call made, its throw its outcome");
+
+    pair.settle().await;
+
+    let failed = crate::testing::patience(Duration::from_secs(10), call)
+        .await
+        .expect("failed within its patience");
+
+    assert!(
+        matches!(&failed, Err(CallError::Other(error))
+            if error.to_string() == "a codec panicked: this codec breaks as it writes, on purpose"),
+        "its throw: {failed:?}"
+    );
+    assert!(locked(&heard).is_empty(), "nothing went, nothing traced");
 }

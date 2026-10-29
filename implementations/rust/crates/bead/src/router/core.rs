@@ -2020,7 +2020,11 @@ fn resolve_session<S: Side>(
             let owner = state.core().owner.clone();
 
             state.core().owner.cover(async move {
-                let resolved = resolving.await;
+                // ! what a resolution panics is its throw, as a resolver's is: the call answered
+                // PROCEDURE_FAILED and the panic reported (decision 0044)
+                let resolved = caught_future(("a credential's resolution", resolving))
+                    .await
+                    .unwrap_or_else(|panicked| Err(Unresolved::Other(Arc::new(panicked))));
                 owner.offer(Box::new(move |state: &mut S| {
                     if !signal.is_aborted() {
                         settle(state, resolved);

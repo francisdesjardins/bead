@@ -314,7 +314,7 @@ where
         }
 
         // a notification that does not decode fails here, for the router to report
-        let value = match self.codec.decode(&payload) {
+        let value = match crate::payloads::decoded(&self.codec, &payload) {
             Ok(value) => value,
             Err(refused) => {
                 let failure = Failure::protocol(

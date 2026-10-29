@@ -327,3 +327,83 @@ async fn a_turn_that_panics_ends_its_router_failing_each_call_it_waits_on_with_t
         "its owner gone"
     );
 }
+
+// spec 13.11; decision 0044: the twin of "answers a verifier that throws at once PROCEDURE_FAILED,
+// and reports it as one that rejects, never SESSION_REQUIRED", a throw at once a panic as it is
+// called, and one its future panics with alike
+#[tokio::test]
+async fn answers_a_verifier_that_throws_at_once_procedure_failed_and_reports_it_as_one_that_rejects_never_session_required()
+ {
+    let verify: crate::credentials::ElsewhereVerifier = Arc::new(|carried: String, _signal| {
+        assert!(carried != "throws", "this verifier throws");
+
+        Box::pin(async move {
+            assert!(carried != "panics", "this verifier panics as it is awaited");
+
+            Err::<Option<crate::credentials::ElsewhereSession>, _>("this verifier rejects".into())
+        })
+    });
+    let served = super::server::Served::new(&crate::router::server::RouterServerOptions {
+        credentials: Some(crate::credentials::Credentials {
+            verify: Some(verify),
+            ..crate::credentials::Credentials::default()
+        }),
+        ..crate::router::server::RouterServerOptions::default()
+    });
+
+    served
+        .services
+        .get_request_resolver(
+            &echo(),
+            crate::managers::service::ResolverDependencies::of(
+                crate::payloads::RawCodec,
+                crate::payloads::RawCodec,
+            ),
+        )
+        .expect("echo resolved")
+        .on(Arc::new(
+            |request, response: crate::managers::service::Response<crate::payloads::RawCodec>| {
+                response.result(request.payload)
+            },
+        ))
+        .expect("echo registered");
+    served.transport.open(&first(), true);
+
+    for (call_id, carried) in [(1, "throws"), (3, "rejects"), (5, "panics")] {
+        served.transport.deliver_message(
+            &crate::router::types::TransportMessage {
+                data: crate::testing::scripted::bytes_of(&crate::envelope::Envelope::Request {
+                    header: crate::envelope::RequestHeader {
+                        credential: Some(crate::envelope::Credential::Elsewhere),
+                        ..super::request_header_of(call_id)
+                    },
+                    payload: Bytes::new(),
+                }),
+                credential: Some(carried.to_owned()),
+                ..crate::router::types::TransportMessage::default()
+            },
+            &first(),
+        );
+    }
+
+    served.settle().await;
+
+    assert_eq!(
+        served.sent_since(),
+        [
+            "first failure 1 PROCEDURE_FAILED",
+            "first failure 3 PROCEDURE_FAILED",
+            "first failure 5 PROCEDURE_FAILED"
+        ],
+        "each answered PROCEDURE_FAILED, never SESSION_REQUIRED"
+    );
+    assert_eq!(
+        served.reported(),
+        [
+            "a verifier panicked: this verifier throws first",
+            "this verifier rejects first",
+            "a verifier panicked: this verifier panics as it is awaited first"
+        ],
+        "each reported, with its connection"
+    );
+}
