@@ -243,7 +243,7 @@ async fn settles_a_call_with_an_answer_of_this_layout_that_does_not_read_and_nev
     );
     client_bytes(&scripted, "A1 12 00 02  00 00 00 01  00");
     scripted.settle().await;
-    let malformed = tokio::time::timeout(super::PATIENCE, call)
+    let malformed = crate::testing::patience(super::PATIENCE, call)
         .await
         .expect("the client settles")
         .expect_err("malformed failure ends its call");
