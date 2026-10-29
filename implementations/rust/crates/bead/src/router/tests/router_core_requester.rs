@@ -19,7 +19,7 @@ use crate::router::types::{CallAddress, RouterActivity, RouterError, RouterLimit
 use crate::testing::core_port::{Peer, completed, error_of, request_of};
 use crate::transport::Sent;
 
-fn limits() -> RouterLimitsOptions {
+pub(super) fn limits() -> RouterLimitsOptions {
     RouterLimitsOptions {
         chunk_bytes: Some(64),
         maximum_envelope_bytes: Some(64),
@@ -28,13 +28,13 @@ fn limits() -> RouterLimitsOptions {
     }
 }
 
-fn pattern(total: usize) -> Bytes {
+pub(super) fn pattern(total: usize) -> Bytes {
     (0..total)
         .map(|index| u8::try_from(index % 256).expect("a byte"))
         .collect()
 }
 
-fn opening(call_id: u32, (payload, total): (Bytes, u64)) -> Envelope {
+pub(super) fn opening(call_id: u32, (payload, total): (Bytes, u64)) -> Envelope {
     Envelope::Result {
         header: ResultHeader {
             call_id,
@@ -45,7 +45,7 @@ fn opening(call_id: u32, (payload, total): (Bytes, u64)) -> Envelope {
     }
 }
 
-fn chunk(call_id: u32, (payload, offset, is_last): (Bytes, u64, bool)) -> Envelope {
+pub(super) fn chunk(call_id: u32, (payload, offset, is_last): (Bytes, u64, bool)) -> Envelope {
     Envelope::Chunk {
         header: ChunkHeader {
             call_id,
@@ -56,7 +56,7 @@ fn chunk(call_id: u32, (payload, offset, is_last): (Bytes, u64, bool)) -> Envelo
     }
 }
 
-fn credit(call_id: u32, end: u64) -> Envelope {
+pub(super) fn credit(call_id: u32, end: u64) -> Envelope {
     Envelope::Credit {
         header: CreditHeader {
             call_id,
@@ -66,7 +66,10 @@ fn credit(call_id: u32, end: u64) -> Envelope {
     }
 }
 
-fn failed(call_id: u32, (code, scope, relays, detail): (u16, FailureScope, u8, &str)) -> Envelope {
+pub(super) fn failed(
+    call_id: u32,
+    (code, scope, relays, detail): (u16, FailureScope, u8, &str),
+) -> Envelope {
     Envelope::Failure {
         header: FailureHeader {
             call_id,
@@ -81,7 +84,7 @@ fn failed(call_id: u32, (code, scope, relays, detail): (u16, FailureScope, u8, &
     }
 }
 
-async fn pieces(peer: &Peer) -> Vec<(EnvelopeKind, u32, Option<u64>, usize)> {
+pub(super) async fn pieces(peer: &Peer) -> Vec<(EnvelopeKind, u32, Option<u64>, usize)> {
     peer.sent()
         .await
         .iter()
@@ -112,7 +115,7 @@ async fn pieces(peer: &Peer) -> Vec<(EnvelopeKind, u32, Option<u64>, usize)> {
         .collect()
 }
 
-async fn quiet(peer: &Peer) {
+pub(super) async fn quiet(peer: &Peer) {
     peer.owner
         .run(|state| {
             assert!(state.reports.is_empty(), "{:?}", state.reports);

@@ -8,7 +8,7 @@ use std::sync::{Arc, Mutex};
 use bytes::Bytes;
 use tokio::sync::oneshot;
 
-use crate::clock::SharedClock;
+use crate::clock::{Clock, Schedule, SharedClock, Timer, TimerCallback};
 use crate::constants::RouterSide;
 use crate::debug::{DebugDirection, TracedEnvelope};
 use crate::envelope::{
@@ -154,12 +154,43 @@ impl Side for State {
 pub(crate) struct Peer {
     pub(crate) clock: Arc<SteppingClock>,
     pub(crate) owner: Owner<State>,
+    armed: Arc<Mutex<Vec<Duration>>>,
+}
+
+#[derive(Debug)]
+struct RecordedClock {
+    clock: Arc<SteppingClock>,
+    armed: Arc<Mutex<Vec<Duration>>>,
+}
+
+impl Clock for RecordedClock {
+    fn monotonic(&self) -> Duration {
+        self.clock.monotonic()
+    }
+
+    fn wall(&self) -> std::time::SystemTime {
+        self.clock.wall()
+    }
+
+    fn arm(&self, schedule: Schedule, callback: TimerCallback) -> Arc<dyn Timer> {
+        let (Schedule::Once(delay) | Schedule::Every(delay)) = schedule;
+        self.armed.lock().expect("timer history").push(delay);
+        self.clock.arm(schedule, callback)
+    }
+
+    fn activity(&self) -> Option<Arc<crate::testing::Activity>> {
+        self.clock.activity()
+    }
 }
 
 impl Peer {
     pub(crate) fn new(side: RouterSide, limits: &RouterLimitsOptions) -> Self {
         let clock = SteppingClock::new(instants::new_year());
-        let shared: SharedClock = Arc::<SteppingClock>::clone(&clock);
+        let armed = Arc::default();
+        let shared: SharedClock = Arc::new(RecordedClock {
+            clock: Arc::clone(&clock),
+            armed: Arc::clone(&armed),
+        });
         let runtime = crate::platform::runtime_of(None, "a test's core").expect("a runtime");
         let limits = limits_of(limits).expect("limits that hold");
         let owner = Owner::spawn((&runtime, &shared), |owner| State {
@@ -181,7 +212,15 @@ impl Peer {
             takes_unpaired: false,
             two_way: true,
         });
-        Self { clock, owner }
+        Self {
+            clock,
+            owner,
+            armed,
+        }
+    }
+
+    pub(crate) fn armed(&self) -> Vec<Duration> {
+        self.armed.lock().expect("timer history").clone()
     }
 
     pub(crate) fn send(&self, (envelope, handle): (Envelope, ConnectionHandle)) -> Completion<()> {
