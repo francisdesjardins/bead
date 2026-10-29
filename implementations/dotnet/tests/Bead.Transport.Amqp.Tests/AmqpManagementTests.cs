@@ -208,4 +208,47 @@ public sealed class AmqpManagementTests : IAsyncLifetime
         await givenScript.Next<End>();
         AmqpEndpoints.CloseAtOnce(given);
     }
+
+    [Fact]
+    public async Task Drops_management_answers_with_no_correlation_id_or_another_string_id_and_waits_for_its_matching_answer_on_the_same_pair()
+    {
+        _script.Holding = (frame) =>
+        {
+            return frame.Performative is AmqpTransfer;
+        };
+
+        var (connection, scripted) = await ConnectedOf();
+        var management = await AmqpManagement.Open(connection, Cancelled);
+        var asking = management.Request(("GET", "/queues/bead.i.ada"), null, Cancelled);
+        var (_, request) = await scripted.NextRequest();
+        var receiver = scripted.LinkOf(AmqpManagement.Node);
+
+        var unmatched = new Message[]
+        {
+            new() { BodySection = new AmqpValue { Value = "unmatched" } },
+            new() { Properties = new Properties { Subject = "503" }, BodySection = new AmqpValue { Value = "unmatched" } },
+            new() { Properties = new Properties { CorrelationId = "another", Subject = "503" }, BodySection = new AmqpValue { Value = "unmatched" } },
+        };
+
+        foreach (var answer in unmatched)
+        {
+            var mark = scripted.Mark;
+
+            await scripted.Deliver((receiver, answer), true);
+            await scripted.Next((frame) =>
+            {
+                return frame.Channel == receiver.Channel && frame.Performative is Flow flow && flow.Handle == receiver.Handle && flow.LinkCredit == 1;
+            }, from: mark);
+
+            Assert.False(asking.IsCompleted);
+        }
+
+        await scripted.Answer(request, ("200", "matched"));
+
+        var result = await asking.WaitAsync(Patience, Cancelled);
+
+        Assert.Equal(("200", "matched"), (result.Status, result.Body));
+        await management.Close(Patience);
+        AmqpEndpoints.CloseAtOnce(connection);
+    }
 }
