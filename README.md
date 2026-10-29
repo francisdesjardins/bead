@@ -26,8 +26,9 @@ This repository holds the protocol and its implementations, side by side:
   and over AMQP 1.0, its adapters over MQTTnet and AMQPNetLite, the joined one, and the same
   gateway;
 - **a Rust implementation**, its core: the same envelope, the same routers and managers, sessions
-  and credentials, the trace, the filter and the registry, and the in-memory transport, playing the
-  conformance files its core reaches, each part it lacks a row of the support matrix ahead
+  and credentials, the trace, the filter and the registry, the in-memory transport, the broker's
+  core over an in-memory broker, and the joined one, playing the conformance files its core
+  reaches, each part it lacks a row of the support matrix ahead
   ([0044](docs/decisions/0044-rust-one-owner-per-router-traits-no-unsafe-two-parameters-no-warning.md));
 - **an interop service** the TypeScript and C# sides offer, which the other side's client calls over
   WebSocket, HTTP, MQTT 5 and AMQP 1.0, beside a gateway whose routes the other side's generated
@@ -123,11 +124,11 @@ envelopes.
 
 ## Where Bead goes
 
-- **Next**: Rust's core whole, its broker's core, the in-memory broker and the joined transport,
-  then its `proto` codec, its library chosen by a spike
-  ([0044](docs/decisions/0044-rust-one-owner-per-router-traits-no-unsafe-two-parameters-no-warning.md)); then its transports over sockets with the
-  interop both ways, its broker bindings, its gateway and beadc's Rust target, each a record of its
-  own, each a row of the [support matrix](docs/support.md#differences) until it lands.
+- **Next**: Rust's `proto` codec, the last of its core, its library chosen by a spike
+  ([0044](docs/decisions/0044-rust-one-owner-per-router-traits-no-unsafe-two-parameters-no-warning.md));
+  then its transports over sockets with the interop both ways, its broker bindings, its gateway and
+  beadc's Rust target, each a record of its own, each a row of the
+  [support matrix](docs/support.md#differences) until it lands.
 - **Then**: a payload's rules written in CEL, a total subset beadc compiles into each side beside
   the rules it compiles already
   ([0035](docs/decisions/0035-a-payload-that-reads-is-held-to-its-messages-rules-before-its-resolver-sees-it.md));

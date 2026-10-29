@@ -1426,14 +1426,8 @@ impl ServerListener for Bridge {
             }));
     }
 
-    fn on_error(&self, error: &RouterError, connection_handle: Option<&ConnectionHandle>) {
-        let error = error.clone();
-        let handle = connection_handle.cloned();
-        self.owner
-            .offer_behind(Box::new(move |state: &mut ServerState| {
-                state.listeners.report(&error, handle.as_ref());
-            }));
-    }
+    // * what its transport reports is its transport's: an application hears it there, whichever
+    // transport it built, as on the other sides (spec 15.1)
 }
 
 // ── The handle ───────────────────────────────────────────────────────────────────────────────

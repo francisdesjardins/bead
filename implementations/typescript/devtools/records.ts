@@ -7,8 +7,9 @@
 // dependencies
 
 import type { IRouterDebugInfo } from '../src/router/client/types';
+import type { IParticipantDebugEvent } from '../src/transport/shared/participant-debug';
 import type { IDebugEvent } from '../src/router/shared/types';
-import type { ICallRecord, IEnvelopeRecord, IErrorRecord } from './messages';
+import type { ICallRecord, IEnvelopeRecord, IErrorRecord, IParticipantRecord } from './messages';
 import { previewOf, previewTreeOf } from './preview';
 
 // helpers
@@ -130,5 +131,47 @@ export const envelopeRecordOf = (
     header: plainHeaderOf(header),
     kind: 'envelope',
     source,
+  };
+};
+
+/** Section 13's allowlist; a source's additional fields never enter a log. */
+export const participantRecordOf = (
+  { at, source }: { at: number; source: number },
+  event: IParticipantDebugEvent
+): IParticipantRecord => {
+  return {
+    at,
+    source,
+    kind: 'participant',
+    event: event.event,
+    direction: event.direction,
+    topic: event.topic === undefined ? undefined : [...event.topic],
+    bytes: event.bytes,
+    layout: event.layout,
+    parcelKind: event.kind,
+    flags: event.flags,
+    sequence: event.sequence,
+    opener: event.opener,
+    connection: event.connection,
+    connectionHandle: event.connectionHandle,
+    id: event.id,
+    incarnation: event.incarnation,
+    bound: event.bound,
+    secure: event.secure,
+    status: event.status,
+    carriedBytes: event.carriedBytes,
+    more: event.more,
+    hasCredential: event.hasCredential,
+    answers: event.answers,
+    code: event.code,
+    verdict: event.verdict,
+    awaited: event.awaited,
+    came: event.came,
+    state: event.state,
+    ended: event.ended === undefined ? undefined : [...event.ended],
+    name: event.name,
+    isHeld: event.isHeld,
+    group: event.group,
+    report: event.report,
   };
 };

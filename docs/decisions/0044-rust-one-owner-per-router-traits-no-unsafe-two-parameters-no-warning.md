@@ -103,9 +103,10 @@ broker, and its cases need no socket; 1c apart, because the router never depends
 the codec's library is a spike's to choose. **Each step merges once it plays**: 1a reaches
 `develop` with Rust's row of `spec/check.py`'s `SIDES`, so the twins, the reads and the counts hold
 it from then on, and a change that reaches across the languages lands on three sides from then on.
-After the core, each a record of its own: the transports over sockets, WebSocket (RFC 6455) and
-HTTP/1.1 and HTTP/2 (RFC 9110, 9112, 9113), with the interop both ways; the broker bindings, MQTT 5
-and AMQP 1.0; the gateway; and beadc's Rust target with `examples/hello`'s Rust half.
+The core holds 1a and 1b; 1c is ahead, the matrix's row `Rust's proto codec`. After the core, each
+a record of its own: the transports over sockets, WebSocket (RFC 6455) and HTTP/1.1 and HTTP/2 (RFC
+9110, 9112, 9113), with the interop both ways; the broker bindings, MQTT 5 and AMQP 1.0; the
+gateway; and beadc's Rust target with `examples/hello`'s Rust half.
 
 ### The partial side
 
@@ -329,9 +330,9 @@ ways, a `Duration` and a function of the previous delay and the attempt.
 Rust's form is a `Result`. Bead's errors are named as the TypeScript side names them, each `Debug +
 Display + Error + Send + Sync + 'static`: `Failure`, its code a `NonZeroU16`, an application's code
 and the protocol's alike; `CallError`, a `Failure`, a cancel or a disconnection, `#[non_exhaustive]`;
-`ConnectError`, `ReconnectError`, `CapacityError`, `ReadyStateError`; `ProgrammerError`, with a
-reason code where a file derives one; `BrokerRefusedError` with 1b. An operation returns the error
-it can return, never a crate-wide `Error`. **No panic in the library**: a builder that refuses its
+`ConnectError`, `ReconnectError`, `CapacityError`, `ReadyStateError`, `BrokerRefusedError`;
+`ProgrammerError`, with a reason code where a file derives one. An operation returns the error it
+can return, never a crate-wide `Error`. **No panic in the library**: a builder that refuses its
 options returns `Result<Self, ProgrammerError>`.
 
 **What the spec lets a side throw has a Rust form at every site.** A resolver returns `Result<T,

@@ -84,6 +84,203 @@ const countRecords = async (page: Page): Promise<() => Promise<number>> => {
 // definition
 
 test.describe('the hook, the bridge and the background', () => {
+  test('budgets participant records independently, saves their evictions and initial levels, and leaves another protocol unwatched', async () => {
+    const { context, extensionId, page, served, worker } = await openPlayground();
+    try {
+      await page.evaluate(() => {
+        const hook = (globalThis as unknown as Record<symbol, { register(source: object): void }>)[
+          Symbol.for('@francisdesjardins/bead/devtools-hook')
+        ];
+        Object.assign(globalThis, {
+          watchedParticipant: false,
+          stoppedParticipant: false,
+          watchedUnknown: false,
+        });
+        hook?.register({
+          protocol: 1,
+          side: 'participant',
+          exposition: () => {
+            return undefined;
+          },
+          inspect: () => {
+            return {
+              id: 'probe',
+              inbox: ['bead', 'i', 'probe'],
+              incarnation: '0102',
+              isLinked: true,
+              names: ['echo'],
+              gauges: { counts: { partsBytes: 0 }, ceilings: { partsBytes: 64 }, anomalies: [] },
+            };
+          },
+          watch: (listeners: {
+            participant?: (event: object) => void;
+            call(error: unknown, event: object): void;
+          }) => {
+            Object.assign(globalThis, { watchedParticipant: true });
+            for (let index = 0; index < 6_000; index += 1) {
+              listeners.participant?.({
+                event: 'parcel',
+                direction: 'rx',
+                kind: 'PING',
+                topic: ['bead', 'i', 'probe'],
+                bytes: 28,
+                sequence: index + 1,
+                connection: 1,
+                verdict: 'taken',
+              });
+            }
+            listeners.call(null, {
+              direction: 'tx',
+              type: 'request',
+              startedAt: 100,
+              serviceId: 1,
+              serviceRevision: 0,
+              procedureId: 1,
+              procedureName: 'budget-call',
+              options: {},
+            });
+            return () => {
+              Object.assign(globalThis, { stoppedParticipant: true });
+            };
+          },
+        });
+        hook?.register({
+          protocol: 2,
+          side: 'client',
+          exposition: () => {
+            return undefined;
+          },
+          watch: () => {
+            Object.assign(globalThis, { watchedUnknown: true });
+            return () => {};
+          },
+        });
+      });
+      const panel = await openPanel(context, { extensionId, tabId: await tabIdOf(worker) });
+      await expect(panel.locator('#calls')).toContainText('budget-call');
+      await panel.click('[data-tab="broker"]');
+      await expect(panel.locator('#broker')).toContainText('5000 let go');
+      await expect(panel.locator('#broker')).toContainText('probe · up');
+      await expect(panel.locator('#broker tbody tr')).toHaveCount(1_000);
+      const [download] = await Promise.all([
+        panel.waitForEvent('download'),
+        panel.click('#export'),
+      ]);
+      const saved = await download.path();
+      const log = JSON.parse(await readFile(saved, 'utf8')) as ILog;
+      expect(log.version).toBe(2);
+      expect(log.dropped).toBe(0);
+      expect(log.droppedParticipants).toBe(5_000);
+      expect(
+        log.sources.find(({ side }) => {
+          return side === 'participant';
+        })?.inspection?.id
+      ).toBe('probe');
+      expect(
+        log.records.filter((record) => {
+          return record.kind === 'participant';
+        })
+      ).toHaveLength(1_000);
+      expect(
+        log.records
+          .filter(({ kind }) => {
+            return kind === 'participant';
+          })
+          .every((record) => {
+            return record.kind === 'participant' && record.event === 'parcel';
+          })
+      ).toBe(true);
+      await panel.close();
+      await page.waitForFunction(() => {
+        return (globalThis as unknown as { stoppedParticipant: boolean }).stoppedParticipant;
+      });
+      expect(
+        await page.evaluate(() => {
+          return (globalThis as unknown as { watchedUnknown: boolean }).watchedUnknown;
+        })
+      ).toBe(false);
+    } finally {
+      await context.close();
+      await served.close();
+    }
+  });
+
+  test('shows the participant’s parcels and a link lost then restored over MQTT 5', async () => {
+    const hasBroker =
+      process.env['BEAD_MQTT_URL'] !== undefined && process.env['BEAD_MQTT_WS_URL'] !== undefined;
+    const noBroker = 'no broker: BEAD_MQTT_URL or BEAD_MQTT_WS_URL is not set';
+    test.skip(!hasBroker && process.env['BEAD_MQTT_REQUIRED'] !== '1', noBroker);
+    expect(hasBroker, noBroker).toBe(true);
+    await assertBuilt();
+    await using served = await serveMqttDemo();
+    const { context, extensionId, worker } = await launchExtension();
+    try {
+      const page = await context.newPage();
+      let cut: (() => void) | undefined;
+      await context.routeWebSocket(process.env['BEAD_MQTT_WS_URL'] ?? '', (socket) => {
+        const server = socket.connectToServer();
+        cut = () => {
+          // ! the network end may wait for its peer; the page's close event starts its recovery.
+          void Promise.all([server.close({ code: 1011 }), socket.close({ code: 1011 })]).catch(
+            () => {}
+          );
+        };
+      });
+      await page.goto(`${served.url}?transport=mqtt`);
+      await expect(page.locator('#connection')).toHaveAttribute('data-state', 'open');
+      const panel = await openPanel(context, { extensionId, tabId: await tabIdOf(worker) });
+      await panel.click('[data-tab="broker"]');
+      await expect(panel.locator('#broker')).toContainText('client · up');
+      await expect(panel.locator('#broker')).toContainText('bead/i/client');
+      await page.click('button[data-action="reader"]');
+      await expect(page.locator('#result')).toContainText('logged in as');
+      await expect(panel.locator('#broker tbody')).toContainText('DATA');
+      expect(cut).toBeDefined();
+      cut?.();
+      await expect(panel.locator('#broker tbody')).toContainText('Link down');
+      await expect(panel.locator('#broker h2').first()).toContainText('client · up');
+      const [download] = await Promise.all([
+        panel.waitForEvent('download'),
+        panel.click('#export'),
+      ]);
+      const saved = await download.path();
+      const log = JSON.parse(await readFile(saved, 'utf8')) as ILog;
+      const records = log.records.filter((record) => {
+        return record.kind === 'participant';
+      });
+      expect(
+        records.some((record) => {
+          return record.parcelKind === 'DATA';
+        })
+      ).toBe(true);
+      const links = records.filter((record) => {
+        return record.event === 'link';
+      });
+      expect(
+        links.map((record) => {
+          return record.state;
+        })
+      ).toEqual(['down', 'up']);
+      expect(links[0]?.incarnation).not.toBe(links[1]?.incarnation);
+      expect(JSON.stringify(records)).not.toContain('eyJ');
+      if (process.env['BEAD_MQTT_PASSWORD'] !== undefined) {
+        expect(JSON.stringify(records)).not.toContain(process.env['BEAD_MQTT_PASSWORD']);
+      }
+      await test
+        .info()
+        .attach('broker-panel-log', { contentType: 'application/json', path: saved });
+      const counted = await countRecords(page);
+      await panel.close();
+      await page.waitForTimeout(300);
+      await counted();
+      cut?.();
+      await page.waitForTimeout(500);
+      expect(await counted()).toBe(0);
+    } finally {
+      await context.close();
+    }
+  });
+
   test('follows the page’s calls, each service debug step and its envelopes to the panel over MQTT 5', async () => {
     const noBroker =
       'no broker: BEAD_MQTT_URL or BEAD_MQTT_WS_URL is not set (node tools/mqtt-broker.mjs start)';
@@ -109,7 +306,11 @@ test.describe('the hook, the bridge and the background', () => {
       expect(links).toEqual([process.env['BEAD_MQTT_WS_URL']]);
       const panel = await openPanel(context, { extensionId, tabId: await tabIdOf(worker) });
 
-      await expect(panel.locator('#source option')).toHaveText(['All clients', 'Client 1']);
+      await expect(panel.locator('#source option')).toHaveText([
+        'All clients',
+        'Participant 1',
+        'Client 2',
+      ]);
       await panel.fill('#filter', '-stats, -metrics');
 
       for (const [action, result] of [
@@ -178,7 +379,10 @@ test.describe('the hook, the bridge and the background', () => {
         '→ command clock',
         '← request ask',
       ]);
-      expect(log.sources).toEqual([{ id: 1, protocol: 1, side: 'client' }]);
+      expect(log.sources).toMatchObject([
+        { id: 1, protocol: 1, side: 'participant' },
+        { id: 2, protocol: 1, side: 'client' },
+      ]);
       expect(log.dropped).toBe(0);
 
       const envelopes = log.records.filter((record): record is IEnvelopeRecord => {

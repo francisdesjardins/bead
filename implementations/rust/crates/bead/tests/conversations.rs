@@ -1,7 +1,8 @@
 //! Bead's conversations, `spec/conversations.json`, played against the Rust side's server of the
 //! interop service: what its clients send, on one connection or on each a conversation opens, what
 //! the server sends back on each and reports; a trial each through a scripted transport, and each a
-//! pair of the in-memory transport stands for, through one (spec 15.13).
+//! pair of the in-memory transport stands for, through one (spec 15.13), and through a broker pair
+//! over the in-memory broker (spec 15.16 to 15.24).
 
 #[path = "players/conversation.rs"]
 mod conversation;
@@ -18,7 +19,7 @@ use conversation::{PlayOptions, is_played_in_memory, play};
 // a runtime of its own for each trial, its time driver on, as a router asks
 fn played(
     conversation: &Value,
-    (in_memory, wall_clock): (bool, std::time::SystemTime),
+    ((in_memory, over_broker), wall_clock): ((bool, bool), std::time::SystemTime),
 ) -> Result<(), Failed> {
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
@@ -30,6 +31,7 @@ fn played(
             conversation,
             PlayOptions {
                 in_memory,
+                over_broker,
                 metrics_registry: None,
                 wall_clock,
             },
@@ -63,17 +65,32 @@ fn trials() -> Result<Vec<Trial>, String> {
         let scripted = Arc::clone(conversation);
 
         trials.push(
-            Trial::test(name.clone(), move || played(&scripted, (false, wall_clock)))
-                .with_kind("scripted"),
+            Trial::test(name.clone(), move || {
+                played(&scripted, ((false, false), wall_clock))
+            })
+            .with_kind("scripted"),
         );
 
         // spec 15.13: each conversation whose connections a pair of it stands for, through a real one
         if is_played_in_memory(conversation) {
             let in_memory = Arc::clone(conversation);
+            let over_broker = Arc::clone(conversation);
 
             trials.push(
-                Trial::test(name, move || played(&in_memory, (true, wall_clock)))
-                    .with_kind("in memory"),
+                Trial::test(name.clone(), move || {
+                    played(&in_memory, ((true, false), wall_clock))
+                })
+                .with_kind("in memory"),
+            );
+
+            // spec 15.16 to 15.24: the same through a broker pair over the in-memory broker, whose
+            // connection is secure and two-way and carries nothing toward its client, as an
+            // in-memory one
+            trials.push(
+                Trial::test(name, move || {
+                    played(&over_broker, ((false, true), wall_clock))
+                })
+                .with_kind("over a broker"),
             );
         }
     }

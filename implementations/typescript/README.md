@@ -2088,3 +2088,9 @@ the broker's — `node ../../tools/mqtt-broker.mjs run -- yarn test:devtools` pl
 broker it is skipped, saying so, or failed under `BEAD_MQTT_REQUIRED=1`; and the panel as a page on
 a fake DevTools API, for what only DevTools gives it. `yarn devtools:build` and
 `yarn playground:build:file` make what they load.
+
+A participant announces itself once to the page's DevTools hook, independently of its clients.
+Set `devtools: false` on `createBrokerParticipant` as well as on each client to opt out. A watch
+shows parcel metadata, never carried bytes, credentials or the acceptor's half; its gauges are
+read while the Broker tab is shown. `participant.on('debug', listener)` and
+`participant.isDebugging` expose the trace of parcels (debugging 13) to an application's own tool.

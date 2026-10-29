@@ -88,10 +88,21 @@ internal sealed class BrokerConnection
     {
         _participant = participant;
         _setup = setup;
+        Ordinal = participant.DrawOrdinal();
         _sent = setup.Sent;
         _sequence = new BrokerSequence(setup.Awaited);
         _parts = new BrokerParts(participant.PartsBounds, PartsLate);
         State = setup.IsHalfOpen ? BrokerConnectionState.HalfOpen : BrokerConnectionState.Open;
+    }
+
+    public long Ordinal { get; }
+
+    public string? TraceHandle
+    {
+        get
+        {
+            return _setup.Owner.IsOpener ? "server" : ConnectionHandle;
+        }
     }
 
     public (ulong Opener, ulong Acceptor) Pair
@@ -138,6 +149,14 @@ internal sealed class BrokerConnection
     public DateTimeOffset? LastActivity { get; private set; }
 
     /// <summary>What waits for its broker on it.</summary>
+    public long MaximumUnsentBytes
+    {
+        get
+        {
+            return _setup.MaximumUnsentBytes;
+        }
+    }
+
     public long UnsentBytes
     {
         get
@@ -214,7 +233,7 @@ internal sealed class BrokerConnection
     /// next handed on by its kind, an advisory one skipped, and an OPEN, an ACCEPT, a REFUSE, a GONE,
     /// or anything but a DATA between an envelope's parts, closing it with 1002.
     /// </summary>
-    public void Take(BrokerParcel parcel)
+    public void Take(BrokerParcel parcel, (int Bytes, byte? Flags) incoming = default)
     {
         if (State == BrokerConnectionState.Closed)
         {
@@ -222,9 +241,11 @@ internal sealed class BrokerConnection
         }
 
         _heartbeat?.Heard();
+        var isDebugging = _participant.IsDebugging;
 
         if (parcel.Kind == BrokerParcelKinds.Reset)
         {
+            if (isDebugging) { TraceReceive(parcel, (incoming.Bytes, ParcelVerdict.Taken, incoming.Flags)); }
             Ended((false, null));
 
             return;
@@ -232,11 +253,21 @@ internal sealed class BrokerConnection
 
         if (parcel.Layout != BrokerParcels.Layout)
         {
+            if (isDebugging) { TraceReceive(parcel, (incoming.Bytes, ParcelVerdict.Taken, incoming.Flags)); }
             Lose((1002, $"a parcel of a layout to come, {BrokerParcels.HexOf(parcel.Layout)}"));
 
             return;
         }
 
+        var verdict = ParcelVerdict.Taken;
+        if (isDebugging)
+        {
+            verdict = parcel.Sequence < _sequence.Awaited ? ParcelVerdict.Copy : parcel.Sequence > _sequence.Awaited ? ParcelVerdict.Loss : BrokerParcelKinds.IsAdvisory(parcel.Kind) ? ParcelVerdict.Advisory : ParcelVerdict.Taken;
+            if (verdict is ParcelVerdict.Copy or ParcelVerdict.Loss)
+            {
+                TraceReceive(parcel, (incoming.Bytes, verdict, incoming.Flags));
+            }
+        }
         if (!IsNext(parcel.Sequence))
         {
             return;
@@ -253,6 +284,7 @@ internal sealed class BrokerConnection
             }
         }
 
+        if (isDebugging) { TraceReceive(parcel, (incoming.Bytes, verdict, incoming.Flags)); }
         if (BrokerParcelKinds.IsAdvisory(parcel.Kind))
         {
             return;
@@ -297,7 +329,7 @@ internal sealed class BrokerConnection
     /// A parcel naming its pair that does not read: a kind to come taken in its order, a copy dropped
     /// and a gap a loss (spec 15.17); then the connection closed with 1002, reported naming it.
     /// </summary>
-    public void TakeUnread((BrokerParcel Prefix, string Why) unread)
+    public void TakeUnread((BrokerParcel Prefix, string Why) unread, int bytes = 0)
     {
         if (State == BrokerConnectionState.Closed)
         {
@@ -308,6 +340,13 @@ internal sealed class BrokerConnection
 
         var sequence = unread.Prefix.Sequence;
 
+        if (_participant.IsDebugging)
+        {
+            var verdict = BrokerParcelKinds.IsToCome(unread.Prefix.Kind) && sequence <= BrokerParcels.LargestSequence
+                ? sequence < _sequence.Awaited ? ParcelVerdict.Copy : sequence > _sequence.Awaited ? ParcelVerdict.Loss : ParcelVerdict.DoesNotRead
+                : ParcelVerdict.DoesNotRead;
+            TraceReceive(unread.Prefix, (bytes, verdict, null));
+        }
         // * a kind to come is taken in its order, a copy dropped and a gap a loss; any other closes at once
         if (BrokerParcelKinds.IsToCome(unread.Prefix.Kind) && sequence <= BrokerParcels.LargestSequence && !IsNext(sequence))
         {
@@ -373,7 +412,8 @@ internal sealed class BrokerConnection
         }
 
         var isReset = parcel.Kind == BrokerParcelKinds.Reset;
-        var bytes = BrokerParcels.Write(parcel with { Opener = _setup.Opener, Acceptor = _setup.Acceptor, Sequence = isReset ? 0 : _sent + 1 });
+        parcel = parcel with { Opener = _setup.Opener, Acceptor = _setup.Acceptor, Sequence = isReset ? 0 : _sent + 1 };
+        var bytes = BrokerParcels.Write(parcel);
 
         // ! held before its sequence is taken: the CLOSE that loses the connection is the next, with
         // no gap before it
@@ -391,7 +431,7 @@ internal sealed class BrokerConnection
 
         _unsent += bytes.Length;
 
-        var published = _participant.Publish(new BrokerPublication { Topic = PeerInbox, Payload = bytes, ExpiresAfter = expiresAfter });
+        var published = _participant.Publish(new BrokerPublication { Topic = PeerInbox, Payload = bytes, ExpiresAfter = expiresAfter }, parcel);
 
         _ = published.ContinueWith(
             (done) =>
@@ -467,6 +507,24 @@ internal sealed class BrokerConnection
             }
         });
     }
+
+    private void TraceReceive(BrokerParcel parcel, (int Bytes, ParcelVerdict Verdict, byte? Flags) incoming)
+    {
+        _participant.TraceParcel(parcel, new ParticipantDebugEvent
+        {
+            Event = "parcel",
+            Direction = "rx",
+            Topic = _participant.InboxOf(_participant.Id),
+            Bytes = incoming.Bytes,
+            Flags = incoming.Flags,
+            Connection = Ordinal,
+            ConnectionHandle = TraceHandle,
+            Verdict = incoming.Verdict,
+            Awaited = incoming.Verdict == ParcelVerdict.Loss ? _sequence.Awaited : null,
+            Came = incoming.Verdict == ParcelVerdict.Loss ? parcel.Sequence : null,
+        });
+    }
+
 
     // whether a sequence is the next awaited; a copy dropped, a gap a loss
     private bool IsNext(ulong sequence)
@@ -558,6 +616,10 @@ internal sealed class BrokerConnection
             _participant.Depart((_setup.PeerId, -1));
         }
 
+        if (end.Reported is not null && _participant.IsDebugging)
+        {
+            _participant.Trace(new ParticipantDebugEvent { Event = "report", Report = end.Reported.Message, Connection = Ordinal, ConnectionHandle = TraceHandle });
+        }
         _setup.Owner.Ended(this, end);
     }
 }

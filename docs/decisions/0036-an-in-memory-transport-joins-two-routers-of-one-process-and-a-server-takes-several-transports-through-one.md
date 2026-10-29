@@ -158,11 +158,12 @@ tell names, a transfer — and the C# side's service tests link a server and a c
 `ServiceLink.cs` built on it. Its connect's timeout is a way of `spec/durations.json`, played by
 each side's harness.
 
-**Rust's core carries the in-memory transport first**, and plays its conformance over it before it
-has a socket: the conversations through a scripted transport and through a pair of it, its
-twins of 15.13 beside the other sides' ([0044](0044-rust-one-owner-per-router-traits-no-unsafe-two-parameters-no-warning.md)). The joined transport is
-a gateway's, and Rust's core takes it with its broker's core, the step after, since 15.14's twins
-join two transports of two types, the in-memory one and a broker's.
+**Rust's core carries the in-memory transport**, and plays its conformance over it before it has a
+socket: the conversations through a scripted transport and through a pair of it, its twins of 15.13
+beside the other sides'
+([0044](0044-rust-one-owner-per-router-traits-no-unsafe-two-parameters-no-warning.md)). It carries
+the joined transport, a gateway's, with its broker's core, since 15.14's twins join two transports
+of two types, the in-memory one and a broker's.
 
 **A broker in memory is a broker**, which repeats, reorders and delays on purpose
 ([0021](0021-a-broker-is-a-transport-and-bead-is-never-a-network.md)): it shares this transport's

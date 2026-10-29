@@ -18,10 +18,11 @@ import {
   isWindowMessage,
   type IWindowMessage,
   type PageMessage,
+  type ISourceRecord,
   type PanelMessage,
   PROTOCOLS,
 } from './messages';
-import { callRecordOf, envelopeRecordOf } from './records';
+import { callRecordOf, envelopeRecordOf, participantRecordOf } from './records';
 import { framesOf, type IStackFrame } from './stack';
 
 // interfaces
@@ -29,6 +30,7 @@ import { framesOf, type IStackFrame } from './stack';
 /** A source the page announced, and what stops its watch while one is under way. */
 interface IHeld {
   source: IDevtoolsSource;
+  inspection?: ISourceRecord['inspection'];
   stop?: (() => void) | undefined;
 }
 
@@ -50,6 +52,8 @@ let nextId = 1;
 let isWatching = false;
 let held: ActivityRecord[] = [];
 let dropped = 0;
+let heldParticipants = 0;
+let droppedParticipants = 0;
 let batch: ReturnType<typeof setTimeout> | undefined;
 
 const post = (message: PageMessage): void => {
@@ -62,8 +66,8 @@ const post = (message: PageMessage): void => {
 
 const postSources = (): void => {
   post({
-    sources: [...sources].map(([id, { source }]) => {
-      return { id, protocol: source.protocol, side: source.side };
+    sources: [...sources].map(([id, { source, inspection }]) => {
+      return { id, protocol: source.protocol, side: source.side, inspection };
     }),
     type: 'sources',
   });
@@ -72,28 +76,39 @@ const postSources = (): void => {
 const flush = (): void => {
   const records = held;
   const left = dropped;
+  const participantsLeft = droppedParticipants;
 
   batch = undefined;
   held = [];
   dropped = 0;
-  post({ dropped: left, records, type: 'records' });
+  heldParticipants = 0;
+  droppedParticipants = 0;
+  post({ dropped: left, droppedParticipants: participantsLeft, records, type: 'records' });
 };
 
 // a record that cannot be made — a payload whose getter throws, say — is let go, never thrown into
 // the client that told it
-const hold = (record: () => ActivityRecord): void => {
-  if (held.length >= MAXIMUM_HELD) {
-    dropped += 1;
-
+const hold = (record: () => ActivityRecord, options?: { isParticipant?: boolean }): void => {
+  const isParticipant = options?.isParticipant === true;
+  const lose = (): void => {
+    if (isParticipant) {
+      droppedParticipants += 1;
+    } else {
+      dropped += 1;
+    }
+  };
+  if ((isParticipant ? heldParticipants : held.length - heldParticipants) >= MAXIMUM_HELD) {
+    lose();
     return;
   }
-
   try {
     held.push(record());
+    if (isParticipant) {
+      heldParticipants += 1;
+    }
   } catch {
-    dropped += 1;
+    lose();
   }
-
   batch ??= setTimeout(flush, BATCH_MILLISECONDS);
 };
 
@@ -134,7 +149,16 @@ const watch = (id: number, entry: IHeld): void => {
   }
 
   try {
+    entry.inspection = entry.source.inspect?.();
     entry.stop = entry.source.watch({
+      participant: (event) => {
+        hold(
+          () => {
+            return participantRecordOf({ at: nowOf(), source: id }, event);
+          },
+          { isParticipant: true }
+        );
+      },
       call: (error, event) => {
         hold(() => {
           const record = callRecordOf(id, [error, event]);
@@ -182,6 +206,21 @@ const postExpositions = (): void => {
     }),
     type: 'expositions',
   });
+};
+
+const postParticipants = (): void => {
+  const inspections: Extract<PageMessage, { type: 'participants' }>['inspections'] = [];
+  for (const [source, entry] of sources) {
+    try {
+      const inspection = entry.source.inspect?.();
+      if (inspection !== undefined) {
+        inspections.push({ source, inspection });
+      }
+    } catch {
+      // an unreadable source contributes no reading
+    }
+  }
+  post({ type: 'participants', inspections });
 };
 
 const hook: IDevtoolsHook = Object.freeze({
@@ -232,17 +271,27 @@ if (!(DEVTOOLS_HOOK_KEY in globalThis)) {
       case 'read-expositions':
         postExpositions();
         break;
+      case 'read-participants':
+        postParticipants();
+        break;
       case 'unwatch':
         isWatching = false;
         sources.forEach(unwatch);
         held = [];
         dropped = 0;
+        heldParticipants = 0;
+        droppedParticipants = 0;
+        if (batch !== undefined) {
+          clearTimeout(batch);
+          batch = undefined;
+        }
         break;
       case 'watch':
         isWatching = true;
         sources.forEach((entry, id) => {
           watch(id, entry);
         });
+        postSources();
         break;
     }
   });

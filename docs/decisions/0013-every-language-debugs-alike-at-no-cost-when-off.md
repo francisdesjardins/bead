@@ -147,16 +147,17 @@ row of the support matrix, not a difference of the protocol.
 ([0007](0007-csharp-interfaces-blocks-two-parameters-no-warning.md)): an event and an emitter's
 listener, a record and an object, a `TimeSpan` and milliseconds.
 
-| Piece                  | TypeScript                                                                                | C#                                                                                                 |
-| ---------------------- | ----------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------- |
-| The trace of calls     | `manager.on('debug', (error, event) => …)`, `IDebugEvent`                                 | `manager.Debug += (error, debugEvent) => …`, `DebugEvent`                                          |
-| Whether anyone listens | `manager.isDebugging`                                                                     | `manager.IsDebugging`                                                                              |
-| The trace of envelopes | `router.on('debug', ({ connectionHandle, direction, header }) => …)`                      | `router.Debug += (direction, envelope) => …`, `TracedEnvelope`                                     |
-| The filter             | `parseDebugFilter`, `filterDebug`, `filterEnvelopeDebug`, `IDebugFilter`                  | `DebugFilter.Parse`, `DebugFilters.FilterDebug`, `DebugFilters.FilterEnvelopeDebug`, `DebugFilter` |
-| The registry           | `createMetricsRegistry({ maximumProcedures })`, `IMetricsRegistry`; `metricsRegistry`     | `new MetricsRegistry(options)`, `MetricsRegistryOptions`; `MetricsRegistry`                        |
-| Its exposition         | `registry.exposition()`, `IMetricsExposition`: `{ contentType, text }`                    | `registry.Exposition()`, `MetricsExposition(ContentType, Text)`                                    |
-| A requester's series   | `router.declareRequester(procedure)`, `IProcedureSeries`; the router's request's `series` | `router.DeclareRequester(procedure)`, `ProcedureSeries`; `RouterRequest.Series`                    |
-| A step's call          | `IDebugEvent`'s `callId` and `connectionHandle`; the router's request's `onCallId`        | `DebugEvent.CallId`, `DebugEvent.ConnectionHandle`; `RouterRequest.OnCallId`                       |
+| Piece                  | TypeScript                                                                                   | C#                                                                                                 |
+| ---------------------- | -------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------- |
+| The trace of calls     | `manager.on('debug', (error, event) => …)`, `IDebugEvent`                                    | `manager.Debug += (error, debugEvent) => …`, `DebugEvent`                                          |
+| Whether anyone listens | `manager.isDebugging`                                                                        | `manager.IsDebugging`                                                                              |
+| The trace of envelopes | `router.on('debug', ({ connectionHandle, direction, header }) => …)`                         | `router.Debug += (direction, envelope) => …`, `TracedEnvelope`                                     |
+| The trace of parcels   | `participant.on('debug', (event) => …)`, `IParticipantDebugEvent`; `participant.isDebugging` | `participant.Debug += (debugEvent) => …`, `ParticipantDebugEvent`; `participant.IsDebugging`       |
+| The filter             | `parseDebugFilter`, `filterDebug`, `filterEnvelopeDebug`, `IDebugFilter`                     | `DebugFilter.Parse`, `DebugFilters.FilterDebug`, `DebugFilters.FilterEnvelopeDebug`, `DebugFilter` |
+| The registry           | `createMetricsRegistry({ maximumProcedures })`, `IMetricsRegistry`; `metricsRegistry`        | `new MetricsRegistry(options)`, `MetricsRegistryOptions`; `MetricsRegistry`                        |
+| Its exposition         | `registry.exposition()`, `IMetricsExposition`: `{ contentType, text }`                       | `registry.Exposition()`, `MetricsExposition(ContentType, Text)`                                    |
+| A requester's series   | `router.declareRequester(procedure)`, `IProcedureSeries`; the router's request's `series`    | `router.DeclareRequester(procedure)`, `ProcedureSeries`; `RouterRequest.Series`                    |
+| A step's call          | `IDebugEvent`'s `callId` and `connectionHandle`; the router's request's `onCallId`           | `DebugEvent.CallId`, `DebugEvent.ConnectionHandle`; `RouterRequest.OnCallId`                       |
 
 `metricsRegistry` and `MetricsRegistry` are a router's option, which the servers and clients that
 build a router pass on. The registry is not `Metrics`: `prometheus-net`'s static class of that name
@@ -267,7 +268,7 @@ has its reason:
   exposition. Bead opens no port.
 
 **Nothing is paid while nobody listens and no registry is given** (debugging 3). One check a call,
-one an envelope, is the whole cost. A side that counts reads the monotonic clock twice a call, at
+one an envelope, one a parcel, is the whole cost. A side that counts reads the monotonic clock twice a call, at
 its router's gates, never the wall clock, and adds to series it reaches through what it holds
 already, with no lookup of its own and no allocation. Where Bead goes
 ([the index](README.md#where-bead-goes)), a counted call is measured against one not counted, on
@@ -295,6 +296,15 @@ exposition, byte for byte, and every exit a conversation reaches, each played as
 [0004](0004-one-behaviour-in-every-language.md) has every conformance file played. The sentences of
 a refusal, a client's own exits that no conversation reaches, a registry shared by two routers and
 the C# side's threads stay with twin tests.
+
+**A participant traces its parcels** (debugging 13): `parcel`, at the attempt out and once judged
+in, with its verdict; `link`, a completed transition; `names`, a name held or let go; and `report`,
+its own words and its transports'. No event carries payload bytes, credentials or the acceptor's
+half, the connection's capability (0038). Levels and bounds are read by pull. Each event is told
+synchronously at its site, on the participant's scheduler on the C# side, ordered per participant;
+each listener is guarded, its error reported through the participant's error event, and later
+listeners called. The TypeScript side's clock gate and the C# side's allocation pin hold the cost
+while unwatched.
 
 ## Consequences
 
@@ -454,3 +464,8 @@ objections are those records'. Each of the three rests on a standard, and none w
 a span's status set from the status its call returned, OpenTelemetry's RPC conventions; each metric
 collected at its own instant, Prometheus's client libraries; and a series identified by its name and
 its labels, Prometheus's.
+
+### The trace of parcels
+
+The round in [0015](0015-a-pages-client-announces-itself-to-a-devtools-hook.md#the-tenth-man) meets the participant's trace, its redaction,
+its delivery and its page source.

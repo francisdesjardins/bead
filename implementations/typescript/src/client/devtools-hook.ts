@@ -12,6 +12,10 @@ import type {
 } from '../router/client/types';
 import type { IMetricsExposition, IMetricsRegistry } from '../router/shared/metrics-registry';
 import type { IDebugEvent, IServiceManager } from '../router/shared/types';
+import type {
+  IParticipantDebugEvent,
+  IParticipantInspection,
+} from '../transport/shared/participant-debug';
 
 // interfaces
 
@@ -23,9 +27,11 @@ export interface IDevtoolsHook {
 
 /** What a client hands the hook, and nothing more: never itself, its router or its credential. */
 export interface IDevtoolsSource {
-  /** The hook's protocol, which a change to this shape moves. */
+  /** The hook's protocol; an incompatible change moves it. */
   readonly protocol: 1;
-  readonly side: 'client';
+  readonly side: 'client' | 'participant';
+  /** A participant's levels; absent on a client's source. */
+  inspect?(): IParticipantInspection;
   /** The client's registry's exposition, or `undefined` when it was given none. */
   exposition(): IMetricsExposition | undefined;
   /** Listens to the services' `debug` and the router's; what it returns stops listening. */
@@ -39,6 +45,8 @@ export interface IDevtoolsSource {
 export interface IDevtoolsListeners {
   call: (error: unknown, event: IDebugEvent) => void;
   envelope: (info: IRouterDebugInfo) => void;
+  /** The participant's own events; an extension that passes none attaches nothing to it. */
+  participant?: ((event: IParticipantDebugEvent) => void) | undefined;
 }
 
 /** The layers of a client a source listens to, and the registry it reads. */
@@ -120,6 +128,15 @@ export const announceToDevtools = ({
       };
     },
   } as const);
+
+  return registerToDevtools(source, hook);
+};
+
+/** Registers a source with one guarded, idempotent withdrawal. @internal */
+export const registerToDevtools = (source: IDevtoolsSource, hook = hookOf()): (() => void) => {
+  if (hook === undefined) {
+    return NOTHING_TO_WITHDRAW;
+  }
 
   try {
     const withdraw = hook.register(source);

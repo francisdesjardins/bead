@@ -738,7 +738,12 @@ test.describe('broker participant', () => {
 
     expect(participant.gauges().counts).toEqual(held);
     expect(server.gauges().counts).toEqual({ ...held, names: 1 });
-    expect(participant.gauges().ceilings).toEqual({ largestPartsBytes: 2_048, partsBytes: 4_096 });
+    expect(participant.gauges().ceilings).toEqual({
+      largestPartsBytes: 2_048,
+      partsBytes: 4_096,
+      unsentBytes: 65_536,
+      largestUnsentBytes: 65_536,
+    });
     expect(server.gauges().ceilings).toEqual({
       connections: 8,
       halfOpen: 8,
