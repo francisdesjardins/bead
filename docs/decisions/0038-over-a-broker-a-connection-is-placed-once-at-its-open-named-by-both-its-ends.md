@@ -193,10 +193,10 @@ its certificate place a socket's server. An acceptor that proves itself to its o
 **Its gates**: the broker cases of `spec/transports.json`, both roles — an OPEN accepted and its
 third leg, a half-open connection past `acceptTimeout`, each refusal and what it tells, an OPEN
 copied, a second acceptor's ACCEPT reset and one past its connect, a RESET, a GONE of each
-incarnation, a stop, a group at its bound — played by both sides' players over each side's
-in-memory broker; the place `brokerTransportServer.acceptTimeout` of `spec/durations.json`; and
-what no case plays, a participant's link lost and its incarnation anew, by twins named by one
-sentence on both sides ([`docs/support.md`](../support.md)).
+incarnation, a stop, a group at its bound — played by every side's players over each side's
+in-memory broker; the place `brokerTransportServer.acceptTimeout` of `spec/durations.json`; and what
+no case plays, a participant's link lost and its incarnation anew, by twins named by one sentence on
+every side ([`docs/support.md`](../support.md)).
 
 ## The Tenth Man
 

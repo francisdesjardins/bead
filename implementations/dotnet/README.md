@@ -79,7 +79,7 @@ src/
                                 HTTP routes, one more client of the application's server
   BannedSymbols.txt             what the banned-API analyzer refuses: the clock is given
 interop/
-  Bead.Interop/                 the interop service, which both sides serve alike
+  Bead.Interop/                 the interop service, which every side serves alike
     Generated/                  its server and client, what beadc generates from the interop's
                                 blueprint
     InteropHandlers.cs          its resolvers, written
@@ -162,6 +162,14 @@ with its will (`Lose`) or has it taken over (`TakeOver`): the broker cases of
 `BrokerTransportsTests`, and the conversations through a broker pair. `BrokerCasePlayer` plays them,
 over whatever broker it is given.
 
+A participant traces its parcels (debugging 13) while anyone listens, `IsDebugging`:
+`participant.Debug += (debugEvent) => …` hears each `ParticipantDebugEvent` — a parcel as it goes
+out and once judged in, with its `ParcelVerdict`; its link's transitions; a name held or let go; and
+its reports — never a parcel's carried bytes, a credential or the acceptor's half. Each is told
+synchronously on the participant's own serial scheduler, in its order, and a listener's throw goes
+to its `Error`, the listeners after it called all the same. Its levels are told by no event:
+`Gauges()`, `IsLinked`, `Names` and `Incarnation` are read when asked.
+
 A binding to a real broker is a project of its own, beside its adapter. `Bead.Transport.Mqtt`'s
 `MqttBrokerAdapter` links a participant to a broker of MQTT 5 over MQTTnet (spec 15.25 to 15.31,
 decision 0041): `mqtt://`, `mqtts://`, or a WebSocket of subprotocol `mqtt`, `ws://` or `wss://`;
@@ -237,13 +245,13 @@ await memory.Start();
 await gateway.Start(new HttpGatewayStartOptions { Port = 8080 });
 ```
 
-It routes, binds, reads and writes as the TypeScript side's gateway does, one form of every body
-on both sides, and its README says it whole: every procedure a client calls at
-`POST /api/<Service>/<procedure>`, one marked `NO_SIDE_EFFECTS` at `GET` and `HEAD` there too
-where the query carries its request, each `google.api.http` rule as written; Bead's own mapping of
+It routes, binds, reads and writes as the TypeScript side's gateway does, one form of every body on
+the TypeScript and C# sides, and its README says it whole: every procedure a client calls at
+`POST /api/<Service>/<procedure>`, one marked `NO_SIDE_EFFECTS` at `GET` and `HEAD` there too where
+the query carries its request, each `google.api.http` rule as written; Bead's own mapping of
 protobuf's JSON, never `JsonParser` or `JsonFormatter`; failures as `application/problem+json`;
-notifications as Server-Sent Events, paced by what the response takes. **The route is no guard**:
-a procedure answers its default route whatever rules map it, and what guards it is its admission.
+notifications as Server-Sent Events, paced by what the response takes. **The route is no guard**: a
+procedure answers its default route whatever rules map it, and what guards it is its admission.
 Each exchange draws one Bead connection, closed as its response ends. It judges a request by the
 HTTP transport's own gates from one `HttpPolicy`, which `HttpTransportServerOptions.Policy` takes
 too; a member given in the policy and beside it, at its default as at any value, is refused.
@@ -402,8 +410,9 @@ the listens, the outboxes and the server's life, under one lock on the C# side.
   `BeadHttpClient` is its client, as .NET's own is `HttpClient`.
   The connection's token, in `bead-connection-token`, is readable by script, where a socket is not:
   off the machine, HTTPS.
-- **The transports** hold the same ready states on both sides, and the client reconnects alike, its
-  delay, attempts, token and tap, its router rejecting what waited on the connection replaced.
+- **The transports** hold the same ready states on the TypeScript and C# sides, and the client
+  reconnects alike, its delay, attempts, token and tap, its router rejecting what waited on the
+  connection replaced.
   Neither client reads a `Retry-After`: a reconnection waits its own schedule, whatever a refusal's
   `Retry-After` asks (spec 15.7). A server listens on `localhost` unless `Start` is given an
   `Address`: both loopbacks, `127.0.0.1` and `::1`, on one port, so no other process can answer a

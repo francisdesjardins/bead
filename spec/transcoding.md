@@ -41,7 +41,7 @@ with the hash of its text. The why of each rule is in the decisions:
 - [0022](../docs/decisions/0022-a-proto-becomes-one-checked-blueprint-and-each-language-is-generated-from-it.md):
   the blueprint its routes come from, and the document its builder writes (3.9, 11).
 
-**Version: 0.2.0**. Its conformance file repeats it as its `transcodingVersion`, and follows its
+**Version: 0.2.1**. Its conformance file repeats it as its `transcodingVersion`, and follows its
 schema in [`schemas/`](schemas/). It moves by `spec.md`'s rule, under a version of its own
 ([0008](../docs/decisions/0008-three-version-axes-and-names-qualified-by-their-owner.md)): the minor
 when a gateway that conforms to its last version must change to conform to this one, the patch when

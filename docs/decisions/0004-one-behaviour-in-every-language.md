@@ -6,8 +6,9 @@
 ## Context
 
 Bead is a protocol before it is a package. It has a TypeScript implementation and a C# one, and a
-Rust one whose core lands step by step ([0044](0044-rust-one-owner-per-router-traits-no-unsafe-two-parameters-no-warning.md)); a
-builder generates servers and clients in the first two from the same definitions
+Rust one, its core, each part it lacks a row of [the support matrix](../support.md) ahead
+([0044](0044-rust-one-owner-per-router-traits-no-unsafe-two-parameters-no-warning.md)); a builder
+generates servers and clients in the first two from the same definitions
 ([0022](0022-a-proto-becomes-one-checked-blueprint-and-each-language-is-generated-from-it.md)), and
 a constrained C side besides is where Bead goes. Implementations of the same bytes drift unless
 something holds them to those bytes, and only a test every one runs does.
@@ -240,7 +241,7 @@ closed.
 ([0011](0011-every-side-takes-its-time-from-a-clock-it-is-given.md)). `advance` steps it from due to
 due, and `spec/check.py` refuses one that no `until` a timer armed on it precedes since the last
 send, expect or advance; `wall` moves its wall clock alone, which starts where each file says; and
-`spec/clocks.json` holds both sides' test clocks to that one meaning.
+`spec/clocks.json` holds every side's test clock to that one meaning.
 
 **Each entry cites its units, and a ledger holds every unit.** A unit is a clause of `spec/spec.md`,
 `"15.5"`, an item of its numbered list, `"9.2.5"`, or a row of its table counted from 1, `"15.6.8"`;
@@ -326,13 +327,17 @@ another's server in any language.
 that shows it, and it stays a row until it closes. Normalising is always the aim: a difference that
 can close is work to do, and one only a platform imposes says which platform, and why.
 
-**A side may play part of the corpus while its steps and stages land**, as Rust's core does
-([0044](0044-rust-one-owner-per-router-traits-no-unsafe-two-parameters-no-warning.md)): what it does not play yet is a row of the matrix's
-differences, of kind open, whose cell for that side says it is ahead, and a row of
-`spec/check.py`'s `AHEAD`, each part a transport, a group, a file, an encoding, a unit or a
-document, a durations place's owner or a way. Each step merges once it plays, with its side's row
-of `SIDES`, so the twins, the reads and the counts hold it from then on; a part ahead that the side
-plays fails, so the rows only shrink, and a step or a stage lands by deleting its own.
+**A side may play part of the corpus while its stages land**, as the Rust side does
+([0044](0044-rust-one-owner-per-router-traits-no-unsafe-two-parameters-no-warning.md)): each part it
+does not play is a row of the matrix's differences, of kind open, whose cell for that side says it
+is ahead, and a row of `spec/check.py`'s `AHEAD`, each part a transport of `spec/transports.json`, a
+group, a file read whole, an encoding, a unit or a document whole, a durations place's owner or a
+place's way. The check consults `AHEAD` at every turn: the twins skip a unit ahead, the reads a
+group, a file or an encoding ahead, the durations' harness a place ahead, and the conformance
+table's cell of that side states what it plays of how many where part is ahead. A stage merges once
+it plays, the side's row of `SIDES` holding its twins, its reads and its counts from the stage that
+brings the side in; **a part ahead that the side plays fails**, so the rows only shrink, and a stage
+lands by deleting its own.
 
 **No implementation is the reference: the set evolves together**, wherever it can. Where one
 implementation does Y and another can do Y and Z, every implementation does Y: the second keeps to
@@ -342,9 +347,9 @@ Y, or comes back to it, and Z comes to all of them at once, by a decision that m
 ## Consequences
 
 **Each behaviour is written and tested once per language.** The conformance files take most of that
-cost off the wire: the vectors, the conversations, the transports' cases and the clock cases,
-which both sides play, written once. CI's `spec` job regenerates them and fails on any byte
-that differs, or on any file a generator writes that is not committed.
+cost off the wire: the vectors, the conversations, the transports' cases and the clock cases, which
+every side plays but the parts its rows ahead name, written once. CI's `spec` job regenerates them
+and fails on any byte that differs, or on any file a generator writes that is not committed.
 
 **What no entry plays stays with each side's twin tests**, and `docs/support.md` says so: a
 destination that is a router the relay calls through, with its two legs' limits and the session
@@ -357,7 +362,7 @@ servers serve, an open row of the matrix naming both; keep-alive, pipelining and
 again, which one socket per exchange leaves out; and the transport's contract with its router — its
 events, its handles, its gauges.
 
-**A twin test leaves both sides one assertion at a time**, in the change that pairs that assertion
+**A twin test leaves every side one assertion at a time**, in the change that pairs that assertion
 with the case that plays it, and the cell of the matrix it proves points to that case in the same
 change; the twins of a transport's contract stay.
 
@@ -367,10 +372,10 @@ a failure and its code, refused, lost, timed out, disconnected — which each si
 of its error, never as a class.
 
 **One vocabulary, and the spec's words.** The conversations and the transports' cases speak `send`
-and `expect`, as their generators write them, and both sides name the relays a failure crossed
+and `expect`, as their generators write them, and every side names the relays a failure crossed
 `relays`, as the spec does.
 
-**The harnesses play the conformance files without retry**, on both sides: Playwright retries a
+**The harnesses play the conformance files without retry**, on every side: Playwright retries a
 failed test twice on CI, which would hide on the TypeScript side what fails the C# side's run.
 
 **The broker's cases speak the file's vocabulary**, named connections and a clock advanced, in both
@@ -381,10 +386,12 @@ roles ([0038](0038-over-a-broker-a-connection-is-placed-once-at-its-open-named-b
 **`spec/check.py` holds the frame**, in the spec job, and reports group by group which sides' tests
 name each file and group, failing on one a side never names. It reads the tests' sources: it sees
 what a test names, not the entries it plays, so a report of what each side plays is a gate owed
-([0006](0006-a-rule-has-its-gate.md)). The transports' harnesses check, on both sides, that they
-played every case but those excused for their language, and so do the codecs' harnesses, and the C#
-side's identities', each checking that what it skips is what its language is excused from; the other
-harnesses skip what is excused in their loops, and check nothing more.
+([0006](0006-a-rule-has-its-gate.md)). The transports' harnesses check, on the TypeScript and C#
+sides, that they played every case but those excused for their language, and so do the codecs'
+harnesses on those two sides, the C# and Rust sides' identities' and every side's durations', each
+checking that what it skips is what its language is excused from or has ahead; the Rust side's
+transports' harness plays every case over a broker, each under a name of its own, its other cases
+ahead; the other harnesses skip what is excused in their loops, and check nothing more.
 
 **The interop needs both runtimes in one place.** In CI, the `dotnet` job runs it: it installs the
 TypeScript side for its interop server, runs the C# tests, the C# client's interop among them, then
@@ -393,10 +400,10 @@ both sides' HTTP servers in Chromium. The `typescript` job leaves out the tests 
 Over MQTT 5 and over AMQP 1.0, the jobs `mqtt` and `amqp` run it both ways, each against a broker
 of the run's own, on the runner's host.
 
-**A language is whole with every vector, conversation and transport case passing, and with
-interop against every language already here**: a client of each against a server of each other,
-N × (N − 1) pairs, two with two languages and six with three. Until it is, it plays the part its
-steps and stages have landed, every other part a row ahead, and its interop is one of them.
+**A language is whole with every vector, conversation and transport case passing, and with interop
+against every language already here**: a client of each against a server of each other, N × (N − 1)
+pairs, two with two languages and six with three. Until it is, it plays the part its stages have
+landed, every other part a row ahead, and its interop is one of them.
 
 **No side decides by default.** What one language could add on its own waits for the others, or for
 a decision that brings it to all of them; what a platform cannot do at all stays a row of the
@@ -406,9 +413,11 @@ to lift when the platform can.
 
 ## The Tenth Man
 
-The decision met the Tenth Man ([0009](0009-conventional-commits-git-flow-and-the-tenth-man.md))
-in seven rounds. Its objections, each with its answer, beside which the partial side's, a side that
-plays part of the corpus while its steps land, are [0044](0044-rust-one-owner-per-router-traits-no-unsafe-two-parameters-no-warning.md)'s, the round of Rust's core:
+The decision met the Tenth Man ([0009](0009-conventional-commits-git-flow-and-the-tenth-man.md)) in
+seven rounds. Its objections, each with its answer, beside which the partial side's, a side that
+plays part of the corpus while its stages land, are
+[0044](0044-rust-one-owner-per-router-traits-no-unsafe-two-parameters-no-warning.md)'s, the round of
+Rust's core:
 
 ### On the files' schemas, their version and their check
 

@@ -1,9 +1,10 @@
-# 0013 — Every language traces, filters and counts its calls alike, beside the wire, at no cost when off
+# 0013 — Every language traces, filters and counts its calls, and traces its participants' parcels, alike, beside the wire, at no cost when off
 
 - **Status**: accepted
 - **Scope**: a companion document, `spec/debugging.md`, with its own version, and its conformance
   files, `spec/debug-filters.json` and `spec/metrics.json`; every implementation's service manager,
-  routers, debug filter and registry; the support matrix. Debugging 4.3 and 10.1 are
+  routers, broker participant, debug filter and registry; debugging 13, the trace of a participant's
+  parcels; the support matrix. Debugging 4.3 and 10.1 are
   [0016](0016-a-json-payload-has-one-form-whichever-side-writes-it.md)'s too, and debugging 1.2,
   6.10, 7.3 and 8.3 [0017](0017-ids-are-for-life-and-a-procedures-name-takes-one-ascii-form.md)'s.
 
@@ -147,25 +148,26 @@ row of the support matrix, not a difference of the protocol.
 ([0007](0007-csharp-interfaces-blocks-two-parameters-no-warning.md)): an event and an emitter's
 listener, a record and an object, a `TimeSpan` and milliseconds.
 
-| Piece                  | TypeScript                                                                                   | C#                                                                                                 |
-| ---------------------- | -------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------- |
-| The trace of calls     | `manager.on('debug', (error, event) => …)`, `IDebugEvent`                                    | `manager.Debug += (error, debugEvent) => …`, `DebugEvent`                                          |
-| Whether anyone listens | `manager.isDebugging`                                                                        | `manager.IsDebugging`                                                                              |
-| The trace of envelopes | `router.on('debug', ({ connectionHandle, direction, header }) => …)`                         | `router.Debug += (direction, envelope) => …`, `TracedEnvelope`                                     |
-| The trace of parcels   | `participant.on('debug', (event) => …)`, `IParticipantDebugEvent`; `participant.isDebugging` | `participant.Debug += (debugEvent) => …`, `ParticipantDebugEvent`; `participant.IsDebugging`       |
-| The filter             | `parseDebugFilter`, `filterDebug`, `filterEnvelopeDebug`, `IDebugFilter`                     | `DebugFilter.Parse`, `DebugFilters.FilterDebug`, `DebugFilters.FilterEnvelopeDebug`, `DebugFilter` |
-| The registry           | `createMetricsRegistry({ maximumProcedures })`, `IMetricsRegistry`; `metricsRegistry`        | `new MetricsRegistry(options)`, `MetricsRegistryOptions`; `MetricsRegistry`                        |
-| Its exposition         | `registry.exposition()`, `IMetricsExposition`: `{ contentType, text }`                       | `registry.Exposition()`, `MetricsExposition(ContentType, Text)`                                    |
-| A requester's series   | `router.declareRequester(procedure)`, `IProcedureSeries`; the router's request's `series`    | `router.DeclareRequester(procedure)`, `ProcedureSeries`; `RouterRequest.Series`                    |
-| A step's call          | `IDebugEvent`'s `callId` and `connectionHandle`; the router's request's `onCallId`           | `DebugEvent.CallId`, `DebugEvent.ConnectionHandle`; `RouterRequest.OnCallId`                       |
+| Piece                  | TypeScript                                                                                   | C#                                                                                                 | Rust                                                                                       |
+| ---------------------- | -------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------ |
+| The trace of calls     | `manager.on('debug', (error, event) => …)`, `IDebugEvent`                                    | `manager.Debug += (error, debugEvent) => …`, `DebugEvent`                                          | `manager.on_debug(listener)`, `DebugListener`, `DebugEvent`                                |
+| Whether anyone listens | `manager.isDebugging`                                                                        | `manager.IsDebugging`                                                                              | `manager.is_debugging()`                                                                   |
+| The trace of envelopes | `router.on('debug', ({ connectionHandle, direction, header }) => …)`                         | `router.Debug += (direction, envelope) => …`, `TracedEnvelope`                                     | `router.on_debug(listener)`, `EnvelopeListener`, `TracedEnvelope`                          |
+| The trace of parcels   | `participant.on('debug', (event) => …)`, `IParticipantDebugEvent`; `participant.isDebugging` | `participant.Debug += (debugEvent) => …`, `ParticipantDebugEvent`; `participant.IsDebugging`       | `participant.on_debug(listener)`, `ParticipantDebugEvent`; `participant.is_debugging()`    |
+| The filter             | `parseDebugFilter`, `filterDebug`, `filterEnvelopeDebug`, `IDebugFilter`                     | `DebugFilter.Parse`, `DebugFilters.FilterDebug`, `DebugFilters.FilterEnvelopeDebug`, `DebugFilter` | `parse_debug_filter`, `FilterKeeper::new`, `keeps_call`, `keeps_envelope`, `DebugFilter`   |
+| The registry           | `createMetricsRegistry({ maximumProcedures })`, `IMetricsRegistry`; `metricsRegistry`        | `new MetricsRegistry(options)`, `MetricsRegistryOptions`; `MetricsRegistry`                        | `MetricsRegistry::new(&options)`, `MetricsRegistryOptions`; `metrics_registry`             |
+| Its exposition         | `registry.exposition()`, `IMetricsExposition`: `{ contentType, text }`                       | `registry.Exposition()`, `MetricsExposition(ContentType, Text)`                                    | `registry.exposition()`, `MetricsExposition { content_type, text }`                        |
+| A requester's series   | `router.declareRequester(procedure)`, `IProcedureSeries`; the router's request's `series`    | `router.DeclareRequester(procedure)`, `ProcedureSeries`; `RouterRequest.Series`                    | `router.declare_requester(&procedure)`, `ProcedureSeries`; the router's request's `series` |
+| A step's call          | `IDebugEvent`'s `callId` and `connectionHandle`; the router's request's `onCallId`           | `DebugEvent.CallId`, `DebugEvent.ConnectionHandle`; `RouterRequest.OnCallId`                       | `DebugEvent`'s `call_id` and `connection_handle`; `CallHooks::on_call_id`                  |
 
-`metricsRegistry` and `MetricsRegistry` are a router's option, which the servers and clients that
-build a router pass on. The registry is not `Metrics`: `prometheus-net`'s static class of that name
-would make a bare one ambiguous (CS0104) in an application that uses both, which
+`metricsRegistry`, `MetricsRegistry` and `metrics_registry` are a router's option, which the servers
+and clients that build a router pass on. The registry is not `Metrics`: `prometheus-net`'s static
+class of that name would make a bare one ambiguous (CS0104) in an application that uses both, which
 [0008](0008-three-version-axes-and-names-qualified-by-their-owner.md) avoids. A requester's series
 is the handle its declaration gives back, which the manager hands to its router's `request` with
-each call: `declareRequester` and `DeclareRequester` give it, `IProcedureSeries` and
-`ProcedureSeries`, and the router's request carries it as `series` and `Series`.
+each call: `declareRequester`, `DeclareRequester` and `declare_requester` give it,
+`IProcedureSeries` and `ProcedureSeries`, and the router's request carries it as `series` and
+`Series`.
 
 **The trace of calls and the trace of envelopes tell each step**, at the service manager and at the
 router, with the same fields on every side, as debugging 4 and 5 state. A call's options are traced
@@ -194,8 +196,8 @@ OpenTelemetry's RPC conventions set it. A call answered nothing tells no failure
 
 **A listener's error never changes a call** (debugging 2.2 and 2.3). It is reported, as spec 9.0
 reports an error, through the router's `error` event, `Error`; the call goes on as if nobody
-listened, its outcome, its answer and what goes on the wire the same. Both sides call each listener
-within a guard, and count on a path no listener runs on.
+listened, its outcome, its answer and what goes on the wire the same. Every side calls each listener
+within a guard, and counts on a path no listener runs on.
 
 **The filter is `DEBUG`'s words, three selectors of Bead's, in ASCII** (debugging 6), its grammar in
 ABNF ([RFC 5234](https://www.rfc-editor.org/rfc/rfc5234), whose quoted strings are case-insensitive,
@@ -268,9 +270,9 @@ has its reason:
   exposition. Bead opens no port.
 
 **Nothing is paid while nobody listens and no registry is given** (debugging 3). One check a call,
-one an envelope, one a parcel, is the whole cost. A side that counts reads the monotonic clock twice a call, at
-its router's gates, never the wall clock, and adds to series it reaches through what it holds
-already, with no lookup of its own and no allocation. Where Bead goes
+one an envelope, one a parcel, is the whole cost. A side that counts reads the monotonic clock twice
+a call, at its router's gates, never the wall clock, and adds to series it reaches through what it
+holds already, with no lookup of its own and no allocation. Where Bead goes
 ([the index](README.md#where-bead-goes)), a counted call is measured against one not counted, on
 each side, a measure beside those the benches take ([the root README](../../README.md#measurement)),
 and it gates nothing: what the clause bounds, the readings and the allocations, its gates hold.
@@ -281,12 +283,12 @@ and it gates nothing: what the clause bounds, the readings and the allocations, 
   a router show a counted call reading two more than an uncounted one. On the C# side,
   `GC.GetAllocatedBytesForCurrentThread()` around a call's synchronous steps, with no `await` within
   them, shows a counted call allocating not a byte more than an uncounted one, and pins what a call
-  allocates with nobody listening. The TypeScript side has no allocation count a test reads, and
-  holds that part by inspection, a row of the matrix.
+  allocates with nobody listening. The TypeScript and Rust sides have no allocation count a test
+  reads, and hold that part by inspection, a row of the matrix.
 - **Two build switches**, for a side whose platform builds that way: one leaves out the trace and
   the filter, the other the registry, each alone or both, so a 1 kHz loop that wants its dashboard
   builds the registry without the trace. A C side takes them as its preprocessor's, in its own
-  record. The TypeScript and C# sides build both, and pay the check alone.
+  record. Every side builds both, and pays the check alone.
 
 **The companion is a document of its own, with a version of its own**
 ([0008](0008-three-version-axes-and-names-qualified-by-their-owner.md)), and two conformance files,
@@ -303,8 +305,9 @@ its own words and its transports'. No event carries payload bytes, credentials o
 half, the connection's capability (0038). Levels and bounds are read by pull. Each event is told
 synchronously at its site, on the participant's scheduler on the C# side, ordered per participant;
 each listener is guarded, its error reported through the participant's error event, and later
-listeners called. The TypeScript side's clock gate and the C# side's allocation pin hold the cost
-while unwatched.
+listeners called. Every side's clock gate, `reads no clock and builds no trace while nobody watches
+a parcel taken or sent` and its twins, and the C# side's allocation pin hold the cost while
+unwatched.
 
 ## Consequences
 
@@ -373,11 +376,11 @@ end counts it under the code of the failure that ended it, whatever that code: t
 notifies ends one with the failure its application chooses (spec 11.7, item 2), as the side that
 hears receives one, so both ends' series take every code and the count follows the wire.
 
-**A constrained profile pays what it builds**: its row of the matrix is "not available" on the
-TypeScript and C# sides, which build both. A 1 kHz loop that turns the trace off and keeps the
-registry pays two monotonic readings and a few increments into static tables a counted call, and
-nothing more; built with neither, it pays nothing. How its registry reaches a scraper, over its
-supervision link or a relay's, is the C side's to decide.
+**A constrained profile pays what it builds**: its row of the matrix is "not available" on every
+side, each building both. A 1 kHz loop that turns the trace off and keeps the registry pays two
+monotonic readings and a few increments into static tables a counted call, and nothing more; built
+with neither, it pays nothing. How its registry reaches a scraper, over its supervision link or a
+relay's, is the C side's to decide.
 
 **The companion's version is an axis of
 [0008](0008-three-version-axes-and-names-qualified-by-their-owner.md)'s**: its files repeat it as
@@ -467,5 +470,5 @@ its labels, Prometheus's.
 
 ### The trace of parcels
 
-The round in [0015](0015-a-pages-client-announces-itself-to-a-devtools-hook.md#the-tenth-man) meets the participant's trace, its redaction,
-its delivery and its page source.
+The round in [0015](0015-a-pages-client-announces-itself-to-a-devtools-hook.md#the-tenth-man) meets
+the participant's trace, its redaction, its delivery and its page source.

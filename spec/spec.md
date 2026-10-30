@@ -87,7 +87,7 @@ to one meaning of `advance`. The why of each rule is in the decisions:
 - [0043](../docs/decisions/0043-over-amqp-1-0-a-participant-is-one-connection-whose-exclusive-inbox-ends-with-it-and-a-parcel-one-message-of-one-profile-each-counted-to-its-byte.md):
   AMQP 1.0's binding of a broker, on RabbitMQ 4, section 15.
 
-**Version: 0.9.0**, of layout `0xA1`, its broker parcels of layout `0xB1`. Each of its
+**Version: 0.10.0**, of layout `0xA1`, its broker parcels of layout `0xB1`. Each of its
 conformance files repeats it as its `specVersion`, and follows its schema in
 [`schemas/`](schemas/). The interop's blueprint,
 [`interop-blueprint.json`](interop-blueprint.json), and what its service does,
@@ -97,15 +97,14 @@ play. **Status: every section is written.**
 What a side traces, filters and counts beside the wire is stated apart, under a version of its own,
 in its companion [`debugging.md`](debugging.md), whether a side builds those or leaves them out.
 What a side's gateway answers over HTTP of its procedures is stated apart, under a version of its
-own, in its companion [`transcoding.md`](transcoding.md), whether a side offers one or not. A
-side conforms to the wire by sections 1 to 15, for each transport it offers, a broker's binding
-among them, to what it declares by section 16, to what its codecs write and read by section 17,
-for each encoding it offers, and to its procedures' rules by section 18: a relay, which reads no
-payload, offers none. A side does
-what each entry of the files that play those sections says, the clock cases holding `advance` to one
-meaning, but an entry whose
-`differs` names a row of the support matrix, [`docs/support.md`](../docs/support.md), and the
-side's language. A unit no entry cites binds it all the same.
+own, in its companion [`transcoding.md`](transcoding.md), whether a side offers one or not. A side
+conforms to the wire by sections 1 to 15, for each transport it offers, a broker's binding among
+them, to what it declares by section 16, to what its codecs write and read by section 17, for each
+encoding it offers, and to its procedures' rules by section 18: a relay, which reads no payload,
+offers none. A side does what each entry of the files that play those sections says, the clock cases
+holding `advance` to one meaning, but an entry whose `differs` names a row of the support matrix,
+[`docs/support.md`](../docs/support.md), and the side's language. A unit no entry cites binds it all
+the same.
 
 ## 1. Conventions
 

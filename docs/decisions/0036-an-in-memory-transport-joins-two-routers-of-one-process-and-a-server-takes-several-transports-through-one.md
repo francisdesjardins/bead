@@ -68,8 +68,9 @@ The options weighed:
 **One in-memory transport in each core** (spec 15.13), beside WebSocket, HTTP and the Web Worker: on
 the TypeScript side `memory-transport-client.ts` and `memory-transport-server.ts` over the
 transports' own bases, on the C# side `MemoryTransportClient` and `MemoryTransportServer`, each end
-telling what comes to it on a serial scheduler, one turn at a time. It is the same transport in both
-cores, and a cleaner split than a Worker's port made to carry what it does not; the Web Worker
+telling what comes to it on a serial scheduler, one turn at a time, on the Rust side `MemoryClient`
+and `MemoryServer`, each end on its router's owner. It is the same transport in every core, and a
+cleaner split than a Worker's port made to carry what it does not; the Web Worker
 transport keeps its messages, an envelope alone across a thread.
 
 - **A connect draws a connection** on the server's side, its handle

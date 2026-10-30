@@ -1,16 +1,17 @@
 # 0018 — A service's procedures are typed descriptors, served and called through one layer in each runtime
 
 - **Status**: accepted
-- **Scope**: both runtimes' public surface: a procedure's kind, checked by each router as it is
-  declared; the payload codecs made public; the admission vocabulary; the failure catalogue; the
-  typed descriptors, and their validator; the service layer that serves and calls them;
-  the notify filter's argument; a notification asked for again at another window; the bound call and
-  its guard; the C# side's server and client interfaces, and its routers' `Notify`; the TypeScript
-  side's `./service` entry; the constant of the contract with generated code. Spec section 16, whose
-  16.10 holds the reason `against its kind` and whose 16.11 says what each way of declaring takes,
-  with `spec/identities.json`, its schema and its generator; the support matrix's rows of the layer;
-  [0003](0003-one-word-one-meaning.md)'s sentence on _kind_ and _type_. The `proto` encoding, section
-  17.9, its file and its rows, is
+- **Scope**: every runtime's public surface, the service layer's client half ahead in the Rust
+  side's core: a procedure's kind, checked by each router as it is declared; the payload codecs made
+  public; the admission vocabulary; the failure catalogue; the typed descriptors, and their
+  validator; the service layer that serves and calls them; the notify filter's argument; a
+  notification asked for again at another window; the bound call and its guard; the C# side's server
+  and client interfaces, and its routers' `Notify`; the TypeScript side's `./service` entry; the
+  constant of the contract with generated code. Spec section 16, whose 16.10 holds the reason
+  `against its kind` and whose 16.11 says what each way of declaring takes, with
+  `spec/identities.json`, its schema and its generator; the support matrix's rows of the layer;
+  [0003](0003-one-word-one-meaning.md)'s sentence on _kind_ and _type_. The `proto` encoding,
+  section 17.9, its file and its rows, is
   [0031](0031-a-proto-payload-is-protobufs-format-and-bead-states-only-its-own.md)'s; the check of a
   `proto` payload's records before its library reads them, its levelings and protobuf's conformance
   suite are
@@ -26,7 +27,7 @@ generates, from a `.proto` or a blueprint, data and types for each service: its 
 descriptors, its failures, a server class where only resolvers are written, and a client class that
 matches it. It keeps behaviour once in each runtime, in a generic layer the generated classes are
 thin shells over, as Connect-ES's `createClient(Service, transport)` types a client from a
-descriptor. That layer needs eight things of each runtime, the same on both sides:
+descriptor. That layer needs eight things of each runtime, the same on every side:
 
 - **A procedure that says how it is called.** A procedure's ids, name, revision, limit and
   deprecation (`IProcedure`, `router/shared/types.ts`; `Procedure`, `Bead.Core/RouterTypes.cs`)
@@ -44,7 +45,7 @@ descriptor. That layer needs eight things of each runtime, the same on both side
   generated code writes none, and needs names for none, a session, and a hook given by name.
 - **A failure catalogue.** A bare code, `{ code: 7, detail }`, narrows nothing: a resolver may
   answer a code its procedure does not list. And a failure received is told an application's or a
-  protocol's alike on both sides.
+  protocol's alike on every side.
 - **A notify filter of one argument.** A filter of two, `(connectionHandle, identifier)`, that comes
   to need the call's server or its session's data can only take a third parameter, a change of
   every filter written.
@@ -79,7 +80,7 @@ Each item of the builder's round, in its order.
 - Two optional members, `type` (`request`, `command`) and `notifies` (a boolean): three states each,
   nine together, one of them, a command that notifies, refused at run time; and the word `type`,
   which the trace gives a step, not a procedure: its `type` takes `notification`
-  (`spec/debugging.md` 4.1; `DebugType` on both sides), and a notification sent for a procedure of
+  (`spec/debugging.md` 4.1; `DebugType` on every side), and a notification sent for a procedure of
   type `request` is traced `notification`.
 - **One optional member, `procedureKind`: `request`, `notifies` or `command`. Chosen**, the user's
   choice: it mirrors the builder's `oneof procedure_kind { Notifies notifies; Command command; }`,
@@ -122,9 +123,9 @@ A request to a procedure that notifies, by a `client-requester`, is taken: it op
 Where it is stated: each router's own, with twin tests; or **a third reason of spec 16.10's table,
 `against its kind`, after `out of its range` and `off its form`, with `spec/identities.json` holding
 a group of declarations played per way, as [0006](0006-a-rule-has-its-gate.md) asks a rule's gate
-and as 0017 pinned there refusals no peer sees. Chosen**, the user's choice: Rust, and each
-language after it, takes the rule from the file, where twin tests hold two sides alone. Section
-16.11 says what each way takes. A side built without the trace and the metrics, which never refuses
+and as 0017 pinned there refusals no peer sees. Chosen**, the user's choice: every language takes
+the rule from the file, where twin tests would hold the sides that write them alone. Section 16.11
+says what each way takes. A side built without the trace and the metrics, which never refuses
 `off its form`, still refuses `against its kind`, which needs no name.
 
 _Conformance:_ 16.10, 16.11 and `spec/identities.json`'s `procedureKinds`, six declarations each
@@ -296,10 +297,11 @@ manager included, its session's member `Identifier`: one name for one pair, as 0
 The C# router's `Notify` takes the same filter: `NotifyRequest` is a sealed record of `init`
 properties, `Procedure`, `Filter` and `Key`, and `IRouterLike.Notify` two overloads, one of a
 payload and one of the reason a value did not write, the TypeScript union's two arms as 0007 maps a
-union, so the two sides hand an unwritten notification to their router alike.
+union, and the Rust router's `notify` takes a `Result`, so every side hands an unwritten
+notification to its router alike.
 
-_Conformance:_ none; a filter is the server's own. _Matrix:_ none; the two sides hand an unwritten
-notification to their router alike.
+_Conformance:_ none; a filter is the server's own. _Matrix:_ none; every side hands an unwritten
+notification to its router alike.
 
 **8. A notification asked for again at another window.**
 
@@ -706,11 +708,12 @@ otherwise. The side that answers hands it, with its options' `failFast`, to its 
 which judges the decoded request before the resolver: a server's resolvers, and a client's command
 resolvers. A request its rules refuse is answered `PAYLOAD_INVALID`, its violations in its detail,
 and its resolver never called; a validator that throws is answered `PROCEDURE_FAILED` and reported
-(spec 9.5, 18.2). The side that requests judges its value before the encode when its options say
-so, `validates` and `Validates`: a client's requests and subscribing requests, and a server's
-commands, whose server takes the option too. A refusal fails the call before anything goes with
+(spec 9.5, 18.2). The side that requests judges its value before the encode when its options say so,
+`validates` and `Validates`: a client's requests and subscribing requests, and a server's commands,
+whose server takes the option too. A refusal fails the call before anything goes with
 `PAYLOAD_INVALID` and the same detail, counted as a call refused before it goes. `failFast`,
-`FailFast`, on either side's options, stops a judging at its first violation.
+`FailFast` and `fail_fast`, in the options of the side that answers and of the side that requests,
+stops a judging at its first violation.
 
 **One layer serves and calls a service, in each runtime.**
 
@@ -896,11 +899,12 @@ public interface IServiceResponse<TResult, TFailure> where TFailure : IApplicati
 
 C# computes no type from another's members. A service's hooks and windows are records that its
 generated code, or its author, writes, one for every service, which the layer reads through an
-interface tied to the service's tag. A hook left out does not compile on either side. A service
-written without beadc writes its records as the tests' `GreeterAdmissions` does. Each record
-implements its interface's `ToDictionary()` explicitly, a conversion named as .NET's Framework
-Design Guidelines name one, so a hook named `toDictionary` still builds beside it; the layer calls
-it once, as it is built.
+interface tied to the service's tag. A hook left out does not compile on the TypeScript and C#
+sides, and the Rust side's `ServiceServer::new` refuses it, a `ProgrammerError`. A service written
+without beadc writes its records as the tests' `GreeterAdmissions` does. Each record implements its
+interface's `ToDictionary()` explicitly, a conversion named as .NET's Framework Design Guidelines
+name one, so a hook named `toDictionary` still builds beside it; the layer calls it once, as it is
+built.
 
 `Data` is the server's own: a server side offered on a server of `string` sessions is made with
 `string`, as the interop's is, since the server's `sessions` is read and written through it. The
@@ -927,8 +931,8 @@ What the layer refuses, as it is built or used:
 | an unlisted failure code answered                                                                  | sent as written; `ProgrammerError` reported     | no counterpart: the failure class holds its procedure's list alone |
 
 **A call bound to its payload is a bound call, and it carries the guard.** The runtime's procedure
-takes its payload and gives a function of the call's options; that function is named, on both sides,
-and the guard sits on it alone:
+takes its payload and gives a function of the call's options; that function is named, on the
+TypeScript and C# sides, and the guard sits on it alone:
 
 ```ts
 /** A call bound to its payload: called with its options, it goes. */
@@ -952,9 +956,12 @@ export interface IRequest<
 On the C# side, the delegate is `BoundCall<TResponse>`, and `Registrar` keeps its name, since it
 names neither a registration nor a request; `IRegistrar` is its TypeScript twin. The spec's
 _requester_ is the party that makes a request ("as a requester is made, through the router's
-`declareRequester`", `spec/debugging.md`), which a delegate named `Requester<TResponse>` would
-give a second meaning; the bound call is named after the call it makes, the user's choice, though
-the object makes a call rather than being one.
+`declareRequester`", `spec/debugging.md`), which a delegate named `Requester<TResponse>` would give
+a second meaning; the bound call is named after the call it makes, the user's choice, though the
+object makes a call rather than being one. The Rust side binds no call: its `Request::call` takes
+the payload and the options at once and sends the call as it is made, its `ServiceCall` only waiting
+for the outcome
+([0044](0044-rust-one-owner-per-router-traits-no-unsafe-two-parameters-no-warning.md)).
 
 What the guard catches, under TypeScript 7.0.2: `await procedure(request)` and `await
 Promise.resolve(procedure(request))` (TS1320); a bound call awaited inside `Promise.all` whose result
@@ -1096,7 +1103,7 @@ test file each in `src/service/__tests__/`; the codecs stay in `router/shared/pa
 router.
 
 **The rule has its gate** ([0006](0006-a-rule-has-its-gate.md)): `spec/identities.json`'s group of
-procedure kinds, played the six ways on both sides; the test of `service-manager.test.ts` that holds
+procedure kinds, played the six ways on every side; the test of `service-manager.test.ts` that holds
 a callable's members; the twin tests of the feature row "The service layer"; `yarn check` and
 `dotnet format`/`dotnet test` over the layer's code.
 
@@ -1119,9 +1126,9 @@ window's key, a command's requester, a notifier and a resolver's key, each repor
 by `no-deprecated`, typescript-eslint's and oxlint's; a test of `service-client.test.ts` and one of
 `service-server.test.ts`, named alike, hold it.
 
-**Rust, and each language after it,** plays the `procedureKinds` group the six ways, and the
-`proto` rows as [0031](0031-a-proto-payload-is-protobufs-format-and-bead-states-only-its-own.md)
-says.
+**The Rust side** plays the `procedureKinds` group the six ways (`bead/tests/identities.rs`), and
+the `proto` rows as [0031](0031-a-proto-payload-is-protobufs-format-and-bead-states-only-its-own.md)
+says; **each language after it** plays them alike.
 
 ## The Tenth Man
 
