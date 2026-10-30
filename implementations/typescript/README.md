@@ -8,8 +8,8 @@ a server's transports joined into one, a client and a server router over them, t
 session and notification managers, the client and server that put the three layers together, the
 service layer a service is served and called through, and a gateway that answers its procedures
 over HTTP and JSON, beside the caller of the HTTP client beadc generates.
-Nothing in it imports a framework at run time. The specification and the conformance files both
-sides play are in [`spec/`](../../spec/).
+Nothing in it imports a framework at run time. The specification and the conformance files every
+side plays are in [`spec/`](../../spec/).
 
 ```ts
 import { createWSTransportClient } from '@francisdesjardins/bead/ws-transport-client';
@@ -1434,19 +1434,19 @@ proxy's rule on a rule's path guards nothing the default route leaves open: what
 is its admission, which every route meets alike.
 
 A `proto` body is read by Bead's own mapping of protobuf's JSON over its message's schema, and a
-result written in Bead's proto JSON form, one sequence of bytes on both sides: fields in their
-numbers' order, a map's entries sorted, a `float` at its shortest, each well-known type in its one
-form; protobuf-es's `fromJson` and `toJson` are never called, and the binary payload stays its
-own. A request read whole that leaves a field of `LEGACY_REQUIRED` presence unset is refused 400
-`PAYLOAD_UNDECODABLE`, `a required field unset`, at the member its object lacks or at the query
-parameter that would set it, before its call; an `Any`'s message is taken as it is held, as its
-server takes it, and a `PATCH`'s derived `update_mask` is set by proto names. A failure is an `application/problem+json`, its status by where its code arose:
-`PAYLOAD_INVALID` 422 with each violation's `pointer` or `parameter`, `SESSION_REQUIRED` 401 with
-`www-authenticate`, a server's answer the gateway could not take 502. A request whose `accept`
-names `text/event-stream` to a procedure that notifies is a stream of Server-Sent Events: its
-result, each notification a `message`, the failure that ends it, each an `id`, paced by what its
-response takes, 16 at once; one that carries `Last-Event-ID` is answered 204, so an `EventSource`
-stops rather than calls again.
+result written in Bead's proto JSON form, one sequence of bytes on the TypeScript and C# sides:
+fields in their numbers' order, a map's entries sorted, a `float` at its shortest, each well-known
+type in its one form; protobuf-es's `fromJson` and `toJson` are never called, and the binary payload
+stays its own. A request read whole that leaves a field of `LEGACY_REQUIRED` presence unset is
+refused 400 `PAYLOAD_UNDECODABLE`, `a required field unset`, at the member its object lacks or at
+the query parameter that would set it, before its call; an `Any`'s message is taken as it is held,
+as its server takes it, and a `PATCH`'s derived `update_mask` is set by proto names. A failure is an
+`application/problem+json`, its status by where its code arose: `PAYLOAD_INVALID` 422 with each
+violation's `pointer` or `parameter`, `SESSION_REQUIRED` 401 with `www-authenticate`, a server's
+answer the gateway could not take 502. A request whose `accept` names `text/event-stream` to a
+procedure that notifies is a stream of Server-Sent Events: its result, each notification a
+`message`, the failure that ends it, each an `id`, paced by what its response takes, 16 at once; one
+that carries `Last-Event-ID` is answered 204, so an `EventSource` stops rather than calls again.
 
 Every body the gateway writes meets `maximumUnsentBytes` and its send pace,
 `minimumSendBytesPerSecond` after `sendGracePeriod`: whole answers, problems, the document and
@@ -1531,7 +1531,7 @@ listener listens; what one throws is reported with its connection, and the refus
 ### Debugging and metrics
 
 What a side traces, filters and counts beside the wire is stated by
-[`spec/debugging.md`](../../spec/debugging.md), the spec's companion, which both sides play from
+[`spec/debugging.md`](../../spec/debugging.md), the spec's companion, which every side plays from
 `spec/debug-filters.json` and `spec/metrics.json`: none of it goes on the wire, and a peer never
 knows whether anyone listens.
 
@@ -1553,9 +1553,22 @@ connection, its router disposed — tells no failure. Each router's own `debug` 
 connection — `server` on a client — and a copy of its header, which carries its credential's scheme
 in place of its credential.
 
-Neither costs anything while nobody listens (section 3). `isDebugging` says whether anyone does;
-until someone does, a call reads no clock and builds nothing for its trace — no step, no copy of its
-options or its payloads — and an envelope no redacted header: one check a call, and one an envelope.
+A broker participant's `debug` tells its trace of parcels (section 13),
+`participant.on('debug', (event) => …)`, each event an `IParticipantDebugEvent`: a `parcel`, as it
+goes out and once the participant judged it in, with its verdict, one of `PARCEL_VERDICTS`; a `link`
+transition, `up`, `down`, `taken-over` or `stopped`, once it is complete, with the connections it
+ended; `names`, a name held or let go; and a `report`, the words of what the participant reports on
+its `error`, or a transport over it on its own, a connection's loss with its ordinal and its handle.
+A parcel is told by its fields — its kind, its sequence, its sizes, its connection by the
+participant's ordinal and, from the third leg, by its handle — never by its carried bytes, a
+credential or the acceptor's half. Its levels are told by no event: `gauges()`, `isLinked`, `names`
+and `incarnation` are read when asked. A listener's throw goes to the participant's `error`, and the
+next listener is called all the same.
+
+None of them costs anything while nobody listens (section 3). `isDebugging` says whether anyone
+does; until someone does, a call reads no clock and builds nothing for its trace — no step, no copy
+of its options or its payloads — an envelope no redacted header, and a parcel no event: one check a
+call, one an envelope and one a parcel.
 
 A listener's error never changes a call (section 2). What a listener throws — the trace's, or the
 one a filter wraps — goes to its router's `error` event, with the call's connection on a server,
@@ -2031,6 +2044,16 @@ first.
   `devtools/exposition.ts`, the demo's reader too: its calls, those that failed or are in flight, a
   median and a p95, its calls a second over the last minute, and its exposition as a scrape reads
   it; a procedure's name shows its calls alone, and a client given no registry says so.
+- **Broker**: each broker participant the page announced, a header each, its levels — its inbox, its
+  incarnation, the names it holds and its gauges against their bounds — read while the view is shown
+  and folded into a disclosure; a table of its parcels, oldest first, its link's transitions and its
+  reports among them, a DATA's parts counted by connection and direction, an incomplete capture
+  named, with filters of its own by kind, connection and verdict; and a row's recorded fields beside
+  it, once it is selected. No row holds a payload, a credential or the acceptor's half, and the last
+  1,000 records of the page's participants, all together, are kept, those let go counted. Its
+  envelope credit is the State view's, which a button opens. It keeps its selection, its focus and
+  its panes' scroll across readings, follows new parcels only while its list stands at its end with
+  no row selected, and its list and the recorded fields scroll in panes of their own.
 - **Wire**: for a page whose clients announce nothing, the HTTP transport's exchanges the Network
   panel saw, read with the package's codec, a line an exchange and its envelopes beneath, each
   procedure named where a client of the page told its name, a PAYLOAD_INVALID summed up on one line
@@ -2038,29 +2061,40 @@ first.
   `spec/conversations.json`.
 
 The bar filters by client and by the package's own filter, as `bead:debug` reads one
-(`d(rx), -token, e(request)`), the last filter that held kept while one is refused, with its
-reason; Requests, Commands and Notifications write their selector into it, and Failed shows the
-calls that failed. It pauses the panel's recording (`Ctrl+E`), clears it (`Ctrl+L`), keeps it
-across a reload with Preserve log, and exports its records as JSON, `bead-devtools-log` at version
-1, which Import reads back, pausing the recording so the page's records do not mix with the file's.
-The keyboard moves through the calls (`↑`, `↓`), unfolds them (`→`,
-`←`) and reaches the filter (`/`); a call's context menu copies its request, its answer, or a
-snippet that makes it again by the page's own service manager, and hides or shows its procedure
-alone. `←`, `→`, `Home` and `End` move across the view tabs and a call's tabs, and the `?` beside
-the filter opens its syntax, which `Escape` closes. Its status bar's Detail choice puts a call's
-detail right of the list, under it, or, at Auto, as DevTools' Elements panel places its sidebar:
-beside a split wider than 680 px, under it otherwise. The splitter between them follows the
-pointer, or, focused, `←` and `→` (`↑` and `↓` when stacked), `Home` and `End` to its limits, and
-`Enter`, which collapses the list to its least and, pressed again, restores it. The list keeps its
-least first, eight rows when stacked, and the detail its whole tab bar where the panel holds both;
-the panel's page keeps both choices.
+(`d(rx), -token, e(request)`), the last filter that held kept while one is refused, with its reason;
+Requests, Commands and Notifications write their selector into it, and Failed shows the calls that
+failed. The filter covers every view, and each counts what it hides: Metrics keeps a series by its
+`procedure` label, a series with none kept; State, each call by its procedure; Broker, a DATA parcel
+by the call and the envelope the panel proves it carried, joined on its connection, its direction
+and their order, names, `d(…)` and `e(…)` applying to it, while a connection's other traffic and a
+parcel no join is proved for stay shown. It pauses the panel's recording (`Ctrl+E`), clears it
+(`Ctrl+L`), keeps it across a reload with Preserve log, and exports every record it keeps as JSON,
+`bead-devtools-log` at version 1, or 2 once it holds a participant's records, which Import reads
+back, a reader of version 2 skipping and counting a record kind it does not know, pausing the
+recording so the page's records do not mix with the file's. The keyboard moves through the calls
+(`↑`, `↓`), unfolds them (`→`, `←`) and reaches the filter (`/`); a call's context menu copies its
+request, its answer, or a snippet that makes it again by the page's own service manager, and hides
+or shows its procedure alone. `←`, `→`, `Home` and `End` move across the view tabs and a call's
+tabs, and the `?` beside the filter opens its syntax, which `Escape` closes. Its status bar's Detail
+choice puts a call's detail right of the list, under it, or, at Auto, as DevTools' Elements panel
+places its sidebar: beside a split wider than 680 px, under it otherwise. The splitter between them
+follows the pointer, or, focused, `←` and `→` (`↑` and `↓` when stacked), `Home` and `End` to its
+limits, and `Enter`, which collapses the list to its least and, pressed again, restores it. The list
+keeps its least first, eight rows when stacked, and the detail its whole tab bar where the panel
+holds both; the panel's page keeps both choices.
 
-A client announces itself as it is built, so a page opened before the extension was installed shows
-nothing until it reloads, which the panel offers; and the hook watches only while a panel is open —
-from the first time the Bead tab is shown until DevTools closes — so the panel shows what came after
-it opened, and a page nobody inspects pays nothing. While it watches, the hook takes, for each call
-made, the stack that made it, and keeps an envelope's time to a fraction of a millisecond. A server
-in a Web Worker of the page shows through its client, whose messages the Network panel does not show.
+A client announces itself as it is built, and a broker participant once, as a source of its own,
+apart from its clients, so a page opened before the extension was installed shows nothing until it
+reloads, which the panel offers. An application that keeps its traffic from the panel gives
+`devtools: false` to each client and to `createBrokerParticipant`. A page whose hook is older than
+the panel — a source of a protocol the panel does not read, or a participant with no reading and no
+record whose hook leaves `read-participants` unanswered — shows a notice to reload the extension in
+`chrome://extensions`, then the page: the panel takes the extension's bundle as DevTools opens, and
+the page's hook as the page loads. The hook watches only while a panel is open — from the first time
+the Bead tab is shown until DevTools closes — so the panel shows what came after it opened, and a
+page nobody inspects pays nothing. While it watches, the hook takes, for each call made, the stack
+that made it, and keeps an envelope's time to a fraction of a millisecond. A server in a Web Worker
+of the page shows through its client, whose messages the Network panel does not show.
 
 The panel, the hook and what they read are every browser's alike; each browser has its own glue.
 Shared: `hook.ts`, in the page's world at `document_start`; `panel.ts` and `panel.html`, with the

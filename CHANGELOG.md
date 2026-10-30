@@ -7,6 +7,70 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-10-30
+
+### Added
+
+- The trace of a participant's parcels on the TypeScript and C# sides, with guarded listeners,
+  incoming verdicts, link and name transitions, reports and no acceptor's half; its own DevTools
+  source and a Broker view with pulled levels, column filters and recorded detail.
+- Rust, the third language, its core: the envelope's codec, the client and server routers with
+  their service, session and notification managers and the service layer, sessions and credentials
+  with a JWT's verification, the clock it is given and every duration held as spec 1.4 holds it,
+  the trace, the filter and the registry, the in-memory transport, the broker's core over an
+  in-memory broker, the joined transport, and the `proto` codec on Buffa, playing every conformance
+  file its core reaches; its own toolchain, Rust 1.99.1 and edition 2024, clippy's pedantic, nursery
+  and cargo groups and chosen restriction lints denied, a warning an error, unsafe code forbidden,
+  and a CI job of its own on Linux and Windows held to its coverage floor of lines and regions
+  (decision 0044).
+
+### Changed
+
+- The spec moves to 0.10.0 (`spec-v0.10.0`), its companion, `spec/debugging.md`, to 0.5.0
+  (`debugging-v0.5.0`), and the transcoding's companion, `spec/transcoding.md`, to 0.2.1
+  (`transcoding-v0.2.1`).
+- The DevTools filter covers every view, with hidden counts, a stale-hook notice, and Broker panes
+  that keep selection, focus and scroll across readings.
+- The builder's image runs Node 26.13.0, Node 26's first LTS release.
+- `spec/check.py` holds a side that plays part of the corpus to what its steps and stages name
+  ahead, each a row of the support matrix, and fails a row of its differences that has not one cell
+  for each column of its header; `tools/coverage-report.mjs` reads LLVM's coverage
+  export, and fails a floor on a measure that no report measured; `tools/protobuf-conformance.mjs`
+  runs protobuf's conformance suite through the Rust side's codec too, its differential kept to the
+  TypeScript and C# sides. The spec's front matter says a side conforms to section 15 for each
+  transport it offers.
+- The support matrix's row "An id or a revision no C# type holds" is "An id or a revision no typed
+  side holds", the Rust side's `u16` and `u32` beside the C# side's `ushort` and `int`.
+- The documents are brought to 0.9.0: the records, the spec and its companion in form, the READMEs,
+  the support matrix and `CLAUDE.md` state what holds and where Bead goes. Records 0013 and 0015
+  name a participant's parcels and its broker participant in their titles; the matrix's row "Parcel
+  trace allocations" is "What a parcel allocates for its trace", and its row "A page's DevTools
+  hook" is open, the C# and Rust sides' clients coming into a page with their core.
+
+### Fixed
+
+- A broker participant's heartbeat on the C# side reads the time since its ping once, so a timer
+  thread held past its heartbeat drops the connection instead of failing its process.
+- An AMQP 1.0 management answer whose correlation-id is no string, a ulong or a uuid, is dropped on
+  the C# side as on the TypeScript side, its credit given back, and its connection goes on.
+- A router is never entered again from its own turn, on the TypeScript and C# sides as on the Rust
+  side's core: what a listener it calls hands it back, an envelope received or a connection let go,
+  a dispose among them, is taken in a later turn, behind what came before it, and a failed resolver
+  or admission is answered `PROCEDURE_FAILED` whatever its report listener submits (spec 9.0).
+- An AMQP 1.0 management link whose ATTACH is answered with no source or target is refused on the
+  TypeScript side as on the C# side: its DETACH's condition fails the request, and no request goes
+  on its pair (AMQP 1.0 §2.6.3, spec 15.33).
+- An AMQP 1.0 stop on the C# side fails each publication without an outcome, sent or waiting for
+  credit, and each subscription awaiting its ATTACH, its inbox's or a name's, with the stop's error,
+  as the TypeScript side does: a publication its library releases as its session ends is never told
+  no subscriber (spec 15.33, 15.35).
+- An AMQP 1.0 sending link whose ATTACH is answered with no target is refused on the TypeScript side
+  as on the C# side: nothing is sent on it, its start fails, and a later one refuses what it held,
+  its link kept; on the C# side a start fails at once on either sender's refusal (spec 15.33).
+- An AMQP 1.0 publication on the C# side asked as its broker ends the sending session, its END
+  answered before AMQPNetLite marks the session ended, goes on the next session, as the TypeScript
+  side's does, rather than being refused with nothing sent (spec 15.33).
+
 ## [0.8.0] - 2026-10-28
 
 ### Added
@@ -2022,7 +2086,8 @@ duration }`: on the C# side `StartedAt`, a `DateTimeOffset`, and `Duration`, a `
   workflows.
 - The licence, Apache-2.0.
 
-[Unreleased]: https://github.com/francisdesjardins/bead/compare/v0.8.0...develop
+[Unreleased]: https://github.com/francisdesjardins/bead/compare/v0.9.0...develop
+[0.9.0]: https://github.com/francisdesjardins/bead/compare/v0.8.0...v0.9.0
 [0.8.0]: https://github.com/francisdesjardins/bead/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/francisdesjardins/bead/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/francisdesjardins/bead/compare/v0.5.0...v0.6.0

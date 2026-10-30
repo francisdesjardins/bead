@@ -1,0 +1,11 @@
+# A warning of rustc, clippy or rustdoc fails the build, here as in CI, as TreatWarningsAsErrors does
+# on the C# side (decision 0044); CARGO_BUILD_WARNINGS=warn releases one run, the nightly's fuzz
+# build among them
+[build]
+warnings = "deny"
+# The browser's WebAssembly target is checked, never run (decision 0044): getrandom's `unsupported`
+# backend, which getrandom names for a target whose JavaScript host it cannot know, so that the core
+# compiles there with no dependency added; a draw returns its error until the core is given its
+# JavaScript, and Bead takes that refusal as a Result
+[target.wasm32-unknown-unknown]
+rustflags = ["--cfg", 'getrandom_backend="unsupported"']

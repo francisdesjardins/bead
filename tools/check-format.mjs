@@ -22,6 +22,7 @@ const ROOT = [
   'CLAUDE.md',
   'beadc.yaml',
   'implementations/dotnet/README.md',
+  'implementations/rust/README.md',
   'examples/hello/README.md',
   'examples/hello/beadc.yaml',
   'examples/hello/buf.yaml',

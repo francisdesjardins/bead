@@ -9,7 +9,8 @@
 //
 // `prepare`, on a release/* or hotfix/* branch, the product's <version> defaulting to the branch's:
 // moves the TypeScript package's version and the builder's where the tree has one, the C# side's
-// <Version> and the project ranges of its lock files and of an example's, each document's line and
+// <Version> and the project ranges of its lock files and of an example's, the Rust workspace's
+// version and its members in the workspace's lock and the locks outside it where the tree has them, each document's line and
 // every conformance file's repeat of it, the two versions beadc's header names in each file it
 // generated, the image each committed wrapper of beadc's names and the spec's version in each
 // blueprint beadc wrote outside spec/, every text changed before any is written; runs the
@@ -34,6 +35,8 @@ import { parseArgs } from 'node:util';
 
 import {
   BUILDER,
+  CARGO,
+  CARGO_LOCK,
   CHANGELOG,
   DOCUMENTS,
   LOCKS,
@@ -42,6 +45,7 @@ import {
   PROPS,
   STATED,
   checkVersions,
+  cargoMembersOf,
   gatherReleases,
   git,
   isDay,
@@ -97,6 +101,50 @@ export const withRepeatedVersion = (text, { key, version }) => {
     pattern: new RegExp(`"${key}": "\\d+\\.\\d+\\.\\d+"`),
     replacement: `"${key}": "${version}"`,
   });
+};
+
+// the Rust workspace's version, its `[workspace.package]` table's alone: a dependency's version is
+// another table's
+export const withCargoVersion = (text, version) => {
+  const table = /^\[workspace\.package\][ \t]*$[\s\S]*?(?=^\[|(?![\s\S]))/m.exec(text);
+  if (table === null) {
+    throw new Error("no [workspace.package] table, where the product's version is due");
+  }
+  const moved = replaceOnce(table[0], {
+    pattern: /^version[ \t]*=[ \t]*"[^"]*"/m,
+    replacement: `version = "${version}"`,
+  });
+  return `${text.slice(0, table.index)}${moved}${text.slice(table.index + table[0].length)}`;
+};
+
+// the locks of the packages outside the workspace that build its crates by path, the fuzz targets
+// and protobuf's conformance testee, each moving the workspace's members and keeping its own
+const OUTER_CARGO_LOCKS = [
+  'implementations/rust/fuzz/Cargo.lock',
+  'implementations/rust/tools/protobuf-conformance/Cargo.lock',
+];
+
+// ! a text replacement, not `cargo update --workspace`: the root's tools run no third toolchain
+// (decision 0005). Each member of a Cargo lock, a `[[package]]` of no `source`, at the version: the
+// text, and how many members it holds; `members`, when given, names only those to move, so the
+// fuzz package's own version stays its manifest's
+export const withCargoLockMembers = (text, version, { members } = {}) => {
+  let count = 0;
+  const blocks = text.split(/(?=^\[\[package\]\][ \t]*$)/m).map((block) => {
+    if (
+      !/^\[\[package\]\]/.test(block) ||
+      /^source[ \t]*=/m.test(block.split(/^\[(?!\[package\]\])/m)[0]) ||
+      (members !== undefined && !members.has(/^name[ \t]*=[ \t]*"([^"]*)"/m.exec(block)?.[1]))
+    ) {
+      return block;
+    }
+    count += 1;
+    return replaceOnce(block, {
+      pattern: /^version[ \t]*=[ \t]*"[^"]*"/m,
+      replacement: `version = "${version}"`,
+    });
+  });
+  return { text: blocks.join(''), count };
 };
 
 // every project range of a lock file, as NuGet writes it from <Version>, at the version: the text,
@@ -470,6 +518,21 @@ export const prepare = (root, options = {}) => {
     stage(BUILDER, (text) => withPackageVersion(text, product));
   }
   stage(PROPS, (text) => withPropsVersion(text, product));
+  // a tree with a Rust workspace moves its members in each lock that holds them
+  if (readText(join(root, CARGO)) !== null) {
+    stage(CARGO, (text) => withCargoVersion(text, product));
+    stage(CARGO_LOCK, (text) => withCargoLockMembers(text, product).text);
+    const members = new Set(
+      cargoMembersOf(readText(join(root, CARGO_LOCK)) ?? '').map(({ name }) => {
+        return name;
+      })
+    );
+    for (const lock of OUTER_CARGO_LOCKS) {
+      if (readText(join(root, lock)) !== null) {
+        stage(lock, (text) => withCargoLockMembers(text, product, { members }).text);
+      }
+    }
+  }
   // * a hotfix starts from main, whose CI keeps the waivers of the release it tags, all moot: the
   // branch compares against that release, where none waives anything
   const moot = kind === 'hotfix' ? breakingWaivers(readText(join(root, CI)) ?? '') : [];

@@ -157,6 +157,10 @@ that stops unsubscribes its names, refuses 503 an OPEN that comes, and closes ea
 
 ## Consequences
 
+The trace of parcels (debugging 13) never hands on a connection's acceptor's half: the pair is
+the connection's capability. A log names the connection by a participant's ordinal and, from
+the third leg, its server's handle, never by that pair.
+
 **Calls spread across a name's participants by connection, not by call**, as HTTP/2's behind a
 connection-level balancer: a client that wants its calls spread holds several connections. A member
 added takes none of the connections already placed, and over a broker devices and services hold
@@ -189,10 +193,10 @@ its certificate place a socket's server. An acceptor that proves itself to its o
 **Its gates**: the broker cases of `spec/transports.json`, both roles — an OPEN accepted and its
 third leg, a half-open connection past `acceptTimeout`, each refusal and what it tells, an OPEN
 copied, a second acceptor's ACCEPT reset and one past its connect, a RESET, a GONE of each
-incarnation, a stop, a group at its bound — played by both sides' players over each side's
-in-memory broker; the place `brokerTransportServer.acceptTimeout` of `spec/durations.json`; and
-what no case plays, a participant's link lost and its incarnation anew, by twins named by one
-sentence on both sides ([`docs/support.md`](../support.md)).
+incarnation, a stop, a group at its bound — played by every side's players over each side's
+in-memory broker; the place `brokerTransportServer.acceptTimeout` of `spec/durations.json`; and what
+no case plays, a participant's link lost and its incarnation anew, by twins named by one sentence on
+every side ([`docs/support.md`](../support.md)).
 
 ## The Tenth Man
 

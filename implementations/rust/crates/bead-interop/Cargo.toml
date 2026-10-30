@@ -1,0 +1,27 @@
+[package]
+name = "francisdesjardins-bead-interop"
+description = "Bead's interop service on the Rust side: its descriptors, its resolvers and its credentials, which the conformance players and the interop serve."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+readme.workspace = true
+keywords.workspace = true
+categories.workspace = true
+publish.workspace = true
+
+[lib]
+name = "bead_interop"
+
+[dependencies]
+bead = { workspace = true }
+tokio = { workspace = true, features = ["rt", "sync", "time"] }
+serde_json = { workspace = true }
+
+[dev-dependencies]
+bead = { workspace = true, features = ["testing"] }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+
+[lints]
+workspace = true

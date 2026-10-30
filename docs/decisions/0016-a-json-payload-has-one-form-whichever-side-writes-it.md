@@ -2,8 +2,8 @@
 
 - **Status**: accepted
 - **Scope**: spec section 17, and the lines that point to it; debugging 4.3 and 10.1;
-  `spec/codecs.json`, its gate, and nine conversations of `spec/conversations.json`; both runtimes'
-  payload codecs, public
+  `spec/codecs.json`, its gate, and nine conversations of `spec/conversations.json`; every
+  runtime's payload codecs, public
   ([0018](0018-a-services-procedures-are-typed-descriptors-served-and-called-through-one-layer.md)),
   and the interop's serializers, which use them; both service managers, where a value does not
   write; the support matrix
@@ -47,8 +47,8 @@ Four inputs reach another outcome, not only other bytes: a byte order mark, a su
 arrays nested, and `1E400`.
 
 Bead asks one behaviour of every language ([0004](0004-one-behaviour-in-every-language.md)): the
-codecs agree, so that the clients the builder generates send one form, and Rust, and each language
-after it, copies one form, not one of two.
+codecs agree, so that the clients the builder generates send one form, and every language, the Rust
+side and each one after it, copies one form, not one of two.
 
 What had to be settled, and the ways weighed for each:
 
@@ -73,12 +73,13 @@ What had to be settled, and the ways weighed for each:
   `{b, a}` by the other are two forms; and RFC 8785's conformance, to anyone who checks it.
 - **RFC 8785 whole, the JSON Canonicalization Scheme**: each object's members sorted by their names'
   UTF-16 code units (RFC 8785 §3.2.3). One value has one form, built in whatever order; the scheme
-  is a standard with test data (its Appendix B) and implementations in many languages, which Rust,
-  and each language after it, takes as it is, where the third way has every language copy an
-  engine's rule for its objects. What it gives up: the author's order on the wire, which RFC 8259 §4
-  and RFC 7493 §2.3 say carries no meaning; and `JSON.stringify` on the TypeScript writer, since
-  every ordinary object holds its array-index names first again: the writer writes such an object by
-  hand, and is 7.7 to 12.5 ms on the payload as tuned (below), against 3.0 to 4.2 for the third way.
+  is a standard with test data (its Appendix B) and implementations in many languages, which the
+  Rust side takes as it is, as each language after it does, where the third way has every language
+  copy an engine's rule for its objects. What it gives up: the author's order on the wire, which RFC
+  8259 §4 and RFC 7493 §2.3 say carries no meaning; and `JSON.stringify` on the TypeScript writer,
+  since every ordinary object holds its array-index names first again: the writer writes such an
+  object by hand, and is 7.7 to 12.5 ms on the payload as tuned (below), against 3.0 to 4.2 for the
+  third way.
 - **Chosen: RFC 8785 whole.**
 
 **A string.** RFC 8785 §3.2.2.2 writes a string as ECMAScript's `JSON.stringify` writes a
@@ -188,7 +189,7 @@ member twice are refused alike.
 
 **A value that does not write.** Refusing `NaN`, a `Date`, a member `undefined` and a surrogate
 alone makes it ordinary. For a notification: the throw handed to the code that notifies, which
-breaks the rule both sides keep that notifying never fails its caller; or **reported, as its router
+breaks the rule every side keeps that notifying never fails its caller; or **reported, as its router
 reports a notification that does not go, and counted `failed` for each subscription it was for,
 chosen**, as a notification too large for one envelope is (`spec/debugging.md` 10.1). For a request:
 its failure told as its `rx`; or **its value written before its trace and its deprecation, chosen**,
@@ -252,18 +253,18 @@ bytes it writes of it; the TypeScript reader turns `-0` into `0`.
 **`text` is UTF-8, read strictly, its leading U+FEFF kept; `raw` is its bytes.** A `text` reader
 refuses bytes that are not UTF-8, and a `text` writer a string holding a surrogate alone.
 
-**What does not read, or does not write, fails where it is**, the same on both sides:
+**What does not read, or does not write, fails where it is**, the same on every side:
 
 - a request's payload that does not read is answered `PAYLOAD_UNDECODABLE`, before its resolver sees
-  it (`service-resolver.ts`; `ServiceManager.Resolver.cs`);
+  it (`service-resolver.ts`; `ServiceManager.Resolver.cs`; `managers/service.rs`);
 - a result's fails its call `PAYLOAD_UNDECODABLE` at the requester (`service-requester.ts`;
-  `ServiceManager.Requester.cs`);
+  `ServiceManager.Requester.cs`; `managers/service.rs`);
 - a notification's is reported `PAYLOAD_UNDECODABLE`, and no callback hears it (`notification.ts`,
-  `Notification.cs`);
+  `Notification.cs`, `managers/service/notification.rs`);
 - a request's value that does not write fails its call before anything goes, written before its
   trace and its deprecation: no call is made, and nothing is traced;
 - an answer's, as a resolver that fails: `PROCEDURE_FAILED`, reported (`service-resolver.ts`;
-  `ServiceManager.Resolver.cs`);
+  `ServiceManager.Resolver.cs`; `managers/service.rs`);
 - a notification's goes to none of its subscriptions: reported, and counted `failed` for each.
 
 **Where Bead departs from the standards it names, it says so:**
@@ -360,7 +361,7 @@ bytes.
 
 **A canonical form can be about five times its payload.** `1e20`, 4 bytes, is written
 `100000000000000000000`, 21. A C# reader given 16 MiB of `[9e20,9e20,…]` writes about 74 MB of
-canonical bytes before it parses them again, and on both sides an echo of a payload within
+canonical bytes before it parses them again, and on every side an echo of a payload within
 `maximumPayloadBytes` can answer one past it, which then fails as a result its side cannot send
 (spec 12.1, 12.2): answered `PROCEDURE_FAILED`, reporting `PAYLOAD_TOO_LARGE`. Every other token is
 written as long as it came, or shorter.
@@ -377,12 +378,29 @@ lets a claim's string hold a surrogate alone that "names nothing"; a payload is 
 The two share the strict decoder and the scan for names given twice; making 13.8 read as 17 does is
 a decision of its own.
 
-**Rust, and each language after it, pays for two algorithms**: the shortest digits of a double,
-laid out as ECMAScript lays them out — Ryū, or Grisu with a fallback, as RFC 8785 §3.2.2.3 points
-to — and the nearest double of a number's text, a tie to the even, which its platform's JSON reader
-may not give, as .NET's does not; and names compared by UTF-16 code units, which a side whose
+**The Rust side, and each language after it, pays for two algorithms**: the shortest digits of a
+double, laid out as ECMAScript lays them out — Ryū, or Grisu with a fallback, as RFC 8785 §3.2.2.3
+points to — and the nearest double of a number's text, a tie to the even, which its platform's JSON
+reader may not give, as .NET's does not; and names compared by UTF-16 code units, which a side whose
 strings are UTF-8 converts, or compares in UTF-8 where no name holds a character past U+FFFF
-together with one from U+E000 to U+FFFF (RFC 8785 §3.2.3's note).
+together with one from U+E000 to U+FFFF (RFC 8785 §3.2.3's note). The Rust side pays as the next
+paragraph says: its numbers spelled by `ryu-js`, a number's text read to its nearest double by
+Rust's own `str::parse`, and its names compared by their UTF-16 code units.
+
+**The Rust side reads, holds and writes a `json` payload by its own parts**
+([0044](0044-rust-one-owner-per-router-traits-no-unsafe-two-parameters-no-warning.md)): **its reader
+is Bead's own**, a strict RFC 8259 tokenizer with 17.5's checks in the TypeScript reader's order,
+since `serde_json` refuses a surrogate alone outright, keeps the last of a name given twice and caps
+its depth at 128; a number whose value is a whole number within 64 bits is read as an integer, any
+other as the nearest double, `-0` as the double `-0.0`, both written back through the double; **its
+value is `serde_json::Value`**, the ecosystem's, re-sorted by UTF-16 code units as it is written;
+**its writer is Bead's own**, its numbers spelled by `ryu-js`, which spells every double of
+`spec/codecs.json` as RFC 8785 does; and **`bead::json::to_value`**, a `serde::Serializer` of Bead's
+own, is a resolver's road from its type to a value, refusing a double that is not finite at any
+depth, `not a finite number`, where `serde_json::to_value`, `Value::from` and `json!` write `null`.
+A `String` holds no surrogate alone, a `serde_json` map no name twice, and Rust has no `undefined`:
+five entries of `spec/codecs.json` are excused from it, each by the platform row; NaN and Infinity
+are played.
 
 **A value a side's type cannot hold** is a platform row of the matrix.
 

@@ -7,6 +7,8 @@ import { EnvelopeKind } from '../../../src/router/shared/constants';
 import { writeEnvelope } from '../../../src/router/shared/envelope';
 import { INVALID_DETAILS, specDetailOf } from '../../__tests__/traffic';
 import { readBody } from '../../wire';
+import { loadView } from './page';
+import type { keeperOf } from '../../model/filter';
 import type { IExchange, wireViewOf } from '../wire';
 
 // interfaces
@@ -182,4 +184,43 @@ test.describe('wireViewOf', () => {
       })
     ).toBeLessThanOrEqual(0);
   });
+});
+
+test('filters Wire envelopes by procedure, direction and kind and counts their hidden rows', async ({
+  page,
+}) => {
+  await loadView(page, 'wire');
+  for (const [spec, hidden] of [
+    ['-offer', 2],
+    ['offer', 0],
+    ['d(rx)', 1],
+    ['e(failure)', 1],
+  ] as const) {
+    await page.evaluate(
+      ({ filter, exchange }) => {
+        const { view } = globalThis as unknown as {
+          view: { keeperOf: typeof keeperOf; wireViewOf: typeof wireViewOf };
+        };
+        if (typeof exchange.response === 'object') {
+          exchange.response.envelopes = exchange.response.envelopes.slice(0, 1);
+        }
+        document.getElementById('root')?.replaceChildren(
+          ...view.wireViewOf({
+            copy: () => {},
+            exchanges: [exchange],
+            isAvailable: true,
+            nameOf: () => {
+              return 'offer';
+            },
+            keeper: view.keeperOf(filter),
+          })
+        );
+      },
+      { filter: spec, exchange: EXCHANGE }
+    );
+    await expect(page.locator('.filter-count')).toHaveText(
+      `${String(hidden)} hidden by the filter`
+    );
+    await expect(page.locator('.envelopes > div')).toHaveCount(2 - hidden);
+  }
 });

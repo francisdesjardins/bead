@@ -1,0 +1,12 @@
+# What Cargo, cargo-fuzz and cargo-llvm-cov write
+/target/
+/fuzz/target/
+/fuzz/corpus/
+/fuzz/findings/
+/fuzz/artifacts/
+/fuzz/coverage/
+/coverage/
+# the testee of protobuf's conformance suite: the set tools/protobuf-conformance.mjs writes into
+# it, and its build
+/tools/protobuf-conformance/generated/
+/tools/protobuf-conformance/target/

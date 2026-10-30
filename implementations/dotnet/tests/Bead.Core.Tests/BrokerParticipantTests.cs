@@ -523,7 +523,7 @@ public sealed class BrokerParticipantTests
 
         Assert.Equal(held, participant.Gauges().Counts);
         Assert.Equal(new Dictionary<string, long>(held) { ["names"] = 1 }, server.Gauges().Counts);
-        Assert.Equal(new Dictionary<string, long> { ["largestPartsBytes"] = 2_048, ["partsBytes"] = 4_096 }, participant.Gauges().Ceilings);
+        Assert.Equal(new Dictionary<string, long> { ["largestPartsBytes"] = 2_048, ["partsBytes"] = 4_096, ["unsentBytes"] = 65_536, ["largestUnsentBytes"] = 65_536 }, participant.Gauges().Ceilings);
         Assert.Equal(new Dictionary<string, long> { ["connections"] = 8, ["halfOpen"] = 8, ["largestPartsBytes"] = 2_048, ["largestUnsentBytes"] = 65_536, ["partsBytes"] = 4_096 }, server.Gauges().Ceilings);
     }
 

@@ -57,6 +57,24 @@ describe('the targets', () => {
     assert.ok(TWINS.includes('jwt') && TWINS.includes('ws-handshake'));
   });
 
+  test('knows the Rust side’s targets, the twins its core holds', () => {
+    assert.deepEqual(TARGETS.rust, ['envelope', 'payload-codecs', 'debug-filter', 'jwt']);
+    assert.ok(
+      TARGETS.rust.every((target) => {
+        return TWINS.includes(target);
+      })
+    );
+    assert.match(SIDES.rust, /implementations[\\/]rust[\\/]fuzz$/u);
+    assert.deepEqual(argumentsOf(['run', 'rust', 'jwt']), {
+      command: 'run',
+      side: 'rust',
+      target: 'jwt',
+      inputs: [],
+      flags: [],
+    });
+    assert.equal(argumentsOf(['run', 'rust', 'http-fields']), undefined);
+  });
+
   test("keep each in its side's folder, and the blueprint's beside beadc", () => {
     for (const side of Object.keys(SIDES)) {
       for (const target of TWINS) {

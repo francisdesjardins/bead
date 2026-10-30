@@ -57,6 +57,20 @@ const conditionOf = (error: unknown): string => {
     : condition;
 };
 
+// ! a terminus an ATTACH left null, which rhea reads back as a typed null rather than as none
+export const isNone = (terminus: unknown): boolean => {
+  return (
+    terminus === undefined ||
+    terminus === null ||
+    (typeof terminus === 'object' && 'value' in terminus && terminus.value === null)
+  );
+};
+
+// the terminus its peer's ATTACH named for `link`: its source, or its target
+export const terminusOf = (link: Receiver | Sender, end: 'source' | 'target'): unknown => {
+  return (link as unknown as { remote: { attach: Record<string, unknown> } }).remote.attach[end];
+};
+
 /**
  * Answers at once the DETACH its peer sent `link`, as its close is heard: rhea answers one a turn
  * later, which would go after an END its session sent meanwhile, a frame on a channel that ended
@@ -132,8 +146,8 @@ export const requestOf = (
       source: { address: MANAGEMENT_ADDRESS },
       target: { address: MANAGEMENT_ADDRESS },
     };
-    let receiver: Receiver | undefined;
     let isSettled = false;
+    let refused: string | undefined;
 
     const detach = (): void => {
       connection.removeListener('disconnected', lost);
@@ -168,10 +182,23 @@ export const requestOf = (
         answerDetach(link);
         fail(
           new GenericError(
-            `the management's ${what} ended as it asked ${method} ${path}: ${conditionOf(error)}`
+            refused === what
+              ? `its broker refused the management's ${what} as it asked ${method} ${path}: ${conditionOf(error)}`
+              : `the management's ${what} ended as it asked ${method} ${path}: ${conditionOf(error)}`
           )
         );
       };
+    };
+    // * an ATTACH that names no terminus of its own is a refusal, its DETACH to follow, whose
+    // condition fails the request (AMQP 1.0 §2.6.3): nothing more goes on its pair
+    const isRefused = (link: Receiver | Sender, what: 'receiver' | 'sender'): boolean => {
+      if (!isNone(terminusOf(link, what === 'sender' ? 'target' : 'source'))) {
+        return false;
+      }
+
+      refused = what;
+
+      return true;
     };
     const send = (): void => {
       if (isSettled) {
@@ -200,17 +227,22 @@ export const requestOf = (
     sender.on('sender_close', ended('sender'));
     // * the receiver opened once the sender's ATTACH was answered, never beside it
     sender.once('sender_open', () => {
-      if (isSettled) {
+      if (isSettled || isRefused(sender, 'sender')) {
         return;
       }
 
-      receiver = session.open_receiver({ ...common, autoaccept: false, credit_window: 0 });
+      const receiver = session.open_receiver({ ...common, autoaccept: false, credit_window: 0 });
+
       // ! its credit granted with its ATTACH, before its request goes: rhea writes a session's
       // transfers before its links' FLOWs, and RabbitMQ ends a session asked with none
       receiver.add_credit(1);
       receiver.on('receiver_error', ended('receiver'));
       receiver.on('receiver_close', ended('receiver'));
       receiver.once('receiver_open', () => {
+        if (isRefused(receiver, 'receiver')) {
+          return;
+        }
+
         if (sender.sendable()) {
           send();
         } else {
@@ -225,7 +257,7 @@ export const requestOf = (
 
         // ! an answer to another request is none of this one's
         if (isSettled || answered !== messageId) {
-          receiver?.add_credit(1);
+          receiver.add_credit(1);
 
           return;
         }

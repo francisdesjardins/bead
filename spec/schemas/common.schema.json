@@ -68,7 +68,7 @@
         "additionalProperties": false,
         "properties": {
           "row": { "type": "string", "minLength": 1 },
-          "language": { "enum": ["TypeScript", "C#"] }
+          "language": { "enum": ["TypeScript", "C#", "Rust"] }
         }
       }
     },

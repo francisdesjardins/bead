@@ -1,0 +1,156 @@
+# The Rust side of Bead (decision 0044): a virtual workspace, its crates mirroring the C# assemblies,
+# each package qualified by its owner and its library short, as NuGet's FrancisDesjardins.Bead.* is
+# over the assemblies Bead.* (decision 0008)
+[workspace]
+resolver = "3"
+members = ["crates/*", "benches"]
+# the fuzz targets and the testee of protobuf's conformance suite, each a project of its own, built
+# with what this workspace does not hold: the nightly, and a descriptor set the suite's tool writes
+exclude = ["fuzz", "tools/protobuf-conformance"]
+
+[workspace.package]
+# the product's one version, which tools/release.mjs moves with the TypeScript manifest and the
+# C# side's Directory.Build.props
+version = "0.9.0"
+edition = "2024"
+# the floor is the pin, rust-toolchain.toml's
+rust-version = "1.99.1"
+license = "Apache-2.0"
+repository = "https://github.com/francisdesjardins/bead"
+readme = "README.md"
+keywords = ["bead", "rpc", "protocol", "binary", "envelope"]
+categories = ["network-programming", "encoding"]
+# until a first publication sets it, as the TypeScript manifest stays private and the C# projects
+# carry no package id
+publish = false
+
+[workspace.dependencies]
+bead = { package = "francisdesjardins-bead", path = "crates/bead" }
+bead-interop = { package = "francisdesjardins-bead-interop", path = "crates/bead-interop" }
+bead-protobuf = { package = "francisdesjardins-bead-protobuf", path = "crates/bead-protobuf" }
+bead-protobuf-build = { package = "francisdesjardins-bead-protobuf-build", path = "crates/bead-protobuf-build" }
+tokio = { version = "1.54.1", default-features = false }
+tokio-util = { version = "0.7.20", default-features = false }
+bytes = { version = "1.12.1", default-features = false, features = ["std"] }
+serde = { version = "1.0.229", default-features = false, features = ["std"] }
+serde_json = { version = "1.0.154", default-features = false, features = ["std"] }
+ryu-js = { version = "1.0.3", default-features = false }
+p256 = { version = "0.14.0", default-features = false, features = ["ecdsa"] }
+hmac = { version = "0.13.0", default-features = false }
+sha2 = { version = "0.11.1", default-features = false }
+getrandom = { version = "0.4.3", default-features = false }
+libtest-mimic = { version = "0.8.2" }
+syn = { version = "3.0.9", default-features = false, features = ["full", "parsing", "visit"] }
+proc-macro2 = { version = "1.0.107", default-features = false, features = ["span-locations"] }
+# the proto payload's codec: Buffa's runtime, its descriptors and dynamic message, its well-known
+# types, and its generator, fed the set protoc writes at builder/protoc.json's pin
+buffa = { version = "0.9.2", default-features = false, features = ["std"] }
+buffa-descriptor = { version = "0.9.2", default-features = false, features = ["std", "reflect"] }
+buffa-types = { version = "0.9.2", default-features = false, features = ["std", "reflect"] }
+buffa-build = { version = "0.9.2" }
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+missing_docs = "deny"
+unreachable_pub = "deny"
+missing_debug_implementations = "deny"
+unused_qualifications = "deny"
+unused_lifetimes = "deny"
+redundant_lifetimes = "deny"
+non_ascii_idents = "forbid"
+let_underscore_drop = "deny"
+trivial_casts = "deny"
+trivial_numeric_casts = "deny"
+unit_bindings = "deny"
+unnameable_types = "deny"
+unexpected_cfgs = "deny"
+
+[workspace.lints.rustdoc]
+broken_intra_doc_links = "deny"
+private_intra_doc_links = "deny"
+missing_crate_level_docs = "deny"
+unescaped_backticks = "deny"
+
+[workspace.lints.clippy]
+all = { level = "deny", priority = -1 }
+pedantic = { level = "deny", priority = -1 }
+nursery = { level = "deny", priority = -1 }
+cargo = { level = "deny", priority = -1 }
+# nursery lints allowed, each with its reason
+# rustc's unreachable_pub asks pub(crate) of an item a private module offers the crate; this one
+# asks pub of the same item, so no visibility passes both: rustc's form is kept
+redundant_pub_crate = { level = "allow", priority = 1 }
+# a public const fn is a promise only a major release takes back; const is written where the code
+# needs one, never because it could be
+missing_const_for_fn = { level = "allow", priority = 1 }
+# restriction lints, chosen one by one
+# a library never ends its caller: every refusal is an Err
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+todo = "deny"
+unimplemented = "deny"
+unreachable = "deny"
+exit = "deny"
+# a parser of a peer's bytes indexes, slices and counts by checked operations only
+indexing_slicing = "deny"
+string_slice = "deny"
+get_unwrap = "deny"
+arithmetic_side_effects = "deny"
+as_conversions = "deny"
+# a library writes nothing of its own; the trace is its voice
+dbg_macro = "deny"
+print_stdout = "deny"
+print_stderr = "deny"
+# defence in depth beside forbid(unsafe_code)
+mem_forget = "deny"
+undocumented_unsafe_blocks = "deny"
+unnecessary_safety_comment = "deny"
+unnecessary_safety_doc = "deny"
+# an exception is #[expect(lint, reason = "…")], which fails once it stops matching
+allow_attributes = "deny"
+allow_attributes_without_reason = "deny"
+# an Arc cloned as Arc::clone, no lock where an atomic or the owner serves
+clone_on_ref_ptr = "deny"
+rc_mutex = "deny"
+mutex_atomic = "deny"
+# a test's assertion says what it holds
+missing_assert_message = "deny"
+assertions_on_result_states = "deny"
+# a new variant of a wire enum breaks every match that must decide it
+wildcard_enum_match_arm = "deny"
+rest_pat_in_fully_bound_structs = "deny"
+unneeded_field_pattern = "deny"
+# an error is named, kept or said dropped
+try_err = "deny"
+map_err_ignore = "deny"
+error_impl_error = "deny"
+let_underscore_must_use = "deny"
+let_underscore_untyped = "deny"
+# one surface, read alike
+impl_trait_in_params = "deny"
+partial_pub_fields = "deny"
+same_name_method = "deny"
+multiple_inherent_impl = "deny"
+# edition 2018's form, envelope.rs beside envelope/, never mod.rs
+mod_module_files = "deny"
+# one form each
+str_to_string = "deny"
+format_push_string = "deny"
+verbose_file_reads = "deny"
+needless_raw_strings = "deny"
+redundant_type_annotations = "deny"
+unseparated_literal_suffix = "deny"
+empty_structs_with_brackets = "deny"
+if_then_some_else_none = "deny"
+deref_by_slicing = "deny"
+infinite_loop = "deny"
+mixed_read_write_in_expression = "deny"
+suspicious_xor_used_as_pow = "deny"
+string_lit_chars_any = "deny"
+float_cmp_const = "deny"
+lossy_float_literal = "deny"
+fn_to_numeric_cast_any = "deny"
+filetype_is_file = "deny"
+large_include_file = "deny"
+create_dir = "deny"

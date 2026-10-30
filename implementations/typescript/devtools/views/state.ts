@@ -7,16 +7,18 @@
 // dependencies
 
 import type { ICall } from '../model/calls';
+import { KEEP_ALL, keepsCall, type IKeeper } from '../model/filter';
 import { startOf } from '../model/facts';
 import type { ISpan } from '../model/scale';
 import { type IStateAt, stateAt } from '../model/state';
 import { bytesOf, clockOf, numberOf, schemeNameOf, spanOf } from '../model/words';
-import { factsOf, make } from './dom';
+import { filterCountOf, replaceKeeping, currentOf, listen, factsOf, make } from './dom';
 
 // interfaces
 
 /** What the State view draws. */
 export interface IStateView {
+  keeper?: IKeeper;
   /** The moment shown; none for Live. */
   at: number | undefined;
   calls: readonly ICall[];
@@ -235,10 +237,30 @@ const sectionsOf = (state: IStateAt, view: IStateView): Node[] => {
 
 /** The State view at its cursor. */
 export const stateViewOf = (view: IStateView): Node[] => {
-  const { calls, span } = view;
+  const { span } = view;
+  const keeper = view.keeper ?? KEEP_ALL;
+  const calls = view.calls.filter((call) => {
+    return keepsCall(call, keeper);
+  });
+  const hiddenAt = (moment: number): number => {
+    const state = stateAt(view.calls, moment);
+    return [
+      ...state.inFlight,
+      ...state.subscriptions.map(({ call }) => {
+        return call;
+      }),
+      ...state.transfers.map(({ call }) => {
+        return call;
+      }),
+    ].filter((call) => {
+      return !keepsCall(call, keeper);
+    }).length;
+  };
+  const count = filterCountOf(hiddenAt(view.at ?? view.now));
 
   if (span === undefined) {
     return [
+      count,
       make('p', {
         className: 'note',
         text: 'No call yet: the state builds from the calls the panel hears.',
@@ -265,24 +287,31 @@ export const stateViewOf = (view: IStateView): Node[] => {
   const body = make('div', { children: sectionsOf(stateAt(calls, at), view) });
   // * the cursor redraws what it reads in place, so a drag is never cut short by a redraw of itself
   const show = (moment: number): void => {
-    when.textContent = clockOf(moment);
-    body.replaceChildren(...sectionsOf(stateAt(calls, moment), view));
+    currentOf(when).textContent = clockOf(moment);
+    currentOf(count).textContent = `${String(hiddenAt(moment))} hidden by the filter`;
+    replaceKeeping(currentOf(body), sectionsOf(stateAt(calls, moment), view));
   };
 
   range.id = 'at';
   live.id = 'live';
-  range.addEventListener('input', () => {
-    const moment = Number(range.value);
+  listen(range, {
+    type: 'input',
+    handle: () => {
+      const moment = Number(currentOf(range).value);
 
-    view.onScrub(moment);
-    live.setAttribute('aria-pressed', 'false');
-    show(moment);
+      view.onScrub(moment);
+      currentOf(live).setAttribute('aria-pressed', 'false');
+      show(moment);
+    },
   });
-  live.addEventListener('click', () => {
-    view.onScrub(undefined);
-    live.setAttribute('aria-pressed', 'true');
-    range.value = range.max;
-    show(view.now);
+  listen(live, {
+    type: 'click',
+    handle: () => {
+      view.onScrub(undefined);
+      currentOf(live).setAttribute('aria-pressed', 'true');
+      currentOf(range).value = currentOf(range).max;
+      show(view.now);
+    },
   });
 
   const scrub = make('div', {
@@ -298,5 +327,5 @@ export const stateViewOf = (view: IStateView): Node[] => {
     className: 'scrub',
   });
 
-  return [scrub, body];
+  return [count, scrub, body];
 };

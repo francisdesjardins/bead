@@ -4,7 +4,8 @@ import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { EnvelopeKind } from '../../src/router/shared/constants';
 import { writeEnvelope } from '../../src/router/shared/envelope';
-import type { BackgroundMessage } from '../messages';
+import type { ActivityRecord, BackgroundMessage } from '../messages';
+import type { ILog } from '../model/log';
 import { assertBuilt, EXTENSION } from './fixtures';
 import { IDS, REFUSED_INVALID, T0, TRAFFIC } from './traffic';
 
@@ -1518,3 +1519,468 @@ test.describe('the panel', () => {
     await expect(page.locator('#toast')).toHaveText('Copied');
   });
 });
+
+test('round-trips participant retention and pause gaps with the initial reading and counts an imported unknown kind', async ({
+  page,
+}) => {
+  await openPanel(page);
+  const inspection = {
+    id: 'ada',
+    inbox: ['bead', 'i', 'ada'],
+    incarnation: '0102',
+    isLinked: true,
+    names: ['echo'],
+    gauges: { counts: { partsBytes: 0 }, ceilings: { partsBytes: 64 }, anomalies: [] },
+  };
+  await deliver(page, {
+    type: 'sources',
+    sources: [{ id: 5, protocol: 1, side: 'participant', inspection }],
+  });
+  const records = Array.from({ length: 1002 }, (_, index) => {
+    return {
+      kind: 'participant' as const,
+      source: 5,
+      at: 100 + index,
+      event: 'parcel' as const,
+      direction: 'rx' as const,
+      parcelKind: 'PING',
+      bytes: 28,
+      sequence: index + 1,
+      connection: 1,
+      verdict: 'taken' as const,
+    };
+  });
+  await deliver(page, { type: 'records', dropped: 0, droppedParticipants: 2, records });
+  await page.click('[data-tab="broker"]');
+  await expect(page.locator('#broker')).toContainText('4 let go');
+  await page.click('#record');
+  await deliver(page, {
+    type: 'records',
+    dropped: 0,
+    droppedParticipants: 1,
+    records: records.slice(0, 2),
+  });
+  await expect(page.locator('#broker')).toContainText('7 let go');
+  await deliver(page, { type: 'sources', sources: [] });
+  const [download] = await Promise.all([page.waitForEvent('download'), page.click('#export')]);
+  const log = JSON.parse(await readFile(await download.path(), 'utf8')) as ILog;
+  expect(log.version).toBe(2);
+  expect(log.droppedParticipants).toBe(7);
+  expect(log.records).toHaveLength(1000);
+  expect(log.sources[0]?.inspection).toEqual(inspection);
+  await page.locator('#import-file').setInputFiles({
+    name: 'participant-log.json',
+    mimeType: 'application/json',
+    buffer: Buffer.from(
+      JSON.stringify({ ...log, records: [...log.records, { kind: 'future', source: 5 }] })
+    ),
+  });
+  await expect(page.locator('#toast')).toContainText('1 unknown records skipped');
+  await expect(page.locator('#broker')).toContainText('ada · up');
+  await expect(page.locator('#broker')).toContainText('7 let go');
+  await deliver(page, {
+    type: 'participants',
+    inspections: [{ source: 5, inspection: { ...inspection, id: 'live-reading' } }],
+  });
+  await expect(page.locator('#broker')).not.toContainText('live-reading');
+  await expect(page.locator('#broker tbody tr[data-event="link"]')).toHaveCount(0);
+});
+
+test('tells a stale page hook by an unanswered participant reading and by a protocol mismatch', async ({
+  page,
+}) => {
+  await page.clock.install();
+  await openPanel(page);
+  await deliver(page, { type: 'page-connected' });
+  await deliver(page, { type: 'sources', sources: [{ id: 1, side: 'participant', protocol: 1 }] });
+  await expect(page.locator('#hook-notice')).toBeHidden();
+  await page.clock.runFor(2_100);
+  await expect(page.locator('#hook-notice')).toContainText(
+    'reload the extension in chrome://extensions, then the page'
+  );
+  await deliver(page, { type: 'participants', inspections: [] });
+  await expect(page.locator('#hook-notice')).toBeHidden();
+  await deliver(page, { type: 'sources', sources: [{ id: 1, side: 'client', protocol: 99 }] });
+  await expect(page.locator('#hook-notice')).toBeVisible();
+});
+
+test('holds Broker selection, focus, pane scroll and keyed rows across the second and records added, and follows only its end', async ({
+  page,
+}) => {
+  await page.clock.install();
+  await openPanel(page);
+  await deliver(page, { type: 'page-connected' });
+  await deliver(page, { type: 'sources', sources: [{ id: 1, side: 'participant', protocol: 1 }] });
+  const records = Array.from({ length: 160 }, (_, index) => {
+    return {
+      kind: 'participant' as const,
+      source: 1,
+      event: 'parcel' as const,
+      direction: 'tx' as const,
+      parcelKind: 'DATA',
+      sequence: index + 3,
+      more: false,
+      connection: 1,
+      connectionHandle: 'server',
+      topic: ['bead', 'i', 'reader'],
+      at: T0 + index,
+      bytes: 32,
+      carriedBytes: 4,
+    };
+  });
+  await deliver(page, { type: 'records', dropped: 0, records });
+  await page.click('[data-tab="broker"]');
+  const pane = page.locator('.participant-table');
+  await expect
+    .poll(async () => {
+      return pane.evaluate((node) => {
+        return node.scrollHeight - node.scrollTop - node.clientHeight;
+      });
+    })
+    .toBeLessThanOrEqual(2);
+  await deliver(page, {
+    type: 'records',
+    dropped: 0,
+    records: [{ ...records[0], sequence: 163, at: T0 + 163 } as (typeof records)[number]],
+  });
+  await expect(page.locator('#broker tbody tr')).toHaveCount(161);
+  await expect
+    .poll(async () => {
+      return pane.evaluate((node) => {
+        return node.scrollHeight - node.scrollTop - node.clientHeight;
+      });
+    })
+    .toBeLessThanOrEqual(2);
+  await pane.evaluate((node) => {
+    node.scrollTop = 200;
+    node.scrollLeft = 80;
+  });
+  await deliver(page, {
+    type: 'records',
+    dropped: 0,
+    records: [{ ...records[0], sequence: 164, at: T0 + 164 } as (typeof records)[number]],
+  });
+  await expect(page.locator('#broker tbody tr')).toHaveCount(162);
+  expect(
+    await pane.evaluate((node) => {
+      return node.scrollTop;
+    })
+  ).toBe(200);
+  await page.locator('#broker tbody tr').nth(8).click();
+  await expect(page.locator('#broker tr[aria-selected="true"]')).toHaveCount(1);
+  await pane.evaluate((node) => {
+    node.scrollTop = 200;
+    node.scrollLeft = 80;
+  });
+  await page.locator('.participant-detail').evaluate((node) => {
+    node.scrollTop = 40;
+  });
+  const before = await page.evaluate(() => {
+    const pane = document.querySelector('.participant-table') as HTMLElement;
+    const row = document.querySelector('#broker tr[aria-selected="true"]') as HTMLElement;
+    Object.assign(globalThis, { heldParcel: row });
+    return {
+      key: row.dataset['row'],
+      top: pane.scrollTop,
+      left: pane.scrollLeft,
+      detail: document.querySelector('.participant-detail')?.scrollTop,
+    };
+  });
+  await page.clock.runFor(1_100);
+  await deliver(page, { type: 'participants', inspections: [] });
+  await deliver(page, {
+    type: 'records',
+    dropped: 0,
+    records: [{ ...records[0], sequence: 200, at: T0 + 200 } as (typeof records)[number]],
+  });
+  await expect(page.locator('#broker tbody tr')).toHaveCount(163);
+  expect(
+    await page.evaluate(() => {
+      const pane = document.querySelector('.participant-table') as HTMLElement;
+      const row = document.querySelector('#broker tr[aria-selected="true"]') as HTMLElement;
+      return {
+        key: row.dataset['row'],
+        top: pane.scrollTop,
+        left: pane.scrollLeft,
+        detail: document.querySelector('.participant-detail')?.scrollTop,
+        same: row === (globalThis as unknown as { heldParcel: Element }).heldParcel,
+        focused: document.activeElement === pane,
+      };
+    })
+  ).toEqual({ ...before, same: true, focused: true });
+  await pane.press('End');
+  await expect(page.locator('#broker tr[aria-selected="true"]')).toContainText('200');
+  await pane.press('Home');
+  await expect(page.locator('#broker tr[aria-selected="true"]')).toContainText('3');
+  await pane.press('ArrowDown');
+  await expect(page.locator('#broker tr[aria-selected="true"]')).toContainText('4');
+  await pane.press('Enter');
+  await expect(page.locator('.participant-detail')).toBeFocused();
+  await page.locator('.participant-detail').press('Escape');
+  await expect(pane).toBeFocused();
+  for (const theme of ['light', 'dark']) {
+    await page.evaluate((value) => {
+      document.documentElement.dataset['colorScheme'] = value;
+    }, theme);
+    expect(await contrastOf(page, '#broker tr[aria-selected="true"]')).toBeGreaterThanOrEqual(4.5);
+    expect(await contrastOf(page, '#broker .participant-controls button')).toBeGreaterThanOrEqual(
+      4.5
+    );
+    for (const width of [1280, 480]) {
+      await page.setViewportSize({ width, height: 800 });
+      expect(
+        await page.locator('#broker').evaluate((node) => {
+          return node.scrollHeight <= node.clientHeight;
+        })
+      ).toBe(true);
+      expect(
+        await page.evaluate(() => {
+          return document.documentElement.scrollHeight <= innerHeight;
+        })
+      ).toBe(true);
+      await page.screenshot({
+        path: test
+          .info()
+          .outputPath(`broker-panel-${theme}-${width === 1280 ? 'wide' : 'narrow'}.png`),
+      });
+    }
+  }
+});
+
+test('filters State and Metrics by procedure and tells their hidden counts while selectors keep unlabelled series', async ({
+  page,
+}) => {
+  await openWithTraffic(page);
+  await deliver(page, {
+    type: 'expositions',
+    expositions: [
+      {
+        source: 1,
+        text: [
+          'bead_client_call_started_total{service="1",procedure="metrics",type="request"} 2',
+          'bead_client_call_started_total{service="1",procedure="reader",type="request"} 1',
+          'bead_connections 3',
+        ].join('\n'),
+      },
+    ],
+  });
+  await page.click('[data-tab="metrics"]');
+  for (const [spec, visible] of [
+    ['-metrics', ['reader']],
+    ['metrics', ['metrics']],
+    ['d(rx)', ['metrics', 'reader']],
+    ['e(result)', ['metrics', 'reader']],
+  ] as const) {
+    await page.fill('#filter', spec);
+    await expect(page.locator('#metrics tbody tr')).toHaveCount(visible.length);
+    for (const name of visible) {
+      await expect(page.locator(`#metrics tr[data-procedure="${name}"]`)).toHaveCount(1);
+    }
+    await expect(page.locator('#metrics .filter-count')).toHaveText(
+      `${String(2 - visible.length)} hidden by the filter`
+    );
+    await expect(page.locator('#metrics pre')).toContainText('bead_connections 3');
+  }
+  await page.click('[data-tab="state"]');
+  await page.fill('#filter', '-counter');
+  await expect(page.locator('#state')).not.toContainText('counter #');
+  await expect(page.locator('#state .filter-count')).toHaveText('1 hidden by the filter');
+  await page.fill('#filter', 'counter');
+  await expect(page.locator('#state')).toContainText('counter #');
+  await expect(page.locator('#state')).not.toContainText('download #');
+});
+
+test('applies the one filter across Calls, Timeline and Broker, counts hidden rows, and exports every record through import', async ({
+  page,
+}) => {
+  await openPanel(page);
+  await deliver(page, { type: 'page-connected' });
+  await deliver(page, {
+    type: 'sources',
+    sources: [
+      { id: 1, side: 'client', protocol: 1 },
+      { id: 10, side: 'participant', protocol: 1 },
+    ],
+  });
+  const records: ActivityRecord[] = [];
+  for (const [index, name] of ['stats', 'reader'].entries()) {
+    const at = T0 + index * 10;
+    const callId = index + 1;
+    const step = {
+      kind: 'call' as const,
+      source: 1,
+      callId,
+      connectionHandle: 'server',
+      procedureId: callId,
+      procedureName: name,
+      serviceId: 1,
+      serviceRevision: 1,
+      type: 'request',
+      startedAt: at,
+    };
+    records.push({ ...step, direction: 'tx' });
+    for (const direction of ['tx', 'rx'] as const) {
+      const envelope = {
+        kind: 'envelope' as const,
+        source: 1,
+        connectionHandle: 'server',
+        direction,
+        at: at + (direction === 'tx' ? 1 : 2),
+        header: {
+          kind: direction === 'tx' ? EnvelopeKind.REQUEST : EnvelopeKind.RESULT,
+          callId,
+          ...(direction === 'tx' ? { procedureId: callId, serviceId: 1, serviceRevision: 1 } : {}),
+        },
+      };
+      const parcel = {
+        kind: 'participant' as const,
+        source: 10,
+        event: 'parcel' as const,
+        direction,
+        connection: 1,
+        connectionHandle: 'server',
+        parcelKind: 'DATA',
+        sequence: index + 3,
+        more: false,
+        at: envelope.at + (direction === 'tx' ? 0.1 : -0.1),
+        verdict: direction === 'rx' ? ('taken' as const) : undefined,
+      };
+      records.push(...(direction === 'tx' ? [envelope, parcel] : [parcel, envelope]));
+    }
+    records.push({ ...step, direction: 'rx', duration: 3 });
+  }
+  records.push({
+    kind: 'participant',
+    source: 10,
+    event: 'parcel',
+    direction: 'tx',
+    connection: 1,
+    connectionHandle: 'server',
+    parcelKind: 'PING',
+    sequence: 5,
+    at: T0 + 30,
+  });
+  await deliver(page, { type: 'records', dropped: 0, records });
+  await page.click('[data-tab="broker"]');
+  for (const spec of ['-stats', 'reader', 'd(rx)', 'e(result)']) {
+    await page.fill('#filter', spec);
+    await expect(page.locator('#broker tbody tr')).toHaveCount(3);
+    await expect(page.locator('#broker .filter-count')).toHaveText('2 hidden by the filter');
+    await expect(page.locator('#broker tbody')).toContainText('PING');
+  }
+  await page.fill('#filter', '-stats');
+  await expect(page.locator('#broker tr[data-procedure="reader"]')).toHaveCount(2);
+  await expect(page.locator('#broker tr[data-procedure="stats"]')).toHaveCount(0);
+  await page.click('[data-tab="calls"]');
+  await expect(page.locator('#calls tr.call')).toHaveCount(1);
+  await expect(page.locator('#footer .filter-count')).toHaveText('1 hidden by the filter');
+  await page.locator('#calls [data-twist]').click();
+  await page.fill('#filter', 'reader,e(result)');
+  await expect(page.locator('#calls tr.envelope')).toHaveCount(1);
+  await expect(page.locator('#footer .filter-count')).toHaveText('2 hidden by the filter');
+  await page.fill('#filter', '-stats');
+  await page.click('[data-tab="timeline"]');
+  await expect(page.locator('#timeline')).toContainText('reader');
+  await expect(page.locator('#timeline')).not.toContainText('stats');
+  await expect(page.locator('#timeline .filter-count')).toHaveText('1 hidden by the filter');
+  const [download] = await Promise.all([page.waitForEvent('download'), page.click('#export')]);
+  const log = JSON.parse(await readFile(await download.path(), 'utf8')) as ILog;
+  expect(log.records).toHaveLength(records.length);
+  await page.locator('#import-file').setInputFiles({
+    name: 'capture.json',
+    mimeType: 'application/json',
+    buffer: Buffer.from(JSON.stringify(log)),
+  });
+  await page.click('[data-tab="broker"]');
+  await expect(page.locator('#broker tbody tr')).toHaveCount(3);
+  await page.locator('#import-file').setInputFiles({
+    name: 'gap.json',
+    mimeType: 'application/json',
+    buffer: Buffer.from(JSON.stringify({ ...log, droppedParticipants: 1 })),
+  });
+  await expect(page.locator('#broker tbody tr')).toHaveCount(5);
+  await expect(page.locator('#broker .filter-count')).toHaveText('0 hidden by the filter');
+});
+
+for (const [tab, selector] of [
+  ['calls', '#calls tr.call .twist'],
+  ['timeline', '#timeline button'],
+  ['state', '#live'],
+  ['metrics', '#metrics tbody button'],
+  ['wire', '#wire .exchange button'],
+] as const) {
+  test(`keeps the ${tab} view’s focused element through the second and records added`, async ({
+    page,
+  }) => {
+    await page.clock.install();
+    await openWithTraffic(page);
+    await deliver(page, {
+      type: 'expositions',
+      expositions: [
+        {
+          source: 1,
+          text: 'bead_client_call_started_total{service="1",procedure="reader",type="request"} 1',
+        },
+      ],
+    });
+    await page.evaluate(() => {
+      (globalThis as unknown as { fake: IFake }).fake.finish({
+        startedDateTime: new Date().toISOString(),
+        request: {
+          method: 'POST',
+          url: 'http://localhost/bead',
+          postData: { mimeType: 'application/prs.bead', text: '' },
+        },
+        response: { status: 200, content: { mimeType: 'application/prs.bead' } },
+        getContent: (callback: (text: string, encoding: string) => void) => {
+          callback('', '');
+        },
+      });
+    });
+    await page.click(`[data-tab="${tab}"]`);
+    const element = page.locator(selector).first();
+    await element.focus();
+    await element.evaluate((node) => {
+      Object.assign(globalThis, { heldFocus: node });
+    });
+    await deliver(page, {
+      type: 'records',
+      dropped: 0,
+      records: [
+        {
+          kind: 'call',
+          source: 1,
+          callId: 999,
+          connectionHandle: 'server',
+          procedureName: 'flight',
+          procedureId: 999,
+          serviceId: 1,
+          serviceRevision: 1,
+          type: 'request',
+          direction: 'tx',
+          startedAt: Date.now(),
+        },
+      ],
+    });
+    await page.clock.runFor(1_100);
+    if (tab === 'metrics') {
+      await deliver(page, {
+        type: 'expositions',
+        expositions: [
+          {
+            source: 1,
+            text: 'bead_client_call_started_total{service="1",procedure="reader",type="request"} 2',
+          },
+        ],
+      });
+    }
+    await expect
+      .poll(async () => {
+        return page.evaluate(() => {
+          const { heldFocus } = globalThis as unknown as { heldFocus: Element };
+          return heldFocus.isConnected && document.activeElement === heldFocus;
+        });
+      })
+      .toBe(true);
+  });
+}

@@ -1,0 +1,37 @@
+// spec/transcoding.proto's Requiring, and the part of its Edges that reaches no required field,
+// declared again for the runtime codec's tests: transcoding.proto imports the gateway's options
+// and buf's validate, which the Rust side generates with its gateway. Their fields keep their
+// numbers there, so a payload's bytes are the other sides' tests' bytes.
+syntax = "proto3";
+
+package bead.test;
+
+import "google/protobuf/any.proto";
+import "google/protobuf/duration.proto";
+import "google/protobuf/field_mask.proto";
+import "google/protobuf/struct.proto";
+import "google/protobuf/timestamp.proto";
+import "transcoding-required.proto";
+
+// A message of fields protobuf requires held at each depth: alone, as a repeated field's item, as
+// a map's value, and in an Any, which the walk does not look into.
+message Requiring {
+  bead.transcoding.v1.Needs needs = 1;
+  repeated bead.transcoding.v1.Needs many = 2;
+  map<string, bead.transcoding.v1.Needs> by_key = 3;
+  google.protobuf.Any any = 4;
+  int32 an_int32 = 5;
+}
+
+// Messages that reach no required field, cycles among them: itself, and a Struct, which holds a
+// Value, which holds a Struct.
+message Edges {
+  google.protobuf.Timestamp at = 1;
+  google.protobuf.Duration took = 2;
+  google.protobuf.FieldMask mask = 3;
+  google.protobuf.Struct extra = 4;
+  google.protobuf.Value value = 5;
+  google.protobuf.Any any = 6;
+  Edges child = 22;
+  repeated Edges children = 23;
+}

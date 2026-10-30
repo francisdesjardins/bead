@@ -87,7 +87,7 @@ to one meaning of `advance`. The why of each rule is in the decisions:
 - [0043](../docs/decisions/0043-over-amqp-1-0-a-participant-is-one-connection-whose-exclusive-inbox-ends-with-it-and-a-parcel-one-message-of-one-profile-each-counted-to-its-byte.md):
   AMQP 1.0's binding of a broker, on RabbitMQ 4, section 15.
 
-**Version: 0.9.0**, of layout `0xA1`, its broker parcels of layout `0xB1`. Each of its
+**Version: 0.10.0**, of layout `0xA1`, its broker parcels of layout `0xB1`. Each of its
 conformance files repeats it as its `specVersion`, and follows its schema in
 [`schemas/`](schemas/). The interop's blueprint,
 [`interop-blueprint.json`](interop-blueprint.json), and what its service does,
@@ -97,14 +97,14 @@ play. **Status: every section is written.**
 What a side traces, filters and counts beside the wire is stated apart, under a version of its own,
 in its companion [`debugging.md`](debugging.md), whether a side builds those or leaves them out.
 What a side's gateway answers over HTTP of its procedures is stated apart, under a version of its
-own, in its companion [`transcoding.md`](transcoding.md), whether a side offers one or not. A
-side conforms to the wire by sections 1 to 15, a broker's binding among them, to what it declares
-by section 16, to what its codecs write and read by section 17, for each encoding it offers, and
-to its procedures' rules by section 18: a relay, which reads no payload, offers none. A side does
-what each entry of the files that play those sections says, the clock cases holding `advance` to one
-meaning, but an entry whose
-`differs` names a row of the support matrix, [`docs/support.md`](../docs/support.md), and the
-side's language. A unit no entry cites binds it all the same.
+own, in its companion [`transcoding.md`](transcoding.md), whether a side offers one or not. A side
+conforms to the wire by sections 1 to 15, for each transport it offers, a broker's binding among
+them, to what it declares by section 16, to what its codecs write and read by section 17, for each
+encoding it offers, and to its procedures' rules by section 18: a relay, which reads no payload,
+offers none. A side does what each entry of the files that play those sections says, the clock cases
+holding `advance` to one meaning, but an entry whose `differs` names a row of the support matrix,
+[`docs/support.md`](../docs/support.md), and the side's language. A unit no entry cites binds it all
+the same.
 
 ## 1. Conventions
 
@@ -349,6 +349,10 @@ carry any detail of that error, an exception's message least of all: the error i
 call went (section 8.1), as a generic message is all an unexpected error returns to its consumer in
 OWASP's Application Security Verification Standard
 ([ASVS 5.0 §16.5.1](https://github.com/OWASP/ASVS/blob/v5.0.0/5.0/en/0x25-V16-Security-Logging-and-Error-Handling.md)).
+A side tells its application what it reports in the turn that raised it; what that application
+hands the side from within the telling — an envelope its transport carries, a connection let go —
+the side takes in a later turn, behind what came before it, never within that one, as section 15.13
+hands an envelope on: a report never changes what its turn answers.
 
 9.1. A call is a request and its answer, under one call id on one connection. Either side opens
 calls: a client its requests, a server its commands to a client. A requester draws its call ids in
@@ -2111,8 +2115,15 @@ closes its connection, and its inbox is never attached again in place, since a r
 hands its unsettled messages back on the same connection. A name's receiver its broker ends is
 attached again once, on a session of its own; that refused, or the name lost again on the same
 link, is its link lost. A sending session that ends refuses each publication it held, its link
-kept, and the next publication begins another. A participant's stop detaches its receivers and
-closes its connection with no error. No link of an id takes another over. Nothing of a link reaches
+kept, and the next publication begins another. A link of its own, its management's or a sending
+one, whose ATTACH is answered with no terminus of its own, no target to a sender and no source to a
+receiver, is refused, its DETACH to follow, and nothing is sent on it (AMQP 1.0 §2.6.3,
+[attach](https://docs.oasis-open.org/amqp/core/v1.0/os/amqp-core-transport-v1.0-os.html#type-attach)):
+a sending link refused as it starts fails its start, and one begun later refuses each publication
+it held, its link kept. A participant's stop detaches its receivers and closes its connection with
+no error; each publication without an outcome, sent or waiting for credit, and each subscription
+awaiting its ATTACH fail with its stop, none of them a no subscriber, which `released` alone tells
+(section 15.35). No link of an id takes another over. Nothing of a link reaches
 another: no library reconnects it, recovers it, or holds what it publishes while it is down, and
 what is asked of a link that is down is refused at once.
 

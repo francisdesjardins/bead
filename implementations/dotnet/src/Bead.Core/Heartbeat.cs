@@ -10,6 +10,13 @@ internal sealed record HeartbeatHooks
     public required Action Drop { get; init; }
 }
 
+/// <summary>The platform clock a heartbeat runs on, replaceable by its unit tests.</summary>
+internal sealed record HeartbeatOptions
+{
+    /// <summary>The platform's clock by default.</summary>
+    public TimeProvider? Clock { get; init; }
+}
+
 /// <summary>
 /// One connection's heartbeat over a broker (spec 15.21), the twin of the TypeScript side's
 /// <c>heartbeat.ts</c>: it pings a connection once nothing of it has come for its heartbeat, and
@@ -23,7 +30,7 @@ internal sealed class Heartbeat
     private readonly TimeSpan _heartbeat;
     private readonly HeartbeatHooks _hooks;
     // the platform's: what a heartbeat plays on in real time
-    private readonly TimeProvider _clock = TimeProvider.System;
+    private readonly TimeProvider _clock;
     private readonly Lock _gate = new();
     private readonly ITimer? _timer;
     private long _lastHeard;
@@ -31,10 +38,11 @@ internal sealed class Heartbeat
     private bool _isStopped;
 
     /// <summary>A heartbeat of <paramref name="heartbeat"/>, held already, its timer armed; none for <see cref="Timeout.InfiniteTimeSpan"/>.</summary>
-    public Heartbeat(TimeSpan heartbeat, HeartbeatHooks hooks)
+    public Heartbeat(TimeSpan heartbeat, HeartbeatHooks hooks, HeartbeatOptions? options = null)
     {
         _heartbeat = heartbeat;
         _hooks = hooks;
+        _clock = options?.Clock ?? TimeProvider.System;
         _lastHeard = _clock.GetTimestamp();
 
         if (heartbeat != Timeout.InfiniteTimeSpan)
@@ -92,7 +100,10 @@ internal sealed class Heartbeat
 
             if (_pingedAt is { } pingedAt)
             {
-                if (_clock.GetElapsedTime(pingedAt) >= _heartbeat)
+                // ! read once: a second read, past its heartbeat, arms the timer for less than nothing
+                var unanswered = _clock.GetElapsedTime(pingedAt);
+
+                if (unanswered >= _heartbeat)
                 {
                     _isStopped = true;
                     act = _hooks.Drop;
@@ -100,7 +111,7 @@ internal sealed class Heartbeat
                 }
                 else
                 {
-                    next = _heartbeat - _clock.GetElapsedTime(pingedAt);
+                    next = _heartbeat - unanswered;
                 }
             }
             else if (silent >= _heartbeat)

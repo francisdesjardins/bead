@@ -46,6 +46,15 @@ import {
   type ISilenceHeartbeat,
 } from './heartbeat';
 import { noop } from './noop';
+import { announceParticipantToDevtools } from './participant-devtools';
+import {
+  type IParticipantDebugEvent,
+  type ParcelVerdict,
+  participantHexOf,
+  participantParcelOf,
+} from './participant-debug';
+export { PARCEL_VERDICTS } from './participant-debug';
+export type { IParticipantDebugEvent, ParcelVerdict } from './participant-debug';
 import type {
   BrokerDelivery,
   BrokerPublished,
@@ -82,6 +91,8 @@ export type {
 export interface IBrokerParticipantOptions {
   /** Its one link to its broker: the adapter of that broker's client. */
   adapter: IBrokerAdapter;
+  /** Announces this participant to the page’s hook unless false; independent of each client’s option. */
+  devtools?: boolean | undefined;
   /**
    * Milliseconds from an envelope's first part before `minimumBodyBytesPerSecond` holds its parts,
    * at both ends (spec 15.20): from 1 to 2³¹ − 1, rounded to the nearest whole one; 0 and
@@ -153,6 +164,10 @@ export interface IBrokerParticipant {
   readonly incarnation: Uint8Array | undefined;
   /** Whether its link is up, its inbox subscribed. */
   readonly isLinked: boolean;
+  /** Whether a listener watches its trace of parcels (debugging 13). */
+  readonly isDebugging: boolean;
+  /** The names its broker holds for it. */
+  readonly names: ReadonlySet<string>;
   readonly root: string;
   /**
    * What it holds: `connections`, those open, and `halfOpen`, those whose third leg has not come;
@@ -161,8 +176,11 @@ export interface IBrokerParticipant {
    */
   gauges(): IGauges;
   off(event: 'error', listener: (error: Error) => void): this;
+  off(event: 'debug', listener: (event: IParticipantDebugEvent) => void): this;
   /** What it reports of its own: a message that is no parcel, or its link given up on. */
   on(event: 'error', listener: (error: Error) => void): this;
+  /** Each parcel's verdict, its link's transitions, its names and its reports. */
+  on(event: 'debug', listener: (event: IParticipantDebugEvent) => void): this;
   /** Starts its link, once: its incarnation drawn, its inbox subscribed. */
   start(options?: { signal?: AbortSignal | undefined }): Promise<void>;
   /** Closes each of its connections with 1001, then ends its link cleanly, so no will goes. */
@@ -178,6 +196,8 @@ export interface IBrokerParticipant {
 export interface IBrokerConnectionOwner {
   /** Its third leg came, at its acceptor: the connection opens. */
   readonly opened?: (() => void) | undefined;
+  /** Its server's handle once drawn, or `server` on a client. */
+  readonly connectionHandle?: (() => string | undefined) | undefined;
   /** An envelope came whole, with the credential its DATA carried. */
   envelope(message: { credential?: string | undefined; data: Uint8Array }): void;
   /** It ended: clean by a CLOSE of 1000 alone. */
@@ -199,6 +219,7 @@ export interface IBrokerConnection {
   readonly peer: IBrokerPeer;
   /** What its broker has not taken yet of what it published. */
   readonly unsentBytes: number;
+  readonly maximumUnsentBytes: number;
   /** Closes it with a CLOSE of `code`, forgotten as it goes; its owner told, clean for 1000 alone. */
   close(code: number): void;
   /** Forgets it, sending nothing: a half-open connection whose third leg never came. */
@@ -419,7 +440,7 @@ export const createBrokerParticipant = (options: IBrokerParticipantOptions): IBr
   // a DATA that carries a credential lives twice its heartbeat in its broker, none without one (spec
   // 15.22)
   const credentialLife = heartbeat === Infinity ? undefined : 2 * heartbeat;
-  const emitter = createEmitter<{ error: [Error] }>();
+  const emitter = createEmitter<{ error: [Error]; debug: [IParticipantDebugEvent] }>();
   const held = createHeldBytes(heldBytesBudget);
   const partsBounds = {
     bodyGracePeriod,
@@ -444,6 +465,7 @@ export const createBrokerParticipant = (options: IBrokerParticipantOptions): IBr
   // the departures it subscribes, by peer, while it holds a connection with it
   const departures = new Map<string, { count: number; isAsked: boolean; isHeld: boolean }>();
 
+  let ordinal = 0;
   let incarnation: Uint8Array | undefined;
   let linking: Promise<void> | undefined;
   let isLinked = false;
@@ -456,8 +478,45 @@ export const createBrokerParticipant = (options: IBrokerParticipantOptions): IBr
   // each link and each down its own, so that what a former link asked does nothing on the next
   let epoch = 0;
 
+  const isDebugging = (): boolean => {
+    return emitter.listenerCount('debug') > 0;
+  };
+  const debug = (event: IParticipantDebugEvent): void => {
+    emitter.emitEach('debug', {
+      onError: (reason) => {
+        emitter.emitEach('error', { onError: noop, params: [toError(reason)] });
+      },
+      params: [event],
+    });
+  };
   const report = (error: Error): void => {
+    if (isDebugging()) {
+      debug({ event: 'report', report: error.message });
+    }
     emitter.emitEach('error', { onError: noop, params: [error] });
+  };
+  const traceParcel = (
+    parcel: IParcelPrefix | undefined,
+    event: Omit<IParticipantDebugEvent, 'event'>
+  ): void => {
+    debug({
+      ...(parcel === undefined ? {} : participantParcelOf(parcel)),
+      ...event,
+      event: 'parcel',
+    });
+  };
+  const transition = (
+    state: 'up' | 'down' | 'taken-over' | 'stopped',
+    ended?: readonly number[]
+  ): void => {
+    if (isDebugging()) {
+      debug({
+        event: 'link',
+        state,
+        incarnation: incarnation === undefined ? undefined : participantHexOf(incarnation),
+        ended,
+      });
+    }
   };
 
   // a publication with its life, where its adapter offers one and one is asked
@@ -474,8 +533,21 @@ export const createBrokerParticipant = (options: IBrokerParticipantOptions): IBr
   const publish = (
     topic: BrokerTopic,
     payload: Uint8Array,
-    options?: { expiresAfter?: number | undefined }
+    options?: {
+      expiresAfter?: number | undefined;
+      parcel?: IParcel | undefined;
+      record?: IConnectionRecord | undefined;
+    }
   ): Promise<BrokerPublished | undefined> => {
+    if (options?.parcel !== undefined) {
+      traceParcel(options.parcel, {
+        bytes: payload.length,
+        direction: 'tx',
+        topic,
+        connection: options.record?.ordinal,
+        connectionHandle: options.record?.handle(),
+      });
+    }
     return adapter
       .publish(publicationOf(topic, { expiresAfter: options?.expiresAfter, payload }))
       .catch(() => {
@@ -502,6 +574,9 @@ export const createBrokerParticipant = (options: IBrokerParticipantOptions): IBr
         entry.group === undefined ? {} : { group: entry.group }
       );
       entry.isHeld = asked === epoch;
+      if (entry.isHeld && isDebugging()) {
+        debug({ event: 'names', name, isHeld: true, group: entry.group });
+      }
 
       return;
     }
@@ -518,6 +593,9 @@ export const createBrokerParticipant = (options: IBrokerParticipantOptions): IBr
 
       // ! nothing asks it again before this settles: each ask after the one before it
       entry.isHeld = false;
+      if (asked === epoch && isDebugging()) {
+        debug({ event: 'names', name, isHeld: false, group: entry.group });
+      }
     }
   };
 
@@ -575,19 +653,26 @@ export const createBrokerParticipant = (options: IBrokerParticipantOptions): IBr
   // ── connections ──
 
   interface IConnectionRecord {
+    readonly ordinal: number;
+    handle(): string | undefined;
     readonly connection: IBrokerConnection;
     /** Its peer's id and incarnation, which a GONE names. */
     readonly peer: IBrokerPeer;
     /** Dropped as its link went down: unclean, unreported, nothing sent. */
     drop(): void;
-    take(parcel: IParcel): void;
-    violate(read: { prefix: IParcelPrefix; reason: string }): void;
+    take(parcel: IParcel, bytes: number, options?: { flags?: number | undefined }): void;
+    violate(
+      read: { prefix: IParcelPrefix; reason: string },
+      bytes: number,
+      options?: { flags?: number | undefined }
+    ): void;
   }
 
   const connect: IBrokerParticipantPort['connect'] = (
     { acceptor, isOpener, opener, peer },
     { isSecure = adapter.isSecure, maximumUnsentBytes, owner }
   ) => {
+    const connectionOrdinal = ++ordinal;
     const key = pairOf({ acceptor, opener });
     const peerInbox = topicOf('i', peer.id);
     const received = createBrokerSequence(2);
@@ -625,12 +710,15 @@ export const createBrokerParticipant = (options: IBrokerParticipantOptions): IBr
       options?: { expiresAfter?: number | undefined }
     ): void => {
       const isReset = fields.kind === ParcelKind.RESET;
-      const bytes = writeParcel({
+      const parcel: IParcel = {
         ...fields,
+        flags: (fields.flags ?? 0) | (fields.credential === undefined ? 0 : ParcelFlag.CREDENTIAL),
+        layout: PARCEL_LAYOUT,
         acceptor,
         opener,
         sequence: isReset ? 0 : nextSend,
-      });
+      };
+      const bytes = writeParcel(parcel);
 
       // ! held before its sequence is taken: the CLOSE that loses the connection is the next, with
       // no gap before it
@@ -648,15 +736,17 @@ export const createBrokerParticipant = (options: IBrokerParticipantOptions): IBr
       }
 
       unsentBytes += bytes.length;
-      void publish(peerInbox, bytes, options).then((published) => {
-        unsentBytes -= bytes.length;
+      void publish(peerInbox, bytes, isDebugging() ? { ...options, parcel, record } : options).then(
+        (published) => {
+          unsentBytes -= bytes.length;
 
-        // a parcel its broker refused, or no subscriber took: its peer's inbox is gone, as a
-        // dropped socket's peer
-        if (published !== BROKER_PUBLISHED.TAKEN) {
-          end(false);
+          // a parcel its broker refused, or no subscriber took: its peer's inbox is gone, as a
+          // dropped socket's peer
+          if (published !== BROKER_PUBLISHED.TAKEN) {
+            end(false);
+          }
         }
-      });
+      );
     };
 
     const closeWith = (code: number): void => {
@@ -676,9 +766,18 @@ export const createBrokerParticipant = (options: IBrokerParticipantOptions): IBr
 
       sendParcel({ code, kind: ParcelKind.CLOSE });
       forget();
-      owner.report(
-        new GenericError(`${owner.subject()} is closed with ${String(code)}: ${reason}`)
+      const error = new GenericError(
+        `${owner.subject()} is closed with ${String(code)}: ${reason}`
       );
+      if (isDebugging()) {
+        debug({
+          event: 'report',
+          report: error.message,
+          connection: record.ordinal,
+          connectionHandle: record.handle(),
+        });
+      }
+      owner.report(error);
       owner.end(false);
     };
 
@@ -726,8 +825,29 @@ export const createBrokerParticipant = (options: IBrokerParticipantOptions): IBr
       }
     };
 
+    let incomingBytes = 0;
+    let incomingOptions: { flags?: number | undefined } | undefined;
+    const trace = (parcel: IParcelPrefix, verdict: ParcelVerdict): void => {
+      if (incomingOptions !== undefined) {
+        traceParcel(parcel, {
+          bytes: incomingBytes,
+          flags: incomingOptions.flags,
+          direction: 'rx',
+          topic: inbox,
+          verdict,
+          connection: record.ordinal,
+          connectionHandle: record.handle(),
+          ...(verdict === 'loss' ? { awaited: received.awaited, came: parcel.sequence } : {}),
+        });
+      }
+    };
     const record: IConnectionRecord = {
+      ordinal: connectionOrdinal,
+      handle: () => {
+        return isOpener ? 'server' : owner.connectionHandle?.();
+      },
       connection: {
+        maximumUnsentBytes,
         acceptor,
         get isHalfOpen() {
           return isHalfOpen;
@@ -789,16 +909,20 @@ export const createBrokerParticipant = (options: IBrokerParticipantOptions): IBr
       drop: () => {
         end(false);
       },
-      take: (parcel) => {
+      take: (parcel, bytes, incoming: { flags?: number | undefined } | undefined) => {
+        incomingOptions = incoming;
+        incomingBytes = bytes;
         beat?.heard();
 
         if (parcel.kind === ParcelKind.RESET) {
+          trace(parcel, 'taken');
           end(false);
 
           return;
         }
 
         if (parcel.layout !== PARCEL_LAYOUT) {
+          trace(parcel, 'taken');
           lose({
             code: CloseCode.PROTOCOL_ERROR,
             reason: `a parcel of a layout to come, ${hexOfByte(parcel.layout)}`,
@@ -810,10 +934,12 @@ export const createBrokerParticipant = (options: IBrokerParticipantOptions): IBr
         const verdict = received.take(parcel.sequence);
 
         if (verdict === SEQUENCE_VERDICTS.COPY) {
+          trace(parcel, 'copy');
           return undefined;
         }
 
         if (verdict === SEQUENCE_VERDICTS.LOSS) {
+          trace(parcel, 'loss');
           lose(gapOf({ awaited: received.awaited, came: parcel.sequence }));
 
           return;
@@ -825,6 +951,7 @@ export const createBrokerParticipant = (options: IBrokerParticipantOptions): IBr
           owner.opened?.();
         }
 
+        trace(parcel, parcel.kind >= FIRST_ADVISORY_KIND ? 'advisory' : 'taken');
         if (parcel.kind >= FIRST_ADVISORY_KIND) {
           return undefined;
         }
@@ -862,7 +989,13 @@ export const createBrokerParticipant = (options: IBrokerParticipantOptions): IBr
             return;
         }
       },
-      violate: ({ prefix, reason }) => {
+      violate: (
+        { prefix, reason },
+        bytes,
+        incoming: { flags?: number | undefined } | undefined
+      ) => {
+        incomingOptions = incoming;
+        incomingBytes = bytes;
         beat?.heard();
 
         // a kind to come is taken in its order: a copy dropped, a gap a loss
@@ -870,16 +1003,19 @@ export const createBrokerParticipant = (options: IBrokerParticipantOptions): IBr
           const verdict = received.take(prefix.sequence);
 
           if (verdict === SEQUENCE_VERDICTS.COPY) {
+            trace(prefix, 'copy');
             return;
           }
 
           if (verdict === SEQUENCE_VERDICTS.LOSS) {
+            trace(prefix, 'loss');
             lose(gapOf({ awaited: received.awaited, came: prefix.sequence }));
 
             return;
           }
         }
 
+        trace(prefix, 'does-not-read');
         lose({ code: CloseCode.PROTOCOL_ERROR, reason: `a parcel that does not read: ${reason}` });
       },
     };
@@ -934,10 +1070,15 @@ export const createBrokerParticipant = (options: IBrokerParticipantOptions): IBr
       return;
     }
 
-    void publish(
-      topicOf('i', peerId),
-      writeParcel({ acceptor, kind: ParcelKind.RESET, opener, sequence: 0 })
-    );
+    const parcel = {
+      acceptor,
+      kind: ParcelKind.RESET,
+      layout: PARCEL_LAYOUT,
+      flags: 0,
+      opener,
+      sequence: 0,
+    };
+    void publish(topicOf('i', peerId), writeParcel(parcel), isDebugging() ? { parcel } : undefined);
   };
 
   const refuse = (open: IParcel, status: number): void => {
@@ -945,16 +1086,20 @@ export const createBrokerParticipant = (options: IBrokerParticipantOptions): IBr
       return;
     }
 
+    const parcel = {
+      acceptor: ZERO_HALF,
+      kind: ParcelKind.REFUSE,
+      layout: PARCEL_LAYOUT,
+      flags: 0,
+      ...(status === 426 ? { layouts: [PARCEL_LAYOUT] } : {}),
+      opener: open.opener,
+      sequence: 1,
+      status,
+    };
     void publish(
       topicOf('i', open.id),
-      writeParcel({
-        acceptor: ZERO_HALF,
-        kind: ParcelKind.REFUSE,
-        ...(status === 426 ? { layouts: [PARCEL_LAYOUT] } : {}),
-        opener: open.opener,
-        sequence: 1,
-        status,
-      })
+      writeParcel(parcel),
+      isDebugging() ? { parcel } : undefined
     );
   };
 
@@ -962,25 +1107,60 @@ export const createBrokerParticipant = (options: IBrokerParticipantOptions): IBr
     const read = readParcel(payload);
 
     if ('refused' in read && read.refused === 'no-parcel') {
+      if (isDebugging()) {
+        traceParcel(undefined, {
+          direction: 'rx',
+          topic: inbox,
+          bytes: payload.length,
+          verdict: 'no-parcel',
+        });
+      }
       report(new GenericError(`a message to the inbox of ${id} is no parcel: ${read.reason}`));
 
       return;
     }
 
     if ('prefix' in read) {
-      return connections.get(pairOf(read.prefix))?.violate(read);
+      const record = connections.get(pairOf(read.prefix));
+      if (record === undefined) {
+        if (isDebugging()) {
+          traceParcel(read.prefix, {
+            flags: payload[2],
+            direction: 'rx',
+            topic: inbox,
+            bytes: payload.length,
+            verdict: 'does-not-read',
+          });
+        }
+      } else {
+        record.violate(read, payload.length, isDebugging() ? { flags: payload[2] } : undefined);
+      }
+      return;
     }
 
     const { parcel } = read;
     const record = connections.get(pairOf(parcel));
 
     if (record !== undefined) {
-      record.take(parcel);
+      record.take(parcel, payload.length, isDebugging() ? { flags: payload[2] } : undefined);
 
       return;
     }
 
     const answers = awaiting.get(keyOf(parcel.opener));
+    if (isDebugging()) {
+      traceParcel(parcel, {
+        flags: payload[2],
+        direction: 'rx',
+        topic: inbox,
+        bytes: payload.length,
+        verdict:
+          answers !== undefined &&
+          (parcel.kind === ParcelKind.ACCEPT || parcel.kind === ParcelKind.REFUSE)
+            ? 'taken'
+            : 'pair-not-held',
+      });
+    }
 
     if (parcel.kind === ParcelKind.ACCEPT && parcel.layout === PARCEL_LAYOUT) {
       // * the first ACCEPT naming its half opens its connect; any other is reset, its router told nothing
@@ -1003,6 +1183,20 @@ export const createBrokerParticipant = (options: IBrokerParticipantOptions): IBr
   const takeAtName = (name: string, payload: Uint8Array): void => {
     const read = readParcel(payload);
 
+    if (isDebugging()) {
+      traceParcel('parcel' in read ? read.parcel : 'prefix' in read ? read.prefix : undefined, {
+        flags: 'parcel' in read || 'prefix' in read ? payload[2] : undefined,
+        direction: 'rx',
+        topic: topicOf('s', name),
+        bytes: payload.length,
+        verdict:
+          'parcel' in read
+            ? read.parcel.kind >= FIRST_ADVISORY_KIND
+              ? 'advisory'
+              : 'taken'
+            : read.refused,
+      });
+    }
     // * no parcel, or an OPEN that does not read, names no connection: dropped and reported
     if (!('parcel' in read)) {
       if (!('prefix' in read)) {
@@ -1030,8 +1224,22 @@ export const createBrokerParticipant = (options: IBrokerParticipantOptions): IBr
   };
 
   // * a GONE closes each connection bound to the id and the incarnation it names, never another
-  const takeAtDeparture = (payload: Uint8Array): void => {
+  const takeAtDeparture = (payload: Uint8Array, topic: BrokerTopic): void => {
     const read = readParcel(payload);
+    if (isDebugging()) {
+      traceParcel('parcel' in read ? read.parcel : 'prefix' in read ? read.prefix : undefined, {
+        flags: 'parcel' in read || 'prefix' in read ? payload[2] : undefined,
+        direction: 'rx',
+        topic,
+        bytes: payload.length,
+        verdict:
+          'parcel' in read
+            ? read.parcel.kind >= FIRST_ADVISORY_KIND
+              ? 'advisory'
+              : 'taken'
+            : read.refused,
+      });
+    }
 
     if (!('parcel' in read) || read.parcel.kind !== ParcelKind.GONE) {
       return;
@@ -1052,7 +1260,24 @@ export const createBrokerParticipant = (options: IBrokerParticipantOptions): IBr
     const [first, kind, token = ''] = topic;
 
     try {
-      if (retained === true || first !== root || topic.length !== 3) {
+      if (
+        retained === true ||
+        first !== root ||
+        topic.length !== 3 ||
+        !(
+          (kind === 'i' && token === id) ||
+          (kind === 's' && reserved.has(token)) ||
+          (kind === 'd' && departures.has(token))
+        )
+      ) {
+        if (isDebugging()) {
+          traceParcel(undefined, {
+            direction: 'rx',
+            topic,
+            bytes: payload.length,
+            verdict: retained === true ? 'retained' : 'off-topic',
+          });
+        }
         return;
       }
 
@@ -1061,7 +1286,7 @@ export const createBrokerParticipant = (options: IBrokerParticipantOptions): IBr
       } else if (kind === 's') {
         takeAtName(token, payload);
       } else if (kind === 'd') {
-        takeAtDeparture(payload);
+        takeAtDeparture(payload, topic);
       }
     } finally {
       message.settle();
@@ -1110,10 +1335,18 @@ export const createBrokerParticipant = (options: IBrokerParticipantOptions): IBr
     isLinked = true;
 
     // * a name its broker refuses at a later link is reported and left unheld
-    for (const [name, { group, isWanted }] of names) {
-      want(name, { group, isWanted }).catch((reason: unknown) => {
-        report(notServedOf(name, reason));
-      });
+    const linkedEpoch = epoch;
+    await Promise.all(
+      [...names].map(async ([name, { group, isWanted }]) => {
+        try {
+          await want(name, { group, isWanted });
+        } catch (reason) {
+          report(notServedOf(name, reason));
+        }
+      })
+    );
+    if (epoch === linkedEpoch) {
+      transition('up');
     }
   };
 
@@ -1203,10 +1436,15 @@ export const createBrokerParticipant = (options: IBrokerParticipantOptions): IBr
     }
 
     for (const { acceptor, opener, peer } of former) {
-      void publish(
-        topicOf('i', peer),
-        writeParcel({ acceptor, kind: ParcelKind.RESET, opener, sequence: 0 })
-      );
+      const parcel = {
+        acceptor,
+        kind: ParcelKind.RESET,
+        layout: PARCEL_LAYOUT,
+        flags: 0,
+        opener,
+        sequence: 0,
+      };
+      void publish(topicOf('i', peer), writeParcel(parcel), isDebugging() ? { parcel } : undefined);
     }
   };
 
@@ -1244,6 +1482,11 @@ export const createBrokerParticipant = (options: IBrokerParticipantOptions): IBr
     isLinked = false;
     epoch += 1;
 
+    const ended = isDebugging()
+      ? [...connections.values()].map((record) => {
+          return record.ordinal;
+        })
+      : undefined;
     const former = [...connections.values()].map(({ connection, peer }) => {
       return { acceptor: connection.acceptor, opener: connection.opener, peer: peer.id };
     });
@@ -1263,6 +1506,7 @@ export const createBrokerParticipant = (options: IBrokerParticipantOptions): IBr
     }
 
     departures.clear();
+    transition(event?.isTakenOver === true ? 'taken-over' : 'down', ended);
 
     if (event?.isTakenOver === true) {
       fence();
@@ -1329,8 +1573,9 @@ export const createBrokerParticipant = (options: IBrokerParticipantOptions): IBr
         throw new GenericError(`the link of ${id} is not up`);
       }
 
-      const payload = writeParcel({
+      const parcel = {
         acceptor: ZERO_HALF,
+        layout: PARCEL_LAYOUT,
         bound: receiveBound,
         flags: adapter.isSecure ? ParcelFlag.SECURE : 0,
         id,
@@ -1338,9 +1583,13 @@ export const createBrokerParticipant = (options: IBrokerParticipantOptions): IBr
         kind: ParcelKind.OPEN,
         opener,
         sequence: 1,
-      });
-
-      return adapter.publish(publicationOf(topicOf('s', name), { expiresAfter, payload }));
+      };
+      const payload = writeParcel(parcel);
+      const topic = topicOf('s', name);
+      if (isDebugging()) {
+        traceParcel(parcel, { direction: 'tx', topic, bytes: payload.length });
+      }
+      return adapter.publish(publicationOf(topic, { expiresAfter, payload }));
     },
     refuse,
     report,
@@ -1363,6 +1612,7 @@ export const createBrokerParticipant = (options: IBrokerParticipantOptions): IBr
     want,
   };
 
+  let withdraw = noop;
   const participant: IBrokerParticipant & { [PARTICIPANT_PORT]: IBrokerParticipantPort } = {
     adapter,
     clock,
@@ -1374,21 +1624,39 @@ export const createBrokerParticipant = (options: IBrokerParticipantOptions): IBr
       return isLinked;
     },
     root,
+    get isDebugging() {
+      return isDebugging();
+    },
+    get names() {
+      return port.names;
+    },
     gauges: () => {
       let halfOpen = 0;
       let unsentBytes = 0;
       let largestPartsBytes = 0;
       let largestUnsentBytes = 0;
+      let unsentCeiling = 0;
+      let largestUnsentCeiling = 0;
 
       for (const { connection } of connections.values()) {
         halfOpen += connection.isHalfOpen ? 1 : 0;
         unsentBytes += connection.unsentBytes;
         largestPartsBytes = Math.max(largestPartsBytes, connection.partsBytes);
-        largestUnsentBytes = Math.max(largestUnsentBytes, connection.unsentBytes);
+        unsentCeiling += connection.maximumUnsentBytes;
+        if (connection.unsentBytes >= largestUnsentBytes) {
+          largestUnsentBytes = connection.unsentBytes;
+          largestUnsentCeiling = connection.maximumUnsentBytes;
+        }
       }
 
       return gaugesOf({
-        ceilings: { largestPartsBytes: maximumEnvelopePartsBytes, partsBytes: held.budget },
+        ceilings: {
+          largestPartsBytes: maximumEnvelopePartsBytes,
+          partsBytes: held.budget,
+          ...(connections.size === 0
+            ? {}
+            : { unsentBytes: unsentCeiling, largestUnsentBytes: largestUnsentCeiling }),
+        },
         counts: {
           connections: connections.size - halfOpen,
           departures: [...departures.values()].filter(({ isHeld }) => {
@@ -1402,13 +1670,27 @@ export const createBrokerParticipant = (options: IBrokerParticipantOptions): IBr
         },
       });
     },
-    off: (event, listener) => {
-      emitter.off(event, listener);
+    off: (
+      event: 'error' | 'debug',
+      listener: ((error: Error) => void) | ((event: IParticipantDebugEvent) => void)
+    ) => {
+      if (event === 'error') {
+        emitter.off(event, listener as (error: Error) => void);
+      } else {
+        emitter.off(event, listener as (event: IParticipantDebugEvent) => void);
+      }
 
       return participant;
     },
-    on: (event, listener) => {
-      emitter.on(event, listener);
+    on: (
+      event: 'error' | 'debug',
+      listener: ((error: Error) => void) | ((event: IParticipantDebugEvent) => void)
+    ) => {
+      if (event === 'error') {
+        emitter.on(event, listener as (error: Error) => void);
+      } else {
+        emitter.on(event, listener as (event: IParticipantDebugEvent) => void);
+      }
 
       return participant;
     },
@@ -1420,14 +1702,28 @@ export const createBrokerParticipant = (options: IBrokerParticipantOptions): IBr
         return;
       }
 
+      const ended = isDebugging()
+        ? [...connections.values()].map((record) => {
+            return record.ordinal;
+          })
+        : undefined;
       for (const record of connections.values()) {
         record.connection.close(CloseCode.GOING_AWAY);
       }
 
       failAwaiting(`the participant ${id} stopped as it connected`);
       isStopped = true;
+      epoch += 1;
       isLinked = false;
       await adapter.stop();
+      for (const entry of names.values()) {
+        entry.isHeld = false;
+      }
+      departures.clear();
+      if (!isTakenOver) {
+        transition('stopped', ended);
+      }
+      withdraw();
     },
     transportClient: (clientOptions) => {
       return createBrokerTransportClient(participant, clientOptions);
@@ -1440,6 +1736,8 @@ export const createBrokerParticipant = (options: IBrokerParticipantOptions): IBr
       return participant.stop();
     },
   };
+
+  withdraw = options.devtools === false ? noop : announceParticipantToDevtools(participant);
 
   return participant;
 };

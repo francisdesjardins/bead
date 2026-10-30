@@ -420,6 +420,9 @@ export const createCallBook = (options?: ICallBookOptions): ICallBook => {
       });
     },
     take: (record) => {
+      if (record.kind === 'participant') {
+        return;
+      }
       taken += 1;
       order.set(record, taken);
 

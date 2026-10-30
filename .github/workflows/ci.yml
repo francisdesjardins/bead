@@ -231,6 +231,118 @@ jobs:
       - run: $YARN test:browser
         working-directory: implementations/typescript
 
+  # ── Rust ─────────────────────────────────────────────────────────────────────
+  # The Rust side's own gate (decision 0044): its toolchain from its rust-toolchain.toml, a warning
+  # an error by its .cargo/config.toml, `[build] warnings = "deny"`; its format, its lints, the
+  # core's lints on the browser's WebAssembly target, its documentation, a build on the default
+  # features alone, where what the test kit alone reaches is left out, its dependencies' advisories,
+  # licences, bans and sources, then its tests and its conformance players under coverage, lines and
+  # regions on the pinned stable, held to the side's floor in tools/coverage-floors.json; and its
+  # fuzz targets built on the nightly pinned by its date, never run. On Windows, its tests alone, as
+  # the user's MSVC toolchain builds them. The registry and the target are cached by the lock and
+  # the toolchain; every build is `--locked`.
+  rust:
+    name: Rust (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-26.04, windows-2025]
+    defaults:
+      run:
+        working-directory: implementations/rust
+        # Git Bash on Windows, so every step reads alike on both
+        shell: bash
+    env:
+      CARGO_TERM_COLOR: always
+      # ! the nightly of the fuzz build alone, by its date: tools/fuzz.mjs's RUST_NIGHTLY names the
+      # same, and both move together, by hand
+      NIGHTLY: nightly-2026-10-27
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      # 1.99.1, its components, clippy, rustfmt and llvm-tools, and its target
+      # wasm32-unknown-unknown, as rust-toolchain.toml names them
+      - run: rustup toolchain install
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cargo/registry
+            implementations/rust/target
+          key: rust-${{ matrix.os }}-${{ hashFiles('implementations/rust/Cargo.lock', 'implementations/rust/rust-toolchain.toml') }}
+          restore-keys: rust-${{ matrix.os }}-
+      - if: matrix.os == 'windows-2025'
+        run: cargo test --workspace --all-features --locked
+      # cargo-deny's and cargo-llvm-cov's prebuilt releases, each checked by its SHA-256 against
+      # the action's manifest
+      - if: matrix.os == 'ubuntu-26.04'
+        uses: taiki-e/install-action@86f7a0ffb25f40114606501a311ebcfaf882ea32 # v2.88.0
+        with:
+          tool: cargo-deny@0.20.2,cargo-llvm-cov@0.9.1
+      - if: matrix.os == 'ubuntu-26.04'
+        run: cargo fmt --all -- --check
+      - if: matrix.os == 'ubuntu-26.04'
+        run: cargo clippy --workspace --all-targets --all-features --locked
+      # the core checked for the browser's WebAssembly, never run, the target rust-toolchain.toml's:
+      # what it links builds there, its spawning and its time through crate::platform and the clock
+      # alone; getrandom's backend for the target is .cargo/config.toml's
+      - if: matrix.os == 'ubuntu-26.04'
+        run: cargo clippy -p francisdesjardins-bead --lib --all-features --locked --target wasm32-unknown-unknown
+      - if: matrix.os == 'ubuntu-26.04'
+        run: cargo doc --workspace --no-deps --all-features --locked
+      # the default features alone: what the test kit alone reaches is cfg'd out, or a warning
+      - if: matrix.os == 'ubuntu-26.04'
+        run: cargo build --workspace --locked
+      - if: matrix.os == 'ubuntu-26.04'
+        run: cargo deny --locked check
+      # the tests under instrumentation, every test binary's profile merged into one LLVM export,
+      # the unit tests, a module's tests.rs and its tests/ folder, and the test kit left out; then
+      # what they ran held to the Rust side's floor
+      - if: matrix.os == 'ubuntu-26.04'
+        run: >-
+          cargo llvm-cov --workspace --all-features --locked --json --summary-only
+          --ignore-filename-regex '(/tests\.rs|/tests/.*|/testing\.rs|/testing/.*)$'
+          --output-path coverage/rust.json
+      - if: matrix.os == 'ubuntu-26.04'
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      # the set the tests' proto messages are generated from, as protoc writes it at its pin, which
+      # builder/tools/fetch-protoc.mjs fetches and checks by its sha256
+      - if: matrix.os == 'ubuntu-26.04'
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: builder/.protoc
+          key: protoc-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('builder/protoc.json') }}
+      - if: matrix.os == 'ubuntu-26.04'
+        name: The tests' descriptor set
+        run: node tools/check-protobuf.mjs
+      - if: matrix.os == 'ubuntu-26.04'
+        name: Coverage, held to its floor
+        run: >-
+          node ../../tools/coverage-report.mjs coverage/rust.json
+          --under implementations/rust/crates/bead/src --under implementations/rust/crates/bead-protobuf/src
+          --floor rust --summary "$GITHUB_STEP_SUMMARY"
+      # the export, kept with the run whether the floor held or not
+      - if: ${{ !cancelled() && matrix.os == 'ubuntu-26.04' }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: coverage-rust
+          path: implementations/rust/coverage/rust.json
+          retention-days: 14
+      # the fuzz targets, built on the nightly their sanitizer needs, never run: cargo-fuzz from its
+      # source on crates.io, by its lock, since the action's manifest has no prebuilt release of it
+      - if: matrix.os == 'ubuntu-26.04'
+        run: rustup toolchain install "$NIGHTLY" --profile minimal
+      - if: matrix.os == 'ubuntu-26.04'
+        run: cargo +"$NIGHTLY" install cargo-fuzz --version 0.13.2 --locked
+      - if: matrix.os == 'ubuntu-26.04'
+        run: cargo +"$NIGHTLY" fuzz build
+        working-directory: implementations/rust/fuzz
+        env:
+          # a newer compiler's warnings are no gate of the pinned one's
+          CARGO_BUILD_WARNINGS: warn
+
   # ── MQTT 5 ───────────────────────────────────────────────────────────────────
   # The cases over MQTT 5, each adapter against the fixture over TCP and WebSocket, the interop over
   # MQTT 5 both ways, the internal demo's sign-up and a page's client over WebSocket, against a
@@ -585,10 +697,11 @@ jobs:
   # 0037): the runner `tools/protobuf-conformance/runner.json`
   # pins, fetched and checked by its sha512 as protoc is by its sha256, against each side's testee
   # and its failure list, which the runner holds both ways, then the floor of tests run; then one
-  # corpus of Probe through both testees, read alike. A job of its own: it needs both runtimes,
-  # beadc and protoc, which no other job has together. The C# testee lies outside Bead.slnx, so its
-  # format is held here, by name, the code generated into it at run time aside; `CI=true`, the
-  # runner's own, restores it locked.
+  # corpus of Probe through the TypeScript and C# testees, read alike. A job of its own: it needs
+  # every side's runtime, beadc and protoc, which no other job has together; the Rust testee's JSON
+  # goes through Buffa's dynamic message until Rust's gateway brings Bead's mapping (decision 0044).
+  # The C# testee lies outside Bead.slnx, so its format is held here, by name, the code generated
+  # into it at run time aside; `CI=true`, the runner's own, restores it locked.
   protobuf-conformance:
     name: Protobuf conformance
     runs-on: ubuntu-26.04
@@ -640,6 +753,23 @@ jobs:
       - name: The C# testee's format
         working-directory: implementations/dotnet/tools/Bead.ProtobufConformance
         run: dotnet format Bead.ProtobufConformance.csproj --verify-no-changes --exclude Generated
+      # 1.99.1, as implementations/rust/rust-toolchain.toml names it
+      - run: rustup toolchain install
+        working-directory: implementations/rust
+      # the registry and the Rust testee's build, by its own lock and the toolchain
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cargo/registry
+            implementations/rust/tools/protobuf-conformance/target
+          key: protobuf-conformance-rust-${{ hashFiles('implementations/rust/tools/protobuf-conformance/Cargo.lock', 'implementations/rust/rust-toolchain.toml') }}
+          restore-keys: protobuf-conformance-rust-
+      - name: The suite through the Rust side's codec
+        run: node tools/protobuf-conformance.mjs rust
+      # the Rust testee lies outside the side's workspace, so its format is held here
+      - name: The Rust testee's format
+        working-directory: implementations/rust/tools/protobuf-conformance
+        run: cargo fmt --check
       - name: One corpus through both sides
         run: node tools/protobuf-conformance.mjs differential
 
@@ -769,9 +899,9 @@ jobs:
             echo "::error title=actions::an action above is not pinned by a commit's full sha"
             exit 1
           fi
-      # Every dependency of every lockfile, the five yarn.lock, the C# side's packages.lock.json
-      # and the spec's requirements.txt, against the advisories OSV knows, the scanner at its
-      # digest. A known vulnerability fails the job.
+      # Every dependency of every lockfile, the five yarn.lock, the C# side's packages.lock.json,
+      # the Rust side's Cargo.lock and the spec's requirements.txt, against the advisories OSV
+      # knows, the scanner at its digest. A known vulnerability fails the job.
       - name: The dependencies, against the known advisories
         run: >-
           docker run --rm -v "$PWD:/src:ro"
@@ -801,6 +931,7 @@ jobs:
         playwright,
         typescript,
         dotnet,
+        rust,
         mqtt,
         amqp,
         builder,

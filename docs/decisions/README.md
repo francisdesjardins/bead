@@ -38,17 +38,26 @@ transport, never a network of its own
 ([0041](0041-over-mqtt-5-a-participant-is-one-clean-link-and-a-parcel-one-publish-each-counted-to-its-byte.md))
 and AMQP 1.0's on RabbitMQ 4
 ([0043](0043-over-amqp-1-0-a-participant-is-one-connection-whose-exclusive-inbox-ends-with-it-and-a-parcel-one-message-of-one-profile-each-counted-to-its-byte.md))
-— and proven byte for byte by the conformance files and the interop. Ahead, in this order:
+— and proven byte for byte by the conformance files and the interop. Its third language, Rust, has
+its core: the envelope's codec, its routers and managers, the service layer's server half, its
+sessions and credentials, the trace, the filter and the registry, the in-memory transport, the
+broker's core over an in-memory broker with the joined transport, and its `proto` codec on Buffa,
+playing the conformance files its core reaches before it has a socket, under a toolchain, lints
+denied whole and a CI job of its own, each part it lacks a row of the support matrix ahead
+([0044](0044-rust-one-owner-per-router-traits-no-unsafe-two-parameters-no-warning.md),
+[0004](0004-one-behaviour-in-every-language.md)). Ahead, in this order:
 
-- **Rust, the third language**: its core first — its router, its service layer and its sessions —
-  playing its conformance over the in-memory transport before it has a socket
-  ([0036](0036-an-in-memory-transport-joins-two-routers-of-one-process-and-a-server-takes-several-transports-through-one.md)),
-  under a toolchain and a CI job of its own ([0005](0005-a-toolchain-per-language.md)), held to
-  clippy's pedantic lints under `-D warnings` and to the newest Rust norms; the validators of a
-  blueprint's rules generated for it by beadc, or beadc refusing to generate it
-  ([0035](0035-a-payload-that-reads-is-held-to-its-messages-rules-before-its-resolver-sees-it.md));
-  and each part it lacks, its transports among them, a row of the support matrix
-  ([0004](0004-one-behaviour-in-every-language.md));
+- **Rust's service client and its transports**: the client half of its service layer, in its core,
+  and a bound on what waits for a router's turn, a connection's reads paced by what waits for its
+  owner, as HTTP/2's flow control paces a stream
+  ([RFC 9113 §5.2](https://www.rfc-editor.org/rfc/rfc9113#section-5.2)), on the Rust and the C#
+  sides alike; then WebSocket (RFC 6455) and HTTP/1.1 and HTTP/2 (RFC 9110, 9112, 9113) over
+  sockets, with the interop both ways with the TypeScript and C# sides; then its broker bindings,
+  MQTT 5 and AMQP 1.0; its gateway; and beadc's Rust target, with `examples/hello`'s Rust half and
+  the validators of a blueprint's rules generated for it, or beadc refusing to generate them
+  ([0035](0035-a-payload-that-reads-is-held-to-its-messages-rules-before-its-resolver-sees-it.md)),
+  each stage under a record of its own
+  ([0044](0044-rust-one-owner-per-router-traits-no-unsafe-two-parameters-no-warning.md));
 - **a payload's rules written in CEL**, a total subset beadc compiles into each side beside the rules
   it compiles already, and then the rules
   [0035](0035-a-payload-that-reads-is-held-to-its-messages-rules-before-its-resolver-sees-it.md)
@@ -64,6 +73,17 @@ and AMQP 1.0's on RabbitMQ 4
 Ahead besides: each a record binds, as it names; each no record decides, by a decision of its own
 that meets the Tenth Man:
 
+- what [0044](0044-rust-one-owner-per-router-traits-no-unsafe-two-parameters-no-warning.md) keeps
+  ahead of the routers on every side: one order for a call a listener makes within its router's
+  turn; one behaviour for a call made just before its router's dispose; and one answer to a codec
+  that throws or panics as it reads a request, which every side answers `PAYLOAD_UNDECODABLE` where
+  spec 9.0 answers a codec that throws other than a refusal `PROCEDURE_FAILED`; and an optional
+  bridge from the Rust side's trace to `tracing`;
+- **the core in a page and in a worker**, the Rust side's and the C# side's in one stage, with its
+  executor, its clock and its tests, then what it serves there: the transports in a page, the Web
+  Worker transport, the DevTools hook from their clients, its contract then a document every side
+  reads ([0015](0015-a-pages-client-announces-itself-to-a-devtools-hook.md)), and a Rust worker for
+  the demo ([0044](0044-rust-one-owner-per-router-traits-no-unsafe-two-parameters-no-warning.md));
 - **the transports' client part** of the conformance over HTTP and a WebSocket, as the broker's
   cases have one, with the outcomes the spec names for a client's call
   ([0004](0004-one-behaviour-in-every-language.md)) and the defaults of a client's durations
@@ -72,8 +92,9 @@ that meets the Tenth Man:
   destination, in the twin tests' place for a relay's two legs' limits and the session its
   requesters share ([0004](0004-one-behaviour-in-every-language.md),
   [0019](0019-a-relay-terminates-each-leg-and-routes-nothing-past-it.md));
-- **the DevTools extension on Firefox**, its own glue beside the core every browser shares
-  ([0015](0015-a-pages-client-announces-itself-to-a-devtools-hook.md));
+- **the DevTools extension on Firefox**, its own glue beside the core every browser shares, and an
+  adapter's own gauges in its Broker view, MQTT 5's Receive Maximum and its PUBACKs to settle among
+  them ([0015](0015-a-pages-client-announces-itself-to-a-devtools-hook.md));
 - **a counted call's cost, measured**: a call counted against one not counted, on each side, a
   measure beside those the benches take
   ([0013](0013-every-language-debugs-alike-at-no-cost-when-off.md)), and a guard in CI against a
@@ -106,11 +127,12 @@ that meets the Tenth Man:
   answered, as HTTP/2's connection window; a raise of `maximumAnsweringCalls` for one trusted
   connection; a requester's queue past it; and a budget of what waits for every socket together, as
   `bodyBytesBudget` is for bodies;
-- **one corpus read alike by both sides' parsers**, held as a gate, as
+- **one corpus read alike by every side's parsers**, held as a gate, as
   `tools/protobuf-conformance.mjs differential` holds a `proto` payload
   ([0028](0028-a-proto-payloads-records-are-read-against-its-message-before-its-library-reads-them.md)),
-  beside the six targets both sides fuzz by hand, guided by coverage
-  ([the root README](../../README.md#fuzzing)), and a short run of them in CI;
+  beside the targets each side fuzzes by hand, guided by coverage, the six the TypeScript and C#
+  sides share and four of them on the Rust side ([the root README](../../README.md#fuzzing)), and a
+  short run of them in CI;
 - what [0030](0030-a-server-believes-x-forwarded-for-from-the-proxies-it-names-and-counts.md)
   names: `Forwarded`, an IPv6 client keyed by its prefix, and a per-address value fit for a NAT,
   for an HTTP server and a WebSocket server at once;
@@ -122,7 +144,8 @@ that meets the Tenth Man:
   as RFC 8693's token exchange or a call on its user's behalf needs
   ([0010](0010-a-request-presents-a-credential-of-a-scheme.md));
 - a bound that tells an event iterator's loop of a lag and lets it go on, as tokio's `broadcast`
-  tells `Lagged`, for both sides at once with an iterator on the C# side
+  tells `Lagged`, for the TypeScript and C# sides at once with an iterator on the C# side, the Rust
+  side's events being callbacks
   ([0023](0023-a-transport-goes-on-through-its-listeners-throw-and-takes-nothing-new-as-it-stops.md));
 - **the options of `bead/options.proto` frozen at their v1**, after an adversarial review: a
   failure's deprecation message, an extension on `EnumValueOptions`; an application failure's own
@@ -140,8 +163,8 @@ that meets the Tenth Man:
   keeps ahead of a gateway's problems, each a round of its own: a report's context, the exchange and
   the route it came of; an event for each refusal of the gateway's own; and an occurrence's id in a
   problem, [RFC 9457 §3.1.5](https://www.rfc-editor.org/rfc/rfc9457#section-3.1.5)'s `instance`;
-- **publication**: the packages on npm and NuGet, beadc's image on a registry, and the options'
-  number of protobuf's global registry
+- **publication**: the packages on npm, NuGet and crates.io, beadc's image on a registry, and the
+  options' number of protobuf's global registry
   ([0008](0008-three-version-axes-and-names-qualified-by-their-owner.md)).
 
 A part that lands leaves this list, and brings its gates to [0006](0006-a-rule-has-its-gate.md)'s
@@ -220,20 +243,21 @@ table.
 
 ### Beside the wire
 
-| #                                                                  | Decision                                                                                         | Status   |
-| ------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------ | -------- |
-| [0013](0013-every-language-debugs-alike-at-no-cost-when-off.md)    | Every language traces, filters and counts its calls alike, beside the wire, at no cost when off  | accepted |
-| [0015](0015-a-pages-client-announces-itself-to-a-devtools-hook.md) | A page's client announces itself to a DevTools hook, which watches it only while a panel is open | accepted |
+| #                                                                  | Decision                                                                                                                               | Status   |
+| ------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------- | -------- |
+| [0013](0013-every-language-debugs-alike-at-no-cost-when-off.md)    | Every language traces, filters and counts its calls, and traces its participants' parcels, alike, beside the wire, at no cost when off | accepted |
+| [0015](0015-a-pages-client-announces-itself-to-a-devtools-hook.md) | A page's client and its broker participant each announce themselves to a DevTools hook, which watches them only while a panel is open  | accepted |
 
 ### One behaviour in every language
 
-| #                                                                     | Decision                                                                                                                                | Status   |
-| --------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- | -------- |
-| [0003](0003-one-word-one-meaning.md)                                  | One word means one thing, and there are no abbreviations                                                                                | accepted |
-| [0004](0004-one-behaviour-in-every-language.md)                       | Every language plays one behaviour, held by the conformance files and the interop                                                       | accepted |
-| [0005](0005-a-toolchain-per-language.md)                              | Each language keeps its own toolchain, and the root holds only what all share                                                           | accepted |
-| [0007](0007-csharp-interfaces-blocks-two-parameters-no-warning.md)    | The C# side composes interfaces, writes every body as a block, takes two parameters and an options record, and builds without a warning | accepted |
-| [0008](0008-three-version-axes-and-names-qualified-by-their-owner.md) | Versions run on three axes, and names are qualified by their owner                                                                      | accepted |
+| #                                                                                    | Decision                                                                                                                                                                                                | Status   |
+| ------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------- |
+| [0003](0003-one-word-one-meaning.md)                                                 | One word means one thing, and there are no abbreviations                                                                                                                                                | accepted |
+| [0004](0004-one-behaviour-in-every-language.md)                                      | Every language plays one behaviour, held by the conformance files and the interop                                                                                                                       | accepted |
+| [0005](0005-a-toolchain-per-language.md)                                             | Each language keeps its own toolchain, and the root holds only what all share                                                                                                                           | accepted |
+| [0007](0007-csharp-interfaces-blocks-two-parameters-no-warning.md)                   | The C# side composes interfaces, writes every body as a block, takes two parameters and an options record, and builds without a warning                                                                 | accepted |
+| [0008](0008-three-version-axes-and-names-qualified-by-their-owner.md)                | Versions run on three axes, and names are qualified by their owner                                                                                                                                      | accepted |
+| [0044](0044-rust-one-owner-per-router-traits-no-unsafe-two-parameters-no-warning.md) | The Rust side owns each router's state in one task, starts each operation as it is made, composes traits, forbids unsafe code, takes two parameters and an options struct, and builds without a warning | accepted |
 
 ### How the repository decides
 
@@ -244,7 +268,7 @@ table.
 
 ## Writing one
 
-The next decision is 0044. Its file is `NNNN-the-decision-in-a-few-words.md`, and its title states
+The next decision is 0045. Its file is `NNNN-the-decision-in-a-few-words.md`, and its title states
 the decision, not its subject. The title may grow with the record; the file's name stays, unless it
 would mislead.
 

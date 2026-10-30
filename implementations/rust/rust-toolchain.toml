@@ -1,0 +1,8 @@
+# The Rust side's toolchain, the floor its workspace declares (decision 0044): moved by a commit of
+# its own, the lints a new compiler brings reviewed with it
+[toolchain]
+channel = "1.99.1"
+profile = "minimal"
+components = ["clippy", "rustfmt", "llvm-tools"]
+# the browser's WebAssembly, which the core is checked for, never run
+targets = ["wasm32-unknown-unknown"]

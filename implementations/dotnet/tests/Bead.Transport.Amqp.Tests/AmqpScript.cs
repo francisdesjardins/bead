@@ -207,6 +207,9 @@ internal sealed record ScriptedFrame(ushort Channel, object? Performative, byte[
 /// <summary>A message the adapter transferred, whole: on which channel and link, its delivery, and its bytes.</summary>
 internal sealed record ScriptedTransfer(ushort Channel, uint Handle, uint DeliveryId, bool IsSettled, uint MessageFormat, byte[] Bytes)
 {
+    /// <summary>Whether it is a management request: one on a sender of the adapter's to the management node, attached as it came.</summary>
+    public bool IsRequest { get; init; }
+
     /// <summary>Its message, as the library decodes it.</summary>
     public Message Message
     {
@@ -243,6 +246,7 @@ internal sealed class ScriptedLink(ushort channel, Attach attach)
     /// <summary>The credit its adapter's last FLOW left the script.</summary>
     public long Credit { get; set; }
 
+    /// <summary>Whether it ended: by a DETACH, or with its session, once its channel began another.</summary>
     public bool IsDetached { get; set; }
 }
 
@@ -784,13 +788,10 @@ internal sealed class ScriptedConnection
         }
     }
 
-    // whether a transfer is a management request: one on a sender of the adapter's to the management node
-    private bool IsManagement(ScriptedTransfer transfer)
+    // whether a transfer is a management request, as it was when it came
+    private static bool IsManagement(ScriptedTransfer transfer)
     {
-        return Links.Any((link) =>
-        {
-            return link.Channel == transfer.Channel && link.Handle == transfer.Handle && !link.IsReceiver && link.Address == AmqpManagement.Node;
-        });
+        return transfer.IsRequest;
     }
 
     private static ScriptedRequest RequestOf(Message message)
@@ -803,6 +804,19 @@ internal sealed class ScriptedConnection
     {
         switch (frame.Performative)
         {
+            // ! a channel ended is the adapter's to begin again, its handles with it (AMQP 1.0 §2.5):
+            // the links of the session that ended there end with it, so that none of them is taken
+            // for one of the new session's, a sender for the management node's above all
+            case Begin:
+                foreach (var link in _links.Where((each) =>
+                {
+                    return each.Channel == frame.Channel;
+                }))
+                {
+                    link.IsDetached = true;
+                }
+
+                break;
             case Attach attach:
                 _links.Add(new ScriptedLink(frame.Channel, attach));
 
@@ -850,7 +864,15 @@ internal sealed class ScriptedConnection
                     }
 
                     _partial.Remove(key);
-                    _transfers.Add(new ScriptedTransfer(frame.Channel, transfer.Handle, partial.First.DeliveryId, partial.First.Settled, partial.First.MessageFormat, partial.Bytes.ToArray()));
+                    _transfers.Add(new ScriptedTransfer(frame.Channel, transfer.Handle, partial.First.DeliveryId, partial.First.Settled, partial.First.MessageFormat, partial.Bytes.ToArray())
+                    {
+                        // ! told as it comes: its link, a sender to the management node, ends with its
+                        // session, whose channel and handle a later sender may take again
+                        IsRequest = _links.Any((each) =>
+                        {
+                            return each.Channel == frame.Channel && each.Handle == transfer.Handle && !each.IsReceiver && !each.IsDetached && each.Address == AmqpManagement.Node;
+                        }),
+                    });
                 }
 
                 break;

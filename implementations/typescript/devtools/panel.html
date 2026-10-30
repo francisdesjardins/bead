@@ -1648,10 +1648,107 @@
         margin: 0;
         font-size: var(--app-text-sm);
       }
+      #broker {
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+        padding: var(--app-space-3);
+        gap: var(--app-space-2);
+      }
+      .participant-headers {
+        max-height: 25%; /* a disclosure leaves room for the parcel panes */
+        overflow: auto;
+        flex-shrink: 0;
+      }
+      .participant-headers > .sect {
+        margin: 0;
+        padding: 0;
+        border: 0;
+      }
+      .participant-controls {
+        margin: 0;
+        align-items: end;
+      }
+      .participant-controls button {
+        align-self: end;
+      }
+      .participant-detail h2 {
+        margin: 0 0 var(--app-space-2);
+      }
+      .participant-header.sect,
+      #broker > .note {
+        margin: 0;
+      }
+      .participant-header h2 {
+        margin: 0;
+      }
+      .participant-controls,
+      .participant-gauges {
+        display: flex;
+        flex-wrap: wrap;
+        gap: var(--app-space-3);
+        margin-block: var(--app-space-3);
+      }
+      .participant-controls label,
+      .participant-gauge {
+        display: grid;
+        gap: var(--app-space-1);
+      }
+      .participant-split {
+        display: grid;
+        grid-template-columns: minmax(0, 2fr) minmax(0, 1fr);
+        flex: 1;
+        min-height: 0;
+        gap: var(--app-space-4);
+      }
+      .participant-table {
+        min-height: 0;
+        overflow: auto;
+        overflow-anchor: none;
+      }
+      .participant-detail {
+        min-width: 0;
+        min-height: 0;
+        overflow: auto;
+        overflow-anchor: none;
+      }
+      .participant-table thead {
+        position: sticky;
+        top: 0;
+        background: var(--app-paper);
+        z-index: 1; /* the header stays above the scrolling rows */
+      }
+      .participant-detail pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      .participant-transition {
+        font-weight: 600;
+      }
+      .participant-report {
+        color: var(--app-error);
+      }
+      #broker tr[aria-selected='true'] {
+        background: var(--app-info-wash);
+        outline: 1px solid var(--app-control-border);
+      } /* a selection's hairline */
+      #broker tr[tabindex] {
+        cursor: pointer;
+      }
+      /* The table and its detail stack at the panel's measured split width. */
+      @media (max-width: 680px) {
+        .participant-split {
+          grid-template-columns: minmax(0, 1fr);
+          grid-template-rows: minmax(0, 3fr) minmax(0, 2fr);
+        }
+      }
     </style>
   </head>
   <body>
     <header class="bar">
+      <p id="hook-notice" role="status" hidden>
+        The page runs an older hook: reload the extension in chrome://extensions, then the page.
+      </p>
       <button
         type="button"
         id="record"
@@ -1708,7 +1805,9 @@
         </dl>
         <p>
           Words are parted by spaces or commas, and the values a <code>|</code> joins add up. It is
-          <code>bead:debug</code>’s filter. Press / to reach it.
+          <code>bead:debug</code>’s filter. Every view follows it. Metrics use procedure labels;
+          Broker uses DATA joined to its call. Uncertain captures and connection traffic stay
+          visible. Export includes every retained record. Press / to reach it.
         </p>
       </div>
       <span id="filter-state" role="status"></span>
@@ -1772,6 +1871,17 @@
         aria-selected="false"
       >
         Metrics
+      </button>
+      <button
+        type="button"
+        role="tab"
+        id="broker-tab"
+        aria-controls="broker"
+        tabindex="-1"
+        data-tab="broker"
+        aria-selected="false"
+      >
+        Broker
       </button>
       <button
         type="button"
@@ -1928,6 +2038,13 @@
         aria-labelledby="wire-tab"
         data-view="wire"
         id="wire"
+        hidden
+      ></section>
+      <section
+        role="tabpanel"
+        aria-labelledby="broker-tab"
+        data-view="broker"
+        id="broker"
         hidden
       ></section>
     </main>

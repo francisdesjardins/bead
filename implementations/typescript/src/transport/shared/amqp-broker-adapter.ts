@@ -11,7 +11,15 @@ import rhea, {
   type Sender,
   type Session,
 } from 'rhea';
-import { answerDetach, bindInbox, declareInbox, deleteInbox, endSession } from './amqp-management';
+import {
+  answerDetach,
+  bindInbox,
+  declareInbox,
+  deleteInbox,
+  endSession,
+  isNone,
+  terminusOf,
+} from './amqp-management';
 import {
   encodeMessage,
   exchangeAddressOf,
@@ -122,6 +130,8 @@ interface IReceiving {
 interface ISending {
   isAttached: boolean;
   isEnded: boolean;
+  /** Its ATTACH answered with no target: refused, its DETACH to follow. */
+  isRefused: boolean;
   /** Its ATTACH's max-message-size, the bound of what it publishes; none named, the largest uint. */
   maximumMessageSize: number;
   /** Its transfers unsettled, by their delivery, until their outcome comes. */
@@ -246,15 +256,6 @@ const payloadOf = (message: unknown): Uint8Array | undefined => {
   const { content } = body as { content?: unknown };
 
   return content instanceof Uint8Array ? content : undefined;
-};
-
-// ! a terminus an ATTACH left null, which rhea reads back as a typed null rather than as none
-const isNone = (terminus: unknown): boolean => {
-  return (
-    terminus === undefined ||
-    terminus === null ||
-    (typeof terminus === 'object' && 'value' in terminus && terminus.value === null)
-  );
 };
 
 // a max-message-size an ATTACH named: none, or 0, is no maximum (AMQP 1.0 §2.7.3)
@@ -603,6 +604,7 @@ export const createAmqpBrokerAdapter = (options: IAmqpBrokerAdapterOptions): IAm
     const sending: ISending = {
       isAttached: false,
       isEnded: false,
+      isRefused: false,
       maximumMessageSize: LARGEST_UINT,
       pending: new Map(),
       sender,
@@ -622,7 +624,9 @@ export const createAmqpBrokerAdapter = (options: IAmqpBrokerAdapterOptions): IAm
       endSending(
         sending,
         new GenericError(
-          `the broker of ${id} ended the session that sends to ${kind}: ${conditionOf(error)}`
+          sending.isRefused
+            ? `its broker refused the sender of ${id} to ${kind}: ${conditionOf(error)}`
+            : `the broker of ${id} ended the session that sends to ${kind}: ${conditionOf(error)}`
         )
       );
 
@@ -672,6 +676,14 @@ export const createAmqpBrokerAdapter = (options: IAmqpBrokerAdapterOptions): IAm
     }
 
     sender.once('sender_open', () => {
+      // * an ATTACH that names no target is a refusal, its DETACH to follow (AMQP 1.0 §2.6.3):
+      // nothing goes on it, and its end refuses what waits
+      if (isNone(terminusOf(sender, 'target'))) {
+        sending.isRefused = true;
+
+        return;
+      }
+
       sending.isAttached = true;
       sending.maximumMessageSize = boundOf(sender.max_message_size);
       lastBounds[kind] = sending.maximumMessageSize;
@@ -1278,7 +1290,18 @@ export const createAmqpBrokerAdapter = (options: IAmqpBrokerAdapterOptions): IAm
                 }
 
                 sending.sender.once('sender_open', () => {
-                  attached();
+                  if (sending.isAttached) {
+                    attached();
+                  }
+                });
+                sending.sender.once('sender_close', (context: EventContext) => {
+                  if (sending.isRefused) {
+                    refused(
+                      new GenericError(
+                        `its broker refused a sender of ${id}: ${conditionOf(context.sender?.error)}`
+                      )
+                    );
+                  }
                 });
                 sending.session.once('session_close', (context: EventContext) => {
                   refused(

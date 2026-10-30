@@ -7,6 +7,7 @@ import {
   canonicalProbe,
   corpusOf,
   CORPUS_SIZE,
+  DIFFERENTIAL_SIDES,
   floorBreaches,
   googleProtobufOf,
   integrityOf,
@@ -19,6 +20,7 @@ import {
   releaseOf,
   requestOf,
   responseOf,
+  RUST_SET_FILES,
   SGROUP,
   SIDES,
   summariesOf,
@@ -98,9 +100,37 @@ describe('the pin', () => {
   });
 
   test("names each side's testee, its generated folder within it", () => {
-    assert.deepEqual(Object.keys(SIDES), ['typescript', 'csharp']);
+    assert.deepEqual(Object.keys(SIDES), ['typescript', 'csharp', 'rust']);
     assert.equal(SIDES.typescript.folder, 'implementations/typescript/tools/protobuf-conformance');
     assert.equal(SIDES.csharp.folder, 'implementations/dotnet/tools/Bead.ProtobufConformance');
+    assert.equal(SIDES.rust.folder, 'implementations/rust/tools/protobuf-conformance');
+  });
+
+  test("gives the Rust side's testee the set of the suite's protos and Probe, and keeps the differential to the TypeScript and C# sides", () => {
+    assert.equal(SIDES.rust.generated, 'generated');
+    assert.deepEqual(RUST_SET_FILES, [
+      'protobuf_test_messages/test_messages_edition2023.proto',
+      'protobuf_test_messages/test_messages_proto2.proto',
+      'protobuf_test_messages/test_messages_proto2_editions.proto',
+      'protobuf_test_messages/test_messages_proto3.proto',
+      'protobuf_test_messages/test_messages_proto3_editions.proto',
+      'conformance/conformance.proto',
+      'codecs.proto',
+    ]);
+
+    // * its build script names the same files, in the same order
+    const build = readFileSync(
+      new URL('../../implementations/rust/tools/protobuf-conformance/build.rs', import.meta.url),
+      'utf8'
+    );
+
+    assert.deepEqual(
+      [...build.matchAll(/^\s+"([^"]+\.proto)",$/gmu)].map((line) => {
+        return line[1];
+      }),
+      RUST_SET_FILES
+    );
+    assert.deepEqual(DIFFERENTIAL_SIDES, ['typescript', 'csharp']);
   });
 });
 

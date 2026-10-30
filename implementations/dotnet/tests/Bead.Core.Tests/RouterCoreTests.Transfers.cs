@@ -944,8 +944,9 @@ public sealed partial class RouterCoreTests
     [Fact]
     public async Task Ends_nothing_by_a_timer_that_fired_as_a_credit_set_it_going_again()
     {
-        // C# only: a timer fires on the thread pool and posts its end to the core's scheduler, where
-        // a credit that came first set it going again; JavaScript's one thread has no such race
+        // C# and Rust only: a timer fires on the thread pool and posts its end to the core's
+        // scheduler, where a credit that came first set it going again; JavaScript's one thread has
+        // no such race
         var peer = new Peer(RouterSide.Client);
         var asked = peer.Request(PatternOf(300), TimeSpan.FromSeconds(5));
 
@@ -1127,7 +1128,7 @@ public sealed partial class RouterCoreTests
     [Fact]
     public async Task Ends_nothing_by_a_result_s_timer_that_fired_as_a_credit_set_it_going_again()
     {
-        // C# only: as the request's twin above, for a result the core sends
+        // C# and Rust only: as the request's twin above, for a result the core sends
         var server = new Peer(RouterSide.Server);
         var resolver = server.Resolve();
 
@@ -1358,6 +1359,8 @@ public sealed partial class RouterCoreTests
         // the connection each report came with, in order
         public List<string?> ReportedOn { get; } = [];
 
+        public Action<Exception, string?>? OnReport { get; set; }
+
         public List<RouterActivity> Activities { get; } = [];
 
         public int BeforeAnswers { get; private set; }
@@ -1523,6 +1526,7 @@ public sealed partial class RouterCoreTests
         {
             Reports.Add(reason);
             ReportedOn.Add(connectionHandle);
+            OnReport?.Invoke(reason, connectionHandle);
         }
 
         public bool Carries(string credential, string connectionHandle)

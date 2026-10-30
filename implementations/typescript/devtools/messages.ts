@@ -9,6 +9,10 @@
 
 import type { PreviewNode } from './preview';
 import type { IStackFrame } from './stack';
+import type {
+  IParticipantDebugEvent,
+  IParticipantInspection,
+} from '../src/transport/shared/participant-debug';
 
 // interfaces
 
@@ -19,6 +23,8 @@ export interface ISourceRecord {
   /** The hook's protocol it speaks; the extension watches the ones it knows alone. */
   protocol: number;
   side: string;
+  /** The levels at the start of the watch, recorded independently of its events. */
+  inspection?: IParticipantInspection | undefined;
 }
 
 /** One step of a call, as a source's `debug` told it, made plain. */
@@ -104,7 +110,15 @@ export interface IEnvelopeRecord {
   source: number;
 }
 
-export type ActivityRecord = ICallRecord | IEnvelopeRecord;
+/** Section 13's fields, mapped by the extension's allowlist. */
+export interface IParticipantRecord extends Omit<IParticipantDebugEvent, 'kind'> {
+  at: number;
+  source: number;
+  kind: 'participant';
+  parcelKind?: string | undefined;
+}
+
+export type ActivityRecord = ICallRecord | IEnvelopeRecord | IParticipantRecord;
 
 /** What the hook says, through the bridge and the background, to the panel. */
 export type PageMessage =
@@ -112,15 +126,19 @@ export type PageMessage =
   | {
       /** The records the hook let go since its last batch, past what it holds. */
       dropped: number;
+      /** Participant records have a budget and losses of their own. */
+      droppedParticipants?: number | undefined;
       records: ActivityRecord[];
       type: 'records';
     }
-  | { expositions: { source: number; text: string | null }[]; type: 'expositions' };
+  | { expositions: { source: number; text: string | null }[]; type: 'expositions' }
+  | { type: 'participants'; inspections: { source: number; inspection: IParticipantInspection }[] };
 
 /** What the panel asks of the hook, through the background and the bridge. */
 export type PanelMessage =
   | { type: 'hello' }
   | { type: 'read-expositions' }
+  | { type: 'read-participants' }
   | { type: 'unwatch' }
   | { type: 'watch' };
 

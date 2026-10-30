@@ -48,10 +48,13 @@ TAKES = {
     'client-notification': {NOTIFIES},
 }
 
-# the row of docs/support.md an input crosses that no C# type holds: a ushort an id, an int a revision
-NO_CSHARP_TYPE = 'An id or a revision no C# type holds'
+# the row of docs/support.md an input crosses that a typed side's types do not hold: on the C# side a
+# ushort an id and an int a revision, on the Rust side a u16 an id and a u32 a revision
+NO_TYPED_SIDE = 'An id or a revision no typed side holds'
 USHORT = (0, 65_535)
 INT = (-2 ** 31, 2 ** 31 - 1)
+U16 = (0, 65_535)
+U32 = (0, 2 ** 32 - 1)
 
 # where a name is declared, and the name an id or a revision is declared under
 SERVICE_ID, PROCEDURE_ID, REVISION, NAME = 1, 1, 1, 'echo'
@@ -91,6 +94,15 @@ def refusal(service_id, procedure_id, revision, name, procedure_kind=None, way=N
 def held_in_csharp(service_id, procedure_id, revision):
     """Whether the C# side can be given the declaration at all: a ushort each id, an int its revision."""
     return is_whole(service_id, *USHORT) and is_whole(procedure_id, *USHORT) and is_whole(revision, *INT)
+
+
+def held_in_rust(service_id, procedure_id, revision):
+    """Whether the Rust side can be given the declaration at all: a u16 each id, a u32 its revision."""
+    return is_whole(service_id, *U16) and is_whole(procedure_id, *U16) and is_whole(revision, *U32)
+
+
+# each typed side, by its language, and whether it can be given a declaration
+HELD = (('C#', held_in_csharp), ('Rust', held_in_rust))
 
 
 # ── The names ───────────────────────────────────────────────────────────────────────────────────
@@ -166,7 +178,8 @@ ROWS = {'service': SERVICE_ROW, 'procedure': PROCEDURE_ROW, 'revision': REVISION
 
 def id_entry(name, service_id, procedure_id, revision, units, procedure_name=None):
     refused = refusal(service_id, procedure_id, revision, procedure_name or NAME)
-    differs = [] if held_in_csharp(service_id, procedure_id, revision) else [{'row': NO_CSHARP_TYPE, 'language': 'C#'}]
+    differs = [{'row': NO_TYPED_SIDE, 'language': language} for language, held in HELD
+               if not held(service_id, procedure_id, revision)]
 
     return {'name': name, 'clauses': [*units, *([OUT_OF_RANGE_ROW] if refused == OUT_OF_ITS_RANGE else [])],
             'serviceId': service_id, 'procedureId': procedure_id, 'serviceRevision': revision,
@@ -263,10 +276,23 @@ for name, outcome in {'service 0': OUT_OF_ITS_RANGE, 'service 1': None, 'service
 
 assert [name for name, outcome in outcomes.items() if outcome is None] == [
     'service 1', 'service 65535', 'procedure 1', 'procedure 65535', 'revision 1', 'revision 2147483647']
-assert [entry['name'] for entry in identities if 'differs' in entry] == [
+
+
+def excused(language):
+    """The entries of ids a language is excused from, by their names."""
+    return [entry['name'] for entry in identities
+            if any(crossed['language'] == language for crossed in entry.get('differs', []))]
+
+
+assert excused('C#') == [
     f'{kind} {value}' for kind, values in (('service', ('65536', '-1', '1.5', '"1"', 'true', 'null')),
                                            ('procedure', ('65536', '-1', '1.5', '"1"', 'true', 'null')),
                                            ('revision', ('2147483648', '1.5', '"1"', 'true', 'null')))
+    for value in values]
+assert excused('Rust') == [
+    f'{kind} {value}' for kind, values in (('service', ('65536', '-1', '1.5', '"1"', 'true', 'null')),
+                                           ('procedure', ('65536', '-1', '1.5', '"1"', 'true', 'null')),
+                                           ('revision', ('-1', '1.5', '"1"', 'true', 'null')))
     for value in values]
 assert [entry['one'] for entry in folds] == [True, True, False, False, False, False, False, True]
 

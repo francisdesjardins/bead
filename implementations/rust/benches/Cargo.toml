@@ -1,0 +1,25 @@
+[package]
+name = "francisdesjardins-bead-bench"
+description = "The Rust side's in-memory bench: calls on one in-memory connection kept, and exchanges, each a client and its connection drawn, called once and closed, written as bead-bench/1."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+readme.workspace = true
+keywords.workspace = true
+categories.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "bead-bench"
+path = "src/main.rs"
+
+[dependencies]
+bead = { workspace = true }
+bead-interop = { workspace = true }
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "time", "sync"] }
+serde_json = { workspace = true }
+
+[lints]
+workspace = true

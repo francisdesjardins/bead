@@ -29,7 +29,9 @@ transcoding.md names each .proto of spec/, and no other; the durations name each
 name, give every place an outcome for every input in their order, cite at each place only what it
 observes, and name, where they cross a row of docs/support.md, a row that names the file and them;
 each implementation plays them in one harness, which names every place, through one helper, which
-alone reads the file; and no file git lists outside spec/, the tests and the interop service names a
+alone reads the file; what a side does not play yet, AHEAD, each part a row of docs/support.md's
+differences, open, which its steps and stages delete as they land, never a part the side plays, each
+row of those differences holding as many cells as their header; and no file git lists outside spec/, the tests and the interop service names a
 published test key; each blueprint of spec/ is in its form, RFC 8785's member order and string escapes,
 integers alone, laid out two spaces with a final newline; and interop-service.json states the
 interop blueprint's procedures, by name and in their order, what each admits where its admission is not
@@ -136,14 +138,37 @@ NAMING = re.compile(rf'\b(spec|debugging|transcoding) ({UNIT_NUMBER}(?:(?:,| and
 
 # where a test names a unit: the line that declares it or its group — a call of test, it or describe
 # on the TypeScript side and beadc's, a [Fact], a [Theory] or a public class, Task or void on the C#
-# side — the title a call opened on the line before, or a comment just above, its attributes between
-DECLARATION = re.compile(r'\b(?:test|it|describe)(?:\.\w+)*\(|^\s*\[(?:Fact|Theory)\b|^\s*public\b.*\b(?:class|Task|void)\b')
+# side, a #[test], a #[tokio::test], a fn or a trial's Trial::test( on the Rust side — the title a
+# call opened on the line before, or a comment just above, its attributes between
+DECLARATION = re.compile(r'\b(?:test|it|describe)(?:\.\w+)*\(|^\s*\[(?:Fact|Theory)\b|^\s*public\b.*\b(?:class|Task|void)\b'
+                         r'|^\s*#\[(?:test|tokio::test)\b|^\s*(?:pub\s+)?(?:async\s+)?fn\s+\w+')
 OPENED = re.compile(r'\b(?:test|it|describe)(?:\.\w+)*\(\s*$')
 COMMENT = re.compile(r'\s*(?://|/\*|\*)')
-ATTRIBUTE = re.compile(r'\s*\[')
+# an attribute, C#'s [Theory] or Rust's #[tokio::test]
+ATTRIBUTE = re.compile(r'\s*#?\[')
+
+
+
+def ending(suffix):
+    """The test files of a side whose tests a suffix tells: each a path from the root."""
+    return lambda path: path.endswith(suffix)
+
+
+def rust_tests(path):
+    """The Rust side's test files, which no suffix tells from its sources, both being .rs (0044): a
+    module's tests beside it, src/<module>/tests.rs; each file of a crate's tests/ folder, the
+    conformance players among them; and the test kit, src/testing.rs and src/testing/. A doc comment
+    on a source's item never stands for a twin."""
+    parts = path.split('/')
+
+    return parts[-1].endswith('.rs') and (parts[-1] in ('tests.rs', 'testing.rs') or 'tests' in parts[:-1]
+                                          or 'testing' in parts[:-1])
+
+
+RUST_TESTS = rust_tests
 
 # beadc's tests, which hold what of the spec the builder alone does
-BUILDER_TESTS = ('builder/src', '.test.ts')
+BUILDER_TESTS = ('builder/src', ending('.test.ts'))
 
 # the transcoding's groups (0037), each by its file's name before it, since vectors.json holds a group
 # of failures of its own
@@ -171,12 +196,58 @@ COMPANION_GROUPS = ('filters', 'sources', 'expositions', 'exits')
 # the transcoding's file, which repeats its version and cites its units, named by a line of it (0037)
 TRANSCODING = {'transcoding': 'Transcoding'}
 
-# where each implementation's tests are, the files among them, how they name a group of vectors, and
-# how they name a file they read whole: a language that joins adds its row
+# where each implementation's tests are, its language's files, its tests among them, how they name a
+# group of vectors, and how they name a file they read whole: a language that joins adds its row.
+# Rust's tests name each group they read, of vectors.json and of validations.json, since a group of
+# each is ahead for it
 SIDES = {
-    'TypeScript': ('implementations/typescript/src', '.test.ts', r'\bVECTORS\.(\w+)', r"'[^']*\b{}\.json'"),
-    'C#': ('implementations/dotnet/tests', '.cs', r'\bVectors\.(?:NamesOf|Of)\("(\w+)"', r'"{}\.json"'),
+    'TypeScript': ('implementations/typescript/src', '.ts', ending('.test.ts'), r'\bVECTORS\.(\w+)',
+                   r"'[^']*\b{}\.json'"),
+    'C#': ('implementations/dotnet/tests', '.cs', ending('.cs'), r'\bVectors\.(?:NamesOf|Of)\("(\w+)"',
+           r'"{}\.json"'),
+    'Rust': ('implementations/rust/crates', '.rs', RUST_TESTS, r'\b(?:vectors|validations)::of\("(\w+)"\)',
+             r'"[^"]*\b{}\.json"'),
 }
+
+# what a side does not play yet, by the row of docs/support.md's differences, of kind open, that names
+# the step or the stage bringing it (0004, 0044): each part a transport of transports.json, a group, a
+# file read whole, an encoding of codecs.json, a unit of a document or a document whole, a durations
+# place's owner, or a place's way. A step or a stage lands by deleting its row, and a part ahead that
+# the side plays fails, so the table only shrinks
+AHEAD = {
+    'Rust': {
+        "Rust's transports over HTTP and WebSocket": {
+            'transports': ('http', 'websocket'),
+            'units': (('spec', '15.10'), ('spec', '15.12.4'), ('spec', '15.12.11'), ('spec', '15.12.12'),
+                      ('spec', '15.12.13')),
+            'places': ('httpTransport', 'httpTransportServer', 'httpTransportClient', 'webSocketTransport',
+                       'webSocketTransportServer'),
+            'ways': (('transportClient.connectTimeout', 'http'), ('transportClient.connectTimeout', 'webSocket')),
+        },
+        # the gateway's ways of 15.12's places stay ahead with the gateway once the HTTP server lands
+        "Rust's gateway": {
+            'files': ('transcoding',),
+            'documents': ('transcoding',),
+            'places': ('gateway',),
+            'ways': (('httpTransportServer.sendGracePeriod', 'gateway'), ('httpTransportServer.headersTimeout', 'gateway'),
+                     ('httpTransportServer.bodyGracePeriod', 'gateway')),
+        },
+        "Rust's broker bindings": {
+            'transports': ('mqtt', 'amqp'),
+            'groups': ('mqttPublishBounds', 'amqpMessages', 'amqpPublishBounds'),
+            'places': ('mqttBrokerAdapter', 'amqpBrokerAdapter'),
+        },
+        "Rust's beadc target": {'groups': ('verdicts',)},
+    },
+}
+
+# the kinds of part a row of AHEAD holds
+AHEAD_PARTS = ('transports', 'groups', 'files', 'encodings', 'units', 'documents', 'places', 'ways')
+
+
+def ahead(side, part):
+    """Every part of a kind AHEAD holds for a side, over all its rows."""
+    return {each for row in AHEAD.get(side, {}).values() for each in row.get(part, ())}
 
 # the harness each side plays spec/durations.json in, and the helper beside it that alone reads the
 # file, for the harness and for the twins of its assertion: the harness names every place it plays, so
@@ -186,6 +257,8 @@ DURATIONS_HARNESSES = {
                    'implementations/typescript/src/transport/shared/__tests__/durations.ts'),
     'C#': ('implementations/dotnet/tests/Bead.Transport.Http.Tests/DurationsTests.cs',
            'implementations/dotnet/tests/Shared/Durations.cs'),
+    'Rust': ('implementations/rust/crates/bead/tests/durations.rs',
+             'implementations/rust/crates/bead/src/testing/durations.rs'),
 }
 
 # the matrix whose rows a case that crosses a platform's difference names
@@ -917,20 +990,24 @@ def beside_a_declaration(lines, index):
     return below < len(lines) and DECLARATION.search(lines[below]) is not None
 
 
-def tests_naming(folder, suffix):
+# what a walk of a side's folder leaves out: what its builds write and its packages
+BUILT = ('bin', 'obj', 'node_modules', 'target')
+
+
+def tests_naming(folder, tests):
     """Where each unit is named by the tests under a folder, spec 15.10 or debugging 4.2, by its
     document and its number, in a test's title or a comment beside its declaration: each place a file
     and a line."""
     found = {}
 
     for directory, children, names in os.walk(os.path.join(ROOT, folder)):
-        children[:] = [child for child in children if child not in ('bin', 'obj', 'node_modules')]
+        children[:] = [child for child in children if child not in BUILT]
 
         for name in sorted(names):
-            if not name.endswith(suffix):
-                continue
-
             path = os.path.relpath(os.path.join(directory, name), ROOT).replace(os.sep, '/')
+
+            if not tests(path):
+                continue
 
             with open(os.path.join(directory, name), encoding='utf-8') as file:
                 lines = file.read().splitlines()
@@ -947,7 +1024,7 @@ def tests_naming(folder, suffix):
 
 
 # the tests of each side, and beadc's, by the units they name
-naming = {side: tests_naming(folder, suffix) for side, (folder, suffix, *_) in SIDES.items()}
+naming = {side: tests_naming(folder, tests) for side, (folder, _, tests, *_) in SIDES.items()}
 naming['beadc'] = tests_naming(*BUILDER_TESTS)
 
 
@@ -1003,6 +1080,11 @@ def ledger_of(path, listing):
 
 owed = {document: [] for document in LEDGERS}
 reasoned = {document: {} for document in LEDGERS}
+
+
+def is_unit_ahead(side, document, key):
+    """Whether a unit is ahead for a side: named by AHEAD, or of a document AHEAD holds whole."""
+    return (document, key) in ahead(side, 'units') or document in ahead(side, 'documents')
 
 for document in sorted(set(WRITE_UNITS or ()) - set(LEDGERS)):
     problems.append(f'--write-units names {", ".join(sorted(WRITE_UNITS[document]))} of {document}, which is no '
@@ -1118,6 +1200,9 @@ for document, (path, _, prefix) in LEDGERS.items():
             sides = SIDES if status == 'twins' else ('beadc',) if status == 'builder' else ()
 
             for side in sides:
+                if side in SIDES and is_unit_ahead(side, document, key):
+                    continue
+
                 if (document, key) not in naming[side]:
                     folder = SIDES[side][0] if side in SIDES else BUILDER_TESTS[0]
                     problems.append(f'{document}.md {key}: {status}, and no test of {side} names it: '
@@ -1363,33 +1448,159 @@ for name in sorted(set(TEST_KEYS) - used):
 
 # ── What each implementation's tests read ───────────────────────────────────────────────────────
 
+# ── What each side does not play yet ────────────────────────────────────────────────────────────
+
+# each row of AHEAD names only what the files, the documents and the durations hold, and is a row of
+# docs/support.md's differences, of kind open, whose cell for its side says it is ahead
+encodings = set(schemas['codecs']['$defs']['encoding']['enum'])
+owners = {place['id'].split('.')[0] for place in places}
+place_ways = {(place['id'], way['id']) for place in places for way in place['ways']}
+transports_of = {case['transport'] for case in named['transports']}
+
+
+def differences_table():
+    """The matrix's differences, each row by its title, with its cells by their column's heading."""
+    with open(SUPPORT, encoding='utf-8') as file:
+        lines = file.read().splitlines()
+
+    start = lines.index('## Differences') if '## Differences' in lines else len(lines)
+    header, table = None, {}
+
+    for line in lines[start + 1:]:
+        if line.startswith('#'):
+            break
+
+        if not line.startswith('| ') or set(line) <= set('|- '):
+            continue
+
+        # ! a pipe a cell escapes, `\|`, splits no cell
+        cells = [cell.strip() for cell in re.split(r'(?<!\\)\|', line)[1:-1]]
+
+        if header is None:
+            header = cells
+        else:
+            # ! a row short of a cell would zip silently, its last column read as empty
+            if len(cells) != len(header):
+                problems.append(f'docs/support.md\'s differences: the row {cells[0]!r} has {len(cells)} cells, '
+                                f'where its header has {len(header)}')
+
+            table[cells[0]] = dict(zip(header, cells))
+
+    return table
+
+
+differences = differences_table()
+
+for side, its_rows in AHEAD.items():
+    if side not in SIDES:
+        problems.append(f'AHEAD holds {side}, which is no side of SIDES')
+
+    for row, parts in its_rows.items():
+        where = f'AHEAD, {side}, {row!r}'
+        known = {
+            'transports': lambda part: part in transports_of,
+            'groups': lambda part: part in named,
+            'files': lambda part: part in WHOLE,
+            'encodings': lambda part: part in encodings,
+            'units': lambda part: part[1] in units.get(part[0], {}),
+            'documents': lambda part: part in LEDGERS,
+            'places': lambda part: part in owners,
+            'ways': lambda part: part in place_ways,
+        }
+
+        for part in sorted(set(parts) - set(AHEAD_PARTS)):
+            problems.append(f'{where}: holds {part}, which is no part AHEAD knows: {", ".join(AHEAD_PARTS)}')
+
+        for kind, its_parts in parts.items():
+            for part in its_parts if kind in known else ():
+                if not known[kind](part):
+                    problems.append(f'{where}: holds the {kind[:-1]} {part}, which the files and documents do not')
+
+        difference = differences.get(row)
+
+        if difference is None:
+            problems.append(f'{where}: docs/support.md\'s differences have no row {row!r}, of kind open')
+        elif difference.get('Kind') != 'open':
+            problems.append(f'{where}: the row of docs/support.md is of kind {difference.get("Kind")}, where a part '
+                            'ahead is open')
+        elif not difference.get(side, '').startswith('ahead'):
+            problems.append(f'{where}: the row\'s cell for {side} in docs/support.md does not say it is ahead')
+
+
+def is_ahead(side, group, entry):
+    """Whether an entry of a group is ahead for a side: its group, its file, its transport or its
+    encoding."""
+    if group in ahead(side, 'groups') or any(group in WHOLE[whole] for whole in ahead(side, 'files')):
+        return True
+
+    if group == 'transports':
+        return entry['transport'] in ahead(side, 'transports')
+
+    if group in WHOLE['codecs']:
+        return entry['encoding'] in ahead(side, 'encodings')
+
+    return False
+
+
+def is_excused(side, entry):
+    """Whether a differs of an entry excuses a side from it."""
+    return any(crossed['language'] == side for crossed in entry.get('differs', []))
+
+
+def groups_ahead(side):
+    """The groups a side plays no entry of, each entry being ahead."""
+    return {group for group, entries in named.items() if entries and all(is_ahead(side, group, entry)
+                                                                          for entry in entries)}
+
+
+def places_ahead(side):
+    """The ids of the durations' places a side plays not yet, by their owner."""
+    return {place['id'] for place in places if place['id'].split('.')[0] in ahead(side, 'places')}
+
+
+# ── What each implementation's tests read ───────────────────────────────────────────────────────
+
 read = {}
 
-for side, (folder, suffix, group_pattern, file_pattern) in SIDES.items():
+for side, (folder, language, tests, group_pattern, file_pattern) in SIDES.items():
     sources = ''
 
     for directory, children, names in os.walk(os.path.join(ROOT, folder)):
-        children[:] = [child for child in children if child not in ('bin', 'obj', 'node_modules')]
+        children[:] = [child for child in children if child not in BUILT]
 
         for name in sorted(names):
-            if name.endswith(suffix):
+            if tests(os.path.relpath(os.path.join(directory, name), ROOT).replace(os.sep, '/')):
                 with open(os.path.join(directory, name), encoding='utf-8') as file:
                     sources += file.read() + '\n'
 
     if not sources:
-        problems.append(f'{side}: no test file ending in {suffix} under {folder}')
+        problems.append(f'{side}: no test file under {folder}')
 
     read[side] = set(re.findall(group_pattern, sources))
+    unplayed = groups_ahead(side)
 
-    # a file read whole reads each of its groups
+    # a file read whole reads each of its groups, but where a group of it is ahead for the side, which
+    # names each group it reads; a file wholly ahead the side reads not
     for whole, its_groups in WHOLE.items():
-        if re.search(file_pattern.format(whole), sources):
+        if not re.search(file_pattern.format(whole), sources):
+            continue
+
+        if set(its_groups) <= unplayed:
+            problems.append(f'{side}: its tests read {whole}.json, which AHEAD holds ahead: take it out of AHEAD')
+        elif not set(its_groups) & unplayed:
             read[side] |= set(its_groups)
 
     for group in sorted(read[side] - set(named)):
         problems.append(f'{side}: its tests read a group, {group}, which vectors.json does not hold')
 
-    unread = set(named) - read[side]
+    for group in sorted(read[side] & unplayed):
+        problems.append(f'{side}: its tests read {group}, which AHEAD holds ahead: take it out of AHEAD')
+
+    for document, key in sorted(naming[side]):
+        if is_unit_ahead(side, document, key):
+            problems.append(f'{side} names {document} {key}, which AHEAD holds ahead: take it out of AHEAD')
+
+    unread = set(named) - read[side] - unplayed
 
     for whole, its_groups in WHOLE.items():
         if set(its_groups) <= unread:
@@ -1402,11 +1613,9 @@ for side, (folder, suffix, group_pattern, file_pattern) in SIDES.items():
     # the durations, read by one helper alone and played by one harness, which names every place
     harness, helper = DURATIONS_HARNESSES[side]
     pattern = file_pattern.format('durations')
-    # the language's own files: '.test.ts' is a TypeScript file, '.cs' a C# one, never a project's
-    language = '.' + suffix.rsplit('.', 1)[-1]
-
+    # the language's own files, never a project's
     for directory, children, names in os.walk(os.path.join(ROOT, folder)):
-        children[:] = [child for child in children if child not in ('bin', 'obj', 'node_modules')]
+        children[:] = [child for child in children if child not in BUILT]
 
         for name in sorted(names):
             path = os.path.relpath(os.path.join(directory, name), ROOT).replace(os.sep, '/')
@@ -1431,7 +1640,12 @@ for side, (folder, suffix, group_pattern, file_pattern) in SIDES.items():
             played = file.read()
 
         for place in places:
-            if f"'{place['id']}'" not in played and f'"{place["id"]}"' not in played:
+            named_there = f"'{place['id']}'" in played or f'"{place["id"]}"' in played
+
+            if place['id'] in places_ahead(side) and named_there:
+                problems.append(f'{side}: its harness, {harness}, plays {place["id"]}, which AHEAD holds ahead: take '
+                                'it out of AHEAD')
+            elif place['id'] not in places_ahead(side) and not named_there:
                 problems.append(f'{side}: its harness, {harness}, plays no {place["id"]}')
 
 # ── The counts the tables of files state ────────────────────────────────────────────────────────
@@ -1542,9 +1756,38 @@ for transport in sorted(set(transport_counts) - set(TRANSPORT_NAMES)):
     problems.append(f'transports: cases over {transport}, which TRANSPORT_NAMES does not name, so no row counts them')
 
 # the entries of codecs.json a side does not play, each excused by a row of docs/support.md
-unplayed = {side: sum(any(crossed['language'] == side for crossed in entry.get('differs', []))
-                      for group in WHOLE['codecs'] for entry in named[group])
+unplayed = {side: sum(is_excused(side, entry) for group in WHOLE['codecs'] for entry in named[group])
             for side in SIDES}
+
+# the files whose rows count what each side plays, by the groups they hold, vectors.json's every group
+FILE_GROUPS = {'spec/vectors.json': tuple(groups), **{f'spec/{whole}.json': its_groups for whole, its_groups in WHOLE.items()}}
+
+
+def entries_played(side, file):
+    """What a side plays of a file, and of how many: every entry neither ahead nor excused, or every
+    place of the durations whose owner is not ahead."""
+    if file == 'spec/durations.json':
+        return len(places) - len(places_ahead(side)), len(places)
+
+    entries = [(group, entry) for group in FILE_GROUPS[file] for entry in named[group]]
+
+    return sum(not is_ahead(side, group, entry) and not is_excused(side, entry) for group, entry in entries), len(entries)
+
+
+def has_ahead(side, file):
+    """Whether part of a file is ahead for a side."""
+    if file == 'spec/durations.json':
+        return bool(places_ahead(side))
+
+    return any(is_ahead(side, group, entry) for group in FILE_GROUPS[file] for entry in named[group])
+
+
+def partly(file, column, side):
+    """The counts of a side's cell where part of a file is ahead for it: what it plays, of how many."""
+    played, total = entries_played(side, file)
+
+    return [(column, r'^{n} of [\d,]+\b', played, f'entries the {side} side plays, the rest ahead or excused'),
+            (column, r'^[\d,]+ of {n}\b', total, f'entries of the file the {side} side plays part of')]
 
 vectors_total = sum(len(vectors[group]) for group in groups)
 ways_total = sum(len(place['ways']) for place in places)
@@ -1555,9 +1798,27 @@ TRANSCODING_COUNTS = [(1, rf'(?:^|\b){{n}} {group.split("/")[1]}\b', len(named[g
                       for group in TRANSCODING_GROUPS]
 
 
-def played_by_each(count):
-    """The cells that say each side plays every entry of a file, by its count."""
-    return [(column, r'^all {n}\b', count, f'entries the {side} side plays') for column, side in enumerate(SIDES, 2)]
+def played_by_each(count, file):
+    """The cells that say each side plays every entry of a file, by its count, or, where part of it is
+    ahead for a side, what it plays of how many."""
+    return [hold for column, side in enumerate(SIDES, 2)
+            for hold in (partly(file, column, side) if has_ahead(side, file)
+                         else [(column, r'^all {n}\b', count, f'entries the {side} side plays')])]
+
+
+def played_but(file):
+    """The cells of each side that plays a file but the entries each excuses it from, or, where part of
+    it is ahead for a side, what it plays of how many."""
+    return [hold for column, side in enumerate(SIDES, 2)
+            for hold in (partly(file, column, side) if has_ahead(side, file)
+                         else [(column, r'^all but {n}\b', unplayed[side],
+                                f'entries the {side} side does not play, each by its row')])]
+
+
+def played_where_ahead(file):
+    """The cells of each side where part of a file is ahead for it, what it plays of how many; the
+    others' cells state no count."""
+    return [hold for column, side in enumerate(SIDES, 2) if has_ahead(side, file) for hold in partly(file, column, side)]
 
 
 COUNTS = {
@@ -1568,10 +1829,11 @@ COUNTS = {
             # each group by its name, its words apart and in any case: jwtVerdicts, JWT verdicts
             *[(1, rf'(?i:\b{re.escape(re.sub(r"(?<=[a-z])(?=[A-Z])", " ", group))}) {{n}}(?:,|$)',
                len(vectors[group]), f'the vectors of {group}') for group in groups],
+            *played_where_ahead('spec/vectors.json'),
         ],
         'spec/conversations.json': [
             (1, r'^{n} conversations', len(named['conversations']), 'conversations'),
-            *played_by_each(len(named['conversations'])),
+            *played_by_each(len(named['conversations']), 'spec/conversations.json'),
         ],
         'spec/transports.json': [
             (1, r'^{n} cases', len(named['transports']), "transports' cases"),
@@ -1593,17 +1855,17 @@ COUNTS = {
              sum(any('advance' in step for step in case['steps']) for case in named['transports']),
              'cases that advance the clock the server is given'),
             (1, r'\b{n} responses cut across reads', len(responses), 'responses cut across reads'),
-            *played_by_each(len(named['transports'])),
+            *played_by_each(len(named['transports']), 'spec/transports.json'),
         ],
         'spec/clocks.json': [
             (1, r'^{n} clock cases', len(named['clocks']), 'clock cases'),
-            *played_by_each(len(named['clocks'])),
+            *played_by_each(len(named['clocks']), 'spec/clocks.json'),
         ],
         'spec/durations.json': [
             (1, r'^{n} places', len(places), 'places of durations'),
             (1, r'\bby {n} ways', ways_total, "the places' ways"),
             (1, r'\beach of {n} inputs', len(inputs), "the durations' inputs"),
-            *played_by_each(len(places)),
+            *played_by_each(len(places), 'spec/durations.json'),
         ],
         'spec/identities.json': [
             (1, r'^{n} procedure names', len(named['names']), 'names'),
@@ -1615,29 +1877,28 @@ COUNTS = {
         'spec/codecs.json': [
             (1, r'^{n} payloads read', len(named['payloads']), 'payloads'),
             (1, r'\b{n} values written', len(named['values']), 'values'),
-            *[(column, r'^all but {n}\b', unplayed[side], f'entries the {side} side does not play, each by its row')
-              for column, side in enumerate(SIDES, 2)],
+            *played_but('spec/codecs.json'),
         ],
         'spec/debug-filters.json': [
             (1, r'^{n} debug filters', len(named['filters']), 'debug filters'),
             (1, r'\bof {n} calls', fixtures['call'], "the filters' calls"),
             (1, r'\b{n} envelopes it keeps', fixtures['envelope'], "the filters' envelopes"),
             (1, r'\b{n} filters given as functions', len(named['sources']), 'filters given as functions'),
-            *played_by_each(len(named['filters']) + len(named['sources'])),
+            *played_by_each(len(named['filters']) + len(named['sources']), 'spec/debug-filters.json'),
         ],
         'spec/metrics.json': [
             (1, r'^{n} expositions', len(named['expositions']), 'expositions'),
             (1, r'\b{n} exits', len(named['exits']), 'exits'),
-            *played_by_each(len(named['expositions']) + len(named['exits'])),
+            *played_by_each(len(named['expositions']) + len(named['exits']), 'spec/metrics.json'),
         ],
         'spec/validations.json': [
             (1, r'^{n} verdicts', len(named['verdicts']), 'verdicts'),
             (1, r'\b{n} details', len(named['details']), 'details'),
-            *played_by_each(len(named['verdicts']) + len(named['details'])),
+            *played_by_each(len(named['verdicts']) + len(named['details']), 'spec/validations.json'),
         ],
         'spec/transcoding.json': [
             *TRANSCODING_COUNTS,
-            *played_by_each(sum(len(named[group]) for group in TRANSCODING_GROUPS)),
+            *played_by_each(sum(len(named[group]) for group in TRANSCODING_GROUPS), 'spec/transcoding.json'),
         ],
     },
     'README.md': {
@@ -1745,9 +2006,18 @@ print(f'spec: {version}, its companion {companion_version}, its transcoding {tra
 width = max(len(f'{group} ({len(entries)})') for group, entries in named.items())
 
 for group, entries in named.items():
-    print(f'  {f"{group} ({len(entries)})":<{width}}  read by {", ".join(SIDES)}')
+    readers = [side for side in SIDES if group not in groups_ahead(side)]
+    later = [side for side in SIDES if group in groups_ahead(side)]
+    print(f'  {f"{group} ({len(entries)})":<{width}}  read by {", ".join(readers)}'
+          + (f'; ahead for {", ".join(later)}' if later else ''))
 
-print(f'  {f"durations ({len(places)})":<{width}}  played by {", ".join(SIDES)}, each in its harness')
+print(f'  {f"durations ({len(places)})":<{width}}  played by {", ".join(SIDES)}, each in its harness'
+      + ''.join(f'; {len(places_ahead(side))} places ahead for {side}' for side in SIDES if places_ahead(side)))
+
+# what each side does not play yet, each row on a line of its own, so a part ahead is never silent
+for side, its_rows in AHEAD.items():
+    for row in its_rows:
+        print(f'  ahead for {side}: {row}, a row of docs/support.md')
 
 # a unit nothing holds yet, each on a line of its own, so a gap is never silent
 for document, keys in owed.items():

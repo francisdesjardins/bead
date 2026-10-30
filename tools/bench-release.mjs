@@ -6,7 +6,7 @@ import { isDeepStrictEqual } from 'node:util';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { medianOf, validate } from './bench-compare.mjs';
+import { RUNTIMES, medianOf, validate } from './bench-compare.mjs';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const fail = (message) => {
@@ -116,9 +116,9 @@ export const merge = (reports, options = {}) => {
 
 export const parse = (args) => {
   const options = { side: args[0], processes: 5, runs: 2, seconds: 3, transcoding: false };
-  if (!['typescript', 'csharp'].includes(options.side)) {
+  if (!Object.hasOwn(RUNTIMES, options.side ?? '')) {
     fail(
-      'usage: node tools/bench-release.mjs typescript|csharp [--tree baseline-checkout --baseline-output baseline.json] [--output candidate.json] [--processes 5] [--runs 2] [--seconds 3] [--transcoding] [--filter id-or-name]'
+      'usage: node tools/bench-release.mjs typescript|csharp|rust [--tree baseline-checkout --baseline-output baseline.json] [--output candidate.json] [--processes 5] [--runs 2] [--seconds 3] [--transcoding] [--filter id-or-name]'
     );
   }
   const seen = new Set();
@@ -187,10 +187,15 @@ const execute = (command, args, options) => {
   });
 };
 
+// each side's bench, by the source that says whether it takes a --filter
+const SOURCES = Object.freeze({
+  typescript: 'implementations/typescript/tools/bench.mjs',
+  csharp: 'implementations/dotnet/tools/Bead.Benchmarks/Program.cs',
+  rust: 'implementations/rust/benches/src/main.rs',
+});
+
 const sourceOf = (tree, side) => {
-  return side === 'typescript'
-    ? join(tree, 'implementations/typescript/tools/bench.mjs')
-    : join(tree, 'implementations/dotnet/tools/Bead.Benchmarks/Program.cs');
+  return join(tree, SOURCES[side]);
 };
 
 // ! A filter reaches the benches only when every one takes it, so that a measure meets the same
@@ -205,12 +210,41 @@ export const level = (filters, options) => {
   return { ...options, filter: undefined };
 };
 
+// a bench's command and its arguments, the measures' own after the side's
+const finished = (command, args, options, filtered) => {
+  const measured = [
+    ...args,
+    '--runs',
+    String(options.runs + 1),
+    '--seconds',
+    String(options.seconds),
+    '--json',
+  ];
+  if (options.transcoding) {
+    measured.push('--transcoding');
+  }
+  if (options.filter && filtered) {
+    measured.push('--filter', options.filter);
+  }
+  return { command, args: measured };
+};
+
 const prepare = async (tree, options) => {
   const dotnet = join(tree, 'implementations/dotnet');
   const source = sourceOf(tree, options.side);
   const filtered = readFileSync(source, 'utf8').includes('--filter');
   let command = process.execPath;
   let args = ['--expose-gc', source];
+  if (options.side === 'rust') {
+    // * bead-bench, the Rust side's in-memory bench, built once in release, then each fresh process
+    // runs what cargo built, by its lock
+    const rust = join(tree, 'implementations/rust');
+    const manifest = ['--manifest-path', 'benches/Cargo.toml', '--release', '--locked'];
+    await execute('cargo', ['build', ...manifest], { cwd: rust, build: true });
+    command = 'cargo';
+    args = ['run', '--quiet', ...manifest, '--'];
+    return { tree: rust, ...finished(command, args, options, filtered) };
+  }
   if (options.side === 'csharp') {
     await execute('dotnet', ['build', '-c', 'Release', 'tools/Bead.Benchmarks'], {
       cwd: dotnet,
@@ -237,14 +271,7 @@ const prepare = async (tree, options) => {
       build: true,
     });
   }
-  args.push('--runs', String(options.runs + 1), '--seconds', String(options.seconds), '--json');
-  if (options.transcoding) {
-    args.push('--transcoding');
-  }
-  if (options.filter && filtered) {
-    args.push('--filter', options.filter);
-  }
-  return { tree, command, args };
+  return { tree, ...finished(command, args, options, filtered) };
 };
 
 // * Alternate the trees process by process, in ABBA order: baseline then candidate, then candidate

@@ -454,14 +454,14 @@ public sealed class BrokerTransportServer : IServerTransport, IAsyncDisposable, 
     /// </summary>
     internal void TakeOpen(string name, BrokerParcelReading reading)
     {
-        if (reading.Verdict == BrokerParcelVerdict.NoParcel)
+        if (reading.Verdict == ParcelVerdict.NoParcel)
         {
             _participant.Report(new InvalidDataException($"a message to the name {name} is no parcel: {reading.Why}"));
 
             return;
         }
 
-        if (reading is { Verdict: BrokerParcelVerdict.DoesNotRead, Parcel.Kind: BrokerParcelKinds.Open })
+        if (reading is { Verdict: ParcelVerdict.DoesNotRead, Parcel.Kind: BrokerParcelKinds.Open })
         {
             _participant.Report(new InvalidDataException($"an OPEN to the name {name} does not read, dropped: {reading.Why}"));
 
@@ -470,7 +470,7 @@ public sealed class BrokerTransportServer : IServerTransport, IAsyncDisposable, 
 
         var open = reading.Parcel!;
 
-        if (reading.Verdict != BrokerParcelVerdict.Parcel || open.Kind != BrokerParcelKinds.Open)
+        if (reading.Verdict != ParcelVerdict.Taken || open.Kind != BrokerParcelKinds.Open)
         {
             return;
         }
@@ -536,8 +536,12 @@ public sealed class BrokerTransportServer : IServerTransport, IAsyncDisposable, 
     }
 
     /// <summary>What its participant ends no connection for, reported with none.</summary>
-    internal void Report(Exception reason)
+    internal void Report(Exception reason, bool isParticipantReport = false)
     {
+        if (!isParticipantReport && _participant.IsDebugging)
+        {
+            _participant.Trace(new ParticipantDebugEvent { Event = "report", Report = reason.Message });
+        }
         Error?.Invoke(reason, "");
     }
 
@@ -605,18 +609,19 @@ public sealed class BrokerTransportServer : IServerTransport, IAsyncDisposable, 
             return;
         }
 
+        var parcel = new BrokerParcel
+        {
+            Kind = BrokerParcelKinds.Refuse,
+            Opener = open.Opener,
+            Sequence = 1,
+            Status = status,
+            Layouts = status == 426 ? Layouts : null,
+        };
         _ = _participant.Publish(new BrokerPublication
         {
             Topic = _participant.InboxOf(id),
-            Payload = BrokerParcels.Write(new BrokerParcel
-            {
-                Kind = BrokerParcelKinds.Refuse,
-                Opener = open.Opener,
-                Sequence = 1,
-                Status = status,
-                Layouts = status == 426 ? Layouts : null,
-            }),
-        });
+            Payload = BrokerParcels.Write(parcel),
+        }, parcel);
         _listeners.Tell(Refusal, new TransportServerRefusal(id, null, null, 0, reason, status));
     }
 

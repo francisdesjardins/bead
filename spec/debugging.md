@@ -9,22 +9,26 @@ capitals, as shown here.
 
 This document is the companion of [`spec.md`](spec.md), which states the wire: what it states never
 goes on the wire. Sections 6 to 12 each name the conformance file that checks them; sections 1 to 5
-name none: the support matrix, [`docs/support.md`](../docs/support.md), names the twin tests that
-hold what of them a test can. The why of each rule is in the decisions:
+and 13 name none: the support matrix, [`docs/support.md`](../docs/support.md), names the twin tests
+that hold what of them a test can. The why of each rule is in the decisions:
 
 - [0001](../docs/decisions/0001-the-envelope-sits-at-fixed-offsets.md): a call to a connection that
   is not open, as a closing connection's teardown fails it (9.7);
 - [0013](../docs/decisions/0013-every-language-debugs-alike-at-no-cost-when-off.md): the whole of it;
+- [0015](../docs/decisions/0015-a-pages-client-announces-itself-to-a-devtools-hook.md): the page
+  hook that carries section 13;
 - [0016](../docs/decisions/0016-a-json-payload-has-one-form-whichever-side-writes-it.md): the
   payloads it writes (4.3, 10.1);
 - [0017](../docs/decisions/0017-ids-are-for-life-and-a-procedures-name-takes-one-ascii-form.md): the
   names it reads (1.2, 6.10, 7.3, 8.3);
 - [0033](../docs/decisions/0033-a-side-bounds-what-a-peer-holds-of-it.md): a call past those its
   connection has it answer, and a requester's call past its bounds (9.4, 9.6);
+- [0038](../docs/decisions/0038-over-a-broker-a-connection-is-placed-once-at-its-open-named-by-both-its-ends.md):
+  a connection's capability absent from its trace (13.7);
 - [0035](../docs/decisions/0035-a-payload-that-reads-is-held-to-its-messages-rules-before-its-resolver-sees-it.md):
   a request its rules refuse, traced and counted (4.3, 4.4, 9.4, 9.6).
 
-**Version: 0.4.1**. Each of its conformance files repeats it as its `debuggingVersion`, and follows
+**Version: 0.5.0**. Each of its conformance files repeats it as its `debuggingVersion`, and follows
 its schema in [`schemas/`](schemas/). It moves by `spec.md`'s rule, under a version of its own
 ([0008](../docs/decisions/0008-three-version-axes-and-names-qualified-by-their-owner.md)): the minor
 when an implementation that conforms to its last version must change to conform to this one, the
@@ -34,7 +38,7 @@ patch when one that conforms passes unchanged. **Status: every section is writte
 
 1.1. A side that carries the protocol whole, built with neither of section 3.5's switches, MUST
 trace its calls and its envelopes, filter both, and count its calls and its notifications, as this
-document states.
+document states, and trace the parcels of its participants where it carries a broker transport.
 
 1.2. A constrained profile MAY leave out, at build time, the trace and the filter, or the metrics,
 or both, as section 3.5's switches do. It conforms to `spec.md` either way, its wire by sections 1
@@ -64,9 +68,10 @@ its answer and what goes on the wire are the same.
 ## 3. The cost when off
 
 3.1. While nobody listens and no registry is given, a call MUST read no clock and allocate nothing
-for debugging: no step, no copy of its options or its payloads, no redacted header. One check a call,
-and one an envelope, is the whole cost. What a call allocates for itself may hold an empty reference
-the trace or the registry fills, the hook through which its call id is heard among them.
+for debugging: no step, no copy of its options or its payloads, no redacted header. One check a
+call, one an envelope, and one a parcel, is the whole cost. What a call allocates for itself may
+hold an empty reference the trace or the registry fills, the hook through which its call id is heard
+among them.
 
 3.2. A side that traces reads, at a call's start, the wall clock for `startedAt` and the monotonic
 clock for `duration`, and the monotonic clock at its end.
@@ -560,3 +565,82 @@ zeros, never with an exponent: 10 µs `0.00001`, 2,500,000 µs `2.5`, 3,000,000 
 it to its own exposition when that one is 0.0.4: Bead's families are `bead_*` alone, each one group.
 One whose exposition is OpenMetrics serves Bead's at a path of its own, a second target. Bead opens
 no port.
+
+## 13. The trace of parcels
+
+13.1. A participant (spec 15.16) tells its parcels, its link's transitions, its names and its reports
+to whoever listens, through `participant.on('debug')` / `participant.Debug +=`, as
+`IParticipantDebugEvent` / `ParticipantDebugEvent`. `isDebugging` / `IsDebugging` says whether
+anyone listens. The events have the same fields on every side, each in its platform's case.
+There is no snapshot event: the state at the start of a watch is read by pull, never fabricated
+as a transition, as Redux DevTools' store initialization is no application action.
+
+13.2. A `parcel` event tells one parcel, or one message that is no parcel. Its `direction` is `tx`
+at the attempt, as the participant hands it to its adapter, or `rx` once the participant judges
+it. Its `topic` is the list of logical topic tokens (spec 15.16); its `bytes` is the payload
+length. When the prefix reads, it gives `layout`, `kind` (spec 15.17's name, or `advisory` and
+its byte), `flags`, `sequence` and `opener`, the opener's half in hexadecimal. The body gives only
+its kind's fields: OPEN and ACCEPT `id`, `incarnation` in hexadecimal, `bound`, `secure`; REFUSE
+`status`; DATA `carriedBytes`, `more`, `hasCredential`; PONG `answers`; CLOSE `code`; GONE `id`
+and `incarnation`. `carriedBytes` comes from lengths, never a copy; `hasCredential` is the flag
+alone, and the trace never decodes the credential.
+
+13.3. A parcel of a connection the participant holds names `connection`, its ordinal, never
+reused. `connectionHandle` is the handle the server's transport draws at the third leg (spec
+15.18, 0025), from then on; `server` on a client's transport. Before the third leg a server's
+handle is absent. An event names no connection the participant does not hold. On a server the
+handle joins its envelopes (5.1). On a client, two connections over one participant are told apart
+by the ordinal alone: a client's envelope trace knows no participant ordinal, and the join is
+by time.
+
+13.4. An `rx` event gives its `verdict`, `PARCEL_VERDICTS` / `ParcelVerdict`: `taken`; `copy`,
+below the sequence awaited (spec 15.19); `loss`, with `awaited` and `came` (spec 15.19);
+`pair-not-held` (spec 15.21); `retained` (spec 15.23); `off-topic`, of no inbox, name or departure
+held; `no-parcel`; `does-not-read` (spec 15.17); or `advisory`, skipped (spec 15.17). A
+`retained`, `off-topic` or `no-parcel` event gives no prefix fields: its judgment precedes a
+prefix's reading. An incoming message is told once, with its judgment, never as a preliminary
+reading and another event after it.
+
+13.5. A `link` event tells a transition once complete: `state` is `up`, `down`, `taken-over`
+(spec 15.21, 0041) or `stopped`. It names its `incarnation`, the one drawn on `up`, and on a
+`down`, `taken-over` or `stopped` the ordinals of the connections it ends, `ended`. Its names
+are cleared and those connections dropped first. A takeover tells no later transition until
+the application starts the participant again. A `names` event tells a name held or let go once
+the broker acknowledges it: `name`, `isHeld`, `group` when any. It covers a name let go at
+`maximumConnections` and taken again below it (spec 15.18).
+
+13.6. A `report` event tells what the participant or one of its transports reports through its
+error event while watched, in its own words, `report` (spec 15.1, 15.19 to 15.23). It names the
+connection's ordinal and handle when it has one. A debug listener's own error is reported through
+the participant's error event and never told back as a `report`: it cannot feed itself.
+
+13.7. No event carries a DATA's carried bytes or a copy or hash of them, its credential, the
+acceptor's half of any connection, an adapter's options, a password, a certificate, an MQTT
+CONNECT or an AMQP authentication field. Under 0038 the pair is the connection's capability:
+spec 15.22 guards who subscribes an inbox, not who publishes to one. The opener's half stays:
+every member serving the name reads it in OPEN. Ids, topics and incarnations stay; a GONE is
+published by its participant's will alone, guarded by its authenticated id (spec 15.22).
+
+13.8. Levels are read by pull: `gauges()` / `Gauges()`, with their bounds, `incarnation` /
+`Incarnation`, `isLinked` / `IsLinked`, the inbox and the names held. The gauges give connections,
+half-open connections, parts held against `heldBytesBudget`, the largest parts against
+`maximumEnvelopePartsBytes`, bytes unsent and the largest unsent against `maximumUnsentBytes`,
+and departures (spec 15.20, 15.23). Transitions are pushed: a pull can miss a down and an up, or a
+name let go and held again, between two reads. A pull costs nothing while nobody reads.
+
+13.9. While nobody listens, one check a parcel is the whole cost: no event is built, no clock
+read, no byte copied or decoded for the trace, and no topic joined. Each event is told
+synchronously at its site within a guard, ordered per participant; on the C# side that site is
+the participant's `SerialScheduler`, as an envelope is told on its router's scheduler. A
+listener's error is reported through the participant's `error` / `Error`, and the listeners
+after it are still called. The participant goes on as if nobody listens. A listener filters
+what it receives, as 0013's call listener does; there is no per-kind selection at the source.
+
+13.10. Twin tests hold each event and verdict, a takeover and no later transition, a link lost
+with the ordinals it ends and restored as another incarnation, the acceptor's half absent from
+every event, a throwing listener reported while the participant goes on, and no clock reading
+or trace construction while unwatched. Where the platform counts a thread's allocations,
+`GC.GetAllocatedBytesForCurrentThread()` around a parcel taken and one sent pins what they
+allocate while nobody listens and shows no additional trace allocation; elsewhere this part
+is held by inspection, a row of the support matrix. Like sections 4 and 5, this section has no
+conformance file.

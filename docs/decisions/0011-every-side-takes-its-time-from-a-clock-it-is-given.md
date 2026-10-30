@@ -31,30 +31,30 @@ Three ways were weighed:
 - **Short timeouts on the real clock, and bounded waits**, keeps every case at the mercy of a
   runner's load, its durations bent to fit.
 - **A clock given to every stack, in each platform's own shape**, reaches Bead's timers and nothing
-  else, alike on both sides, and lets an application advance its own.
+  else, alike on every side, and lets an application advance its own.
 
 ## Decision
 
 **What the spec times takes the clock; what bounds a platform's own close, or its socket, takes the
 real one.** The clock times everything the spec times — a call's timeout and a relay's leg B among
 it — the bounds of section 15.12, a body's rate among them, but not those it holds a platform's
-socket and parser to, and a client's connect and its waits. The real clock times, alike on both
-sides, what bounds a platform's close or stop against a peer that does not answer — a close
-handshake, a stop's grace, a disconnect's `DELETE`, a lingering close's 2 seconds — and a
-heartbeat: a WebSocket's ping, which the C# side's platform times, and a broker's, which each side
-times on its platform's timer, `heartbeat.ts` and `Heartbeat.cs` on `TimeProvider.System`, a ping
-on a connection silent for its `heartbeat` (spec 15.21;
+socket and parser to, and a client's connect and its waits. The real clock times, alike on every
+side, what bounds a platform's close or stop against a peer that does not answer — a close
+handshake, a stop's grace, a disconnect's `DELETE`, a lingering close's 2 seconds — and a heartbeat:
+a WebSocket's ping, which the C# side's platform times, and a broker's, which each side times on its
+platform's timer, `heartbeat.ts` and `Heartbeat.cs` on `TimeProvider.System`, and the Rust side's
+`broker/heartbeat.rs` on its `SystemClock`, a ping on a connection silent for its `heartbeat` (spec
+15.21;
 [0040](0040-a-brokers-adapter-offers-bytes-at-topics-and-bead-keeps-its-own-credit-credential-and-heartbeat.md)),
-each played in real time ([0004](0004-one-behaviour-in-every-language.md)). What the spec times
-over a broker beside it takes the clock: a half-open connection's `acceptTimeout`, and the rate of
-an envelope's parts (spec 15.18, 15.20). It times as well what 15.12
-holds a platform's socket and parser to: what waits for a socket, its pace and its bound, since each
-bounds what the platform's socket does; and a head's `headersTimeout`, since the platform's parser
-alone sees a head before it is whole, and its check, Kestrel's heartbeat or Node's
-`connectionsCheckingInterval`, is internal ([0033](0033-a-side-bounds-what-a-peer-holds-of-it.md)).
-These run on the platforms' own timers, `node:http`'s, `undici`'s, `ws`'s, Kestrel's,
-`SocketsHttpHandler`'s, or on a side's own timer on the platform's clock, `globalThis` and
-`TimeProvider.System`.
+each played in real time ([0004](0004-one-behaviour-in-every-language.md)). What the spec times over
+a broker beside it takes the clock: a half-open connection's `acceptTimeout`, and the rate of an
+envelope's parts (spec 15.18, 15.20). It times as well what 15.12 holds a platform's socket and
+parser to: what waits for a socket, its pace and its bound, since each bounds what the platform's
+socket does; and a head's `headersTimeout`, since the platform's parser alone sees a head before it
+is whole, and its check, Kestrel's heartbeat or Node's `connectionsCheckingInterval`, is internal
+([0033](0033-a-side-bounds-what-a-peer-holds-of-it.md)). These run on the platforms' own timers,
+`node:http`'s, `undici`'s, `ws`'s, Kestrel's, `SocketsHttpHandler`'s, or on a side's own timer on
+the platform's clock, `globalThis` and `TimeProvider.System`.
 
 **Time has three uses.** A duration runs on a timer. A deadline of Bead's own, a call id's
 reservation, is compared on the monotonic reading. An instant from outside, a token's `exp` or
@@ -64,30 +64,34 @@ each step's due, and again when a renewal moves it. Section 15.10 times a client
 timer of the client's, never on a reading of its wall clock".
 
 **A stack has one clock, set where it starts and read upward.** The transports, the session manager
-and a router built alone take one — `clock` on the TypeScript side, `Clock` on the C# side — and
-each layer exposes the clock it runs on. A layer built on another runs on that layer's clock, and
-refuses one that differs; a facade given a transport already built takes that transport's clock, and
-the builder of its sessions receives the clock to use. The code the builder generates adds none: it
-runs on its transport's clock.
+and a router built alone take one — `clock` on the TypeScript side, `Clock` on the C# side, `clock`
+on the Rust side — and each layer exposes the clock it runs on. A layer built on another runs on
+that layer's clock, and refuses one that differs; a facade given a transport already built takes
+that transport's clock, and the builder of its sessions receives the clock to use. The code the
+builder generates adds none: it runs on its transport's clock.
 
-**The clock has each platform's shape.** On the C# side it is a `TimeProvider`. On the TypeScript
-side it is the part of the globals Bead calls — `setTimeout`, `clearTimeout`, `setInterval`,
-`clearInterval`, `Date.now` and `performance.now` — which `globalThis` is by default, so its timers
-keep the platform's handle, `unref` included where it has one. The pair is a row of each side's list
-of terms ([0007](0007-csharp-interfaces-blocks-two-parameters-no-warning.md)). The word is _clock_
-([0003](0003-one-word-one-meaning.md)): `clock`, `Clock`, `IClock`; a _timestamp_ is the monotonic
-reading alone, and the instants a side reports are `lastActivity`, `LastActivity`, and a trace's
-`startedAt`, `StartedAt`, beside its `duration`, `Duration` — the shape of an OpenTelemetry span: a
-start on the wall clock, a duration on the monotonic one.
+**The clock has each platform's shape.** On the C# side it is a `TimeProvider`. On the Rust side it
+is a `Clock` trait, its monotonic reading, its wall clock and a timer armed, `SystemClock` the
+platform's on tokio's timers, and a router built on a runtime without tokio's time driver refused as
+it is built, never failing at its first timer
+([0044](0044-rust-one-owner-per-router-traits-no-unsafe-two-parameters-no-warning.md)). On the
+TypeScript side it is the part of the globals Bead calls — `setTimeout`, `clearTimeout`,
+`setInterval`, `clearInterval`, `Date.now` and `performance.now` — which `globalThis` is by default,
+so its timers keep the platform's handle, `unref` included where it has one. The pair is a row of
+each side's list of terms ([0007](0007-csharp-interfaces-blocks-two-parameters-no-warning.md)). The
+word is _clock_ ([0003](0003-one-word-one-meaning.md)): `clock`, `Clock`, `IClock`; a _timestamp_ is
+the monotonic reading alone, and the instants a side reports are `lastActivity`, `LastActivity`, and
+a trace's `startedAt`, `StartedAt`, beside its `duration`, `Duration` — the shape of an
+OpenTelemetry span: a start on the wall clock, a duration on the monotonic one.
 
 **One ceiling, JavaScript's: 2³¹ − 1 milliseconds**, which the C# side keeps for parity, though its
 timers reach twice as far. Every option and method that takes a timeout refuses a longer one — a
-session manager's reset and a server's connection timeout among them — and _never_ is `Infinity` and
-`Timeout.InfiniteTimeSpan`, which arm nothing. One constant a side, beside its clock. **And one
-floor: a millisecond, counted whole.** Bead arms no timer for less on the clock it is given, where
-Node waits a millisecond at least and .NET fires at once, nor for a fraction, which both drop. How a
-side holds a duration an application gives it, between that floor and that ceiling, is
-[0014](0014-every-place-that-takes-a-duration-is-a-row-of-one-file.md)'s.
+session manager's reset and a server's connection timeout among them — and _never_ is `Infinity`,
+`Timeout.InfiniteTimeSpan` and `Duration::MAX`, which arm nothing. One constant a side, beside its
+clock. **And one floor: a millisecond, counted whole.** Bead arms no timer for less on the clock it
+is given, where Node waits a millisecond at least and .NET fires at once, nor for a fraction, which
+both drop. How a side holds a duration an application gives it, between that floor and that
+ceiling, is [0014](0014-every-place-that-takes-a-duration-is-a-row-of-one-file.md)'s.
 
 **`advance` steps.** It settles the side; takes the earliest timer due by now plus its milliseconds;
 sets both readings to that due; fires it; settles; and so on, then sets the readings to now plus its
@@ -96,13 +100,16 @@ fires once for each period crossed, each at its own due. The C# harnesses' test 
 timers armed on it and fires them from due to due, a `FakeTimeProvider` giving its readings alone:
 the fake fires a timer due within an advance with its readings at the end already, and timers due at
 once in no order of its own. The TypeScript side's test clock is `@sinonjs/fake-timers`'
-`createClock()`, never installed on the globals, and its `tickAsync` steps. Both pass one shared
-table of clock cases, `spec/clocks.json`: two timers chained in one advance, a periodic timer across
-three periods, timers due at once, the wall clock moved alone. A periodic timer is armed again as it
-is taken, before its callback runs: it fires after every timer armed before it fired, and before any
-its callback arms. A due is counted in whole milliseconds, a fraction dropped, as both platforms
-count it; both test clocks refuse a timer for less than a millisecond or past the ceiling, and an
-advance within another, so what Bead never arms fails a test on either side.
+`createClock()`, never installed on the globals, and its `tickAsync` steps. The Rust side's is the
+core's own `SteppingClock`, in its test kit, the C# one's twin, its own timers in armed order:
+tokio's paused time is not it, since it moves no wall clock, fires every timer due at once in its
+own order and settles nothing between them. Each passes one shared table of clock cases,
+`spec/clocks.json`: two timers chained in one advance, a periodic timer across three periods, timers
+due at once, the wall clock moved alone. A periodic timer is armed again as it is taken, before its
+callback runs: it fires after every timer armed before it fired, and before any its callback arms. A
+due is counted in whole milliseconds, a fraction dropped, as Node and .NET count it; each test clock
+refuses a timer for less than a millisecond or past the ceiling, and an advance within another, so
+what Bead never arms fails a test on every side.
 
 **An `advance` follows a timer armed.** Each side's test clock counts the timers armed and their
 dues, and `until` waits for "a timer armed, due its milliseconds from now" before an advance:
@@ -110,12 +117,12 @@ dues, and `until` waits for "a timer armed, due its milliseconds from now" befor
 advance. Bytes and gauges prove what crossed the wire; this proves what the side means to fire.
 
 **The wall clock starts where a file says.** Each conformance file states its start as an RFC 3339
-instant, and both sides' test clocks start there; `advance` moves both readings together, and a step
-of its own moves the wall clock alone, forward or back, as a clock set by hand moves.
+instant, and every side's test clock starts there; `advance` moves both readings together, and a
+step of its own moves the wall clock alone, forward or back, as a clock set by hand moves.
 
-**Randomness is not time.** A wait drawn at random keeps its platform's draw, and both sides check
-it by its bounds: advanced to a millisecond short of half the wait, nothing; advanced to the whole
-of it, what it waited for.
+**Randomness is not time.** A wait drawn at random keeps its platform's draw, and the TypeScript and
+C# sides check it by its bounds, the wait their HTTP client draws before it listens again: advanced
+to a millisecond short of half the wait, nothing; advanced to the whole of it, what it waited for.
 
 **The clock does not order sockets.** A case where a timer ends a connection under an exchange
 handed on expects the exchange `orLost` (spec 15.7): the clock makes the end come on time, not its
@@ -124,17 +131,21 @@ bytes come first.
 **Every language plays the contract in readings and deadlines.** A side is given a monotonic reading
 and a wall one; a deadline is due once the monotonic reading reaches it, and is acted on at the
 side's next turn — a timer's callback, or a loop's cycle; `advance` moves the readings and lets the
-side take its turns. The shapes above are the TypeScript and C# sides'; a language that joins maps
-the contract in its own record, and a 1 kHz loop with no timer to create maps it to deadlines it
-polls each cycle.
+side take its turns. The shapes above are the TypeScript, C# and Rust sides', the Rust side's mapped
+by [0044](0044-rust-one-owner-per-router-traits-no-unsafe-two-parameters-no-warning.md); a language
+that joins maps the contract in its own record, and a 1 kHz loop with no timer to create maps it to
+deadlines it polls each cycle.
 
 **The rule has its gate** ([0006](0006-a-rule-has-its-gate.md)). On the C# side, the banned-API
 analyzer (RS0030) refuses `DateTime`'s and `DateTimeOffset`'s `Now` and `UtcNow`, `Stopwatch`,
 `Environment.TickCount64`, a `Timer`'s constructors, and `Task.Delay` and `CancellationTokenSource`
 given no `TimeProvider`. On the TypeScript side, oxlint's `no-restricted-globals` and
-`no-restricted-properties` refuse the globals' timers and clocks. Each exception is suppressed where
-it stands, with its reason, as [0007](0007-csharp-interfaces-blocks-two-parameters-no-warning.md)
-overrules an analyzer.
+`no-restricted-properties` refuse the globals' timers and clocks. On the Rust side, clippy's
+`disallowed-methods` and `disallowed-types` refuse tokio's sleeps, intervals and timeouts,
+`SystemTime::now` and the `Instant`s, so that time goes through the clock
+([0044](0044-rust-one-owner-per-router-traits-no-unsafe-two-parameters-no-warning.md)). Each
+exception is suppressed where it stands, with its reason, as
+[0007](0007-csharp-interfaces-blocks-two-parameters-no-warning.md) overrules an analyzer.
 
 ## Consequences
 

@@ -11,10 +11,12 @@ export const meta = {
   ],
 };
 
-// args: { repo, scratch, venv, slug, scope, lenses?, effort? }
+// args: { repo, scratch, venv, slug, scope, lenses?, effort?, serial? }
 // - scope: what is reviewed, in full: the ref and its commit, the versions, what is out of scope;
 // - lenses: [{ key, focus }], the five below by default;
-// - effort: the reviewers', 'max' by default, as before a freeze (CLAUDE.md, the agents' effort).
+// - effort: the reviewers', 'max' by default, as before a freeze (CLAUDE.md, the agents' effort);
+// - serial: one agent at a time, each lens reviewed then verified before the next, where the quota
+//   asks it; the lenses run side by side otherwise.
 const required = (name) => {
   if (!args || !args[name]) {
     throw new Error(`args.${name} is required`);
@@ -68,28 +70,35 @@ CLAUDE.md's rules are injected; these are the ones a stage most often misses:
 - Before 1.0.0, a decision record or a released behaviour yields to a standard, an industry practice, a cleaner split, stability or clarity: name it and recommend the revision outright.
 Cite file and line for every claim, and prove what can be proved by running it.`;
 
-const reviewed = await pipeline(
-  LENSES,
-  (lens) => {
-    return agent(
-      `${COMMON}
+const review = (lens) => {
+  return agent(
+    `${COMMON}
 # Your task: review through one lens (effort ${EFFORT})
 The lens: ${lens.focus}.
 Be adversarial: look for what is wrong, missing or inconsistent, and what a reader, a peer or an attacker would trip on; say what you looked at and found sound as well, so that the silence means something. For each finding: an id (\`${lens.key}-<n>\`), what is wrong, the evidence (file and line, the probe and its output, under ${OUT}/probes-${lens.key}/), the severity you propose (blocker: the version cannot ship with it; major: it ships only fixed or declared, a row of the matrix or an open point; minor), and the remedy. Write ${OUT}/${lens.key}.md and return a summary of fifteen lines.`,
-      { label: `review:${lens.key}`, phase: 'Review', effort: EFFORT }
-    );
-  },
-  (summary, lens) => {
-    return agent(
-      `${COMMON}
+    { label: `review:${lens.key}`, phase: 'Review', effort: EFFORT }
+  );
+};
+const verify = (summary, lens) => {
+  return agent(
+    `${COMMON}
 # Your task: verify one lens's findings (effort xhigh)
 Read ${OUT}/${lens.key}.md. Put each finding to the code and the text it cites, and rerun its proof under ${OUT}/verify-${lens.key}/: give it a verdict, confirmed, partly or refuted, and a severity, blocker, major or minor, which may differ from the reviewer's. Refute what does not hold; default to refuted when the evidence does not reproduce. Write ${OUT}/${lens.key}-verdicts.md (a table, Id | Verdict | Severity | In short, then a section per finding) and return its table.
 The reviewer's summary:
 ${summary || '(no summary)'}`,
-      { label: `verify:${lens.key}`, phase: 'Verify', effort: 'xhigh' }
-    );
+    { label: `verify:${lens.key}`, phase: 'Verify', effort: 'xhigh' }
+  );
+};
+
+const serially = async () => {
+  const tables = [];
+  for (const lens of LENSES) {
+    tables.push(await verify(await review(lens), lens));
   }
-);
+  return tables;
+};
+
+const reviewed = args.serial ? await serially() : await pipeline(LENSES, review, verify);
 
 phase('Synthesize');
 const synthesis = await agent(

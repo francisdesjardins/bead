@@ -610,7 +610,8 @@ export interface IRouterCore<Handle extends string> {
    * reported, save an answer or a chunk of this layout on a call id reserved, or a chunk on a call
    * abandoned, which is late and dropped in silence. Given as a transport hands it on, the envelope
    * comes with the credential its transport carried beside it, which a request presenting
-   * `ELSEWHERE` stands for (spec 15.1); given alone, it came with none.
+   * `ELSEWHERE` stands for (spec 15.1); given alone, it came with none. Given from within a
+   * listener this core called, it is taken in a later turn, behind what came before it (spec 9.0).
    */
   receive(message: Data | ITransportMessage, connectionHandle: Handle): void;
   /**
@@ -626,7 +627,8 @@ export interface IRouterCore<Handle extends string> {
    * Rejects what waits for an answer — from `connectionHandle` only, when given — with a
    * {@link DisconnectError} saying `reason`, and forgets the calls the connection opened, the call
    * ids it reserved, and the session announced to it; then the signal of each call it opened is
-   * aborted, with that error as its reason.
+   * aborted, with that error as its reason. Asked from within a listener this core called, it is
+   * done in a later turn, behind what came before it (spec 9.0).
    */
   rejectPending(reason: string, connectionHandle?: Handle): void;
   /**
@@ -709,7 +711,7 @@ export interface IRouterCore<Handle extends string> {
   ): Promise<void>;
   /**
    * Rejects what still waits, aborts the signal of each call it still answers, and sends nothing
-   * more: no cancel either.
+   * more: no cancel either. Disposed at once, it lets go of what waits as `rejectPending` does.
    */
   [Symbol.dispose](): void;
 }

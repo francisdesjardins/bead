@@ -55,7 +55,7 @@ The options weighed:
   on a silent connection alone does.
 - **The heartbeat on the clock a side is given**: against
   [0011](0011-every-side-takes-its-time-from-a-clock-it-is-given.md), which runs a WebSocket's ping
-  on the real clock, its platform timing it on the C# side, so that both sides' heartbeats play
+  on the real clock, its platform timing it on the C# side, so that every side's heartbeat plays
   alike.
 - **AMQP as the core**: its model of exchanges and queues would become Bead's; it is one binding
   among others, which proves the core common.
@@ -63,20 +63,21 @@ The options weighed:
 ## Decision
 
 **An adapter brings one broker's client and offers bytes at topics** (spec 15.24), the same members
-on both sides, name for name: its handles' type, `BROKER` in memory; the id its broker authenticates
-its link by; to start a link that keeps no broker session, with its will where it takes one; to
-subscribe a topic, alone or in a group, said held once its broker holds it; to let one go, said let
-go once its broker did; to publish a payload to a topic, said taken once its broker took it, or as
-it goes at most once, or refused, `no-subscriber` where its broker says so; each message, with its
-topic, its payload and its acknowledgement; its link lost, and whether another link of its id took
-it over; the largest payload a message to a topic carries, asked by the topic, its inbox's among
-them, since a binding counts a topic in each message; the delivery it gives, at least once, its
-broker acknowledging each publication it took and the adapter itself, not its library, holding what
-it publishes to the quota its broker gives, or at most once; whether its leg is secure; and to end
-its link cleanly, so no will goes. It
-names its optional capabilities: `groups`, `will`, `noSubscriber` and `expiry`, a message's life in
-its broker; a name served by several participants needs `groups`. So a broker's library stays in its
-adapter, and the core depends on none.
+on every side, name for name, each in its language's case: its handles' type, `BROKER` in memory;
+the id its broker authenticates its link by; to start a link that keeps no broker session, with its
+will where it takes one; to subscribe a topic, alone or in a group, said held once its broker holds
+it; to let one go, said let go once its broker did; to publish a payload to a topic, said taken once
+its broker took it, or as it goes at most once, or refused, `no-subscriber` where its broker says
+so; each message, with its topic, its payload and its acknowledgement; its link lost, and whether
+another link of its id took it over; the largest payload a message to a topic carries, asked by the
+topic, its inbox's among them, since a binding counts a topic in each message; the delivery it
+gives, at least once, its broker acknowledging each publication it took and the adapter itself, not
+its library, holding what it publishes to the quota its broker gives, or at most once; whether its
+leg is secure; and to end its link cleanly, so no will goes. It names its optional capabilities:
+`groups`, `will`, `noSubscriber` and `expiry`, a message's life in its broker; a name served by
+several participants needs `groups`. So a broker's library stays in its adapter, and the core
+depends on none. The Rust side's handles' type is `transport_type`, and its messages and its link
+down come to a `BrokerListener` it hands `listen`.
 
 **Each side's core holds an in-memory broker** of that contract, with every optional capability:
 topics and subscriptions, alone and in groups, a group's members chosen in turn; each message copied
@@ -146,10 +147,11 @@ nothing of it has come for `heartbeat`, 30 s by default or never, and closes it 
 nothing of it has come by `heartbeat` after that PING; any parcel answers, as TCP sends a keep-alive
 only when nothing came within its interval
 ([RFC 9293 §3.8.4](https://www.rfc-editor.org/rfc/rfc9293#section-3.8.4)), and a PING waits behind
-what was sent before it. It runs on the platform's timer on both sides, as a WebSocket's does: the
+what was sent before it. It runs on the platform's timer on every side, as a WebSocket's does: the
 TypeScript side's `heartbeat.ts` on `globalThis`, the C# side's `Heartbeat.cs`, its twin, on
-`TimeProvider.System`'s timer. A PING, a PONG and a CLOSE are no messages for 13.7's timeouts, so
-over a broker, as over a WebSocket, a peer that only hears is silent.
+`TimeProvider.System`'s timer, and the Rust side's `broker/heartbeat.rs` on its `SystemClock`, never
+the clock its participant is given. A PING, a PONG and a CLOSE are no messages for 13.7's timeouts,
+so over a broker, as over a WebSocket, a peer that only hears is silent.
 
 ## Consequences
 
@@ -185,7 +187,7 @@ server's credential, notifications to two subscribers at their own credit, a tra
 a retained message, the heartbeat in real time and a queue's overrun; the place
 `brokerParticipant.heartbeat` and the way `broker` of `transportClient.connectTimeout`; and the
 twins of the participant, the in-memory broker and the heartbeat, those holding 15.24 naming it,
-each named by one sentence on both sides.
+each named by one sentence on every side.
 
 ## The Tenth Man
 

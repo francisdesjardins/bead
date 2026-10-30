@@ -34,7 +34,7 @@
       "bead.transport.websockets": {
         "type": "Project",
         "dependencies": {
-          "Bead.Core": "[0.8.0, )"
+          "Bead.Core": "[0.9.0, )"
         }
       }
     }

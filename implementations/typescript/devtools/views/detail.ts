@@ -41,7 +41,7 @@ import {
 import type { PreviewNode } from '../preview';
 import type { IStackFrame } from '../stack';
 import { durationWordsOf, typeWordsOf } from './calls';
-import { factsOf, make, noteOf, statusIconOf } from './dom';
+import { currentOf, listen, factsOf, make, noteOf, statusIconOf } from './dom';
 import { threadViewOf } from './thread';
 
 // interfaces
@@ -199,12 +199,18 @@ const payloadBlockOf = (
     text: 'Raw',
   });
 
-  copyButton.addEventListener('click', () => {
-    copy(payload.text);
+  listen(copyButton, {
+    type: 'click',
+    handle: () => {
+      copy(payload.text);
+    },
   });
-  rawButton.addEventListener('click', () => {
-    body.replaceWith(raw);
-    rawButton.remove();
+  listen(rawButton, {
+    type: 'click',
+    handle: () => {
+      currentOf(body).replaceWith(raw);
+      currentOf(rawButton).remove();
+    },
   });
 
   return [
@@ -554,8 +560,11 @@ const frameOf = (frame: IStackFrame, context: IDetailContext): HTMLElement => {
       : make('button', { attributes: { title: 'Open in Sources', type: 'button' }, text: where });
 
   if (open !== undefined) {
-    link.addEventListener('click', () => {
-      open(frame.url, frame.line);
+    listen(link, {
+      type: 'click',
+      handle: () => {
+        open(frame.url, frame.line);
+      },
     });
   }
 

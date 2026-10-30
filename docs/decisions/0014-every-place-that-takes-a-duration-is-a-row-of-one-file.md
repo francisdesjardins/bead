@@ -2,7 +2,7 @@
 
 - **Status**: accepted
 - **Scope**: spec 1.4, 15.9, 15.10 and 15.12, and the line naming the file; `spec/durations.json`,
-  its schema, its generator and its gate; both implementations' harnesses; the support matrix. The
+  its schema, its generator and its gate; every implementation's harness; the support matrix. The
   clock a duration runs on, its floor and its ceiling are
   [0011](0011-every-side-takes-its-time-from-a-clock-it-is-given.md)'s.
 
@@ -104,9 +104,10 @@ owner keeps a place of its own.
 
 `server.connectionInactivityTimeout` is the server layer's option, which 13.7 leaves without end
 when not given; an HTTP server gives its own 30 s (15.12.10), which `spec/transports.json`'s
-`defaults` holds and both sides check, and the place's `state` says so.
+`defaults` holds and the TypeScript and C# sides check, and the place's `state` says so.
 `httpTransport.inactivityTimeout` is an HTTP connection's inactivity timeout, which 15.12 names for
-both sides: 5 minutes by default, and without end if given so, its client's and its server's alike.
+both ends of a connection: 5 minutes by default, and without end if given so, its client's and its
+server's alike.
 `httpTransportClient.pause`'s at once is 15.10's "listen again at once", stated with a schedule no
 file checks: the file leaves it out, as it leaves out the defaults no clause states.
 `webSocketTransport.closeTimeout` is a WebSocket's close timeout by two ways, its client's and its
@@ -117,11 +118,13 @@ tests play its client's way besides.
 user writes on every platform:
 
 - `milliseconds`, a JSON number: the TypeScript side gives it as it is, the C# side through
-  `TimeSpan.FromMilliseconds`;
-- `seconds`, a JSON number, as a user writes seconds: `seconds * 1000` and `TimeSpan.FromSeconds`,
-  each platform's own arithmetic — 0.41 s is 410 ms in JavaScript and 409.9999 ms in .NET, 2.01 s
-  2009.9999999999998 ms and 2009.9999 ms;
-- `never`: `Infinity` and `Timeout.InfiniteTimeSpan`, which RFC 8259 §6 leaves JSON without;
+  `TimeSpan.FromMilliseconds`, the Rust side through `Duration::from_secs_f64` of `ms / 1000.0`;
+- `seconds`, a JSON number, as a user writes seconds: `seconds * 1000`, `TimeSpan.FromSeconds` and
+  `Duration::from_secs_f64`, each platform's own arithmetic — 0.41 s is 410 ms in JavaScript,
+  409.9999 ms in .NET and 410 ms in Rust, which rounds to the nanosecond, 2.01 s
+  2009.9999999999998 ms, 2009.9999 ms and 2010 ms;
+- `never`: `Infinity`, `Timeout.InfiniteTimeSpan` and `Duration::MAX`, which RFC 8259 §6 leaves
+  JSON without ([0044](0044-rust-one-owner-per-router-traits-no-unsafe-two-parameters-no-warning.md));
 - `nan`: IEEE 754's NaN, which JSON has no number for either;
 - `json`: a value that is no number, a string or a boolean, as a limit read from JSON may be.
 
@@ -139,15 +142,18 @@ the words that say so: a duration's refusal is thrown to the application, never 
 vectors pin a refusal's detail because it goes on the wire; and [RFC
 9457](https://www.rfc-editor.org/rfc/rfc9457) keeps a problem's type apart from its words alike. A
 side that reports a refusal by a code checks the reason against that code. No surface changes for
-it: the TypeScript and C# sides word one sentence for every reason.
+it: the TypeScript and C# sides word one sentence for every reason, and the Rust side reports a
+refusal by a code, `DurationRefusal`, which its harness checks against the reason.
 
-**The generator plays both platforms.** Each outcome is 1.4 over the input's value as written.
-Beside it, the generator plays each platform's conversion — JavaScript's arithmetic on a double, and
-.NET's `TimeSpan`, the double multiplied into ticks and truncated — and runs 1.4 over what each
-reaches. It fails on any outcome, held value or reason a platform reaches otherwise, unless that
-outcome, or its input, crosses a row of the matrix for that language; on a row an input names that
-nothing crosses; and on an input in seconds within a tick of a half, as written or as either
-platform computes it, since a value so near a half rounds with its platform's error. JavaScript
+**The generator plays every platform.** Each outcome is 1.4 over the input's value as written.
+Beside it, the generator plays each platform's conversion — JavaScript's arithmetic on a double,
+.NET's `TimeSpan`, the double multiplied into ticks and truncated, and Rust's `Duration`, the
+double's exact value rounded to the nearest nanosecond — and runs 1.4 over what each reaches. It
+fails on any outcome, held value or reason a platform reaches otherwise, unless that outcome, or its
+input, crosses a row of the matrix for that language; on a row an input names that nothing crosses;
+and on an input in seconds within a platform's error of a half, a tick as written and on the
+platforms that count one, half a nanosecond on Rust's, since a value so near a half rounds with its
+platform's error. Rust reaches 1.4's outcome at every input it can be given. JavaScript
 reaches 1.4's outcome at every input. .NET reaches another at three: under a tick, 0.00001 ms is
 `TimeSpan.Zero`, at once at a delay and refused as 0 elsewhere; 0.00001 ms past the ceiling is
 truncated onto the ceiling, and held; and −1 ms is `Timeout.InfiniteTimeSpan`, never where never is
@@ -158,10 +164,12 @@ the language the row excuses, as in every file of entries
 ([0004](0004-one-behaviour-in-every-language.md)), at three levels:
 
 - on an input the language cannot be given at all: NaN, `"1000"` and `true` are no value a
-  `TimeSpan` holds, and cross "A duration that is not a number", a platform row;
-- on a way the language lacks: the Web Worker's connect, which crosses "The Web Worker transport",
-  and a reconnection's delay given as a number, which crosses "A reconnection's delay given as a
-  number", an open row;
+  `TimeSpan` or a `Duration` holds, and cross "A duration that is not a number", a platform row;
+  −2 ms and −1 ms are no `Duration`, and cross "A duration under zero" for the Rust side;
+- on a way the language lacks: the Web Worker's connect, which crosses "The Web Worker transport"
+  for the C# and the Rust sides, and a reconnection's delay given as a number, which crosses "A
+  reconnection's delay given as a number" for the C# side, an open row, since the Rust side takes
+  both ways;
 - on an outcome the language reaches otherwise: −1 ms crosses "A duration of -1 ms" at every place,
   the ten that refuse never among them, where the C# side refuses it as never rather than under the
   floor; the two inputs finer than a tick cross "A duration finer than a tick" at every place.
@@ -173,12 +181,15 @@ excuses its language from, at whichever level.
 **Each side plays the file in one harness, through one helper.** The helper reads the file whole,
 from `spec/`, never a copy, and gives the inputs as its side is given them: on the TypeScript side
 `transport/shared/__tests__/durations.ts`, on the C# side `tests/Shared/Durations.cs`, linked with
-the file into each test project that uses it. The harness is the TypeScript side's
-`server/__tests__/durations.test.ts`, in the folder whose tests already build every layer, and the
-C# side's `DurationsTests`, in `Bead.Transport.Http.Tests`, which references every assembly holding
-a place. Each keeps a table from each place and way to a function that builds the place on the
-side's test clock, given one input or none, and fails when its table's places or ways are not the
-file's, one more or one less; each way keeps what its loop asserted besides the outcome.
+the file into each test project that uses it, on the Rust side its test kit's
+`src/testing/durations.rs`. The harness is the TypeScript side's
+`server/__tests__/durations.test.ts`, in the folder whose tests already build every layer, the C#
+side's `DurationsTests`, in `Bead.Transport.Http.Tests`, which references every assembly holding a
+place, and the Rust side's `crates/bead/tests/durations.rs`, its core's, which plays the places its
+core holds, each other one ahead with the stage that brings it. Each keeps a table from each place
+and way to a function that builds the place on the side's test clock, given one input or none, and
+fails when its table's places or ways are not the file's, one more or one less; each way keeps what
+its loop asserted besides the outcome.
 
 **The words stay with each side.** Each side keeps a phrase a place, in its own words and its
 language's case, beside the table that builds it, and one words function, beside the helper, which

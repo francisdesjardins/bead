@@ -368,11 +368,14 @@ public sealed class WebSocketTransportClientTests : IAsyncLifetime
             foreach (var ending in new[] { "cancel", "timeout", "dispose" })
             {
                 var released = await LateUpgrade(ending);
-                for (var tries = 0; tries < 10 && released.IsAlive; tries++)
+                // ! a deadline, never a count of tries: under coverage, the late upgrade's task can
+                // hold its reference past ten collections a yield apart
+                var deadline = DateTime.UtcNow + Patience;
+                while (released.IsAlive && DateTime.UtcNow < deadline)
                 {
                     GC.Collect();
                     GC.WaitForPendingFinalizers();
-                    await Task.Yield();
+                    await Task.Delay(TimeSpan.FromMilliseconds(10), Cancelled);
                 }
                 Assert.False(released.IsAlive);
                 GC.Collect();

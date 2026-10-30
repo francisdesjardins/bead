@@ -10,19 +10,26 @@
 //
 //   node tools/protobuf-conformance.mjs typescript     the suite through the TypeScript side's codec
 //   node tools/protobuf-conformance.mjs csharp         the suite through the C# side's codec
-//   node tools/protobuf-conformance.mjs differential   one corpus of Probe through both
+//   node tools/protobuf-conformance.mjs rust           the suite through the Rust side's codec
+//   node tools/protobuf-conformance.mjs differential   one corpus of Probe through the TypeScript
+//                                                      and C# sides
 //
 // For a side, it ejects the suite's test protos from the pinned package into
 // `protobuf-conformance/.work/<side>/`, under `protobuf_test_messages/` rather than
 // `google/protobuf/`, where beadc writes no message, and the suite's `conformance/conformance.proto`;
 // puts spec/codecs.proto and `protobuf-conformance/service.proto` beside them; runs `beadc generate`
-// there for the side's target, and copies what it writes into the side's testee:
+// there for the side's target, and copies what it writes into the side's testee. The Rust side's
+// beadc target is ahead, so for it protoc writes the set of the suite's protos and Probe instead,
+// which its testee's build script generates its messages from (decision 0044):
 //
 // - TypeScript: `implementations/typescript/tools/protobuf-conformance/`, its `generated/` written
 //   here, type-checked by its own tsconfig.json, its `testee.ts` run by Node on the side's own
 //   install, its `failing.txt` the side's list;
 // - C#: `implementations/dotnet/tools/Bead.ProtobufConformance/`, its `Generated/` written here,
-//   built in Release and run by `dotnet`, its `failing.txt` the side's list.
+//   built in Release and run by `dotnet`, its `failing.txt` the side's list;
+// - Rust: `implementations/rust/tools/protobuf-conformance/`, its `generated/conformance.binpb`
+//   written here, built in release by Cargo on the toolchain the side pins, by its own lock, its
+//   `failing.txt` the side's list.
 //
 // A testee is a conformance testee, as protobuf's runner drives one: on its standard input, each
 // ConformanceRequest after its length, a 32-bit little-endian integer; on its standard output, each
@@ -51,8 +58,9 @@
 // and an entry's key at its default, which protobuf-es writes and Google.Protobuf leaves out. Any
 // other parting fails.
 //
-// The runner ships linux-x64 and darwin-x64 binaries alone: the suite runs in CI and, on Windows, in
-// a Linux container; the differential runs wherever both testees do. From the repository's root,
+// The runner ships linux-x64 and darwin-x64 binaries alone, and asks glibc 2.38 or later, Debian 13's:
+// the suite runs in CI and, on Windows, in a Linux container that recent; the differential runs
+// wherever both testees do. From the repository's root,
 // once implementations/typescript and builder/ are installed; protoc is `BEADC_PROTOC`, or the one
 // builder/tools/fetch-protoc.mjs fetches. Exit 1 on a failure, with its reason.
 
@@ -67,7 +75,7 @@ import {
   rmSync,
   writeFileSync,
 } from 'node:fs';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 // ── Places ────────────────────────────────────────────────────────────────────
@@ -112,7 +120,25 @@ export const SIDES = Object.freeze({
     folder: 'implementations/dotnet/tools/Bead.ProtobufConformance',
     generated: 'Generated',
   }),
+  rust: Object.freeze({
+    language: 'rust',
+    folder: 'implementations/rust/tools/protobuf-conformance',
+    generated: 'generated',
+  }),
 });
+
+// * the sides the differential reads one corpus through, compared two by two
+export const DIFFERENTIAL_SIDES = Object.freeze(['typescript', 'csharp']);
+
+// the files of the set the Rust side's testee generates its messages from, as its build script
+// names them
+export const RUST_SET_FILES = Object.freeze([
+  ...TEST_MESSAGES.map((file) => {
+    return `${TEST_FOLDER}/${file}`;
+  }),
+  'conformance/conformance.proto',
+  'codecs.proto',
+]);
 
 // ── Pin ───────────────────────────────────────────────────────────────────────
 
@@ -979,6 +1005,26 @@ const generate = ({ side, runner, protoc }) => {
     join(proto, 'conformance', 'conformance.proto')
   );
   cpSync(join(ROOT, 'spec', 'codecs.proto'), join(proto, 'codecs.proto'));
+
+  const generated = join(ROOT, side.folder, side.generated);
+
+  rmSync(generated, { force: true, recursive: true });
+
+  if (side.language === 'rust') {
+    // * the set protoc writes, the well-known types from its own include, which the testee's build
+    // script hands to Buffa's generator: no protoc runs in a Rust build
+    mkdirSync(generated, { recursive: true });
+    run(protoc, [
+      `-I${proto}`,
+      `-I${join(dirname(protoc), '..', 'include')}`,
+      '--include_imports',
+      `--descriptor_set_out=${join(generated, 'conformance.binpb')}`,
+      ...RUST_SET_FILES,
+    ]);
+
+    return work;
+  }
+
   cpSync(join(HERE, 'service.proto'), join(proto, 'service.proto'));
   writeFileSync(
     join(work, 'beadc.yaml'),
@@ -988,10 +1034,6 @@ const generate = ({ side, runner, protoc }) => {
     cwd: work,
     env: { ...process.env, BEADC_PROTOC: protoc },
   });
-
-  const generated = join(ROOT, side.folder, side.generated);
-
-  rmSync(generated, { force: true, recursive: true });
   cpSync(join(work, 'gen'), generated, { recursive: true });
 
   return work;
@@ -1007,6 +1049,20 @@ const testeeCommandOf = ({ side, work }) => {
     run(process.execPath, [TYPESCRIPT_COMPILER, '--noEmit', '-p', folder]);
 
     return { command: process.execPath, args: [join(folder, 'testee.ts')], cwd: folder };
+  }
+
+  if (side.language === 'rust') {
+    // ! its own target folder, whatever CARGO_TARGET_DIR says, so the binary is where it is run from;
+    // --locked, as a release moves the side's crates in its lock beside the workspace's
+    const target = join(folder, 'target');
+
+    run('cargo', ['build', '--release', '--locked', '--target-dir', target], { cwd: folder });
+
+    return {
+      command: join(target, 'release', process.platform === 'win32' ? 'testee.exe' : 'testee'),
+      args: [],
+      cwd: folder,
+    };
   }
 
   const out = join(work, 'out');
@@ -1081,7 +1137,9 @@ const suite = ({ side, runner, pin, protoc }) => {
 const differential = async ({ runner, protoc }) => {
   const testees = {};
 
-  for (const side of Object.values(SIDES)) {
+  for (const side of DIFFERENTIAL_SIDES.map((language) => {
+    return SIDES[language];
+  })) {
     testees[side.language] = testeeOf(
       testeeCommandOf({ side, work: generate({ side, runner, protoc }) })
     );
@@ -1121,7 +1179,9 @@ const differential = async ({ runner, protoc }) => {
 
 const main = async (command) => {
   if (command !== 'differential' && !(command in SIDES)) {
-    throw new Error('usage: node tools/protobuf-conformance.mjs typescript|csharp|differential');
+    throw new Error(
+      'usage: node tools/protobuf-conformance.mjs typescript|csharp|rust|differential'
+    );
   }
 
   const pin = readPin(readFileSync(PIN_FILE, 'utf8'));

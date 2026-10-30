@@ -2,8 +2,10 @@
 
 Bead is a binary wire protocol: its spec and conformance files in `spec/`, a TypeScript
 implementation in `implementations/typescript` and a C# one in `implementations/dotnet`, at
-behavioural parity, the builder, `beadc`, in `builder/`, an example in `examples/hello`, the demo
-and the DevTools extension. `README.md` says how each part builds and tests.
+behavioural parity, and a Rust one in `implementations/rust`, its core, each part it lacks a
+row of `docs/support.md` ahead (decision 0044), the builder, `beadc`, in `builder/`, an example in
+`examples/hello`, the demo and the DevTools extension. `README.md` says how each part builds and
+tests.
 
 What a session needs beyond this file lives in `.claude/`:
 
@@ -16,7 +18,7 @@ What a session needs beyond this file lives in `.claude/`:
 
 The repository's documentation looks forward: it states what holds and where the project goes,
 in the present tense. Where something came from, and how it was before, stays out of it. What is ahead is said plainly,
-with no date, condition or version it waits on ("no third language before 1.0"), and no two
+with no date, condition or version it waits on ("a C side after 1.0"), and no two
 documents say it differently; a version's semantics, what a minor may remove before 1.0.0, stays. At each
 release every document that states where Bead goes — the records, the spec, the READMEs, the
 matrix, this file — is brought to it by the `bead-release-documents` workflow: what landed in the
@@ -47,15 +49,15 @@ number never given to another.
 ## Names
 
 The package is `@francisdesjardins/bead`; in prose, the protocol is Bead, and "the TypeScript
-side" or "the C# side" tells the implementations apart. The rules a clone keeps for itself are
-these: @.claude/local/rules.md
+side", "the C# side" or "the Rust side" tells the implementations apart. The rules a clone keeps
+for itself are these: @.claude/local/rules.md
 
 ## Parity
 
-The implementations behave the same, in every language: one behaviour, which both play from the
-same conformance files and prove against each other in the interop. Where a language cannot yet, or
-its platform cannot at all, the difference is a row of the support matrix, `docs/support.md`, with
-the test that shows it, and a difference that can close is work to do.
+The implementations behave the same, in every language: one behaviour, which each plays from the
+same conformance files and proves against the others in the interop. Where a language has it ahead,
+or its platform cannot have it at all, the difference is a row of the support matrix,
+`docs/support.md`, with the test that shows it, and a difference that can close is work to do.
 
 - A test missing on one side is added to the other.
 - A term renamed on one side is renamed on both, wherever it applies.
@@ -103,7 +105,10 @@ comment that a reader must not miss opens with its tag, after its marker (`//`, 
 - `TODO` work to do beside the code, the plan keeping the larger work;
 - `*` the key point of a block.
 
-Every other comment stays plain, and doc comments (JSDoc, `///`) carry no tag.
+Every other comment stays plain, and doc comments (JSDoc, `///`, `//!`) carry no tag. Rust's inner
+doc comment, `//!`, a module's and a crate's documentation, is the one exception to the `!` tag: a
+doc comment, never the tag, though Better Comments shows it as one; `bead-house` tells the two
+apart by rustc's own tokens.
 
 A document that cites a test copies its title to the byte, an apostrophe included: the TypeScript
 titles that hold one write it `’`, and the citation does the same.
@@ -129,6 +134,32 @@ titles that hold one write it `’`, and the citation does the same.
 - one test file per module, named after it, in a `__tests__/` folder beside it
   (`src/transport/shared/create-promise.ts` →
   `src/transport/shared/__tests__/create-promise.test.ts`).
+
+**Rust** (`implementations/rust`, decision 0044):
+
+- the lints of the workspace's `[lints]` table, every crate inheriting it: clippy's `all`,
+  `pedantic`, `nursery` and `cargo` denied, the chosen restriction lints, `unsafe_code` forbidden,
+  `missing_docs` denied, so a doc comment on every public item; a lint allowed only as a line of
+  that table with its reason, an exception in the code only as `#[expect(lint, reason = "…")]`;
+- every warning an error by `[build] warnings = "deny"` in `.cargo/config.toml`, never by
+  `RUSTFLAGS`; the toolchain `rust-toolchain.toml` pins, edition 2024;
+- beside the receiver, at most two parameters, then at most one options struct, always last: named
+  `…Options`, `#[non_exhaustive]`, `Default`, its fields public, each an `Option`, set by
+  assignment over its default and taken by `&`; a third essential thing is a design to revisit,
+  never a third parameter;
+- traits and composition, no `I` prefix; a `Result` for every refusal, never a panic in the
+  library;
+- one owner per router, its state one task's, a turn awaiting nothing; an operation takes effect as
+  it is made, its future only waits, and dropping it cancels nothing;
+- spawning and time through `crate::platform` and the clock alone, clippy's `disallowed-methods`
+  and `disallowed-types` holding every other path, so the core compiles for
+  `wasm32-unknown-unknown`, checked, never run;
+- a module's tests beside it (`src/envelope.rs` → `src/envelope/tests.rs`), the conformance players
+  in a crate's `tests/`, the test kit in `bead::testing`, behind the feature `testing`;
+- `cargo fmt --all -- --check`, `cargo clippy --workspace --all-targets --all-features --locked`,
+  `cargo clippy -p francisdesjardins-bead --lib --all-features --locked --target
+  wasm32-unknown-unknown`, `cargo test --workspace --all-features --locked` and `cargo deny
+  --locked check` pass, from its folder.
 
 ## The Bead page
 

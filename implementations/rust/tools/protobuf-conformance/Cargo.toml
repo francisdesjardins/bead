@@ -1,0 +1,35 @@
+# The Rust side's testee of protobuf's conformance suite (decisions 0028 and 0044), outside the
+# side's workspace, as the C# side's lies outside Bead.slnx: `node tools/protobuf-conformance.mjs
+# rust`, from the repository's root, writes the set protoc writes of the suite's test messages into
+# generated/, then builds this and runs it under the runner. It reads and writes each message through
+# bead-protobuf's codec of the code Buffa generates for it, set as bead-protobuf-build sets the
+# generator.
+[package]
+name = "francisdesjardins-bead-protobuf-conformance"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[workspace]
+members = ["."]
+
+[[bin]]
+name = "testee"
+path = "src/main.rs"
+test = false
+doc = false
+bench = false
+
+[dependencies]
+bead = { package = "francisdesjardins-bead", path = "../../crates/bead" }
+bead-protobuf = { package = "francisdesjardins-bead-protobuf", path = "../../crates/bead-protobuf" }
+buffa = { version = "0.9.2", default-features = false, features = ["std"] }
+buffa-descriptor = { version = "0.9.2", default-features = false, features = ["std", "reflect", "json"] }
+buffa-types = { version = "0.9.2", default-features = false, features = ["std", "reflect", "json"] }
+bytes = { version = "1.12.1", default-features = false, features = ["std"] }
+# ! the JSON stand-in's reader of numbers reads a double to its last digit with float_roundtrip
+# alone: 2.22507e-308, read without it, is one ulp off
+serde_json = { version = "1.0.154", default-features = false, features = ["std", "float_roundtrip"] }
+
+[build-dependencies]
+bead-protobuf-build = { package = "francisdesjardins-bead-protobuf-build", path = "../../crates/bead-protobuf-build" }
