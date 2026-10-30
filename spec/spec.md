@@ -97,15 +97,14 @@ play. **Status: every section is written.**
 What a side traces, filters and counts beside the wire is stated apart, under a version of its own,
 in its companion [`debugging.md`](debugging.md), whether a side builds those or leaves them out.
 What a side's gateway answers over HTTP of its procedures is stated apart, under a version of its
-own, in its companion [`transcoding.md`](transcoding.md), whether a side offers one or not. A
-side conforms to the wire by sections 1 to 15, for each transport it offers, a broker's binding
-among them, to what it declares by section 16, to what its codecs write and read by section 17,
-for each encoding it offers, and to its procedures' rules by section 18: a relay, which reads no
-payload, offers none. A side does
-what each entry of the files that play those sections says, the clock cases holding `advance` to one
-meaning, but an entry whose
-`differs` names a row of the support matrix, [`docs/support.md`](../docs/support.md), and the
-side's language. A unit no entry cites binds it all the same.
+own, in its companion [`transcoding.md`](transcoding.md), whether a side offers one or not. A side
+conforms to the wire by sections 1 to 15, for each transport it offers, a broker's binding among
+them, to what it declares by section 16, to what its codecs write and read by section 17, for each
+encoding it offers, and to its procedures' rules by section 18: a relay, which reads no payload,
+offers none. A side does what each entry of the files that play those sections says, the clock cases
+holding `advance` to one meaning, but an entry whose `differs` names a row of the support matrix,
+[`docs/support.md`](../docs/support.md), and the side's language. A unit no entry cites binds it all
+the same.
 
 ## 1. Conventions
 

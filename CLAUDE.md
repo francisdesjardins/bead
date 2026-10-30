@@ -2,7 +2,7 @@
 
 Bead is a binary wire protocol: its spec and conformance files in `spec/`, a TypeScript
 implementation in `implementations/typescript` and a C# one in `implementations/dotnet`, at
-behavioural parity, and a Rust one in `implementations/rust`, its core first, each part it lacks a
+behavioural parity, and a Rust one in `implementations/rust`, its core, each part it lacks a
 row of `docs/support.md` ahead (decision 0044), the builder, `beadc`, in `builder/`, an example in
 `examples/hello`, the demo and the DevTools extension. `README.md` says how each part builds and
 tests.
@@ -18,7 +18,7 @@ What a session needs beyond this file lives in `.claude/`:
 
 The repository's documentation looks forward: it states what holds and where the project goes,
 in the present tense. Where something came from, and how it was before, stays out of it. What is ahead is said plainly,
-with no date, condition or version it waits on ("no third language before 1.0"), and no two
+with no date, condition or version it waits on ("a C side after 1.0"), and no two
 documents say it differently; a version's semantics, what a minor may remove before 1.0.0, stays. At each
 release every document that states where Bead goes — the records, the spec, the READMEs, the
 matrix, this file — is brought to it by the `bead-release-documents` workflow: what landed in the
@@ -54,10 +54,10 @@ for itself are these: @.claude/local/rules.md
 
 ## Parity
 
-The implementations behave the same, in every language: one behaviour, which both play from the
-same conformance files and prove against each other in the interop. Where a language cannot yet, or
-its platform cannot at all, the difference is a row of the support matrix, `docs/support.md`, with
-the test that shows it, and a difference that can close is work to do.
+The implementations behave the same, in every language: one behaviour, which each plays from the
+same conformance files and proves against the others in the interop. Where a language has it ahead,
+or its platform cannot have it at all, the difference is a row of the support matrix,
+`docs/support.md`, with the test that shows it, and a difference that can close is work to do.
 
 - A test missing on one side is added to the other.
 - A term renamed on one side is renamed on both, wherever it applies.

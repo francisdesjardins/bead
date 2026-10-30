@@ -41,6 +41,11 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   transport it offers.
 - The support matrix's row "An id or a revision no C# type holds" is "An id or a revision no typed
   side holds", the Rust side's `u16` and `u32` beside the C# side's `ushort` and `int`.
+- The documents are brought to 0.9.0: the records, the spec and its companion in form, the READMEs,
+  the support matrix and `CLAUDE.md` state what holds and where Bead goes. Records 0013 and 0015
+  name a participant's parcels and its broker participant in their titles; the matrix's row "Parcel
+  trace allocations" is "What a parcel allocates for its trace", and its row "A page's DevTools
+  hook" is open, the C# and Rust sides' clients coming into a page with their core.
 
 ### Fixed
 

@@ -73,9 +73,10 @@ generators a library each, `make_validations.py` `google-re2`, RE2 itself, and
 three and `spec/requirements.txt` locks them with every hash, installed with
 `--require-hashes --only-binary=:all:`; the other generators use the standard library alone.
 
-**Each language after Rust comes the same way**: a folder under `implementations/`, its own
-native toolchain, and a CI job of its own, as Rust's is held to clippy's pedantic, nursery and cargo
-groups denied and to the newest Rust norms ([0044](0044-rust-one-owner-per-router-traits-no-unsafe-two-parameters-no-warning.md)). A part every
+**Each language after Rust comes the same way**: a folder under `implementations/`, its own native
+toolchain, and a CI job of its own, as Rust's is held to clippy's pedantic, nursery and cargo groups
+denied and to the newest Rust norms
+([0044](0044-rust-one-owner-per-router-traits-no-unsafe-two-parameters-no-warning.md)). A part every
 language uses that is neither an implementation nor the spec is placed by a decision of its own, as
 the builder and the examples are by
 [0022](0022-a-proto-becomes-one-checked-blueprint-and-each-language-is-generated-from-it.md).
@@ -83,14 +84,16 @@ the builder and the examples are by
 ## Consequences
 
 - A contributor installs the toolchains of the languages they touch, Node for the root's tools, and
-  Python for the spec's. The interop asks for both runtimes
+  Python for the spec's. The interop asks for the TypeScript and C# runtimes
   ([0004](0004-one-behaviour-in-every-language.md)), and so do CI's `dotnet`, `mqtt` and `amqp`
   jobs.
 - The house style is stated once per language, in that language's own terms: the TypeScript side's
   `curly` and `arrow-body-style` are oxlint rules whose C# counterparts are `.editorconfig` rules
-  the build holds; the parameter rule is `max-params` and `bead/options-last` on one side and
-  review's on the other ([0007](0007-csharp-interfaces-blocks-two-parameters-no-warning.md)).
-  Keeping the two alike is review's, not a tool's.
+  the build holds; the parameter rule is `max-params` and `bead/options-last` on the TypeScript
+  side, review's on the C# side ([0007](0007-csharp-interfaces-blocks-two-parameters-no-warning.md))
+  and `bead-house`'s on the Rust side
+  ([0044](0044-rust-one-owner-per-router-traits-no-unsafe-two-parameters-no-warning.md)). Keeping
+  them alike is review's, not a tool's.
 - The root's prose and scripts have no formatter of their own: CI holds the root's prose, scripts
   and schemas, and the spec's text, to the TypeScript side's oxfmt, through
   `-c implementations/typescript/.oxfmtrc.json` (`tools/check-format.mjs` lists them, for CI and the

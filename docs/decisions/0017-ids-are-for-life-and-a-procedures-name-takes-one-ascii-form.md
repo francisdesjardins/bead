@@ -74,7 +74,8 @@ system that ignores case never meets two names.
 ### The options weighed
 
 **Where the protocol's own services live.** Spec 4.7 reads a service id of 0 and refuses it by
-routing; 4.10 never writes one, and neither side's writer does (`header.ts`, with `FIELD_MAXIMUMS`).
+routing; 4.10 never writes one, and no side's writer does (`header.ts`, with `FIELD_MAXIMUMS`;
+`EnvelopeCodec.Header.cs`; the Rust side's `write_header`).
 
 - **Service 0, the protocol's, its procedures defined by decision.** Chosen. No application holds 0,
   since no writer writes it, so nothing is taken from anyone, and every id from 1 to 65,535 stays
@@ -98,9 +99,8 @@ routing; 4.10 never writes one, and neither side's writer does (`header.ts`, wit
   (`spec/interop-blueprint.json`), with the bytes of the conversations that call it and every
   `service="1"` label of `spec/metrics.json`, and the demo's
   (`implementations/typescript/demo/procedures.ts`); and every test that declares a service below
-  256, which `serviceId: 2` and `ServiceId = 2` alone reach in both sides' test files.
-  [0008](0008-three-version-axes-and-names-qualified-by-their-owner.md) lets the wire be revised in
-  place until it is published.
+  256, on every side. [0008](0008-three-version-axes-and-names-qualified-by-their-owner.md) lets the
+  wire be revised in place until it is published.
 - Left to the first protocol service's decision: a protocol service that needs an id past 0 takes
   one an application may hold by then.
 
@@ -289,8 +289,8 @@ name, a revision or a reservation.
 generator `make_identities.py` from the standard library alone
 ([0005](0005-a-toolchain-per-language.md)), and `spec/check.py`. Its groups: `names`, procedure
 names each taken or refused; `ids`, service ids, procedure ids and revisions each taken or refused,
-an input no C# type holds crossing a row of the matrix; and `folds`, pairs of names, one or two;
-beside them,
+an input no typed side's type holds, a C# one's or a Rust one's, crossing the row "An id or a
+revision no typed side holds"; and `folds`, pairs of names, one or two; beside them,
 [0018](0018-a-services-procedures-are-typed-descriptors-served-and-called-through-one-layer.md)'s
 procedure kinds. It lists the ways a side declares by a stable id, and each side's harness keys its
 table by them. A builder plays `names` and `ids` as one-procedure blueprints.
@@ -304,7 +304,7 @@ second revision counts into.
 ## Consequences
 
 **A hand-written side declares under the rules a generated one does.** A name off the form, a
-revision of 0 or a service 0 fail as the side is built, on both sides alike.
+revision of 0 or a service 0 fail as the side is built, on every side alike.
 
 **A declaration pays a scan of its name, and a call that makes no requester pays nothing.** The
 service manager declares a requester at each `getRequest` (`service-requester.ts`), and the demo

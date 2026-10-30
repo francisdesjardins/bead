@@ -1,19 +1,20 @@
 # 0042 — A `proto` message that leaves a required field unset neither reads nor writes, and a gateway refuses it where its server would
 
 - **Status**: accepted
-- **Scope**: the protocol, both runtimes and beadc: in [`spec/spec.md`](../../spec/spec.md), 17.9.7
+- **Scope**: the protocol, every runtime and beadc: in [`spec/spec.md`](../../spec/spec.md), 17.9.7
   and 17.9.8; in [`spec/transcoding.md`](../../spec/transcoding.md), 4.5's derived mask, 5.2's order
   and its step 4, 5.6's sentence of an `Any`'s message, 7.4's place of a field left unset and its
   pointer, and the `required` of 11.4, 11.5 and 11.7; each side's runtime codec of a schema,
-  `protoCodecOf` of `./proto` and `ProtoCodecs` of `Bead.Protobuf`, its required walk, and on the C#
-  side its filter of a closed enum's record and `ProtoRequired.Check`; generated code's contract 6;
-  `spec/codecs.proto`'s `Needs`, `Shade` and fields 7, 8 and 14, `spec/codecs.json`'s rows of 17.9.7
-  and 17.9.8 and the reason `a required field unset`; `spec/transcoding-required.proto`,
-  `Requiring` and the procedures `require`, `getNeeds` and `updateNeeds` of
-  `spec/transcoding.proto`, and their entries in `spec/transcoding.json`; the blueprint's
-  `legacyRequired` under the feature `legacy-required`, beadc's document, and its rules
-  `HTTP_REQUIRED_UNBOUND` and `HTTP_PATCH_REQUIRED`; the support matrix's rows of an extension's
-  required field given to a writer, a closed enum's echo, and a repeated closed enum's leveling.
+  `protoCodecOf` of `./proto`, `ProtoCodecs` of `Bead.Protobuf` and `ProtoCodec` and `DynamicCodec`
+  of `bead-protobuf`, its required walk, and on the C# side its filter of a closed enum's record and
+  `ProtoRequired.Check`; generated code's contract 6; `spec/codecs.proto`'s `Needs`, `Shade` and
+  fields 7, 8 and 14, `spec/codecs.json`'s rows of 17.9.7 and 17.9.8 and the reason
+  `a required field unset`; `spec/transcoding-required.proto`, `Requiring` and the procedures
+  `require`, `getNeeds` and `updateNeeds` of `spec/transcoding.proto`, and their entries in
+  `spec/transcoding.json`; the blueprint's `legacyRequired` under the feature `legacy-required`,
+  beadc's document, and its rules `HTTP_REQUIRED_UNBOUND` and `HTTP_PATCH_REQUIRED`; the support
+  matrix's rows of an extension's required field given to a writer, a closed enum's echo, and a
+  repeated closed enum's leveling.
   What 17.9 restates of protobuf, and its items 1 to 4, are
   [0031](0031-a-proto-payload-is-protobufs-format-and-bead-states-only-its-own.md)'s; the check of a
   payload's records, 17.9.5 and 17.9.6,
@@ -99,33 +100,41 @@ parse, so a message given twice sets its required fields in either record, and i
 
 **A closed enum's undeclared number sets nothing on a singular field** (spec 17.9.8), as Enum
 Behavior has it: the field holds the last declared number its records give, or none. protobuf-es
-reads so already; the C# side's runtime reader drops such a record before Google.Protobuf reads,
-which narrows what reads and never reads in the library's place
+reads so already, and Buffa sets such a record aside itself; the C# side's runtime reader drops such
+a record before Google.Protobuf reads, which narrows what reads and never reads in the library's
+place
 ([0028](0028-a-proto-payloads-records-are-read-against-its-message-before-its-library-reads-them.md)).
-A repeated field's items and a map's values keep the number on both sides: a row of "Leveled down".
-What each writes back of a singular field's number is a platform row.
+A repeated field's items and a map's values keep the number on every side, the Rust side's generator
+opening each such field of a closed enum: a row of "Leveled down". What each writes back of a
+singular field's number is a platform row.
 
 **One runtime codec of a schema on each side holds 17.9 once**: `protoCodecOf(schema)` of
-`@francisdesjardins/bead/proto` and `ProtoCodecs.Of<T>()` with `ProtoCodecs.Read(descriptor,
-bytes)` of `Bead.Protobuf`. Its read runs the records check, then, on the C# side, 17.9.8's filter,
-then the parse at 17.9.3's bound, then the walk; its write runs the walk, then the stock writer.
-The TypeScript side throws a `SyntaxError` when it reads and a `TypeError` when it writes, as its
-other codecs do; the C# side a `FormatException` both ways, its codecs' type; the words are the
-same, `a proto message leaves <full name> unset`, naming a field of the schema and never a key the
-peer sent. The walk is Bead's own on both sides, its facts in the one shape per descriptor
-`ProtoRecords` holds, weakly held as long as its descriptor is: each message's required fields, the
-message fields that reach one, and on the C# side its singular closed enums. Reachability is one
-search over the descriptor's closure, cycles included, with no flag cached mid-search. Generated
-code, the gateway's result reader, `HttpEvents.DataOf`, an `Any`'s bytes on writing, both HTTP
-callers and every test codec read and write through it; an `Any`'s bytes are read with the records
-check, the bound and the filter, and no walk.
+`@francisdesjardins/bead/proto` and `ProtoCodecs.Of<T>()` with `ProtoCodecs.Read(descriptor, bytes)`
+of `Bead.Protobuf`, and `ProtoCodec` and `DynamicCodec` of `bead-protobuf`
+([0044](0044-rust-one-owner-per-router-traits-no-unsafe-two-parameters-no-warning.md)). Its read
+runs the records check, then, on the C# side, 17.9.8's filter, then the parse at 17.9.3's bound,
+then the walk; its write runs the walk, then the stock writer. On the Rust side both codecs walk
+before they write, and the typed one's walk never refuses, since a generated message's type leaves
+no required field unset, as the platform row "A proto value that leaves a required field unset or
+holds a closed enum's undeclared number, given to a typed writer" says. The TypeScript side throws a
+`SyntaxError` when it reads and a `TypeError` when it writes, as its other codecs do; the C# side a
+`FormatException` both ways, its codecs' type; the Rust side a `CodecRefusal` both ways; the words
+are the same, `a proto message leaves <full name> unset`, naming a field of the schema and never a
+key the peer sent. The walk is Bead's own on every side, its facts in the one shape per descriptor
+`ProtoRecords` holds, weakly held as long as its descriptor is, the Rust side's in its
+`ProtoSchema`, read once from its pool: each message's required fields, the message fields that
+reach one, and on the C# side its singular closed enums. Reachability is one search over the
+descriptor's closure, cycles included, with no flag cached mid-search. Generated code, the gateway's
+result reader, `HttpEvents.DataOf`, an `Any`'s bytes on writing, both HTTP callers and every test
+codec read and write through it; an `Any`'s bytes are read with the records check, the bound and the
+filter, and no walk.
 
 **Generated code's contract moves to 6.** A service's generated file calls the runtime codec, which
 a runtime without it lacks, so it names `GENERATED_CODE_SUPPORTS_VERSION_6` and
-`GeneratedCode.SupportsVersion6`. 4 goes from both runtimes, since code that names it checks no
-required field and no longer conforms through the runtime. 5, the route table's, stays: a route
-table holds descriptors and calls no codec, so code that names it still conforms, and by 0028's rule
-before 1.0.0 it stays.
+`GeneratedCode.SupportsVersion6`. 4 goes from the TypeScript and C# runtimes, since code that names
+it checks no required field and no longer conforms through the runtime. 5, the route table's, stays:
+a route table holds descriptors and calls no codec, so code that names it still conforms, and by
+0028's rule before 1.0.0 it stays.
 
 **A gateway refuses such a request after its reading** (transcoding 5.2, step 4), as its server's
 codec would, since a gateway is one more client of its server and beside the wire (transcoding 1.1,
@@ -146,9 +155,9 @@ unset does not read at the gateway, 502 (7.5.2), and an `Any`'s message is writt
 the field left out, as C++ and Go write one.
 
 **A PATCH's derived mask is set on the message**, by proto names, after steps 1 to 3 and before step
-4, on both sides, never read back through 5.4's form, so a required `update_mask` binds and a body
-naming `line_1` binds. A required field of the body's message is always among the derived paths, so
-a caller keeps one unchanged only by an `update_mask` of its own, as
+4, on the TypeScript and C# sides, never read back through 5.4's form, so a required `update_mask`
+binds and a body naming `line_1` binds. A required field of the body's message is always among the
+derived paths, so a caller keeps one unchanged only by an `update_mask` of its own, as
 [AIP-203](https://google.aip.dev/203) has a required field marked by `field_behavior` and not by
 protobuf's presence; beadc warns of such a rule.
 
@@ -169,9 +178,9 @@ message holds one. buf's cardinality rules already judge a field made required o
 
 ## Consequences
 
-**Every file generated before contract 6 fails its build until it is regenerated**, on both sides,
-beadc's goldens, `examples/hello`'s and the demo's `gen/` among them; both sides and every gateway
-must change to conform.
+**Every file generated before contract 6 fails its build until it is regenerated**, on the
+TypeScript and C# sides, beadc's goldens, `examples/hello`'s and the demo's `gen/` among them; those
+sides and every gateway must change to conform.
 
 **A PATCH of a message that holds a required field names that field on every call** whose mask is
 derived: a caller that would keep it unchanged sends its own `update_mask`, which beadc's
@@ -179,12 +188,15 @@ derived: a caller that would keep it unchanged sends its own `update_mask`, whic
 
 **Two platform rows and a leveling.** An extension's message that leaves a required field unset,
 given to a writer: refused on the TypeScript side, as protobuf-es's `toBinary` checks it, written on
-the C# side, since Google.Protobuf lists no extension a message holds; reading is at parity. A
-singular closed enum's undeclared number, echoed: protobuf-es writes it back among the unknown
-fields, the C# side has dropped it before its library read; what each reads is at parity. A
-repeated closed enum's item, or a map's value, of an undeclared number: kept on both sides, where
-Enum Behavior moves it among the unknown fields, a row of "Leveled down" that lifts when the
-TypeScript side can move it to `$unknown` and the C# side can drop it in its filter, together.
+the C# side, since Google.Protobuf lists no extension a message holds, and on the Rust side, since
+Buffa's generated codec, given no registry, writes it back among the unknown fields; reading is at
+parity. A singular closed enum's undeclared number, echoed: protobuf-es and Buffa write it back
+among the unknown fields, the C# side has dropped it before its library read; what each reads is at
+parity. A repeated closed enum's item, or a map's value, of an undeclared number: kept on every
+side, the Rust side's generator opening such a field, where Enum Behavior moves it among the unknown
+fields, a row of "Leveled down" that lifts when the TypeScript side can move it to `$unknown`, the
+C# side can drop it in its filter and the Rust side's generator can leave such a field closed,
+together.
 
 **The cost is the walk**, linear in the messages a payload holds that reach a required field, and
 one lookup for a message that reaches none; the floor of protobuf's conformance suite, 5,601 tests
@@ -197,8 +209,8 @@ of the codec, the service client and server, the gateway and the HTTP caller, on
 pair; beadc's tests of the blueprint, the document and the two rules.
 
 **Out of scope**: a pointer written by the name the body used, so that one resolves in a body that
-named a member by its proto name, which would change both sides' readers and the 422's
-placement.
+named a member by its proto name, which would change the TypeScript and C# sides' readers and the
+422's placement.
 
 ## The Tenth Man
 

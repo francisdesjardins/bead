@@ -1,7 +1,7 @@
 # 0031 — A `proto` payload is protobuf's binary format, read and written through each side's stock library, and Bead states only what is its own
 
 - **Status**: accepted
-- **Scope**: the protocol and both sides' tests: in [`spec/spec.md`](../../spec/spec.md), 17.9 and
+- **Scope**: the protocol and every side's tests: in [`spec/spec.md`](../../spec/spec.md), 17.9 and
   the sentence of 17.1 that counts four encodings; `spec/codecs.proto`; `spec/codecs.json`'s `proto`
   rows, its schema's `proto` encoding and its reasons `not its message` and `nested past 100`;
   `spec/generators/make_codecs.py`'s reader of `Probe`, and `spec/check.py` over those rows; each
@@ -27,8 +27,8 @@ library's two functions
 ([0018](0018-a-services-procedures-are-typed-descriptors-served-and-called-through-one-layer.md)).
 Every side needs one answer to a protobuf message that does not decode, and a conformance file that
 pins it, as `spec/codecs.json` pins `raw`, `text` and `json`
-([0016](0016-a-json-payload-has-one-form-whichever-side-writes-it.md)); and Rust, and each language
-after it, needs to know what of the format is Bead's to state, and what is protobuf's.
+([0016](0016-a-json-payload-has-one-form-whichever-side-writes-it.md)); and every language needs to
+know what of the format is Bead's to state, and what is protobuf's.
 
 **What the stock libraries do.** Probed on 2026-10-05: protobuf-es 2.16.0 and Google.Protobuf 3.36.2
 agree on every outcome a protobuf payload's reader meets first — a premature end, a string that is
@@ -320,14 +320,20 @@ its generator by `yarn check`.
 
 ## Consequences
 
-**The tests of both sides depend on a protobuf library**, each its platform's stock one: the
-TypeScript side's lockfile holds `@bufbuild/protobuf`, `@bufbuild/protoc-gen-es` and
+**The tests of every side depend on a protobuf library**: on the TypeScript and C# sides each its
+platform's stock one, and on the Rust side Buffa 0.9.2, which meets the five criteria
+[0044](0044-rust-one-owner-per-router-traits-no-unsafe-two-parameters-no-warning.md) holds a library
+to. The TypeScript side's lockfile holds `@bufbuild/protobuf`, `@bufbuild/protoc-gen-es` and
 `@bufbuild/buf`, which carries a binary per platform and runs under the repository's Yarn with its
-build scripts disabled, and `yarn check` runs it; the C# test project references Google.Protobuf
-and Grpc.Tools, which carries protoc. `Bead.Core` references no protobuf library, and the TypeScript
-side takes `@bufbuild/protobuf` as an optional peer, for its `./proto` entry alone
-([0028](0028-a-proto-payloads-records-are-read-against-its-message-before-its-library-reads-them.md)):
-a user of `raw`, `text` or `json` carries neither.
+build scripts disabled, and `yarn check` runs it; the C# test project references Google.Protobuf and
+Grpc.Tools, which carries protoc; the Rust side's `bead-protobuf` generates its tests' messages as
+it builds, by Buffa's generator, from the set protoc writes at its pin, that set committed and held
+to what protoc writes by `implementations/rust/tools/check-protobuf.mjs`. `Bead.Core` references no
+protobuf library, the TypeScript side takes `@bufbuild/protobuf` as an optional peer, for its
+`./proto` entry alone
+([0028](0028-a-proto-payloads-records-are-read-against-its-message-before-its-library-reads-them.md)),
+and the Rust side's core, `bead`, depends on none, `bead-protobuf` holding the `proto` codec apart
+from it: a user of `raw`, `text` or `json` carries none.
 
 **A `proto` row tests a library's locked version through Bead's generated calls.** A library
 upgrade that changes a pinned outcome fails the rows with nothing of Bead's changed, and is then
@@ -337,8 +343,12 @@ pin no whole message's bytes, so a library's order of fields is never one of the
 **A C# read of a `proto` payload costs a copy** of its bytes after their length, and a stream
 around them, for the bound to be Bead's rather than the library's.
 
-**Rust, and each language after it,** plays the `proto` rows through its own stock library and its
-target's calls, sets the bound in its library, and finds its own outcome for the platform row.
+**The Rust side** plays the `proto` rows through Buffa
+([0044](0044-rust-one-owner-per-router-traits-no-unsafe-two-parameters-no-warning.md)) and the code
+its generator writes, sets the bound in Buffa, `DecodeOptions::with_recursion_limit(100)`, and finds
+its own outcome for the platform row, none, since a Rust `String` holds no surrogate alone; **each
+language after it** plays them through its own library and its target's calls, sets the bound in its
+library, and finds its own outcome for the platform row.
 
 **The matrix's `proto` rows.** The feature "Payloads" counts `proto`; the open row "A string's
 leading U+FEFF in a proto payload" holds the one `differs` of these rows, the TypeScript side's; the

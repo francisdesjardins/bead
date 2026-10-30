@@ -2,7 +2,7 @@
 
 - **Status**: accepted
 - **Scope**: spec 1.4, 15.9, 15.10 and 15.12, and the line naming the file; `spec/durations.json`,
-  its schema, its generator and its gate; both implementations' harnesses; the support matrix. The
+  its schema, its generator and its gate; every implementation's harness; the support matrix. The
   clock a duration runs on, its floor and its ceiling are
   [0011](0011-every-side-takes-its-time-from-a-clock-it-is-given.md)'s.
 
@@ -104,9 +104,10 @@ owner keeps a place of its own.
 
 `server.connectionInactivityTimeout` is the server layer's option, which 13.7 leaves without end
 when not given; an HTTP server gives its own 30 s (15.12.10), which `spec/transports.json`'s
-`defaults` holds and both sides check, and the place's `state` says so.
+`defaults` holds and the TypeScript and C# sides check, and the place's `state` says so.
 `httpTransport.inactivityTimeout` is an HTTP connection's inactivity timeout, which 15.12 names for
-both sides: 5 minutes by default, and without end if given so, its client's and its server's alike.
+both ends of a connection: 5 minutes by default, and without end if given so, its client's and its
+server's alike.
 `httpTransportClient.pause`'s at once is 15.10's "listen again at once", stated with a schedule no
 file checks: the file leaves it out, as it leaves out the defaults no clause states.
 `webSocketTransport.closeTimeout` is a WebSocket's close timeout by two ways, its client's and its
@@ -183,11 +184,12 @@ from `spec/`, never a copy, and gives the inputs as its side is given them: on t
 the file into each test project that uses it, on the Rust side its test kit's
 `src/testing/durations.rs`. The harness is the TypeScript side's
 `server/__tests__/durations.test.ts`, in the folder whose tests already build every layer, the C#
-side's `DurationsTests`, in `Bead.Transport.Http.Tests`, which references every assembly holding
-a place, and the Rust side's `crates/bead/tests/durations.rs`, its core's, which plays the places
-its core holds, each other one ahead with the step or the stage that brings it. Each keeps a table from each place and way to a function that builds the place on the
-side's test clock, given one input or none, and fails when its table's places or ways are not the
-file's, one more or one less; each way keeps what its loop asserted besides the outcome.
+side's `DurationsTests`, in `Bead.Transport.Http.Tests`, which references every assembly holding a
+place, and the Rust side's `crates/bead/tests/durations.rs`, its core's, which plays the places its
+core holds, each other one ahead with the stage that brings it. Each keeps a table from each place
+and way to a function that builds the place on the side's test clock, given one input or none, and
+fails when its table's places or ways are not the file's, one more or one less; each way keeps what
+its loop asserted besides the outcome.
 
 **The words stay with each side.** Each side keeps a phrase a place, in its own words and its
 language's case, beside the table that builds it, and one words function, beside the helper, which

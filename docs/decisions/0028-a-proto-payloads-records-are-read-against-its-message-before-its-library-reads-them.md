@@ -1,14 +1,14 @@
 # 0028 — A `proto` payload's records are read against its message before its library reads them
 
 - **Status**: accepted
-- **Scope**: the protocol and both runtimes: in [`spec/spec.md`](../../spec/spec.md), 17.9.3's count
+- **Scope**: the protocol and every runtime: in [`spec/spec.md`](../../spec/spec.md), 17.9.3's count
   of a group and a map's entry, 17.9.5 and 17.9.6; the check of a `proto` payload's records, the
-  TypeScript side's `@francisdesjardins/bead/proto` and the C# side's `Bead.Protobuf` assembly; the
-  contract of generated code from 3, whose code first calls the check; `spec/codecs.proto`,
-  `spec/codecs.json`'s `proto` rows, its schema and its generator; protobuf's conformance suite and
-  the differential, through `tools/protobuf-conformance.mjs`, its pin, each side's testee and
-  failure list, and their CI job; the support matrix's `proto` rows. What section 17 states of
-  `proto`, and why it restates none of protobuf's format, is
+  TypeScript side's `@francisdesjardins/bead/proto`, the C# side's `Bead.Protobuf` assembly and the
+  Rust side's `bead-protobuf`; the contract of generated code from 3, whose code first calls the
+  check; `spec/codecs.proto`, `spec/codecs.json`'s `proto` rows, its schema and its generator;
+  protobuf's conformance suite and the differential, through `tools/protobuf-conformance.mjs`, its
+  pin, each side's testee and failure list, and their CI job; the support matrix's `proto` rows.
+  What section 17 states of `proto`, and why it restates none of protobuf's format, is
   [0031](0031-a-proto-payload-is-protobufs-format-and-bead-states-only-its-own.md)'s; the codec of
   two functions,
   [0018](0018-a-services-procedures-are-typed-descriptors-served-and-called-through-one-layer.md)'s;
@@ -94,9 +94,9 @@ The options weighed:
 ## Decision
 
 **Each side checks a `proto` payload's records against its message before its stock library reads
-them, and refuses what protobuf refuses where a library reads on.** One check, the same on both
-sides, refuses what each stock library reads past protobuf's rules, and the parts above, and guards
-each side against its library regressing on what the other's gets right.
+them, and refuses what protobuf refuses where a library reads on.** One check, the same on every
+side, refuses what each stock library reads past protobuf's rules, and the parts above, and guards
+each side against its library regressing on what another's gets right.
 
 **A side narrows what reads; it never changes what its stock library reads or writes.** The check
 refuses a payload before the library sees it, as 17.9.1 has it of bytes that are no encoding of the
@@ -162,14 +162,15 @@ gives, and the check is the runtime's behaviour
   repeated scalar of a numeric type taking its own and the length-delimited (17.9.5);
 - a field a map's entry does not declare (17.9.6).
 
-**Two levelings, the user's choice, both as recommended**: 17.9.5 and 17.9.6. No
-standard settles either: protobuf states no rule of them, and the reference parsers keep the first
-as an unknown field and skip the second. The parity rule settles the direction
+**Two levelings, the user's choice, both as recommended**: 17.9.5 and 17.9.6. No standard settles
+either: protobuf states no rule of them, and the reference parsers keep the first as an unknown
+field and skip the second. The parity rule settles the direction
 ([0004](0004-one-behaviour-in-every-language.md)): where one library reads Y and the other Y and Z,
 every side reads Y, and refuses the rest, each a row of the matrix's "Leveled down". Without the
 first, protobuf-es still takes a record past its message through a message field at the varint wire
-type, and the two sides read a map's key at another wire type apart; without the second, they read
-an entry with an undeclared field apart. `WIRE` makes the first break no evolution beadc passes.
+type, and the TypeScript and C# sides read a map's key at another wire type apart; without the
+second, they read an entry with an undeclared field apart. `WIRE` makes the first break no evolution
+beadc passes.
 
 **17.9.3 counts a group and a map's entry as a message**, as each is one on the wire ("Maps"), and
 as Google.Protobuf counts them.
@@ -180,7 +181,7 @@ codec of its message's schema, `protoCodecOf(FooSchema)` of `@francisdesjardins/
 library reads them, then reads at 17.9.3's bound and judges the message's required fields
 ([0042](0042-a-proto-message-that-leaves-a-required-field-unset-neither-reads-nor-writes-and-a-gateway-refuses-it-where-its-server-would.md)). 3 is the contract whose code first called the check, since generated code that
 calls it needs an export a runtime without it lacks, which is what moves the counter. **The runtimes
-hold 5 and 6**, on both sides, 5 for a route table ([0037](0037-a-procedure-is-also-an-http-route-which-a-gateway-answers-as-one-more-client-of-its-server.md)) and 6 since a service's
+hold 5 and 6**, on the TypeScript and C# sides, 5 for a route table ([0037](0037-a-procedure-is-also-an-http-route-which-a-gateway-answers-as-one-more-client-of-its-server.md)) and 6 since a service's
 generated file calls the runtime codec ([0042](0042-a-proto-message-that-leaves-a-required-field-unset-neither-reads-nor-writes-and-a-gateway-refuses-it-where-its-server-would.md)), and none older: they hold no
 `GENERATED_CODE_SUPPORTS_VERSION_2`, `_3` or `_4` and no `GeneratedCode.SupportsVersion2`,
 `SupportsVersion3` or `SupportsVersion4`, so code that names 2, 3 or 4, an earlier beadc's, fails its
@@ -222,8 +223,8 @@ which a row's `read` gives as a depth. protoc 36.2, protoc-gen-es 2.16.0 under b
 **The entries.** The entries of what a stock library reads past protobuf's rules — a tag of more
 than 5 bytes or past 32 bits, a length past 32 bits, an unknown varint of more than 10 bytes, a
 record past the end of its message — are played by every side, none excused. Each part has its
-entries, each citing its unit, none excused, every reading confirmed on both libraries, the check
-in front:
+entries, each citing its unit, none excused, every reading confirmed on protobuf-es and
+Google.Protobuf, the check in front:
 
 - read: `counts packed`, `counts unpacked and packed, in one message`, `stamps unpacked`,
   `stamps packed`, `a map's entry, its value before its key`, `a group closed by its own end group`
@@ -254,25 +255,33 @@ codec, the check in front:
   No manifest and no lockfile go at the root, whose tools are Node scripts without dependencies
   ([0005](0005-a-toolchain-per-language.md)), and no install of a side carries it. It ships
   linux-x64 and darwin-x64 binaries alone, so the gate runs in CI, and on Windows in Docker.
-- **`tools/protobuf-conformance.mjs <typescript|csharp|differential>`** ejects the pinned package's
-  test protos into a scratch folder, runs `beadc generate` over
+- **`tools/protobuf-conformance.mjs <typescript|csharp|rust|differential>`** ejects the pinned
+  package's test protos into a scratch folder, runs `beadc generate` over
   `tools/protobuf-conformance/service.proto`, which binds the five test messages, proto3, proto2,
   edition 2023 and the two editions variants, and `Probe`, for the side's target, builds its testee,
   and runs
   `conformance_test_runner --enforce_recommended --maximum_edition MAX --failure_list <the side's list> <testee>`.
   **Its floor**: a side's successes and its expected failures are 5,601, and its skips 48, its JSON
   tests answered through Bead's mapping of protobuf's JSON
-  ([0037](0037-a-procedure-is-also-an-http-route-which-a-gateway-answers-as-one-more-client-of-its-server.md));
-  the runner closes a text-format suite after it, whose 909 tests a testee skips, since Bead's
-  `proto` carries no text form. Each count moves only with the pin, or with a form the testees
-  answer. Rust, and each language after it, adds its testee's command.
+  ([0037](0037-a-procedure-is-also-an-http-route-which-a-gateway-answers-as-one-more-client-of-its-server.md)),
+  the Rust side's through Buffa's `DynamicMessage` until its gateway brings that mapping; the runner
+  closes a text-format suite after it, whose 909 tests a testee skips, since Bead's `proto` carries
+  no text form. Each count moves only with the pin, or with a form the testees answer. The Rust
+  side's beadc target is ahead, so for it protoc writes the set of the suite's test messages and
+  `Probe` instead, which its testee's build script hands to Buffa's generator
+  ([0044](0044-rust-one-owner-per-router-traits-no-unsafe-two-parameters-no-warning.md)); each
+  language after it adds its testee's command.
 - **The testees**, `implementations/typescript/tools/protobuf-conformance/` on the TypeScript side's
   own install, type-checked by its own `tsconfig.json` once its code is generated, since the side's
-  type-check and lint cannot read it without that code, and `implementations/dotnet/tools/Bead.ProtobufConformance/`, outside `Bead.slnx`
-  since its generated code exists only at run time, under `Directory.Build.props`, with its own
-  `packages.lock.json`, restored locked, and its format run by name. Nothing of protobuf's is
-  committed: its test protos, under BSD-3-Clause, are ejected at run time from the pinned package,
-  and the code generated from them is written at run time.
+  type-check and lint cannot read it without that code;
+  `implementations/dotnet/tools/Bead.ProtobufConformance/`, outside `Bead.slnx` since its generated
+  code exists only at run time, under `Directory.Build.props`, with its own `packages.lock.json`,
+  restored locked, and its format run by name; and
+  `implementations/rust/tools/protobuf-conformance/`, outside the Rust side's workspace as the C#
+  one lies outside `Bead.slnx`, built in release by Cargo on the toolchain the side pins, by its own
+  lock. Nothing of protobuf's is committed: its test protos, under BSD-3-Clause, are ejected at run
+  time from the pinned package, and the code generated from them, or the set protoc writes of them,
+  is written at run time.
 - **A skip never hides a test**: a testee answers `skipped` only for a text or JSPB request or
   output, for a JSON test that asks an unknown member ignored, which Bead's mapping refuses and
   takes no option to ignore, and for `protobuf_test_messages.edition_unstable`'s message, an
@@ -287,25 +296,27 @@ codec, the check in front:
   message's unknown fields back by number and wire type, a platform row; and each names besides the
   two JSON tests of an extension's JSON name, which Bead's mapping reads as no field of its message
   ([0037](0037-a-procedure-is-also-an-http-route-which-a-gateway-answers-as-one-more-client-of-its-server.md)).
+  The Rust side's names the extension's test alone, its JSON Buffa's until its gateway brings Bead's
+  mapping.
 
-**How the pin moves.** One runner serves both libraries. The tool fails when `runner.json`'s
+**How the pin moves.** One runner serves every side's library. The tool fails when `runner.json`'s
 `upstreamVersion` and Google.Protobuf's pin name different protobuf releases, `v36` and `3.36`
 alike. A bump of `@bufbuild/protobuf` reads the `protobuf-conformance` version its
-`packages/protobuf-conformance/package.json` pins at the new tag. A bump of either library moves
-`runner.json`, both failure lists and the floor in one commit. Where the two libraries pin different
+`packages/protobuf-conformance/package.json` pins at the new tag. A bump of either of those two
+moves `runner.json`, the failure lists and the floor in one commit. Where the two pin different
 releases, the runner follows the older, and the newer library's bump waits for the other.
 
-**The differential.** `tools/protobuf-conformance.mjs differential` feeds each side's testee the
-same 10,000 payloads from a fixed seed: `Probe`'s own records, mutated by cuts, lengths, wire types
-and nesting, maps and groups among them. It compares each side's verdict, read or refused, and the
-bytes each writes back as what they read, at every depth, the choices protobuf leaves to a writer
-aside: the order of unknown fields, the order of a map's entries, and an entry's key at its
-default, which protobuf-es writes and Google.Protobuf leaves out. The first and the last are the
-platform rows; any other parting fails it.
+**The differential.** `tools/protobuf-conformance.mjs differential` feeds the TypeScript and C#
+sides' testees the same 10,000 payloads from a fixed seed: `Probe`'s own records, mutated by cuts,
+lengths, wire types and nesting, maps and groups among them. It compares each side's verdict, read
+or refused, and the bytes each writes back as what they read, at every depth, the choices protobuf
+leaves to a writer aside: the order of unknown fields, the order of a map's entries, and an entry's
+key at its default, which protobuf-es writes and Google.Protobuf leaves out. The first and the last
+are the platform rows; any other parting fails it.
 
 ## Consequences
 
-**The matrix holds no open row for a stock library reading past protobuf's rules**, both sides
+**The matrix holds no open row for a stock library reading past protobuf's rules**, every side
 playing those entries. Its "Leveled down" holds "A known proto field at a wire type its type does
 not take, a map's entry's included" and "A proto map's entry with a field other than its key and
 its value"; two platform rows, "A proto message's unknown fields, written back" and "A proto map's
@@ -314,8 +325,8 @@ U+FEFF in a proto payload" is open, as it says why, and "A proto string no strin
 writer" is a platform row
 ([0031](0031-a-proto-payload-is-protobufs-format-and-bead-states-only-its-own.md)).
 
-**Code that names contract 2, 3 or 4 is regenerated**, on both sides, before it builds against
-the runtime.
+**Code that names contract 2, 3 or 4 is regenerated**, on the TypeScript and C# sides, before it
+builds against the runtime.
 A C# project that binds `proto` references `Bead.Protobuf`; a TypeScript one carries
 `@bufbuild/protobuf` for its messages, which `./proto` takes as a peer.
 
@@ -333,21 +344,25 @@ Release:
 | a few fields          | 9–12    | 5.61 µs           | 0.09 µs   | 2%    | 2.80 µs   | 0.05 µs   | 2%    |
 | 90 messages deep      | 313–317 | 558.90 µs         | 4.68 µs   | 1%    | 123.61 µs | 1.94 µs   | 2%    |
 
-Under the read on every row, on both sides; most on a payload of many small messages, where
-TypeScript's ratio ran from 47% to 84% across runs, and close to nothing otherwise. A packed
-record's walk counts its varints' bytes without decoding a value, which keeps it under the library's
-decoding of each. The bound each runtime holds: on each row, the check costs no more than its
-library's read, the packed walk included, and allocates nothing per record; the C# side's allocates
-no byte over 1,000 checks of each payload.
+Under the read on every row, on the TypeScript and C# sides; most on a payload of many small
+messages, where TypeScript's ratio ran from 47% to 84% across runs, and close to nothing otherwise.
+A packed record's walk counts its varints' bytes without decoding a value, which keeps it under the
+library's decoding of each. The bound the TypeScript and C# runtimes hold: on each row, the check
+costs no more than its library's read, the packed walk included, and allocates nothing per record;
+the C# side's allocates no byte over 1,000 checks of each payload.
 
 **The gate.** [0006](0006-a-rule-has-its-gate.md)'s table holds the suite and the differential, a
 job of their own, `protobuf-conformance`; `spec/codecs.json`'s entries hold the parts the suite at
-v36.2 does not reach; each side's twin tests of the check, `src/proto/__tests__/records.test.ts` and
-`tests/Bead.Protobuf.Tests/ProtoRecordsTests.cs`, one sentence each pair, hold what no entry of
-`Probe` reaches.
+v36.2 does not reach; each side's twin tests of the check, `src/proto/__tests__/records.test.ts`,
+`tests/Bead.Protobuf.Tests/ProtoRecordsTests.cs` and `bead-protobuf/src/records/tests.rs`, one
+sentence each set of twins, hold what no entry of `Probe` reaches.
 
-**Rust, and each language after it,** checks a payload's records by its own library's descriptor,
-plays the entries, and adds its testee to the suite.
+**The Rust side** checks a payload's records by its message's descriptors, `bead-protobuf`'s
+`check_records` over the pool the code Buffa generates from protoc's set embeds, or the one its
+dynamic codec is given, plays the entries, and answers the suite through its testee
+([0044](0044-rust-one-owner-per-router-traits-no-unsafe-two-parameters-no-warning.md)); **each
+language after it** checks by its own library's descriptors, plays the entries, and adds its testee
+to the suite.
 
 **Out of scope**: the U+FEFF row, which stays open; the writer's surrogate; and the upstream
 reports, protobuf-es's points, its packed reading, its map entries, its depth count and its wire
