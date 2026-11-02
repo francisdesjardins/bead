@@ -243,6 +243,12 @@ impl Parts {
         u64::try_from(self.held.len()).unwrap_or(u64::MAX)
     }
 
+    /// What its buffer holds room for, held or not.
+    #[cfg(test)]
+    pub(crate) fn held_capacity(&self) -> usize {
+        self.held.capacity()
+    }
+
     /// What it holds in parts, read from any thread.
     pub(crate) fn counted(&self) -> Arc<AtomicU64> {
         Arc::clone(&self.bytes)
@@ -323,12 +329,17 @@ impl Parts {
         }
 
         let credential = self.credential.take();
-        let whole = Bytes::copy_from_slice(&self.held);
+        // ! the buffer itself handed on: one kept would hold the largest envelope's capacity for
+        // good (spec 15.23)
+        let whole = core::mem::take(&mut self.held);
 
         // the envelope whole, its parts given back to the budget
+        self.bounds
+            .budget
+            .release(u64::try_from(whole.len()).unwrap_or(u64::MAX));
         self.stop();
 
-        PartTaking::Whole(whole, credential)
+        PartTaking::Whole(whole.freeze(), credential)
     }
 
     /// Whether its parts are owed more than came, now: they came too slowly.
@@ -341,7 +352,8 @@ impl Parts {
     /// Lets go of what it holds, its budget freed and its timer disarmed.
     pub(crate) fn stop(&mut self) {
         self.bounds.budget.release(self.held_bytes());
-        self.held.clear();
+        // ! a new buffer, not a cleared one, which would keep its capacity (spec 15.23)
+        self.held = BytesMut::new();
         self.bytes.store(0, Ordering::SeqCst);
         self.credential = None;
         self.first_at = None;

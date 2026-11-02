@@ -171,6 +171,46 @@ async fn reassembles_an_envelope_from_its_parts_and_loses_the_connection_past_it
 }
 
 #[test]
+fn keeps_no_room_for_an_envelope_s_parts_once_its_envelope_is_whole_or_its_parts_let_go() {
+    let clock = SteppingClock::new(SystemTime::UNIX_EPOCH);
+    let bounds = bounds_of((&clock, 100));
+    let mut parts = Parts::new(Arc::clone(&bounds), Arc::new(|| {}));
+
+    // spec 15.23: what a connection holds is what its parts hold, not the largest it ever took
+    assert_eq!(
+        parts.take((part(&[1; 40]), true, None)),
+        PartTaking::Held,
+        "held"
+    );
+    assert!(parts.held_capacity() >= 40, "its parts held");
+    assert_eq!(
+        parts.take((part(&[2; 20]), false, None)),
+        PartTaking::Whole(
+            Bytes::from([[1; 40].as_slice(), [2; 20].as_slice()].concat()),
+            None
+        ),
+        "whole once its last came"
+    );
+    assert_eq!(
+        (parts.held_capacity(), bounds.budget.held()),
+        (0, 0),
+        "no room kept once whole"
+    );
+
+    assert_eq!(
+        parts.take((part(&[3; 30]), true, None)),
+        PartTaking::Held,
+        "held again"
+    );
+    parts.stop();
+    assert_eq!(
+        (parts.held_capacity(), bounds.budget.held()),
+        (0, 0),
+        "no room kept once let go"
+    );
+}
+
+#[test]
 fn cuts_an_envelope_in_parts_each_as_large_as_the_peer_s_bound_lets_it_the_credential_on_the_first_alone()
  {
     let envelope: Bytes = (0_u8..100).collect::<Vec<u8>>().into();

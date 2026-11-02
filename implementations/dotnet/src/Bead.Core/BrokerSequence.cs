@@ -118,7 +118,7 @@ internal readonly record struct BrokerPartTaking(byte[]? Envelope, string? Crede
 /// </summary>
 internal sealed class BrokerParts(BrokerPartsBounds bounds, Action late)
 {
-    private readonly List<byte> _held = [];
+    private List<byte> _held = [];
     private string? _credential;
     private long? _firstAt;
     private ITimer? _timer;
@@ -178,6 +178,15 @@ internal sealed class BrokerParts(BrokerPartsBounds bounds, Action late)
         get
         {
             return _held.Count;
+        }
+    }
+
+    /// <summary>What its list holds room for, held or not.</summary>
+    public int HeldCapacity
+    {
+        get
+        {
+            return _held.Capacity;
         }
     }
 
@@ -269,7 +278,8 @@ internal sealed class BrokerParts(BrokerPartsBounds bounds, Action late)
     public void Stop()
     {
         bounds.Budget.Release(_held.Count);
-        _held.Clear();
+        // ! a new list, not a cleared one, which would keep its capacity (spec 15.23)
+        _held = [];
         _credential = null;
         _firstAt = null;
         _timer?.Dispose();
