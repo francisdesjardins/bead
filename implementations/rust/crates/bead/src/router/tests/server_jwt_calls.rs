@@ -1,0 +1,462 @@
+//! JWT calls waiting for keys, cancelled or disposed, and a registered resolver's admission.
+
+use core::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex};
+
+use bytes::Bytes;
+use hmac::{Hmac, KeyInit, Mac};
+use serde_json::{Value, json};
+use sha2::Sha256;
+use tokio::sync::oneshot;
+use tokio_util::sync::CancellationToken;
+
+use super::server::{Served, first};
+use super::{answered, cancel_of, locked, request_header_of};
+use crate::constants::{ProtocolCode, RouterSide};
+use crate::credentials::{Credentials, JwtKeySet, JwtSetKey, KeySetAnswer};
+use crate::envelope::{Credential, Envelope, RequestHeader};
+use crate::errors::CallError;
+use crate::failure::Failure;
+use crate::jwt_verifier::{JwtAlgorithm, JwtKey};
+use crate::router::core::Handler;
+use crate::router::server::{CallHooks, RouterServerOptions};
+use crate::router::types::{RequestCredential, RouterAnswer};
+use crate::testing::pair::{Pair, PairOptions, echo};
+
+const ISSUER: &str = "https://issuer.example";
+const AUDIENCE: &str = "https://bead.example";
+const NOW: i64 = 1_767_225_600;
+const SECRET: [u8; 32] = [2; 32];
+
+fn jwk() -> serde_json::Map<String, Value> {
+    json!({"kty": "oct", "k": crate::base64url::encode(&SECRET), "kid": "set-key"})
+        .as_object()
+        .cloned()
+        .expect("a JWK object")
+}
+
+fn jwt() -> String {
+    jwt_of(&json!({}))
+}
+
+fn jwt_of(extra: &Value) -> String {
+    let header = crate::base64url::encode(
+        json!({"alg": "HS256", "typ": "at+jwt", "kid": "set-key"})
+            .to_string()
+            .as_bytes(),
+    );
+    let mut claims =
+        json!({"iss": ISSUER, "aud": AUDIENCE, "sub": "grace", "exp": NOW.saturating_add(3_600)});
+    for (key, value) in extra.as_object().expect("extra claims") {
+        claims[key] = value.clone();
+    }
+    let claims = crate::base64url::encode(claims.to_string().as_bytes());
+    let signing = format!("{header}.{claims}");
+    let mut mac = Hmac::<Sha256>::new_from_slice(&SECRET).expect("an HMAC key");
+    mac.update(signing.as_bytes());
+    format!(
+        "{signing}.{}",
+        crate::base64url::encode(&mac.finalize().into_bytes())
+    )
+}
+
+type Ask = (String, CancellationToken, oneshot::Sender<KeySetAnswer>);
+type Asks = Arc<Mutex<Vec<Ask>>>;
+
+fn key_set() -> (JwtKeySet, Asks) {
+    let asks = Asks::default();
+    let asking = Arc::clone(&asks);
+    (
+        JwtKeySet {
+            ask: Arc::new(move |issuer, signal| {
+                let (reply, answer) = oneshot::channel();
+                locked(&asking).push((issuer, signal, reply));
+                Box::pin(async move { answer.await.expect("the test answers its ask") })
+            }),
+            issuers: vec![ISSUER.to_owned()],
+            maximum_waiting_calls: None,
+        },
+        asks,
+    )
+}
+
+fn release(asks: &Asks) {
+    for (issuer, signal, reply) in core::mem::take(&mut *locked(asks)) {
+        assert_eq!(issuer, ISSUER);
+        assert!(
+            !signal.is_cancelled(),
+            "a call's end does not cancel the issuer's shared ask"
+        );
+        reply
+            .send(Ok(vec![JwtSetKey {
+                algorithm: JwtAlgorithm::Hs256,
+                jwk: jwk(),
+            }]))
+            .expect("the issuer's ask still waits");
+    }
+}
+
+fn handler(ran: &Arc<AtomicUsize>) -> Handler {
+    let ran = Arc::clone(ran);
+    Handler {
+        resolve: Arc::new(move |props| {
+            ran.fetch_add(1, Ordering::SeqCst);
+            let sub = props
+                .session
+                .as_ref()
+                .and_then(|session| session.data.as_ref())
+                .and_then(|claims| claims.get("sub"))
+                .and_then(Value::as_str)
+                .expect("verified claims")
+                .to_owned();
+            Box::pin(async move {
+                props
+                    .answerer
+                    .respond(RouterAnswer::Result(Bytes::from(sub)))
+                    .await
+                    .map_err(crate::errors::ResolverError::other)
+            })
+        }),
+        admit: None,
+        maximum_payload_bytes: None,
+        forwards_credentials: false,
+        notifies: false,
+    }
+}
+
+fn serving(key_set: JwtKeySet, ran: &Arc<AtomicUsize>) -> Served {
+    let served = Served::new(&RouterServerOptions {
+        credentials: Some(Credentials {
+            audience: Some(AUDIENCE.to_owned()),
+            key_set: Some(key_set),
+            ..Credentials::default()
+        }),
+        ..RouterServerOptions::default()
+    });
+    served.transport.open(&first(), true);
+    served
+        .router
+        .register_resolver((&echo(), handler(ran)))
+        .expect("echo registered");
+    served
+}
+
+fn request(call_id: u32) -> Envelope {
+    Envelope::Request {
+        header: RequestHeader {
+            credential: Some(Credential::Jwt(Bytes::from(jwt()))),
+            ..request_header_of(call_id)
+        },
+        payload: Bytes::new(),
+    }
+}
+
+#[tokio::test]
+async fn answers_nothing_to_a_call_cancelled_while_it_waits_on_its_key_set_whose_ask_goes_on_for_the_others()
+ {
+    let (key_set, asks) = key_set();
+    let ran = Arc::new(AtomicUsize::new(0));
+    let served = serving(key_set, &ran);
+    served.transport.deliver(&request(1), &first());
+    served.transport.deliver(&request(3), &first());
+    served.settle().await;
+    assert_eq!(locked(&asks).len(), 1);
+    served.transport.deliver(&cancel_of(1), &first());
+    served.settle().await;
+    release(&asks);
+    served.settle().await;
+    assert_eq!(served.sent_since(), ["first result 3 grace"]);
+    assert_eq!(ran.load(Ordering::SeqCst), 1);
+    assert_eq!(locked(&asks).len(), 0, "no second ask");
+    assert_eq!(served.reported(), Vec::<String>::new());
+}
+
+#[tokio::test]
+async fn dispatches_nothing_and_runs_no_resolver_for_a_jwt_call_that_waits_on_its_key_set_as_the_router_is_disposed()
+ {
+    let (key_set, asks) = key_set();
+    let ran = Arc::new(AtomicUsize::new(0));
+    let live_ran = Arc::new(AtomicUsize::new(0));
+    let served = serving(key_set.clone(), &ran);
+    let live = serving(key_set, &live_ran);
+    served.transport.deliver(&request(1), &first());
+    live.transport.deliver(&request(1), &first());
+    served.settle().await;
+    live.settle().await;
+    assert_eq!(locked(&asks).len(), 2);
+    served.router.dispose().await;
+    release(&asks);
+    served.settle().await;
+    live.settle().await;
+    assert_eq!(live.sent_since(), ["first result 1 grace"]);
+    assert_eq!(live_ran.load(Ordering::SeqCst), 1);
+    assert_eq!(ran.load(Ordering::SeqCst), 0);
+    assert_eq!(served.sent_since(), Vec::<String>::new());
+    assert_eq!(served.reported(), Vec::<String>::new());
+    assert_eq!(live.reported(), Vec::<String>::new());
+    live.router.dispose().await;
+}
+
+#[tokio::test]
+async fn answers_session_required_from_the_admission_of_a_resolver_registered_on_it_access_denied_to_a_call_that_presented_a_jwt_that_holds_whose_client_keeps_its_default_and_session_required_to_one_that_presented_none()
+ {
+    let credential = RequestCredential::Jwt(jwt());
+    let pair = Pair::connected((
+        crate::testing::instants::new_year(),
+        PairOptions {
+            server: crate::server::ServerOptions {
+                credentials: Some(Credentials {
+                    audience: Some(AUDIENCE.to_owned()),
+                    keys: vec![JwtKey {
+                        algorithm: JwtAlgorithm::Hs256,
+                        issuer: ISSUER.to_owned(),
+                        jwk: jwk(),
+                    }],
+                    ..Credentials::default()
+                }),
+                ..crate::server::ServerOptions::default()
+            },
+            client: crate::client::ClientOptions {
+                credential: Some(credential.clone()),
+                ..crate::client::ClientOptions::default()
+            },
+        },
+    ))
+    .await
+    .expect("a connected pair");
+    pair.server
+        .router()
+        .register_resolver((
+            &echo(),
+            Handler {
+                resolve: Arc::new(|_| {
+                    Box::pin(async { panic!("a refused call reaches no resolver") })
+                }),
+                admit: Some(Arc::new(|_| {
+                    Ok(Some(crate::router::core::AdmissionRefusal {
+                        failure: Failure::protocol(
+                            ProtocolCode::SESSION_REQUIRED,
+                            RouterSide::Server,
+                        )
+                        .saying("sign in first"),
+                        by: None,
+                    }))
+                })),
+                maximum_payload_bytes: None,
+                forwards_credentials: false,
+                notifies: false,
+            },
+        ))
+        .expect("a raw resolver registered");
+    let withdrawn = Arc::new(Mutex::new(Vec::new()));
+    let hearing = Arc::clone(&withdrawn);
+    pair.client
+        .router()
+        .on_credential_withdrawn(Arc::new(move |scheme| locked(&hearing).push(scheme)));
+    for (presented, expected) in [
+        (None, ProtocolCode::ACCESS_DENIED),
+        (
+            Some(RequestCredential::None),
+            ProtocolCode::SESSION_REQUIRED,
+        ),
+    ] {
+        let mut request = super::request_of((None, super::TIMEOUT));
+        request.options.credential = presented;
+        let call = pair
+            .client
+            .router()
+            .request(Bytes::new(), (request, CallHooks::default()))
+            .expect("a request");
+        pair.settle().await;
+        let error = answered(call).await.expect_err("the admission refuses");
+        assert!(
+            matches!(error, CallError::Failure(failure) if failure.code() == expected.get() && failure.detail() == "sign in first")
+        );
+    }
+    assert_eq!(*locked(&withdrawn), Vec::new());
+    assert_eq!(pair.client.router().credential(), Some(credential));
+    assert_eq!(locked(&pair.server_reports).len(), 0);
+    assert_eq!(locked(&pair.client_reports).len(), 0);
+}
+
+#[expect(
+    clippy::too_many_lines,
+    reason = "the issuer twin checks two identifier kinds, two connections and an unaffected issuer and scheme"
+)]
+#[tokio::test]
+async fn ends_every_credentials_session_of_an_issuer_by_that_issuer_on_every_connection_its_sids_and_its_subs_alike_and_nothing_of_another_issuers_nor_an_elsewheres_whose_id_is_that_issuer_an_issuer_none_names_ends_nothing()
+ {
+    use super::server::{header_of, news, second};
+    use crate::credentials::ElsewhereSession;
+    use crate::router::types::{SessionIdentifier, TransportMessage};
+
+    let other = "https://other.example";
+    let served = Served::new(&RouterServerOptions {
+        credentials: Some(Credentials {
+            audience: Some(AUDIENCE.to_owned()),
+            keys: [ISSUER, other]
+                .into_iter()
+                .map(|issuer| JwtKey {
+                    algorithm: JwtAlgorithm::Hs256,
+                    issuer: issuer.to_owned(),
+                    jwk: jwk(),
+                })
+                .collect(),
+            verify: Some(Arc::new(|carried, _| {
+                Box::pin(async move {
+                    Ok(Some(ElsewhereSession {
+                        id: carried.clone(),
+                        data: Some(json!(carried)),
+                        end: None,
+                    }))
+                })
+            })),
+            ..Credentials::default()
+        }),
+        ..RouterServerOptions::default()
+    });
+    for handle in [first(), second()] {
+        served.transport.open(&handle, true);
+    }
+    served
+        .router
+        .register_resolver((
+            &news(),
+            Handler {
+                resolve: Arc::new(|props| {
+                    Box::pin(async move {
+                        props
+                            .answerer
+                            .respond(RouterAnswer::Result(Bytes::from_static(b"subscribed")))
+                            .await
+                            .map_err(crate::errors::ResolverError::other)
+                    })
+                }),
+                admit: None,
+                maximum_payload_bytes: None,
+                forwards_credentials: false,
+                notifies: true,
+            },
+        ))
+        .expect("news registered");
+    let subscribe = |(call_id, handle, credential, carried): (u32, _, _, Option<&str>)| {
+        served.transport.deliver_message(
+            &TransportMessage {
+                data: crate::testing::scripted::bytes_of(&Envelope::Request {
+                    header: RequestHeader {
+                        opens_subscription: true,
+                        credential: Some(credential),
+                        ..header_of((call_id, &news()))
+                    },
+                    payload: Bytes::new(),
+                }),
+                credential: carried.map(str::to_owned),
+                ..TransportMessage::default()
+            },
+            &handle,
+        );
+    };
+    for (id, handle, claims) in [
+        (1, first(), json!({})),
+        (3, first(), json!({"sid":"one"})),
+        (5, first(), json!({"iss":other})),
+        (1, second(), json!({"sub":"carol"})),
+    ] {
+        subscribe((
+            id,
+            handle,
+            Credential::Jwt(Bytes::from(jwt_of(&claims))),
+            None,
+        ));
+    }
+    subscribe((7, first(), Credential::Elsewhere, Some(ISSUER)));
+    served.settle().await;
+    let mut sent = served.sent_since();
+    sent.sort();
+    assert_eq!(
+        sent,
+        [
+            "first result 1 subscribed",
+            "first result 3 subscribed",
+            "first result 5 subscribed",
+            "first result 7 subscribed",
+            "second result 1 subscribed"
+        ]
+    );
+    served.router.end_sessions_of(ISSUER.to_uppercase()).await;
+    assert_eq!(served.sent_since(), Vec::<String>::new());
+    for issuer in [ISSUER, ISSUER, "https://unnamed.example"] {
+        served.router.end_sessions_of(issuer.to_owned()).await;
+    }
+    served.settle().await;
+    let mut sent = served.sent_since();
+    sent.sort();
+    assert_eq!(
+        sent,
+        [
+            "first failure 1 SESSION_REQUIRED",
+            "first failure 3 SESSION_REQUIRED",
+            "second failure 1 SESSION_REQUIRED"
+        ]
+    );
+    served
+        .router
+        .owner()
+        .run(move |state| {
+            let mut subscriptions = state
+                .notifications
+                .subscriptions(None)
+                .into_iter()
+                .map(|call| (call.connection_handle, call.call_id, call.identifier))
+                .collect::<Vec<_>>();
+            subscriptions.sort_by_key(|(_, call_id, _)| *call_id);
+            assert_eq!(
+                subscriptions,
+                [
+                    (
+                        first(),
+                        5,
+                        Some(SessionIdentifier::JwtSub {
+                            issuer: other.to_owned(),
+                            sub: "grace".to_owned()
+                        })
+                    ),
+                    (
+                        first(),
+                        7,
+                        Some(SessionIdentifier::Elsewhere {
+                            id: ISSUER.to_owned()
+                        })
+                    ),
+                ]
+            );
+        })
+        .await
+        .expect("only the other issuer and scheme remain");
+    subscribe((
+        9,
+        first(),
+        Credential::Jwt(Bytes::from(jwt_of(&json!({"sid":"one"})))),
+        None,
+    ));
+    served.settle().await;
+    assert_eq!(served.sent_since(), ["first result 9 subscribed"]);
+    served
+        .router
+        .owner()
+        .run(|state| {
+            let mut ids = state
+                .notifications
+                .subscriptions(None)
+                .into_iter()
+                .map(|call| call.call_id)
+                .collect::<Vec<_>>();
+            ids.sort_unstable();
+            assert_eq!(ids, [5, 7, 9]);
+        })
+        .await
+        .expect("a still-valid credential opens its session again");
+    assert_eq!(served.reported(), Vec::<String>::new());
+    served.router.dispose().await;
+    assert_eq!(served.clock.dues(), Vec::<core::time::Duration>::new());
+}
