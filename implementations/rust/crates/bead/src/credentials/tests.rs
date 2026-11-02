@@ -457,11 +457,16 @@ async fn fails_a_call_alike_when_its_key_set_throws_as_it_is_asked_and_has_the_n
             .expect("failed at once, not at its deadline")
             .expect("joined");
 
+        let Err(crate::router::core::Unresolved::Other(error)) = refused else {
+            panic!("{breaks}: failed with its throw");
+        };
         assert_eq!(
-            failed_with(refused),
-            format!(
-                "the key set's ask for {SET_ISSUER} failed: a key set's ask panicked: the key set cannot be reached"
-            ),
+            error.to_string(),
+            format!("the key set's ask for {SET_ISSUER} failed")
+        );
+        assert_eq!(
+            error.source().expect("the ask's panic").to_string(),
+            "a key set's ask panicked: the key set cannot be reached",
             "{breaks}: failed with its throw"
         );
 
