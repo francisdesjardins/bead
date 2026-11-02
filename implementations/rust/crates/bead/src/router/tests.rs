@@ -27,6 +27,7 @@ use crate::testing::scripted::ScriptedClient;
 
 mod calls;
 mod client;
+mod client_command_credentials;
 mod client_commands;
 mod client_credentials;
 mod client_drops;
@@ -36,6 +37,7 @@ mod client_sessions;
 mod client_subscription_rebinding;
 mod client_subscription_registration;
 mod client_subscriptions;
+mod client_trace;
 mod disposal;
 mod limits;
 mod metrics;
