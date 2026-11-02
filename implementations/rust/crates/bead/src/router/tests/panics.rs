@@ -117,7 +117,9 @@ async fn a_request_whose_send_panics_fails_as_its_transport_s_throw_would_and_th
         let scripted = Scripted::new();
         let words = match &panicking {
             Sending::Panicked(words) | Sending::PanickedLater(words) => words.clone(),
-            Sending::Taken | Sending::Thrown(_) | Sending::Rejected(_) => String::new(),
+            Sending::Taken | Sending::Thrown(_) | Sending::Rejected(_) | Sending::Error(_) => {
+                String::new()
+            }
         };
 
         scripted.transport.send_as(panicking);

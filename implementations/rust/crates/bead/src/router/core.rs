@@ -42,7 +42,7 @@ use crate::router::types::{
     TransportMessage,
 };
 use crate::session_token::SessionToken;
-use crate::transport::{Panicked, Sent, caught_future, panicked_of};
+use crate::transport::{Panicked, Sent, caught, caught_future, panicked_of};
 use crate::violations::detail_bound_of;
 
 /// What a router's handlers are told the router was disposed with.
@@ -1685,7 +1685,12 @@ fn dispatch_to<S: Side>(
         carried: None,
     };
     // * off the owner, on the runtime: one that blocks its thread stalls a worker, never the router
-    let resolving = (handler.resolve)(props);
+    let resolving = match caught(("a resolver", || (handler.resolve)(props))) {
+        Ok(resolving) => resolving,
+        Err(panicked) => {
+            return resolver_failed(state, (&dispatch, &signal, ResolverError::other(panicked)));
+        }
+    };
     let Some(running) = owner.spawn(resolving) else {
         return;
     };

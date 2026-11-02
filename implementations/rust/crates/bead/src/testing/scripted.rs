@@ -31,6 +31,8 @@ pub enum Sending {
     Taken,
     /// Refused as it is handed over, saying why.
     Thrown(String),
+    /// Refused as it is handed over, with this error object.
+    Error(RouterError),
     /// Taken, then refused, saying why.
     Rejected(String),
     /// Panicking as it is handed over, saying why: an application's transport that breaks.
@@ -46,6 +48,7 @@ pub enum Sending {
 fn sent_of(sending: &Sending) -> Result<Sent, RouterError> {
     match sending {
         Sending::Taken => Ok(Sent::Done),
+        Sending::Error(error) => Err(error.clone()),
         Sending::Thrown(message) => Err(RouterError::Other(Arc::new(std::io::Error::other(
             message.clone(),
         )))),
