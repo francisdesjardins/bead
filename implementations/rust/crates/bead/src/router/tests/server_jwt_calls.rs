@@ -28,6 +28,155 @@ const AUDIENCE: &str = "https://bead.example";
 const NOW: i64 = 1_767_225_600;
 const SECRET: [u8; 32] = [2; 32];
 
+#[expect(
+    clippy::too_many_lines,
+    reason = "the twin checks all four credential schemes through the same admission"
+)]
+#[tokio::test]
+async fn answers_an_admission_s_session_required_to_a_call_that_presented_a_credential_access_denied_and_to_one_that_presented_none_session_required()
+ {
+    use crate::credentials::ElsewhereSession;
+    use crate::managers::service::{ResolverDependencies, Response};
+    use crate::payloads::TextCodec;
+    use crate::router::admissions::BeforeRequest;
+    use crate::router::types::TransportMessage;
+    use crate::testing::scripted::bytes_of;
+
+    let clock = crate::testing::SteppingClock::new(super::january_first());
+    let transport = crate::testing::scripted::ScriptedServer::new(Arc::<
+        crate::testing::SteppingClock,
+    >::clone(&clock));
+    let served = crate::server::Server::new(
+        Arc::<crate::testing::scripted::ScriptedServer>::clone(&transport),
+        &crate::server::ServerOptions {
+            credentials: Some(Credentials {
+                audience: Some(AUDIENCE.to_owned()),
+                keys: vec![JwtKey {
+                    algorithm: JwtAlgorithm::Hs256,
+                    issuer: ISSUER.to_owned(),
+                    jwk: jwk(),
+                }],
+                verify: Some(Arc::new(|_, _| {
+                    Box::pin(async {
+                        Ok(Some(ElsewhereSession {
+                            id: "ada".to_owned(),
+                            data: None,
+                            end: None,
+                        }))
+                    })
+                })),
+                ..Credentials::default()
+            }),
+            ..crate::server::ServerOptions::default()
+        },
+    )
+    .expect("a server");
+    transport.open(&first(), true);
+    let mut session = served.sessions().create(first());
+    session.data = Some(json!("leg A"));
+    let stored = served
+        .sessions()
+        .set(session)
+        .expect("a valid session")
+        .await
+        .expect("stored");
+    let token = stored.session_token.expect("the connection's token");
+    let reports = Arc::new(Mutex::new(Vec::<String>::new()));
+    let reporting = Arc::clone(&reports);
+    served.router().on_error(Arc::new(move |error, _| {
+        locked(&reporting).push(error.to_string());
+    }));
+    let admitted = Arc::new(Mutex::new(Vec::new()));
+    let admitting = Arc::clone(&admitted);
+    let mut dependencies = ResolverDependencies::of(TextCodec, TextCodec);
+    dependencies.before_request = Some(BeforeRequest::new(
+        move |request| {
+            locked(&admitting).push((request.header.call_id, request.session.is_some()));
+            false
+        },
+        Some(
+            Failure::protocol(ProtocolCode::SESSION_REQUIRED, RouterSide::Server)
+                .saying("not this one"),
+        ),
+    ));
+    served
+        .services()
+        .get_request_resolver(&echo(), dependencies)
+        .expect("echo resolved")
+        .on(Arc::new(|_, response: Response<TextCodec>| {
+            response.result("admitted".to_owned())
+        }))
+        .expect("registered");
+    for (call_id, credential, carried) in [
+        (1, None, None),
+        (3, Some(Credential::Opaque(token)), None),
+        (5, Some(Credential::Jwt(Bytes::from(jwt()))), None),
+        (
+            7,
+            Some(Credential::Elsewhere),
+            Some("Interop sub=ada".to_owned()),
+        ),
+    ] {
+        transport.deliver_message(
+            &TransportMessage {
+                data: bytes_of(&Envelope::Request {
+                    header: RequestHeader {
+                        credential,
+                        ..request_header_of(call_id)
+                    },
+                    payload: Bytes::new(),
+                }),
+                credential: carried,
+                ..TransportMessage::default()
+            },
+            &first(),
+        );
+    }
+    clock.settle().await;
+    let mut failures = transport
+        .take()
+        .into_iter()
+        .map(|(handle, envelope)| {
+            assert_eq!(handle, first());
+            let Envelope::Failure { header, failure } = envelope else {
+                panic!("each call is refused")
+            };
+            (header.call_id, failure.code, failure.detail)
+        })
+        .collect::<Vec<_>>();
+    failures.sort_by_key(|(call_id, _, _)| *call_id);
+    assert_eq!(
+        failures,
+        [
+            (
+                1,
+                ProtocolCode::SESSION_REQUIRED.get(),
+                "not this one".to_owned()
+            ),
+            (
+                3,
+                ProtocolCode::ACCESS_DENIED.get(),
+                "not this one".to_owned()
+            ),
+            (
+                5,
+                ProtocolCode::ACCESS_DENIED.get(),
+                "not this one".to_owned()
+            ),
+            (
+                7,
+                ProtocolCode::ACCESS_DENIED.get(),
+                "not this one".to_owned()
+            ),
+        ]
+    );
+    let mut admitted = locked(&admitted).clone();
+    admitted.sort_unstable();
+    assert_eq!(admitted, [(1, true), (3, true), (5, true), (7, true)]);
+    assert_eq!(*locked(&reports), Vec::<String>::new());
+    served.dispose().await.expect("disposed");
+}
+
 fn jwk() -> serde_json::Map<String, Value> {
     json!({"kty": "oct", "k": crate::base64url::encode(&SECRET), "kid": "set-key"})
         .as_object()
