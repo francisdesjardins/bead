@@ -31,6 +31,7 @@ mod client_credentials;
 mod client_requests;
 mod client_subscription_rebinding;
 mod client_subscription_registration;
+mod client_subscriptions;
 mod disposal;
 mod limits;
 mod metrics;
