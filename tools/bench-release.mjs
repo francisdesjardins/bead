@@ -188,7 +188,7 @@ const execute = (command, args, options) => {
 };
 
 // each side's bench, by the source that says whether it takes a --filter
-const SOURCES = Object.freeze({
+export const SOURCES = Object.freeze({
   typescript: 'implementations/typescript/tools/bench.mjs',
   csharp: 'implementations/dotnet/tools/Bead.Benchmarks/Program.cs',
   rust: 'implementations/rust/benches/src/main.rs',

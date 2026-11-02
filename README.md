@@ -522,8 +522,7 @@ its built binary and Rust by `cargo run` over its release build, by its lock, wi
 the measurement processes. The TypeScript bench's C# interop server is built once, then launched
 with `--no-build`.
 
-From the root, screen the TypeScript and C# sides against the last release's stored reports, and
-the Rust side against a report of its own:
+From the root, screen each side against the last release's stored report:
 
 ```sh
 node tools/bench-release.mjs typescript --output .bench/candidate-typescript.json
@@ -605,8 +604,7 @@ measures no memory, since an allocator that counts takes unsafe code, which the 
 codec, notification, large echo, interop or transcoding. `node tools/bench-release.mjs rust` builds
 it once in release and runs it in fresh processes as it runs the others; its report names `rust` for
 its side and `rustc` for its runtime, and `tools/bench-compare.mjs` compares two of them. A release
-keeps no report of it, so its baseline is a report of an earlier commit's, or `--tree`'s. Alone,
-from `implementations/rust`:
+keeps its report, as it keeps the others' (below). Alone, from `implementations/rust`:
 
 ```sh
 cargo run --release --locked --manifest-path benches/Cargo.toml -- --runs 3 --seconds 3 --json
@@ -687,11 +685,12 @@ node tools/bench-release.mjs csharp --tree ../bench-baseline --baseline-output .
 node tools/bench-compare.mjs .bench/confirm-baseline-csharp.json .bench/confirm-candidate-csharp.json --threshold 25%
 ```
 
-For a full interleave, omit `--filter`. Each release keeps its two full reports,
-`.bench/v<version>-typescript.json` and `.bench/v<version>-csharp.json`, which git ignores. A
-`regression` or `inconclusive` is read before the finish, confirmed, then explained in the release's
-notes or fixed. A stored baseline from another session can include machine drift; the interleave
-reduces that drift's effect.
+For a full interleave, omit `--filter`. Each release keeps a full report of each side's bench,
+`.bench/v<version>-<side>.json`, which git ignores, compared with the last release's on the machine
+that made it, or with the last tag's checkout by `--tree` where that machine keeps none; a side whose
+bench the last tag lacks keeps its first, compared with none. A `regression` or `inconclusive` is
+read before the finish, confirmed, then explained in the release's notes or fixed. A stored baseline
+from another session can include machine drift; the interleave reduces that drift's effect.
 
 ## Fuzzing
 

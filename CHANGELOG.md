@@ -9,6 +9,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- The gates every side shares hold the Rust side: `tools/check-details.mjs` reads its sources, the
+  differential reads one corpus through every side's testee, a release keeps each side's bench
+  report, the Rust side's included, and the Rust broker trial plays every case but those a row of
+  the matrix excuses it from.
 - `bead::testing::Difference`, with `is_excused` and `LANGUAGE` beside it, in place of
   `bead::testing::durations::Difference`.
 - The support matrix's "A singular closed enum's undeclared number, echoed" says what protobuf-es
