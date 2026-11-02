@@ -310,13 +310,14 @@ alike. A bump of `@bufbuild/protobuf` reads the `protobuf-conformance` version i
 moves `runner.json`, the failure lists and the floor in one commit. Where the two pin different
 releases, the runner follows the older, and the newer library's bump waits for the other.
 
-**The differential.** `tools/protobuf-conformance.mjs differential` feeds the TypeScript and C#
-sides' testees the same 10,000 payloads from a fixed seed: `Probe`'s own records, mutated by cuts,
-lengths, wire types and nesting, maps and groups among them. It compares each side's verdict, read
-or refused, and the bytes each writes back as what they read, at every depth, the choices protobuf
-leaves to a writer aside: the order of unknown fields, the order of a map's entries, and an entry's
-key at its default, which protobuf-es writes and Google.Protobuf leaves out. The first and the last
-are the platform rows; any other parting fails it.
+**The differential.** `tools/protobuf-conformance.mjs differential` feeds every side's testee the
+same 10,000 payloads from a fixed seed: `Probe`'s own records, mutated by cuts, lengths, wire types
+and nesting, maps and groups among them; a record of `needs`, `needs_items` and `shade`, fields 7, 8
+and 14, is written by none of its payloads. It compares the sides two by two, each one's verdict,
+read or refused, and the bytes each writes back as what they read, at every depth, the choices
+protobuf leaves to a writer aside: the order of unknown fields, the order of a map's entries, and an
+entry's key at its default, which protobuf-es writes and Google.Protobuf leaves out. The first and
+the last are the platform rows; any other parting fails it.
 
 ## Consequences
 

@@ -806,10 +806,10 @@ against each server.
 - `node tools/protobuf-conformance.mjs typescript|csharp|rust|differential`: protobuf's conformance
   suite through one side's generated `proto` codec, its failure list held both ways and its count
   of tests to the floor `tools/protobuf-conformance/runner.json` pins with the runner, fetched by
-  its sha512; or one corpus of `Probe` through the TypeScript and C# sides, read alike. The suite
-  runs on Linux or macOS, where the runner has a binary, on Linux one of glibc 2.38 or later; it
-  needs the TypeScript side and the builder installed, .NET for the C# side, and Rust's toolchain
-  for the Rust side.
+  its sha512; or one corpus of `Probe` through every side's testee, read alike, compared two by
+  two. The suite runs on Linux or macOS, where the runner has a binary, on Linux one of glibc 2.38
+  or later; it needs the TypeScript side and the builder installed, .NET for the C# side, and
+  Rust's toolchain for the Rust side.
 - `node tools/protovalidate-differential.mjs oracle|typescript|csharp`: protovalidate-es, at the pin
   `tools/protovalidate-differential/pin.json` holds and fetched by its sha512, over the verdicts of
   `spec/validations.json`; or those verdicts and a corpus mutated from them through one side's
@@ -950,8 +950,8 @@ buf's lint and layout over its `.proto`; each half's gates and both its builds; 
 against each server, both modes of each half, sixteen pairs, each server's gateway asked after its
 client); `protobuf-conformance` (protobuf's conformance suite, its runner by its pin's sha512,
 through each side's generated `proto` codec and its JSON, each held to its failure list and the
-floor, the C# and Rust testees' format, then one corpus of `Probe` through the TypeScript and C#
-sides); `protovalidate-differential` (protovalidate-es, by its pin's sha512, over the verdicts of
+floor, the C# and Rust testees' format, then one corpus of `Probe` through every side's testee);
+`protovalidate-differential` (protovalidate-es, by its pin's sha512, over the verdicts of
 `spec/validations.json`, then those verdicts and a corpus mutated from them through the TypeScript
 and C# sides' generated validators and through protovalidate-es, the violations compared, and the C#
 testee's format); and `commits` (the subjects, the links, the details, the versions, the root's
