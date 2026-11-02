@@ -6,21 +6,12 @@
 use std::process::ExitCode;
 
 use bead::json::{self, JsonRefusal};
-use bead::testing::files;
-use bead::testing::hexadecimal;
+use bead::testing::{Difference, files, hexadecimal, is_excused};
 use bead::{JsonCodec, PayloadCodec, RawCodec, TextCodec};
 use bytes::Bytes;
 use libtest_mimic::{Arguments, Failed, Trial};
 use serde::Deserialize;
 use serde_json::Value;
-
-/// A row of `docs/support.md` an entry crosses, and the language it excuses.
-#[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct Differs {
-    row: String,
-    language: String,
-}
 
 /// Bytes read in an encoding, and what its reader makes of them.
 #[derive(Debug, Deserialize)]
@@ -35,7 +26,7 @@ struct Payload {
     refused: Option<String>,
     #[serde(rename = "read")]
     _read: Option<Value>,
-    differs: Option<Vec<Differs>>,
+    differs: Option<Vec<Difference>>,
 }
 
 /// A value given to a writer, in one of eight forms.
@@ -69,7 +60,7 @@ struct Written {
     value: Given,
     written: Option<String>,
     refused: Option<String>,
-    differs: Option<Vec<Differs>>,
+    differs: Option<Vec<Difference>>,
 }
 
 /// The file whole.
@@ -84,15 +75,6 @@ struct Codecs {
     _spec_version: String,
     payloads: Vec<Payload>,
     values: Vec<Written>,
-}
-
-// whether an entry's differs excuses the Rust side
-fn is_excused(differs: Option<&Vec<Differs>>) -> bool {
-    differs.is_some_and(|differs| {
-        differs
-            .iter()
-            .any(|differs| differs.language == "Rust" && !differs.row.is_empty())
-    })
 }
 
 fn bytes_of(text: &str) -> Result<Bytes, Failed> {
@@ -244,7 +226,8 @@ fn trials() -> Result<Vec<Trial>, String> {
     let mut trials = Vec::new();
 
     for payload in codecs.payloads {
-        if payload.encoding == "proto" || is_excused(payload.differs.as_ref()) {
+        if payload.encoding == "proto" || is_excused(payload.differs.as_deref().unwrap_or_default())
+        {
             continue;
         }
 
@@ -254,7 +237,7 @@ fn trials() -> Result<Vec<Trial>, String> {
     }
 
     for entry in codecs.values {
-        if entry.encoding == "proto" || is_excused(entry.differs.as_ref()) {
+        if entry.encoding == "proto" || is_excused(entry.differs.as_deref().unwrap_or_default()) {
             continue;
         }
 

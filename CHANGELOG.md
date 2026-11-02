@@ -7,6 +7,11 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+
+- `bead::testing::Difference`, with `is_excused` and `LANGUAGE` beside it, in place of
+  `bead::testing::durations::Difference`.
+
 ## [0.9.0] - 2026-10-30
 
 ### Added
