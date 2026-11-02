@@ -5,6 +5,60 @@ use crate::envelope::FailureRecord;
 use crate::failure::Failure;
 use crate::router::types::LIMIT_DEFAULTS;
 
+#[test]
+fn holds_23_codes_each_once_and_leaves_out_the_ones_to_come() {
+    let codes = ProtocolCode::named();
+    assert_eq!(codes.len(), 23);
+    assert_eq!(
+        codes
+            .iter()
+            .collect::<std::collections::BTreeSet<_>>()
+            .len(),
+        23
+    );
+    for later in [23, 37, 53, 66] {
+        assert!(!codes.iter().any(|code| code.get().get() == later));
+    }
+}
+
+#[test]
+fn are_the_layout_the_kinds_the_flags_and_the_scopes_of_the_envelope() {
+    use super::{CredentialScheme, EnvelopeFlag, EnvelopeKind, EnvelopeLayout, FailureScope};
+
+    assert_eq!(EnvelopeLayout::First.byte(), 0xa1);
+    assert_eq!(
+        EnvelopeKind::ALL.map(EnvelopeKind::byte),
+        [0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16]
+    );
+    assert_eq!(
+        [
+            EnvelopeFlag::DESTINATION,
+            EnvelopeFlag::TRANSFER,
+            EnvelopeFlag::CREDENTIAL,
+            EnvelopeFlag::SUBSCRIPTION,
+            EnvelopeFlag::PACED,
+            EnvelopeFlag::MORE,
+        ]
+        .map(EnvelopeFlag::bits),
+        [0x02, 0x04, 0x08, 0x10, 0x20, 0x40]
+    );
+    assert_eq!(
+        [
+            CredentialScheme::NONE,
+            CredentialScheme::OPAQUE,
+            CredentialScheme::JWT,
+            CredentialScheme::ELSEWHERE
+        ]
+        .map(CredentialScheme::get),
+        [0, 1, 2, 3]
+    );
+    assert_eq!(
+        [FailureScope::Protocol, FailureScope::Application].map(FailureScope::number),
+        [0, 1]
+    );
+    assert_eq!(super::SESSION_TOKEN_BYTES, 16);
+}
+
 // spec 8.1
 #[test]
 fn puts_each_code_in_the_block_of_the_stage_that_raises_it() {
