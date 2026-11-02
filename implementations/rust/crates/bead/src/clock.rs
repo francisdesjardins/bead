@@ -190,16 +190,20 @@ mod native {
 ///
 /// # Errors
 ///
-/// A [`ProgrammerError`] naming both when one given differs from the one beneath: `a server runs
-/// on the clock of its transport, and was given another`.
+/// A [`ProgrammerError`] naming both layers and describing each clock when one given differs from
+/// the one beneath.
 pub fn clock_of(
     (beneath, given): (Option<&SharedClock>, Option<&SharedClock>),
     (layer, below): (&str, &str),
 ) -> Result<Option<SharedClock>, ProgrammerError> {
     match (beneath, given) {
-        (Some(beneath), Some(given)) if !Arc::ptr_eq(beneath, given) => Err(ProgrammerError::new(
-            format!("{layer} runs on the clock of {below}, and was given another"),
-        )),
+        (Some(beneath), Some(given)) if !Arc::ptr_eq(beneath, given) => {
+            Err(ProgrammerError::new(format!(
+                "{layer} runs on the clock of {below}, {}, and was given another, {}",
+                beneath.description(),
+                given.description()
+            )))
+        }
         (Some(clock), _) | (None, Some(clock)) => Ok(Some(Arc::clone(clock))),
         (None, None) => Ok(None),
     }

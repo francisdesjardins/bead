@@ -5,7 +5,7 @@ use core::task::Poll;
 use core::time::Duration;
 use std::sync::{Arc, Mutex};
 
-use crate::clock::{Clock, Schedule};
+use crate::clock::{Clock, Schedule, SharedClock, SystemClock, clock_of};
 use crate::duration::LONGEST_TIMER;
 use crate::testing::{SteppingClock, instants};
 use crate::transport::{caught, caught_future};
@@ -73,4 +73,48 @@ async fn refuses_an_advance_within_another_and_takes_one_once_it_ends() {
     advancing.await;
     clock.advance(Duration::from_millis(1)).await;
     assert_eq!(clock.monotonic(), Duration::from_millis(1_001));
+}
+
+#[tokio::test]
+async fn describes_the_platform_s_clock_and_one_of_the_application_s_own() {
+    let own = SteppingClock::new(instants::new_year());
+    let platform = SystemClock::current().expect("a platform clock");
+    assert_eq!(own.description(), "one of its own");
+    assert_eq!(platform.description(), "the platform's");
+}
+
+#[tokio::test]
+async fn a_layer_runs_on_the_clock_of_the_one_beneath_it_unless_given_one_and_refuses_one_that_differs_naming_both()
+ {
+    let beneath: SharedClock = SteppingClock::new(instants::new_year());
+    let given: SharedClock = SteppingClock::new(instants::new_year());
+    let platform: SharedClock = Arc::new(SystemClock::current().expect("a platform clock"));
+    let names = ("a server", "its transport");
+    for (below, own, expected) in [
+        (Some(&beneath), None, &beneath),
+        (Some(&beneath), Some(&beneath), &beneath),
+        (None, Some(&given), &given),
+    ] {
+        assert!(Arc::ptr_eq(
+            &clock_of((below, own), names)
+                .expect("one clock")
+                .expect("a clock selected"),
+            expected
+        ));
+    }
+    assert!(
+        clock_of((None, None), names)
+            .expect("the builder supplies its platform clock")
+            .is_none()
+    );
+    for (given, description) in [(&given, "one of its own"), (&platform, "the platform's")] {
+        assert_eq!(
+            clock_of((Some(&beneath), Some(given)), names)
+                .expect_err("two clocks")
+                .message(),
+            format!(
+                "a server runs on the clock of its transport, one of its own, and was given another, {description}"
+            )
+        );
+    }
 }
