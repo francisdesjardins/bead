@@ -10,6 +10,7 @@ use super::server::{Served, first, news, request_of, second, subscribing_of};
 use super::{cancel_of, locked};
 use crate::envelope::{Envelope, RequestHeader};
 use crate::errors::{CallError, ResolverError};
+use crate::failure::Failure;
 use crate::managers::service::{
     Notifier, NotifyOptions, ResolverCallback, ResolverDependencies, Response,
 };
@@ -57,6 +58,95 @@ async fn subscriptions(served: &Served) -> Vec<(ConnectionHandle, u32)> {
         })
         .await
         .expect("subscriptions read")
+}
+
+// spec 11.2
+#[tokio::test]
+async fn a_notification_s_successful_answer_subscribes_the_connection_under_its_call_id_once_before_the_answer_goes_out_a_plain_request_s_does_not()
+ {
+    let served = served();
+    let observed = Arc::new(Mutex::new(Vec::new()));
+    let recording = Arc::clone(&observed);
+    served
+        .router
+        .owner()
+        .run(move |state| {
+            state.transmit_probe = Some(Arc::new(move |state, target| {
+                let candidates = state.notifications.candidates(news().address());
+                locked(&recording).push(
+                    candidates
+                        .iter()
+                        .map(|subscriber| {
+                            if subscriber.connection_handle == *target {
+                                "itself"
+                            } else {
+                                "another"
+                            }
+                        })
+                        .collect::<Vec<_>>(),
+                );
+            }));
+        })
+        .await
+        .expect("a probe in the sending turn");
+    served
+        .services
+        .get_request_resolver(
+            &crate::testing::pair::echo(),
+            ResolverDependencies::of(TextCodec, TextCodec),
+        )
+        .expect("echo resolved")
+        .on(Arc::new(|_, response| {
+            Box::pin(async move { response.result("plain".to_owned()).await })
+        }))
+        .expect("echo registered");
+    resolving(
+        &served,
+        Arc::new(|request, response| {
+            Box::pin(async move {
+                if request.payload == "refuse" {
+                    response
+                        .failure(&Failure::application(
+                            core::num::NonZeroU16::new(1).expect("a code"),
+                            "",
+                        ))
+                        .await
+                } else {
+                    response.result("ok".to_owned()).await
+                }
+            })
+        }),
+    );
+    served.transport.deliver(
+        &request_of((1, &crate::testing::pair::echo(), "")),
+        &first(),
+    );
+    for id in [3, 5] {
+        served.transport.deliver(&subscribing_of(id), &first());
+    }
+    let Envelope::Request { header, .. } = subscribing_of(1) else {
+        panic!("a subscribing request")
+    };
+    served.transport.deliver(
+        &Envelope::Request {
+            header,
+            payload: Bytes::from_static(b"refuse"),
+        },
+        &second(),
+    );
+    served.settle().await;
+    assert_eq!(
+        *locked(&observed),
+        [vec![], vec!["itself"], vec!["itself"], vec!["another"]]
+    );
+    assert_eq!(subscriptions(&served).await, [(first(), 3)]);
+    let sent = served.transport.take();
+    assert_eq!(sent.len(), 4);
+    assert_eq!(sent[3].0, second());
+    assert!(
+        matches!(&sent[3].1, Envelope::Failure { header, failure } if header.call_id == 1 && failure.code.get() == 1)
+    );
+    assert_eq!(served.reported(), Vec::<String>::new());
 }
 
 // spec 11.2

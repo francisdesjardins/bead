@@ -140,6 +140,8 @@ pub(crate) struct Waiting {
 /// What a server's router holds, in its owner.
 pub(crate) struct ServerState {
     pub(crate) core: Core<Self>,
+    #[cfg(test)]
+    pub(crate) transmit_probe: Option<crate::testing::scripted::ServerTransmitProbe>,
     // ! its transport and its bridge held weakly: the transport holds the bridge, which holds the
     // owner, so a strong edge back would keep the owner of its own (decision 0044); the handle holds
     // the transport strongly, so it goes only once nothing holds the router
@@ -377,6 +379,11 @@ impl Side for ServerState {
         let transport = self
             .transport()
             .ok_or_else(crate::router::core::transport_gone)?;
+
+        #[cfg(test)]
+        if let Some(probe) = &self.transmit_probe {
+            probe(self, connection_handle);
+        }
 
         caught(("a transport", || transport.send(message, connection_handle)))
             .unwrap_or_else(|panicked| Err(panicked.into()))
@@ -1771,6 +1778,8 @@ impl RouterServer {
         let disposal = Disposal::default();
         let owner = Owner::spawn((&runtime, &clock), |weak: WeakOwner<ServerState>| {
             ServerState {
+                #[cfg(test)]
+                transmit_probe: None,
                 core: Core {
                     pending,
                     resolvers: Arc::clone(&resolvers),

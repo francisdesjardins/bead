@@ -22,6 +22,10 @@ use crate::transport::{
     TransportServerRefusal,
 };
 
+#[cfg(test)]
+pub(crate) type ServerTransmitProbe =
+    Arc<dyn Fn(&crate::router::server::ServerState, &ConnectionHandle) + Send + Sync>;
+
 fn locked<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
     mutex.lock().unwrap_or_else(PoisonError::into_inner)
 }
