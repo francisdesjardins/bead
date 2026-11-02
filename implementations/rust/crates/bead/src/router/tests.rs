@@ -1007,3 +1007,712 @@ async fn a_listener_s_panic_is_reported_and_the_transport_goes_on() {
         locked(&pair.server_reports)
     );
 }
+
+// ── What a router has not taken yet: its intake (spec 15.12, decision 0046) ──────────────────
+
+// the twins of what a router counts of what its transport hands it, its pauses and its resumes,
+// over the scripted transports and the in-memory one
+mod intake {
+    use core::sync::atomic::{AtomicBool, Ordering};
+    use core::time::Duration;
+    use std::sync::{Arc, Mutex};
+
+    use bytes::Bytes;
+
+    use super::{
+        PATIENCE, Scripted, answered, cancel_of, january_first, locked, options_of, panics,
+        router_core_rest, server,
+    };
+    use crate::client::ClientOptions;
+    use crate::clock::SharedClock;
+    use crate::constants::EnvelopeKind;
+    use crate::debug::{DebugDirection, TracedEnvelope};
+    use crate::errors::CallError;
+    use crate::managers::service::{
+        RequestDependencies, RequestOptions, ResolverDependencies, Response,
+    };
+    use crate::memory::{
+        MemoryClient, MemoryClientOptions, MemoryConnectOptions, MemoryServer, MemoryServerOptions,
+    };
+    use crate::payloads::RawCodec;
+    use crate::router::client::RouterClientOptions;
+    use crate::router::server::{CallHooks, RouterServer, RouterServerOptions, ServerRequest};
+    use crate::router::types::{IntakeLimitsOptions, RouterLimitsOptions, TransportMessage};
+    use crate::server::ServerOptions;
+    use crate::testing::SteppingClock;
+    use crate::testing::pair::{Pair, PairOptions, echo};
+    use crate::testing::scripted::bytes_of;
+    use crate::transport::{ClientTransport, ServerTransport};
+
+    // a server's router options of the intake bounds given, its envelopes then its bytes
+    fn intake_of((envelopes, bytes): (u64, u64)) -> RouterServerOptions {
+        RouterServerOptions {
+            intake: Some(IntakeLimitsOptions {
+                maximum_untaken_envelopes: Some(envelopes),
+                maximum_untaken_bytes: Some(bytes),
+            }),
+            ..RouterServerOptions::default()
+        }
+    }
+
+    // what a server's router takes, as it takes each: its connection's name and its call id, and
+    // `paused` when its transport holds that connection paused at that moment
+    fn taking(served: &server::Served) -> Arc<Mutex<Vec<String>>> {
+        let taken: Arc<Mutex<Vec<String>>> = Arc::default();
+        let (seeing, transport) = (Arc::clone(&taken), Arc::clone(&served.transport));
+
+        served.router.on_debug(Arc::new(
+            move |direction: DebugDirection, traced: &TracedEnvelope| {
+                if direction == DebugDirection::Rx {
+                    let handle = &traced.connection_handle;
+                    let paused = if transport.is_paused(handle) {
+                        " paused"
+                    } else {
+                        ""
+                    };
+
+                    locked(&seeing).push(format!(
+                        "{} {}{paused}",
+                        server::name_of(Some(handle)),
+                        traced.header.call_id()
+                    ));
+                }
+            },
+        ));
+
+        taken
+    }
+
+    // each pause and resume a server's router asked of its transport, with its connection's name
+    fn paces_of(served: &server::Served) -> Vec<String> {
+        served
+            .transport
+            .pauses()
+            .iter()
+            .map(|(is_paused, handle)| {
+                format!(
+                    "{} {}",
+                    if *is_paused { "pause" } else { "resume" },
+                    server::name_of(Some(handle))
+                )
+            })
+            .collect()
+    }
+
+    // spec 15.12.17, 15.12.18: the twin of "pauses a connection once its untaken envelopes reach a
+    // bound, and resumes it once they are at half"
+    #[tokio::test]
+    async fn pauses_a_connection_once_its_untaken_envelopes_reach_a_bound_and_resumes_it_once_they_are_at_half()
+     {
+        let served = server::Served::new(&intake_of((4, 1_048_576)));
+        let taken = taking(&served);
+        let first = server::first();
+
+        served.transport.open(&first, true);
+
+        for call_id in 1..=3 {
+            served.transport.deliver(&cancel_of(call_id), &first);
+        }
+
+        assert!(
+            !served.transport.is_paused(&first),
+            "three untaken, under its bound of 4"
+        );
+
+        served.transport.deliver(&cancel_of(4), &first);
+
+        assert!(served.transport.is_paused(&first), "paused at the fourth");
+
+        for call_id in [5, 6] {
+            served.transport.deliver(&cancel_of(call_id), &first);
+        }
+
+        assert_eq!(
+            served.transport.held(&first),
+            2,
+            "what came after it held by its transport"
+        );
+        assert!(locked(&taken).is_empty(), "nothing taken yet");
+
+        served.settle().await;
+
+        // * resumed once the second was taken, 2 untaken, half of 4; what it held handed on after
+        assert_eq!(
+            *locked(&taken),
+            [
+                "first 1 paused",
+                "first 2 paused",
+                "first 3",
+                "first 4",
+                "first 5",
+                "first 6"
+            ],
+            "each taken in order, resumed at half"
+        );
+        assert_eq!(
+            paces_of(&served),
+            ["pause first", "resume first"],
+            "paused once, resumed once"
+        );
+        assert_eq!(served.transport.held(&first), 0, "nothing held");
+    }
+
+    // spec 15.12.17, 15.12.18: the twin of "takes the envelope that reaches a bound": by its count,
+    // and by its bytes, an envelope past the byte bound taken whole, never held for good
+    #[tokio::test]
+    async fn takes_the_envelope_that_reaches_a_bound() {
+        let served = server::Served::new(&intake_of((2, 1_048_576)));
+        let taken = taking(&served);
+        let first = server::first();
+
+        served.transport.open(&first, true);
+
+        for call_id in 1..=3 {
+            served.transport.deliver(&cancel_of(call_id), &first);
+        }
+
+        assert_eq!(
+            served.transport.held(&first),
+            1,
+            "the second, which reached the bound, handed; the third alone held"
+        );
+
+        served.settle().await;
+
+        assert_eq!(
+            *locked(&taken),
+            ["first 1 paused", "first 2", "first 3"],
+            "the one that reached the bound taken, and the rest once resumed"
+        );
+
+        // * an envelope larger than the byte bound is handed, taken and released
+        let served = server::Served::new(&intake_of((64, 100)));
+        let taken = taking(&served);
+
+        served.transport.open(&first, true);
+        served.transport.deliver(
+            &server::request_of((1, &echo(), &"a".repeat(1_000))),
+            &first,
+        );
+
+        assert!(
+            served.transport.is_paused(&first),
+            "paused by the bytes of the one that reached it"
+        );
+
+        served.transport.deliver(&cancel_of(9), &first);
+
+        assert_eq!(served.transport.held(&first), 1, "what came after it held");
+
+        served.settle().await;
+
+        assert_eq!(
+            *locked(&taken),
+            ["first 1 paused", "first 9"],
+            "taken whole, then the rest"
+        );
+        assert_eq!(
+            paces_of(&served),
+            ["pause first", "resume first"],
+            "resumed once it was taken"
+        );
+    }
+
+    // a client of `memory` connected from `address`, on `clock`
+    async fn connected_from(
+        (memory, clock): (&MemoryServer, &Arc<SteppingClock>),
+        address: &str,
+    ) -> MemoryClient {
+        let shared: SharedClock = Arc::<SteppingClock>::clone(clock);
+        let client = MemoryClient::new(&MemoryClientOptions {
+            clock: Some(shared),
+            server: memory.clone(),
+        })
+        .expect("a client");
+        let connecting = client.connect(MemoryConnectOptions {
+            address: Some(address.to_owned()),
+            ..MemoryConnectOptions::default()
+        });
+
+        clock.settle().await;
+        connecting.await.expect("connected");
+
+        client
+    }
+
+    // spec 15.12.17: the twin of "an envelope of one connection waits behind no more than the bound
+    // of another that floods", over the in-memory transport
+    #[tokio::test]
+    async fn an_envelope_of_one_connection_waits_behind_no_more_than_the_bound_of_another_that_floods()
+     {
+        let clock = SteppingClock::new(january_first());
+        let shared: SharedClock = Arc::<SteppingClock>::clone(&clock);
+        let memory = MemoryServer::new(&MemoryServerOptions {
+            clock: Some(shared),
+            runtime: None,
+        })
+        .expect("a server");
+        let router = RouterServer::new(Arc::new(memory.clone()), &intake_of((4, 1_048_576)))
+            .expect("a router");
+        let taken: Arc<Mutex<Vec<String>>> = Arc::default();
+        let seeing = Arc::clone(&taken);
+
+        router.on_debug(Arc::new(
+            move |direction: DebugDirection, traced: &TracedEnvelope| {
+                if direction == DebugDirection::Rx {
+                    let from = if traced.connection_handle.contains("ip=flooding;") {
+                        "flooding"
+                    } else {
+                        "other"
+                    };
+
+                    locked(&seeing).push(format!("{from} {}", traced.header.call_id()));
+                }
+            },
+        ));
+        memory.start().await.expect("started");
+
+        let flooding = connected_from((&memory, &clock), "flooding").await;
+        let other = connected_from((&memory, &clock), "other").await;
+        let message_of = |call_id: u32| TransportMessage {
+            data: bytes_of(&cancel_of(call_id)),
+            ..TransportMessage::default()
+        };
+
+        // * 40 of one connection, then one of the other, sent before any is taken
+        for call_id in 1..=40 {
+            flooding.send(message_of(call_id)).expect("sent");
+        }
+
+        other.send(message_of(1_001)).expect("sent");
+        clock.settle().await;
+
+        let taken = locked(&taken).clone();
+        let ahead = taken
+            .iter()
+            .position(|seen| seen.starts_with("other"))
+            .expect("the other's taken");
+
+        assert!(
+            ahead <= 4,
+            "the other's waited behind {ahead} of the flood's, its bound 4: {taken:?}"
+        );
+        assert_eq!(
+            taken
+                .iter()
+                .filter(|seen| seen.starts_with("flooding"))
+                .cloned()
+                .collect::<Vec<_>>(),
+            (1..=40)
+                .map(|call_id| format!("flooding {call_id}"))
+                .collect::<Vec<_>>(),
+            "the flood taken whole, in order"
+        );
+
+        router.dispose().await;
+    }
+
+    // spec 15.12.17, 15.12.18: the twin of "counts nothing the router does of its own: a timer, a
+    // resolution, a dispose, a deferred call": of a bound of 1, the one envelope its transport
+    // handed alone pauses its connection
+    #[tokio::test]
+    async fn counts_nothing_the_router_does_of_its_own_a_timer_a_resolution_a_dispose_a_deferred_call()
+     {
+        let served = server::Served::new(&intake_of((1, 1_048_576)));
+        let first = server::first();
+
+        served.transport.open(&first, true);
+        // a resolution: echo resolved off the owner, its outcome posted back
+        served
+            .services
+            .get_request_resolver(&echo(), ResolverDependencies::of(RawCodec, RawCodec))
+            .expect("echo resolved")
+            .on(Arc::new(|request, response: Response<RawCodec>| {
+                response.result(request.payload)
+            }))
+            .expect("echo registered");
+
+        // a deferred call: one of its own, made from within the telling of the request it takes
+        let (deferring, is_made) = (served.router.clone(), Arc::new(AtomicBool::new(false)));
+        let made = Arc::clone(&is_made);
+
+        served.router.on_debug(Arc::new(
+            move |direction: DebugDirection, _traced: &TracedEnvelope| {
+                if direction == DebugDirection::Rx && !made.swap(true, Ordering::SeqCst) {
+                    let mut options = options_of(Duration::from_millis(50));
+
+                    options.connection_handle = Some(server::first());
+                    drop(
+                        deferring
+                            .request(
+                                Bytes::new(),
+                                (
+                                    ServerRequest {
+                                        procedure: echo().address(),
+                                        maximum_payload_bytes: None,
+                                        options,
+                                        series: None,
+                                        refusal: None,
+                                    },
+                                    CallHooks::default(),
+                                ),
+                            )
+                            .expect("a call made"),
+                    );
+                }
+            },
+        ));
+
+        // a timer: a call of its own, ended by its timeout on the clock
+        let timed = router_core_rest::asking(&served, Duration::from_millis(50));
+
+        served
+            .transport
+            .deliver(&server::request_of((1, &echo(), "hi")), &first);
+        served.settle().await;
+        served.clock.advance(Duration::from_millis(50)).await;
+
+        assert!(
+            matches!(answered(timed).await, Err(CallError::TimedOut(_))),
+            "its own call timed out"
+        );
+        assert!(is_made.load(Ordering::SeqCst), "its deferred call made");
+        assert!(
+            served
+                .transport
+                .calls(&first)
+                .contains(&(EnvelopeKind::Result, 1)),
+            "echo answered"
+        );
+
+        // a dispose
+        served.router.dispose().await;
+        served.settle().await;
+
+        assert_eq!(
+            paces_of(&served),
+            ["pause first", "resume first"],
+            "the envelope its transport handed alone counted"
+        );
+    }
+
+    // spec 15.12.17; decision 0045: the twin of "counts an envelope handed within a telling, and
+    // releases it by its deferred turn"
+    #[tokio::test]
+    async fn counts_an_envelope_handed_within_a_telling_and_releases_it_by_its_deferred_turn() {
+        let served = server::Served::new(&intake_of((1, 1_048_576)));
+        let (first, second) = (server::first(), server::second());
+        let seen: Arc<Mutex<Vec<String>>> = Arc::default();
+        let (seeing, transport) = (Arc::clone(&seen), Arc::clone(&served.transport));
+
+        served.transport.open(&first, true);
+        served.transport.open(&second, true);
+        served.router.on_debug(Arc::new(
+            move |direction: DebugDirection, traced: &TracedEnvelope| {
+                if direction == DebugDirection::Rx && traced.header.call_id() == 1 {
+                    // * handed within the turn that tells this listener: counted as it is handed
+                    transport.deliver(&cancel_of(2), &server::second());
+                    locked(&seeing).push(format!(
+                        "the second paused within the telling: {}",
+                        transport.is_paused(&server::second())
+                    ));
+                }
+            },
+        ));
+        served.transport.deliver(&cancel_of(1), &first);
+        served.settle().await;
+
+        assert_eq!(
+            *locked(&seen),
+            ["the second paused within the telling: true"],
+            "counted as it was handed, within the telling"
+        );
+        assert_eq!(
+            paces_of(&served),
+            [
+                "pause first",
+                "pause second",
+                "resume first",
+                "resume second"
+            ],
+            "released by its deferred turn, after the telling's"
+        );
+        assert!(!served.transport.is_paused(&second), "resumed");
+    }
+
+    // spec 15.12.17: the twin of "reports what its transport throws as it pauses or resumes a
+    // connection, and takes the envelope all the same": what it panics with is its transport's
+    // error, and what the count decided holds
+    #[tokio::test]
+    async fn reports_what_its_transport_throws_as_it_pauses_or_resumes_a_connection_and_takes_the_envelope_all_the_same()
+     {
+        let served = server::Served::new(&intake_of((1, 1_048_576)));
+        let first = server::first();
+        let taken = taking(&served);
+
+        served.transport.open(&first, true);
+        served.transport.set_pacing_broken(true);
+        served.transport.deliver(&cancel_of(1), &first);
+        served.settle().await;
+
+        assert_eq!(*locked(&taken), ["first 1 paused"], "taken all the same");
+        assert_eq!(
+            paces_of(&served),
+            ["pause first", "resume first"],
+            "paused and resumed"
+        );
+
+        let reported = served.reported();
+
+        assert!(
+            reported.len() == 2
+                && reported[0].contains("no pause")
+                && reported[1].contains("no resume")
+                && reported.iter().all(|line| line.ends_with(" first")),
+            "each panic reported with its connection: {reported:?}"
+        );
+    }
+
+    // spec 15.12.17; decision 0044: the twin of "resumes a connection whose envelope a throwing
+    // listener heard": a listener's panic is caught and its turn goes on, releasing what it took; a
+    // panic past the guards ends the owner, whose end resumes each connection it paused
+    #[tokio::test]
+    async fn resumes_a_connection_whose_envelope_a_throwing_listener_heard() {
+        let served = server::Served::new(&intake_of((1, 1_048_576)));
+        let first = server::first();
+
+        served.transport.open(&first, true);
+        served.router.on_debug(Arc::new(
+            |direction: DebugDirection, _traced: &TracedEnvelope| {
+                assert!(
+                    direction != DebugDirection::Rx,
+                    "this listener breaks, on purpose"
+                );
+            },
+        ));
+        served.transport.deliver(&cancel_of(1), &first);
+
+        assert!(served.transport.is_paused(&first), "paused");
+
+        served.settle().await;
+
+        assert_eq!(
+            paces_of(&served),
+            ["pause first", "resume first"],
+            "resumed as its turn went on past the listener"
+        );
+        assert!(
+            served
+                .reported()
+                .iter()
+                .any(|reported| reported.contains("this listener breaks, on purpose")),
+            "the listener's panic reported: {:?}",
+            served.reported()
+        );
+
+        // * a turn that panics past the guards ends its owner, which resumes what it paused
+        let clock = Arc::new(panics::Breaking {
+            clock: SteppingClock::new(january_first()),
+            breaks: AtomicBool::new(false),
+        });
+        let shared: SharedClock = Arc::<panics::Breaking>::clone(&clock);
+        let broken = server::Served::on(
+            (shared, Arc::clone(&clock.clock)),
+            &intake_of((1, 1_048_576)),
+        );
+
+        broken.transport.open(&first, true);
+        broken.settle().await;
+        clock.breaks.store(true, Ordering::SeqCst);
+
+        // its turn arms its timeout on a clock that breaks, ahead of the envelope's turn
+        let breaking = router_core_rest::asking(&broken, Duration::from_secs(1));
+
+        broken.transport.deliver(&cancel_of(1), &first);
+
+        assert!(broken.transport.is_paused(&first), "paused");
+
+        broken.settle().await;
+
+        assert!(answered(breaking).await.is_err(), "its owner ended");
+        assert_eq!(
+            paces_of(&broken),
+            ["pause first", "resume first"],
+            "resumed as its owner ended, its envelope's turn never run"
+        );
+    }
+
+    // spec 15.12.17: the twin of "resumes every connection it paused as it is disposed": what a
+    // turn took before the dispose's is released as ever; an envelope counted as the dispose's job
+    // was queued ahead of its own, a reader's thread racing the dispose, is resumed by the dispose;
+    // and nothing is paused after
+    #[tokio::test]
+    async fn resumes_every_connection_it_paused_as_it_is_disposed() {
+        let served = server::Served::new(&intake_of((1, 1_048_576)));
+        let (first, second) = (server::first(), server::second());
+
+        served.transport.open(&first, true);
+        served.transport.open(&second, true);
+        served.settle().await;
+
+        // * the race, in order: the dispose's job queued as the reader's thread counts what it
+        // hands, the handle's mark not seen yet
+        served
+            .router
+            .owner()
+            .offer(Box::new(crate::router::server::dispose));
+        served.transport.deliver(&cancel_of(1), &first);
+        served.transport.deliver(&cancel_of(2), &second);
+
+        assert!(
+            served.transport.is_paused(&first) && served.transport.is_paused(&second),
+            "both paused"
+        );
+
+        served.settle().await;
+
+        assert_eq!(
+            paces_of(&served),
+            [
+                "pause first",
+                "pause second",
+                "resume first",
+                "resume second"
+            ],
+            "each connection it paused resumed as it was disposed"
+        );
+
+        // nothing paused after: what its transport hands from then on is counted no more
+        for call_id in 3..=5 {
+            served.transport.deliver(&cancel_of(call_id), &first);
+        }
+
+        served.router.dispose().await;
+        served.settle().await;
+
+        assert_eq!(paces_of(&served).len(), 4, "no pause after its dispose");
+        assert_eq!(served.transport.held(&first), 0, "nothing held");
+    }
+
+    // spec 15.12.17: the twin of "a client pauses its transport while what its server sent is
+    // untaken past a bound"
+    #[tokio::test]
+    async fn a_client_pauses_its_transport_while_what_its_server_sent_is_untaken_past_a_bound() {
+        let scripted = Scripted::with(&RouterClientOptions {
+            intake: Some(IntakeLimitsOptions {
+                maximum_untaken_envelopes: Some(2),
+                maximum_untaken_bytes: Some(1_048_576),
+            }),
+            ..RouterClientOptions::default()
+        });
+        let taken: Arc<Mutex<Vec<String>>> = Arc::default();
+        let (seeing, transport) = (Arc::clone(&taken), Arc::clone(&scripted.transport));
+
+        scripted.router.on_debug(Arc::new(
+            move |direction: DebugDirection, traced: &TracedEnvelope| {
+                if direction == DebugDirection::Rx {
+                    let paused = if transport.is_paused() { " paused" } else { "" };
+
+                    locked(&seeing).push(format!("{}{paused}", traced.header.call_id()));
+                }
+            },
+        ));
+
+        for call_id in 1..=3 {
+            scripted.transport.deliver(&cancel_of(call_id));
+        }
+
+        assert!(scripted.transport.is_paused(), "paused at the second");
+        assert_eq!(scripted.transport.held(), 1, "the third held");
+
+        scripted.settle().await;
+
+        assert_eq!(
+            *locked(&taken),
+            ["1 paused", "2", "3"],
+            "each taken in order, resumed at half"
+        );
+        assert_eq!(
+            scripted.transport.pauses(),
+            [true, false],
+            "paused once, resumed once"
+        );
+        assert!(!scripted.transport.is_paused(), "resumed");
+    }
+
+    // spec 15.12.17; decision 0046: the twin of "a result sent as a transfer completes while its
+    // credits come on a paused connection": each envelope pauses its connection at a bound of 1,
+    // and the release never waits on the peer
+    #[tokio::test]
+    async fn a_result_sent_as_a_transfer_completes_while_its_credits_come_on_a_paused_connection() {
+        // an envelope of 64 bytes at most: 300 bytes cross as a transfer each way
+        let limits = RouterLimitsOptions {
+            chunk_bytes: Some(64),
+            maximum_envelope_bytes: Some(64),
+            window_bytes: Some(128),
+            ..RouterLimitsOptions::default()
+        };
+        let intake = IntakeLimitsOptions {
+            maximum_untaken_envelopes: Some(1),
+            maximum_untaken_bytes: Some(1_048_576),
+        };
+        let mut server = ServerOptions::default();
+        let mut client = ClientOptions::default();
+
+        server.limits = Some(limits.clone());
+        server.intake = Some(intake.clone());
+        client.limits = Some(limits);
+        client.intake = Some(intake);
+
+        let pair = Pair::connected((january_first(), PairOptions { server, client }))
+            .await
+            .expect("a pair connected");
+        let credits: Arc<Mutex<Vec<bool>>> = Arc::default();
+        let (seeing, memory) = (Arc::clone(&credits), pair.memory.clone());
+
+        pair.server
+            .services()
+            .get_request_resolver(&echo(), ResolverDependencies::of(RawCodec, RawCodec))
+            .expect("echo resolved")
+            .on(Arc::new(|request, response: Response<RawCodec>| {
+                response.result(request.payload)
+            }))
+            .expect("echo registered");
+        pair.server.router().on_debug(Arc::new(
+            move |direction: DebugDirection, traced: &TracedEnvelope| {
+                if direction == DebugDirection::Rx && traced.header.kind() == EnvelopeKind::Credit {
+                    locked(&seeing).push(memory.is_paused(&traced.connection_handle));
+                }
+            },
+        ));
+
+        let payload = Bytes::from(
+            (0..300_u16)
+                .map(|index| u8::try_from(index % 251).unwrap_or(0))
+                .collect::<Vec<u8>>(),
+        );
+        let call = pair
+            .client
+            .services()
+            .get_request(&echo(), RequestDependencies::of(RawCodec, RawCodec))
+            .expect("echo asked")
+            .call(payload.clone(), RequestOptions::default())
+            .expect("echo called");
+
+        pair.settle().await;
+
+        let echoed = crate::testing::patience(PATIENCE, call)
+            .await
+            .expect("answered within its patience")
+            .expect("echo answered");
+
+        assert_eq!(echoed, payload, "its payload, whole, both ways");
+
+        let credits = locked(&credits).clone();
+
+        assert!(
+            !credits.is_empty() && credits.iter().all(|is_paused| *is_paused),
+            "each credit taken on a connection paused: {credits:?}"
+        );
+    }
+}

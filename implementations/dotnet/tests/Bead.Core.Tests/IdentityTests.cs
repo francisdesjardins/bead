@@ -334,6 +334,16 @@ public sealed class IdentityTests
     // a client's transport that never connects
     private sealed class UnconnectedClient : IRouterClientTransport
     {
+        // its router paused and resumed it, which hands what it hands all the same: no test of
+        // this one's reaches a bound
+        public void Pause()
+        {
+        }
+
+        public void Resume()
+        {
+        }
+
         public TimeProvider Clock
         {
             get
@@ -373,6 +383,16 @@ public sealed class IdentityTests
     // a server's transport whose connections never open
     private sealed class Unconnected : IRouterServerTransport
     {
+        // its router paused and resumed it, which hands what it hands all the same: no test of
+        // this one's reaches a bound
+        public void Pause(string connectionHandle)
+        {
+        }
+
+        public void Resume(string connectionHandle)
+        {
+        }
+
         public TimeProvider Clock
         {
             get

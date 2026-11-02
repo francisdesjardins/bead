@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test';
+import { noop } from '../../transport/shared/noop';
 import { createTestClock } from '../../transport/shared/__tests__/fixtures';
 import { createEmitter } from '../../transport/shared/emitter';
 import type { ITransportMessage } from '../../transport/shared/types';
@@ -77,6 +78,8 @@ const createEchoTransport = () => {
         });
       });
     },
+    pause: noop,
+    resume: noop,
     send: ({ data }) => {
       const request = readEnvelope(bytesOf(data), {
         failures: SERVER_FAILURES,

@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test';
+import { noop } from '../../transport/shared/noop';
 import { createEmitter } from '../../transport/shared/emitter';
 import type { ITransportMessage } from '../../transport/shared/types';
 import type { IRouterDebugInfo } from '../../router/client/types';
@@ -57,6 +58,8 @@ const createEchoTransport = (): IClientTransportLike => {
     reconnect: () => {
       return Promise.resolve();
     },
+    pause: noop,
+    resume: noop,
     send: ({ data }) => {
       const request = readEnvelope(bytesOf(data), {
         failures: SERVER_FAILURES,

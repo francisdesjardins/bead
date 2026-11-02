@@ -206,13 +206,15 @@ async fn settles_a_call_with_an_answer_of_this_layout_that_does_not_read_and_nev
         ],
         "the peer told of both calls that ended here"
     );
+    // * the envelope past maximumUntakenBytes paused the first connection: what it sent after it
+    // came once it was taken, behind the second's (spec 15.12)
     assert_eq!(
         served.reported(),
         [
             "ENVELOPE_TOO_LARGE first",
+            "ENVELOPE_MALFORMED second",
             "LAYOUT_UNSUPPORTED first",
-            "LAYOUT_UNSUPPORTED first",
-            "ENVELOPE_MALFORMED second"
+            "LAYOUT_UNSUPPORTED first"
         ],
         "only unpaired or untrusted answers reported"
     );

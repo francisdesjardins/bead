@@ -206,6 +206,8 @@ export const listenOn = async (
  *     defaults: { address: '127.0.0.1', findOpenPort: false, port: 80 },
  *     type: 'WS',
  *     close: () => Promise.resolve(),
+ *     pause: noop,
+ *     resume: noop,
  *     send: () => Promise.resolve(),
  *     start: ({ address, port }) => Promise.resolve({ address, port }),
  *     stop: () => Promise.resolve(),
@@ -327,6 +329,21 @@ export const createTransportServer = <Socket extends object, Request>(
         }),
         ...(implementation.gauges === undefined ? [] : [implementation.gauges()]),
       ]);
+    },
+    // * a connection it holds, by its handle: one gone, or unknown, is let be, its hold gone with it
+    pause: (connectionHandle) => {
+      const connection = connections.get(connectionHandle);
+
+      if (connection !== undefined) {
+        implementation.pause(connection);
+      }
+    },
+    resume: (connectionHandle) => {
+      const connection = connections.get(connectionHandle);
+
+      if (connection !== undefined) {
+        implementation.resume(connection);
+      }
     },
     send: async (message, connectionHandle) => {
       const connection = connections.get(connectionHandle);

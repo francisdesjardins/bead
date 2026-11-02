@@ -314,6 +314,16 @@ public sealed partial class RouterCoreTests
 
         public List<Exception> Reports { get; } = [];
 
+        // its server's router paused and resumed it, which hands what it hands all the same: no
+        // test of this one's reaches a bound
+        public void Pause(string connectionHandle)
+        {
+        }
+
+        public void Resume(string connectionHandle)
+        {
+        }
+
         // asks the server a procedure of the interop service, and gives its result's text
         public async Task<string> Ask(string procedureName, string payload = "null")
         {

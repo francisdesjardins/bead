@@ -454,4 +454,99 @@ public sealed class MemoryTransportServerTests
 
         Assert.Equal((0L, 0L), (counts["receivingTransfers"], counts["sendingTransfers"]));
     }
+
+    // spec 15.12.17, 15.12.18
+    [Fact]
+    public async Task A_paused_in_memory_transport_holds_what_it_is_sent_in_order_and_hands_it_on_once_resumed()
+    {
+        const string ConnectionHandle = "type=MEMORY;ip=local;ordinal=1";
+
+        var scheduler = new SerialScheduler();
+        await using var server = new MemoryTransportServer(new MemoryTransportServerOptions { Scheduler = scheduler });
+        await using var client = new MemoryTransportClient(new MemoryTransportClientOptions { Scheduler = scheduler });
+        var atServer = new List<byte>();
+        var atClient = new List<byte>();
+
+        async Task Turn()
+        {
+            await scheduler.WhenIdle().WaitAsync(Patience, Cancelled);
+        }
+
+        server.Message += (message, _) =>
+        {
+            var value = message.Bytes.Span[0];
+
+            atServer.Add(value);
+
+            // * a router at its bound pauses within the hand: what comes after waits
+            if (value == 3)
+            {
+                server.Pause(ConnectionHandle);
+            }
+        };
+        client.Message += (message) =>
+        {
+            atClient.AddRange(message.Bytes.ToArray());
+        };
+        await server.Start();
+        await client.Connect(new MemoryConnectOptions { Server = server }, Cancelled);
+
+        // the server's end, paused, then paused again as it hands what it held
+        server.Pause(ConnectionHandle);
+        server.Pause(ConnectionHandle);
+
+        foreach (var value in new byte[] { 1, 2, 3, 4, 5 })
+        {
+            await client.Send(new TransportMessage(new[] { value }, false));
+        }
+
+        await Turn();
+
+        Assert.Empty(atServer);
+
+        // * handed in a turn of its own, never within the resume; what comes meanwhile waits behind it
+        server.Resume(ConnectionHandle);
+        await client.Send(new TransportMessage(new byte[] { 6 }, false));
+
+        Assert.Empty(atServer);
+
+        await Turn();
+
+        Assert.Equal([1, 2, 3], atServer);
+
+        server.Resume(ConnectionHandle);
+        await Turn();
+
+        Assert.Equal([1, 2, 3, 4, 5, 6], atServer);
+
+        // the client's end, paused whole
+        client.Pause();
+
+        foreach (var value in new byte[] { 7, 8 })
+        {
+            await server.Send(new TransportMessage(new[] { value }, false), ConnectionHandle);
+        }
+
+        await Turn();
+
+        Assert.Empty(atClient);
+
+        client.Resume();
+        client.Resume();
+        await Turn();
+
+        Assert.Equal([7, 8], atClient);
+
+        // * a handle no longer held is let be; what a connection held goes with it
+        server.Pause(ConnectionHandle);
+        await client.Send(new TransportMessage(new byte[] { 9 }, false));
+        await Turn();
+        await client.CloseConnection();
+        await Turn();
+        server.Resume(ConnectionHandle);
+        await Turn();
+
+        Assert.Equal([1, 2, 3, 4, 5, 6], atServer);
+        Assert.Empty(server.Clients);
+    }
 }

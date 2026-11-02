@@ -428,6 +428,54 @@ test.describe('createBrokerTransportServer', () => {
     await Promise.all([participant.stop(), ada.stop()]);
   });
 
+  // spec 15.12.17: a router whose release is its next task's resumes a connection that may be gone
+  test('lets be a pause and a resume its router asks of a connection gone, its participant holding a paused one in order', async () => {
+    const broker = createMemoryBroker();
+    const participant = createBrokerParticipant({ adapter: broker.adapter({ id: 'server' }) });
+    const server = participant.transportServer({ names: ['interop'] });
+    const ada = createBrokerParticipant({ adapter: broker.adapter({ id: 'ada' }) });
+    const client = ada.transportClient();
+    const told: number[] = [];
+
+    server.on('message', ({ data }) => {
+      told.push(...(data as Uint8Array));
+    });
+    await server.start();
+    await client.connect({ server: 'interop' });
+    await turn();
+
+    const handle = server.clients[0]?.connectionHandle ?? 'type=BROKER;participant=ada;ordinal=1';
+
+    server.pause(handle);
+
+    for (const byte of [1, 2]) {
+      await client.send({ data: Uint8Array.of(byte) });
+    }
+
+    await until(() => {
+      return told.length > 0;
+    });
+
+    expect(told).toEqual([]);
+
+    server.resume(handle);
+    await until(() => {
+      return told.length === 2;
+    });
+
+    expect(told).toEqual([1, 2]);
+
+    // * a router's late resume of a connection gone: let be
+    await client.disconnect();
+    await turn();
+    server.pause(handle);
+    server.resume(handle);
+
+    expect(server.clients).toEqual([]);
+
+    await Promise.all([participant.stop(), ada.stop()]);
+  });
+
   test('starts once its broker holds each name it serves, fails its start on a name refused, and stops once it let each go', async () => {
     const broker = createMemoryBroker();
     const adapter = broker.adapter({ id: 'server' });

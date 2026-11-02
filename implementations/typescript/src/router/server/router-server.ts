@@ -50,6 +50,7 @@ export {
   CredentialScheme,
   EnvelopeKind,
   FailureScope,
+  INTAKE_DEFAULTS,
   LIMIT_DEFAULTS,
   ProtocolCode,
   SERVER_FAILURES,
@@ -108,6 +109,8 @@ export type {
   INotificationHeader,
   IProtocolFailure,
   IHandedRequestHeader,
+  IIntakeLimits,
+  IntakeLimitsOptions,
   IRequestHeader,
   IResultHeader,
   IRouterResult,
@@ -383,7 +386,15 @@ export const createRouterServer = <Transport extends IRouterServerTransportLike>
           void sendNotification(payload, { callId, connectionHandle });
         }
       },
+      // ! called within the turn that counted the envelope: a transport's pair never tells a
+      // listener within it (decision 0046)
+      pause: (connectionHandle) => {
+        transport.pause(connectionHandle);
+      },
       report,
+      resume: (connectionHandle) => {
+        transport.resume(connectionHandle);
+      },
       send: (message, connectionHandle) => {
         return transport.send(message, connectionHandle);
       },
@@ -415,7 +426,7 @@ export const createRouterServer = <Transport extends IRouterServerTransportLike>
         });
       },
     },
-    { clock, limits: options?.limits, metrics, telling }
+    { clock, intake: options?.intake, limits: options?.limits, metrics, telling }
   );
 
   // the handle's mark, set at once by its dispose: a call or an answer made after it fails unsent

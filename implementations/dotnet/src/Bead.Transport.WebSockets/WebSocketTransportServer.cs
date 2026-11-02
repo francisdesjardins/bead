@@ -622,6 +622,32 @@ public sealed class WebSocketTransportServer : IServerTransport, IAsyncDisposabl
         return _isSecure;
     }
 
+    /// <summary>
+    /// Pauses a connection (spec 15.12): its socket read no more, a message partway read to its end
+    /// and held, one at most, so TCP's window paces its peer (RFC 9293 §3.8.6); one this side closes
+    /// reads on to its peer's Close. Nothing for a connection it does not hold.
+    /// </summary>
+    public void Pause(string connectionHandle)
+    {
+        // ! the connection's own lock alone, never held as it delivers
+        if (_connections.TryGetValue(connectionHandle, out var held))
+        {
+            held.Connection.Pause();
+        }
+    }
+
+    /// <summary>
+    /// Resumes a connection: what it held delivered, then each message as it comes, from its read's
+    /// own step. Nothing for a connection it does not hold.
+    /// </summary>
+    public void Resume(string connectionHandle)
+    {
+        if (_connections.TryGetValue(connectionHandle, out var held))
+        {
+            held.Connection.Resume();
+        }
+    }
+
     /// <inheritdoc/>
     public Task Send(TransportMessage message, string connectionHandle)
     {

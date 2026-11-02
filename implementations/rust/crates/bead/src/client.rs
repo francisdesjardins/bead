@@ -11,7 +11,9 @@ use crate::errors::ProgrammerError;
 use crate::managers::service::{ServiceManager, ServiceManagerOptions, ServiceRouter};
 use crate::metrics::MetricsRegistry;
 use crate::router::client::{RouterClient, RouterClientOptions};
-use crate::router::types::{BoxFuture, RequestCredential, RouterLimitsOptions};
+use crate::router::types::{
+    BoxFuture, IntakeLimitsOptions, RequestCredential, RouterLimitsOptions,
+};
 use crate::transport::ClientTransport;
 
 /// How a client is built, beyond its transport.
@@ -28,6 +30,9 @@ pub struct ClientOptions {
     pub limits: Option<RouterLimitsOptions>,
     /// What its router counts its calls into.
     pub metrics_registry: Option<MetricsRegistry>,
+    /// What its router holds untaken of what its server sent, past which it pauses its transport
+    /// (spec 15.12).
+    pub intake: Option<IntakeLimitsOptions>,
 }
 
 impl fmt::Debug for ClientOptions {
@@ -71,6 +76,7 @@ impl Client {
             credentials: options.credentials.clone(),
             limits: options.limits.clone(),
             metrics_registry: options.metrics_registry.clone(),
+            intake: options.intake.clone(),
         };
 
         let router = RouterClient::new(Arc::clone(&transport), &router_options)?;

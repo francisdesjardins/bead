@@ -765,6 +765,16 @@ public sealed partial class DurationsTests
     // to close, and counts the handlers on its events
     private sealed class ServerTransport : IServerTransport
     {
+        // its router paused and resumed it, which hands what it hands all the same: no test of
+        // this one's reaches a bound
+        public void Pause(string connectionHandle)
+        {
+        }
+
+        public void Resume(string connectionHandle)
+        {
+        }
+
         public string? Type
         {
             get

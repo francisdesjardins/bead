@@ -173,6 +173,56 @@ public sealed class BrokerTransportClientTests
         Assert.Equal([(ReadyState.Open, "A116")], told);
     }
 
+    // spec 15.12.17
+    [Fact]
+    public async Task Paused_before_its_connect_opened_holds_what_its_server_sent_and_hands_it_in_order_once_resumed()
+    {
+        var scheduler = new SerialScheduler();
+        var broker = new MemoryBroker(new MemoryBrokerOptions { Scheduler = scheduler });
+        await using var ada = new BrokerParticipant(broker.Adapter(new MemoryBrokerAdapterOptions { Id = "ada" }), new BrokerParticipantOptions { Scheduler = scheduler });
+        var (peer, heard) = await PeerOf(broker);
+        await using var client = ada.Client();
+        var told = new ConcurrentQueue<string>();
+
+        client.Message += (message) =>
+        {
+            told.Enqueue(Convert.ToHexString(message.Bytes.Span));
+        };
+
+        // * a pause outlasts its connection: the connection it opens is paused as it is made
+        client.Pause();
+
+        var connecting = client.Connect(new BrokerConnectOptions { Server = "interop" }, Cancelled);
+        var opener = await OpenerOf(heard);
+
+        await peer.Publish(new BrokerPublication { Topic = Inbox, Payload = AcceptOf(opener) });
+        await connecting.WaitAsync(BrokerPair.Patience, Cancelled);
+
+        foreach (var (sequence, value) in new (uint Sequence, byte Value)[] { (2, 0x01), (3, 0x02) })
+        {
+            await peer.Publish(new BrokerPublication
+            {
+                Topic = Inbox,
+                Payload = BrokerParcels.Write(new BrokerParcel { Kind = BrokerParcelKinds.Data, Opener = opener, Acceptor = Half, Sequence = sequence, Carried = (byte[])[0xA1, value] }),
+            });
+        }
+
+        await scheduler.WhenIdle();
+
+        Assert.Empty(told);
+        Assert.Equal(ReadyState.Open, client.ReadyState);
+
+        client.Resume();
+        await BrokerPair.Until(
+            () =>
+            {
+                return told.Count == 2;
+            },
+            "what it held told");
+
+        Assert.Equal(["A101", "A102"], told);
+    }
+
     [Fact]
     public async Task Fails_a_connect_its_server_refused_as_malformed_or_closed_as_it_opened_telling_no_close_and_tells_one_once_it_opened()
     {

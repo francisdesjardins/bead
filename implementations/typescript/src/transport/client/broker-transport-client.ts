@@ -24,6 +24,7 @@ import {
   ReadyStateError,
   toError,
 } from '../shared/errors';
+import { createHold } from '../shared/hold';
 import { noop } from '../shared/noop';
 import {
   getReadyState,
@@ -127,7 +128,9 @@ const refusedOf = (refusal: BrokerRefusedError): ConnectError => {
  * envelope crosses in DATA parcels, in parts past its server's bound, with the credential a request
  * presents, any field value; a server's DATA that carries one closes the connection with 1002. It is
  * secure while its participant's leg and its server's are; a reconnection opens a new connection
- * through the same name, possibly to another participant.
+ * through the same name, possibly to another participant. Paused by its router, whole, a pause that
+ * outlasts its connection, its participant holds what comes on it, in order, to
+ * `maximumHeldEnvelopeBytes`, and never pauses its link (spec 15.12, 15.23).
  *
  * @example
  * const client = participant.transportClient();
@@ -150,12 +153,19 @@ export const createBrokerTransportClient = (
       // gives up on the connect in flight, so a dispose under it cannot leave it pending
       let giveUp: ((reason: Error) => void) | undefined;
       let isPeerSecure = false;
+      // * paused whole by its router, a pause outlasting its connection: its participant holds what
+      // comes on the connection, never its link; what came before its connect returned is held here
+      // behind its pause, in order (spec 15.12, 15.23)
+      const hold = createHold((message: ITransportMessage) => {
+        tell(MESSAGE_EVENT, [message]);
+      });
 
       const drop = (): IAttempt | undefined => {
         const attempt = current;
 
         current = undefined;
         client.socket = null;
+        hold.drop();
 
         return attempt;
       };
@@ -181,7 +191,7 @@ export const createBrokerTransportClient = (
                 const message = { data };
 
                 if (current === attempt && attempt.isOpen) {
-                  return (tell(MESSAGE_EVENT, [message]), undefined);
+                  return (hold.offer(message), undefined);
                 }
 
                 if (!attempt.isEnded) {
@@ -278,6 +288,11 @@ export const createBrokerTransportClient = (
                     accept: (accepted) => {
                       attempt.release();
                       attempt.connection = connectionOf(attempt, { accepted, opener });
+
+                      if (hold.isPaused) {
+                        attempt.connection.pause();
+                      }
+
                       resolve();
                     },
                     fail: (error) => {
@@ -344,7 +359,7 @@ export const createBrokerTransportClient = (
 
           for (const message of attempt.early.splice(0)) {
             if (current === attempt) {
-              tell(MESSAGE_EVENT, [message]);
+              hold.offer(message);
             }
           }
         },
@@ -372,6 +387,16 @@ export const createBrokerTransportClient = (
           tell(CLOSE_EVENT, [isClean, isQuick]);
 
           return Promise.resolve();
+        },
+
+        pause: () => {
+          hold.pause();
+          current?.connection?.pause();
+        },
+        // what it held here first, then what its participant held, each from a microtask in turn
+        resume: () => {
+          hold.resume();
+          current?.connection?.resume();
         },
 
         send: ({ credential, data }) => {

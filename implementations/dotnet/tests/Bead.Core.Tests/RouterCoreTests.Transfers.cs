@@ -94,6 +94,42 @@ public sealed partial class RouterCoreTests
 
     // definition
 
+    // spec 15.12.17; decision 0046: each envelope pauses its connection at a bound of 1, and the
+    // release never waits on the peer
+    [Fact]
+    public async Task A_result_sent_as_a_transfer_completes_while_its_credits_come_on_a_paused_connection()
+    {
+        var intake = new IntakeLimits { MaximumUntakenEnvelopes = 1 };
+        await using var memory = new MemoryTransportServer();
+        await using var server = new Server<string>(memory, new ServerOptions { Limits = Chunked, Intake = intake });
+        await using var transport = new MemoryTransportClient();
+        using var client = new RouterClient(transport, new RouterClientOptions { Limits = Chunked, Intake = intake });
+        var credits = new System.Collections.Concurrent.ConcurrentQueue<bool>();
+
+        InteropHandlers.Offer(server);
+        server.Router.Debug += (direction, traced) =>
+        {
+            if (direction == DebugDirection.Rx && traced.Header is CreditHeader)
+            {
+                credits.Enqueue(memory.IsPaused(traced.ConnectionHandle));
+            }
+        };
+        await memory.Start();
+        await transport.Connect(new MemoryConnectOptions { Server = memory }, TestContext.Current.CancellationToken);
+
+        // * 300 bytes and their quotes, a transfer each way
+        var payload = $"\"{new string('x', 300)}\"";
+        var echoed = await client.Request(
+            JsonOf(payload),
+            new RouterRequest(InteropProcedures.Echo.Procedure, new ResolvedRequestOptions { Timeout = TimeSpan.FromSeconds(5) })).WaitAsync(Patience, TestContext.Current.CancellationToken);
+
+        Assert.Equal(payload, System.Text.Encoding.UTF8.GetString(echoed.Payload.Span));
+
+        // each credit taken on a connection paused
+        Assert.NotEmpty(credits);
+        Assert.All(credits, Assert.True);
+    }
+
     [Fact]
     public async Task Ends_a_transfer_it_sends_that_no_credit_comes_for_a_request_with_a_timeout_a_result_with_a_failure()
     {

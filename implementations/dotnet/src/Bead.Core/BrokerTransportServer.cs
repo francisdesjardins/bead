@@ -50,7 +50,10 @@ public sealed record BrokerTransportServerOptions
 /// <c>type=…;participant=…;ordinal=…</c>, once the client's first parcel naming both halves proves
 /// it reads its inbox, and forgets one whose third leg did not come within its accept timeout. It
 /// hands its router each envelope with its peer participant's id as its address and no port, the
-/// credential its DATA carried beside it; it carries none toward its client.
+/// credential its DATA carried beside it; it carries none toward its client. A connection its
+/// router paused is held by its participant, in order, its CLOSE behind what it holds, to
+/// <c>maximumHeldEnvelopeBytes</c>, past which that connection alone is lost: nothing of a pause
+/// reaches its peer over a broker, whose link carries other connections (spec 15.12, 15.23).
 /// </summary>
 public sealed class BrokerTransportServer : IServerTransport, IAsyncDisposable, IBrokerConnectionOwner
 {
@@ -369,6 +372,41 @@ public sealed class BrokerTransportServer : IServerTransport, IAsyncDisposable, 
         });
 
         return Task.CompletedTask;
+    }
+
+    /// <summary>
+    /// Pauses a connection: its participant holds what comes for it, in order, its CLOSE behind what
+    /// it holds, to <c>maximumHeldEnvelopeBytes</c>, past which that connection alone is lost; it
+    /// never pauses its link, which carries other connections, so nothing of a pause reaches its
+    /// peer (spec 15.12, 15.23). Nothing for a connection it does not hold.
+    /// </summary>
+    public void Pause(string connectionHandle)
+    {
+        // ! its own lock, never held as it tells, then the connection's flag
+        BrokerConnection? connection;
+
+        lock (_gate)
+        {
+            connection = _connections.GetValueOrDefault(connectionHandle);
+        }
+
+        connection?.Pause();
+    }
+
+    /// <summary>
+    /// Resumes a connection: what its participant held handed on, in order, in a turn of its
+    /// participant's, never within this call. Nothing for a connection it does not hold.
+    /// </summary>
+    public void Resume(string connectionHandle)
+    {
+        BrokerConnection? connection;
+
+        lock (_gate)
+        {
+            connection = _connections.GetValueOrDefault(connectionHandle);
+        }
+
+        connection?.Resume();
     }
 
     /// <summary>Nothing is carried toward a client (spec 15.22): a command presenting ELSEWHERE fails before it goes.</summary>

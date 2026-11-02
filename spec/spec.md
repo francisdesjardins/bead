@@ -1353,7 +1353,8 @@ layout, kind and call id, in the prefix every layout keeps (section 2), and noth
 
 1. a REQUEST waits for its answer, which comes back in the body of a 200 — a FAILURE too, since a
    failure travels once, in its envelope;
-2. any other envelope ends 204 at once, handed on;
+2. any other envelope ends 204 once handed on: at once, unless its connection is paused (section
+   15.12);
 3. a REQUEST on the server's own parity is refused, 400; one on a call id already waiting, 409.
 
 Exchanges keep no order between them, so a CANCEL may come before its REQUEST: the server buries
@@ -1376,8 +1377,13 @@ its body is read: the field is no list to combine
 one.
 
 15.6. A refusal of the transport's own has an empty body, and is marked in `bead-refusal`. A client
-rejects a send on a marked refusal: nothing was tried. It names the status and the reason in what it
-fails with, its connect's and its upgrade's among them, where its platform lets it read the response
+rejects a send on a marked refusal: nothing was tried. An envelope that is no request, refused
+`busy`, it sends again once the refusal's `Retry-After` passed
+([RFC 6585 §4](https://www.rfc-editor.org/rfc/rfc6585#section-4),
+[RFC 9110 §10.2.3](https://www.rfc-editor.org/rfc/rfc9110#section-10.2.3)), since exchanges keep
+no order (section 15.5); past `exchangeTimeout` from its first send, its exchange is lost (section
+15.7). It names the status and the reason in what it fails with, its connect's and its upgrade's
+among them, where its platform lets it read the response
 ([RFC 6455 §4.1](https://www.rfc-editor.org/rfc/rfc6455#section-4.1)); a page's WebSocket reads
 none, the [WHATWG WebSockets Standard](https://websockets.spec.whatwg.org/) failing its connection
 with no detail, and its server's tell (section 15.1) is then what says why. A client follows no
@@ -1407,7 +1413,7 @@ the request ran: the client counts the exchange lost.
 | 413    | `too-large`                           | a body past the envelope's limit                                                                                                                                                                                                                                             |
 | 415    | `type-refused`                        | not `application/prs.bead`, or encoded                                                                                                                                                                                                                                       |
 | 426    | `upgrade-required`, `version-refused` | at a WebSocket's address, a request that asks no WebSocket, `Upgrade: websocket`; an upgrade of a version but 13, or of none, `Sec-WebSocket-Version: 13` beside it                                                                                                          |
-| 429    | `busy`                                | too many requests waiting on one connection, or exchanges under way                                                                                                                                                                                                          |
+| 429    | `busy`                                | too many requests waiting on one connection, or exchanges under way; `Retry-After` 1                                                                                                                                                                                         |
 | 503    | `busy`                                | too many connections — all, or one address's —, over HTTP or at a WebSocket's address; bytes of body being read; or a connect or a WebSocket's upgrade once the server's stop began; `Retry-After`                                                                           |
 
 Every response on the path carries `cache-control: no-store`, `x-content-type-options: nosniff`
@@ -1433,8 +1439,9 @@ past `maximumBodyBytes` 413, past the budget 503, slower than its rate 408 (sect
 
 15.7. A client's send settles on the head of its answer: a 2xx says the server had the envelope. An
 exchange lost — a network that failed, an answer that could not be written, a request unanswered
-past the exchange timeout, 5 minutes by default — closes the connection at both ends, as a socket
-that drops does; the exchanges it handed on are cut, never answered. So does the 404 marked
+past the exchange timeout, 5 minutes by default, or an envelope still refused `busy` past it from
+its first send (section 15.6) — closes the connection at both ends, as a socket that drops does;
+the exchanges it handed on are cut, never answered. So does the 404 marked
 `connection-unknown`. An answer whose socket still holds it past its deadline (section 15.12) is an
 answer that could not be written. A request handed on is never refused: when its connection closes,
 its exchange gets its 200 head and is cut, and a cut that overtakes the head on its way leaves the
@@ -1507,26 +1514,29 @@ envelope holds.
 15.12. A server bounds what its clients hold, and times what is under way, by these names; a client
 bounds what it reads, an answer or an envelope a batch brings, by `maximumBodyBytes`, its default
 alike, and times its own inactivity by `inactivityTimeout`, its default and whether it may be
-without end alike (section 15.10):
+without end alike (section 15.10); and each end of a connection, on every transport, paces its
+reads by `maximumUntakenEnvelopes` and `maximumUntakenBytes`:
 
-| Bound                          | By default                                                                                                     | Bounds                                                                                   | Transports              |
-| ------------------------------ | -------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------- | ----------------------- |
-| `maximumConnections`           | 10,000                                                                                                         | the connections a server holds, all of them                                              | HTTP, WebSocket, broker |
-| `maximumConnectionsPerAddress` | 64                                                                                                             | the connections one address holds, over a broker one participant's id                    | HTTP, WebSocket, broker |
-| `maximumWaitingExchanges`      | `maximumAnsweringCalls`                                                                                        | the requests waiting on one connection; the exchanges under way on it, twice that        | HTTP                    |
-| `bodyBytesBudget`              | 268,435,456                                                                                                    | the bytes of body a server reads at once, across its exchanges                           | HTTP                    |
-| `maximumBodyBytes`             | `maximumEnvelopeBytes`                                                                                         | a body                                                                                   | HTTP                    |
-| `maximumOutboxBytes`           | twice `maximumEnvelopeBytes`                                                                                   | what one connection's outbox holds                                                       | HTTP                    |
-| `maximumWait`                  | 30 s                                                                                                           | the longest a server holds a listen                                                      | HTTP                    |
-| `exchangeTimeout`              | 5 min                                                                                                          | how long an exchange handed on waits for its answer, at both ends                        | HTTP                    |
-| `inactivityTimeout`            | 5 min                                                                                                          | how long a connection with no exchange under way stays                                   | HTTP                    |
-| `connectionInactivityTimeout`  | 30 s                                                                                                           | the server's own connection timeout (section 13.7)                                       | HTTP                    |
-| `minimumSendBytesPerSecond`    | 240                                                                                                            | the slowest a socket may take what waits for it, once its grace passed; 0 holds none     | HTTP, WebSocket         |
-| `sendGracePeriod`              | 5 s                                                                                                            | the least time an envelope is given to be taken                                          | HTTP, WebSocket         |
-| `maximumUnsentBytes`           | 2 × `maximumAnsweringCalls` × `chunkBytes` + `maximumTransfers` × `windowBytes` + twice `maximumEnvelopeBytes` | what waits for a WebSocket's socket, or for a broker at both ends                        | WebSocket, broker       |
-| `headersTimeout`               | 30 s                                                                                                           | how long a request's head may take to come whole                                         | HTTP, WebSocket         |
-| `minimumBodyBytesPerSecond`    | 240                                                                                                            | the slowest a body may come, or an envelope's parts over a broker, once its grace passed | HTTP, broker            |
-| `bodyGracePeriod`              | 5 s                                                                                                            | how long a body comes, or an envelope's parts over a broker, before its rate is held     | HTTP, broker            |
+| Bound                          | By default                                                                                                     | Bounds                                                                                                                          | Transports                         |
+| ------------------------------ | -------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------- |
+| `maximumConnections`           | 10,000                                                                                                         | the connections a server holds, all of them                                                                                     | HTTP, WebSocket, broker            |
+| `maximumConnectionsPerAddress` | 64                                                                                                             | the connections one address holds, over a broker one participant's id                                                           | HTTP, WebSocket, broker            |
+| `maximumWaitingExchanges`      | `maximumAnsweringCalls`                                                                                        | the requests waiting on one connection; the exchanges under way on it, twice that                                               | HTTP                               |
+| `bodyBytesBudget`              | 268,435,456                                                                                                    | the bytes of body a server reads at once, across its exchanges                                                                  | HTTP                               |
+| `maximumBodyBytes`             | `maximumEnvelopeBytes`                                                                                         | a body                                                                                                                          | HTTP                               |
+| `maximumOutboxBytes`           | twice `maximumEnvelopeBytes`                                                                                   | what one connection's outbox holds                                                                                              | HTTP                               |
+| `maximumWait`                  | 30 s                                                                                                           | the longest a server holds a listen                                                                                             | HTTP                               |
+| `exchangeTimeout`              | 5 min                                                                                                          | how long an exchange handed on waits for its answer, at both ends, and how long a client sends again an envelope refused `busy` | HTTP                               |
+| `inactivityTimeout`            | 5 min                                                                                                          | how long a connection with no exchange under way stays                                                                          | HTTP                               |
+| `connectionInactivityTimeout`  | 30 s                                                                                                           | the server's own connection timeout (section 13.7)                                                                              | HTTP                               |
+| `minimumSendBytesPerSecond`    | 240                                                                                                            | the slowest a socket may take what waits for it, once its grace passed; 0 holds none                                            | HTTP, WebSocket                    |
+| `sendGracePeriod`              | 5 s                                                                                                            | the least time an envelope is given to be taken                                                                                 | HTTP, WebSocket                    |
+| `maximumUnsentBytes`           | 2 × `maximumAnsweringCalls` × `chunkBytes` + `maximumTransfers` × `windowBytes` + twice `maximumEnvelopeBytes` | what waits for a WebSocket's socket, or for a broker at both ends                                                               | WebSocket, broker                  |
+| `headersTimeout`               | 30 s                                                                                                           | how long a request's head may take to come whole                                                                                | HTTP, WebSocket                    |
+| `minimumBodyBytesPerSecond`    | 240                                                                                                            | the slowest a body may come, or an envelope's parts over a broker, once its grace passed                                        | HTTP, broker                       |
+| `bodyGracePeriod`              | 5 s                                                                                                            | how long a body comes, or an envelope's parts over a broker, before its rate is held                                            | HTTP, broker                       |
+| `maximumUntakenEnvelopes`      | 64                                                                                                             | the envelopes one connection's transport handed its router that no turn of it took yet                                          | HTTP, WebSocket, broker, in memory |
+| `maximumUntakenBytes`          | 1,048,576                                                                                                      | their bytes                                                                                                                     | HTTP, WebSocket, broker, in memory |
 
 `exchangeTimeout`, `inactivityTimeout` and `connectionInactivityTimeout` may be without end;
 `maximumWait`, `sendGracePeriod`, `headersTimeout` and `bodyGracePeriod` are never without end.
@@ -1546,6 +1556,33 @@ unclean, since a peer that does not read would read no close frame waiting behin
 read ([RFC 6455 §7.1.7](https://www.rfc-editor.org/rfc/rfc6455#section-7.1.7)). The envelope is one
 its transport had, as an HTTP outbox's is (section 15.9): it is lost with the connection. These run
 on the platform's clock, as the heartbeat does.
+
+A side holds what waits to come in on each connection — each envelope its transport handed its
+router that no turn of its router took yet — to `maximumUntakenEnvelopes` and
+`maximumUntakenBytes`, its own, announced to no one; an application MAY set others, each 1 at
+least. An envelope counts as it is handed, one within a telling among them, and is released once
+a turn took it, and no sooner than the side could take another connection's. The envelope that
+reaches a bound is taken; the side then pauses its connection, and its transport hands nothing
+more of it: what it already received, it holds, in order, until the side resumes it, once each
+count is at half its bound or below, as a pipe's writer pauses at one threshold and resumes at
+another. A WebSocket reads no frame, but of a connection that closes, which it reads to its peer's
+Close and drops what comes ([RFC 6455 §7.1.1](https://www.rfc-editor.org/rfc/rfc6455#section-7.1.1));
+HTTP hands on no envelope, its exchanges waiting under the bounds above, and a client asks no
+listen; a broker's participant holds what comes for that connection, its CLOSE behind it, to
+`maximumHeldEnvelopeBytes` (section 15.23), and never pauses its link, which carries other
+connections; an in-memory transport holds what its application sends, without bound. Only a turn
+releases a count, and a turn awaits nothing — never what it starts, a resolver, a transfer, an
+answer — so a paused connection resumes with nothing more of it read
+([RFC 9113 §5.2.2](https://www.rfc-editor.org/rfc/rfc9113#section-5.2.2)). What the side does of
+its own — a timer, a resolution, its dispose, a turn it defers — is no envelope handed, and waits
+for no bound. A side that ends resumes each connection it paused. A pause is a reader that stops:
+its peer loses the connection past its own bounds — a server's send pace and
+`maximumUnsentBytes`, an outbox's bound (section 15.9), the heartbeat — as it loses any reader
+that stops. So, beyond one read of its socket or one batch, no connection's envelope waits behind
+more than these bounds of another's on a transport that hands many in one step, and a peer over a
+socket is paced by its transport's own window
+([RFC 9293 §3.8.6](https://www.rfc-editor.org/rfc/rfc9293#section-3.8.6)); over HTTP, a paused
+connection's bodies hold `bodyBytesBudget` until handed on, as a slow body holds it.
 
 A request whose head does not come whole within `headersTimeout` is answered 408, as HTTP answers
 it, unmarked, its connection closed
@@ -1881,9 +1918,10 @@ request. An adapter delivers at least once, its broker acknowledging each public
 its adapter holding what it publishes to the quota its broker gives, or at most once, acknowledging
 none; either holds within its broker's queue
 alone, and a message its broker drops leaves a loss. A participant takes a message — hands it on,
-or drops it as a copy — before it acknowledges it to its broker, and acknowledges it then, never
-once its router is done with it. A participant whose application requires delivery at least once
-of an adapter that gives it at most once is refused as it is built.
+holds it for a connection its router paused (section 15.12), or drops it as a copy — before it
+acknowledges it to its broker, and acknowledges it then, never once its router is done with it. A
+participant whose application requires delivery at least once of an adapter that gives it at most
+once is refused as it is built.
 
 15.20. A parcel toward a peer never passes the smaller of that peer's receive bound and the largest
 its own adapter publishes to the peer's inbox. A DATA whose envelope would pass it goes in parts:
@@ -1948,15 +1986,22 @@ its own connection and call id, at its own credit (sections 11.8 to 11.11), a tr
 connection — parcels its adapter has not had taken — is bounded at both ends by
 `maximumUnsentBytes` (section 15.12): a parcel that would pass it loses the connection, a CLOSE of
 4000, reported naming the bound. No parcel is retained: a side subscribes so its broker hands it
-nothing retained, and drops in silence a retained message that comes all the same. A participant
-and its server's transport hold these bounds, besides those of section 15.12 they name:
+nothing retained, and drops in silence a retained message that comes all the same.
 
-| Bound                       | By default             | Bounds                                                               |
-| --------------------------- | ---------------------- | -------------------------------------------------------------------- |
-| `heartbeat`                 | 30 s                   | how long a connection is silent before a PING, and a PING unanswered |
-| `acceptTimeout`             | 30 s                   | how long a half-open connection waits for its client's first parcel  |
-| `maximumEnvelopePartsBytes` | `maximumEnvelopeBytes` | one envelope's parts together                                        |
-| `heldBytesBudget`           | 268,435,456            | what a participant holds in parts, across its connections            |
+What a participant holds for a connection its router paused (section 15.12) is bounded by
+`maximumHeldEnvelopeBytes`, apart from the parts `heldBytesBudget` bounds: an envelope that would
+take it past it loses that connection, a CLOSE of 4000, reported naming the bound, and no other.
+Nothing of a pause reaches the peer over a broker, so the participant holds, then loses. A
+participant and its server's transport hold these bounds, besides those of section 15.12 they
+name:
+
+| Bound                       | By default             | Bounds                                                                 |
+| --------------------------- | ---------------------- | ---------------------------------------------------------------------- |
+| `heartbeat`                 | 30 s                   | how long a connection is silent before a PING, and a PING unanswered   |
+| `acceptTimeout`             | 30 s                   | how long a half-open connection waits for its client's first parcel    |
+| `maximumEnvelopePartsBytes` | `maximumEnvelopeBytes` | one envelope's parts together                                          |
+| `heldBytesBudget`           | 268,435,456            | what a participant holds in parts, across its connections              |
+| `maximumHeldEnvelopeBytes`  | `maximumUnsentBytes`   | the envelopes a participant holds for one connection its router paused |
 
 `heartbeat` may be without end; `acceptTimeout` never is.
 

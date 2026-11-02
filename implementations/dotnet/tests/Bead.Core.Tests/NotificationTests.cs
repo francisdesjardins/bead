@@ -535,6 +535,16 @@ public sealed class NotificationTests : IDisposable
 
     private sealed class ClientEnd : IRouterClientTransport
     {
+        // its router paused and resumed it, which hands what it hands all the same: no test of
+        // this one's reaches a bound
+        public void Pause()
+        {
+        }
+
+        public void Resume()
+        {
+        }
+
         public TimeProvider Clock { get; init; } = TimeProvider.System;
 
         public event Action<TransportMessage>? Message;
@@ -565,6 +575,16 @@ public sealed class NotificationTests : IDisposable
 
     private sealed class ServerEnd : IServerTransport
     {
+        // its router paused and resumed it, which hands what it hands all the same: no test of
+        // this one's reaches a bound
+        public void Pause(string connectionHandle)
+        {
+        }
+
+        public void Resume(string connectionHandle)
+        {
+        }
+
         public string? Type
         {
             get

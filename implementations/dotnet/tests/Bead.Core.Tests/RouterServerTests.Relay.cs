@@ -959,6 +959,16 @@ public sealed partial class RouterServerTests
     // a pipe's client end
     private sealed class PipeClient(Pipe pipe) : IRouterClientTransport
     {
+        // its router paused and resumed it, which hands what it hands all the same: no test of
+        // this one's reaches a bound
+        public void Pause()
+        {
+        }
+
+        public void Resume()
+        {
+        }
+
         public TimeProvider Clock
         {
             get
@@ -1000,6 +1010,16 @@ public sealed partial class RouterServerTests
     // a pipe's server end, of its one connection
     private sealed class PipeServer(Pipe pipe) : IRouterServerTransport
     {
+        // its router paused and resumed it, which hands what it hands all the same: no test of
+        // this one's reaches a bound
+        public void Pause(string connectionHandle)
+        {
+        }
+
+        public void Resume(string connectionHandle)
+        {
+        }
+
         public TimeProvider Clock
         {
             get

@@ -147,6 +147,8 @@ const createStubServer = (options?: {
           end.emit('close', true, connectionHandle);
           return Promise.resolve();
         },
+        pause: noop,
+        resume: noop,
         send: (_, { connectionHandle }) => {
           calls.push(`send:${connectionHandle}`);
           return Promise.resolve();
@@ -238,6 +240,8 @@ test.describe('@francisdesjardins/bead/transport-server', () => {
       close: () => {
         return Promise.resolve();
       },
+      pause: noop,
+      resume: noop,
       send: () => {
         return Promise.resolve();
       },
@@ -271,6 +275,8 @@ test.describe('@francisdesjardins/bead/transport-server', () => {
           close: () => {
             return Promise.resolve();
           },
+          pause: noop,
+          resume: noop,
           send: () => {
             return Promise.resolve();
           },

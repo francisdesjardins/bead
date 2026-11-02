@@ -8,8 +8,8 @@ namespace Bead;
 /// sessions, its services, each offered once — takes its connections from each: an in-memory
 /// transport beside a WebSocket one, say, as the TypeScript side's <c>joinTransports</c>. Each
 /// handle is the one its transport drew, and the join refuses, as it is built, two transports of
-/// one type, whose handles might be one; each connection's flags, its sending and its closing are
-/// asked of the transport that drew it, known by its handle's type. Each transport's events are
+/// one type, whose handles might be one; each connection's flags, its sending, its closing, its
+/// pause and its resume are asked of the transport that drew it, known by its handle's type. Each transport's events are
 /// told on, with its handle, in the order that transport told them, each listener within the
 /// join's guard; its stop stops every one, and settles once all have; its gauges are their sum. It
 /// starts nothing: an application starts each transport it joined, at its own address, and the
@@ -195,6 +195,22 @@ public sealed class JoinedServerTransport : IServerTransport, IAsyncDisposable
     public bool IsSecure(string connectionHandle)
     {
         return OwnerOf(connectionHandle)?.IsSecure(connectionHandle) ?? false;
+    }
+
+    /// <summary>
+    /// Pauses a connection on the transport that drew it, by its handle's type, unique within a join
+    /// (spec 15.12, 15.14); nothing for a handle none of them drew.
+    /// </summary>
+    public void Pause(string connectionHandle)
+    {
+        // ! the drawing transport's own pair, which takes no lock it holds while it tells
+        OwnerOf(connectionHandle)?.Pause(connectionHandle);
+    }
+
+    /// <summary>Resumes a connection on the transport that drew it, as <see cref="Pause"/> pauses it.</summary>
+    public void Resume(string connectionHandle)
+    {
+        OwnerOf(connectionHandle)?.Resume(connectionHandle);
     }
 
     /// <summary>Closes a connection through the transport that drew it; false when none holds it.</summary>

@@ -10,8 +10,9 @@ import {
   WORKER_MESSAGES,
 } from '../shared/constants';
 import { ProgrammerError } from '../shared/errors';
+import { createHold, type IHold } from '../shared/hold';
 import { transferableOf } from '../shared/transferable';
-import type { IWorkerMessageEventLike, IWorkerPortLike } from '../shared/types';
+import type { ITransportMessage, IWorkerMessageEventLike, IWorkerPortLike } from '../shared/types';
 import { createTransportServer, generateHandle } from './transport-server';
 import type {
   ITransportServerClientAware,
@@ -51,7 +52,9 @@ export const START_DEFAULTS = Object.freeze({
  * `start` listens at once, before anything is awaited, so no connect a worker hears early is lost.
  * A worker terminated takes its connections with it, and a port does not say so. A worker carries no
  * credential beside an envelope: each message delivered carries none, and a credential given to
- * `send` is not carried.
+ * `send` is not carried. A port hands each message as its own task, so its router's count pauses
+ * none of it; paused all the same, a connection holds what its port brings, in order, without
+ * bound, its peer its application's own script, and hands it on once resumed (spec 15.12).
  *
  * @example
  * const server = createWorkerTransportServer({ scope });
@@ -64,6 +67,12 @@ export const createWorkerTransportServer = ({
 }: IWorkerTransportServerOptions): WorkerTransportServer => {
   return createTransportServer<IWorkerPortLike, undefined>((server, connections, { tell }) => {
     let ordinal = 0;
+    // what each connection holds while its router paused it, without bound: its peer is its
+    // application's own script, loaded by its own page (spec 15.12)
+    const holds = new WeakMap<
+      ITransportServerClientAware<IWorkerPortLike>,
+      IHold<ITransportMessage>
+    >();
 
     // a connection held ends, as clean as the end that closes it says: its port closes, and what it
     // still had queued goes unheard
@@ -75,6 +84,7 @@ export const createWorkerTransportServer = ({
 
       port.close();
       connections.delete(connectionHandle);
+      holds.get(connection)?.drop();
       tell(CLOSE_EVENT, [isClean, connectionHandle]);
     };
 
@@ -103,9 +113,7 @@ export const createWorkerTransportServer = ({
         if (data instanceof ArrayBuffer) {
           connection.lastActivity = server.clock.Date.now();
 
-          return (
-            tell(MESSAGE_EVENT, [{ credential: undefined, data }, connectionHandle]), undefined
-          );
+          return (holds.get(connection)?.offer({ credential: undefined, data }), undefined);
         }
 
         if (data === WORKER_MESSAGES.CLOSE || data === WORKER_MESSAGES.LOST) {
@@ -116,6 +124,14 @@ export const createWorkerTransportServer = ({
       port.addEventListener('message', onMessage);
       port.start();
       connections.set(connectionHandle, connection);
+      holds.set(
+        connection,
+        createHold((message) => {
+          if (connections.get(connectionHandle) === connection) {
+            tell(MESSAGE_EVENT, [message, connectionHandle]);
+          }
+        })
+      );
       tell(CONNECTION_EVENT, [port, undefined, connectionHandle]);
       port.postMessage(WORKER_MESSAGES.OPEN);
     };
@@ -137,6 +153,14 @@ export const createWorkerTransportServer = ({
         end(connection, true);
 
         return Promise.resolve();
+      },
+      // * a port has no pause: what it brings while paused is held, in order, and handed on from
+      // a microtask once resumed
+      pause: (connection) => {
+        holds.get(connection)?.pause();
+      },
+      resume: (connection) => {
+        holds.get(connection)?.resume();
       },
       // a credential given here is not carried: the router fails a command that presents one
       // its transport cannot carry before it goes, DESTINATION_UNREACHABLE (decision 0010)

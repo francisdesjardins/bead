@@ -64,7 +64,7 @@ public sealed partial class HttpTransportServer
 
             internal required Func<TConnection, Task> Handing { get; init; }
 
-            internal required Func<(TConnection Connection, Waiting Waiting, TransportMessage Message), HandOff> HandOn { get; init; }
+            internal required Func<(TConnection Connection, Waiting Waiting, TransportMessage Message), Task<HandOff>> HandOn { get; init; }
 
             internal required Func<(TConnection Connection, Waiting Waiting, uint CallId), bool> WaitAfterHandOff { get; init; }
 
@@ -110,7 +110,7 @@ public sealed partial class HttpTransportServer
 
             if (waiting is null)
             {
-                await _port.Finish(context, new End(StatusCodes.Status429TooManyRequests, HttpRefusals.Busy));
+                await _port.Finish(context, BusyExchanges);
 
                 return;
             }
@@ -124,6 +124,13 @@ public sealed partial class HttpTransportServer
             try
             {
                 var (envelope, end) = await BodyOf(context, (connection, waiting, headAt));
+
+                // ! a body read whole stays charged until handed on, as a slow body holds it; any
+                // other gives its charge back at once
+                if (envelope is null)
+                {
+                    Release(waiting);
+                }
 
                 // handed on; or ended as it came — answered, by an answer no request handed on was owed,
                 // or its connection closed — and so never handed on
@@ -163,9 +170,22 @@ public sealed partial class HttpTransportServer
             }
             finally
             {
+                Release(waiting);
                 waiting.Written.TrySetException(new IOException("the exchange closed before its answer went out"));
 
                 _port.EndExchange(connection);
+            }
+        }
+
+        // what an exchange's body holds of the server's budget, given back once: as it is handed on,
+        // or as its exchange ends without
+        private void Release(Waiting waiting)
+        {
+            var charged = waiting.TakeCharge();
+
+            if (charged != 0)
+            {
+                _port.ReleaseBody(charged);
             }
         }
 
@@ -300,7 +320,9 @@ public sealed partial class HttpTransportServer
             finally
             {
                 rate?.Dispose();
-                _port.ReleaseBody(charged);
+
+                // given back by its exchange: once handed on, for a body read whole (spec 15.12)
+                waiting.Charge(charged);
             }
 
             var (isGone, isEnded) = _port.FinishBody((connection, waiting));
@@ -345,8 +367,18 @@ public sealed partial class HttpTransportServer
             await _port.Handing(connection);
 
             // ! told as one with its connection's close, never after it: its connection gone, its
-            // client learns it, nothing handed on
-            var handOff = _port.HandOn((connection, waiting, handed));
+            // client learns it, nothing handed on. While its router paused its connection, it waits
+            // at its gate, in order, outside any telling, its body still charged (spec 15.12)
+            HandOff handOff;
+
+            try
+            {
+                handOff = await _port.HandOn((connection, waiting, handed));
+            }
+            finally
+            {
+                Release(waiting);
+            }
 
             if (kind != EnvelopeKind.Request)
             {
@@ -503,6 +535,9 @@ public sealed partial class HttpTransportServer
         // ends its connection, as lost, once its request waited past the exchange timeout
         public ITimer? Timer { get; set; }
 
+        // what its body holds of the server's budget, until handed on or ended
+        private long _charged;
+
         // what reads its body, while it still comes: its connection's close ends the read
         public PipeReader? Reading { get; set; }
 
@@ -510,5 +545,17 @@ public sealed partial class HttpTransportServer
 
         // its answer, once written: what its send settles on
         public TaskCompletionSource Written { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        // its body's bytes, charged to the server's budget
+        public void Charge(long bytes)
+        {
+            Interlocked.Exchange(ref _charged, bytes);
+        }
+
+        // what it charged, taken once, nothing after
+        public long TakeCharge()
+        {
+            return Interlocked.Exchange(ref _charged, 0);
+        }
     }
 }

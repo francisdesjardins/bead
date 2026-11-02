@@ -6,9 +6,11 @@
 //! ended. It carries the credential a request presents beside it, any field value, on the first
 //! part of its DATA, and takes none from its server, closing with 1002 a connection whose server's
 //! DATA carries one (spec 15.22). It is secure while its own leg and its server's are, as its ACCEPT
-//! said.
+//! said. Paused by its router, whole, its participant holds what comes on its connection, never its
+//! link (spec 15.12, 15.23).
 
 use core::fmt;
+use core::sync::atomic::{AtomicBool, Ordering};
 use core::time::Duration;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
@@ -111,6 +113,9 @@ pub(crate) struct ClientInner {
     maximum_unsent: u64,
     state: Mutex<ClientState>,
     listeners: Listeners<dyn ClientListener>,
+    // its router's pause, whole, which outlasts a connection: the flag each connection's
+    // participant reads (spec 15.12)
+    paused: Arc<AtomicBool>,
 }
 
 /// A client's transport over a broker's participant, one connection at a time through a server's
@@ -229,6 +234,7 @@ impl ClientInner {
             sent: 1,
             maximum_unsent: self.maximum_unsent,
             is_half_open: false,
+            paused: Arc::clone(&self.paused),
         });
         state.open(pair);
         *locked(&attempt.pair) = Some(pair);
@@ -453,9 +459,10 @@ async fn opening(
                 held.early.take().unwrap_or_default()
             };
 
-            // * after what came before its connect returned, in order, then each as it comes
+            // * after what came before its connect returned, in order, then each as it comes; held
+            // as any other while its router paused it
             for message in early {
-                opening.delivered(pair, message);
+                state.hand(pair, message);
             }
 
             (true, is_open)
@@ -506,6 +513,7 @@ impl BrokerClient {
                     is_attempting: false,
                 }),
                 listeners: Listeners::default(),
+                paused: Arc::new(AtomicBool::new(false)),
             }),
         })
     }
@@ -890,6 +898,26 @@ impl ClientTransport for BrokerClient {
 
     fn unlisten(&self, listener: &Arc<dyn ClientListener>) {
         self.inner.listeners.remove(listener);
+    }
+
+    // ! no lock: the flag its participant reads as each envelope of its connection comes whole,
+    // holding it from then on (spec 15.23); its link reads on
+    fn pause(&self) {
+        self.inner.paused.store(true, Ordering::SeqCst);
+    }
+
+    // ! its state's lock alone, which it never holds as it tells a listener: what its connection
+    // holds is handed on by a release turn of its participant's, never within this call
+    fn resume(&self) {
+        self.inner.paused.store(false, Ordering::SeqCst);
+
+        let held = locked(&self.inner.state).held.map(|held| held.pair);
+
+        if let Some(pair) = held {
+            self.inner
+                .participant
+                .post(move |state: &mut ParticipantState| state.release(pair));
+        }
     }
 
     fn clock(&self) -> Option<SharedClock> {

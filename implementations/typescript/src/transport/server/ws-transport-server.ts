@@ -25,8 +25,9 @@ import { createPromise } from '../shared/create-promise';
 import { tooBigOf } from '../shared/errors';
 import { gaugesOf } from '../shared/gauges';
 import { assertHeartbeat, createHeartbeat, HEARTBEAT } from '../shared/heartbeat';
+import { createHold, type IHold } from '../shared/hold';
 import { ReadyState } from '../shared/ready-state';
-import type { Data } from '../shared/types';
+import type { Data, ITransportMessage } from '../shared/types';
 import {
   assertHosts,
   assertListeningAddress,
@@ -221,6 +222,12 @@ const upgradeCredentialOf = (request: IIncomingMessageLike): string | undefined 
  * it reads on to the peer's close, or to `closeTimeout`, which it is given, and drops it then,
  * reading nothing of the answer, so its close is unclean whatever the peer answers (spec 15.3).
  *
+ * A connection its router paused reads no more of its socket, `ws` paused, and holds in order what
+ * `ws` still emits of the read under way, one socket read at most; resumed, it hands that on from a
+ * microtask, its router pausing it again at its bound, and reads its socket once nothing is held,
+ * so TCP's window paces its peer. One this side closes reads on to its peer's Close, dropping what
+ * it held and what comes (spec 15.12).
+ *
  * @example
  * const server = createWSTransportServer({ WebSocketServer });
  * server.on('message', ({ data }, connectionHandle) => {});
@@ -279,6 +286,11 @@ export const createWSTransportServer = (options: IWSTransportServerOptions): WST
       const refusedBusy = new WeakSet<IIncomingMessageLike>();
       // what waits for each connection's socket, held to its pace
       const paces = new WeakMap<IServerSocketLike, ISendPace>();
+      // what each connection's socket still brought once its router paused it, one read at most,
+      // its socket paused until it is handed on (spec 15.12, decision 0046)
+      const holds = new WeakMap<IServerSocketLike, IHold<ITransportMessage>>();
+      // the sockets this side closes, which read on to their peer's Close, paused no more
+      const closing = new WeakSet<IServerSocketLike>();
 
       const heldBy = (address: string): number => {
         return perAddress.get(address) ?? 0;
@@ -342,6 +354,13 @@ export const createWSTransportServer = (options: IWSTransportServerOptions): WST
       // on the real clock, whatever the server's is, since it bounds the platform's own close against
       // a peer that does not answer (decision 0011)
       const closeSocket = (socket: IServerSocketLike, code: number): Promise<void> => {
+        // ! a socket that closes reads on to its peer's Close, so its handshake never waits on its
+        // own pause: what it held is dropped with it (RFC 6455 §7.1.1)
+        closing.add(socket);
+        holds.get(socket)?.drop();
+        holds.get(socket)?.resume();
+        socket.resume?.();
+
         return createPromise((resolve) => {
           const terminate = (): void => {
             socket.terminate();
@@ -534,6 +553,22 @@ export const createWSTransportServer = (options: IWSTransportServerOptions): WST
         };
 
         connections.set(connectionHandle, connection);
+        holds.set(
+          socket,
+          createHold(
+            (message) => {
+              if (connections.get(connectionHandle) === connection) {
+                tell(MESSAGE_EVENT, [message, connectionHandle]);
+              }
+            },
+            {
+              // its socket read again once what it held was handed on
+              onReleased: () => {
+                socket.resume?.();
+              },
+            }
+          )
+        );
         paces.set(
           socket,
           createSendPace(
@@ -572,6 +607,7 @@ export const createWSTransportServer = (options: IWSTransportServerOptions): WST
         socket.on(CLOSE_EVENT, (code) => {
           beating.stop();
           paces.get(socket)?.stop();
+          holds.get(socket)?.drop();
 
           const failure = failures.get(socket);
 
@@ -599,17 +635,20 @@ export const createWSTransportServer = (options: IWSTransportServerOptions): WST
         });
 
         socket.on(MESSAGE_EVENT, (data, isBinary) => {
+          // ! a socket this side closes reads on to its peer's Close, and drops what comes
+          if (closing.has(socket)) {
+            return undefined;
+          }
+
           connection.lastActivity = server.clock.Date.now();
 
           // a text frame arrives as bytes whatever `binaryType` says
           const delivered = isBinary ? (data as Data) : decoder.decode(data as ArrayBufferView);
 
-          // handed with the address and port of its connection, which an access refused names
+          // handed with the address and port of its connection, which an access refused names; held
+          // behind what is held while its router paused it, ws emitting the rest of its read
           return (
-            tell(MESSAGE_EVENT, [
-              { address, credential, data: delivered, port: remotePort },
-              connectionHandle,
-            ]),
+            holds.get(socket)?.offer({ address, credential, data: delivered, port: remotePort }),
             undefined
           );
         });
@@ -767,6 +806,21 @@ export const createWSTransportServer = (options: IWSTransportServerOptions): WST
 
         close: ({ socket }) => {
           return closeSocket(socket, 1000);
+        },
+
+        // ! ws stops its socket, and emits what it already parsed of the read under way, which the
+        // hold keeps in order; a socket closing reads on, paused no more
+        pause: ({ socket }) => {
+          if (closing.has(socket)) {
+            return;
+          }
+
+          holds.get(socket)?.pause();
+          socket.pause?.();
+        },
+        // what it held handed on from a microtask, its socket read again once nothing is held
+        resume: ({ socket }) => {
+          holds.get(socket)?.resume();
         },
 
         // what each socket holds that it has not taken yet, all together and the most one holds,

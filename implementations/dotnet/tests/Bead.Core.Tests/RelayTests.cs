@@ -1302,6 +1302,16 @@ public sealed class RelayTests
     // a client's transport that counts what it is handed and hears nothing: secure, in process
     private sealed class SilentTransport : IRouterClientTransport
     {
+        // its router paused and resumed it, which hands what it hands all the same: no test of
+        // this one's reaches a bound
+        public void Pause()
+        {
+        }
+
+        public void Resume()
+        {
+        }
+
         public TimeProvider Clock
         {
             get

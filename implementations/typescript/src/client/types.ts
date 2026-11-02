@@ -10,6 +10,7 @@ import type {
 import type {
   DefaultCredential,
   ICredentials,
+  IntakeLimitsOptions,
   IServiceManager,
   RouterLimitsOptions,
 } from '../router/shared/types';
@@ -74,6 +75,12 @@ export interface IClientOptions {
    * this is `false`. Announced, it builds nothing for a `debug` event until the hook watches.
    */
   devtools?: boolean | undefined;
+  /**
+   * What its router holds untaken of what its server sent within one task, past which it pauses
+   * its transport (spec 15.12), which it is built with: `INTAKE_DEFAULTS`' where these say nothing,
+   * each 1 at least, or the client is a {@link ProgrammerError}.
+   */
+  intake?: IntakeLimitsOptions | undefined;
   /**
    * How much the router reads, writes and holds, which it is built with: {@link LIMIT_DEFAULTS}'
    * where these say nothing. They must hold together, or the client is a {@link ProgrammerError}.

@@ -136,6 +136,13 @@ export interface ITransportClient<
     listener: EmitterListener<TransportClientEventMap[K]>
   ): this;
   /**
+   * Pauses it whole, its router behind (spec 15.12, decision 0046): it emits no more `message`, and
+   * holds what it already received, in order, until `resume`; while it holds anything, what comes
+   * next waits behind it, paused or not. What it holds of a connection goes with that connection; a
+   * pause outlasts it, until a resume. Idempotent, it emits nothing within it.
+   */
+  pause(): void;
+  /**
    * Connects again with the options of the last accepted `connect`, replacing an open socket without
    * a `close`. Attempts that run out end CLOSED without a `close`; a cancel after a successful
    * attempt disconnects, which emits one; a misuse or an already aborted signal leaves the state as it
@@ -146,6 +153,11 @@ export interface ITransportClient<
    */
   reconnect(options?: ITransportClientReconnectOptions): Promise<void>;
   removeAllListeners(event?: TRANSPORT_CLIENT_EVENTS): this;
+  /**
+   * Resumes it: what it holds it emits, in order, from a later turn of its own, never within this
+   * call, asking before each whether it was paused again. Idempotent, it emits nothing within it.
+   */
+  resume(): void;
   /**
    * Resolves once the message is on its way, not once it is delivered: over a socket, once the
    * socket has accepted it; over HTTP, on the head of its exchange's answer — the server had it — or
@@ -200,6 +212,13 @@ export interface ITransportClientImplementation<
   readonly isSecure?: boolean | undefined;
   connect(options: ConnectOptions): Promise<void>;
   disconnect(options?: ITransportClientDisconnectOptions): Promise<void>;
+  /**
+   * Pauses it, as {@link ITransportClient.pause} says: required, so each transport states what it
+   * pauses.
+   */
+  pause(): void;
+  /** Resumes it, as {@link ITransportClient.resume} says. */
+  resume(): void;
   send(message: ITransportMessage): Promise<void>;
   [dispose](): void;
 }
@@ -309,8 +328,15 @@ export interface IWebSocketLike {
     event: 'unexpected-response',
     listener: (request: unknown, response: IUpgradeResponseLike) => void
   ): unknown;
+  /**
+   * `ws`'s alone: stops reading its socket, what it parsed of the read under way still emitted; a
+   * browser's socket has none.
+   */
+  pause?(): void;
   /** As `on`. */
   ping?(): void;
+  /** As `pause`: reads its socket again. */
+  resume?(): void;
   send(data: Data): void;
   /** As `on`: drops the socket without a close handshake. */
   terminate?(): void;
@@ -464,6 +490,14 @@ export interface IHTTPTransportClientConnectOptions extends ITransportClientAddr
 }
 
 export interface IHTTPTransportClientOptions extends ITransportClientOptions {
+  /**
+   * Milliseconds from its first send a client sends again an envelope that is no request, refused
+   * `busy` — 429, or 503 — once its `Retry-After` passed; still refused past them, its exchange is
+   * lost, and its connection with it (spec 15.6, 15.7): from 1 to 2³¹ − 1, rounded to the nearest
+   * whole one, or `Infinity` for as long as it is refused; 0 is refused. Defaults to
+   * {@link EXCHANGE_TIMEOUT}. A request refused `busy` rejects its send at once.
+   */
+  exchangeTimeout?: number | undefined;
   /**
    * Defaults to the global `fetch`. One given honours `redirect`, and follows no redirect: one whose
    * answer says it followed one fails the connect, and loses the connection of a send or a listen.

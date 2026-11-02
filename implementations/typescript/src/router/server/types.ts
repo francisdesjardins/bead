@@ -26,6 +26,7 @@ import type {
   INotificationLike,
   IProcedure,
   IProcedureAddress,
+  IntakeLimitsOptions,
   IResolvedRequestOptions,
   IRouterResult,
   IRouterLike,
@@ -603,6 +604,13 @@ export interface IRouterServerOptions {
    * nothing, and costs nothing.
    */
   metricsRegistry?: IMetricsRegistry | undefined;
+  /**
+   * What it holds untaken of each connection within one task, past which it pauses that
+   * connection's transport, resumed in the next (spec 15.12): {@link INTAKE_DEFAULTS}' where these
+   * say nothing, each 1 at least, or the router is a {@link ProgrammerError}. A side's own,
+   * announced to no one, beside `pacing`.
+   */
+  intake?: IntakeLimitsOptions | undefined;
   /** What a paced subscription queues at most: {@link PACING_DEFAULTS}' where it says nothing. */
   pacing?: PacingLimitsOptions | undefined;
   /** How the router relays a request that names a destination registered in it. */
@@ -774,6 +782,20 @@ export interface IRouterServerTransportLike {
    * it no request.
    */
   isTwoWay?(connectionHandle: TransportServerConnectionHandle): boolean;
+  /**
+   * Pauses a connection, its router behind on it (spec 15.12, decision 0046): it hands nothing more
+   * of it, and holds what it already received, whole or still arriving, in order, until `resume`;
+   * while it holds anything, what comes next waits behind it, paused or not, so nothing overtakes
+   * what is held. One whose peer is its application's own code holds without bound, and says so.
+   * Idempotent, it tells no listener within it; an unknown handle is let be.
+   */
+  pause(connectionHandle: TransportServerConnectionHandle): void;
+  /**
+   * Resumes a connection: what it holds it hands on, in order, from a later step of its own, never
+   * within this call, asking before each hand whether it was paused again. Idempotent, it tells no
+   * listener within it; an unknown handle is let be.
+   */
+  resume(connectionHandle: TransportServerConnectionHandle): void;
   send(
     message: ITransportMessage,
     connectionHandle: TransportServerConnectionHandle

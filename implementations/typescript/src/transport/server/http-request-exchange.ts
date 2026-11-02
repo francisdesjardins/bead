@@ -81,6 +81,11 @@ export interface IHTTPRequestExchangePort<Connection> {
   finishBody: (connection: Connection, state: IExchange) => 'ended' | 'gone' | 'continue';
   /** A request about to go on to the router, which then owes it an answer. */
   beginHandOff: (state: IExchange) => void;
+  /**
+   * An envelope read whole, handed on by `hand` now, or, its connection paused or holding, once
+   * resumed, in order; dropped by `drop` instead, its connection gone first (spec 15.12).
+   */
+  handOn: (connection: Connection, gated: { drop: () => void; hand: () => void }) => void;
   /** A request handed on: whether it still waits for its answer. */
   waitAfterHandOff: (
     connection: Connection,
@@ -125,6 +130,14 @@ interface IBody {
 
 // what a body is first given room for, before it grows
 const FIRST_BODY_BYTES = 65_536;
+
+// * a connection with too much under way: busy, told when to come back, which Bead's client waits
+// for before it sends a non-request again (spec 15.6)
+export const BUSY_EXCHANGES: IEnd = Object.freeze({
+  headers: Object.freeze({ 'retry-after': '1' }),
+  reason: REFUSALS.BUSY,
+  status: 429,
+});
 
 // helpers
 
@@ -188,7 +201,7 @@ export const createHTTPRequestExchange = <Connection>(
     // a bound on what one connection has under way, cancels included, well past what its
     // waiting requests may be: those are refused at their prefix
     if (!port.admitExchange(connection)) {
-      return (port.finish(exchange, { reason: REFUSALS.BUSY, status: 429 }), undefined);
+      return (port.finish(exchange, BUSY_EXCHANGES), undefined);
     }
 
     const state = port.createExchange(exchange);
@@ -200,6 +213,8 @@ export const createHTTPRequestExchange = <Connection>(
     };
     let charged = 0;
     let received = 0;
+    // ! read whole and waiting at its connection's gate: its body stays charged until handed on
+    let isHeldBack = false;
     // under way until both its request and its response are done
     let sides = 2;
     // * its body's pace, on the server's clock from its head's reading: due once it has not brought
@@ -285,7 +300,11 @@ export const createHTTPRequestExchange = <Connection>(
 
     request.on('close', () => {
       unpace();
-      release();
+
+      if (!isHeldBack) {
+        release();
+      }
+
       done();
     });
 
@@ -334,29 +353,35 @@ export const createHTTPRequestExchange = <Connection>(
 
     request.on('error', () => {
       unpace();
-      release();
+
+      if (!isHeldBack) {
+        release();
+      }
     });
 
     pace();
 
     request.on('end', () => {
       unpace();
-      release();
 
       const outcome = port.finishBody(connection, state);
 
       if (outcome === 'ended') {
-        return undefined;
+        return (release(), undefined);
       }
 
       // its connection closed while its body came: its client learns it is gone
       if (outcome === 'gone') {
+        release();
+
         return (endWith(response, UNKNOWN_CONNECTION), undefined);
       }
 
       const prefix = port.prefixOf(state);
 
       if (prefix === undefined) {
+        release();
+
         return (endEarly({ reason: REFUSALS.MALFORMED, status: 400 }), undefined);
       }
 
@@ -364,13 +389,15 @@ export const createHTTPRequestExchange = <Connection>(
 
       // its cancel came first, or while it came: dropped, and ended empty
       if (port.isCancelled(state)) {
+        release();
+
         return (endEarly({ status: 204 }), undefined);
       }
 
       const envelope = body.bytes.slice(0, body.length);
 
       // a request is handed on with the credential its exchange carried; no other envelope is
-      if (kind === ENVELOPE_KINDS.REQUEST) {
+      const handRequest = (): void => {
         const credential = credentialOf(authorizations);
 
         port.beginHandOff(state);
@@ -383,25 +410,56 @@ export const createHTTPRequestExchange = <Connection>(
 
           port.armExchangeTimer(connection, state);
         }
+      };
 
-        return undefined;
-      }
+      // any other ends 204 once handed on
+      const handOther = (): void => {
+        port.message(connection, {
+          ...port.originOf(request),
+          credential: undefined,
+          data: envelope,
+        });
 
-      port.message(connection, {
-        ...port.originOf(request),
-        credential: undefined,
-        data: envelope,
-      });
+        if (kind === ENVELOPE_KINDS.CANCEL) {
+          const cancelled = port.cancel(connection, callId);
 
-      if (kind === ENVELOPE_KINDS.CANCEL) {
-        const cancelled = port.cancel(connection, callId);
-
-        if (cancelled !== undefined) {
-          endWith(cancelled, { status: 204 });
+          if (cancelled !== undefined) {
+            endWith(cancelled, { status: 204 });
+          }
         }
-      }
 
-      return (endEarly({ status: 204 }), undefined);
+        endEarly({ status: 204 });
+      };
+
+      isHeldBack = true;
+
+      // * at its connection's gate, while its router paused it: in order, its body charged until
+      // handed on, as a slow body holds it (spec 15.5, 15.12)
+      return (
+        port.handOn(connection, {
+          // its connection gone while it waited: a request ended with it, any other told it is gone
+          drop: () => {
+            isHeldBack = false;
+            release();
+
+            if (!port.isEnded(state)) {
+              port.endEarly(connection, state);
+              endWith(response, UNKNOWN_CONNECTION);
+            }
+          },
+          hand: () => {
+            isHeldBack = false;
+            release();
+
+            if (kind === ENVELOPE_KINDS.REQUEST) {
+              handRequest();
+            } else {
+              handOther();
+            }
+          },
+        }),
+        undefined
+      );
     });
   };
 

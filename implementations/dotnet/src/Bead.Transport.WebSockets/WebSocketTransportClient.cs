@@ -152,6 +152,8 @@ public sealed class WebSocketTransportClient : IRouterClientTransport, IAsyncDis
     // the close handshake under way on the open connection, told whether a dispose dropped it
     private (WebSocketConnection Connection, TaskCompletionSource<bool> Closed)? _disconnecting;
     private Action? _reconnect;
+    // * paused whole by its router, a pause outlasting its connection; under the lock (spec 15.12)
+    private bool _isPaused;
     // how its events are told: what a listener throws is reported through Error
     private readonly ListenerGuard _listeners;
 
@@ -332,6 +334,41 @@ public sealed class WebSocketTransportClient : IRouterClientTransport, IAsyncDis
                 return _lastConnectOptions is { } given && TransportSecurity.IsSecure((given.Secured, given.Host));
             }
         }
+    }
+
+    /// <summary>
+    /// Pauses it whole (spec 15.12): its socket read no more, a message partway read to its end and
+    /// held, one at most, so TCP's window paces its server (RFC 9293 §3.8.6); a pause outlasts its
+    /// connection, until a resume, and one this side closes reads on to its peer's Close.
+    /// </summary>
+    public void Pause()
+    {
+        WebSocketConnection? connection;
+
+        // ! its own lock, never held as it delivers, then the connection's
+        lock (_gate)
+        {
+            _isPaused = true;
+            connection = _connection;
+        }
+
+        connection?.Pause();
+    }
+
+    /// <summary>
+    /// Resumes it: what it held delivered, then each message as it comes, from its read's own step.
+    /// </summary>
+    public void Resume()
+    {
+        WebSocketConnection? connection;
+
+        lock (_gate)
+        {
+            _isPaused = false;
+            connection = _connection;
+        }
+
+        connection?.Resume();
     }
 
     /// <summary>
@@ -822,6 +859,13 @@ public sealed class WebSocketTransportClient : IRouterClientTransport, IAsyncDis
                 _connecting = null;
                 _connectDisposed = null;
                 _connection = connection = new WebSocketConnection(socket, (MaximumMessageBytes, CloseTimeout));
+
+                // a pause outlasts the connection it was made on
+                if (_isPaused)
+                {
+                    connection.Pause();
+                }
+
                 _carried = credential is null ? null : (connection, credential);
                 _readyState = ReadyState.Open;
             }

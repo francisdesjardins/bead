@@ -73,6 +73,28 @@ public interface IRouterServerTransport
     /// </summary>
     Task Send(TransportMessage message, string connectionHandle);
 
+    /// <summary>
+    /// Pauses a connection, its router behind on it (spec 15.12, decision 0046): it hands nothing
+    /// more of it, and holds what it already received, whole or still arriving, in order, until
+    /// <see cref="Resume"/>; while it holds anything, what comes next waits behind it, paused or
+    /// not, so nothing overtakes what is held. One whose peer is its application's own code holds
+    /// without bound, and says so. Idempotent, it never blocks, tells no listener within it, and
+    /// takes no lock the transport holds while it tells one; an unknown handle is let be.
+    /// </summary>
+    void Pause(string connectionHandle);
+
+    /// <summary>
+    /// Resumes a connection: what it holds it hands on, in order, from a later step of its own, never
+    /// within this call, asking before each hand whether it was paused again. Idempotent, it never
+    /// blocks, tells no listener within it, and takes no lock the transport holds while it tells one;
+    /// an unknown handle is let be.
+    /// </summary>
+    [System.Diagnostics.CodeAnalysis.SuppressMessage(
+        "Naming",
+        "CA1716:Identifiers should not match keywords",
+        Justification = "pause and resume, as every side's transport and the readers they are built on name them: one word, one meaning (0003)")]
+    void Resume(string connectionHandle);
+
     /// <summary>Whether a connection carries both ways; every one does by default.</summary>
     bool IsTwoWay(string connectionHandle)
     {
@@ -114,6 +136,13 @@ public sealed record RouterServerOptions
 
     /// <summary>What each paced subscription queues at most; <see cref="PacingLimits.Default"/> when none.</summary>
     public PacingLimits? Pacing { get; init; }
+
+    /// <summary>
+    /// What it holds untaken of each connection, past which it pauses that connection's transport,
+    /// and resumes it once both counts are at half (spec 15.12); <see cref="IntakeLimits.Default"/>
+    /// when none. Limits below 1 are an <see cref="ArgumentException"/>.
+    /// </summary>
+    public IntakeLimits? Intake { get; init; }
 
     /// <summary>How it relays a request that names a destination registered in it.</summary>
     public RelayOptions? Relay { get; init; }
@@ -225,6 +254,10 @@ public sealed class RouterServer : IRouterLike, IDisposable
     // goes past its bounds before the answer is answered with that failure
     private readonly System.Runtime.CompilerServices.ConditionalWeakTable<NotificationPacing, RequestHeader> _requests = [];
 
+    // what each connection's transport handed it that no turn took yet, which pauses and resumes
+    // that connection (decision 0046)
+    private readonly RouterIntake _intake;
+
     /// <summary>
     /// A server's router over <paramref name="transport"/>, on its transport's clock: one given that
     /// differs is an <see cref="ArgumentException"/>.
@@ -236,6 +269,7 @@ public sealed class RouterServer : IRouterLike, IDisposable
         var clock = Clocks.Of((options?.Clock, transport.Clock), ("a server's router", "its transport"));
 
         Transport = transport;
+        _intake = new RouterIntake(options?.Intake ?? IntakeLimits.Default);
         _notifications = new NotificationManager(options?.Pacing ?? PacingLimits.Default);
         _places = new SubscriptionPlaces(
             _notifications,
@@ -724,6 +758,10 @@ public sealed class RouterServer : IRouterLike, IDisposable
     public void Dispose()
     {
         _core.MarkDisposed();
+
+        // * a transport outlives its router: each connection it paused resumed before it hears no
+        // more, and none paused after (decision 0046)
+        _intake.End(Resume);
         Transport.Connection -= OnConnection;
         Transport.Message -= OnMessage;
         Transport.Close -= OnClose;
@@ -1049,6 +1087,9 @@ public sealed class RouterServer : IRouterLike, IDisposable
         });
     }
 
+    // * counted as it is handed, one within a telling among them, and released once the job that
+    // takes it returned or threw: the scheduler goes on past a throw, so a release in its finally
+    // never leaves its connection paused (decision 0046)
     private void OnMessage(TransportMessage message, string connectionHandle)
     {
         // a connection that speaks is open, even one opened before the router was built
@@ -1062,23 +1103,80 @@ public sealed class RouterServer : IRouterLike, IDisposable
             _connections.Add(connectionHandle);
         });
 
+        var counted = (connectionHandle, (long)message.Bytes.Length);
+
+        // ! counted before its job is posted, so no turn releases what is not counted yet; the
+        // transport paused under the count's lock, and its pair takes no lock it holds as it tells
+        var isCounted = _intake.Handed(counted, Pause);
+
+        void Taken()
+        {
+            if (isCounted)
+            {
+                _intake.Taken(counted, Resume);
+            }
+        }
+
         if (message.IsText)
         {
             _core.Post(() =>
             {
-                Error?.Invoke(FailureException.OfProtocol(ProtocolCode.EnvelopeMalformed, RouterSide.Server, "an envelope is binary, not a string"), connectionHandle);
+                try
+                {
+                    Error?.Invoke(FailureException.OfProtocol(ProtocolCode.EnvelopeMalformed, RouterSide.Server, "an envelope is binary, not a string"), connectionHandle);
+                }
+                finally
+                {
+                    Taken();
+                }
             });
 
             return;
         }
 
-        _core.Receive(message, connectionHandle);
+        _core.Receive(message, (connectionHandle, Taken));
+    }
+
+    // the transport paused on a connection, what it throws dropped as a send's is: what the count
+    // decided holds whatever it does
+    private void Pause(string connectionHandle)
+    {
+        try
+        {
+            Transport.Pause(connectionHandle);
+        }
+        catch (Exception reason)
+        {
+            _core.Post(() =>
+            {
+                Error?.Invoke(reason, connectionHandle);
+            });
+        }
+    }
+
+    // the transport resumed on a connection, as it is paused
+    private void Resume(string connectionHandle)
+    {
+        try
+        {
+            Transport.Resume(connectionHandle);
+        }
+        catch (Exception reason)
+        {
+            _core.Post(() =>
+            {
+                Error?.Invoke(reason, connectionHandle);
+            });
+        }
     }
 
     private void OnClose(bool wasClean, string connectionHandle)
     {
         _core.Post(() =>
         {
+            // what it handed before its close was taken in the turns before this one: nothing of it
+            // is left to resume
+            _intake.Forget(connectionHandle);
             _connections.Remove(connectionHandle);
 
             // ! closed for its relay first: a destination registered on it from now on is registered

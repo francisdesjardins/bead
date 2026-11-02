@@ -47,14 +47,11 @@ denied whole and a CI job of its own, each part it lacks a row of the support ma
 ([0044](0044-rust-one-owner-per-router-traits-no-unsafe-two-parameters-no-warning.md),
 [0004](0004-one-behaviour-in-every-language.md)). Ahead, in this order:
 
-- **Rust's service client and its transports**: the client half of its service layer, in its core,
-  and a bound on what waits for a router's turn, a connection's reads paced by what waits for its
-  owner, as HTTP/2's flow control paces a stream
-  ([RFC 9113 §5.2](https://www.rfc-editor.org/rfc/rfc9113#section-5.2)), on the Rust and the C#
-  sides alike; then WebSocket (RFC 6455) and HTTP/1.1 and HTTP/2 (RFC 9110, 9112, 9113) over
-  sockets, with the interop both ways with the TypeScript and C# sides; then its broker bindings,
-  MQTT 5 and AMQP 1.0; its gateway; and beadc's Rust target, with `examples/hello`'s Rust half and
-  the validators of a blueprint's rules generated for it, or beadc refusing to generate them
+- **Rust's service client and its transports**: the client half of its service layer, in its core;
+  then WebSocket (RFC 6455) and HTTP/1.1 and HTTP/2 (RFC 9110, 9112, 9113) over sockets, with the
+  interop both ways with the TypeScript and C# sides; then its broker bindings, MQTT 5 and AMQP 1.0;
+  its gateway; and beadc's Rust target, with `examples/hello`'s Rust half and the validators of a
+  blueprint's rules generated for it, or beadc refusing to generate them
   ([0035](0035-a-payload-that-reads-is-held-to-its-messages-rules-before-its-resolver-sees-it.md)),
   each stage under a record of its own
   ([0044](0044-rust-one-owner-per-router-traits-no-unsafe-two-parameters-no-warning.md));
@@ -208,6 +205,7 @@ table.
 | [0029](0029-a-listen-names-its-cursor-and-its-wait-in-fields-of-its-own.md)                                               | A listen names its cursor and its wait in fields of its own, at the connection's one URL                                                                           | accepted |
 | [0032](0032-a-websocket-upgrade-from-no-page-carries-its-credential-beside-every-envelope.md)                             | A WebSocket upgrade from no page carries its credential beside every envelope of its connection, a client follows no redirect, and a connect bounds what it awaits | accepted |
 | [0036](0036-an-in-memory-transport-joins-two-routers-of-one-process-and-a-server-takes-several-transports-through-one.md) | An in-memory transport joins two routers of one process, and a server takes several transports through one                                                         | accepted |
+| [0046](0046-a-router-paces-each-connections-reads-by-what-it-has-not-taken.md)                                            | A router paces each connection's reads by what it has not taken                                                                                                    | accepted |
 
 ### Over a broker
 

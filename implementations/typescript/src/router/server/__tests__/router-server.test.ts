@@ -5,8 +5,12 @@ import { WebSocketServer } from 'ws';
 import { createWSClient } from '../../../client/ws-client';
 import { allClosed, host, IMPLEMENTATIONS } from '../../../transport/shared/__tests__/fixtures';
 import { createWSTransportServer } from '../../../transport/server/ws-transport-server';
+import { createMemoryTransportServer } from '../../../transport/server/memory-transport-server';
+import { createMemoryTransportClient } from '../../../transport/client/memory-transport-client';
 import type { TransportServerConnectionHandle } from '../../../transport/server/types';
 import { createEmitter } from '../../../transport/shared/emitter';
+import { createHold, type IHold } from '../../../transport/shared/hold';
+import { nextTask } from '../../../transport/shared/later-task';
 import { noop } from '../../../transport/shared/noop';
 import type { ITransportMessage } from '../../../transport/shared/types';
 import { bytesOf, readEnvelope } from '../../shared/envelope';
@@ -266,7 +270,8 @@ const resultOf = (callId: number, payload = new Uint8Array(0)): OutgoingEnvelope
 /**
  * A transport server that records what it sends, read as a client reads it, and the credential it
  * is given beside it, delivers what a test gives, with what its transport carried, and carries a
- * credential, securely, unless told otherwise.
+ * credential, securely, unless told otherwise. A connection its router paused holds what the test
+ * delivers, in order, until resumed; `paces` holds each pause and resume, by connection.
  */
 const createScriptedTransport = ({
   carriesCredential = true,
@@ -279,6 +284,26 @@ const createScriptedTransport = ({
   }>();
   const sent: ISentEnvelope[] = [];
   const carried: (string | undefined)[] = [];
+  const paces: string[] = [];
+  const holds = new Map<Handle, IHold<ITransportMessage>>();
+  const holdOf = (connectionHandle: Handle): IHold<ITransportMessage> => {
+    const known = holds.get(connectionHandle);
+
+    if (known !== undefined) {
+      return known;
+    }
+
+    const hold = createHold((message: ITransportMessage) => {
+      emitter.emit('message', message, connectionHandle);
+    });
+
+    holds.set(connectionHandle, hold);
+
+    return hold;
+  };
+  const nameOf = (connectionHandle: Handle): string => {
+    return connectionHandle === first ? 'first' : 'second';
+  };
   const control = {
     /** Called with each envelope as it is handed over, before the send settles. */
     onSend: undefined as ((sentEnvelope: ISentEnvelope) => void) | undefined,
@@ -297,6 +322,14 @@ const createScriptedTransport = ({
     },
     off: emitter.off,
     on: emitter.on,
+    pause: (connectionHandle) => {
+      paces.push(`pause ${nameOf(connectionHandle)}`);
+      holdOf(connectionHandle).pause();
+    },
+    resume: (connectionHandle) => {
+      paces.push(`resume ${nameOf(connectionHandle)}`);
+      holdOf(connectionHandle).resume();
+    },
     send: ({ credential, data }, connectionHandle) => {
       carried.push(credential);
 
@@ -332,11 +365,9 @@ const createScriptedTransport = ({
   };
 
   const deliver = (connectionHandle: Handle, envelope: OutgoingEnvelope | Uint8Array) => {
-    emitter.emit(
-      'message',
-      { data: envelope instanceof Uint8Array ? envelope : envelopeOf(envelope) },
-      connectionHandle
-    );
+    holdOf(connectionHandle).offer({
+      data: envelope instanceof Uint8Array ? envelope : envelopeOf(envelope),
+    });
   };
 
   // as `deliver`, with what its transport carried beside it
@@ -344,10 +375,31 @@ const createScriptedTransport = ({
     connectionHandle: Handle,
     { credential, envelope }: { credential: string; envelope: OutgoingEnvelope }
   ) => {
-    emitter.emit('message', { credential, data: envelopeOf(envelope) }, connectionHandle);
+    holdOf(connectionHandle).offer({ credential, data: envelopeOf(envelope) });
   };
 
-  return { carried, carry, close, control, deliver, emitter, open, sent, transport };
+  // whether its router paused a connection, and what it holds of it
+  const isPaused = (connectionHandle: Handle): boolean => {
+    return holdOf(connectionHandle).isPaused;
+  };
+  const heldOf = (connectionHandle: Handle): number => {
+    return holdOf(connectionHandle).size;
+  };
+
+  return {
+    carried,
+    carry,
+    close,
+    control,
+    deliver,
+    emitter,
+    heldOf,
+    isPaused,
+    open,
+    paces,
+    sent,
+    transport,
+  };
 };
 
 const recordErrors = (router: ReturnType<typeof createRouterServer>) => {
@@ -2197,6 +2249,286 @@ test.describe('createRouterServer', () => {
       await expect(router.unregisterNotification(notification)).rejects.toBeInstanceOf(
         ProgrammerError
       );
+    });
+  });
+
+  test.describe('its intake', () => {
+    // each envelope it takes, by its connection and its call id, and whether its transport was
+    // paused on it as it took it
+    const takenBy = (
+      router: ReturnType<typeof createRouterServer>,
+      isPaused: (connectionHandle: Handle) => boolean
+    ) => {
+      const taken: string[] = [];
+
+      router.on('debug', ({ connectionHandle, direction, header }) => {
+        if (direction === 'rx') {
+          const name = connectionHandle === first ? 'first' : 'second';
+
+          taken.push(
+            `${name} ${String(header.callId)}${isPaused(connectionHandle) ? ' paused' : ''}`
+          );
+        }
+      });
+
+      return taken;
+    };
+
+    // spec 15.12.17, 15.12.18
+    test('pauses a connection once its untaken envelopes reach a bound, and resumes it once they are at half', async () => {
+      const { deliver, heldOf, isPaused, open, paces, transport } = createScriptedTransport();
+      using router = createRouterServer(transport, { intake: { maximumUntakenEnvelopes: 4 } });
+      const taken = takenBy(router, isPaused);
+
+      open(first);
+
+      for (const callId of [1, 3, 5]) {
+        deliver(first, cancelOf(callId));
+      }
+
+      // three untaken within this task, under its bound of 4
+      expect(isPaused(first)).toBe(false);
+
+      deliver(first, cancelOf(7));
+
+      expect(isPaused(first)).toBe(true);
+
+      for (const callId of [9, 11]) {
+        deliver(first, cancelOf(callId));
+      }
+
+      // what came after it held by its transport
+      expect([heldOf(first), taken]).toEqual([
+        2,
+        ['first 1', 'first 3', 'first 5', 'first 7 paused'],
+      ]);
+
+      // * released in the next task, every count cleared, below half: resumed, what it held handed
+      await nextTask();
+      await sleep(0);
+
+      expect(taken).toEqual([
+        'first 1',
+        'first 3',
+        'first 5',
+        'first 7 paused',
+        'first 9',
+        'first 11',
+      ]);
+      expect([paces, heldOf(first)]).toEqual([['pause first', 'resume first'], 0]);
+    });
+
+    // spec 15.12.17, 15.12.18
+    test('takes the envelope that reaches a bound', async () => {
+      const { deliver, heldOf, isPaused, open, paces, transport } = createScriptedTransport();
+      using router = createRouterServer(transport, { intake: { maximumUntakenEnvelopes: 2 } });
+      const taken = takenBy(router, isPaused);
+
+      open(first);
+
+      for (const callId of [1, 3, 5]) {
+        deliver(first, cancelOf(callId));
+      }
+
+      // the second, which reached the bound, taken; the third alone held
+      expect([taken, heldOf(first)]).toEqual([['first 1', 'first 3 paused'], 1]);
+
+      await nextTask();
+      await sleep(0);
+
+      expect(taken).toEqual(['first 1', 'first 3 paused', 'first 5']);
+
+      // * an envelope larger than the byte bound is taken whole, and released
+      const bytes = createScriptedTransport();
+      using byBytes = createRouterServer(bytes.transport, { intake: { maximumUntakenBytes: 100 } });
+      const byBytesTaken = takenBy(byBytes, bytes.isPaused);
+
+      bytes.open(first);
+      bytes.deliver(first, requestOf(1, { payload: new Uint8Array(1_000) }));
+
+      expect(bytes.isPaused(first)).toBe(true);
+
+      bytes.deliver(first, cancelOf(9));
+
+      expect(bytes.heldOf(first)).toBe(1);
+
+      await nextTask();
+      await sleep(0);
+
+      expect(byBytesTaken).toEqual(['first 1 paused', 'first 9']);
+      expect([paces, bytes.paces]).toEqual([
+        ['pause first', 'resume first'],
+        ['pause first', 'resume first'],
+      ]);
+    });
+
+    // spec 15.12.17
+    test('an envelope of one connection waits behind no more than the bound of another that floods', async () => {
+      const memory = createMemoryTransportServer();
+      using router = createRouterServer(memory, { intake: { maximumUntakenEnvelopes: 4 } });
+      await using flooding = createMemoryTransportClient({ server: memory });
+      await using other = createMemoryTransportClient({ server: memory });
+      const taken: string[] = [];
+
+      router.on('debug', ({ connectionHandle, direction, header }) => {
+        if (direction === 'rx') {
+          const from = connectionHandle.includes('ip=flooding;') ? 'flooding' : 'other';
+
+          taken.push(`${from} ${String(header.callId)}`);
+        }
+      });
+      await memory.start();
+      await flooding.connect({ address: 'flooding' });
+      await other.connect({ address: 'other' });
+
+      // * 40 of one connection, then one of the other, sent before any is taken
+      for (let callId = 1; callId <= 79; callId += 2) {
+        void flooding.send({ data: envelopeOf(cancelOf(callId)) });
+      }
+
+      void other.send({ data: envelopeOf(cancelOf(1_001)) });
+
+      for (let task = 0; task < 100 && taken.length < 41; task += 1) {
+        await nextTask();
+      }
+
+      const ahead = taken.indexOf('other 1001');
+
+      // the other's waited behind no more than the flood's bound of 4
+      expect(ahead).toBeGreaterThanOrEqual(0);
+      expect(ahead).toBeLessThanOrEqual(4);
+      // the flood taken whole, in order
+      expect(
+        taken.filter((seen) => {
+          return seen.startsWith('flooding');
+        })
+      ).toEqual(
+        Array.from({ length: 40 }, (_, index) => {
+          return `flooding ${String(2 * index + 1)}`;
+        })
+      );
+    });
+
+    // spec 15.12.17, 15.12.18
+    test('counts nothing the router does of its own: a timer, a resolution, a dispose, a deferred call', async () => {
+      const { deliver, open, paces, sent, transport } = createScriptedTransport();
+      const router = createRouterServer(transport, { intake: { maximumUntakenEnvelopes: 1 } });
+      const services = createServiceManager(router);
+      let isMade = false;
+
+      open(first);
+      // a resolution: answered in a later turn
+      services.getRequestResolver(echo, { serializer: answering })(async (request, response) => {
+        await sleep(0);
+
+        return response(request.payload);
+      });
+      // a deferred call: one of its own, made from within the telling of the request it takes
+      router.on('debug', ({ direction }) => {
+        if (direction === 'rx' && !isMade) {
+          isMade = true;
+          router
+            .request(new Uint8Array(0), {
+              options: { connectionHandle: first, timeout: 20 },
+              procedure: echo,
+            })
+            .catch(noop);
+        }
+      });
+
+      // a timer: a call of its own, ended by its timeout
+      const timed = router.request(new Uint8Array(0), {
+        options: { connectionHandle: first, timeout: 20 },
+        procedure: echo,
+      });
+
+      deliver(first, requestOf(1, { payload: text.encode('hi') }));
+      await expect(timed).rejects.toBeInstanceOf(TimeoutError);
+      await sleep(50);
+
+      expect(isMade).toBe(true);
+      expect(answersOf(sent)).toContainEqual([first, 'result', 1, 'hi']);
+
+      // a dispose
+      router[Symbol.dispose]();
+      await nextTask();
+
+      // * the envelope its transport handed alone counted
+      expect(paces).toEqual(['pause first', 'resume first']);
+    });
+
+    // spec 15.12.17; decision 0045
+    test('counts an envelope handed within a telling, and releases it by its deferred turn', async () => {
+      const { deliver, isPaused, open, paces, transport } = createScriptedTransport();
+      using router = createRouterServer(transport, { intake: { maximumUntakenEnvelopes: 1 } });
+      const seen: string[] = [];
+
+      open(first);
+      open(second);
+      router.on('debug', ({ direction, header }) => {
+        if (direction === 'rx' && header.callId === 1) {
+          // * handed within the telling of this listener: counted as it is handed
+          deliver(second, cancelOf(3));
+          seen.push(`the second paused within the telling: ${String(isPaused(second))}`);
+        }
+      });
+      deliver(first, cancelOf(1));
+      await nextTask();
+
+      expect(seen).toEqual(['the second paused within the telling: true']);
+      // released by its deferred turn's task, after the telling's
+      expect(paces).toEqual(['pause first', 'pause second', 'resume first', 'resume second']);
+      expect(isPaused(second)).toBe(false);
+    });
+
+    // spec 15.12.17
+    test('resumes a connection whose envelope a throwing listener heard', async () => {
+      const { deliver, isPaused, open, paces, transport } = createScriptedTransport();
+      using router = createRouterServer(transport, { intake: { maximumUntakenEnvelopes: 1 } });
+      const errors = recordErrors(router);
+
+      open(first);
+      router.on('debug', ({ direction }) => {
+        if (direction === 'rx') {
+          throw new Error('this listener breaks, on purpose');
+        }
+      });
+      deliver(first, cancelOf(1));
+
+      expect(isPaused(first)).toBe(true);
+
+      await nextTask();
+
+      // * the next task's release clears the count, whatever its turn threw
+      expect(paces).toEqual(['pause first', 'resume first']);
+      expect(reportedOf(errors)).toEqual([['this listener breaks, on purpose', first]]);
+    });
+
+    // spec 15.12.17
+    test('resumes every connection it paused as it is disposed', async () => {
+      const { deliver, heldOf, isPaused, open, paces, transport } = createScriptedTransport();
+      const router = createRouterServer(transport, { intake: { maximumUntakenEnvelopes: 1 } });
+
+      open(first);
+      open(second);
+      deliver(first, cancelOf(1));
+      deliver(second, cancelOf(3));
+
+      expect([isPaused(first), isPaused(second)]).toEqual([true, true]);
+
+      // * at once, before the next task's release
+      router[Symbol.dispose]();
+
+      expect(paces).toEqual(['pause first', 'pause second', 'resume first', 'resume second']);
+
+      // nothing paused after: what its transport hands from then on reaches no router
+      for (const callId of [5, 7, 9]) {
+        deliver(first, cancelOf(callId));
+      }
+
+      await nextTask();
+
+      expect([paces.length, heldOf(first)]).toEqual([4, 0]);
     });
   });
 

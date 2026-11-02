@@ -158,6 +158,8 @@ export const createPort = (hooks: Partial<IRouterCorePort<Handle>> = {}) => {
   // the bytes of each envelope sent
   const sizes: number[] = [];
   const traced: string[] = [];
+  // each pause and resume the core asked of it, with its connection
+  const paces: string[] = [];
   const control = {
     /** Sends held until settled by hand, when set. */
     held: undefined as { reject: (reason: Error) => void; resolve: () => void }[] | undefined,
@@ -177,8 +179,14 @@ export const createPort = (hooks: Partial<IRouterCorePort<Handle>> = {}) => {
     isTracing: () => {
       return true;
     },
+    pause: (connectionHandle) => {
+      paces.push(`pause ${connectionHandle}`);
+    },
     report: (error, connectionHandle) => {
       reported.push([error, connectionHandle]);
+    },
+    resume: (connectionHandle) => {
+      paces.push(`resume ${connectionHandle}`);
     },
     send: ({ data: bytes }, connectionHandle) => {
       const sendError = control.sendErrors.get(connectionHandle);
@@ -213,7 +221,7 @@ export const createPort = (hooks: Partial<IRouterCorePort<Handle>> = {}) => {
     ...hooks,
   };
 
-  return { activities, control, port, reported, sent, sizes, traced };
+  return { activities, control, paces, port, reported, sent, sizes, traced };
 };
 
 /**

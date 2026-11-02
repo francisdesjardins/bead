@@ -9,6 +9,7 @@ import {
   TRANSPORT_MEMORY,
 } from '../shared/constants';
 import { ConnectError, ProgrammerError, toCancelError } from '../shared/errors';
+import { createHold, type IHold } from '../shared/hold';
 import { getReadyStateName } from '../shared/ready-state';
 import { transferableOf } from '../shared/transferable';
 import type {
@@ -54,7 +55,9 @@ export const START_DEFAULTS = Object.freeze({
  * client handed with a request crosses beside it, and none goes toward the client.
  *
  * It never leaves the process, so it is secure; it holds no bound, heartbeat or timeout of its own,
- * its routers' limits bounding what crosses. Either end closes a connection, the other told in a
+ * its routers' limits bounding what crosses. A connection its router paused holds what its client
+ * sends, in order, without bound, its peer its application's own code, and hands it on once
+ * resumed (spec 15.12). Either end closes a connection, the other told in a
  * later turn; `stop` closes each, and a connect while it does not listen fails, a
  * {@link ConnectError}.
  *
@@ -78,6 +81,12 @@ export const createMemoryTransportServer = (
   const transport = createTransportServer<IMemoryPeerLike, undefined>(
     (server, connections, { tell }) => {
       let ordinal = 0;
+      // what each connection holds while its router paused it, without bound: its peer is its
+      // application's own code (spec 15.12, 15.13)
+      const holds = new WeakMap<
+        ITransportServerClientAware<IMemoryPeerLike>,
+        IHold<ITransportMessage>
+      >();
 
       // a connection held ends: closed at this end, clean, its client told in a later turn; or at
       // its client's, told here as its client closed it; what either end still had on its way goes
@@ -89,6 +98,7 @@ export const createMemoryTransportServer = (
         const { connectionHandle, socket: peer } = connection;
 
         connections.delete(connectionHandle);
+        holds.get(connection)?.drop();
 
         if (isClosedHere) {
           queueMicrotask(() => {
@@ -139,6 +149,14 @@ export const createMemoryTransportServer = (
             };
 
             connections.set(connectionHandle, connection);
+            holds.set(
+              connection,
+              createHold((message) => {
+                if (isHeld()) {
+                  tell(MESSAGE_EVENT, [message, connectionHandle]);
+                }
+              })
+            );
             tell(CONNECTION_EVENT, [peer, undefined, connectionHandle]);
             resolve({
               close: (wasClean) => {
@@ -152,10 +170,9 @@ export const createMemoryTransportServer = (
                 }
 
                 connection.lastActivity = server.clock.Date.now();
-                tell(MESSAGE_EVENT, [
-                  { address: peer.address, credential, data, port: peer.port },
-                  connectionHandle,
-                ]);
+                holds
+                  .get(connection)
+                  ?.offer({ address: peer.address, credential, data, port: peer.port });
               },
             });
           });
@@ -180,6 +197,13 @@ export const createMemoryTransportServer = (
               resolve();
             });
           });
+        },
+        // * held while paused, in order, handed on from a microtask once resumed
+        pause: (connection) => {
+          holds.get(connection)?.pause();
+        },
+        resume: (connection) => {
+          holds.get(connection)?.resume();
         },
         // a credential given here is not carried: the router fails a command that presents one
         // its transport cannot carry before it goes, DESTINATION_UNREACHABLE (decision 0010)
