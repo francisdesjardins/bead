@@ -10524,7 +10524,8 @@
             "failure": {
               "code": 50,
               "scope": 0,
-              "relays": 0
+              "relays": 0,
+              "detail": "not UTF-8"
             }
           }
         },

@@ -1,13 +1,13 @@
 // ── Codecs ────────────────────────────────────────────────────────────────────
 
 // Bead's codecs, `spec/codecs.json`, played against the TypeScript side's: each payload read, and
-// written back or refused, and each value written or refused, through its encoding's codec —
-// `proto`'s over the generated `Probe`, as generated code makes one. The C# side plays the same file.
+// written back or refused, and each value written or refused, a refusal's message its reason
+// (spec 17.2), `proto`'s through the generated `Probe`. The C# and the Rust sides play the same file.
 
 // dependencies
 
 import { readFileSync } from 'node:fs';
-import { isFieldSet, type MessageInitShape } from '@bufbuild/protobuf';
+import { create, isFieldSet, type MessageInitShape } from '@bufbuild/protobuf';
 import { expect, test } from '@playwright/test';
 import { protoCodecOf } from '../../../proto/codec';
 import { type IPayloadCodec, PAYLOAD_CODECS } from '../payloads';
@@ -55,12 +55,20 @@ interface IProbeRead extends IProbeHeld {
   stamps?: number[];
 }
 
-/** A `Probe` given to a writer, one field set or none: its text as UTF-16 code units. */
+/**
+ * A `Probe` given to a writer, one field set or none, its text as UTF-16 code units; or a chain of
+ * `Probe`s that many below it, through `child`, `children` under the key `""` or `delimited`, the
+ * deepest holding `tallies {"a": 1}` where it is tallied (spec 17.9.3).
+ */
 interface IProbeValue {
   child?: Record<string, never>;
+  delimited?: number;
+  entries?: number;
   /** A `Needs`, each of its required fields set where it is given (spec 17.9.7). */
   needs?: { must?: number; shade?: number };
+  nested?: number;
   number?: number;
+  tallied?: boolean;
   text?: string;
 }
 
@@ -132,11 +140,12 @@ const unitsOf = (text: string): string => {
 };
 
 /**
- * How deep messages nest below `probe`, at the deepest: through `child` and `delimited`, and
- * through each of `children`, its entry counting as a message and its value as another.
+ * How deep messages nest below `probe`, at the deepest: through `child` and `delimited`, through
+ * each of `children`, its entry counting as a message and its value as another, and through an
+ * entry of `tallies`, a message on the wire.
  */
 const nestedBelow = (probe: Probe): number => {
-  let deepest = 0;
+  let deepest = Object.keys(probe.tallies).length > 0 ? 1 : 0;
 
   for (const below of [probe.child, probe.delimited]) {
     if (below !== undefined) {
@@ -179,13 +188,49 @@ const readOf = (probe: Probe): IProbeRead => {
   };
 };
 
+/**
+ * A chain of `count` `Probe`s below the top one, each holding the next as `link` says, the deepest
+ * tallied where `isTallied`: built from the deepest up, so no recursion builds it.
+ */
+const chainOf = (
+  count: number,
+  { isTallied, link }: { isTallied: boolean; link: 'child' | 'children' | 'delimited' }
+): Probe => {
+  let probe = create(ProbeSchema, isTallied ? { tallies: { a: 1 } } : {});
+
+  for (let above = 0; above < count; above += 1) {
+    probe = create(
+      ProbeSchema,
+      link === 'children' ? { children: { '': probe } } : { [link]: probe }
+    );
+  }
+
+  return probe;
+};
+
 /** A `Probe`'s initializer, as a row gives one. */
 const probeOf = ({
   child,
+  delimited,
+  entries,
   needs,
+  nested,
   number,
+  tallied = false,
   text,
 }: IProbeValue): MessageInitShape<typeof ProbeSchema> => {
+  if (nested !== undefined) {
+    return chainOf(nested, { isTallied: tallied, link: 'child' });
+  }
+
+  if (entries !== undefined) {
+    return chainOf(entries, { isTallied: tallied, link: 'children' });
+  }
+
+  if (delimited !== undefined) {
+    return chainOf(delimited, { isTallied: tallied, link: 'delimited' });
+  }
+
   return {
     ...(child === undefined ? {} : { child: {} }),
     ...(needs === undefined ? {} : { needs }),
@@ -267,6 +312,15 @@ const thrownBy = (act: () => unknown): unknown => {
   return undefined;
 };
 
+/** Holds `thrown` to a refusal of `refusal`'s class whose message is `reason`, exactly. */
+const expectRefused = (
+  thrown: unknown,
+  { reason, refusal }: { reason: string; refusal: typeof SyntaxError | typeof TypeError }
+): void => {
+  expect(thrown).toBeInstanceOf(refusal);
+  expect((thrown as Error).message).toBe(reason);
+};
+
 // definition
 
 test.describe('the codecs', () => {
@@ -316,16 +370,17 @@ test.describe('the codecs', () => {
           return readOf(PROBE_CODEC.decode(bytesOf(entry.bytes)));
         };
 
-        // * a refusal is a SyntaxError, as every codec's reader refuses: its words are each side's
+        // * a refusal is a SyntaxError of its reason, as every codec's reader refuses
         if (entry.refused === undefined) {
           expect(read()).toEqual(entry.read);
         } else {
           // ! the decode alone refuses, as the C# side holds it: a helper of the read throws none
-          expect(
+          expectRefused(
             thrownBy(() => {
               return PROBE_CODEC.decode(bytesOf(entry.bytes));
-            })
-          ).toBeInstanceOf(SyntaxError);
+            }),
+            { reason: entry.refused, refusal: SyntaxError }
+          );
         }
 
         return;
@@ -334,11 +389,12 @@ test.describe('the codecs', () => {
       const codec = CODECS_BY_ENCODING[entry.encoding] as IPayloadCodec<unknown>;
 
       if (entry.refused !== undefined) {
-        expect(
+        expectRefused(
           thrownBy(() => {
             return codec.decode(bytesOf(entry.bytes));
-          })
-        ).toBeInstanceOf(SyntaxError);
+          }),
+          { reason: entry.refused, refusal: SyntaxError }
+        );
 
         return;
       }
@@ -360,11 +416,12 @@ test.describe('the codecs', () => {
       const value = valueOf(entry);
 
       if (entry.refused !== undefined) {
-        expect(
+        expectRefused(
           thrownBy(() => {
             return codec.encode(value);
-          })
-        ).toBeInstanceOf(TypeError);
+          }),
+          { reason: entry.refused, refusal: TypeError }
+        );
 
         return;
       }

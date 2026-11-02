@@ -1,4 +1,5 @@
 using Bead.Codecs.V1;
+using Bead.Protobuf.Tests.Codec;
 using Bead.Transcoding.V1;
 using Google.Protobuf;
 using Needs = Bead.Transcoding.V1.Needs;
@@ -9,11 +10,17 @@ namespace Bead.Protobuf.Tests;
 /// <summary>
 /// <see cref="ProtoRequired"/>'s walk of spec 17.9.7 over a message Google.Protobuf holds, on
 /// <c>spec/transcoding.proto</c>'s <c>Requiring</c> and <c>spec/codecs.proto</c>'s <c>Probe</c>: its
-/// order, and what it names. <see cref="ProtoCodecsTests"/> plays it through the reader and the
-/// writer. The twin of the TypeScript side's <c>required.test.ts</c>, sentence for sentence.
+/// order, what it names, and its bound. <see cref="ProtoCodecsTests"/> plays it through the reader
+/// and the writer. The twin of the TypeScript side's <c>required.test.ts</c>, sentence for sentence,
+/// and of the Rust side's <c>required/tests.rs</c>.
 /// </summary>
 public sealed class ProtoRequiredTests
 {
+    // constants
+
+    // how many messages below the top a value nests past the bound
+    private static readonly int[] PastTheBound = [101, 10_000];
+
     // helpers
 
     // the path the walk gives of a message: each step's field by its name, then an item's index or
@@ -44,6 +51,20 @@ public sealed class ProtoRequiredTests
         path.Add(unset.Field.Name);
 
         return [.. path];
+    }
+
+    // a Loop holding a Back holding a Loop, `levels` messages below the top Loop, no Must among them,
+    // built from the deepest up
+    private static Loop Looped(int levels)
+    {
+        var looped = levels % 2 == 1 ? new Loop { Back = new Back() } : new Loop();
+
+        for (var index = 0; index < levels / 2; index += 1)
+        {
+            looped = new Loop { Back = new Back { Loop = looped } };
+        }
+
+        return looped;
     }
 
     // definition
@@ -87,5 +108,26 @@ public sealed class ProtoRequiredTests
 
         Assert.Equal(["needs_items", 0, "shade"], PathOf(probe));
         Assert.Equal("bead.codecs.v1.Needs.shade", ProtoRequired.UnsetOf(probe)?.Field.FullName);
+    }
+
+    [Fact]
+    public void Check_stops_at_the_bound_and_refuses()
+    {
+        // ! a walk 10,000 deep would overflow a thread of 1 MiB: it stops past 100
+        ProtoCodecsTests.OnAThreadOf1MiB(() =>
+        {
+            ProtoRequired.Check(Looped(100));
+
+            foreach (var levels in PastTheBound)
+            {
+                var refused = Record.Exception(() =>
+                {
+                    ProtoRequired.Check(Looped(levels));
+                });
+
+                // ! by its type and its message alone: a message this deep is never shown
+                Assert.True(refused is FormatException { Message: "nested past 100" }, $"{levels} below the top: {refused?.Message}");
+            }
+        });
     }
 }

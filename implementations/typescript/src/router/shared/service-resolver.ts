@@ -144,13 +144,18 @@ export const createServiceResolver = <Handle extends string>(
       }
 
       // a payload that does not decode never reaches the callback: its codec's refusal, a
-      // SyntaxError, is the payload's; anything else it throws is its side's own error, answered as
-      // a resolver's that throws, and why goes on for the router to report (spec 9.0, 17.2)
+      // SyntaxError, is answered with its reason as its detail; anything else it throws is its
+      // side's own error, answered as a resolver's that throws, and reported (spec 9.0, 17.2)
       try {
         requestPayload = serializer.decode(props.payload);
       } catch (reason) {
         if (reason instanceof SyntaxError) {
-          return router.respond({ failure: router.failures.payloadUndecodable }, target);
+          return router.respond(
+            // ! a detail of the side's own words: its codec's reason, in spec 17.2's words; the
+            // rest of the refusal goes no further
+            { failure: { ...router.failures.payloadUndecodable, detail: reason.message } },
+            target
+          );
         }
 
         await router.respond({ failure: router.failures.procedureFailed }, target).catch(noop);

@@ -29,8 +29,8 @@ use bytes::Bytes;
 // how long a call is waited on
 const PATIENCE: Duration = Duration::from_secs(10);
 
-// the words the codec refuses the unset value in, reading and writing
-const WORDS: &str = "a proto message leaves bead.codecs.v1.Needs.shade unset";
+// the words the codec refuses the unset value in, reading and writing: its reason (spec 17.2)
+const WORDS: &str = "a required field unset";
 
 fn locked<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
     mutex.lock().unwrap_or_else(PoisonError::into_inner)
@@ -234,9 +234,10 @@ async fn answers_payload_undecodable_to_a_request_that_leaves_a_required_field_u
 
     pair.settle().await;
 
+    // * its detail the codec's reason (spec 17.2, item 1)
     assert!(
-        matches!(&failed, Err(CallError::Failure(failure)) if failure.protocol_code() == Some(ProtocolCode::PAYLOAD_UNDECODABLE)),
-        "answered PAYLOAD_UNDECODABLE: {failed:?}"
+        matches!(&failed, Err(CallError::Failure(failure)) if failure.protocol_code() == Some(ProtocolCode::PAYLOAD_UNDECODABLE) && failure.detail() == WORDS),
+        "answered PAYLOAD_UNDECODABLE, saying its reason: {failed:?}"
     );
     assert!(locked(&resolved).is_empty(), "its resolver not called");
     assert!(locked(&pair.server_reports).is_empty(), "nothing reported");

@@ -485,7 +485,8 @@ public sealed class ServiceServerTests
         var reported = await link.FirstReported.WaitAsync(Patience, Cancelled);
 
         Assert.IsType<FormatException>(reported);
-        Assert.Equal(RequiredProcedures.Words, reported.Message);
+        Assert.Equal(RequiredProcedures.Reason, reported.Message);
+        Assert.Equal(RequiredProcedures.Words, reported.InnerException?.Message);
         Assert.Single(link.Reported);
     }
 

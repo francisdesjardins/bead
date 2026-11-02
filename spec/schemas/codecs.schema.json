@@ -123,7 +123,7 @@
       }
     },
     "nested": {
-      "description": "How deep messages nest below a Probe, at the deepest, through child, delimited and children, a map's entry counting as a message and its value as another: 0 where none is set, 100 at most (spec 17.9.3).",
+      "description": "How deep messages nest below a Probe, at the deepest, through child, delimited, children and tallies, a map's entry counting as a message and a value of children as another: 0 where none is set, 100 at most (spec 17.9.3).",
       "type": "integer",
       "minimum": 0,
       "maximum": 100
@@ -181,7 +181,7 @@
           "then": {
             "properties": {
               "value": { "required": ["probe"] },
-              "refused": { "const": "a required field unset" }
+              "refused": { "enum": ["a required field unset", "nested past 100"] }
             }
           }
         },
@@ -246,10 +246,20 @@
       }
     },
     "probe": {
-      "description": "A Probe of spec/codecs.proto given to a proto writer, one field set or none, so that protobuf fixes the bytes it writes: its text, its number, its child set to the empty message, or its needs set to a Needs of the fields it gives.",
+      "description": "A Probe of spec/codecs.proto given to a proto writer, so that protobuf fixes the bytes it writes: one field set or none, its text, its number, its child set to the empty message, or its needs set to a Needs of the fields it gives; or a chain of Probes nested below it, through child, children or delimited, the deepest tallied where it says so.",
       "type": "object",
-      "maxProperties": 1,
+      "maxProperties": 2,
       "additionalProperties": false,
+      "anyOf": [{ "maxProperties": 1 }, { "required": ["tallied"] }],
+      "dependentSchemas": {
+        "tallied": {
+          "oneOf": [
+            { "required": ["nested"] },
+            { "required": ["entries"] },
+            { "required": ["delimited"] }
+          ]
+        }
+      },
       "properties": {
         "text": { "$ref": "#/$defs/codeUnits" },
         "number": { "$ref": "common.schema.json#/$defs/u32" },
@@ -266,11 +276,33 @@
             "must": { "$ref": "common.schema.json#/$defs/u32" },
             "shade": { "type": "integer", "minimum": -2147483648, "maximum": 2147483647 }
           }
+        },
+        "nested": {
+          "description": "That many Probes below the top through child, none with a field set but child (spec 17.9.3).",
+          "$ref": "#/$defs/chained"
+        },
+        "entries": {
+          "description": "That many maps' entries below the top through children, each holding the next Probe under the key \"\", each entry counting as a message, so twice as many messages below the top (spec 17.9.3).",
+          "$ref": "#/$defs/chained"
+        },
+        "delimited": {
+          "description": "That many Probes below the top through delimited, a group each, none with a field set but delimited (spec 17.9.3).",
+          "$ref": "#/$defs/chained"
+        },
+        "tallied": {
+          "description": "Whether the deepest Probe of the chain holds tallies {\"a\": 1}, a scalar map's entry, which counts as a message (spec 17.9.3).",
+          "type": "boolean"
         }
       }
     },
+    "chained": {
+      "description": "How many a chain holds below the top.",
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 1000
+    },
     "reason": {
-      "description": "Why a reader refuses bytes, or a writer a value, derived and held by the regeneration alone: no harness reads it.",
+      "description": "Why a reader refuses bytes, or a writer a value: its refusal's message, exactly, and the detail of the PAYLOAD_UNDECODABLE a request's payload that does not read is answered with (spec 17.2).",
       "enum": [
         "not UTF-8",
         "a byte order mark",

@@ -8,9 +8,15 @@ namespace Bead.Protobuf;
 /// its records checked against its descriptor before Google.Protobuf reads them
 /// (<see cref="ProtoRecords"/>, decision 0028), a singular closed enum's record of a number its enum
 /// declares no value of dropped first (17.9.8), the bound of 17.9.3 set in the call, then the
-/// message refused where it leaves a required field unset (<see cref="ProtoRequired"/>, 17.9.7);
-/// written once the same walk takes it. Generated code, a gateway's reader of a result, a stream's
-/// event and the HTTP caller go through it. The TypeScript side's twin is <c>protoCodecOf</c>, of
+/// message refused where it leaves a required field unset (<see cref="ProtoRequired"/>, 17.9.7). A
+/// value is written as its reader would read it (17.2, decision 0031): refused before
+/// Google.Protobuf writes any of it where its known fields nest past the bound
+/// (<see cref="ProtoDepth"/>) or the same walk finds a required field unset; then its bytes checked
+/// as a reader checks them, which refuses what a reading kept nesting past the bound. Each refusal
+/// is a <see cref="FormatException"/> of its reason in 17.2's words, <c>not its message</c>,
+/// <c>nested past 100</c> or <c>a required field unset</c>, Google.Protobuf's own error or what Bead
+/// found its inner exception. Generated code, a gateway's reader of a result, a stream's event and
+/// the HTTP caller go through it. The TypeScript side's twin is <c>protoCodecOf</c>, of
 /// <c>@francisdesjardins/bead/proto</c>.
 /// </summary>
 public static class ProtoCodecs
@@ -23,10 +29,11 @@ public static class ProtoCodecs
 
     /// <summary>
     /// The codec of <typeparamref name="T"/>, as a generated binding names it: its reading refuses
-    /// what 17.9 refuses, each refusal a <see cref="FormatException"/>, its records', its required
-    /// fields', or Google.Protobuf's own, which it holds as its inner exception; its writing refuses a
-    /// message that leaves a required field unset, with a <see cref="FormatException"/> in the same
-    /// words, before anything is written.
+    /// what 17.9 refuses, each refusal a <see cref="FormatException"/> of its reason, its records',
+    /// its required fields', or Google.Protobuf's own, which it holds as its inner exception; its
+    /// writing refuses a message whose known fields nest past the bound, or that leaves a required
+    /// field unset, with a <see cref="FormatException"/> of the same reason, before anything is
+    /// written, then checks what it wrote as its reading does, so it writes nothing its reader refuses.
     /// </summary>
     public static IPayloadCodec<T> Of<T>()
         where T : IMessage<T>, new()
@@ -37,16 +44,20 @@ public static class ProtoCodecs
                 var message = new T();
 
                 ReadInto(message, (bytes, Bound));
-                ProtoRequired.Check(message);
+                ProtoRequired.CheckRead(message);
 
                 return message;
             },
             (T message) =>
             {
                 ArgumentNullException.ThrowIfNull(message);
+
+                // ! the depth pass first: past it, neither the required walk nor Google.Protobuf's
+                // CalculateSize recurses past the bound
+                ProtoDepth.Check(message);
                 ProtoRequired.Check(message);
 
-                return message.ToByteArray();
+                return ReadBack(message.ToByteArray(), message.Descriptor);
             });
     }
 
@@ -59,7 +70,7 @@ public static class ProtoCodecs
     {
         var message = Unjudged(descriptor, (bytes, Bound));
 
-        ProtoRequired.Check(message);
+        ProtoRequired.CheckRead(message);
 
         return message;
     }
@@ -78,6 +89,24 @@ public static class ProtoCodecs
         ReadInto(message, read);
 
         return message;
+    }
+
+    // * what a writer writes, its reader reads (17.2): the bytes checked as a reader checks them, its
+    // refusal the writer's, of the same reason, the reader's its inner exception; past the depth
+    // pass, it refuses what a reading kept nesting past the bound, an unknown group or an
+    // extension's message
+    private static byte[] ReadBack(byte[] bytes, MessageDescriptor descriptor)
+    {
+        try
+        {
+            ProtoRecords.Checked(bytes, descriptor);
+        }
+        catch (FormatException reason)
+        {
+            throw new FormatException(reason.Message, reason);
+        }
+
+        return bytes;
     }
 
     // the records checked, a closed enum's undeclared ones dropped, then read framed within the bound
@@ -115,7 +144,7 @@ public static class ProtoCodecs
         }
         catch (InvalidProtocolBufferException reason)
         {
-            throw new FormatException($"the proto payload does not read: {reason.Message}", reason);
+            throw new FormatException(ProtoRecords.NotItsMessage, reason);
         }
     }
 }

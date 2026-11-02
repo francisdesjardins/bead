@@ -77,6 +77,7 @@ const namePartOf = ({ request, result }: { request: 'proto' | 'raw'; result: 'pr
 // a NamePart that leaves is_extension unset, `name_part` "a" alone
 const PARTIAL = Uint8Array.of(0x0a, 0x01, 0x61);
 
+// what the refusal's cause says of the field it leaves unset, its reason 17.2's words
 const UNSET =
   'a proto message leaves google.protobuf.UninterpretedOption.NamePart.is_extension unset';
 
@@ -492,7 +493,8 @@ test.describe('createServiceClient', () => {
 
     // * the codec's own refusal, its writer's, passed on: no Bead failure, nothing sent
     expect(refused).toBeInstanceOf(TypeError);
-    expect((refused as Error).message).toBe(UNSET);
+    expect((refused as Error).message).toBe('a required field unset');
+    expect(((refused as Error).cause as Error).message).toBe(UNSET);
     expect(seen).toEqual([]);
     await expect(
       client.request.part({ isExtension: false, namePart: 'a' })()

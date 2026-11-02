@@ -134,12 +134,13 @@ serializer, which refuses a double that is not finite at any depth, where `serde
 
 `crates/bead-protobuf/src`:
 
-| Module     | What it holds                                                                                                                               |
-| ---------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
-| `records`  | a message's schema, read once from its descriptors, and the check of a payload's records against it (spec 17.9.1 to 17.9.6)                 |
-| `required` | the walk of the fields protobuf requires (spec 17.9.7), over a view or a dynamic message, whose presence is the wire's or the application's |
-| `codec`    | `ProtoCodec`, the typed codec of a message Buffa generates, and `DynamicCodec`, by its descriptor alone, each a payload codec of `proto`    |
-| `testing`  | the test kit, behind the feature `testing`: the tests' messages, generated from `proto/tests.binpb`; no API                                 |
+| Module     | What it holds                                                                                                                                                                                                   |
+| ---------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `records`  | a message's schema, read once from its descriptors, and the check of a payload's records against it (spec 17.9.1 to 17.9.6)                                                                                     |
+| `required` | the walk of the fields protobuf requires (spec 17.9.7), over a view or a dynamic message, whose presence is the wire's or the application's, and a writer's depth pass (17.9.3), each 100 messages deep at most |
+| `refusal`  | a refusal's reasons in spec 17.2's words, what more the side knows in its cause                                                                                                                                 |
+| `codec`    | `ProtoCodec`, the typed codec of a message Buffa generates, and `DynamicCodec`, by its descriptor alone, each a payload codec of `proto`                                                                        |
+| `testing`  | the test kit, behind the feature `testing`: the tests' messages, generated from `proto/tests.binpb`; no API                                                                                                     |
 
 A message an application binds to `proto` is generated as `bead-protobuf-build` sets Buffa's
 generator, from the set protoc writes; `ProtoCodec` reads it through its view, which tells a field

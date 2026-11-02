@@ -11,8 +11,8 @@ option features.field_presence = IMPLICIT;
 // and how deep it nests. Then the records protobuf frames otherwise: a packed run, a repeated
 // fixed32, a map's entries, and a group, at 10 to 13. Then a message of fields protobuf requires,
 // alone and repeated, at 7 and 8, and a closed enum at 14, its presence explicit, since a closed
-// enum's field cannot be implicit. That leaves 4 to 6, 9 and 15 to the rows that read a field Probe
-// does not declare.
+// enum's field cannot be implicit. Then a map of scalars at 16, whose entry nests as a message
+// (spec 17.9.3). That leaves 4 to 6, 9 and 15 to the rows that read a field Probe does not declare.
 message Probe {
   string text = 1;
   uint32 number = 2;
@@ -24,6 +24,7 @@ message Probe {
   map<string, Probe> children = 12;
   Probe delimited = 13 [features.message_encoding = DELIMITED];
   Shade shade = 14 [features.field_presence = EXPLICIT];
+  map<string, uint32> tallies = 16;
 }
 
 // A closed enum: a record of a number it declares no value of sets nothing (spec 17.9.8).

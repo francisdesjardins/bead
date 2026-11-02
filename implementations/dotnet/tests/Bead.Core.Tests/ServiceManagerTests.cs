@@ -65,8 +65,9 @@ public sealed partial class ServiceManagerTests
     // x64, in the Debug build `dotnet test` makes, on Windows and on Linux alike. A runtime that
     // moves them is pinned anew, by hand: run the gate, take the bytes its failure prints, and name
     // the runtime, and why each step moved, in the commit. A call made holds the refusal its rules
-    // may judge it with, which its router's request carries (decision 0035)
-    private static readonly long[] AllocatedWhileNobodyListens = [1272, 984, 560, 768];
+    // may judge it with, which its router's request carries (decision 0035); a request answered, the
+    // refusal its payload's codec may give, whose reason its answer carries (spec 17.2)
+    private static readonly long[] AllocatedWhileNobodyListens = [1272, 992, 560, 768];
 
     // helpers
 
@@ -1133,6 +1134,23 @@ public sealed partial class ServiceManagerTests
         public ReadOnlyMemory<byte> EncodeNotification(T notification)
         {
             return Encode(notification);
+        }
+    }
+
+    // a resolver's serializer whose request the json codec reads first, so that a refusal is the
+    // codec's, of its reason (spec 17.2)
+    private sealed class ReadByTheJsonCodec : IRequestSerializerServer<Text, Text>
+    {
+        public Text Decode(ReadOnlyMemory<byte> request)
+        {
+            PayloadCodecs.Json.Decode(request);
+
+            return Json.Decode(request);
+        }
+
+        public ReadOnlyMemory<byte> Encode(Text response)
+        {
+            return Json.Encode(response);
         }
     }
 

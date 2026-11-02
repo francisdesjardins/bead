@@ -131,22 +131,25 @@ public sealed partial class ServiceManagerTests
             Assert.Single(router.Responses).Failure);
     }
 
+    // spec 17.2
     [Fact]
-    public async Task A_payload_that_does_not_decode_is_answered_as_undecodable_with_no_detail_never_reaching_the_callback()
+    public async Task A_payload_that_does_not_decode_is_answered_as_undecodable_its_reason_as_its_detail_never_reaching_the_callback()
     {
         var router = new RecordingRouter();
         var reached = false;
-        var resolver = new ServiceManager(router).GetRequestResolver(Echo, Answered())((_, _) =>
-        {
-            reached = true;
+        var resolver = new ServiceManager(router).GetRequestResolver(
+            Echo,
+            new RequestResolverDependencies<Text, Text> { Serializer = new ReadByTheJsonCodec() })((_, _) =>
+            {
+                reached = true;
 
-            return Task.CompletedTask;
-        });
+                return Task.CompletedTask;
+            });
 
         await resolver.Handle(PropsOf("{not json"u8.ToArray())).WaitAsync(Patience, Cancelled);
 
         Assert.False(reached);
-        Assert.Equal([new Responded(Target, null, Failure.OfProtocol(ProtocolCode.PayloadUndecodable))], router.Responses);
+        Assert.Equal([new Responded(Target, null, Failure.OfProtocol(ProtocolCode.PayloadUndecodable, "not JSON"))], router.Responses);
     }
 
     // spec 9.0, 17.2

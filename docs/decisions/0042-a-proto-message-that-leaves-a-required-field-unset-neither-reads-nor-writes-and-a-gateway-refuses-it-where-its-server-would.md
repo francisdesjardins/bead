@@ -113,14 +113,19 @@ singular field's number is a platform row.
 of `Bead.Protobuf`, and `ProtoCodec` and `DynamicCodec` of `bead-protobuf`
 ([0044](0044-rust-one-owner-per-router-traits-no-unsafe-two-parameters-no-warning.md)). Its read
 runs the records check, then, on the C# side, 17.9.8's filter, then the parse at 17.9.3's bound,
-then the walk; its write runs the walk, then the stock writer. On the Rust side both codecs walk
-before they write, and the typed one's walk never refuses, since a generated message's type leaves
-no required field unset, as the platform row "A proto value that leaves a required field unset or
-holds a closed enum's undeclared number, given to a typed writer" says. The TypeScript side throws a
-`SyntaxError` when it reads and a `TypeError` when it writes, as its other codecs do; the C# side a
-`FormatException` both ways, its codecs' type; the Rust side a `CodecRefusal` both ways; the words
-are the same, `a proto message leaves <full name> unset`, naming a field of the schema and never a
-key the peer sent. The walk is Bead's own on every side, its facts in the one shape per descriptor
+then the walk; its write runs 17.9.3's depth pass, then the walk, within 101 levels, then the stock
+writer, then the records check over what it wrote
+([0031](0031-a-proto-payload-is-protobufs-format-and-bead-states-only-its-own.md)). On the Rust side
+both codecs walk before they write, and the typed one's walk never refuses, since a generated
+message's type leaves no required field unset, as the platform row "A proto value that leaves a
+required field unset or holds a closed enum's undeclared number, given to a typed writer" says. The
+TypeScript side throws a `SyntaxError` when it reads and a `TypeError` when it writes, as its other
+codecs do; the C# side a `FormatException` both ways, its codecs' type; the Rust side a
+`CodecRefusal` both ways; the words are 17.2's, `a required field unset`, and the field's full name,
+of the schema and never a key the peer sent, and its path ride in the refusal's cause
+([0016](0016-a-json-payload-has-one-form-whichever-side-writes-it.md)). The public walks, the C#
+side's `ProtoRequired.Check` and the Rust side's `check_required`, refuse past 17.9.3's bound with
+the same refusal. The walk is Bead's own on every side, its facts in the one shape per descriptor
 `ProtoRecords` holds, weakly held as long as its descriptor is, the Rust side's in its
 `ProtoSchema`, read once from its pool: each message's required fields, the message fields that
 reach one, and on the C# side its singular closed enums. Reachability is one search over the

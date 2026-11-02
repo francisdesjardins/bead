@@ -2,8 +2,10 @@
 
 - **Status**: accepted
 - **Scope**: the protocol and every side's tests: in [`spec/spec.md`](../../spec/spec.md), 17.9 and
-  the sentence of 17.1 that counts four encodings; `spec/codecs.proto`; `spec/codecs.json`'s `proto`
-  rows, its schema's `proto` encoding and its reasons `not its message` and `nested past 100`;
+  the sentence of 17.1 that counts four encodings, 17.9.3's bound of a writer among them;
+  `spec/codecs.proto`, its field 16 among them; `spec/codecs.json`'s `proto` rows, its schema's
+  `proto` encoding, its `probe`'s chains and its reasons `not its message` and `nested past 100`;
+  each side's `proto` writer, its depth pass and its records check over what it wrote;
   `spec/generators/make_codecs.py`'s reader of `Probe`, and `spec/check.py` over those rows; each
   side's tests' protobuf toolchain; the support matrix's `proto` rows. The codec of two functions a
   `proto` binding is made with, `payloadCodecOf` and `PayloadCodecs.Of`, is
@@ -79,6 +81,18 @@ before its bytes do, a stray end group among them, as its parse of bytes does an
 stream does not; and an empty payload reads as the message with no field set, where a size limit of
 its length, 0, would be refused. Probed: both then take 100 below the top and refuse 101.
 
+**What a writer does with a deep value.** protobuf's readers bound their recursion, at 100 in C++'s
+`CodedInputStream`, Java's `DEFAULT_RECURSION_LIMIT`, Google.Protobuf's `DefaultRecursionLimit` and
+upb's `upb_DecodeOptions_MaxDepth`, at 10,000 in Go's `protowire`; its writers bound nothing. upb
+writes 101 and 200 levels it then refuses to read, and overflows its stack at 10,000. Each stock
+library writes a `Probe` 101 below the top, 239 bytes its own reader refuses, and a value 60 unknown
+groups deep, kept from a reading, under 41 known levels. Past that, protobuf-es's `toBinary` throws
+a `RangeError` at 10,000 levels; Google.Protobuf's `CalculateSize` recurses about 2,475 frames on a
+1 MiB thread, and a C# `StackOverflowException` is never caught; Buffa's writer takes 10,000 levels.
+RFC 1122 §1.2.2 ("be conservative in what you send") and RFC 9413 §4 say why a writer that emits
+what every conforming reader refuses fails at the far end, after the call went out; the `json`
+writer refuses past 64 for that reason (17.7).
+
 **The leading U+FEFF.** It is Bead's rule, with 17.4.2's reason, RFC 3629 §6: protobuf says a
 string holds UTF-8 text, and U+FEFF is a character of it. protobuf-es strips it: its strict decoder
 is `new TextDecoder("utf-8", { fatal: true })`, whose `ignoreBOM` is false (WHATWG Encoding), and
@@ -129,7 +143,8 @@ keeps, a known field at a wire type its type does not take among them, a row of 
 > 3. A reader MUST refuse a message nested more than 100 deep below the top one, a group and a map's
 >    entry each counting as a message, as a map's entry is one on the wire
 >    ([Encoding](https://protobuf.dev/programming-guides/encoding/), "Maps"), and sets that bound in
->    its library rather than leaving it to the library's default.
+>    its library rather than leaving it to the library's default. A writer MUST refuse a value so
+>    nested (section 17.2).
 > 4. A string's leading U+FEFF is a character of it (section 17.4.2).
 > 5. A field the message declares, at a wire type its type does not take, does not read (section
 >    17.2), a map's entry's key and value among them, where protobuf's reference parsers keep it as
@@ -166,8 +181,10 @@ request: protoCodecOf(SayHelloRequestSchema),
 global::Bead.Protobuf.ProtoCodecs.Of<global::Hello.V1.SayHelloRequest>()
 ```
 
-What the codec runs, laid out here over lines, its required walk and the C# side's filter of a
-closed enum's record aside:
+What the codec runs, laid out here over lines, its depth pass, its required walk, its check of what
+it wrote and the C# side's filter of a closed enum's record aside, which the paragraphs below and
+[0042](0042-a-proto-message-that-leaves-a-required-field-unset-neither-reads-nor-writes-and-a-gateway-refuses-it-where-its-server-would.md)
+state:
 
 ```ts
 payloadCodecOf<SayHelloRequest, MessageInitShape<typeof SayHelloRequestSchema>>({
@@ -218,6 +235,69 @@ global::Bead.PayloadCodecs.Of<global::Hello.V1.SayHelloRequest>(
 protobuf-es counts the top message, so its 101 is 17.9.3's 100 below it; Google.Protobuf reads the
 payload framed as a message field, whose read counts the top message too.
 
+**A writer refuses what its reader refuses for depth** (17.9.3, 17.2): a message nested more than
+100 deep below the top one, counted as the reader counts on the wire, a group, a map's entry and an
+unknown group each a message. The refusal is the writer's codec refusal, never a programmer error:
+a `TypeError` on the TypeScript side, a `FormatException` on the C# side, a `CodecRefusal` on the
+Rust side, its words `nested past 100`; 17.2 says what each place does with it, a request's value
+failing its call before anything goes, an answer's answered `PROCEDURE_FAILED`, a notification's
+going to no subscription. The writer runs, in this order:
+
+1. **The depth pass, before anything is built or written.** Its job is to keep every recursion
+   unreached, the library's and Bead's own: protobuf-es's `create` of a deep init and its
+   `toBinary`, Google.Protobuf's `CalculateSize`, and the required walk on each side. It walks the
+   value's known fields as the side holds them, bounded at 101 frames, and counts as the wire nests:
+   a singular message field, a repeated field's item and a group, one each; a oneof's message
+   member, as the message field it is, on the TypeScript side under the oneof's name as
+   `{ case, value }`; every map's entry one, a scalar or enum map's among them, and its message
+   value one more; and on the TypeScript side a `google.protobuf.Struct` held as a JSON object in a
+   field, three a level (the `Struct`, its entry, the `Value`), and a JSON array two (`ListValue`,
+   `Value`), the count the gateway makes, one module of `src/proto/` serving both. It may count less
+   than the wire nests — kept unknown groups, an extension's message, an `Any`'s bytes — never more,
+   so it never refuses what the reader takes. Each side's shape of a message holds, beside whether
+   it reaches a required field, whether its known fields can nest past 100, a cycle or a path deeper
+   than 100, computed once from the descriptor; the pass is skipped where they cannot. That flag is
+   sound for this layer's job alone, never for the rule: any schema carries what a reading kept.
+2. **The required walk**
+   ([0042](0042-a-proto-message-that-leaves-a-required-field-unset-neither-reads-nor-writes-and-a-gateway-refuses-it-where-its-server-would.md)),
+   within 101 levels wherever the pass ran.
+3. **The library writes.**
+4. **The reader's own records check over the written bytes**
+   ([0028](0028-a-proto-payloads-records-are-read-against-its-message-before-its-library-reads-them.md)),
+   `checkProtoRecords`, `ProtoRecords.Checked`, `check_records`. A refusal there is the writer's
+   refusal, its words the reader's reason. This layer is 17.2's judgment, for every rule of 17.9's
+   records: depth through kept unknown groups and delimited extensions, and anything the pass
+   counts short. It costs one linear pass over the bytes a write, the cost 0028 accepts for every
+   read.
+
+A value nested past the bound in its known fields that also leaves a required field unset is
+refused for its depth, as the pass runs first. One residual is the application's: unknown fields it
+builds by hand (Buffa's `UnknownFields` is public) deeper than its stack recurse in the library
+before the check, as the drop of a deep owned message is the application's own recursion. The
+public walks are bounded alike: the C# side's `ProtoRequired.Check` refuses past the bound with the
+same `FormatException`, its `UnsetOf` internal; the Rust side's `check_required` with the same
+`CodecRefusal`, its `unset_of`, `Unset`, `UnsetStep` and `Place` the crate's own, which only its
+tests call; the TypeScript side exports no required walk. Every path that writes a `proto` value
+an application gives goes through the codec's write: the typed and dynamic codecs and the generated
+bindings. The HTTP gateway writes the request its JSON reader built, which that reader refuses past
+the bound, counting as the wire nests, and which holds no unknown field, so its library writes it
+directly. On the Rust side the pass rides in the required walk, which carries the depth, and guards
+the walk itself; Buffa's own writer needs no guard.
+
+A reading's required walk judges no depth: the records check held the wire to the bound before the
+library read it. Each library gives a map's entry that held no value its value's default, a message
+one deeper than the wire nests, so an entry 100 deep below the top one that holds no value reads,
+and the message read is refused when written back, as each library writes the value it gave. The
+`protobuf-conformance` differential found it, and every side holds it alike:
+`reads a map’s entry 100 deep that holds no value, and refuses to write the value its library gives it`.
+
+**A `proto` codec's refusal says its reason**, `not its message`, `nested past 100` or
+`a required field unset`, in 17.2's words, as
+[0016](0016-a-json-payload-has-one-form-whichever-side-writes-it.md) has every built-in codec's: its
+library's own words, which differ by library and version, the record the check refused and the
+required field's full name and path ride in the refusal's cause, for what the side reports, never
+on the wire.
+
 **`spec/codecs.json` holds `proto` rows, played through each side's stock library.** The fixed
 message is `spec/codecs.proto`:
 
@@ -239,6 +319,7 @@ message Probe {
   map<string, Probe> children = 12;
   Probe delimited = 13 [features.message_encoding = DELIMITED];
   Shade shade = 14 [features.field_presence = EXPLICIT];
+  map<string, uint32> tallies = 16;
 }
 ```
 
@@ -246,54 +327,71 @@ Its first three fields are the ones the rows below read, beside fields it does n
 13, a packed record, a repeated fixed32, a map's entries and a group, are
 [0028](0028-a-proto-payloads-records-are-read-against-its-message-before-its-library-reads-them.md)'s;
 7, 8 and 14, a message of fields protobuf requires, alone and repeated, and a closed enum, are
-[0042](0042-a-proto-message-that-leaves-a-required-field-unset-neither-reads-nor-writes-and-a-gateway-refuses-it-where-its-server-would.md)'s; and implicit presence keeps `text` and `number` as proto3 reads them. A `proto` payload row pins an
+[0042](0042-a-proto-message-that-leaves-a-required-field-unset-neither-reads-nor-writes-and-a-gateway-refuses-it-where-its-server-would.md)'s;
+16, a map of scalars whose entry counts as a message, is this record's, for 17.9.3's bound read and
+written; and implicit presence keeps `text` and `number` as proto3 reads them. A `proto` payload row pins an
 outcome: taken, with the fields read (`read`: its `text` as UTF-16 code units, its `number`, how
 deep messages nest below the top, and, where it holds them, its `counts`, its `stamps`, its
 `children`, its `delimited` and its `shade`), or refused, with its reason. A `proto` value row pins written bytes
-only where protobuf fixes them, one field at a time. The schema's `encoding` takes `proto`; its
-reasons `not its message` (17.9.1), `nested past 100` (17.9.3) and `a required field unset`
-(17.9.7), derived by the regeneration alone, as 0016's are. `make_codecs.py` reads each row's bytes
-with a reader of `Probe` written with the standard library from protobuf's Encoding guide, and
-Bead's 17.9.2 to 17.9.8. The rows, those
+only where protobuf fixes them, one field at a time or a chain of `Probe`s nested to the bound, or
+its refusal. The schema's `encoding` takes `proto`; its reasons `not its message` (17.9.1),
+`nested past 100` (17.9.3) and `a required field unset` (17.9.7), derived by the regeneration and
+checked by every harness as its refusal's words, as 0016's are. `make_codecs.py` reads each row's
+bytes with a reader of `Probe` written with the standard library from protobuf's Encoding guide,
+and Bead's 17.9.2 to 17.9.8. The rows, those
 [0028](0028-a-proto-payloads-records-are-read-against-its-message-before-its-library-reads-them.md)
 states aside:
 
-| Row                                      | Bytes                                | Outcome                        | `differs`  |
-| ---------------------------------------- | ------------------------------------ | ------------------------------ | ---------- |
-| an empty payload                         | none                                 | taken: no field set            |            |
-| a string and a number                    | `0A 01 61 10 07`                     | taken: `a`, 7                  |            |
-| a length past the bytes                  | `0A 05 61 62`                        | refused: not its message       |            |
-| a varint cut short                       | `10 80`                              | refused: not its message       |            |
-| a tag alone                              | `0A`                                 | refused: not its message       |            |
-| a string that is not UTF-8               | `0A 01 FF`                           | refused: not its message       |            |
-| an overlong form in a string             | `0A 02 C0 AF`                        | refused: not its message       |            |
-| a surrogate in UTF-8                     | `0A 03 ED A0 80`                     | refused: not its message       |            |
-| a string's leading U+FEFF                | `0A 04 EF BB BF 61`                  | taken: U+FEFF `a`              | TypeScript |
-| U+FEFF after a string's first character  | `0A 04 61 EF BB BF`                  | taken: `a` U+FEFF              |            |
-| a noncharacter, U+FFFF                   | `0A 03 EF BF BF`                     | taken: U+FFFF                  |            |
-| U+0000                                   | `0A 01 00`                           | taken: U+0000                  |            |
-| an unknown field after the known         | `0A 01 61 78 07`                     | taken: `a`                     |            |
-| an unknown field before the known        | `78 07 0A 01 61`                     | taken: `a`                     |            |
-| an unknown field of each wire type       | `21 01 … 08 2A 01 7A 35 01 02 03 04` | taken: no field set            |            |
-| a number given at its default            | `10 00`                              | taken: 0                       |            |
-| a scalar given twice                     | `10 01 10 02`                        | taken: 2                       |            |
-| a message given twice                    | `1A 02 1A 00 1A 02 10 01`            | taken: merged, 2 below the top |            |
-| a message field set to the empty message | `1A 00`                              | taken: a child, no field set   |            |
-| field number 0                           | `00 01`                              | refused: not its message       |            |
-| a varint of 10 bytes                     | `10 FF FF FF FF FF FF FF FF FF 01`   | taken: 4294967295              |            |
-| a varint of 11 bytes                     | `10 80 … 80 01`                      | refused: not its message       |            |
-| an end group no group opened             | `24`                                 | refused: not its message       |            |
-| an unknown group, closed                 | `23 24`                              | taken: no field set            |            |
-| an unknown group never closed            | `23`                                 | refused: not its message       |            |
-| 99 messages below the top                | `1A E6 01 …`                         | taken: 99 below                |            |
-| 100 messages below the top               | `1A E9 01 …`                         | taken: 100 below               |            |
-| 101 messages below the top               | `1A EC 01 …`                         | refused: nested past 100       |            |
+| Row                                                               | Bytes                                | Outcome                        | `differs`  |
+| ----------------------------------------------------------------- | ------------------------------------ | ------------------------------ | ---------- |
+| an empty payload                                                  | none                                 | taken: no field set            |            |
+| a string and a number                                             | `0A 01 61 10 07`                     | taken: `a`, 7                  |            |
+| a length past the bytes                                           | `0A 05 61 62`                        | refused: not its message       |            |
+| a varint cut short                                                | `10 80`                              | refused: not its message       |            |
+| a tag alone                                                       | `0A`                                 | refused: not its message       |            |
+| a string that is not UTF-8                                        | `0A 01 FF`                           | refused: not its message       |            |
+| an overlong form in a string                                      | `0A 02 C0 AF`                        | refused: not its message       |            |
+| a surrogate in UTF-8                                              | `0A 03 ED A0 80`                     | refused: not its message       |            |
+| a string's leading U+FEFF                                         | `0A 04 EF BB BF 61`                  | taken: U+FEFF `a`              | TypeScript |
+| U+FEFF after a string's first character                           | `0A 04 61 EF BB BF`                  | taken: `a` U+FEFF              |            |
+| a noncharacter, U+FFFF                                            | `0A 03 EF BF BF`                     | taken: U+FFFF                  |            |
+| U+0000                                                            | `0A 01 00`                           | taken: U+0000                  |            |
+| an unknown field after the known                                  | `0A 01 61 78 07`                     | taken: `a`                     |            |
+| an unknown field before the known                                 | `78 07 0A 01 61`                     | taken: `a`                     |            |
+| an unknown field of each wire type                                | `21 01 … 08 2A 01 7A 35 01 02 03 04` | taken: no field set            |            |
+| a number given at its default                                     | `10 00`                              | taken: 0                       |            |
+| a scalar given twice                                              | `10 01 10 02`                        | taken: 2                       |            |
+| a message given twice                                             | `1A 02 1A 00 1A 02 10 01`            | taken: merged, 2 below the top |            |
+| a message field set to the empty message                          | `1A 00`                              | taken: a child, no field set   |            |
+| field number 0                                                    | `00 01`                              | refused: not its message       |            |
+| a varint of 10 bytes                                              | `10 FF FF FF FF FF FF FF FF FF 01`   | taken: 4294967295              |            |
+| a varint of 11 bytes                                              | `10 80 … 80 01`                      | refused: not its message       |            |
+| an end group no group opened                                      | `24`                                 | refused: not its message       |            |
+| an unknown group, closed                                          | `23 24`                              | taken: no field set            |            |
+| an unknown group never closed                                     | `23`                                 | refused: not its message       |            |
+| 99 messages below the top                                         | `1A E6 01 …`                         | taken: 99 below                |            |
+| 100 messages below the top                                        | `1A E9 01 …`                         | taken: 100 below               |            |
+| 101 messages below the top                                        | `1A EC 01 …`                         | refused: nested past 100       |            |
+| 100 groups below the top                                          | `6B 6B … 6C 6C`                      | taken: 100 below               |            |
+| 101 groups below the top                                          | `6B 6B … 6C 6C`                      | refused: nested past 100       |            |
+| 99 messages below the top, the last holding a scalar map's entry  | `1A F2 01 … 82 01 05 0A 01 61 10 01` | taken: 100 below               |            |
+| 100 messages below the top, the last holding a scalar map's entry | `1A F5 01 … 82 01 05 0A 01 61 10 01` | refused: nested past 100       |            |
 
 A message given twice is merged, so its row gives the child of the first copy a child of its own:
 a reader that merges reads 2 below the top, and one that keeps the last copy reads 1. Six values,
 each one field or none: `text` `a`, written `0A 01 61`; `number` 7, written `10 07`; `number` 0,
 written as nothing; no field set, written as nothing; `child` set to the empty message, written
-`1A 00`; `text` U+FEFF `a`, written `0A 04 EF BB BF 61`.
+`1A 00`; `text` U+FEFF `a`, written `0A 04 EF BB BF 61`. Then the writer's bound, `probe` given as
+a chain of `Probe`s below the top, each with no field set but the one that holds the next, through
+`child` (`nested`), through `children`'s entries under the key `""` (`entries`) or through the group
+(`delimited`), the deepest holding `tallies {"a": 1}` where it is `tallied`: 100 through `child`,
+written as the payload of 100 messages below the top; 101, refused; 51 maps deep, 102 messages
+below the top, refused; 100 through the group, written as the payload of 100 groups; 101, refused;
+99 through `child` and a scalar map's entry, written as its payload, the entry's key and value each
+written; and 100 so, refused, `nested past 100` each. A chain of maps' entries has no written row,
+since Google.Protobuf leaves an entry's key out at its default, so those bytes are each library's.
+`tallies`, field 16, is the first number no row and no corpus writes as an unknown field, the rows
+writing 4, 5, 6, 9 and 15, the differential's corpus 4, 5, 6, 9, 15, 20, 1,000 and 536,870,911.
 
 Beside them, the file holds the entries
 [0028](0028-a-proto-payloads-records-are-read-against-its-message-before-its-library-reads-them.md)
@@ -315,8 +413,15 @@ included:
 
 **The rule has its gate** ([0006](0006-a-rule-has-its-gate.md)): `spec/check.py` over the `proto`
 rows, their `differs` and their schema, and over the `.proto` the spec names; each side's harness,
-which plays every row but those a `differs` excuses its language from; the generated `Probe` held to
-its generator by `yarn check`.
+which plays every row but those a `differs` excuses its language from, its refusal's type and words
+among them; the generated `Probe` held to its generator by `yarn check`. The writer's bound has its
+twins beside each side's codec, one sentence each: 100 written and 101 refused through a child, a
+group and a map's entry; a message 101 deep that reaches no required field; a value 10,000 deep
+refused before its library writes any of it; 41 messages above 60 unknown groups a reading kept,
+their bytes one hex constant on every side; `spec/transcoding.proto`'s `Edges.extra`, a JSON object
+33 deep written and 34 refused; a `google.protobuf.Value`, 50 lists written and 51 refused; and
+the pass skipped where a message's fields cannot nest past the bound. The C# and Rust sides' public
+required walks have a twin each, bounded.
 
 ## Consequences
 

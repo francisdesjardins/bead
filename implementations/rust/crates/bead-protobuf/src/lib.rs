@@ -16,6 +16,13 @@
 //!    whether it was given;
 //! 4. the owned message the view gives the application.
 //!
+//! A value is written in four steps too: refused where its known fields nest past the bound,
+//! before anything walks it further (17.9.3); its required fields walked; Buffa's writing; and its
+//! bytes checked as a reader checks them, so a writer writes nothing its reader refuses (17.2).
+//! Every refusal is a [`CodecRefusal`](bead::CodecRefusal) of 17.2's words, `not its message`,
+//! `nested past 100` or `a required field unset`, Buffa's own error or what Bead found in its
+//! cause.
+//!
 //! [`ProtoCodec`] reads and writes a message Buffa generated, set as `bead_protobuf_build` sets
 //! its generator; [`DynamicCodec`] reads and writes a [`DynamicMessage`] by its descriptor alone,
 //! the one form that holds a required field unset, so the one through which a writer's refusal of
@@ -25,11 +32,12 @@
 
 mod codec;
 mod records;
+mod refusal;
 mod required;
 
 pub use codec::{DynamicCodec, ENCODING, ProtoCodec};
 pub use records::{ProtoSchema, check_records};
-pub use required::{Place, Unset, UnsetStep, check_required, unset_of};
+pub use required::check_required;
 
 #[cfg(feature = "testing")]
 #[doc(hidden)]

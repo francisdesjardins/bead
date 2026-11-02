@@ -491,7 +491,10 @@ through the double; **`serde_json::Value`** the value; **Bead's own canonical wr
 `ryu-js`, RFC 8785; and **`bead::json::to_value`**, Bead's own `serde::Serializer`, the resolver's
 documented road from its type to a `json` payload, which refuses a double that is not finite at any
 depth where `serde_json` writes `null`. What the type cannot hold — a surrogate alone, a name twice,
-`undefined` — is excused by its row; NaN and Infinity are played.
+`undefined` — is excused by its row; NaN and Infinity are played. **`JsonOf<T>`** reads a `json`
+payload as the application's own type through serde, and refuses a JSON value not of it in words of
+its own, `not its type`, as a codec an application writes does (spec 17.2), serde's in its cause:
+the type is the application's, and the matrix's row says so. Its other refusals say 17.2's words.
 
 **A `JWT`'s verification** on RustCrypto: ES256 by `p256`, its signature R‖S's 64 bytes and nothing
 else, HS256 by `hmac`'s constant-time check; pure Rust, so no C toolchain on Windows and

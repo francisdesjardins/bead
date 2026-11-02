@@ -8,6 +8,7 @@ import re
 from datetime import datetime
 
 from details import detail_of as violations_detail, judged, violation
+from make_codecs import payload_outcome
 from spec_version import spec_version
 
 # the conformance files sit one folder up from their generators
@@ -17,6 +18,8 @@ SERVICE = json.load(open(ROOT + 'interop-service.json', encoding='utf8'))
 API = json.load(open(ROOT + 'interop-blueprint.json', encoding='utf8'))['services'][0]
 SERVICE_ID = API['serviceId']
 PROCEDURES = {procedure['procedureName']: procedure['procedureId'] for procedure in API['procedures']}
+# each procedure's request's encoding, which reads its payload
+ENCODINGS = {procedure['procedureName']: procedure['request']['encoding'] for procedure in API['procedures']}
 # the interop's own failures, by their names in its blueprint's catalogue: a code renumbered there moves here
 FAILURES = {failure['failureName']: failure['code'] for failure in API['failures']}
 ON_PURPOSE, REGISTERED_ALREADY = FAILURES['ON_PURPOSE'], FAILURES['REGISTERED_ALREADY']
@@ -82,6 +85,13 @@ def failure(call_id, code, scope=PROTOCOL, credential=None, relays=0, detail=Non
                        'failure': {'code': code, 'scope': scope, 'relays': relays,
                                    **({'detail': detail} if detail is not None else {})},
                        **({'credential': credential} if credential else {})}}
+
+
+def undecodable(call_id, procedure, payload):
+    """A request whose payload does not read, and its PAYLOAD_UNDECODABLE, its detail the reason its
+    codec refuses it for, as spec/codecs.json derives it (17.2, item 1)."""
+    reason = payload_outcome(ENCODINGS[procedure], bytes.fromhex(payload))['refused']
+    return [request(call_id, procedure, payload), failure(call_id, PAYLOAD_UNDECODABLE, detail=reason)]
 
 
 def report(code):
@@ -856,7 +866,7 @@ conversations = [
         json_request(1, 'broken', 'null'), failure(1, PROCEDURE_FAILED, detail=''),
         command(2, 'clock', QUESTION), report('exception'), answer(2, '"noon"')])),
     ('a payload that is not JSON is answered PAYLOAD_UNDECODABLE', ['9.5'], None, [
-        request(1, 'echo', 'FF'), failure(1, PAYLOAD_UNDECODABLE)]),
+        *undecodable(1, 'echo', 'FF')]),
     # 18: checked's rules, which each server gives its descriptor by hand, judged once its payload
     # reads and before its resolver, its violations in the detail of the PAYLOAD_INVALID it answers
     ('a request its rules refuse is answered PAYLOAD_INVALID, its violations in its detail', ['9.5', '17.2.1', '18.2', '18.6'], None, [
@@ -868,7 +878,7 @@ conversations = [
     ('a request its rules take reaches its resolver', ['18.2'], None, [
         json_request(1, 'checked', '{"names":["a","bcd"]}'), result(1, '2')]),
     ('a request of checked that is not JSON is answered PAYLOAD_UNDECODABLE', ['9.2.9', '9.5'], None, [
-        request(1, 'checked', 'FF'), failure(1, PAYLOAD_UNDECODABLE)]),
+        *undecodable(1, 'checked', 'FF')]),
     ('a request of checked of another shape breaks required at names', ['18.2', '18.3'], None, [
         json_request(1, 'checked', '{"names":3}'), failure(1, PAYLOAD_INVALID, detail=checked_detail(None))]),
     # 17: a json payload read as section 17.5 reads it, and written in its canonical form, whichever side
@@ -887,17 +897,17 @@ conversations = [
         on(json_request(1, 'echo', '{"' + SILL + '":2,"x' + BACKSLASH + '"":2}'), 'second'),
         on(result(1, '{"' + SILL + '":2,"x' + BACKSLASH + '"":2}'), 'second')]),
     ('a payload that starts with a byte order mark is answered PAYLOAD_UNDECODABLE', ['17.2.1', '17.5.2'], None, [
-        request(1, 'echo', 'EF BB BF 31'), failure(1, PAYLOAD_UNDECODABLE)]),
+        *undecodable(1, 'echo', 'EF BB BF 31')]),
     ('a payload that names a member twice is answered PAYLOAD_UNDECODABLE', ['17.2.1', '17.5.4'], None, [
-        json_request(1, 'echo', '{"a":1,"a":2}'), failure(1, PAYLOAD_UNDECODABLE)]),
+        *undecodable(1, 'echo', text('{"a":1,"a":2}'))]),
     ('a payload whose string holds a byte that is not UTF-8 is answered PAYLOAD_UNDECODABLE', ['17.2.1', '17.5.1'], None, [
-        request(1, 'echo', '22 FF 22'), failure(1, PAYLOAD_UNDECODABLE)]),
+        *undecodable(1, 'echo', '22 FF 22')]),
     ('a payload whose string holds a surrogate alone is answered PAYLOAD_UNDECODABLE', ['17.2.1', '17.5.5'], None, [
-        json_request(1, 'echo', '"' + BACKSLASH + 'uD800"'), failure(1, PAYLOAD_UNDECODABLE)]),
+        *undecodable(1, 'echo', text('"' + BACKSLASH + 'uD800"'))]),
     ('a payload nested past 64 is answered PAYLOAD_UNDECODABLE', ['17.2.1', '17.5.7'], None, [
-        json_request(1, 'echo', '[' * 65 + ']' * 65), failure(1, PAYLOAD_UNDECODABLE)]),
+        *undecodable(1, 'echo', text('[' * 65 + ']' * 65))]),
     ('a payload whose number is past a double is answered PAYLOAD_UNDECODABLE', ['17.2.1', '17.5.6'], None, [
-        json_request(1, 'echo', '1E400'), failure(1, PAYLOAD_UNDECODABLE)]),
+        *undecodable(1, 'echo', text('1E400'))]),
     ('an admission is asked before the payload is read: one that is not JSON is refused by it, not undecodable', ['9.2.6'], None, [
         request(1, 'denied', 'FF'), failure(1, ACCESS_DENIED, detail=ADMITS_NOBODY),
         request(3, 'whoami', 'FF'), failure(3, SESSION_REQUIRED)]),

@@ -5,6 +5,7 @@
 //! side's `codec.test.ts` and the C# side's `ProtoCodecsTests`, sentence for sentence, beside the
 //! Rust side's own rows of the matrix.
 
+use std::error::Error;
 use std::ptr;
 use std::sync::Arc;
 
@@ -18,9 +19,9 @@ use buffa_descriptor::generated::descriptor::{
     FieldDescriptorProto, FileDescriptorProto, FileDescriptorSet, FileOptions, MessageOptions,
 };
 use buffa_descriptor::reflect::{
-    DynamicMessage, ReflectMessage, ReflectMessageMut, Value, ValueRef,
+    DynamicMessage, MapKey, ReflectMessage, ReflectMessageMut, Value, ValueRef,
 };
-use buffa_descriptor::{DescriptorPool, MessageIndex};
+use buffa_descriptor::{DescriptorPool, FieldKind, MessageIndex};
 use bytes::Bytes;
 
 use super::{DynamicCodec, ProtoCodec};
@@ -46,9 +47,24 @@ fn hex_of(bytes: &[u8]) -> String {
     hexadecimal::text_of(bytes)
 }
 
-// the words of the refusal of a message that leaves the field `name` unset
+// what a refusal says: its reason, then the field its cause names where it names one, its cause
+// whole otherwise
+fn said(refusal: &CodecRefusal) -> String {
+    let cause = refusal
+        .source()
+        .map(ToString::to_string)
+        .unwrap_or_default();
+    let named = cause
+        .strip_prefix("a proto message leaves ")
+        .and_then(|rest| rest.split_once(" unset"))
+        .map_or(cause.as_str(), |(name, _)| name);
+
+    format!("{}: {named}", refusal.reason())
+}
+
+// what the refusal of a message that leaves the field `name` unset says
 fn words_of(name: &str) -> String {
-    format!("a proto message leaves {name} unset")
+    format!("a required field unset: {name}")
 }
 
 // the dynamic codec of the message `name`, by the pool the tests' generated code embeds
@@ -350,7 +366,7 @@ fn refuses_a_message_that_leaves_a_required_field_unset_at_every_depth_a_proto3_
 
         for refused in [typed, dynamic] {
             assert_eq!(
-                refused.map_err(|refusal| refusal.to_string()),
+                refused.map_err(|refusal| said(&refusal)),
                 Err(words_of(name)),
                 "{hex} refused"
             );
@@ -369,11 +385,12 @@ fn refuses_a_payload_and_a_value_with_a_codec_refusal_in_the_same_words() {
         .expect_err("a value that leaves name unset");
 
     assert_eq!(
-        read.to_string(),
+        said(&read),
         words_of("bead.transcoding.v1.Needs.name"),
         "read"
     );
-    assert_eq!(written, read, "written, in the same words");
+    assert_eq!(written, read, "written, of the same reason");
+    assert_eq!(said(&written), said(&read), "in the same words");
 
     // * a closed enum's number its enum does not declare is no value of a required field
     let probe = dynamic_of("bead.codecs.v1.Probe");
@@ -390,7 +407,7 @@ fn refuses_a_payload_and_a_value_with_a_codec_refusal_in_the_same_words() {
     );
 
     assert_eq!(
-        probe.encode(&value).map_err(|refusal| refusal.to_string()),
+        probe.encode(&value).map_err(|refusal| said(&refusal)),
         Err(words_of("bead.codecs.v1.Needs.shade")),
         "a shade of 5"
     );
@@ -407,13 +424,15 @@ fn refuses_bytes_its_library_cannot_read_as_every_reader_refuses_the_library_s_e
 
     let refusal: CodecRefusal = probe.decode(&bytes).expect_err("a text that is not UTF-8");
 
-    // * a CodecRefusal carries no cause: the library's words are its reason's, after the codec's
-    let words = refusal
-        .reason()
-        .strip_prefix("a proto payload is not its message: ")
-        .unwrap_or_default();
-
-    assert!(!words.is_empty(), "Buffa's words: {refusal}");
+    // * its reason 17.2's words, Buffa's error its cause
+    assert_eq!(refusal.reason(), "not its message", "its reason");
+    assert!(
+        refusal
+            .source()
+            .is_some_and(<dyn Error>::is::<buffa::DecodeError>),
+        "Buffa's error its cause: {:?}",
+        refusal.source()
+    );
 }
 
 #[test]
@@ -645,6 +664,445 @@ fn walks_nothing_of_a_message_that_reaches_no_required_field_cycles_included() {
     );
 }
 
+// ── A writer's bound (spec 17.2, 17.9.3) ──────────────────────────────────────
+
+// 60 groups of field 4, which Probe does not declare, one in another: what a reading keeps among
+// its unknown fields, the same bytes on every side
+const GROUPS: &str = "23 23 23 23 23 23 23 23 23 23 23 23 23 23 23 23 23 23 23 23 23 23 23 23 23 23 23 23 23 23 23 23 23 23 23 23 23 23 23 23 23 23 23 23 23 23 23 23 23 23 23 23 23 23 23 23 23 23 23 23 24 24 24 24 24 24 24 24 24 24 24 24 24 24 24 24 24 24 24 24 24 24 24 24 24 24 24 24 24 24 24 24 24 24 24 24 24 24 24 24 24 24 24 24 24 24 24 24 24 24 24 24 24 24 24 24 24 24 24 24";
+
+// a Probe that holds `inner` as its child, as an entry's value under the key "", or as its group
+fn child_of(inner: Probe) -> Probe {
+    Probe {
+        child: MessageField::some(inner),
+        ..Probe::default()
+    }
+}
+
+fn entry_of(inner: Probe) -> Probe {
+    let mut probe = Probe::default();
+
+    probe.children.insert(String::new(), inner);
+
+    probe
+}
+
+fn group_of(inner: Probe) -> Probe {
+    Probe {
+        delimited: MessageField::some(inner),
+        ..Probe::default()
+    }
+}
+
+// a path a chain takes: its name, how a Probe holds the next, the field, and how many messages
+// each step counts
+type Link = (&'static str, fn(Probe) -> Probe, &'static str, usize);
+
+// `deepest`, then `count` messages above it, each holding the one below as `link` does
+fn wrapped<M, L: Fn(M) -> M>(deepest: M, (count, link): (usize, L)) -> M {
+    (0..count).fold(deepest, |inner, _| link(inner))
+}
+
+// the dynamic codec of `M`'s message, by the pool its generated code embeds
+fn dynamic_codec_of<M: ReflectMessage + Default>() -> DynamicCodec {
+    let schema = ProtoSchema::of::<M>();
+
+    DynamicCodec::new(Arc::clone(schema.pool()), schema.message())
+}
+
+// `deepest`, then `count` dynamic messages of its message above it, each holding the one below
+// in its field `name`, as an entry's value under the key "" where it is a map
+fn dynamic_wrapped(deepest: DynamicMessage, (count, name): (usize, &str)) -> DynamicMessage {
+    let pool = Arc::clone(deepest.pool());
+    let index = deepest.message_index();
+    let field = pool
+        .message(index)
+        .field_by_name(name)
+        .expect("a field of the message");
+
+    wrapped(
+        deepest,
+        (count, |inner: DynamicMessage| {
+            let mut above = DynamicMessage::new(Arc::clone(&pool), index);
+            let held = if matches!(field.kind(), FieldKind::Map { .. }) {
+                Value::Map(
+                    core::iter::once((MapKey::String(String::new()), Value::Message(inner)))
+                        .collect(),
+                )
+            } else {
+                Value::Message(inner)
+            };
+
+            above.set(field, held);
+
+            above
+        }),
+    )
+}
+
+// what the typed codec of `M` writes of `value`, and the dynamic codec of `dynamic`, where it is
+// given one, each read back by its codec
+fn written_both<M>(
+    (value, dynamic): (&M, Option<&DynamicMessage>),
+) -> Vec<(&'static str, Result<Bytes, CodecRefusal>)>
+where
+    M: buffa::HasMessageView + ReflectMessage + Default + 'static,
+    for<'a> M::View<'a>: ReflectMessage,
+{
+    let typed = ProtoCodec::<M>::new();
+    let by_descriptor = dynamic_codec_of::<M>();
+    let mut written = vec![(
+        "typed",
+        typed
+            .encode(value)
+            .and_then(|bytes| typed.decode(&bytes).map(|_| bytes)),
+    )];
+
+    if let Some(dynamic) = dynamic {
+        written.push((
+            "dynamic",
+            by_descriptor
+                .encode(dynamic)
+                .and_then(|bytes| by_descriptor.decode(&bytes).map(|_| bytes)),
+        ));
+    }
+
+    written
+}
+
+// written alike by each codec, and read back
+fn assert_written<M>(given: (&M, Option<&DynamicMessage>), what: &str)
+where
+    M: buffa::HasMessageView + ReflectMessage + Default + 'static,
+    for<'a> M::View<'a>: ReflectMessage,
+{
+    let written: Vec<String> = written_both(given)
+        .into_iter()
+        .map(|(codec, written)| {
+            written.map_or_else(
+                |refusal| panic!("{what}, {codec}: {refusal}"),
+                |bytes| hex_of(&bytes),
+            )
+        })
+        .collect();
+
+    assert!(
+        written.windows(2).all(|pair| pair[0] == pair[1]),
+        "{what}, written alike"
+    );
+}
+
+// refused by each codec, for its depth
+fn assert_refused<M>(given: (&M, Option<&DynamicMessage>), what: &str)
+where
+    M: buffa::HasMessageView + ReflectMessage + Default + 'static,
+    for<'a> M::View<'a>: ReflectMessage,
+{
+    for (codec, written) in written_both(given) {
+        assert_eq!(
+            written
+                .map(|bytes| hex_of(&bytes))
+                .map_err(|refusal| refusal.to_string()),
+            Err("nested past 100".to_owned()),
+            "{what}, {codec}"
+        );
+    }
+}
+
+// `run` on a thread of 2 MiB, a test thread's stack
+fn on_a_thread_of_2_mib(run: fn()) {
+    std::thread::Builder::new()
+        .stack_size(2 << 20)
+        .spawn(run)
+        .expect("a thread")
+        .join()
+        .expect("run without a panic");
+}
+
+#[test]
+fn refuses_to_write_a_message_nested_more_than_100_deep_below_the_top_one_through_a_child_a_group_and_a_map_s_entry()
+ {
+    let codec = dynamic_codec_of::<Probe>();
+    let empty = || DynamicMessage::new(Arc::clone(codec.schema().pool()), codec.schema().message());
+    let links: [Link; 3] = [
+        ("a child", child_of, "child", 1),
+        ("a group", group_of, "delimited", 1),
+        ("a map's entry", entry_of, "children", 2),
+    ];
+
+    for (name, link, field, per) in links {
+        for (count, is_written) in [(100 / per, true), (100 / per + 1, false)] {
+            let typed = wrapped(Probe::default(), (count, link));
+            let dynamic = dynamic_wrapped(empty(), (count, field));
+            let what = format!("{count} through {name}");
+
+            if is_written {
+                assert_written((&typed, Some(&dynamic)), &what);
+            } else {
+                assert_refused((&typed, Some(&dynamic)), &what);
+            }
+        }
+    }
+
+    // * a map of scalars' entry is a message on the wire: 99 below the top, then its entry
+    let mut tallied = Probe::default();
+    let mut held = empty();
+
+    tallied.tallies.insert("a".to_owned(), 1);
+    held.set(
+        codec
+            .schema()
+            .pool()
+            .message(codec.schema().message())
+            .field_by_name("tallies")
+            .expect("Probe.tallies"),
+        Value::Map(core::iter::once((MapKey::String("a".to_owned()), Value::U32(1))).collect()),
+    );
+
+    assert_written(
+        (
+            &wrapped(tallied.clone(), (99, child_of)),
+            Some(&dynamic_wrapped(held.clone(), (99, "child"))),
+        ),
+        "a scalar map's entry at 100",
+    );
+    assert_refused(
+        (
+            &wrapped(tallied, (100, child_of)),
+            Some(&dynamic_wrapped(held, (100, "child"))),
+        ),
+        "a scalar map's entry at 101",
+    );
+}
+
+#[test]
+fn refuses_to_write_a_message_101_deep_that_reaches_no_required_field() {
+    let alone = |inner: Alone| Alone {
+        alone: MessageField::some(inner),
+        ..Alone::default()
+    };
+    let schema = ProtoSchema::of::<Alone>();
+
+    assert!(
+        !schema.root().reaches && schema.root().nests_past,
+        "Alone reaches no required field, and nests past"
+    );
+
+    let codec = dynamic_codec_of::<Alone>();
+    let empty = || DynamicMessage::new(Arc::clone(codec.schema().pool()), codec.schema().message());
+
+    assert_written(
+        (
+            &wrapped(Alone::default(), (100, alone)),
+            Some(&dynamic_wrapped(empty(), (100, "alone"))),
+        ),
+        "100 below the top",
+    );
+    assert_refused(
+        (
+            &wrapped(Alone::default(), (101, alone)),
+            Some(&dynamic_wrapped(empty(), (101, "alone"))),
+        ),
+        "101 below the top",
+    );
+}
+
+#[test]
+fn refuses_a_value_10_000_deep_before_its_library_writes_any_of_it() {
+    // ! no walk and no write of Buffa's reached: neither recurses 10,000 deep on a thread of 2 MiB.
+    // Each value is given back unread, since its drop would
+    #[expect(
+        clippy::mem_forget,
+        reason = "a value 10,000 deep, whose drop recurses as deep, never dropped"
+    )]
+    fn run() {
+        let typed = wrapped(Probe::default(), (10_000, child_of));
+
+        assert_eq!(
+            ProtoCodec::<Probe>::new()
+                .encode(&typed)
+                .map_err(|refusal| refusal.to_string()),
+            Err("nested past 100".to_owned()),
+            "the typed codec"
+        );
+
+        let codec = dynamic_codec_of::<Probe>();
+        let dynamic = dynamic_wrapped(
+            DynamicMessage::new(Arc::clone(codec.schema().pool()), codec.schema().message()),
+            (10_000, "child"),
+        );
+
+        assert_eq!(
+            codec
+                .encode(&dynamic)
+                .map_err(|refusal| refusal.to_string()),
+            Err("nested past 100".to_owned()),
+            "the dynamic codec"
+        );
+
+        let alone = wrapped(
+            Alone::default(),
+            (10_000, |inner: Alone| Alone {
+                alone: MessageField::some(inner),
+                ..Alone::default()
+            }),
+        );
+
+        assert_eq!(
+            ProtoCodec::<Alone>::new()
+                .encode(&alone)
+                .map_err(|refusal| refusal.to_string()),
+            Err("nested past 100".to_owned()),
+            "a message that reaches no required field"
+        );
+
+        core::mem::forget(typed);
+        core::mem::forget(dynamic);
+        core::mem::forget(alone);
+    }
+
+    on_a_thread_of_2_mib(run);
+}
+
+#[test]
+fn refuses_to_write_41_messages_above_60_unknown_groups_a_reading_kept() {
+    let typed = ProtoCodec::<Probe>::new();
+    let dynamic = dynamic_codec_of::<Probe>();
+    let read = typed.decode(&bytes_of(GROUPS)).expect("60 groups read");
+    let held = dynamic
+        .decode(&bytes_of(GROUPS))
+        .expect("60 groups read by the dynamic codec");
+
+    // * the depth pass sees none of them: the check over the written bytes refuses
+    for (levels, is_written) in [(40, true), (41, false)] {
+        let written = [
+            typed.encode(&wrapped(read.clone(), (levels, child_of))),
+            dynamic.encode(&dynamic_wrapped(held.clone(), (levels, "child"))),
+        ];
+
+        for (codec, written) in ["typed", "dynamic"].into_iter().zip(written) {
+            if is_written {
+                let bytes =
+                    written.unwrap_or_else(|refusal| panic!("{levels}, {codec}: {refusal}"));
+
+                assert!(
+                    typed.decode(&bytes).is_ok(),
+                    "{levels} levels, {codec}, read back"
+                );
+            } else {
+                assert_eq!(
+                    written
+                        .map(|bytes| hex_of(&bytes))
+                        .map_err(|refusal| refusal.to_string()),
+                    Err("nested past 100".to_owned()),
+                    "{levels} levels, {codec}"
+                );
+            }
+        }
+    }
+}
+
+// `inner` as the bytes of a Probe's child, its field 3's record
+fn child_bytes(inner: &[u8]) -> Vec<u8> {
+    let mut bytes = vec![0x1A];
+    let mut length = inner.len();
+
+    while length >= 0x80 {
+        bytes.push(u8::try_from(length & 0x7F).expect("seven bits") | 0x80);
+        length >>= 7;
+    }
+
+    bytes.push(u8::try_from(length).expect("seven bits"));
+    bytes.extend_from_slice(inner);
+
+    bytes
+}
+
+#[test]
+fn reads_a_map_s_entry_100_deep_that_holds_no_value_and_refuses_to_write_the_value_its_library_gives_it()
+ {
+    // * 99 children below the top, the last holding an entry of children with no key and no value:
+    // 100 deep on the wire, which a reader takes; its library gives the entry its value's default,
+    // a message 101 deep, which its writer refuses
+    let deepest = (0..99).fold(vec![0x62, 0x00], |inner, _| child_bytes(&inner));
+    let deeper = Bytes::from(child_bytes(&deepest));
+    let deepest = Bytes::from(deepest);
+    let typed = ProtoCodec::<Probe>::new();
+    let dynamic = dynamic_codec_of::<Probe>();
+    let read = typed.decode(&deepest).expect("an entry 100 deep read");
+    let held = dynamic
+        .decode(&deepest)
+        .expect("an entry 100 deep read by the dynamic codec");
+
+    assert_eq!(
+        typed.encode(&read).map_err(|refusal| refusal.to_string()),
+        Err("nested past 100".to_owned()),
+        "the typed codec"
+    );
+    assert_eq!(
+        dynamic.encode(&held).map_err(|refusal| refusal.to_string()),
+        Err("nested past 100".to_owned()),
+        "the dynamic codec"
+    );
+
+    for (codec, refusal) in [
+        ("typed", typed.decode(&deeper).map(drop)),
+        ("dynamic", dynamic.decode(&deeper).map(drop)),
+    ] {
+        assert_eq!(
+            refusal.map_err(|refusal| refusal.to_string()),
+            Err("nested past 100".to_owned()),
+            "an entry 101 deep, {codec}"
+        );
+    }
+}
+
+#[test]
+fn refuses_to_write_a_struct_nested_past_the_bound_a_member_three_messages_deep() {
+    // a JSON object `levels` deep, its innermost {"leaf": 1}: each level a Struct, its entry and
+    // a Value, three messages
+    let object_of = |levels: usize| {
+        let mut leaf = buffa_types::Struct::new();
+
+        leaf.insert("leaf", 1.0_f64);
+
+        wrapped(
+            leaf,
+            (levels - 1, |inner: buffa_types::Struct| {
+                let mut above = buffa_types::Struct::new();
+
+                above.insert("k", inner);
+
+                above
+            }),
+        )
+    };
+    let edges = |levels: usize| Edges {
+        extra: MessageField::some(object_of(levels)),
+        ..Edges::default()
+    };
+
+    // * the typed codec alone: a dynamic message of these is no generated message's
+    assert_written((&edges(33), None), "a JSON object 33 deep");
+    assert_refused((&edges(34), None), "a JSON object 34 deep");
+}
+
+#[test]
+fn refuses_to_write_a_value_nested_past_the_bound_through_its_lists() {
+    // a Value of a list of one Value, that many lists deep, its innermost the number 1: each list
+    // two messages, a ListValue and a Value
+    let listed = |lists: usize| {
+        wrapped(
+            buffa_types::Value::from(1.0_f64),
+            (lists, |inner| {
+                buffa_types::Value::from(buffa_types::ListValue::from_values([inner]))
+            }),
+        )
+    };
+
+    assert_written((&listed(50), None), "50 lists deep");
+    assert_refused((&listed(51), None), "51 lists deep");
+}
+
 // ── The Rust side's own ───────────────────────────────────────────────────────
 
 // a matrix row: no counterpart, since a Rust String holds no surrogate alone; the string the other
@@ -705,9 +1163,7 @@ fn a_typed_value_leaves_no_required_field_unset_and_holds_no_undeclared_number_o
         );
 
         assert_eq!(
-            dynamic
-                .encode(&value)
-                .map_err(|refusal| refusal.to_string()),
+            dynamic.encode(&value).map_err(|refusal| said(&refusal)),
             Err(words_of(name)),
             "{name} refused"
         );
@@ -726,7 +1182,7 @@ fn refuses_a_message_that_leaves_an_edition_s_required_message_field_unset_readi
         typed
             .decode(&bytes_of(""))
             .map(|_| ())
-            .map_err(|refusal| refusal.to_string()),
+            .map_err(|refusal| said(&refusal)),
         words,
         "read by the typed codec"
     );
@@ -734,7 +1190,7 @@ fn refuses_a_message_that_leaves_an_edition_s_required_message_field_unset_readi
         dynamic_of("bead.transcoding.v1.NeedsUpdate")
             .decode(&bytes_of(""))
             .map(|_| ())
-            .map_err(|refusal| refusal.to_string()),
+            .map_err(|refusal| said(&refusal)),
         words,
         "read by the dynamic codec"
     );
@@ -742,7 +1198,7 @@ fn refuses_a_message_that_leaves_an_edition_s_required_message_field_unset_readi
         typed
             .encode(&NeedsUpdate::default())
             .map(|_| ())
-            .map_err(|refusal| refusal.to_string()),
+            .map_err(|refusal| said(&refusal)),
         words,
         "written"
     );
@@ -764,9 +1220,9 @@ fn writes_a_dynamic_message_of_its_own_message_alone() {
     assert_eq!(
         probe
             .encode(&message_of(&needs, vec![]))
-            .map_err(|refusal| refusal.to_string()),
+            .map_err(|refusal| said(&refusal)),
         Err(
-            "a proto value of bead.codecs.v1.Needs, where its codec writes bead.codecs.v1.Probe"
+            "not its message: a proto value of bead.codecs.v1.Needs, where its codec writes bead.codecs.v1.Probe"
                 .to_owned()
         ),
         "a Needs given to Probe's codec"

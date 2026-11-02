@@ -8,16 +8,17 @@ namespace Bead.Tests;
 
 /// <summary>
 /// Bead's codecs, <c>spec/codecs.json</c>, played whole through this side's (decisions 0016 and
-/// 0031): each payload read in its encoding, then refused, or written back to the bytes given, the
+/// 0031): each payload read in its encoding, then refused, a refusal's message its reason (spec
+/// 17.2), or written back to the bytes given, the
 /// value read equal by <see cref="JsonElement.DeepEquals"/> to the value read of those bytes and its
 /// raw text those very bytes, so that the value handed on is the canonical form's; a <c>proto</c>
 /// payload read as <c>Probe</c>, of <c>spec/codecs.proto</c>, through the runtime codec generated
 /// code names, <see cref="ProtoCodecs"/>: its records checked first (decision 0028), a closed enum's
 /// undeclared number set aside (17.9.8), its required fields judged once it is read (17.9.7,
 /// decision 0042), then refused, or its fields those read; each value built from its form and
-/// written, to its bytes or refused. An entry a row of the support matrix excuses this side from, a value no
-/// <see cref="JsonElement"/> holds, is counted and not played. The TypeScript side plays the same
-/// file.
+/// written, to its bytes or refused, a chain of probes among them, built from the deepest up. An
+/// entry a row of the support matrix excuses this side from, a value no <see cref="JsonElement"/>
+/// holds, is counted and not played. The TypeScript and the Rust sides play the same file.
 /// </summary>
 public sealed class CodecsTests
 {
@@ -154,9 +155,56 @@ public sealed class CodecsTests
         }));
     }
 
-    // a probe built from its form: one field, or none; needs of the fields it gives
+    // a chain of `count` probes below the top one, each holding the next as `link` does, the deepest
+    // tallied where it is: built from the deepest up, so no recursion builds it
+    private static Probe ChainOf(int count, (bool IsTallied, Func<Probe, Probe> Link) chain)
+    {
+        var probe = chain.IsTallied ? new Probe { Tallies = { ["a"] = 1 } } : new Probe();
+
+        for (var above = 0; above < count; above += 1)
+        {
+            probe = chain.Link(probe);
+        }
+
+        return probe;
+    }
+
+    // a probe built from its form: one field, or none; needs of the fields it gives; or a chain of
+    // probes through child, children under the key "" or delimited (spec 17.9.3)
     private static Probe ProbeOf(JsonElement form)
     {
+        var isTallied = form.TryGetProperty("tallied", out var tallied) && tallied.GetBoolean();
+
+        static Probe Child(Probe inner)
+        {
+            return new Probe { Child = inner };
+        }
+
+        static Probe Entry(Probe inner)
+        {
+            return new Probe { Children = { [""] = inner } };
+        }
+
+        static Probe Group(Probe inner)
+        {
+            return new Probe { Delimited = inner };
+        }
+
+        if (form.TryGetProperty("nested", out var nested))
+        {
+            return ChainOf(nested.GetInt32(), (isTallied, Child));
+        }
+
+        if (form.TryGetProperty("entries", out var entries))
+        {
+            return ChainOf(entries.GetInt32(), (isTallied, Entry));
+        }
+
+        if (form.TryGetProperty("delimited", out var delimited))
+        {
+            return ChainOf(delimited.GetInt32(), (isTallied, Group));
+        }
+
         var probe = new Probe();
 
         if (form.TryGetProperty("needs", out var needs))
@@ -193,10 +241,11 @@ public sealed class CodecsTests
     }
 
     // how deep messages nest below a probe, through child, delimited and children, a map's entry
-    // counting as a message and its value as another
+    // counting as a message and its value as another, and through an entry of tallies, a message on
+    // the wire
     private static int NestedOf(Probe probe)
     {
-        var nested = 0;
+        var nested = probe.Tallies.Count > 0 ? 1 : 0;
 
         foreach (var message in new[] { probe.Child, probe.Delimited })
         {
@@ -279,6 +328,16 @@ public sealed class CodecsTests
         };
     }
 
+    // holds `thrown` to a refusal, a FormatException, whose message is the entry's reason, exactly
+    private static void Refused(JsonElement entry, Func<object> coding)
+    {
+        var thrown = Record.Exception(coding);
+
+        // ! by its type and its message alone: a value refused for its depth is never shown
+        Assert.True(thrown is FormatException, $"refused with {thrown?.GetType().Name}");
+        Assert.Equal(entry.GetProperty("refused").GetString(), thrown?.Message);
+    }
+
     // definition
 
     /// <summary>The names of every payload this side plays.</summary>
@@ -300,7 +359,7 @@ public sealed class CodecsTests
             case "json":
                 if (isRefused)
                 {
-                    Assert.Throws<FormatException>(() =>
+                    Refused(entry, () =>
                     {
                         return Payloads.ReadJson(bytes);
                     });
@@ -321,7 +380,7 @@ public sealed class CodecsTests
             case "text":
                 if (isRefused)
                 {
-                    Assert.Throws<FormatException>(() =>
+                    Refused(entry, () =>
                     {
                         return Payloads.ReadText(bytes);
                     });
@@ -338,9 +397,9 @@ public sealed class CodecsTests
             case "proto":
                 if (isRefused)
                 {
-                    // * a refusal is a FormatException, as every codec's reader refuses, whether the
-                    // check, the walk or Google.Protobuf past them refuses: its words are each side's
-                    Assert.Throws<FormatException>(() =>
+                    // * a refusal is a FormatException of its reason, as every codec's reader refuses,
+                    // whether the check, the walk or Google.Protobuf past them refuses
+                    Refused(entry, () =>
                     {
                         return ProbeCodec.Decode(bytes);
                     });
@@ -370,7 +429,7 @@ public sealed class CodecsTests
 
         if (entry.TryGetProperty("refused", out _))
         {
-            Assert.Throws<FormatException>(() =>
+            Refused(entry, () =>
             {
                 return WrittenOf(entry);
             });

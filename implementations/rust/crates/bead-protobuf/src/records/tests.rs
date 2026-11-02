@@ -3,6 +3,7 @@
 //! `records.test.ts` and the C# side's `ProtoRecordsTests`. `spec/codecs.json`'s entries play the
 //! check through the codecs.
 
+use std::error::Error;
 use std::iter;
 use std::ptr;
 use std::sync::Arc;
@@ -298,8 +299,8 @@ fn refuses_a_varint_of_10_bytes_past_64_bits_known_unknown_or_packed() {
         let refusal = check_records(&bytes_of(hex), &schema).expect_err(hex);
 
         assert_eq!(
-            refusal.reason(),
-            "a proto payload is not its message: a varint past 64 bits",
+            (refusal.reason(), refusal.source().map(ToString::to_string)),
+            ("not its message", Some("a varint past 64 bits".to_owned())),
             "{hex}"
         );
     }

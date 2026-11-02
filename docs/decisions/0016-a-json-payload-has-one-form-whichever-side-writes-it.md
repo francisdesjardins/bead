@@ -1,9 +1,10 @@
 # 0016 — A JSON payload is read as I-JSON, its noncharacters aside, and written in RFC 8785's canonical form, the same bytes from every language
 
 - **Status**: accepted
-- **Scope**: spec section 17, and the lines that point to it; debugging 4.3 and 10.1;
-  `spec/codecs.json`, its gate, and nine conversations of `spec/conversations.json`; every
-  runtime's payload codecs, public
+- **Scope**: spec section 17, and the lines that point to it, a codec's refusal said in its reason
+  among them; debugging 4.3 and 10.1; `spec/codecs.json`, its gate, nine conversations of
+  `spec/conversations.json`, and the eight it answers `PAYLOAD_UNDECODABLE`, a reason their detail;
+  every runtime's payload codecs, public
   ([0018](0018-a-services-procedures-are-typed-descriptors-served-and-called-through-one-layer.md)),
   and the interop's serializers, which use them; both service managers, where a value does not
   write; the support matrix
@@ -285,11 +286,28 @@ written back of what was read, or `refused` and its reason; and `values`, a valu
 in a form a file can hold, a named form among them for what no JSON text holds, and either the bytes
 written, or `refused` and its reason.
 
-**A reason is derived, and held by the regeneration alone**, as a duration's is
-([0014](0014-every-place-that-takes-a-duration-is-a-row-of-one-file.md)): `not UTF-8`,
-`a byte order mark`, `not JSON`, `a name twice`, `a surrogate alone`, `a number past a double`,
-`nested past 64`, `not a finite number`, `no JSON value`. No harness reads it: a refusal answers
-`PAYLOAD_UNDECODABLE` whatever the reason, and its words are each side's.
+**A refusal says its reason, in one set of words on every side** (spec 17.2): `not UTF-8`,
+`a byte order mark`, `not JSON`, `a name twice`, `a surrogate alone`, `a number past a double` and
+`nested past 64` of a reader; `a surrogate alone`, `a name twice`, `nested past 64`,
+`not a finite number` and `no JSON value` of a writer; and the `proto` codec's, `not its message`,
+`nested past 100` and `a required field unset`
+([0031](0031-a-proto-payload-is-protobufs-format-and-bead-states-only-its-own.md)). Each is derived
+by the regeneration, as a duration's is
+([0014](0014-every-place-that-takes-a-duration-is-a-row-of-one-file.md)), and every harness checks
+it, payloads and values: a built-in codec's refusal's message is its reason, exactly. A request's
+payload that does not read is answered `PAYLOAD_UNDECODABLE` with that reason as its detail, eight
+conversations checking it; a result's and a notification's carry the same words locally; and the
+HTTP gateway's problem carries them as the failure's detail. RFC 9457 §3.1.4 asks a `detail` to be
+"a human-readable explanation specific to this occurrence of the problem", one that "ought to focus
+on helping the client correct the problem", and a consumer not to parse it: fixed words a person
+reads, the code being the type. The gateway already sends fixed words for its own reading,
+`nested past 100` among them, and
+[0035](0035-a-payload-that-reads-is-held-to-its-messages-rules-before-its-resolver-sees-it.md)
+sends a payload's violations in its detail, gated by cases. What more a side knows of a refusal —
+its library's own words, which differ by library and version, the record a check refused, a
+required field's full name and path — rides in the refusal's cause, for its reports and its trace,
+never on the wire. The refusal's types stay each side's, a row of the matrix; a codec an
+application writes refuses in words of its own.
 
 **Each side plays the file in one harness.** For a payload, its reader reads the bytes, and the
 harness checks the refusal, or that its writer writes back the bytes given and that the value read
