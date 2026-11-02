@@ -80,7 +80,7 @@ const PACKAGE = JSON.parse(
 test.describe('createRouterCore', () => {
   test.describe('takes what comes in', () => {
     // debugging 5.2
-    test('read, traced, then dispatched; what does not read is reported, not traced', () => {
+    test('read, traced, then dispatched; what does not read is reported, not traced', async () => {
       const { port, reported, traced } = createPort();
       using core = createRouterCore(port);
       const seen: IRequestResolverProps<Handle>[] = [];
@@ -98,6 +98,7 @@ test.describe('createRouterCore', () => {
       ]);
       expect(reported[0]?.[0].cause).toBeInstanceOf(TypeError);
       expect(traced).toEqual([`rx 10 ${String(callId)} a`]);
+      await sleep(0);
       // admitted already: its resolver asks nothing again
       expect(seen).toEqual([
         {
@@ -251,6 +252,7 @@ test.describe('createRouterCore', () => {
       await sleep(0);
       // the call closed: a request on its call id is dispatched
       core.receive(requestOf(1), 'a');
+      await sleep(0);
 
       expect(sent).toEqual([]);
       expect(
@@ -498,7 +500,7 @@ test.describe('createRouterCore', () => {
       core.receive(requestOf(1, { credential, destinationId: 5 }), 'a');
       expect(handled).toEqual([]);
       delete handler.admit;
-      await Promise.resolve();
+      await sleep(0);
 
       expect(handled).toHaveLength(1);
       expect(handled[0]).toMatchObject({
@@ -1407,13 +1409,15 @@ test.describe('createRouterCore', () => {
       core.receive(requestOf(1), 'a');
       core.receive(requestOf(3, { credential: OPAQUE }), 'b');
 
-      // nothing awaited: each resolved, was admitted and dispatched as it came
+      // nothing awaited: each resolved and was admitted as it came
       expect(asked).toEqual([
         ['a', 1, undefined, false],
         ['admit', 1, undefined],
         ['b', 3, OPAQUE, false],
         ['admit', 3, SESSION],
       ]);
+      // then handed to its resolver in a later turn
+      await sleep(0);
       expect(
         seen.map(({ header, session }) => {
           return [header.callId, session];
@@ -1558,6 +1562,7 @@ test.describe('createRouterCore', () => {
         return undefined;
       };
       fallbackCore.receive(requestOf(11), 'a');
+      await sleep(0);
       expect(failuresOf(fallback.sent)).toEqual([
         [1, ProtocolCode.SESSION_REQUIRED, 'the credential does not hold'],
         [3, ProtocolCode.SESSION_REQUIRED, 'no credential came'],
@@ -2477,11 +2482,13 @@ test.describe('createRouterCore', () => {
       boundedCore.registerResolver(resolverOf({ ...echo, maximumPayloadBytes: 10 }, boundedSeen));
       bounded.control.sendErrors.set('a', new Error('the transport refused the result'));
       boundedCore.receive(requestOf(1, { payload: Uint8Array.of(1) }), 'a');
+      await sleep(0);
       await expect(
         boundedCore.respond({ payload: Uint8Array.of(1) }, boundedSeen[0]!)
       ).rejects.toThrow('the transport refused the result');
       expect(boundedTold).toEqual(['before', 'undo']);
       boundedCore.receive(requestOf(3, { payload: Uint8Array.of(1) }), 'a');
+      await sleep(0);
       await expect(
         boundedCore.respond({ payload: new Uint8Array(11) }, boundedSeen[1]!)
       ).rejects.toMatchObject({ code: ProtocolCode.PAYLOAD_TOO_LARGE });
@@ -2627,6 +2634,7 @@ test.describe('createRouterCore', () => {
         }, echo)
       );
       core.receive(requestOf(5), 'a');
+      await sleep(0);
       core.receive(cancelOf(5), 'a');
       await sleep(0);
       // free again: a request on it is dispatched
@@ -2683,6 +2691,7 @@ test.describe('createRouterCore', () => {
       );
       core.receive(requestOf(5), 'a');
       core.receive(requestOf(5), 'b');
+      await sleep(0);
       core.rejectPending('a closed', 'a');
       await sleep(0);
 
@@ -3187,6 +3196,7 @@ test.describe('createRouterCore', () => {
       expect(seen).toEqual([]);
 
       core.receive(chunk(232, 280), 'a');
+      await sleep(0);
 
       expect(
         seen.map(({ header, payload: whole }) => {
@@ -3225,6 +3235,7 @@ test.describe('createRouterCore', () => {
       core.receive(chunkOf(1, { offset: 88, payload: payload.subarray(88), total: 100 }), 'a');
       // whole and dispatched, its call not answered yet
       core.receive(requestOf(3, { payload: Uint8Array.of(1), total: 8 }), 'a');
+      await sleep(0);
       await core.respond(
         { payload: Uint8Array.of(9) },
         { connectionHandle: 'a', header: seen[0]?.header ?? headerOf(1) }
@@ -3250,6 +3261,7 @@ test.describe('createRouterCore', () => {
       );
       sameCore.receive(chunkOf(1, { offset: 92, payload: payload.subarray(92), total: 100 }), 'a');
       sameCore.receive(requestOf(3, { payload: payload.subarray(0, 44), total: 100 }), 'a');
+      await sleep(0);
       await sameCore.respond({ payload: Uint8Array.of(1) }, sameSeen[0]!);
       sameCore.receive(requestOf(5, { payload: payload.subarray(0, 44), total: 100 }), 'a');
       expect(answersOf(same.sent)).toEqual([
@@ -3743,6 +3755,7 @@ test.describe('createRouterCore', () => {
         'a'
       );
       wholeCore.receive(chunkOf(1, { offset: 92, payload: payload.subarray(92), total: 100 }), 'a');
+      await sleep(0);
       expect(seen[0]?.payload).toEqual(payload);
       wholeClock.tick(10_000);
       wholeCore.receive(chunkOf(1, { offset: 100, payload: Uint8Array.of(1), total: 101 }), 'a');
@@ -3834,6 +3847,7 @@ test.describe('createRouterCore', () => {
         let isAnswered = false;
 
         core.receive(requestOf(1), 'a');
+        await sleep(0);
 
         const responding = answerOf(answering, { payload }).then(() => {
           isAnswered = true;
@@ -3850,6 +3864,7 @@ test.describe('createRouterCore', () => {
         await responding;
         // answered: a request on its call id is dispatched
         core.receive(requestOf(1), 'a');
+        await sleep(0);
 
         expect(seen).toHaveLength(2);
         expect(piecesOf(sent)).toEqual(
@@ -3918,6 +3933,7 @@ test.describe('createRouterCore', () => {
 
       core.registerResolver(resolverOf(echo, seen));
       core.receive(requestOf(1), 'a');
+      await sleep(0);
       await core.respond(
         { payload },
         { connectionHandle: 'a', header: seen[0]?.header ?? headerOf(1) }
@@ -3957,6 +3973,7 @@ test.describe('createRouterCore', () => {
           requestOf(1, { payload: total === 100 ? Uint8Array.of(1) : new Uint8Array(0) }),
           'a'
         );
+        await sleep(0);
 
         const responding = answerOf(answering, { payload: patternOf(total) });
 
@@ -4041,6 +4058,7 @@ test.describe('createRouterCore', () => {
           }),
           'a'
         );
+        await sleep(0);
 
         await expect(answerOf({ core, seen }, { payload: Uint8Array.of(1) })).rejects.toThrow(
           message
@@ -4052,6 +4070,7 @@ test.describe('createRouterCore', () => {
           }),
           'a'
         );
+        await sleep(0);
 
         expect(seen).toHaveLength(2);
         expect(reported).toEqual([]);
@@ -4071,6 +4090,7 @@ test.describe('createRouterCore', () => {
           requestOf(1, { payload: total === 150 ? new Uint8Array(0) : Uint8Array.of(1) }),
           'a'
         );
+        await sleep(0);
 
         const responding = answerOf(answering, { payload: patternOf(total) });
 
@@ -4086,6 +4106,7 @@ test.describe('createRouterCore', () => {
           requestOf(1, { payload: total === 150 ? new Uint8Array(0) : Uint8Array.of(2) }),
           'a'
         );
+        await sleep(0);
 
         expect(seen).toHaveLength(2);
         expect(reported).toEqual([]);
@@ -4100,6 +4121,7 @@ test.describe('createRouterCore', () => {
       const refused = new Error('the transport refused the opening');
 
       core.receive(requestOf(1, { payload: Uint8Array.of(1) }), 'a');
+      await sleep(0);
       control.sendErrors.set('a', refused);
 
       await expect(answerOf(answering, { payload: patternOf(100) })).rejects.toBe(refused);
@@ -4108,6 +4130,7 @@ test.describe('createRouterCore', () => {
       // forgotten: a request on its call id is dispatched
       control.sendErrors.delete('a');
       core.receive(requestOf(1, { payload: Uint8Array.of(2) }), 'a');
+      await sleep(0);
 
       expect(seen).toHaveLength(2);
       expect(reported).toEqual([]);
@@ -4121,6 +4144,7 @@ test.describe('createRouterCore', () => {
       let responding: Promise<unknown> = Promise.resolve();
 
       core.receive(requestOf(1), 'a');
+      await sleep(0);
 
       const { armed } = timersBy(clock, () => {
         asking = core.request(patternOf(200), { connectionHandle: 'a', options, procedure: echo });
@@ -4148,6 +4172,7 @@ test.describe('createRouterCore', () => {
       await sleep(0);
       // its call forgotten, a request on its call id is dispatched
       core.receive(requestOf(1), 'a');
+      await sleep(0);
 
       expect(seen).toHaveLength(2);
       expect(answersOf(sent).slice(2)).toEqual([
@@ -4182,6 +4207,7 @@ test.describe('createRouterCore', () => {
       const result = createAnswering({ transferInactivityTimeout: 2_000 });
       using answeringResult = result.core;
       answeringResult.receive(requestOf(1, { payload: Uint8Array.of(1) }), 'a');
+      await sleep(0);
       const answer = answerOf(result, { payload: patternOf(300) });
       result.clock.tick(2_000);
       await expect(answer).rejects.toMatchObject({ code: ProtocolCode.TRANSFER_STALLED });
@@ -4201,6 +4227,7 @@ test.describe('createRouterCore', () => {
         ProtocolCode.TRANSFER_STALLED,
       ]);
       answeringResult.receive(requestOf(1, { payload: Uint8Array.of(2) }), 'a');
+      await sleep(0);
       expect(result.seen).toHaveLength(2);
       expect(result.reported).toEqual([]);
       expect(
@@ -4242,6 +4269,7 @@ test.describe('createRouterCore', () => {
         }),
         'a'
       );
+      await sleep(0);
 
       const subscribing = {
         connectionHandle: 'a',
@@ -4274,6 +4302,7 @@ test.describe('createRouterCore', () => {
         requestOf(1, { opensSubscription: true, payload: Uint8Array.of(1) }),
         'a'
       );
+      await sleep(0);
       await expect(
         rejectedCore.respond({ payload: patternOf(100) }, rejectedSeen[0]!)
       ).rejects.toMatchObject({ code: ProtocolCode.PAYLOAD_TOO_LARGE });
@@ -4295,6 +4324,7 @@ test.describe('createRouterCore', () => {
         return TOKEN;
       };
       core.receive(requestOf(1), 'a');
+      await sleep(0);
 
       const responding = answerOf(answering, { payload: patternOf(100) });
 
@@ -4320,6 +4350,7 @@ test.describe('createRouterCore', () => {
       );
 
       core.receive(requestOf(1), 'a');
+      await sleep(0);
 
       const responding = settledOf(answerOf(answering, { payload: patternOf(150) }));
 

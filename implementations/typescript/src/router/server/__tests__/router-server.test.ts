@@ -561,9 +561,10 @@ test.describe('createRouterServer', () => {
       await sleep(0);
 
       expect(asked).toEqual([31, 33]);
+      // the refusal in the turn its request came, the result in the later turn its resolver runs in
       expect(answersOf(sent)).toEqual([
-        [first, 'result', 31, 'hi!'],
         [first, 'failure', 33, ProtocolCode.ACCESS_DENIED],
+        [first, 'result', 31, 'hi!'],
       ]);
     });
 
@@ -603,19 +604,20 @@ test.describe('createRouterServer', () => {
       deliver(first, requestOf(35, { credential: { ...OPAQUE, token: OTHER_TOKEN } }));
       await sleep(0);
 
+      // each callback in a later turn than its request's, behind the requests delivered with it
       expect(order).toEqual([
         ['session', first, 31, false],
         ['admit', 31, undefined],
-        ['callback', 31, undefined],
         ['session', first, 33, false],
         ['admit', 33, { data: 'ada' }],
-        ['callback', 33, { data: 'ada' }],
         ['session', first, 35, false],
+        ['callback', 31, undefined],
+        ['callback', 33, { data: 'ada' }],
       ]);
       expect(answersOf(sent)).toEqual([
+        [first, 'failure', 35, ProtocolCode.SESSION_REQUIRED],
         [first, 'result', 31, 'ok'],
         [first, 'result', 33, 'ok'],
-        [first, 'failure', 35, ProtocolCode.SESSION_REQUIRED],
       ]);
     });
 
@@ -749,6 +751,8 @@ test.describe('createRouterServer', () => {
       deliver(first, requestOf(1));
       deliver(second, subscribingOf(1));
       emitter.emit('message', { data: 'text' }, first);
+      // each resolver handed its request in a later turn
+      await sleep(0);
 
       // a refusal that cannot go out
       const gone = new Error('gone');
@@ -758,18 +762,19 @@ test.describe('createRouterServer', () => {
       await sleep(0);
 
       expect(reportedOf(errors)).toEqual([
-        ['thrown', second],
         [ProtocolCode.ENVELOPE_MALFORMED, first],
+        ['thrown', second],
         ['rejected', first],
         ['gone', second],
       ]);
       expect(errors[3]?.[0]).toBe(gone);
-      // each resolver that failed answered PROCEDURE_FAILED: the one that threw within its
-      // delivery, before its connection's sends fail, then the one that rejected
+      // each resolver that failed answered PROCEDURE_FAILED, in the later turn it was handed its
+      // request in, before its connection's sends fail: the one that threw, then the one that
+      // rejected
       expect(answersOf(sent)).toEqual([
         [second, 'failure', 1, ProtocolCode.PROCEDURE_FAILED],
-        [second, 'failure', 3, ProtocolCode.SERVICE_UNKNOWN],
         [first, 'failure', 1, ProtocolCode.PROCEDURE_FAILED],
+        [second, 'failure', 3, ProtocolCode.SERVICE_UNKNOWN],
       ]);
     });
 
@@ -2981,14 +2986,34 @@ test.describe('createRouterServer, credentials', () => {
     deliver(first, requestOf(7, { credential: ELSEWHERE }));
     await sleep(0);
 
+    const answers = answersOf(sent);
+    const at = (callId: number): number => {
+      return answers.findIndex(([, , answered]) => {
+        return answered === callId;
+      });
+    };
+
     expect(asked).toEqual([[` \t${CARRIED}`, false]]);
-    expect(answersOf(sent)).toEqual([
+    expect(
+      answers.toSorted(([, , a], [, , b]) => {
+        return Number(a) - Number(b);
+      })
+    ).toEqual([
+      [first, 'result', 1, JSON.stringify(` \t${CARRIED}`)],
       [first, 'result', 3, 'none'],
       [first, 'failure', 5, ProtocolCode.SESSION_REQUIRED],
-      [first, 'failure', 9, ProtocolCode.CREDENTIAL_UNSUPPORTED],
       [first, 'failure', 7, ProtocolCode.SESSION_REQUIRED],
-      [first, 'result', 1, JSON.stringify(` \t${CARRIED}`)],
+      [first, 'failure', 9, ProtocolCode.CREDENTIAL_UNSUPPORTED],
     ]);
+    // * the refusals in the turns their requests came, in their order, and a later request's
+    // refusal before the answer a resolver gives at once, which it is handed in a later turn
+    // (decision 0010); 3 and 7 keep no order between them
+    expect(at(5)).toBeLessThan(at(9));
+    expect(at(9)).toBeLessThan(at(3));
+    expect(at(9)).toBeLessThan(at(7));
+    // 3 before 1 and 7 before 1 are what this side's turns give, not an order the spec states
+    expect(at(3)).toBeLessThan(at(1));
+    expect(at(7)).toBeLessThan(at(1));
     expect(failuresOf(sent)).toEqual([
       [5, ProtocolCode.SESSION_REQUIRED, 'the credential does not hold'],
       [9, ProtocolCode.CREDENTIAL_UNSUPPORTED, 'OPAQUE, ELSEWHERE'],
@@ -4064,25 +4089,26 @@ test.describe('createRouterServer, relaying', () => {
     deliver(first, requestOf(5, { destinationId: 7, procedure: { ...echo, procedureId: 9 } }));
     await sleep(0);
 
+    // the target's refusal in the turn its request came, its resolvers' answers in a later turn
     expect(answersOf(sent)).toEqual([
+      [first, 'failure', 5, ProtocolCode.PROCEDURE_UNKNOWN],
       [first, 'result', 1, 'HI'],
       [first, 'failure', 3, 21],
-      [first, 'failure', 5, ProtocolCode.PROCEDURE_UNKNOWN],
     ]);
     expect(
       sent.map(({ envelope }) => {
         return envelope?.kind === EnvelopeKind.FAILURE ? envelope.failure : envelope?.header;
       })
     ).toEqual([
-      // an answer names its call alone
-      { callId: 1, kind: EnvelopeKind.RESULT },
-      { code: 21, detail: 'nothing to echo', relays: 1, scope: FailureScope.APPLICATION },
       {
         code: ProtocolCode.PROCEDURE_UNKNOWN,
         detail: 'no procedure 9 in service 2',
         relays: 1,
         scope: FailureScope.PROTOCOL,
       },
+      // an answer names its call alone
+      { callId: 1, kind: EnvelopeKind.RESULT },
+      { code: 21, detail: 'nothing to echo', relays: 1, scope: FailureScope.APPLICATION },
     ]);
     expect(admissions).toBe(3);
     // the target's own failures are answered, not reported
@@ -6109,6 +6135,8 @@ test.describe('createRouterServer, within a telling', () => {
     });
     open(first);
     deliver(first, requestOf(5));
+    // the turn its resolver is handed the request in, a later one
+    await Promise.resolve();
 
     // * nothing of the call within the turn: its answer first
     expect(answersOf(sent)).toEqual([[first, 'failure', 5, ProtocolCode.PROCEDURE_FAILED]]);

@@ -1,4 +1,5 @@
 using System.Buffers.Text;
+using System.Globalization;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -631,33 +632,55 @@ public sealed partial class RouterServerTests
             return ValueTask.FromResult<ElsewhereSession?>(new ElsewhereSession { Id = "ada" });
         });
 
-        DeliverElsewhere(First, (1, " Interop  sub=ada "));
+        // in one job of the router's scheduler, so no job of its own comes between two deliveries
+        _scheduler.Post(() =>
+        {
+            DeliverElsewhere(First, (1, " Interop  sub=ada "));
+
+            // what a request presenting none, OPAQUE or a JWT carried stands for nothing
+            _transport.Carrying(First, (EnvelopeCodec.WriteEnvelope(RequestOf(3)), Carried));
+            _transport.Carrying(First, (EnvelopeCodec.WriteEnvelope(Presenting(RequestOf(5), Token)), Carried));
+            _transport.Carrying(First, (EnvelopeCodec.WriteEnvelope(Presenting(RequestOf(9), Credential.Jwt("a.b.c"))), Carried));
+            Deliver(First, Presenting(RequestOf(7), Credential.Elsewhere()));
+        });
         await Settle();
 
-        // what a request presenting none, OPAQUE or a JWT carried stands for nothing
-        _transport.Carrying(First, (EnvelopeCodec.WriteEnvelope(RequestOf(3)), Carried));
-        _transport.Carrying(First, (EnvelopeCodec.WriteEnvelope(Presenting(RequestOf(5), Token)), Carried));
-        _transport.Carrying(First, (EnvelopeCodec.WriteEnvelope(Presenting(RequestOf(7), Credential.Jwt("a.b.c"))), Carried));
-        Deliver(First, Presenting(RequestOf(9), Credential.Elsewhere()));
-        await Settle();
+        var failures = _transport.Sent
+            .Where((entry) =>
+            {
+                return entry.Envelope.Failure is not null;
+            })
+            .Select((entry) =>
+            {
+                return $"{entry.Envelope.Header.CallId} {entry.Envelope.Failure!.Detail}";
+            })
+            .ToList();
+        var answers = SentSince();
 
-        // a refusal and a resolver's answer, in one turn, come in no order of their own
+        int At(uint callId)
+        {
+            return answers.FindIndex((answer) =>
+            {
+                return answer.Split(' ')[2] == callId.ToString(CultureInfo.InvariantCulture);
+            });
+        }
+
         Assert.Equal([(" Interop  sub=ada ", true)], asked);
         Assert.Equal(
-            ["5 the credential does not hold", "7 OPAQUE, ELSEWHERE", "9 no credential came"],
-            _transport.Sent
-                .Where((entry) =>
-                {
-                    return entry.Envelope.Failure is not null;
-                })
-                .Select((entry) =>
-                {
-                    return $"{entry.Envelope.Header.CallId} {entry.Envelope.Failure!.Detail}";
-                })
-                .Order(StringComparer.Ordinal));
-        Assert.Equal(
-            ["first failure 5 SessionRequired", "first failure 7 CredentialUnsupported", "first failure 9 SessionRequired", "first result 1 ada", "first result 3 none"],
-            SentSince().Order(StringComparer.Ordinal));
+            ["first failure 5 SessionRequired", "first failure 7 SessionRequired", "first failure 9 CredentialUnsupported", "first result 1 ada", "first result 3 none"],
+            answers.Order(StringComparer.Ordinal));
+
+        // * the refusals in the turns their requests came, in their order, and a later request's
+        // refusal before the answer a resolver gives at once, which it is handed in a later turn
+        // (decision 0010); 3 and 7 keep no order between them
+        Assert.True(At(5) < At(9));
+        Assert.True(At(9) < At(3));
+        Assert.True(At(9) < At(7));
+
+        // 3 before 1 and 7 before 1 are what this side's turns give, not an order the spec states
+        Assert.True(At(3) < At(1));
+        Assert.True(At(7) < At(1));
+        Assert.Equal(["5 the credential does not hold", "9 OPAQUE, ELSEWHERE", "7 no credential came"], failures);
     }
 
     [Fact]
@@ -668,9 +691,12 @@ public sealed partial class RouterServerTests
             return ValueTask.FromResult<ElsewhereSession?>(new ElsewhereSession { Id = "ada" });
         });
 
-        // in one turn: the router takes both before either is answered
-        DeliverElsewhere(First, (1, Carried));
-        Deliver(First, RequestOf(3));
+        // in one job of the router's scheduler: the router takes both before either is answered
+        _scheduler.Post(() =>
+        {
+            DeliverElsewhere(First, (1, Carried));
+            Deliver(First, RequestOf(3));
+        });
         await Settle();
 
         Assert.Equal(["first result 3 none", "first result 1 ada"], SentSince());

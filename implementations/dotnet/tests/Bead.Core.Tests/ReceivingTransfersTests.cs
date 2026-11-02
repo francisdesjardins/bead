@@ -253,9 +253,16 @@ public sealed class ReceivingTransfersTests
 
         receiving.Grant(whole);
         receiving.Place(whole, new Chunk(new byte[] { 2 }, true, 1));
+
+        // the chunk that made it whole stopped its timer, and set none going
+        Assert.Single(time.Armed);
+        Assert.True(time.Armed[0].IsCleared);
+
         receiving.Complete(whole);
         receiving.Close(OpenedOf(receiving.Open(new byte[] { 1 }, (CallOf(3, "a"), OnStall, 2))));
-        Assert.Equal(3, time.Armed.Count);
+
+        // the opening's and the second transfer's: none left
+        Assert.Equal(2, time.Armed.Count);
         Assert.All(time.Armed, (timer) => { Assert.True(timer.IsCleared); });
         Assert.DoesNotContain(time.Armed, (timer) => { return !timer.IsCleared; });
         time.Advance(TimeSpan.FromSeconds(1));

@@ -789,8 +789,9 @@ export const createRouterCore = <Handle extends string>(
     });
   };
 
-  // hands a request to its resolver: one that throws before it returns fails as one that rejects,
-  // reported unless its call was cancelled or went with its connection
+  // hands a request to its resolver in a later turn, its call's signal aborted if it ended
+  // meanwhile: one that throws before it returns fails as one that rejects, reported unless its call
+  // was cancelled or went with its connection
   const dispatch = (
     resolver: IRequestHandler<Handle>,
     dispatched: IDispatched<Handle> & { payload: Uint8Array }
@@ -811,19 +812,23 @@ export const createRouterCore = <Handle extends string>(
       }
     };
 
-    // admitted already, before its payload was read: the resolver asks nothing again
-    try {
-      resolver({
-        connectionHandle,
-        header,
-        isAdmitted: true,
-        payload,
-        session,
-        signal: controller.signal,
-      }).catch(fail);
-    } catch (reason) {
-      fail(reason);
-    }
+    // ! a later turn, whether the resolver waits or not, so a later request's refusal goes before an
+    // answer given at once, as on every side (decision 0010, spec 9.0)
+    queueMicrotask(() => {
+      try {
+        resolver({
+          connectionHandle,
+          header,
+          // admitted already, before its payload was read: the resolver asks nothing again
+          isAdmitted: true,
+          payload,
+          session,
+          signal: controller.signal,
+        }).catch(fail);
+      } catch (reason) {
+        fail(reason);
+      }
+    });
   };
 
   // an admission's refusal as it is answered

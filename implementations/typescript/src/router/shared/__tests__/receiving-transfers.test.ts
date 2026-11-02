@@ -286,6 +286,12 @@ test.describe('createReceivingTransfers', () => {
 
     receiving.grant(whole);
     receiving.place(whole, { bytes: Uint8Array.of(2), isLast: true, offset: 1 });
+
+    // the chunk that made it whole stopped its timer, and set none going
+    expect(clock.armed).toHaveLength(1);
+    expect(clock.cleared).toContain(clock.armed[0]?.handle);
+    expect(clock.countTimers()).toBe(0);
+
     receiving.complete(whole);
     receiving.close(
       openedOf(
@@ -297,8 +303,8 @@ test.describe('createReceivingTransfers', () => {
       )
     );
 
-    // the opening's, the one the last bytes set going, and the second transfer's: none left
-    expect(clock.armed).toHaveLength(3);
+    // the opening's and the second transfer's: none left
+    expect(clock.armed).toHaveLength(2);
     expect(
       clock.armed.every(({ handle }) => {
         return clock.cleared.includes(handle);

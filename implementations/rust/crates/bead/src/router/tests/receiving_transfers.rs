@@ -409,7 +409,6 @@ async fn stalls_a_transfer_nothing_comes_for_its_timer_set_going_again_by_bytes_
 }
 
 #[tokio::test]
-#[ignore = "divergence: the core arms no further timer for the last chunk; TypeScript and C# arm then cancel it"]
 async fn stops_a_transfer_s_timer_once_its_payload_is_whole_and_once_it_is_closed() {
     use core::time::Duration;
 
@@ -418,6 +417,9 @@ async fn stops_a_transfer_s_timer_once_its_payload_is_whole_and_once_it_is_close
     peer.settle().await;
     peer.receive((byte((1, true)), Arc::from("a")));
     peer.settle().await;
+    // the chunk that made it whole stopped its timer, and set none going
+    assert_eq!(peer.armed(), [Duration::from_millis(250)]);
+    assert_eq!(peer.clock.dues(), []);
     peer.receive((opening((3, 2)), Arc::from("a")));
     peer.settle().await;
     peer.owner
@@ -435,7 +437,8 @@ async fn stops_a_transfer_s_timer_once_its_payload_is_whole_and_once_it_is_close
         })
         .await
         .expect("the second transfer closed");
-    assert_eq!(peer.armed(), [Duration::from_millis(250); 3]);
+    // the opening's and the second transfer's: none left
+    assert_eq!(peer.armed(), [Duration::from_millis(250); 2]);
     assert_eq!(peer.clock.dues(), []);
     peer.clock.advance(Duration::from_millis(1_000)).await;
     assert_eq!(failures(&peer).await, []);

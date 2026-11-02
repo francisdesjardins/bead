@@ -673,6 +673,8 @@ test.describe('createServer', () => {
     });
 
     ask(first, { procedure: openSession });
+    // its session opened in the later turn its resolver runs in, before the subscription comes
+    await sleep(0);
     ask(first, { opensSubscription: true, procedure: news });
     await sleep(0);
 
@@ -982,6 +984,8 @@ test.describe('createServer', () => {
       return response('');
     });
     ask(first, { procedure: openSession });
+    // its session opened in the later turn its resolver runs in, before the subscription comes
+    await sleep(0);
     ask(first, { opensSubscription: true, procedure: news });
     await sleep(0);
     listen(first, true);
