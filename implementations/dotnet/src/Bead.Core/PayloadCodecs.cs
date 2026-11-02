@@ -2,11 +2,17 @@ using System.Text.Json;
 
 namespace Bead;
 
-/// <summary>How one encoding reads a payload and writes a value; what does not read, or write, throws.</summary>
+/// <summary>
+/// How one encoding reads a payload and writes a value; what does not read, or write, throws a
+/// <see cref="FormatException"/>, its refusal.
+/// </summary>
 /// <typeparam name="T">The value a payload holds.</typeparam>
 public interface IPayloadCodec<T>
 {
-    /// <summary>The value a payload holds; one that does not read throws.</summary>
+    /// <summary>
+    /// The value a payload holds; one that does not read throws a <see cref="FormatException"/>, its
+    /// refusal, and anything else it throws is the side's own error (spec 9.0, 17.2).
+    /// </summary>
     T Decode(ReadOnlyMemory<byte> payload);
 
     /// <summary>The payload of a value; one that does not write throws.</summary>
@@ -32,7 +38,11 @@ public static class PayloadCodecs
     /// <summary>
     /// A codec of <paramref name="decode"/> and <paramref name="encode"/>: a protobuf message's,
     /// which <c>Bead.Protobuf</c>'s <c>ProtoCodecs</c> makes of its stock library's reader and
-    /// writer, spec 17.9 held whole. One that is none is an <see cref="ArgumentNullException"/>.
+    /// writer, spec 17.9 held whole. What does not read throws a <see cref="FormatException"/>, its
+    /// refusal, and a request's payload so refused is answered <c>PAYLOAD_UNDECODABLE</c> as any
+    /// other's. Anything else its reader throws is the side's own error: a request is answered
+    /// <c>PROCEDURE_FAILED</c> and the error reported (spec 9.0, 17.2). One that is none is an
+    /// <see cref="ArgumentNullException"/>.
     /// </summary>
     public static IPayloadCodec<T> Of<T>(Func<ReadOnlyMemory<byte>, T> decode, Func<T, ReadOnlyMemory<byte>> encode)
     {

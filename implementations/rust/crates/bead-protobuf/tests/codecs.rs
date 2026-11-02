@@ -5,13 +5,15 @@
 //! dynamic codec always. `needs set to no field` and `needs with a shade its enum does not declare`
 //! no `Probe` holds, as the row `A proto value that leaves a required field unset or holds a closed
 //! enum's undeclared number, given to a typed writer` says: the dynamic codec alone is given them.
-//! The core's player, `bead/tests/codecs.rs`, plays the other encodings.
+//! The core's player, `bead/tests/codecs.rs`, plays the other encodings. Every refusal is a
+//! [`CodecRefusal`], the codec trait's error, as the other sides' players hold theirs to its type: a
+//! codec that panics refuses nothing, and fails its trial.
 
 use std::process::ExitCode;
 use std::sync::Arc;
 
-use bead::PayloadCodec;
 use bead::testing::{Difference, files, hexadecimal, is_excused};
+use bead::{CodecRefusal, PayloadCodec};
 use bead_protobuf::testing::codecs::descriptor_pool;
 use bead_protobuf::testing::codecs::{Needs, Probe, Shade};
 use bead_protobuf::{DynamicCodec, ProtoCodec};
@@ -201,21 +203,17 @@ fn dynamic() -> Result<DynamicCodec, Failed> {
     Ok(DynamicCodec::new(Arc::clone(pool), index))
 }
 
-// what each codec reads of a payload, or why it refuses it: the dynamic message read as a Probe
-fn reads_of(bytes: &Bytes) -> Result<[Result<Value, String>; 2], Failed> {
-    let by_type = typed()
-        .decode(bytes)
-        .map(|probe| read_of(&probe))
-        .map_err(|refusal| refusal.to_string());
-    let by_descriptor = dynamic()?
-        .decode(bytes)
-        .map_err(|refusal| refusal.to_string())
-        .and_then(|message| {
-            message
+// what each codec reads of a payload, or its refusal: the dynamic message read as a Probe
+fn reads_of(bytes: &Bytes) -> Result<[Result<Value, CodecRefusal>; 2], Failed> {
+    let by_type = typed().decode(bytes).map(|probe| read_of(&probe));
+    let by_descriptor = match dynamic()?.decode(bytes) {
+        Ok(message) => Ok(read_of(
+            &message
                 .to_message::<Probe>()
-                .map(|probe| read_of(&probe))
-                .map_err(|error| error.to_string())
-        });
+                .map_err(|error| error.to_string())?,
+        )),
+        Err(refusal) => Err(refusal),
+    };
 
     Ok([by_type, by_descriptor])
 }
@@ -225,7 +223,8 @@ fn play_payload(payload: &Payload) -> Result<(), Failed> {
 
     for (codec, read) in ["typed", "dynamic"].into_iter().zip(reads_of(&bytes)?) {
         match (&payload.refused, &payload.read, read) {
-            (Some(_), _, Err(_)) => {}
+            // * a refusal, a CodecRefusal
+            (Some(_), _, Err(_refusal)) => {}
             (Some(reason), _, Ok(read)) => {
                 return Err(format!(
                     "the {codec} codec read {read}, where it is refused: {reason}"
@@ -349,27 +348,19 @@ fn play_value(entry: &Written) -> Result<(), Failed> {
         .as_ref()
         .ok_or("a proto writer is given a Probe")?;
     let codec = dynamic()?;
-    let mut written = vec![(
-        "dynamic",
-        codec
-            .encode(&message_of(given, &codec)?)
-            .map_err(|refusal| refusal.to_string()),
-    )];
+    let mut written: Vec<(&str, Result<Bytes, CodecRefusal>)> =
+        vec![("dynamic", codec.encode(&message_of(given, &codec)?))];
 
     if let Some(probe) = probe_of(given)? {
-        written.push((
-            "typed",
-            typed()
-                .encode(&probe)
-                .map_err(|refusal| refusal.to_string()),
-        ));
+        written.push(("typed", typed().encode(&probe)));
     } else if entry.refused.is_none() {
         return Err("a value the typed form cannot hold, which is written".into());
     }
 
     for (codec, written) in written {
         match (&entry.refused, &entry.written, written) {
-            (Some(_), _, Err(_)) => {}
+            // * a refusal, a CodecRefusal
+            (Some(_), _, Err(_refusal)) => {}
             (Some(reason), _, Ok(written)) => {
                 return Err(format!(
                     "the {codec} codec wrote {written:02X?}, where it is refused: {reason}"

@@ -108,7 +108,7 @@ ConformanceResponse Answer(ConformanceRequest request)
             ? codec.Decode(form.Read(codec.Descriptor, Encoding.UTF8.GetBytes(request.JsonPayload)).ToByteArray())
             : codec.Decode(request.ProtobufPayload.Memory);
     }
-    catch (Exception reason) when (reason is JsonFormException or FormatException or InvalidProtocolBufferException)
+    catch (Exception reason) when (reason is JsonFormException or FormatException)
     {
         return new ConformanceResponse { ParseError = reason.Message };
     }

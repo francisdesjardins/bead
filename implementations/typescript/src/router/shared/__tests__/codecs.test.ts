@@ -10,7 +10,6 @@ import { readFileSync } from 'node:fs';
 import { isFieldSet, type MessageInitShape } from '@bufbuild/protobuf';
 import { expect, test } from '@playwright/test';
 import { protoCodecOf } from '../../../proto/codec';
-import { ProgrammerError } from '../../../transport/shared/errors';
 import { type IPayloadCodec, PAYLOAD_CODECS } from '../payloads';
 import { type Probe, ProbeSchema } from './codecs_pb';
 
@@ -317,17 +316,16 @@ test.describe('the codecs', () => {
           return readOf(PROBE_CODEC.decode(bytesOf(entry.bytes)));
         };
 
-        // * a refusal's class is protobuf-es's own: the words of a refusal are each side's
+        // * a refusal is a SyntaxError, as every codec's reader refuses: its words are each side's
         if (entry.refused === undefined) {
           expect(read()).toEqual(entry.read);
         } else {
           // ! the decode alone refuses, as the C# side holds it: a helper of the read throws none
-          const thrown = thrownBy(() => {
-            return PROBE_CODEC.decode(bytesOf(entry.bytes));
-          });
-
-          expect(thrown).toBeInstanceOf(Error);
-          expect(thrown).not.toBeInstanceOf(ProgrammerError);
+          expect(
+            thrownBy(() => {
+              return PROBE_CODEC.decode(bytesOf(entry.bytes));
+            })
+          ).toBeInstanceOf(SyntaxError);
         }
 
         return;

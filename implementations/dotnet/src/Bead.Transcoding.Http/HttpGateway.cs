@@ -1067,7 +1067,7 @@ public sealed class HttpGateway : IAsyncDisposable
         {
             return ProtoCodecs.Read(descriptor, bytes);
         }
-        catch (Exception reason) when (reason is FormatException or InvalidProtocolBufferException)
+        catch (FormatException reason)
         {
             throw new UndecodedAnswerException(reason);
         }

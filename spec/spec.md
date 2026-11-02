@@ -343,10 +343,11 @@ _Conversations: `spec/conversations.json`._
 came on — and puts nothing on the wire. What it _answers_ goes back on the wire, as a failure on
 the call id. What it _drops in silence_ it does neither. A failure a side answers for an error of
 its own — a resolver that throws, a verifier or an admission that fails, a result it cannot send,
-an answer leg A cannot carry (section 14.5), a codec that throws other than a refusal — MUST NOT
-carry any detail of that error, an exception's message least of all: the error is reported, and
-`PROCEDURE_FAILED` so answered carries no detail. Its code alone tells the requester how far its
-call went (section 8.1), as a generic message is all an unexpected error returns to its consumer in
+an answer leg A cannot carry (section 14.5), an envelope's or a payload's codec that throws other
+than its refusal (sections 9.6 and 17.2) — MUST NOT carry any detail of that error, an exception's
+message least of all: the error is reported, and `PROCEDURE_FAILED` so answered carries no detail.
+Its code alone tells the requester how far its call went (section 8.1), as a generic message is all
+an unexpected error returns to its consumer in
 OWASP's Application Security Verification Standard
 ([ASVS 5.0 §16.5.1](https://github.com/OWASP/ASVS/blob/v5.0.0/5.0/en/0x25-V16-Security-Logging-and-Error-Handling.md)).
 A side tells its application what it reports in the turn that raised it; what that application
@@ -2320,6 +2321,12 @@ writes one as its encoding says. A relay reads none (section 14.2).
 5. an answer's value fails as a resolver that fails: the request is answered with
    `PROCEDURE_FAILED`, and the failure reported (section 9.5);
 6. a notification's value goes to none of its subscriptions, and the failure is reported.
+
+A codec that throws other than its refusal is its side's own error, not a payload that does not
+read (section 9.0): at item 1, the request is answered with `PROCEDURE_FAILED` and the error
+reported, as a rule that fails to judge (section 18.2), never with `PAYLOAD_UNDECODABLE`, which
+would have its requester change a payload that may read; at items 2 to 6, it fails as a refusal
+does, its words the side's own. What each language's codec refuses with is the support matrix's.
 
 A writer MUST NOT write what a reader refuses, as section 4.10 has it of an envelope.
 

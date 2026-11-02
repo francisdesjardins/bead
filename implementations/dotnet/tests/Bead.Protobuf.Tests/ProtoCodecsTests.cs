@@ -225,6 +225,18 @@ public sealed class ProtoCodecsTests
     }
 
     [Fact]
+    public void Refuses_bytes_its_library_cannot_read_as_every_reader_refuses_the_library_s_error_as_its_cause()
+    {
+        // a text of one byte that is not UTF-8, which Google.Protobuf reads, past the records' check
+        var thrown = Assert.Throws<FormatException>(() =>
+        {
+            return ProtoCodecs.Of<Probe>().Decode(BytesOf("0A 01 FF"));
+        });
+
+        Assert.IsType<InvalidProtocolBufferException>(thrown.InnerException);
+    }
+
+    [Fact]
     public void Takes_a_required_field_set_at_its_default_and_one_a_message_given_twice_sets_in_either_record()
     {
         var needs = ProtoCodecs.Of<Needs>();

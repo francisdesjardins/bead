@@ -1537,7 +1537,7 @@ public sealed partial class JsonForm
         {
             inner = ProtoCodecs.Unjudged(held, (any.Value.Memory, Depth + 1 - depth));
         }
-        catch (Exception reason) when (reason is FormatException or InvalidProtocolBufferException)
+        catch (FormatException reason)
         {
             throw new JsonFormException("an Any whose bytes do not read as its type", reason);
         }

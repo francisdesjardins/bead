@@ -1631,7 +1631,8 @@ export interface IServiceManager<Handle extends string = ConnectionHandle> {
    * A procedure to answer: given its callback, the resolver is made and registered in the router.
    * A procedure off spec section 16 is a {@link ProgrammerError}, before any other reason. A request
    * `beforeRequest` refuses — before its payload is read — or whose payload does not decode, is
-   * answered with a failure of the router's without reaching the callback.
+   * answered with a failure of the router's without reaching the callback: a codec that throws other
+   * than its refusal, a `SyntaxError`, is answered `PROCEDURE_FAILED`, and why goes on to the router.
    */
   getRequestResolver<
     RequestPayload,
