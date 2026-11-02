@@ -23,14 +23,17 @@
 **Each stock library reads bytes that are no encoding of the message**, against protobuf's own
 rules, and spec 17.9.1 says they do not read. protobuf-es 2.16.0 reads a record that runs past the
 end of its message, since its reader never checks that the last ended there, and a varint of more
-than 10 bytes where its field is unknown. Google.Protobuf 3.36.2 reads a tag of more than 5 bytes
-or past 32 bits, keeping its low 32 bits, where the
+than 10 bytes where its field is unknown. Google.Protobuf 3.36.2 reads a tag of more than 5 bytes or
+past 32 bits, keeping its low 32 bits, where the
 [Encoding](https://protobuf.dev/programming-guides/encoding/) guide's reference card gives a tag
 "encoded as uint32 varint" and protobuf's conformance suite refuses one in its REQUIRED `BadTag_*`
 tests, which protobuf's own failure list for C# keeps. Both read a length whose varint sets bits
 past 32, which the guide gives as "size encoded as int32 varint" and the suite's
-`BadLength_Varint32BitOverflow` refuses. Without a check, each is an open row of the support matrix,
-its entries of `spec/codecs.json` excused for the side that reads them.
+`BadLength_Varint32BitOverflow` refuses. Both read a varint whose 10th byte sets a bit past the
+64th, dropping the bits, where the guide's "Base 128 Varints" encodes "unsigned 64-bit integers
+using anywhere between one and ten bytes"; Buffa and Go's `protowire` refuse it, and the suite tests
+none: the guide's width decides. Without a check, each is an open row of the support matrix, its
+entries of `spec/codecs.json` excused for the side that reads them.
 
 **Probed on `TestAllTypesProto3`, the two libraries part on more**, where Google.Protobuf is right
 by protobuf's guide or no rule settles it:
@@ -142,7 +145,8 @@ gives, and the check is the runtime's behaviour
 **What the check refuses**, in one walk of the payload that allocates nothing per record:
 
 - a tag of more than 5 bytes or past 32 bits, and field number 0;
-- a varint of more than 10 bytes, its field known or not;
+- a varint of more than 10 bytes, or whose 10th byte sets a bit past the 64th, its field known or
+  not, packed or not;
 - a length whose varint runs past 10 bytes or that runs past the bytes after it, a length past
   2³¹ − 1 among them, which also passes every payload Bead carries;
 - a fixed value past its message;
@@ -222,9 +226,9 @@ which a row's `read` gives as a depth. protoc 36.2, protoc-gen-es 2.16.0 under b
 
 **The entries.** The entries of what a stock library reads past protobuf's rules — a tag of more
 than 5 bytes or past 32 bits, a length past 32 bits, an unknown varint of more than 10 bytes, a
-record past the end of its message — are played by every side, none excused. Each part has its
-entries, each citing its unit, none excused, every reading confirmed on protobuf-es and
-Google.Protobuf, the check in front:
+varint past 64 bits, a record past the end of its message — are played by every side, none excused.
+Each part has its entries, each citing its unit, none excused, every reading confirmed on
+protobuf-es and Google.Protobuf, the check in front:
 
 - read: `counts packed`, `counts unpacked and packed, in one message`, `stamps unpacked`,
   `stamps packed`, `a map's entry, its value before its key`, `a group closed by its own end group`

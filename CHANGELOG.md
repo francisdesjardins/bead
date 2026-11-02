@@ -12,6 +12,11 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - `bead::testing::Difference`, with `is_excused` and `LANGUAGE` beside it, in place of
   `bead::testing::durations::Difference`.
 
+### Fixed
+
+- A `proto` payload whose varint's 10th byte sets a bit past the 64th is refused on every side, as
+  no encoding (spec 17.9.1; protobuf's Encoding guide, "Base 128 Varints").
+
 ## [0.9.0] - 2026-10-30
 
 ### Added

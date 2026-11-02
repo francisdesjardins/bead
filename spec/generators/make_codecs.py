@@ -314,9 +314,8 @@ SHADES = {0: 'SHADE_DARK', 1: 'SHADE_LIGHT'}
 # a map's entry, as it is on the wire: a message of its key at 1 and its value at 2 (Encoding, "Maps")
 ENTRY = {1: ('key', 'string', (LEN,)), 2: ('value', 'Probe', (LEN,))}
 
-# the 64 bits a varint holds, and the 32 of them a uint32 keeps, truncated as protobuf reads one
+# the 32 bits of a varint's 64 that a uint32 keeps, truncated as protobuf reads one
 UINT32 = 0xFFFF_FFFF
-UINT64 = 0xFFFF_FFFF_FFFF_FFFF
 
 
 class NotItsMessage(Exception):
@@ -351,7 +350,7 @@ def declared_values(name):
 
 
 def proto_varint(data, at):
-    """The varint at `at` and where it ends: ten bytes at most, its bits past 64 dropped (Encoding, "Base
+    """The varint at `at` and where it ends: ten bytes at most, its value within 64 bits (Encoding, "Base
     128 Varints")."""
     value = 0
 
@@ -362,7 +361,11 @@ def proto_varint(data, at):
         value |= (data[at + index] & 0x7F) << (7 * index)
 
         if data[at + index] < 0x80:
-            return value & UINT64, at + index + 1
+            # * a 10th byte past 0x01 sets a bit past the 64th: no unsigned 64-bit integer, no encoding
+            if index == 9 and data[at + index] > 0x01:
+                raise NotItsMessage('a varint past 64 bits')
+
+            return value, at + index + 1
 
     raise NotItsMessage('a varint of more than ten bytes')
 
@@ -947,6 +950,10 @@ PAYLOADS = [
     ('a varint of 11 bytes', 'proto', ['17.9.1'], bytes.fromhex('10' + ' 80' * 10 + ' 01')),
     ('an unknown varint of 10 bytes', 'proto', ['17.9'], bytes.fromhex('48' + ' 80' * 9 + ' 00')),
     ('an unknown varint of 11 bytes', 'proto', ['17.9.1'], bytes.fromhex('48' + ' 80' * 10 + ' 00')),
+    # a varint encodes an unsigned 64-bit integer: a 10th byte past 0x01 is no encoding
+    ('a varint of 10 bytes past 64 bits', 'proto', ['17.9.1'], bytes.fromhex('10' + ' FF' * 9 + ' 02')),
+    ('an unknown varint of 10 bytes past 64 bits', 'proto', ['17.9.1'], bytes.fromhex('48' + ' 80' * 9 + ' 02')),
+    ('a packed uint32 of 10 bytes past 64 bits', 'proto', ['17.9.1'], bytes.fromhex('52 0A' + ' FF' * 9 + ' 02')),
     # * a message's records end where its length ends: one that runs on reads its parent's bytes
     ('an unknown record past the end of its message', 'proto', ['17.9.1'],
      bytes.fromhex('0A 01 61 1A 02 25 00 0A 01 62')),
@@ -1258,7 +1265,7 @@ assert declared_values('Shade') == (SHADES, True), declared_values('Shade')
 payloads = [payload_entry(*entry) for entry in PAYLOADS]
 values = [value_entry(*entry) for entry in VALUES]
 
-assert len(payloads) == 148 and len(values) == 47
+assert len(payloads) == 151 and len(values) == 47
 
 
 
@@ -1283,7 +1290,10 @@ PROTO_RECORD = {
     'a message given twice': ('', 0, 2), 'a message field set to the empty message': ('', 0, 1),
     'field number 0': NOT_ITS_MESSAGE, 'a varint of 10 bytes': ('', 4_294_967_295, 0),
     'a varint of 11 bytes': NOT_ITS_MESSAGE, 'an unknown varint of 10 bytes': ('', 0, 0),
-    'an unknown varint of 11 bytes': NOT_ITS_MESSAGE, 'an unknown record past the end of its message': NOT_ITS_MESSAGE,
+    'an unknown varint of 11 bytes': NOT_ITS_MESSAGE, 'a varint of 10 bytes past 64 bits': NOT_ITS_MESSAGE,
+    'an unknown varint of 10 bytes past 64 bits': NOT_ITS_MESSAGE,
+    'a packed uint32 of 10 bytes past 64 bits': NOT_ITS_MESSAGE,
+    'an unknown record past the end of its message': NOT_ITS_MESSAGE,
     'a string past the end of its message': NOT_ITS_MESSAGE, 'a tag of 5 bytes within 32 bits': ('0062', 0, 0),
     'a tag of 6 bytes': NOT_ITS_MESSAGE, 'a tag of 9 bytes': NOT_ITS_MESSAGE,
     'a tag of 5 bytes past 32 bits': NOT_ITS_MESSAGE, 'a tag of 7 bytes past 32 bits': NOT_ITS_MESSAGE,

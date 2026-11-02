@@ -233,6 +233,32 @@ public sealed class ProtoRecordsTests
 
     // spec 17.9.1
     [Fact]
+    public void Refuses_a_varint_of_10_bytes_past_64_bits_known_unknown_or_packed()
+    {
+        foreach (var hex in new[]
+        {
+            "10 FF FF FF FF FF FF FF FF FF 02",
+            "48 80 80 80 80 80 80 80 80 80 02",
+            "52 0A FF FF FF FF FF FF FF FF FF 02",
+            "1A 0B 20 80 80 80 80 80 80 80 80 80 7F",
+        })
+        {
+            // * the check's refusal, where Google.Protobuf would drop the bits past the 64th
+            var refusal = Assert.Throws<FormatException>(() =>
+            {
+                ProtoRecords.Check(BytesOf(hex), Probe.Descriptor);
+            });
+
+            Assert.Equal("a proto payload is not its message: a varint past 64 bits", refusal.Message);
+        }
+
+        // a 10th byte of 0x01 is the 64th bit, within
+        ProtoRecords.Check(BytesOf("10 FF FF FF FF FF FF FF FF FF 01"), Probe.Descriptor);
+        ProtoRecords.Check(BytesOf("48 80 80 80 80 80 80 80 80 80 01"), Probe.Descriptor);
+    }
+
+    // spec 17.9.1
+    [Fact]
     public void Refuses_a_tag_of_more_than_5_bytes_or_past_32_bits()
     {
         Refuses("90 80 80 80 80 00 07");
