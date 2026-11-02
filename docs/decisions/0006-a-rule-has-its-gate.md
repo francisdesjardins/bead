@@ -29,8 +29,9 @@ that one check stands for them all. Each rule, and the job that holds it, whose 
 | No configuration holds a published test key                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                | `spec`                                                                                                |
 | The interop's blueprint keeps its schema and its form, its arrays in their order, and `interop-service.json` its procedures, by name ([0022](0022-a-proto-becomes-one-checked-blueprint-and-each-language-is-generated-from-it.md))                                                                                                                                                                                                                                                                                                                        | `spec`                                                                                                |
 | Every implementation reads the wire alike, as the conformance files state it, but what a row of the matrix excuses                                                                                                                                                                                                                                                                                                                                                                                                                                         | `typescript`, `dotnet`, `rust`                                                                        |
-| Each side's envelope readers read, or refuse with a failure, within a second, every seeded mutation of `spec/vectors.json`'s bytes                                                                                                                                                                                                                                                                                                                                                                                                                         | `typescript`, `dotnet`                                                                                |
-| Each side's generated `proto` codec passes protobuf's conformance suite, at the release its libraries pin, but what its failure list names, each with its reason, and every side reads one corpus alike ([0028](0028-a-proto-payloads-records-are-read-against-its-message-before-its-library-reads-them.md))                                                                                                                                                                                                                                              | `protobuf-conformance`                                                                                |
+| Each side's envelope readers and its parcel reader read, or refuse as each is designed to, within a second, every seeded mutation of the conformance files' bytes, the same inputs on every side by their seeds' order and digests                                                                                                                                                                                                                                                                                                                         | `typescript`, `dotnet`, `rust`                                                                        |
+| Every fuzz target builds on the C# and Rust sides and type-checks on the TypeScript side, twins named alike, as `tools/fuzz.mjs` lists them                                                                                                                                                                                                                                                                                                                                                                                                                | `typescript`, `dotnet`, `rust`                                                                        |
+| Each side's generated `proto` codec passes protobuf's conformance suite, at the release its libraries pin, but what its failure list names, each with its reason, and every side reads one corpus alike, `spec/codecs.json`'s `proto` payloads among its seeds ([0028](0028-a-proto-payloads-records-are-read-against-its-message-before-its-library-reads-them.md))                                                                                                                                                                                       | `protobuf-conformance`                                                                                |
 | Each side judges a payload by its rules as `spec/validations.json` states, and as protovalidate-es does every verdict and payloads mutated from them, its order aside ([0035](0035-a-payload-that-reads-is-held-to-its-messages-rules-before-its-resolver-sees-it.md))                                                                                                                                                                                                                                                                                     | `typescript`, `dotnet`, `protovalidate-differential`                                                  |
 | Each side transcodes as `spec/transcoding.json` states — its templates and bindings, its mapping of protobuf's JSON read and written, its problems, its streams and its gateway's exchanges — and protobuf's own Python library parts from the generator's mapping only where an entry names why ([0037](0037-a-procedure-is-also-an-http-route-which-a-gateway-answers-as-one-more-client-of-its-server.md))                                                                                                                                              | `spec`, `typescript`, `dotnet`                                                                        |
 | Each side's mapping of protobuf's JSON passes protobuf's conformance suite's JSON tests, at the release its libraries pin, but what its failure list names, each with its reason, the same lines on the TypeScript and C# sides ([0037](0037-a-procedure-is-also-an-http-route-which-a-gateway-answers-as-one-more-client-of-its-server.md))                                                                                                                                                                                                               | `protobuf-conformance`                                                                                |
@@ -85,6 +86,22 @@ that one check stands for them all. Each rule, and the job that holds it, whose 
 | No dependency of any lockfile, the C# side's, every `yarn.lock`, five, and the spec's `requirements.txt`, is under an advisory OSV knows; no C# package restored, direct or transitive, under one NuGet knows                                                                                                                                                                                                                                                                                                                                              | `commits`, `dotnet`                                                                                   |
 | No code is under a blocking rule of Semgrep's community sets for TypeScript, C#, GitHub Actions and secrets                                                                                                                                                                                                                                                                                                                                                                                                                                                | `commits`                                                                                             |
 
+**A fuzzing campaign runs on a schedule, never as a pull request's gate.** Every fuzz target runs
+ten minutes a week, and by hand, in `.github/workflows/fuzz.yml`: a Windows job runs the TypeScript
+targets (Jazzer.js) and the C# ones (libfuzzer-dotnet, at `tools/fuzz/fuzzer.json`'s pin), a Linux
+job the Rust ones (cargo-fuzz, on the pinned nightly), each target `-max_total_time=600` through
+`tools/fuzz.mjs`. Each job keeps its corpus between runs in the cache, uploads its findings, and
+fails on one; `tools/release.mjs prepare` lists the last campaign's run among what a release owes by
+hand, so every release sees one, and a finding becomes a case of the side's tests. It follows
+ClusterFuzzLite's `batch` mode, whose `fuzz-seconds` defaults to 600, through `tools/fuzz.mjs`,
+since OSS-Fuzz runs no .NET. Each side's suite meanwhile holds the deterministic part: seeded
+mutations of the readers no differential holds, the envelope's and the parcel's, the same inputs on
+every side, each side ordering its seeds by their SHA-1 and asserting their count and digests; the
+`proto` codecs' mutations are the differential's, which takes `spec/codecs.json`'s `proto` payloads
+among its seeds. A target passes what a row of the support matrix states of its side, and nothing
+more: the TypeScript side's `proto-codecs` takes a message that kept a singular closed enum's
+undeclared number among its unknown fields as written again otherwise, which protobuf-es does.
+
 **A gate guards itself against finding nothing.** A floor says what it must have found: the comment
 budget fails under 40 blocks in 10 files; Microsoft.Testing.Platform fails a run where no test ran,
 with exit code 8, and Playwright one that found no test; `BEAD_INTEROP_REQUIRED=1` turns an interop
@@ -93,20 +110,21 @@ MQTT 5 or AMQP 1.0 that would skip without a broker, `BEADC_PROTOC_REQUIRED=1` a
 would skip without protoc, `BEADC_WRAPPERS_REQUIRED=1` a wrapper's test that would skip without
 bash, PowerShell 7.6 or, on Windows, the right to make a symbolic link, and `BEADC_IMAGE_REQUIRED=1`
 one that would skip without beadc's image; the TypeScript and C# sides' envelope fuzz tests fail
-where `spec/vectors.json` gives them 100 seeds or fewer; `tools/check-versions.mjs` fails where no
-`v*` is reached and where a released section of the CHANGELOG has no tag, and a document none of
-whose files repeats its version; `spec/check.py` fails where a table of files has lost a row whose
-counts it holds, or a row the words that state one, or the runner's floor the suite its row counts,
-and on a number a row states that no count holds; the `beadc breaking` step compares against the
-newest `vX.Y.Z` whose commit is not HEAD's, read by the tag's commit and never by ancestry, so a
-release's own commit holds against the release before it, and fails where no such tag is found or it
-carries no blueprint, and on every warning, a waiver that waived nothing among them; a branch behind
-a release's merge-back merges `develop` first; protobuf's conformance suite fails a side, the Rust
-side's testee as the others', whose successes and expected failures are not 5,601, or whose skips
-are not 48, and its text-format suite's skips not 909, and a testee answers a binary request for a
-message it lacks as a runtime error, never a skip, but the unstable edition's, which no stock
-generator compiles. A floor is passed by a wide margin and fails only when code really went away,
-which is worth being told.
+where `spec/vectors.json` gives them 100 seeds or fewer, and every side's mutation tests where their
+seeds' count, or the digests of their seeds and of their first inputs, part from those every side
+asserts; `tools/check-versions.mjs` fails where no `v*` is reached and where a released section of
+the CHANGELOG has no tag, and a document none of whose files repeats its version; `spec/check.py`
+fails where a table of files has lost a row whose counts it holds, or a row the words that state
+one, or the runner's floor the suite its row counts, and on a number a row states that no count
+holds; the `beadc breaking` step compares against the newest `vX.Y.Z` whose commit is not HEAD's,
+read by the tag's commit and never by ancestry, so a release's own commit holds against the release
+before it, and fails where no such tag is found or it carries no blueprint, and on every warning, a
+waiver that waived nothing among them; a branch behind a release's merge-back merges `develop`
+first; protobuf's conformance suite fails a side, the Rust side's testee as the others', whose
+successes and expected failures are not 5,601, or whose skips are not 48, and its text-format
+suite's skips not 909, and a testee answers a binary request for a message it lacks as a runtime
+error, never a skip, but the unstable edition's, which no stock generator compiles. A floor is
+passed by a wide margin and fails only when code really went away, which is worth being told.
 
 **What comes from another's hands is held where it comes in.** An action runs by its commit's full
 sha, its version in a comment beside it, since a tag moves and a moved tag runs another's code in

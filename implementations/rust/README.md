@@ -159,17 +159,21 @@ entry's own name, under `libtest-mimic`; the `proto` entries of `spec/codecs.jso
 
 `bead::testing`, behind the feature `testing`, is the test kit: the stepping clock the players give
 the side, the conformance files' typed readers, the durations' helper, a pair of the in-memory
-transport, the scripted transports the unit tests write bytes on, and what a test takes from its
-platform: a task spawned, a rest, a patience, a monotonic instant and the wall clock's reading. It is
-no API: an application never turns the feature on.
+transport, the scripted transports the unit tests write bytes on, the seeded mutations the suite's
+readers are fed, and what a test takes from its platform: a task spawned, a rest, a patience, a
+monotonic instant and the wall clock's reading. It is no API: an application never turns the feature
+on.
 
 ## Fuzzing and the bench
 
-`node ../../tools/fuzz.mjs build rust`, then `run rust envelope|payload-codecs|debug-filter|jwt`,
-fuzzes the core's four targets with cargo-fuzz on the nightly the tool pins by its date, on Linux or
-WSL; the transports' two come with them. `node ../../tools/bench-release.mjs rust` runs bead-bench in
-fresh processes, from its release build: calls on one in-memory connection kept, and exchanges, each
-a client and its connection drawn, called once and closed. `cargo run --release --locked
---manifest-path benches/Cargo.toml -- --scale` measures instead a message's cost through a router
-alone and through a `Server`, each holding 1, 1,000 and 10,000 connections, and fails unless it holds
-flat.
+`node ../../tools/fuzz.mjs build rust`, then `run rust
+envelope|payload-codecs|debug-filter|jwt|broker-parcel|proto-codecs`, fuzzes the side's six targets
+with cargo-fuzz on the nightly the tool pins by its date, on Linux or WSL; the transports' two come
+with them. `crates/bead/tests/envelope_fuzz.rs` and `broker_parcel_fuzz.rs` feed the envelope
+readers and the parcel's seeded mutations of `spec/vectors.json` in the suite, from
+`bead::testing::mutations`, the generator every side shares. `node ../../tools/bench-release.mjs
+rust` runs bead-bench in fresh processes, from its release build: calls on one in-memory connection
+kept, and exchanges, each a client and its connection drawn, called once and closed. `cargo run
+--release --locked --manifest-path benches/Cargo.toml -- --scale` measures instead a message's cost
+through a router alone and through a `Server`, each holding 1, 1,000 and 10,000 connections, and
+fails unless it holds flat.

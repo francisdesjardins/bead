@@ -697,7 +697,7 @@ from another session can include machine drift; the interleave reduces that drif
 
 ## Fuzzing
 
-The TypeScript and C# sides fuzz the same six parsers, guided by coverage, each fed raw bytes:
+The TypeScript and C# sides fuzz the same eight parsers, guided by coverage, each fed raw bytes:
 `envelope`, the envelope reader, header and body, and a failure's record; `payload-codecs`, the
 `json` and `text` codecs' readers, what they read written back; `http-fields`, the HTTP transport's
 field parsers, an Item of RFC 9651 for the `Bead-*` fields, `Authorization`, `X-Forwarded-For`, the
@@ -707,22 +707,30 @@ over a token one octet a character, as the header carries it, verified as it cam
 with the HS256 key it may name, under the keys, audiences and clock of `spec/vectors.json`'s
 verdicts; `ws-handshake`, the WebSocket transport's judgement of an upgrade before its 101 (spec
 15.2), the first byte picking the whole head, its request line or one field of RFC 6455's handshake
-that the rest replaces. The Rust side fuzzes four of them, those its core holds, `envelope`,
-`payload-codecs`, `debug-filter` and `jwt`, with cargo-fuzz on the nightly `tools/fuzz.mjs` pins by
-its date, on Linux or WSL, from `implementations/rust/fuzz/`, `http-fields` and `ws-handshake`
-coming with its transports. The TypeScript side fuzzes a seventh, `blueprint`, beadc's blueprint
-reader, its JSON, its schema and its rules, and its form written back and read again; beadc has no
-C# side, so it has no twin. A target lets its parser's documented refusal pass; any other exception
-or a panic, an input past 1 s, or memory past its bound, 256 MiB of its own on the TypeScript and C#
-sides and libFuzzer's own on the Rust side, is a finding. The TypeScript side runs
-[Jazzer.js](https://github.com/CodeIntelligenceTesting/jazzer.js) over
+that the rest replaces; `broker-parcel`, a broker's parcel reader (spec 15.17), a parcel that reads
+written again, its writer refusing exactly what it documents, and what it writes read back to the
+same parcel and the same bytes; `proto-codecs`, the `proto` codecs over `spec/codecs.proto`'s
+`Probe` (spec 17.9), the first three bytes drawing a path, a depth and a number of unknown groups to
+wrap what reads, which its writer then refuses as nested past 100 or writes so that its reader takes
+it back. The Rust side fuzzes six of them, those its core holds, `envelope`, `payload-codecs`,
+`debug-filter`, `jwt`, `broker-parcel` and `proto-codecs`, with cargo-fuzz on the nightly
+`tools/fuzz.mjs` pins by its date, on Linux or WSL, from `implementations/rust/fuzz/`, `http-fields`
+and `ws-handshake` coming with its transports. The TypeScript side fuzzes a ninth, `blueprint`,
+beadc's blueprint reader, its JSON, its schema and its rules, and its form written back and read
+again; beadc has no C# side, so it has no twin. A target lets its parser's documented refusal pass;
+any other exception or a panic, an input past 1 s, or memory past its bound, 256 MiB of its own on
+the TypeScript and C# sides and libFuzzer's own on the Rust side, is a finding. The TypeScript side
+runs [Jazzer.js](https://github.com/CodeIntelligenceTesting/jazzer.js) over
 `implementations/typescript/tools/fuzz/`, a Yarn project of its own, installed by hand, which
-neither the package's install nor CI fetches; `blueprint` runs from `builder/tools/fuzz/`, beadc's
-alike, since beadc's code imports its own `.ts` files as Node runs them, which the TypeScript side's
-type-check refuses. The C# side runs [SharpFuzz](https://github.com/Metalnem/sharpfuzz) and
-libFuzzer for Windows, [libfuzzer-dotnet](https://github.com/Metalnem/libfuzzer-dotnet), over
+neither the package's install nor a pull request's CI fetches; `blueprint` runs from
+`builder/tools/fuzz/`, beadc's alike, since beadc's code imports its own `.ts` files as Node runs
+them, which the TypeScript side's type-check refuses. The C# side runs
+[SharpFuzz](https://github.com/Metalnem/sharpfuzz) and libFuzzer for Windows,
+[libfuzzer-dotnet](https://github.com/Metalnem/libfuzzer-dotnet), over
 `implementations/dotnet/tools/Bead.Fuzz`, whose fuzzer `tools/fuzz/fuzzer.json` pins by its release
-and its SHA-256. `tools/fuzz.mjs` drives each side, by hand; CI only builds and checks the targets.
+and its SHA-256. `tools/fuzz.mjs` drives each side, by hand, and every week in
+[`fuzz.yml`](.github/workflows/fuzz.yml), each target ten minutes, its corpus kept between runs
+and its findings uploaded; a pull request's CI only builds and checks the targets.
 
 From the root, once, then after every change to what a target reads:
 
@@ -742,7 +750,8 @@ bytes of `spec/vectors.json`, `conversations.json`, `transports.json`, `codecs.j
 case of `builder/test/blueprints/` applied to the interop's, into `builder/tools/fuzz/`'s;
 `build typescript` bundles both folders' targets with the TypeScript side's esbuild, so it wants
 `yarn install` done in `implementations/typescript` and in `builder`; `build csharp` publishes
-`Bead.Fuzz` and instruments its copies of `Bead.Core` and `Bead.Transport.WebSockets`; `build rust`
+`Bead.Fuzz` and instruments its copies of `Bead.Core`, `Bead.Transport.WebSockets`,
+`Bead.Protobuf` and `Google.Protobuf`; `build rust`
 builds cargo-fuzz's targets in `implementations/rust/fuzz/` on the nightly `tools/fuzz.mjs` pins,
 which wants that nightly and cargo-fuzz installed. Then, for ten minutes:
 
@@ -751,6 +760,9 @@ node tools/fuzz.mjs run typescript envelope -- -max_total_time=600
 node tools/fuzz.mjs run csharp envelope -- -max_total_time=600
 node tools/fuzz.mjs run rust envelope -- -max_total_time=600
 ```
+
+`node tools/fuzz.mjs campaign <side> -- -max_total_time=600` runs every target of a side in turn,
+as the weekly campaign does, and fails once all have run where any found something.
 
 A run grows its target's `corpus/<target>/` and writes a finding to `findings/<target>/`, as
 `crash-`, `timeout-` or `oom-` and the input's SHA-1; git ignores both folders. The run prints the

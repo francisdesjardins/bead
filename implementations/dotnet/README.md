@@ -94,7 +94,9 @@ tests/
   Bead.Goldens/                 the builder's C# goldens, builder/test/golden/csharp, compiled
                                 under this side's rules as a consumer compiles them
   Shared/                       what several test projects link: the test clock, the durations'
-                                helper, the JSON payloads, the addresses a server listens on
+                                helper, the JSON payloads, the addresses a server listens on, the
+                                seeded mutations of the conformance files' bytes, and what a
+                                broker's parcel reader and writer hold, which Bead.Fuzz links too
 tools/
   Bead.Benchmarks/              the bench, outside the solution: the seven layers on the loopback,
                                 in the TypeScript bench's units (README, Measurement); CI's dotnet

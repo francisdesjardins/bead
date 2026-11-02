@@ -19,9 +19,9 @@
 // on a hotfix, which starts from main, takes every waiver out of CI's `beadc breaking` step, each
 // moot since the release main holds; and lists what it owes by hand: the CHANGELOG's line on a
 // document's new tag, each of decision 0006's gates owed that names the release, the documents
-// brought to it, and a report of each side's bench the tree holds, compared with the last
-// release's, or with its checkout's by --tree; a side whose bench the last release lacks keeps its
-// first, compared with none.
+// brought to it, a report of each side's bench the tree holds, compared with the last
+// release's, or with its checkout's by --tree, a side whose bench the last release lacks keeping
+// its first, compared with none; and the last fuzzing campaign's run, read.
 // A <move> is x.y.z, patch, minor, major or same, from the document's last release. Run again, it
 // re-dates, regenerates and checks. `tag`, after the finish, <version> defaulting to the newest v*:
 // tags spec-v…, debugging-v… and transcoding-v… at the commit v<version> tags, for each document whose version no
@@ -334,6 +334,13 @@ export const RECORDS = 'docs/decisions/README.md';
 // by --tree; a side whose bench the last release lacks has none to compare with
 export const BENCH = 'tools/bench-compare.mjs';
 export const REPORTS = '.bench';
+
+// the weekly fuzzing campaign (decision 0006): a tree that keeps it owes each release its last
+// run read, never a gate of the release
+export const FUZZ = '.github/workflows/fuzz.yml';
+
+// the line that owes the last fuzzing campaign's run its reading
+export const FUZZ_OWED = `owed by hand: the last run of ${FUZZ}, its findings read, each a case of its side's tests, as \`gh run list --workflow fuzz.yml --limit 1\` lists it`;
 
 // a list's words, joined as a sentence joins them
 const listed = (words) => {
@@ -761,6 +768,9 @@ export const prepare = (root, options = {}) => {
   const benches = existsSync(join(root, BENCH)) ? benchesOwed(root, { product, last }) : null;
   if (benches !== null) {
     log(benches);
+  }
+  if (existsSync(join(root, FUZZ))) {
+    log(FUZZ_OWED);
   }
   if (first) {
     log(`next: git add -A && git commit -m "chore(release): ${product}"`);

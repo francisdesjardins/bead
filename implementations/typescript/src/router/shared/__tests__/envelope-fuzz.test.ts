@@ -3,114 +3,19 @@ import { readFileSync } from 'node:fs';
 import { CLIENT_FAILURES, SERVER_FAILURES } from '../constants';
 import { readEnvelope, readFailure } from '../envelope';
 import { FailureError } from '../errors';
+import { digestOf, firstInputs, generatorOf, mutate, seedsOf } from './mutations';
 
 // Seeded mutations of the vectors' bytes: each read returns or throws a `FailureError`, within a
-// second, as the C# side's `EnvelopeFuzzTests` holds.
+// second. The generator is `./mutations`, the other sides' own; the C# side's `EnvelopeFuzzTests`
+// and the Rust side's `envelope_fuzz.rs` draw the same inputs.
 
 // constants
 
 // how many inputs a seed draws: BEAD_FUZZ_INPUTS raises it for a longer run
 const INPUTS = Number(process.env['BEAD_FUZZ_INPUTS'] ?? 20_000);
-const INTERESTING = [0x00, 0x01, 0x7f, 0x80, 0xff, 0x10, 0x11, 0x12, 0xa1];
 const LIMITS = { maximumDetailBytes: 1_024, maximumEnvelopeBytes: 16_778_240 };
 
-// types
-
-type Below = (count: number) => number;
-
-interface IMutation {
-  below: Below;
-  seeds: Uint8Array[];
-}
-
 // helpers
-
-/** The bytes the vectors hold under a `bytes` or a `record` key, spaces and bars aside. */
-const seedsOf = (value: unknown, seeds: Uint8Array[] = []): Uint8Array[] => {
-  if (Array.isArray(value)) {
-    for (const item of value) {
-      seedsOf(item, seeds);
-    }
-  } else if (value !== null && typeof value === 'object') {
-    for (const [key, inner] of Object.entries(value)) {
-      const digits = typeof inner === 'string' ? inner.replace(/[\s|]/g, '') : '';
-
-      if ((key === 'bytes' || key === 'record') && /^(?:[0-9A-Fa-f]{2})+$/.test(digits)) {
-        seeds.push(
-          Uint8Array.from(digits.match(/../g) ?? [], (pair) => {
-            return parseInt(pair, 16);
-          })
-        );
-      } else {
-        seedsOf(inner, seeds);
-      }
-    }
-  }
-
-  return seeds;
-};
-
-/** A xorshift32 generator: `below(count)` is in `[0, count)`, and one seed replays. */
-const generatorOf = (seed: number): Below => {
-  let state = seed >>> 0 || 1;
-
-  return (count) => {
-    state ^= state << 13;
-    state >>>= 0;
-    state ^= state >>> 17;
-    state ^= state << 5;
-    state >>>= 0;
-
-    return state % count;
-  };
-};
-
-/** `source` changed by one to four random edits. */
-const mutate = (source: Uint8Array, { below, seeds }: IMutation): Uint8Array => {
-  let bytes = Array.from(source);
-
-  for (let round = 1 + below(4); round > 0; round--) {
-    const at = below(bytes.length + 1);
-
-    switch (below(7)) {
-      case 0:
-        if (bytes.length > 0) {
-          bytes[at % bytes.length]! ^= 1 << below(8);
-        }
-        break;
-      case 1:
-        bytes.splice(at, 0, INTERESTING[below(INTERESTING.length)]!);
-        break;
-      case 2:
-        bytes.splice(at, 1 + below(4));
-        break;
-      case 3:
-        bytes = bytes.slice(0, at);
-        break;
-      case 4: {
-        const other = seeds[below(seeds.length)]!;
-
-        bytes = [...bytes.slice(0, at), ...other.slice(below(other.length + 1))];
-        break;
-      }
-      case 5:
-        if (bytes.length > 0) {
-          bytes[at % bytes.length] = INTERESTING[below(INTERESTING.length)]!;
-        }
-        break;
-      default:
-        bytes.splice(
-          at,
-          0,
-          ...Array.from({ length: 1 + below(16) }, () => {
-            return below(256);
-          })
-        );
-    }
-  }
-
-  return Uint8Array.from(bytes);
-};
 
 const hexadecimal = (bytes: Uint8Array): string => {
   return Array.from(bytes, (byte) => {
@@ -142,11 +47,15 @@ const seeds = seedsOf(
 // tests
 
 test.describe('the envelope readers, fed mutations of the vectors', () => {
-  test('find the vectors bytes', () => {
-    expect(seeds.length).toBeGreaterThan(100);
+  test('finds the vectors bytes', () => {
+    expect(seeds.length).toBe(264);
+    // * the seeds in their order, as every side holds them
+    expect(digestOf(seeds)).toBe(
+      '4d0885103f89b5753c2204b02affcb89106c9e8d2300b8262c6d6b8a577e1c48'
+    );
   });
 
-  test('draws what the C# side draws for a seed', () => {
+  test('draws what the other sides draw for a seed', () => {
     const below = generatorOf(1);
 
     expect(
@@ -154,6 +63,10 @@ test.describe('the envelope readers, fed mutations of the vectors', () => {
         return below(1_000);
       })
     ).toEqual([369, 689, 461, 695, 233, 504, 482, 210]);
+    // * the first eight inputs of a seed of 1, as every side draws them
+    expect(digestOf(firstInputs(seeds, { count: 8, seed: 1 }))).toBe(
+      '59e97d7f4c6b6dbd434bf66b5b848289e8903f415a5d075b848ef843c8d2fe28'
+    );
   });
 
   for (const seed of [1, 2]) {

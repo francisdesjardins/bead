@@ -51,14 +51,18 @@
 //
 // The differential feeds every side's testee the same payloads of Probe, `CORPUS_SIZE` of them
 // from `CORPUS_SEED`: Probe's own records, mutated by cuts, lengths, wire types, tags and nesting,
-// its packed runs, its map's entries and its group among them. Each side reads or refuses each,
-// and the sides are compared two by two; where two read, what each writes back is compared as what
-// it reads, the choices protobuf leaves to a writer aside, at every depth: the order of a message's
-// unknown fields, which Google.Protobuf writes by number and wire type (a platform row of
-// docs/support.md), the order of a map's entries, and an entry's key at its default, which
+// its packed runs, its map's entries and its group among them; then spec/codecs.json's `proto`
+// payloads as seeds, each as it is and mutated by the same steps, drawn after the others. Each side
+// reads or refuses each, and writes back what it read or refuses to, as its writer refuses what
+// its reader would (spec 17.2); the sides are compared two by two; where two write back, what each
+// writes is compared as what it reads, the choices protobuf leaves to a writer aside, at every
+// depth: the order of a message's unknown fields, which Google.Protobuf writes by number and wire
+// type (a platform row of docs/support.md), and an unknown varint's form, which protobuf-es keeps
+// as it read it; the order of a map's entries, and an entry's key at its default, which
 // protobuf-es writes and Google.Protobuf leaves out. Any other parting fails, one line a payload,
 // every side's verdict on it. The corpus writes no record of `needs`, `needs_items` or `shade`,
-// Probe's fields 7, 8 and 14.
+// Probe's fields 7, 8 and 14, and takes no seed that holds one, nor one a `differs` of the file
+// excuses a side from.
 //
 // The runner ships linux-x64 and darwin-x64 binaries alone, and asks glibc 2.38 or later, Debian 13's:
 // the suite runs in CI and, on Windows, in a Linux container that recent; the differential runs
@@ -85,6 +89,7 @@ import { fileURLToPath } from 'node:url';
 const ROOT = fileURLToPath(new URL('../', import.meta.url));
 const HERE = join(ROOT, 'tools', 'protobuf-conformance');
 const PIN_FILE = join(HERE, 'runner.json');
+const CODECS = join(ROOT, 'spec', 'codecs.json');
 const RUNNER = join(HERE, '.runner');
 const WORK = join(HERE, '.work');
 const PACKAGES = join(ROOT, 'implementations', 'dotnet', 'Directory.Packages.props');
@@ -471,11 +476,22 @@ const hexOf = (bytes) => {
   return Buffer.from(bytes).toString('hex');
 };
 
+// an unknown field's record in that form: its number, its wire type, and its value, a varint's
+// read, so an overlong form kept as read, as protobuf-es keeps one, and the minimal form
+// Google.Protobuf and Buffa write give alike
+const canonicalUnknown = ({ field, wireType, whole, payload }) => {
+  // * a tag ends at its first byte under 0x80, however long its form
+  const body = payload ?? whole.subarray(whole.findIndex((byte) => byte < 0x80) + 1);
+  const value = wireType === VARINT ? String(readVarint(body, 0)?.value) : hexOf(body);
+
+  return `${String(field)}:${String(wireType)}:${value}`;
+};
+
 /**
- * A Probe's bytes in a form two writers that differ only where protobuf leaves the order to a
+ * A Probe's bytes in a form two writers that differ only where protobuf leaves the form to a
  * writer give alike: its declared records in their order, each message among them in this form;
- * its map's entries, then its unknown fields, each set sorted. Bytes that do not read as records
- * keep their own form.
+ * its map's entries, then its unknown fields, each set sorted, an unknown varint by its value.
+ * Bytes that do not read as records keep their own form.
  */
 export const canonicalProbe = (bytes) => {
   const records = recordsOf(bytes);
@@ -490,7 +506,7 @@ export const canonicalProbe = (bytes) => {
 
   for (const record of records) {
     if (!PROBE_FIELDS.has(record.field)) {
-      unknown.push(hexOf(record.whole));
+      unknown.push(canonicalUnknown(record));
     } else if (record.field === PROBE_MAP && record.wireType === LEN) {
       entries.push(canonicalEntry(record.payload));
     } else if (PROBE_MESSAGES.has(record.field) && record.payload !== undefined) {
@@ -729,33 +745,106 @@ const writerOf = (random) => {
 
     return parts.flat();
   };
-  // a Probe nested `levels` deep, each level a child, a map's value or a group
-  const deep = (levels) => {
-    let inner = probe(DEPTH_BOUND, 0);
+  // `bytes`' records written again, each now and then with a fault as `record` puts one in, its
+  // value kept; bytes that do not read as records, as they are
+  const refaulted = (bytes, faults) => {
+    const records = recordsOf(bytes);
+
+    if (records === undefined) {
+      return [...bytes];
+    }
+
+    return records.flatMap(({ field, wireType, whole, payload }) => {
+      // * a tag ends at its first byte under 0x80, however long its form
+      const value = payload ?? whole.subarray(whole.findIndex((byte) => byte < 0x80) + 1);
+
+      return record(field, wireType, [...value], faults);
+    });
+  };
+  // a Probe nested `levels` deep, each level a child, a map's value or a group, `inner` the
+  // innermost
+  const deep = (levels, inner = probe(DEPTH_BOUND, 0)) => {
+    let nested = [...inner];
 
     for (let level = 0; level < levels; level += 1) {
-      inner = pick([
+      nested = pick([
         () => {
-          return record(3, LEN, inner, 0);
+          return record(3, LEN, nested, 0);
         },
         () => {
           // * an entry and its value, two messages below the one that holds the map
-          return record(12, LEN, [...record(1, LEN, text(), 0), ...record(2, LEN, inner, 0)], 0);
+          return record(12, LEN, [...record(1, LEN, text(), 0), ...record(2, LEN, nested, 0)], 0);
         },
         () => {
-          return record(13, SGROUP, inner, 0);
+          return record(13, SGROUP, nested, 0);
         },
       ])();
     }
 
-    return inner;
+    return nested;
   };
 
-  return { below, chance, pick, probe, deep };
+  return { below, chance, pick, probe, refaulted, deep };
 };
 
-/** The corpus: `size` payloads of Probe from `seed`, each a byte array. */
-export const corpusOf = ({ seed = CORPUS_SEED, size = CORPUS_SIZE } = {}) => {
+// the fields the corpus writes no record of: Probe's `needs`, `needs_items` and `shade`, where
+// protobuf-es parts from Buffa, a round of its own (decision 0006)
+const UNWRITTEN = new Set([7, 8, 14]);
+
+/**
+ * Whether a Probe's bytes hold a record of `needs`, `needs_items` or `shade` in any Probe they
+ * nest, through a child, a group and a map's value; bytes that do not read as records hold none
+ * a reader reaches, since its check refuses them first.
+ */
+export const holdsUnwritten = (bytes) => {
+  return (recordsOf(bytes) ?? []).some(({ field, wireType, payload }) => {
+    if (UNWRITTEN.has(field)) {
+      return true;
+    }
+
+    if (payload === undefined || !(PROBE_MESSAGES.has(field) || field === PROBE_MAP)) {
+      return false;
+    }
+
+    if (field !== PROBE_MAP) {
+      return holdsUnwritten(payload);
+    }
+
+    return (
+      wireType === LEN &&
+      (recordsOf(payload) ?? []).some((entry) => {
+        return entry.field === 2 && entry.payload !== undefined && holdsUnwritten(entry.payload);
+      })
+    );
+  });
+};
+
+/**
+ * The corpus's seeds from `spec/codecs.json`, parsed: the bytes of its `proto` payloads, but those
+ * that hold a record of a field the corpus writes none of, and those a `differs` excuses a side
+ * from, which part by design.
+ */
+export const codecsSeedsOf = (codecs) => {
+  return codecs.payloads
+    .filter((entry) => {
+      return entry.encoding === 'proto' && entry.differs === undefined;
+    })
+    .map((entry) => {
+      return Uint8Array.from(Buffer.from(entry.bytes.replaceAll(/[\s|]/gu, ''), 'hex'));
+    })
+    .filter((bytes) => {
+      return !holdsUnwritten(bytes);
+    });
+};
+
+/**
+ * The corpus: `size` payloads of Probe from `seed`, each a byte array; then each of `seeds` as it
+ * is and mutated by the same steps, drawn after them so the first `size` stay what the seed gives:
+ * its records written again with a fault now and then, cut short anywhere, a byte changed
+ * anywhere, and nested around the depth bound, each one that holds no record of a field the corpus
+ * writes none of.
+ */
+export const corpusOf = ({ seed = CORPUS_SEED, size = CORPUS_SIZE, seeds = [] } = {}) => {
   const random = randomOf(seed);
   const writer = writerOf(random);
   const payloads = [];
@@ -788,6 +877,30 @@ export const corpusOf = ({ seed = CORPUS_SEED, size = CORPUS_SIZE } = {}) => {
     }
 
     payloads.push(Uint8Array.from(bytes));
+  }
+
+  for (const given of seeds) {
+    const changed = [...given];
+
+    if (changed.length > 0) {
+      changed[writer.below(changed.length)] = writer.below(256);
+    }
+
+    const mutated = [
+      given,
+      writer.refaulted(given, 0.08),
+      given.slice(0, writer.below(given.length + 1)),
+      changed,
+      writer.deep(DEPTH_BOUND / 2 - 5 + writer.below(DEPTH_BOUND / 2 + 10), given),
+    ].map((bytes) => {
+      return Uint8Array.from(bytes);
+    });
+
+    payloads.push(
+      ...mutated.filter((bytes) => {
+        return !holdsUnwritten(bytes);
+      })
+    );
   }
 
   return payloads;
@@ -899,10 +1012,17 @@ const testeeOf = ({ command, args, cwd }) => {
   };
 };
 
-/** A side's verdict on one payload: `read` and the bytes written back, or `refused`. */
+/**
+ * A side's verdict on one payload: `read` and the bytes written back, `read` and its writing
+ * refused, as a writer refuses what its reader would (spec 17.2), or `refused`.
+ */
 export const verdictOf = (response) => {
   if (response.case === 'protobuf_payload') {
     return { read: true, written: response.value };
+  }
+
+  if (response.case === 'serialize_error') {
+    return { read: true, written: undefined };
   }
 
   if (response.case === 'parse_error') {
@@ -929,13 +1049,24 @@ export const parting = ([one, other], { names: [oneName, otherName] }) => {
     return undefined;
   }
 
+  if (one.written === undefined || other.written === undefined) {
+    if (one.written === other.written) {
+      return undefined;
+    }
+
+    return one.written === undefined
+      ? `both read it, ${oneName} refuses to write it back, ${otherName} writes ${hexOf(other.written)}`
+      : `both read it, ${oneName} writes ${hexOf(one.written)}, ${otherName} refuses to write it back`;
+  }
+
   return canonicalProbe(one.written) === canonicalProbe(other.written)
     ? undefined
     : `both read it and write back apart: ${oneName} ${hexOf(one.written)}, ${otherName} ${hexOf(other.written)}`;
 };
 
 /**
- * Every side's verdict on one payload, read and its bytes or refused, where any two of them part,
+ * Every side's verdict on one payload, read and its bytes, read and its writing refused, or
+ * refused, where any two of them part,
  * or nothing when every pair agrees: one line, so two sides against one read as one parting.
  */
 export const partingOfAll = (verdicts, { names }) => {
@@ -953,9 +1084,13 @@ export const partingOfAll = (verdicts, { names }) => {
 
   return verdicts
     .map((verdict, index) => {
-      return verdict.read
-        ? `${names[index]} reads it, writing back ${hexOf(verdict.written)}`
-        : `${names[index]} refuses it`;
+      if (!verdict.read) {
+        return `${names[index]} refuses it`;
+      }
+
+      return verdict.written === undefined
+        ? `${names[index]} reads it, refusing to write it back`
+        : `${names[index]} reads it, writing back ${hexOf(verdict.written)}`;
     })
     .join('; ');
 };
@@ -1178,7 +1313,9 @@ const differential = async ({ runner, protoc }) => {
   });
   const testees = [];
   const partings = [];
-  const corpus = corpusOf();
+  const corpus = corpusOf({
+    seeds: codecsSeedsOf(JSON.parse(readFileSync(CODECS, 'utf8'))),
+  });
 
   try {
     for (const side of sides) {

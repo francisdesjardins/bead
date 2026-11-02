@@ -63,10 +63,10 @@ yarn install --immutable
 An upgrade moves both projects in one change: the descriptor in both `package.json`, then each
 lock, the builder's resolution set again to the TypeScript side's locked version.
 
-**The blueprint reader is fuzzed by hand**, guided by coverage, from
+**The blueprint reader is fuzzed by hand and every week**, guided by coverage, from
 [`tools/fuzz/`](tools/fuzz/blueprint.ts), a Yarn project of its own that `yarn install` there
-installs, so neither this project's install nor CI fetches Jazzer.js; the root's `tools/fuzz.mjs`
-seeds, bundles and runs it ([the root README](../README.md#fuzzing), Fuzzing).
+installs, so neither this project's install nor a pull request's CI fetches Jazzer.js; the root's
+`tools/fuzz.mjs` seeds, bundles and runs it ([the root README](../README.md#fuzzing), Fuzzing).
 
 **protoc is pinned by [`protoc.json`](protoc.json)**: its version, 36.2, the oldest Google.Protobuf
 the C# it writes runs on, 3.36.2, the runtime its release pairs it with, and each release archive's

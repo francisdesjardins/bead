@@ -17,6 +17,13 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `busy` carries `Retry-After: 1`, and an HTTP client sends a non-request refused `busy` again once
   its `Retry-After` passed. Each transport has a required `pause` and `resume` (spec 15.5, 15.6,
   15.7, 15.12, 15.19, 15.23).
+- Two fuzz targets on every side, named alike: `broker-parcel`, a broker's parcel reader (spec
+  15.17), and `proto-codecs`, the `proto` codecs over `spec/codecs.proto`'s `Probe` (spec 17.9),
+  which wraps what it read before it writes; seeded from `spec/vectors.json`'s parcels and
+  `spec/codecs.json`'s `proto` rows, and run ten minutes a target every week.
+- Each side's suite reads seeded mutations of the parcels, as it reads the envelope's, the Rust
+  side's the envelope's too, the same inputs on every side; the `proto` differential takes
+  `spec/codecs.json`'s payloads among its seeds.
 
 ### Changed
 

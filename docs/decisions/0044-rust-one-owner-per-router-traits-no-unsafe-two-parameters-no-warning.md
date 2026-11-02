@@ -618,9 +618,12 @@ the floor, and the fuzz targets built on the dated nightly, never run; on Window
 --workspace --all-features --locked`, as the user's MSVC toolchain builds it. The registry and the
 target are cached by the lock and the toolchain, cargo-deny and cargo-llvm-cov installed prebuilt,
 each checked by its SHA-256, and `ci-ok` needs the job. **Fuzz**: cargo-fuzz on the nightly, on
-Linux or WSL, by hand through `tools/fuzz.mjs`, its four targets the twins the core holds,
-`envelope`, `payload-codecs`, `debug-filter` and `jwt`, `http-fields` and `ws-handshake` coming with
-the transports. **Bench**: `bead-bench`, the in-memory bench, each fresh process writing
+Linux or WSL, through `tools/fuzz.mjs`, by hand and ten minutes a target every week
+([0006](0006-a-rule-has-its-gate.md)), its six targets the twins the core holds, `envelope`,
+`payload-codecs`, `debug-filter`, `jwt`, `broker-parcel` and `proto-codecs`, `http-fields` and
+`ws-handshake` coming with the transports; its suite holds the envelope readers' and the parcel
+reader's seeded mutations, the same inputs as the other sides'. **Bench**: `bead-bench`, the
+in-memory bench, each fresh process writing
 `bead-bench/1`, which `tools/bench-release.mjs rust` merges into `bead-bench/2` for
 `tools/bench-compare.mjs`. The gates every side shares hold it too: `tools/check-details.mjs` reads
 its sources, the differential its testee, a release keeps its bench's report, and its broker trial

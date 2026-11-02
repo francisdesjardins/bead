@@ -2,6 +2,18 @@
   "version": 2,
   "dependencies": {
     "net10.0": {
+      "Google.Protobuf": {
+        "type": "Direct",
+        "requested": "[3.36.2, )",
+        "resolved": "3.36.2",
+        "contentHash": "Ci1q1iJg74qAE5riTA2FbMS0wPbpruPQI/JQ9DrAsRo2VsSxgt1e/pmxGxgrci+pXJEgrSYg2vPl8rrStZkclQ=="
+      },
+      "Grpc.Tools": {
+        "type": "Direct",
+        "requested": "[2.85.0, )",
+        "resolved": "2.85.0",
+        "contentHash": "JpACpJuD56v9MBlgJEakwBLbbDifYwE3fpktbsKMPOI3yvs/VFFQVGnmWatu6mgZSNo7gzFe+TDmda9SOKg+NQ=="
+      },
       "Microsoft.VisualStudio.Threading.Analyzers": {
         "type": "Direct",
         "requested": "[18.12.1, )",
@@ -30,6 +42,13 @@
       },
       "bead.core": {
         "type": "Project"
+      },
+      "bead.protobuf": {
+        "type": "Project",
+        "dependencies": {
+          "Bead.Core": "[0.9.0, )",
+          "Google.Protobuf": "[3.36.2, )"
+        }
       },
       "bead.transport.websockets": {
         "type": "Project",

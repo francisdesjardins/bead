@@ -6,17 +6,17 @@ namespace Bead.Tests;
 /// <summary>
 /// <see cref="EnvelopeCodec"/>'s readers fed mutations of <c>spec/vectors.json</c>'s bytes: each
 /// read returns or throws a <see cref="FailureException"/>, never another exception and never takes
-/// over a second. The generator is seeded, so a failure replays; the TypeScript side's
-/// <c>envelope-fuzz.test.ts</c> holds the same property.
+/// over a second. The generator is <see cref="Mutations"/>, the other sides' own, so a seed draws
+/// the same inputs on every side, which the seeds' count and digests prove; the TypeScript side's
+/// <c>envelope-fuzz.test.ts</c> and the Rust side's <c>envelope_fuzz.rs</c> are its twins.
 /// </summary>
 public sealed class EnvelopeFuzzTests
 {
     // constants
 
-    // how many inputs a seed draws; BEAD_FUZZ_INPUTS sets it for a longer run, as on the TypeScript side
+    // how many inputs a seed draws; BEAD_FUZZ_INPUTS sets it for a longer run, as on the other sides
     private static readonly int Inputs =
         int.TryParse(Environment.GetEnvironmentVariable("BEAD_FUZZ_INPUTS"), out var given) ? given : 20_000;
-    private static readonly byte[] Interesting = [0x00, 0x01, 0x7F, 0x80, 0xFF, 0x10, 0x11, 0x12, 0xA1];
     private static readonly List<byte[]> Seeds = SeedsOfVectors();
 
     // helpers
@@ -26,120 +26,8 @@ public sealed class EnvelopeFuzzTests
         var path = Path.Combine(AppContext.BaseDirectory, "vectors.json");
         // ! past the default depth of 64: a JWT's claims set nests 64 deep below the file's own levels
         using var document = JsonDocument.Parse(File.ReadAllText(path), new JsonDocumentOptions { MaxDepth = 128 });
-        var seeds = new List<byte[]>();
 
-        Collect(document.RootElement, seeds);
-
-        return seeds;
-    }
-
-    private static void Collect(JsonElement element, List<byte[]> seeds)
-    {
-        switch (element.ValueKind)
-        {
-            case JsonValueKind.Array:
-                foreach (var item in element.EnumerateArray())
-                {
-                    Collect(item, seeds);
-                }
-
-                break;
-            case JsonValueKind.Object:
-                foreach (var property in element.EnumerateObject())
-                {
-                    if (property.Name is "bytes" or "record" && property.Value.ValueKind == JsonValueKind.String)
-                    {
-                        var digits = property.Value.GetString()!.Replace(" ", "").Replace("|", "");
-
-                        if (digits.Length > 0 && digits.Length % 2 == 0 && digits.All(Uri.IsHexDigit))
-                        {
-                            seeds.Add(Convert.FromHexString(digits));
-                        }
-                    }
-                    else
-                    {
-                        Collect(property.Value, seeds);
-                    }
-                }
-
-                break;
-            default:
-                break;
-        }
-    }
-
-    // ! a xorshift32 generator, the TypeScript side's: below(count) is in [0, count), and one seed
-    // draws the same inputs on both sides, in the same order
-    private static Func<int, int> GeneratorOf(int seed)
-    {
-        var state = seed == 0 ? 1u : (uint)seed;
-
-        return (count) =>
-        {
-            state ^= state << 13;
-            state ^= state >> 17;
-            state ^= state << 5;
-
-            return (int)(state % (uint)count);
-        };
-    }
-
-    private static byte[] Mutate(byte[] source, Func<int, int> below)
-    {
-        var bytes = new List<byte>(source);
-
-        for (var round = 1 + below(4); round > 0; round--)
-        {
-            var at = below(bytes.Count + 1);
-
-            switch (below(7))
-            {
-                case 0:
-                    if (bytes.Count > 0)
-                    {
-                        bytes[at % bytes.Count] ^= (byte)(1 << below(8));
-                    }
-
-                    break;
-                case 1:
-                    bytes.Insert(at, Interesting[below(Interesting.Length)]);
-
-                    break;
-                case 2:
-                    bytes.RemoveRange(at, Math.Min(1 + below(4), bytes.Count - at));
-
-                    break;
-                case 3:
-                    bytes.RemoveRange(at, bytes.Count - at);
-
-                    break;
-                case 4:
-                    var other = Seeds[below(Seeds.Count)];
-
-                    bytes.RemoveRange(at, bytes.Count - at);
-                    bytes.AddRange(other.Skip(below(other.Length + 1)));
-
-                    break;
-                case 5:
-                    if (bytes.Count > 0)
-                    {
-                        bytes[at % bytes.Count] = Interesting[below(Interesting.Length)];
-                    }
-
-                    break;
-                default:
-                    var inserted = 1 + below(16);
-
-                    bytes.InsertRange(at, Enumerable.Range(0, inserted).Select(_ =>
-                    {
-                        return (byte)below(256);
-                    }).ToList());
-
-                    break;
-            }
-        }
-
-        return [.. bytes];
+        return Mutations.SeedsOf(document.RootElement);
     }
 
     private static void Read(Action read, byte[] input)
@@ -156,31 +44,37 @@ public sealed class EnvelopeFuzzTests
         }
         catch (Exception exception)
         {
-            Assert.Fail($"{exception.GetType().Name}: {exception.Message}; input {Convert.ToHexString(input)}");
+            Assert.Fail($"{exception.GetType().Name}: {exception.Message}; input {Mutations.LowerHexOf(input)}");
         }
 
-        Assert.True(clock.ElapsedMilliseconds < 1000, $"over a second; input {Convert.ToHexString(input)}");
+        Assert.True(clock.ElapsedMilliseconds < 1000, $"over a second; input {Mutations.LowerHexOf(input)}");
     }
 
     // definition
 
-    /// <summary>The vectors hold the bytes the mutations start from.</summary>
+    /// <summary>The vectors hold the bytes the mutations start from, in the order every side holds them.</summary>
     [Fact]
     public void Finds_the_vectors_bytes()
     {
-        Assert.True(Seeds.Count > 100, "the vectors hold their bytes");
+        Assert.Equal(264, Seeds.Count);
+
+        // * the seeds in their order, as every side holds them
+        Assert.Equal("4d0885103f89b5753c2204b02affcb89106c9e8d2300b8262c6d6b8a577e1c48", Mutations.DigestOf(Seeds));
     }
 
-    /// <summary>The generator draws what the TypeScript side's draws for a seed, so a seed replays alike on both.</summary>
+    /// <summary>The generator draws what the other sides' draw for a seed, so a seed replays alike on every side.</summary>
     [Fact]
-    public void Draws_what_the_TypeScript_side_draws_for_a_seed()
+    public void Draws_what_the_other_sides_draw_for_a_seed()
     {
-        var below = GeneratorOf(1);
+        var below = Mutations.GeneratorOf(1);
 
         Assert.Equal([369, 689, 461, 695, 233, 504, 482, 210], Enumerable.Range(0, 8).Select((_) =>
         {
             return below(1_000);
         }));
+
+        // * the first eight inputs of a seed of 1, as every side draws them
+        Assert.Equal("59e97d7f4c6b6dbd434bf66b5b848289e8903f415a5d075b848ef843c8d2fe28", Mutations.DigestOf(Mutations.FirstInputs(Seeds, (8, 1))));
     }
 
     /// <summary>The readers return or refuse with a failure for every mutation of a vector.</summary>
@@ -190,11 +84,11 @@ public sealed class EnvelopeFuzzTests
     [InlineData(2)]
     public void Reads_or_refuses_with_a_failure_every_mutation_of_a_vector(int seed)
     {
-        var below = GeneratorOf(seed);
+        var below = Mutations.GeneratorOf(seed);
 
         for (var count = 0; count < Inputs; count++)
         {
-            var input = Mutate(Seeds[below(Seeds.Count)], below);
+            var input = Mutations.Mutate(Seeds[below(Seeds.Count)], (below, Seeds));
 
             foreach (var side in new[] { RouterSide.Server, RouterSide.Client })
             {

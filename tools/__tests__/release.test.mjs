@@ -919,6 +919,20 @@ console.log(localDay(new Date('2026-10-08T01:30:00Z')));`;
     ]);
   });
 
+  test('it owes the last fuzzing campaign’s run its reading where the tree keeps the campaign, and none where it does not', () => {
+    const kept = releasing();
+    write(kept, { '.github/workflows/fuzz.yml': 'name: Fuzz\n' });
+    const owing = (root) => {
+      return prepared(root, { moves: { spec: 'minor' } }).logged.filter((line) => {
+        return line.includes('fuzz.yml');
+      });
+    };
+    assert.deepEqual(owing(kept), [
+      "owed by hand: the last run of .github/workflows/fuzz.yml, its findings read, each a case of its side's tests, as `gh run list --workflow fuzz.yml --limit 1` lists it",
+    ]);
+    assert.deepEqual(owing(releasing()), []);
+  });
+
   test('--dry-run prints the plan and writes nothing', () => {
     const root = releasing();
     const { plan, ran, logged } = prepared(root, { moves: { spec: 'minor' }, dryRun: true });

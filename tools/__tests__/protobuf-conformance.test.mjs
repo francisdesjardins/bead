@@ -5,11 +5,13 @@ import { describe, test } from 'node:test';
 
 import {
   canonicalProbe,
+  codecsSeedsOf,
   corpusOf,
   CORPUS_SIZE,
   DIFFERENTIAL_SIDES,
   floorBreaches,
   googleProtobufOf,
+  holdsUnwritten,
   integrityOf,
   LEN,
   lengthDelimited,
@@ -55,6 +57,17 @@ const TWO = Object.freeze(['TypeScript', 'C#']);
 
 const bytesOf = (...parts) => {
   return Uint8Array.from(parts.flat());
+};
+
+// the SHA-256 of payloads' lowercase hexadecimal, a line each
+const lineDigestOf = (payloads) => {
+  const hash = createHash('sha256');
+
+  for (const payload of payloads) {
+    hash.update(`${Buffer.from(payload).toString('hex')}\n`);
+  }
+
+  return hash.digest('hex');
 };
 
 // ── Pin ───────────────────────────────────────────────────────────────────────
@@ -245,6 +258,15 @@ describe('the exchange', () => {
       return verdictOf(responseOf(Uint8Array.from(lengthDelimited(5, [...Buffer.from('json')]))));
     }, /skipped/u);
   });
+
+  test("reads a writer's refusal of what its reader took as a reading, nothing written back", () => {
+    const unwritten = responseOf(
+      Uint8Array.from(lengthDelimited(6, [...Buffer.from('nested past 100')]))
+    );
+
+    assert.equal(unwritten.case, 'serialize_error');
+    assert.deepEqual(verdictOf(unwritten), { read: true, written: undefined });
+  });
 });
 
 // ── The comparison ────────────────────────────────────────────────────────────
@@ -287,6 +309,24 @@ describe('the comparison', () => {
     assert.notEqual(
       canonicalProbe(bytesOf(lengthDelimited(12, [0x0a, 0x01, 0x61, 0x12, 0x00]))),
       canonicalProbe(bytesOf(lengthDelimited(12, [0x12, 0x00])))
+    );
+  });
+
+  test('reads an unknown varint by its value, an overlong form kept or made minimal, and its tag by its number', () => {
+    // * protobuf-es writes back an unknown varint of 10 bytes as it read it, Google.Protobuf and
+    // Buffa its value in one
+    const overlong = bytesOf([0x48, ...Array.from({ length: 9 }, () => 0x80), 0x00]);
+
+    assert.equal(canonicalProbe(overlong), canonicalProbe(bytesOf([0x48, 0x00])));
+    assert.equal(
+      canonicalProbe(bytesOf([0xc8, 0x80, 0x00, 0x05])),
+      canonicalProbe(bytesOf([0x48, 0x05]))
+    );
+    assert.notEqual(canonicalProbe(overlong), canonicalProbe(bytesOf([0x48, 0x01])));
+    assert.notEqual(canonicalProbe(bytesOf([0x48, 0x01])), canonicalProbe(bytesOf([0x50, 0x01])));
+    assert.notEqual(
+      canonicalProbe(bytesOf(lengthDelimited(9, [0x61]))),
+      canonicalProbe(bytesOf(lengthDelimited(9, [0x62])))
     );
   });
 
@@ -346,6 +386,30 @@ describe('the comparison', () => {
       'TypeScript reads it, writing back 1001; C# reads it, writing back 1002; Rust reads it, writing back 1001'
     );
   });
+
+  test('parts a side that writes back what another refuses to write, and none where both refuse', () => {
+    const read = { read: true, written: bytesOf([0x10, 0x01]) };
+    const unwritten = { read: true, written: undefined };
+    const names = ['TypeScript', 'C#', 'Rust'];
+
+    assert.equal(parting([unwritten, unwritten], { names: TWO }), undefined);
+    assert.equal(
+      parting([unwritten, read], { names: TWO }),
+      'both read it, TypeScript refuses to write it back, C# writes 1001'
+    );
+    assert.equal(
+      parting([read, unwritten], { names: TWO }),
+      'both read it, TypeScript writes 1001, C# refuses to write it back'
+    );
+    assert.equal(
+      parting([unwritten, { read: false }], { names: TWO }),
+      'TypeScript reads it, C# refuses it'
+    );
+    assert.equal(
+      partingOfAll([unwritten, { read: false }, { read: false }], { names }),
+      'TypeScript reads it, refusing to write it back; C# refuses it; Rust refuses it'
+    );
+  });
 });
 
 // ── The corpus ────────────────────────────────────────────────────────────────
@@ -384,5 +448,76 @@ describe('the corpus', () => {
         `field ${String(field)} is reached`
       );
     }
+  });
+
+  test('keeps its seed and its size: the same payloads, a line of hexadecimal each, digested', () => {
+    // * a change of this digest is a change of the gate
+    assert.equal(
+      lineDigestOf(corpusOf()),
+      '7b1e5a69e6e423f8869c98047f5b7116e22e6dfbb6ba472126e5c32f18719ca4'
+    );
+  });
+
+  test("seeds itself from codecs.json's proto payloads, but those that hold needs, needs_items or shade and those a differs excuses", () => {
+    const codecs = JSON.parse(
+      readFileSync(new URL('../../spec/codecs.json', import.meta.url), 'utf8')
+    );
+    const seeds = codecsSeedsOf(codecs);
+    const named = (name) => {
+      const entry = codecs.payloads.find((each) => {
+        return each.name === name;
+      });
+
+      return Uint8Array.from(Buffer.from(entry.bytes.replaceAll(/[\s|]/gu, ''), 'hex'));
+    };
+    const has = (bytes) => {
+      return seeds.some((seed) => {
+        return Buffer.from(seed).equals(Buffer.from(bytes));
+      });
+    };
+
+    assert.equal(seeds.length, 67);
+    assert.ok(has(named('an empty payload')));
+    assert.ok(has(named('100 groups below the top')));
+    assert.ok(has(named('a varint of 10 bytes')));
+    assert.ok(!has(named('a required field unset, one below the top')));
+    assert.ok(!has(named("a map's value whose message leaves a required field unset")));
+    assert.ok(!has(named("a string's leading U+FEFF")));
+  });
+
+  test('draws its seeds after its own payloads, each as it is and mutated, none holding a field it writes none of', () => {
+    const seeds = [
+      bytesOf(lengthDelimited(1, [0x61]), [0x10, 0x07]),
+      bytesOf(lengthDelimited(3, [0x10, 0x01])),
+    ];
+    const corpus = corpusOf({ size: 50, seeds });
+
+    assert.deepEqual(corpus.slice(0, 50), corpusOf({ size: 50 }));
+    assert.equal(corpus.length, 50 + 5 * seeds.length);
+    assert.deepEqual(corpus[50], seeds[0]);
+    assert.deepEqual(corpus[55], seeds[1]);
+    assert.deepEqual(corpusOf({ size: 50, seeds }), corpus);
+    assert.ok(
+      corpus.every((payload) => {
+        return !holdsUnwritten(payload);
+      })
+    );
+  });
+
+  test('finds needs, needs_items and shade through a child, a group and a map’s value, and in nothing else', () => {
+    const needs = lengthDelimited(7, [0x08, 0x01]);
+
+    assert.ok(holdsUnwritten(bytesOf(needs)));
+    assert.ok(holdsUnwritten(bytesOf([0x70, 0x01])));
+    assert.ok(holdsUnwritten(bytesOf(lengthDelimited(3, needs))));
+    assert.ok(holdsUnwritten(bytesOf(tag(13, SGROUP), needs, tag(13, 4))));
+    assert.ok(
+      holdsUnwritten(
+        bytesOf(lengthDelimited(12, [...lengthDelimited(1, [0x61]), ...lengthDelimited(2, needs)]))
+      )
+    );
+    assert.ok(!holdsUnwritten(bytesOf(lengthDelimited(9, needs))));
+    assert.ok(!holdsUnwritten(bytesOf(lengthDelimited(1, [0x61]))));
+    assert.ok(!holdsUnwritten(bytesOf([0x0a, 0x05, 0x61])));
   });
 });
