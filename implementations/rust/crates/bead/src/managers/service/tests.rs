@@ -16,6 +16,7 @@ use crate::testing::SteppingClock;
 use crate::testing::scripted::{ScriptedServer, handle_of};
 
 mod admissions;
+mod notification_endings;
 mod notifications;
 mod requester;
 mod resolver;

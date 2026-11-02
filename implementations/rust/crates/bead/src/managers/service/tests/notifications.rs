@@ -20,16 +20,16 @@ use crate::router::types::BoxFuture;
 use crate::testing::pair::echo;
 
 type News = Notification<TextCodec, TextCodec, TextCodec>;
-type Heard = Arc<Mutex<Vec<String>>>;
+pub(super) type Heard = Arc<Mutex<Vec<String>>>;
 
-fn procedure() -> Procedure {
+pub(super) fn procedure() -> Procedure {
     Procedure {
         kind: None,
         ..echo()
     }
 }
 
-fn notification(fixture: &ClientFixture) -> News {
+pub(super) fn notification(fixture: &ClientFixture) -> News {
     fixture
         .manager
         .get_notification(
@@ -39,7 +39,7 @@ fn notification(fixture: &ClientFixture) -> News {
         .expect("declared")
 }
 
-fn callback(heard: &Heard, label: &str) -> NotificationCallback<String> {
+pub(super) fn callback(heard: &Heard, label: &str) -> NotificationCallback<String> {
     let (heard, label) = (Arc::clone(heard), label.to_owned());
     Arc::new(move |value| {
         locked(&heard).push(format!("{label}{value}"));
@@ -47,7 +47,7 @@ fn callback(heard: &Heard, label: &str) -> NotificationCallback<String> {
     })
 }
 
-async fn pending<T>(future: &mut BoxFuture<T>) {
+pub(super) async fn pending<T>(future: &mut BoxFuture<T>) {
     core::future::poll_fn(|context| {
         assert!(future.as_mut().poll(context).is_pending());
         core::task::Poll::Ready(())
@@ -55,7 +55,7 @@ async fn pending<T>(future: &mut BoxFuture<T>) {
     .await;
 }
 
-fn result(call_id: u32, payload: &[u8]) -> Envelope {
+pub(super) fn result(call_id: u32, payload: &[u8]) -> Envelope {
     Envelope::Result {
         header: ResultHeader {
             call_id,
@@ -66,14 +66,14 @@ fn result(call_id: u32, payload: &[u8]) -> Envelope {
     }
 }
 
-fn deliver(fixture: &ClientFixture, (call_id, payload): (u32, &str)) {
+pub(super) fn deliver(fixture: &ClientFixture, (call_id, payload): (u32, &str)) {
     fixture.transport.deliver(&Envelope::Notification {
         header: NotificationHeader { call_id },
         payload: Bytes::copy_from_slice(payload.as_bytes()),
     });
 }
 
-fn requests(fixture: &ClientFixture) -> Vec<Envelope> {
+pub(super) fn requests(fixture: &ClientFixture) -> Vec<Envelope> {
     fixture
         .transport
         .envelopes()
@@ -82,7 +82,7 @@ fn requests(fixture: &ClientFixture) -> Vec<Envelope> {
         .collect()
 }
 
-async fn subscribed(
+pub(super) async fn subscribed(
     fixture: &ClientFixture,
     (notification, callback): (&News, NotificationCallback<String>),
 ) -> NotificationRegistration {
