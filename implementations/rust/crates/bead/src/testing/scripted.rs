@@ -39,6 +39,13 @@ pub enum Sending {
     Panicked(String),
     /// Taken, then panicking as its sending is awaited, saying why.
     PanickedLater(String),
+    /// Taken, then settled with `outcome` once `released` is cancelled.
+    Waiting {
+        /// What releases the send's settlement.
+        released: tokio_util::sync::CancellationToken,
+        /// What the send settles with once released.
+        outcome: Result<(), RouterError>,
+    },
 }
 
 #[expect(
@@ -62,6 +69,14 @@ fn sent_of(sending: &Sending) -> Result<Sent, RouterError> {
             let message = message.clone();
 
             Ok(Sent::Later(Box::pin(async move { panic!("{message}") })))
+        }
+        Sending::Waiting { released, outcome } => {
+            let released = released.clone();
+            let outcome = outcome.clone();
+            Ok(Sent::Later(Box::pin(async move {
+                released.cancelled().await;
+                outcome
+            })))
         }
     }
 }

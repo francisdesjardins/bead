@@ -372,6 +372,33 @@ async fn a_connection_that_closes_takes_its_calls_in_flight_and_waiting_away() {
 }
 
 #[tokio::test]
+async fn takes_no_place_on_a_connection_that_closed_as_the_answer_of_that_call_failed_to_go_out() {
+    let holding = Holding::new(Outcome::Answer).await;
+    let released = CancellationToken::new();
+    holding.served.transport.send_as((
+        &first(),
+        Sending::Waiting {
+            released: released.clone(),
+            outcome: Err(crate::testing::core_port::error_of("gone")),
+        },
+    ));
+    holding.release().await;
+    assert_eq!(holding.served.sent_since(), ["first result 1 held"]);
+    assert_eq!(holding.served.reported(), Vec::<String>::new());
+    holding.served.transport.close_connection(&first());
+    holding.served.settle().await;
+    assert_eq!(held(&holding.served).await, []);
+    released.cancel();
+    holding.served.settle().await;
+    assert_eq!(holding.served.reported(), ["gone first"]);
+    assert_eq!(held(&holding.served).await, []);
+    assert_eq!(
+        holding.served.router.gauges().await.counts["subscriptionsWaiting"],
+        0
+    );
+}
+
+#[tokio::test]
 async fn keeps_apart_the_subscribing_calls_in_flight_on_one_connection_each_settled_by_its_own_answer()
  {
     let served = Served::new(&RouterServerOptions::default());
