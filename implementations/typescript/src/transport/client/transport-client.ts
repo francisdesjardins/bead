@@ -174,6 +174,8 @@ const sleep = (
  *       client.emit('close', true, false);
  *       return Promise.resolve();
  *     },
+ *     pause: noop,
+ *     resume: noop,
  *     send: () => Promise.resolve(),
  *     [dispose]: () => {
  *       client.socket = null;
@@ -265,6 +267,12 @@ export const createTransportClient = <
     },
     disconnect: (options) => {
       return implementation.disconnect(options);
+    },
+    pause: () => {
+      implementation.pause();
+    },
+    resume: () => {
+      implementation.resume();
     },
     send: (message) => {
       return implementation.send(message);

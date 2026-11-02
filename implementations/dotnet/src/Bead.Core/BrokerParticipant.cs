@@ -24,6 +24,14 @@ public sealed record BrokerParticipantOptions
     /// <summary>What it holds in parts across its connections (spec 15.23): 268,435,456 bytes unless told.</summary>
     public long HeldBytesBudget { get; init; } = 268_435_456;
 
+    /// <summary>
+    /// What it holds of the envelopes of one connection its router paused, past which it loses that
+    /// connection, a CLOSE of 4000 (spec 15.12, 15.23): a whole number above 0, charged to no budget
+    /// of its parts. Each connection's <c>maximumUnsentBytes</c>, its transport's, unless told: the
+    /// most a conforming peer has under way on it.
+    /// </summary>
+    public long? MaximumHeldEnvelopeBytes { get; init; }
+
     /// <summary>One envelope's parts together (spec 15.23): the router's <c>maximumEnvelopeBytes</c> unless told, at its default.</summary>
     public long MaximumEnvelopePartsBytes { get; init; } = RouterLimits.Default.MaximumEnvelopeBytes;
 
@@ -123,6 +131,12 @@ public sealed class BrokerParticipant : IAsyncDisposable
         }
 
         ServerBounds.AssertCount((nameof(BrokerParticipantOptions.HeldBytesBudget), given.HeldBytesBudget));
+
+        if (given.MaximumHeldEnvelopeBytes is { } maximumHeldEnvelopeBytes)
+        {
+            ServerBounds.AssertCount((nameof(BrokerParticipantOptions.MaximumHeldEnvelopeBytes), maximumHeldEnvelopeBytes));
+        }
+
         ServerBounds.AssertCount((nameof(BrokerParticipantOptions.MaximumEnvelopePartsBytes), given.MaximumEnvelopePartsBytes));
         ServerBounds.AssertCount((nameof(BrokerParticipantOptions.MinimumBodyBytesPerSecond), given.MinimumBodyBytesPerSecond));
 
@@ -352,6 +366,15 @@ public sealed class BrokerParticipant : IAsyncDisposable
     }
 
     internal BrokerPartsBounds PartsBounds { get; }
+
+    // what one connection its router paused holds at most; its own maximumUnsentBytes when none
+    internal long? MaximumHeldEnvelopeBytes
+    {
+        get
+        {
+            return _options.MaximumHeldEnvelopeBytes;
+        }
+    }
 
     internal TimeSpan HeartbeatPeriod
     {

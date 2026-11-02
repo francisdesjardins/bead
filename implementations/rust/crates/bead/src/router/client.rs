@@ -30,13 +30,14 @@ use crate::owner::{Owner, WeakOwner};
 use crate::router::core::{
     Core, Disposal, Handler, Resolution, Resolved, Resolvers, SessionRequest, Side,
 };
+use crate::router::intake::Intake;
 use crate::router::relay::{RelayLeg, RelayRouter};
 use crate::router::requester::{CoreRequest, OnDrawn};
 use crate::router::server::{Call, CallHooks};
 use crate::router::types::{
-    BoxFuture, CallAddress, ConnectionHandle, Gauges, RequestCredential, ResolvedRequestOptions,
-    RouterActivity, RouterError, RouterLimits, RouterLimitsOptions, RouterResult, Signal,
-    TransportMessage, limits_of,
+    BoxFuture, CallAddress, ConnectionHandle, Gauges, IntakeLimitsOptions, RequestCredential,
+    ResolvedRequestOptions, RouterActivity, RouterError, RouterLimits, RouterLimitsOptions,
+    RouterResult, Signal, TransportMessage, intake_limits_of, limits_of,
 };
 use crate::session_token::SessionToken;
 use crate::transport::{
@@ -99,6 +100,9 @@ pub struct RouterClientOptions {
     pub limits: Option<RouterLimitsOptions>,
     /// What it counts its calls into.
     pub metrics_registry: Option<MetricsRegistry>,
+    /// What it holds untaken of what its server sent, past which it pauses its transport (spec
+    /// 15.12): [`crate::INTAKE_DEFAULTS`] where it says nothing.
+    pub intake: Option<IntakeLimitsOptions>,
 }
 
 impl fmt::Debug for RouterClientOptions {
@@ -222,6 +226,9 @@ pub(crate) struct ClientState {
     // the transport strongly, so it goes only once nothing holds the router
     transport: Weak<dyn ClientTransport>,
     listener: Option<Weak<dyn ClientListener>>,
+    // what its transport handed it that no turn took yet, its bridge's count, which its end resumes
+    // (decision 0046)
+    intake: Arc<Intake>,
     credentials: CredentialResolver,
     notifications: Registered,
     hearings: Arc<Mutex<BTreeMap<(u16, u16), NotificationSeries>>>,
@@ -257,8 +264,18 @@ impl ClientState {
     fn dispose(&mut self) {
         self.core.mark_disposed();
 
+        // * a transport outlives its router: resumed before it hears no more, and never paused
+        // after (decision 0046)
+        let transport = self.transport.upgrade();
+
+        self.intake.end(|_server| {
+            if let Some(transport) = &transport {
+                caught(("a transport", || transport.resume())).ok();
+            }
+        });
+
         if let Some(listener) = self.listener.take().and_then(|listener| listener.upgrade())
-            && let Some(transport) = self.transport.upgrade()
+            && let Some(transport) = transport
         {
             transport.unlisten(&listener);
         }
@@ -606,6 +623,10 @@ impl Side for ClientState {
 struct Bridge {
     owner: Owner<ClientState>,
     disposal: Disposal,
+    // what its transport handed and no turn took yet, under its one connection's name; its
+    // transport, held weakly as its state holds it, paused and resumed by it (decision 0046)
+    intake: Arc<Intake>,
+    transport: Weak<dyn ClientTransport>,
 }
 
 impl Bridge {
@@ -619,13 +640,73 @@ impl Bridge {
     }
 }
 
-impl ClientListener for Bridge {
-    fn on_message(&self, message: TransportMessage) {
-        self.offer(Box::new(move |state: &mut ClientState| {
-            let handle = server_handle();
+// the transport paused or resumed whole, what it panicked with given back to be reported as its
+// error, as the other sides report a pause that throws: what the count decided holds whatever it
+// does
+fn paced(transport: &Weak<dyn ClientTransport>, is_paused: bool) -> Option<Panicked> {
+    let transport = transport.upgrade()?;
 
+    caught(("a transport", || {
+        if is_paused {
+            transport.pause();
+        } else {
+            transport.resume();
+        }
+    }))
+    .err()
+}
+
+impl ClientListener for Bridge {
+    // * counted as it is handed, one within a telling among them, and released once the turn that
+    // takes it returned, whichever connection carried it: each is taken in its turn, in order, so a
+    // close or a reconnection needs no count of its own; a turn that panics ends the owner, whose
+    // end resumes its transport (decisions 0044 and 0046)
+    fn on_message(&self, message: TransportMessage) {
+        if self.disposal.is_set() {
+            return;
+        }
+
+        let handle = server_handle();
+        let bytes = u64::try_from(message.data.len()).unwrap_or(u64::MAX);
+        // ! counted before its job is posted, so no turn releases what is not counted yet; the
+        // transport paused under the count's lock, and its pair takes no lock it holds as it tells
+        let mut broken = None;
+        let is_counted = self.intake.handed((&handle, bytes), |_server| {
+            broken = paced(&self.transport, true);
+        });
+
+        // what its transport panicked with as it paused, reported in a turn of its own
+        if let Some(panicked) = broken {
+            self.offer(Box::new(move |state: &mut ClientState| {
+                state.report_error(&panicked.into());
+            }));
+        }
+
+        let (intake, transport) = (Arc::clone(&self.intake), Weak::clone(&self.transport));
+        let release = move |handle: &ConnectionHandle| {
+            let mut broken = None;
+
+            if is_counted {
+                intake.taken((handle, bytes), |_server| {
+                    broken = paced(&transport, false);
+                });
+            }
+
+            broken
+        };
+        let releasing = release.clone();
+        let posted = self.owner.post(Box::new(move |state: &mut ClientState| {
             crate::router::core::receive(state, (message, &handle));
+
+            if let Some(panicked) = releasing(&handle) {
+                state.report_error(&panicked.into());
+            }
         }));
+
+        // an owner gone takes nothing: what it counted is released at once, with no one to tell
+        if posted.is_err() {
+            drop(release(&server_handle()));
+        }
     }
 
     fn on_close(&self, _was_clean: bool, _is_quick: bool) {
@@ -727,6 +808,9 @@ impl RouterClient {
             platform
         });
         let limits = limits_of(&options.limits.clone().unwrap_or_default())?;
+        let intake = Intake::new(intake_limits_of(
+            &options.intake.clone().unwrap_or_default(),
+        )?);
         let credentials = CredentialResolver::new(
             &options.credentials.clone().unwrap_or_default(),
             (Arc::clone(&clock), runtime.clone()),
@@ -765,6 +849,7 @@ impl RouterClient {
                 },
                 transport: Arc::downgrade(&transport),
                 listener: None,
+                intake: Arc::clone(&intake),
                 credentials,
                 notifications: Arc::clone(&notifications),
                 hearings: Arc::clone(&hearings),
@@ -777,6 +862,8 @@ impl RouterClient {
         let listener: Arc<dyn ClientListener> = Arc::new(Bridge {
             owner: owner.clone(),
             disposal: disposal.clone(),
+            intake,
+            transport: Arc::downgrade(&transport),
         });
 
         let held = Arc::downgrade(&listener);

@@ -40,12 +40,13 @@ use crate::router::core::{
     BeforeAnswer, Core, Dispatch, Disposal, Handler, Resolution, Resolved, Resolvers, Responded,
     SessionRequest, Side, Undo, Unresolved, is_answering, reported, reported_call, respond,
 };
+use crate::router::intake::Intake;
 use crate::router::requester::CoreRequest;
 use crate::router::types::{
     AccessRefusal, BoxFuture, CallAddress, CallSession, ConnectionHandle, Gauges,
-    RequestCredential, ResolvedRequestOptions, RouterActivity, RouterAnswer, RouterError,
-    RouterLimits, RouterLimitsOptions, RouterResult, SessionIdentifier, Signal, TransportMessage,
-    limits_of, session_key_of,
+    IntakeLimitsOptions, RequestCredential, ResolvedRequestOptions, RouterActivity, RouterAnswer,
+    RouterError, RouterLimits, RouterLimitsOptions, RouterResult, SessionIdentifier, Signal,
+    TransportMessage, intake_limits_of, limits_of, session_key_of,
 };
 use crate::session_token::SessionToken;
 use crate::transport::{
@@ -90,6 +91,9 @@ pub struct RouterServerOptions {
     pub metrics_registry: Option<MetricsRegistry>,
     /// What a paced subscription queues at most.
     pub pacing: Option<PacingLimitsOptions>,
+    /// What it holds of each connection untaken, past which it pauses that connection (spec
+    /// 15.12): [`crate::INTAKE_DEFAULTS`] where it says nothing.
+    pub intake: Option<IntakeLimitsOptions>,
     /// What resolves a `JWT` and an `ELSEWHERE`.
     pub credentials: Option<Credentials>,
     /// The connection's token: the server's session manager supplies it when none is given.
@@ -139,6 +143,9 @@ pub(crate) struct ServerState {
     // the transport strongly, so it goes only once nothing holds the router
     transport: Weak<dyn ServerTransport>,
     pub(crate) listener: Option<Weak<dyn ServerListener>>,
+    // what each connection's transport handed it that no turn took yet, its bridge's count, which
+    // its end resumes (decision 0046)
+    intake: Arc<Intake>,
     // the connections it follows, in the order it heard of them
     pub(crate) connections: Ordered<ConnectionHandle, ()>,
     pub(crate) credentials: CredentialResolver,
@@ -1404,6 +1411,9 @@ pub(crate) fn on_connection(state: &mut ServerState, handle: &ConnectionHandle) 
 }
 
 pub(crate) fn on_close(state: &mut ServerState, handle: &ConnectionHandle) {
+    // what it handed before its close was taken in the turns before this one: nothing of it is
+    // left to resume
+    state.intake.forget(handle);
     drop_with(state, handle);
     state.connections.remove(handle);
     // its destinations stay unreachable until each is registered anew, on another connection
@@ -1428,11 +1438,21 @@ pub(crate) fn dispose(state: &mut ServerState) {
         drop_with(state, handle);
     }
 
+    // * a transport outlives its router: each connection it paused resumed before it hears no
+    // more, and none paused after (decision 0046)
+    let transport = state.transport();
+
+    state.intake.end(|handle| {
+        if let Some(transport) = &transport {
+            caught(("a transport", || transport.resume(handle))).ok();
+        }
+    });
+
     if let Some(listener) = state
         .listener
         .take()
         .and_then(|listener| listener.upgrade())
-        && let Some(transport) = state.transport()
+        && let Some(transport) = transport
     {
         transport.unlisten(&listener);
     }
@@ -1462,6 +1482,10 @@ pub(crate) fn dispose(state: &mut ServerState) {
 struct Bridge {
     owner: Owner<ServerState>,
     disposal: Disposal,
+    // what each connection handed and no turn took yet; its transport, held weakly as its state
+    // holds it, paused and resumed by it (decision 0046)
+    intake: Arc<Intake>,
+    transport: Weak<dyn ServerTransport>,
 }
 
 impl Bridge {
@@ -1475,6 +1499,25 @@ impl Bridge {
     }
 }
 
+// the transport paused or resumed on a connection, what it panicked with given back to be reported
+// as its error, as the other sides report a pause that throws: what the count decided holds
+// whatever it does
+fn paced(
+    transport: &Weak<dyn ServerTransport>,
+    (handle, is_paused): (&ConnectionHandle, bool),
+) -> Option<Panicked> {
+    let transport = transport.upgrade()?;
+
+    caught(("a transport", || {
+        if is_paused {
+            transport.pause(handle);
+        } else {
+            transport.resume(handle);
+        }
+    }))
+    .err()
+}
+
 impl ServerListener for Bridge {
     fn on_connection(&self, connection_handle: &ConnectionHandle) {
         let handle = Arc::clone(connection_handle);
@@ -1484,12 +1527,58 @@ impl ServerListener for Bridge {
         }));
     }
 
+    // * counted as it is handed, one within a telling among them, and released once the turn
+    // that takes it returned; a turn that panics ends the owner, whose end resumes every
+    // connection (decisions 0044 and 0046)
     fn on_message(&self, message: TransportMessage, connection_handle: &ConnectionHandle) {
+        if self.disposal.is_set() {
+            return;
+        }
+
         let handle = Arc::clone(connection_handle);
-        self.offer(Box::new(move |state: &mut ServerState| {
+        let bytes = u64::try_from(message.data.len()).unwrap_or(u64::MAX);
+        // ! counted before its job is posted, so no turn releases what is not counted yet; the
+        // transport paused under the count's lock, and its pair takes no lock it holds as it tells
+        let mut broken = None;
+        let is_counted = self.intake.handed((&handle, bytes), |held| {
+            broken = paced(&self.transport, (held, true));
+        });
+
+        // what its transport panicked with as it paused, reported in a turn of its own
+        if let Some(panicked) = broken {
+            let reported = Arc::clone(&handle);
+
+            self.offer(Box::new(move |state: &mut ServerState| {
+                state.listeners.report(&panicked.into(), Some(&reported));
+            }));
+        }
+
+        let (intake, transport) = (Arc::clone(&self.intake), Weak::clone(&self.transport));
+        let release = move |handle: &ConnectionHandle| {
+            let mut broken = None;
+
+            if is_counted {
+                intake.taken((handle, bytes), |held| {
+                    broken = paced(&transport, (held, false));
+                });
+            }
+
+            broken
+        };
+        let releasing = release.clone();
+        let posted = self.owner.post(Box::new(move |state: &mut ServerState| {
             crate::server::on_message(state, &handle);
             on_message(state, (message, &handle));
+
+            if let Some(panicked) = releasing(&handle) {
+                state.listeners.report(&panicked.into(), Some(&handle));
+            }
         }));
+
+        // an owner gone takes nothing: what it counted is released at once, with no one to tell
+        if posted.is_err() {
+            drop(release(connection_handle));
+        }
     }
 
     fn on_close(&self, _was_clean: bool, connection_handle: &ConnectionHandle) {
@@ -1649,6 +1738,9 @@ impl RouterServer {
         });
         let limits = limits_of(&options.limits.clone().unwrap_or_default())?;
         let pacing = pacing_limits_of(&options.pacing.clone().unwrap_or_default())?;
+        let intake = Intake::new(intake_limits_of(
+            &options.intake.clone().unwrap_or_default(),
+        )?);
         let credentials = CredentialResolver::new(
             &options.credentials.clone().unwrap_or_default(),
             (Arc::clone(&clock), runtime.clone()),
@@ -1688,6 +1780,7 @@ impl RouterServer {
                 },
                 transport: Arc::downgrade(&transport),
                 listener: None,
+                intake: Arc::clone(&intake),
                 connections: Ordered::new(),
                 credentials,
                 notifications: NotificationManager::new(pacing),
@@ -1705,6 +1798,8 @@ impl RouterServer {
         let listener: Arc<dyn ServerListener> = Arc::new(Bridge {
             owner: owner.clone(),
             disposal: disposal.clone(),
+            intake,
+            transport: Arc::downgrade(&transport),
         });
 
         let held = Arc::downgrade(&listener);

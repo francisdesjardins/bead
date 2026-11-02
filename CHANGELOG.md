@@ -7,6 +7,17 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- A router paces each connection's reads by what it has not taken yet, on every side: past
+  `maximumUntakenEnvelopes` envelopes (64) or `maximumUntakenBytes` bytes (1 MiB) of one
+  connection, its transport hands no more of it, holding in order what it received, until its
+  router's turns took them down to half. A broker's participant holds a paused connection's
+  envelopes to `maximumHeldEnvelopeBytes` and loses that connection past it; an HTTP server's 429
+  `busy` carries `Retry-After: 1`, and an HTTP client sends a non-request refused `busy` again once
+  its `Retry-After` passed. Each transport has a required `pause` and `resume` (spec 15.5, 15.6,
+  15.7, 15.12, 15.19, 15.23).
+
 ### Changed
 
 - The gates every side shares hold the Rust side: `tools/check-details.mjs` reads its sources, the

@@ -101,6 +101,12 @@ const createFake = (
     off: emitter.off,
     // oxlint-disable-next-line typescript/unbound-method -- as above
     on: emitter.on,
+    pause: (connectionHandle) => {
+      asked.push(['pause', connectionHandle]);
+    },
+    resume: (connectionHandle) => {
+      asked.push(['resume', connectionHandle]);
+    },
     send: (message: ITransportMessage, connectionHandle) => {
       asked.push(['send', [...new Uint8Array(message.data as ArrayBuffer)], connectionHandle]);
 
@@ -473,6 +479,50 @@ test.describe('joinTransports', () => {
     await turn();
 
     expect(settled).toEqual(new Error('a stop that fails'));
+  });
+
+  // spec 15.12.17, 15.14
+  test('a joined transport pauses the connection on the transport that drew it', async () => {
+    const webSocket = createFake('WS', { flags: {} });
+    const http = createFake('HTTP', { flags: {} });
+    const memory = createMemoryTransportServer();
+    const joined = joinTransports([webSocket.transport, http.transport, memory]);
+    await using client = createMemoryTransportClient({ server: memory });
+    const heard: number[] = [];
+    const toWebSocket = 'type=WS;ip=127.0.0.1;port=50000;ordinal=1';
+    const toHTTP = 'type=HTTP;ip=127.0.0.1;ordinal=1';
+    const toMemory = 'type=MEMORY;ip=local;ordinal=1';
+    // a handle no transport joined draws
+    const unknown = 'type=OTHER;ip=local;ordinal=1' as TransportServerConnectionHandle;
+
+    joined.on('message', ({ data }) => {
+      heard.push(...new Uint8Array(data as ArrayBuffer));
+    });
+    await memory.start();
+    await client.connect({});
+
+    joined.pause(toWebSocket);
+    joined.pause(toHTTP);
+    joined.pause(toMemory);
+    joined.pause(unknown);
+    await client.send({ data: new Uint8Array([1]) });
+    await client.send({ data: new Uint8Array([2]) });
+    await turn();
+
+    // * the memory transport holds what its client sent, paused through the join
+    expect(heard).toEqual([]);
+
+    joined.resume(toHTTP);
+    joined.resume(toMemory);
+    joined.resume(unknown);
+    await turn();
+
+    expect(heard).toEqual([1, 2]);
+    expect(webSocket.asked).toEqual([['pause', toWebSocket]]);
+    expect(http.asked).toEqual([
+      ['pause', toHTTP],
+      ['resume', toHTTP],
+    ]);
   });
 
   // spec 15.14

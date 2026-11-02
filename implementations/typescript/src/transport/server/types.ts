@@ -186,7 +186,20 @@ export interface ITransportServer<
     event: K,
     listener: EmitterListener<TransportServerEventMap<Socket, Request>[K]>
   ): this;
+  /**
+   * Pauses a connection, its router behind on it (spec 15.12, decision 0046): it emits no more
+   * `message` of it, and holds what it already received, in order, until `resume`; while it holds
+   * anything, what comes next waits behind it, paused or not. Idempotent, it emits nothing within
+   * it; an unknown handle is let be.
+   */
+  pause(connectionHandle: TransportServerConnectionHandle): void;
   removeAllListeners(event?: TRANSPORT_SERVER_EVENTS): this;
+  /**
+   * Resumes a connection: what it holds it emits, in order, from a later turn of its own, never
+   * within this call, asking before each whether it was paused again. Idempotent, it emits nothing
+   * within it; an unknown handle is let be.
+   */
+  resume(connectionHandle: TransportServerConnectionHandle): void;
   /**
    * Hands a message to one connection. A message for a connection that is gone, or not open, is
    * dropped and resolves: the loss shows as that connection's `close`. A socket carries any message.
@@ -238,6 +251,13 @@ export interface ITransportServerImplementation<Socket = unknown> {
   close(connection: ITransportServerClientAware<Socket>): Promise<void>;
   /** What the transport keeps of its connections besides the registry, counted; none, when nothing. */
   gauges?(): IGauges<TransportServerConnectionHandle>;
+  /**
+   * Pauses a connection it holds, as {@link ITransportServer.pause} says: required, so each
+   * transport states what it pauses; it takes no lock it holds as it tells a listener.
+   */
+  pause(connection: ITransportServerClientAware<Socket>): void;
+  /** Resumes a connection it holds, as {@link ITransportServer.resume} says. */
+  resume(connection: ITransportServerClientAware<Socket>): void;
   send(message: ITransportMessage, connection: ITransportServerClientAware<Socket>): Promise<void>;
   start(
     options: TransportServerResolvedStartOptions & { signal?: AbortSignal | undefined }
@@ -356,7 +376,11 @@ export interface IServerSocketLike {
   on(event: 'message', listener: (data: unknown, isBinary: boolean) => void): unknown;
   on(event: 'pong', listener: () => void): unknown;
   once(event: 'close', listener: () => void): unknown;
+  /** Stops reading its socket; what it parsed of the read under way it still emits. */
+  pause?(): void;
   ping(): void;
+  /** Reads its socket again. */
+  resume?(): void;
   send(data: Data): void;
   terminate(): void;
 }
@@ -927,6 +951,8 @@ export interface IJoinableTransportServer {
     event: K,
     listener: EmitterListener<TransportServerEventMap[K]>
   ): unknown;
+  pause(connectionHandle: TransportServerConnectionHandle): void;
+  resume(connectionHandle: TransportServerConnectionHandle): void;
   send(
     message: ITransportMessage,
     connectionHandle: TransportServerConnectionHandle
@@ -961,6 +987,10 @@ export interface IJoinedTransportServer<
   isSecure(connectionHandle: TransportServerConnectionHandle): boolean;
   /** As the transport that drew the handle says, two-way without it; `false` for one none drew. */
   isTwoWay(connectionHandle: TransportServerConnectionHandle): boolean;
+  /** Pauses one connection through its transport (spec 15.12); a handle none drew is let be. */
+  pause(connectionHandle: TransportServerConnectionHandle): void;
+  /** Resumes one connection through its transport; a handle none drew is let be. */
+  resume(connectionHandle: TransportServerConnectionHandle): void;
   /** Hands a message to one connection through its transport; dropped for a handle none drew. */
   send(
     message: ITransportMessage,

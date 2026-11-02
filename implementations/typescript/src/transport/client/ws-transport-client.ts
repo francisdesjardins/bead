@@ -22,6 +22,7 @@ import {
   wrapReason,
 } from '../shared/errors';
 import { assertHeartbeat, createHeartbeat, HEARTBEAT, type IHeartbeat } from '../shared/heartbeat';
+import { createHold } from '../shared/hold';
 import { noop } from '../shared/noop';
 import { isSecureUrl } from '../shared/secure';
 import {
@@ -32,7 +33,7 @@ import {
   setReadyStateConnecting,
   setReadyStateOpen,
 } from '../shared/ready-state';
-import type { Data } from '../shared/types';
+import type { Data, ITransportMessage } from '../shared/types';
 import { dispose } from './symbols';
 import {
   createTransportClient,
@@ -175,6 +176,12 @@ const refusalOf = ({ headers, statusCode }: IUpgradeResponseLike): string => {
  * `close` alone; so does every unclean close over the global `WebSocket`, whose bare `error` cannot
  * be told from a drop.
  *
+ * Paused by its router, over `ws`, it reads no more of its socket, and holds in order what `ws`
+ * still emits of the read under way, one socket read at most; resumed, it hands that on from a
+ * microtask and reads its socket once nothing is held. The global `WebSocket` has no pause and
+ * hands one message a task, which its router's count never pauses: paused all the same, it holds
+ * what comes. A close it begins reads on to its server's Close, what it held dropped (spec 15.12).
+ *
  * @example
  * const client = createWSTransportClient();
  * client.on('message', ({ data }) => {});
@@ -215,6 +222,22 @@ export const createWSTransportClient = (options?: IWSTransportClientOptions): WS
         NonNullable<IWSTransportClientConnectOptions['credentialProvider']>,
         Set<() => void>
       >();
+
+      // * what its socket still brought once its router paused it, one read of `ws`'s at most, its
+      // socket paused until it is handed on; a global WebSocket, which has no pause, hands one
+      // message a task, which its router's count never pauses (spec 15.12, decision 0046)
+      const hold = createHold(
+        (message: ITransportMessage) => {
+          if (!client.isClosing()) {
+            tell(MESSAGE_EVENT, [message]);
+          }
+        },
+        {
+          onReleased: () => {
+            client.socket?.resume?.();
+          },
+        }
+      );
 
       // a drop closes as a network does, and the open socket's `onclose` reports it
       const beatOf = (socket: IWebSocketLike): IHeartbeat | undefined => {
@@ -416,16 +439,14 @@ export const createWSTransportClient = (options?: IWSTransportClientOptions): WS
                         return undefined;
                       }
 
-                      return (
-                        tell(MESSAGE_EVENT, [{ credential: undefined, data: data as Data }]),
-                        undefined
-                      );
+                      return (hold.offer({ credential: undefined, data: data as Data }), undefined);
                     };
 
                     // * its end: its one error, then its close, told even when a listener of
                     // `error` throws, which is Node's or the page's (spec 15.1)
                     socket.onclose = () => {
                       stopBeating();
+                      hold.drop();
 
                       if (!client.isReconnecting()) {
                         setReadyStateClosed(client);
@@ -442,6 +463,12 @@ export const createWSTransportClient = (options?: IWSTransportClientOptions): WS
 
                     beating = beatOf(socket);
                     carried = written;
+
+                    // its router's pause outlasts the connection it was made on
+                    if (hold.isPaused) {
+                      socket.pause?.();
+                    }
+
                     resolve();
                   };
 
@@ -595,6 +622,10 @@ export const createWSTransportClient = (options?: IWSTransportClientOptions): WS
 
             setReadyStateClosing(client);
             stopBeating();
+            // ! a socket that closes reads on to its peer's Close, so its handshake never waits on
+            // its own pause: what it held is dropped with it (RFC 6455 §7.1.1)
+            hold.drop();
+            socket.resume?.();
 
             if (isQuick) {
               client[dispose]();
@@ -647,6 +678,20 @@ export const createWSTransportClient = (options?: IWSTransportClientOptions): WS
           }
         },
 
+        // ! `ws` stops its socket, and emits what it already parsed of the read under way, which
+        // the hold keeps in order; a socket closing reads on, paused no more
+        pause: () => {
+          hold.pause();
+
+          if (!client.isClosing()) {
+            client.socket?.pause?.();
+          }
+        },
+        // what it held handed on from a microtask, its socket read again once nothing is held
+        resume: () => {
+          hold.resume();
+        },
+
         // a credential given here is not carried: its upgrade's is, and the client fails a call
         // that presents another before it goes, DESTINATION_UNREACHABLE (decision 0032)
         send: ({ data }) => {
@@ -671,6 +716,7 @@ export const createWSTransportClient = (options?: IWSTransportClientOptions): WS
           rejectConnect?.(new ConnectError('the transport client was disposed as it connected'));
           resolveDisconnect?.(true);
           stopBeating();
+          hold.drop();
 
           if (socket === null) {
             return;

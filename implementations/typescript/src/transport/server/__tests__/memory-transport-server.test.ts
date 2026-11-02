@@ -398,4 +398,84 @@ test.describe('createMemoryTransportServer', () => {
       [`a listener broke ${connectionHandle}`, `a listener broke ${connectionHandle}`],
     ]);
   });
+
+  // spec 15.12.17, 15.12.18
+  test('a paused in-memory transport holds what it is sent, in order, and hands it on once resumed', async () => {
+    await using server = createMemoryTransportServer();
+    await using client = createMemoryTransportClient({ server });
+    const atServer: number[] = [];
+    const atClient: number[] = [];
+    const connectionHandle = 'type=MEMORY;ip=local;ordinal=1';
+
+    server.on('message', ({ data }) => {
+      const [byte = 0] = new Uint8Array(data as ArrayBuffer);
+
+      atServer.push(byte);
+
+      // * a router at its bound pauses within the hand: what comes after waits
+      if (byte === 3) {
+        server.pause(connectionHandle);
+      }
+    });
+    client.on('message', ({ data }) => {
+      atClient.push(...new Uint8Array(data as ArrayBuffer));
+    });
+    await server.start();
+    await client.connect({});
+
+    // the server's end, paused, then paused again as it hands what it held
+    server.pause(connectionHandle);
+    server.pause(connectionHandle);
+
+    for (const byte of [1, 2, 3, 4, 5]) {
+      await client.send({ data: new Uint8Array([byte]) });
+    }
+
+    await turn();
+
+    expect(atServer).toEqual([]);
+
+    // * handed from a microtask, never within the resume; what comes meanwhile waits behind it
+    server.resume(connectionHandle);
+    void client.send({ data: new Uint8Array([6]) });
+
+    expect(atServer).toEqual([]);
+
+    await turn();
+
+    expect(atServer).toEqual([1, 2, 3]);
+
+    server.resume(connectionHandle);
+    await turn();
+
+    expect(atServer).toEqual([1, 2, 3, 4, 5, 6]);
+
+    // the client's end, paused whole
+    client.pause();
+
+    for (const byte of [7, 8]) {
+      await server.send({ data: new Uint8Array([byte]) }, connectionHandle);
+    }
+
+    await turn();
+
+    expect(atClient).toEqual([]);
+
+    client.resume();
+    client.resume();
+    await turn();
+
+    expect(atClient).toEqual([7, 8]);
+
+    // * a handle no longer held is let be; what a connection held goes with it
+    server.pause(connectionHandle);
+    await client.send({ data: new Uint8Array([9]) });
+    await turn();
+    await client.disconnect();
+    await turn();
+    server.resume(connectionHandle);
+    await turn();
+
+    expect([atServer, server.clients]).toEqual([[1, 2, 3, 4, 5, 6], []]);
+  });
 });

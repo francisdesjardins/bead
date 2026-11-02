@@ -28,7 +28,9 @@ use crate::owner::WeakOwner;
 use crate::router::admissions::require_credential;
 use crate::router::relay::RelayOptions;
 use crate::router::server::{RouterServer, RouterServerOptions, ServerState, end_session};
-use crate::router::types::{BoxFuture, ConnectionHandle, Gauges, RouterError, RouterLimitsOptions};
+use crate::router::types::{
+    BoxFuture, ConnectionHandle, Gauges, IntakeLimitsOptions, RouterError, RouterLimitsOptions,
+};
 use crate::session_token::SessionToken;
 use crate::transport::{Listened, ListenerId, ServerTransport};
 
@@ -58,6 +60,9 @@ pub struct ServerOptions {
     pub metrics_registry: Option<MetricsRegistry>,
     /// What a paced subscription queues at most.
     pub pacing: Option<PacingLimitsOptions>,
+    /// What its router holds of each connection untaken, past which it pauses that connection
+    /// (spec 15.12).
+    pub intake: Option<IntakeLimitsOptions>,
     /// Its router's relay's options: its admission, `require_credential` when none.
     pub relay: Option<RelayOptions>,
     /// Its sessions' defaults, and their clock, which must be its own.
@@ -1201,6 +1206,7 @@ impl Server {
                     limits: options.limits.clone(),
                     metrics_registry: options.metrics_registry.clone(),
                     pacing: options.pacing.clone(),
+                    intake: options.intake.clone(),
                     credentials: options.credentials.clone(),
                     relay: Some(relay),
                     session_token_of: None,

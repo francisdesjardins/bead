@@ -169,6 +169,23 @@ pub trait ServerTransport: Send + Sync + fmt::Debug {
     /// Hears its events no more.
     fn unlisten(&self, listener: &Arc<dyn ServerListener>);
 
+    /// Pauses `connection_handle`, its router behind on it (spec 15.12, decision 0046): it hands
+    /// nothing more of that connection, and holds what it already received, whole or still
+    /// arriving, in order, until it is resumed; while it holds anything, what comes next waits
+    /// behind it, paused or not, so nothing overtakes what is held. A transport whose peer is its
+    /// application's own code holds without bound, and says so.
+    ///
+    /// Idempotent, it never blocks and tells no listener within it. Its router calls it under the
+    /// lock of its counts, from a reader's thread or its own turn, so it takes no lock that this
+    /// transport holds while it tells a listener.
+    fn pause(&self, connection_handle: &ConnectionHandle);
+
+    /// Resumes `connection_handle`: what it holds it hands on, in order, from a later step of its
+    /// own, never within this call, asking before each hand whether it was paused again. As
+    /// [`ServerTransport::pause`], idempotent, never blocking, telling no listener within it, and
+    /// taking no lock this transport holds while it tells one.
+    fn resume(&self, connection_handle: &ConnectionHandle);
+
     /// The clock it runs on, which the layers above it run on too.
     fn clock(&self) -> Option<SharedClock> {
         None
@@ -243,6 +260,23 @@ pub trait ClientTransport: Send + Sync + fmt::Debug {
 
     /// Hears its events no more.
     fn unlisten(&self, listener: &Arc<dyn ClientListener>);
+
+    /// Pauses it whole, its router behind (spec 15.12, decision 0046): it hands nothing more, and
+    /// holds what it already received, whole or still arriving, in order, until it is resumed;
+    /// while it holds anything, what comes next waits behind it, paused or not. What it holds of a
+    /// connection is dropped with that connection; a pause outlasts it, until a resume. A transport
+    /// whose peer is its application's own code holds without bound, and says so.
+    ///
+    /// Idempotent, it never blocks and tells no listener within it. Its router calls it under the
+    /// lock of its counts, from a reader's thread or its own turn, so it takes no lock that this
+    /// transport holds while it tells a listener.
+    fn pause(&self);
+
+    /// Resumes it: what it holds it hands on, in order, from a later step of its own, never within
+    /// this call, asking before each hand whether it was paused again. As
+    /// [`ClientTransport::pause`], idempotent, never blocking, telling no listener within it, and
+    /// taking no lock this transport holds while it tells one.
+    fn resume(&self);
 
     /// The clock it runs on.
     fn clock(&self) -> Option<SharedClock> {

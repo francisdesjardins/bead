@@ -12,12 +12,17 @@
 //! The participant is an owner of its own (decision 0044): its connections, its connects awaiting
 //! their answer and the departures it subscribes are one task's, each touched in its turn; what its
 //! transports and its gauges read from any thread is kept beside it.
+//!
+//! A connection its router paused is held, never its link (spec 15.12, 15.23; decision 0046): each
+//! envelope that comes whole for it waits in its held queue, in order, behind what is held, its
+//! CLOSE behind them, acknowledged to its broker once held; a resume's release turn hands them on.
+//! Past `maximumHeldEnvelopeBytes`, that connection alone is lost.
 
 use core::fmt;
 use core::future::Future;
 use core::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use core::time::Duration;
-use std::collections::{BTreeSet, HashMap};
+use std::collections::{BTreeSet, HashMap, VecDeque};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError, Weak};
 
 use bytes::Bytes;
@@ -115,6 +120,10 @@ pub struct BrokerParticipantOptions {
     /// Whether its link connects again once lost, as `reconnect` says: true when none; false leaves
     /// it down, reported, until a start or a connect links it anew.
     pub is_reconnecting: Option<bool>,
+    /// What it holds of the envelopes of one connection its router paused, past which it loses that
+    /// connection, a CLOSE of 4000 (spec 15.23); none bounds each by that connection's
+    /// `maximumUnsentBytes`, its transport's. Charged to no budget of its parts.
+    pub maximum_held_envelope_bytes: Option<u64>,
 }
 
 /// The peer of a broker's connection, as its OPEN or its ACCEPT named it (spec 15.18): its
@@ -177,7 +186,9 @@ enum State {
     Open,
 }
 
-// one end of a connection (spec 15.17 to 15.23), touched in its participant's turn alone
+// one end of a connection (spec 15.17 to 15.23), touched in its participant's turn alone: what its
+// router paused it for held in order, its bytes counted apart from its parts', and the CLOSE that
+// came behind them, whether clean
 struct Connection {
     serial: u64,
     owner: Arc<dyn ConnectionOwner>,
@@ -191,6 +202,10 @@ struct Connection {
     state: State,
     counters: Arc<Counters>,
     handle: Option<ConnectionHandle>,
+    paused: Arc<AtomicBool>,
+    held: VecDeque<TransportMessage>,
+    held_bytes: u64,
+    closing: Option<bool>,
 }
 
 impl Connection {
@@ -217,6 +232,8 @@ pub(crate) struct Setup {
     pub(crate) maximum_unsent: u64,
     /// Whether it is half-open, its third leg awaited; open otherwise.
     pub(crate) is_half_open: bool,
+    /// Whether its router paused it, the flag its transport sets and clears (spec 15.12).
+    pub(crate) paused: Arc<AtomicBool>,
 }
 
 /// What takes an ACCEPT naming a connect's half: its connection made, held and opened, in its
@@ -349,6 +366,8 @@ pub(crate) struct Config {
     pub(crate) heartbeat: Duration,
     pub(crate) receive_bound: u64,
     pub(crate) parts_bounds: Arc<PartsBounds>,
+    // what it holds of one connection paused, past which it loses it; none, its maximumUnsentBytes
+    maximum_held_envelope_bytes: Option<u64>,
     reconnect: ReconnectOptions,
     is_reconnecting: bool,
     status: Mutex<Status>,
@@ -755,6 +774,10 @@ impl ParticipantState {
                 },
                 counters,
                 handle: None,
+                paused: setup.paused,
+                held: VecDeque::new(),
+                held_bytes: 0,
+                closing: None,
             },
         );
     }
@@ -873,13 +896,17 @@ impl ParticipantState {
     /// goes: the next of its sequence, a RESET unnumbered, what waits for its broker counted until
     /// it is taken. A parcel but a CLOSE that would take that past `maximumUnsentBytes` loses the
     /// connection instead, a CLOSE of 4000, reported naming the bound (spec 15.23); once it ended,
-    /// none goes.
+    /// or its peer's CLOSE came, held behind what it holds, none goes.
     pub(crate) fn publish_on(
         &mut self,
         pair: Pair,
         (parcel, expires_after): (Parcel, Option<Duration>),
     ) {
-        let Some(connection) = self.connections.get_mut(&pair) else {
+        let Some(connection) = self
+            .connections
+            .get_mut(&pair)
+            .filter(|connection| connection.closing.is_none())
+        else {
             return;
         };
         let is_reset = parcel.kind == kinds::RESET;
@@ -1143,6 +1170,11 @@ impl ParticipantState {
             return;
         }
 
+        // * its peer closed it, its CLOSE held behind what it holds: nothing comes after a CLOSE
+        if connection.closing.is_some() {
+            return;
+        }
+
         if parcel.layout != LAYOUT {
             self.trace_rx((message, Some(&parcel)), (ParcelVerdict::Taken, Some(pair)));
             let why = format!(
@@ -1220,9 +1252,7 @@ impl ParticipantState {
             }
             // a PONG answers what it heard
             kinds::PONG => {}
-            kinds::CLOSE => {
-                self.ended(pair, (parcel.code == Some(codes::NORMAL), None));
-            }
+            kinds::CLOSE => self.take_close(pair, parcel.code == Some(codes::NORMAL)),
             _ => {
                 let why = format!("{} on a connection open", kind_named(parcel.kind));
 
@@ -1239,7 +1269,13 @@ impl ParticipantState {
         pair: Pair,
         (prefix, why, message): (Parcel, String, &BrokerMessage),
     ) {
-        let Some(connection) = self.connections.get(&pair) else {
+        // * nothing comes after a CLOSE: what comes once one is held behind what it holds is
+        // dropped
+        let Some(connection) = self
+            .connections
+            .get(&pair)
+            .filter(|connection| connection.closing.is_none())
+        else {
             return;
         };
 
@@ -1301,9 +1337,8 @@ impl ParticipantState {
             PartTaking::Held => {}
             PartTaking::Whole(envelope, credential) => {
                 let address = (!is_opener).then(|| connection.peer.id.clone());
-                let owner = Arc::clone(&connection.owner);
 
-                owner.delivered(
+                self.hand(
                     pair,
                     TransportMessage {
                         data: envelope,
@@ -1313,6 +1348,100 @@ impl ParticipantState {
                     },
                 );
             }
+        }
+    }
+
+    // a CLOSE ends its connection once all before it was handed on (spec 15.21): at once, unless
+    // what its router paused it for is held, which it then waits behind, its heartbeat stopped
+    fn take_close(&mut self, pair: Pair, is_clean: bool) {
+        let Some(connection) = self.connections.get_mut(&pair) else {
+            return;
+        };
+
+        if connection.held.is_empty() {
+            self.ended(pair, (is_clean, None));
+
+            return;
+        }
+
+        connection.closing = Some(is_clean);
+
+        if let Some(heartbeat) = connection.heartbeat.take() {
+            heartbeat.stop();
+        }
+    }
+
+    /// Hands an envelope come whole for `pair` on to that connection's end; or, while its router
+    /// paused it or anything is held, holds it behind what is held, in order (spec 15.12). One that
+    /// would take what the connection holds past `maximumHeldEnvelopeBytes` loses it instead, a
+    /// CLOSE of 4000, reported naming the bound, and no other connection (spec 15.23).
+    pub(crate) fn hand(&mut self, pair: Pair, message: TransportMessage) {
+        let bound = self.config.maximum_held_envelope_bytes;
+        let Some(connection) = self.connections.get_mut(&pair) else {
+            return;
+        };
+
+        // ! asked anew for each envelope: what is held goes first, whatever the flag says now
+        if !connection.paused.load(Ordering::SeqCst) && connection.held.is_empty() {
+            let owner = Arc::clone(&connection.owner);
+
+            owner.delivered(pair, message);
+
+            return;
+        }
+
+        let bound = bound.unwrap_or(connection.maximum_unsent);
+        let length = u64::try_from(message.data.len()).unwrap_or(u64::MAX);
+
+        match connection.held_bytes.checked_add(length) {
+            Some(held) if held <= bound => {
+                connection.held_bytes = held;
+                connection.held.push_back(message);
+            }
+            Some(_) | None => {
+                let why = format!(
+                    "what it holds for its router, paused, would pass maximumHeldEnvelopeBytes, {bound} bytes"
+                );
+
+                self.lose(pair, (codes::LOST, why));
+            }
+        }
+    }
+
+    /// A resume's turn: what `pair` holds handed on, in order, each after asking whether its
+    /// router paused it again, which handing one may do; then a CLOSE held behind them ends it. A
+    /// `take_data` queued ahead of this turn held its envelope behind what was held, so none
+    /// overtakes another.
+    pub(crate) fn release(&mut self, pair: Pair) {
+        loop {
+            let Some(connection) = self.connections.get_mut(&pair) else {
+                return;
+            };
+
+            if connection.paused.load(Ordering::SeqCst) {
+                return;
+            }
+
+            let Some(message) = connection.held.pop_front() else {
+                break;
+            };
+
+            connection.held_bytes = connection
+                .held_bytes
+                .saturating_sub(u64::try_from(message.data.len()).unwrap_or(u64::MAX));
+
+            let owner = Arc::clone(&connection.owner);
+
+            owner.delivered(pair, message);
+        }
+
+        let closing = self
+            .connections
+            .get(&pair)
+            .and_then(|connection| connection.closing);
+
+        if let Some(is_clean) = closing {
+            self.ended(pair, (is_clean, None));
         }
     }
 
@@ -1913,6 +2042,13 @@ impl BrokerParticipant {
             ),
             MINIMUM_BODY_BYTES_PER_SECOND,
         )?;
+
+        if options.maximum_held_envelope_bytes == Some(0) {
+            return Err(ProgrammerError::new(
+                "maximumHeldEnvelopeBytes is a whole number above 0, not 0",
+            ));
+        }
+
         let heartbeat = hold("a heartbeat", options.heartbeat.unwrap_or(HEARTBEAT))?;
         let body_grace_period = hold_finite(
             "bodyGracePeriod",
@@ -1951,6 +2087,7 @@ impl BrokerParticipant {
             platform,
             heartbeat,
             receive_bound,
+            maximum_held_envelope_bytes: options.maximum_held_envelope_bytes,
             reconnect: options.reconnect.clone().unwrap_or_default(),
             is_reconnecting: options.is_reconnecting.unwrap_or(true),
             status: Mutex::new(Status {
@@ -2320,6 +2457,32 @@ impl BrokerParticipant {
         job: J,
     ) -> crate::owner::Pending<T> {
         self.inner.owner.run(job)
+    }
+
+    /// What each connection holds for its router, paused, and whether its peer's CLOSE waits behind
+    /// it, in the order the connections were made, as a test reads it.
+    #[cfg(test)]
+    pub(crate) async fn held(&self) -> Vec<(usize, bool)> {
+        let held = self.run(|state: &mut ParticipantState| {
+            let mut held: Vec<(u64, usize, bool)> = state
+                .connections
+                .values()
+                .map(|connection| {
+                    (
+                        connection.serial,
+                        connection.held.len(),
+                        connection.closing.is_some(),
+                    )
+                })
+                .collect();
+
+            held.sort_unstable();
+            held.into_iter()
+                .map(|(_, count, is_closing)| (count, is_closing))
+                .collect()
+        });
+
+        held.await.unwrap_or_default()
     }
 
     /// Posts `job`, in its turn, after what came before it.

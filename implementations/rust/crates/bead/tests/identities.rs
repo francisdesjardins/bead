@@ -40,6 +40,11 @@ impl ClientTransport for Unconnected {
 
     fn unlisten(&self, _listener: &Arc<dyn ClientListener>) {}
 
+    // a pause holds nothing here: it hands nothing
+    fn pause(&self) {}
+
+    fn resume(&self) {}
+
     fn ready_state(&self) -> ReadyState {
         ReadyState::Uninitialized
     }
@@ -65,6 +70,11 @@ impl ServerTransport for Unconnecting {
     fn listen(&self, _listener: Arc<dyn ServerListener>) {}
 
     fn unlisten(&self, _listener: &Arc<dyn ServerListener>) {}
+
+    // a pause holds nothing here: it hands nothing
+    fn pause(&self, _connection_handle: &ConnectionHandle) {}
+
+    fn resume(&self, _connection_handle: &ConnectionHandle) {}
 
     fn start(&self) -> BoxFuture<Result<(), RouterError>> {
         Box::pin(async { Ok(()) })

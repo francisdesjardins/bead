@@ -236,6 +236,59 @@ test.describe('createBrokerTransportClient', () => {
     await ada.stop();
   });
 
+  // spec 15.12.17
+  test('paused before its connect opened, holds what its server sent, and hands it in order once resumed', async () => {
+    const broker = createMemoryBroker();
+    const ada = createBrokerParticipant({ adapter: broker.adapter({ id: 'ada' }) });
+    const peer = await peerOf(broker);
+    const client = ada.transportClient();
+    const told: string[] = [];
+
+    client.on('message', ({ data }) => {
+      told.push(hexadecimalOf(new Uint8Array(data as Uint8Array)));
+    });
+
+    // * a pause outlasts its connection: the connection it opens is paused as it is made
+    client.pause();
+
+    const connecting = client.connect({ server: 'interop' });
+
+    await turn();
+
+    const opener = peer.heard[0]?.opener ?? new Uint8Array(8);
+
+    await peer.adapter.publish({ payload: acceptOf(opener), topic: INBOX });
+    await connecting;
+
+    for (const [sequence, byte] of [
+      [2, 0x01],
+      [3, 0x02],
+    ] as const) {
+      await peer.adapter.publish({
+        payload: writeParcel({
+          acceptor: HALF,
+          carried: Uint8Array.of(0xa1, byte),
+          kind: ParcelKind.DATA,
+          opener,
+          sequence,
+        }),
+        topic: INBOX,
+      });
+    }
+
+    await turn();
+
+    expect([told, client.isOpen()]).toEqual([[], true]);
+
+    client.resume();
+    await turn();
+
+    expect(told).toEqual(['A1 01', 'A1 02']);
+
+    await client.disconnect();
+    await ada.stop();
+  });
+
   test('fails a connect its server refused as malformed or closed as it opened, telling no close, and tells one once it opened', async () => {
     const broker = createMemoryBroker();
     const ada = createBrokerParticipant({ adapter: broker.adapter({ id: 'ada' }) });

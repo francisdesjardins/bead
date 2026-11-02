@@ -1990,6 +1990,66 @@ public sealed class WebSocketTransportClientTests : IAsyncLifetime
         }
     }
 
+    // spec 15.12.17; RFC 6455 §7.1.1
+    [Fact]
+    public async Task A_paused_connection_closes_cleanly()
+    {
+        using var listener = new Listener(IPAddress.Loopback);
+        var messages = Channel.CreateUnbounded<TransportMessage>();
+        var closes = ClosesOf(_client);
+
+        _client.Message += (message) =>
+        {
+            messages.Writer.TryWrite(message);
+        };
+
+        var connecting = _client.Connect(new WebSocketConnectOptions { Host = Host, Port = listener.Port }, Cancelled);
+        var (peer, head) = await listener.Next();
+
+        using (peer)
+        using (var server = await Listener.Answer(peer, head))
+        {
+            await connecting.WaitAsync(Patience, Cancelled);
+            _client.Pause();
+            await server.SendAsync(new byte[4], WebSocketMessageType.Binary, true, Cancelled);
+            await Task.Delay(TimeSpan.FromMilliseconds(50), Cancelled);
+
+            // * paused, its socket reads no more, what it brought held
+            Assert.True(messages.Reader.Count == 0);
+
+            var watch = System.Diagnostics.Stopwatch.StartNew();
+            var closing = _client.CloseConnection();
+            var received = await server.ReceiveAsync(new byte[16], Cancelled).WaitAsync(Patience, Cancelled);
+
+            Assert.Equal(WebSocketMessageType.Close, received.MessageType);
+            await server.CloseOutputAsync(WebSocketCloseStatus.NormalClosure, null, Cancelled);
+            await closing.WaitAsync(Patience, Cancelled);
+
+            // it read its server's Close, its own pause opened: clean, long before its close timeout
+            Assert.Equal((true, false), await Next(closes));
+            Assert.InRange(watch.Elapsed, TimeSpan.Zero, TimeSpan.FromMilliseconds(1_500));
+            Assert.True(messages.Reader.Count == 0);
+        }
+
+        // * its pause outlasts the connection: one connected after holds until resumed
+        connecting = _client.Connect(new WebSocketConnectOptions { Host = Host, Port = listener.Port }, Cancelled);
+        (peer, head) = await listener.Next();
+
+        using (peer)
+        using (var server = await Listener.Answer(peer, head))
+        {
+            await connecting.WaitAsync(Patience, Cancelled);
+            await server.SendAsync(new byte[] { 7 }, WebSocketMessageType.Binary, true, Cancelled);
+            await Task.Delay(TimeSpan.FromMilliseconds(50), Cancelled);
+
+            Assert.True(messages.Reader.Count == 0);
+
+            _client.Resume();
+
+            Assert.Equal(new byte[] { 7 }, (await Next(messages)).Bytes.ToArray());
+        }
+    }
+
     [Fact]
     public async Task Hears_the_next_message_after_a_message_listener_throws_the_throw_reported()
     {

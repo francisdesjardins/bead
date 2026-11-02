@@ -2,13 +2,16 @@
 //!
 //! What a router sends on one is recorded and read back as envelopes, what the test delivers
 //! reaches the router as its transport's message, and a send is taken, refused as it is handed
-//! over, or refused later, as the test says.
+//! over, or refused later, as the test says. Each keeps its router's pause (spec 15.12, decision
+//! 0046): it records each call, and holds what the test delivers while paused, or while it holds
+//! anything, handing it on once resumed, in order, from a task of its own its clock counts.
 
-use std::collections::{BTreeSet, HashMap};
+use std::collections::{BTreeSet, HashMap, VecDeque};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
+use std::sync::{Arc, Mutex, MutexGuard, PoisonError, Weak};
 
 use bytes::Bytes;
+use tokio::runtime::Handle;
 
 use crate::clock::SharedClock;
 use crate::constants::{EnvelopeKind, RouterSide};
@@ -20,6 +23,57 @@ use crate::transport::{
 
 fn locked<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
     mutex.lock().unwrap_or_else(PoisonError::into_inner)
+}
+
+// one connection's pause as its router set it, what it holds meanwhile, in order, and whether a
+// task of its own hands that on now
+#[derive(Debug, Default)]
+struct Paced {
+    is_paused: bool,
+    is_handing: bool,
+    held: VecDeque<TransportMessage>,
+}
+
+impl Paced {
+    // whether what comes waits: paused, handing, or holding anything
+    fn holds(&self) -> bool {
+        self.is_paused || self.is_handing || !self.held.is_empty()
+    }
+
+    // resumed: whether a task of its own is to hand what it holds, marked handing if so
+    fn resumed(&mut self) -> bool {
+        self.is_paused = false;
+
+        let is_to_hand = !self.is_handing && !self.held.is_empty();
+
+        if is_to_hand {
+            self.is_handing = true;
+        }
+
+        is_to_hand
+    }
+
+    // the next it holds to hand, or none, its hand then over: paused again, or nothing held
+    fn next(&mut self) -> Option<TransportMessage> {
+        let next = if self.is_paused {
+            None
+        } else {
+            self.held.pop_front()
+        };
+
+        if next.is_none() {
+            self.is_handing = false;
+        }
+
+        next
+    }
+}
+
+// the runtime a scripted transport hands on from: the one it was built on, or the current one
+fn runtime_of(built: Option<&Handle>) -> Option<Handle> {
+    built
+        .cloned()
+        .or_else(|| crate::platform::runtime_of(None, "a scripted transport").ok())
 }
 
 /// How a scripted transport answers a send.
@@ -114,12 +168,16 @@ pub fn envelope_of(bytes: &Bytes, side: RouterSide) -> Envelope {
 /// A client's transport a test scripts: what its router sends, read as a server reads it, and what
 /// the test delivers as its server.
 pub struct ScriptedClient {
+    me: Weak<Self>,
     clock: SharedClock,
+    runtime: Option<Handle>,
     sent: Mutex<Vec<TransportMessage>>,
     listeners: Mutex<Vec<Arc<dyn ClientListener>>>,
     sending: Mutex<Sending>,
     carrying: AtomicBool,
     secure: AtomicBool,
+    paced: Mutex<Paced>,
+    pauses: Mutex<Vec<bool>>,
 }
 
 impl core::fmt::Debug for ScriptedClient {
@@ -134,13 +192,17 @@ impl ScriptedClient {
     /// A transport on `clock`, which takes every send.
     #[must_use]
     pub fn new(clock: SharedClock) -> Arc<Self> {
-        Arc::new(Self {
+        Arc::new_cyclic(|me| Self {
+            me: Weak::clone(me),
             clock,
+            runtime: runtime_of(None),
             sent: Mutex::default(),
             listeners: Mutex::default(),
             sending: Mutex::default(),
             carrying: AtomicBool::new(true),
             secure: AtomicBool::new(true),
+            paced: Mutex::default(),
+            pauses: Mutex::default(),
         })
     }
 
@@ -175,19 +237,64 @@ impl ScriptedClient {
         });
     }
 
-    /// Hands its router `message`.
+    /// Hands its router `message`; or holds it, in order, while its router paused it or it holds
+    /// anything.
     pub fn deliver_message(&self, message: &TransportMessage) {
+        {
+            let mut paced = locked(&self.paced);
+
+            if paced.holds() {
+                paced.held.push_back(message.clone());
+
+                return;
+            }
+
+            drop(paced);
+        }
+
         self.tell(|listener| listener.on_message(message.clone()));
     }
 
-    /// Tells its router its connection closed.
+    /// Tells its router its connection closed, what it held dropped with it.
     pub fn close_connection(&self) {
+        locked(&self.paced).held.clear();
         self.tell(|listener| listener.on_close(false, false));
     }
 
-    /// Tells its router its connection was replaced, as a reconnection starts.
+    /// Tells its router its connection was replaced, as a reconnection starts, what it held
+    /// dropped with it.
     pub fn replace(&self) {
+        locked(&self.paced).held.clear();
         self.tell(|listener| listener.on_reconnect());
+    }
+
+    /// Whether its router holds it paused.
+    #[must_use]
+    pub fn is_paused(&self) -> bool {
+        locked(&self.paced).is_paused
+    }
+
+    /// How many messages it holds for its router.
+    #[must_use]
+    pub fn held(&self) -> usize {
+        locked(&self.paced).held.len()
+    }
+
+    /// Each pause and resume its router asked, in order: true for a pause.
+    #[must_use]
+    pub fn pauses(&self) -> Vec<bool> {
+        locked(&self.pauses).clone()
+    }
+
+    // in a task of its own: what it holds handed on, in order, until its router pauses it again
+    fn release(&self) {
+        loop {
+            let Some(message) = locked(&self.paced).next() else {
+                return;
+            };
+
+            self.tell(|listener| listener.on_message(message.clone()));
+        }
     }
 
     /// Each message its router handed it.
@@ -257,6 +364,28 @@ impl ClientTransport for ScriptedClient {
         locked(&self.listeners).retain(|held| !Arc::ptr_eq(held, listener));
     }
 
+    // ! its own locks alone, which it never holds as it tells a listener
+    fn pause(&self) {
+        locked(&self.pauses).push(true);
+        locked(&self.paced).is_paused = true;
+    }
+
+    // ! as `pause`: what it holds handed on by a task of its own, never within this call
+    fn resume(&self) {
+        locked(&self.pauses).push(false);
+
+        let is_to_hand = locked(&self.paced).resumed();
+
+        if is_to_hand
+            && let Some(me) = self.me.upgrade()
+            && let Some(runtime) = runtime_of(self.runtime.as_ref())
+        {
+            crate::owner::spawn_counted((&runtime, &self.clock), async move {
+                me.release();
+            });
+        }
+    }
+
     fn clock(&self) -> Option<SharedClock> {
         Some(Arc::clone(&self.clock))
     }
@@ -277,13 +406,18 @@ impl ClientTransport for ScriptedClient {
 /// A server's transport a test scripts: the connections it opens, what its router sends on each,
 /// read as a client reads it, and what the test delivers on each as its client.
 pub struct ScriptedServer {
+    me: Weak<Self>,
     clock: SharedClock,
+    runtime: Option<Handle>,
     sent: Mutex<Vec<(ConnectionHandle, TransportMessage)>>,
     listeners: Mutex<Vec<Arc<dyn ServerListener>>>,
     sending: Mutex<HashMap<ConnectionHandle, Sending>>,
     one_way: Mutex<BTreeSet<ConnectionHandle>>,
     secure: Mutex<BTreeSet<ConnectionHandle>>,
     carrying: Mutex<BTreeSet<ConnectionHandle>>,
+    paced: Mutex<HashMap<ConnectionHandle, Paced>>,
+    pauses: Mutex<Vec<(bool, ConnectionHandle)>>,
+    is_pacing_broken: AtomicBool,
 }
 
 impl core::fmt::Debug for ScriptedServer {
@@ -307,14 +441,19 @@ impl ScriptedServer {
     /// A transport on `clock`, which takes every send.
     #[must_use]
     pub fn new(clock: SharedClock) -> Arc<Self> {
-        Arc::new(Self {
+        Arc::new_cyclic(|me| Self {
+            me: Weak::clone(me),
             clock,
+            runtime: runtime_of(None),
             sent: Mutex::default(),
             listeners: Mutex::default(),
             sending: Mutex::default(),
             one_way: Mutex::default(),
             secure: Mutex::default(),
             carrying: Mutex::default(),
+            paced: Mutex::default(),
+            pauses: Mutex::default(),
+            is_pacing_broken: AtomicBool::new(false),
         })
     }
 
@@ -372,28 +511,85 @@ impl ScriptedServer {
         self.tell(|listener| listener.on_connection(connection_handle));
     }
 
-    /// Hands its router `envelope` on `connection_handle`, as its client sent it.
+    /// Hands its router `envelope` on `connection_handle`, as its client sent it; or holds it, as
+    /// [`ScriptedServer::deliver_message`] does.
     pub fn deliver(&self, envelope: &Envelope, connection_handle: &ConnectionHandle) {
-        let message = TransportMessage {
-            data: bytes_of(envelope),
-            ..TransportMessage::default()
-        };
-
-        self.tell(|listener| listener.on_message(message.clone(), connection_handle));
+        self.deliver_message(
+            &TransportMessage {
+                data: bytes_of(envelope),
+                ..TransportMessage::default()
+            },
+            connection_handle,
+        );
     }
 
-    /// Hands its router `message` on `connection_handle`.
+    /// Hands its router `message` on `connection_handle`; or holds it, in order, while its router
+    /// paused that connection or it holds anything of it.
     pub fn deliver_message(
         &self,
         message: &TransportMessage,
         connection_handle: &ConnectionHandle,
     ) {
+        {
+            let mut paced = locked(&self.paced);
+
+            if let Some(held) = paced.get_mut(connection_handle).filter(|held| held.holds()) {
+                held.held.push_back(message.clone());
+
+                return;
+            }
+        }
+
         self.tell(|listener| listener.on_message(message.clone(), connection_handle));
     }
 
-    /// Tells its router `connection_handle` closed.
+    /// Tells its router `connection_handle` closed, what it held of it dropped with it.
     pub fn close_connection(&self, connection_handle: &ConnectionHandle) {
+        locked(&self.paced).remove(connection_handle);
         self.tell(|listener| listener.on_close(false, connection_handle));
+    }
+
+    /// Whether each pause and resume its router asks panics, once it is done: an application's
+    /// transport that breaks.
+    pub fn set_pacing_broken(&self, is_broken: bool) {
+        self.is_pacing_broken.store(is_broken, Ordering::SeqCst);
+    }
+
+    /// Whether its router holds `connection_handle` paused.
+    #[must_use]
+    pub fn is_paused(&self, connection_handle: &ConnectionHandle) -> bool {
+        locked(&self.paced)
+            .get(connection_handle)
+            .is_some_and(|held| held.is_paused)
+    }
+
+    /// How many messages it holds of `connection_handle` for its router.
+    #[must_use]
+    pub fn held(&self, connection_handle: &ConnectionHandle) -> usize {
+        locked(&self.paced)
+            .get(connection_handle)
+            .map_or(0, |held| held.held.len())
+    }
+
+    /// Each pause and resume its router asked, in order, with its connection: true for a pause.
+    #[must_use]
+    pub fn pauses(&self) -> Vec<(bool, ConnectionHandle)> {
+        locked(&self.pauses).clone()
+    }
+
+    // in a task of its own: what it holds of a connection handed on, in order, until its router
+    // pauses it again
+    fn release(&self, connection_handle: &ConnectionHandle) {
+        loop {
+            let next = locked(&self.paced)
+                .get_mut(connection_handle)
+                .and_then(Paced::next);
+            let Some(message) = next else {
+                return;
+            };
+
+            self.tell(|listener| listener.on_message(message.clone(), connection_handle));
+        }
     }
 
     /// Each envelope its router sent on `connection_handle`, as a client reads it.
@@ -452,6 +648,41 @@ impl ServerTransport for ScriptedServer {
 
     fn unlisten(&self, listener: &Arc<dyn ServerListener>) {
         locked(&self.listeners).retain(|held| !Arc::ptr_eq(held, listener));
+    }
+
+    // ! its own locks alone, which it never holds as it tells a listener
+    fn pause(&self, connection_handle: &ConnectionHandle) {
+        locked(&self.pauses).push((true, Arc::clone(connection_handle)));
+        locked(&self.paced)
+            .entry(Arc::clone(connection_handle))
+            .or_default()
+            .is_paused = true;
+
+        // a transport that breaks, on purpose, as an application's might
+        assert!(!self.is_pacing_broken.load(Ordering::SeqCst), "no pause");
+    }
+
+    // ! as `pause`: what it holds handed on by a task of its own, never within this call
+    fn resume(&self, connection_handle: &ConnectionHandle) {
+        locked(&self.pauses).push((false, Arc::clone(connection_handle)));
+
+        let is_to_hand = locked(&self.paced)
+            .get_mut(connection_handle)
+            .is_some_and(Paced::resumed);
+
+        if is_to_hand
+            && let Some(me) = self.me.upgrade()
+            && let Some(runtime) = runtime_of(self.runtime.as_ref())
+        {
+            let handle = Arc::clone(connection_handle);
+
+            crate::owner::spawn_counted((&runtime, &self.clock), async move {
+                me.release(&handle);
+            });
+        }
+
+        // a transport that breaks, on purpose, as an application's might
+        assert!(!self.is_pacing_broken.load(Ordering::SeqCst), "no resume");
     }
 
     fn clock(&self) -> Option<SharedClock> {

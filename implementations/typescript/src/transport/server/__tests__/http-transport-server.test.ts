@@ -571,6 +571,95 @@ test.describe('createHTTPTransportServer', () => {
     expect(heavy).toEqual([503, REFUSALS.BUSY]);
   });
 
+  // spec 15.5.2, 15.6.13, 15.12.17
+  test('hands on no envelope of a paused connection, its 204 going once handed on, and 429 busy with Retry-After past the exchanges under way', async () => {
+    await using started = await startTransport({ maximumWaitingExchanges: 2 });
+    const { events, server, url } = started;
+    const { connectionHandle, connectionToken } = await connect(url, server);
+    const settled: string[] = [];
+    const sent = (label: string, body: Uint8Array) => {
+      return post(url, { body, connectionToken }).then((response) => {
+        settled.push(`${label} ${String(response.status)}`);
+
+        return response;
+      });
+    };
+
+    server.pause(connectionHandle);
+
+    // * four under way, twice the requests that may wait: each read whole, and held at its gate
+    const request = sent('request', envelopeOf(ENVELOPE_KINDS.REQUEST, { callId: 1 }));
+    const cancels = [9, 11, 13].map((callId) => {
+      return sent(`cancel ${String(callId)}`, envelopeOf(ENVELOPE_KINDS.CANCEL, { callId }));
+    });
+
+    await expect
+      .poll(() => {
+        return server.gauges().counts['bodyBytes'] ?? 0;
+      })
+      .toBe(32);
+    await new Promise((resolve) => {
+      setTimeout(resolve, 50);
+    });
+
+    expect([namesOf(events, 'message'), settled]).toEqual([[], []]);
+
+    // past the exchanges under way: busy, told when to come back
+    const crowded = await post(url, {
+      body: envelopeOf(ENVELOPE_KINDS.CANCEL, { callId: 15 }),
+      connectionToken,
+    });
+
+    expect([
+      crowded.status,
+      crowded.headers.get(REFUSAL_HEADER),
+      crowded.headers.get('retry-after'),
+    ]).toEqual([429, REFUSALS.BUSY, '1']);
+
+    server.resume(connectionHandle);
+
+    // handed on in order, each non-request's 204 once it was, the request's head once it was
+    expect(
+      (await Promise.all(cancels)).map(({ status }) => {
+        return status;
+      })
+    ).toEqual([204, 204, 204]);
+    expect((await request).status).toBe(200);
+    expect(
+      namesOf(events, 'message').map(([, bytes]) => {
+        return new DataView(Uint8Array.from(bytes as number[]).buffer).getUint32(4);
+      })
+    ).toEqual([1, 9, 11, 13]);
+    expect(server.gauges().counts['bodyBytes'] ?? 0).toBe(0);
+    await server.send({ data: envelopeOf(ENVELOPE_KINDS.RESULT, { callId: 1 }) }, connectionHandle);
+    await (await request).arrayBuffer();
+  });
+
+  // spec 15.12.17
+  test('tells an exchange held at the gate of a paused connection that its connection is gone as it closes', async () => {
+    await using started = await startTransport();
+    const { events, server, url } = started;
+    const { connectionHandle, connectionToken } = await connect(url, server);
+
+    server.pause(connectionHandle);
+
+    const held = post(url, {
+      body: envelopeOf(ENVELOPE_KINDS.CANCEL, { callId: 9 }),
+      connectionToken,
+    });
+
+    await expect
+      .poll(() => {
+        return server.gauges().counts['bodyBytes'] ?? 0;
+      })
+      .toBe(8);
+    await server.close(connectionHandle);
+
+    // * what waited at its gate goes with it, its charge released, and nothing of it handed on
+    expect(await refusalOf(held)).toEqual([404, REFUSALS.CONNECTION_UNKNOWN]);
+    expect([namesOf(events, 'message'), server.gauges().counts['bodyBytes'] ?? 0]).toEqual([[], 0]);
+  });
+
   test('"closeAll" closes every connection cleanly, and gives nothing without one', async () => {
     await using started = await startTransport();
     const { events, server, url } = started;

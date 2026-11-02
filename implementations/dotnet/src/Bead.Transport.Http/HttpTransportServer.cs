@@ -517,6 +517,10 @@ public sealed partial class HttpTransportServer : IServerTransport, IAsyncDispos
     private static readonly End TooSlow = new(StatusCodes.Status408RequestTimeout, HttpRefusals.TooSlow);
     private static readonly End Busy = new(StatusCodes.Status503ServiceUnavailable, HttpRefusals.Busy) { Headers = new Dictionary<string, string> { ["retry-after"] = "1" } };
 
+    // * a connection with too much under way: busy, told when to come back, which Bead's client
+    // waits for before it sends again what is no request (spec 15.6)
+    private static readonly End BusyExchanges = new(StatusCodes.Status429TooManyRequests, HttpRefusals.Busy) { Headers = new Dictionary<string, string> { ["retry-after"] = "1" } };
+
     private readonly HttpTransportServerOptions _options;
     private readonly TimeProvider _clock;
 
@@ -532,6 +536,10 @@ public sealed partial class HttpTransportServer : IServerTransport, IAsyncDispos
     private readonly HashSet<Task> _exchanging = [];
     private long _bodyBytes;
     private long _ordinal;
+
+    // the connections as their routers pause and resume them, written under the lock and read
+    // without it: a pause comes from within a telling, which takes no lock of the transport's
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<string, Drawn> _gates = new(StringComparer.Ordinal);
 
     // its ready state, and the guards around its start and its stop, as every transport server's
     private readonly TransportServerLife _life = new();
@@ -610,7 +618,7 @@ public sealed partial class HttpTransportServer : IServerTransport, IAsyncDispos
             {
                 return Handing?.Invoke(connection.ConnectionHandle) ?? Task.CompletedTask;
             },
-            HandOn = HandOn,
+            HandOn = HandOnGated,
             WaitAfterHandOff = WaitAfterHandOff,
             Finish = Finish,
             EndEarly = EndEarly,
@@ -1515,6 +1523,7 @@ public sealed partial class HttpTransportServer : IServerTransport, IAsyncDispos
                     Port = context.Connection.RemotePort,
                 };
                 _drawn[connection.ConnectionHandle] = connection;
+                _gates[connection.ConnectionHandle] = connection;
                 _byToken[connection.ConnectionToken] = connection;
                 _perAddress[address] = _perAddress.GetValueOrDefault(address) + 1;
                 Rest(connection);
@@ -1625,6 +1634,89 @@ public sealed partial class HttpTransportServer : IServerTransport, IAsyncDispos
         }
 
         return (false, false);
+    }
+
+    // * an envelope read whole, handed on now; or, its connection paused by its router or holding
+    // what it paused for, at its gate, in order, handed on once resumed, from a step of its own
+    // (spec 15.12)
+    private Task<HandOff> HandOnGated((Drawn Connection, Waiting Waiting, TransportMessage Message) call)
+    {
+        var gated = new Gated(call.Waiting, call.Message);
+
+        if (call.Connection.Gate.Offer(gated))
+        {
+            return Task.FromResult(HandOn(call));
+        }
+
+        return gated.HandedOff.Task;
+    }
+
+    // * a resume's step: what waited at a connection's gate handed on, in order, each after asking
+    // whether its router paused it again, which handing one may do
+    private void HandHeld(Drawn connection)
+    {
+        while (connection.Gate.TryTake(out var gated))
+        {
+            try
+            {
+                gated.HandedOff.TrySetResult(HandOn((connection, gated.Waiting, gated.Message)));
+            }
+            catch (Exception reason)
+            {
+                gated.HandedOff.TrySetException(reason);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Pauses a connection (spec 15.12): each envelope read whole waits at its gate, in order, its
+    /// body still charged to <c>bodyBytesBudget</c>, its request's head and any other's 204 going
+    /// once it is handed on; its exchanges wait under the bound on what one connection has under
+    /// way, twice <c>maximumWaitingExchanges</c>, past which an exchange is refused 429 <c>busy</c>
+    /// with <c>Retry-After: 1</c>. Its listen goes on, the outbox's bound pacing its client.
+    /// Nothing for a connection it does not hold.
+    /// </summary>
+    public void Pause(string connectionHandle)
+    {
+        // ! its gate's own lock alone, never the telling lock nor the transport's: a pause comes
+        // from within a telling
+        if (_gates.TryGetValue(connectionHandle, out var connection))
+        {
+            connection.Gate.Pause();
+        }
+    }
+
+    /// <summary>
+    /// Resumes a connection: what waited at its gate handed on, in order, from a step of its own,
+    /// never within this call. Nothing for a connection it does not hold.
+    /// </summary>
+    public void Resume(string connectionHandle)
+    {
+        if (_gates.TryGetValue(connectionHandle, out var connection))
+        {
+            Reopen(connection);
+        }
+    }
+
+    // what waits at a connection's gate: the tests' way to see an exchange reach it
+    internal int HeldOf(string connectionHandle)
+    {
+        return _gates.TryGetValue(connectionHandle, out var connection) ? connection.Gate.Count : 0;
+    }
+
+    // a connection's gate opened, what waits at it handed on from a step of its own
+    private void Reopen(Drawn connection)
+    {
+        if (connection.Gate.Resume())
+        {
+            ThreadPool.QueueUserWorkItem(
+                (held) =>
+                {
+                    HandHeld(held);
+                },
+                connection,
+                preferLocal: false);
+        }
     }
 
     // ! an envelope read whole, told to the router as one with what the registry holds, so never
@@ -1746,7 +1838,7 @@ public sealed partial class HttpTransportServer : IServerTransport, IAsyncDispos
 
             if (connection.Waiting.Count >= _options.MaximumWaitingExchanges)
             {
-                return new End(StatusCodes.Status429TooManyRequests, HttpRefusals.Busy);
+                return BusyExchanges;
             }
 
             waiting.Prefix = (callId, kind);
@@ -2151,7 +2243,19 @@ public sealed partial class HttpTransportServer : IServerTransport, IAsyncDispos
             }
 
             _drawn.Remove(connection.ConnectionHandle);
+            _gates.TryRemove(connection.ConnectionHandle, out _);
             _byToken.Remove(connection.ConnectionToken);
+
+            // what waited at its gate goes with it, its client told it is gone; and its gate opens,
+            // so what reaches it after is told it is gone too
+            foreach (var gated in connection.Gate.Drop())
+            {
+                gated.Waiting.IsEnded = true;
+                gated.Waiting.Ended.TrySetResult(new Ending { IsGone = true });
+                gated.HandedOff.TrySetResult(HandOff.Gone);
+            }
+
+            Reopen(connection);
 
             var others = _perAddress.GetValueOrDefault(connection.Address) - 1;
 
@@ -2266,5 +2370,15 @@ public sealed partial class HttpTransportServer : IServerTransport, IAsyncDispos
 
         // the exchanges of requests, by call id, from their first 8 bytes to their answer
         public Dictionary<uint, Waiting> Waiting { get; } = [];
+
+        // * its gate: the envelopes read whole while its router paused it, each handed on once
+        // resumed, in order, or told it is gone with it (spec 15.12); under its own lock
+        public TransportHold<Gated> Gate { get; } = new();
+    }
+
+    // an envelope at its connection's gate, and what its hand-on came to, once it came
+    private sealed record Gated(Waiting Waiting, TransportMessage Message)
+    {
+        public TaskCompletionSource<HandOff> HandedOff { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
     }
 }

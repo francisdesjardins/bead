@@ -23,6 +23,13 @@ public sealed record WebSocketClientOptions
     /// says; none counts nothing.
     /// </summary>
     public MetricsRegistry? MetricsRegistry { get; init; }
+
+    /// <summary>
+    /// What its router holds untaken of what its server sent, past which it pauses its transport
+    /// (spec 15.12), as its own option of that name says: <see cref="IntakeLimits.Default"/> when
+    /// none.
+    /// </summary>
+    public IntakeLimits? Intake { get; init; }
 }
 
 /// <summary>
@@ -61,6 +68,7 @@ public sealed class WebSocketClient : IClient
             Credentials = options?.Credentials,
             Limits = limits,
             MetricsRegistry = options?.MetricsRegistry,
+            Intake = options?.Intake,
         });
         Services = new ServiceManager(Router);
     }

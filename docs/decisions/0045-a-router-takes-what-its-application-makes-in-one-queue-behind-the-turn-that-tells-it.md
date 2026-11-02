@@ -125,13 +125,18 @@ under `listener` and the twins below hold it. Each side keeps four rules.
    the turn that tells. It joins the FIFO's tail when it is made: behind what that turn sends at
    once, and in its place among what that turn and others defer. This is run to completion as
    ECMA-262's jobs define it, and a self-send as the actor model defines it. The order is defined
-   by what each side takes, not by when the application asks.
+   by what each side takes, not by when the application asks. An envelope a transport hands within
+   a telling is deferred alike, and
+   [0046](0046-a-router-paces-each-connections-reads-by-what-it-has-not-taken.md)
+   counts it as it is handed and releases it by the deferred turn that takes it.
 3. **From outside.** An operation made from outside any turn takes effect when it is made, as 0044
    has it: on the Rust and C# sides it is posted to the FIFO at the call; on the TypeScript side it
    runs at once, since no turn runs then. What a transport hands its side enters where its platform
-   hands it over: on the TypeScript side a WebSocket's message and a timer are HTML tasks, and enter
-   when their task runs, those platform queues being outside the side as HTML's task queue is
-   outside a script.
+   hands it over, paced by
+   [0046](0046-a-router-paces-each-connections-reads-by-what-it-has-not-taken.md):
+   on the TypeScript side a WebSocket's message and a timer are HTML tasks, and enter when their
+   task runs, those platform queues being outside the side as HTML's task queue is outside a
+   script.
 4. **A dispose, in two steps.** The handle's mark is set at once, so an operation made after it
    fails unsent — a `DisconnectError`, a `DisconnectException`, a `CallError::Disconnected` — "the
    router was disposed", a reason kept apart from "the router was disposed before the answer". The

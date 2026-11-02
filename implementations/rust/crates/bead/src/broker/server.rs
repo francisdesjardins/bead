@@ -6,10 +6,11 @@
 //! `type=…;participant=…;ordinal=…`, once the client's first parcel naming both halves proves it
 //! reads its inbox, and forgets one whose third leg did not come within its accept timeout. It
 //! hands its router each envelope with its peer participant's id as its address and no port, the
-//! credential its DATA carried beside it; it carries none toward its client.
+//! credential its DATA carried beside it; it carries none toward its client. A connection its
+//! router paused is held by its participant, never its link (spec 15.12, 15.23).
 
 use core::fmt;
-use core::sync::atomic::Ordering;
+use core::sync::atomic::{AtomicBool, Ordering};
 use core::time::Duration;
 use std::collections::{BTreeSet, HashMap};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError, Weak};
@@ -87,7 +88,8 @@ impl BrokerServerOptions {
     }
 }
 
-// a connection held, half-open or told
+// a connection held, half-open or told, and the flag its router's pause sets, which its
+// participant reads
 struct HeldConnection {
     peer_id: String,
     opener: u64,
@@ -97,6 +99,7 @@ struct HeldConnection {
     accepting: Option<Arc<dyn Timer>>,
     arrival: u64,
     last_activity: Option<i64>,
+    paused: Arc<AtomicBool>,
 }
 
 struct ServerState {
@@ -323,6 +326,7 @@ impl ServerInner {
         let owner: Arc<dyn ConnectionOwner> = Arc::<Self>::clone(self);
         let peer_id = peer.id.clone();
         let is_peer_secure = peer.is_secure;
+        let paused = Arc::new(AtomicBool::new(false));
 
         state.hold(Setup {
             owner,
@@ -331,6 +335,7 @@ impl ServerInner {
             sent: 0,
             maximum_unsent: self.maximum_unsent,
             is_half_open: true,
+            paused: Arc::clone(&paused),
         });
 
         let room = state.room_of(pair).unwrap_or(0);
@@ -361,6 +366,7 @@ impl ServerInner {
                     accepting: Some(accepting),
                     arrival: 0,
                     last_activity: None,
+                    paused,
                 },
             );
         }
@@ -894,6 +900,43 @@ impl ServerTransport for BrokerServer {
 
     fn unlisten(&self, listener: &Arc<dyn ServerListener>) {
         self.inner.listeners.remove(listener);
+    }
+
+    // ! its state's lock alone, which it never holds as it tells a listener: the flag its
+    // participant reads as each envelope of the connection comes whole, holding it from then on
+    // (spec 15.23); its link reads on
+    fn pause(&self, connection_handle: &ConnectionHandle) {
+        let state = locked(&self.inner.state);
+
+        if let Some(held) = state
+            .handles
+            .get(connection_handle)
+            .and_then(|pair| state.held.get(pair))
+        {
+            held.paused.store(true, Ordering::SeqCst);
+        }
+    }
+
+    // ! its state's lock alone, as `pause`: what the connection holds is handed on by a release
+    // turn of its participant's, behind what is queued there, never within this call
+    fn resume(&self, connection_handle: &ConnectionHandle) {
+        let pair = {
+            let state = locked(&self.inner.state);
+
+            state.handles.get(connection_handle).and_then(|pair| {
+                state.held.get(pair).map(|held| {
+                    held.paused.store(false, Ordering::SeqCst);
+
+                    *pair
+                })
+            })
+        };
+
+        if let Some(pair) = pair {
+            self.inner
+                .participant
+                .post(move |state: &mut ParticipantState| state.release(pair));
+        }
     }
 
     fn clock(&self) -> Option<SharedClock> {

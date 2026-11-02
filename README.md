@@ -127,9 +127,8 @@ envelopes.
 
 ## Where Bead goes
 
-- **Next**: Rust's service client in its core, and a bound on what waits for a router's turn on the
-  Rust and the C# sides alike; then Rust's transports over sockets with the interop both ways, its
-  broker bindings, its gateway and beadc's Rust target, each a record of its own
+- **Next**: Rust's service client in its core; then Rust's transports over sockets with the interop
+  both ways, its broker bindings, its gateway and beadc's Rust target, each a record of its own
   ([0044](docs/decisions/0044-rust-one-owner-per-router-traits-no-unsafe-two-parameters-no-warning.md)),
   each a row of the [support matrix](docs/support.md#differences) until it lands.
 - **Then**: a payload's rules written in CEL, a total subset beadc compiles into each side beside

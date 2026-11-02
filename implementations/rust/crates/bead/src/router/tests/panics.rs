@@ -222,9 +222,9 @@ async fn an_answer_whose_send_panics_fails_as_its_transport_s_throw_would_and_it
 
 /// A clock that breaks as it arms its next timer once told to: an application's clock, called
 /// within a router's turn.
-struct Breaking {
-    clock: Arc<SteppingClock>,
-    breaks: AtomicBool,
+pub(super) struct Breaking {
+    pub(super) clock: Arc<SteppingClock>,
+    pub(super) breaks: AtomicBool,
 }
 
 impl fmt::Debug for Breaking {

@@ -3033,3 +3033,79 @@ test.describe('WSTransportClient, by a name', () => {
     }
   });
 });
+
+test.describe('WSTransportClient, paused by its router', () => {
+  const [, [, TrackedWs]] = IMPLEMENTATIONS;
+
+  // spec 15.12.17; RFC 6455 §7.1.1
+  test('a paused connection closes cleanly', async () => {
+    const server = await startServer();
+    const client = createWSTransportClient({ closeTimeout: 2_000, WebSocket: TrackedWs });
+    const connection = nextConnection(server);
+    const heard: unknown[] = [];
+
+    client.on('message', ({ data }) => {
+      heard.push(data);
+    });
+
+    try {
+      await client.connect({ host, port: portOf(server) });
+
+      const { socket } = await connection;
+      const own = client.socket as unknown as WsWebSocket;
+      const codes = new Promise<number>((resolve) => {
+        own.once('close', (code: number) => {
+          resolve(code);
+        });
+      });
+
+      client.pause();
+      socket.send(new Uint8Array(4));
+      await new Promise((resolve) => {
+        setTimeout(resolve, 50);
+      });
+
+      // * paused, its socket reads no more, what it brought held
+      expect([heard, own.isPaused]).toEqual([[], true]);
+
+      const closed = nextEvent(client, 'close');
+      const startedAt = performance.now();
+
+      await client.disconnect();
+
+      // it read its server's Close, its own pause opened: clean, long before its close timeout
+      expect(await codes).toBe(1000);
+      expect(await closed).toEqual([true, false]);
+      expect(performance.now() - startedAt).toBeLessThan(1_500);
+      expect(heard).toEqual([]);
+
+      // * its pause outlasts the connection: one connected after holds until resumed
+      const next = nextConnection(server);
+
+      await client.connect({ host, port: portOf(server) });
+
+      const { socket: again } = await next;
+
+      again.send(Uint8Array.of(7));
+      await new Promise((resolve) => {
+        setTimeout(resolve, 50);
+      });
+
+      expect(heard).toEqual([]);
+
+      client.resume();
+
+      await expect
+        .poll(() => {
+          return heard.map((data) => {
+            return [...new Uint8Array(data as ArrayBuffer)];
+          });
+        })
+        .toEqual([[7]]);
+      await client.disconnect();
+    } finally {
+      await stopServer(server);
+      await allClosed();
+    }
+  });
+});

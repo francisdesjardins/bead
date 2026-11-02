@@ -18,6 +18,8 @@ import { sideOfCallId } from './identifiers';
 import { checkDeclaration } from './identity';
 import { CallEnding, endingOf, type IResolverSeries, microsecondsOf } from './metrics-registry';
 import { type ChunkEnvelope, createPayloadPlacement, isPayloadLimit } from './payload-placement';
+import { createIntake } from './intake';
+import { intakeLimitsOf } from './intake-limits';
 import { createProcedureMap } from './procedure-map';
 import { createReceivingTransfers, type IReceiving } from './receiving-transfers';
 import { limitsOf } from './router-limits';
@@ -239,6 +241,33 @@ export const createRouterCore = <Handle extends string>(
       receivings.close(transfer);
     },
   });
+  // * what each connection's transport handed within this task, paused past a bound and resumed in
+  // the next, whatever a turn threw; what the port throws as it pauses or resumes is reported
+  // (spec 15.12; decision 0046)
+  const paced = (connectionHandle: Handle, isPaused: boolean): void => {
+    try {
+      if (isPaused) {
+        port.pause(connectionHandle);
+      } else {
+        port.resume(connectionHandle);
+      }
+    } catch (reason) {
+      heard(() => {
+        port.report(toError(reason), connectionHandle);
+      });
+    }
+  };
+  const intake = createIntake<Handle>(
+    {
+      pause: (connectionHandle) => {
+        paced(connectionHandle, true);
+      },
+      resume: (connectionHandle) => {
+        paced(connectionHandle, false);
+      },
+    },
+    intakeLimitsOf(options?.intake)
+  );
   // ! its port's listeners this core calls run within the telling it shares with its router: what
   // one hands this core back is taken in a later turn, behind what came before it (spec 9.0)
   const telling = options?.telling ?? createTelling();
@@ -1426,12 +1455,12 @@ export const createRouterCore = <Handle extends string>(
     );
   };
 
-  const receive = (message: Data | ITransportMessage, connectionHandle: Handle): void => {
+  const take = (message: Data | ITransportMessage, connectionHandle: Handle): void => {
     // ! handed within a telling, it is taken in a later turn, behind what came before it (spec 9.0)
     if (telling.isTelling()) {
       return (
         queueMicrotask(() => {
-          receive(message, connectionHandle);
+          take(message, connectionHandle);
         }),
         undefined
       );
@@ -1523,6 +1552,13 @@ export const createRouterCore = <Handle extends string>(
       case EnvelopeKind.CANCEL:
         return (receiveCancel(envelope, connectionHandle), undefined);
     }
+  };
+
+  // * counted as its transport hands it, one within a telling among them, before it is taken: its
+  // connection paused at a bound, the envelope that reached it taken all the same (spec 15.12)
+  const receive = (message: Data | ITransportMessage, connectionHandle: Handle): void => {
+    intake.handed(connectionHandle, messageOf(message).data);
+    take(message, connectionHandle);
   };
 
   const rejectPending = (reason: string, connectionHandle?: Handle): void => {
@@ -1654,6 +1690,8 @@ export const createRouterCore = <Handle extends string>(
     },
     [Symbol.dispose]: () => {
       isDisposeMarked = true;
+      // * a transport outlives its router: each connection paused resumed at once, and none after
+      intake.end();
       // * the state's mark, then every connection's calls let go, each call answering aborted too,
       // so what a resolution settles after dispatches nothing: at once, or — disposed within a
       // telling — in a later turn, behind what that turn sends (spec 9.0)

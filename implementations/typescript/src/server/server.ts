@@ -43,6 +43,7 @@ export {
   DisconnectError,
   FailureError,
   FailureScope,
+  INTAKE_DEFAULTS,
   LIMIT_DEFAULTS,
   METRICS_CONTENT_TYPE,
   METRICS_REGISTRY_DEFAULTS,
@@ -73,9 +74,11 @@ export type {
   IDestination,
   IDestinationOptions,
   IDestinationRegistration,
+  IIntakeLimits,
   IMetricsExposition,
   IMetricsRegistry,
   IMetricsRegistryOptions,
+  IntakeLimitsOptions,
   IPacingLimits,
   IRelayOptions,
   IRouterLimits,
@@ -323,6 +326,7 @@ export const createServer = <Transport extends IServerTransportLike, Data = unkn
   try {
     router = createRouter(transport, {
       clock,
+      intake: options?.intake,
       limits: options?.limits,
       metricsRegistry: options?.metricsRegistry,
       pacing: options?.pacing,

@@ -79,6 +79,11 @@ impl ServerTransport for Stage {
             .retain(|held| !Arc::ptr_eq(held, listener));
     }
 
+    // a pause holds nothing here: the bench hands each message as it measures it
+    fn pause(&self, _connection_handle: &ConnectionHandle) {}
+
+    fn resume(&self, _connection_handle: &ConnectionHandle) {}
+
     fn clock(&self) -> Option<SharedClock> {
         Some(Arc::clone(&self.clock))
     }

@@ -1486,6 +1486,27 @@ internal sealed partial class RouterCore : IDisposable
     }
 
     /// <summary>
+    /// As <see cref="Receive(TransportMessage, string)"/>, with what its side runs once the job that
+    /// takes it returned or threw: the release of its intake's count (spec 15.12, decision 0046).
+    /// </summary>
+    internal void Receive(TransportMessage message, (string ConnectionHandle, Action Taken) received)
+    {
+        var (connectionHandle, taken) = received;
+
+        Post(() =>
+        {
+            try
+            {
+                ReceiveOnLoop(message, connectionHandle);
+            }
+            finally
+            {
+                taken();
+            }
+        });
+    }
+
+    /// <summary>
     /// Registers a resolver; a procedure out of its range, off its form or against its kind (spec
     /// 16.10), first, then a second one for its procedure, a payload's limit below 1, or a procedure
     /// its router's registry refuses to declare (spec/debugging.md 7.3), is an

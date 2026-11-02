@@ -142,9 +142,9 @@ Each listener of a transport's events is called within a guard: what one throws 
 transport's `error`, the next listener is called all the same, and the transport goes on as if it
 returned (spec 15.1). It awaits nothing a listener returns, so a listener's rejection is Node's, as
 what a listener of `error` throws is: an unhandled rejection ends the process, and a listener
-catches its own, as the `reconnect` above does. Neither client reads a `Retry-After`, which a
-server's 503 `busy` carries and spec 15.7 lets a client wait for: a reconnection waits its own
-schedule, whatever the field asks.
+catches its own, as the `reconnect` above does. The HTTP client waits a `busy` refusal's
+`Retry-After` before it sends an envelope that is no request again, until `exchangeTimeout` from
+its first send (spec 15.6); a reconnection waits its own schedule, whatever the field asks.
 
 What a transport carries, both ways, is a message, `{ data, credential }`: an envelope, and the
 credential the transport carries beside it, which a request presenting `ELSEWHERE` stands for. Over
@@ -796,6 +796,18 @@ envelope's size at both ends, delivers every chunk and credit — in any order, 
 carries both ways. WebSocket does all four. The router copies every payload it reads, so a
 transport may use its buffers again once `receive` returns.
 
+Beside the limits, and like `pacing` a side's own, `intake` bounds what each connection hands its
+router within one task of its event loop (spec 15.12): `maximumUntakenEnvelopes`, 64, and
+`maximumUntakenBytes`, 1 MiB, `INTAKE_DEFAULTS`, each 1 at least. The envelope that reaches either
+bound is taken, and the router pauses that connection's transport, which hands nothing more of it
+and holds in order what it received, until the next task resumes it — `createServer(layers,
+{ intake })`, `createClient(layers, { intake })`, or a router's own options. A `ws` socket stops
+reading, holding the rest of the read under way; an HTTP server holds a paused connection's
+exchanges at its gate, and its client asks no listen; a broker's participant holds the connection's
+envelopes to `maximumHeldEnvelopeBytes`, losing it alone past them; the in-memory and the worker
+transports hold what their application sends. So one connection's flood keeps no other connection,
+and no timer, waiting behind more than these bounds of it. Nothing announces them.
+
 What comes late is dropped in silence where it is known for late, and reported elsewhere:
 
 | Late         | On a call id reserved | On a call abandoned                                 | On none                                                           |
@@ -987,7 +999,7 @@ redirect followed", and a send or a listen loses its connection, nothing of the 
 | 413    | `too-large`                           | a body past the envelope's limit                                                                                                                                                                                                                                            |
 | 415    | `type-refused`                        | not `application/prs.bead`, or encoded                                                                                                                                                                                                                                      |
 | 426    | `upgrade-required`, `version-refused` | at a WebSocket's address, a request that asks no WebSocket, `Upgrade: websocket`; an upgrade of a version but 13, or of none, `Sec-WebSocket-Version: 13` beside it                                                                                                         |
-| 429    | `busy`                                | too many requests waiting on one connection, or exchanges under way                                                                                                                                                                                                         |
+| 429    | `busy`                                | too many requests waiting on one connection, or exchanges under way; `Retry-After` 1                                                                                                                                                                                        |
 | 503    | `busy`                                | too many connections — all, or one address's — bytes of body being read, or a connect or a WebSocket's upgrade once the server's stop began; `Retry-After`                                                                                                                  |
 
 The server bounds what its clients hold: `maximumConnections`, 10 000, and 64 per address;

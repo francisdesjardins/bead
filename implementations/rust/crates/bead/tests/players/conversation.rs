@@ -156,6 +156,11 @@ impl ServerTransport for Scripted {
         locked(&self.listeners).retain(|held| !Arc::ptr_eq(held, listener));
     }
 
+    // a pause holds nothing here: a conversation hands each envelope at the pace it scripts
+    fn pause(&self, _connection_handle: &ConnectionHandle) {}
+
+    fn resume(&self, _connection_handle: &ConnectionHandle) {}
+
     fn is_two_way(&self, connection_handle: &ConnectionHandle) -> bool {
         !locked(&self.script).one_way.contains(connection_handle)
     }

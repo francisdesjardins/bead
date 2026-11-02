@@ -1835,3 +1835,138 @@ async fn calls_each_listener_though_one_throws_reporting_the_throw_with_its_conn
         "every listener told, each panic reported, with its connection where there is one"
     );
 }
+
+// spec 15.12.17, 15.12.18: the twin of "a paused in-memory transport holds what it is sent, in
+// order, and hands it on once resumed", each end; what comes as it hands what it held waits behind
+// it, and a pause again stops it at once
+#[tokio::test]
+async fn a_paused_in_memory_transport_holds_what_it_is_sent_in_order_and_hands_it_on_once_resumed()
+{
+    let ends = Ends::started().await;
+    let (client, at_client) = ends.connected((None, None)).await;
+    let handle: ConnectionHandle = Arc::from(FIRST);
+    let heard =
+        |bytes: &str| format!("heard {bytes} on {FIRST} carrying None from Some(\"local\") None");
+
+    ends.server_told();
+
+    // * its server's end: paused, it holds what its client sends, in order
+    ends.server.pause(&handle);
+    ends.server.pause(&handle);
+
+    for bytes in [&[1_u8][..], &[2], &[3]] {
+        client.send(message_of_bytes(bytes)).expect("sent");
+    }
+
+    ends.clock.settle().await;
+
+    assert!(ends.server_told().is_empty(), "nothing told while paused");
+
+    // resumed: what it held handed on in a later turn, never within the call; what comes meanwhile
+    // waits behind it
+    ends.server.resume(&handle);
+    client.send(message_of_bytes(&[4])).expect("sent");
+
+    assert!(
+        ends.server_told().is_empty(),
+        "nothing told within the resume"
+    );
+
+    ends.clock.settle().await;
+
+    assert_eq!(
+        ends.server_told(),
+        ["01", "02", "03", "04"].map(heard),
+        "each once, in the order sent"
+    );
+
+    // * a pause again, told as it hands what it held, stops it at once: the rest stays held
+    ends.server.pause(&handle);
+
+    for bytes in [&[5_u8][..], &[6], &[7]] {
+        client.send(message_of_bytes(bytes)).expect("sent");
+    }
+
+    ends.clock.settle().await;
+
+    let server = ends.server.clone();
+    let pausing = Arc::clone(&handle);
+
+    ends.server.listen(Arc::new(OnServerMessage(
+        move |message: &TransportMessage, _: &ConnectionHandle| {
+            if message.data.as_ref() == [5] {
+                server.pause(&pausing);
+            }
+        },
+    )));
+    ends.server.resume(&handle);
+    ends.clock.settle().await;
+
+    assert_eq!(
+        ends.server_told(),
+        [heard("05")],
+        "the one handed as it paused again, the rest held"
+    );
+
+    ends.server.resume(&handle);
+    ends.clock.settle().await;
+
+    assert_eq!(
+        ends.server_told(),
+        ["06", "07"].map(heard),
+        "the rest, in order, once resumed"
+    );
+
+    // * its client's end alike, whole
+    client.pause();
+
+    for bytes in [&[8_u8][..], &[9]] {
+        ends.server
+            .send(message_of_bytes(bytes), &handle)
+            .expect("sent");
+    }
+
+    ends.clock.settle().await;
+
+    assert!(taken(&at_client).is_empty(), "nothing told while paused");
+
+    client.resume();
+    ends.server
+        .send(message_of_bytes(&[10]), &handle)
+        .expect("sent");
+    ends.clock.settle().await;
+
+    assert_eq!(
+        taken(&at_client),
+        [
+            "heard 08 carrying None",
+            "heard 09 carrying None",
+            "heard 0A carrying None"
+        ],
+        "each once, in the order sent"
+    );
+
+    // what a connection held is dropped with it
+    ends.server.pause(&handle);
+    client.send(message_of_bytes(&[11])).expect("sent");
+    ends.clock.settle().await;
+    client
+        .disconnect(DisconnectOptions::default())
+        .expect("disconnected");
+    ends.clock.settle().await;
+    ends.server.resume(&handle);
+    ends.clock.settle().await;
+
+    assert_eq!(
+        ends.server_told(),
+        [format!("closed {FIRST} true")],
+        "its close, and nothing of what it held"
+    );
+}
+
+fn message_of_bytes(bytes: &[u8]) -> TransportMessage {
+    TransportMessage {
+        data: Bytes::copy_from_slice(bytes),
+        ..TransportMessage::default()
+    }
+}

@@ -163,6 +163,14 @@ impl ServerTransport for Paired {
         self.listeners.remove(listener);
     }
 
+    fn pause(&self, connection_handle: &ConnectionHandle) {
+        locked(&self.calls).push(format!("pause {connection_handle}"));
+    }
+
+    fn resume(&self, connection_handle: &ConnectionHandle) {
+        locked(&self.calls).push(format!("resume {connection_handle}"));
+    }
+
     fn clock(&self) -> Option<SharedClock> {
         self.clock.clone()
     }
@@ -233,6 +241,14 @@ impl ServerTransport for Silent {
     fn listen(&self, _listener: Arc<dyn ServerListener>) {}
 
     fn unlisten(&self, _listener: &Arc<dyn ServerListener>) {}
+
+    fn pause(&self, _connection_handle: &ConnectionHandle) {
+        locked(&self.calls).push("pause".to_owned());
+    }
+
+    fn resume(&self, _connection_handle: &ConnectionHandle) {
+        locked(&self.calls).push("resume".to_owned());
+    }
 
     fn start(&self) -> BoxFuture<Result<(), RouterError>> {
         Box::pin(async { Ok(()) })
@@ -949,4 +965,92 @@ async fn serves_one_service_offered_once_to_a_client_of_each_transport() {
     );
     brokered.client_participant.stop().await;
     brokered.server_participant.stop().await;
+}
+
+// what the join tells of each message, its first byte and its connection, as a line
+struct Messages(Arc<Mutex<Vec<String>>>);
+
+impl ServerListener for Messages {
+    fn on_message(&self, message: TransportMessage, connection_handle: &ConnectionHandle) {
+        locked(&self.0).push(format!(
+            "message {} {connection_handle}",
+            message.data.first().copied().unwrap_or_default()
+        ));
+    }
+}
+
+// spec 15.12.17, 15.14: the twin of "a joined transport pauses the connection on the transport
+// that drew it"
+#[tokio::test]
+async fn a_joined_transport_pauses_the_connection_on_the_transport_that_drew_it() {
+    let clock = SteppingClock::new(january_first());
+    let shared: SharedClock = Arc::<SteppingClock>::clone(&clock);
+    let memory = memory_on(&shared).await;
+    let paired = Arc::new(Paired::default());
+    let joined = JoinedServerTransport::new(vec![
+        Arc::new(memory.clone()),
+        Arc::<Paired>::clone(&paired),
+    ])
+    .expect("a join");
+    let told: Arc<Mutex<Vec<String>>> = Arc::default();
+
+    joined.listen(Arc::new(Messages(Arc::clone(&told))));
+
+    let client = memory_client_of((&memory, &shared));
+    let connecting = client.connect(MemoryConnectOptions::default());
+
+    clock.settle().await;
+    connecting.await.expect("connected");
+    paired.open();
+
+    let local: ConnectionHandle = Arc::from("type=MEMORY;ip=local;ordinal=1");
+    let socket: ConnectionHandle = Arc::from(SOCKET);
+
+    // * the WebSocket-typed one's pause and resume asked of it alone
+    joined.pause(&socket);
+    joined.resume(&socket);
+
+    assert_eq!(
+        paired.calls(),
+        [format!("pause {SOCKET}"), format!("resume {SOCKET}")],
+        "asked of the transport that drew it"
+    );
+
+    // the in-memory one's held by it, in order, until resumed
+    joined.pause(&local);
+
+    for byte in [1_u8, 2] {
+        client
+            .send(TransportMessage {
+                data: Bytes::copy_from_slice(&[byte]),
+                ..TransportMessage::default()
+            })
+            .expect("sent");
+    }
+
+    clock.settle().await;
+
+    assert!(locked(&told).is_empty(), "nothing told while paused");
+
+    joined.resume(&local);
+    clock.settle().await;
+
+    assert_eq!(
+        *locked(&told),
+        [
+            "message 1 type=MEMORY;ip=local;ordinal=1",
+            "message 2 type=MEMORY;ip=local;ordinal=1"
+        ],
+        "each told, in order, once resumed"
+    );
+    assert_eq!(
+        paired.calls(),
+        [format!("pause {SOCKET}"), format!("resume {SOCKET}")],
+        "nothing more asked of the other"
+    );
+
+    // a handle no transport of it drew is asked of none
+    joined.pause(&Arc::from("type=HTTP;ip=127.0.0.1;port=50003;ordinal=1"));
+
+    assert_eq!(paired.calls().len(), 2, "none asked");
 }

@@ -2428,6 +2428,208 @@ public sealed class HttpTransportClientTests
         }
     }
 
+    // a server busy, or a router behind
+
+    // spec 15.6, 15.7, 15.12.8
+    [Fact]
+    public async Task A_client_sends_again_a_non_request_refused_busy_once_its_Retry_After_passed()
+    {
+        var time = new FakeTimeProvider(new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero));
+        var clock = new ObservedClock(time);
+        await using var faked = await ConnectFake(new HttpTransportClientOptions { Clock = clock, ExchangeTimeout = TimeSpan.FromSeconds(10), IsListening = false });
+
+        static Answer Busy(int status, string retryAfter)
+        {
+            return new Answer
+            {
+                Status = status,
+                Headers = new Dictionary<string, string> { [HttpTransport.RefusalHeader] = HttpRefusals.Busy, ["retry-after"] = retryAfter },
+            };
+        }
+
+        // its wait for the Retry-After armed, of the delay given
+        async Task ArmedFor(TimeSpan delay)
+        {
+            var watch = System.Diagnostics.Stopwatch.StartNew();
+
+            while (watch.Elapsed < Patience)
+            {
+                if (clock.Armed.TryDequeue(out var armed))
+                {
+                    if (armed == delay)
+                    {
+                        return;
+                    }
+
+                    continue;
+                }
+
+                await Task.Delay(TimeSpan.FromMilliseconds(5), Cancelled);
+            }
+
+            Assert.Fail($"no wait of {delay} armed");
+        }
+
+        // * a cancel refused 429, then 503 with a date: sent again each time its Retry-After passed
+        var cancel = EnvelopeOf(EnvelopeKind.Cancel, (1, 0));
+        var sending = faked.Client.Send(new TransportMessage(cancel, false));
+
+        (await faked.Fetch.CallOf(1)).Answer(Busy(429, "2"));
+        await ArmedFor(TimeSpan.FromSeconds(2));
+        time.Advance(TimeSpan.FromMilliseconds(1_999));
+
+        Assert.Equal((2, false), (faked.Fetch.Count, sending.IsCompleted));
+
+        time.Advance(TimeSpan.FromMilliseconds(1));
+        (await faked.Fetch.CallOf(2)).Answer(Busy(503, (time.GetUtcNow() + TimeSpan.FromSeconds(3)).ToString("R", CultureInfo.InvariantCulture)));
+        await ArmedFor(TimeSpan.FromSeconds(3));
+        time.Advance(TimeSpan.FromSeconds(3));
+
+        // * a date far off waits no longer than what is left of its exchange's time
+        (await faked.Fetch.CallOf(3)).Answer(Busy(503, "Thu, 01 Jan 2099 00:00:00 GMT"));
+        await ArmedFor(TimeSpan.FromSeconds(5));
+        time.Advance(TimeSpan.FromMilliseconds(4_999));
+
+        Assert.Equal((4, false), (faked.Fetch.Count, sending.IsCompleted));
+
+        time.Advance(TimeSpan.FromMilliseconds(1));
+        (await faked.Fetch.CallOf(4)).Answer(new Answer { Status = 204 });
+        await sending.WaitAsync(Patience, Cancelled);
+
+        Assert.All(faked.Fetch.Calls.Skip(1), (call) =>
+        {
+            Assert.Equal(HttpMethod.Post, call.Method);
+            Assert.Equal(cancel, call.Body);
+        });
+
+        // a request refused busy fails its send at once: the application decides
+        var request = faked.Client.Send(new TransportMessage(EnvelopeOf(EnvelopeKind.Request, (3, 0)), false));
+
+        (await faked.Fetch.CallOf(5)).Answer(Busy(429, "1"));
+
+        Assert.Equal(
+            "the server refused the exchange: 429 busy",
+            (await Assert.ThrowsAsync<IOException>(() =>
+            {
+                return request.WaitAsync(Patience, Cancelled);
+            })).Message);
+
+        time.Advance(TimeSpan.FromSeconds(5));
+
+        Assert.Equal((6, ReadyState.Open), (faked.Fetch.Count, faked.Client.ReadyState));
+
+        // * still refused past its exchange timeout from its first send: its exchange lost, and the
+        // connection with it
+        var lost = faked.Client.Send(new TransportMessage(EnvelopeOf(EnvelopeKind.Cancel, (5, 0)), false));
+
+        for (var index = 6; index < 17; index += 1)
+        {
+            (await faked.Fetch.CallOf(index)).Answer(Busy(429, "1"));
+
+            if (index < 16)
+            {
+                await ArmedFor(TimeSpan.FromSeconds(1));
+                time.Advance(TimeSpan.FromSeconds(1));
+            }
+        }
+
+        Assert.Equal(
+            "the server refused the exchange: 429 busy",
+            (await Assert.ThrowsAsync<IOException>(() =>
+            {
+                return lost.WaitAsync(Patience, Cancelled);
+            })).Message);
+        Assert.Equal((false, false), await faked.Closed());
+        Assert.Equal(HttpMethod.Delete, (await faked.Fetch.CallOf(17)).Method);
+    }
+
+    // spec 15.12.17
+    [Fact]
+    public async Task A_paused_HTTP_client_asks_no_listen_and_holds_the_rest_of_a_batch()
+    {
+        await using var faked = await ConnectFake(ListeningOn(new FakeTimeProvider()));
+        var envelopes = new uint[] { 1, 3, 5 }.Select((callId) =>
+        {
+            return EnvelopeOf(EnvelopeKind.Cancel, (callId, 0));
+        }).ToArray();
+
+        // * a router at its bound pauses within the hand: the rest of the batch it read is held
+        faked.Client.Message += (_) =>
+        {
+            if (faked.Heard.Count == 1)
+            {
+                faked.Client.Pause();
+            }
+        };
+        (await faked.Fetch.CallOf(1)).Answer(Batch(1, envelopes));
+        await Task.Delay(TimeSpan.FromMilliseconds(50), Cancelled);
+
+        Assert.Equal([envelopes[0]], faked.Heard);
+        Assert.Equal(2, faked.Fetch.Count);
+
+        faked.Client.Resume();
+
+        // what it held handed on in order, then its listen asked again, acknowledging the batch
+        var next = await faked.Fetch.CallOf(2);
+
+        Assert.Equal(envelopes, faked.Heard);
+        Assert.Equal("3", next.After);
+
+        await faked.Client.CloseConnection(new TransportDisconnectOptions { IsQuick = true }).WaitAsync(Patience, Cancelled);
+    }
+
+    // spec 15.12.17
+    [Fact]
+    public async Task A_paused_HTTP_client_whose_connection_goes_while_it_holds_a_batch_asks_no_listen_after_it()
+    {
+        await using var faked = await ConnectFake(ListeningOn(new FakeTimeProvider()));
+
+        faked.Client.Pause();
+        (await faked.Fetch.CallOf(1)).Answer(Batch(1, EnvelopeOf(EnvelopeKind.Cancel, (1, 0))));
+        await Task.Delay(TimeSpan.FromMilliseconds(50), Cancelled);
+
+        Assert.Empty(faked.Heard);
+        Assert.Equal(2, faked.Fetch.Count);
+
+        // * its listen waits on its pause, and ends with its connection: its DELETE alone goes after
+        await faked.Client.CloseConnection(new TransportDisconnectOptions { IsQuick = true }).WaitAsync(Patience, Cancelled);
+        faked.Client.Resume();
+        await Task.Delay(TimeSpan.FromMilliseconds(50), Cancelled);
+
+        Assert.Empty(faked.Heard);
+        Assert.Equal([HttpMethod.Post, HttpMethod.Get, HttpMethod.Delete], faked.Fetch.Calls.Select((call) =>
+        {
+            return call.Method;
+        }));
+    }
+
+    // spec 15.6
+    [Fact]
+    public async Task A_non_request_waiting_its_Retry_After_as_its_connection_goes_is_sent_no_more()
+    {
+        var time = new FakeTimeProvider(new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero));
+        await using var faked = await ConnectFake(new HttpTransportClientOptions { Clock = new ObservedClock(time), IsListening = false });
+        var sending = faked.Client.Send(new TransportMessage(EnvelopeOf(EnvelopeKind.Cancel, (1, 0)), false));
+
+        (await faked.Fetch.CallOf(1)).Answer(new Answer
+        {
+            Status = 429,
+            Headers = new Dictionary<string, string> { [HttpTransport.RefusalHeader] = HttpRefusals.Busy, ["retry-after"] = "2" },
+        });
+        await Task.Delay(TimeSpan.FromMilliseconds(50), Cancelled);
+        time.Advance(TimeSpan.FromSeconds(1));
+
+        // * as any send whose connection drops: settled, and sent no more
+        await faked.Client.CloseConnection(new TransportDisconnectOptions { IsQuick = true }).WaitAsync(Patience, Cancelled);
+        time.Advance(TimeSpan.FromSeconds(5));
+        await sending.WaitAsync(Patience, Cancelled);
+
+        Assert.Equal([HttpMethod.Post, HttpMethod.Post, HttpMethod.Delete], faked.Fetch.Calls.Select((call) =>
+        {
+            return call.Method;
+        }));
+    }
+
     // listening
 
     // spec 15.10

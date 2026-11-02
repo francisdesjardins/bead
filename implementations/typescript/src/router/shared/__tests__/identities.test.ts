@@ -7,6 +7,7 @@
 // dependencies
 
 import { readFileSync } from 'node:fs';
+import { noop } from '../../../transport/shared/noop';
 import { expect, test } from '@playwright/test';
 import { ProgrammerError } from '../../../transport/shared/errors';
 import { createRouterClient } from '../../client/router-client';
@@ -107,6 +108,8 @@ const clientTransport = (): IRouterClientTransportLike => {
     on: () => {
       return undefined;
     },
+    pause: noop,
+    resume: noop,
     send: () => {
       return Promise.resolve();
     },
@@ -122,6 +125,8 @@ const serverTransport = (): IRouterServerTransportLike => {
     on: () => {
       return undefined;
     },
+    pause: noop,
+    resume: noop,
     send: () => {
       return Promise.resolve();
     },

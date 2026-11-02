@@ -3591,4 +3591,94 @@ public sealed class WebSocketTransportServerTests : IAsyncLifetime
         // 0 holds no pace; a transport built alone holds what a peer that keeps every rule can be owed
         Assert.Equal(184_551_424, new WebSocketTransportServer(new WebSocketTransportServerOptions { MinimumSendBytesPerSecond = 0 }).MaximumUnsentBytes);
     }
+
+    // spec 15.12.17
+    [Fact]
+    public async Task Reads_no_message_of_a_paused_connection_holds_the_rest_of_its_read_and_hands_it_in_order_once_resumed()
+    {
+        await Start(new WebSocketTransportServerOptions { Heartbeat = Timeout.InfiniteTimeSpan });
+
+        var heard = new ConcurrentQueue<uint>();
+
+        _server.Message += (message, connectionHandle) =>
+        {
+            heard.Enqueue(System.Buffers.Binary.BinaryPrimitives.ReadUInt32BigEndian(message.Bytes.Span));
+
+            // * a router at its bound pauses within the hand
+            if (heard.Count == 3)
+            {
+                _server.Pause(connectionHandle);
+            }
+        };
+
+        var (client, connectionHandle) = await Connect();
+
+        using (client)
+        {
+            // many messages, coalesced into the reads of its socket
+            for (var index = 0u; index < 2_000; index += 1)
+            {
+                var bytes = new byte[4];
+
+                System.Buffers.Binary.BinaryPrimitives.WriteUInt32BigEndian(bytes, index);
+                await client.SendAsync(bytes, WebSocketMessageType.Binary, true, Cancelled);
+            }
+
+            var watch = Stopwatch.StartNew();
+
+            while (heard.Count < 3 && watch.Elapsed < Patience)
+            {
+                await Task.Delay(TimeSpan.FromMilliseconds(5), Cancelled);
+            }
+
+            await Task.Delay(TimeSpan.FromMilliseconds(100), Cancelled);
+
+            // * its socket read no more: no message started past the pause
+            Assert.Equal(3, heard.Count);
+
+            _server.Resume(connectionHandle);
+            watch.Restart();
+
+            while (heard.Count < 2_000 && watch.Elapsed < Patience)
+            {
+                await Task.Delay(TimeSpan.FromMilliseconds(5), Cancelled);
+            }
+
+            Assert.Equal(Enumerable.Range(0, 2_000).Select((index) =>
+            {
+                return (uint)index;
+            }), heard);
+        }
+    }
+
+    // spec 15.12.17; RFC 6455 §7.1.1
+    [Fact]
+    public async Task A_paused_connection_closes_cleanly()
+    {
+        await Start(new WebSocketTransportServerOptions { CloseTimeout = TimeSpan.FromSeconds(2), Heartbeat = Timeout.InfiniteTimeSpan });
+
+        var (client, connectionHandle) = await Connect();
+
+        using (client)
+        {
+            _server.Pause(connectionHandle);
+            await client.SendAsync(new byte[4], WebSocketMessageType.Binary, true, Cancelled);
+            await Task.Delay(TimeSpan.FromMilliseconds(50), Cancelled);
+
+            var watch = Stopwatch.StartNew();
+            var closing = _server.CloseConnection(connectionHandle);
+
+            // a pause its router asks as it closes is let be
+            _server.Pause(connectionHandle);
+
+            // * it read its peer's Close, its own pause opened: clean, long before its close timeout
+            Assert.Equal(WebSocketCloseStatus.NormalClosure, await AnswerClose(client));
+            await closing.WaitAsync(Patience, Cancelled);
+            Assert.Equal((true, connectionHandle), await Next(_closes));
+            Assert.InRange(watch.Elapsed, TimeSpan.Zero, TimeSpan.FromMilliseconds(1_500));
+
+            // what it held dropped with it
+            Assert.True(_messages.Reader.Count == 0);
+        }
+    }
 }

@@ -10,7 +10,7 @@ use tokio_util::sync::CancellationToken;
 
 use super::{
     AtClient, BrokerPair, BrokerPairOptions, ClientTold, Heard, adapter_of, broker, locked,
-    participant_of, peer_of, publish_to, until,
+    participant_of, peer_of, publish_to, settle, until,
 };
 use crate::broker::adapter::{BrokerAdapter, BrokerPublication};
 use crate::broker::client::{BrokerClientOptions, BrokerConnectOptions};
@@ -231,6 +231,78 @@ async fn reconnects_through_the_name_it_serves_a_pair_drawn_anew() {
     pair.stop().await;
 }
 
+// spec 15.12.17: the twin of "paused before its connect opened, holds what its server sent, and
+// hands it in order once resumed": a pause outlasts its connection, the one it opens paused as it
+// is made
+#[tokio::test]
+async fn paused_before_its_connect_opened_holds_what_its_server_sent_and_hands_it_in_order_once_resumed()
+ {
+    struct Telling {
+        told: Arc<Mutex<Vec<Vec<u8>>>>,
+    }
+
+    impl ClientListener for Telling {
+        fn on_message(&self, message: TransportMessage) {
+            locked(&self.told).push(message.data.to_vec());
+        }
+    }
+
+    let broker = broker();
+    let ada = participant_of(
+        &adapter_of(&broker, "ada"),
+        &BrokerParticipantOptions::default(),
+    );
+    let (peer, heard) = peer_of(&broker, ("acceptor", &[&["bead", "s", "interop"]])).await;
+    let client = ada
+        .client(&BrokerClientOptions::default())
+        .expect("a client");
+    let told: Arc<Mutex<Vec<Vec<u8>>>> = Arc::default();
+
+    client.listen(Arc::new(Telling {
+        told: Arc::clone(&told),
+    }));
+    client.pause();
+
+    let connecting = crate::testing::spawn(client.connect(BrokerConnectOptions::of("interop")));
+    let opener = opener_of(&heard).await;
+
+    publish_to(&peer, (INBOX, accept_of(opener))).await;
+    connecting.await.expect("joined").expect("connected");
+
+    for (sequence, byte) in [(2, 0x01), (3, 0x02)] {
+        publish_to(
+            &peer,
+            (
+                INBOX,
+                write_parcel(&Parcel {
+                    opener,
+                    acceptor: HALF,
+                    sequence,
+                    carried: Some(Bytes::copy_from_slice(&[0xA1, byte])),
+                    ..Parcel::of(kinds::DATA)
+                })
+                .expect("written")
+                .to_vec(),
+            ),
+        )
+        .await;
+    }
+
+    settle().await;
+
+    assert!(locked(&told).is_empty(), "nothing told while paused");
+    assert_eq!(client.ready_state(), ReadyState::Open, "open");
+
+    client.resume();
+    until(|| locked(&told).len() == 2, "what it held told").await;
+    assert_eq!(
+        *locked(&told),
+        [vec![0xA1, 0x01], vec![0xA1, 0x02]],
+        "in order"
+    );
+    ada.stop().await;
+}
+
 #[tokio::test]
 async fn hands_on_an_envelope_its_server_sent_as_it_accepted_once_its_connect_opened() {
     // what it tells, and where it stood as it told it
@@ -376,7 +448,7 @@ async fn fails_a_connect_its_server_refused_as_malformed_or_closed_as_it_opened_
         "the server closed the connection as it opened",
         "closed as it opened"
     );
-    super::settle().await;
+    settle().await;
     assert_eq!(client.ready_state(), ReadyState::Closed, "closed");
     assert!(locked(&told.closes).is_empty(), "no close told");
 

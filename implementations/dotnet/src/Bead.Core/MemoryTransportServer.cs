@@ -34,7 +34,9 @@ public sealed record MemoryTransportServerOptions
 /// own call; one its client sends comes with the credential the client handed beside it and the
 /// address and the port the client gave as it connected; nothing is carried toward a client. It
 /// never leaves the process, so its connections are secure (spec 13.4), and it holds no bound,
-/// heartbeat or timeout of its own: its routers' limits bound what it carries. It goes from
+/// heartbeat or timeout of its own: its routers' limits bound what it carries. A connection its
+/// router paused holds what its client sends, in order, without bound, its peer its application's
+/// own code, and hands it on once resumed, in a turn of its own (spec 15.12). It goes from
 /// <see cref="ReadyState.Uninitialized"/> through Connecting and Open to Closing and Closed, and
 /// starts again once Closed; a connect to it while it is not open fails before anything goes.
 /// </summary>
@@ -223,6 +225,40 @@ public sealed class MemoryTransportServer : IServerTransport, IAsyncDisposable
     }
 
     /// <summary>
+    /// Holds what the client of a connection sends from now on, in order, without bound: its peer
+    /// is its application's own code (spec 15.12, 15.13). Nothing for a connection it does not hold.
+    /// </summary>
+    public void Pause(string connectionHandle)
+    {
+        // ! the hold's own lock alone, never one held while it tells
+        if (_connections.TryGetValue(connectionHandle, out var connection))
+        {
+            connection.Hold.Pause();
+        }
+    }
+
+    /// <summary>Whether its router paused a connection: the tests' way to see a pause it holds.</summary>
+    internal bool IsPaused(string connectionHandle)
+    {
+        return _connections.TryGetValue(connectionHandle, out var connection) && connection.Hold.IsPaused;
+    }
+
+    /// <summary>
+    /// Hands on what a connection holds, in order, in a turn of its own, never within this call,
+    /// asking before each whether it was paused again. Nothing for a connection it does not hold.
+    /// </summary>
+    public void Resume(string connectionHandle)
+    {
+        if (_connections.TryGetValue(connectionHandle, out var connection) && connection.Hold.Resume())
+        {
+            _scheduler.Post(() =>
+            {
+                HandHeld(connection);
+            });
+        }
+    }
+
+    /// <summary>
     /// Nothing is carried toward a client (spec 15.13): a command presenting
     /// <see cref="CredentialScheme.Elsewhere"/> fails before it goes, DESTINATION_UNREACHABLE.
     /// </summary>
@@ -353,8 +389,28 @@ public sealed class MemoryTransportServer : IServerTransport, IAsyncDisposable
             }
 
             connection.LastActivity = _clock.GetUtcNow();
-            _listeners.Tell(Message, (message with { Address = connection.Address ?? Local, Port = connection.Port }, connection.ConnectionHandle));
+
+            var told = message with { Address = connection.Address ?? Local, Port = connection.Port };
+
+            // * held while its router paused it, or while anything is held, behind what is held
+            if (connection.Hold.Offer(told))
+            {
+                _listeners.Tell(Message, (told, connection.ConnectionHandle));
+            }
         });
+    }
+
+    // * in a turn of the server's: what a connection held handed on, in order, each after asking
+    // whether its router paused it again, which handing one may do; nothing once it ended
+    private void HandHeld(MemoryConnection connection)
+    {
+        while (connection.Hold.TryTake(out var message))
+        {
+            if (!connection.IsClosedAtServer)
+            {
+                _listeners.Tell(Message, (message, connection.ConnectionHandle));
+            }
+        }
     }
 
     /// <summary>
@@ -371,6 +427,9 @@ public sealed class MemoryTransportServer : IServerTransport, IAsyncDisposable
             }
 
             _connections.TryRemove(new KeyValuePair<string, MemoryConnection>(connection.ConnectionHandle, connection));
+
+            // what it held goes with it
+            connection.Hold.Drop();
             _listeners.Tell(Close, (isClean, connection.ConnectionHandle));
         });
     }
@@ -391,6 +450,7 @@ public sealed class MemoryTransportServer : IServerTransport, IAsyncDisposable
         }
 
         _connections.TryRemove(new KeyValuePair<string, MemoryConnection>(connection.ConnectionHandle, connection));
+        connection.Hold.Drop();
         connection.Peer.Ended(connection);
         _listeners.Tell(Close, (true, connection.ConnectionHandle));
     }
@@ -470,6 +530,9 @@ internal sealed class MemoryConnection
 
     /// <summary>Its server.</summary>
     public required MemoryTransportServer Server { get; init; }
+
+    /// <summary>What its server's end holds of what its client sent while its router paused it.</summary>
+    public TransportHold<TransportMessage> Hold { get; } = new();
 
     /// <summary>When it last delivered an envelope to its server, on its server's clock; none until then.</summary>
     public DateTimeOffset? LastActivity

@@ -7,6 +7,7 @@
 // dependencies
 
 import { EventEmitter } from 'node:events';
+import { noop } from '../../transport/shared/noop';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { isDeepStrictEqual } from 'node:util';
 import { expect, test } from '@playwright/test';
@@ -400,6 +401,8 @@ const createPort = () => {
       return false;
     },
     report: () => {},
+    pause: noop,
+    resume: noop,
     send: ({ data }) => {
       sent.push(data);
 
@@ -722,6 +725,8 @@ const createScriptedTransport = () => {
 
       return Promise.resolve(true);
     },
+    pause: noop,
+    resume: noop,
     send: () => {
       return Promise.resolve();
     },
@@ -1463,6 +1468,8 @@ const createFailingClient = (clock: TestClock) => {
 
         return Promise.resolve();
       },
+      pause: noop,
+      resume: noop,
       send: () => {
         return Promise.resolve();
       },

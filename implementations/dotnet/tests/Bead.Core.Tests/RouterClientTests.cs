@@ -2210,9 +2210,54 @@ public sealed partial class RouterClientTests
             }
         }
 
+        // each pause, true, and resume its router asked of it
+        public List<bool> Pauses { get; } = [];
+
+        // * what it holds while its router paused it, in order, handed on once resumed
+        public TransportHold<TransportMessage> Hold { get; } = new();
+
+        // where what it held is handed on once resumed, a step of its own: the thread pool unless a
+        // test gives its router's scheduler, so what it hands is settled with the rest
+        public Action<Action> Later { get; init; } = (step) =>
+        {
+            ThreadPool.QueueUserWorkItem((_) =>
+            {
+                step();
+            });
+        };
+
+        public void Pause()
+        {
+            lock (Pauses)
+            {
+                Pauses.Add(true);
+            }
+
+            Hold.Pause();
+        }
+
+        public void Resume()
+        {
+            lock (Pauses)
+            {
+                Pauses.Add(false);
+            }
+
+            if (Hold.Resume())
+            {
+                Later(() =>
+                {
+                    while (Hold.TryTake(out var message))
+                    {
+                        Message?.Invoke(message);
+                    }
+                });
+            }
+        }
+
         public void Deliver(byte[] bytes)
         {
-            Message?.Invoke(new TransportMessage(bytes, false));
+            Hand(new TransportMessage(bytes, false));
         }
 
         public void Deliver(Envelope envelope)
@@ -2223,18 +2268,18 @@ public sealed partial class RouterClientTests
         // an envelope that came by a way that keeps no order with the answers, which it may overtake
         public void Overtaking(Envelope envelope)
         {
-            Message?.Invoke(new TransportMessage(EnvelopeCodec.WriteEnvelope(envelope), false) { MayOvertake = true });
+            Hand(new TransportMessage(EnvelopeCodec.WriteEnvelope(envelope), false) { MayOvertake = true });
         }
 
         // an envelope, with what the transport carried beside it
         public void Carrying(Envelope envelope, string carried)
         {
-            Message?.Invoke(new TransportMessage(EnvelopeCodec.WriteEnvelope(envelope), false) { Credential = carried });
+            Hand(new TransportMessage(EnvelopeCodec.WriteEnvelope(envelope), false) { Credential = carried });
         }
 
         public void DeliverText(byte[] bytes)
         {
-            Message?.Invoke(new TransportMessage(bytes, true));
+            Hand(new TransportMessage(bytes, true));
         }
 
         public void CloseConnection()
@@ -2246,6 +2291,15 @@ public sealed partial class RouterClientTests
         public void Replace()
         {
             Reconnect?.Invoke();
+        }
+
+        // what a test delivers: handed on at once, or held while its router paused it
+        private void Hand(TransportMessage message)
+        {
+            if (Hold.Offer(message))
+            {
+                Message?.Invoke(message);
+            }
         }
 
         public bool Carries(string credential)
@@ -2283,7 +2337,7 @@ public sealed partial class RouterClientTests
         {
             var scheduler = new SerialScheduler();
 
-            Transport = new ScriptedTransport { Clock = options.Clock ?? new FakeTimeProvider() };
+            Transport = new ScriptedTransport { Clock = options.Clock ?? new FakeTimeProvider(), Later = scheduler.Post };
             Router = new RouterClient(
                 Transport,
                 options with
@@ -2573,6 +2627,16 @@ public sealed partial class RouterClientTests
 
         private sealed class ClientEnd : IRouterClientTransport
         {
+            // its router paused and resumed it, which hands what it hands all the same: no test of
+            // this one's reaches a bound
+            public void Pause()
+            {
+            }
+
+            public void Resume()
+            {
+            }
+
             public TimeProvider Clock { get; init; } = TimeProvider.System;
 
             public event Action<TransportMessage>? Message;
@@ -2603,6 +2667,16 @@ public sealed partial class RouterClientTests
 
         private sealed class ServerEnd : IServerTransport
         {
+            // its router paused and resumed it, which hands what it hands all the same: no test of
+            // this one's reaches a bound
+            public void Pause(string connectionHandle)
+            {
+            }
+
+            public void Resume(string connectionHandle)
+            {
+            }
+
             public string? Type
             {
                 get
@@ -2688,6 +2762,16 @@ public sealed partial class RouterClientTests
     // a client's transport a test delivers to, and whose connection it replaces, as a reconnection does
     private sealed class ReconnectingTransport : IRouterClientTransport
     {
+        // its router paused and resumed it, which hands what it hands all the same: no test of
+        // this one's reaches a bound
+        public void Pause()
+        {
+        }
+
+        public void Resume()
+        {
+        }
+
         public TimeProvider Clock { get; init; } = TimeProvider.System;
 
         public event Action<TransportMessage>? Message;

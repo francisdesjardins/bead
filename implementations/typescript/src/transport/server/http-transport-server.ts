@@ -22,6 +22,7 @@ import { assertHeld, assertHeldFinite, PLATFORM_CLOCK, type TimeoutId } from '..
 import { createPromise } from '../shared/create-promise';
 import { GenericError, ProgrammerError } from '../shared/errors';
 import { gaugesOf } from '../shared/gauges';
+import { createHold, type IHold } from '../shared/hold';
 import type { Data } from '../shared/types';
 import {
   assertHosts,
@@ -57,7 +58,7 @@ import {
 } from './server-bounds';
 import { withPolicy } from './http-policy';
 import { clientAddressOf, trustedProxiesOf } from './trusted-proxies';
-import { createHTTPRequestExchange, type IExchange } from './http-request-exchange';
+import { BUSY_EXCHANGES, createHTTPRequestExchange, type IExchange } from './http-request-exchange';
 import {
   authorityNamedBy,
   countOf,
@@ -168,6 +169,11 @@ interface IDrawn extends IDrawnConnection {
   sequence: number;
   /** The exchanges of requests, by call id, from their first 8 bytes to their answer. */
   readonly waiting: Map<number, IExchange>;
+  /**
+   * Its gate: the envelopes read whole while its router paused it, each handed on once resumed, in
+   * order, or dropped with it (spec 15.12).
+   */
+  readonly gate: IHold<{ drop: () => void; hand: () => void }>;
 }
 
 // constants
@@ -293,6 +299,12 @@ const unref = (timer: TimeoutId): void => {
  * credential allowed. An exchange lost — its response closed before the transport ended it — closes
  * the connection, as a socket that drops does; so do a request unanswered past `exchangeTimeout` and
  * a connection idle past `inactivityTimeout`.
+ *
+ * A connection its router paused hands on nothing (spec 15.12): each envelope read whole waits at
+ * its gate, in order, its body still charged to `bodyBytesBudget`, its request's head and any
+ * other's 204 going once it is handed on, as its router resumes it. Its exchanges wait there under
+ * the bound on what one connection has under way, twice `maximumWaitingExchanges`, past which an
+ * exchange is refused 429 `busy`, with `Retry-After: 1`, as one past the requests that may wait is.
  *
  * What the server sends of its own reaches a client that said at connect that it listens —
  * `bead-listen: ?1`, which the 201 says back. It waits in the connection's outbox, numbered, until a
@@ -500,6 +512,11 @@ export const createHTTPTransportServer = (
         connection.waiting.clear();
         connection.outbox = [];
         connection.outboxBytes = 0;
+
+        // what waited at its gate goes with it, its charge released
+        for (const { drop: dropHeld } of connection.gate.drop()) {
+          dropHeld();
+        }
 
         if (connection.listen !== undefined) {
           answer(connection.listen, UNKNOWN_CONNECTION);
@@ -759,6 +776,9 @@ export const createHTTPTransportServer = (
           outboxBytes: 0,
           sequence: 0,
           waiting: new Map(),
+          gate: createHold(({ hand }) => {
+            hand();
+          }),
         };
         // what its events show of it: the order it was drawn in, and what drew it, headers aside —
         // a frozen copy, never the state the registry holds, which keeps the token
@@ -873,7 +893,7 @@ export const createHTTPTransportServer = (
             }
 
             if (connection.waiting.size >= maximumWaitingExchanges) {
-              return { reason: REFUSALS.BUSY, status: 429 };
+              return BUSY_EXCHANGES;
             }
 
             state.prefix = prefix;
@@ -919,6 +939,10 @@ export const createHTTPTransportServer = (
           },
           beginHandOff: (state) => {
             state.isDelivered = true;
+          },
+          // ! a paused connection's envelopes wait here, outside any telling, in order
+          handOn: (connection, gated) => {
+            connection.gate.offer(gated);
           },
           waitAfterHandOff: (connection, state, { callId }) => {
             return connection.waiting.get(callId) === state;
@@ -1253,6 +1277,16 @@ export const createHTTPTransportServer = (
           closeDrawn(socket as IDrawn, true);
 
           return Promise.resolve();
+        },
+
+        // ! its gate alone, never a telling: its exchanges wait there, under the bounds on what is
+        // under way, and its listen goes on, the outbox's bound pacing its client (spec 15.12)
+        pause: ({ socket }) => {
+          (socket as IDrawn).gate.pause();
+        },
+        // what waited at its gate handed on from a microtask, in order
+        resume: ({ socket }) => {
+          (socket as IDrawn).gate.resume();
         },
 
         // an answer ends the exchange of its request; anything else — a late answer too — waits for

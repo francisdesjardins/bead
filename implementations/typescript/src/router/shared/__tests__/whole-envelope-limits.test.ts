@@ -1,5 +1,6 @@
 import { expect, test } from '@playwright/test';
 import { ProgrammerError } from '../../../transport/shared/errors';
+import { noop } from '../../../transport/shared/noop';
 import { createRouterServer } from '../../server/router-server';
 import { LIMIT_DEFAULTS } from '../constants';
 import { wholeEnvelopeLimitsOf } from '../whole-envelope-limits';
@@ -34,6 +35,8 @@ test.describe('wholeEnvelopeLimitsOf', () => {
         {
           off: () => {},
           on: () => {},
+          pause: noop,
+          resume: noop,
           send: () => {
             return Promise.resolve();
           },
