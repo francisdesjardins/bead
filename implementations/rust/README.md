@@ -168,4 +168,7 @@ no API: an application never turns the feature on.
 fuzzes the core's four targets with cargo-fuzz on the nightly the tool pins by its date, on Linux or
 WSL; the transports' two come with them. `node ../../tools/bench-release.mjs rust` runs bead-bench in
 fresh processes, from its release build: calls on one in-memory connection kept, and exchanges, each
-a client and its connection drawn, called once and closed.
+a client and its connection drawn, called once and closed. `cargo run --release --locked
+--manifest-path benches/Cargo.toml -- --scale` measures instead a message's cost through a router
+alone and through a `Server`, each holding 1, 1,000 and 10,000 connections, and fails unless it holds
+flat.
