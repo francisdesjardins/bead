@@ -102,16 +102,25 @@ public sealed partial class ServiceManager
                 }
             }
 
-            // a payload that does not decode never reaches the callback
+            // a payload that does not decode never reaches the callback: its codec's refusal, a
+            // FormatException, is the payload's; anything else it throws is its side's own error,
+            // answered as a resolver's that throws, and why goes on for the router to report (spec
+            // 9.0, 17.2)
             try
             {
                 payload = _made.Serializer.Decode(props.Payload);
             }
-            catch (Exception)
+            catch (FormatException)
             {
                 await _router.Respond(RouterAnswer.OfFailure(Failure.OfProtocol(ProtocolCode.PayloadUndecodable)), target);
 
                 return;
+            }
+            catch (Exception)
+            {
+                await AnswerFailed(target);
+
+                throw;
             }
 
             if (started is { } at)

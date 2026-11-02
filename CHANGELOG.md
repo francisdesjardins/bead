@@ -23,11 +23,18 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - The spec and its companion, `spec/debugging.md`, state each rule once for every side, a name in
   its platform's form, and name no language; the support matrix cites the Rust side's tests of a
   duration read in a browser, and says what Buffa does with a field at another wire type.
+- A codec that throws other than its refusal, or panics, as it reads a request is answered
+  `PROCEDURE_FAILED`, with no detail, and reported, on every side; its refusal — a `SyntaxError`, a
+  `FormatException`, a `CodecRefusal` — is still answered `PAYLOAD_UNDECODABLE` (spec 9.0, 17.2).
+  An application's codec refuses with its side's type.
 
 ### Fixed
 
 - A `proto` payload whose varint's 10th byte sets a bit past the 64th is refused on every side, as
   no encoding (spec 17.9.1; protobuf's Encoding guide, "Base 128 Varints").
+- Bead's `proto` codecs refuse bytes that do not read with their side's refusal, a `SyntaxError` on
+  the TypeScript side and a `FormatException` on the C# side, where protobuf-es's `TypeError` or
+  `Error` and Google.Protobuf's `InvalidProtocolBufferException` came through.
 
 ## [0.9.0] - 2026-10-30
 

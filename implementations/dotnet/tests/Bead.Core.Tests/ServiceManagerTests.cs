@@ -1041,7 +1041,7 @@ public sealed partial class ServiceManagerTests
         Assert.Empty(heard);
         Assert.Equal([(DebugDirection.Rx, DebugType.Notification)], StepsOf(seen));
         Assert.Same(failure, Assert.Single(seen).Error);
-        Assert.IsType<JsonException>(failure.InnerException);
+        Assert.IsType<FormatException>(failure.InnerException);
     }
 
     [Fact]
@@ -1104,7 +1104,8 @@ public sealed partial class ServiceManagerTests
     // an answer as the router was handed it: its request, and its payload decoded, or its failure
     private sealed record Responded(AnswerTarget Target, Text? Payload, Failure? Failure);
 
-    // JSON, in UTF-8, either way and on either side; what is not JSON throws
+    // JSON, in UTF-8, either way and on either side; what is not JSON is refused, as every codec
+    // refuses, with a FormatException
     private sealed class JsonPayloads<T> : INotificationSerializerClient<T, T, T>, INotificationSerializerServer<T, T, T>
     {
         public ReadOnlyMemory<byte> Encode(T request)
@@ -1114,7 +1115,14 @@ public sealed partial class ServiceManagerTests
 
         public T Decode(ReadOnlyMemory<byte> response)
         {
-            return JsonSerializer.Deserialize<T>(response.Span, JsonOptions)!;
+            try
+            {
+                return JsonSerializer.Deserialize<T>(response.Span, JsonOptions)!;
+            }
+            catch (JsonException reason)
+            {
+                throw new FormatException("not JSON", reason);
+            }
         }
 
         public T DecodeNotification(ReadOnlyMemory<byte> notification)
@@ -1139,6 +1147,20 @@ public sealed partial class ServiceManagerTests
         public ReadOnlyMemory<byte> Encode(Text response)
         {
             throw new FormatException("cannot encode");
+        }
+    }
+
+    // a resolver's serializer whose reader fails other than by its refusal, and writes its answer
+    private sealed class Unreadable(Exception broken) : IRequestSerializerServer<Text, Text>
+    {
+        public Text Decode(ReadOnlyMemory<byte> request)
+        {
+            throw broken;
+        }
+
+        public ReadOnlyMemory<byte> Encode(Text response)
+        {
+            return Json.Encode(response);
         }
     }
 

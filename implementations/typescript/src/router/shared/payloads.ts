@@ -593,9 +593,10 @@ export const PAYLOAD_CODECS: Readonly<{
 /**
  * A codec of `codec`'s two functions, frozen: an encoding of a project's own, or a protobuf
  * message's, which generated code takes from `protoCodecOf` of `./proto`, spec 17.9 held there
- * whole. The runtime reads no field of the message; what does not read throws, and a request's
- * payload is answered `PAYLOAD_UNDECODABLE` as any other's. One that is not a function is a
- * {@link ProgrammerError}.
+ * whole. The runtime reads no field of the message; what does not read throws a `SyntaxError`, its
+ * refusal, and a request's payload so refused is answered `PAYLOAD_UNDECODABLE` as any other's.
+ * Anything else its reader throws is the side's own error: a request is answered `PROCEDURE_FAILED`
+ * and the error reported (spec 9.0, 17.2). One that is not a function is a {@link ProgrammerError}.
  *
  * @example
  * import { protoCodecOf } from '@francisdesjardins/bead/proto';

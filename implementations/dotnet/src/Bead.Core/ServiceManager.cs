@@ -129,8 +129,10 @@ public delegate Task<TResponse> BoundCall<TResponse>(RequestOptions? options = n
 
 /// <summary>
 /// How the side that answers a request reads it and writes the answer. A failure is the router's to
-/// write. What does not decode throws, and its request is answered with
-/// <see cref="ProtocolCode.PayloadUndecodable"/>.
+/// write. What does not decode throws a <see cref="FormatException"/>, its refusal, and its request
+/// is answered with <see cref="ProtocolCode.PayloadUndecodable"/>; anything else its reader throws
+/// is the side's own error: the request is answered with <see cref="ProtocolCode.ProcedureFailed"/>
+/// and the error reported (spec 9.0, 17.2).
 /// </summary>
 /// <typeparam name="TRequest">What a request carries.</typeparam>
 /// <typeparam name="TResponse">What a result carries.</typeparam>
@@ -730,8 +732,10 @@ public sealed partial class ServiceManager
     /// <summary>
     /// The resolver of <paramref name="procedure"/>: given its callback, it is registered on the
     /// router. A request is answered once — by its callback, by a refusal of its admission, with
-    /// PAYLOAD_UNDECODABLE when it does not decode, with PAYLOAD_INVALID when its rules refuse it, or
-    /// with PROCEDURE_FAILED when its rules or its callback throw before it answered.
+    /// PAYLOAD_UNDECODABLE when its codec refuses it, with PAYLOAD_INVALID when its rules refuse it,
+    /// or with PROCEDURE_FAILED when its codec throws other than its refusal, a
+    /// <see cref="FormatException"/>, or its rules or its callback throw before it answered, and why
+    /// goes on to the router.
     /// </summary>
     public Func<RequestResolverCallback<TRequest, TResponse>, IRequestResolver> GetRequestResolver<TRequest, TResponse>(
         Procedure procedure,

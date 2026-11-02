@@ -26,7 +26,7 @@ use crate::failure::Failure;
 use crate::identity::{Procedure, check_declaration};
 use crate::managers::notification::NotificationKey;
 use crate::metrics::ProcedureSeries;
-use crate::payloads::{PayloadCodec, decoded, encoded};
+use crate::payloads::{PayloadCodec, decoded, encoded, refusal_saying};
 use crate::router::admissions::BeforeRequest;
 use crate::router::client::{ClientRequest, NotificationLike, RouterClient};
 use crate::router::core::{Answerer, Handler, ResolverProps};
@@ -1011,7 +1011,10 @@ where
                 Ok(result) => {
                     call_id = Some(result.header.call_id);
 
-                    match decoded(&shared.dependencies.result, &result.payload) {
+                    // * a codec's panic fails the call as its refusal does (spec 17.2, item 2)
+                    match decoded(&shared.dependencies.result, &result.payload)
+                        .unwrap_or_else(|panicked| Err(refusal_saying(&panicked)))
+                    {
                         // an answer that does not decode fails here, with the result's header
                         Err(refused) => {
                             let failure = Failure::protocol(
@@ -1476,14 +1479,30 @@ where
         // * the one check a request makes while nobody listens; traced, the call starts as it
         // arrives, its decoding counting in its duration
         let started = manager.is_debugging().then(|| manager.started_now());
-        // a payload that does not decode never reaches the callback
-        let Ok(value) = decoded(&self.request, &payload) else {
-            return answerer
-                .respond(RouterAnswer::Failure(
-                    self.failure(ProtocolCode::PAYLOAD_UNDECODABLE),
-                ))
-                .await
-                .map_err(ResolverError::other);
+        // a payload that does not decode never reaches the callback: its codec's refusal is the
+        // payload's; its panic is its side's own error, answered as a resolver's that panics, and
+        // why goes on for the router to report (spec 9.0, 17.2)
+        let value = match decoded(&self.request, &payload) {
+            Ok(Ok(value)) => value,
+            Ok(Err(_refused)) => {
+                return answerer
+                    .respond(RouterAnswer::Failure(
+                        self.failure(ProtocolCode::PAYLOAD_UNDECODABLE),
+                    ))
+                    .await
+                    .map_err(ResolverError::other);
+            }
+            Err(panicked) => {
+                drop(
+                    answerer
+                        .respond(RouterAnswer::Failure(
+                            self.failure(ProtocolCode::PROCEDURE_FAILED),
+                        ))
+                        .await,
+                );
+
+                return Err(ResolverError::other(panicked));
+            }
         };
         let step = started.map(|started| Step {
             call_id: Some(header.call_id),

@@ -23,9 +23,10 @@ public static class ProtoCodecs
 
     /// <summary>
     /// The codec of <typeparamref name="T"/>, as a generated binding names it: its reading refuses
-    /// what 17.9 refuses, with a <see cref="FormatException"/> where its records or its required
-    /// fields do, and its writing refuses a message that leaves a required field unset, with a
-    /// <see cref="FormatException"/> in the same words, before anything is written.
+    /// what 17.9 refuses, each refusal a <see cref="FormatException"/>, its records', its required
+    /// fields', or Google.Protobuf's own, which it holds as its inner exception; its writing refuses a
+    /// message that leaves a required field unset, with a <see cref="FormatException"/> in the same
+    /// words, before anything is written.
     /// </summary>
     public static IPayloadCodec<T> Of<T>()
         where T : IMessage<T>, new()
@@ -105,6 +106,16 @@ public static class ProtoCodecs
         using var stream = new MemoryStream(framed, writable: false);
         using var input = CodedInputStream.CreateWithLimits(stream, int.MaxValue, bound);
 
-        input.ReadMessage(message);
+        // ! Google.Protobuf throws an InvalidProtocolBufferException on a string that is not UTF-8,
+        // and on what else it cannot read: what the stock reader throws as it reads is spec 17.9's
+        // refusal, never the side's own error
+        try
+        {
+            input.ReadMessage(message);
+        }
+        catch (InvalidProtocolBufferException reason)
+        {
+            throw new FormatException($"the proto payload does not read: {reason.Message}", reason);
+        }
     }
 }
