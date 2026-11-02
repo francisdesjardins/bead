@@ -2415,7 +2415,8 @@ generator writes for the message. What is Bead's:
    writer MUST refuse to write it. protobuf has such a field "required for parsing and
    serialization" ([Feature Settings](https://protobuf.dev/editions/features/#field_presence)).
    Its C++, Java and Go parsers refuse one, and so do Go's writer, upb's and protobuf-es's, while
-   C++ checks only in a debug build and Google.Protobuf reads and writes it.
+   C++ checks only in a debug build, Google.Protobuf reads and writes it, and Buffa reads it and
+   writes its default in its place.
 
    Every message the payload holds is looked into, of any syntax: a singular field's, a repeated
    field's items, a map's values, a group and a delimited field. An extension, which every side
@@ -2435,10 +2436,11 @@ generator writes for the message. What is Bead's:
    protobuf keeps it among the unknown fields
    ([Enum Behavior](https://protobuf.dev/programming-guides/enum/)). The field holds the last
    declared number its records give, or none, and a `oneof` it is a member of holds what its
-   other records give it. A repeated field's items and a map's values keep such a number, as both
-   stock libraries read them.
+   other records give it. A repeated field's items and a map's values keep such a number on every
+   side, where protobuf's Enum Behavior sets it among the unknown fields: a leveling the support
+   matrix keeps.
 
-Where two stock libraries part on what protobuf states no rule of, the support matrix says what
+Where the stock libraries part on what protobuf states no rule of, the support matrix says what
 each does. The `proto` rows of `spec/codecs.json` read and write `Probe`, the message of
 `spec/codecs.proto`.
 

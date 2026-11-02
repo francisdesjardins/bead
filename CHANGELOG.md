@@ -20,6 +20,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - A `JWT` whose header or claims set holds a number past the largest finite double, or nests deeper
   than 64, is refused at `token` on every side, before its signature is reached, and a relay that
   does not verify reads no `aud` from it (spec 13.8, 17.5; RFC 7493 §2.2).
+- The spec and its companion, `spec/debugging.md`, state each rule once for every side, a name in
+  its platform's form, and name no language; the support matrix cites the Rust side's tests of a
+  duration read in a browser, and says what Buffa does with a field at another wire type.
 
 ### Fixed
 
