@@ -41,6 +41,209 @@ fn registry_of(maximum_procedures: Option<usize>) -> MetricsRegistry {
     MetricsRegistry::new(&MetricsRegistryOptions { maximum_procedures }).expect("a registry")
 }
 
+#[test]
+fn shares_notification_counts_across_repeated_declarations_and_keeps_another_procedure_separate() {
+    let registry = registry_of(None);
+    let first = registry
+        .attach(RouterSide::Server)
+        .declare_resolver(&echo_of_1(), true)
+        .expect("a resolver")
+        .notifying
+        .expect("a notifying series");
+    let second = registry
+        .attach(RouterSide::Server)
+        .declare_resolver(
+            &Procedure {
+                service_revision: 2,
+                ..echo_of_1()
+            },
+            true,
+        )
+        .expect("a resolver at another revision")
+        .notifying
+        .expect("a notifying series");
+    let other = registry
+        .attach(RouterSide::Server)
+        .declare_resolver(&named((2, "other")), true)
+        .expect("another resolver")
+        .notifying
+        .expect("a notifying series");
+    assert!(Arc::ptr_eq(&first.state, &second.state));
+    assert_eq!(first.key, second.key);
+    assert_ne!(first.key, other.key);
+    first.sent();
+    second.sent();
+    second.failed();
+    other.failed();
+    assert_eq!(
+        registry
+            .exposition()
+            .text
+            .lines()
+            .filter(|line| line.starts_with("bead_notifications_sent_total{"))
+            .collect::<Vec<_>>(),
+        [
+            "bead_notifications_sent_total{service=\"1\",procedure=\"echo\",outcome=\"sent\"} 2",
+            "bead_notifications_sent_total{service=\"1\",procedure=\"echo\",outcome=\"failed\"} 1",
+            "bead_notifications_sent_total{service=\"1\",procedure=\"other\",outcome=\"sent\"} 0",
+            "bead_notifications_sent_total{service=\"1\",procedure=\"other\",outcome=\"failed\"} 1",
+        ]
+    );
+}
+
+// One series in an exposition: its starts, sum of outcomes, histogram count and rising buckets.
+fn one_reading(text: &str, family_and_labels: (&str, &str)) -> (u64, u64) {
+    let (family, labels) = family_and_labels;
+    let selected = |suffix: &str| -> Vec<u64> {
+        let prefix = format!("bead_{family}_call_{suffix}{{{labels}");
+        text.lines()
+            .filter(|line| line.starts_with(&prefix))
+            .map(|line| {
+                line.rsplit_once(' ')
+                    .expect("a sample")
+                    .1
+                    .parse()
+                    .expect("a count")
+            })
+            .collect()
+    };
+    let started = selected("started_total");
+    let handled = selected("handled_total").iter().sum();
+    let count = selected("duration_seconds_count");
+    let buckets = selected("duration_seconds_bucket");
+    assert_eq!(started.len(), 1);
+    assert_eq!(count, [handled]);
+    assert!(started[0] >= handled);
+    assert_eq!(buckets.last(), Some(&handled));
+    assert!(buckets.windows(2).all(|pair| pair[0] <= pair[1]));
+    (started[0], handled)
+}
+
+#[test]
+fn writes_each_series_from_one_reading_of_its_counts() {
+    use super::CallEnding;
+    use core::sync::atomic::{AtomicBool, Ordering};
+
+    let registry = registry_of(None);
+    let metrics = registry.attach(RouterSide::Server);
+    let echoing = metrics
+        .declare_resolver(&echo(), false)
+        .expect("echo")
+        .calls;
+    let failing = metrics
+        .declare_resolver(
+            &Procedure {
+                id: 2,
+                name: "fail".to_owned(),
+                ..echo()
+            },
+            false,
+        )
+        .expect("fail")
+        .calls;
+    for series in [
+        &echoing,
+        &echoing,
+        &echoing,
+        &failing,
+        metrics.other_server(),
+    ] {
+        series.start();
+    }
+    echoing.end(CallEnding::Result, 10);
+    echoing.end(CallEnding::Application, 20);
+    failing.end(CallEnding::Timeout, 30);
+    let text = registry.exposition().text;
+    for (labels, in_flight) in [
+        ("service=\"2\",procedure=\"echo\",type=\"request\"", 1),
+        ("service=\"2\",procedure=\"fail\",type=\"request\"", 0),
+        (
+            "service=\"_OTHER\",procedure=\"_OTHER\",type=\"request\"",
+            1,
+        ),
+    ] {
+        let (started, handled) = one_reading(&text, ("server", labels));
+        assert_eq!(started.saturating_sub(handled), in_flight);
+    }
+    assert!(
+        text.find("# HELP bead_server_call_handled_total")
+            < text.find("# HELP bead_server_call_started_total")
+    );
+
+    // The C# twin counts on four threads while reading 200 snapshots.
+    let registry = registry_of(None);
+    let calls = registry
+        .attach(RouterSide::Client)
+        .declare_requester(&echo_of_1())
+        .expect("echo");
+    let running = AtomicBool::new(true);
+    let ready = std::sync::Barrier::new(5);
+    let labels = "service=\"1\",procedure=\"echo\",type=\"request\"";
+    let snapshots = std::thread::scope(|scope| {
+        for _ in 0..4 {
+            scope.spawn(|| {
+                calls.start();
+                calls.end(CallEnding::Result, 0);
+                ready.wait();
+                let mut call = 0_u64;
+                while running.load(Ordering::SeqCst) {
+                    calls.start();
+                    calls.end(
+                        if call.is_multiple_of(2) {
+                            CallEnding::Result
+                        } else {
+                            CallEnding::Application
+                        },
+                        call % 1_000,
+                    );
+                    call = call.saturating_add(1);
+                }
+            });
+        }
+        ready.wait();
+        let snapshots = (0..200)
+            .map(|_| registry.exposition().text)
+            .collect::<Vec<_>>();
+        running.store(false, Ordering::SeqCst);
+        snapshots
+    });
+    for text in snapshots {
+        one_reading(&text, ("client", labels));
+    }
+    let (started, handled) = one_reading(&registry.exposition().text, ("client", labels));
+    assert!(started > 0);
+    assert_eq!(started, handled);
+}
+
+#[test]
+fn refuses_a_ceiling_that_is_not_a_whole_number_above_0_and_names_1000_procedures_by_default() {
+    assert_eq!(super::MAXIMUM_PROCEDURES, 1_000);
+    assert_eq!(
+        registry_of(None).state.lock().expect("a registry").maximum,
+        1_000
+    );
+    assert_eq!(
+        MetricsRegistry::new(&MetricsRegistryOptions {
+            maximum_procedures: Some(0)
+        })
+        .expect_err("zero refused")
+        .to_string(),
+        "maximumProcedures is a whole number above 0, not 0"
+    );
+    let consumer = crate::testing::surface::Consumer::new();
+    consumer.accepts(
+        "pub fn check(o: &mut bead::MetricsRegistryOptions) { o.maximum_procedures = Some(1000); }",
+    );
+    consumer.refuses(
+        "pub fn check(o: &mut bead::MetricsRegistryOptions) { o.maximum_procedures = Some(-1); }",
+        ("E0600", "cannot apply unary operator"),
+    );
+    consumer.refuses(
+        "pub fn check(o: &mut bead::MetricsRegistryOptions) { o.maximum_procedures = Some(1.5); }",
+        ("E0308", "mismatched types"),
+    );
+}
+
 // spec 16.7
 #[test]
 fn refuses_a_declaration_as_it_is_made_in_sentences_that_name_its_address_its_names_and_its_reason_declaring_nothing()
