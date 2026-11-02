@@ -8,6 +8,8 @@ use crate::errors::CallError;
 use crate::router::types::RequestCredential;
 use crate::session_token::SessionToken;
 
+mod twins;
+
 fn token() -> SessionToken {
     SessionToken::new([3; 16]).expect("a token")
 }
