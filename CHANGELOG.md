@@ -35,6 +35,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Bead's `proto` codecs refuse bytes that do not read with their side's refusal, a `SyntaxError` on
   the TypeScript side and a `FormatException` on the C# side, where protobuf-es's `TypeError` or
   `Error` and Google.Protobuf's `InvalidProtocolBufferException` came through.
+- A broker connection on the C# side keeps no room for an envelope's parts once its envelope is
+  whole or its parts let go, where it kept the largest envelope's for good (spec 15.23).
 
 ## [0.9.0] - 2026-10-30
 
