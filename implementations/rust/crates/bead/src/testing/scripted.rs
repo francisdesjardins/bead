@@ -104,6 +104,7 @@ pub struct ScriptedClient {
     listeners: Mutex<Vec<Arc<dyn ClientListener>>>,
     sending: Mutex<Sending>,
     carrying: AtomicBool,
+    secure: AtomicBool,
 }
 
 impl core::fmt::Debug for ScriptedClient {
@@ -124,6 +125,7 @@ impl ScriptedClient {
             listeners: Mutex::default(),
             sending: Mutex::default(),
             carrying: AtomicBool::new(true),
+            secure: AtomicBool::new(true),
         })
     }
 
@@ -143,6 +145,11 @@ impl ScriptedClient {
     /// Carries a credential beside an envelope from now on, or none when `carrying` is false.
     pub fn carry(&self, carrying: bool) {
         self.carrying.store(carrying, Ordering::SeqCst);
+    }
+
+    /// Reports whether this connection protects the credentials it carries.
+    pub fn secure(&self, secure: bool) {
+        self.secure.store(secure, Ordering::SeqCst);
     }
 
     /// Hands its router `envelope`, as its server sent it.
@@ -240,7 +247,7 @@ impl ClientTransport for ScriptedClient {
     }
 
     fn is_secure(&self) -> bool {
-        true
+        self.secure.load(Ordering::SeqCst)
     }
 
     fn carries(&self, _credential: &str) -> bool {
