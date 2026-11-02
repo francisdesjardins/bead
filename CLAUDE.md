@@ -158,8 +158,9 @@ titles that hold one write it `’`, and the citation does the same.
   in a crate's `tests/`, the test kit in `bead::testing`, behind the feature `testing`;
 - `cargo fmt --all -- --check`, `cargo clippy --workspace --all-targets --all-features --locked`,
   `cargo clippy -p francisdesjardins-bead --lib --all-features --locked --target
-  wasm32-unknown-unknown`, `cargo test --workspace --all-features --locked` and `cargo deny
-  --locked check` pass, from its folder.
+  wasm32-unknown-unknown`, `cargo test --workspace --all-features --locked`, `cargo doc --workspace
+  --no-deps --all-features --locked`, `cargo build --workspace --locked` and `cargo deny --locked
+  check` pass, from its folder.
 
 ## The Bead page
 

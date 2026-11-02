@@ -307,6 +307,8 @@ cargo fmt --all -- --check
 cargo clippy --workspace --all-targets --all-features --locked
 cargo clippy -p francisdesjardins-bead --lib --all-features --locked --target wasm32-unknown-unknown
 cargo test --workspace --all-features --locked
+cargo doc --workspace --no-deps --all-features --locked
+cargo build --workspace --locked
 cargo deny --locked check
 ```
 
