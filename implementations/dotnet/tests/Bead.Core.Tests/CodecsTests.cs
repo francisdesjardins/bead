@@ -3,7 +3,6 @@ using System.Text;
 using System.Text.Json;
 using Bead.Codecs.V1;
 using Bead.Protobuf;
-using Google.Protobuf;
 
 namespace Bead.Tests;
 
@@ -339,14 +338,12 @@ public sealed class CodecsTests
             case "proto":
                 if (isRefused)
                 {
-                    // * refused by the check or the walk, or past them by Google.Protobuf: a string
-                    // that is not UTF-8 is the library's to refuse
-                    var refusal = Assert.ThrowsAny<Exception>(() =>
+                    // * a refusal is a FormatException, as every codec's reader refuses, whether the
+                    // check, the walk or Google.Protobuf past them refuses: its words are each side's
+                    Assert.Throws<FormatException>(() =>
                     {
                         return ProbeCodec.Decode(bytes);
                     });
-
-                    Assert.True(refusal is FormatException or InvalidProtocolBufferException, refusal.ToString());
 
                     return;
                 }

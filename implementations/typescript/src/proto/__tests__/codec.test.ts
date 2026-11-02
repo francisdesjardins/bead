@@ -366,6 +366,16 @@ test.describe("a proto payload's codec of its schema", () => {
     ).toBe(wordsOf('bead.codecs.v1.Needs.shade'));
   });
 
+  test('refuses bytes its library cannot read as every reader refuses, the library’s error as its cause', () => {
+    // a text of one byte that is not UTF-8, which protobuf-es reads, past the records' check
+    const thrown = thrownBy(() => {
+      return protoCodecOf(ProbeSchema).decode(bytesOf('0A 01 FF'));
+    });
+
+    expect(thrown).toBeInstanceOf(SyntaxError);
+    expect((thrown as Error).cause).toBeInstanceOf(TypeError);
+  });
+
   test('takes a required field set at its default, and one a message given twice sets in either record', () => {
     const needs = protoCodecOf(NeedsSchema);
     const requiring = protoCodecOf(RequiringSchema);

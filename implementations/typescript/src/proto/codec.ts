@@ -15,6 +15,7 @@ import {
   toBinary,
 } from '@bufbuild/protobuf';
 import { type IPayloadCodec, payloadCodecOf } from '../router/shared/payloads';
+import { toError } from '../transport/shared/errors';
 import { checkProtoRecords } from './records';
 import { type RequiredPath, unsetNameOf, unsetPathOf } from './required';
 
@@ -34,6 +35,8 @@ const unsetWordsOf = (path: RequiredPath): string => {
  * `bytes` read as `schema` as spec 17.9 reads a payload but for its item 7: the records checked,
  * then protobuf-es's reader within `recursionLimit`, which keeps a closed enum's undeclared number
  * among the unknown fields (17.9.8). An `Any`'s bytes are read so, which 17.9.7 does not look into.
+ * What does not read throws a `SyntaxError`, the refusal of every codec's reader, protobuf-es's own
+ * error as its `cause`.
  */
 export const readProtoBytes = <Desc extends DescMessage>(
   schema: Desc,
@@ -41,7 +44,15 @@ export const readProtoBytes = <Desc extends DescMessage>(
 ): MessageShape<Desc> => {
   checkProtoRecords(bytes, schema);
 
-  return fromBinary(schema, bytes, { recursionLimit });
+  // ! protobuf-es throws a TypeError on a string that is not UTF-8, and a plain Error elsewhere:
+  // what the stock reader throws as it reads is spec 17.9's refusal, never the side's own error
+  try {
+    return fromBinary(schema, bytes, { recursionLimit });
+  } catch (reason) {
+    throw new SyntaxError(`the proto payload does not read: ${toError(reason).message}`, {
+      cause: reason,
+    });
+  }
 };
 
 // definition
@@ -50,9 +61,9 @@ export const readProtoBytes = <Desc extends DescMessage>(
  * The codec of a `proto` payload of `schema`, as generated code holds one: its reader checks the
  * records against the schema (`checkProtoRecords`), reads them with protobuf-es within spec
  * 17.9.3's bound, then refuses a message that leaves a field of `LEGACY_REQUIRED` presence unset
- * (17.9.7) with a `SyntaxError`; its writer builds the message of what it is given, refuses one
- * that leaves such a field unset with a `TypeError`, in the same words, then writes it. The walk
- * looks into every message the payload holds but an extension's and an `Any`'s.
+ * (17.9.7), each refusal a `SyntaxError`; its writer builds the message of what it is given,
+ * refuses one that leaves such a field unset with a `TypeError`, in the same words, then writes it.
+ * The walk looks into every message the payload holds but an extension's and an `Any`'s.
  *
  * @example
  * import { protoCodecOf } from '@francisdesjardins/bead/proto';

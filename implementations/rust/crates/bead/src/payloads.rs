@@ -52,7 +52,12 @@ impl From<JsonRefusal> for CodecRefusal {
     }
 }
 
-/// How one encoding reads a payload and writes a value.
+/// How one encoding reads a payload and writes a value: what does not read, or write, is a
+/// [`CodecRefusal`], its refusal.
+///
+/// A request's payload its codec refuses is answered `PAYLOAD_UNDECODABLE`. A codec that panics is
+/// no refusal but the side's own error: a request is answered `PROCEDURE_FAILED` and the panic
+/// reported (spec 9.0, 17.2).
 pub trait PayloadCodec: Send + Sync + fmt::Debug + 'static {
     /// What it reads a payload to, and writes.
     type Value: Send + 'static;
@@ -61,7 +66,8 @@ pub trait PayloadCodec: Send + Sync + fmt::Debug + 'static {
     ///
     /// # Errors
     ///
-    /// A [`CodecRefusal`] for bytes that do not read.
+    /// A [`CodecRefusal`] for bytes that do not read, its refusal; what it panics with is the
+    /// side's own error (spec 9.0, 17.2).
     fn decode(&self, bytes: &Bytes) -> Result<Self::Value, CodecRefusal>;
 
     /// The bytes `value` writes.

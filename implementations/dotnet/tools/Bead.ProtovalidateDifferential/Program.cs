@@ -2,7 +2,6 @@ using System.Text;
 using System.Text.Json;
 using Bead;
 using Bead.Validations.V1;
-using Google.Protobuf;
 
 // The C# side's testee of the protovalidate differential (decision 0035), as
 // tools/protovalidate-differential.mjs drives one: on the standard input, a case a line,
@@ -76,10 +75,6 @@ byte[] Answer(string line)
         judged = judge(Convert.FromBase64String(read.RootElement.GetProperty("payload").GetString()!));
     }
     catch (FormatException)
-    {
-        return """{"refused":true}"""u8.ToArray();
-    }
-    catch (InvalidProtocolBufferException)
     {
         return """{"refused":true}"""u8.ToArray();
     }

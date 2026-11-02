@@ -8,8 +8,8 @@
 use std::ptr;
 use std::sync::Arc;
 
-use bead::PayloadCodec;
 use bead::testing::hexadecimal;
+use bead::{CodecRefusal, PayloadCodec};
 use buffa::{DecodeOptions, EnumValue, Enumeration, ExtensionSet, Inline, MessageField};
 use buffa_descriptor::generated::descriptor::feature_set::EnumType;
 use buffa_descriptor::generated::descriptor::field_descriptor_proto::{Label, Type};
@@ -24,7 +24,7 @@ use buffa_descriptor::{DescriptorPool, MessageIndex};
 use bytes::Bytes;
 
 use super::{DynamicCodec, ProtoCodec};
-use crate::records::ProtoSchema;
+use crate::records::{ProtoSchema, check_records};
 use crate::required::{Place, unset_of};
 use crate::testing::codecs::{self, Probe, Shade};
 use crate::testing::test::__buffa::ext::INNER;
@@ -394,6 +394,26 @@ fn refuses_a_payload_and_a_value_with_a_codec_refusal_in_the_same_words() {
         Err(words_of("bead.codecs.v1.Needs.shade")),
         "a shade of 5"
     );
+}
+
+#[test]
+fn refuses_bytes_its_library_cannot_read_as_every_reader_refuses_the_library_s_error_as_its_cause()
+{
+    // a text of one byte that is not UTF-8, which Buffa reads, past the records' check
+    let probe = ProtoCodec::<Probe>::new();
+    let bytes = bytes_of("0A 01 FF");
+
+    check_records(&bytes, probe.schema()).expect("past the records' check");
+
+    let refusal: CodecRefusal = probe.decode(&bytes).expect_err("a text that is not UTF-8");
+
+    // * a CodecRefusal carries no cause: the library's words are its reason's, after the codec's
+    let words = refusal
+        .reason()
+        .strip_prefix("a proto payload is not its message: ")
+        .unwrap_or_default();
+
+    assert!(!words.is_empty(), "Buffa's words: {refusal}");
 }
 
 #[test]

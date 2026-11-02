@@ -28,6 +28,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 - A `proto` payload whose varint's 10th byte sets a bit past the 64th is refused on every side, as
   no encoding (spec 17.9.1; protobuf's Encoding guide, "Base 128 Varints").
+- Bead's `proto` codecs refuse bytes that do not read with their side's refusal, a `SyntaxError` on
+  the TypeScript side and a `FormatException` on the C# side, where protobuf-es's `TypeError` or
+  `Error` and Google.Protobuf's `InvalidProtocolBufferException` came through.
 
 ## [0.9.0] - 2026-10-30
 

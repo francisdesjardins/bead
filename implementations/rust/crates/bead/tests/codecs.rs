@@ -1,13 +1,15 @@
 //! `spec/codecs.json` played against the Rust side's codecs: each payload read, and written back or
 //! refused, and each value written or refused, through its encoding's codec. The `proto` entries
 //! are `bead-protobuf`'s player's, `crates/bead-protobuf/tests/codecs.rs`, since the core never
-//! depends on protobuf; an entry whose `differs` excuses Rust is not played.
+//! depends on protobuf; an entry whose `differs` excuses Rust is not played. Every refusal is a
+//! [`CodecRefusal`], the codec trait's error, as the other sides' players hold theirs to its type: a
+//! codec that panics refuses nothing, and fails its trial.
 
 use std::process::ExitCode;
 
 use bead::json::{self, JsonRefusal};
 use bead::testing::{Difference, files, hexadecimal, is_excused};
-use bead::{JsonCodec, PayloadCodec, RawCodec, TextCodec};
+use bead::{CodecRefusal, JsonCodec, JsonOf, PayloadCodec, RawCodec, TextCodec};
 use bytes::Bytes;
 use libtest_mimic::{Arguments, Failed, Trial};
 use serde::Deserialize;
@@ -83,37 +85,22 @@ fn bytes_of(text: &str) -> Result<Bytes, Failed> {
         .ok_or_else(|| format!("{text:?} is no hexadecimal").into())
 }
 
+// a payload read, then written back, through `codec`: what it writes, twice, or its refusal
+fn written_by<C: PayloadCodec>(codec: &C, bytes: &Bytes) -> Result<(Bytes, Bytes), CodecRefusal> {
+    let again = |bytes: &Bytes| codec.decode(bytes).and_then(|value| codec.encode(&value));
+
+    again(bytes).and_then(|written| again(&written).map(|twice| (written, twice)))
+}
+
 // a payload read, then written back, through its encoding's codec: what it writes, or its refusal
-fn round_trip(encoding: &str, bytes: &Bytes) -> Result<Result<(Bytes, Bytes), String>, Failed> {
-    let written = |again: &dyn Fn(&Bytes) -> Result<Bytes, String>| {
-        again(bytes).and_then(|written| again(&written).map(|twice| (written, twice)))
-    };
-
+fn round_trip(
+    encoding: &str,
+    bytes: &Bytes,
+) -> Result<Result<(Bytes, Bytes), CodecRefusal>, Failed> {
     Ok(match encoding {
-        "raw" => written(&|bytes| {
-            let codec = RawCodec;
-
-            codec
-                .decode(bytes)
-                .and_then(|value| codec.encode(&value))
-                .map_err(|refusal| refusal.to_string())
-        }),
-        "text" => written(&|bytes| {
-            let codec = TextCodec;
-
-            codec
-                .decode(bytes)
-                .and_then(|value| codec.encode(&value))
-                .map_err(|refusal| refusal.to_string())
-        }),
-        "json" => written(&|bytes| {
-            let codec = JsonCodec;
-
-            codec
-                .decode(bytes)
-                .and_then(|value| codec.encode(&value))
-                .map_err(|refusal| refusal.to_string())
-        }),
+        "raw" => written_by(&RawCodec, bytes),
+        "text" => written_by(&TextCodec, bytes),
+        "json" => written_by(&JsonCodec, bytes),
         other => return Err(format!("{other} is no encoding this player plays").into()),
     })
 }
@@ -123,7 +110,8 @@ fn play_payload(payload: &Payload) -> Result<(), Failed> {
     let outcome = round_trip(&payload.encoding, &bytes)?;
 
     match (&payload.refused, &payload.written, outcome) {
-        (Some(_), _, Err(_)) => Ok(()),
+        // * a refusal, a CodecRefusal
+        (Some(_), _, Err(_refusal)) => Ok(()),
         (Some(reason), _, Ok((written, _))) => {
             Err(format!("read and wrote {written:02X?}, where it is refused: {reason}").into())
         }
@@ -160,33 +148,31 @@ fn nested_of(depth: usize) -> Value {
 
 fn play_value(entry: &Written) -> Result<(), Failed> {
     let given = &entry.value;
-    let written: Result<Bytes, String> = match entry.encoding.as_str() {
+    // * each value written through a codec: a double through a codec of the application's own type
+    let written: Result<Bytes, CodecRefusal> = match entry.encoding.as_str() {
         "json" => {
-            let value = if let Some(value) = &given.json {
-                Ok(value.clone())
-            } else if let Some(bits) = &given.double {
+            if let Some(bits) = &given.double {
                 let bits = u64::from_str_radix(bits, 16).map_err(|error| error.to_string())?;
 
-                json::to_value(&f64::from_bits(bits))
-            } else if let Some(digits) = &given.number {
-                number_of(digits)
-            } else if let Some(depth) = given.nested {
-                Ok(nested_of(depth))
+                JsonOf::<f64>::new().encode(&f64::from_bits(bits))
             } else {
-                return Err(format!("{given:?} is no form a json writer is given here").into());
-            };
+                let value = if let Some(value) = &given.json {
+                    value.clone()
+                } else if let Some(digits) = &given.number {
+                    number_of(digits).map_err(|refusal| refusal.to_string())?
+                } else if let Some(depth) = given.nested {
+                    nested_of(depth)
+                } else {
+                    return Err(format!("{given:?} is no form a json writer is given here").into());
+                };
 
-            value
-                .and_then(|value| json::write(&value))
-                .map(Bytes::from)
-                .map_err(|refusal| refusal.to_string())
+                JsonCodec.encode(&value)
+            }
         }
         "text" => {
             let text = given.text.clone().ok_or("a text writer is given a text")?;
 
-            TextCodec
-                .encode(&text)
-                .map_err(|refusal| refusal.to_string())
+            TextCodec.encode(&text)
         }
         "raw" => {
             let bytes = bytes_of(
@@ -196,15 +182,14 @@ fn play_value(entry: &Written) -> Result<(), Failed> {
                     .ok_or("a raw writer is given bytes")?,
             )?;
 
-            RawCodec
-                .encode(&bytes)
-                .map_err(|refusal| refusal.to_string())
+            RawCodec.encode(&bytes)
         }
         other => return Err(format!("{other} is no encoding this player plays").into()),
     };
 
     match (&entry.refused, &entry.written, written) {
-        (Some(_), _, Err(_)) => Ok(()),
+        // * a refusal, a CodecRefusal
+        (Some(_), _, Err(_refusal)) => Ok(()),
         (Some(reason), _, Ok(written)) => {
             Err(format!("wrote {written:02X?}, where it is refused: {reason}").into())
         }
