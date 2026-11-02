@@ -25,6 +25,10 @@ const ISSUER: &str = "https://issuer.example";
 const SET_ISSUER: &str = "https://keys.example";
 const AUDIENCE: &str = "https://bead.example";
 
+mod construction;
+mod deadlines;
+mod waiting;
+
 fn claims(issuer: &str) -> Value {
     json!({"aud": AUDIENCE, "exp": 1_767_229_200, "iss": issuer, "sub": "grace"})
 }
@@ -103,11 +107,15 @@ impl Fixture {
     }
 
     fn with(keys: Vec<JwtKey>, maximum_waiting_calls: Option<u64>) -> Self {
+        Self::on(keys, (maximum_waiting_calls, vec![SET_ISSUER.to_owned()]))
+    }
+
+    fn on(keys: Vec<JwtKey>, (maximum_waiting_calls, issuers): (Option<u64>, Vec<String>)) -> Self {
         let clock = SteppingClock::new(instants::new_year());
         let asks: Arc<Mutex<Vec<Ask>>> = Arc::default();
         let asking = Arc::clone(&asks);
         let key_set = JwtKeySet {
-            issuers: vec![SET_ISSUER.to_owned()],
+            issuers,
             maximum_waiting_calls,
             ask: Arc::new(move |issuer, signal| {
                 let (answer, receiver) = oneshot::channel();
