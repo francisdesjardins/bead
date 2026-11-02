@@ -139,7 +139,8 @@ pub use router::relay::{
 };
 pub use router::server::{
     ActivityListener, Call, CallHooks, EnvelopeListener, ErrorListener, NotifyFilter,
-    RefusalListener, RouterServer, RouterServerOptions, ServerRequest, SessionTokenProvider,
+    RefusalListener, RouterServer, RouterServerOptions, ServerRequest, SessionProvider,
+    SessionTokenProvider,
 };
 pub use router::types::{
     AccessRefusal, AccessRefusalStage, BoxFuture, CallAddress, CallSession, ConnectionHandle,

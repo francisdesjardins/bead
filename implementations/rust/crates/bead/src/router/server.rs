@@ -77,6 +77,14 @@ pub type ActivityListener = Arc<dyn Fn(RouterActivity, &ConnectionHandle) + Send
 pub type SessionTokenProvider =
     Arc<dyn Fn(&ConnectionHandle) -> Result<Option<SessionToken>, RouterError> + Send + Sync>;
 
+/// Resolves a connection's session for NONE or OPAQUE in the request's turn, before admission.
+/// The header and signal belong to the call; no transport credential is handed to it.
+pub type SessionProvider = Arc<
+    dyn Fn((&ConnectionHandle, &RequestHeader), &Signal) -> Result<Option<CallSession>, RouterError>
+        + Send
+        + Sync,
+>;
+
 /// How a server's router is built, beyond its transport.
 #[derive(Clone, Default)]
 #[non_exhaustive]
@@ -98,6 +106,8 @@ pub struct RouterServerOptions {
     pub intake: Option<IntakeLimitsOptions>,
     /// What resolves a `JWT` and an `ELSEWHERE`.
     pub credentials: Option<Credentials>,
+    /// Resolves NONE and OPAQUE synchronously; the server's session manager supplies it when none.
+    pub session_of: Option<SessionProvider>,
     /// The connection's token: the server's session manager supplies it when none is given.
     pub session_token_of: Option<SessionTokenProvider>,
     /// Its relay's options.
@@ -166,6 +176,7 @@ pub(crate) struct ServerState {
     pub(crate) relay: crate::router::relay::Relay,
     pub(crate) listeners: Arc<ServerListeners>,
     pub(crate) facade: Option<crate::server::Facade>,
+    session_of: Option<SessionProvider>,
     session_token_of: Option<SessionTokenProvider>,
 }
 
@@ -435,12 +446,21 @@ impl Side for ServerState {
             )));
         }
 
-        let session = crate::server::sessions_of(self).and_then(|sessions| {
-            connection_session_of(
-                credential.as_ref(),
-                (sessions.token_of(handle).as_ref(), sessions.data_of(handle)),
-            )
-        });
+        let session = if let Some(provider) = &self.session_of {
+            match caught(("a session provider", || provider((handle, header), signal)))
+                .unwrap_or_else(|panicked| Err(panicked.into()))
+            {
+                Ok(session) => session,
+                Err(error) => return Resolution::Now(Err(Unresolved::Other(Arc::new(error)))),
+            }
+        } else {
+            crate::server::sessions_of(self).and_then(|sessions| {
+                connection_session_of(
+                    credential.as_ref(),
+                    (sessions.token_of(handle).as_ref(), sessions.data_of(handle)),
+                )
+            })
+        };
 
         // an OPAQUE no session holds on its connection is refused for its session
         Resolution::Now(Ok(match session {
@@ -1808,6 +1828,7 @@ impl RouterServer {
                 relay: relay.clone(),
                 listeners: Arc::clone(&listeners),
                 facade,
+                session_of: options.session_of.clone(),
                 session_token_of: options.session_token_of.clone(),
             }
         });

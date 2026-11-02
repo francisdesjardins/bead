@@ -1207,6 +1207,7 @@ impl Server {
             (
                 &RouterServerOptions {
                     last_call_id: None,
+                    session_of: None,
                     clock: Some(clock),
                     runtime: Some(runtime),
                     limits: options.limits.clone(),
