@@ -59,7 +59,7 @@ impl Generator {
 
 /// `source` changed by one to four edits drawn from `generator`.
 ///
-/// Each is a bit flipped, a byte of [`INTERESTING`] put in or written over one, bytes removed, the
+/// Each is a bit flipped, a byte of `INTERESTING` put in or written over one, bytes removed, the
 /// rest cut, the rest replaced by a tail of another seed of `seeds`, or random bytes put in, each
 /// drawn as the other sides' are, in their order.
 pub fn mutate(source: &[u8], (generator, seeds): (&mut Generator, &[Vec<u8>])) -> Vec<u8> {
