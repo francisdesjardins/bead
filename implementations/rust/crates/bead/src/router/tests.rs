@@ -43,6 +43,7 @@ mod limits;
 mod metrics;
 mod panics;
 mod parts;
+mod relay;
 mod requester;
 mod router_core;
 mod router_core_answering;
