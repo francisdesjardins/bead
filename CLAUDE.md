@@ -59,8 +59,8 @@ same conformance files and proves against the others in the interop. Where a lan
 or its platform cannot have it at all, the difference is a row of the support matrix,
 `docs/support.md`, with the test that shows it, and a difference that can close is work to do.
 
-- A test missing on one side is added to the other.
-- A term renamed on one side is renamed on both, wherever it applies.
+- A test missing on one side is added to the others.
+- A term renamed on one side is renamed on every side, wherever it applies.
 - No implementation is the reference: the set evolves together, wherever it can. Where one does Y
   and another can do Y and Z, every one does Y: the second keeps to Y, or comes back to it, and Z
   comes to all of them at once, by a decision that meets the Tenth Man. Where every side keeps to

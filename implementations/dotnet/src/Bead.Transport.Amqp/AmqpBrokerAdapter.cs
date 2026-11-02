@@ -717,6 +717,7 @@ public sealed class AmqpBrokerAdapter : IBrokerAdapter, IAsyncDisposable
     public async Task Stop()
     {
         Incarnation? link;
+        // ! the link's end, its message alone: what waits on it fails with an IOException that carries it
         var stopped = new InvalidOperationException($"the link of {Id} stopped");
 
         lock (_gate)
