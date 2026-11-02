@@ -14,6 +14,27 @@ mod tests;
 
 pub(crate) mod participant;
 
+/// Keeps the call steps `source` names, passing their error and event to `listener` as given.
+///
+/// # Errors
+///
+/// A [`ProgrammerError`] for a filter whose first value is not a filter.
+pub fn filter_debug(
+    listener: crate::managers::service::DebugListener,
+    source: DebugFilterSource,
+) -> Result<crate::managers::service::DebugListener, ProgrammerError> {
+    let keeper = FilterKeeper::new(source)?;
+    Ok(Arc::new(move |error, event| {
+        if keeper.keeps_call(&CallAsked {
+            direction: event.direction,
+            call_type: event.call_type,
+            procedure_name: &event.procedure_name,
+        }) {
+            listener(error, event);
+        }
+    }))
+}
+
 /// Which way a step or an envelope went: in, or out.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[non_exhaustive]

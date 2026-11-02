@@ -75,7 +75,8 @@ pub use credentials::{
 pub use debug::participant::{ParcelVerdict, ParticipantDebugEvent, ParticipantDebugListener};
 pub use debug::{
     CallAsked, DebugDirection, DebugFilter, DebugFilterSource, DebugType, EnvelopeAsked,
-    FilterGiven, FilterKeeper, FilterRefusal, GivenFilter, TracedEnvelope, parse_debug_filter,
+    FilterGiven, FilterKeeper, FilterRefusal, GivenFilter, TracedEnvelope, filter_debug,
+    parse_debug_filter,
 };
 pub use duration::{DurationRefusal, LONGEST_TIMER, NEVER, hold, hold_delay, hold_finite};
 pub use envelope::{

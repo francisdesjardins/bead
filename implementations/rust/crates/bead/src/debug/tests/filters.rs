@@ -28,6 +28,57 @@ fn events() -> [CallAsked<'static>; 5] {
     })
 }
 
+#[test]
+fn passes_the_error_and_the_event_on_as_they_came() {
+    let failure: crate::managers::service::TracedError = Arc::new(std::io::Error::other("failed"));
+    let event = Arc::new(crate::managers::service::DebugEvent {
+        call_id: Some(3),
+        connection_handle: None,
+        direction: DebugDirection::Tx,
+        duration: None,
+        options: None,
+        procedure_id: 1,
+        procedure_name: "echo".to_owned(),
+        rx: None,
+        service_id: 2,
+        service_revision: 1,
+        started_at: 0,
+        tx: None,
+        call_type: DebugType::Request,
+    });
+    let heard = Arc::new(AtomicUsize::new(0));
+    let hearing = Arc::clone(&heard);
+    let expected_error = Arc::clone(&failure);
+    let expected_event = Arc::clone(&event);
+    let listener = crate::debug::filter_debug(
+        Arc::new(move |error, event| {
+            assert!(Arc::ptr_eq(
+                error.expect("the error given"),
+                &expected_error
+            ));
+            assert!(std::ptr::eq(event, expected_event.as_ref()));
+            hearing.fetch_add(1, Ordering::SeqCst);
+        }),
+        spec("echo"),
+    )
+    .expect("a filtered listener");
+    listener(Some(&failure), &event);
+    listener(
+        Some(&failure),
+        &crate::managers::service::DebugEvent {
+            procedure_name: "another".to_owned(),
+            ..(*event).clone()
+        },
+    );
+    assert_eq!(heard.load(Ordering::SeqCst), 1);
+    crate::debug::filter_debug(
+        Arc::new(|_, _| panic!("a refused filter calls nothing")),
+        spec("d(up)"),
+    )
+    .err()
+    .expect("a refused filter");
+}
+
 fn heard(source: DebugFilterSource) -> Vec<String> {
     let keeper = FilterKeeper::new(source).expect("a filter");
     events()
