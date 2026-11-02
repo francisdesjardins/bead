@@ -81,10 +81,15 @@ const thrownBy = (bytes: Uint8Array | number[], message: DescMessage = ProbeSche
   return undefined;
 };
 
-/** Each of `payloads` refused, a `SyntaxError`, as a codec's reader refuses. */
+/** What `thrown` is: its class, and its message, a reason of spec 17.2. */
+const reasonOf = (thrown: unknown): [unknown, string] => {
+  return [(thrown as Error | undefined)?.constructor, (thrown as Error | undefined)?.message ?? ''];
+};
+
+/** Each of `payloads` refused, a `SyntaxError` of `not its message`, as a codec's reader refuses. */
 const expectRefused = (payloads: readonly string[]): void => {
   for (const hex of payloads) {
-    expect(thrownBy(bytesOf(hex)), hex).toBeInstanceOf(SyntaxError);
+    expect(reasonOf(thrownBy(bytesOf(hex))), hex).toEqual([SyntaxError, 'not its message']);
   }
 };
 
@@ -95,9 +100,7 @@ test.describe("the check of a proto payload's records", () => {
     for (const hex of ['A0 06 01', '1A 03 A0 06 01']) {
       expect(thrownBy(bytesOf(hex)), hex).toBeUndefined();
     }
-    for (const hex of ['0E', '0F', 'A6 06', 'A7 06', '1A 02 A6 06', '1A 02 A7 06']) {
-      expect(thrownBy(bytesOf(hex)), hex).toBeInstanceOf(SyntaxError);
-    }
+    expectRefused(['0E', '0F', 'A6 06', 'A7 06', '1A 02 A6 06', '1A 02 A7 06']);
   });
 
   test('reads enum map values as varints and refuses other wire types or undeclared entry fields', () => {
@@ -206,9 +209,12 @@ test.describe("the check of a proto payload's records", () => {
     for (const hex of payloads) {
       const refusal = thrownBy(bytesOf(hex));
 
-      // * the check's refusal, where protobuf-es would drop the bits past the 64th
-      expect(refusal, hex).toBeInstanceOf(SyntaxError);
-      expect((refusal as Error).message, hex).toBe('the proto payload holds a varint past 64 bits');
+      // * the check's refusal, where protobuf-es would drop the bits past the 64th: its reason
+      // 17.2's words, the record it refused in its cause
+      expect(reasonOf(refusal), hex).toEqual([SyntaxError, 'not its message']);
+      expect(((refusal as Error).cause as Error).message, hex).toBe(
+        'the proto payload holds a varint past 64 bits'
+      );
     }
 
     // a 10th byte of 0x01 is the 64th bit, within
@@ -249,12 +255,14 @@ test.describe("the check of a proto payload's records", () => {
 
   test('refuses a message nested more than 100 deep below the top one, groups and map entries counted', () => {
     // spec 17.9.3: an entry counts as a message, its value as another
+    const nestedPast: [unknown, string] = [SyntaxError, 'nested past 100'];
+
     expect(thrownBy(childrenDeep(100))).toBeUndefined();
-    expect(thrownBy(childrenDeep(101))).toBeInstanceOf(SyntaxError);
+    expect(reasonOf(thrownBy(childrenDeep(101)))).toEqual(nestedPast);
     expect(thrownBy(groupsDeep(100))).toBeUndefined();
-    expect(thrownBy(groupsDeep(101))).toBeInstanceOf(SyntaxError);
+    expect(reasonOf(thrownBy(groupsDeep(101)))).toEqual(nestedPast);
     expect(thrownBy(entriesDeep(50))).toBeUndefined();
-    expect(thrownBy(entriesDeep(51))).toBeInstanceOf(SyntaxError);
+    expect(reasonOf(thrownBy(entriesDeep(51)))).toEqual(nestedPast);
 
     // an unknown group counts as a message: under 99 children, the 100th below the top
     const groupUnder = (count: number): number[] => {
@@ -268,7 +276,7 @@ test.describe("the check of a proto payload's records", () => {
     };
 
     expect(thrownBy(groupUnder(99))).toBeUndefined();
-    expect(thrownBy(groupUnder(100))).toBeInstanceOf(SyntaxError);
+    expect(reasonOf(thrownBy(groupUnder(100)))).toEqual(nestedPast);
   });
 
   test("builds a message's shape once, from its descriptor, a message that holds itself among them", () => {

@@ -55,6 +55,7 @@ const namePartOf = ({ request, result }: { request: 'proto' | 'raw'; result: 'pr
 // a NamePart that leaves is_extension unset, `name_part` "a" alone
 const PARTIAL = Uint8Array.of(0x0a, 0x01, 0x61);
 
+// what the refusal's cause says of the field it leaves unset, its reason 17.2's words
 const UNSET =
   'a proto message leaves google.protobuf.UninterpretedOption.NamePart.is_extension unset';
 
@@ -619,7 +620,12 @@ test.describe('createServiceServer', () => {
     expect(await codeOf(client.request.part(new Uint8Array())())).toBe(
       ProtocolCode.PROCEDURE_FAILED
     );
-    expect(reported).toEqual([new TypeError(UNSET)]);
+    expect(
+      reported.map((error) => {
+        return [(error as Error).message, ((error as Error).cause as Error).message];
+      })
+    ).toEqual([['a required field unset', UNSET]]);
+    expect(reported[0]).toBeInstanceOf(TypeError);
   });
 
   test("a mapped member keeps its descriptor's @deprecated", async () => {

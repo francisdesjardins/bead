@@ -61,7 +61,8 @@ src/
                                 broker's core over an in-memory broker
   Bead.Protobuf/                the runtime codec of a proto message, which a generated binding
                                 names: its records checked against its descriptor before
-                                Google.Protobuf reads them, its required fields judged both ways;
+                                Google.Protobuf reads them, its required fields judged both ways,
+                                its writer bounded as its reader is;
                                 and what the validators beadc generates are made of: Bead.Core
                                 references no Google.Protobuf
   Bead.Transport.WebSockets/    the server on Kestrel and the client on ClientWebSocket, one
@@ -93,7 +94,9 @@ tests/
   Bead.Goldens/                 the builder's C# goldens, builder/test/golden/csharp, compiled
                                 under this side's rules as a consumer compiles them
   Shared/                       what several test projects link: the test clock, the durations'
-                                helper, the JSON payloads, the addresses a server listens on
+                                helper, the JSON payloads, the addresses a server listens on, the
+                                seeded mutations of the conformance files' bytes, and what a
+                                broker's parcel reader and writer hold, which Bead.Fuzz links too
 tools/
   Bead.Benchmarks/              the bench, outside the solution: the seven layers on the loopback,
                                 in the TypeScript bench's units (README, Measurement); CI's dotnet
@@ -515,8 +518,18 @@ the listens, the outboxes and the server's life, under one lock on the C# side.
   a singular closed enum's record of a number its enum does not declare is dropped before the
   library reads (17.9.8). `ProtoRequired.Check` then refuses a message that leaves a field of
   `LEGACY_REQUIRED` presence unset, at any depth but inside an extension or an `Any`, reading and
-  writing, with a `FormatException` in the same words (17.9.7, [decision
-  0042](../../docs/decisions/0042-a-proto-message-that-leaves-a-required-field-unset-neither-reads-nor-writes-and-a-gateway-refuses-it-where-its-server-would.md)).
+  writing, with a `FormatException` of the same reason (17.9.7, [decision
+  0042](../../docs/decisions/0042-a-proto-message-that-leaves-a-required-field-unset-neither-reads-nor-writes-and-a-gateway-refuses-it-where-its-server-would.md)),
+  its walk going 100 messages deep at most. The writer writes nothing its reader refuses (17.2): a
+  value whose own fields nest a message past the bound is refused before Google.Protobuf writes any
+  of it, and the bytes it writes are checked as its reader checks them, which refuses what a reading
+  kept nesting past it ([decision
+  0031](../../docs/decisions/0031-a-proto-payload-is-protobufs-format-and-bead-states-only-its-own.md)).
+  Every codec's refusal, `PayloadCodecs`' and these, is a `FormatException` whose message is its
+  reason in section 17.2's words and no others, `not JSON` or `nested past 100`, say, what more the
+  side knows in its inner exception; a request whose payload does not read is answered
+  `PAYLOAD_UNDECODABLE`, the refusal's reason its detail ([decision
+  0016](../../docs/decisions/0016-a-json-payload-has-one-form-whichever-side-writes-it.md)).
   `ProtoCodecs.Read` reads a message by its descriptor so, as a gateway reads a result. A project
   that binds `proto` references `Bead.Protobuf`, which carries Google.Protobuf with it.
 - **A `proto` request's rules** are protovalidate's options on its message, which beadc compiles

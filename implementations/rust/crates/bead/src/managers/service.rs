@@ -1021,7 +1021,8 @@ where
                                 ProtocolCode::PAYLOAD_UNDECODABLE,
                                 manager.router.side(),
                             )
-                            // ! a detail of the side's own words: the decoder's, for this side's caller alone
+                            // ! a detail of the side's own words: its codec's reason, in spec 17.2's
+                            // words; the rest in its cause
                             .saying(refused.reason().to_owned())
                             .about(&Header::Result(result.header.clone()))
                             .of_call(Some(procedure.address()), destination_id)
@@ -1480,14 +1481,22 @@ where
         // arrives, its decoding counting in its duration
         let started = manager.is_debugging().then(|| manager.started_now());
         // a payload that does not decode never reaches the callback: its codec's refusal is the
-        // payload's; its panic is its side's own error, answered as a resolver's that panics, and
-        // why goes on for the router to report (spec 9.0, 17.2)
+        // payload's, answered with its reason as its detail; its panic is its side's own error,
+        // answered as a resolver's that panics, and why goes on for the router to report (spec
+        // 9.0, 17.2)
         let value = match decoded(&self.request, &payload) {
             Ok(Ok(value)) => value,
-            Ok(Err(_refused)) => {
+            Ok(Err(refused)) => {
                 return answerer
                     .respond(RouterAnswer::Failure(
-                        self.failure(ProtocolCode::PAYLOAD_UNDECODABLE),
+                        Failure::protocol(
+                            ProtocolCode::PAYLOAD_UNDECODABLE,
+                            self.manager.router.side(),
+                        )
+                        // ! a detail of the side's own words: its codec's reason, in spec 17.2's
+                        // words; the rest of the refusal goes no further
+                        .saying(refused.reason())
+                        .record(),
                     ))
                     .await
                     .map_err(ResolverError::other);

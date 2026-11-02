@@ -3524,9 +3524,12 @@ FAILURES = [
              'parameter': 'revision'}),
     failure("a text the gateway's reading refuses, placed nowhere", ['7.4', '7.5', '7.5.1'],
             {'code': 50, 'arose': 'gateway', 'detail': 'not JSON'}),
+    # a server answers PAYLOAD_UNDECODABLE with its codec's reason as its detail (spec 17.2), which the
+    # problem carries as any failure's
     failure("a json request its server's codec refuses", ['7.5', '7.5.1'],
-            {'code': 50, 'arose': 'server', 'encoding': 'json'}),
-    failure("a proto request its server does not read", ['7.5', '7.5.4'], {'code': 50, 'arose': 'server', 'encoding': 'proto'}),
+            {'code': 50, 'arose': 'server', 'encoding': 'json', 'detail': 'not JSON'}),
+    failure("a proto request its server does not read", ['7.5', '7.5.4'],
+            {'code': 50, 'arose': 'server', 'encoding': 'proto', 'detail': 'not its message'}),
     failure("a result the gateway's client does not read", ['7.5', '7.5.2'], {'code': 50, 'arose': 'answer'}),
     failure('a transfer that stalled', [], {'code': 51, 'arose': 'client'}),
     failure("a payload its server's rules refuse, a pointer and a parameter", INVALID,

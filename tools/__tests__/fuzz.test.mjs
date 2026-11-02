@@ -48,17 +48,55 @@ const textOf = (bytes) => {
   return Buffer.from(bytes).toString('latin1');
 };
 
+// `seeds` ordered by their SHA-1, its hexadecimal ascending, as every side's mutation tests order
+// theirs, and as libFuzzer's corpus names them
+const inSeedOrder = (seeds) => {
+  return seeds.toSorted((one, other) => {
+    const [oneName, otherName] = [seedNameOf(one), seedNameOf(other)];
+
+    return oneName < otherName ? -1 : oneName > otherName ? 1 : 0;
+  });
+};
+
+// the SHA-256 of `inputs`' lowercase hexadecimal, a line each, as every side's mutation tests
+// digest their seeds
+const digestOf = (inputs) => {
+  const hash = createHash('sha256');
+
+  for (const input of inputs) {
+    hash.update(`${Buffer.from(input).toString('hex')}\n`);
+  }
+
+  return hash.digest('hex');
+};
+
 // ── Targets ───────────────────────────────────────────────────────────────────
 
 describe('the targets', () => {
   test("fuzz the twins on each side, and beadc's blueprint on the TypeScript side alone", () => {
+    assert.deepEqual(TWINS, [
+      'envelope',
+      'payload-codecs',
+      'http-fields',
+      'debug-filter',
+      'jwt',
+      'ws-handshake',
+      'broker-parcel',
+      'proto-codecs',
+    ]);
     assert.deepEqual(TARGETS.csharp, TWINS);
     assert.deepEqual(TARGETS.typescript, [...TWINS, 'blueprint']);
-    assert.ok(TWINS.includes('jwt') && TWINS.includes('ws-handshake'));
   });
 
   test('knows the Rust side’s targets, the twins its core holds', () => {
-    assert.deepEqual(TARGETS.rust, ['envelope', 'payload-codecs', 'debug-filter', 'jwt']);
+    assert.deepEqual(TARGETS.rust, [
+      'envelope',
+      'payload-codecs',
+      'debug-filter',
+      'jwt',
+      'broker-parcel',
+      'proto-codecs',
+    ]);
     assert.ok(
       TARGETS.rust.every((target) => {
         return TWINS.includes(target);
@@ -226,6 +264,68 @@ describe('the seeds', () => {
     );
   });
 
+  test("seed the parcel target with every side's parcel mutation seeds, in their order and digest", () => {
+    // * the count and the digest every side's broker parcel fuzz test asserts of its seeds
+    assert.equal(SEEDS['broker-parcel'].length, 72);
+    assert.equal(
+      digestOf(inSeedOrder(SEEDS['broker-parcel'])),
+      '654a2c65cf1911a21e201cd09d3f1cb59af1688e318e7ddf1f2f0d3c73984d45'
+    );
+    assert.ok(
+      SEEDS['broker-parcel'].some((seed) => {
+        return seed.length === 0;
+      }),
+      'no byte at all is a seed'
+    );
+  });
+
+  test("seed the envelope target with every side's envelope mutation seeds, in their order and digest", () => {
+    const vectors = hexUnder(specOf('vectors.json'), ['bytes', 'record']);
+
+    // * the count and the digest every side's envelope fuzz test asserts of its seeds
+    assert.equal(vectors.length, 264);
+    assert.equal(
+      digestOf(inSeedOrder(vectors)),
+      '4d0885103f89b5753c2204b02affcb89106c9e8d2300b8262c6d6b8a577e1c48'
+    );
+    assert.deepEqual(SEEDS.envelope.slice(0, vectors.length), vectors);
+  });
+
+  test("seed the proto target with codecs.json's proto payloads and written values, on the plain path", () => {
+    const codecs = specOf('codecs.json');
+    const isProto = (entry) => {
+      return entry.encoding === 'proto';
+    };
+    const written = codecs.values.filter((entry) => {
+      return isProto(entry) && entry.written !== undefined;
+    });
+    // the payload `100 messages below the top`, as `written` holds its bytes again
+    const deepest = codecs.payloads.find((entry) => {
+      return entry.name === '100 messages below the top';
+    });
+
+    assert.equal(
+      SEEDS['proto-codecs'].length,
+      codecs.payloads.filter(isProto).length + written.length
+    );
+    assert.ok(
+      SEEDS['proto-codecs'].every((seed) => {
+        return seed.subarray(0, 3).equals(Buffer.of(0, 0, 0));
+      })
+    );
+    assert.ok(
+      SEEDS['proto-codecs'].some((seed) => {
+        return seed.length === 3;
+      }),
+      'the empty payload is a seed'
+    );
+    assert.ok(
+      SEEDS['proto-codecs'].some((seed) => {
+        return seed.subarray(3).equals(hexBytesOf(deepest.bytes));
+      })
+    );
+  });
+
   test('name a seed by its SHA-1, as libFuzzer names an input it keeps', () => {
     assert.equal(seedNameOf(Buffer.from('bead')), createHash('sha1').update('bead').digest('hex'));
   });
@@ -259,6 +359,10 @@ describe('the command line', () => {
       ['typescript', 'ws-handshake'],
       ['csharp', 'ws-handshake'],
       ['typescript', 'blueprint'],
+      ['typescript', 'broker-parcel'],
+      ['csharp', 'proto-codecs'],
+      ['rust', 'broker-parcel'],
+      ['rust', 'proto-codecs'],
     ]) {
       assert.deepEqual(argumentsOf(['run', side, target]), {
         command: 'run',
@@ -270,9 +374,25 @@ describe('the command line', () => {
     }
   });
 
+  test("reads a campaign's side and the flags each of its targets runs with", () => {
+    assert.deepEqual(argumentsOf(['campaign', 'rust', '--', '-max_total_time=600']), {
+      command: 'campaign',
+      side: 'rust',
+      flags: ['-max_total_time=600'],
+    });
+    assert.deepEqual(argumentsOf(['campaign', 'typescript']), {
+      command: 'campaign',
+      side: 'typescript',
+      flags: [],
+    });
+  });
+
   test('refuses what it does not read', () => {
     for (const argv of [
       [],
+      ['campaign'],
+      ['campaign', 'java'],
+      ['campaign', 'csharp', 'envelope'],
       ['seed', 'csharp'],
       ['build'],
       ['build', 'java'],

@@ -24,6 +24,7 @@ pub mod durations;
 pub mod files;
 pub mod hexadecimal;
 pub mod instants;
+pub mod mutations;
 pub mod pair;
 pub mod parcels;
 mod platform;

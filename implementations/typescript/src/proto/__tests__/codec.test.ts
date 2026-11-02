@@ -1,8 +1,8 @@
 // ── Codec ─────────────────────────────────────────────────────────────────────
 
-// The runtime's codec of a `proto` payload's schema, a required field unset both ways (spec 17.9.7)
-// and a closed enum's undeclared number (17.9.8), on `Probe`, `Requiring` and a proto2 file written
-// here; the C# side's `ProtoCodecsTests` plays the same sentences.
+// The runtime's codec of a `proto` payload's schema: a required field unset both ways (spec
+// 17.9.7), a closed enum's undeclared number (17.9.8) and a writer's bound (17.2, 17.9.3). The C#
+// side's `ProtoCodecsTests` and the Rust side's `codec/tests.rs` play the same sentences.
 
 // dependencies
 
@@ -13,6 +13,9 @@ import {
   type DescMessage,
   getExtension,
   isFieldSet,
+  type JsonObject,
+  type Message,
+  type MessageInitShape,
   setExtension,
 } from '@bufbuild/protobuf';
 import { reflect } from '@bufbuild/protobuf/reflect';
@@ -23,16 +26,19 @@ import {
   FieldDescriptorProto_Label,
   FieldDescriptorProto_Type,
   FileDescriptorProtoSchema,
+  ListValueSchema,
+  type Value,
+  ValueSchema,
 } from '@bufbuild/protobuf/wkt';
 import { expect, test } from '@playwright/test';
-import { ProbeSchema, type Shade } from '../../router/shared/__tests__/codecs_pb';
+import { type Probe, ProbeSchema, type Shade } from '../../router/shared/__tests__/codecs_pb';
 import { EdgesSchema, RequiringSchema } from '../../transcoding/__tests__/generated/transcoding_pb';
 import {
   NeedsSchema,
   NeedsUpdateSchema,
 } from '../../transcoding/__tests__/generated/transcoding-required_pb';
 import { protoCodecOf } from '../codec';
-import { requiredShapeOf } from '../records';
+import { nestsPastOf, requiredShapeOf } from '../records';
 import { unsetPathOf } from '../required';
 
 // constants
@@ -310,9 +316,69 @@ const thrownBy = (act: () => unknown): unknown => {
   return undefined;
 };
 
-/** The words of the refusal of a message that leaves the field `name` unset. */
+/**
+ * 60 groups of field 4, which `Probe` does not declare, one in another: what a reading keeps among
+ * its unknown fields, the same bytes on every side.
+ */
+const GROUPS = `${'23 '.repeat(60)}${'24 '.repeat(60)}`.trim();
+
+/** `count` messages above `deepest`, each holding the one below as `link` does, built from the deepest up. */
+const wrapped = <Held>(
+  deepest: Held,
+  { count, link }: { count: number; link: (inner: Held) => Held }
+): Held => {
+  let held = deepest;
+
+  for (let above = 0; above < count; above += 1) {
+    held = link(held);
+  }
+
+  return held;
+};
+
+/** A `Probe` that holds `inner` as its child. */
+const childOf = (inner: Probe): Probe => {
+  return create(ProbeSchema, { child: inner });
+};
+
+/** Holds that `codec` writes `value` and reads back what it wrote. */
+const expectWritten = <Desc extends DescMessage>(
+  codec: ReturnType<typeof protoCodecOf<Desc>>,
+  { value, what }: { value: MessageInitShape<Desc>; what: string }
+): void => {
+  const thrown = thrownBy(() => {
+    return codec.decode(codec.encode(value));
+  });
+
+  expect(thrown, what).toBeUndefined();
+};
+
+/** Holds that `codec` refuses to write `value` for its depth: a `TypeError` of `nested past 100`. */
+const expectNestedPast = <Desc extends DescMessage>(
+  codec: ReturnType<typeof protoCodecOf<Desc>>,
+  { value, what }: { value: MessageInitShape<Desc>; what: string }
+): void => {
+  const thrown = thrownBy(() => {
+    return codec.encode(value);
+  });
+
+  expect(
+    [(thrown as Error | undefined)?.constructor, (thrown as Error | undefined)?.message],
+    what
+  ).toEqual([TypeError, 'nested past 100']);
+};
+
+/** What a refusal says: its reason, then the field its cause names where it names one. */
+const saidOf = (thrown: unknown): string => {
+  const cause = ((thrown as Error).cause as Error | undefined)?.message ?? '';
+  const named = /^a proto message leaves (?<name>\S+) unset$/u.exec(cause)?.groups?.['name'];
+
+  return `${(thrown as Error).message}: ${named ?? cause}`;
+};
+
+/** What the refusal of a message that leaves the field `name` unset says, as `saidOf` has it. */
 const wordsOf = (name: string): string => {
-  return `a proto message leaves ${name} unset`;
+  return `a required field unset: ${name}`;
 };
 
 // definition
@@ -339,7 +405,7 @@ test.describe("a proto payload's codec of its schema", () => {
       });
 
       expect(thrown, hex).toBeInstanceOf(SyntaxError);
-      expect((thrown as Error).message, hex).toBe(wordsOf(name));
+      expect(saidOf(thrown), hex).toBe(wordsOf(name));
     }
   });
 
@@ -354,15 +420,15 @@ test.describe("a proto payload's codec of its schema", () => {
 
     expect(read).toBeInstanceOf(SyntaxError);
     expect(written).toBeInstanceOf(TypeError);
-    expect((read as Error).message).toBe(wordsOf('bead.transcoding.v1.Needs.name'));
-    expect((written as Error).message).toBe((read as Error).message);
+    expect(saidOf(read)).toBe(wordsOf('bead.transcoding.v1.Needs.name'));
+    expect(saidOf(written)).toBe(saidOf(read));
     // * a closed enum's number its enum does not declare is no value of a required field
     expect(
-      (
+      saidOf(
         thrownBy(() => {
           return protoCodecOf(ProbeSchema).encode({ needs: { must: 0, shade: 5 as Shade } });
-        }) as Error
-      ).message
+        })
+      )
     ).toBe(wordsOf('bead.codecs.v1.Needs.shade'));
   });
 
@@ -372,7 +438,9 @@ test.describe("a proto payload's codec of its schema", () => {
       return protoCodecOf(ProbeSchema).decode(bytesOf('0A 01 FF'));
     });
 
+    // * its reason 17.2's words, protobuf-es's error its cause
     expect(thrown).toBeInstanceOf(SyntaxError);
+    expect((thrown as Error).message).toBe('not its message');
     expect((thrown as Error).cause).toBeInstanceOf(TypeError);
   });
 
@@ -490,10 +558,197 @@ test.describe("a proto payload's codec of its schema", () => {
     });
 
     expect(read).toBeInstanceOf(SyntaxError);
-    expect((read as Error).message).toBe(words);
+    expect(saidOf(read)).toBe(words);
     expect(written).toBeInstanceOf(TypeError);
-    expect((written as Error).message).toBe(words);
+    expect(saidOf(written)).toBe(words);
     // its mask given, empty
     expect(hexOf(update.encode(update.decode(bytesOf('12 00'))))).toBe('12 00');
+  });
+});
+
+// spec 17.2, 17.9.3: a writer refuses what its reader would refuse for its depth
+test.describe("a proto payload's codec of its schema, writing within the bound", () => {
+  test('refuses to write a message nested more than 100 deep below the top one, through a child, a group and a map’s entry', () => {
+    const probe = protoCodecOf(ProbeSchema);
+    const links: [name: string, per: number, link: (inner: Probe) => Probe][] = [
+      ['a child', 1, childOf],
+      [
+        'a group',
+        1,
+        (inner) => {
+          return create(ProbeSchema, { delimited: inner });
+        },
+      ],
+      [
+        'a map’s entry',
+        2,
+        (inner) => {
+          return create(ProbeSchema, { children: { '': inner } });
+        },
+      ],
+    ];
+
+    for (const [name, per, link] of links) {
+      const count = 100 / per;
+
+      expectWritten(probe, {
+        value: wrapped(create(ProbeSchema), { count, link }),
+        what: `${String(count)} through ${name}`,
+      });
+      expectNestedPast(probe, {
+        value: wrapped(create(ProbeSchema), { count: count + 1, link }),
+        what: `${String(count + 1)} through ${name}`,
+      });
+    }
+
+    // * a map of scalars' entry is a message on the wire: 99 below the top, then its entry
+    const tallied = create(ProbeSchema, { tallies: { a: 1 } });
+
+    expectWritten(probe, {
+      value: wrapped(tallied, { count: 99, link: childOf }),
+      what: "a scalar map's entry at 100",
+    });
+    expectNestedPast(probe, {
+      value: wrapped(tallied, { count: 100, link: childOf }),
+      what: "a scalar map's entry at 101",
+    });
+  });
+
+  test('refuses to write a message 101 deep that reaches no required field', () => {
+    const schema = messageOf('Alone');
+    const alone = protoCodecOf(schema);
+    const link = (inner: Message): Message => {
+      return create(schema, { alone: inner });
+    };
+
+    // * the required walk's shortcut skips Alone: the bound holds all the same
+    expect(requiredShapeOf(schema)).toBeUndefined();
+    expect(nestsPastOf(schema)).toBe(true);
+    expectWritten(alone, { value: wrapped(create(schema), { count: 100, link }), what: '100' });
+    expectNestedPast(alone, { value: wrapped(create(schema), { count: 101, link }), what: '101' });
+  });
+
+  test('refuses a value 10,000 deep before its library writes any of it', () => {
+    const probe = protoCodecOf(ProbeSchema);
+    const schema = messageOf('Alone');
+    const given: MessageInitShape<typeof ProbeSchema> = wrapped<
+      MessageInitShape<typeof ProbeSchema>
+    >(
+      {},
+      {
+        count: 10_000,
+        link: (inner) => {
+          return { child: inner };
+        },
+      }
+    );
+
+    // ! neither create nor toBinary reached: either recurses past the stack 10,000 deep
+    expectNestedPast(probe, {
+      value: wrapped(create(ProbeSchema), { count: 10_000, link: childOf }),
+      what: 'a message',
+    });
+    expectNestedPast(probe, { value: given, what: 'its initializer' });
+    expectNestedPast(protoCodecOf(schema), {
+      value: wrapped(create(schema), {
+        count: 10_000,
+        link: (inner: Message) => {
+          return create(schema, { alone: inner });
+        },
+      }),
+      what: 'a message that reaches no required field',
+    });
+  });
+
+  test('refuses to write 41 messages above 60 unknown groups a reading kept', () => {
+    const probe = protoCodecOf(ProbeSchema);
+    const read = probe.decode(bytesOf(GROUPS));
+
+    // * the depth pass sees none of them: the check over the written bytes refuses, the reader's
+    // refusal its cause
+    expectWritten(probe, { value: wrapped(read, { count: 40, link: childOf }), what: '40' });
+    expectNestedPast(probe, { value: wrapped(read, { count: 41, link: childOf }), what: '41' });
+    expect(
+      (
+        thrownBy(() => {
+          return probe.encode(wrapped(read, { count: 41, link: childOf }));
+        }) as Error
+      ).cause
+    ).toBeInstanceOf(SyntaxError);
+  });
+
+  test('reads a map’s entry 100 deep that holds no value, and refuses to write the value its library gives it', () => {
+    const probe = protoCodecOf(ProbeSchema);
+    // `inner` as the bytes of a Probe's child, its field 3's record
+    const childBytes = (inner: Uint8Array): Uint8Array => {
+      const length: number[] = [];
+
+      for (let left = inner.length; ; left >>>= 7) {
+        if (left < 0x80) {
+          length.push(left);
+
+          break;
+        }
+
+        length.push((left & 0x7f) | 0x80);
+      }
+
+      return Uint8Array.from([0x1a, ...length, ...inner]);
+    };
+
+    // * 99 children below the top, the last holding an entry of children with no key and no value:
+    // 100 deep on the wire, which a reader takes; its library gives the entry its value's default, a
+    // message 101 deep, which its writer refuses
+    const deepest = wrapped(Uint8Array.from([0x62, 0x00]), { count: 99, link: childBytes });
+
+    expectNestedPast(probe, { value: probe.decode(deepest), what: 'an entry 100 deep, read' });
+
+    const deeper = thrownBy(() => {
+      return probe.decode(childBytes(deepest));
+    }) as Error;
+
+    expect([deeper.constructor, deeper.message], 'an entry 101 deep').toEqual([
+      SyntaxError,
+      'nested past 100',
+    ]);
+  });
+
+  test('refuses to write a Struct nested past the bound, a member three messages deep', () => {
+    const edges = protoCodecOf(EdgesSchema);
+    // a JSON object `levels` deep, its innermost {"leaf": 1}: each level a Struct, its entry and a
+    // Value, three messages
+    const objectOf = (levels: number): JsonObject => {
+      return wrapped<JsonObject>(
+        { leaf: 1 },
+        {
+          count: levels - 1,
+          link: (inner) => {
+            return { k: inner };
+          },
+        }
+      );
+    };
+
+    expectWritten(edges, { value: { extra: objectOf(33) }, what: 'a JSON object 33 deep' });
+    expectNestedPast(edges, { value: { extra: objectOf(34) }, what: 'a JSON object 34 deep' });
+  });
+
+  test('refuses to write a Value nested past the bound through its lists', () => {
+    const value = protoCodecOf(ValueSchema);
+    // a Value of a list of one Value, that many lists deep, its innermost the number 1: each list
+    // two messages, a ListValue and a Value, the ListValue a oneof's member
+    const listed = (lists: number): Value => {
+      return wrapped(create(ValueSchema, { kind: { case: 'numberValue', value: 1 } }), {
+        count: lists,
+        link: (inner) => {
+          return create(ValueSchema, {
+            kind: { case: 'listValue', value: create(ListValueSchema, { values: [inner] }) },
+          });
+        },
+      });
+    };
+
+    expectWritten(value, { value: listed(50), what: '50 lists deep' });
+    expectNestedPast(value, { value: listed(51), what: '51 lists deep' });
   });
 });

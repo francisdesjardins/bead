@@ -312,12 +312,13 @@ releases, the runner follows the older, and the newer library's bump waits for t
 
 **The differential.** `tools/protobuf-conformance.mjs differential` feeds every side's testee the
 same 10,000 payloads from a fixed seed: `Probe`'s own records, mutated by cuts, lengths, wire types
-and nesting, maps and groups among them; a record of `needs`, `needs_items` and `shade`, fields 7, 8
-and 14, is written by none of its payloads. It compares the sides two by two, each one's verdict,
-read or refused, and the bytes each writes back as what they read, at every depth, the choices
-protobuf leaves to a writer aside: the order of unknown fields, the order of a map's entries, and an
-entry's key at its default, which protobuf-es writes and Google.Protobuf leaves out. The first and
-the last are the platform rows; any other parting fails it.
+and nesting, maps and groups among them; beside them, `spec/codecs.json`'s `proto` payloads, each
+mutated by the same steps, those that hold a record of fields 7, 8 or 14 left out; a record of
+`needs`, `needs_items` and `shade` is written by none of its payloads. It compares the sides two by
+two, each one's verdict, read or refused, and the bytes each writes back as what they read, at every
+depth, the choices protobuf leaves to a writer aside: the order of unknown fields, the order of a
+map's entries, and an entry's key at its default, which protobuf-es writes and Google.Protobuf
+leaves out. The first and the last are the platform rows; any other parting fails it.
 
 ## Consequences
 
@@ -354,7 +355,10 @@ messages, where TypeScript's ratio ran from 47% to 84% across runs, and close to
 A packed record's walk counts its varints' bytes without decoding a value, which keeps it under the
 library's decoding of each. The bound the TypeScript and C# runtimes hold: on each row, the check
 costs no more than its library's read, the packed walk included, and allocates nothing per record;
-the C# side's allocates no byte over 1,000 checks of each payload.
+the C# side's allocates no byte over 1,000 checks of each payload. A `proto` writer runs the same
+check over the bytes it wrote, its refusal the writer's
+([0031](0031-a-proto-payload-is-protobufs-format-and-bead-states-only-its-own.md)), so a write costs
+that walk too.
 
 **The gate.** [0006](0006-a-rule-has-its-gate.md)'s table holds the suite and the differential, a
 job of their own, `protobuf-conformance`; `spec/codecs.json`'s entries hold the parts the suite at

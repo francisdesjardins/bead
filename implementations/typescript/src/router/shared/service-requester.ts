@@ -250,7 +250,8 @@ export const createServiceRequester = <Handle extends string>(
           responsePayload = serializer.decode(payload);
         } catch (reason) {
           const failure = new FailureError(
-            // ! a detail of the side's own words: the decoder's, for this side's caller alone
+            // ! a detail of the side's own words: its codec's reason, in spec 17.2's words; the
+            // rest in its cause
             { ...router.failures.payloadUndecodable, detail: toError(reason).message },
             {
               cause: reason,

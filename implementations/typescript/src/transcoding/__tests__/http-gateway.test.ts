@@ -1983,7 +1983,7 @@ test('answers 502 to a result that leaves a required field unset, and reports it
     body: '{"code":50,"scope":"protocol","status":502,"title":"PAYLOAD_UNDECODABLE","type":"tag:francisdesjardins.ca,2026:bead/PAYLOAD_UNDECODABLE"}',
     status: 502,
   });
-  expect(reported).toEqual(['a proto message leaves bead.transcoding.v1.Needs.name unset']);
+  expect(reported).toEqual(['a required field unset']);
 });
 
 test('writes an event’s data through the runtime reader, its records checked', async () => {

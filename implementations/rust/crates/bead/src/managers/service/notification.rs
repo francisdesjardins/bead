@@ -324,7 +324,8 @@ where
                     ProtocolCode::PAYLOAD_UNDECODABLE,
                     crate::constants::RouterSide::Client,
                 )
-                // ! a detail of the side's own words: the decoder's, for the side's report alone
+                // ! a detail of the side's own words: its codec's reason, in spec 17.2's words;
+                // the rest in its cause
                 .saying(refused.reason().to_owned())
                 .of_call(Some(self.procedure.address()), None)
                 .caused_by(Arc::new(refused));

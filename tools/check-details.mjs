@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 // No exception's message goes into a failure's detail unless the failure stays with the side, its
-// report alone (spec 9.0), or the error is the side's own, its words written for the peer: what a
-// foreign exception says is the side's, never a peer's to read.
+// report alone (spec 9.0), or the error is the side's own, its words written for the peer, as a
+// built-in codec's refusal says its reason in spec 17.2's words: what a foreign exception says is
+// the side's, never a peer's to read.
 //
 //   node tools/check-details.mjs             every implementation's sources
 //   node tools/check-details.mjs <file…>     those files alone
@@ -31,19 +32,22 @@ import { readFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 
 // the marked sites allowed, by file: how many each holds. Each marker says why its site's words
-// are the side's own: a payload or an envelope that does not decode, reported alone; a bound of the
-// side's own; or the gateway's mapping's own refusal, whose words transcoding.json fixes. Every
-// implementation's sources are read
+// are the side's own: a payload's codec's reason, in spec 17.2's words, which conversations.json
+// checks at a request's PAYLOAD_UNDECODABLE; an envelope that does not decode, reported alone; a
+// bound of the side's own; or the gateway's mapping's own refusal, whose words transcoding.json
+// fixes. Every implementation's sources are read
 export const ALLOWED = Object.freeze({
   'implementations/typescript/src/router/shared/notification.ts': 1,
   'implementations/typescript/src/router/shared/router-core.ts': 2,
   'implementations/typescript/src/router/shared/service-requester.ts': 1,
+  'implementations/typescript/src/router/shared/service-resolver.ts': 1,
   'implementations/typescript/src/transcoding/http-gateway.ts': 2,
   'implementations/dotnet/src/Bead.Core/Notification.cs': 1,
   'implementations/dotnet/src/Bead.Core/RouterCore.cs': 2,
   'implementations/dotnet/src/Bead.Core/ServiceManager.Requester.cs': 1,
+  'implementations/dotnet/src/Bead.Core/ServiceManager.Resolver.cs': 1,
   'implementations/dotnet/src/Bead.Transcoding.Http/HttpGateway.cs': 2,
-  'implementations/rust/crates/bead/src/managers/service.rs': 1,
+  'implementations/rust/crates/bead/src/managers/service.rs': 2,
   'implementations/rust/crates/bead/src/managers/service/notification.rs': 1,
   'implementations/rust/crates/bead/src/router/core.rs': 1,
 });
@@ -445,7 +449,7 @@ export const problemsOf = (files, read = (path) => readFileSync(path, 'utf8')) =
 
     if (unheld.length > 0) {
       problems.push(
-        `${path}:${unheld.join(',')}: an exception's message goes into a detail, which spec 9.0 keeps to the side's own report; mark the site "// ! a detail of the side's own words: <why>" and count it in tools/check-details.mjs only if it never leaves the side`
+        `${path}:${unheld.join(',')}: an exception's message goes into a detail, which spec 9.0 keeps to the side's own report; mark the site "// ! a detail of the side's own words: <why>" and count it in tools/check-details.mjs only if it never leaves the side or its words are the side's own`
       );
     }
     if (idle.length > 0) {
@@ -455,7 +459,7 @@ export const problemsOf = (files, read = (path) => readFileSync(path, 'utf8')) =
     }
     if (held.length > allowed) {
       problems.push(
-        `${path}:${held.join(',')}: ${held.length} marked site(s), ${allowed} allowed; count a new one in tools/check-details.mjs only if it never leaves the side`
+        `${path}:${held.join(',')}: ${held.length} marked site(s), ${allowed} allowed; count a new one in tools/check-details.mjs only if it never leaves the side or its words are the side's own`
       );
     } else if (held.length < allowed) {
       problems.push(`${path}: ${allowed - held.length} allowed site(s) gone; lower ALLOWED`);

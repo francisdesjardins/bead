@@ -1817,7 +1817,7 @@ public sealed class HttpGatewayTests
             Assert.Equal(
                 "{\"code\":50,\"scope\":\"protocol\",\"status\":502,\"title\":\"PAYLOAD_UNDECODABLE\",\"type\":\"tag:francisdesjardins.ca,2026:bead/PAYLOAD_UNDECODABLE\"}",
                 await answered.Content.ReadAsStringAsync(Cancelled));
-            Assert.Equal(["a proto message leaves bead.transcoding.v1.Needs.name unset"], reported);
+            Assert.Equal(["a required field unset"], reported);
         }
         finally
         {
@@ -1840,7 +1840,7 @@ public sealed class HttpGatewayTests
         {
             return HttpEvents.DataOf(HttpPayload.Of(Edges.Descriptor), (varintAt, Form));
         });
-        Assert.Equal("a proto message leaves bead.transcoding.v1.Needs.name unset", Assert.Throws<FormatException>(() =>
+        Assert.Equal("a required field unset", Assert.Throws<FormatException>(() =>
         {
             return HttpEvents.DataOf(HttpPayload.Of(Needs.Descriptor), (new byte[] { 0x10, 1 }, Form));
         }).Message);

@@ -13,7 +13,8 @@ namespace Bead;
 /// as an I-JSON message is read but for its noncharacters, and written in the canonical form of
 /// RFC 8785, so that one value has one form whichever side writes it. <see cref="PayloadCodecs"/>
 /// gives them as codecs, and the interop's serializers delegate to them. What does not read, or does
-/// not write, is a <see cref="FormatException"/> saying why, in this side's words.
+/// not write, is a <see cref="FormatException"/> of its reason in spec 17.2's words, exactly, what
+/// more this side knows in its inner exception.
 /// </summary>
 internal static class Payloads
 {
@@ -36,24 +37,34 @@ internal static class Payloads
         MaxDepth = Depth,
     };
 
-    // what a json reader says of what it refuses, after the parse: its canonical write refuses it
+    // * the reasons of spec 17.2, a refusal's message exactly, and a request's PAYLOAD_UNDECODABLE's
+    // detail: a reader's, then a writer's own
+    private const string NotUtf8 = "not UTF-8";
+
+    private const string AByteOrderMark = "a byte order mark";
+
+    private const string NotJson = "not JSON";
+
+    private const string ASurrogateAlone = "a surrogate alone";
+
+    private const string ANameTwice = "a name twice";
+
+    private const string NestedPast64 = "nested past 64";
+
+    // what a json reader refuses, after the parse: its canonical write refuses it
     private static readonly Refusals Read = new()
     {
-        SurrogateAlone = "a json payload holds a surrogate alone",
-        NameTwice = "a json payload names a member twice",
-        Nested = "a json payload nests deeper than 64",
-        NotFinite = "a json payload holds a number past the largest double",
-        NoValue = "a json payload holds no JSON value",
+        SurrogateAlone = ASurrogateAlone,
+        NameTwice = ANameTwice,
+        Nested = NestedPast64,
+        NotFinite = "a number past a double",
+        NoValue = "no JSON value",
     };
 
-    // what a json writer says of a value it refuses
-    private static readonly Refusals Written = new()
+    // what a json writer refuses of a value
+    private static readonly Refusals Written = Read with
     {
-        SurrogateAlone = "a json value holds a surrogate alone",
-        NameTwice = "a json value names a member twice",
-        Nested = "a json value nests deeper than 64",
-        NotFinite = "a json value holds a number that is not finite",
-        NoValue = "a json value of kind Undefined is no JSON value",
+        NotFinite = "not a finite number",
     };
 
     private static ReadOnlySpan<byte> ByteOrderMark
@@ -88,10 +99,10 @@ internal static class Payloads
         }
         catch (JsonException)
         {
-            return "a json payload is not one JSON text";
+            return NotJson;
         }
 
-        return isRead ? Read.NameTwice : "a json payload is not one JSON text";
+        return isRead ? Read.NameTwice : NotJson;
     }
 
     // a number as a double, read from its digits
@@ -152,12 +163,12 @@ internal static class Payloads
         // ! .NET's reader takes a byte that is not UTF-8 within a string, and writes it back as U+FFFD
         if (!Utf8.IsValid(payload.Span))
         {
-            throw new FormatException("a json payload is not UTF-8");
+            throw new FormatException(NotUtf8);
         }
 
         if (payload.Span.StartsWith(ByteOrderMark))
         {
-            throw new FormatException("a json payload starts with a byte order mark");
+            throw new FormatException(AByteOrderMark);
         }
 
         JsonDocument document;
@@ -276,7 +287,7 @@ internal static class Payloads
         }
         catch (DecoderFallbackException reason)
         {
-            throw new FormatException("a text payload is not UTF-8", reason);
+            throw new FormatException(NotUtf8, reason);
         }
     }
 
@@ -291,7 +302,7 @@ internal static class Payloads
         }
         catch (EncoderFallbackException reason)
         {
-            throw new FormatException("a text value holds a surrogate alone", reason);
+            throw new FormatException(ASurrogateAlone, reason);
         }
     }
 
@@ -307,7 +318,7 @@ internal static class Payloads
         return value;
     }
 
-    // what a canonical write says of what it refuses: a reader's words, or a writer's
+    // the reasons a canonical write refuses with: a reader's, or a writer's
     private sealed record Refusals
     {
         public required string SurrogateAlone { get; init; }
@@ -417,7 +428,7 @@ internal static class Payloads
                     WriteObject(value, depth);
                     break;
                 default:
-                    throw new FormatException(refusals.NoValue);
+                    throw new FormatException(refusals.NoValue, new FormatException($"a json value of kind {value.ValueKind} is no JSON value"));
             }
         }
 

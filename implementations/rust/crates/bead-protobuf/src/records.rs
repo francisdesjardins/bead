@@ -17,6 +17,8 @@ use buffa_descriptor::{
     DescriptorPool, FieldDescriptor, FieldKind, MessageIndex, ScalarType, SingularKind,
 };
 
+use crate::refusal::{NESTED_PAST_100, NOT_ITS_MESSAGE, found};
+
 #[cfg(test)]
 mod tests;
 
@@ -42,6 +44,8 @@ static UNKNOWN: Shape = Shape {
     required: Vec::new(),
     holding: Vec::new(),
     reaches: false,
+    nesting: Vec::new(),
+    nests_past: false,
 };
 
 // ── The schema ────────────────────────────────────────────────────────────────
@@ -133,8 +137,15 @@ impl Shapes {
                 .cloned()
                 .collect();
 
+            let mut nesting: Vec<Holding> = message
+                .fields()
+                .iter()
+                .filter_map(Holding::nesting)
+                .collect();
+
             fields.sort_by_key(|(number, _)| *number);
             required.sort_by_key(FieldDescriptor::number);
+            nesting.sort_by_key(|holding| holding.field.number());
             holds.insert(index, message.fields().iter().filter_map(held_of).collect());
             by_message.insert(
                 index,
@@ -144,9 +155,13 @@ impl Shapes {
                     required,
                     holding: Vec::new(),
                     reaches: false,
+                    nesting,
+                    nests_past: false,
                 },
             );
         }
+
+        let past = nesting_past(&by_message);
 
         let mut reaching: HashSet<MessageIndex> = by_message
             .iter()
@@ -178,19 +193,70 @@ impl Shapes {
                 .fields()
                 .iter()
                 .filter_map(Holding::of)
-                .filter(|holding| reaching.contains(&holding.held))
+                .filter(|holding| holding.held.is_some_and(|held| reaching.contains(&held)))
                 .collect();
 
             holding.sort_by_key(|holding| holding.field.number());
 
             if let Some(shape) = by_message.get_mut(&index) {
                 shape.reaches = reaching.contains(&index);
+                shape.nests_past = past.contains(&index);
                 shape.holding = holding;
             }
         }
 
         Self { pool, by_message }
     }
+}
+
+// the messages whose known fields can nest past the bound, counted as the wire nests: a message
+// field, an item and a group one each, a map's entry one and its message value one more; a cycle
+// among them nests past. How deep each can nest, at most DEPTH + 1, grows from 0 until none grows,
+// so a cycle stops at the cap
+fn nesting_past(by_message: &HashMap<MessageIndex, Shape>) -> HashSet<MessageIndex> {
+    let cap = DEPTH.saturating_add(1);
+    let mut deepest: HashMap<MessageIndex, u32> =
+        by_message.keys().map(|index| (*index, 0)).collect();
+
+    loop {
+        let mut grown = false;
+
+        for (index, shape) in by_message {
+            let deep = shape
+                .nesting
+                .iter()
+                .map(|holding| {
+                    let below = holding.held.map_or(0, |held| {
+                        deepest.get(&held).copied().unwrap_or(0).saturating_add(1)
+                    });
+
+                    match holding.form {
+                        Form::Map => below.saturating_add(1),
+                        Form::Singular | Form::List => below,
+                    }
+                })
+                .max()
+                .unwrap_or(0)
+                .min(cap);
+
+            if let Some(was) = deepest.get_mut(index)
+                && deep > *was
+            {
+                *was = deep;
+                grown = true;
+            }
+        }
+
+        if !grown {
+            break;
+        }
+    }
+
+    deepest
+        .into_iter()
+        .filter(|(_, deep)| *deep > DEPTH)
+        .map(|(index, _)| index)
+        .collect()
 }
 
 // whether a field is of LEGACY_REQUIRED presence: proto2's `required`, or an edition's feature
@@ -224,8 +290,9 @@ fn held_of(field: &FieldDescriptor) -> Option<MessageIndex> {
 }
 
 /// A message's shape: its fields by their numbers, each what its records take; its fields
-/// protobuf requires, by their numbers; those that hold a message reaching one; and whether it, or
-/// a message it holds at any depth, has one.
+/// protobuf requires, by their numbers; those that hold a message reaching one; whether it, or a
+/// message it holds at any depth, has one; its fields that nest, a message or a map's entry; and
+/// whether they can nest past the bound.
 #[derive(Debug)]
 pub(crate) struct Shape {
     /// Its full name.
@@ -237,6 +304,13 @@ pub(crate) struct Shape {
     pub(crate) holding: Vec<Holding>,
     /// Whether it reaches a required field.
     pub(crate) reaches: bool,
+    /// Its fields that nest, by their numbers: each that holds a message, and each map.
+    pub(crate) nesting: Vec<Holding>,
+    /// Whether its known fields can nest a message more than 100 deep below it (17.9.3): a cycle
+    /// among them, or a path that deep, a map's entry counting as a message. Sound for keeping a
+    /// walk of a value's fields within the bound, never for the bound itself: any message holds
+    /// what a reading kept.
+    pub(crate) nests_past: bool,
 }
 
 impl Shape {
@@ -250,42 +324,51 @@ impl Shape {
     }
 }
 
-/// A field that holds a message reaching a required field, and how it holds it.
+/// A field that holds a message, or a map's entries, and how it holds them.
 #[derive(Debug)]
 pub(crate) struct Holding {
     /// The field.
     pub(crate) field: FieldDescriptor,
-    /// The message it holds.
-    pub(crate) held: MessageIndex,
-    /// How: one, a list of them, or a map's values.
+    /// The message it holds, a map's value's among them; none for a map of scalars or enums.
+    pub(crate) held: Option<MessageIndex>,
+    /// How: one, a list of them, or a map's entries.
     pub(crate) form: Form,
 }
 
 impl Holding {
+    // a field that holds a message, as the required walk takes it
     fn of(field: &FieldDescriptor) -> Option<Self> {
-        let held = held_of(field)?;
+        held_of(field)?;
+
+        Self::nesting(field)
+    }
+
+    // a field that nests: one that holds a message, or a map, whose entry is a message on the wire
+    fn nesting(field: &FieldDescriptor) -> Option<Self> {
         let form = match field.kind() {
-            FieldKind::Singular(_) => Form::Singular,
-            FieldKind::List(_) => Form::List,
+            FieldKind::Singular(SingularKind::Message(_)) => Form::Singular,
+            FieldKind::List(SingularKind::Message(_)) => Form::List,
             FieldKind::Map { .. } => Form::Map,
+            FieldKind::Singular(SingularKind::Scalar(_) | SingularKind::Enum(_))
+            | FieldKind::List(SingularKind::Scalar(_) | SingularKind::Enum(_)) => return None,
         };
 
         Some(Self {
             field: field.clone(),
-            held,
+            held: held_of(field),
             form,
         })
     }
 }
 
-/// How a field holds a message.
+/// How a field holds a message, or a map's entries.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Form {
     /// One message.
     Singular,
     /// A repeated field's items.
     List,
-    /// A map's values.
+    /// A map's entries, each a message on the wire, and their values.
     Map,
 }
 
@@ -410,7 +493,8 @@ fn wire_of(scalar: ScalarType) -> u32 {
 ///
 /// # Errors
 ///
-/// A [`CodecRefusal`] for bytes that are no encoding of the message, or nest too deep.
+/// A [`CodecRefusal`] for bytes that are no encoding of the message, its reason `not its message`,
+/// or that nest too deep, `nested past 100`: spec 17.2's words, the record refused in its cause.
 pub fn check_records(bytes: &[u8], schema: &ProtoSchema) -> Result<(), CodecRefusal> {
     let mut reader = Reader {
         schema,
@@ -441,17 +525,19 @@ impl Frame {
     // the depth of what a record of this frame holds
     fn deeper(self) -> Result<u32, CodecRefusal> {
         if self.depth >= DEPTH {
-            return Err(CodecRefusal::new(format!(
-                "a proto payload nests a message more than {DEPTH} deep below the top one"
-            )));
+            return Err(found(
+                NESTED_PAST_100,
+                format!("a proto payload nests a message more than {DEPTH} deep below the top one"),
+            ));
         }
 
         Ok(self.depth.saturating_add(1))
     }
 }
 
-fn refused(reason: &str) -> CodecRefusal {
-    CodecRefusal::new(format!("a proto payload is not its message: {reason}"))
+// the record refused, in the check's words, the refusal's cause
+fn refused(record: &str) -> CodecRefusal {
+    found(NOT_ITS_MESSAGE, record)
 }
 
 // one walk of a payload, its position moving over its bytes

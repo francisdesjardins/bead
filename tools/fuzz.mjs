@@ -1,7 +1,7 @@
 #!/usr/bin/env node
-// Coverage-guided fuzzing of Bead's own parsers, on every side, by hand: never in CI. Six targets,
-// the same on each side and named alike, four of them on the Rust side until its transports land,
-// and one of beadc's, each fed raw bytes:
+// Coverage-guided fuzzing of Bead's own parsers, on every side, by hand and every week, never as a
+// pull request's gate (decision 0006). Eight targets, the same on each side and named alike, six of
+// them on the Rust side until its transports land, and one of beadc's, each fed raw bytes:
 //
 // - `envelope`: the envelope reader, its header then its body, and a failure's record;
 // - `payload-codecs`: the `json` and `text` codecs' readers, and the writers behind them;
@@ -12,6 +12,11 @@
 //   it came and signed again with the key it may name;
 // - `ws-handshake`: the WebSocket transport's judgement of an upgrade, spec 15.2, the part of an
 //   RFC 6455 handshake the first byte names, or its whole head;
+// - `broker-parcel`: a broker's parcel reader, spec 15.17, a parcel that reads written again, its
+//   writer refusing exactly what it documents;
+// - `proto-codecs`: the `proto` codecs over `spec/codecs.proto`'s `Probe`, spec 17.9, the first
+//   three bytes drawing a path, a depth and a number of unknown groups to wrap what reads in,
+//   before it is written;
 // - `blueprint`, the TypeScript side's alone, as beadc has no other: beadc's blueprint reader, its
 //   JSON, its schema and its rules, and its form written back.
 //
@@ -19,40 +24,44 @@
 // past a second, or memory past 256 MiB of its own is a finding, which the fuzzer keeps.
 //
 // - TypeScript: Jazzer.js, in-process, over `implementations/typescript/tools/fuzz/`, a project of
-//   its own that `yarn install` there installs by hand, so neither the package's install nor CI
-//   fetches it; `blueprint` over `builder/tools/fuzz/`, beadc's, alike. Each target is bundled by
-//   the TypeScript side's esbuild into its folder's `.build/`, which Jazzer.js instruments alone.
+//   its own that `yarn install` there installs apart, so neither the package's install nor a pull
+//   request's CI fetches it; `blueprint` over `builder/tools/fuzz/`, beadc's, alike. Each target
+//   is bundled by the TypeScript side's esbuild into its folder's `.build/`, which Jazzer.js
+//   instruments alone.
 //   Node and Jazzer.js hold about 220 MiB of their own before the first input, so libFuzzer's
 //   limit on the process is 512 MiB; `blueprint`'s, which loads beadc's descriptors and schemas
 //   before it, about 170 MiB more, is 768 MiB. Node holds its heap to 256 MiB, as the C# side's
 //   runtime does: what a run keeps past it fails as a finding, never as a slow climb to the limit.
 // - Rust: cargo-fuzz's libFuzzer, over `implementations/rust/fuzz/`, a project outside the side's
 //   workspace, on the nightly its `-Z sanitizer` needs, pinned by its date as CI's fuzz build is,
-//   on Linux or WSL; `envelope`, `payload-codecs`, `debug-filter` and `jwt`, the twins its core
-//   holds, `http-fields` and `ws-handshake` coming with its transports (decision 0044). Its runs
-//   read the folder's `.cargo/config.toml`, and set `CARGO_BUILD_WARNINGS=warn`: a newer compiler's
-//   warnings are no gate of the pinned one's.
+//   on Linux or WSL; `envelope`, `payload-codecs`, `debug-filter`, `jwt`, `broker-parcel` and
+//   `proto-codecs`, the twins its core holds, `http-fields` and `ws-handshake` coming with its
+//   transports (decision 0044). Its runs read the folder's `.cargo/config.toml`, and set
+//   `CARGO_BUILD_WARNINGS=warn`: a newer compiler's warnings are no gate of the pinned one's.
 // - C#: libFuzzer as libfuzzer-dotnet builds it for Windows, over
 //   `implementations/dotnet/tools/Bead.Fuzz/`, which it runs as its child, once SharpFuzz has
-//   instrumented Bead.Core and Bead.Transport.WebSockets in a copy of its build.
-//   `fuzz/fuzzer.json` pins both: the fuzzer's release and its SHA-256, checked before a byte of it
-//   is written, and the instrumenter's version, which is the SharpFuzz library's in
-//   implementations/dotnet/Directory.Packages.props. Both land in `.fuzzer/` beside the project,
-//   which git ignores. The child's runtime holds its managed heap to 256 MiB.
+//   instrumented Bead.Core, Bead.Transport.WebSockets, Bead.Protobuf and Google.Protobuf in a copy
+//   of its build. `fuzz/fuzzer.json` pins both: the fuzzer's release and its SHA-256, checked
+//   before a byte of it is written, and the instrumenter's version, which is the SharpFuzz
+//   library's in implementations/dotnet/Directory.Packages.props. Both land in `.fuzzer/` beside
+//   the project, which git ignores. The child's runtime holds its managed heap to 256 MiB.
 //
 //   node tools/fuzz.mjs seed                     every target's corpora, from the conformance files
 //   node tools/fuzz.mjs fetch                    the C# side's fuzzer and instrumenter, by the pin
 //   node tools/fuzz.mjs build <side>             typescript: the bundles; csharp: the instrumented build;
 //                                                rust: cargo-fuzz's targets
 //   node tools/fuzz.mjs run <side> <target> [input...] [-- libFuzzer flags...]
+//   node tools/fuzz.mjs campaign <side> [-- libFuzzer flags...]
 //
 // `run` fuzzes from the target's `corpus/<target>/`, where it keeps what it finds new, and writes a
 // finding to `findings/<target>/`, both beside the target and ignored by git; given inputs,
 // it runs each once instead, a finding's among them, on either side. libFuzzer's flags follow `--`:
 // `-max_total_time=600` for ten minutes, `-minimize_crash=1 -runs=10000` with a finding to minimise
-// it. The seeds are the conformance files' bytes, and the repository's blueprints, each file named
-// by its SHA-1, as libFuzzer names what it keeps, so seeding again adds nothing twice. Exit as the
-// fuzzer exits, 1 on a usage error.
+// it. `campaign` runs every target of a side in turn from its corpus, each with the flags given,
+// and fails once all have run where any found something: `.github/workflows/fuzz.yml` runs it
+// every week, `-max_total_time=600` a target. The seeds are the conformance files' bytes, and the
+// repository's blueprints, each file named by its SHA-1, as libFuzzer names what it keeps, so
+// seeding again adds nothing twice. Exit as the fuzzer exits, 1 on a usage error.
 
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
@@ -77,6 +86,8 @@ export const TWINS = Object.freeze([
   'debug-filter',
   'jwt',
   'ws-handshake',
+  'broker-parcel',
+  'proto-codecs',
 ]);
 
 /**
@@ -86,7 +97,14 @@ export const TWINS = Object.freeze([
 export const TARGETS = Object.freeze({
   typescript: Object.freeze([...TWINS, 'blueprint']),
   csharp: TWINS,
-  rust: Object.freeze(['envelope', 'payload-codecs', 'debug-filter', 'jwt']),
+  rust: Object.freeze([
+    'envelope',
+    'payload-codecs',
+    'debug-filter',
+    'jwt',
+    'broker-parcel',
+    'proto-codecs',
+  ]),
 });
 
 /** Each side's folder, where its targets, its corpora and its findings are. */
@@ -310,19 +328,42 @@ const stringsUnder = (value, key) => {
   return found;
 };
 
+// what the `proto-codecs` target reads before its payload: the path, the count and the number of
+// unknown groups, each 0, so the payload is read as it is and written as it was read
+const PLAIN = Buffer.of(0, 0, 0);
+
+// the bytes a conformance file's entry writes under `key` in hexadecimal, an empty string none at
+// all
+const entryBytesOf = (entry, key) => {
+  const text = entry[key];
+  const bytes = typeof text === 'string' && text.trim() === '' ? Buffer.alloc(0) : hexBytesOf(text);
+
+  if (bytes === undefined) {
+    throw new Error(`${String(entry.name)}: its ${key} is no hexadecimal`);
+  }
+
+  return bytes;
+};
+
 /**
  * Each target's seeds, from the conformance files as `files` holds them parsed, by their names:
  * the envelopes of `vectors.json`, `conversations.json` and `transports.json`; the `json` and
  * `text` payloads of `codecs.json`, read and written, and the payloads the conversations and the
  * transports carry; the heads of `transports.json`, field by field; the filters of
  * `debug-filters.json`, as written and as given by a function; the tokens of the JWT verdicts of
- * `vectors.json`; the WebSocket cases' upgrades, whole and part by part; and `blueprints`, the
- * repository's blueprints as bytes.
+ * `vectors.json`; the WebSocket cases' upgrades, whole and part by part; the parcels of
+ * `vectors.json`, read and refused, no byte at all among them, the seeds of every side's parcel
+ * mutation tests; the `proto` payloads of `codecs.json` and the bytes its `proto` values are
+ * written as, each after three zero bytes, the plain path; and `blueprints`, the repository's
+ * blueprints as bytes.
  */
 export const seedsOf = (files) => {
   const { blueprints, codecs, conversations, debugFilters, transports, vectors } = files;
   const isTextual = (entry) => {
     return entry.encoding === 'json' || entry.encoding === 'text';
+  };
+  const isProto = (entry) => {
+    return entry.encoding === 'proto';
   };
 
   return {
@@ -352,6 +393,19 @@ export const seedsOf = (files) => {
       }),
       'head'
     ).flatMap(handshakeSeedsOf),
+    'broker-parcel': [...vectors.parcels, ...vectors.parcelRefusals].map((entry) => {
+      return entryBytesOf(entry, 'bytes');
+    }),
+    'proto-codecs': [
+      ...codecs.payloads.filter(isProto).map((entry) => {
+        return entryBytesOf(entry, 'bytes');
+      }),
+      ...codecs.values.filter(isProto).flatMap((entry) => {
+        return entry.written === undefined ? [] : [entryBytesOf(entry, 'written')];
+      }),
+    ].map((bytes) => {
+      return Buffer.concat([PLAIN, bytes]);
+    }),
     blueprint: blueprints,
   };
 };
@@ -505,6 +559,7 @@ const USAGE = [
   `       node tools/fuzz.mjs run typescript ${TARGETS.typescript.join('|')} [input...] [-- libFuzzer flags...]`,
   `       node tools/fuzz.mjs run csharp ${TARGETS.csharp.join('|')} [input...] [-- libFuzzer flags...]`,
   `       node tools/fuzz.mjs run rust ${TARGETS.rust.join('|')} [input...] [-- libFuzzer flags...]`,
+  '       node tools/fuzz.mjs campaign typescript|csharp|rust [-- libFuzzer flags...]',
 ].join('\n');
 
 /** A command line read: the command, its side and target, its inputs, and libFuzzer's flags. */
@@ -520,6 +575,10 @@ export const argumentsOf = (argv) => {
 
   if (command === 'build') {
     return isSide && target === undefined ? { command, side } : undefined;
+  }
+
+  if (command === 'campaign') {
+    return isSide && target === undefined ? { command, side, flags } : undefined;
   }
 
   if (command === 'run') {
@@ -674,8 +733,14 @@ const buildCSharp = () => {
       cwd: SIDES.csharp,
     }
   );
-  // the assemblies whose parsers the targets read, Bead.Core's and the WebSocket judgement's
-  for (const assembly of ['Bead.Core.dll', 'Bead.Transport.WebSockets.dll']) {
+  // the assemblies whose parsers the targets read: Bead.Core's, the WebSocket judgement's, and the
+  // proto codecs', Bead.Protobuf's and the library it reads through
+  for (const assembly of [
+    'Bead.Core.dll',
+    'Bead.Transport.WebSockets.dll',
+    'Bead.Protobuf.dll',
+    'Google.Protobuf.dll',
+  ]) {
     runOrThrow(sharpfuzz, [join(BUILD, assembly)]);
   }
 };
@@ -800,6 +865,30 @@ const runRust = ({ target, inputs, flags }) => {
   );
 };
 
+const runOne = (given) => {
+  if (given.side === 'rust') {
+    return runRust(given);
+  }
+
+  return given.side === 'typescript' ? runTypeScript(given) : runCSharp(given);
+};
+
+// every target of `side` from its corpus, in turn, each with `flags`: 1 once all have run where
+// any found something, so one finding never keeps the others' targets from their run
+const campaign = ({ side, flags }) => {
+  const found = TARGETS[side].filter((target) => {
+    return runOne({ side, target, inputs: [], flags }) !== 0;
+  });
+
+  process.stdout.write(
+    found.length === 0
+      ? `fuzz: ${side}, ${String(TARGETS[side].length)} targets, nothing found\n`
+      : `fuzz: ${side}, found by ${found.join(', ')}: see each one's findings/\n`
+  );
+
+  return found.length === 0 ? 0 : 1;
+};
+
 const main = async (argv) => {
   const given = argumentsOf(argv);
 
@@ -824,12 +913,10 @@ const main = async (argv) => {
       }
 
       return 0;
+    case 'campaign':
+      return campaign(given);
     default:
-      if (given.side === 'rust') {
-        return runRust(given);
-      }
-
-      return given.side === 'typescript' ? runTypeScript(given) : runCSharp(given);
+      return runOne(given);
   }
 };
 

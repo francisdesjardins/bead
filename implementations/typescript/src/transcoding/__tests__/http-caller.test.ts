@@ -943,7 +943,8 @@ test('fails a request whose value leaves a required field unset before anything 
 
   // * the codec's own refusal, a writer's, as it is on every encoding: no Bead failure
   expect(refused).toBeInstanceOf(TypeError);
-  expect((refused as Error).message).toBe(
+  expect((refused as Error).message).toBe('a required field unset');
+  expect(((refused as Error).cause as Error).message).toBe(
     'a proto message leaves bead.transcoding.v1.Needs.name unset'
   );
   expect(sent).toBe(0);

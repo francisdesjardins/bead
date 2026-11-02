@@ -106,7 +106,7 @@ public sealed partial class RouterServerTests
         await Settle();
 
         Assert.Empty(_transport.Sent);
-        Assert.Equal(["a text value holds a surrogate alone no connection"], Reported());
+        Assert.Equal(["a surrogate alone no connection"], Reported());
         Assert.Equal(
             [
                 "bead_notifications_sent_total{outcome=\"failed\"} 2",

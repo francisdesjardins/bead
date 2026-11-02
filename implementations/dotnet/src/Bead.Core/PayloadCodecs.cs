@@ -21,8 +21,9 @@ public interface IPayloadCodec<T>
 
 /// <summary>
 /// The codecs of spec section 17, by their encoding's name — <c>raw</c>, <c>text</c> and
-/// <c>json</c>, each refusing with a <see cref="FormatException"/> saying why — and a codec made of
-/// two functions, a protobuf message's from its stock library's, as gRPC's marshallers are.
+/// <c>json</c>, each refusing with a <see cref="FormatException"/> of its reason in 17.2's words —
+/// and a codec made of two functions, a protobuf message's from its stock library's, as gRPC's
+/// marshallers are.
 /// </summary>
 public static class PayloadCodecs
 {
@@ -40,7 +41,8 @@ public static class PayloadCodecs
     /// which <c>Bead.Protobuf</c>'s <c>ProtoCodecs</c> makes of its stock library's reader and
     /// writer, spec 17.9 held whole. What does not read throws a <see cref="FormatException"/>, its
     /// refusal, and a request's payload so refused is answered <c>PAYLOAD_UNDECODABLE</c> as any
-    /// other's. Anything else its reader throws is the side's own error: a request is answered
+    /// other's, the refusal's message its detail: a codec an application writes refuses in words of
+    /// its own. Anything else its reader throws is the side's own error: a request is answered
     /// <c>PROCEDURE_FAILED</c> and the error reported (spec 9.0, 17.2). One that is none is an
     /// <see cref="ArgumentNullException"/>.
     /// </summary>

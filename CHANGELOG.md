@@ -17,6 +17,13 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `busy` carries `Retry-After: 1`, and an HTTP client sends a non-request refused `busy` again once
   its `Retry-After` passed. Each transport has a required `pause` and `resume` (spec 15.5, 15.6,
   15.7, 15.12, 15.19, 15.23).
+- Two fuzz targets on every side, named alike: `broker-parcel`, a broker's parcel reader (spec
+  15.17), and `proto-codecs`, the `proto` codecs over `spec/codecs.proto`'s `Probe` (spec 17.9),
+  which wraps what it read before it writes; seeded from `spec/vectors.json`'s parcels and
+  `spec/codecs.json`'s `proto` rows, and run ten minutes a target every week.
+- Each side's suite reads seeded mutations of the parcels, as it reads the envelope's, the Rust
+  side's the envelope's too, the same inputs on every side; the `proto` differential takes
+  `spec/codecs.json`'s payloads among its seeds.
 
 ### Changed
 
@@ -43,6 +50,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   side, where the TypeScript and C# sides ran it at once. A call made before a dispose goes, one
   made after it fails unsent, and the turn a listener disposes in still sends its answer (spec 9.0,
   9.1).
+- A codec's refusal says its reason in spec 17.2's words on every side, its library's own words
+  kept in its cause, and a request whose payload does not read is answered `PAYLOAD_UNDECODABLE`
+  with that reason as its detail (spec 17.2, `spec/codecs.json`, `spec/conversations.json`).
 
 ### Fixed
 
@@ -55,6 +65,12 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   whole or its parts let go, where it kept the largest envelope's for good (spec 15.23).
 - The in-memory broker routes a publish made within its own turn behind what its publisher
   published before it, on the C# side (spec 15.24).
+- A `proto` writer refuses a value its reader would refuse for its depth, past 100 messages below
+  the top one, a map's entry and an unknown group each counting, on every side: a `TypeError`, a
+  `FormatException`, a `CodecRefusal` (spec 17.2, 17.9.3). A value deep in its own fields is
+  refused before its library writes any of it, so the codec's write no longer overflows the stack;
+  one deep through what a reading kept is refused once written. C#'s `ProtoRequired.Check` and
+  Rust's `check_required` are bounded alike.
 
 ## [0.9.0] - 2026-10-30
 

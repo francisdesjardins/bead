@@ -6,7 +6,10 @@
 use bytes::Bytes;
 use serde::Deserialize;
 
-use crate::broker::parcel::{LAYOUT, Parcel, ParcelRead, encode_parcel, read_parcel, write_parcel};
+use crate::broker::parcel::{
+    LARGEST_BOUND, LAYOUT, LEAST_BOUND, Parcel, ParcelRead, encode_parcel, is_token, kinds,
+    read_parcel, write_parcel,
+};
 use crate::testing::hexadecimal;
 
 /// A parcel by its fields, as `spec/vectors.json` and `spec/transports.json` write one.
@@ -197,6 +200,25 @@ pub fn write(fields: &ParcelFields) -> Result<Vec<u8>, String> {
     write_parcel(&parcel_of(fields)?)
         .map(|bytes| bytes.to_vec())
         .map_err(|refused| refused.to_string())
+}
+
+/// Whether the side's writer refuses `fields` by design (spec 15.18).
+///
+/// Such a parcel a side reads and no writer writes: a layout other than `0xB1`, an advisory kind or
+/// one not assigned, or an OPEN or an ACCEPT that names no token or a receive bound outside 1,024
+/// to 2^32 - 1.
+#[must_use]
+pub fn is_refused_by_design(fields: &ParcelFields) -> bool {
+    let is_opening = fields.kind == kinds::OPEN || fields.kind == kinds::ACCEPT;
+    let is_open_as_written = fields.id.as_deref().is_some_and(is_token)
+        && fields
+            .bound
+            .is_some_and(|bound| (LEAST_BOUND..=LARGEST_BOUND).contains(&bound));
+
+    fields.layout != LAYOUT
+        || fields.kind == 0
+        || fields.kind > kinds::GONE
+        || (is_opening && !is_open_as_written)
 }
 
 /// The bytes of `fields`, held to nothing: what a test's own peer writes, a parcel the side refuses

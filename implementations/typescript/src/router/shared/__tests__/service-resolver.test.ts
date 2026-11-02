@@ -12,6 +12,7 @@ import {
   type IBeforeRequest,
   type IProtocolFailure,
 } from '../service-manager';
+import { PAYLOAD_CODECS } from '../payloads';
 import { createServiceResolver, type IServiceResolverOptions } from '../service-resolver';
 import { createServiceTrace } from '../service-trace';
 import {
@@ -191,12 +192,20 @@ test.describe('createServiceManager', () => {
       });
     });
 
-    test('a payload that does not decode is answered as undecodable, with no detail, never reaching the callback', async () => {
+    // spec 17.2
+    test('a payload that does not decode is answered as undecodable, its reason as its detail, never reaching the callback', async () => {
       const { calls, router } = createFakeRouter();
       const manager = createServiceManager(router);
       let reached = false;
 
-      const resolver = manager.getRequestResolver(echo, { serializer: serverSerializer })(() => {
+      const resolver = manager.getRequestResolver(echo, {
+        serializer: {
+          ...serverSerializer,
+          decode: (bytes: Uint8Array) => {
+            return PAYLOAD_CODECS.json.decode(bytes) as unknown as IText;
+          },
+        },
+      })(() => {
         reached = true;
 
         return Promise.resolve();
@@ -208,7 +217,7 @@ test.describe('createServiceManager', () => {
       expect(calls.respond).toEqual([
         {
           request: { connectionHandle, header },
-          response: { failure: SERVER_FAILURES.payloadUndecodable },
+          response: { failure: { ...SERVER_FAILURES.payloadUndecodable, detail: 'not JSON' } },
         },
       ]);
     });
