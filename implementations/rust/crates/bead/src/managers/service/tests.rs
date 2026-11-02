@@ -18,6 +18,7 @@ use crate::testing::scripted::{ScriptedServer, handle_of};
 mod admissions;
 mod notification_endings;
 mod notifications;
+mod notifier;
 mod requester;
 mod resolver;
 mod resolver_edges;
@@ -74,6 +75,7 @@ impl Fixture {
 
 #[derive(Debug, Default)]
 struct Recording {
+    subscriptions: Mutex<usize>,
     answers: Mutex<Vec<RouterAnswer>>,
     attempts: Mutex<Vec<RouterAnswer>>,
     refuse_payload: Mutex<Option<CallError>>,
@@ -114,6 +116,9 @@ impl Answerer for Recording {
     }
 
     fn subscribe(&self) -> BoxFuture<Result<u32, CallError>> {
+        let mut subscriptions = locked(&self.subscriptions);
+        *subscriptions = subscriptions.saturating_add(1);
+        drop(subscriptions);
         Box::pin(async { Ok(7) })
     }
 }

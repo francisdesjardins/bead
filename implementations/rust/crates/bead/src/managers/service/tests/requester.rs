@@ -38,6 +38,146 @@ fn command() -> Procedure {
 }
 
 #[tokio::test]
+#[expect(
+    clippy::too_many_lines,
+    reason = "the same timeout matrix and the other endings as both other sides"
+)]
+async fn one_unanswered_in_time_closes_its_connection_as_the_call_or_else_the_manager_says_nothing_else_does()
+ {
+    use crate::constants::{ProtocolCode, RouterSide};
+    use crate::envelope::FailureHeader;
+    use crate::errors::CallError;
+    use crate::failure::Failure;
+
+    let closed = Arc::new(Mutex::new(Vec::new()));
+    for (default, own, can_close, ending, closes) in [
+        (true, None, true, "timeout", true),
+        (true, Some(false), true, "timeout", false),
+        (false, None, true, "timeout", false),
+        (true, None, false, "timeout", false),
+        (false, Some(true), true, "timeout", true),
+        (true, None, true, "failure", false),
+        (true, None, true, "closed", false),
+        (true, None, true, "cancelled", false),
+        (true, None, true, "result", false),
+    ] {
+        let fixture = Fixture::new();
+        fixture.transport.open(&handle_of(1), true);
+        let closing = Arc::clone(&closed);
+        let manager = ServiceManager::new(
+            ServiceRouter::Server(fixture.router.clone()),
+            &ServiceManagerOptions {
+                close_connection: can_close.then(|| -> super::super::CloseConnection {
+                    Arc::new(move |handle| locked(&closing).push(Arc::clone(handle)))
+                }),
+                defaults: Some(RequestDefaults {
+                    close_on_timeout: Some(default),
+                    ..RequestDefaults::default()
+                }),
+                ..ServiceManagerOptions::default()
+            },
+        )
+        .expect("a manager");
+        let signal = CancellationToken::new();
+        let call = manager
+            .get_command(&command(), RequestDependencies::of(TextCodec, TextCodec))
+            .expect("declared")
+            .call(
+                "run".to_owned(),
+                RequestOptions {
+                    connection_handle: Some(handle_of(1)),
+                    timeout: Some(Duration::from_millis(10)),
+                    close_on_timeout: own,
+                    signal: Some(signal.clone()),
+                    ..RequestOptions::default()
+                },
+            )
+            .expect("called");
+        fixture.clock.settle().await;
+        let before = locked(&closed).len();
+        match ending {
+            "timeout" => fixture.clock.advance(Duration::from_millis(10)).await,
+            "failure" => fixture.transport.deliver(
+                &Envelope::Failure {
+                    header: FailureHeader {
+                        call_id: 2,
+                        credential: None,
+                    },
+                    failure: Failure::protocol(ProtocolCode::PROCEDURE_FAILED, RouterSide::Client)
+                        .record(),
+                },
+                &handle_of(1),
+            ),
+            "closed" => fixture.transport.close_connection(&handle_of(1)),
+            "cancelled" => signal.cancel(),
+            "result" => fixture
+                .transport
+                .deliver(&result(2, Bytes::from_static(b"run")), &handle_of(1)),
+            _ => panic!("a test ending"),
+        }
+        let outcome = crate::testing::patience(Duration::from_secs(10), call)
+            .await
+            .expect("settled");
+        match ending {
+            "timeout" => assert!(
+                matches!(outcome, Err(CallError::TimedOut(delay)) if delay == Duration::from_millis(10))
+            ),
+            "failure" => assert!(
+                matches!(outcome, Err(CallError::Failure(failure)) if failure.code() == ProtocolCode::PROCEDURE_FAILED.get())
+            ),
+            "closed" => assert!(matches!(outcome, Err(CallError::Disconnected(_)))),
+            "cancelled" => assert!(matches!(outcome, Err(CallError::Cancelled))),
+            "result" => assert_eq!(outcome.expect("answered"), "run"),
+            _ => panic!("a test ending"),
+        }
+        assert_eq!(
+            locked(&closed).len() - before,
+            usize::from(closes),
+            "{ending}, default {default}, own {own:?}"
+        );
+        fixture.router.dispose().await;
+    }
+    assert_eq!(*locked(&closed), [handle_of(1), handle_of(1)]);
+
+    let fixture = ClientFixture::new();
+    let closing = Arc::clone(&closed);
+    let manager = ServiceManager::new(
+        ServiceRouter::Client(fixture.router.clone()),
+        &ServiceManagerOptions {
+            close_connection: Some(Arc::new(move |handle| {
+                locked(&closing).push(Arc::clone(handle));
+            })),
+            defaults: Some(RequestDefaults {
+                close_on_timeout: Some(true),
+                ..RequestDefaults::default()
+            }),
+            ..ServiceManagerOptions::default()
+        },
+    )
+    .expect("a manager");
+    let call = manager
+        .get_request(&echo(), RequestDependencies::of(TextCodec, TextCodec))
+        .expect("declared")
+        .call(
+            "run".to_owned(),
+            RequestOptions {
+                timeout: Some(Duration::from_millis(10)),
+                ..RequestOptions::default()
+            },
+        )
+        .expect("called");
+    fixture.clock.advance(Duration::from_millis(10)).await;
+    assert!(matches!(
+        crate::testing::patience(Duration::from_secs(10), call)
+            .await
+            .expect("settled"),
+        Err(CallError::TimedOut(_))
+    ));
+    assert_eq!(*locked(&closed), [handle_of(1), handle_of(1)]);
+    fixture.router.dispose().await;
+}
+
+#[tokio::test]
 async fn fills_what_the_options_leave_out_and_passes_a_destination_as_it_is() {
     let fixture = Fixture::new();
     fixture.transport.open(&handle_of(1), true);
