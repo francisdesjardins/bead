@@ -1991,6 +1991,7 @@ fn resolve_session<S: Side>(
                 let failure = state
                     .core()
                     .failure(ProtocolCode::CAPACITY_EXCEEDED)
+                    // ! a detail of the side's own words: a bound of the side's own, its own words
                     .saying(error.message().to_owned());
 
                 refuse(state, (failure, &dispatch));

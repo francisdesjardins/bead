@@ -619,7 +619,9 @@ Linux or WSL, by hand through `tools/fuzz.mjs`, its four targets the twins the c
 `envelope`, `payload-codecs`, `debug-filter` and `jwt`, `http-fields` and `ws-handshake` coming with
 the transports. **Bench**: `bead-bench`, the in-memory bench, each fresh process writing
 `bead-bench/1`, which `tools/bench-release.mjs rust` merges into `bead-bench/2` for
-`tools/bench-compare.mjs`.
+`tools/bench-compare.mjs`. The gates every side shares hold it too: `tools/check-details.mjs` reads
+its sources, the differential its testee, a release keeps its bench's report, and its broker trial
+plays every case no row of the matrix excuses it from ([0006](0006-a-rule-has-its-gate.md)).
 
 ## Consequences
 

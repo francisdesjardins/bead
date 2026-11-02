@@ -725,9 +725,11 @@ fn read_credential(
 
     Ok(match scheme {
         CredentialScheme::NONE => Credential::None,
-        CredentialScheme::OPAQUE => Credential::Opaque(
-            SessionToken::from_slice(held).map_err(|error| malformed(side, error.to_string()))?,
-        ),
+        CredentialScheme::OPAQUE => {
+            Credential::Opaque(SessionToken::from_slice(held).map_err(|_error| {
+                malformed(side, "an OPAQUE token is never all zero".to_owned())
+            })?)
+        }
         // a relay passes the same bytes on, whatever they are: a token past ASCII never verifies
         CredentialScheme::JWT => Credential::Jwt(Bytes::copy_from_slice(held)),
         CredentialScheme::ELSEWHERE => Credential::Elsewhere,

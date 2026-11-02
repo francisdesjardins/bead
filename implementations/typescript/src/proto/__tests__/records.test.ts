@@ -194,6 +194,29 @@ test.describe("the check of a proto payload's records", () => {
     ]);
   });
 
+  test('refuses a varint of 10 bytes past 64 bits, known, unknown or packed', () => {
+    // spec 17.9.1
+    const payloads = [
+      '10 FF FF FF FF FF FF FF FF FF 02',
+      '48 80 80 80 80 80 80 80 80 80 02',
+      '52 0A FF FF FF FF FF FF FF FF FF 02',
+      '1A 0B 20 80 80 80 80 80 80 80 80 80 7F',
+    ];
+
+    for (const hex of payloads) {
+      const refusal = thrownBy(bytesOf(hex));
+
+      // * the check's refusal, where protobuf-es would drop the bits past the 64th
+      expect(refusal, hex).toBeInstanceOf(SyntaxError);
+      expect((refusal as Error).message, hex).toBe('the proto payload holds a varint past 64 bits');
+    }
+
+    // a 10th byte of 0x01 is the 64th bit, within
+    for (const hex of ['10 FF FF FF FF FF FF FF FF FF 01', '48 80 80 80 80 80 80 80 80 80 01']) {
+      expect(thrownBy(bytesOf(hex)), hex).toBeUndefined();
+    }
+  });
+
   test('refuses a tag of more than 5 bytes, or past 32 bits', () => {
     // spec 17.9.1
     expectRefused([

@@ -81,6 +81,9 @@ const PLACES = Object.freeze(
   })
 );
 
+// the place of a varint's 10th byte, the last, which holds its 64th bit and no other
+const LAST_PLACE = PLACES.length - 1;
+
 /**
  * Each scalar type's wire type, by `descriptor.proto`'s type number, which protobuf-es's
  * `ScalarType` carries: keyed by that type, so a type added or renumbered fails the type-check.
@@ -297,7 +300,10 @@ const searchRequired = (root: DescMessage): void => {
   }
 };
 
-/** The varint at the reader, ten bytes at most and within its message; the reader moves past it. */
+/**
+ * The varint at the reader, ten bytes at most, within 64 bits (Encoding, "Base 128 Varints") and
+ * within its message; the reader moves past it.
+ */
 const readVarint = (reader: IReader): number => {
   const { bytes, end } = reader;
   let value = 0;
@@ -314,6 +320,12 @@ const readVarint = (reader: IReader): number => {
     value += (byte & 0x7f) * (PLACES[place] ?? 0);
 
     if (byte < 0x80) {
+      // ! a 10th byte past 0x01 sets a bit past the 64th: no unsigned 64-bit integer, so no
+      // encoding, refused here before protobuf-es drops those bits
+      if (place === LAST_PLACE && byte > 0x01) {
+        refuse('holds a varint past 64 bits');
+      }
+
       return value;
     }
   }
@@ -377,7 +389,14 @@ const skipPacked = (reader: IReader, packs: number): void => {
 
   // * no value is read: each varint ends within ten bytes, and the last at the record's end
   for (let at = reader.at; at < end; at += 1) {
-    carried = (bytes[at] ?? 0) < 0x80 ? 0 : carried + 1;
+    const byte = bytes[at] ?? 0;
+
+    // ! the byte that ends a varint after nine carried ones is its 10th: past 0x01, past 64 bits
+    if (byte < 0x80 && carried === LAST_PLACE && byte > 0x01) {
+      refuse('holds a varint past 64 bits');
+    }
+
+    carried = byte < 0x80 ? 0 : carried + 1;
 
     if (carried === PLACES.length) {
       refuse('holds a varint of more than 10 bytes');
@@ -493,11 +512,12 @@ const walkRecords = (reader: IReader, shape: IMessageShape): void => {
  * Reads `bytes`' records against `message`, the descriptor its generated code holds, before
  * protobuf-es reads them, and throws a `SyntaxError` where they are no encoding of it or where
  * spec 17.9 refuses them: a record past the end of its message, at any depth, its field known or
- * not; a packed record whose values do not end at its length; a varint of more than 10 bytes; a
- * tag of more than 5 bytes or past 32 bits, field number 0, the wire types 6 and 7; a group not
- * closed by its own end group; a message nested more than 100 deep below the top one, a group and
- * a map's entry each counting (17.9.3); a field at a wire type its type does not take, in a map's
- * entry too (17.9.5); and a map's entry with a field other than its key and its value (17.9.6).
+ * not; a packed record whose values do not end at its length; a varint of more than 10 bytes, or
+ * whose 10th byte sets a bit past the 64th, its field known or not, packed or not; a tag of more
+ * than 5 bytes or past 32 bits, field number 0, the wire types 6 and 7; a group not closed by its
+ * own end group; a message nested more than 100 deep below the top one, a group and a map's entry
+ * each counting (17.9.3); a field at a wire type its type does not take, in a map's entry too
+ * (17.9.5); and a map's entry with a field other than its key and its value (17.9.6).
  * It reads nothing of the message and allocates nothing per record; each message's shape is built
  * once, from its descriptor. `protoCodecOf` runs it first, as generated code reads a payload.
  *

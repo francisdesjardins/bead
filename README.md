@@ -522,8 +522,7 @@ its built binary and Rust by `cargo run` over its release build, by its lock, wi
 the measurement processes. The TypeScript bench's C# interop server is built once, then launched
 with `--no-build`.
 
-From the root, screen the TypeScript and C# sides against the last release's stored reports, and
-the Rust side against a report of its own:
+From the root, screen each side against the last release's stored report:
 
 ```sh
 node tools/bench-release.mjs typescript --output .bench/candidate-typescript.json
@@ -605,8 +604,7 @@ measures no memory, since an allocator that counts takes unsafe code, which the 
 codec, notification, large echo, interop or transcoding. `node tools/bench-release.mjs rust` builds
 it once in release and runs it in fresh processes as it runs the others; its report names `rust` for
 its side and `rustc` for its runtime, and `tools/bench-compare.mjs` compares two of them. A release
-keeps no report of it, so its baseline is a report of an earlier commit's, or `--tree`'s. Alone,
-from `implementations/rust`:
+keeps its report, as it keeps the others' (below). Alone, from `implementations/rust`:
 
 ```sh
 cargo run --release --locked --manifest-path benches/Cargo.toml -- --runs 3 --seconds 3 --json
@@ -687,11 +685,12 @@ node tools/bench-release.mjs csharp --tree ../bench-baseline --baseline-output .
 node tools/bench-compare.mjs .bench/confirm-baseline-csharp.json .bench/confirm-candidate-csharp.json --threshold 25%
 ```
 
-For a full interleave, omit `--filter`. Each release keeps its two full reports,
-`.bench/v<version>-typescript.json` and `.bench/v<version>-csharp.json`, which git ignores. A
-`regression` or `inconclusive` is read before the finish, confirmed, then explained in the release's
-notes or fixed. A stored baseline from another session can include machine drift; the interleave
-reduces that drift's effect.
+For a full interleave, omit `--filter`. Each release keeps a full report of each side's bench,
+`.bench/v<version>-<side>.json`, which git ignores, compared with the last release's on the machine
+that made it, or with the last tag's checkout by `--tree` where that machine keeps none; a side whose
+bench the last tag lacks keeps its first, compared with none. A `regression` or `inconclusive` is
+read before the finish, confirmed, then explained in the release's notes or fixed. A stored baseline
+from another session can include machine drift; the interleave reduces that drift's effect.
 
 ## Fuzzing
 
@@ -785,7 +784,7 @@ against each server.
 - `node tools/check-links.mjs`: every relative link of the repository's Markdown resolves, to a file
   or a folder git keeps, and its anchor to a heading of the file it names. Given files, those alone.
 - `node tools/check-details.mjs`: no exception's message goes into a failure's detail but at the few
-  sites that report alone (spec 9.0), on the TypeScript and C# sides, each marked where it stands by
+  sites that report alone (spec 9.0), on every side, each marked where it stands by
   `// ! a detail of the side's own words: <why>`. Given files, those alone.
 - `node tools/check-versions.mjs`: on every ref, each version agrees with itself — the TypeScript
   package's and the builder's, the C# side's and the project ranges of the C# lock files, an
@@ -806,10 +805,10 @@ against each server.
 - `node tools/protobuf-conformance.mjs typescript|csharp|rust|differential`: protobuf's conformance
   suite through one side's generated `proto` codec, its failure list held both ways and its count
   of tests to the floor `tools/protobuf-conformance/runner.json` pins with the runner, fetched by
-  its sha512; or one corpus of `Probe` through the TypeScript and C# sides, read alike. The suite
-  runs on Linux or macOS, where the runner has a binary, on Linux one of glibc 2.38 or later; it
-  needs the TypeScript side and the builder installed, .NET for the C# side, and Rust's toolchain
-  for the Rust side.
+  its sha512; or one corpus of `Probe` through every side's testee, read alike, compared two by
+  two. The suite runs on Linux or macOS, where the runner has a binary, on Linux one of glibc 2.38
+  or later; it needs the TypeScript side and the builder installed, .NET for the C# side, and
+  Rust's toolchain for the Rust side.
 - `node tools/protovalidate-differential.mjs oracle|typescript|csharp`: protovalidate-es, at the pin
   `tools/protovalidate-differential/pin.json` holds and fetched by its sha512, over the verdicts of
   `spec/validations.json`; or those verdicts and a corpus mutated from them through one side's
@@ -950,8 +949,8 @@ buf's lint and layout over its `.proto`; each half's gates and both its builds; 
 against each server, both modes of each half, sixteen pairs, each server's gateway asked after its
 client); `protobuf-conformance` (protobuf's conformance suite, its runner by its pin's sha512,
 through each side's generated `proto` codec and its JSON, each held to its failure list and the
-floor, the C# and Rust testees' format, then one corpus of `Probe` through the TypeScript and C#
-sides); `protovalidate-differential` (protovalidate-es, by its pin's sha512, over the verdicts of
+floor, the C# and Rust testees' format, then one corpus of `Probe` through every side's testee);
+`protovalidate-differential` (protovalidate-es, by its pin's sha512, over the verdicts of
 `spec/validations.json`, then those verdicts and a corpus mutated from them through the TypeScript
 and C# sides' generated validators and through protovalidate-es, the violations compared, and the C#
 testee's format); and `commits` (the subjects, the links, the details, the versions, the root's

@@ -11,7 +11,7 @@ use std::process::ExitCode;
 use std::sync::Arc;
 
 use bead::PayloadCodec;
-use bead::testing::{files, hexadecimal};
+use bead::testing::{Difference, files, hexadecimal, is_excused};
 use bead_protobuf::testing::codecs::descriptor_pool;
 use bead_protobuf::testing::codecs::{Needs, Probe, Shade};
 use bead_protobuf::{DynamicCodec, ProtoCodec};
@@ -21,14 +21,6 @@ use bytes::Bytes;
 use libtest_mimic::{Arguments, Failed, Trial};
 use serde::Deserialize;
 use serde_json::{Map, Value, json};
-
-/// A row of `docs/support.md` an entry crosses, and the language it excuses.
-#[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct Differs {
-    row: String,
-    language: String,
-}
 
 /// Bytes read in an encoding, and what its reader makes of them.
 #[derive(Debug, Deserialize)]
@@ -43,7 +35,7 @@ struct Payload {
     _written: Option<String>,
     refused: Option<String>,
     read: Option<Value>,
-    differs: Option<Vec<Differs>>,
+    differs: Option<Vec<Difference>>,
 }
 
 /// A `Needs` given to a writer, each of its required fields where it is given.
@@ -85,7 +77,7 @@ struct Written {
     value: Given,
     written: Option<String>,
     refused: Option<String>,
-    differs: Option<Vec<Differs>>,
+    differs: Option<Vec<Difference>>,
 }
 
 /// The file whole.
@@ -100,15 +92,6 @@ struct Codecs {
     _spec_version: String,
     payloads: Vec<Payload>,
     values: Vec<Written>,
-}
-
-// whether an entry's differs excuses the Rust side
-fn is_excused(differs: Option<&Vec<Differs>>) -> bool {
-    differs.is_some_and(|differs| {
-        differs
-            .iter()
-            .any(|differs| differs.language == "Rust" && !differs.row.is_empty())
-    })
 }
 
 fn bytes_of(text: &str) -> Result<Bytes, Failed> {
@@ -438,7 +421,8 @@ fn trials() -> Result<Vec<Trial>, String> {
     )];
 
     for payload in codecs.payloads {
-        if payload.encoding != "proto" || is_excused(payload.differs.as_ref()) {
+        if payload.encoding != "proto" || is_excused(payload.differs.as_deref().unwrap_or_default())
+        {
             continue;
         }
 
@@ -448,7 +432,7 @@ fn trials() -> Result<Vec<Trial>, String> {
     }
 
     for entry in codecs.values {
-        if entry.encoding != "proto" || is_excused(entry.differs.as_ref()) {
+        if entry.encoding != "proto" || is_excused(entry.differs.as_deref().unwrap_or_default()) {
             continue;
         }
 

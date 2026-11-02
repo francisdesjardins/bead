@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Protobuf's conformance suite against each side's generated `proto` codec, and one corpus read by
-// both sides alike (decision 0028). The runner is `protobuf-conformance`, the npm distribution of
+// every side alike (decision 0028). The runner is `protobuf-conformance`, the npm distribution of
 // protobuf's `conformance_test_runner`, at the release both libraries pin: `protobuf-conformance/
 // runner.json` gives its tarball, its upstream release and npm's integrity, a sha512, and the floor
 // of tests a run holds. This fetches the tarball, checks its sha512 before it reads a byte of it,
@@ -11,8 +11,8 @@
 //   node tools/protobuf-conformance.mjs typescript     the suite through the TypeScript side's codec
 //   node tools/protobuf-conformance.mjs csharp         the suite through the C# side's codec
 //   node tools/protobuf-conformance.mjs rust           the suite through the Rust side's codec
-//   node tools/protobuf-conformance.mjs differential   one corpus of Probe through the TypeScript
-//                                                      and C# sides
+//   node tools/protobuf-conformance.mjs differential   one corpus of Probe through every side's
+//                                                      testee
 //
 // For a side, it ejects the suite's test protos from the pinned package into
 // `protobuf-conformance/.work/<side>/`, under `protobuf_test_messages/` rather than
@@ -49,18 +49,20 @@
 // The tool fails before anything when the pin's release and Google.Protobuf's in
 // implementations/dotnet/Directory.Packages.props differ, v36.2 against 3.36.2.
 //
-// The differential feeds both testees the same payloads of Probe, `CORPUS_SIZE` of them from
-// `CORPUS_SEED`: Probe's own records, mutated by cuts, lengths, wire types, tags and nesting, its
-// packed runs, its map's entries and its group among them. Each side reads or refuses each; where
-// both read, what each writes back is compared as what it reads, the choices protobuf leaves to a
-// writer aside, at every depth: the order of a message's unknown fields, which Google.Protobuf
-// writes by number and wire type (a platform row of docs/support.md), the order of a map's entries,
-// and an entry's key at its default, which protobuf-es writes and Google.Protobuf leaves out. Any
-// other parting fails.
+// The differential feeds every side's testee the same payloads of Probe, `CORPUS_SIZE` of them
+// from `CORPUS_SEED`: Probe's own records, mutated by cuts, lengths, wire types, tags and nesting,
+// its packed runs, its map's entries and its group among them. Each side reads or refuses each,
+// and the sides are compared two by two; where two read, what each writes back is compared as what
+// it reads, the choices protobuf leaves to a writer aside, at every depth: the order of a message's
+// unknown fields, which Google.Protobuf writes by number and wire type (a platform row of
+// docs/support.md), the order of a map's entries, and an entry's key at its default, which
+// protobuf-es writes and Google.Protobuf leaves out. Any other parting fails, one line a payload,
+// every side's verdict on it. The corpus writes no record of `needs`, `needs_items` or `shade`,
+// Probe's fields 7, 8 and 14.
 //
 // The runner ships linux-x64 and darwin-x64 binaries alone, and asks glibc 2.38 or later, Debian 13's:
 // the suite runs in CI and, on Windows, in a Linux container that recent; the differential runs
-// wherever both testees do. From the repository's root,
+// wherever every testee does, the runner's protos alone needed, no runner. From the repository's root,
 // once implementations/typescript and builder/ are installed; protoc is `BEADC_PROTOC`, or the one
 // builder/tools/fetch-protoc.mjs fetches. Exit 1 on a failure, with its reason.
 
@@ -108,27 +110,31 @@ const TEST_MESSAGES = [
 ];
 const TEST_FOLDER = 'protobuf_test_messages';
 
-// * each side's testee: where beadc's output goes, its failure list, and how it is built and run
+// * each side's testee: its name in prose, where beadc's output goes, its failure list, and how it
+// is built and run
 export const SIDES = Object.freeze({
   typescript: Object.freeze({
     language: 'typescript',
+    name: 'TypeScript',
     folder: 'implementations/typescript/tools/protobuf-conformance',
     generated: 'generated',
   }),
   csharp: Object.freeze({
     language: 'csharp',
+    name: 'C#',
     folder: 'implementations/dotnet/tools/Bead.ProtobufConformance',
     generated: 'Generated',
   }),
   rust: Object.freeze({
     language: 'rust',
+    name: 'Rust',
     folder: 'implementations/rust/tools/protobuf-conformance',
     generated: 'generated',
   }),
 });
 
 // * the sides the differential reads one corpus through, compared two by two
-export const DIFFERENTIAL_SIDES = Object.freeze(['typescript', 'csharp']);
+export const DIFFERENTIAL_SIDES = Object.freeze(['typescript', 'csharp', 'rust']);
 
 // the files of the set the Rust side's testee generates its messages from, as its build script
 // names them
@@ -908,21 +914,50 @@ export const verdictOf = (response) => {
   );
 };
 
-/** How two verdicts on one payload part, or nothing when they agree. */
-export const parting = (typescript, csharp) => {
-  if (typescript.read !== csharp.read) {
-    return typescript.read
-      ? 'TypeScript reads it, C# refuses it'
-      : 'C# reads it, TypeScript refuses it';
+/**
+ * How two sides' verdicts on one payload part, each side named by `names` in the same order, or
+ * nothing when they agree.
+ */
+export const parting = ([one, other], { names: [oneName, otherName] }) => {
+  if (one.read !== other.read) {
+    return one.read
+      ? `${oneName} reads it, ${otherName} refuses it`
+      : `${oneName} refuses it, ${otherName} reads it`;
   }
 
-  if (!typescript.read) {
+  if (!one.read) {
     return undefined;
   }
 
-  return canonicalProbe(typescript.written) === canonicalProbe(csharp.written)
+  return canonicalProbe(one.written) === canonicalProbe(other.written)
     ? undefined
-    : `both read it and write back apart: TypeScript ${hexOf(typescript.written)}, C# ${hexOf(csharp.written)}`;
+    : `both read it and write back apart: ${oneName} ${hexOf(one.written)}, ${otherName} ${hexOf(other.written)}`;
+};
+
+/**
+ * Every side's verdict on one payload, read and its bytes or refused, where any two of them part,
+ * or nothing when every pair agrees: one line, so two sides against one read as one parting.
+ */
+export const partingOfAll = (verdicts, { names }) => {
+  const parted = verdicts.some((one, index) => {
+    return verdicts.slice(index + 1).some((other, offset) => {
+      return (
+        parting([one, other], { names: [names[index], names[index + 1 + offset]] }) !== undefined
+      );
+    });
+  });
+
+  if (!parted) {
+    return undefined;
+  }
+
+  return verdicts
+    .map((verdict, index) => {
+      return verdict.read
+        ? `${names[index]} reads it, writing back ${hexOf(verdict.written)}`
+        : `${names[index]} refuses it`;
+    })
+    .join('; ');
 };
 
 // ── Steps ─────────────────────────────────────────────────────────────────────
@@ -1133,35 +1168,41 @@ const suite = ({ side, runner, pin, protoc }) => {
   );
 };
 
-// the corpus through both testees, each payload's verdicts compared
+// the corpus through every side's testee, each payload's verdicts compared two by two
 const differential = async ({ runner, protoc }) => {
-  const testees = {};
-
-  for (const side of DIFFERENTIAL_SIDES.map((language) => {
+  const sides = DIFFERENTIAL_SIDES.map((language) => {
     return SIDES[language];
-  })) {
-    testees[side.language] = testeeOf(
-      testeeCommandOf({ side, work: generate({ side, runner, protoc }) })
-    );
-  }
-
+  });
+  const names = sides.map((side) => {
+    return side.name;
+  });
+  const testees = [];
   const partings = [];
   const corpus = corpusOf();
 
   try {
+    for (const side of sides) {
+      testees.push(testeeOf(testeeCommandOf({ side, work: generate({ side, runner, protoc }) })));
+    }
+
     for (const [index, payload] of corpus.entries()) {
       const request = requestOf(payload, 'bead.codecs.v1.Probe');
-      const typescript = verdictOf(responseOf(await testees.typescript.exchange(request)));
-      const csharp = verdictOf(responseOf(await testees.csharp.exchange(request)));
-      const parted = parting(typescript, csharp);
+      const verdicts = [];
+
+      for (const testee of testees) {
+        verdicts.push(verdictOf(responseOf(await testee.exchange(request))));
+      }
+
+      const parted = partingOfAll(verdicts, { names });
 
       if (parted !== undefined) {
         partings.push(`payload ${String(index)}, ${hexOf(payload)}: ${parted}`);
       }
     }
   } finally {
-    testees.typescript.close();
-    testees.csharp.close();
+    for (const testee of testees) {
+      testee.close();
+    }
   }
 
   if (partings.length > 0) {
@@ -1171,7 +1212,7 @@ const differential = async ({ runner, protoc }) => {
   }
 
   process.stdout.write(
-    `protobuf-conformance: both sides read ${String(corpus.length)} payloads alike\n`
+    `protobuf-conformance: every side reads ${String(corpus.length)} payloads alike\n`
   );
 };
 

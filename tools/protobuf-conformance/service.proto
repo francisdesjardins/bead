@@ -59,7 +59,7 @@ service ConformanceService {
     option (bead.procedure) = {id: 6};
   }
 
-  // bead.codecs.v1.Probe, which the differential feeds both sides.
+  // bead.codecs.v1.Probe, which the differential feeds every side's testee.
   rpc Probe(bead.codecs.v1.Probe) returns (bead.codecs.v1.Probe) {
     option (bead.procedure) = {id: 7};
   }

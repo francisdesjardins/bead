@@ -23,14 +23,17 @@
 **Each stock library reads bytes that are no encoding of the message**, against protobuf's own
 rules, and spec 17.9.1 says they do not read. protobuf-es 2.16.0 reads a record that runs past the
 end of its message, since its reader never checks that the last ended there, and a varint of more
-than 10 bytes where its field is unknown. Google.Protobuf 3.36.2 reads a tag of more than 5 bytes
-or past 32 bits, keeping its low 32 bits, where the
+than 10 bytes where its field is unknown. Google.Protobuf 3.36.2 reads a tag of more than 5 bytes or
+past 32 bits, keeping its low 32 bits, where the
 [Encoding](https://protobuf.dev/programming-guides/encoding/) guide's reference card gives a tag
 "encoded as uint32 varint" and protobuf's conformance suite refuses one in its REQUIRED `BadTag_*`
 tests, which protobuf's own failure list for C# keeps. Both read a length whose varint sets bits
 past 32, which the guide gives as "size encoded as int32 varint" and the suite's
-`BadLength_Varint32BitOverflow` refuses. Without a check, each is an open row of the support matrix,
-its entries of `spec/codecs.json` excused for the side that reads them.
+`BadLength_Varint32BitOverflow` refuses. Both read a varint whose 10th byte sets a bit past the
+64th, dropping the bits, where the guide's "Base 128 Varints" encodes "unsigned 64-bit integers
+using anywhere between one and ten bytes"; Buffa and Go's `protowire` refuse it, and the suite tests
+none: the guide's width decides. Without a check, each is an open row of the support matrix, its
+entries of `spec/codecs.json` excused for the side that reads them.
 
 **Probed on `TestAllTypesProto3`, the two libraries part on more**, where Google.Protobuf is right
 by protobuf's guide or no rule settles it:
@@ -142,7 +145,8 @@ gives, and the check is the runtime's behaviour
 **What the check refuses**, in one walk of the payload that allocates nothing per record:
 
 - a tag of more than 5 bytes or past 32 bits, and field number 0;
-- a varint of more than 10 bytes, its field known or not;
+- a varint of more than 10 bytes, or whose 10th byte sets a bit past the 64th, its field known or
+  not, packed or not;
 - a length whose varint runs past 10 bytes or that runs past the bytes after it, a length past
   2³¹ − 1 among them, which also passes every payload Bead carries;
 - a fixed value past its message;
@@ -222,9 +226,9 @@ which a row's `read` gives as a depth. protoc 36.2, protoc-gen-es 2.16.0 under b
 
 **The entries.** The entries of what a stock library reads past protobuf's rules — a tag of more
 than 5 bytes or past 32 bits, a length past 32 bits, an unknown varint of more than 10 bytes, a
-record past the end of its message — are played by every side, none excused. Each part has its
-entries, each citing its unit, none excused, every reading confirmed on protobuf-es and
-Google.Protobuf, the check in front:
+varint past 64 bits, a record past the end of its message — are played by every side, none excused.
+Each part has its entries, each citing its unit, none excused, every reading confirmed on
+protobuf-es and Google.Protobuf, the check in front:
 
 - read: `counts packed`, `counts unpacked and packed, in one message`, `stamps unpacked`,
   `stamps packed`, `a map's entry, its value before its key`, `a group closed by its own end group`
@@ -306,13 +310,14 @@ alike. A bump of `@bufbuild/protobuf` reads the `protobuf-conformance` version i
 moves `runner.json`, the failure lists and the floor in one commit. Where the two pin different
 releases, the runner follows the older, and the newer library's bump waits for the other.
 
-**The differential.** `tools/protobuf-conformance.mjs differential` feeds the TypeScript and C#
-sides' testees the same 10,000 payloads from a fixed seed: `Probe`'s own records, mutated by cuts,
-lengths, wire types and nesting, maps and groups among them. It compares each side's verdict, read
-or refused, and the bytes each writes back as what they read, at every depth, the choices protobuf
-leaves to a writer aside: the order of unknown fields, the order of a map's entries, and an entry's
-key at its default, which protobuf-es writes and Google.Protobuf leaves out. The first and the last
-are the platform rows; any other parting fails it.
+**The differential.** `tools/protobuf-conformance.mjs differential` feeds every side's testee the
+same 10,000 payloads from a fixed seed: `Probe`'s own records, mutated by cuts, lengths, wire types
+and nesting, maps and groups among them; a record of `needs`, `needs_items` and `shade`, fields 7, 8
+and 14, is written by none of its payloads. It compares the sides two by two, each one's verdict,
+read or refused, and the bytes each writes back as what they read, at every depth, the choices
+protobuf leaves to a writer aside: the order of unknown fields, the order of a map's entries, and an
+entry's key at its default, which protobuf-es writes and Google.Protobuf leaves out. The first and
+the last are the platform rows; any other parting fails it.
 
 ## Consequences
 
@@ -391,3 +396,7 @@ the answer that holds:
 | Keeping version 2 lets code generated before the check run unchecked on a runtime that claims to refuse those payloads                                                                                                                                                                                                     | Accepted: the runtime holds contract 3 alone, on both sides, so code that names 2 fails its type-check and build until it is regenerated. The reason is the runtime's own rule ("while the runtime still serves the code that names it"): a runtime that would run version-2 code unchecked no longer serves it as Bead conforms. `generated-code.ts` and its C# twin state the rule before and after 1.0.0.                                                                                                                                                                                                         |
 | Filing the unknown ordering as `open` contradicts the matrix's own kinds, 17.9 and the row's own text, and the draft gives no criterion for when a side may go past its library                                                                                                                                            | Accepted: the row is `platform`, lifting when Google.Protobuf keeps the order. This record states the criterion: a side may narrow what reads before its library, never read or write in its place. The check is a refusal before a read. Reordering a write would replace the library's writer, which 17.9 does not allow.                                                                                                                                                                                                                                                                                          |
 | The U+FEFF row's "the decoder strips it before any check could" passes over `configureTextEncoding`                                                                                                                                                                                                                        | In part: the row already names `configureTextEncoding` and why it is not taken (global to the library's copy, and deprecated), so the row stands as it is. The out-of-scope sentence points at the row.                                                                                                                                                                                                                                                                                                                                                                                                              |
+
+The Rust testee's place in the differential, and a varint past 64 bits, met their round with the
+gates every side shares:
+[0006](0006-a-rule-has-its-gate.md#on-the-gates-every-side-shares-held-on-the-rust-side).

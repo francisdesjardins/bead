@@ -697,9 +697,10 @@ jobs:
   # 0037): the runner `tools/protobuf-conformance/runner.json`
   # pins, fetched and checked by its sha512 as protoc is by its sha256, against each side's testee
   # and its failure list, which the runner holds both ways, then the floor of tests run; then one
-  # corpus of Probe through the TypeScript and C# testees, read alike. A job of its own: it needs
-  # every side's runtime, beadc and protoc, which no other job has together; the Rust testee's JSON
-  # goes through Buffa's dynamic message until Rust's gateway brings Bead's mapping (decision 0044).
+  # corpus of Probe through every side's testee, read alike, compared two by two, after the suite
+  # step that built the Rust testee. A job of its own: it needs every side's runtime, beadc and
+  # protoc, which no other job has together; the Rust testee's JSON goes through Buffa's dynamic
+  # message until Rust's gateway brings Bead's mapping (decision 0044).
   # The C# testee lies outside Bead.slnx, so its format is held here, by name, the code generated
   # into it at run time aside; `CI=true`, the runner's own, restores it locked.
   protobuf-conformance:
@@ -770,7 +771,7 @@ jobs:
       - name: The Rust testee's format
         working-directory: implementations/rust/tools/protobuf-conformance
         run: cargo fmt --check
-      - name: One corpus through both sides
+      - name: One corpus through every side
         run: node tools/protobuf-conformance.mjs differential
 
   # ── protovalidate differential ───────────────────────────────────────────────

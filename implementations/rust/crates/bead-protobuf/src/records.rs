@@ -400,8 +400,8 @@ fn wire_of(scalar: ScalarType) -> u32 {
 /// Checks `bytes` against the records of `schema`'s message, at every depth.
 ///
 /// Refused: a tag of more than 5 bytes, past 32 bits or of field number 0; a varint of more than
-/// 10 bytes; a length
-/// past the bytes that follow it; a record past the end of its message; a packed record whose
+/// 10 bytes, or whose 10th byte sets a bit past the 64th, its field known or not, packed or not; a
+/// length past the bytes that follow it; a record past the end of its message; a packed record whose
 /// values do not end at its length; a group closed by another number's end group or never closed,
 /// an end group that closes none, and the wire types 6 and 7; a message nested more than 100 deep
 /// below the top one (17.9.3); a field the message declares at a wire type its type does not take
@@ -622,7 +622,8 @@ impl Reader<'_> {
         Some(byte)
     }
 
-    // a varint of 10 bytes at most, within the message
+    // a varint of 10 bytes at most, within 64 bits (Encoding, "Base 128 Varints"), within the
+    // message
     fn varint(&mut self, end: usize) -> Result<u64, CodecRefusal> {
         let mut value = 0_u64;
 
@@ -634,6 +635,12 @@ impl Reader<'_> {
             value |= u64::from(byte & 0x7F).checked_shl(shift).unwrap_or(0);
 
             if byte & 0x80 == 0 {
+                // ! a 10th byte past 0x01 sets a bit past the 64th: no unsigned 64-bit integer, so no
+                // encoding, refused here before Buffa reads
+                if shift == 63 && byte > 0x01 {
+                    return Err(refused("a varint past 64 bits"));
+                }
+
                 return Ok(value);
             }
         }

@@ -2,8 +2,9 @@
 //! side's broker transports over the in-memory broker: in the server role, the interop service's
 //! server on a broker server transport over the participant `server`; in the client role, a broker
 //! client transport alone over the participant `client`; the case's peers, adapters of the same
-//! broker, publishing parcels and reading their inboxes. A trial a case; the cases over HTTP,
-//! WebSocket, MQTT 5 and AMQP 1.0 are ahead, with the stages that bring their transports.
+//! broker, publishing parcels and reading their inboxes. A trial a case; a case a row of the
+//! support matrix excuses this side from is not played. The cases over HTTP, WebSocket, MQTT 5 and
+//! AMQP 1.0 are ahead, with the stages that bring their transports.
 
 #![expect(
     clippy::disallowed_methods,
@@ -25,7 +26,7 @@ use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::{Instant, SystemTime};
 
 use bead::testing::parcels::{self, ParcelFields, ParcelReading};
-use bead::testing::{SteppingClock, files, hexadecimal, instants};
+use bead::testing::{Difference, SteppingClock, files, hexadecimal, instants, is_excused};
 use bead::{
     BoxFuture, BrokerAdapter, BrokerCapabilities, BrokerClient, BrokerClientOptions,
     BrokerConnectOptions, BrokerDelivery, BrokerError, BrokerListener, BrokerMessage,
@@ -53,8 +54,9 @@ const ROOT: &str = "bead";
 
 // ! every key of a case and of a step this player reads: one it does not know fails the case,
 // rather than pass it unplayed
-const CASE_KEYS: [&str; 9] = [
+const CASE_KEYS: [&str; 10] = [
     "clauses",
+    "differs",
     "limits",
     "name",
     "options",
@@ -1509,22 +1511,10 @@ fn trials() -> Result<Vec<Trial>, String> {
         .map(Arc::new)
         .collect();
     let mut trials = Vec::new();
-    let count = cases.len();
-    let names: HashSet<String> = cases
-        .iter()
-        .filter_map(|case| case.get("name").and_then(Value::as_str).map(str::to_owned))
-        .collect();
-
-    // no broker case a row of the support matrix excuses this side from: each played, once
-    trials.push(Trial::test(
-        "plays every broker case but those a row of the support matrix excuses this side from",
-        move || {
-            hold(count > 0 && names.len() == count, || {
-                format!("{} names for {count} cases", names.len())
-            })
-            .map_err(Failed::from)
-        },
-    ));
+    // each case's name, and whether a row of the support matrix excuses this side from it
+    let mut excusals = Vec::new();
+    // the names of the cases made a trial
+    let mut played = HashSet::new();
 
     for case in cases {
         let name = case
@@ -1532,7 +1522,22 @@ fn trials() -> Result<Vec<Trial>, String> {
             .and_then(Value::as_str)
             .unwrap_or_default()
             .to_owned();
+        // ! a differs malformed fails the run, as a key unread fails its case
+        let differs: Vec<Difference> = case
+            .get("differs")
+            .map(|differs| serde_json::from_value(differs.clone()))
+            .transpose()
+            .map_err(|error| format!("{name}'s differs: {error}"))?
+            .unwrap_or_default();
 
+        excusals.push((name.clone(), is_excused(&differs)));
+
+        // * an excused case is left out, as every other player leaves it
+        if is_excused(&differs) {
+            continue;
+        }
+
+        played.insert(name.clone());
         trials.push(
             Trial::test(name, move || {
                 let runtime = tokio::runtime::Builder::new_current_thread()
@@ -1545,6 +1550,38 @@ fn trials() -> Result<Vec<Trial>, String> {
             .with_kind("broker"),
         );
     }
+
+    // each broker case named once, at least one played, and each played if and only if no row
+    // excuses this side from it
+    trials.insert(
+        0,
+        Trial::test(
+            "plays every broker case but those a row of the support matrix excuses this side from",
+            move || {
+                let names: HashSet<&String> = excusals.iter().map(|(name, _)| name).collect();
+                let wrong: Vec<&String> = excusals
+                    .iter()
+                    .filter(|(name, is_excused)| played.contains(name) == *is_excused)
+                    .map(|(name, _)| name)
+                    .collect();
+
+                hold(!played.is_empty() && names.len() == excusals.len(), || {
+                    format!(
+                        "{} names for {} cases, {} played",
+                        names.len(),
+                        excusals.len(),
+                        played.len()
+                    )
+                })
+                .and_then(|()| {
+                    hold(wrong.is_empty(), || {
+                        format!("played against their excusal: {wrong:?}")
+                    })
+                })
+                .map_err(Failed::from)
+            },
+        ),
+    );
 
     Ok(trials)
 }

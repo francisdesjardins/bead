@@ -14,6 +14,7 @@ import {
   LEN,
   lengthDelimited,
   parting,
+  partingOfAll,
   pinDisagreement,
   readPin,
   recordsOf,
@@ -48,6 +49,9 @@ const TEXT_FORMAT = summaryLine('PASSED', [0, 909, 0, 0]);
 const PASSED_CSHARP = `CONFORMANCE TEST BEGIN ====================================\n\n${summaryLine('PASSED', [5594, 48, 7, 0])}${TEXT_FORMAT}`;
 const PASSED_TYPESCRIPT = `${summaryLine('PASSED', [5598, 48, 3, 0])}${TEXT_FORMAT}`;
 const FAILED = `${summaryLine('FAILED', [5598, 48, 2, 1])}${TEXT_FORMAT}`;
+
+// two sides, as a parting names them
+const TWO = Object.freeze(['TypeScript', 'C#']);
 
 const bytesOf = (...parts) => {
   return Uint8Array.from(parts.flat());
@@ -106,7 +110,7 @@ describe('the pin', () => {
     assert.equal(SIDES.rust.folder, 'implementations/rust/tools/protobuf-conformance');
   });
 
-  test("gives the Rust side's testee the set of the suite's protos and Probe, and keeps the differential to the TypeScript and C# sides", () => {
+  test("gives the Rust side's testee the set of the suite's protos and Probe, and reads the differential through every side", () => {
     assert.equal(SIDES.rust.generated, 'generated');
     assert.deepEqual(RUST_SET_FILES, [
       'protobuf_test_messages/test_messages_edition2023.proto',
@@ -130,7 +134,7 @@ describe('the pin', () => {
       }),
       RUST_SET_FILES
     );
-    assert.deepEqual(DIFFERENTIAL_SIDES, ['typescript', 'csharp']);
+    assert.deepEqual(DIFFERENTIAL_SIDES, ['typescript', 'csharp', 'rust']);
   });
 });
 
@@ -262,7 +266,16 @@ describe('the comparison', () => {
       canonicalProbe(bytesOf(lengthDelimited(3, one))),
       canonicalProbe(bytesOf(lengthDelimited(3, other)))
     );
-    assert.equal(parting({ read: true, written: one }, { read: true, written: other }), undefined);
+    assert.equal(
+      parting(
+        [
+          { read: true, written: one },
+          { read: true, written: other },
+        ],
+        { names: TWO }
+      ),
+      undefined
+    );
   });
 
   test("reads a map's entry as its key and its value, an empty key written or left out", () => {
@@ -289,14 +302,49 @@ describe('the comparison', () => {
       canonicalProbe(bytesOf([0x10, 0x01], lengthDelimited(1, [0x61])))
     );
     assert.match(
-      parting({ read: true, written: one }, { read: true, written: bytesOf([0x10, 0x02]) }) ?? '',
+      parting(
+        [
+          { read: true, written: one },
+          { read: true, written: bytesOf([0x10, 0x02]) },
+        ],
+        { names: TWO }
+      ) ?? '',
       /write back apart/u
     );
     assert.equal(
-      parting({ read: true, written: one }, { read: false }),
+      parting([{ read: true, written: one }, { read: false }], { names: TWO }),
       'TypeScript reads it, C# refuses it'
     );
-    assert.equal(parting({ read: false }, { read: false }), undefined);
+    assert.equal(parting([{ read: false }, { read: false }], { names: TWO }), undefined);
+  });
+
+  test('names the two sides that part, whichever pair it is', () => {
+    const read = { read: true, written: bytesOf([0x10, 0x01]) };
+    const apart = { read: true, written: bytesOf([0x10, 0x02]) };
+    const refused = { read: false };
+    const names = DIFFERENTIAL_SIDES.map((language) => {
+      return SIDES[language].name;
+    });
+
+    assert.deepEqual(names, ['TypeScript', 'C#', 'Rust']);
+    assert.equal(
+      parting([refused, read], { names: ['Rust', 'C#'] }),
+      'Rust refuses it, C# reads it'
+    );
+    assert.equal(
+      parting([read, apart], { names: ['C#', 'Rust'] }),
+      'both read it and write back apart: C# 1001, Rust 1002'
+    );
+    assert.equal(partingOfAll([read, read, read], { names }), undefined);
+    assert.equal(partingOfAll([refused, refused, refused], { names }), undefined);
+    assert.equal(
+      partingOfAll([read, read, refused], { names }),
+      'TypeScript reads it, writing back 1001; C# reads it, writing back 1001; Rust refuses it'
+    );
+    assert.equal(
+      partingOfAll([read, apart, read], { names }),
+      'TypeScript reads it, writing back 1001; C# reads it, writing back 1002; Rust reads it, writing back 1001'
+    );
   });
 });
 

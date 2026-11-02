@@ -946,6 +946,33 @@
       "refused": "not its message"
     },
     {
+      "name": "a varint of 10 bytes past 64 bits",
+      "encoding": "proto",
+      "clauses": [
+        "17.9.1"
+      ],
+      "bytes": "10 FF FF FF FF FF FF FF FF FF 02",
+      "refused": "not its message"
+    },
+    {
+      "name": "an unknown varint of 10 bytes past 64 bits",
+      "encoding": "proto",
+      "clauses": [
+        "17.9.1"
+      ],
+      "bytes": "48 80 80 80 80 80 80 80 80 80 02",
+      "refused": "not its message"
+    },
+    {
+      "name": "a packed uint32 of 10 bytes past 64 bits",
+      "encoding": "proto",
+      "clauses": [
+        "17.9.1"
+      ],
+      "bytes": "52 0A FF FF FF FF FF FF FF FF FF 02",
+      "refused": "not its message"
+    },
+    {
       "name": "an unknown record past the end of its message",
       "encoding": "proto",
       "clauses": [
