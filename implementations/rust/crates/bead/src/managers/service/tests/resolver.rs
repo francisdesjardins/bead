@@ -150,7 +150,7 @@ async fn an_answer_with_a_failure_of_the_procedures_own_sends_it_as_the_applicat
 }
 
 #[tokio::test]
-async fn a_payload_that_does_not_decode_is_answered_as_undecodable_with_no_detail_never_reaching_the_callback()
+async fn a_payload_that_does_not_decode_is_answered_as_undecodable_its_reason_as_its_detail_never_reaching_the_callback()
  {
     let fixture = Fixture::new();
     let recording = Arc::new(Recording::default());
@@ -171,7 +171,11 @@ async fn a_payload_that_does_not_decode_is_answered_as_undecodable_with_no_detai
         .expect("refused");
     assert_eq!(
         recording.answers(),
-        [failed(ProtocolCode::PAYLOAD_UNDECODABLE)]
+        [RouterAnswer::Failure(
+            Failure::protocol(ProtocolCode::PAYLOAD_UNDECODABLE, RouterSide::Server)
+                .saying("not JSON".to_owned())
+                .record()
+        )]
     );
 }
 

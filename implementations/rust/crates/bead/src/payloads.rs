@@ -203,13 +203,7 @@ impl PayloadCodec for JsonCodec {
     type Value = Value;
 
     fn decode(&self, bytes: &Bytes) -> Result<Value, CodecRefusal> {
-        json::read(bytes).map_err(|refusal| {
-            if refusal == JsonRefusal::NestedPast64 {
-                CodecRefusal::new("a json payload nests deeper than 64")
-            } else {
-                CodecRefusal::from(refusal)
-            }
-        })
+        json::read(bytes).map_err(CodecRefusal::from)
     }
 
     fn encode(&self, value: &Value) -> Result<Bytes, CodecRefusal> {

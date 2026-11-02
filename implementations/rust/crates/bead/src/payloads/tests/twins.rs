@@ -15,7 +15,7 @@ fn refuses_16_mib_of_nested_arrays_within_a_second_building_nothing_past_64() {
     let bytes = Bytes::from(bytes);
     let started = Instant::now();
     let refused = JsonCodec.decode(&bytes).expect_err("past depth 64");
-    assert_eq!(refused.to_string(), "a json payload nests deeper than 64");
+    assert_eq!(refused.to_string(), "nested past 64");
     assert!(started.elapsed() < Duration::from_secs(1));
 }
 
