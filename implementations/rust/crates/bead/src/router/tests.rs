@@ -28,6 +28,7 @@ use crate::testing::scripted::ScriptedClient;
 mod calls;
 mod client;
 mod client_credentials;
+mod client_pacing;
 mod client_requests;
 mod client_subscription_rebinding;
 mod client_subscription_registration;

@@ -1179,7 +1179,7 @@ impl RouterClient {
                     Box::new(move |outcome: Result<RouterResult, CallError>| {
                         let call_id = *locked(&drawn);
                         // settled on the owner, after the turn it came in
-                        owner.offer(Box::new(move |state: &mut ClientState| {
+                        owner.offer_behind(Box::new(move |state: &mut ClientState| {
                             settled(
                                 state,
                                 (

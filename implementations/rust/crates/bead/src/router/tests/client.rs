@@ -34,6 +34,12 @@ impl Notified {
         Self::paced((super::notifying(), window))
     }
 
+    pub(super) fn held(window: Option<u64>) -> Arc<Self> {
+        let mut notification = Self::new(window);
+        Arc::get_mut(&mut notification).expect("one owner").is_held = true;
+        notification
+    }
+
     // a notification of `procedure`, heard at once
     pub(super) fn of(procedure: Procedure) -> Arc<Self> {
         Self::paced((procedure, None))
