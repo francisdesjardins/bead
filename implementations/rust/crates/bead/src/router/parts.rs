@@ -20,6 +20,10 @@ use crate::router::transfer::{
 use crate::router::types::{CallAddress, ConnectionHandle, Gauges, RouterLimits, Signal};
 use crate::session_token::SessionToken;
 
+#[cfg(test)]
+#[path = "tests/sending_transfers.rs"]
+mod sending_tests;
+
 /// A timer a part holds, cancelled as it goes.
 pub(crate) type HeldTimer = Option<Arc<dyn Timer>>;
 
