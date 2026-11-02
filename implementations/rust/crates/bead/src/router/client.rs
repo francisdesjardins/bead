@@ -98,6 +98,8 @@ pub struct RouterClientOptions {
     pub credentials: Option<Credentials>,
     /// How much it reads, writes and holds.
     pub limits: Option<RouterLimitsOptions>,
+    /// The last call id it draws, of its own parity: its whole range when none.
+    pub last_call_id: Option<u32>,
     /// What it counts its calls into.
     pub metrics_registry: Option<MetricsRegistry>,
     /// What it holds untaken of what its server sent, past which it pauses its transport (spec
@@ -797,6 +799,10 @@ impl RouterClient {
         transport: Arc<dyn ClientTransport>,
         options: &RouterClientOptions,
     ) -> Result<Self, ProgrammerError> {
+        let pending = options.last_call_id.map_or_else(
+            || Ok(crate::router::parts::PendingCalls::new(RouterSide::Client)),
+            |last| crate::router::parts::PendingCalls::bounded(RouterSide::Client, last),
+        )?;
         let runtime = crate::platform::runtime_of(options.runtime.as_ref(), "a router")?;
         let clock = crate::clock::clock_of(
             (transport.clock().as_ref(), options.clock.as_ref()),
@@ -835,6 +841,7 @@ impl RouterClient {
         let owner = Owner::spawn((&runtime, &clock), |weak: WeakOwner<ClientState>| {
             ClientState {
                 core: Core {
+                    pending,
                     resolvers: Arc::clone(&resolvers),
                     disposal: disposal.clone(),
                     ..Core::new(

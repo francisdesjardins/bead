@@ -87,6 +87,8 @@ pub struct RouterServerOptions {
     pub runtime: Option<Handle>,
     /// How much it reads, writes and holds.
     pub limits: Option<RouterLimitsOptions>,
+    /// The last call id it draws, of its own parity: its whole range when none.
+    pub last_call_id: Option<u32>,
     /// What it counts its calls into.
     pub metrics_registry: Option<MetricsRegistry>,
     /// What a paced subscription queues at most.
@@ -1726,6 +1728,10 @@ impl RouterServer {
         transport: Arc<dyn ServerTransport>,
         (options, facade): (&RouterServerOptions, Option<crate::server::Facade>),
     ) -> Result<Self, ProgrammerError> {
+        let pending = options.last_call_id.map_or_else(
+            || Ok(crate::router::parts::PendingCalls::new(RouterSide::Server)),
+            |last| crate::router::parts::PendingCalls::bounded(RouterSide::Server, last),
+        )?;
         let runtime = crate::platform::runtime_of(options.runtime.as_ref(), "a router")?;
         let clock = crate::clock::clock_of(
             (transport.clock().as_ref(), options.clock.as_ref()),
@@ -1766,6 +1772,7 @@ impl RouterServer {
         let owner = Owner::spawn((&runtime, &clock), |weak: WeakOwner<ServerState>| {
             ServerState {
                 core: Core {
+                    pending,
                     resolvers: Arc::clone(&resolvers),
                     disposal: disposal.clone(),
                     ..Core::new(

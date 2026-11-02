@@ -665,7 +665,8 @@ async fn counts_a_call_made_refused_before_it_goes_no_call_id_free_or_payload_to
         .router
         .owner()
         .run(|state| {
-            state.core().pending = PendingCalls::new(RouterSide::Client, Some(3));
+            state.core().pending =
+                PendingCalls::bounded(RouterSide::Client, 3).expect("a bound of its side");
         })
         .await
         .expect("its call ids bounded");

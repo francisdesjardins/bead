@@ -14,13 +14,13 @@ use crate::debug::{DebugDirection, TracedEnvelope};
 use crate::envelope::{
     CreditHeader, Envelope, FailureHeader, FailureRecord, Header, NotificationHeader,
 };
-use crate::errors::CallError;
+use crate::errors::{CallError, ProgrammerError};
 use crate::owner::Owner;
 use crate::router::core::{
     self as router_core, BeforeAnswer, Core, Dispatch, Handler, Resolution, Resolved,
     SessionRequest, Side, Undo,
 };
-use crate::router::parts::Answering;
+use crate::router::parts::{Answering, PendingCalls};
 use crate::router::requester::{self, CoreRequest};
 use crate::router::types::{
     ConnectionHandle, RouterAnswer, RouterError, RouterLimitsOptions, RouterResult, Signal,
@@ -230,8 +230,34 @@ impl Clock for RecordedClock {
     }
 }
 
+/// Construction controls shared by a scripted core and its bounded-range twins.
+#[derive(Debug, Default)]
+#[non_exhaustive]
+pub(crate) struct PeerOptions {
+    pub(crate) limits: Option<RouterLimitsOptions>,
+    pub(crate) last_call_id: Option<u32>,
+}
+
 impl Peer {
     pub(crate) fn new(side: RouterSide, limits: &RouterLimitsOptions) -> Self {
+        Self::with_options(
+            side,
+            &PeerOptions {
+                limits: Some(limits.clone()),
+                ..PeerOptions::default()
+            },
+        )
+        .expect("a core on valid limits")
+    }
+
+    pub(crate) fn with_options(
+        side: RouterSide,
+        options: &PeerOptions,
+    ) -> Result<Self, ProgrammerError> {
+        let pending = options.last_call_id.map_or_else(
+            || Ok(PendingCalls::new(side)),
+            |last| PendingCalls::bounded(side, last),
+        )?;
         let clock = SteppingClock::new(instants::new_year());
         let armed = Arc::default();
         let shared: SharedClock = Arc::new(RecordedClock {
@@ -239,9 +265,12 @@ impl Peer {
             armed: Arc::clone(&armed),
         });
         let runtime = crate::platform::runtime_of(None, "a test's core").expect("a runtime");
-        let limits = limits_of(limits).expect("limits that hold");
+        let limits = limits_of(&options.limits.clone().unwrap_or_default())?;
         let owner = Owner::spawn((&runtime, &shared), |owner| State {
-            core: Core::new(owner, (side, limits, Arc::clone(&shared), None)),
+            core: Core {
+                pending,
+                ..Core::new(owner, (side, limits, Arc::clone(&shared), None))
+            },
             tokens: BTreeMap::new(),
             token: None,
             sending: VecDeque::new(),
@@ -267,11 +296,11 @@ impl Peer {
             one_way: Vec::new(),
             two_way_asked: Mutex::new(Vec::new()),
         });
-        Self {
+        Ok(Self {
             clock,
             owner,
             armed,
-        }
+        })
     }
 
     pub(crate) fn armed(&self) -> Vec<Duration> {

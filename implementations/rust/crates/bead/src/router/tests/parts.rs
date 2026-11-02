@@ -89,13 +89,56 @@ fn handles_of(gauges: &Gauges) -> Vec<String> {
 
 // ── The call ids a side draws ────────────────────────────────────────────────────────────────
 
+#[test]
+fn refuses_a_last_call_id_of_zero_or_its_peer_s_parity_before_a_router_starts() {
+    use crate::router::client::{RouterClient, RouterClientOptions};
+    use crate::router::server::{RouterServer, RouterServerOptions};
+    use crate::testing::scripted::{ScriptedClient, ScriptedServer};
+
+    let clock = crate::testing::SteppingClock::new(crate::testing::instants::new_year());
+    let client = ScriptedClient::new(Arc::<crate::testing::SteppingClock>::clone(&clock));
+    let server = ScriptedServer::new(clock);
+    for last in [0, 2, 8, u32::MAX - 1] {
+        let error = RouterClient::new(
+            Arc::<ScriptedClient>::clone(&client),
+            &RouterClientOptions {
+                last_call_id: Some(last),
+                ..RouterClientOptions::default()
+            },
+        )
+        .expect_err("a client draws only nonzero odd ids");
+        assert!(error.message().contains("last call id"));
+    }
+    for last in [0, 1, 7, u32::MAX] {
+        let error = RouterServer::new(
+            Arc::<ScriptedServer>::clone(&server),
+            &RouterServerOptions {
+                last_call_id: Some(last),
+                ..RouterServerOptions::default()
+            },
+        )
+        .expect_err("a server draws only nonzero even ids");
+        assert!(error.message().contains("last call id"));
+    }
+    assert_eq!((client.listener_count(), server.listener_count()), (0, 0));
+    for (side, last) in [
+        (RouterSide::Client, 1),
+        (RouterSide::Client, u32::MAX),
+        (RouterSide::Server, 2),
+        (RouterSide::Server, u32::MAX - 1),
+    ] {
+        let mut calls = PendingCalls::bounded(side, last).expect("either boundary holds");
+        assert_eq!(calls.draw((&handle("a"), free)), Some(side.call_ids().0));
+    }
+}
+
 // a side draws from its first, two apart, where the TypeScript side's sequence takes any first and
 // step: each test below walks a side's own range, as the C# side's do
 
 // spec 9.1
 #[test]
 fn walks_its_range_by_two_then_from_its_first_again() {
-    let mut calls = PendingCalls::new(RouterSide::Client, Some(7));
+    let mut calls = PendingCalls::bounded(RouterSide::Client, 7).expect("a bound of its side");
     let a = handle("a");
     let drawn: Vec<Option<u32>> = (0..5).map(|_| calls.draw((&a, free))).collect();
 
@@ -109,7 +152,7 @@ fn walks_its_range_by_two_then_from_its_first_again() {
 // spec 9.1
 #[test]
 fn skips_the_ids_in_use_and_gives_none_once_every_one_is() {
-    let mut calls = PendingCalls::new(RouterSide::Server, Some(8));
+    let mut calls = PendingCalls::bounded(RouterSide::Server, 8).expect("a bound of its side");
     let a = handle("a");
     let some = |call_id: u32| call_id == 2 || call_id == 6;
     let drawn: Vec<Option<u32>> = (0..3).map(|_| calls.draw((&a, some))).collect();
@@ -123,7 +166,9 @@ fn skips_the_ids_in_use_and_gives_none_once_every_one_is() {
 
     // ids outside the range, however many, stop nothing: every id but 5 is in use here
     assert_eq!(
-        PendingCalls::new(RouterSide::Client, Some(7)).draw((&a, |call_id: u32| call_id != 5)),
+        PendingCalls::bounded(RouterSide::Client, 7)
+            .expect("a bound of its side")
+            .draw((&a, |call_id: u32| call_id != 5)),
         Some(5),
         "the one free"
     );
@@ -132,7 +177,7 @@ fn skips_the_ids_in_use_and_gives_none_once_every_one_is() {
 // spec 9.1
 #[test]
 fn asks_about_each_id_once_at_most_however_many_are_in_use() {
-    let mut calls = PendingCalls::new(RouterSide::Client, Some(9));
+    let mut calls = PendingCalls::bounded(RouterSide::Client, 9).expect("a bound of its side");
     let asked = std::sync::Mutex::new(Vec::new());
 
     assert_eq!(
@@ -152,8 +197,8 @@ fn asks_about_each_id_once_at_most_however_many_are_in_use() {
 // spec 9.1
 #[test]
 fn draws_call_ids_of_its_side_skipping_those_waited_on_reserved_or_in_use_by_the_side() {
-    let mut client = PendingCalls::new(RouterSide::Client, Some(9));
-    let mut server = PendingCalls::new(RouterSide::Server, None);
+    let mut client = PendingCalls::bounded(RouterSide::Client, 9).expect("a bound of its side");
+    let mut server = PendingCalls::new(RouterSide::Server);
     let (a, b) = (handle("a"), handle("b"));
     let in_use = |call_id: u32| call_id == 5;
 
@@ -176,7 +221,7 @@ fn draws_call_ids_of_its_side_skipping_those_waited_on_reserved_or_in_use_by_the
 // spec 9.1
 #[test]
 fn forgets_a_call_only_while_it_is_the_request_given_when_one_is() {
-    let mut calls = PendingCalls::new(RouterSide::Client, None);
+    let mut calls = PendingCalls::new(RouterSide::Client);
     let call = call_of((1, "a"));
 
     calls.add(&call, request_of(1));
@@ -199,7 +244,7 @@ fn forgets_a_call_only_while_it_is_the_request_given_when_one_is() {
 // spec 9.1
 #[test]
 fn takes_out_every_call_of_a_connection_or_of_every_one_freeing_the_call_ids_it_reserved() {
-    let mut calls = PendingCalls::new(RouterSide::Client, None);
+    let mut calls = PendingCalls::new(RouterSide::Client);
     let a = handle("a");
 
     calls.add(&call_of((1, "a")), request_of(1));
@@ -222,7 +267,7 @@ fn takes_out_every_call_of_a_connection_or_of_every_one_freeing_the_call_ids_it_
 // spec 9.1
 #[test]
 fn hears_each_call_leave_once_whichever_way_it_leaves() {
-    let mut calls = PendingCalls::new(RouterSide::Client, None);
+    let mut calls = PendingCalls::new(RouterSide::Client);
     let mut removed: Vec<u64> = Vec::new();
     let a = handle("a");
 
@@ -252,7 +297,7 @@ fn hears_each_call_leave_once_whichever_way_it_leaves() {
 // spec 9.1
 #[test]
 fn count_the_calls_waited_on_and_the_call_ids_reserved_and_the_connections_they_belong_to() {
-    let mut calls = PendingCalls::new(RouterSide::Client, None);
+    let mut calls = PendingCalls::new(RouterSide::Client);
 
     calls.add(&call_of((1, "a")), request_of(1));
     calls.add(&call_of((3, "a")), request_of(2));

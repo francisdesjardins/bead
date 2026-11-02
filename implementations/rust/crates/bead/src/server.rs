@@ -1206,6 +1206,7 @@ impl Server {
             Arc::clone(&transport),
             (
                 &RouterServerOptions {
+                    last_call_id: None,
                     clock: Some(clock),
                     runtime: Some(runtime),
                     limits: options.limits.clone(),

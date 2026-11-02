@@ -495,7 +495,7 @@ impl<S: Side> Core<S> {
                 most: limits.maximum_answering_calls,
                 ..AnsweringCalls::default()
             },
-            pending: PendingCalls::new(side, None),
+            pending: PendingCalls::new(side),
             announcements: Announcements::default(),
             resolvers: Resolvers::default(),
             disposal: Disposal::default(),

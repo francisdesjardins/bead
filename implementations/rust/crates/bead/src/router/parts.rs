@@ -12,6 +12,7 @@ use crate::constants::{ProtocolCode, RouterSide};
 use crate::envelope::{
     ChunkHeader, Envelope, Header, MAXIMUM_HEADER_BYTES, header_bytes_of, unbounded_header_bytes_of,
 };
+use crate::errors::ProgrammerError;
 use crate::failure::{Failure, ProcedureAddress};
 use crate::metrics::ProcedureSeries;
 use crate::router::transfer::{
@@ -650,16 +651,30 @@ pub(crate) struct PendingCalls {
 }
 
 impl PendingCalls {
-    pub(crate) fn new(side: RouterSide, last_call_id: Option<u32>) -> Self {
+    pub(crate) fn new(side: RouterSide) -> Self {
         let (first, last) = side.call_ids();
 
         Self {
             first,
-            last: last_call_id.unwrap_or(last),
+            last,
             next: first,
             pending: BTreeMap::new(),
             reservations: BTreeMap::new(),
         }
+    }
+
+    /// A side's range bounded by its own last call id; 0 and the peer's parity are refused.
+    pub(crate) fn bounded(side: RouterSide, last: u32) -> Result<Self, ProgrammerError> {
+        if RouterSide::of_call_id(last) != Some(side) {
+            return Err(ProgrammerError::new(format!(
+                "the last call id of a {side} has its own parity and is not 0, not {last}"
+            )));
+        }
+
+        Ok(Self {
+            last,
+            ..Self::new(side)
+        })
     }
 
     pub(crate) fn count_on(&self, handle: &ConnectionHandle) -> u64 {
