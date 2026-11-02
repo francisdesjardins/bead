@@ -280,6 +280,292 @@ fn request(call_id: u32) -> Envelope {
     }
 }
 
+#[expect(
+    clippy::too_many_lines,
+    reason = "the twin checks both a wall-clock leap and a timer advance with two subscription paths and both peers' observations"
+)]
+#[tokio::test]
+async fn answers_a_subscribing_call_whose_jwts_end_passes_before_its_answer_with_its_result_then_session_required_and_its_client_withdraws_nothing()
+ {
+    use core::time::Duration;
+
+    use super::client::Notified;
+    use super::server::news;
+    use crate::constants::EnvelopeKind;
+    use crate::debug::DebugDirection;
+    use crate::managers::service::{ResolverDependencies, Response};
+    use crate::payloads::TextCodec;
+
+    for (seconds, advance_clock) in [(120, false), (1, true)] {
+        let credential = RequestCredential::Jwt(jwt_of(&json!({"exp": NOW + seconds - 60})));
+        let pair = Pair::connected((
+            crate::testing::instants::new_year(),
+            PairOptions {
+                server: crate::server::ServerOptions {
+                    credentials: Some(Credentials {
+                        audience: Some(AUDIENCE.to_owned()),
+                        keys: vec![JwtKey {
+                            algorithm: JwtAlgorithm::Hs256,
+                            issuer: ISSUER.to_owned(),
+                            jwk: jwk(),
+                        }],
+                        ..Credentials::default()
+                    }),
+                    ..crate::server::ServerOptions::default()
+                },
+                client: crate::client::ClientOptions {
+                    credential: Some(credential.clone()),
+                    ..crate::client::ClientOptions::default()
+                },
+            },
+        ))
+        .await
+        .expect("a connected pair");
+        let released = CancellationToken::new();
+        let entered = Arc::new(AtomicUsize::new(0));
+        let flash = crate::identity::Procedure {
+            id: 7,
+            name: "flash".to_owned(),
+            ..news()
+        };
+        for (procedure, explicit) in [(news(), true), (flash.clone(), false)] {
+            let released = released.clone();
+            let entered = Arc::clone(&entered);
+            pair.server
+                .services()
+                .get_notification_resolver(
+                    &procedure,
+                    (ResolverDependencies::of(TextCodec, TextCodec), TextCodec),
+                )
+                .expect("the notification resolved")
+                .on(Arc::new(move |_, response: Response<TextCodec>| {
+                    entered.fetch_add(1, Ordering::SeqCst);
+                    let released = released.clone();
+                    Box::pin(async move {
+                        released.cancelled().await;
+                        if explicit {
+                            response
+                                .register_notification()
+                                .await
+                                .map_err(crate::errors::ResolverError::other)?;
+                            crate::testing::rest(Duration::ZERO).await;
+                        }
+                        response.result("subscribed".to_owned()).await
+                    })
+                }))
+                .expect("the notification registered");
+        }
+        let sent = Arc::new(Mutex::new(Vec::new()));
+        let seeing = Arc::clone(&sent);
+        pair.server
+            .router()
+            .on_debug(Arc::new(move |direction, envelope| {
+                if direction == DebugDirection::Tx {
+                    locked(&seeing).push(envelope.header.clone());
+                }
+            }));
+        let withdrawn = Arc::new(Mutex::new(Vec::new()));
+        let hearing = Arc::clone(&withdrawn);
+        pair.client
+            .router()
+            .on_credential_withdrawn(Arc::new(move |scheme| {
+                locked(&hearing).push(scheme);
+            }));
+        let notifications = [Notified::of(news()), Notified::of(flash)];
+        let mut calls = Vec::new();
+        for notification in &notifications {
+            let like = notification.like();
+            pair.client
+                .router()
+                .register_notification(Arc::clone(&like))
+                .expect("a client notification registered");
+            let mut request = super::request_of((None, Duration::from_secs(5)));
+            request.procedure = like.procedure().clone();
+            request.subscribes = Some(like);
+            calls.push(
+                pair.client
+                    .router()
+                    .request(Bytes::new(), (request, CallHooks::default()))
+                    .expect("a subscribing call"),
+            );
+        }
+        pair.settle().await;
+        assert_eq!(entered.load(Ordering::SeqCst), 2);
+        if advance_clock {
+            pair.clock.advance(Duration::from_secs(1)).await;
+        } else {
+            pair.clock.wall_by(120_000);
+        }
+        released.cancel();
+        pair.settle().await;
+        for call in calls {
+            assert_eq!(
+                answered(call)
+                    .await
+                    .expect("the result comes first")
+                    .payload,
+                Bytes::from_static(b"subscribed")
+            );
+        }
+        pair.settle().await;
+        let sent = locked(&sent).clone();
+        assert_eq!(sent.len(), 4);
+        for call_id in [1, 3] {
+            assert_eq!(
+                sent.iter()
+                    .filter(|header| header.call_id() == call_id)
+                    .map(crate::envelope::Header::kind)
+                    .collect::<Vec<_>>(),
+                [EnvelopeKind::Result, EnvelopeKind::Failure]
+            );
+        }
+        for notification in notifications {
+            assert_eq!(
+                notification.dropped(),
+                [Some(ProtocolCode::SESSION_REQUIRED.get().get())]
+            );
+        }
+        assert_eq!(*locked(&withdrawn), Vec::new());
+        assert_eq!(pair.client.router().credential(), Some(credential));
+        assert_eq!(locked(&pair.client_reports).len(), 0);
+        assert_eq!(locked(&pair.server_reports).len(), 0);
+        pair.client.dispose().await;
+        pair.server.dispose().await.expect("the server disposed");
+    }
+}
+
+#[expect(
+    clippy::too_many_lines,
+    reason = "the twin plays both an abandoned ask and held keys, then an admission failure, a verifier failure and the waiting bound"
+)]
+#[tokio::test]
+async fn tells_nothing_of_a_verifier_or_an_admission_that_fails_or_of_a_call_past_those_let_wait_for_an_issuer()
+ {
+    for prime_keys in [false, true] {
+        let (mut key_set, asks) = key_set();
+        key_set.maximum_waiting_calls = Some(1);
+        let served = Served::new(&RouterServerOptions {
+            credentials: Some(Credentials {
+                audience: Some(AUDIENCE.to_owned()),
+                key_set: Some(key_set),
+                verify: Some(Arc::new(|_, _| {
+                    Box::pin(async { Err(std::io::Error::other("the verifier fails").into()) })
+                })),
+                ..Credentials::default()
+            }),
+            ..RouterServerOptions::default()
+        });
+        served.transport.open(&first(), true);
+        let ran = Arc::new(AtomicUsize::new(0));
+        let mut resolver = handler(&ran);
+        resolver.admit = Some(Arc::new(|request| {
+            if request.header.call_id == 3 {
+                Err(crate::errors::ResolverError::other(std::io::Error::other(
+                    "the admission fails",
+                )))
+            } else {
+                Ok(None)
+            }
+        }));
+        served
+            .router
+            .register_resolver((&echo(), resolver))
+            .expect("echo registered");
+        let told = Arc::new(Mutex::new(Vec::new()));
+        let telling = Arc::clone(&told);
+        served.router.on_access_refused(Arc::new(move |refusal| {
+            locked(&telling).push(refusal.clone());
+        }));
+        let prime_id = if prime_keys { 1 } else { 5 };
+        let verifier_id = if prime_keys { 5 } else { 1 };
+        let fail = || {
+            served
+                .transport
+                .deliver(&super::server::request_of((3, &echo(), "")), &first());
+            served.transport.deliver_message(
+                &crate::router::types::TransportMessage {
+                    data: crate::testing::scripted::bytes_of(&Envelope::Request {
+                        header: RequestHeader {
+                            credential: Some(Credential::Elsewhere),
+                            ..request_header_of(verifier_id)
+                        },
+                        payload: Bytes::new(),
+                    }),
+                    credential: Some("Interop sub=ada".to_owned()),
+                    ..crate::router::types::TransportMessage::default()
+                },
+                &first(),
+            );
+        };
+        if !prime_keys {
+            fail();
+        }
+        served.transport.deliver(&request(prime_id), &first());
+        served.settle().await;
+        assert_eq!(locked(&asks).len(), 1);
+        if !prime_keys {
+            served.transport.deliver(&cancel_of(prime_id), &first());
+            served.settle().await;
+        }
+        if prime_keys {
+            release(&asks);
+        } else {
+            release_keys(&asks, &[]);
+        }
+        served.settle().await;
+        if prime_keys {
+            fail();
+        }
+        for call_id in [7, 9] {
+            served.transport.deliver(
+                &Envelope::Request {
+                    header: RequestHeader {
+                        credential: Some(Credential::Jwt(Bytes::from(jwt_with_kid(
+                            &json!({}),
+                            "second",
+                        )))),
+                        ..request_header_of(call_id)
+                    },
+                    payload: Bytes::new(),
+                },
+                &first(),
+            );
+            served.settle().await;
+        }
+        let mut sent = served.sent_since();
+        sent.sort();
+        let expected = if prime_keys {
+            vec![
+                "first result 1 grace",
+                "first failure 3 PROCEDURE_FAILED",
+                "first failure 5 PROCEDURE_FAILED",
+                "first failure 9 CAPACITY_EXCEEDED",
+            ]
+        } else {
+            vec![
+                "first failure 1 PROCEDURE_FAILED",
+                "first failure 3 PROCEDURE_FAILED",
+                "first failure 9 CAPACITY_EXCEEDED",
+            ]
+        };
+        let mut expected = expected;
+        expected.sort_unstable();
+        assert_eq!(sent, expected);
+        assert_eq!(
+            served.reported(),
+            ["the admission fails first", "the verifier fails first"]
+        );
+        assert_eq!(locked(&told).len(), 0);
+        assert_eq!(
+            locked(&asks).len(),
+            0,
+            "no ask before the issuer's minute ends"
+        );
+        assert_eq!(ran.load(Ordering::SeqCst), usize::from(prime_keys));
+        served.router.dispose().await;
+    }
+}
+
 #[tokio::test]
 async fn answers_nothing_to_a_call_cancelled_while_it_waits_on_its_key_set_whose_ask_goes_on_for_the_others()
  {

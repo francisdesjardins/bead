@@ -54,6 +54,7 @@ mod router_core_teardown;
 mod router_core_token_provider;
 mod router_core_writer;
 mod server;
+mod server_access_refusals;
 mod server_command_credentials;
 mod server_commands;
 mod server_credential_notifications;
