@@ -610,6 +610,10 @@ keeps its report, as it keeps the others' (below). Alone, from `implementations/
 cargo run --release --locked --manifest-path benches/Cargo.toml -- --runs 3 --seconds 3 --json
 ```
 
+`-- --scale` measures instead a message's cost through a router alone and through a `Server`, each
+holding 1, 1,000 and 10,000 connections, and fails unless its cost at 10,000 stays within four times
+its cost at one.
+
 Each bench's `bead-bench/1` report carries:
 
 - `side`: `typescript`, `csharp` or `rust`;

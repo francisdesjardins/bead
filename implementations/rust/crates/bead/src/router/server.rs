@@ -530,7 +530,7 @@ trait IntoEntries<K, V> {
     fn into_iter_entries(self) -> Vec<(K, V)>;
 }
 
-impl<K: PartialEq, V> IntoEntries<K, V> for Ordered<K, V> {
+impl<K: Eq + core::hash::Hash + Clone, V> IntoEntries<K, V> for Ordered<K, V> {
     fn into_iter_entries(mut self) -> Vec<(K, V)> {
         self.drain().collect()
     }

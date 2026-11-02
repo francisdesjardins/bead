@@ -5,6 +5,9 @@
 //!
 //! `cargo run --release --locked --manifest-path benches/Cargo.toml -- [--runs 3] [--seconds 3]
 //! [--json] [--filter id-or-name]`
+//!
+//! `-- --scale` measures instead how a message's cost holds as the connections a server holds grow,
+//! and fails when it does not hold flat.
 
 #![expect(
     clippy::print_stdout,
@@ -30,6 +33,8 @@ use bead::{
 use bead_interop::{interop_procedures, offer_interop};
 use serde_json::{Value, json};
 
+mod scale;
+
 // the calls a throughput keeps under way at once
 const CONCURRENCY: usize = 32;
 
@@ -42,9 +47,10 @@ const MEMORY_CALLS: u64 = 2_000;
 // the calls a measure warms up on
 const WARM_UP: usize = 500;
 
-/// How a run goes: its runs, the seconds of each measure, the report as JSON, and the measure it
-/// keeps to.
+/// How a run goes: its runs, the seconds of each measure, the report as JSON, the measure it keeps
+/// to, or the scale alone.
 struct Options {
+    scale: bool,
     runs: u32,
     seconds: u64,
     json: bool,
@@ -53,6 +59,7 @@ struct Options {
 
 fn options_of(arguments: &[String]) -> Result<Options, String> {
     let mut options = Options {
+        scale: false,
         runs: 3,
         seconds: 3,
         json: false,
@@ -63,6 +70,7 @@ fn options_of(arguments: &[String]) -> Result<Options, String> {
     while let Some(flag) = given.next() {
         match flag.as_str() {
             "--json" => options.json = true,
+            "--scale" => options.scale = true,
             "--runs" | "--seconds" => {
                 let value: u32 = given
                     .next()
@@ -433,6 +441,11 @@ fn report_of((options, measures): (&Options, &Measures)) -> Result<Value, String
 async fn main() -> Result<(), String> {
     let arguments: Vec<String> = std::env::args().skip(1).collect();
     let options = options_of(&arguments)?;
+
+    if options.scale {
+        return scale::scale().await;
+    }
+
     let stand = Arc::new(stand().await?);
     let mut measures = Measures {
         filter: options.filter.clone(),
