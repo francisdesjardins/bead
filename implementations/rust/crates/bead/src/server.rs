@@ -309,15 +309,20 @@ fn close(state: &mut ServerState, handle: &ConnectionHandle) {
         return;
     }
 
-    let closing = transport.close(handle);
+    let closing = crate::transport::caught(("a transport's close", || transport.close(handle)));
     let owner = state.core.owner.clone();
     let handle = Arc::clone(handle);
 
     state.core.owner.cover(async move {
-        let is_closed = closing.await;
+        let outcome = match closing {
+            Ok(closing) => crate::transport::caught_future(("a transport's close", closing)).await,
+            Err(panicked) => Err(panicked),
+        };
         owner.offer(Box::new(move |state: &mut ServerState| {
-            if !is_closed {
-                forget_connection(state, &handle);
+            match outcome {
+                Ok(false) => forget_connection(state, &handle),
+                Ok(true) => {}
+                Err(panicked) => state.listeners.report(&panicked.into(), Some(&handle)),
             }
 
             if let Some(facade) = state.facade.as_mut() {

@@ -1256,7 +1256,6 @@ async fn hears_its_transport_s_error_and_refusal_through_the_server_s_transport(
 }
 
 #[tokio::test]
-#[ignore = "divergence: a failed transport close is not reported and stays counted under way"]
 async fn a_connection_that_closes_takes_its_session_and_a_close_that_fails_is_reported() {
     let fixture = Fixture::new(&ServerOptions::default());
     fixture.sessions((Some(Duration::from_millis(30)), None));
