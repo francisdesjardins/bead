@@ -17,6 +17,7 @@ use crate::testing::scripted::{ScriptedServer, handle_of};
 
 mod admissions;
 mod notification_endings;
+mod notification_unit;
 mod notifications;
 mod notifier;
 mod requester;
