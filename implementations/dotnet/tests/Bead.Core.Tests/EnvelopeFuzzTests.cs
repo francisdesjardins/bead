@@ -24,7 +24,8 @@ public sealed class EnvelopeFuzzTests
     private static List<byte[]> SeedsOfVectors()
     {
         var path = Path.Combine(AppContext.BaseDirectory, "vectors.json");
-        using var document = JsonDocument.Parse(File.ReadAllText(path));
+        // ! past the default depth of 64: a JWT's claims set nests 64 deep below the file's own levels
+        using var document = JsonDocument.Parse(File.ReadAllText(path), new JsonDocumentOptions { MaxDepth = 128 });
         var seeds = new List<byte[]>();
 
         Collect(document.RootElement, seeds);

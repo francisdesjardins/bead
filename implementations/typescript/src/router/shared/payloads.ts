@@ -131,6 +131,28 @@ const assertLeaf = (value: unknown): void => {
 };
 
 /**
+ * Throws when `value`, as `JSON.parse` gave it, holds a number past a double at any depth. A walk
+ * with a stack of its own, never a recursion.
+ */
+const assertFinite = (value: unknown): void => {
+  const pending: unknown[] = [value];
+
+  // ! no JSON value is undefined, so an empty stack alone ends the walk
+  for (let item = pending.pop(); item !== undefined; item = pending.pop()) {
+    if (typeof item === 'number' && !Number.isFinite(item)) {
+      throw new SyntaxError('a json text holds a number past the largest double');
+    }
+
+    if (typeof item === 'object' && item !== null) {
+      // * one by one, never spread: an array as long as a token allows passes no argument limit
+      for (const member of Object.values(item)) {
+        pending.push(member);
+      }
+    }
+  }
+};
+
+/**
  * `value`, as `JSON.parse` gave it, made the value of its canonical form in place, −0 as 0, each
  * leaf and each name checked. A walk with a stack of its own, never a recursion.
  */
@@ -321,15 +343,22 @@ const buildJson = (text: string): unknown => {
 };
 
 /**
- * The value of `text`, a JSON text, as `JSON.parse` reads it: built by Bead's own reader when a
- * member's name holds an escape, which V8 can read as the name of an earlier object of the same
- * shape, one holding a backslash and as long once read. Throws what `JSON.parse` throws.
+ * The value of `text`, a JSON text, as `JSON.parse` reads it, bounded as spec 17.5's items 6 and 7
+ * bound a payload: no number past the largest double, 64 deep at most. Built by Bead's own reader
+ * when a member's name holds an escape, which V8 can read as the name of an earlier object of the
+ * same shape, one holding a backslash and as long once read. Throws a `SyntaxError`.
  */
 export const parseJson = (text: string): unknown => {
-  const value: unknown = JSON.parse(text);
+  // * before the parse, so a peer never chooses how deep it goes
+  assertDepth(text);
 
+  const value: unknown = JSON.parse(text);
   // * the parse holds the text to JSON's grammar; only the names it hands on are in doubt
-  return scanNames(text).isEscaped ? buildJson(text) : value;
+  const read: unknown = scanNames(text).isEscaped ? buildJson(text) : value;
+
+  assertFinite(read);
+
+  return read;
 };
 
 /**

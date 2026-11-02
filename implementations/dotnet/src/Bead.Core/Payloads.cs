@@ -29,8 +29,8 @@ internal static class Payloads
     private static readonly UTF8Encoding Strict = new(encoderShouldEmitUTF8Identifier: false, throwOnInvalidBytes: true);
 
     // ! a name given twice refuses the JSON, and the 65th level refuses it as it is read, before
-    // anything deeper is built
-    private static readonly JsonDocumentOptions Strictly = new()
+    // anything deeper is built: a json payload's, and a JWT's header and claims set (13.8 step 1)
+    internal static readonly JsonDocumentOptions Strictly = new()
     {
         AllowDuplicateProperties = false,
         MaxDepth = Depth,
@@ -94,7 +94,52 @@ internal static class Payloads
         return isRead ? Read.NameTwice : "a json payload is not one JSON text";
     }
 
+    // a number as a double, read from its digits
+    private static double DoubleOf(JsonElement value)
+    {
+        // ! never TryGetDouble nor GetDouble, which read some ties of many digits to the odd
+        // neighbour: double.Parse of the raw digits reads each to the nearest, a tie to the even
+        return double.Parse(JsonMarshal.GetRawUtf8Value(value), NumberStyles.Float, CultureInfo.InvariantCulture);
+    }
+
     // definition
+
+    /// <summary>
+    /// Whether every number <paramref name="value"/> holds, at any depth, reads as a finite double
+    /// (17.5.6), each read as the canonical form reads it. A walk with a stack of its own, never a
+    /// recursion.
+    /// </summary>
+    internal static bool IsFinite(JsonElement value)
+    {
+        var pending = new Stack<JsonElement>();
+
+        pending.Push(value);
+
+        while (pending.TryPop(out var item))
+        {
+            if (item.ValueKind == JsonValueKind.Number && !double.IsFinite(DoubleOf(item)))
+            {
+                return false;
+            }
+
+            if (item.ValueKind == JsonValueKind.Array)
+            {
+                foreach (var each in item.EnumerateArray())
+                {
+                    pending.Push(each);
+                }
+            }
+            else if (item.ValueKind == JsonValueKind.Object)
+            {
+                foreach (var member in item.EnumerateObject())
+                {
+                    pending.Push(member.Value);
+                }
+            }
+        }
+
+        return true;
+    }
 
     /// <summary>
     /// The value of a <c>json</c> payload (17.5, 17.6), its canonical form's: the document read when
@@ -431,9 +476,7 @@ internal static class Payloads
 
         private void WriteNumber(JsonElement value)
         {
-            // ! never TryGetDouble nor GetDouble, which read some ties of many digits to the odd
-            // neighbour: double.Parse of the raw digits reads each to the nearest, a tie to the even
-            var number = double.Parse(JsonMarshal.GetRawUtf8Value(value), NumberStyles.Float, CultureInfo.InvariantCulture);
+            var number = DoubleOf(value);
 
             if (!double.IsFinite(number))
             {

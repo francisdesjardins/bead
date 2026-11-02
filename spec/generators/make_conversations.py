@@ -336,9 +336,10 @@ def access(issuer=ISSUERS['HS256'], *, exp=START + HOUR, iat=START, jti, aud=AUD
 
 def hs256(claims, jwk=HS_KEY):
     """A JWS signed with HMAC-SHA256 (RFC 7518 §3.2), with Python's own hmac, typed at+jwt, and named
-    by its key's kid when the key has one."""
+    by its key's kid when the key has one; its claims a JSON value, or their bytes as given."""
     header = {'alg': 'HS256', 'typ': 'at+jwt', **({'kid': jwk['kid']} if 'kid' in jwk else {})}
-    signing_input = base64url(compact(header)) + '.' + base64url(compact(claims))
+    claims = claims if isinstance(claims, bytes) else compact(claims)
+    signing_input = base64url(compact(header)) + '.' + base64url(claims)
     signature = hmac.new(unbase64url(jwk['k']), signing_input.encode('ascii'), hashlib.sha256).digest()
     return signing_input + '.' + base64url(signature)
 
@@ -1361,6 +1362,14 @@ def credentials_through_a_relay():
     # and one whose aud array holds that string beside the audience, which is no array of strings
     lone = hs256(access(sub='carol', aud=audience + '\ud800', jti='at-relay-0003'))
     beside = hs256(access(sub='carol', aud=[audience + '\ud800', audience], jti='at-relay-0004'))
+    # a JWT whose claims set section 17.5 does not let read, its aud its destination's audience: its
+    # exp past the largest double, written by hand since JSON has no infinity, and a claim nested 65
+    # deep, the claims set at depth 1
+    exp_past_a_double = compact(access(sub='carol', jti='at-relay-0005')).replace(
+        b'"exp":%d' % (START + HOUR), b'"exp":1e400')
+    assert b'"exp":1e400' in exp_past_a_double
+    past_a_double = hs256(exp_past_a_double)
+    too_deep = hs256({**access(sub='carol', jti='at-relay-0006'), 'deep': json.loads('[' * 64 + ']' * 64)})
     # a JWT whose parts do not read: its aud names nothing
     unreadable = '00 02 00 05  61 2E 62 2E 63  00 00 00'
     no_credential_came, does_not_hold = NO_CREDENTIAL, DOES_NOT_HOLD
@@ -1399,6 +1408,11 @@ def credentials_through_a_relay():
              opened('client'), opened('device'), *registered_as(DEVICE, audience),
              to(1, '"x"', jwt(lone)), refused_with(1, DESTINATION_UNREACHABLE),
              to(3, '"y"', jwt(beside)), refused_with(3, DESTINATION_UNREACHABLE)]),
+        ('a JWT whose claims set holds a number past the largest double, or nests 65 deep, does not read at a relay that does not verify: its aud names nothing, DESTINATION_UNREACHABLE',
+         ['13.8.1', '14.3.5'], None, [
+             opened('client'), opened('device'), *registered_as(DEVICE, audience),
+             to(1, '"x"', jwt(past_a_double)), refused_with(1, DESTINATION_UNREACHABLE),
+             to(3, '"y"', jwt(too_deep)), refused_with(3, DESTINATION_UNREACHABLE)]),
         ('a JWT to a destination of another audience, or of none, is answered DESTINATION_UNREACHABLE: its credential may hold, and its route does not',
          ['14.1', '14.3.5'], None, [
              opened('client'), opened('device'), opened('other'),

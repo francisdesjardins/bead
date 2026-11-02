@@ -168,14 +168,6 @@ internal static class JwtVerifier
     // the base64url alphabet (RFC 4648 §5), each character at its value
     private const string Base64Url = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
 
-    // ! a member named twice, or by a name that is not well-formed, refuses the JSON as the
-    // TypeScript side's check does; and no depth bound, as JSON.parse sets none
-    private static readonly JsonDocumentOptions Json = new()
-    {
-        AllowDuplicateProperties = false,
-        MaxDepth = int.MaxValue,
-    };
-
     // the media type of an access token (RFC 9068 §4), whole or without its `application/`
     private static readonly HashSet<string> AccessTokenTypes = new(StringComparer.Ordinal)
     {
@@ -280,8 +272,9 @@ internal static class JwtVerifier
         return json.TryGetProperty(name, out var value) ? TextOf(value) : null;
     }
 
-    // a header or a claims set: a JSON object in UTF-8 that names each member once; none for any
-    // other part
+    // a header or a claims set: a JSON object in UTF-8 that names each member once, by names that
+    // are well-formed, bounded as spec 17.5 bounds a payload, no number past a double and 64 deep at
+    // most; none for any other part
     private static JsonDocument? ObjectOf(string part)
     {
         var bytes = FromBase64Url(part);
@@ -296,14 +289,15 @@ internal static class JwtVerifier
 
         try
         {
-            document = JsonDocument.Parse(bytes, Json);
+            // * the 65th level refuses it as it is read, so a peer never chooses how deep it goes
+            document = JsonDocument.Parse(bytes, Payloads.Strictly);
         }
         catch (Exception exception) when (exception is JsonException or InvalidOperationException)
         {
             return null;
         }
 
-        if (document.RootElement.ValueKind == JsonValueKind.Object)
+        if (document.RootElement.ValueKind == JsonValueKind.Object && Payloads.IsFinite(document.RootElement))
         {
             return document;
         }
