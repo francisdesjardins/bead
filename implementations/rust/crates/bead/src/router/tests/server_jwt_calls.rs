@@ -40,8 +40,12 @@ fn jwt() -> String {
 }
 
 fn jwt_of(extra: &Value) -> String {
+    jwt_with_kid(extra, "set-key")
+}
+
+fn jwt_with_kid(extra: &Value, kid: &str) -> String {
     let header = crate::base64url::encode(
-        json!({"alg": "HS256", "typ": "at+jwt", "kid": "set-key"})
+        json!({"alg": "HS256", "typ": "at+jwt", "kid": kid})
             .to_string()
             .as_bytes(),
     );
@@ -81,6 +85,16 @@ fn key_set() -> (JwtKeySet, Asks) {
 }
 
 fn release(asks: &Asks) {
+    release_keys(
+        asks,
+        &[JwtSetKey {
+            algorithm: JwtAlgorithm::Hs256,
+            jwk: jwk(),
+        }],
+    );
+}
+
+fn release_keys(asks: &Asks, keys: &[JwtSetKey]) {
     for (issuer, signal, reply) in core::mem::take(&mut *locked(asks)) {
         assert_eq!(issuer, ISSUER);
         assert!(
@@ -88,12 +102,127 @@ fn release(asks: &Asks) {
             "a call's end does not cancel the issuer's shared ask"
         );
         reply
-            .send(Ok(vec![JwtSetKey {
-                algorithm: JwtAlgorithm::Hs256,
-                jwk: jwk(),
-            }]))
+            .send(Ok(keys.to_owned()))
             .expect("the issuer's ask still waits");
     }
+}
+
+#[expect(
+    clippy::too_many_lines,
+    reason = "the twin primes the held keys, fills their waiting bound, then settles the deadline and checks the client's credential"
+)]
+#[tokio::test]
+async fn answers_a_jwt_call_past_the_calls_its_key_set_lets_wait_for_an_issuers_deadline_capacity_exceeded_reporting_nothing_and_its_client_keeps_its_default()
+ {
+    let (mut key_set, asks) = key_set();
+    key_set.maximum_waiting_calls = Some(1);
+    let credential = RequestCredential::Jwt(jwt_with_kid(&json!({}), "set-2"));
+    let pair = Pair::connected((
+        crate::testing::instants::new_year(),
+        PairOptions {
+            server: crate::server::ServerOptions {
+                credentials: Some(Credentials {
+                    audience: Some(AUDIENCE.to_owned()),
+                    key_set: Some(key_set),
+                    ..Credentials::default()
+                }),
+                ..crate::server::ServerOptions::default()
+            },
+            client: crate::client::ClientOptions {
+                credential: Some(credential.clone()),
+                ..crate::client::ClientOptions::default()
+            },
+        },
+    ))
+    .await
+    .expect("a connected pair");
+    let ran = Arc::new(AtomicUsize::new(0));
+    pair.server
+        .router()
+        .register_resolver((&echo(), handler(&ran)))
+        .expect("echo registered");
+    let withdrawn = Arc::new(Mutex::new(Vec::new()));
+    let hearing = Arc::clone(&withdrawn);
+    pair.client
+        .router()
+        .on_credential_withdrawn(Arc::new(move |scheme| locked(&hearing).push(scheme)));
+    let mut holding = super::request_of((None, super::TIMEOUT));
+    holding.options.credential = Some(RequestCredential::Jwt(jwt()));
+    let holding = pair
+        .client
+        .router()
+        .request(Bytes::new(), (holding, CallHooks::default()))
+        .expect("a holding call");
+    pair.settle().await;
+    assert_eq!(locked(&asks).len(), 1);
+    release(&asks);
+    pair.settle().await;
+    assert_eq!(
+        answered(holding)
+            .await
+            .expect("the named key holds")
+            .payload,
+        Bytes::from_static(b"grace")
+    );
+    let call = || {
+        pair.client
+            .router()
+            .request(
+                Bytes::new(),
+                (
+                    super::request_of((None, core::time::Duration::from_secs(120))),
+                    CallHooks::default(),
+                ),
+            )
+            .expect("a call using its default")
+    };
+    let waiting = call();
+    let refused = call();
+    pair.settle().await;
+    let failure = answered(refused)
+        .await
+        .expect_err("one call is past the waiting bound");
+    assert!(
+        matches!(failure, CallError::Failure(failure) if failure.code() == ProtocolCode::CAPACITY_EXCEEDED.get() && failure.origin() == crate::failure::FailureOrigin::Peer)
+    );
+    assert_eq!(
+        locked(&asks).len(),
+        0,
+        "the held keys' deadline has not come"
+    );
+    assert_eq!(ran.load(Ordering::SeqCst), 1);
+    pair.clock
+        .advance(core::time::Duration::from_secs(60))
+        .await;
+    assert_eq!(
+        locked(&asks).len(),
+        1,
+        "a single ask at the issuer's deadline"
+    );
+    let mut second = jwk();
+    second.insert("kid".to_owned(), json!("set-2"));
+    release_keys(
+        &asks,
+        &[jwk(), second]
+            .into_iter()
+            .map(|jwk| JwtSetKey {
+                algorithm: JwtAlgorithm::Hs256,
+                jwk,
+            })
+            .collect::<Vec<_>>(),
+    );
+    pair.settle().await;
+    assert_eq!(
+        answered(waiting).await.expect("the new key holds").payload,
+        Bytes::from_static(b"grace")
+    );
+    assert_eq!(ran.load(Ordering::SeqCst), 2);
+    assert_eq!(*locked(&withdrawn), Vec::new());
+    assert_eq!(pair.client.router().credential(), Some(credential));
+    assert_eq!(locked(&pair.server_reports).len(), 0);
+    assert_eq!(locked(&pair.client_reports).len(), 0);
+    pair.client.dispose().await;
+    pair.server.dispose().await.expect("the server disposed");
 }
 
 fn handler(ran: &Arc<AtomicUsize>) -> Handler {

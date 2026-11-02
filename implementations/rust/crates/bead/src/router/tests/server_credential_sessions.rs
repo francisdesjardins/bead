@@ -5,7 +5,7 @@ use core::time::Duration;
 use std::sync::Arc;
 
 use super::{
-    RouterServer, RouterServerOptions, ServerState, clean_tracked, gauges, register_tracked,
+    RouterServer, RouterServerOptions, ServerState, clean_tracked, gauges, held, register_tracked,
     resolved_session, unregister_tracked,
 };
 use crate::constants::ProtocolCode;
@@ -79,6 +79,91 @@ struct Sessions {
     router: RouterServer,
     clock: Arc<SteppingClock>,
     transport: Arc<ScriptedServer>,
+}
+
+#[tokio::test]
+async fn times_an_end_past_a_timers_ceiling_in_steps_the_wall_clock_read_again_at_each_due_and_ends_it_at_once_once_reached_no_timer_armed()
+ {
+    use crate::duration::LONGEST_TIMER;
+
+    let kept = Sessions::new().await;
+    let span = Duration::from_mins(30 * 24 * 60 + 1);
+    let end = NOW + i64::try_from(span.as_millis()).expect("thirty days fit");
+    kept.router
+        .owner()
+        .run(move |state| {
+            register(state, (1, first(), 5, Some(end), Some(grace())));
+        })
+        .await
+        .expect("a distant end kept");
+    assert_eq!(kept.clock.dues(), [LONGEST_TIMER]);
+    kept.clock.advance(LONGEST_TIMER).await;
+    let remaining = span.saturating_sub(LONGEST_TIMER);
+    assert_eq!(kept.clock.dues(), [remaining]);
+    assert_eq!(kept.ended(), Vec::new());
+    kept.clock.wall_by(-1_000);
+    kept.clock.advance(remaining).await;
+    assert_eq!(kept.ended(), Vec::new());
+    assert_eq!(kept.clock.dues(), [Duration::from_secs(1)]);
+    kept.clock.advance(Duration::from_millis(999)).await;
+    assert_eq!(kept.ended(), Vec::new());
+    kept.clock.advance(Duration::from_millis(1)).await;
+    assert_eq!(kept.ended(), [(first(), 1)]);
+    assert_eq!(kept.clock.dues(), Vec::<Duration>::new());
+    kept.router
+        .owner()
+        .run(move |state| {
+            let reached = super::wall_milliseconds(state);
+            register(state, (3, second(), 5, Some(reached), Some(grace())));
+            assert_eq!(counts(state), (1, 0));
+            assert_eq!(
+                state.notifications.subscriptions(None).len(),
+                1,
+                "the end is behind its answer"
+            );
+        })
+        .await
+        .expect("an end reached is deferred");
+    kept.clock.settle().await;
+    assert_eq!(kept.ended(), [(second(), 3)]);
+    kept.router
+        .owner()
+        .run(|state| {
+            // A subscription whose call was in flight when its session ended is kept anew by its answer.
+            state
+                .notifications
+                .register(
+                    ProcedureAddress {
+                        service_id: 2,
+                        procedure_id: 5,
+                    },
+                    &SubscribingCall {
+                        call_id: 3,
+                        connection_handle: second(),
+                        end: Some(NOW),
+                        identifier: Some(grace()),
+                        paced: false,
+                        series: None,
+                    },
+                )
+                .expect("the answered subscription");
+            held(state, (3, &second(), Some(NOW), grace()));
+            assert_eq!(counts(state), (1, 0));
+        })
+        .await
+        .expect("an answered call keeps it anew");
+    kept.clock.settle().await;
+    assert_eq!(kept.ended(), [(second(), 3)]);
+    kept.router
+        .owner()
+        .run(|state| {
+            held(state, (9, &second(), None, grace()));
+            assert_eq!(counts(state), (0, 0));
+        })
+        .await
+        .expect("a failed answer keeps nothing");
+    assert_eq!(kept.clock.dues(), Vec::<Duration>::new());
+    kept.router.dispose().await;
 }
 impl Sessions {
     async fn new() -> Self {

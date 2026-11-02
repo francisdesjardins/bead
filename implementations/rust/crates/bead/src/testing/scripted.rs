@@ -254,6 +254,8 @@ pub struct ScriptedServer {
     listeners: Mutex<Vec<Arc<dyn ServerListener>>>,
     sending: Mutex<HashMap<ConnectionHandle, Sending>>,
     one_way: Mutex<BTreeSet<ConnectionHandle>>,
+    secure: Mutex<BTreeSet<ConnectionHandle>>,
+    carrying: Mutex<BTreeSet<ConnectionHandle>>,
 }
 
 impl core::fmt::Debug for ScriptedServer {
@@ -283,6 +285,8 @@ impl ScriptedServer {
             listeners: Mutex::default(),
             sending: Mutex::default(),
             one_way: Mutex::default(),
+            secure: Mutex::default(),
+            carrying: Mutex::default(),
         })
     }
 
@@ -297,6 +301,38 @@ impl ScriptedServer {
     /// Answers each send on `connection_handle` from now on as `sending` says.
     pub fn send_as(&self, (connection_handle, sending): (&ConnectionHandle, Sending)) {
         locked(&self.sending).insert(Arc::clone(connection_handle), sending);
+    }
+
+    /// Marks `connection_handle` secure, or in the clear when `secure` is false.
+    pub fn secure(&self, connection_handle: &ConnectionHandle, secure: bool) {
+        let mut handles = locked(&self.secure);
+        if secure {
+            handles.insert(Arc::clone(connection_handle));
+        } else {
+            handles.remove(connection_handle);
+        }
+    }
+
+    /// Carries a credential beside an envelope on this connection, or none when false.
+    pub fn carry(&self, connection_handle: &ConnectionHandle, carrying: bool) {
+        let mut handles = locked(&self.carrying);
+        if carrying {
+            handles.insert(Arc::clone(connection_handle));
+        } else {
+            handles.remove(connection_handle);
+        }
+    }
+
+    /// Each message its router handed it, with its connection.
+    #[must_use]
+    pub fn sent(&self) -> Vec<(ConnectionHandle, TransportMessage)> {
+        locked(&self.sent).clone()
+    }
+
+    /// How many listeners hold this transport.
+    #[must_use]
+    pub fn listener_count(&self) -> usize {
+        locked(&self.listeners).len()
     }
 
     /// Opens the connection `connection_handle`, two-way unless `is_two_way` is false.
@@ -396,6 +432,14 @@ impl ServerTransport for ScriptedServer {
 
     fn is_two_way(&self, connection_handle: &ConnectionHandle) -> bool {
         !locked(&self.one_way).contains(connection_handle)
+    }
+
+    fn is_secure(&self, connection_handle: &ConnectionHandle) -> bool {
+        locked(&self.secure).contains(connection_handle)
+    }
+
+    fn carries_credential(&self, connection_handle: &ConnectionHandle) -> bool {
+        locked(&self.carrying).contains(connection_handle)
     }
 
     fn start(&self) -> BoxFuture<Result<(), RouterError>> {

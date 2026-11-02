@@ -25,6 +25,100 @@ fn session(carried: String) -> ElsewhereSession {
     }
 }
 
+#[tokio::test]
+async fn moves_the_end_of_a_session_kept_by_a_call_whose_credential_renews_it_and_by_none_that_settles_once_its_call_ended()
+ {
+    use core::time::Duration;
+    use std::collections::BTreeMap;
+
+    use super::server::{news, subscribing_of};
+    use crate::managers::service::{ResolverDependencies, Response};
+    use crate::payloads::TextCodec;
+
+    let settling = Arc::new(Mutex::new(BTreeMap::new()));
+    let asking = Arc::clone(&settling);
+    let served = verifying(Arc::new(move |carried, _| {
+        let (reply, answer) = oneshot::channel();
+        locked(&asking).insert(carried, reply);
+        Box::pin(async move { answer.await.expect("the test settles each resolution") })
+    }));
+    served
+        .services
+        .get_notification_resolver(
+            &news(),
+            (ResolverDependencies::of(TextCodec, TextCodec), TextCodec),
+        )
+        .expect("news resolved")
+        .on(Arc::new(|_, response: Response<TextCodec>| {
+            Box::pin(async move {
+                response
+                    .register_notification()
+                    .await
+                    .map_err(crate::errors::ResolverError::other)?;
+                response.result("subscribed".to_owned()).await
+            })
+        }))
+        .expect("news registered");
+    let Envelope::Request {
+        mut header,
+        payload,
+    } = subscribing_of(1)
+    else {
+        panic!("a subscription")
+    };
+    header.credential = Some(Credential::Elsewhere);
+    served.transport.deliver_message(
+        &TransportMessage {
+            data: bytes_of(&Envelope::Request { header, payload }),
+            credential: Some("kept".to_owned()),
+            ..TransportMessage::default()
+        },
+        &first(),
+    );
+    deliver(
+        &served,
+        (3, &first(), Some(Credential::Elsewhere), Some("late")),
+    );
+    deliver(
+        &served,
+        (5, &first(), Some(Credential::Elsewhere), Some("renewed")),
+    );
+    served.settle().await;
+    let settle = |(carried, after): (&str, i64)| {
+        locked(&settling)
+            .remove(carried)
+            .expect("a resolution waits")
+            .send(Ok(Some(ElsewhereSession {
+                id: "ada".to_owned(),
+                data: Some(serde_json::json!("ada")),
+                end: Some(1_767_225_600_000 + after),
+            })))
+            .expect("the resolving call waits on its verdict");
+    };
+    settle(("kept", 60_000));
+    served.settle().await;
+    assert_eq!(served.clock.dues(), [Duration::from_secs(60)]);
+    served.transport.deliver(&cancel_of(3), &first());
+    served.settle().await;
+    settle(("late", 120_000));
+    served.settle().await;
+    assert_eq!(served.clock.dues(), [Duration::from_secs(60)]);
+    settle(("renewed", 90_000));
+    served.settle().await;
+    assert_eq!(served.clock.dues(), [Duration::from_secs(90)]);
+    assert_eq!(
+        served.sent_since(),
+        ["first result 1 subscribed", "first result 5 \"ada\""]
+    );
+    served.clock.advance(Duration::from_millis(89_999)).await;
+    assert_eq!(served.sent_since(), Vec::<String>::new());
+    served.clock.advance(Duration::from_millis(1)).await;
+    assert_eq!(served.sent_since(), ["first failure 1 SESSION_REQUIRED"]);
+    assert_eq!(served.reported(), Vec::<String>::new());
+    served.router.dispose().await;
+    assert_eq!(served.clock.dues(), Vec::<Duration>::new());
+}
+
 fn verifying(verify: ElsewhereVerifier) -> Served {
     let served = Served::new(&RouterServerOptions {
         credentials: Some(Credentials {
