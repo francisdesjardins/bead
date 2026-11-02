@@ -28,6 +28,7 @@ const AUDIENCE: &str = "https://bead.example";
 mod construction;
 mod deadlines;
 mod failures;
+mod kidless;
 mod waiting;
 
 fn claims(issuer: &str) -> Value {
