@@ -330,6 +330,34 @@ async fn a_turn_that_panics_ends_its_router_failing_each_call_it_waits_on_with_t
     );
 }
 
+#[tokio::test]
+async fn keeps_the_result_of_a_subscription_answered_before_a_later_turn_panics() {
+    let scripted = Scripted::new();
+    let notification = super::client::Notified::new(Some(4));
+    let subscribing = scripted
+        .subscribe((&notification.like(), super::TIMEOUT))
+        .await;
+    let transport = Arc::clone(&scripted.transport);
+    let owner = scripted.router.owner().clone();
+    scripted
+        .router
+        .owner()
+        .run(move |_| {
+            transport.deliver(&result_of(1, None));
+            owner.offer_behind(Box::new(|_| panic!("a later turn breaks")));
+        })
+        .await
+        .expect("the result precedes the failing turn");
+    super::answered(subscribing)
+        .await
+        .expect("the completed call keeps its result");
+    scripted.settle().await;
+    assert_eq!(
+        scripted.codes(),
+        ["a turn of the router's panicked: a later turn breaks"]
+    );
+}
+
 // spec 13.11; decision 0044: the twin of "answers a verifier that throws at once PROCEDURE_FAILED,
 // and reports it as one that rejects, never SESSION_REQUIRED", a throw at once a panic as it is
 // called, and one its future panics with alike

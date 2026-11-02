@@ -1179,7 +1179,7 @@ impl RouterClient {
                     Box::new(move |outcome: Result<RouterResult, CallError>| {
                         let call_id = *locked(&drawn);
                         // settled on the owner, after the turn it came in
-                        owner.offer_behind(Box::new(move |state: &mut ClientState| {
+                        owner.offer(Box::new(move |state: &mut ClientState| {
                             settled(
                                 state,
                                 (
@@ -1389,8 +1389,13 @@ fn settled(
                     bound.is_answered = true;
                 }
 
-                // the server paces nothing before its answer: the window opens once it came
-                state.renew(call_id);
+                // the window opens after the read's envelopes, while the call keeps its result
+                state
+                    .core
+                    .owner
+                    .offer_behind(Box::new(move |state: &mut ClientState| {
+                        state.renew(call_id);
+                    }));
             }
             Err(_) => {
                 // a subscription that did not take holds nothing, whatever ended it
