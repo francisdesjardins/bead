@@ -11,6 +11,7 @@ use crate::constants::{CredentialScheme, FailureScope};
 use crate::router::types::LIMIT_DEFAULTS;
 use crate::testing::hexadecimal;
 
+mod fuzz;
 mod twins;
 
 const TWO_TO_53: u64 = 1 << 53;
