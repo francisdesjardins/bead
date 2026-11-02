@@ -7,7 +7,7 @@
 //! anything, handing it on once resumed, in order, from a task of its own its clock counts.
 
 use std::collections::{BTreeSet, HashMap, VecDeque};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError, Weak};
 
 use bytes::Bytes;
@@ -16,9 +16,10 @@ use tokio::runtime::Handle;
 use crate::clock::SharedClock;
 use crate::constants::{EnvelopeKind, RouterSide};
 use crate::envelope::{Envelope, ReadEnvelopeOptions, read_envelope, write_envelope};
-use crate::router::types::{BoxFuture, ConnectionHandle, RouterError, TransportMessage};
+use crate::router::types::{BoxFuture, ConnectionHandle, Gauges, RouterError, TransportMessage};
 use crate::transport::{
     ClientListener, ClientTransport, ReadyState, Sent, ServerListener, ServerTransport,
+    TransportServerRefusal,
 };
 
 fn locked<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -418,6 +419,23 @@ pub struct ScriptedServer {
     paced: Mutex<HashMap<ConnectionHandle, Paced>>,
     pauses: Mutex<Vec<(bool, ConnectionHandle)>>,
     is_pacing_broken: AtomicBool,
+    closing: Mutex<ClosingOptions>,
+    closed: Mutex<Vec<ConnectionHandle>>,
+    closed_after: Mutex<Vec<usize>>,
+    stops: AtomicUsize,
+    gauges: Mutex<Option<Gauges>>,
+}
+
+/// How a scripted server's close settles, beyond its connection.
+#[derive(Debug, Clone, Default)]
+#[non_exhaustive]
+pub struct ClosingOptions {
+    /// What releases its settlement; none for a close that settles at once.
+    pub released: Option<tokio_util::sync::CancellationToken>,
+    /// Whether the transport held the connection: false when none.
+    pub result: Option<bool>,
+    /// What the close panics with as it settles, a transport that breaks.
+    pub panicked: Option<String>,
 }
 
 impl core::fmt::Debug for ScriptedServer {
@@ -454,6 +472,11 @@ impl ScriptedServer {
             paced: Mutex::default(),
             pauses: Mutex::default(),
             is_pacing_broken: AtomicBool::new(false),
+            closing: Mutex::default(),
+            closed: Mutex::default(),
+            closed_after: Mutex::default(),
+            stops: AtomicUsize::new(0),
+            gauges: Mutex::default(),
         })
     }
 
@@ -500,6 +523,49 @@ impl ScriptedServer {
     #[must_use]
     pub fn listener_count(&self) -> usize {
         locked(&self.listeners).len()
+    }
+
+    /// Makes a close settle as `options` says, recording it as it is asked.
+    pub fn close_as(&self, options: &ClosingOptions) {
+        *locked(&self.closing) = options.clone();
+    }
+
+    /// Each connection it was asked to close, in order.
+    #[must_use]
+    pub fn closed(&self) -> Vec<ConnectionHandle> {
+        locked(&self.closed).clone()
+    }
+
+    /// How many messages it had been handed at each call of close, in the order asked.
+    #[must_use]
+    pub fn closed_after(&self) -> Vec<usize> {
+        locked(&self.closed_after).clone()
+    }
+
+    /// How many times it was asked to stop.
+    #[must_use]
+    pub fn stops(&self) -> usize {
+        self.stops.load(Ordering::SeqCst)
+    }
+
+    /// Gives `gauges` when asked, or no gauges when none.
+    pub fn count_as(&self, gauges: Option<Gauges>) {
+        *locked(&self.gauges) = gauges;
+    }
+
+    /// Tells its listeners a listen is held on `connection_handle`, or has ended.
+    pub fn hold_listen(&self, is_held: bool, connection_handle: &ConnectionHandle) {
+        self.tell(|listener| listener.on_listen(is_held, connection_handle));
+    }
+
+    /// Reports an error from a connection, or the transport's own when none.
+    pub fn report(&self, error: &RouterError, connection_handle: Option<&ConnectionHandle>) {
+        self.tell(|listener| listener.on_error(error, connection_handle));
+    }
+
+    /// Tells its listeners the request its transport refused.
+    pub fn refuse(&self, refusal: &TransportServerRefusal) {
+        self.tell(|listener| listener.on_refusal(refusal));
     }
 
     /// Opens the connection `connection_handle`, two-way unless `is_two_way` is false.
@@ -638,8 +704,23 @@ impl ServerTransport for ScriptedServer {
         sent_of(&sending)
     }
 
-    fn close(&self, _connection_handle: &ConnectionHandle) -> BoxFuture<bool> {
-        Box::pin(async { false })
+    #[expect(
+        clippy::panic,
+        reason = "a test's transport that breaks as its close settles"
+    )]
+    fn close(&self, connection_handle: &ConnectionHandle) -> BoxFuture<bool> {
+        locked(&self.closed).push(Arc::clone(connection_handle));
+        locked(&self.closed_after).push(locked(&self.sent).len());
+        let options = locked(&self.closing).clone();
+        Box::pin(async move {
+            if let Some(released) = options.released {
+                released.cancelled().await;
+            }
+            if let Some(message) = options.panicked {
+                panic!("{message}");
+            }
+            options.result.unwrap_or(false)
+        })
     }
 
     fn listen(&self, listener: Arc<dyn ServerListener>) {
@@ -706,6 +787,11 @@ impl ServerTransport for ScriptedServer {
     }
 
     fn stop(&self) -> BoxFuture<Result<(), RouterError>> {
+        self.stops.fetch_add(1, Ordering::SeqCst);
         Box::pin(async { Ok(()) })
+    }
+
+    fn gauges(&self) -> Option<Gauges> {
+        locked(&self.gauges).clone()
     }
 }

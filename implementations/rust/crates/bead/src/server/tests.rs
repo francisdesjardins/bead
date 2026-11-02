@@ -13,6 +13,8 @@ use crate::router::types::{ConnectionHandle, Gauges};
 use crate::session_token::SessionToken;
 use crate::testing::pair::{Pair, PairOptions};
 
+mod facade;
+
 async fn pair() -> Pair {
     Pair::connected((crate::testing::instants::new_year(), PairOptions::default()))
         .await
