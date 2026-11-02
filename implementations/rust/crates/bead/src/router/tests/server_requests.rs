@@ -8,13 +8,13 @@ use bytes::Bytes;
 use super::server::{Served, first, news, request_of, second, subscribing_of};
 use super::{locked, result_of};
 use crate::constants::{ProtocolCode, RouterSide};
-use crate::envelope::{Envelope, NotificationHeader, RequestHeader};
+use crate::envelope::{Credential, Envelope, NotificationHeader, RequestHeader};
 use crate::managers::service::{ResolverDependencies, Response};
 use crate::payloads::{CodecRefusal, PayloadCodec, TextCodec};
 use crate::router::admissions::BeforeRequest;
 use crate::router::core::Handler;
 use crate::router::server::RouterServerOptions;
-use crate::router::types::TransportMessage;
+use crate::router::types::{CallSession, ConnectionHandle, TransportMessage};
 use crate::testing::pair::echo;
 
 // A refused request is deliberately unreadable: the decode history proves its admission comes
@@ -50,6 +50,166 @@ fn idle() -> Handler {
         forwards_credentials: false,
         notifies: false,
     }
+}
+
+#[derive(Debug, PartialEq, Eq)]
+enum SessionStep {
+    Session(ConnectionHandle, u32, bool),
+    Admit(u32, Option<CallSession>),
+    Callback(u32, Option<CallSession>),
+}
+
+#[tokio::test]
+async fn a_session_provider_s_error_or_panic_is_reported_and_refuses_only_its_call() {
+    for panics in [false, true] {
+        let served = Served::new(&RouterServerOptions {
+            session_of: Some(Arc::new(move |(_, header), _| {
+                if header.call_id == 1 {
+                    assert!(!panics, "the session provider failed");
+                    return Err(crate::testing::core_port::error_of(
+                        "the session provider failed",
+                    ));
+                }
+                Ok(None)
+            })),
+            ..RouterServerOptions::default()
+        });
+        let admitted = Arc::new(Mutex::new(Vec::new()));
+        let admitting = Arc::clone(&admitted);
+        let mut dependencies = ResolverDependencies::of(TextCodec, TextCodec);
+        dependencies.before_request = Some(BeforeRequest::new(
+            move |request| {
+                locked(&admitting).push(request.header.call_id);
+                true
+            },
+            None,
+        ));
+        served
+            .services
+            .get_request_resolver(&echo(), dependencies)
+            .expect("echo resolved")
+            .on(Arc::new(|_, response| response.result("ok".to_owned())))
+            .expect("echo registered");
+        for id in [1, 3] {
+            served
+                .transport
+                .deliver(&request_of((id, &echo(), "")), &first());
+        }
+        served.settle().await;
+        assert_eq!(*locked(&admitted), [3]);
+        let sent = served.transport.take();
+        assert!(
+            matches!(&sent[0].1, Envelope::Failure { header, failure } if header.call_id == 1 && failure.code == ProtocolCode::PROCEDURE_FAILED.get() && failure.detail.is_empty())
+        );
+        assert!(
+            matches!(&sent[1].1, Envelope::Result { header, payload } if header.call_id == 3 && payload.as_ref() == b"ok")
+        );
+        {
+            let reports = locked(&served.reports).clone();
+            assert_eq!(reports.len(), 1);
+            assert_eq!(reports[0].1, Some(first()));
+            assert!(
+                reports[0]
+                    .0
+                    .to_string()
+                    .contains("the session provider failed")
+            );
+        }
+        assert_eq!(served.router.gauges().await.counts["answeringCalls"], 0);
+    }
+}
+
+// spec 9.2, 13.1
+#[tokio::test]
+async fn are_each_asked_their_session_of_its_session_of_once_their_call_id_held_before_their_admission_which_reads_it_as_their_callback_does()
+ {
+    let order = Arc::new(Mutex::new(Vec::new()));
+    let resolving = Arc::clone(&order);
+    let session = CallSession {
+        data: Some(serde_json::json!("ada")),
+        ..CallSession::default()
+    };
+    let resolved = session.clone();
+    let token = super::token();
+    let served = Served::new(&RouterServerOptions {
+        session_of: Some(Arc::new(move |(handle, header), signal| {
+            locked(&resolving).push(SessionStep::Session(
+                Arc::clone(handle),
+                header.call_id,
+                signal.is_aborted(),
+            ));
+            Ok((header.credential == Some(Credential::Opaque(token))).then(|| resolved.clone()))
+        })),
+        ..RouterServerOptions::default()
+    });
+    let admitting = Arc::clone(&order);
+    let mut dependencies = ResolverDependencies::of(TextCodec, TextCodec);
+    dependencies.before_request = Some(BeforeRequest::new(
+        move |request| {
+            locked(&admitting).push(SessionStep::Admit(
+                request.header.call_id,
+                request.session.clone(),
+            ));
+            true
+        },
+        None,
+    ));
+    let callbacks = Arc::clone(&order);
+    served
+        .services
+        .get_request_resolver(&echo(), dependencies)
+        .expect("echo resolved")
+        .on(Arc::new(move |request, response| {
+            locked(&callbacks).push(SessionStep::Callback(
+                request.header.call_id,
+                request.session,
+            ));
+            response.result("ok".to_owned())
+        }))
+        .expect("echo registered");
+    for (id, credential) in [
+        (31, None),
+        (33, Some(Credential::Opaque(token))),
+        (
+            35,
+            Some(Credential::Opaque(
+                crate::SessionToken::new([2; 16]).expect("another token"),
+            )),
+        ),
+    ] {
+        served.transport.deliver(
+            &Envelope::Request {
+                header: RequestHeader {
+                    credential,
+                    ..super::server::header_of((id, &echo()))
+                },
+                payload: Bytes::new(),
+            },
+            &first(),
+        );
+    }
+    served.settle().await;
+    assert_eq!(
+        *locked(&order),
+        [
+            SessionStep::Session(first(), 31, false),
+            SessionStep::Admit(31, None),
+            SessionStep::Session(first(), 33, false),
+            SessionStep::Admit(33, Some(session.clone())),
+            SessionStep::Session(first(), 35, false),
+            SessionStep::Callback(31, None),
+            SessionStep::Callback(33, Some(session)),
+        ]
+    );
+    assert_eq!(
+        served.sent_since(),
+        [
+            "first failure 35 SESSION_REQUIRED",
+            "first result 31 ok",
+            "first result 33 ok",
+        ]
+    );
+    assert_eq!(served.reported(), Vec::<String>::new());
 }
 
 #[tokio::test]
