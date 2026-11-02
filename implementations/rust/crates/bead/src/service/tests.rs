@@ -26,6 +26,8 @@ use crate::router::types::RouterError;
 use crate::testing::pair::{Pair, PairOptions, echo};
 use crate::violations::{Judged, Violation};
 
+mod descriptors;
+
 // what a manager's debug listener heard: why, when a step went wrong, and the step
 type Heard = Arc<Mutex<Vec<(Option<String>, DebugEvent)>>>;
 
