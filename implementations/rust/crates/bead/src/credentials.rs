@@ -882,6 +882,15 @@ async fn resolve_elsewhere(
         return Ok(Resolved::Refused("verifier".to_owned()));
     };
 
+    if session
+        .end
+        .is_some_and(|end| !(-9_007_199_254_740_991..=9_007_199_254_740_991).contains(&end))
+    {
+        return Err(Unresolved::Other(Arc::new(ProgrammerError::new(
+            "an ELSEWHERE's verifier settles with a session whose end is a number of milliseconds within ±9007199254740991",
+        ))));
+    }
+
     // the wall clock read as the verifier settles: a session whose end it reached does not hold
     if let Some(end) = session.end
         && milliseconds_since_epoch(wall_now(inner)) >= end

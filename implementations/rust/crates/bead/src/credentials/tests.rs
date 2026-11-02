@@ -24,6 +24,7 @@ use crate::testing::SteppingClock;
 use crate::testing::scripted::ScriptedClient;
 use crate::transport::ClientTransport;
 
+mod elsewhere_bound;
 mod key_sets;
 
 #[test]
