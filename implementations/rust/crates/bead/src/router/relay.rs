@@ -232,6 +232,8 @@ fn locked(inner: &Mutex<Inner>) -> MutexGuard<'_, Inner> {
 /// What a server's router relays by: its destinations, shared by its handle and its owner.
 #[derive(Debug, Clone)]
 pub(crate) struct Relay {
+    #[cfg(test)]
+    pub(crate) fills: Option<Arc<crate::testing::scripted::DestinationFills>>,
     inner: Arc<Mutex<Inner>>,
     before_route: Option<BeforeRequest>,
     timeout: Duration,
@@ -267,6 +269,8 @@ impl Relay {
         let timeout = hold("a relay's timeout", options.timeout)?;
 
         Ok(Self {
+            #[cfg(test)]
+            fills: None,
             inner: Arc::new(Mutex::new(Inner {
                 registrations: Vec::new(),
                 open: BTreeSet::new(),
@@ -362,11 +366,11 @@ pub(crate) fn gauges(relay: &Relay) -> Gauges {
     gauges
 }
 
-fn draw_destination_id(is_in_use: &dyn Fn(u32) -> bool) -> u32 {
+fn draw_destination_id(relay: &Relay, is_in_use: &dyn Fn(u32) -> bool) -> u32 {
     loop {
         let mut bytes = [0_u8; 4];
 
-        if getrandom::fill(&mut bytes).is_err() {
+        if fill_destination(relay, &mut bytes).is_err() {
             continue;
         }
 
@@ -376,6 +380,17 @@ fn draw_destination_id(is_in_use: &dyn Fn(u32) -> bool) -> u32 {
             return destination_id;
         }
     }
+}
+
+fn fill_destination(relay: &Relay, bytes: &mut [u8; 4]) -> Result<(), getrandom::Error> {
+    #[cfg(test)]
+    if let Some(fills) = &relay.fills {
+        *bytes = fills.draw();
+        return Ok(());
+    }
+    #[cfg(not(test))]
+    let _: &Relay = relay;
+    getrandom::fill(bytes)
 }
 
 /// Registers a destination.
@@ -440,7 +455,7 @@ pub(crate) fn register(
     }
 
     let destination_id = given.unwrap_or_else(|| {
-        draw_destination_id(&|candidate| {
+        draw_destination_id(relay, &|candidate| {
             inner
                 .registrations
                 .iter()

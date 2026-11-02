@@ -1,5 +1,27 @@
 //! Relay admission, destination registrations and the calls bound to them.
 
+#[test]
+fn draws_a_destination_again_when_0_or_in_use() {
+    let fills = Arc::new(crate::testing::scripted::DestinationFills::new(
+        vec![[0, 0, 0, 0], [0, 0, 0, 5], [0, 0, 1, 7]],
+        [0, 0, 0, 9],
+    ));
+    let mut relay = Relay::new(
+        (RouterSide::Server, crate::router::types::LIMIT_DEFAULTS),
+        admitting(),
+    )
+    .expect("a relay");
+    relay.fills = Some(Arc::clone(&fills));
+    let target = Target::plain();
+    register(&relay, (target.as_target(), 5));
+    assert_eq!(fills.remaining(), 3, "an explicit id draws nothing");
+    let drawn = relay::register(&relay, (target.as_target(), DestinationOptions::default()))
+        .expect("a drawn destination");
+    assert_eq!(drawn.destination_id(), 263);
+    assert_eq!(fills.remaining(), 0);
+    assert_eq!(locked(&target.asked).len(), 0);
+}
+
 async fn through_own(
     served: &Served,
     (resolver, props): (Arc<Handler>, ResolverProps),

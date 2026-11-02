@@ -26,6 +26,36 @@ use crate::transport::{
 pub(crate) type ServerTransmitProbe =
     Arc<dyn Fn(&crate::router::server::ServerState, &ConnectionHandle) + Send + Sync>;
 
+/// Four-byte draws a destination test supplies, followed by its fallback once exhausted.
+#[derive(Debug)]
+pub struct DestinationFills {
+    fills: Mutex<VecDeque<[u8; 4]>>,
+    fallback: [u8; 4],
+}
+
+impl DestinationFills {
+    /// Draws `fills` in order, then `fallback` on each draw after them.
+    #[must_use]
+    pub fn new(fills: Vec<[u8; 4]>, fallback: [u8; 4]) -> Self {
+        Self {
+            fills: Mutex::new(fills.into()),
+            fallback,
+        }
+    }
+
+    /// The next four bytes, in the order the destination reader takes them.
+    #[must_use]
+    pub fn draw(&self) -> [u8; 4] {
+        locked(&self.fills).pop_front().unwrap_or(self.fallback)
+    }
+
+    /// How many supplied draws remain.
+    #[must_use]
+    pub fn remaining(&self) -> usize {
+        locked(&self.fills).len()
+    }
+}
+
 fn locked<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
     mutex.lock().unwrap_or_else(PoisonError::into_inner)
 }
