@@ -20,6 +20,7 @@ mod notification_endings;
 mod notifications;
 mod requester;
 mod resolver;
+mod resolver_edges;
 mod validation;
 
 type Heard = Arc<Mutex<Vec<(Option<String>, DebugEvent)>>>;
