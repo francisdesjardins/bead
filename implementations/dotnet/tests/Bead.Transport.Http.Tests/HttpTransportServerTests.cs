@@ -4505,4 +4505,101 @@ public sealed partial class HttpTransportServerTests : IAsyncLifetime
             BodyGracePeriod = TimeSpan.FromMilliseconds(1),
         });
     }
+
+    // spec 15.5.2, 15.6.13, 15.12.17
+    [Fact]
+    public async Task Hands_on_no_envelope_of_a_paused_connection_its_204_going_once_handed_on_and_429_busy_with_Retry_After_past_the_exchanges_under_way()
+    {
+        await Start(new HttpTransportServerOptions { MaximumWaitingExchanges = 2 });
+
+        var (connectionToken, connectionHandle) = await Connect();
+
+        _server.Pause(connectionHandle);
+
+        // * four under way, twice the requests that may wait: each read whole, and held at its
+        // gate, in the order it came
+        var request = Fetch(PostOf(connectionToken, EnvelopeOf(EnvelopeKind.Request, 1)));
+
+        await Until(() =>
+        {
+            return _server.HeldOf(connectionHandle) == 1;
+        });
+
+        var cancels = new List<Task<HttpResponseMessage>>();
+
+        foreach (var callId in new uint[] { 9, 11, 13 })
+        {
+            cancels.Add(Fetch(PostOf(connectionToken, EnvelopeOf(EnvelopeKind.Cancel, callId))));
+            await Until(() =>
+            {
+                return _server.HeldOf(connectionHandle) == cancels.Count + 1;
+            });
+        }
+
+        await Task.Delay(TimeSpan.FromMilliseconds(50), Cancelled);
+
+        // * each body still charged, as a slow body holds it
+        Assert.Equal(32, Count("bodyBytes"));
+
+        Assert.Empty(_messages);
+        Assert.False(request.IsCompleted);
+        Assert.All(cancels, (cancel) =>
+        {
+            Assert.False(cancel.IsCompleted);
+        });
+
+        // past the exchanges under way: busy, told when to come back
+        using (var crowded = await Fetch(PostOf(connectionToken, EnvelopeOf(EnvelopeKind.Cancel, 15))))
+        {
+            Assert.Equal(
+                (429, HttpRefusals.Busy, "1"),
+                ((int)crowded.StatusCode, HeaderOf(crowded, HttpTransport.RefusalHeader), HeaderOf(crowded, "retry-after")));
+        }
+
+        _server.Resume(connectionHandle);
+
+        // handed on in order, each non-request's 204 once it was, the request's head once it was
+        foreach (var cancel in cancels)
+        {
+            using var answered = await cancel;
+
+            Assert.Equal(204, (int)answered.StatusCode);
+        }
+
+        using var asked = await request;
+
+        Assert.Equal(200, (int)asked.StatusCode);
+        Assert.Equal([1u, 9u, 11u, 13u], _messages.Select((message) =>
+        {
+            return BinaryPrimitives.ReadUInt32BigEndian(message.Bytes.AsSpan(4));
+        }));
+        Assert.Equal(0, Count("bodyBytes"));
+
+        await _server.Send(new TransportMessage(EnvelopeOf(EnvelopeKind.Result, 1), false), connectionHandle);
+        await BytesOf(asked);
+    }
+
+    // spec 15.12.17
+    [Fact]
+    public async Task Tells_an_exchange_held_at_the_gate_of_a_paused_connection_that_its_connection_is_gone_as_it_closes()
+    {
+        await Start(new HttpTransportServerOptions());
+
+        var (connectionToken, connectionHandle) = await Connect();
+
+        _server.Pause(connectionHandle);
+
+        var held = RefusalOf(Fetch(PostOf(connectionToken, EnvelopeOf(EnvelopeKind.Cancel, 9))));
+
+        await Until(() =>
+        {
+            return _server.HeldOf(connectionHandle) == 1;
+        });
+        Assert.True(await _server.CloseConnection(connectionHandle).WaitAsync(Patience, Cancelled));
+
+        // * what waited at its gate goes with it, its charge released, and nothing of it handed on
+        Assert.Equal((404, HttpRefusals.ConnectionUnknown), await held);
+        Assert.Empty(_messages);
+        Assert.Equal(0, Count("bodyBytes"));
+    }
 }

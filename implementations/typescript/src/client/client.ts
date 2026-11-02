@@ -14,6 +14,7 @@ export {
   DisconnectError,
   FailureError,
   FailureScope,
+  INTAKE_DEFAULTS,
   LIMIT_DEFAULTS,
   ProtocolCode,
   SERVER_FAILURES,
@@ -44,6 +45,8 @@ export type {
 } from '../router/client/router-client';
 export type {
   ICallSession,
+  IIntakeLimits,
+  IntakeLimitsOptions,
   IRouterClientOptions,
   IRouterLimits,
   RequestCredential,
@@ -83,6 +86,7 @@ export const createClient = <Transport extends IClientTransportLike>(
     clock,
     credential: options?.credential,
     credentials: options?.credentials,
+    intake: options?.intake,
     limits: options?.limits,
     metricsRegistry: options?.metricsRegistry,
   });

@@ -19,6 +19,9 @@ use crate::envelope::{FailureRecord, MAXIMUM_DETAIL_BYTES, MAXIMUM_ENVELOPE_BYTE
 use crate::errors::ProgrammerError;
 use crate::failure::Failure;
 
+#[cfg(test)]
+mod tests;
+
 /// A future of Bead's, boxed, as an application's callback gives one.
 pub type BoxFuture<T> = Pin<Box<dyn Future<Output = T> + Send + 'static>>;
 
@@ -229,6 +232,65 @@ pub fn whole_envelope_limits_of(
     whole.window_bytes = Some(maximum_envelope_bytes.saturating_mul(2));
 
     Ok(whole)
+}
+
+/// What a router holds of each connection that its turns have not taken yet (spec 15.12).
+///
+/// Past either bound it pauses the connection, and resumes it once both counts are at half their
+/// bound or below (decision 0046). A side's own, announced to no one, unlike the limits of
+/// [`RouterLimits`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct IntakeLimits {
+    /// The envelopes one connection's transport handed its router that no turn of it took yet.
+    pub maximum_untaken_envelopes: u64,
+    /// Their bytes.
+    pub maximum_untaken_bytes: u64,
+}
+
+/// What a router holds of each connection untaken when its options say nothing: 64 envelopes, and
+/// 1 MiB of them.
+pub const INTAKE_DEFAULTS: IntakeLimits = IntakeLimits {
+    maximum_untaken_envelopes: 64,
+    maximum_untaken_bytes: 1_048_576,
+};
+
+/// A router's intake limits as its options give them: each left out, the default.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct IntakeLimitsOptions {
+    /// See [`IntakeLimits::maximum_untaken_envelopes`].
+    pub maximum_untaken_envelopes: Option<u64>,
+    /// See [`IntakeLimits::maximum_untaken_bytes`].
+    pub maximum_untaken_bytes: Option<u64>,
+}
+
+/// `options` over [`INTAKE_DEFAULTS`], where they say nothing.
+///
+/// # Errors
+///
+/// A [`ProgrammerError`] for a bound below 1.
+pub fn intake_limits_of(options: &IntakeLimitsOptions) -> Result<IntakeLimits, ProgrammerError> {
+    let limits = IntakeLimits {
+        maximum_untaken_envelopes: options
+            .maximum_untaken_envelopes
+            .unwrap_or(INTAKE_DEFAULTS.maximum_untaken_envelopes),
+        maximum_untaken_bytes: options
+            .maximum_untaken_bytes
+            .unwrap_or(INTAKE_DEFAULTS.maximum_untaken_bytes),
+    };
+
+    for (name, value) in [
+        ("maximumUntakenEnvelopes", limits.maximum_untaken_envelopes),
+        ("maximumUntakenBytes", limits.maximum_untaken_bytes),
+    ] {
+        if value < 1 {
+            return Err(ProgrammerError::new(format!(
+                "{name} is a whole number above 0, not {value}"
+            )));
+        }
+    }
+
+    Ok(limits)
 }
 
 /// A credential's session's identifier (spec 13.10): its scheme and its claim.

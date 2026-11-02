@@ -231,6 +231,8 @@ const createScriptedConnections = () => {
     stop: () => {
       return Promise.resolve();
     },
+    pause: noop,
+    resume: noop,
     send: ({ credential, data }, connectionHandle) => {
       queueOf(connectionHandle).push({ bytes: bytesOf(data), credential });
 

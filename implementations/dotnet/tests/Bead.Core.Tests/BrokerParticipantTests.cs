@@ -934,6 +934,213 @@ public sealed class BrokerParticipantTests
         Assert.Equal((0, ReadyState.Open, 1), (heard.Count, client.ReadyState, pair.Server.Clients.Count));
     }
 
+    // spec 15.12.17, 15.23.5
+    [Fact]
+    public async Task Holds_what_comes_for_a_paused_connection_in_order_and_loses_it_alone_past_maximumHeldEnvelopeBytes()
+    {
+        var (connections, peer) = await HeldConnectionsOf((new BrokerParticipantOptions { MaximumHeldEnvelopeBytes = 100 }, 2));
+        var (held, other) = (connections[0], connections[1]);
+
+        // * held while paused, in order, its link reading on for the other connection
+        held.Client.Pause();
+        await held.Send(DataOf(1, 40));
+        await held.Send(DataOf(2, 40));
+        await other.Send(DataOf(9));
+        await BrokerPair.Until(
+            () =>
+            {
+                return other.Told.Count == 1;
+            },
+            "the other connection told what came for it");
+        await peer.Settled();
+
+        Assert.Empty(held.Told);
+        Assert.Equal([9], other.FirstBytes);
+
+        held.Client.Resume();
+        await BrokerPair.Until(
+            () =>
+            {
+                return held.Told.Count == 2;
+            },
+            "what it held told once resumed");
+
+        Assert.Equal([1, 2], held.FirstBytes);
+
+        // * past what one connection may hold: that connection lost, a CLOSE of 4000, and no other
+        held.Client.Pause();
+        peer.Heard.Clear();
+        await held.Send(DataOf(3, 40));
+        await held.Send(DataOf(4, 40));
+        await held.Send(DataOf(5, 40));
+        await BrokerPair.Until(
+            () =>
+            {
+                return !held.Closes.IsEmpty;
+            },
+            "the held connection lost");
+        await other.Send(DataOf(10));
+        await BrokerPair.Until(
+            () =>
+            {
+                return other.Told.Count == 2;
+            },
+            "the other connection told what came for it");
+
+        Assert.Equal([false], held.Closes);
+        Assert.Equal(ReadyState.Closed, held.Client.ReadyState);
+        Assert.Equal([(BrokerParcelKinds.Close, (int?)4000)], peer.Heard.Select((parcel) =>
+        {
+            return (parcel.Kind, parcel.Code);
+        }));
+        Assert.Equal(["the connection to acceptor is closed with 4000: what it holds for its router, paused, would pass maximumHeldEnvelopeBytes, 100 bytes"], held.Reported);
+        Assert.Equal([9, 10], other.FirstBytes);
+        Assert.Equal((0, ReadyState.Open), (other.Closes.Count, other.Client.ReadyState));
+        Assert.Equal(
+            "MaximumHeldEnvelopeBytes is a whole number above 0, not 0 (Parameter 'MaximumHeldEnvelopeBytes')",
+            Assert.Throws<ArgumentOutOfRangeException>(() =>
+            {
+                return new BrokerParticipant(new MemoryBroker().Adapter(new MemoryBrokerAdapterOptions { Id = "bob" }), new BrokerParticipantOptions { MaximumHeldEnvelopeBytes = 0 });
+            }).Message);
+
+        await peer.DisposeAsync();
+    }
+
+    // spec 15.12.17, 15.23.5
+    [Fact]
+    public async Task A_resume_with_a_hand_already_queued_keeps_the_order_of_what_is_held()
+    {
+        var (connections, peer) = await HeldConnectionsOf((new BrokerParticipantOptions(), 1));
+        var held = connections[0];
+
+        held.Client.Pause();
+        await held.Send(DataOf(1));
+        await peer.Settled();
+
+        // * the next one's hand queued ahead of the resume's release: held behind what is held
+        var sending = held.Send(DataOf(2));
+
+        held.Client.Resume();
+        await sending;
+        await held.Send(DataOf(3));
+        await BrokerPair.Until(
+            () =>
+            {
+                return held.Told.Count == 3;
+            },
+            "each told once resumed");
+
+        Assert.Equal([1, 2, 3], held.FirstBytes);
+
+        await peer.DisposeAsync();
+    }
+
+    // spec 15.12.17, 15.21
+    [Fact]
+    public async Task A_CLOSE_behind_held_envelopes_comes_after_them_and_a_RESET_drops_them()
+    {
+        var (connections, peer) = await HeldConnectionsOf((new BrokerParticipantOptions(), 2));
+        var (closing, reset) = (connections[0], connections[1]);
+
+        // * a CLOSE that comes while anything is held waits behind it
+        closing.Client.Pause();
+        await closing.Send(DataOf(1));
+        await closing.Send(new BrokerParcel { Kind = BrokerParcelKinds.Close, Code = 1000 });
+        await peer.Settled();
+
+        Assert.Equal((0, 0, ReadyState.Open), (closing.Told.Count, closing.Closes.Count, closing.Client.ReadyState));
+
+        // nothing comes after a CLOSE: a DATA behind it dropped, and nothing of this side's goes
+        peer.Heard.Clear();
+        await closing.Send(DataOf(9));
+        await closing.Client.Send(new TransportMessage(new byte[] { 0xA1, 0x16 }, false));
+        await peer.Settled();
+
+        Assert.Empty(peer.Heard);
+
+        closing.Client.Resume();
+        await BrokerPair.Until(
+            () =>
+            {
+                return !closing.Closes.IsEmpty;
+            },
+            "its close told once what it held was");
+
+        Assert.Equal([1], closing.FirstBytes);
+        Assert.Equal([true], closing.Closes);
+        Assert.Equal(ReadyState.Closed, closing.Client.ReadyState);
+
+        // * a RESET ends it at once, whatever its order, what is held lost with it
+        reset.Client.Pause();
+        await reset.Send(DataOf(2));
+        await reset.Send(new BrokerParcel { Kind = BrokerParcelKinds.Reset });
+        await BrokerPair.Until(
+            () =>
+            {
+                return !reset.Closes.IsEmpty;
+            },
+            "its RESET ends it at once");
+
+        Assert.Equal([false], reset.Closes);
+        Assert.Equal(ReadyState.Closed, reset.Client.ReadyState);
+
+        reset.Client.Resume();
+        await peer.Settled();
+
+        Assert.Empty(reset.Told);
+
+        await peer.DisposeAsync();
+    }
+
+    // spec 15.23.4, 15.23.5
+    [Fact]
+    public async Task One_connection_held_to_its_bound_fails_the_parts_of_no_other_connection()
+    {
+        var (connections, peer) = await HeldConnectionsOf(
+            (new BrokerParticipantOptions { HeldBytesBudget = 2_048 }, 2),
+            new BrokerTransportClientOptions { MaximumUnsentBytes = 65_536 });
+        var (held, other) = (connections[0], connections[1]);
+
+        // * past the budget of the parts, held whole: charged to none of it
+        held.Client.Pause();
+
+        foreach (var value in new byte[] { 1, 2, 3 })
+        {
+            await held.Send(DataOf(value, 1_000));
+        }
+
+        await peer.Settled();
+
+        // the other's envelope in two parts of 600 bytes, under the budget alone
+        await other.Send(DataOf(7, 600) with { Flags = BrokerParcelFlags.More });
+        await other.Send(DataOf(8, 600));
+        await BrokerPair.Until(
+            () =>
+            {
+                return !other.Told.IsEmpty;
+            },
+            "the other's envelope told whole");
+
+        Assert.Equal([1_200], other.Told.Select((told) =>
+        {
+            return told.Length;
+        }));
+        Assert.Empty(other.Closes);
+        Assert.Equal((0, 0, ReadyState.Open), (held.Told.Count, held.Closes.Count, held.Client.ReadyState));
+
+        held.Client.Resume();
+        await BrokerPair.Until(
+            () =>
+            {
+                return held.Told.Count == 3;
+            },
+            "what it held told once resumed");
+
+        Assert.Equal([1, 2, 3], held.FirstBytes);
+
+        await peer.DisposeAsync();
+    }
+
     private static TimeSpan Immediately(TimeSpan? previousDelay, int attempt)
     {
         return TimeSpan.Zero;
@@ -997,6 +1204,169 @@ public sealed class BrokerParticipantTests
         heard.Clear();
 
         return (acceptor, heard, open.Opener);
+    }
+
+    // an envelope of `length` bytes, each `value`, in one DATA
+    private static BrokerParcel DataOf(byte value, int length = 1)
+    {
+        return new BrokerParcel { Kind = BrokerParcelKinds.Data, Carried = Enumerable.Repeat(value, length).ToArray() };
+    }
+
+    // a participant `ada` of the options given whose `Count` client transports each hold a
+    // connection to a peer of the test's own, `acceptor`, on one scheduler with their broker: what
+    // each heard, how each closed, and the parcels the peer sends on each, numbered from 2
+    private static async Task<(List<HeldConnection> Connections, HeldPeer Peer)> HeldConnectionsOf((BrokerParticipantOptions Options, int Count) held, BrokerTransportClientOptions? clientOptions = null)
+    {
+        var scheduler = new SerialScheduler();
+        var broker = new MemoryBroker(new MemoryBrokerOptions { Scheduler = scheduler });
+        var acceptor = broker.Adapter(new MemoryBrokerAdapterOptions { Id = "acceptor" });
+        var participant = new BrokerParticipant(broker.Adapter(new MemoryBrokerAdapterOptions { Id = "ada" }), held.Options with { Scheduler = scheduler });
+        var peer = new HeldPeer(scheduler, participant);
+        var connections = new List<HeldConnection>();
+
+        acceptor.Message += (message) =>
+        {
+            if (BrokerParcels.Read(message.Payload).Parcel is { } parcel)
+            {
+                peer.Heard.Enqueue(parcel);
+            }
+
+            message.Settle();
+        };
+        await acceptor.Start();
+        await acceptor.Subscribe(["bead", "i", "acceptor"]);
+        await acceptor.Subscribe(["bead", "s", "interop"]);
+
+        for (var index = 0; index < held.Count; index += 1)
+        {
+            var client = participant.Client(clientOptions);
+            var acceptorHalf = AcceptorHalf + (ulong)index;
+
+            peer.Heard.Clear();
+
+            var connecting = client.Connect(new BrokerConnectOptions { Server = "interop" }, Cancelled);
+
+            await BrokerPair.Until(
+                () =>
+                {
+                    return !peer.Heard.IsEmpty;
+                },
+                "its OPEN reaches the name");
+            Assert.True(peer.Heard.TryDequeue(out var open));
+            await acceptor.Publish(new BrokerPublication
+            {
+                Topic = ["bead", "i", "ada"],
+                Payload = BrokerParcels.Write(new BrokerParcel
+                {
+                    Kind = BrokerParcelKinds.Accept,
+                    Flags = BrokerParcelFlags.Secure,
+                    Opener = open.Opener,
+                    Acceptor = acceptorHalf,
+                    Sequence = 1,
+                    Id = "acceptor",
+                    Incarnation = 0xC0,
+                    Bound = 65_536,
+                }),
+            });
+            await connecting.WaitAsync(BrokerPair.Patience, Cancelled);
+            await BrokerPair.Until(
+                () =>
+                {
+                    return !peer.Heard.IsEmpty;
+                },
+                "its third leg's PING");
+            peer.Heard.Clear();
+            connections.Add(new HeldConnection(client, (acceptor, (open.Opener, acceptorHalf))));
+        }
+
+        return (connections, peer);
+    }
+
+    // the peer of the test's own, the participant its connections go through, and what the peer
+    // heard; settled once their scheduler is idle
+    private sealed class HeldPeer(SerialScheduler scheduler, BrokerParticipant participant) : IAsyncDisposable
+    {
+        public ConcurrentQueue<BrokerParcel> Heard { get; } = new();
+
+        // what was published taken, and what that queued behind it
+        public async Task Settled()
+        {
+            for (var round = 0; round < 3; round += 1)
+            {
+                await scheduler.WhenIdle().WaitAsync(BrokerPair.Patience, Cancelled);
+                await Task.Delay(TimeSpan.FromMilliseconds(10), TimeProvider.System, Cancelled);
+            }
+        }
+
+        public async ValueTask DisposeAsync()
+        {
+            await participant.DisposeAsync();
+        }
+    }
+
+    // one connection of the participant's client transports to the test's peer: what it told, how
+    // it closed, what it reported, and the parcels the peer sends on it, numbered from 2
+    private sealed class HeldConnection
+    {
+        private readonly MemoryBrokerAdapter _acceptor;
+        private readonly (ulong Opener, ulong Acceptor) _pair;
+        private ulong _sequence = 1;
+
+        public HeldConnection(BrokerTransportClient client, (MemoryBrokerAdapter Acceptor, (ulong Opener, ulong Acceptor) Pair) peer)
+        {
+            Client = client;
+            _acceptor = peer.Acceptor;
+            _pair = peer.Pair;
+            client.Message += (message) =>
+            {
+                Told.Enqueue(message.Bytes.ToArray());
+            };
+            client.Close += (isClean, _) =>
+            {
+                Closes.Enqueue(isClean);
+            };
+            client.Error += (reason) =>
+            {
+                Reported.Enqueue(reason.Message);
+            };
+        }
+
+        public BrokerTransportClient Client { get; }
+
+        public ConcurrentQueue<byte[]> Told { get; } = new();
+
+        public ConcurrentQueue<bool> Closes { get; } = new();
+
+        public ConcurrentQueue<string> Reported { get; } = new();
+
+        // the first byte of each envelope told, in order
+        public List<int> FirstBytes
+        {
+            get
+            {
+                return [.. Told.Select((told) =>
+                {
+                    return (int)told[0];
+                })];
+            }
+        }
+
+        // a parcel of its pair from the peer, the next of its sequence, a RESET unnumbered
+        public async Task Send(BrokerParcel fields)
+        {
+            var isReset = fields.Kind == BrokerParcelKinds.Reset;
+
+            if (!isReset)
+            {
+                _sequence += 1;
+            }
+
+            await _acceptor.Publish(new BrokerPublication
+            {
+                Topic = ["bead", "i", "ada"],
+                Payload = BrokerParcels.Write(fields with { Opener = _pair.Opener, Acceptor = _pair.Acceptor, Sequence = isReset ? 0 : _sequence }),
+            });
+        }
     }
 
     [Fact]

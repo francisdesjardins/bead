@@ -1,4 +1,5 @@
 import { once } from 'node:events';
+import { noop } from '../../transport/shared/noop';
 import { type IncomingMessage, request } from 'node:http';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { expect, test } from '@playwright/test';
@@ -107,6 +108,8 @@ const createScriptedTransport = () => {
 
       return control.closeResult;
     },
+    pause: noop,
+    resume: noop,
     send: ({ data }, connectionHandle) => {
       sent.push({
         connectionHandle,

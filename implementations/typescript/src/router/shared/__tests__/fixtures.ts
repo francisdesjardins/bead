@@ -11,6 +11,7 @@ import type { ITransportMessage } from '../../../transport/shared/types';
 import { createRouterCore } from '../router-core';
 import type {
   CallId,
+  IntakeLimitsOptions,
   IRouterCore,
   IRouterCorePort,
   IRouterFailures,
@@ -105,13 +106,15 @@ interface IQueued {
  * `seed`, the chunks and the credits taken in any order and sent twice half the time — every other
  * kind in order, and once. Each side records what it reports, and the kind of each envelope it
  * sends; `sizes` holds the bytes of every envelope sent, and `traffic` every envelope as it was
- * sent, once, and as it was handed over.
+ * sent, once, and as it was handed over. A side paused waits for its resume.
  */
 export const createLoopback = ({
+  intake,
   limits,
   seed,
   serverLimits = limits,
 }: {
+  intake?: IntakeLimitsOptions | undefined;
   limits?: RouterLimitsOptions | undefined;
   seed?: number | undefined;
   serverLimits?: RouterLimitsOptions | undefined;
@@ -123,6 +126,12 @@ export const createLoopback = ({
   const recorded = {
     client: { reported: [] as Error[], sent: [] as number[] },
     server: { reported: [] as Error[], sent: [] as number[] },
+  };
+  const paused = { client: false, server: false };
+  // each envelope's kind as a side took it, and whether its intake had paused it then
+  const taken = {
+    client: [] as { isPaused: boolean; kind: number }[],
+    server: [] as { isPaused: boolean; kind: number }[],
   };
 
   const portOf = <Handle extends string>(
@@ -138,8 +147,14 @@ export const createLoopback = ({
       isTracing: () => {
         return false;
       },
+      pause: () => {
+        paused[side] = true;
+      },
       report: (error) => {
         recorded[side].reported.push(error);
+      },
+      resume: () => {
+        paused[side] = false;
       },
       send: ({ data: bytes }) => {
         // the kind is an envelope's second byte, whatever its layout
@@ -167,10 +182,12 @@ export const createLoopback = ({
   const client: IRouterCore<'server'> = createRouterCore(
     portOf<'server'>('client', CLIENT_FAILURES),
     {
+      intake,
       limits,
     }
   );
   const server: IRouterCore<'a'> = createRouterCore(portOf<'a'>('server', SERVER_FAILURES), {
+    intake,
     limits: serverLimits,
   });
 
@@ -196,6 +213,11 @@ export const createLoopback = ({
       for (const queued of queue.splice(nextIndex(), 1)) {
         const { bytes, to } = queued;
 
+        // * a side paused is handed nothing until its core resumes it, in a later task
+        while (paused[to]) {
+          await nextTurn();
+        }
+
         traffic.delivered.push(queued);
 
         if (to === 'server') {
@@ -203,6 +225,8 @@ export const createLoopback = ({
         } else {
           client.receive(bytes, 'server');
         }
+
+        taken[to].push({ isPaused: paused[to], kind: bytes[1] ?? 0 });
       }
 
       // a turn for what answers asynchronously
@@ -210,14 +234,15 @@ export const createLoopback = ({
     }
   };
 
-  return { client, flush, recorded, server, sizes, traffic };
+  return { client, flush, paused, recorded, server, sizes, taken, traffic };
 };
 
 /**
  * A client transport and a server transport joined back to back, as one connection `connectionHandle`:
  * what the client sends the server takes from it, and the other way. A message is handed over within
  * its send, or a turn later when `isDeferred`; a send while the connection is not open rejects.
- * `open` and `close` play its life; `sent` holds each side's bytes, in order.
+ * `open` and `close` play its life; `sent` holds each side's bytes, in order, and `pauses` each
+ * pause, `true`, and resume its router asked of it, which holds nothing.
  */
 export const createPipedTransports = ({
   connectionHandle,
@@ -241,6 +266,8 @@ export const createPipedTransports = ({
     message: [message: ITransportMessage, connectionHandle: TransportServerConnectionHandle];
   }>();
   const sent = { client: [] as Uint8Array[], server: [] as Uint8Array[] };
+  // each pause and resume each side's router asked of its transport, which holds nothing
+  const pauses = { client: [] as boolean[], server: [] as boolean[] };
   let isOpen = false;
 
   // within the send, or a turn later
@@ -269,6 +296,12 @@ export const createPipedTransports = ({
     off: client.off,
     // oxlint-disable-next-line typescript/unbound-method -- as above
     on: client.on,
+    pause: () => {
+      pauses.client.push(true);
+    },
+    resume: () => {
+      pauses.client.push(false);
+    },
     send: ({ credential, data }) => {
       if (!isOpen) {
         return Promise.reject(new Error(`${connectionHandle} is not open`));
@@ -295,6 +328,12 @@ export const createPipedTransports = ({
     off: server.off,
     // oxlint-disable-next-line typescript/unbound-method -- as above
     on: server.on,
+    pause: () => {
+      pauses.server.push(true);
+    },
+    resume: () => {
+      pauses.server.push(false);
+    },
     send: ({ credential, data }, handle) => {
       if (!isOpen || handle !== connectionHandle) {
         return Promise.reject(new Error(`${handle} is not open`));
@@ -322,6 +361,7 @@ export const createPipedTransports = ({
       isOpen = true;
       server.emit('connection', {}, {}, connectionHandle);
     },
+    pauses,
     sent,
     server: serverTransport,
   };

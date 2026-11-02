@@ -142,9 +142,10 @@ pub use router::server::{
 };
 pub use router::types::{
     AccessRefusal, AccessRefusalStage, BoxFuture, CallAddress, CallSession, ConnectionHandle,
-    Gauges, LIMIT_DEFAULTS, RequestCredential, ResolvedRequestOptions, RouterActivity,
-    RouterAnswer, RouterError, RouterLimits, RouterLimitsOptions, RouterResult, SessionIdentifier,
-    Signal, SignalReason, TransportMessage, limits_of, session_key_of, whole_envelope_limits_of,
+    Gauges, INTAKE_DEFAULTS, IntakeLimits, IntakeLimitsOptions, LIMIT_DEFAULTS, RequestCredential,
+    ResolvedRequestOptions, RouterActivity, RouterAnswer, RouterError, RouterLimits,
+    RouterLimitsOptions, RouterResult, SessionIdentifier, Signal, SignalReason, TransportMessage,
+    intake_limits_of, limits_of, session_key_of, whole_envelope_limits_of,
 };
 pub use server::{
     Health, HealthCheck, HealthStatus, LayerGauges, Server, ServerGauges, ServerOptions,

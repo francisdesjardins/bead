@@ -3428,3 +3428,101 @@ test.describe('WSTransportServer, its bounds', () => {
     }
   });
 });
+
+test.describe('WSTransportServer, a connection its router paused', () => {
+  // spec 15.12.17
+  test('reads no message of a paused connection, holds the rest of its read, and hands it in order once resumed', async () => {
+    await using started = await startDated({ heartbeat: Infinity });
+    const { port, server } = started;
+    const connection = nextServerEvent(server, 'connection');
+    const client = new WsClient(`ws://${host}:${String(port)}`);
+    const heard: number[] = [];
+
+    await once(client, 'open');
+
+    const [socket, , connectionHandle] = await connection;
+
+    server.on('message', ({ data }) => {
+      heard.push(new DataView(data as ArrayBuffer).getUint32(0));
+
+      // * a router at its bound pauses within the hand, ws emitting the rest of its read
+      if (heard.length === 3) {
+        server.pause(connectionHandle);
+      }
+    });
+
+    // many messages, coalesced into the reads of its socket
+    for (let index = 0; index < 2_000; index += 1) {
+      const bytes = new Uint8Array(4);
+
+      new DataView(bytes.buffer).setUint32(0, index);
+      client.send(bytes);
+    }
+
+    await expect
+      .poll(() => {
+        return heard.length;
+      })
+      .toBe(3);
+    await sleep(100);
+
+    // its socket read no more, and what ws emitted of the read under way was held
+    expect([heard.length, (socket as unknown as WsWebSocket).isPaused]).toEqual([3, true]);
+
+    server.resume(connectionHandle);
+
+    await expect
+      .poll(() => {
+        return heard.length;
+      })
+      .toBe(2_000);
+    expect(heard).toEqual(
+      Array.from({ length: 2_000 }, (_, index) => {
+        return index;
+      })
+    );
+    expect((socket as unknown as WsWebSocket).isPaused).toBe(false);
+    client.close();
+  });
+
+  // spec 15.12.17; RFC 6455 §7.1.1
+  test('a paused connection closes cleanly', async () => {
+    await using started = await startDated({ closeTimeout: 2_000, heartbeat: Infinity });
+    const { port, server } = started;
+    const connection = nextServerEvent(server, 'connection');
+    const client = new WsClient(`ws://${host}:${String(port)}`);
+    const heard: unknown[] = [];
+
+    await once(client, 'open');
+
+    const [socket, , connectionHandle] = await connection;
+    const codes = new Promise<number>((resolve) => {
+      (socket as unknown as WsWebSocket).once('close', (code: number) => {
+        resolve(code);
+      });
+    });
+
+    server.on('message', ({ data }) => {
+      heard.push(data);
+    });
+    server.pause(connectionHandle);
+    client.send(new Uint8Array(4));
+    await sleep(50);
+
+    const closed = nextServerEvent(server, 'close');
+    const startedAt = performance.now();
+
+    const closing = server.close(connectionHandle);
+
+    // a pause its router asks as it closes is let be
+    server.pause(connectionHandle);
+    await closing;
+
+    // * it read its peer's Close, its own pause opened: clean, long before its close timeout
+    expect(await codes).toBe(1000);
+    expect(await closed).toEqual([true, connectionHandle]);
+    expect(performance.now() - startedAt).toBeLessThan(1_500);
+    // what it held dropped with it
+    expect(heard).toEqual([]);
+  });
+});

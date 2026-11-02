@@ -56,8 +56,9 @@ public sealed record MemoryConnectOptions
 /// process: each envelope copied as it is sent, and handed on whole, once and in order, in a later
 /// turn than its send, with the credential its router gives beside it, any field value, as
 /// <c>POST /bead</c> carries one; what comes back carries none. It never leaves the process, so it
-/// is secure (spec 13.4), and holds no bound, heartbeat or timeout of its own but its connect's. It
-/// goes from <see cref="ReadyState.Uninitialized"/> through Connecting and Open to Closing and
+/// is secure (spec 13.4), and holds no bound, heartbeat or timeout of its own but its connect's.
+/// Paused by its router, it holds what its server sends, in order, without bound, and hands it on
+/// once resumed (spec 15.12). It goes from <see cref="ReadyState.Uninitialized"/> through Connecting and Open to Closing and
 /// Closed, and connects again once Closed — or reconnects, with the options of its last connect.
 /// </summary>
 public sealed class MemoryTransportClient : IRouterClientTransport, IAsyncDisposable
@@ -75,6 +76,9 @@ public sealed class MemoryTransportClient : IRouterClientTransport, IAsyncDispos
     // the open connection; one this side let go of is none, and its end tells nothing
     private volatile MemoryConnection? _connection;
     private Action? _reconnect;
+    // * what its router paused it for, held in order without bound, its peer its application's own
+    // code; what a connection holds goes with it, its pause outlasting it (spec 15.12, 15.13)
+    private readonly TransportHold<(MemoryConnection Connection, TransportMessage Message)> _hold = new();
     // how its events are told: what a listener throws is reported through Error
     private readonly ListenerGuard _listeners;
 
@@ -185,6 +189,28 @@ public sealed class MemoryTransportClient : IRouterClientTransport, IAsyncDispos
         ArgumentNullException.ThrowIfNull(credential);
 
         return HostsAndOrigins.IsVisibleField(credential);
+    }
+
+    /// <summary>
+    /// Holds what its server sends from now on, in order, without bound: its peer is its
+    /// application's own code (spec 15.12, 15.13). A pause outlasts its connection, until a resume.
+    /// </summary>
+    public void Pause()
+    {
+        // ! the hold's own lock alone, never one held while it tells
+        _hold.Pause();
+    }
+
+    /// <summary>
+    /// Hands on what it holds, in order, in a turn of its own, never within this call, asking
+    /// before each whether it was paused again.
+    /// </summary>
+    public void Resume()
+    {
+        if (_hold.Resume())
+        {
+            _scheduler.Post(HandHeld);
+        }
     }
 
     /// <summary>
@@ -619,7 +645,25 @@ public sealed class MemoryTransportClient : IRouterClientTransport, IAsyncDispos
             return;
         }
 
-        _listeners.Tell(Message, message);
+        if (_hold.Offer((connection, message)))
+        {
+            _listeners.Tell(Message, message);
+        }
+    }
+
+    // * in a turn of its own: what it held handed on, in order, each after asking whether its
+    // router paused it again; nothing of a connection it let go of
+    private void HandHeld()
+    {
+        while (_hold.TryTake(out var held))
+        {
+            var (connection, message) = held;
+
+            if (_connection == connection && !connection.IsClosedAtClient)
+            {
+                _listeners.Tell(Message, message);
+            }
+        }
     }
 
     // * in a turn of its own: its server ended the connection, after what it sent before; told
@@ -642,6 +686,7 @@ public sealed class MemoryTransportClient : IRouterClientTransport, IAsyncDispos
             _readyState = ReadyState.Closed;
         }
 
+        _hold.Drop();
         _listeners.Tell(Close, (false, false));
     }
 
@@ -672,6 +717,8 @@ public sealed class MemoryTransportClient : IRouterClientTransport, IAsyncDispos
         {
             // the connect ended meanwhile: there is nothing left to cancel
         }
+
+        _hold.Drop();
 
         if (connection is not null)
         {

@@ -110,6 +110,98 @@ const acceptOf = (
   });
 };
 
+/**
+ * A participant `ada` of `options` whose `count` client transports each hold a connection to a
+ * peer of the test's own, `acceptor`: what each heard, how each closed, and the parcels the peer
+ * sends on each, numbered from 2, behind its ACCEPT.
+ */
+const heldConnections = async (
+  options: Omit<Parameters<typeof createBrokerParticipant>[0], 'adapter'>,
+  { count, maximumUnsentBytes }: { count: number; maximumUnsentBytes?: number }
+) => {
+  const broker = createMemoryBroker();
+  const peer = await peerOf(broker, { id: 'acceptor', isServing: true });
+  const participant = createBrokerParticipant({
+    adapter: broker.adapter({ id: 'ada' }),
+    ...options,
+  });
+  const reported: string[] = [];
+  const connections: {
+    client: ReturnType<typeof participant.transportClient>;
+    closes: boolean[];
+    told: number[][];
+    send: (fields: Omit<IParcel, 'acceptor' | 'layout' | 'opener' | 'sequence'>) => Promise<void>;
+  }[] = [];
+
+  for (let index = 0; index < count; index += 1) {
+    const client = participant.transportClient({ maximumUnsentBytes });
+    const acceptor = Uint8Array.of(0xa1, 0, 0, 0, 0, 0, 1, index + 1);
+    const told: number[][] = [];
+    const closes: boolean[] = [];
+    const connecting = client.connect({ server: 'interop' });
+
+    client.on('message', ({ data }) => {
+      told.push([...(data as Uint8Array)]);
+    });
+    client.on('close', (wasClean) => {
+      closes.push(wasClean);
+    });
+    client.on('error', ({ message }) => {
+      reported.push(message);
+    });
+    await settled();
+
+    const opener = peer.heard.findLast(({ topic }) => {
+      return topic === NAME.join('/');
+    })?.parcel?.opener;
+
+    if (opener === undefined) {
+      throw new Error('no OPEN came');
+    }
+
+    await peer.adapter.publish({
+      payload: acceptOf({ opener } as IParcel, { acceptor, id: 'acceptor' }),
+      topic: ['bead', 'i', 'ada'],
+    });
+    await connecting;
+    await settled();
+
+    let sequence = 1;
+
+    connections.push({
+      client,
+      closes,
+      send: (fields) => {
+        const isReset = fields.kind === ParcelKind.RESET;
+
+        sequence += isReset ? 0 : 1;
+
+        return peer.adapter
+          .publish({
+            payload: writeParcel({
+              ...fields,
+              acceptor,
+              opener,
+              sequence: isReset ? 0 : sequence,
+            }),
+            topic: ['bead', 'i', 'ada'],
+          })
+          .then(() => {
+            return undefined;
+          });
+      },
+      told,
+    });
+  }
+
+  return { connections, participant, peer, reported };
+};
+
+/** An envelope of `length` bytes, each `byte`, in one DATA. */
+const dataOf = (byte: number, length = 1) => {
+  return { carried: new Uint8Array(length).fill(byte), kind: ParcelKind.DATA };
+};
+
 // definition
 
 test.describe('broker participant', () => {
@@ -327,6 +419,190 @@ test.describe('broker participant', () => {
     expect(reported).toEqual([
       'the connection to acceptor is closed with 4000: what waits for its broker would pass maximumUnsentBytes, 2048 bytes',
     ]);
+
+    await participant.stop();
+  });
+
+  // spec 15.12.17, 15.23.5
+  test('holds what comes for a paused connection, in order, and loses it alone past maximumHeldEnvelopeBytes', async () => {
+    const { connections, participant, peer, reported } = await heldConnections(
+      { maximumHeldEnvelopeBytes: 100 },
+      { count: 2 }
+    );
+    const [held, other] = connections;
+
+    if (held === undefined || other === undefined) {
+      throw new Error('two connections');
+    }
+
+    // * held while paused, in order, its link reading on for the other connection
+    held.client.pause();
+    await held.send(dataOf(1, 40));
+    await held.send(dataOf(2, 40));
+    await other.send(dataOf(9));
+    await settled();
+
+    expect([held.told, other.told]).toEqual([[], [[9]]]);
+
+    held.client.resume();
+    await settled();
+
+    expect(
+      held.told.map(([byte]) => {
+        return byte;
+      })
+    ).toEqual([1, 2]);
+
+    // * past what one connection may hold: that connection lost, a CLOSE of 4000, and no other
+    held.client.pause();
+    peer.heard.length = 0;
+    await held.send(dataOf(3, 40));
+    await held.send(dataOf(4, 40));
+    await held.send(dataOf(5, 40));
+    await settled();
+    await other.send(dataOf(10));
+    await settled();
+
+    expect([held.closes, held.client.isOpen()]).toEqual([[false], false]);
+    expect(
+      peer.heard.map(({ parcel }) => {
+        return [parcel?.kind, parcel?.code];
+      })
+    ).toEqual([[ParcelKind.CLOSE, 4000]]);
+    expect(reported).toEqual([
+      'the connection to acceptor is closed with 4000: what it holds for its router, paused, would pass maximumHeldEnvelopeBytes, 100 bytes',
+    ]);
+    expect([other.told, other.closes, other.client.isOpen()]).toEqual([[[9], [10]], [], true]);
+    expect(() => {
+      return createBrokerParticipant({
+        adapter: createMemoryBroker().adapter({ id: 'bob' }),
+        maximumHeldEnvelopeBytes: 0,
+      });
+    }).toThrow(new ProgrammerError('maximumHeldEnvelopeBytes is a whole number above 0, not 0'));
+
+    await participant.stop();
+  });
+
+  // spec 15.12.17, 15.23.5
+  test('a resume with a hand already queued keeps the order of what is held', async () => {
+    const { connections, participant } = await heldConnections({}, { count: 1 });
+    const [held] = connections;
+
+    if (held === undefined) {
+      throw new Error('one connection');
+    }
+
+    held.client.pause();
+    await held.send(dataOf(1));
+    await settled();
+
+    // * the next one's hand queued ahead of the resume's release: held behind what is held
+    const sending = held.send(dataOf(2));
+
+    held.client.resume();
+    await sending;
+    await settled();
+    await held.send(dataOf(3));
+    await settled();
+
+    expect(
+      held.told.map(([byte]) => {
+        return byte;
+      })
+    ).toEqual([1, 2, 3]);
+
+    await participant.stop();
+  });
+
+  // spec 15.12.17, 15.21
+  test('a CLOSE behind held envelopes comes after them, and a RESET drops them', async () => {
+    const { connections, participant, peer } = await heldConnections({}, { count: 2 });
+    const [closing, reset] = connections;
+
+    if (closing === undefined || reset === undefined) {
+      throw new Error('two connections');
+    }
+
+    // * a CLOSE that comes while anything is held waits behind it
+    closing.client.pause();
+    await closing.send(dataOf(1));
+    await closing.send({ code: 1000, kind: ParcelKind.CLOSE });
+    await settled();
+
+    expect([closing.told, closing.closes, closing.client.isOpen()]).toEqual([[], [], true]);
+
+    // nothing comes after a CLOSE: a DATA behind it dropped, and nothing of this side's goes
+    const heard = peer.heard.length;
+
+    await closing.send(dataOf(9));
+    await closing.client.send({ data: Uint8Array.of(0xa1, 0x16) });
+    await settled();
+
+    expect(peer.heard.length).toBe(heard);
+
+    closing.client.resume();
+    await settled();
+
+    expect([closing.told, closing.closes, closing.client.isOpen()]).toEqual([[[1]], [true], false]);
+
+    // * a RESET ends it at once, whatever its order, what is held lost with it
+    reset.client.pause();
+    await reset.send(dataOf(2));
+    await reset.send({ kind: ParcelKind.RESET });
+    await settled();
+
+    expect([reset.closes, reset.client.isOpen()]).toEqual([[false], false]);
+
+    reset.client.resume();
+    await settled();
+
+    expect(reset.told).toEqual([]);
+
+    await participant.stop();
+  });
+
+  // spec 15.23.4, 15.23.5
+  test('one connection held to its bound fails the parts of no other connection', async () => {
+    const { connections, participant } = await heldConnections(
+      { heldBytesBudget: 2_048 },
+      { count: 2, maximumUnsentBytes: 65_536 }
+    );
+    const [held, other] = connections;
+
+    if (held === undefined || other === undefined) {
+      throw new Error('two connections');
+    }
+
+    // * past the budget of the parts, held whole: charged to none of it
+    held.client.pause();
+
+    for (const byte of [1, 2, 3]) {
+      await held.send(dataOf(byte, 1_000));
+    }
+
+    await settled();
+
+    // the other's envelope in two parts of 600 bytes, under the budget alone
+    await other.send({ ...dataOf(7, 600), flags: ParcelFlag.MORE });
+    await other.send(dataOf(8, 600));
+    await settled();
+
+    expect([
+      other.told.map(({ length }) => {
+        return length;
+      }),
+      other.closes,
+    ]).toEqual([[1_200], []]);
+    expect([held.told, held.closes, held.client.isOpen()]).toEqual([[], [], true]);
+
+    held.client.resume();
+    await settled();
+
+    expect(
+      held.told.map(([byte]) => {
+        return byte;
+      })
+    ).toEqual([1, 2, 3]);
 
     await participant.stop();
   });

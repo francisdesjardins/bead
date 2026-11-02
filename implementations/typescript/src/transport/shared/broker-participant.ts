@@ -116,6 +116,13 @@ export interface IBrokerParticipantOptions {
    */
   heldBytesBudget?: number | undefined;
   /**
+   * What it holds of the envelopes of one connection its router paused, past which it loses that
+   * connection, a CLOSE of 4000 (spec 15.23): a whole number above 0, charged to no budget of its
+   * parts. Each connection's `maximumUnsentBytes`, its transport's, when not given: the most a
+   * conforming peer has under way on it.
+   */
+  maximumHeldEnvelopeBytes?: number | undefined;
+  /**
    * One envelope's parts together, at most, at both ends; past them its connection closes with
    * 1009 (spec 15.20). A whole number above 0, its router's `maximumEnvelopeBytes` at least.
    * Defaults to {@link MAXIMUM_ENVELOPE_PARTS_BYTES}, the default envelope's limit.
@@ -224,8 +231,19 @@ export interface IBrokerConnection {
   close(code: number): void;
   /** Forgets it, sending nothing: a half-open connection whose third leg never came. */
   forget(): void;
+  /**
+   * Holds each envelope that comes whole for it from now on, its router paused (spec 15.12): in
+   * order, its peer's CLOSE behind them, to `maximumHeldEnvelopeBytes`, past which it is lost; its
+   * link reads on, which carries other connections. Idempotent.
+   */
+  pause(): void;
   /** Ends it at once, unclean, by a RESET to its peer. */
   reset(): void;
+  /**
+   * Hands on what it holds, in order, from a microtask, never within this call, asking before
+   * each whether it was paused again; then a CLOSE held behind them ends it. Idempotent.
+   */
+  resume(): void;
   /** Sends an envelope, in parts past what its peer takes whole, a credential beside it. */
   send(data: Uint8Array, options?: { credential?: string | undefined }): Promise<void>;
 }
@@ -378,6 +396,7 @@ export const createBrokerParticipant = (options: IBrokerParticipantOptions): IBr
     clock = PLATFORM_CLOCK,
     heldBytesBudget = HELD_BYTES_BUDGET,
     maximumEnvelopePartsBytes = MAXIMUM_ENVELOPE_PARTS_BYTES,
+    maximumHeldEnvelopeBytes,
     minimumBodyBytesPerSecond = MINIMUM_BODY_BYTES_PER_SECOND,
     reconnect = {},
     requireDelivery,
@@ -421,6 +440,11 @@ export const createBrokerParticipant = (options: IBrokerParticipantOptions): IBr
         };
 
   assertCount('heldBytesBudget', { value: heldBytesBudget });
+
+  if (maximumHeldEnvelopeBytes !== undefined) {
+    assertCount('maximumHeldEnvelopeBytes', { value: maximumHeldEnvelopeBytes });
+  }
+
   assertCount('maximumEnvelopePartsBytes', { value: maximumEnvelopePartsBytes });
   assertCount('minimumBodyBytesPerSecond', { value: minimumBodyBytesPerSecond });
 
@@ -681,6 +705,14 @@ export const createBrokerParticipant = (options: IBrokerParticipantOptions): IBr
     let isHalfOpen = !isOpener;
     let isEnded = false;
     let beat: ISilenceHeartbeat | undefined;
+    // * what its router paused it for: each envelope come whole held in order, its bytes counted
+    // apart from its parts', and the CLOSE that came behind them, whether clean (spec 15.12, 15.23)
+    const heldBound = maximumHeldEnvelopeBytes ?? maximumUnsentBytes;
+    const heldEnvelopes: { credential?: string | undefined; data: Uint8Array }[] = [];
+    let heldEnvelopeBytes = 0;
+    let isPaused = false;
+    let isReleasing = false;
+    let closing: boolean | undefined;
 
     const forget = (): void => {
       if (isEnded) {
@@ -691,6 +723,8 @@ export const createBrokerParticipant = (options: IBrokerParticipantOptions): IBr
       connections.delete(key);
       parts.stop();
       beat?.stop();
+      heldEnvelopes.length = 0;
+      heldEnvelopeBytes = 0;
 
       if (!isHalfOpen) {
         depart(peer.id, -1);
@@ -710,6 +744,12 @@ export const createBrokerParticipant = (options: IBrokerParticipantOptions): IBr
       options?: { expiresAfter?: number | undefined }
     ): void => {
       const isReset = fields.kind === ParcelKind.RESET;
+
+      // * its peer's CLOSE came, held behind what it holds: nothing goes after a CLOSE
+      if (closing !== undefined) {
+        return;
+      }
+
       const parcel: IParcel = {
         ...fields,
         flags: (fields.flags ?? 0) | (fields.credential === undefined ? 0 : ParcelFlag.CREDENTIAL),
@@ -799,6 +839,55 @@ export const createBrokerParticipant = (options: IBrokerParticipantOptions): IBr
             });
     };
 
+    // an envelope come whole handed on to its owner; or, while its router paused it or anything is
+    // held, held behind what is held, in order, the connection lost past what it may hold
+    const hand = (envelope: { credential?: string | undefined; data: Uint8Array }): void => {
+      if (!isPaused && heldEnvelopes.length === 0) {
+        return (owner.envelope(envelope), undefined);
+      }
+
+      if (heldEnvelopeBytes + envelope.data.length > heldBound) {
+        return (
+          lose({
+            code: CloseCode.LOST,
+            reason: `what it holds for its router, paused, would pass maximumHeldEnvelopeBytes, ${String(heldBound)} bytes`,
+          }),
+          undefined
+        );
+      }
+
+      heldEnvelopeBytes += envelope.data.length;
+      heldEnvelopes.push(envelope);
+    };
+
+    // * a resume's turn: what it holds handed on, in order, each after asking whether its router
+    // paused it again, which handing one may do; then a CLOSE held behind them ends it (spec 15.21)
+    const release = (): void => {
+      isReleasing = false;
+
+      while (!isPaused && !isEnded && heldEnvelopes.length > 0) {
+        const envelope = heldEnvelopes.shift() as { credential?: string; data: Uint8Array };
+
+        heldEnvelopeBytes -= envelope.data.length;
+        owner.envelope(envelope);
+      }
+
+      if (!isPaused && heldEnvelopes.length === 0 && closing !== undefined) {
+        end(closing);
+      }
+    };
+
+    // a CLOSE ends its connection once all before it was handed on: at once, unless what its
+    // router paused it for is held, which it then waits behind, its heartbeat stopped
+    const takeClose = (isClean: boolean): void => {
+      if (heldEnvelopes.length === 0) {
+        return (end(isClean), undefined);
+      }
+
+      closing = isClean;
+      beat?.stop();
+    };
+
     const takeData = (parcel: IParcel): void => {
       const { carried = new Uint8Array(), credential, flags = 0 } = parcel;
 
@@ -821,7 +910,7 @@ export const createBrokerParticipant = (options: IBrokerParticipantOptions): IBr
       }
 
       if ('envelope' in verdict) {
-        owner.envelope({ credential: verdict.credential, data: verdict.envelope });
+        hand({ credential: verdict.credential, data: verdict.envelope });
       }
     };
 
@@ -864,10 +953,21 @@ export const createBrokerParticipant = (options: IBrokerParticipantOptions): IBr
         forget: () => {
           end(false);
         },
+        pause: () => {
+          isPaused = true;
+        },
         reset: () => {
           if (!isEnded) {
             sendParcel({ kind: ParcelKind.RESET });
             end(false);
+          }
+        },
+        resume: () => {
+          isPaused = false;
+
+          if (!isReleasing && !isEnded) {
+            isReleasing = true;
+            queueMicrotask(release);
           }
         },
         send: (data, sendOptions) => {
@@ -912,6 +1012,13 @@ export const createBrokerParticipant = (options: IBrokerParticipantOptions): IBr
       take: (parcel, bytes, incoming: { flags?: number | undefined } | undefined) => {
         incomingOptions = incoming;
         incomingBytes = bytes;
+
+        // * its peer's CLOSE held behind what it holds: nothing comes after a CLOSE but a RESET,
+        // which ends it at once, what it holds lost with it
+        if (closing !== undefined && parcel.kind !== ParcelKind.RESET) {
+          return;
+        }
+
         beat?.heard();
 
         if (parcel.kind === ParcelKind.RESET) {
@@ -977,7 +1084,7 @@ export const createBrokerParticipant = (options: IBrokerParticipantOptions): IBr
           case ParcelKind.PONG:
             return undefined;
           case ParcelKind.CLOSE:
-            end(parcel.code === CloseCode.NORMAL);
+            takeClose(parcel.code === CloseCode.NORMAL);
 
             return;
           default:
@@ -996,6 +1103,12 @@ export const createBrokerParticipant = (options: IBrokerParticipantOptions): IBr
       ) => {
         incomingOptions = incoming;
         incomingBytes = bytes;
+
+        // nothing comes after a CLOSE: what comes once one is held behind what it holds is dropped
+        if (closing !== undefined) {
+          return;
+        }
+
         beat?.heard();
 
         // a kind to come is taken in its order: a copy dropped, a gap a loss

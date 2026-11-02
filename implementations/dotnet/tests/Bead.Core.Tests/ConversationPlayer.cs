@@ -1020,6 +1020,16 @@ internal static class ConversationPlayer
     // never gave (spec 15.1)
     private sealed class ScriptedTransport : IServerTransport, IPlayedTransport
     {
+        // its router paused and resumed it, which hands what it hands all the same: no test of
+        // this one's reaches a bound
+        public void Pause(string connectionHandle)
+        {
+        }
+
+        public void Resume(string connectionHandle)
+        {
+        }
+
         // what is sent and asked on the router's scheduler, and taken on the test's
         private readonly Lock _gate = new();
 

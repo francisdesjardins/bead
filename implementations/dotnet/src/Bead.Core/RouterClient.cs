@@ -48,6 +48,27 @@ public interface IRouterClientTransport
     Task Send(TransportMessage message);
 
     /// <summary>
+    /// Pauses it whole, its router behind (spec 15.12, decision 0046): it hands nothing more, and
+    /// holds what it already received, whole or still arriving, in order, until <see cref="Resume"/>;
+    /// while it holds anything, what comes next waits behind it, paused or not. What it holds of a
+    /// connection goes with that connection; a pause outlasts it, until a resume. One whose peer is
+    /// its application's own code holds without bound, and says so. Idempotent, it never blocks,
+    /// tells no listener within it, and takes no lock the transport holds while it tells one.
+    /// </summary>
+    void Pause();
+
+    /// <summary>
+    /// Resumes it: what it holds it hands on, in order, from a later step of its own, never within
+    /// this call, asking before each hand whether it was paused again. Idempotent, it never blocks,
+    /// tells no listener within it, and takes no lock the transport holds while it tells one.
+    /// </summary>
+    [System.Diagnostics.CodeAnalysis.SuppressMessage(
+        "Naming",
+        "CA1716:Identifiers should not match keywords",
+        Justification = "pause and resume, as every side's transport and the readers they are built on name them: one word, one meaning (0003)")]
+    void Resume();
+
+    /// <summary>
     /// Whether it carries <paramref name="credential"/> beside an envelope it sends (spec 15.1):
     /// HTTP any field value, in the <c>Authorization</c> of each <c>POST</c>; a WebSocket the one its
     /// upgrade carried alone, compared in constant time. A call presenting
@@ -110,6 +131,13 @@ public sealed record RouterClientOptions
     public MetricsRegistry? MetricsRegistry { get; init; }
 
     /// <summary>
+    /// What it holds untaken of what its server sent, past which it pauses its transport, and
+    /// resumes it once both counts are at half (spec 15.12); <see cref="IntakeLimits.Default"/> when
+    /// none. Limits below 1 are an <see cref="ArgumentException"/>.
+    /// </summary>
+    public IntakeLimits? Intake { get; init; }
+
+    /// <summary>
     /// Where resolvers run, and notifications' callbacks: the thread pool for the first, one
     /// serial scheduler of their own for the second, in the order they came, when none.
     /// </summary>
@@ -170,6 +198,10 @@ public sealed class RouterClient : IRouterLike, IRouterTarget, IDisposable
     private Credential? _credential;
     private bool _isCredentialWithdrawn;
 
+    // what its transport handed it that no turn took yet, under its one connection's name, which
+    // pauses and resumes its transport (decision 0046)
+    private readonly RouterIntake _intake;
+
     /// <summary>
     /// A client's router over <paramref name="transport"/>, on its transport's clock: one given that
     /// differs is an <see cref="ArgumentException"/>.
@@ -181,6 +213,7 @@ public sealed class RouterClient : IRouterLike, IRouterTarget, IDisposable
         var clock = Clocks.Of((options?.Clock, transport.Clock), ("a client's router", "its transport"));
 
         Transport = transport;
+        _intake = new RouterIntake(options?.Intake ?? IntakeLimits.Default);
         _callbacks = options?.ResolverScheduler ?? new SerialScheduler();
         _metrics = options?.MetricsRegistry?.Give(RouterSide.Client);
         _core = new RouterCore(
@@ -651,6 +684,13 @@ public sealed class RouterClient : IRouterLike, IRouterTarget, IDisposable
     public void Dispose()
     {
         _core.MarkDisposed();
+
+        // * a transport outlives its router: resumed before it hears no more, and never paused
+        // after (decision 0046)
+        _intake.End((_) =>
+        {
+            Paced(false);
+        });
         Transport.Message -= OnMessage;
         Transport.Close -= OnClose;
         Transport.Reconnect -= OnReconnect;
@@ -841,19 +881,73 @@ public sealed class RouterClient : IRouterLike, IRouterTarget, IDisposable
         }
     }
 
+    // * counted as it is handed, one within a telling among them, and released once the job that
+    // takes it returned or threw, whichever connection carried it: each is taken in its turn, in
+    // order, so a close or a reconnection needs no count of its own (decision 0046)
     private void OnMessage(TransportMessage message)
     {
+        var counted = (ServerConnectionHandle, (long)message.Bytes.Length);
+
+        // ! counted before its job is posted, so no turn releases what is not counted yet; the
+        // transport paused under the count's lock, and its pair takes no lock it holds as it tells
+        var isCounted = _intake.Handed(counted, (_) =>
+        {
+            Paced(true);
+        });
+
+        void Taken()
+        {
+            if (isCounted)
+            {
+                _intake.Taken(counted, (_) =>
+                {
+                    Paced(false);
+                });
+            }
+        }
+
         if (message.IsText)
         {
             _core.Post(() =>
             {
-                Error?.Invoke(FailureException.OfProtocol(ProtocolCode.EnvelopeMalformed, RouterSide.Client, "an envelope is binary, not a string"));
+                try
+                {
+                    Error?.Invoke(FailureException.OfProtocol(ProtocolCode.EnvelopeMalformed, RouterSide.Client, "an envelope is binary, not a string"));
+                }
+                finally
+                {
+                    Taken();
+                }
             });
 
             return;
         }
 
-        _core.Receive(message, ServerConnectionHandle);
+        _core.Receive(message, (ServerConnectionHandle, Taken));
+    }
+
+    // its transport paused or resumed whole, what it throws reported, never thrown: what the count
+    // decided holds whatever it does
+    private void Paced(bool isPaused)
+    {
+        try
+        {
+            if (isPaused)
+            {
+                Transport.Pause();
+            }
+            else
+            {
+                Transport.Resume();
+            }
+        }
+        catch (Exception reason)
+        {
+            _core.Post(() =>
+            {
+                Error?.Invoke(reason);
+            });
+        }
     }
 
     // in its turn, behind what the connection delivered before it closed

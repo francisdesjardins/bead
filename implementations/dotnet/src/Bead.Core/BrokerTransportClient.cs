@@ -92,6 +92,9 @@ public sealed record BrokerConnectOptions
 /// carries the credential a request presents beside it, any field value, on the first part of its
 /// DATA, and takes none from its server, closing with 1002 a connection whose server's DATA carries
 /// one (spec 15.22). It is secure while its own leg and its server's are, as its ACCEPT said.
+/// Paused by its router, whole, a pause that outlasts its connection, its participant holds what
+/// comes on it, in order, to <c>maximumHeldEnvelopeBytes</c>, and never pauses its link (spec
+/// 15.12, 15.23).
 /// </summary>
 public sealed class BrokerTransportClient : IRouterClientTransport, IAsyncDisposable, IBrokerConnectionOwner
 {
@@ -110,6 +113,9 @@ public sealed class BrokerTransportClient : IRouterClientTransport, IAsyncDispos
     // participant's turn alone
     private List<TransportMessage>? _early;
     private Action? _reconnect;
+    // * paused whole by its router, a pause outlasting its connection: its participant holds what
+    // comes on the connection, never its link (spec 15.12, 15.23)
+    private volatile bool _isPaused;
 
     internal BrokerTransportClient(BrokerParticipant participant, BrokerTransportClientOptions? options)
     {
@@ -238,6 +244,42 @@ public sealed class BrokerTransportClient : IRouterClientTransport, IAsyncDispos
     public Task Connect(BrokerConnectOptions options, CancellationToken cancellationToken = default)
     {
         return Connecting(options, (cancellationToken, false));
+    }
+
+    /// <summary>
+    /// Pauses it whole, a pause that outlasts its connection: its participant holds what comes on
+    /// it, in order, its CLOSE behind what it holds, to <c>maximumHeldEnvelopeBytes</c>, and never
+    /// pauses its link (spec 15.12, 15.23).
+    /// </summary>
+    public void Pause()
+    {
+        BrokerConnection? connection;
+
+        // ! its own lock, never held as it tells, then the connection's flag
+        lock (_gate)
+        {
+            _isPaused = true;
+            connection = _connection;
+        }
+
+        connection?.Pause();
+    }
+
+    /// <summary>
+    /// Resumes it: what its participant held handed on, in order, in a turn of its participant's,
+    /// never within this call.
+    /// </summary>
+    public void Resume()
+    {
+        BrokerConnection? connection;
+
+        lock (_gate)
+        {
+            _isPaused = false;
+            connection = _connection;
+        }
+
+        connection?.Resume();
     }
 
     /// <summary>
@@ -615,9 +657,10 @@ public sealed class BrokerTransportClient : IRouterClientTransport, IAsyncDispos
 
                         _early = null;
 
+                        // through its hold, which a pause meanwhile holds them in, behind what it holds
                         foreach (var message in early)
                         {
-                            ((IBrokerConnectionOwner)this).Delivered(connection, message);
+                            connection.Hand(message);
                         }
                     });
 
@@ -761,6 +804,12 @@ public sealed class BrokerTransportClient : IRouterClientTransport, IAsyncDispos
         lock (_gate)
         {
             _connection = connection;
+        }
+
+        // a pause outlasts the connection it was made on
+        if (_isPaused)
+        {
+            connection.Pause();
         }
 
         _participant.Hold(connection);

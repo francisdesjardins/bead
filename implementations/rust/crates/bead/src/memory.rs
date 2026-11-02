@@ -1,10 +1,13 @@
 //! The in-memory transport (spec 15.13): a server and its clients in one process, each envelope
 //! handed on whole, once and in order, in a later turn than its send, each close told to the other
 //! end in a later turn; a connection secure and two-way, which carries a credential toward its
-//! server and none toward its client.
+//! server and none toward its client. An end its router paused holds what comes, in order and
+//! without bound, its peer being its application's own code, and hands it on once resumed, in a
+//! later turn of the pipe (spec 15.12, decision 0046).
 
 use core::fmt;
 use core::time::Duration;
+use std::collections::VecDeque;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError, Weak};
 
 use bytes::Bytes;
@@ -75,14 +78,16 @@ pub struct MemoryServerOptions {
     pub runtime: Option<Handle>,
 }
 
-// a connection held, as the server keeps it
-#[derive(Clone)]
+// a connection held, as the server keeps it: what its client sent while its router paused it held
+// in order, dropped with it
 struct Connection {
     serial: u64,
     address: String,
     port: Option<u16>,
     peer: Arc<ClientPeer>,
     last_activity: Option<i64>,
+    is_paused: bool,
+    held: VecDeque<TransportMessage>,
 }
 
 struct ServerState {
@@ -219,6 +224,8 @@ impl ServerInner {
                             port: peer.port,
                             peer: Arc::clone(&peer),
                             last_activity: None,
+                            is_paused: false,
+                            held: VecDeque::new(),
                         },
                     );
 
@@ -252,6 +259,31 @@ impl ServerInner {
         });
 
         accepted
+    }
+
+    // in a turn of the pipe: what a connection held handed on, in order, each after asking whether
+    // its router paused it again, which telling one may do
+    fn release(&self, (handle, serial): (&ConnectionHandle, u64)) {
+        loop {
+            let next = {
+                let mut state = locked(&self.state);
+
+                match state.connections.get_mut(handle) {
+                    Some(connection) if connection.serial == serial && !connection.is_paused => {
+                        connection.held.pop_front()
+                    }
+                    _ => None,
+                }
+            };
+            let Some(told) = next else {
+                return;
+            };
+
+            self.tell((
+                |listener: &dyn ServerListener| listener.on_message(told.clone(), handle),
+                Some(handle),
+            ));
+        }
     }
 }
 
@@ -289,6 +321,15 @@ impl MemoryServer {
     #[must_use]
     pub fn ready_state(&self) -> ReadyState {
         locked(&self.inner.state).ready
+    }
+
+    /// Whether its router holds `connection_handle` paused, as a test reads it.
+    #[cfg(test)]
+    pub(crate) fn is_paused(&self, connection_handle: &ConnectionHandle) -> bool {
+        locked(&self.inner.state)
+            .connections
+            .get(connection_handle)
+            .is_some_and(|connection| connection.is_paused)
     }
 
     /// The connections it holds, and the address and port each client gave, with its last
@@ -365,6 +406,42 @@ impl ServerTransport for MemoryServer {
 
     fn unlisten(&self, listener: &Arc<dyn ServerListener>) {
         self.inner.listeners.remove(listener);
+    }
+
+    // ! its state's lock alone, which it never holds as it tells a listener: what comes on the
+    // connection from now on is held, in order and without bound, its client being its
+    // application's own code (spec 15.13)
+    fn pause(&self, connection_handle: &ConnectionHandle) {
+        if let Some(connection) = locked(&self.inner.state)
+            .connections
+            .get_mut(connection_handle)
+        {
+            connection.is_paused = true;
+        }
+    }
+
+    // ! its state's lock alone, as `pause`: what the connection holds is handed on in a later turn
+    // of the pipe, behind what is queued there, never within this call
+    fn resume(&self, connection_handle: &ConnectionHandle) {
+        let releasing = {
+            let mut state = locked(&self.inner.state);
+
+            state
+                .connections
+                .get_mut(connection_handle)
+                .and_then(|connection| {
+                    connection.is_paused = false;
+
+                    (!connection.held.is_empty()).then_some(connection.serial)
+                })
+        };
+
+        if let Some(serial) = releasing {
+            let inner = Arc::clone(&self.inner);
+            let handle = Arc::clone(connection_handle);
+
+            self.inner.later(move || inner.release((&handle, serial)));
+        }
     }
 
     fn clock(&self) -> Option<SharedClock> {
@@ -483,31 +560,39 @@ impl ServerEnd {
         }
     }
 
-    // what its client sent, told with the address and the port its client gave
+    // what its client sent, told with the address and the port its client gave; held behind what
+    // the connection holds, while its router paused it or anything is held (spec 15.12)
     fn receive(&self, message: TransportMessage) {
         let Some(server) = self.server.upgrade() else {
             return;
         };
         let now = wall_of(&server.clock);
-        let origin = {
+        let told = {
             let mut state = locked(&server.state);
 
             match state.connections.get_mut(&self.handle) {
                 Some(connection) if connection.serial == self.serial => {
                     connection.last_activity = Some(now);
 
-                    Some((connection.address.clone(), connection.port))
+                    let told = TransportMessage {
+                        address: Some(connection.address.clone()),
+                        port: connection.port,
+                        ..message
+                    };
+
+                    if connection.is_paused || !connection.held.is_empty() {
+                        connection.held.push_back(told);
+
+                        None
+                    } else {
+                        Some(told)
+                    }
                 }
                 _ => None,
             }
         };
-        let Some((address, port)) = origin else {
+        let Some(told) = told else {
             return;
-        };
-        let told = TransportMessage {
-            address: Some(address),
-            port,
-            ..message
         };
         let handle = &self.handle;
 
@@ -585,6 +670,10 @@ struct ClientState {
     is_attempting: bool,
     attempt: Option<Arc<Attempt>>,
     serial: u64,
+    // its router's pause, whole, which outlasts a connection; what the current connection brought
+    // meanwhile, in order, dropped with it
+    is_paused: bool,
+    held: VecDeque<TransportMessage>,
 }
 
 struct ClientInner {
@@ -605,22 +694,13 @@ struct ClientPeer {
 }
 
 impl ClientPeer {
-    fn is_current(&self, client: &ClientInner) -> bool {
-        locked(&client.state)
-            .current
-            .as_ref()
-            .is_some_and(|(_, serial)| *serial == self.attempt.serial)
-    }
-
     fn receive(&self, message: TransportMessage) {
         let Some(client) = self.client.upgrade() else {
             return;
         };
-
-        if self.is_current(&client) {
-            return client
-                .tell(|listener: &dyn ClientListener| listener.on_message(message.clone()));
-        }
+        let Some(message) = client.hand((self.attempt.serial, message)) else {
+            return;
+        };
 
         // what comes once this end closed is dropped, as a socket's would be
         let mut attempt = locked(&self.attempt.state);
@@ -644,6 +724,7 @@ impl ClientPeer {
 
             let told = is_current.then(|| {
                 state.current = None;
+                state.held.clear();
 
                 let is_reconnecting = state.ready == ReadyState::Reconnecting;
 
@@ -689,6 +770,58 @@ impl ClientInner {
 
     fn later<J: FnOnce() + Send + 'static>(&self, job: J) {
         later_on(&self.server.inner.pipe.downgrade(), job);
+    }
+
+    // a message of the connection `serial` names told, or held behind what is held while its
+    // router paused it or anything is held (spec 15.12); given back when that connection is not
+    // the current one
+    fn hand(&self, (serial, message): (u64, TransportMessage)) -> Option<TransportMessage> {
+        let told = {
+            let mut state = locked(&self.state);
+            let is_current = state
+                .current
+                .as_ref()
+                .is_some_and(|(_, current)| *current == serial);
+
+            if !is_current {
+                return Some(message);
+            }
+
+            if state.is_paused || !state.held.is_empty() {
+                state.held.push_back(message);
+
+                return None;
+            }
+
+            drop(state);
+
+            message
+        };
+
+        self.tell(|listener: &dyn ClientListener| listener.on_message(told.clone()));
+
+        None
+    }
+
+    // in a turn of the pipe: what it held handed on, in order, each after asking whether its
+    // router paused it again, which telling one may do
+    fn release(&self) {
+        loop {
+            let next = {
+                let mut state = locked(&self.state);
+
+                if state.is_paused {
+                    None
+                } else {
+                    state.held.pop_front()
+                }
+            };
+            let Some(told) = next else {
+                return;
+            };
+
+            self.tell(|listener: &dyn ClientListener| listener.on_message(told.clone()));
+        }
     }
 
     // the connect settles: opened, unless given up on or closed by its server meanwhile
@@ -771,6 +904,7 @@ impl ClientInner {
                     let mut state = locked(&self.state);
 
                     state.current = Some((end, attempt.serial));
+                    state.held.clear();
                     state.ready = ReadyState::Open;
 
                     if state
@@ -782,17 +916,9 @@ impl ClientInner {
                     }
                 }
 
+                // * held as any other, while its router paused it: none overtakes another
                 for message in early {
-                    let is_current = locked(&self.state)
-                        .current
-                        .as_ref()
-                        .is_some_and(|(_, serial)| *serial == attempt.serial);
-
-                    if is_current {
-                        self.tell(|listener: &dyn ClientListener| {
-                            listener.on_message(message.clone());
-                        });
-                    }
+                    drop(self.hand((attempt.serial, message)));
                 }
 
                 drop(reply.send(Ok(())));
@@ -811,9 +937,12 @@ impl ClientInner {
         }
     }
 
-    // drops the open connection
+    // drops the open connection, and what it held
     fn drop_current(&self) -> Option<ServerEnd> {
-        locked(&self.state).current.take().map(|(end, _)| end)
+        let mut state = locked(&self.state);
+
+        state.held.clear();
+        state.current.take().map(|(end, _)| end)
     }
 }
 
@@ -865,6 +994,8 @@ impl MemoryClient {
                     is_attempting: false,
                     attempt: None,
                     serial: 0,
+                    is_paused: false,
+                    held: VecDeque::new(),
                 }),
                 listeners: Listeners::default(),
             }),
@@ -1065,6 +1196,7 @@ impl MemoryClient {
             }
 
             state.ready = ReadyState::Closing;
+            state.held.clear();
 
             let end = state.current.take().map(|(end, _)| end);
 
@@ -1275,6 +1407,31 @@ impl ClientTransport for MemoryClient {
 
     fn unlisten(&self, listener: &Arc<dyn ClientListener>) {
         self.inner.listeners.remove(listener);
+    }
+
+    // ! its state's lock alone, which it never holds as it tells a listener: what comes from now on
+    // is held, in order and without bound, its server being its application's own code (spec
+    // 15.13); the pause outlasts a connection
+    fn pause(&self) {
+        locked(&self.inner.state).is_paused = true;
+    }
+
+    // ! its state's lock alone, as `pause`: what it holds is handed on in a later turn of the pipe,
+    // behind what is queued there, never within this call
+    fn resume(&self) {
+        let is_holding = {
+            let mut state = locked(&self.inner.state);
+
+            state.is_paused = false;
+
+            !state.held.is_empty()
+        };
+
+        if is_holding {
+            let inner = Arc::clone(&self.inner);
+
+            self.inner.later(move || inner.release());
+        }
     }
 
     fn clock(&self) -> Option<SharedClock> {

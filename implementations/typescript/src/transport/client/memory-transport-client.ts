@@ -5,6 +5,7 @@
 import { CLOSE_EVENT, MESSAGE_EVENT } from '../shared/constants';
 import { createPromise } from '../shared/create-promise';
 import { ConnectError, ProgrammerError, ReadyStateError, toError } from '../shared/errors';
+import { createHold } from '../shared/hold';
 import {
   getReadyState,
   ReadyState,
@@ -57,7 +58,8 @@ const ADDRESS = /^[!-:<-~]+$/u;
  * the server sends carries one.
  *
  * It never leaves the process, so it is secure; it holds no bound or heartbeat of its own, and a
- * connect's timeout alone. `disconnect` closes the connection, its server told in a later turn,
+ * connect's timeout alone. Paused by its router, it holds what its server sends, in order, without
+ * bound, and hands it on once resumed (spec 15.12). `disconnect` closes the connection, its server told in a later turn,
  * clean as the close said; a server that closes it is heard as a `close`, not clean at this end.
  *
  * @example
@@ -78,12 +80,18 @@ export const createMemoryTransportClient = ({
       // gives up on the connect in flight, so a dispose under it cannot leave it pending, nor let it
       // open once its connection was drawn
       let giveUp: ((reason: Error) => void) | undefined;
+      // what its router paused it for, held in order without bound, its peer its application's own
+      // code; what a connection holds goes with it, its pause outlasting it (spec 15.12, 15.13)
+      const hold = createHold((message: ITransportMessage) => {
+        tell(MESSAGE_EVENT, [message]);
+      });
 
       const drop = (): IMemoryEndLike | undefined => {
         const end = current?.end;
 
         current = undefined;
         client.socket = null;
+        hold.drop();
 
         return end;
       };
@@ -147,7 +155,7 @@ export const createMemoryTransportClient = ({
             },
             receive: (message) => {
               if (isCurrent()) {
-                return (tell(MESSAGE_EVENT, [message]), undefined);
+                return (hold.offer(message), undefined);
               }
 
               // what comes once this end closed is dropped, as a socket's would be
@@ -242,7 +250,7 @@ export const createMemoryTransportClient = ({
 
           for (const message of early) {
             if (isCurrent()) {
-              tell(MESSAGE_EVENT, [message]);
+              hold.offer(message);
             }
           }
         },
@@ -267,6 +275,13 @@ export const createMemoryTransportClient = ({
           tell(CLOSE_EVENT, [isClean, isQuick]);
 
           return Promise.resolve();
+        },
+
+        pause: () => {
+          hold.pause();
+        },
+        resume: () => {
+          hold.resume();
         },
 
         // ! the bytes copied now, so a sender that reuses its buffer changes nothing on its way

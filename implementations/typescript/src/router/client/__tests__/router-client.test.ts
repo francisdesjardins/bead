@@ -2,6 +2,8 @@ import { setTimeout as sleep } from 'node:timers/promises';
 import { expect, test } from '@playwright/test';
 import { createWSTransportClient } from '../../../transport/client/ws-transport-client';
 import { createEmitter } from '../../../transport/shared/emitter';
+import { createHold } from '../../../transport/shared/hold';
+import { nextTask } from '../../../transport/shared/later-task';
 import type { ITransportMessage } from '../../../transport/shared/types';
 import { bytesOf, readEnvelope } from '../../shared/envelope';
 import { toSessionToken } from '../../shared/identifiers';
@@ -114,6 +116,8 @@ const notificationEnvelopeOf = (callId: number, payload = Uint8Array.of(5)): Out
 /**
  * A transport that records what is sent, read as the server reads it, and the credential carried
  * beside it, delivers what a test gives, and carries a credential, securely, unless told otherwise.
+ * Paused by its router, it holds what the test delivers, in order, until resumed; `pauses` holds
+ * each pause, `true`, and resume.
  */
 const createScriptedTransport = ({
   carries = () => {
@@ -131,12 +135,24 @@ const createScriptedTransport = ({
   const raw: Uint8Array[] = [];
   const carried: (string | undefined)[] = [];
   const control = { sendError: undefined as Error | undefined };
+  const pauses: boolean[] = [];
+  const hold = createHold((message: ITransportMessage) => {
+    emitter.emit('message', message);
+  });
 
   const transport: IRouterClientTransportLike = {
     carries,
     isSecure,
     off: emitter.off,
     on: emitter.on,
+    pause: () => {
+      pauses.push(true);
+      hold.pause();
+    },
+    resume: () => {
+      pauses.push(false);
+      hold.resume();
+    },
     send: ({ credential, data }) => {
       carried.push(credential);
       raw.push(bytesOf(data).slice());
@@ -154,14 +170,14 @@ const createScriptedTransport = ({
   };
 
   const deliver = (envelope: OutgoingEnvelope, credential?: string) => {
-    emitter.emit('message', { credential, data: envelopeOf(envelope) });
+    hold.offer({ credential, data: envelopeOf(envelope) });
   };
 
   const close = () => {
     emitter.emit('close', false, false);
   };
 
-  return { carried, close, control, deliver, emitter, raw, sent, transport };
+  return { carried, close, control, deliver, emitter, hold, pauses, raw, sent, transport };
 };
 
 // a JWT, which a client presents as it is given, and an ELSEWHERE, with what its transport carries
@@ -3161,6 +3177,32 @@ test.describe('createRouterClient', () => {
         bucketOf('0.0003', 2),
       ]);
     });
+  });
+
+  // spec 15.12.17
+  test('a client pauses its transport while what its server sent is untaken past a bound', async () => {
+    const { deliver, hold, pauses, transport } = createScriptedTransport();
+    using router = createRouterClient(transport, { intake: { maximumUntakenEnvelopes: 2 } });
+    const taken: string[] = [];
+
+    router.on('debug', ({ direction, header }) => {
+      if (direction === 'rx') {
+        taken.push(`${String(header.callId)}${hold.isPaused ? ' paused' : ''}`);
+      }
+    });
+
+    for (const callId of [2, 4, 6]) {
+      deliver({ header: { callId, kind: EnvelopeKind.CANCEL }, kind: EnvelopeKind.CANCEL });
+    }
+
+    // paused at the second, the third held
+    expect([hold.isPaused, hold.size, taken]).toEqual([true, 1, ['2', '4 paused']]);
+
+    await nextTask();
+    await sleep(0);
+
+    expect(taken).toEqual(['2', '4 paused', '6']);
+    expect([pauses, hold.isPaused]).toEqual([[true, false], false]);
   });
 
   test('dispose lets go of the transport, rejects what still waits, and sends nothing more', async () => {

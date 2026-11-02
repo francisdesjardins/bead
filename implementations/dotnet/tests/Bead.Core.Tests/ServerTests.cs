@@ -1303,6 +1303,16 @@ public sealed class ServerTests : IAsyncLifetime
     // how often it is stopped
     private sealed class ScriptedTransport : IServerTransport
     {
+        // its router paused and resumed it, which hands what it hands all the same: no test of
+        // this one's reaches a bound
+        public void Pause(string connectionHandle)
+        {
+        }
+
+        public void Resume(string connectionHandle)
+        {
+        }
+
         public string? Type
         {
             get
@@ -1464,6 +1474,16 @@ public sealed class ServerTests : IAsyncLifetime
     // a transport that counts nothing: the server's own connections stand for its
     private sealed class Uncounted : IServerTransport
     {
+        // its router paused and resumed it, which hands what it hands all the same: no test of
+        // this one's reaches a bound
+        public void Pause(string connectionHandle)
+        {
+        }
+
+        public void Resume(string connectionHandle)
+        {
+        }
+
         public string? Type
         {
             get

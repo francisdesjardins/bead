@@ -74,6 +74,8 @@ const createStubClient = (options?: { clock?: TestClock; failures?: number; hang
         setReadyStateClosed(client);
         return Promise.resolve();
       },
+      pause: noop,
+      resume: noop,
       send: () => {
         calls.push('send');
         return Promise.resolve();

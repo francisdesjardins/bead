@@ -461,11 +461,15 @@ impl ClientListener for AtClient {
     }
 }
 
-/// How a broker pair is built: its client's adapter's capabilities, and its heartbeat.
+/// How a broker pair is built: its client's adapter's capabilities, and its heartbeat; its
+/// broker's bound on a message, and its server participant's on what it holds.
 #[derive(Default)]
 pub(super) struct BrokerPairOptions {
     pub(super) client_capabilities: Option<BrokerCapabilities>,
     pub(super) heartbeat: Option<Duration>,
+    pub(super) maximum_message_bytes: Option<u64>,
+    pub(super) held_bytes_budget: Option<u64>,
+    pub(super) maximum_held_envelope_bytes: Option<u64>,
 }
 
 /// A server's transport and its clients' participant over one in-memory broker: the server's
@@ -483,7 +487,11 @@ pub(super) struct BrokerPair {
 
 impl BrokerPair {
     pub(super) async fn of(options: BrokerPairOptions) -> Self {
-        let broker = broker();
+        let broker = MemoryBroker::new(&MemoryBrokerOptions {
+            maximum_message_bytes: options.maximum_message_bytes,
+            ..MemoryBrokerOptions::default()
+        })
+        .expect("a broker");
         let server_adapter = adapter_of(&broker, "server");
         let mut client_options = MemoryBrokerAdapterOptions::of("client");
 
@@ -492,6 +500,8 @@ impl BrokerPair {
         let client_adapter = broker.adapter(&client_options).expect("an adapter");
         let server_participant_options = BrokerParticipantOptions {
             heartbeat: options.heartbeat,
+            held_bytes_budget: options.held_bytes_budget,
+            maximum_held_envelope_bytes: options.maximum_held_envelope_bytes,
             ..BrokerParticipantOptions::default()
         };
         let server_participant = participant_of(&server_adapter, &server_participant_options);
@@ -553,5 +563,317 @@ impl BrokerPair {
         self.server.stop().await.expect("stopped");
         self.client_participant.stop().await;
         self.server_participant.stop().await;
+    }
+}
+
+// ── What a participant holds for a connection its router paused (spec 15.12, 15.23) ───────────
+
+// the twins of a participant's hold: by the other sides' sentences, over the in-memory broker, a
+// server's transport paused and resumed as its router would
+mod held {
+    use std::sync::{Arc, Mutex};
+
+    use bytes::Bytes;
+
+    use super::{BrokerPair, BrokerPairOptions, PATIENCE, locked, settle, until};
+    use crate::broker::participant::BrokerParticipant;
+    use crate::router::types::{ConnectionHandle, TransportMessage};
+    use crate::testing::Instant;
+    use crate::transport::{ClientTransport, DisconnectOptions, ServerListener, ServerTransport};
+
+    // an envelope of `length` bytes, each `byte`
+    fn data_of(byte: u8, length: usize) -> TransportMessage {
+        TransportMessage {
+            data: Bytes::from(vec![byte; length]),
+            ..TransportMessage::default()
+        }
+    }
+
+    // what a server's transport told, in order: each message's connection's rank, its first byte
+    // and its length, and each close
+    struct Logged(Arc<Mutex<Vec<String>>>);
+
+    fn rank_of(connection_handle: &ConnectionHandle) -> &str {
+        connection_handle.rsplit('=').next().unwrap_or_default()
+    }
+
+    impl ServerListener for Logged {
+        fn on_message(&self, message: TransportMessage, connection_handle: &ConnectionHandle) {
+            locked(&self.0).push(format!(
+                "{} {:02X} {}",
+                rank_of(connection_handle),
+                message.data.first().copied().unwrap_or_default(),
+                message.data.len()
+            ));
+        }
+
+        fn on_close(&self, was_clean: bool, connection_handle: &ConnectionHandle) {
+            locked(&self.0).push(format!("{} closed {was_clean}", rank_of(connection_handle)));
+        }
+    }
+
+    fn logged(pair: &BrokerPair) -> Arc<Mutex<Vec<String>>> {
+        let log: Arc<Mutex<Vec<String>>> = Arc::default();
+
+        pair.server.listen(Arc::new(Logged(Arc::clone(&log))));
+
+        log
+    }
+
+    fn log_of(log: &Arc<Mutex<Vec<String>>>) -> Vec<String> {
+        locked(log).clone()
+    }
+
+    // waits, within a patience, until what each connection of `participant` holds is `held`
+    async fn until_held(participant: &BrokerParticipant, held: &[(usize, bool)]) {
+        let start = Instant::now();
+
+        while participant.held().await != held && start.elapsed() < PATIENCE {
+            crate::testing::rest(core::time::Duration::from_millis(5)).await;
+        }
+
+        assert_eq!(participant.held().await, held, "what its participant holds");
+    }
+
+    // the handles its server's transport drew, in order
+    fn handles_of(pair: &BrokerPair) -> Vec<ConnectionHandle> {
+        locked(&pair.told.opened).clone()
+    }
+
+    // spec 15.12.17, 15.23.5: the twin of "holds what comes for a paused connection, in order, and
+    // loses it alone past maximumHeldEnvelopeBytes"
+    #[tokio::test]
+    async fn holds_what_comes_for_a_paused_connection_in_order_and_loses_it_alone_past_maximum_held_envelope_bytes()
+     {
+        let pair = BrokerPair::of(BrokerPairOptions {
+            maximum_held_envelope_bytes: Some(100),
+            ..BrokerPairOptions::default()
+        })
+        .await;
+        let log = logged(&pair);
+        let first = pair.connect().await;
+        let second = pair.connect().await;
+        let handles = handles_of(&pair);
+
+        pair.server.pause(&handles[0]);
+
+        for byte in [1, 2, 3] {
+            first.send(data_of(byte, 30)).expect("sent");
+        }
+
+        until_held(&pair.server_participant, &[(3, false), (0, false)]).await;
+        second.send(data_of(9, 30)).expect("sent");
+        until(|| log_of(&log).len() == 1, "the other connection's told").await;
+
+        assert_eq!(
+            log_of(&log),
+            ["2 09 30"],
+            "nothing of the paused connection told, the other's at once"
+        );
+
+        pair.server.resume(&handles[0]);
+        until(|| log_of(&log).len() == 4, "what it held told").await;
+
+        assert_eq!(
+            log_of(&log),
+            ["2 09 30", "1 01 30", "1 02 30", "1 03 30"],
+            "what it held, in order, once resumed"
+        );
+
+        // * past its bound, 120 bytes against 100: that connection lost, a CLOSE of 4000, alone
+        pair.server.pause(&handles[0]);
+
+        for byte in [4, 5, 6, 7] {
+            first.send(data_of(byte, 30)).expect("sent");
+        }
+
+        until(
+            || log_of(&log).contains(&"1 closed false".to_owned()),
+            "the paused connection lost",
+        )
+        .await;
+        second.send(data_of(10, 30)).expect("sent");
+        until(
+            || log_of(&log).contains(&"2 0A 30".to_owned()),
+            "the other connection goes on",
+        )
+        .await;
+
+        assert_eq!(
+            log_of(&log),
+            [
+                "2 09 30",
+                "1 01 30",
+                "1 02 30",
+                "1 03 30",
+                "1 closed false",
+                "2 0A 30"
+            ],
+            "nothing it held told, the other connection told on"
+        );
+        assert!(
+            locked(&pair.told.errors).iter().any(|(error, handle)| {
+                error.ends_with(
+                    "is closed with 4000: what it holds for its router, paused, would pass maximumHeldEnvelopeBytes, 100 bytes",
+                ) && handle.as_ref() == handles.first()
+            }),
+            "reported naming the bound, with its connection: {:?}",
+            locked(&pair.told.errors)
+        );
+
+        pair.stop().await;
+    }
+
+    // spec 15.12.17, 15.23.5: the twin of "a resume with a hand already queued keeps the order of
+    // what is held": a take queued in the participant's turns ahead of the resume's release holds
+    // its envelope behind what is held
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn a_resume_with_a_hand_already_queued_keeps_the_order_of_what_is_held() {
+        let pair = BrokerPair::of(BrokerPairOptions::default()).await;
+        let log = logged(&pair);
+        let first = pair.connect().await;
+        let handles = handles_of(&pair);
+
+        pair.server.pause(&handles[0]);
+
+        for byte in [1, 2] {
+            first.send(data_of(byte, 30)).expect("sent");
+        }
+
+        until_held(&pair.server_participant, &[(2, false)]).await;
+
+        // * its participant kept in a turn of its own while the next envelope's take is queued,
+        // then the resume's release behind it
+        let (started, starting) = tokio::sync::oneshot::channel::<()>();
+        let gate = Arc::new(std::sync::Barrier::new(2));
+        let holding = Arc::clone(&gate);
+
+        pair.server_participant.post(move |_state| {
+            started.send(()).ok();
+            holding.wait();
+        });
+        starting.await.expect("its turn started");
+        first.send(data_of(3, 30)).expect("sent");
+        until(
+            || pair.server_adapter.unsettled() > 0,
+            "the third handed to its participant",
+        )
+        .await;
+        settle().await;
+        pair.server.resume(&handles[0]);
+        gate.wait();
+        until(|| log_of(&log).len() == 3, "each told").await;
+
+        assert_eq!(
+            log_of(&log),
+            ["1 01 30", "1 02 30", "1 03 30"],
+            "the one queued ahead of the release behind what was held"
+        );
+
+        pair.stop().await;
+    }
+
+    // spec 15.12.17, 15.21: the twin of "a CLOSE behind held envelopes comes after them, and a
+    // RESET drops them"
+    #[tokio::test]
+    async fn a_close_behind_held_envelopes_comes_after_them_and_a_reset_drops_them() {
+        let pair = BrokerPair::of(BrokerPairOptions::default()).await;
+        let log = logged(&pair);
+        let first = pair.connect().await;
+        let second = pair.connect().await;
+        let handles = handles_of(&pair);
+
+        pair.server.pause(&handles[0]);
+
+        for byte in [1, 2] {
+            first.send(data_of(byte, 30)).expect("sent");
+        }
+
+        until_held(&pair.server_participant, &[(2, false), (0, false)]).await;
+        first
+            .disconnect(DisconnectOptions::default())
+            .expect("disconnected");
+        until_held(&pair.server_participant, &[(2, true), (0, false)]).await;
+
+        assert!(log_of(&log).is_empty(), "nothing told, its close among it");
+
+        pair.server.resume(&handles[0]);
+        until(|| log_of(&log).len() == 3, "what it held, then its close").await;
+
+        assert_eq!(
+            log_of(&log),
+            ["1 01 30", "1 02 30", "1 closed true"],
+            "its CLOSE once all before it was handed on"
+        );
+
+        // * a RESET ends it at once, whatever its order: what it held lost with it
+        pair.server.pause(&handles[1]);
+        second.send(data_of(5, 30)).expect("sent");
+        until_held(&pair.server_participant, &[(1, false)]).await;
+        second.dispose();
+        until(
+            || log_of(&log).contains(&"2 closed false".to_owned()),
+            "ended by its RESET",
+        )
+        .await;
+        pair.server.resume(&handles[1]);
+        settle().await;
+
+        assert_eq!(
+            log_of(&log),
+            ["1 01 30", "1 02 30", "1 closed true", "2 closed false"],
+            "nothing of what it held told"
+        );
+
+        pair.stop().await;
+    }
+
+    // spec 15.23.4, 15.23.5: the twin of "one connection held to its bound fails the parts of no
+    // other connection": what a connection holds paused is charged to no budget of the parts
+    #[tokio::test]
+    async fn one_connection_held_to_its_bound_fails_the_parts_of_no_other_connection() {
+        let pair = BrokerPair::of(BrokerPairOptions {
+            maximum_message_bytes: Some(1_024),
+            held_bytes_budget: Some(4_096),
+            ..BrokerPairOptions::default()
+        })
+        .await;
+        let log = logged(&pair);
+        let first = pair.connect().await;
+        let second = pair.connect().await;
+        let handles = handles_of(&pair);
+
+        pair.server.pause(&handles[0]);
+
+        // * 8,000 bytes held, past the budget of the parts, each envelope whole
+        for byte in 1..=10 {
+            first.send(data_of(byte, 800)).expect("sent");
+        }
+
+        until_held(&pair.server_participant, &[(10, false), (0, false)]).await;
+
+        // the other's envelope in parts, which the budget holds
+        second.send(data_of(0x20, 3_000)).expect("sent");
+        until(|| log_of(&log).len() == 1, "the other's envelope told").await;
+
+        assert_eq!(log_of(&log), ["2 20 3000"], "its parts taken whole");
+        assert!(
+            locked(&pair.told.errors).is_empty(),
+            "nothing lost: {:?}",
+            locked(&pair.told.errors)
+        );
+
+        pair.server.resume(&handles[0]);
+        until(|| log_of(&log).len() == 11, "what it held told").await;
+
+        assert_eq!(
+            log_of(&log).split_off(1),
+            (1..=10_u8)
+                .map(|byte| format!("1 {byte:02X} 800"))
+                .collect::<Vec<_>>(),
+            "what it held, in order"
+        );
+
+        pair.stop().await;
     }
 }

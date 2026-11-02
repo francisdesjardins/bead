@@ -168,6 +168,18 @@ export interface IRouterFailures extends RouterFailureEntries {
   readonly side: RouterSide;
 }
 
+/**
+ * What a router holds of each connection that no turn of it took yet, past which it pauses that
+ * connection's transport (spec 15.12, decision 0046): a side's own, announced to no one, so no
+ * limit of {@link IRouterLimits}, which both ends set alike.
+ */
+export interface IIntakeLimits {
+  /** The bytes of those envelopes. */
+  maximumUntakenBytes: number;
+  /** The envelopes one connection's transport handed its router that no turn of it took yet. */
+  maximumUntakenEnvelopes: number;
+}
+
 /** How much a router reads, writes and holds. */
 export interface IRouterLimits {
   /**
@@ -617,6 +629,8 @@ export interface IRouterCore<Handle extends string> {
    * comes with the credential its transport carried beside it, which a request presenting
    * `ELSEWHERE` stands for (spec 15.1); given alone, it came with none. Given from within a
    * listener this core called, it is taken in a later turn, behind what came before it (spec 9.0).
+   * Each is counted as it is given, against its `intake`, its connection paused past a bound within
+   * one task and resumed in the next (spec 15.12).
    */
   receive(message: Data | ITransportMessage, connectionHandle: Handle): void;
   /**
@@ -745,6 +759,12 @@ export interface IRouterCoreOptions {
    */
   limits?: RouterLimitsOptions | undefined;
   /**
+   * What it holds of each connection that no turn took yet, past which it pauses that connection
+   * (spec 15.12): {@link INTAKE_DEFAULTS}' where these say nothing, each 1 at least, or the core is
+   * a {@link ProgrammerError}.
+   */
+  intake?: IntakeLimitsOptions | undefined;
+  /**
    * The telling it shares with its router: what it tells its side runs within it, and what is
    * handed back from within one waits for a later turn; one of its own when not given.
    */
@@ -842,8 +862,19 @@ export interface IRouterCorePort<Handle extends string> {
   ): boolean;
   /** Whether anyone listens to the envelopes traced: nothing is built for `trace` otherwise. */
   isTracing(): boolean;
+  /**
+   * Pauses `connectionHandle`'s transport, what it handed within this task untaken past a bound
+   * (spec 15.12): it hands nothing more of that connection, holding what it received, until
+   * `resume`. Called within the turn that counted the envelope; what it throws is reported.
+   */
+  pause(connectionHandle: Handle): void;
   /** What went wrong that no call waits on. */
   report(error: Error, connectionHandle: Handle): void;
+  /**
+   * Resumes `connectionHandle`'s transport, paused by `pause`: in the next task, or as the core is
+   * disposed. What it throws is reported.
+   */
+  resume(connectionHandle: Handle): void;
   /**
    * Hands an envelope's bytes over to the transport, for `connectionHandle`, with the credential it
    * carries beside them, when it carries one.
@@ -1057,6 +1088,9 @@ export type NotificationKey = number | string;
 
 /** A router's limits as its options give them: each one it leaves out, or `undefined`, the default. */
 export type RouterLimitsOptions = { [Key in keyof IRouterLimits]?: IRouterLimits[Key] | undefined };
+
+/** An intake's limits as options give them: each one left out, or `undefined`, the default. */
+export type IntakeLimitsOptions = { [Key in keyof IIntakeLimits]?: IIntakeLimits[Key] | undefined };
 
 /** What a router did: sent or took a request, a response, or a notification. */
 export type RouterActivity = 'notification' | 'request' | 'response';

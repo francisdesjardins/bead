@@ -11,6 +11,7 @@ import type {
   AdmissionFailure,
   IAdmissionRequest,
   ICredentials,
+  IntakeLimitsOptions,
   IServiceManager,
   IServiceManagerOptions,
   RouterLimitsOptions,
@@ -140,6 +141,12 @@ export interface IServerOptions {
    * CREDENTIAL_UNSUPPORTED.
    */
   credentials?: ICredentials | undefined;
+  /**
+   * What its router holds untaken of each connection within one task, past which it pauses that
+   * connection's transport (spec 15.12), which it is built with: `INTAKE_DEFAULTS`' where these say
+   * nothing, each 1 at least, or the server is a {@link ProgrammerError}.
+   */
+  intake?: IntakeLimitsOptions | undefined;
   /**
    * How much the router reads, writes and holds, which it is built with: {@link LIMIT_DEFAULTS}'
    * where these say nothing. They must hold together, or the server is a {@link ProgrammerError}.

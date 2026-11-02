@@ -43,6 +43,7 @@ export {
   CredentialScheme,
   EnvelopeKind,
   FailureScope,
+  INTAKE_DEFAULTS,
   LIMIT_DEFAULTS,
   ProtocolCode,
   SERVER_CONNECTION_HANDLE,
@@ -90,6 +91,8 @@ export type {
   INotificationHeader,
   IProtocolFailure,
   IHandedRequestHeader,
+  IIntakeLimits,
+  IntakeLimitsOptions,
   IRequestHeader,
   IResultHeader,
   ICallSession,
@@ -394,7 +397,15 @@ export const createRouterClient = <Transport extends IRouterClientTransportLike>
             credential.scheme === CredentialScheme.OPAQUE ? credential.token : undefined;
         }
       },
+      // ! its transport paused whole, its one connection's, within the turn that counted the
+      // envelope: a transport's pair never tells a listener within it (decision 0046)
+      pause: () => {
+        transport.pause();
+      },
       report,
+      resume: () => {
+        transport.resume();
+      },
       send: (message) => {
         return transport.send(message);
       },
@@ -418,7 +429,7 @@ export const createRouterClient = <Transport extends IRouterClientTransportLike>
         });
       },
     },
-    { clock, limits: options?.limits, metrics, telling }
+    { clock, intake: options?.intake, limits: options?.limits, metrics, telling }
   );
 
   // the handle's mark, set at once by its dispose: a call or an answer made after it fails unsent

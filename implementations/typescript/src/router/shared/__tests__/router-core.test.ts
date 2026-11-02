@@ -4,6 +4,7 @@ import { expect, test } from '@playwright/test';
 import { createTestClock, hasRef, timersBy } from '../../../transport/shared/__tests__/fixtures';
 import type { IClock } from '../../../transport/shared/clock';
 import { CancelError, ProgrammerError, TimeoutError } from '../../../transport/shared/errors';
+import { nextTask } from '../../../transport/shared/later-task';
 import { noop } from '../../../transport/shared/noop';
 import {
   CLIENT_FAILURES,
@@ -107,6 +108,35 @@ test.describe('createRouterCore', () => {
           signal: expect.any(AbortSignal),
         },
       ]);
+    });
+
+    // spec 15.12.17
+    test('reports what its transport throws as it pauses or resumes a connection, and takes the envelope all the same', async () => {
+      const { port, reported } = createPort({
+        pause: () => {
+          throw new Error('no pause');
+        },
+        resume: () => {
+          throw new Error('no resume');
+        },
+      });
+      using core = createRouterCore(port, { intake: { maximumUntakenEnvelopes: 1 } });
+      const seen: IRequestResolverProps<Handle>[] = [];
+      const nextCallId = callIdsOf('client');
+
+      core.registerResolver(resolverOf(echo, seen));
+      core.receive(requestOf(nextCallId(), { payload: Uint8Array.of(7) }), 'a');
+      await nextTask();
+
+      expect(
+        reported.map(([error, connectionHandle]) => {
+          return [error.message, connectionHandle];
+        })
+      ).toEqual([
+        ['no pause', 'a'],
+        ['no resume', 'a'],
+      ]);
+      expect(seen).toHaveLength(1);
     });
 
     // spec 9.0
@@ -4528,6 +4558,45 @@ test.describe('createRouterCore', () => {
   });
 
   test.describe('between two cores', () => {
+    // spec 15.12.17; decision 0046
+    test('a result sent as a transfer completes while its credits come on a paused connection', async () => {
+      const small = { chunkBytes: 1_024, maximumEnvelopeBytes: 1_024, windowBytes: 2_048 };
+      const result = patternOf(10_240);
+      // * each envelope pauses its connection at a bound of 1, and the release never waits on the
+      // peer: the next task's
+      const loop = createLoopback({ intake: { maximumUntakenEnvelopes: 1 }, limits: small });
+
+      loop.server.registerResolver(
+        Object.assign((props: IRequestResolverProps<'a'>) => {
+          return loop.server.respond({ payload: result }, props);
+        }, echo)
+      );
+
+      const asking = loop.client.request(patternOf(16), {
+        connectionHandle: 'server',
+        options,
+        procedure: echo,
+      });
+
+      await loop.flush();
+
+      const credits = loop.taken.server.filter(({ kind }) => {
+        return kind === EnvelopeKind.CREDIT;
+      });
+
+      expect(digestOf((await asking).payload)).toBe(digestOf(result));
+      expect(credits.length).toBeGreaterThan(1);
+      expect(
+        credits.every(({ isPaused }) => {
+          return isPaused;
+        })
+      ).toBe(true);
+      expect([loop.recorded.client.reported, loop.recorded.server.reported]).toEqual([[], []]);
+
+      loop.client[Symbol.dispose]();
+      loop.server[Symbol.dispose]();
+    });
+
     test('carry a request, its result and a command as transfers, their chunks and credits shuffled and doubled', async () => {
       const small = { chunkBytes: 1_024, maximumEnvelopeBytes: 1_024, windowBytes: 8_192 };
       const ping: IProcedure = { ...echo, procedureId: 2, procedureName: 'ping' };

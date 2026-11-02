@@ -17,6 +17,7 @@ import type {
   IProcedure,
   IResolvedRequestOptions,
   IRouterResult,
+  IntakeLimitsOptions,
   IRouterLike,
   IRouterLimits,
   RedactedHeader,
@@ -160,6 +161,12 @@ export interface IRouterClientOptions {
    */
   credentials?: ICredentials | undefined;
   /**
+   * What it holds untaken of what its server sent within one task, past which it pauses its
+   * transport, resumed in the next (spec 15.12): {@link INTAKE_DEFAULTS}' where these say nothing,
+   * each 1 at least, or the router is a {@link ProgrammerError}.
+   */
+  intake?: IntakeLimitsOptions | undefined;
+  /**
    * How much the router reads, writes and holds: {@link LIMIT_DEFAULTS}' where these say nothing.
    * They must hold together, or the router is a {@link ProgrammerError}.
    */
@@ -195,6 +202,21 @@ export interface IRouterClientTransportLike {
   on(event: 'close', listener: (wasClean: boolean, wasQuick: boolean) => void): unknown;
   on(event: 'message', listener: (message: ITransportMessage) => void): unknown;
   on(event: 'reconnect', listener: () => void): unknown;
+  /**
+   * Pauses it whole, its router behind (spec 15.12, decision 0046): it hands nothing more, and
+   * holds what it already received, whole or still arriving, in order, until `resume`; while it
+   * holds anything, what comes next waits behind it, paused or not. What it holds of a connection
+   * goes with that connection; a pause outlasts it, until a resume. One whose peer is its
+   * application's own code holds without bound, and says so. Idempotent, it tells no listener
+   * within it.
+   */
+  pause(): void;
+  /**
+   * Resumes it: what it holds it hands on, in order, from a later step of its own, never within
+   * this call, asking before each hand whether it was paused again. Idempotent, it tells no
+   * listener within it.
+   */
+  resume(): void;
   send(message: ITransportMessage): Promise<void>;
 }
 

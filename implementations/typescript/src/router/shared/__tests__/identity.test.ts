@@ -1,5 +1,6 @@
 import { expect, test } from '@playwright/test';
 import { ProgrammerError } from '../../../transport/shared/errors';
+import { noop } from '../../../transport/shared/noop';
 import { createRouterClient } from '../../client/router-client';
 import { createRouterServer } from '../../server/router-server';
 import {
@@ -124,6 +125,8 @@ test.describe('checkDeclaration', () => {
         on: () => {
           return undefined;
         },
+        pause: noop,
+        resume: noop,
         send: () => {
           return Promise.resolve();
         },
@@ -162,6 +165,8 @@ test.describe('checkDeclaration', () => {
       on: () => {
         return undefined;
       },
+      pause: noop,
+      resume: noop,
       send: () => {
         return Promise.resolve();
       },

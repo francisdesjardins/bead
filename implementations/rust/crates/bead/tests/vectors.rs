@@ -463,6 +463,11 @@ impl ServerTransport for Recording {
         locked(&self.listeners).retain(|held| !Arc::ptr_eq(held, listener));
     }
 
+    // a pause holds nothing here: a vector hands a few envelopes, far under any bound
+    fn pause(&self, _connection_handle: &ConnectionHandle) {}
+
+    fn resume(&self, _connection_handle: &ConnectionHandle) {}
+
     fn is_secure(&self, _connection_handle: &ConnectionHandle) -> bool {
         true
     }

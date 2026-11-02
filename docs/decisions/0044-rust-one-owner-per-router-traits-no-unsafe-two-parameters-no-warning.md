@@ -18,14 +18,14 @@
   [0014](0014-every-place-that-takes-a-duration-is-a-row-of-one-file.md)'s, a `json` payload
   [0016](0016-a-json-payload-has-one-form-whichever-side-writes-it.md)'s, and what an application
   makes from within a telling and a dispose's two marks, on every side,
-  [0045](0045-a-router-takes-what-its-application-makes-in-one-queue-behind-the-turn-that-tells-it.md)'s. Ahead: Rust's service
-  client, the client half of its service layer, in its core, and a bound on what waits for a
-  router's turn, a connection's reads paced by what waits for its owner, on the Rust and the C#
-  sides alike; then its transports over sockets, WebSocket (RFC 6455) and HTTP/1.1 and HTTP/2
-  (RFC 9110, 9112, 9113), with the interop both ways with the TypeScript and C# sides; then its
-  broker bindings, MQTT 5 and AMQP 1.0; its gateway; and beadc's Rust target, with
-  `examples/hello`'s Rust half and the validators of a blueprint's rules generated for it, or beadc
-  refusing to generate them
+  [0045](0045-a-router-takes-what-its-application-makes-in-one-queue-behind-the-turn-that-tells-it.md)'s,
+  and a connection's reads paced by what its router has not taken, on every side,
+  [0046](0046-a-router-paces-each-connections-reads-by-what-it-has-not-taken.md)'s. Ahead: Rust's
+  service client, the client half of its service layer, in its core; then its transports over
+  sockets, WebSocket (RFC 6455) and HTTP/1.1 and HTTP/2 (RFC 9110, 9112, 9113), with the interop
+  both ways with the TypeScript and C# sides; then its broker bindings, MQTT 5 and AMQP 1.0; its
+  gateway; and beadc's Rust target, with `examples/hello`'s Rust half and the validators of a
+  blueprint's rules generated for it, or beadc refusing to generate them
   ([0035](0035-a-payload-that-reads-is-held-to-its-messages-rules-before-its-resolver-sees-it.md)),
   each stage under a record of its own. The crate's layout and its modules are its README's.
 
@@ -80,8 +80,8 @@ counts the receiver.
   the C# scheduler are unbounded. Bead's own bounds, `maximumAnsweringCalls`, credit and the limits
   of spec 12.2, bound the work a turn takes, judged as it takes it; none bounds what waits for that
   turn. A bounded queue alone would only move that wait into the transport, which cannot learn that
-  its router is behind: a bound on what waits is a pace on a connection's reads, ahead (One owner
-  per router).
+  its router is behind: a bound on what waits is a pace on a connection's reads,
+  [0046](0046-a-router-paces-each-connections-reads-by-what-it-has-not-taken.md)'s.
 - **An operation as an `async fn`**: it sends nothing until polled, sends in await order, and
   nothing when its future is dropped unpolled, where both other sides send as the call is made.
 - **Cancel on drop**, much of Rust's ecosystem's way: neither other side can, so Rust keeps to what
@@ -125,13 +125,11 @@ reaches across the languages lands on the three sides. Of the service layer, the
 descriptors, the failures' catalogue, the managers' requesters and resolvers and the server of one
 service, `ServiceServer`; its client half, the twin of `createServiceClient` and of
 `ServiceClient<TService>`, is ahead in the core, the matrix's open row `Rust's service client`.
-Ahead, in this order: Rust's service client, the client half of its service layer, in its core, and
-a bound on what waits for a router's turn, a connection's reads paced by what waits for its owner,
-on the Rust and the C# sides alike; then its transports over sockets, WebSocket (RFC 6455) and
-HTTP/1.1 and HTTP/2 (RFC 9110, 9112, 9113), with the interop both ways with the TypeScript and C#
-sides; then its broker bindings, MQTT 5 and AMQP 1.0; its gateway; and beadc's Rust target, with
-`examples/hello`'s Rust half and the validators of a blueprint's rules generated for it, or beadc
-refusing to generate them
+Ahead, in this order: Rust's service client, the client half of its service layer, in its core;
+then its transports over sockets, WebSocket (RFC 6455) and HTTP/1.1 and HTTP/2 (RFC 9110, 9112,
+9113), with the interop both ways with the TypeScript and C# sides; then its broker bindings,
+MQTT 5 and AMQP 1.0; its gateway; and beadc's Rust target, with `examples/hello`'s Rust half and
+the validators of a blueprint's rules generated for it, or beadc refusing to generate them
 ([0035](0035-a-payload-that-reads-is-held-to-its-messages-rules-before-its-resolver-sees-it.md)),
 each stage under a record of its own.
 
@@ -335,18 +333,17 @@ spec 9.0's three, a failed resolver's, a failed admission's and a dispose from t
 `lets_its_connections_go_after_the_turn_its_report_listener_disposes_it_in_behind_the_failed_resolver_s_answer`,
 and `a_request_its_transport_tells_once_its_router_is_disposed_reaches_no_resolver`.
 
-Beside them: **the queue is unbounded**, as the C# scheduler's is. What a transport hands its
-router waits there whole, before the turn that judges it: an envelope's size, `maximumAnsweringCalls`
-and a transfer's bounds are judged as the turn takes it, and nothing of Bead's bounds what waits
-for that turn, where the TypeScript side takes each message within the event that hands it. A
-transport's listener returns nothing, so it can neither learn that its router is behind nor wait
-for it. A bound on what waits is ahead, on the Rust and the C# sides alike, by a decision that meets
-the Tenth Man: a connection's reads paced by what waits for its owner, as HTTP/2's flow control
-paces a stream (RFC 9113 §5.2) and .NET's `PipeOptions.PauseWriterThreshold` a pipe's writer, the
-listener seam given a way to wait; it lands ahead of Rust's transports over HTTP and WebSocket, the
-matrix's open row `What a transport hands its router, waiting for its turn`. **Resolvers run off
-the owner**, spawned on the runtime, the router awaiting each one's
-`JoinHandle`, so its panic is seen; **the public handles are `Clone + Send + Sync`**, an `Arc` to
+Beside them: **the owner's queue holds what the router posts for itself without bound, and what a
+transport hands it within
+[0046](0046-a-router-paces-each-connections-reads-by-what-it-has-not-taken.md)'s
+bound**. An envelope's size, `maximumAnsweringCalls` and a transfer's bounds are judged as the turn
+takes it; the bridge counts what each connection's transport handed that no turn took yet, and
+pauses that connection past `maximumUntakenEnvelopes` or `maximumUntakenBytes` by the transport's
+required `pause`, as HTTP/2's flow control paces a stream (RFC 9113 §5.2) and .NET's
+`PipeOptions.PauseWriterThreshold` a pipe's writer. A transport's listener still returns nothing:
+the pause is a call, never a wait. **Resolvers run off the owner**, spawned on the runtime, the
+router awaiting each one's `JoinHandle`, so its panic is seen; **the public handles are
+`Clone + Send + Sync`**, an `Arc` to
 the owner's queue, and a resolver's future `Send + 'static`, no `!Send` resolver offered; **the
 runtime is the application's**, its handle given in the options or the current one, none a
 `ProgrammerError`, and **its time driver checked at construction**: the builder arms a zero timer
