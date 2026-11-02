@@ -75,10 +75,8 @@ that meets the Tenth Man:
 
 - what [0044](0044-rust-one-owner-per-router-traits-no-unsafe-two-parameters-no-warning.md) keeps
   ahead of the routers on every side: one order for a call a listener makes within its router's
-  turn; one behaviour for a call made just before its router's dispose; and one answer to a codec
-  that throws or panics as it reads a request, which every side answers `PAYLOAD_UNDECODABLE` where
-  spec 9.0 answers a codec that throws other than a refusal `PROCEDURE_FAILED`; and an optional
-  bridge from the Rust side's trace to `tracing`;
+  turn; one behaviour for a call made just before its router's dispose; and an optional bridge from
+  the Rust side's trace to `tracing`;
 - **the core in a page and in a worker**, the Rust side's and the C# side's in one stage, with its
   executor, its clock and its tests, then what it serves there: the transports in a page, the Web
   Worker transport, the DevTools hook from their clients, its contract then a document every side

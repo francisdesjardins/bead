@@ -11,7 +11,7 @@ use serde::de::DeserializeOwned;
 use serde_json::Value;
 
 use crate::json::{self, JsonRefusal};
-use crate::transport::caught;
+use crate::transport::{Panicked, caught};
 
 #[cfg(test)]
 mod tests;
@@ -81,18 +81,27 @@ pub trait PayloadCodec: Send + Sync + fmt::Debug + 'static {
     fn encoding(&self) -> &'static str;
 }
 
-/// What `codec` reads `bytes` to, within a guard: a codec is the application's code, and what it
-/// panics is its throw, a refusal saying it, as both other sides take any throw of a decode
-/// (decision 0044).
-pub(crate) fn decoded<C: PayloadCodec>(codec: &C, bytes: &Bytes) -> Result<C::Value, CodecRefusal> {
+/// What `codec` reads `bytes` to, within a guard: its value or its refusal, the payload's; or,
+/// apart, what it panicked with, its throw other than its refusal, the side's own error (spec 9.0,
+/// 17.2, decision 0044), since a codec is the application's code.
+pub(crate) fn decoded<C: PayloadCodec>(
+    codec: &C,
+    bytes: &Bytes,
+) -> Result<Result<C::Value, CodecRefusal>, Panicked> {
     caught(("a codec", || codec.decode(bytes)))
-        .unwrap_or_else(|panicked| Err(CodecRefusal::new(panicked.to_string())))
 }
 
-/// The bytes `codec` writes `value` to, within a guard, as [`decoded`] reads.
+/// A codec's panic where a refusal and a bug end alike, a result's or a notification's read or any
+/// write (spec 17.2, items 2 to 6): a refusal saying it, its words the side's own.
+pub(crate) fn refusal_saying(panicked: &Panicked) -> CodecRefusal {
+    CodecRefusal::new(panicked.to_string())
+}
+
+/// The bytes `codec` writes `value` to, within a guard, as [`decoded`] reads: its panic a refusal
+/// saying it, as [`refusal_saying`] has it (spec 17.2, items 4 to 6).
 pub(crate) fn encoded<C: PayloadCodec>(codec: &C, value: &C::Value) -> Result<Bytes, CodecRefusal> {
     caught(("a codec", || codec.encode(value)))
-        .unwrap_or_else(|panicked| Err(CodecRefusal::new(panicked.to_string())))
+        .unwrap_or_else(|panicked| Err(refusal_saying(&panicked)))
 }
 
 /// `raw`: a payload's bytes as they are, any of them, none included (spec 17.3).

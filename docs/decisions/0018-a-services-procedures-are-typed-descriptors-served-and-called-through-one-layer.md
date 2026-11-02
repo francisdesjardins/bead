@@ -164,10 +164,11 @@ A protobuf message. Four ways:
   marshaller of two functions, and the code Grpc.Tools 2.84.0 generates passes each message's
   `Parser` to it. One function on each side, `payloadCodecOf` and `PayloadCodecs.Of`.
 
-The codec needs nothing more of the runtime: what does not decode throws, and the service manager
-answers any throw from a decoder `PAYLOAD_UNDECODABLE`. The check of a `proto` payload's records,
-which reads its library's descriptors, lives in a module of that second kind, `./proto` with an
-optional peer dependency and `Bead.Protobuf` referencing Google.Protobuf
+The codec needs nothing more of the runtime: what does not decode throws its refusal, which the
+service manager answers `PAYLOAD_UNDECODABLE`; anything else a decoder throws is the side's own
+error, answered `PROCEDURE_FAILED` and reported (spec 9.0, 17.2). The check of a `proto` payload's
+records, which reads its library's descriptors, lives in a module of that second kind, `./proto`
+with an optional peer dependency and `Bead.Protobuf` referencing Google.Protobuf
 ([0028](0028-a-proto-payloads-records-are-read-against-its-message-before-its-library-reads-them.md)):
 `Bead.Core` references no protobuf library, and a user of `raw`, `text` or `json` alone carries
 none. What a `proto` payload is, read through the codec, is

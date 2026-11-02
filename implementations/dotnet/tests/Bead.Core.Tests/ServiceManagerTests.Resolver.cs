@@ -149,6 +149,31 @@ public sealed partial class ServiceManagerTests
         Assert.Equal([new Responded(Target, null, Failure.OfProtocol(ProtocolCode.PayloadUndecodable))], router.Responses);
     }
 
+    // spec 9.0, 17.2
+    [Fact]
+    public async Task A_payload_whose_codec_throws_other_than_its_refusal_is_answered_PROCEDURE_FAILED_with_no_detail_and_reported_never_reaching_the_callback()
+    {
+        var router = new RecordingRouter();
+        var broken = new InvalidOperationException("a codec that fails to read");
+        var reached = false;
+        var resolver = new ServiceManager(router).GetRequestResolver(
+            Echo,
+            new RequestResolverDependencies<Text, Text> { Serializer = new Unreadable(broken) })((_, _) =>
+            {
+                reached = true;
+
+                return Task.CompletedTask;
+            });
+
+        // * the reason goes on for the router to report, with the request's connection
+        Assert.Same(broken, await Assert.ThrowsAsync<InvalidOperationException>(() =>
+        {
+            return resolver.Handle(PropsOf(Encode(new Text("hi")))).WaitAsync(Patience, Cancelled);
+        }));
+        Assert.False(reached);
+        Assert.Equal([new Responded(Target, null, Failure.OfProtocol(ProtocolCode.ProcedureFailed))], router.Responses);
+    }
+
     [Fact]
     public async Task Answers_PAYLOAD_INVALID_to_a_request_its_rules_refuse_before_its_callback()
     {

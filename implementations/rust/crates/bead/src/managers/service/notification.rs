@@ -313,8 +313,11 @@ where
             )))));
         }
 
-        // a notification that does not decode fails here, for the router to report
-        let value = match crate::payloads::decoded(&self.codec, &payload) {
+        // a notification that does not decode fails here, for the router to report; its codec's
+        // panic fails it as its refusal does (spec 17.2, item 3)
+        let value = match crate::payloads::decoded(&self.codec, &payload)
+            .unwrap_or_else(|panicked| Err(crate::payloads::refusal_saying(&panicked)))
+        {
             Ok(value) => value,
             Err(refused) => {
                 let failure = Failure::protocol(

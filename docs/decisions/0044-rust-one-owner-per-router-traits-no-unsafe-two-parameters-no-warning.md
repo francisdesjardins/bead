@@ -430,23 +430,22 @@ it stands for, the transport going on
 The sites are every place the router calls the application's code: an admission, a verifier and
 its future, a key set's ask and its future, a codec as it reads and as it writes, a listener, a
 call's hooks, and a transport's `send` and what the router asks of its transport. A codec's panic
-as it reads a request is answered `PAYLOAD_UNDECODABLE` with no detail, as the other sides answer
-any throw in a decode, where spec 9.0 answers a codec that throws other than a refusal
-`PROCEDURE_FAILED`: one answer on every side is ahead, by a decision that meets the Tenth Man. Its
-panic as it reads a result fails the call here, undecodable; as it writes, the call fails with its
-throw and nothing goes. A hook's panic fails its own call; a `send`'s is the transport's error, the
-send undone and reported, as the other sides' writers take a `send` that
+as it reads a request is its throw other than a refusal: answered `PROCEDURE_FAILED` with no
+detail and reported, as every side answers a codec that throws other than its refusal (spec 9.0,
+17.2). Its panic as it reads a result fails the call here, undecodable; as it writes, the call
+fails with its throw and nothing goes. A hook's panic fails its own call; a `send`'s is the
+transport's error, the send undone and reported, as the other sides' writers take a `send` that
 throws. **A panic past those sites**, within a turn — a custom clock's, say — leaves the owner's
 state half changed with nothing to undo it: the owner ends at once, each call it waits on failed
 now with that panic for its reason, the panic reported, nothing queued run, and a call made after
 refused at once, never going on over that state, where the C# scheduler goes on past a job's
 exception. Held by `a_hook_that_panics_fails_its_own_call_and_the_router_answers_the_next`,
 `a_request_whose_send_panics_fails_as_its_transport_s_throw_would_and_the_router_answers_the_next`,
-`a_request_whose_codec_panics_as_it_reads_is_answered_as_undecodable_with_no_detail_never_reaching_the_callback`
+`a_request_whose_codec_panics_as_it_reads_is_answered_procedure_failed_with_no_detail_and_reported_never_reaching_the_callback`
 and
 `a_turn_that_panics_ends_its_router_failing_each_call_it_waits_on_with_that_panic_and_strands_no_later_call`
-among them. Under `panic = "abort"`, which an application may set, nothing unwinds: a platform row
-of the matrix, every throw site among it.
+among them. Under `panic = "abort"`, which an application may set and `wasm32-unknown-unknown`
+sets by default, nothing unwinds: a platform row of the matrix, every throw site among it.
 
 **A code space the spec keeps open is a newtype with associated constants**, as `http::StatusCode`
 holds one: `ProtocolCode(NonZeroU16)`, a code spec 8.1 names none of kept as a number, and

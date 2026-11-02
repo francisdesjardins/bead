@@ -17,7 +17,7 @@ use crate::managers::service::{
     ResolverDependencies, Response, ServiceManager, TracedError,
 };
 use crate::payloads::{CodecRefusal, JsonCodec, PayloadCodec, RawCodec};
-use crate::router::types::RouterError;
+use crate::router::types::{ConnectionHandle, RouterError};
 use crate::testing::pair::{Pair, PairOptions, echo};
 
 // what a manager's debug listener heard: whether the step went wrong and why, and the step
@@ -405,11 +405,11 @@ impl PayloadCodec for Breaking {
     }
 }
 
-// decision 0044: a codec's panic is its throw, as both other sides answer any throw of a request's
-// decode PAYLOAD_UNDECODABLE: the twin of "a payload that does not decode is answered as
-// undecodable, with no detail, never reaching the callback", its codec panicking
+// spec 9.0, 17.2, decision 0044: a codec's panic is its throw other than its refusal, the one a
+// CodecRefusal leaves it: the twin of "a payload whose codec throws other than its refusal is
+// answered PROCEDURE_FAILED, with no detail, and reported, never reaching the callback"
 #[tokio::test]
-async fn a_request_whose_codec_panics_as_it_reads_is_answered_as_undecodable_with_no_detail_never_reaching_the_callback()
+async fn a_request_whose_codec_panics_as_it_reads_is_answered_procedure_failed_with_no_detail_and_reported_never_reaching_the_callback()
  {
     let pair = pair().await;
     let reached = Arc::new(Mutex::new(0_u32));
@@ -454,13 +454,24 @@ async fn a_request_whose_codec_panics_as_it_reads_is_answered_as_undecodable_wit
 
     assert_eq!(
         (failure.protocol_code(), failure.detail()),
-        (Some(ProtocolCode::PAYLOAD_UNDECODABLE), ""),
-        "undecodable, with no detail"
+        (Some(ProtocolCode::PROCEDURE_FAILED), ""),
+        "PROCEDURE_FAILED, with no detail"
     );
     assert_eq!(*locked(&reached), 0, "never reaching the callback");
-    assert!(
-        locked(&pair.server_reports).is_empty(),
-        "nothing reported, as for a decode that refuses"
+
+    // * the panic reported once, with the request's connection
+    let reported: Vec<(String, Option<ConnectionHandle>)> = locked(&pair.server_reports)
+        .iter()
+        .map(|(error, handle)| (error.to_string(), handle.clone()))
+        .collect();
+
+    assert_eq!(
+        reported,
+        [(
+            "a codec panicked: this codec breaks as it reads, on purpose".to_owned(),
+            Some(Arc::clone(&pair.connection_handle))
+        )],
+        "its panic reported, with its connection"
     );
 }
 

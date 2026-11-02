@@ -213,6 +213,37 @@ test.describe('createServiceManager', () => {
       ]);
     });
 
+    // spec 9.0, 17.2
+    test('a payload whose codec throws other than its refusal is answered PROCEDURE_FAILED, with no detail, and reported, never reaching the callback', async () => {
+      const { calls, router } = createFakeRouter();
+      const manager = createServiceManager(router);
+      const broken = new RangeError('a codec that fails to read');
+      let reached = false;
+
+      const resolver = manager.getRequestResolver(echo, {
+        serializer: {
+          ...serverSerializer,
+          decode: () => {
+            throw broken;
+          },
+        },
+      })(() => {
+        reached = true;
+
+        return Promise.resolve();
+      });
+
+      // * the reason goes on for the router to report, with the request's connection
+      await expect(resolver(propsOf(encode({ text: 'hi' })))).rejects.toBe(broken);
+      expect(reached).toBe(false);
+      expect(calls.respond).toEqual([
+        {
+          request: { connectionHandle, header },
+          response: { failure: SERVER_FAILURES.procedureFailed },
+        },
+      ]);
+    });
+
     test('a request "beforeRequest" refuses is answered with an access denied, seen on its header alone', async () => {
       const { calls, router } = createFakeRouter();
       const manager = createServiceManager(router);
