@@ -11,6 +11,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 - `bead::testing::Difference`, with `is_excused` and `LANGUAGE` beside it, in place of
   `bead::testing::durations::Difference`.
+- The support matrix's "A singular closed enum's undeclared number, echoed" says what protobuf-es
+  writes beside another unknown field and for a wide number, and what Buffa writes.
 
 ### Fixed
 

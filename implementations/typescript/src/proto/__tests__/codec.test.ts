@@ -393,8 +393,23 @@ test.describe("a proto payload's codec of its schema", () => {
     expect(isFieldSet(nothing, ProbeSchema.field.shade)).toBe(false);
     expect(kept.shade).toBe(1);
     expect(toned.pick).toEqual({ case: 'word', value: 'a' });
-    // * kept among the unknown fields, which protobuf-es writes back
+    // * kept among the unknown fields, which protobuf-es writes back where the message holds no other
     expect(hexOf(probe.encode(kept))).toBe('70 01 70 05');
+  });
+
+  test('echoes a closed enum’s undeclared number beside another unknown field, and a wide one, as its library keeps them', () => {
+    const probe = protoCodecOf(ProbeSchema);
+    const beside = probe.decode(bytesOf('70 05 20 01'));
+    const wide = probe.decode(bytesOf('70 FF FF FF FF 0F'));
+
+    expect(isFieldSet(beside, ProbeSchema.field.shade)).toBe(false);
+    expect(isFieldSet(wide, ProbeSchema.field.shade)).toBe(false);
+    // ! a matrix row: protobuf-es's reader replaces the number it set among the unknown fields
+    // with the message's other unknown fields, so the number is dropped
+    expect(hexOf(probe.encode(beside))).toBe('20 01');
+    // ! a matrix row: written again as an int32 varint, a number past 31 bits in ten bytes
+    // (Encoding, "Signed Integers")
+    expect(hexOf(probe.encode(wide))).toBe('70 FF FF FF FF FF FF FF FF FF 01');
   });
 
   test('looks into no extension and no Any’s message', () => {
