@@ -564,6 +564,11 @@ impl fmt::Debug for ProcedureSeries {
 }
 
 impl ProcedureSeries {
+    #[cfg(test)]
+    pub(crate) fn is_same(&self, other: &Self) -> bool {
+        self.at == other.at && Arc::ptr_eq(&self.state, &other.state)
+    }
+
     /// Counts a call started.
     pub fn start(&self) {
         if let Some(data) = locked(&self.state).calls.get_mut(self.at) {

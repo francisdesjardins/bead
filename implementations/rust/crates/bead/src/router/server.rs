@@ -1709,6 +1709,8 @@ impl fmt::Debug for CallHooks {
 }
 
 struct Shared {
+    #[cfg(test)]
+    requester_probe: Mutex<Option<crate::testing::scripted::RequesterProbe>>,
     owner: Owner<ServerState>,
     disposal: Disposal,
     clock: SharedClock,
@@ -1849,6 +1851,8 @@ impl RouterServer {
 
         Ok(Self {
             shared: Arc::new(Shared {
+                #[cfg(test)]
+                requester_probe: Mutex::new(None),
                 owner,
                 disposal,
                 clock,
@@ -1865,6 +1869,24 @@ impl RouterServer {
 
     pub(crate) fn owner(&self) -> &Owner<ServerState> {
         &self.shared.owner
+    }
+
+    #[cfg(test)]
+    pub(crate) fn observe_requester(&self, probe: crate::testing::scripted::RequesterProbe) {
+        *self
+            .shared
+            .requester_probe
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner) = Some(probe);
+    }
+
+    #[cfg(test)]
+    fn requester_probe(&self) -> Option<crate::testing::scripted::RequesterProbe> {
+        self.shared
+            .requester_probe
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone()
     }
 
     // marks it disposed at once, before what it holds is let go in a later turn (spec 9.0)
@@ -1942,11 +1964,17 @@ impl RouterServer {
         check_declaration(procedure)?;
         check_procedure_kind(procedure, DeclarationWay::ServerRequester)?;
 
-        self.shared
+        let series = self
+            .shared
             .metrics
             .as_ref()
             .map(|metrics| metrics.declare_requester(procedure))
-            .transpose()
+            .transpose()?;
+        #[cfg(test)]
+        if let Some(probe) = self.requester_probe() {
+            (probe.declared)(procedure, series.as_ref());
+        }
+        Ok(series)
     }
 
     /// Registers a resolver of `procedure`.
@@ -1996,6 +2024,10 @@ impl RouterServer {
         payload: Bytes,
         (request, hooks): (ServerRequest, CallHooks),
     ) -> Result<Call, ProgrammerError> {
+        #[cfg(test)]
+        if let Some(probe) = self.requester_probe() {
+            (probe.called)(request.series.as_ref());
+        }
         // ! its handle's mark, read once, as its job is posted, a programmer's error first: one
         // made after its router's dispose fails unsent, whatever thread or turn it is made on; one
         // made before goes (spec 9.1)

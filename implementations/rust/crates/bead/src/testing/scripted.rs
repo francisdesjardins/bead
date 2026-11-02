@@ -26,6 +26,20 @@ use crate::transport::{
 pub(crate) type ServerTransmitProbe =
     Arc<dyn Fn(&crate::router::server::ServerState, &ConnectionHandle) + Send + Sync>;
 
+#[cfg(test)]
+type DeclaredProbe = Arc<
+    dyn Fn(&crate::identity::Procedure, Option<&crate::metrics::ProcedureSeries>) + Send + Sync,
+>;
+#[cfg(test)]
+type CalledProbe = Arc<dyn Fn(Option<&crate::metrics::ProcedureSeries>) + Send + Sync>;
+
+#[cfg(test)]
+#[derive(Clone)]
+pub(crate) struct RequesterProbe {
+    pub(crate) declared: DeclaredProbe,
+    pub(crate) called: CalledProbe,
+}
+
 /// Four-byte draws a destination test supplies, followed by its fallback once exhausted.
 #[derive(Debug)]
 pub struct DestinationFills {

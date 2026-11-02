@@ -38,6 +38,68 @@ fn command() -> Procedure {
 }
 
 #[tokio::test]
+async fn declares_its_requester_to_its_router_as_it_is_made_and_hands_each_of_its_calls_the_series_it_gave()
+ {
+    let registry =
+        crate::metrics::MetricsRegistry::new(&crate::metrics::MetricsRegistryOptions::default())
+            .expect("a registry");
+    let fixture = Fixture::with(&crate::router::server::RouterServerOptions {
+        metrics_registry: Some(registry),
+        ..crate::router::server::RouterServerOptions::default()
+    });
+    let declarations = Arc::new(Mutex::new(Vec::new()));
+    let declared_series = Arc::new(Mutex::new(None::<crate::metrics::ProcedureSeries>));
+    let declarations_for_probe = Arc::clone(&declarations);
+    let series_for_probe = Arc::clone(&declared_series);
+    let calls = Arc::new(Mutex::new(Vec::new()));
+    let calls_for_probe = Arc::clone(&calls);
+    fixture
+        .router
+        .observe_requester(crate::testing::scripted::RequesterProbe {
+            declared: Arc::new(move |procedure, series| {
+                locked(&declarations_for_probe).push(procedure.name.clone());
+                *locked(&series_for_probe) = Some(series.expect("a declared series").clone());
+            }),
+            called: Arc::new(move |series| {
+                let same = locked(&declared_series)
+                    .as_ref()
+                    .expect("declared before the call")
+                    .is_same(series.expect("the handed series"));
+                locked(&calls_for_probe).push(same);
+            }),
+        });
+    let request = fixture
+        .manager
+        .get_command(&command(), RequestDependencies::of(TextCodec, TextCodec))
+        .expect("echo declared");
+    assert_eq!(*locked(&declarations), ["echo"]);
+    assert!(locked(&calls).is_empty(), "the declaration makes no call");
+    fixture.transport.open(&handle_of(1), true);
+    fixture.clock.settle().await;
+    for (id, payload) in [(2, "x"), (4, "y")] {
+        let answer = request
+            .call(
+                payload.to_owned(),
+                RequestOptions {
+                    connection_handle: Some(handle_of(1)),
+                    ..RequestOptions::default()
+                },
+            )
+            .expect("a command");
+        fixture.clock.settle().await;
+        fixture.transport.deliver(
+            &result(id, Bytes::copy_from_slice(payload.as_bytes())),
+            &handle_of(1),
+        );
+        fixture.clock.settle().await;
+        assert_eq!(answer.await.expect("answered"), payload);
+    }
+    assert_eq!(*locked(&declarations), ["echo"]);
+    assert_eq!(*locked(&calls), [true, true]);
+    fixture.router.dispose().await;
+}
+
+#[tokio::test]
 #[expect(
     clippy::too_many_lines,
     reason = "the same timeout matrix and the other endings as both other sides"
