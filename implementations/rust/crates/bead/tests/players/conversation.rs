@@ -1,7 +1,8 @@
 //! A conversation of `spec/conversations.json`, or an exit of `spec/metrics.json`, played against
 //! the Rust side's server of the interop service: what its clients send, what it sends back and
-//! reports, and, for an exit, what moved in its registry's exposition. The TypeScript and C# sides'
-//! players play the same files.
+//! reports, what its application does from within a telling where the conversation scripts it, and,
+//! for an exit, what moved in its registry's exposition. The TypeScript and C# sides' players play
+//! the same files.
 
 use core::time::Duration;
 use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
@@ -12,13 +13,13 @@ use bead::testing::{SteppingClock, hexadecimal};
 use bead::{
     BoxFuture, BrokerAdapter, BrokerClient, BrokerClientOptions, BrokerConnectOptions,
     BrokerParticipant, BrokerParticipantOptions, BrokerServer, BrokerServerOptions, ClientListener,
-    ClientTransport, ConnectionHandle, Credential, CredentialScheme, DisconnectOptions, Envelope,
-    EnvelopeKind, MemoryBroker, MemoryBrokerAdapterOptions, MemoryBrokerOptions, MemoryClient,
-    MemoryClientOptions, MemoryConnectOptions, MemoryServer, MemoryServerOptions, MetricsRegistry,
-    NEVER, PacingLimitsOptions, ReadEnvelopeOptions, RelayOptions, RouterError,
-    RouterLimitsOptions, RouterSide, Sent, Server, ServerListener, ServerOptions, ServerTransport,
-    SharedClock, TransportMessage, read_envelope, require_credential, require_session,
-    share_leg_b_session,
+    ClientTransport, ConnectionHandle, Credential, CredentialScheme, DebugDirection,
+    DisconnectOptions, Envelope, EnvelopeKind, MemoryBroker, MemoryBrokerAdapterOptions,
+    MemoryBrokerOptions, MemoryClient, MemoryClientOptions, MemoryConnectOptions, MemoryServer,
+    MemoryServerOptions, MetricsRegistry, NEVER, PacingLimitsOptions, ReadEnvelopeOptions,
+    RelayOptions, RequestOptions, RouterError, RouterLimitsOptions, RouterSide, Sent, Server,
+    ServerListener, ServerOptions, ServerTransport, ServiceServer, SharedClock, TracedEnvelope,
+    TransportMessage, read_envelope, require_credential, require_session, share_leg_b_session,
 };
 use bytes::Bytes;
 use serde_json::{Map, Value, json};
@@ -35,6 +36,9 @@ const STEP_KEYS: [&str; 15] = [
 
 // how many times an until settles the side and looks again for its timer
 const PATIENCE: usize = 1_000;
+
+// the clock's question, which a conversation's listener asks its command with
+const QUESTION: &str = "What time is it where you are?";
 
 fn locked<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
     mutex.lock().unwrap_or_else(PoisonError::into_inner)
@@ -875,6 +879,84 @@ fn relay_of(conversation: &Value) -> Result<Option<RelayOptions>, String> {
     Ok(Some(relay))
 }
 
+// what the server's application does from within a telling, the conversation's where it gives it:
+// the telling it acts on, report or read, and the command of the interop service's it calls
+fn listener_of(conversation: &Value) -> Result<Option<(String, String)>, String> {
+    let Some(given) = conversation.get("listener").and_then(Value::as_object) else {
+        return Ok(None);
+    };
+    let telling = given
+        .get("telling")
+        .and_then(Value::as_str)
+        .ok_or("a conversation's listener names its telling")?;
+    let command = given
+        .get("command")
+        .and_then(Value::as_str)
+        .ok_or("a conversation's listener names its command")?;
+
+    if !matches!(telling, "report" | "read") {
+        return Err(format!(
+            "a conversation's listener acts on a telling no test reads: {telling}"
+        ));
+    }
+
+    Ok(Some((telling.to_owned(), command.to_owned())))
+}
+
+// the conversation's listener attached to `server`: on the first telling of its kind on a
+// connection, and once, a call of its command on that connection, with the clock's question, its
+// answer let go (spec 9.0)
+fn listen(
+    (server, interop): (&Server, &ServiceServer),
+    (telling, command): (&str, &str),
+) -> Result<(), String> {
+    let procedures = bead_interop::interop_procedures(None).map_err(|error| error.to_string())?;
+    let descriptor = match command {
+        "clock" => procedures.clock,
+        other => {
+            return Err(format!(
+                "a conversation's listener calls a command no test reads: {other}"
+            ));
+        }
+    };
+    let asking = interop
+        .command(&descriptor)
+        .map_err(|error| error.to_string())?;
+    let told: Mutex<HashSet<ConnectionHandle>> = Mutex::default();
+    // * a call made from within the telling, its future dropped: it goes as it is made, whatever
+    // becomes of its future
+    let ask = move |handle: &ConnectionHandle| {
+        if !locked(&told).insert(Arc::clone(handle)) {
+            return;
+        }
+
+        let mut options = RequestOptions::default();
+
+        options.connection_handle = Some(Arc::clone(handle));
+        drop(asking.call(Value::String(QUESTION.to_owned()), options));
+    };
+
+    if telling == "report" {
+        server.router().on_error(Arc::new(
+            move |_error: &RouterError, handle: Option<&ConnectionHandle>| {
+                if let Some(handle) = handle {
+                    ask(handle);
+                }
+            },
+        ));
+    } else {
+        server.router().on_debug(Arc::new(
+            move |direction: DebugDirection, traced: &TracedEnvelope| {
+                if direction == DebugDirection::Rx {
+                    ask(&traced.connection_handle);
+                }
+            },
+        ));
+    }
+
+    Ok(())
+}
+
 /// Whether a pair of the in-memory transport stands for each connection `conversation` opens (spec
 /// 15.13): every one secure and two-way, and none a request its server sends expects carried toward
 /// its client.
@@ -1014,7 +1096,11 @@ pub(crate) async fn play(conversation: &Value, options: PlayOptions) -> Result<(
         },
     ));
 
-    let _interop = bead_interop::offer_interop(&server).map_err(|error| error.to_string())?;
+    let interop = bead_interop::offer_interop(&server).map_err(|error| error.to_string())?;
+
+    if let Some((telling, command)) = listener_of(conversation)? {
+        listen((&server, &interop), (&telling, &command))?;
+    }
 
     transport.start().await.map_err(|error| error.to_string())?;
 

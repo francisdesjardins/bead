@@ -32,10 +32,16 @@ use crate::router::types::{
 };
 use crate::transport::caught;
 
+/// A side's own step on its state as a call's id is drawn.
+pub(crate) type OnDrawn<S> = Box<dyn FnOnce(&mut S, u32) + Send>;
+
 /// A call this side makes, as its router hands it to its core.
-pub(crate) struct CoreRequest {
+pub(crate) struct CoreRequest<S> {
     pub(crate) connection_handle: ConnectionHandle,
     pub(crate) credential: Option<Credential>,
+    // its side's own step on its state as its call id is drawn, before the application hears it
+    // and before its request goes out: a subscription bound anew
+    pub(crate) on_drawn: Option<OnDrawn<S>>,
     pub(crate) on_call_id: Option<Box<dyn FnOnce(u32) + Send>>,
     pub(crate) on_sent: Option<OnSent>,
     pub(crate) opens_subscription: bool,
@@ -48,7 +54,7 @@ pub(crate) struct CoreRequest {
     pub(crate) transport_credential: Option<String>,
 }
 
-impl core::fmt::Debug for CoreRequest {
+impl<S> core::fmt::Debug for CoreRequest<S> {
     fn fmt(&self, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         formatter
             .debug_struct("CoreRequest")
@@ -75,7 +81,7 @@ pub(crate) fn made_ending_of(outcome: &Result<RouterResult, CallError>) -> CallE
 /// # Errors
 ///
 /// A [`ProgrammerError`] for a header that would pass 1,020 bytes.
-pub(crate) fn assert_header_holds(request: &CoreRequest) -> Result<(), ProgrammerError> {
+pub(crate) fn assert_header_holds<S>(request: &CoreRequest<S>) -> Result<(), ProgrammerError> {
     let is_asked = request.credential.as_ref().is_some_and(|credential| {
         !matches!(
             credential.scheme(),
@@ -362,7 +368,7 @@ fn on_request_refused<S: Side>(state: &mut S, (call, id, error): (&CallAddress, 
 )]
 pub(crate) fn request<S: Side>(
     state: &mut S,
-    (payload, request, reply): (Bytes, CoreRequest, CallReply),
+    (payload, request, reply): (Bytes, CoreRequest<S>, CallReply),
 ) {
     let core = state.core();
     let procedure = request.procedure;
@@ -507,6 +513,12 @@ pub(crate) fn request<S: Side>(
 
     if let Some(signal) = request.options.signal.clone() {
         watch_signal(state, ((signal, watched), (call.clone(), id)));
+    }
+
+    // * its side's own step, within the turn: a subscription's call bound anew cancels the call
+    // bound before ahead of its own request, as the other sides' facades do (decision 0045)
+    if let Some(on_drawn) = request.on_drawn {
+        on_drawn(state, call_id);
     }
 
     // ! a hook that panics fails its own call, and nothing of it goes out, as one that throws

@@ -311,7 +311,10 @@ public sealed class ParticipantDebugEventTests
         await pair.Scheduler.Run(() =>
         {
             var unheard = Allocated();
-            Assert.Equal(new long[] { 0, 2608 }, unheard);
+
+            // * what is sent, pinned up to its broker's turn, which their one scheduler queues behind
+            // this one and routes there (decision 0045)
+            Assert.Equal(new long[] { 0, 1736 }, unheard);
             pair.ClientParticipant.Debug += pair.Events.Enqueue;
             var heard = Allocated();
             Assert.True(heard[0] > unheard[0]);

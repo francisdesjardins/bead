@@ -1018,11 +1018,12 @@ public sealed partial class RouterServerTests : IDisposable
         Start();
 
         // * who a notification would reach as each answer is handed over, read in its router's turn
-        // by a filter that keeps none
+        // by a filter that keeps none: through its own form, as a public notify made there is taken
+        // in a later turn
         _transport.OnSend = (connectionHandle, _) =>
         {
             var reached = new List<string>();
-            var probing = Router.Notify(BytesOf(Probe), new NotifyRequest
+            var probing = Router.NotifyOnLoop(BytesOf(Probe), new NotifyRequest
             {
                 Procedure = News.Address,
                 Filter = (subscriber) =>

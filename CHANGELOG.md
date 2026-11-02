@@ -27,6 +27,11 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `PROCEDURE_FAILED`, with no detail, and reported, on every side; its refusal — a `SyntaxError`, a
   `FormatException`, a `CodecRefusal` — is still answered `PAYLOAD_UNDECODABLE` (spec 9.0, 17.2).
   An application's codec refuses with its side's type.
+- What an application does with a router from within a listener — a call, a notification, a
+  cancel, a dispose — goes behind what that turn sends and in the order its turn defers, on every
+  side, where the TypeScript and C# sides ran it at once. A call made before a dispose goes, one
+  made after it fails unsent, and the turn a listener disposes in still sends its answer (spec 9.0,
+  9.1).
 
 ### Fixed
 
@@ -37,6 +42,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `Error` and Google.Protobuf's `InvalidProtocolBufferException` came through.
 - A broker connection on the C# side keeps no room for an envelope's parts once its envelope is
   whole or its parts let go, where it kept the largest envelope's for good (spec 15.23).
+- The in-memory broker routes a publish made within its own turn behind what its publisher
+  published before it, on the C# side (spec 15.24).
 
 ## [0.9.0] - 2026-10-30
 

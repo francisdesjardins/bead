@@ -69,6 +69,59 @@ public sealed class MemoryBrokerTests
         Assert.Equal(["01", "02", "03", "05"], heard);
     }
 
+    // spec 15.24; decision 0045: one queue of turns, a publish made within the broker's turn at its
+    // tail, behind the one its publisher queued from another thread while that turn ran
+    [Fact]
+    public async Task A_publish_a_listener_makes_within_the_broker_s_turn_comes_behind_one_its_publisher_made_before_it()
+    {
+        var scheduler = new SerialScheduler();
+        var broker = new MemoryBroker(new MemoryBrokerOptions { Scheduler = scheduler });
+        IReadOnlyList<string> inbox = ["bead", "i", "ada"];
+        using var entered = new ManualResetEventSlim();
+        using var released = new ManualResetEventSlim();
+        var publisher = broker.Adapter(new MemoryBrokerAdapterOptions { Id = "ada" });
+
+        // what the publisher's application does as it hears "go" within the broker's turn: it says
+        // so, waits until its own publish made from another thread is queued, then publishes again,
+        // still within that turn
+        publisher.Message += (message) =>
+        {
+            message.Settle();
+
+            if (message.Payload.Span[0] != 0x60)
+            {
+                return;
+            }
+
+            entered.Set();
+            _ = released.Wait(TimeSpan.FromSeconds(10), TestContext.Current.CancellationToken);
+            _ = publisher.Publish(PublicationOf(2));
+        };
+        await publisher.Start();
+        await publisher.Subscribe(inbox);
+
+        var (subscriber, heard) = await LinkedOf((broker, "bob"));
+        var (other, _) = await LinkedOf((broker, "cid"));
+
+        await subscriber.Subscribe(Topic);
+
+        // its "go" reaches the publisher's application within a turn of the broker's
+        _ = other.Publish(new BrokerPublication { Topic = inbox, Payload = (byte[])[0x60] });
+        Assert.True(entered.Wait(TimeSpan.FromSeconds(10), TestContext.Current.CancellationToken));
+
+        // * meanwhile, from this thread, the publisher publishes: queued while that turn runs
+        _ = publisher.Publish(PublicationOf(1));
+        released.Set();
+
+        for (var round = 0; round < 3; round += 1)
+        {
+            await scheduler.WhenIdle();
+        }
+
+        // in the order its publisher published, the one made within the turn behind
+        Assert.Equal(["01", "02"], heard);
+    }
+
     [Fact]
     public async Task Hands_a_group_message_to_one_member_in_turn_and_again_to_another_when_a_test_asks_spec_15_24()
     {
@@ -150,13 +203,18 @@ public sealed class MemoryBrokerTests
         Assert.Equal(["06", "07"], heard);
         heard.Clear();
 
-        // retained, as a test asks; and a message whose life passed before it was handed on, deleted
+        // retained, as a test asks; and a message whose life passed before it was handed on, deleted:
+        // routed in its turn, its life past in the turn queued behind it, ahead of the one that
+        // hands it on
         await publisher.PublishRetained(PublicationOf(9));
+
+        var expiring = publisher.Publish(PublicationOf(10) with { ExpiresAfter = TimeSpan.FromSeconds(1) });
+
         await broker.Turn(() =>
         {
-            _ = publisher.Publish(PublicationOf(10) with { ExpiresAfter = TimeSpan.FromSeconds(1) });
             clock.Advance(TimeSpan.FromSeconds(2));
         });
+        Assert.Equal(BrokerPublished.Taken, await expiring);
         await scheduler.WhenIdle();
         Assert.Equal(["retained 09"], heard);
         heard.Clear();

@@ -240,7 +240,7 @@ impl BrokerState {
 
         link.queue.push_back(routed);
         self.owner
-            .offer_behind(Box::new(move |state: &mut Self| state.hand_one(index)));
+            .offer(Box::new(move |state: &mut Self| state.hand_one(index)));
     }
 
     // a publication routed to each subscription that matches its topic — each alone, and one member

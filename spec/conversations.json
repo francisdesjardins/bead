@@ -11,6 +11,7 @@
     "A conversation that opens its connections, open, plays them all at once: every other step names its connection, on, but a step that moves time, which is the server's, and each connection has its own expectations; one that opens none plays one connection, opened before its first step. twoWay false beside open declares a connection that carries nothing back, as an HTTP client that does not listen; carries false, one whose transport carries no credential beside an envelope it sends, as a WebSocket's toward its client or a listen's batch; secure false, one that reaches off the machine in the clear, neither over TLS nor within the machine. By default a connection carries a credential and is secure. A connection closed and opened again is a new connection under the same name.",
     "Before each send, after close, and at the end, nothing more was sent or reported: what a conversation does not expect, a server does not do.",
     "limits, where given, are the server's limits, by the names section 12.2 gives them, in milliseconds for a time; any other is its default. pacing, where given, bounds the queues of its paced subscriptions. relay, where given, sets the options of the server's relay: verifies true has it verify what it forwards (decision 0010); beforeRoute names its admission, requireCredential by default, shareLegBSession or requireSession.",
+    "listener, where given, is what the server's application does from within a telling: on the first telling of its kind on a connection, and once, it calls command, a command of the interop service's, on that connection, with the clock's question as its payload, and lets its answer go. telling report is a report it hears with that connection; read, its debug listener hearing an envelope read on it.",
     "The server is given the interop service's credentials: credentials.jwt, its keys, its audience, and its key set with the issuers it answers for, which answers on the server's clock as its words say, and with maximumWaitingCalls, the most calls that wait for one issuer's deadline at once; and credentials.elsewhere, its verifier, which settles on the server's clock as its words say. A server whose limits hold chunkBytes or maximumEnvelopeBytes under 1,024 bytes is given no JWT key and no key set, which section 12.2 forbids beside them, and takes no JWT. A JWT a send presents is written as its characters' bytes, as any header byte is.",
     "clauses are the units of spec.md an entry checks: a clause, 9.2; an item of its numbered list, 9.2.5; a row of its table, counted from 1, 15.6.8."
   ],
@@ -250,6 +251,49 @@
         },
         {
           "report": "exception"
+        }
+      ]
+    },
+    {
+      "name": "a call the report listener makes goes behind what the reporting turn answers",
+      "clauses": [
+        "9.0"
+      ],
+      "listener": {
+        "telling": "report",
+        "command": "clock"
+      },
+      "steps": [
+        {
+          "send": "A1 10 00 03  00 00 00 01  00 01 00 06 | 6E 75 6C 6C"
+        },
+        {
+          "expect": {
+            "kind": 18,
+            "callId": 1,
+            "failure": {
+              "code": 64,
+              "scope": 0,
+              "relays": 0,
+              "detail": ""
+            }
+          }
+        },
+        {
+          "expect": {
+            "kind": 16,
+            "callId": 2,
+            "flags": 0,
+            "serviceId": 1,
+            "procedureId": 9,
+            "payload": "22 57 68 61 74 20 74 69 6D 65 20 69 73 20 69 74 20 77 68 65 72 65 20 79 6F 75 20 61 72 65 3F 22"
+          }
+        },
+        {
+          "report": "exception"
+        },
+        {
+          "send": "A1 11 00 02  00 00 00 02 | 22 6E 6F 6F 6E 22"
         }
       ]
     },
@@ -4035,6 +4079,47 @@
               "detail": "no credential came"
             }
           }
+        }
+      ]
+    },
+    {
+      "name": "a call made as a request is read goes before the refusal its turn defers",
+      "clauses": [
+        "9.0",
+        "15.1"
+      ],
+      "listener": {
+        "telling": "read",
+        "command": "clock"
+      },
+      "steps": [
+        {
+          "send": "A1 10 08 04  00 00 00 01  00 01 00 01  00 03 00 00 | 22 78 22"
+        },
+        {
+          "expect": {
+            "kind": 16,
+            "callId": 2,
+            "flags": 0,
+            "serviceId": 1,
+            "procedureId": 9,
+            "payload": "22 57 68 61 74 20 74 69 6D 65 20 69 73 20 69 74 20 77 68 65 72 65 20 79 6F 75 20 61 72 65 3F 22"
+          }
+        },
+        {
+          "expect": {
+            "kind": 18,
+            "callId": 1,
+            "failure": {
+              "code": 32,
+              "scope": 0,
+              "relays": 0,
+              "detail": "no credential came"
+            }
+          }
+        },
+        {
+          "send": "A1 11 00 02  00 00 00 02 | 22 6E 6F 6F 6E 22"
         }
       ]
     },

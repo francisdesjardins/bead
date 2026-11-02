@@ -158,6 +158,86 @@ async fn hands_each_message_on_once_in_a_later_turn_in_the_order_its_publisher_p
     assert_eq!(taken(&heard), ["05"], "the one taken");
 }
 
+// what a publisher's application does as it hears "go" within the broker's turn: it says so, waits
+// until its own publish made from another thread is queued, then publishes again, still within that
+// turn
+struct Reacting {
+    adapter: Mutex<Option<MemoryBrokerAdapter>>,
+    entered: Mutex<std::sync::mpsc::Sender<()>>,
+    released: Mutex<std::sync::mpsc::Receiver<()>>,
+}
+
+impl BrokerListener for Reacting {
+    fn on_message(&self, message: &BrokerMessage) {
+        message.settle();
+
+        if message.payload().as_ref() != [0x60] {
+            return;
+        }
+
+        let adapter = locked(&self.adapter).clone().expect("its adapter");
+
+        locked(&self.entered).send(()).expect("told it entered");
+        locked(&self.released)
+            .recv()
+            .expect("released once the other publish is queued");
+        drop(adapter.publish(publication_of(2)));
+    }
+}
+
+// spec 15.24; decision 0045: one queue of turns, a publish made within the broker's turn at its
+// tail, behind the one its publisher queued from another thread while that turn ran
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_publish_a_listener_makes_within_the_broker_s_turn_comes_behind_one_its_publisher_made_before_it()
+ {
+    let (broker, clock) = broker_on(MemoryBrokerOptions::default());
+    let (entered, entering) = std::sync::mpsc::channel();
+    let (releasing, released) = std::sync::mpsc::channel();
+    let publisher = broker
+        .adapter(&MemoryBrokerAdapterOptions::of("ada"))
+        .expect("an adapter");
+    let inbox = topic_of(["bead", "i", "ada"]);
+
+    publisher.listen(Arc::new(Reacting {
+        adapter: Mutex::new(Some(publisher.clone())),
+        entered: Mutex::new(entered),
+        released: Mutex::new(released),
+    }));
+    publisher
+        .start(BrokerStart::default())
+        .await
+        .expect("started");
+    publisher
+        .subscribe(&inbox, BrokerSubscription::default())
+        .await
+        .expect("subscribed");
+
+    let (subscriber, heard) = linked_of((&broker, "bob")).await;
+    let (other, _) = linked_of((&broker, "cid")).await;
+
+    subscriber
+        .subscribe(&topic(), BrokerSubscription::default())
+        .await
+        .expect("subscribed");
+
+    // its "go" reaches the publisher's application within a turn of the broker's
+    drop(other.publish(BrokerPublication::of(inbox, Bytes::from_static(&[0x60]))));
+    entering
+        .recv_timeout(Duration::from_secs(10))
+        .expect("the publisher's application within the broker's turn");
+
+    // * meanwhile, from this thread, the publisher publishes: queued while that turn runs
+    drop(publisher.publish(publication_of(1)));
+    releasing.send(()).expect("released");
+    clock.settle().await;
+
+    assert_eq!(
+        taken(&heard),
+        ["01", "02"],
+        "in the order its publisher published, the one made within the turn behind"
+    );
+}
+
 // spec 15.24
 #[tokio::test]
 async fn hands_a_group_message_to_one_member_in_turn_and_again_to_another_when_a_test_asks() {

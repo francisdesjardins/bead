@@ -19,8 +19,11 @@
   </ItemGroup>
 
   <ItemGroup>
-    <!-- what the procedures' parsers take, for the tests to hold -->
+    <!-- what the procedures' parsers take, for the tests to hold, and the question a conversation's
+         listener puts to its client's clock, for every project that plays the conversations -->
     <InternalsVisibleTo Include="Bead.Core.Tests" />
+    <InternalsVisibleTo Include="Bead.Transport.Amqp.Tests" />
+    <InternalsVisibleTo Include="Bead.Transport.Mqtt.Tests" />
   </ItemGroup>
 
   <ItemGroup>

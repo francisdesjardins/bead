@@ -182,12 +182,14 @@ public sealed class MemoryBroker
     }
 
     /// <summary>
-    /// Runs <paramref name="action"/> in one turn of the broker's: what it publishes is published in
-    /// that turn, each in its order, none handed on before it ends.
+    /// Runs <paramref name="action"/> in one turn of the broker's, behind what came before it — never
+    /// at once, even from within a turn of its own, so a publish a listener makes as it is handed a
+    /// message goes behind one its publisher made before it (spec 15.24; decision 0045): what it
+    /// publishes is published in that turn, each in its order, none handed on before it ends.
     /// </summary>
     internal Task Turn(Action action)
     {
-        return _scheduler.Run(() =>
+        return _scheduler.RunBehind(() =>
         {
             // ! a refusal is the call's task, never a throw into the turn that called
             try
@@ -206,7 +208,7 @@ public sealed class MemoryBroker
     /// <summary>As <see cref="Turn"/>, giving what <paramref name="action"/> gives.</summary>
     internal Task<T> Turn<T>(Func<T> action)
     {
-        return _scheduler.Run(() =>
+        return _scheduler.RunBehind(() =>
         {
             try
             {
@@ -618,26 +620,28 @@ public sealed class MemoryBrokerAdapter : IBrokerAdapter
     {
         ArgumentNullException.ThrowIfNull(published.Publication);
 
+        // * copied as it is published, at the call: the publisher's buffer stays its own, though it
+        // is routed in a later turn
+        var copy = published.Publication with
+        {
+            Topic = [.. published.Publication.Topic],
+            Payload = published.Publication.Payload.ToArray(),
+        };
+
         return _broker.Turn(() =>
         {
             AssertLinked();
 
-            if (_broker.MaximumMessageBytes is { } bound && published.Publication.Payload.Length > bound)
+            if (_broker.MaximumMessageBytes is { } bound && copy.Payload.Length > bound)
             {
-                throw new ArgumentException(string.Create(CultureInfo.InvariantCulture, $"a payload of {published.Publication.Payload.Length} bytes, past the broker's maximumMessageBytes, {bound} bytes"), nameof(published));
+                throw new ArgumentException(string.Create(CultureInfo.InvariantCulture, $"a payload of {copy.Payload.Length} bytes, past the broker's maximumMessageBytes, {bound} bytes"), nameof(published));
             }
 
-            if (published.Publication.CancellationToken.IsCancellationRequested)
+            if (copy.CancellationToken.IsCancellationRequested)
             {
-                throw new OperationCanceledException("the publication was given up on", published.Publication.CancellationToken);
+                throw new OperationCanceledException("the publication was given up on", copy.CancellationToken);
             }
 
-            // * copied as it is published: the publisher's buffer stays its own
-            var copy = published.Publication with
-            {
-                Topic = [.. published.Publication.Topic],
-                Payload = published.Publication.Payload.ToArray(),
-            };
             var isRouted = _broker.Route((copy, published.IsRetained));
 
             return !isRouted && (_capabilities & BrokerCapabilities.NoSubscriber) != 0 ? BrokerPublished.NoSubscriber : BrokerPublished.Taken;

@@ -435,7 +435,7 @@ async fn opening(
     // ! settled in a turn of its participant's, after every parcel taken before it: a CLOSE that
     // came with its ACCEPT is the connection's end as it opened
     let outcome = participant
-        .run_behind(move |state: &mut ParticipantState| {
+        .run(move |state: &mut ParticipantState| {
             let is_open = state.is_open(pair);
             let early = {
                 let mut held = locked(&opening.state);

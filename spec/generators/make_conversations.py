@@ -124,6 +124,17 @@ def refusal(call_id, code, scope=PROTOCOL):
 
 QUESTION = '"What time is it where you are?"'
 
+# the listener a conversation's server's application attaches, by its name: on the first telling of
+# its kind on a connection, it calls a command of the interop service's on that connection once
+LISTENERS = {}
+
+
+def with_listener(telling, conversation):
+    # a conversation whose server's application calls clock, the command, from within that telling:
+    # report, a report heard with a connection; read, its debug listener hearing an envelope read
+    LISTENERS[conversation[0]] = {'telling': telling, 'command': 'clock'}
+    return conversation
+
 
 def subscribe(call_id, *, paced=False, hold=None, fail=False):
     payload = 'null' if hold is None else ('{"hold":%d,"fail":true}' % hold if fail else '{"hold":%d}' % hold)
@@ -839,6 +850,11 @@ conversations = [
     # detail of it (9.0)
     ('a resolver that throws before it answers is answered PROCEDURE_FAILED, and reported', ['9.0', '9.5'], None, [
         json_request(1, 'broken', 'null'), failure(1, PROCEDURE_FAILED, detail=''), report('exception')]),
+    # 9.0: a call the server's application makes from its report listener goes behind what the
+    # reporting turn answers
+    with_listener('report', ('a call the report listener makes goes behind what the reporting turn answers', ['9.0'], None, [
+        json_request(1, 'broken', 'null'), failure(1, PROCEDURE_FAILED, detail=''),
+        command(2, 'clock', QUESTION), report('exception'), answer(2, '"noon"')])),
     ('a payload that is not JSON is answered PAYLOAD_UNDECODABLE', ['9.5'], None, [
         request(1, 'echo', 'FF'), failure(1, PAYLOAD_UNDECODABLE)]),
     # 18: checked's rules, which each server gives its descriptor by hand, judged once its payload
@@ -1029,6 +1045,11 @@ conversations = [
     ('an ELSEWHERE whose transport carried nothing is refused SESSION_REQUIRED, whatever its procedure requires, its detail saying no credential came',
      ['9.2.6', '15.1'], None, [
          elsewhere(1, 'echo', '"x"'), failure(1, SESSION_REQUIRED, detail=NO_CREDENTIAL)]),
+    # 9.0: a call the server's application makes as it reads a request goes before what that turn
+    # defers after it
+    with_listener('read', ('a call made as a request is read goes before the refusal its turn defers', ['9.0', '15.1'], None, [
+        elsewhere(1, 'echo', '"x"'), command(2, 'clock', QUESTION),
+        failure(1, SESSION_REQUIRED, detail=NO_CREDENTIAL), answer(2, '"noon"')])),
     *elsewhere_conversations(),
     # 9.2, steps 1 and 2: what would answer another call
     ('a request on the server\'s own parity is reported, never answered', ['9.2.1'], None, [
@@ -1566,6 +1587,7 @@ document = {
         'A conversation that opens its connections, open, plays them all at once: every other step names its connection, on, but a step that moves time, which is the server\'s, and each connection has its own expectations; one that opens none plays one connection, opened before its first step. twoWay false beside open declares a connection that carries nothing back, as an HTTP client that does not listen; carries false, one whose transport carries no credential beside an envelope it sends, as a WebSocket\'s toward its client or a listen\'s batch; secure false, one that reaches off the machine in the clear, neither over TLS nor within the machine. By default a connection carries a credential and is secure. A connection closed and opened again is a new connection under the same name.',
         'Before each send, after close, and at the end, nothing more was sent or reported: what a conversation does not expect, a server does not do.',
         'limits, where given, are the server\'s limits, by the names section 12.2 gives them, in milliseconds for a time; any other is its default. pacing, where given, bounds the queues of its paced subscriptions. relay, where given, sets the options of the server\'s relay: verifies true has it verify what it forwards (decision 0010); beforeRoute names its admission, requireCredential by default, shareLegBSession or requireSession.',
+        'listener, where given, is what the server\'s application does from within a telling: on the first telling of its kind on a connection, and once, it calls command, a command of the interop service\'s, on that connection, with the clock\'s question as its payload, and lets its answer go. telling report is a report it hears with that connection; read, its debug listener hearing an envelope read on it.',
         'The server is given the interop service\'s credentials: credentials.jwt, its keys, its audience, and its key set with the issuers it answers for, which answers on the server\'s clock as its words say, and with maximumWaitingCalls, the most calls that wait for one issuer\'s deadline at once; and credentials.elsewhere, its verifier, which settles on the server\'s clock as its words say. A server whose limits hold chunkBytes or maximumEnvelopeBytes under 1,024 bytes is given no JWT key and no key set, which section 12.2 forbids beside them, and takes no JWT. A JWT a send presents is written as its characters\' bytes, as any header byte is.',
         'clauses are the units of spec.md an entry checks: a clause, 9.2; an item of its numbered list, 9.2.5; a row of its table, counted from 1, 15.6.8.',
     ],
@@ -1574,6 +1596,7 @@ document = {
     'conversations': [
         {'name': name, 'clauses': clauses, **({'limits': limits} if limits else {}),
          **({'pacing': rest[0]} if len(rest) > 1 else {}), **({'relay': RELAY_OPTIONS[name]} if name in RELAY_OPTIONS else {}),
+         **({'listener': LISTENERS[name]} if name in LISTENERS else {}),
          'steps': rest[-1]}
         for name, clauses, limits, *rest in conversations
     ],

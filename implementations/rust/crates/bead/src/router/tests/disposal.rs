@@ -1,6 +1,7 @@
 //! A router's dispose and its end: what its transport tells once it is disposed reaches nothing of
-//! it, as both other sides stop listening within their dispose; and a router nobody holds, its
-//! transport gone, ends with its owner, as the other sides collect one nothing references.
+//! it, as both other sides stop listening within their dispose; a call made before it goes, and one
+//! made after it fails unsent; and a router nobody holds, its transport gone, ends with its owner,
+//! as the other sides collect one nothing references.
 
 use core::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Weak};
@@ -108,6 +109,72 @@ async fn a_command_its_transport_tells_once_its_router_is_disposed_reaches_no_re
     assert!(
         scripted.transport.envelopes().is_empty(),
         "nothing answered"
+    );
+}
+
+// spec 9.1; decision 0045: a dispose takes effect in two steps, its handle's mark at once and its
+// state's by its job, behind what came before it; each failure says which side of it its call was
+#[tokio::test]
+async fn a_call_made_before_its_router_s_dispose_goes_and_one_made_after_it_fails_unsent() {
+    let scripted = super::Scripted::new();
+
+    scripted.settle().await;
+
+    let request = || super::request_of((None, super::TIMEOUT));
+    let before = scripted
+        .router
+        .request(
+            Bytes::from_static(b"before"),
+            (request(), crate::router::server::CallHooks::default()),
+        )
+        .expect("a call made before");
+    let disposed = scripted.router.dispose();
+    let after = scripted
+        .router
+        .request(
+            Bytes::from_static(b"after"),
+            (request(), crate::router::server::CallHooks::default()),
+        )
+        .expect("a call made after");
+
+    scripted.settle().await;
+    disposed.await;
+
+    let sent: Vec<Bytes> = scripted
+        .transport
+        .envelopes()
+        .into_iter()
+        .filter_map(|envelope| match envelope {
+            Envelope::Request { payload, .. } => Some(payload),
+            Envelope::Result { .. }
+            | Envelope::Failure { .. }
+            | Envelope::Notification { .. }
+            | Envelope::Chunk { .. }
+            | Envelope::Credit { .. }
+            | Envelope::Cancel { .. } => None,
+        })
+        .collect();
+
+    assert_eq!(
+        sent,
+        [Bytes::from_static(b"before")],
+        "the call made before went"
+    );
+    assert_eq!(
+        super::answered(before)
+            .await
+            .err()
+            .map(|error| error.to_string()),
+        Some("the router was disposed before the answer".to_owned()),
+        "it went, and the dispose's job rejected it as it waited"
+    );
+    assert_eq!(
+        super::answered(after)
+            .await
+            .err()
+            .map(|error| error.to_string()),
+        Some("the router was disposed".to_owned()),
+        "the call made after failed unsent, saying so"
     );
 }
 
