@@ -53,6 +53,14 @@ use crate::transport::{
     Listened, ListenerId, Panicked, Sent, ServerListener, ServerTransport, caught,
 };
 
+#[cfg(test)]
+#[path = "tests/server_places.rs"]
+mod tests;
+
+#[cfg(test)]
+#[path = "tests/server_credential_sessions.rs"]
+mod credential_tests;
+
 /// What hears what a server's router reports: an error, and the connection it came with.
 pub type ErrorListener = Arc<dyn Fn(&RouterError, Option<&ConnectionHandle>) + Send + Sync>;
 
@@ -64,6 +72,10 @@ pub type RefusalListener = Arc<dyn Fn(&AccessRefusal) + Send + Sync>;
 
 /// What hears what a server's router did on a connection.
 pub type ActivityListener = Arc<dyn Fn(RouterActivity, &ConnectionHandle) + Send + Sync>;
+
+/// What supplies a connection's current token for an answer or an OPAQUE command.
+pub type SessionTokenProvider =
+    Arc<dyn Fn(&ConnectionHandle) -> Result<Option<SessionToken>, RouterError> + Send + Sync>;
 
 /// How a server's router is built, beyond its transport.
 #[derive(Clone, Default)]
@@ -84,6 +96,8 @@ pub struct RouterServerOptions {
     pub intake: Option<IntakeLimitsOptions>,
     /// What resolves a `JWT` and an `ELSEWHERE`.
     pub credentials: Option<Credentials>,
+    /// The connection's token: the server's session manager supplies it when none is given.
+    pub session_token_of: Option<SessionTokenProvider>,
     /// Its relay's options.
     pub relay: Option<crate::router::relay::RelayOptions>,
 }
@@ -148,6 +162,7 @@ pub(crate) struct ServerState {
     pub(crate) relay: crate::router::relay::Relay,
     pub(crate) listeners: Arc<ServerListeners>,
     pub(crate) facade: Option<crate::server::Facade>,
+    session_token_of: Option<SessionTokenProvider>,
 }
 
 impl fmt::Debug for ServerState {
@@ -428,8 +443,16 @@ impl Side for ServerState {
         }))
     }
 
-    fn session_token_of(&mut self, connection_handle: &ConnectionHandle) -> Option<SessionToken> {
-        crate::server::sessions_of(self).and_then(|sessions| sessions.token_of(connection_handle))
+    fn session_token_of(
+        &mut self,
+        connection_handle: &ConnectionHandle,
+    ) -> Result<Option<SessionToken>, RouterError> {
+        if let Some(provider) = &self.session_token_of {
+            return caught(("a session token provider", || provider(connection_handle)))
+                .unwrap_or_else(|panicked| Err(panicked.into()));
+        }
+        Ok(crate::server::sessions_of(self)
+            .and_then(|sessions| sessions.token_of(connection_handle)))
     }
 
     fn subscribe(&mut self, dispatch: &Arc<Dispatch>) -> Result<u32, CallError> {
@@ -1294,24 +1317,30 @@ pub type NotifyFilter =
 pub(crate) fn notify(
     state: &mut ServerState,
     (payload, procedure, (filter, key)): (Result<Bytes, RouterError>, ProcedureAddress, Notifying),
-) {
+) -> Result<(), RouterError> {
     // who gets it is settled before any is sent
-    let targets: Vec<_> = state
-        .notifications
-        .candidates(procedure)
-        .into_iter()
-        .filter(|subscription| {
-            filter.as_ref().is_none_or(|filter| {
-                std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                    filter(
-                        &subscription.connection_handle,
-                        subscription.identifier.as_ref(),
-                    )
-                }))
-                .unwrap_or(false)
+    let mut targets = Vec::new();
+
+    for subscription in state.notifications.candidates(procedure) {
+        let kept = filter.as_ref().map_or(Ok(true), |filter| {
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                filter(
+                    &subscription.connection_handle,
+                    subscription.identifier.as_ref(),
+                )
+            }))
+            .map_err(|panicked| {
+                RouterError::Other(Arc::new(crate::transport::panicked_of((
+                    "a notification filter",
+                    &*panicked,
+                ))))
             })
-        })
-        .collect();
+        })?;
+
+        if kept {
+            targets.push(subscription);
+        }
+    }
     let payload = match payload {
         Ok(payload) => payload,
         // a value that does not write goes to none: each subscription it was for counts it failed,
@@ -1328,7 +1357,7 @@ pub(crate) fn notify(
 
             state.listeners.report(&error, None);
 
-            return;
+            return Ok(());
         }
     };
 
@@ -1349,6 +1378,8 @@ pub(crate) fn notify(
             Some(PacingOutcome::Exceeded) => exceed(state, call),
         }
     }
+
+    Ok(())
 }
 
 // ── Transport events ─────────────────────────────────────────────────────────────────────────
@@ -1387,8 +1418,7 @@ pub(crate) fn on_close(state: &mut ServerState, handle: &ConnectionHandle) {
     state.connections.remove(handle);
     // its destinations stay unreachable until each is registered anew, on another connection
     crate::router::relay::close_connection(&state.relay, handle);
-    state.in_flight.remove(handle);
-    state.waiting.remove(handle);
+    clear_places(state, Some(handle));
     clean_tracked(state, handle);
     state.requests.retain(|(held, _), _| held != handle);
     crate::router::core::reject_pending(
@@ -1428,8 +1458,7 @@ pub(crate) fn dispose(state: &mut ServerState) {
     }
 
     state.connections.clear();
-    state.in_flight.clear();
-    state.waiting.clear();
+    clear_places(state, None);
 
     for (_, sessions) in state.kept.drain() {
         for (_, mut session) in sessions.into_iter_entries() {
@@ -1763,6 +1792,7 @@ impl RouterServer {
                 relay: relay.clone(),
                 listeners: Arc::clone(&listeners),
                 facade,
+                session_token_of: options.session_token_of.clone(),
             }
         });
         let listener: Arc<dyn ServerListener> = Arc::new(Bridge {
@@ -1944,7 +1974,12 @@ impl RouterServer {
     }
 
     /// Sends a notification's payload to each subscription its procedure holds that `filter`
-    /// keeps; or, given why its value does not write, to none.
+    /// keeps; or, given why its value does not write, to none. Its future gives the outcome of
+    /// choosing its subscribers; each transport's send failure is reported with its connection.
+    ///
+    /// # Errors
+    ///
+    /// A filter that panics fails the notification before any subscriber is sent it.
     pub fn notify(
         &self,
         payload: Result<Bytes, RouterError>,
@@ -1953,19 +1988,18 @@ impl RouterServer {
             Option<NotifyFilter>,
             Option<NotificationKey>,
         ),
-    ) -> BoxFuture<()> {
+    ) -> BoxFuture<Result<(), RouterError>> {
         // ! once its handle is disposed, a notification made after it goes to nobody
         if self.shared.disposal.is_set() {
-            return Box::pin(async {});
+            return Box::pin(async { Ok(()) });
         }
 
-        let posted = self.shared.owner.run(move |state: &mut ServerState| {
-            notify(state, (payload, procedure, (filter, key)));
-        });
+        let posted = self
+            .shared
+            .owner
+            .run(move |state: &mut ServerState| notify(state, (payload, procedure, (filter, key))));
 
-        Box::pin(async move {
-            posted.await.ok();
-        })
+        Box::pin(async move { posted.await.unwrap_or(Ok(())) })
     }
 
     /// Ends the credential's session `identifier` names on every connection that keeps it.
@@ -1998,6 +2032,17 @@ impl RouterServer {
         Box::pin(async move {
             posted.await.ok();
         })
+    }
+
+    /// Takes away the subscription of `call`, or its wait for a place. Gives whether the
+    /// connection held that subscription; a waiting call holds none.
+    pub fn unsubscribe(&self, call: CallAddress) -> BoxFuture<bool> {
+        let posted = self.shared.owner.run(move |state: &mut ServerState| {
+            leave_waiting(state, &call);
+            unregister_tracked(state, (call.call_id, &call.connection_handle)).is_some()
+        });
+
+        Box::pin(async move { posted.await.unwrap_or(false) })
     }
 
     /// Ends the subscriptions of a connection's session, with `failure`.
@@ -2074,17 +2119,8 @@ impl RouterServer {
     }
 }
 
-/// What a server's router holds, merged.
-pub(crate) fn gauges(state: &ServerState) -> Gauges {
-    let mut own = Gauges::default();
-
-    own.counts.insert(
-        "connections",
-        u64::try_from(state.connections.len()).unwrap_or(u64::MAX),
-    );
-    own.connection_handles
-        .extend(state.connections.keys().cloned());
-
+// What the subscription places hold, apart from notifications already established.
+fn place_gauges(state: &ServerState) -> Gauges {
     let mut places = Gauges::default();
 
     places.counts.insert(
@@ -2106,6 +2142,33 @@ pub(crate) fn gauges(state: &ServerState) -> Gauges {
     places
         .connection_handles
         .extend(state.in_flight.keys().cloned());
+
+    places
+}
+
+// Forgets the in-flight holders and their waiters; established subscriptions stay held.
+fn clear_places(state: &mut ServerState, handle: Option<&ConnectionHandle>) {
+    if let Some(handle) = handle {
+        state.in_flight.remove(handle);
+        state.waiting.remove(handle);
+    } else {
+        state.in_flight.clear();
+        state.waiting.clear();
+    }
+}
+
+/// What a server's router holds, merged.
+pub(crate) fn gauges(state: &ServerState) -> Gauges {
+    let mut own = Gauges::default();
+
+    own.counts.insert(
+        "connections",
+        u64::try_from(state.connections.len()).unwrap_or(u64::MAX),
+    );
+    own.connection_handles
+        .extend(state.connections.keys().cloned());
+
+    let places = place_gauges(state);
 
     let mut sessions = Gauges::default();
     let timed: u64 = state
@@ -2177,16 +2240,17 @@ pub(crate) fn request_on(
         let is_open = state.connections.contains_key(&named);
         // OPAQUE, the connection's session, as its answers announce it; a JWT, or an ELSEWHERE
         // beside it; OPAQUE with no session refuses the call once it started
-        let token =
-            crate::server::sessions_of(state).and_then(|sessions| sessions.token_of(&named));
-        let mut own_refusal: Option<CallError> = None;
+        let (token, mut own_refusal) = match state.session_token_of(&named) {
+            Ok(token) => (token, None),
+            Err(error) => (None, Some(crate::router::core::call_error_of(error))),
+        };
         let (credential, carried) = match presented_credential_of(
             options.credential.as_ref(),
             (RouterSide::Server, token.as_ref()),
         ) {
             Ok(presented) => (presented.credential, presented.carried),
             Err(error) => {
-                own_refusal = Some(error);
+                own_refusal = own_refusal.or(Some(error));
 
                 (None, None)
             }

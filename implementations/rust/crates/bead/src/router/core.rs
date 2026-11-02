@@ -42,7 +42,7 @@ use crate::router::types::{
     TransportMessage,
 };
 use crate::session_token::SessionToken;
-use crate::transport::{Panicked, Sent, caught_future, panicked_of};
+use crate::transport::{Panicked, Sent, caught, caught_future, panicked_of};
 use crate::violations::detail_bound_of;
 
 /// What a router's handlers are told the router was disposed with.
@@ -370,8 +370,11 @@ pub(crate) trait Side: Sized + Send + 'static {
     }
 
     /// The session of `connection_handle`, which its next answer announces when it changed.
-    fn session_token_of(&mut self, _connection_handle: &ConnectionHandle) -> Option<SessionToken> {
-        None
+    fn session_token_of(
+        &mut self,
+        _connection_handle: &ConnectionHandle,
+    ) -> Result<Option<SessionToken>, RouterError> {
+        Ok(None)
     }
 
     /// The session a credential resolved to, as the side keeps it: a credential's session a
@@ -426,6 +429,8 @@ pub(crate) struct Core<S> {
     pub(crate) side: RouterSide,
     pub(crate) limits: RouterLimits,
     pub(crate) clock: SharedClock,
+    #[cfg(test)]
+    pub(crate) observed_reads: Option<Arc<Mutex<Vec<Gauges>>>>,
     pub(crate) owner: WeakOwner<S>,
     pub(crate) metrics: Option<RouterMetrics>,
     pub(crate) placement: Placement,
@@ -478,6 +483,8 @@ impl<S: Side> Core<S> {
             side,
             limits,
             clock,
+            #[cfg(test)]
+            observed_reads: None,
             deferral: Deferral::of(owner.clone()),
             owner,
             metrics,
@@ -545,6 +552,10 @@ impl<S: Side> Core<S> {
 
     /// The monotonic reading now.
     pub(crate) fn now(&self) -> Duration {
+        #[cfg(test)]
+        if let Some(reads) = &self.observed_reads {
+            locked(reads).push(self.gauges());
+        }
         self.clock.monotonic()
     }
 
@@ -588,11 +599,11 @@ pub(crate) fn reported_error_of(error: Box<dyn Error + Send + Sync>) -> RouterEr
 pub(crate) fn reported_call(error: CallError) -> RouterError {
     match error {
         CallError::Failure(failure) => RouterError::Failure(failure),
+        CallError::Other(error) => RouterError::Other(error),
         other @ (CallError::Cancelled
         | CallError::Disconnected(_)
         | CallError::TimedOut(_)
-        | CallError::Refused(_)
-        | CallError::Other(_)) => RouterError::Other(Arc::new(other)),
+        | CallError::Refused(_)) => RouterError::Other(Arc::new(other)),
     }
 }
 
@@ -625,15 +636,15 @@ impl<S> Deliver<S> {
 fn announce<S: Side>(
     state: &mut S,
     (envelope, handle): (Envelope, &ConnectionHandle),
-) -> (Envelope, Option<crate::router::parts::Announced>) {
+) -> Result<(Envelope, Option<crate::router::parts::Announced>), RouterError> {
     if !matches!(envelope, Envelope::Result { .. } | Envelope::Failure { .. }) {
-        return (envelope, None);
+        return Ok((envelope, None));
     }
 
-    let current = state.session_token_of(handle);
+    let current = state.session_token_of(handle)?;
     let Some((credential, announced)) = state.core().announcements.announce((handle, current))
     else {
-        return (envelope, None);
+        return Ok((envelope, None));
     };
 
     let envelope = match envelope {
@@ -658,7 +669,7 @@ fn announce<S: Side>(
         | Envelope::Cancel { .. }) => other,
     };
 
-    (envelope, Some(announced))
+    Ok((envelope, Some(announced)))
 }
 
 /// Sends an envelope, within its limits, announced, traced and handed to the transport; `then`
@@ -709,7 +720,10 @@ pub(crate) fn deliver<S: Side>(state: &mut S, (envelope, options): (Envelope, De
         return settle(state, Err(CallError::Failure(failure)), then);
     }
 
-    let (envelope, announced) = announce(state, (envelope, &connection_handle));
+    let (envelope, announced) = match announce(state, (envelope, &connection_handle)) {
+        Ok(announced) => announced,
+        Err(error) => return settle(state, Err(call_error_of(error)), then),
+    };
     let detail_bytes = detail_bound_of(
         usize::try_from(limits.maximum_detail_bytes).unwrap_or(usize::MAX),
         usize::try_from(limits.maximum_envelope_bytes).unwrap_or(usize::MAX),
@@ -1691,7 +1705,12 @@ fn dispatch_to<S: Side>(
         carried: None,
     };
     // * off the owner, on the runtime: one that blocks its thread stalls a worker, never the router
-    let resolving = (handler.resolve)(props);
+    let resolving = match caught(("a resolver", || (handler.resolve)(props))) {
+        Ok(resolving) => resolving,
+        Err(panicked) => {
+            return resolver_failed(state, (&dispatch, &signal, ResolverError::other(panicked)));
+        }
+    };
     let Some(running) = owner.spawn(resolving) else {
         return;
     };
@@ -1972,6 +1991,19 @@ fn resolve_session<S: Side>(
         carried,
     };
     let resolution = state.session_of(&request, &signal);
+    // NONE and OPAQUE resolve in the receive turn. A future violates that contract; its eventual
+    // outcome is consumed off the owner and never admits the call (spec 13.1).
+    let resolution = match resolution {
+        Resolution::Later(resolving) if !is_later => {
+            state.core().owner.cover(async move {
+                let _outcome = resolving.await;
+            });
+            Resolution::Now(Err(Unresolved::Other(Arc::new(ProgrammerError::new(
+                "session_of resolves a request presenting none or OPAQUE in the turn it came, never by a future",
+            )))))
+        }
+        resolution @ (Resolution::Now(_) | Resolution::Later(_)) => resolution,
+    };
     let settle = move |state: &mut S, resolved: Result<Resolved, Unresolved>| {
         match resolved {
             Ok(resolved) => {
@@ -2497,37 +2529,7 @@ pub(crate) fn reject_pending<S: Side>(
     core.announcements.forget(handle);
 
     // ! the calls it answers taken last, each counted closed once all are out
-    let handles: Vec<ConnectionHandle> = handle.map_or_else(
-        || {
-            let mut handles: BTreeSet<ConnectionHandle> =
-                core.answering.answering.keys().cloned().collect();
-
-            handles.extend(core.answering.abandoned.keys().cloned());
-            handles.into_iter().collect()
-        },
-        |handle| vec![Arc::clone(handle)],
-    );
-    let mut taken: Vec<(CallAddress, Answering)> = Vec::new();
-
-    for handle in handles {
-        if let Some(calls) = core.answering.answering.remove(&handle) {
-            for (call_id, answering) in calls {
-                taken.push((
-                    CallAddress {
-                        connection_handle: Arc::clone(&handle),
-                        call_id,
-                    },
-                    answering,
-                ));
-            }
-        }
-
-        if let Some(calls) = core.answering.abandoned.remove(&handle) {
-            for (_, mut abandoned) in calls {
-                cancel_timer(&mut abandoned.timer);
-            }
-        }
-    }
+    let mut taken = core.answering.take_all(handle);
 
     // * read only when a call it takes is counted (spec/debugging.md 3.1)
     let now = if taken

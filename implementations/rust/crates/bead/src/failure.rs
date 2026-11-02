@@ -9,6 +9,9 @@ use std::sync::Arc;
 use crate::constants::{FailureScope, ProtocolCode, RouterSide};
 use crate::envelope::{FailureRecord, Header};
 
+#[cfg(test)]
+mod tests;
+
 /// Where a failure comes from: raised here, received from the peer, or received through a relay.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[non_exhaustive]
@@ -106,6 +109,16 @@ impl Failure {
             header: None,
             source: None,
         }
+    }
+
+    // A failure the router answers in its resolver's place is raised here, on this side.
+    pub(crate) fn answered(record: &FailureRecord, side: RouterSide) -> Self {
+        let mut failure = Self::local(record.code, (record.scope, Some(side)));
+
+        failure.detail.clone_from(&record.detail);
+        failure.relays = record.relays;
+
+        failure
     }
 
     /// The same failure, saying `detail`.
@@ -221,10 +234,23 @@ impl Failure {
         self.scope == FailureScope::Protocol && codes.iter().any(|code| code.get() == self.code)
     }
 
+    /// Whether this is one of the protocol's `codes`, raised by the known `side`.
+    /// A failure received through a relay has no known side and matches none.
+    #[must_use]
+    pub fn is_protocol_code_from(&self, codes: &[ProtocolCode], side: RouterSide) -> bool {
+        self.side == Some(side) && self.is_protocol_code(codes)
+    }
+
     /// Whether this is the procedure's own failure.
     #[must_use]
     pub fn is_application(&self) -> bool {
         self.scope == FailureScope::Application
+    }
+
+    /// Whether this is one of the procedure's own `codes`, never a protocol code of the same number.
+    #[must_use]
+    pub fn is_application_code(&self, codes: &[u16]) -> bool {
+        self.is_application() && codes.contains(&self.code.get())
     }
 
     /// Its code as the protocol's, for a failure of the protocol's scope.

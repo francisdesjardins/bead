@@ -237,20 +237,39 @@ fn locked(inner: &Inner) -> MutexGuard<'_, KeySetState> {
 }
 
 fn failure_of(message: String) -> Unresolved {
-    Unresolved::Other(Arc::new(KeySetError(message)))
+    Unresolved::Other(Arc::new(KeySetError {
+        message,
+        cause: None,
+    }))
 }
 
 /// A key set's failure, as the calls that waited on it are failed.
 #[derive(Debug, Clone)]
-struct KeySetError(String);
+struct KeySetError {
+    message: String,
+    cause: Option<Arc<dyn Error + Send + Sync>>,
+}
 
 impl fmt::Display for KeySetError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter.write_str(&self.0)
+        formatter.write_str(&self.message)
     }
 }
 
-impl Error for KeySetError {}
+impl Error for KeySetError {
+    fn source(&self) -> Option<&(dyn Error + 'static)> {
+        self.cause
+            .as_ref()
+            .map(|cause| -> &(dyn Error + 'static) { cause.as_ref() })
+    }
+}
+
+fn ask_failed(issuer: &str, cause: Arc<dyn Error + Send + Sync>) -> Unresolved {
+    Unresolved::Other(Arc::new(KeySetError {
+        message: format!("the key set's ask for {issuer} failed"),
+        cause: Some(cause),
+    }))
+}
 
 fn string_of<'a>(object: &'a Map<String, Value>, name: &str) -> Option<&'a str> {
     object.get(name).and_then(Value::as_str)
@@ -580,17 +599,11 @@ fn answer(weak: &Weak<Inner>, (issuer, id, answered): (&str, u64, KeySetAnswer))
                 .collect();
 
             held.map_or_else(
-                |error| {
-                    AskOutcome::Failure(failure_of(format!(
-                        "the key set's ask for {issuer} failed: {error}"
-                    )))
-                },
+                |error| AskOutcome::Failure(ask_failed(issuer, Arc::new(error))),
                 AskOutcome::Keys,
             )
         }
-        Err(error) => AskOutcome::Failure(failure_of(format!(
-            "the key set's ask for {issuer} failed: {error}"
-        ))),
+        Err(error) => AskOutcome::Failure(ask_failed(issuer, Arc::from(error))),
     };
     let now = inner.clock.monotonic();
     let mut state = locked(&inner);
@@ -881,6 +894,15 @@ async fn resolve_elsewhere(
     let Some(session) = session else {
         return Ok(Resolved::Refused("verifier".to_owned()));
     };
+
+    if session
+        .end
+        .is_some_and(|end| !(-9_007_199_254_740_991..=9_007_199_254_740_991).contains(&end))
+    {
+        return Err(Unresolved::Other(Arc::new(ProgrammerError::new(
+            "an ELSEWHERE's verifier settles with a session whose end is a number of milliseconds within ±9007199254740991",
+        ))));
+    }
 
     // the wall clock read as the verifier settles: a session whose end it reached does not hold
     if let Some(end) = session.end

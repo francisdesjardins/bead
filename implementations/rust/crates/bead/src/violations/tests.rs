@@ -9,6 +9,9 @@ use super::{
 };
 use crate::constants::{FailureScope, ProtocolCode};
 
+mod details;
+mod words;
+
 fn violation(rule_id: &str) -> Violation {
     Violation {
         field_path: Some("names".to_owned()),

@@ -9,14 +9,17 @@ use bytes::Bytes;
 use tokio::sync::oneshot;
 
 use crate::clock::{Clock, Schedule, SharedClock, Timer, TimerCallback};
-use crate::constants::RouterSide;
+use crate::constants::{CredentialScheme, RouterSide};
 use crate::debug::{DebugDirection, TracedEnvelope};
 use crate::envelope::{
     CreditHeader, Envelope, FailureHeader, FailureRecord, Header, NotificationHeader,
 };
 use crate::errors::CallError;
 use crate::owner::Owner;
-use crate::router::core::{self as router_core, BeforeAnswer, Core, Dispatch, Side, Undo};
+use crate::router::core::{
+    self as router_core, BeforeAnswer, Core, Dispatch, Handler, Resolution, Resolved,
+    SessionRequest, Side, Undo,
+};
 use crate::router::parts::Answering;
 use crate::router::requester::{self, CoreRequest};
 use crate::router::types::{
@@ -29,6 +32,9 @@ use crate::transport::Sent;
 
 pub(crate) type Completion<T> = oneshot::Receiver<Result<T, CallError>>;
 pub(crate) type TransmitHook = Box<dyn FnMut(&mut State, &Envelope) + Send>;
+pub(crate) type TokenHook =
+    Box<dyn FnMut(&ConnectionHandle) -> Result<Option<SessionToken>, RouterError> + Send>;
+pub(crate) type SessionHook = Box<dyn FnMut(&SessionRequest, &Signal) -> Resolution + Send>;
 
 #[expect(
     clippy::struct_excessive_bools,
@@ -37,8 +43,13 @@ pub(crate) type TransmitHook = Box<dyn FnMut(&mut State, &Envelope) + Send>;
 pub(crate) struct State {
     pub(crate) core: Core<Self>,
     pub(crate) tokens: BTreeMap<ConnectionHandle, SessionToken>,
+    pub(crate) token: Option<TokenHook>,
     pub(crate) sending: VecDeque<Result<Sent, RouterError>>,
     pub(crate) on_transmit: Option<TransmitHook>,
+    pub(crate) session: Option<SessionHook>,
+    pub(crate) schemes: Vec<CredentialScheme>,
+    pub(crate) destination: Option<Arc<Handler>>,
+    pub(crate) held: Vec<u32>,
     pub(crate) sent: Vec<(ConnectionHandle, Envelope)>,
     pub(crate) reports: Vec<(ConnectionHandle, RouterError)>,
     pub(crate) before: Vec<BeforeAnswer>,
@@ -53,6 +64,8 @@ pub(crate) struct State {
     pub(crate) sends_notifications: bool,
     pub(crate) takes_unpaired: bool,
     pub(crate) two_way: bool,
+    pub(crate) one_way: Vec<ConnectionHandle>,
+    pub(crate) two_way_asked: Mutex<Vec<ConnectionHandle>>,
 }
 
 impl core::fmt::Debug for State {
@@ -69,8 +82,31 @@ impl Side for State {
         &mut self.core
     }
 
-    fn is_two_way(&self, _handle: &ConnectionHandle) -> bool {
-        self.two_way
+    fn credential_schemes(&self) -> Vec<CredentialScheme> {
+        self.schemes.clone()
+    }
+
+    fn session_of(&mut self, request: &SessionRequest, signal: &Signal) -> Resolution {
+        self.session.as_mut().map_or_else(
+            || Resolution::Now(Ok(Resolved::None)),
+            |resolve| resolve(request, signal),
+        )
+    }
+
+    fn handler_of_destination(&mut self, _destination_id: u32) -> Option<Arc<Handler>> {
+        self.destination.clone()
+    }
+
+    fn is_call_id_in_use(&self, call_id: u32, _handle: &ConnectionHandle) -> bool {
+        self.held.contains(&call_id)
+    }
+
+    fn is_two_way(&self, handle: &ConnectionHandle) -> bool {
+        self.two_way_asked
+            .lock()
+            .expect("two-way questions")
+            .push(Arc::clone(handle));
+        self.two_way && !self.one_way.contains(handle)
     }
 
     fn before_answer(&mut self, answer: BeforeAnswer) -> Option<Undo<Self>> {
@@ -149,8 +185,14 @@ impl Side for State {
         sent
     }
 
-    fn session_token_of(&mut self, handle: &ConnectionHandle) -> Option<SessionToken> {
-        self.tokens.get(handle).copied()
+    fn session_token_of(
+        &mut self,
+        handle: &ConnectionHandle,
+    ) -> Result<Option<SessionToken>, RouterError> {
+        if let Some(token) = &mut self.token {
+            return token(handle);
+        }
+        Ok(self.tokens.get(handle).copied())
     }
 }
 
@@ -201,8 +243,13 @@ impl Peer {
         let owner = Owner::spawn((&runtime, &shared), |owner| State {
             core: Core::new(owner, (side, limits, Arc::clone(&shared), None)),
             tokens: BTreeMap::new(),
+            token: None,
             sending: VecDeque::new(),
             on_transmit: None,
+            session: None,
+            schemes: Vec::new(),
+            destination: None,
+            held: Vec::new(),
             sent: Vec::new(),
             reports: Vec::new(),
             before: Vec::new(),
@@ -217,6 +264,8 @@ impl Peer {
             sends_notifications: false,
             takes_unpaired: false,
             two_way: true,
+            one_way: Vec::new(),
+            two_way_asked: Mutex::new(Vec::new()),
         });
         Self {
             clock,

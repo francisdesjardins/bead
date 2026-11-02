@@ -20,6 +20,10 @@ use crate::router::transfer::{
 use crate::router::types::{CallAddress, ConnectionHandle, Gauges, RouterLimits, Signal};
 use crate::session_token::SessionToken;
 
+#[cfg(test)]
+#[path = "tests/sending_transfers.rs"]
+mod sending_tests;
+
 /// A timer a part holds, cancelled as it goes.
 pub(crate) type HeldTimer = Option<Arc<dyn Timer>>;
 
@@ -928,6 +932,43 @@ impl AnsweringCalls {
         }
 
         answering
+    }
+
+    /// Takes every call out, `handle`'s alone when given, without aborting its signal. Forgets
+    /// abandoned calls and cancels their timers on the same connections.
+    pub(crate) fn take_all(
+        &mut self,
+        handle: Option<&ConnectionHandle>,
+    ) -> Vec<(CallAddress, Answering)> {
+        let handles: Vec<ConnectionHandle> = handle.map_or_else(
+            || {
+                let mut handles: std::collections::BTreeSet<ConnectionHandle> =
+                    self.answering.keys().cloned().collect();
+                handles.extend(self.abandoned.keys().cloned());
+                handles.into_iter().collect()
+            },
+            |handle| vec![Arc::clone(handle)],
+        );
+        let mut taken = Vec::new();
+        for handle in handles {
+            if let Some(calls) = self.answering.remove(&handle) {
+                for (call_id, answering) in calls {
+                    taken.push((
+                        CallAddress {
+                            connection_handle: Arc::clone(&handle),
+                            call_id,
+                        },
+                        answering,
+                    ));
+                }
+            }
+            if let Some(calls) = self.abandoned.remove(&handle) {
+                for (_, mut abandoned) in calls {
+                    cancel_timer(&mut abandoned.timer);
+                }
+            }
+        }
+        taken
     }
 
     pub(crate) fn gauges(&self) -> Gauges {

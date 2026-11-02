@@ -117,7 +117,11 @@ async fn a_request_whose_send_panics_fails_as_its_transport_s_throw_would_and_th
         let scripted = Scripted::new();
         let words = match &panicking {
             Sending::Panicked(words) | Sending::PanickedLater(words) => words.clone(),
-            Sending::Taken | Sending::Thrown(_) | Sending::Rejected(_) => String::new(),
+            Sending::Taken
+            | Sending::Thrown(_)
+            | Sending::Rejected(_)
+            | Sending::Error(_)
+            | Sending::Waiting { .. } => String::new(),
         };
 
         scripted.transport.send_as(panicking);
@@ -325,6 +329,34 @@ async fn a_turn_that_panics_ends_its_router_failing_each_call_it_waits_on_with_t
         router.gauges().await,
         crate::router::types::Gauges::default(),
         "its owner gone"
+    );
+}
+
+#[tokio::test]
+async fn keeps_the_result_of_a_subscription_answered_before_a_later_turn_panics() {
+    let scripted = Scripted::new();
+    let notification = super::client::Notified::new(Some(4));
+    let subscribing = scripted
+        .subscribe((&notification.like(), super::TIMEOUT))
+        .await;
+    let transport = Arc::clone(&scripted.transport);
+    let owner = scripted.router.owner().clone();
+    scripted
+        .router
+        .owner()
+        .run(move |_| {
+            transport.deliver(&result_of(1, None));
+            owner.offer(Box::new(|_| panic!("a later turn breaks")));
+        })
+        .await
+        .expect("the result precedes the failing turn");
+    super::answered(subscribing)
+        .await
+        .expect("the completed call keeps its result");
+    scripted.settle().await;
+    assert_eq!(
+        scripted.codes(),
+        ["a turn of the router's panicked: a later turn breaks"]
     );
 }
 

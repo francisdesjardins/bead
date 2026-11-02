@@ -30,6 +30,8 @@ pub mod parcels;
 mod platform;
 pub mod scripted;
 #[cfg(test)]
+pub(crate) mod surface;
+#[cfg(test)]
 mod tests;
 pub mod validations;
 pub mod vectors;

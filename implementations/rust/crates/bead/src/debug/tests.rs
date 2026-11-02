@@ -22,6 +22,8 @@ use crate::payloads::{CodecRefusal, JsonCodec, PayloadCodec};
 use crate::router::types::RequestCredential;
 use crate::testing::pair::{Pair, PairOptions, echo};
 
+mod filters;
+
 // what a manager's debug listener heard: why, when a step went wrong, and the step
 type Heard = Arc<Mutex<Vec<(Option<String>, DebugEvent)>>>;
 

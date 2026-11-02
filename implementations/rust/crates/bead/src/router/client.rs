@@ -1157,7 +1157,8 @@ impl RouterClient {
 
         // ! a programmer's error first, before the call starts, so it is never counted
         if let Some(subscribes) = &subscribes
-            && !self.has_notification(subscribes)
+            && (procedure.address() != subscribes.procedure().address()
+                || !self.has_notification(subscribes))
         {
             return Err(ProgrammerError::new(format!(
                 "{} is not the notification this router holds for {}",
@@ -1239,6 +1240,8 @@ impl RouterClient {
         let timeout = options.timeout;
         let subscribing = subscribes.clone();
         let posted = shared.owner.post(Box::new(move |state: &mut ClientState| {
+            let drawn: Arc<Mutex<Option<u32>>> = Arc::default();
+            let told = Arc::clone(&drawn);
             let deferral = state.core.deferral.clone();
             let is_subscribing = subscribing.is_some();
             let paced = subscribing
@@ -1248,6 +1251,7 @@ impl RouterClient {
             // behind its result is heard, and the call bound before is cancelled ahead of it
             let on_drawn = is_subscribing.then(|| -> OnDrawn<ClientState> {
                 Box::new(move |state: &mut ClientState, call_id: u32| {
+                    *locked(&told) = Some(call_id);
                     let held = locked(&state.notifications)
                         .get(&(address.service_id, address.procedure_id))
                         .cloned();
@@ -1279,6 +1283,15 @@ impl RouterClient {
                         transport_credential: presented.carried,
                     },
                     Box::new(move |outcome: Result<RouterResult, CallError>| {
+                        let call_id = *locked(&drawn);
+                        // ! the call owns a result already received, even if a queued turn panics
+                        // before its subscription's settlement; only that side effect waits
+                        let reply = if outcome.is_ok() {
+                            drop(reply.send(outcome.clone()));
+                            None
+                        } else {
+                            Some(reply)
+                        };
                         // settled in a later turn than the one it came in: as its router ends
                         // too, with what ended it for its reason
                         deferral.offer(Box::new(move |state: &mut ClientState| {
@@ -1286,7 +1299,7 @@ impl RouterClient {
                                 state,
                                 (
                                     (outcome, reply),
-                                    (subscribing, presented_default, default, listeners),
+                                    (subscribing, call_id, presented_default, default, listeners),
                                 ),
                             );
                         }));
@@ -1470,13 +1483,14 @@ fn bind(
 )]
 fn settled(
     state: &mut ClientState,
-    ((outcome, reply), (subscribing, presented, default, listeners)): (
+    ((outcome, reply), (subscribing, bound_call_id, presented, default, listeners)): (
         (
             Result<RouterResult, CallError>,
-            oneshot::Sender<Result<RouterResult, CallError>>,
+            Option<oneshot::Sender<Result<RouterResult, CallError>>>,
         ),
         (
             Option<Arc<dyn NotificationLike>>,
+            Option<u32>,
             Option<RequestCredential>,
             Arc<Mutex<Default_>>,
             Arc<ClientListeners>,
@@ -1494,12 +1508,14 @@ fn settled(
                     bound.is_answered = true;
                 }
 
-                // the server paces nothing before its answer: the window opens once it came
+                // the settlement follows the read's envelopes, so a subscription ended in that
+                // read opens no window
                 state.renew(call_id);
             }
             Err(_) => {
                 // a subscription that did not take holds nothing, whatever ended it
-                if let Some(call_id) = state.call_ids.get(&key).copied()
+                if let Some(call_id) = bound_call_id
+                    && state.call_ids.get(&key) == Some(&call_id)
                     && state
                         .subscriptions
                         .get(&call_id)
@@ -1515,7 +1531,9 @@ fn settled(
         withdraw((reason, presented.as_ref()), (&default, &listeners));
     }
 
-    drop(reply.send(outcome));
+    if let Some(reply) = reply {
+        drop(reply.send(outcome));
+    }
 }
 
 // a call that presented the default, refused SESSION_REQUIRED, withdraws it while it is still that
