@@ -174,21 +174,21 @@
       "bead.interop": {
         "type": "Project",
         "dependencies": {
-          "Bead.Core": "[0.8.0, )",
-          "Bead.Protobuf": "[0.8.0, )"
+          "Bead.Core": "[0.9.0, )",
+          "Bead.Protobuf": "[0.9.0, )"
         }
       },
       "bead.protobuf": {
         "type": "Project",
         "dependencies": {
-          "Bead.Core": "[0.8.0, )",
+          "Bead.Core": "[0.9.0, )",
           "Google.Protobuf": "[3.36.2, )"
         }
       },
       "bead.transport.mqtt": {
         "type": "Project",
         "dependencies": {
-          "Bead.Core": "[0.8.0, )",
+          "Bead.Core": "[0.9.0, )",
           "MQTTnet": "[5.2.0.1603, )"
         }
       },

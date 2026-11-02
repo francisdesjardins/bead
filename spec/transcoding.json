@@ -14,7 +14,7 @@
     "defaults are the gateway's options where a case gives none, by the names of transcoding 2.4, 7.6, 8.7, 8.8, 9.2, 10.3 and 11.1, and of spec 15.12, in milliseconds for a time; options, where given, are a case's beside them. service is what each procedure's resolver does, by its name, what its server verifies, and the counts an exchange waits on. A case marked realTime plays on the real clock.",
     "clauses are the units of transcoding.md an entry checks: a clause, 5.2; an item of its numbered list, 5.2.1; a row of its table, counted from 1, 7.6.8; and a unit of spec.md behind spec:, spec:9.2.5, after them."
   ],
-  "transcodingVersion": "0.2.0",
+  "transcodingVersion": "0.2.1",
   "defaults": {
     "hosts": [],
     "origins": [

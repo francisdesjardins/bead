@@ -151,7 +151,9 @@ the id holds the inbox, the start fails on the 400 and the participant's reconne
 the earlier link keeps the id, where MQTT 5's later one does. A link is up once its inbox's receiver
 attached; the end of its connection, of its inbox's session or of its receiver is its link lost,
 and its inbox is never attached again in place, since a receiver detached hands its unsettled
-messages back on the same connection, which the core would read behind later parcels.
+messages back on the same connection, which the core would read behind later parcels. A stop fails
+what waits on its link, none of it a no subscriber, which `released` alone tells (spec 15.33,
+15.35).
 
 **Sessions are the walls** (spec 15.33): one for the inbox's receiver, one for each name served,
 one sending to inboxes and one sending to names, each to the anonymous terminus, and the management
@@ -163,7 +165,8 @@ same link, is its link lost, so the core's next link wants the name again and re
 where its broker still refuses it. A sending session that ends refuses each publication it held, the
 link kept, and the next publication begins another; on the sending side the wall is per session: an
 OPEN to a name its client may not call fails each OPEN in flight beside it. A subscription past the
-OPEN's `channel-max` is refused, naming it, before it begins a session.
+OPEN's `channel-max` is refused, naming it, before it begins a session. A link of its own whose
+ATTACH is answered with no terminus of its own is refused (spec 15.33; Transport §2.6.3).
 
 **A subscription is a receiver of its queue, unsettled, `first`, with no `max-message-size`, under
 credit of its own** (spec 15.34): the inbox's `linkCredit`, 1,000 by default, and a name's 1, granted

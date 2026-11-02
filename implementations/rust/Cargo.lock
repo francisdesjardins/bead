@@ -401,7 +401,7 @@ checksum = "d9c4f5dac5e15c24eb999c26181a6ca40b39fe946cbe4c263c7209467bc83af2"
 
 [[package]]
 name = "francisdesjardins-bead"
-version = "0.8.0"
+version = "0.9.0"
 dependencies = [
  "bytes",
  "francisdesjardins-bead",
@@ -420,7 +420,7 @@ dependencies = [
 
 [[package]]
 name = "francisdesjardins-bead-bench"
-version = "0.8.0"
+version = "0.9.0"
 dependencies = [
  "francisdesjardins-bead",
  "francisdesjardins-bead-interop",
@@ -430,7 +430,7 @@ dependencies = [
 
 [[package]]
 name = "francisdesjardins-bead-house"
-version = "0.8.0"
+version = "0.9.0"
 dependencies = [
  "proc-macro2",
  "syn 3.0.9",
@@ -438,7 +438,7 @@ dependencies = [
 
 [[package]]
 name = "francisdesjardins-bead-interop"
-version = "0.8.0"
+version = "0.9.0"
 dependencies = [
  "francisdesjardins-bead",
  "serde_json",
@@ -447,7 +447,7 @@ dependencies = [
 
 [[package]]
 name = "francisdesjardins-bead-protobuf"
-version = "0.8.0"
+version = "0.9.0"
 dependencies = [
  "buffa",
  "buffa-descriptor",
@@ -464,7 +464,7 @@ dependencies = [
 
 [[package]]
 name = "francisdesjardins-bead-protobuf-build"
-version = "0.8.0"
+version = "0.9.0"
 dependencies = [
  "buffa",
  "buffa-build",

@@ -11,7 +11,7 @@ exclude = ["fuzz", "tools/protobuf-conformance"]
 [workspace.package]
 # the product's one version, which tools/release.mjs moves with the TypeScript manifest and the
 # C# side's Directory.Build.props
-version = "0.8.0"
+version = "0.9.0"
 edition = "2024"
 # the floor is the pin, rust-toolchain.toml's
 rust-version = "1.99.1"

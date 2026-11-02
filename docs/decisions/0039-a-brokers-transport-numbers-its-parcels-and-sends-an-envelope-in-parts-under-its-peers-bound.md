@@ -144,11 +144,11 @@ WebSocket's fragmented message does; the transfers of 12.4 stay the way to inter
 with calls.
 
 **Its gates**: the groups `parcels` and `parcelRefusals` of `spec/vectors.json`, each kind read and
-written back and each refusal of 15.17, played by both codecs; the broker cases of
+written back and each refusal of 15.17, played by every side's codec; the broker cases of
 `spec/transports.json` of an OPEN and a DATA delivered twice, a cancel before its request, a result
 and a request in parts, parts past their bound, their budget and their rate, and a queue overrun's
 gap; the place `brokerParticipant.bodyGracePeriod`; and the sequence's twins, named by one sentence
-on both sides ([`docs/support.md`](../support.md)).
+on every side ([`docs/support.md`](../support.md)).
 
 ## The Tenth Man
 
@@ -156,4 +156,4 @@ The decision met the Tenth Man ([0009](0009-conventional-commits-git-flow-and-th
 the round of the broker's core, which
 [0038](0038-over-a-broker-a-connection-is-placed-once-at-its-open-named-by-both-its-ends.md) keeps:
 its objections on the layout to come and a kind to come, on a gap no broker fills, on parts with no
-time bound and on the bytes both sides write are answered there.
+time bound and on the bytes every side writes are answered there.

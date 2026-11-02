@@ -15,10 +15,12 @@ export const meta = {
   ],
 };
 
-// args: { repo, scratch, venv, slug, version, since?, notes? }
+// args: { repo, scratch, venv, slug, version, since?, notes?, serial? }
 // - version: the release the documents are brought to, `0.4.0`;
 // - since: the last release's tag (`v0.3.0`), the newest `v*` by default;
-// - notes: what the stages need beyond this, in a few lines.
+// - notes: what the stages need beyond this, in a few lines;
+// - serial: one agent at a time, each batch rewritten then verified before the next, where the
+//   quota asks it; the batches run side by side otherwise.
 const required = (name) => {
   if (!args || !args[name]) {
     throw new Error(`args.${name} is required`);
@@ -101,22 +103,20 @@ Write ${OUT}/plan.md: the plan, document by document, and the records' \`Where B
 
 const MOVES = JSON.stringify(planned ? planned.moves : [], null, 1);
 
-const results = await pipeline(
-  planned ? planned.batches : [],
-  (batch) => {
-    return agent(
-      `${COMMON}
+const rewrite = (batch) => {
+  return agent(
+    `${COMMON}
 # Your task: rewrite batch ${batch.key} (effort high)
 The plan is ${OUT}/plan.md; the records' moves (merged, renamed, split out):
 ${MOVES}
 Your documents: ${batch.documents.join(', ')}. ${batch.task}
 Write each as it is to read at ${VERSION} under ${OUT}/documents/, at its path from the repository's root (a renamed record at its new file name, a merged one as its short file naming its successor, a part split out at its new file), and leave the repository as it is: the integration moves the files. A citation of a merged record, in yours, names its successor; of a renamed one, its new file name. Hold each sentence you state in the present to the code and the spec at the release branch's HEAD, reading the code; a claim that does not hold is fixed, never kept. Run \`node .claude/local/check.mjs\` over each file. Report, document by document, what moved, what you took out and why, every claim you checked, and, for the spec, each requirement you left for the user.`,
-      { label: `rewrite:${batch.key}`, phase: 'Rewrite', effort: 'high' }
-    );
-  },
-  (report, batch) => {
-    return agent(
-      `${COMMON}
+    { label: `rewrite:${batch.key}`, phase: 'Rewrite', effort: 'high' }
+  );
+};
+const verify = (report, batch) => {
+  return agent(
+    `${COMMON}
 # Your task: verify batch ${batch.key} (effort ${batch.key === 'spec' ? 'xhigh' : 'high'})
 The plan is ${OUT}/plan.md; the records' moves (merged, renamed, split out):
 ${MOVES}
@@ -130,17 +130,27 @@ Hold the rewrite to this, and fix under ${OUT}/documents/ what fails:
 - no sentence narrates how things were, or how the document came to be;
 - every citation of a merged record names its successor, of a renamed one its new file name, and every link resolves once the files move; no number is given twice.
 Return \`holds\`, what you \`fixed\`, what you \`left\` for the integration, each with its file and line, and \`forTheUser\`.`,
-      // * xhigh where a requirement's meaning could move unseen, the spec and its companion; high
-      // for the records and the READMEs, whose claims the verifier holds to the code
-      {
-        label: `verify:${batch.key}`,
-        phase: 'Verify',
-        effort: batch.key === 'spec' ? 'xhigh' : 'high',
-        schema: VERDICT,
-      }
-    );
+    // * xhigh where a requirement's meaning could move unseen, the spec and its companion; high
+    // for the records and the READMEs, whose claims the verifier holds to the code
+    {
+      label: `verify:${batch.key}`,
+      phase: 'Verify',
+      effort: batch.key === 'spec' ? 'xhigh' : 'high',
+      schema: VERDICT,
+    }
+  );
+};
+
+const serially = async (batches) => {
+  const verdicts = [];
+  for (const batch of batches) {
+    verdicts.push(await verify(await rewrite(batch), batch));
   }
-);
+  return verdicts;
+};
+
+const batches = planned ? planned.batches : [];
+const results = args.serial ? await serially(batches) : await pipeline(batches, rewrite, verify);
 
 phase('Integrate');
 const integration = await agent(
