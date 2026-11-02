@@ -24,6 +24,8 @@ use crate::testing::SteppingClock;
 use crate::testing::scripted::ScriptedClient;
 use crate::transport::ClientTransport;
 
+mod key_sets;
+
 #[test]
 fn holds_a_jwt_s_header_in_a_chunk_and_an_envelope_of_1_024_bytes_at_least() {
     assert_eq!(JWT_LIMIT_BYTES, 1_024, "its bound");
