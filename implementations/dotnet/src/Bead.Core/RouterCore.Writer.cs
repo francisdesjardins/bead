@@ -85,7 +85,8 @@ internal sealed partial class RouterCore
         {
             var (connectionHandle, carried) = going;
 
-            // a disposed router is done with its transport: nothing more goes out on it
+            // a router whose dispose's job ran is done with its transport: nothing more goes out on
+            // it; what came before that job went
             if (_options.IsDisposed())
             {
                 throw new DisconnectException(Disposed);

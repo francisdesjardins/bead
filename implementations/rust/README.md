@@ -115,7 +115,7 @@ its root, with its reason.
 | `identity`, `duration`, `clock`                                | a procedure's identity (spec 16), every duration held as spec 1.4 holds it, the clock a side is given (decision 0011)                              |
 | `payloads`, `json`, `violations`                               | the codecs of spec 17, `raw`, `text` and `json`; a `json` value's reader and writer; `PAYLOAD_INVALID`'s detail (spec 18)                          |
 | `router`                                                       | the core both routers share, the client's and the server's, the relay, the admissions Bead gives, and transfers                                    |
-| `owner`                                                        | one owner per router: its jobs in order, a call within a turn as that turn ends, a listener's hand-back behind them all                            |
+| `owner`                                                        | one owner per router: its jobs from one queue, in order, what a turn defers and what a listener makes within it at the tail                        |
 | `platform`                                                     | what the core spawns on, the application's tokio runtime, its time driver checked: the one place it spawns                                         |
 | `managers`                                                     | the service manager, a server's notifications and their pacing, its sessions                                                                       |
 | `service`                                                      | a service's procedures as typed descriptors, its failures, and the service server                                                                  |

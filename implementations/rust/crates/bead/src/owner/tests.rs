@@ -1,7 +1,7 @@
-//! The owner's tests (decision 0044): calls sent in the order they are made, whatever becomes of
-//! their futures; a call a listener makes within a turn, and an envelope a listener hands its
-//! router within one; a router kept by its transport; and a router refused off a runtime, or on
-//! one without its time driver.
+//! The owner's tests (decisions 0044 and 0045): calls sent in the order they are made, whatever
+//! becomes of their futures; a call a listener makes within a turn, and an envelope a listener
+//! hands its router within one; a router kept by its transport; and a router refused off a runtime,
+//! or on one without its time driver.
 
 use core::time::Duration;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
@@ -152,9 +152,9 @@ async fn a_call_s_future_dropped_unpolled_still_sends_its_call() {
     assert!(locked(&reported).is_empty(), "its answer heard in silence");
 }
 
+// decision 0045: one queue of turns, a listener's call at its tail
 #[tokio::test]
-async fn a_call_a_listener_makes_within_a_turn_goes_as_that_turn_ends_before_any_job_queued_after_it()
- {
+async fn a_call_a_listener_makes_within_a_turn_goes_behind_every_call_made_before_it() {
     let (clock, transport, router) = scripted();
     let seen: Arc<Mutex<Vec<String>>> = Arc::default();
     let (telling, within, carried) = (Arc::clone(&seen), router.clone(), Arc::clone(&transport));
@@ -173,7 +173,7 @@ async fn a_call_a_listener_makes_within_a_turn_goes_as_that_turn_ends_before_any
             // within its router's turn: a call, then a job queued after it
             let before = carried.sent().len();
             let call = within
-                .request(Bytes::from_static(&[2]), (request(), CallHooks::default()))
+                .request(Bytes::from_static(&[3]), (request(), CallHooks::default()))
                 .expect("a call within a turn");
 
             drop(call);
@@ -198,7 +198,15 @@ async fn a_call_a_listener_makes_within_a_turn_goes_as_that_turn_ends_before_any
         .expect("a call");
 
     clock.settle().await;
+
+    // the first answer handed to its router, then a call made before the turn that takes it
     transport.deliver(&result_of(1, b"a"));
+
+    let made_before = router
+        .request(Bytes::from_static(&[2]), (request(), CallHooks::default()))
+        .expect("a call");
+
+    drop(made_before);
     first.await.expect("answered");
     clock.settle().await;
 
@@ -206,14 +214,14 @@ async fn a_call_a_listener_makes_within_a_turn_goes_as_that_turn_ends_before_any
         *locked(&seen),
         [
             "sent within the listener 0",
-            "sent before the job queued after it 1"
+            "sent before the job queued after it 2"
         ],
-        "it goes as the turn ends, before the job queued after it"
+        "nothing sent within its turn; both calls before the job queued after it"
     );
     assert_eq!(
         payloads_of(&transport),
-        [vec![1], vec![2]],
-        "both sent, in order"
+        [vec![1], vec![2], vec![3]],
+        "the listener's call behind the one made before its turn"
     );
 }
 

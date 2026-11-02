@@ -270,8 +270,10 @@ public sealed class RouterServer : IRouterLike, IDisposable
                 IsTwoWay = transport.IsTwoWay,
                 Limits = _core.Limits,
                 Report = Report,
-                Request = Request,
-                Respond = Respond,
+
+                // * the router's own calls, never deferred: its leg B and its answers on leg A
+                Request = RequestOnLoop,
+                Respond = _core.Respond,
             },
             options?.Relay);
         _notifications.OnRegister = OnSubscribed;
@@ -354,46 +356,55 @@ public sealed class RouterServer : IRouterLike, IDisposable
         _core.RegisterResolver(resolver);
     }
 
-    /// <inheritdoc/>
+    /// <summary>
+    /// Answers a request, as <see cref="IRouterLike.Respond"/> says, in a turn of its own behind what
+    /// came before it (spec 9.0); once disposed, it fails unsent, a
+    /// <see cref="DisconnectException"/>.
+    /// </summary>
     public Task Respond(RouterAnswer response, AnswerTarget target)
     {
-        return _core.Respond(response, target);
+        ArgumentNullException.ThrowIfNull(response);
+
+        // ! the handle's mark, read once, at the call (decision 0045)
+        if (_core.IsDisposed)
+        {
+            return Task.FromException(new DisconnectException(RouterCore.Disposed));
+        }
+
+        return _core.Loop.RunBehind(() =>
+        {
+            return _core.Respond(response, target);
+        });
     }
 
     /// <summary>
     /// A request of the router's own — a command — to the connection its options name, on an even
-    /// call id. One that names none fails with an <see cref="ArgumentException"/>, refused before it
-    /// starts; one that names a connection not open, with a <see cref="DisconnectException"/>, as it
-    /// starts. Each fails by the task it gives, as <see cref="IRouterLike.Request"/> says.
+    /// call id, in a turn of its own behind what came before it (spec 9.0). One that names none
+    /// fails with an <see cref="ArgumentException"/>, refused before it starts; one made once the
+    /// router was disposed, with a <see cref="DisconnectException"/>, unsent; one that names a
+    /// connection not open, with a <see cref="DisconnectException"/>, as it starts. Each fails by
+    /// the task it gives, as <see cref="IRouterLike.Request"/> says.
     /// </summary>
     public Task<RouterResult> Request(ReadOnlyMemory<byte> payload, RouterRequest request)
     {
         ArgumentNullException.ThrowIfNull(request);
 
-        if (request.Subscribes is not null)
+        // ! a programmer's error first, then the handle's mark, both read at once: one made after the
+        // dispose fails unsent (spec 9.1)
+        if (MisuseOf(request) is { } misuse)
         {
-            return Task.FromException<RouterResult>(
-                new InvalidOperationException("a server does not subscribe to notifications; it sends them"));
+            return Task.FromException<RouterResult>(misuse);
         }
 
-        if (request.Options.ConnectionHandle is not { } connectionHandle)
+        if (_core.IsDisposed)
         {
-            return Task.FromException<RouterResult>(
-                new ArgumentException("a server request names the connection it goes to", nameof(request)));
+            return Task.FromException<RouterResult>(new DisconnectException(RouterCore.Disposed));
         }
 
-        return _core.Request(
-            payload,
-            new CoreRequest
-            {
-                ConnectionHandle = connectionHandle,
-                OnCallId = request.OnCallId,
-                OnSent = request.OnSent,
-                Options = request.Options,
-                Procedure = request.Procedure,
-                Refusal = request.Refusal,
-                Series = request.Series,
-            });
+        return _core.Loop.RunBehind(() =>
+        {
+            return RequestOnLoop(payload, request);
+        });
     }
 
     /// <inheritdoc/>
@@ -406,14 +417,28 @@ public sealed class RouterServer : IRouterLike, IDisposable
     }
 
     /// <summary>
-    /// Notifies each connection subscribed to a procedure, as its filter keeps them, in order: a
-    /// paced subscription sends it, queues it, or ends past its bounds. Settles once each was sent or
-    /// queued; one that cannot go out is reported, and keeps none of the others from going.
+    /// Notifies each connection subscribed to a procedure, as its filter keeps them, in order, in a
+    /// turn of its own behind what came before it (spec 9.0): a paced subscription sends it, queues
+    /// it, or ends past its bounds. Settles once each was sent or queued; one that cannot go out is
+    /// reported, and keeps none of the others from going.
     /// </summary>
     public Task Notify(ReadOnlyMemory<byte> payload, NotifyRequest request)
     {
         ArgumentNullException.ThrowIfNull(request);
 
+        return _core.Loop.RunBehind(() =>
+        {
+            return NotifyOnLoop(payload, request);
+        });
+    }
+
+    /// <summary>
+    /// As <see cref="Notify(ReadOnlyMemory{byte}, NotifyRequest)"/>, in the turn it is made in when
+    /// that is its router's: the router's own, and a test's that reads who a notification reaches
+    /// as an envelope is handed over.
+    /// </summary>
+    internal Task NotifyOnLoop(ReadOnlyMemory<byte> payload, NotifyRequest request)
+    {
         return _core.Loop.Run(() =>
         {
             var targets = TargetsOf(request);
@@ -449,7 +474,7 @@ public sealed class RouterServer : IRouterLike, IDisposable
         ArgumentNullException.ThrowIfNull(unwritten);
         ArgumentNullException.ThrowIfNull(request);
 
-        return _core.Loop.Run(() =>
+        return _core.Loop.RunBehind(() =>
         {
             foreach (var target in TargetsOf(request))
             {
@@ -614,7 +639,7 @@ public sealed class RouterServer : IRouterLike, IDisposable
     /// </summary>
     public Task DropSubscriptions(string connectionHandle, Failure failure)
     {
-        return _core.Loop.Run(() =>
+        return _core.Loop.RunBehind(() =>
         {
             return Task.WhenAll(_places.Drop(connectionHandle).Select((dropped) =>
             {
@@ -635,7 +660,7 @@ public sealed class RouterServer : IRouterLike, IDisposable
     {
         ArgumentNullException.ThrowIfNull(identifier);
 
-        return _core.Loop.Run(() =>
+        return _core.Loop.RunBehind(() =>
         {
             return Task.WhenAll(_kept.Keys.Where((place) =>
             {
@@ -659,7 +684,7 @@ public sealed class RouterServer : IRouterLike, IDisposable
     {
         ArgumentNullException.ThrowIfNull(issuer);
 
-        return _core.Loop.Run(() =>
+        return _core.Loop.RunBehind(() =>
         {
             return Task.WhenAll(_kept.Keys.Where((place) =>
             {
@@ -692,32 +717,76 @@ public sealed class RouterServer : IRouterLike, IDisposable
 
     /// <summary>
     /// Follows no connection any more, forgets its subscriptions, rejects what still waits and
-    /// cancels the signal of each call it still answers.
+    /// cancels the signal of each call it still answers: in two steps (decision 0045), its mark and
+    /// its transport heard no more at once, so what is made after fails unsent; what it holds let go
+    /// in a job of its own, behind what came before it, the turn it was made in included.
     /// </summary>
     public void Dispose()
     {
+        _core.MarkDisposed();
         Transport.Connection -= OnConnection;
         Transport.Message -= OnMessage;
         Transport.Close -= OnClose;
-        WhenDisposed = _core.Loop.Run(() =>
+        WhenDisposed = _core.Loop.RunBehind(() =>
         {
-            DropEstablished(null);
-            _connections.Clear();
-            _open.Clear();
-            _places.Clear();
-            _notifications.CleanAll();
-            Forget(null);
+            _core.DisposeOnLoop(() =>
+            {
+                DropEstablished(null);
+                _connections.Clear();
+                _open.Clear();
+                _places.Clear();
+                _notifications.CleanAll();
+                Forget(null);
+            });
 
             return Task.CompletedTask;
         });
-        _core.Dispose();
     }
 
     /// <summary>
     /// Settles once what <see cref="Dispose"/> ran on the core's scheduler: the sessions kept, the
-    /// subscriptions and the notifications forgotten — their timers stopped — not merely posted.
+    /// subscriptions and the notifications forgotten — their timers stopped — and what waited
+    /// rejected, not merely posted.
     /// </summary>
     internal Task WhenDisposed { get; private set; } = Task.CompletedTask;
+
+    // what a request of the router's own asks that no server does: a programmer's error
+    private static Exception? MisuseOf(RouterRequest request)
+    {
+        if (request.Subscribes is not null)
+        {
+            return new InvalidOperationException("a server does not subscribe to notifications; it sends them");
+        }
+
+        if (request.Options.ConnectionHandle is null)
+        {
+            return new ArgumentException("a server request names the connection it goes to", nameof(request));
+        }
+
+        return null;
+    }
+
+    // a request of the router's own, in its turn — the relay's leg B, too, which is never deferred
+    private Task<RouterResult> RequestOnLoop(ReadOnlyMemory<byte> payload, RouterRequest request)
+    {
+        if (MisuseOf(request) is { } misuse)
+        {
+            return Task.FromException<RouterResult>(misuse);
+        }
+
+        return _core.Request(
+            payload,
+            new CoreRequest
+            {
+                ConnectionHandle = request.Options.ConnectionHandle!,
+                OnCallId = request.OnCallId,
+                OnSent = request.OnSent,
+                Options = request.Options,
+                Procedure = request.Procedure,
+                Refusal = request.Refusal,
+                Series = request.Series,
+            });
+    }
 
     // the end a credential's session gives, in milliseconds since the epoch; none for one no timer
     // ends

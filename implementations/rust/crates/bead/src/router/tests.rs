@@ -1,6 +1,7 @@
 //! The routers' tests: a client's against bytes a test writes as a server would, a server's against
 //! bytes a test writes as its clients would, the core both share, the relay, what a resolver or a
-//! listener that fails changes, and what a report listener hands its router back.
+//! listener that fails changes, and what a listener hands its router back or makes of it within the
+//! turn that tells it.
 
 use core::sync::atomic::{AtomicUsize, Ordering};
 use core::time::Duration;
@@ -623,18 +624,254 @@ async fn answers_a_failed_admission_s_call_procedure_failed_before_what_its_repo
     );
 }
 
-// spec 9.0
+// spec 9.0; decision 0045: disposed at once, a call made after it fails unsent, and what it holds
+// is let go in a later turn, behind the answer of the turn its report listener disposes it in
 #[tokio::test]
-async fn lets_its_connections_go_after_the_turn_its_report_listener_disposes_it_in_the_failed_resolver_s_answer_refused_as_disposed_and_reported()
+async fn lets_its_connections_go_after_the_turn_its_report_listener_disposes_it_in_behind_the_failed_resolver_s_answer()
  {
     let handed: Handed = Arc::default();
     let served = resolving(keeping((&handed, Some("the resolver failed"))));
     let router = served.router.clone();
+    let made: Arc<Mutex<Vec<Call>>> = Arc::default();
+    let making = Arc::clone(&made);
 
     served.router.on_error(Arc::new(
-        move |error: &RouterError, _handle: Option<&crate::router::types::ConnectionHandle>| {
-            if error.to_string() == "the resolver failed" {
-                // disposed at once, what it holds let go in a later turn
+        move |error: &RouterError, handle: Option<&crate::router::types::ConnectionHandle>| {
+            if error.to_string() == "the resolver failed"
+                && let Some(handle) = handle
+            {
+                // disposed at once, its mark read within the listener by a call made after it
+                drop(router.dispose());
+                locked(&making).push(asking(&router, (handle, "after")));
+            }
+        },
+    ));
+    served
+        .transport
+        .deliver(&server::request_of((5, &echo(), "hi")), &server::first());
+    served.settle().await;
+
+    assert_eq!(
+        served.sent_since(),
+        ["first failure 5 PROCEDURE_FAILED"],
+        "the turn's answer sent, and nothing after it"
+    );
+    assert_eq!(
+        served.reported(),
+        ["the resolver failed first"],
+        "the failure reported, and no answer refused as disposed"
+    );
+    assert_eq!(answering_of(&served).await, Some(0), "nothing answering");
+    assert_eq!(
+        locked(&handed)
+            .iter()
+            .map(|props| props.signal.is_aborted())
+            .collect::<Vec<_>>(),
+        [false],
+        "its call closed as its answer went, before what the dispose lets go: nothing aborted"
+    );
+
+    let after = locked(&made).pop().expect("a call made after the dispose");
+
+    assert_eq!(
+        answered(after).await.err().map(|error| error.to_string()),
+        Some("the router was disposed".to_owned()),
+        "the call made after the dispose failed unsent"
+    );
+}
+
+// a call of the server's own to echo on `handle`, as its application makes one
+fn asking(
+    router: &crate::router::server::RouterServer,
+    (handle, payload): (&crate::router::types::ConnectionHandle, &'static str),
+) -> Call {
+    let mut options = options_of(TIMEOUT);
+
+    options.connection_handle = Some(Arc::clone(handle));
+
+    router
+        .request(
+            Bytes::from_static(payload.as_bytes()),
+            (
+                crate::router::server::ServerRequest {
+                    procedure: echo().address(),
+                    maximum_payload_bytes: None,
+                    options,
+                    series: None,
+                    refusal: None,
+                },
+                CallHooks::default(),
+            ),
+        )
+        .expect("a call")
+}
+
+// spec 9.0; decision 0045: the report listener's call of the conversations, at the router
+#[tokio::test]
+async fn a_call_its_report_listener_makes_goes_behind_what_that_turn_answers() {
+    let handed: Handed = Arc::default();
+    let served = resolving(keeping((&handed, Some("the resolver failed"))));
+    let router = served.router.clone();
+    let made: Arc<Mutex<Vec<Call>>> = Arc::default();
+    let making = Arc::clone(&made);
+
+    served.router.on_error(Arc::new(
+        move |error: &RouterError, handle: Option<&crate::router::types::ConnectionHandle>| {
+            if error.to_string() == "the resolver failed"
+                && let Some(handle) = handle
+            {
+                // within the reporting turn, a call on the connection it reports
+                locked(&making).push(asking(&router, (handle, "what time?")));
+            }
+        },
+    ));
+    served
+        .transport
+        .deliver(&server::request_of((5, &echo(), "hi")), &server::first());
+    served.settle().await;
+
+    assert_eq!(
+        served.sent_since(),
+        [
+            "first failure 5 PROCEDURE_FAILED",
+            "first request 2 what time?"
+        ],
+        "the call behind what the reporting turn answered"
+    );
+    assert_eq!(
+        served.reported(),
+        ["the resolver failed first"],
+        "the failure reported"
+    );
+    assert_eq!(locked(&made).len(), 1, "one call made");
+}
+
+// spec 9.0, 15.1; decision 0045: the client's side of the conversation of a call made as a request
+// is read, its turn deferring the refusal of an ELSEWHERE its transport carried nothing beside
+#[tokio::test]
+async fn a_call_a_listener_makes_goes_among_what_its_turn_defers_in_the_order_deferred() {
+    let verify: crate::credentials::ElsewhereVerifier =
+        Arc::new(|_carried: String, _signal| Box::pin(async { Ok(None) }));
+    let scripted = Scripted::with(&RouterClientOptions {
+        credentials: Some(crate::credentials::Credentials {
+            verify: Some(verify),
+            ..crate::credentials::Credentials::default()
+        }),
+        ..RouterClientOptions::default()
+    });
+    let clock = Procedure {
+        id: 9,
+        name: "clock".to_owned(),
+        kind: Some(ProcedureKind::Command),
+        ..echo()
+    };
+
+    scripted
+        .router
+        .register_resolver((
+            &clock,
+            crate::router::core::Handler {
+                resolve: Arc::new(|_props: crate::router::core::ResolverProps| {
+                    Box::pin(async { Ok(()) })
+                }),
+                admit: None,
+                maximum_payload_bytes: None,
+                forwards_credentials: false,
+                notifies: false,
+            },
+        ))
+        .expect("clock registered");
+
+    let within = scripted.router.clone();
+    let made: Arc<Mutex<Vec<Call>>> = Arc::default();
+    let making = Arc::clone(&made);
+
+    scripted.router.on_debug(Arc::new(
+        move |direction: crate::debug::DebugDirection, traced: &crate::debug::TracedEnvelope| {
+            if direction != crate::debug::DebugDirection::Rx
+                || traced.header.kind() != crate::constants::EnvelopeKind::Request
+            {
+                return;
+            }
+
+            // within the turn that reads its server's command, before the refusal it defers
+            let call = within
+                .request(
+                    Bytes::from_static(b"made"),
+                    (request_of((None, TIMEOUT)), CallHooks::default()),
+                )
+                .expect("a call");
+
+            locked(&making).push(call);
+        },
+    ));
+
+    // its server's command, an ELSEWHERE its transport carried nothing beside
+    scripted.transport.deliver(&Envelope::Request {
+        header: RequestHeader {
+            service_id: clock.service_id,
+            procedure_id: clock.id,
+            credential: Some(Credential::Elsewhere),
+            ..request_header_of(2)
+        },
+        payload: Bytes::new(),
+    });
+    scripted.settle().await;
+
+    let sent: Vec<String> = scripted
+        .transport
+        .envelopes()
+        .iter()
+        .map(|envelope| match envelope {
+            Envelope::Request { payload, .. } => format!(
+                "request {} {}",
+                envelope.call_id(),
+                String::from_utf8_lossy(payload)
+            ),
+            Envelope::Failure { failure, .. } => format!(
+                "failure {} {} {}",
+                envelope.call_id(),
+                ProtocolCode::new(failure.code)
+                    .name()
+                    .unwrap_or("application"),
+                failure.detail
+            ),
+            Envelope::Result { .. }
+            | Envelope::Notification { .. }
+            | Envelope::Chunk { .. }
+            | Envelope::Credit { .. }
+            | Envelope::Cancel { .. } => format!("{:?} {}", envelope.kind(), envelope.call_id()),
+        })
+        .collect();
+
+    assert_eq!(
+        sent,
+        [
+            "request 1 made",
+            "failure 2 SESSION_REQUIRED no credential came"
+        ],
+        "the call ahead of the refusal its turn deferred after it"
+    );
+    assert_eq!(locked(&made).len(), 1, "one call made");
+}
+
+// spec 9.0, 9.1; decision 0045: a call, then a dispose, made within one telling: the call goes
+// behind the turn's answer, and the dispose's job lets go of it behind them both
+#[tokio::test]
+async fn a_call_then_a_dispose_its_report_listener_makes_go_behind_that_turn_s_answer_the_call_before_the_dispose()
+ {
+    let handed: Handed = Arc::default();
+    let served = resolving(keeping((&handed, Some("the resolver failed"))));
+    let router = served.router.clone();
+    let made: Arc<Mutex<Vec<Call>>> = Arc::default();
+    let making = Arc::clone(&made);
+
+    served.router.on_error(Arc::new(
+        move |error: &RouterError, handle: Option<&crate::router::types::ConnectionHandle>| {
+            if error.to_string() == "the resolver failed"
+                && let Some(handle) = handle
+            {
+                locked(&making).push(asking(&router, (handle, "before")));
                 drop(router.dispose());
             }
         },
@@ -644,21 +881,68 @@ async fn lets_its_connections_go_after_the_turn_its_report_listener_disposes_it_
         .deliver(&server::request_of((5, &echo(), "hi")), &server::first());
     served.settle().await;
 
-    assert!(served.sent_since().is_empty(), "nothing sent once disposed");
+    assert_eq!(
+        served.sent_since(),
+        ["first failure 5 PROCEDURE_FAILED", "first request 2 before"],
+        "the turn's answer, then the call made before the dispose"
+    );
     assert_eq!(
         served.reported(),
-        ["the resolver failed first", "the router was disposed first"],
-        "the failure reported, then its answer refused as disposed"
+        ["the resolver failed first"],
+        "the failure reported, and nothing refused as disposed"
     );
-    assert_eq!(answering_of(&served).await, Some(0), "nothing answering");
+
+    let before = locked(&made).pop().expect("a call made before the dispose");
+
     assert_eq!(
-        locked(&handed)
-            .iter()
-            .map(|props| props.signal.is_aborted())
-            .collect::<Vec<_>>(),
-        [false],
-        "its call closed as its answer failed, before what the dispose lets go: nothing aborted"
+        answered(before).await.err().map(|error| error.to_string()),
+        Some("the router was disposed before the answer".to_owned()),
+        "the call went, and the dispose's job rejected it as it waited"
     );
+}
+
+// decision 0045: the skip of an answer to a call no longer answering and the send gate read one
+// mark, the state's, so an answer queued ahead of a dispose's job, on a call its requester
+// cancelled, goes nowhere, though the handle's mark is set
+#[tokio::test]
+async fn an_answer_its_resolver_gives_after_a_dispose_queued_behind_it_sends_nothing_on_a_cancelled_call()
+ {
+    let handed: Handed = Arc::default();
+    let served = resolving(keeping((&handed, None)));
+
+    served
+        .transport
+        .deliver(&server::request_of((5, &echo(), "hi")), &server::first());
+    served.settle().await;
+    served.transport.deliver(&cancel_of(5), &server::first());
+    served.settle().await;
+
+    // * the answer queued, then the dispose behind it, its handle's mark set at once
+    let answerer = locked(&handed)
+        .first()
+        .map(|props| Arc::clone(&props.answerer))
+        .expect("a request handed");
+    let answering = answerer.respond(crate::router::types::RouterAnswer::Result(
+        Bytes::from_static(b"late"),
+    ));
+    let disposed = served.router.dispose();
+
+    served.settle().await;
+    disposed.await;
+
+    assert!(
+        served.sent_since().is_empty(),
+        "nothing sent on the cancelled call"
+    );
+    assert_eq!(
+        crate::testing::patience(PATIENCE, answering)
+            .await
+            .expect("taken within its patience")
+            .map_err(|error| error.to_string()),
+        Ok(()),
+        "its answer skipped, as a cancelled call's is, never refused as disposed"
+    );
+    assert!(served.reported().is_empty(), "nothing reported");
 }
 
 // a listener of a transport's that panics on each message it hears

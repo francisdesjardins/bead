@@ -1309,8 +1309,9 @@ impl Server {
     }
 
     /// Disposes of it: its router, its sessions, then its transport, stopped. Its router disposed
-    /// at once, what it holds is let go in a later turn, behind what came before it, a listener's
-    /// dispose too (spec 9.0).
+    /// at once, a call made after it fails unsent; what it holds is let go in a later turn, behind
+    /// what came before it, a call made before it among it, and a listener's dispose too (spec 9.0,
+    /// 9.1).
     ///
     /// # Errors
     ///
@@ -1319,18 +1320,14 @@ impl Server {
     pub fn dispose(&self) -> BoxFuture<Result<(), RouterError>> {
         self.shared.router.mark_disposed();
 
-        let disposed = self
-            .shared
-            .router
-            .owner()
-            .run_behind(|state: &mut ServerState| {
-                dispose_facade(state);
-                crate::router::server::dispose(state);
+        let disposed = self.shared.router.owner().run(|state: &mut ServerState| {
+            dispose_facade(state);
+            crate::router::server::dispose(state);
 
-                if let Some(facade) = state.facade.as_mut() {
-                    facade.sessions.dispose();
-                }
-            });
+            if let Some(facade) = state.facade.as_mut() {
+                facade.sessions.dispose();
+            }
+        });
         let transport = Arc::clone(&self.shared.transport);
 
         Box::pin(async move {

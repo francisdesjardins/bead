@@ -24,6 +24,7 @@ import { limitsOf } from './router-limits';
 import { createRouterRequester } from './router-requester';
 import { createRouterWriter, DISPOSED } from './router-writer';
 import { createSendingTransfers } from './sending-transfers';
+import { createTelling } from './telling';
 import { ChunkOutcome, type IChunk, type IOutgoingTransfer } from './transfer';
 import type {
   AccessRefusalStage,
@@ -238,17 +239,11 @@ export const createRouterCore = <Handle extends string>(
       receivings.close(transfer);
     },
   });
-  // ! its port's listeners this core calls, counted while one runs: what one hands this core back
-  // is taken in a later turn, behind what came before it (spec 9.0)
-  let listening = 0;
+  // ! its port's listeners this core calls run within the telling it shares with its router: what
+  // one hands this core back is taken in a later turn, behind what came before it (spec 9.0)
+  const telling = options?.telling ?? createTelling();
   const heard = <Value>(listener: () => Value): Value => {
-    listening += 1;
-
-    try {
-      return listener();
-    } finally {
-      listening -= 1;
-    }
+    return telling.heard(listener);
   };
   // what the writer tells the side, heard as this core's listeners are; the rest asked of the
   // port as it stands
@@ -319,7 +314,11 @@ export const createRouterCore = <Handle extends string>(
     { address?: string | undefined; port?: number | undefined }
   >();
 
+  // ! the state's mark, set by the dispose's own turn: what skips an answer, gates a send and sends
+  // a cancel read it, never the handle's, so the skip and the gate always agree (decision 0045)
   let isDisposed = false;
+  // the handle's mark, set at once by the dispose, which `isDisposed` gives
+  let isDisposeMarked = false;
 
   // what the core raises itself, for the side to hear
   const report = (
@@ -662,8 +661,8 @@ export const createRouterCore = <Handle extends string>(
         : endingOf(response.failure);
 
     try {
-      // ! disposed, it fails in this turn, its call closed before what the dispose lets go in a
-      // later one finds it (spec 9.0)
+      // ! disposed — its dispose's turn ran — it fails, its call closed, as the writer's gate would
+      // fail it: both read the state's mark (decision 0045)
       if (isDisposed) {
         throw new DisconnectError(DISPOSED);
       }
@@ -1428,9 +1427,8 @@ export const createRouterCore = <Handle extends string>(
   };
 
   const receive = (message: Data | ITransportMessage, connectionHandle: Handle): void => {
-    // ! handed within a listener of this core's turn, it is taken in a later turn, behind what
-    // came before it (spec 9.0)
-    if (listening > 0) {
+    // ! handed within a telling, it is taken in a later turn, behind what came before it (spec 9.0)
+    if (telling.isTelling()) {
       return (
         queueMicrotask(() => {
           receive(message, connectionHandle);
@@ -1528,9 +1526,8 @@ export const createRouterCore = <Handle extends string>(
   };
 
   const rejectPending = (reason: string, connectionHandle?: Handle): void => {
-    // ! asked within a listener of this core's turn, it is done in a later turn, behind what came
-    // before it (spec 9.0)
-    if (listening > 0) {
+    // ! asked within a telling, it is done in a later turn, behind what came before it (spec 9.0)
+    if (telling.isTelling()) {
       return (
         queueMicrotask(() => {
           rejectPending(reason, connectionHandle);
@@ -1565,7 +1562,7 @@ export const createRouterCore = <Handle extends string>(
 
   return {
     get isDisposed() {
-      return isDisposed;
+      return isDisposeMarked;
     },
     get limits() {
       return limits;
@@ -1656,10 +1653,14 @@ export const createRouterCore = <Handle extends string>(
       }
     },
     [Symbol.dispose]: () => {
-      isDisposed = true;
-      // every connection's — in a later turn, disposed by a listener of this core's — each call
-      // answering aborted too, so what a resolution settles after dispatches nothing
-      rejectPending(`${DISPOSED} before the answer`);
+      isDisposeMarked = true;
+      // * the state's mark, then every connection's calls let go, each call answering aborted too,
+      // so what a resolution settles after dispatches nothing: at once, or — disposed within a
+      // telling — in a later turn, behind what that turn sends (spec 9.0)
+      telling.defer(() => {
+        isDisposed = true;
+        rejectPending(`${DISPOSED} before the answer`);
+      });
     },
   };
 };

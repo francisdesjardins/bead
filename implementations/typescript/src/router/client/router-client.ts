@@ -16,11 +16,13 @@ import {
   SERVER_CONNECTION_HANDLE,
 } from '../shared/constants';
 import { assertLimitsHoldJwt, createCredentialResolver } from '../shared/credentials';
-import { FailureError } from '../shared/errors';
+import { DisconnectError, FailureError } from '../shared/errors';
 import { checkDeclaration, checkProcedureKind } from '../shared/identity';
 import type { IHearingSeries } from '../shared/metrics-registry';
 import { createProcedureMap } from '../shared/procedure-map';
 import { createRouterCore } from '../shared/router-core';
+import { DISPOSED } from '../shared/router-writer';
+import { createTelling, toldOf } from '../shared/telling';
 import type {
   CallId,
   DefaultCredential,
@@ -212,7 +214,10 @@ export const createRouterClient = <Transport extends IRouterClientTransportLike>
     { beneath: transport.clock, given: options?.clock },
     { below: 'its transport', layer: "a client's router" }
   );
-  const emitter = createEmitter<RouterClientEventMap>();
+  // * what it tells its application, the core's and its own, runs within one telling: what that
+  // application does with it from within one is taken in a later turn (spec 9.0; decision 0045)
+  const telling = createTelling();
+  const emitter = toldOf(createEmitter<RouterClientEventMap>(), telling);
   // what it counts its calls and notifications through, attached to the registry it was given
   const metrics = options?.metricsRegistry?.attach('client');
   // the notification registered for each procedure, until it is unregistered or dropped
@@ -413,8 +418,11 @@ export const createRouterClient = <Transport extends IRouterClientTransportLike>
         });
       },
     },
-    { clock, limits: options?.limits, metrics }
+    { clock, limits: options?.limits, metrics, telling }
   );
+
+  // the handle's mark, set at once by its dispose: a call or an answer made after it fails unsent
+  let isDisposeMarked = false;
 
   // a router that takes a JWT holds its header: its limits hold 1,024 bytes at least
   if (credentials.takesJwt) {
@@ -481,13 +489,16 @@ export const createRouterClient = <Transport extends IRouterClientTransportLike>
     subscriptions.clear();
     callIds.clear();
 
-    for (const notification of dropped) {
-      try {
-        notification.drop?.();
-      } catch (reason) {
-        report(toError(reason));
+    // * each told within the telling, whatever dropped it: a transport's close, its dispose
+    telling.heard(() => {
+      for (const notification of dropped) {
+        try {
+          notification.drop?.();
+        } catch (reason) {
+          report(toError(reason));
+        }
       }
-    }
+    });
   };
 
   // what a transport carried beside the envelope goes with it: a command presenting ELSEWHERE
@@ -528,6 +539,137 @@ export const createRouterClient = <Transport extends IRouterClientTransportLike>
     sessionToken = undefined;
     core.rejectPending('the connection was replaced before the answer');
     dropNotifications();
+  };
+
+  // a request of the client's, to its server, bound to the notification it subscribes, if any
+  const request: IRouterClient<Transport>['request'] = (
+    payload,
+    { onCallId, onSent, options, procedure, refusal: judged, series, subscribes }
+  ) => {
+    const connectionHandle = SERVER_CONNECTION_HANDLE;
+
+    // ! a programmer's error first, before the call starts, so it is never counted: only the
+    // notification held for the procedure is bound, or its notifications would reach none that
+    // is listening
+    if (subscribes !== undefined && notifications.get(procedure) !== subscribes) {
+      return Promise.reject(
+        new ProgrammerError(
+          `${subscribes.procedureName} is not the notification this router holds for ${procedure.procedureName}`
+        )
+      );
+    }
+
+    // the call's own credential, or the default, as it is now
+    const presentedDefault = options.credential === undefined ? defaultCredential : undefined;
+    let presented: ReturnType<typeof presentedCredentialOf> = {};
+    let refusal: Error | undefined;
+
+    // OPAQUE, the session this client learned, as its answers announced it; a JWT, or an
+    // ELSEWHERE beside it. A credential asked of the wrong shape is a programmer's error; OPAQUE
+    // with no session known refuses the call once it started
+    try {
+      presented = presentedCredentialOf(options.credential ?? presentedDefault, {
+        failures: CLIENT_FAILURES,
+        token: sessionToken,
+      });
+    } catch (reason) {
+      if (!(reason instanceof FailureError)) {
+        return Promise.reject(toError(reason));
+      }
+
+      refusal = reason;
+    }
+
+    const { carried, credential } = presented;
+    // a credential its transport cannot carry fails the call before it goes: nothing was tried,
+    // and the default stays
+    const uncarried = uncarriedOf(credential, {
+      carried,
+      carries: transport.carries?.bind(transport),
+      failures: CLIENT_FAILURES,
+      isSecure: transport.isSecure === true,
+    });
+
+    if (refusal === undefined && uncarried !== undefined) {
+      const { destinationId } = options;
+      const { procedureId, serviceId } = procedure;
+
+      refusal = new FailureError(uncarried, {
+        destinationId,
+        procedureAddress: { procedureId, serviceId },
+      });
+    }
+
+    // a call that would present a default withdrawn fails before it goes, withdrawing nothing:
+    // one that gives its own credential, or none, goes
+    if (refusal === undefined && isWithdrawn && options.credential === undefined) {
+      const { destinationId } = options;
+      const { procedureId, serviceId } = procedure;
+
+      refusal = new FailureError(
+        { ...CLIENT_FAILURES.sessionRequired, detail: 'the default credential was withdrawn' },
+        { destinationId, procedureAddress: { procedureId, serviceId } }
+      );
+    }
+
+    // * its requester's refusal before the router's own: its value was judged before it came
+    const sent = {
+      connectionHandle,
+      credential,
+      onSent,
+      options,
+      procedure,
+      refusal: judged ?? refusal,
+      series,
+    };
+    const withdrawing = (reason: unknown): never => {
+      withdraw(reason, presentedDefault);
+
+      throw reason;
+    };
+
+    if (subscribes === undefined) {
+      return core
+        .request(payload, { ...sent, onCallId, transportCredential: carried })
+        .catch(withdrawing);
+    }
+
+    const binding = bindingOf(subscribes, options.timeout);
+
+    return core
+      .request(payload, {
+        ...sent,
+        // ! bound first, then the id told its caller: whatever hears it finds the subscription
+        // held, and a notification right behind the result reaches it
+        onCallId: (callId) => {
+          binding.onCallId(callId);
+          onCallId?.(callId);
+        },
+        opensSubscription: true,
+        paced: subscribes.window !== undefined,
+        transportCredential: carried,
+      })
+      .then(
+        (result) => {
+          const subscription = subscriptions.get(result.header.callId);
+
+          // answered, it is a subscription: what ends it now drops it
+          if (subscription !== undefined) {
+            subscription.isAnswered = true;
+          }
+
+          // the server paces nothing before its answer: the window opens once it came, unless
+          // the server ended the subscription since
+          renew(subscription);
+
+          return result;
+        },
+        (reason: unknown) => {
+          binding.release();
+
+          return withdrawing(reason);
+        }
+      );
   };
 
   const router: IRouterClient<Transport> = {
@@ -588,26 +730,31 @@ export const createRouterClient = <Transport extends IRouterClientTransportLike>
         return Promise.reject(toError(reason));
       }
 
-      if (notifications.has(notification)) {
-        return Promise.reject(
-          new ProgrammerError(`${notification.procedureName} is already a registered notification`)
-        );
-      }
-
-      // declared as it is registered: one the registry refuses is not registered either
-      try {
-        const hearing = metrics?.declareNotification(notification);
-
-        if (hearing !== undefined) {
-          hearings.set(notification, hearing);
+      // ! what it holds, read in its turn: behind an unregistration made before it, within a telling
+      return telling.later(() => {
+        if (notifications.has(notification)) {
+          return Promise.reject(
+            new ProgrammerError(
+              `${notification.procedureName} is already a registered notification`
+            )
+          );
         }
-      } catch (reason) {
-        return Promise.reject(toError(reason));
-      }
 
-      notifications.set(notification, notification);
+        // declared as it is registered: one the registry refuses is not registered either
+        try {
+          const hearing = metrics?.declareNotification(notification);
 
-      return Promise.resolve();
+          if (hearing !== undefined) {
+            hearings.set(notification, hearing);
+          }
+        } catch (reason) {
+          return Promise.reject(toError(reason));
+        }
+
+        notifications.set(notification, notification);
+
+        return Promise.resolve();
+      });
     },
     registerResolver: (resolver) => {
       // * spec 16.10: its identity, then its kind, before the core's reasons and its registry's
@@ -616,137 +763,24 @@ export const createRouterClient = <Transport extends IRouterClientTransportLike>
       core.registerResolver(resolver);
     },
     report,
-    request: (
-      payload,
-      { onCallId, onSent, options, procedure, refusal: judged, series, subscribes }
-    ) => {
-      const connectionHandle = SERVER_CONNECTION_HANDLE;
-
-      // ! a programmer's error first, before the call starts, so it is never counted: only the
-      // notification held for the procedure is bound, or its notifications would reach none that
-      // is listening
-      if (subscribes !== undefined && notifications.get(procedure) !== subscribes) {
-        return Promise.reject(
-          new ProgrammerError(
-            `${subscribes.procedureName} is not the notification this router holds for ${procedure.procedureName}`
-          )
-        );
+    request: (payload, requested) => {
+      // ! the handle's mark, read at once: one made after the dispose fails unsent (spec 9.1)
+      if (isDisposeMarked) {
+        return Promise.reject(new DisconnectError(DISPOSED));
       }
 
-      // the call's own credential, or the default, as it is now
-      const presentedDefault = options.credential === undefined ? defaultCredential : undefined;
-      let presented: ReturnType<typeof presentedCredentialOf> = {};
-      let refusal: Error | undefined;
-
-      // OPAQUE, the session this client learned, as its answers announced it; a JWT, or an
-      // ELSEWHERE beside it. A credential asked of the wrong shape is a programmer's error; OPAQUE
-      // with no session known refuses the call once it started
-      try {
-        presented = presentedCredentialOf(options.credential ?? presentedDefault, {
-          failures: CLIENT_FAILURES,
-          token: sessionToken,
-        });
-      } catch (reason) {
-        if (!(reason instanceof FailureError)) {
-          return Promise.reject(toError(reason));
-        }
-
-        refusal = reason;
-      }
-
-      const { carried, credential } = presented;
-      // a credential its transport cannot carry fails the call before it goes: nothing was tried,
-      // and the default stays
-      const uncarried = uncarriedOf(credential, {
-        carried,
-        carries: transport.carries?.bind(transport),
-        failures: CLIENT_FAILURES,
-        isSecure: transport.isSecure === true,
+      return telling.later(() => {
+        return request(payload, requested);
       });
-
-      if (refusal === undefined && uncarried !== undefined) {
-        const { destinationId } = options;
-        const { procedureId, serviceId } = procedure;
-
-        refusal = new FailureError(uncarried, {
-          destinationId,
-          procedureAddress: { procedureId, serviceId },
-        });
-      }
-
-      // a call that would present a default withdrawn fails before it goes, withdrawing nothing:
-      // one that gives its own credential, or none, goes
-      if (refusal === undefined && isWithdrawn && options.credential === undefined) {
-        const { destinationId } = options;
-        const { procedureId, serviceId } = procedure;
-
-        refusal = new FailureError(
-          { ...CLIENT_FAILURES.sessionRequired, detail: 'the default credential was withdrawn' },
-          { destinationId, procedureAddress: { procedureId, serviceId } }
-        );
-      }
-
-      // * its requester's refusal before the router's own: its value was judged before it came
-      const sent = {
-        connectionHandle,
-        credential,
-        onSent,
-        options,
-        procedure,
-        refusal: judged ?? refusal,
-        series,
-      };
-      const withdrawing = (reason: unknown): never => {
-        withdraw(reason, presentedDefault);
-
-        throw reason;
-      };
-
-      if (subscribes === undefined) {
-        return core
-          .request(payload, { ...sent, onCallId, transportCredential: carried })
-          .catch(withdrawing);
-      }
-
-      const binding = bindingOf(subscribes, options.timeout);
-
-      return core
-        .request(payload, {
-          ...sent,
-          // ! bound first, then the id told its caller: whatever hears it finds the subscription
-          // held, and a notification right behind the result reaches it
-          onCallId: (callId) => {
-            binding.onCallId(callId);
-            onCallId?.(callId);
-          },
-          opensSubscription: true,
-          paced: subscribes.window !== undefined,
-          transportCredential: carried,
-        })
-        .then(
-          (result) => {
-            const subscription = subscriptions.get(result.header.callId);
-
-            // answered, it is a subscription: what ends it now drops it
-            if (subscription !== undefined) {
-              subscription.isAnswered = true;
-            }
-
-            // the server paces nothing before its answer: the window opens once it came, unless
-            // the server ended the subscription since
-            renew(subscription);
-
-            return result;
-          },
-          (reason: unknown) => {
-            binding.release();
-
-            return withdrawing(reason);
-          }
-        );
     },
     respond: (response, { header }) => {
-      return core.respond(response, { connectionHandle: SERVER_CONNECTION_HANDLE, header });
+      if (isDisposeMarked) {
+        return Promise.reject(new DisconnectError(DISPOSED));
+      }
+
+      return telling.later(() => {
+        return core.respond(response, { connectionHandle: SERVER_CONNECTION_HANDLE, header });
+      });
     },
     subscribe: () => {
       throw new ProgrammerError(
@@ -754,32 +788,40 @@ export const createRouterClient = <Transport extends IRouterClientTransportLike>
       );
     },
     unregisterNotification: (notification, options) => {
-      // another's of the same procedure stays: only what registered takes itself away
-      if (notifications.get(notification) !== notification) {
+      return telling.later(() => {
+        // another's of the same procedure stays: only what registered takes itself away
+        if (notifications.get(notification) !== notification) {
+          return Promise.resolve();
+        }
+
+        notifications.delete(notification);
+
+        const call = unbind(notification);
+
+        // the server is told unless it ended it already; either way, what was on its way is
+        // dropped in silence
+        if (call !== undefined && options?.cancel === false) {
+          core.reserve(call);
+        } else if (call !== undefined) {
+          core.cancel(call);
+        }
+
         return Promise.resolve();
-      }
-
-      notifications.delete(notification);
-
-      const call = unbind(notification);
-
-      // the server is told unless it ended it already; either way, what was on its way is dropped
-      // in silence
-      if (call !== undefined && options?.cancel === false) {
-        core.reserve(call);
-      } else if (call !== undefined) {
-        core.cancel(call);
-      }
-
-      return Promise.resolve();
+      });
     },
     [Symbol.dispose]: () => {
+      // * in two steps (decision 0045): its handle's mark at once, and its transport heard no more;
+      // what it holds let go then, or — disposed within a telling — in a later turn, behind what
+      // that turn sends and what was made before it
+      isDisposeMarked = true;
       transport.off(MESSAGE_EVENT, onMessage);
       transport.off(CLOSE_EVENT, onClose);
       transport.off(RECONNECT_EVENT, onReconnect);
-      sessionToken = undefined;
-      core[Symbol.dispose]();
-      dropNotifications();
+      telling.defer(() => {
+        sessionToken = undefined;
+        core[Symbol.dispose]();
+        dropNotifications();
+      });
     },
   };
 

@@ -45,7 +45,8 @@ internal sealed partial class RouterCore : IDisposable
 {
     // constants
 
-    private const string Disposed = "the router was disposed";
+    /// <summary>Why a call made once its router was disposed fails unsent.</summary>
+    internal const string Disposed = "the router was disposed";
 
     // what a relay that does not verify takes at step 1 of section 14.3: none and OPAQUE it resolves,
     // a JWT and an ELSEWHERE it forwards
@@ -75,7 +76,11 @@ internal sealed partial class RouterCore : IDisposable
     // what it counts through, at its gates: its router's; none when its router was given no registry
     private readonly RouterSeries? _metrics;
 
+    // ! two marks, never one (decision 0045): the handle's, set at once by its dispose, read where
+    // an operation enters from the application; the state's, set by the dispose's own job, read by
+    // what skips an answer, gates a send and sends a cancel, so the skip and the gate always agree
     private volatile bool _isDisposed;
+    private bool _isStateDisposed;
 
     /// <summary>A core for the side <paramref name="port"/> is, with its options.</summary>
     public RouterCore(IRouterCorePort port, RouterCoreOptions? options = null)
@@ -99,7 +104,7 @@ internal sealed partial class RouterCore : IDisposable
             Limits = Limits,
             IsDisposed = () =>
             {
-                return _isDisposed;
+                return _isStateDisposed;
             },
         });
 
@@ -163,7 +168,10 @@ internal sealed partial class RouterCore : IDisposable
         }
     }
 
-    /// <summary>Whether it was disposed: nothing more goes out, and nothing more waits.</summary>
+    /// <summary>
+    /// Whether it was disposed, from the dispose on: what is made after it fails unsent, and what it
+    /// holds is let go in the dispose's own job, behind what came before it.
+    /// </summary>
     public bool IsDisposed
     {
         get
@@ -265,9 +273,9 @@ internal sealed partial class RouterCore : IDisposable
         var answering = _answeringCalls.CallOf(header);
 
         // a call its requester cancelled, its connection took away, or whose call id another request
-        // opened since, is answered by nothing; once disposed, the answer goes on, to throw a
-        // DisconnectException
-        if (!_isDisposed && !_answeringCalls.IsAnswering(target))
+        // opened since, is answered by nothing; once its dispose's job ran, the answer goes on, to
+        // throw a DisconnectException at the writer's gate, which reads the same mark
+        if (!_isStateDisposed && !_answeringCalls.IsAnswering(target))
         {
             return;
         }
@@ -861,7 +869,7 @@ internal sealed partial class RouterCore : IDisposable
     // closing or the router disposed ended it, and what its resolution brings is dropped
     private bool IsResolving(Arrival arrival)
     {
-        return !_isDisposed
+        return !_isStateDisposed
             && !arrival.Answering.IsAborted
             && ReferenceEquals(_answeringCalls.CallOf(arrival.Target.Header), arrival.Answering)
             && _answeringCalls.IsAnswering(arrival.Target);
@@ -1651,24 +1659,47 @@ internal sealed partial class RouterCore : IDisposable
     }
 
     /// <summary>
-    /// Rejects what still waits, cancels the signal of each call it still answers, and sends
-    /// nothing more: no cancel either.
+    /// Disposed in two steps (decision 0045): its mark at once, so what is made after fails unsent;
+    /// then, in a job of its own behind what came before it, the turn it was made in included, it
+    /// rejects what still waits, cancels the signal of each call it still answers, and sends nothing
+    /// more: no cancel either.
     /// </summary>
     public void Dispose()
     {
-        _isDisposed = true;
-        RejectPending($"{Disposed} before the answer");
+        MarkDisposed();
+        Post(() =>
+        {
+            DisposeOnLoop(null);
+        });
     }
 
-    // what the requester asks of the core it serves: the core's port, its scheduler, whether it was
-    // disposed, its reader of a chunk no transfer takes, and its report of what it raises itself
+    /// <summary>The dispose's first step, the handle's mark, set at once.</summary>
+    internal void MarkDisposed()
+    {
+        _isDisposed = true;
+    }
+
+    /// <summary>
+    /// The dispose's job, on the core's scheduler: the state's mark first, then what its router lets
+    /// go with it, then what waits rejected, application code last.
+    /// </summary>
+    internal void DisposeOnLoop(Action? alongside)
+    {
+        _isStateDisposed = true;
+        alongside?.Invoke();
+        RejectPendingOnLoop($"{Disposed} before the answer", null);
+    }
+
+    // what the requester asks of the core it serves: the core's port, its scheduler, whether its
+    // dispose's job ran, its reader of a chunk no transfer takes, and its report of what it raises
+    // itself
     private sealed class RequesterPort(RouterCore core) : IRouterRequesterPort
     {
         public bool IsDisposed
         {
             get
             {
-                return core._isDisposed;
+                return core._isStateDisposed;
             }
         }
 

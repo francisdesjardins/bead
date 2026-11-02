@@ -340,7 +340,7 @@ impl Peer {
 
     pub(crate) fn request(
         &self,
-        (payload, request): (Bytes, CoreRequest),
+        (payload, request): (Bytes, CoreRequest<State>),
     ) -> Completion<RouterResult> {
         let (reply, answer) = oneshot::channel();
         self.owner.offer(Box::new(move |state| {
@@ -398,10 +398,11 @@ pub(crate) fn scripted_header(call_id: u32) -> crate::envelope::RequestHeader {
     }
 }
 
-pub(crate) fn request_of(handle: &str) -> CoreRequest {
+pub(crate) fn request_of(handle: &str) -> CoreRequest<State> {
     CoreRequest {
         connection_handle: Arc::from(handle),
         credential: None,
+        on_drawn: None,
         on_call_id: None,
         on_sent: None,
         opens_subscription: false,

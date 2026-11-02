@@ -30,7 +30,7 @@ use crate::envelope::{
 use crate::errors::{CallError, CapacityError, ProgrammerError, ResolverError};
 use crate::failure::Failure;
 use crate::metrics::{CallEnding, ProcedureSeries, ResolverSeries, RouterMetrics};
-use crate::owner::{Job, Owned, WeakOwner};
+use crate::owner::{Deferral, Job, Owned, WeakOwner};
 use crate::router::parts::{
     Announcements, Answering, AnsweringCalls, PendingCalls, Placed, Placement, ReceivingTransfers,
     RequestReceiving, SendingFor, SendingTransfers, cancel_timer,
@@ -405,8 +405,10 @@ pub(crate) struct Registered {
     pub(crate) series: Option<ResolverSeries>,
 }
 
-/// Whether a router was disposed, which its handle and its owner's state share: set at once by its
-/// dispose, what it holds let go in a later turn, behind what came before it (spec 9.0).
+/// Whether a router's handle was disposed, which its handle and what its transport tells share: set
+/// at once by its dispose, so an operation made after it fails unsent and what its transport tells
+/// is dropped; what it holds is let go by the dispose's job, behind what came before it, which sets
+/// its state's own mark first (spec 9.0, 9.1; decision 0045).
 #[derive(Debug, Clone, Default)]
 pub(crate) struct Disposal(Arc<AtomicBool>);
 
@@ -438,7 +440,14 @@ pub(crate) struct Core<S> {
     pub(crate) pending: PendingCalls,
     pub(crate) announcements: Announcements,
     pub(crate) resolvers: Resolvers,
+    // the handle's mark, which a debug view reads
     pub(crate) disposal: Disposal,
+    // ! the state's mark, set first by the dispose's job, or as its owner ends: what skips an
+    // answer, gates a send and sends a cancel read it, never the handle's, so the skip and the gate
+    // always agree (decision 0045)
+    pub(crate) disposed: bool,
+    // what it defers to a later turn: its owner's queue's tail, or held as its owner ends
+    pub(crate) deferral: Deferral<S>,
     // the receiving transfers of requests, by their transfer's id: the request as it waits, and
     // its handler
     pub(crate) receiving_requests: BTreeMap<u64, (Arc<Dispatch>, Arc<Handler>)>,
@@ -476,6 +485,7 @@ impl<S: Side> Core<S> {
             clock,
             #[cfg(test)]
             observed_reads: None,
+            deferral: Deferral::of(owner.clone()),
             owner,
             metrics,
             placement,
@@ -489,6 +499,7 @@ impl<S: Side> Core<S> {
             announcements: Announcements::default(),
             resolvers: Resolvers::default(),
             disposal: Disposal::default(),
+            disposed: false,
             receiving_requests: BTreeMap::new(),
             results: BTreeMap::new(),
             settled: BTreeMap::new(),
@@ -496,9 +507,17 @@ impl<S: Side> Core<S> {
         }
     }
 
-    /// Whether its router was disposed.
-    pub(crate) fn is_disposed(&self) -> bool {
-        self.disposal.is_set()
+    /// Whether its router was disposed, by the state's mark: once the dispose's job ran, or its
+    /// owner ended.
+    pub(crate) const fn is_disposed(&self) -> bool {
+        self.disposed
+    }
+
+    /// Marks its router disposed: its state's mark, and its handle's should a turn of its own end
+    /// it; the first thing a dispose's job does.
+    pub(crate) fn mark_disposed(&mut self) {
+        self.disposed = true;
+        self.disposal.set();
     }
 
     /// A number never given before, which tells one thing from another of the same place.
@@ -525,9 +544,10 @@ impl<S: Side> Core<S> {
         self.owner.after((&self.clock, due), job)
     }
 
-    /// Posts `job` to the owner, to run in a later turn: as this one ends, when posted within it.
+    /// Defers `job` to a later turn, at its owner's queue's tail, behind every job queued: never
+    /// within this one (decision 0045).
     pub(crate) fn later<J: FnOnce(&mut S) + Send + 'static>(&self, job: J) {
-        self.owner.offer(Box::new(job));
+        self.deferral.offer(Box::new(job));
     }
 
     /// The monotonic reading now.
@@ -2546,23 +2566,32 @@ pub(crate) fn reject_pending<S: Side>(
 }
 
 /// A router whose owner ends on a job that panicked: marked disposed, each call it waits on failed
-/// now, with that panic for its reason, the signal of each it answers aborted alike.
+/// now, with that panic for its reason, the signal of each it answers aborted alike; what it defers
+/// from now on held, for its owner to run next, its queue closed.
 pub(crate) fn end<S: Side>(state: &mut S, panicked: &Panicked) {
-    state.core().disposal.set();
+    let core = state.core();
+
+    core.deferral.end();
+    core.mark_disposed();
     reject_pending(state, (&panicked.to_string(), None));
 }
 
-// * a router's state, as its owner ends on a job that panicked: its side's way (decision 0044)
+// * a router's state, as its owner ends on a job that panicked: its side's way, then what that
+// deferred (decision 0044)
 impl<S: Side> Owned for S {
     fn on_panic(&mut self, panicked: &(dyn core::any::Any + Send)) {
         self.ended(&panicked_of(("a turn of the router's", panicked)));
+    }
+
+    fn deferred(&mut self) -> Option<Job<Self>> {
+        self.core().deferral.next()
     }
 }
 
 /// Rejects what still waits, aborts the signal of each call it still answers, and sends nothing
 /// more: no cancel either.
 pub(crate) fn dispose<S: Side>(state: &mut S) {
-    state.core().disposal.set();
+    state.core().mark_disposed();
     reject_pending(state, (&format!("{DISPOSED} before the answer"), None));
 }
 

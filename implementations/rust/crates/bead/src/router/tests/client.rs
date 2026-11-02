@@ -281,6 +281,42 @@ async fn a_failure_after_its_result_ends_the_subscription_no_call_unknown_the_no
     );
 }
 
+// spec 11.7; decision 0045: a step on its router's state, never deferred, as the other sides'
+// facades call their core within the turn
+#[tokio::test]
+async fn a_subscription_s_call_cancels_the_one_bound_before_it_ahead_of_its_own_request() {
+    let scripted = Scripted::new();
+    let notification = Notified::new(None);
+
+    let first = scripted
+        .subscribe((&notification.like(), super::TIMEOUT))
+        .await;
+
+    scripted.transport.deliver(&result_of(1, None));
+    super::answered(first).await.expect("subscribed");
+
+    let second = scripted
+        .subscribe((&notification.like(), super::TIMEOUT))
+        .await;
+    let sent: Vec<(EnvelopeKind, u32)> = scripted
+        .transport
+        .envelopes()
+        .iter()
+        .map(|envelope| (envelope.kind(), envelope.call_id()))
+        .collect();
+
+    assert_eq!(
+        sent,
+        [
+            (EnvelopeKind::Request, 1),
+            (EnvelopeKind::Cancel, 1),
+            (EnvelopeKind::Request, 3)
+        ],
+        "the call bound before cancelled ahead of the request that binds anew"
+    );
+    drop(second);
+}
+
 // spec 11.7.3
 #[tokio::test]
 async fn forgets_each_notification_when_its_connection_closes_is_replaced_or_it_is_disposed_and_tells_it()

@@ -777,9 +777,10 @@ public sealed partial class RouterCoreTests
         Assert.Equal([failure], server.Reports);
     }
 
-    // spec 9.0
+    // spec 9.0; decision 0045: its mark set at once, what it holds let go in a later turn, behind
+    // the answer of the turn its report listener disposes it in
     [Fact]
-    public async Task Lets_its_connections_go_after_the_turn_its_report_listener_disposes_it_in_the_failed_resolver_s_answer_refused_as_disposed_and_reported()
+    public async Task Lets_its_connections_go_after_the_turn_its_report_listener_disposes_it_in_behind_the_failed_resolver_s_answer()
     {
         var server = new Peer(RouterSide.Server);
         var core = server.Core;
@@ -804,16 +805,15 @@ public sealed partial class RouterCoreTests
 
         await server.Deliver(new Envelope { Header = RequestOf(5) }, "a");
 
-        // disposed at once, what it holds let go in a later turn
+        // marked at once, what it holds let go in a later turn, behind the turn's answer
         Assert.Equal([(1L, true)], disposed);
-        Assert.Empty(server.Sent);
-        Assert.Equal(2, server.Reports.Count);
-        Assert.Same(failure, server.Reports[0]);
-        Assert.Equal("the router was disposed", Assert.IsType<DisconnectException>(server.Reports[1]).Message);
-        Assert.Equal(["a", "a"], server.ReportedOn);
+        Assert.Equal([(EnvelopeKind.Failure, 5u, (ushort)ProtocolCode.ProcedureFailed)], AnswersOf(server));
+        Assert.Same(failure, Assert.Single(server.Reports));
+        Assert.Equal(["a"], server.ReportedOn);
+        Assert.True(core.IsDisposed);
         Assert.Equal(0, (await GaugesOf(server)).Counts["answeringCalls"]);
 
-        // its call closed as its answer failed, before what the dispose lets go: nothing cancelled
+        // its call closed as its answer went, before what the dispose lets go: nothing cancelled
         Assert.False(Assert.Single(resolver.Requests).Signal.IsCancellationRequested);
     }
 

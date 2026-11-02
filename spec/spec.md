@@ -350,18 +350,22 @@ Its code alone tells the requester how far its call went (section 8.1), as a gen
 an unexpected error returns to its consumer in
 OWASP's Application Security Verification Standard
 ([ASVS 5.0 §16.5.1](https://github.com/OWASP/ASVS/blob/v5.0.0/5.0/en/0x25-V16-Security-Logging-and-Error-Handling.md)).
-A side tells its application what it reports in the turn that raised it; what that application
-hands the side from within the telling — an envelope its transport carries, a connection let go —
-the side takes in a later turn, behind what came before it, never within that one, as section 15.13
-hands an envelope on: a report never changes what its turn answers.
+A side tells its application what it reports in the turn that raised it, as it does all it tells
+it, an envelope it traces among them. What that application does with the side from within a
+telling — a call, a notification, a cancel it makes, an envelope its transport carries, a
+connection let go, its dispose — the side takes in a later turn, never within that one, as section
+15.13 hands an envelope on: behind what that turn sends, and among what that turn defers in the
+order it was deferred. A report never changes what its turn answers.
 
 9.1. A call is a request and its answer, under one call id on one connection. Either side opens
-calls: a client its requests, a server its commands to a client. A requester draws its call ids in
-its own parity (section 3.5), from the first again once past the last, and skips those it waits on,
-those it reserved (section 10) and those it holds otherwise, a subscription's. A requester with no
-call id free in its parity fails its call before it goes, with `CAPACITY_EXCEEDED`. So does a
-requester whose calls waiting on the connection number `maximumAnsweringCalls` (section 12.2),
-drawing no call id, as an HTTP/2 endpoint never passes the streams its peer lets it open
+calls: a client its requests, a server its commands to a client. A call its application makes before
+it disposes of the side goes. One made after fails before it goes, and its failure says it was never
+sent. A requester draws its call ids in its own parity (section 3.5), from the first again once past
+the last, and skips those it waits on, those it reserved (section 10) and those it holds otherwise,
+a subscription's. A requester with no call id free in its parity fails its call before it goes, with
+`CAPACITY_EXCEEDED`. So does a requester whose calls waiting on the connection number
+`maximumAnsweringCalls` (section 12.2), drawing no call id, as an HTTP/2 endpoint never passes the
+streams its peer lets it open
 ([RFC 9113 §5.1.2](https://www.rfc-editor.org/rfc/rfc9113#section-5.1.2)): a call that waits counts
 from the turn it goes until its answer is wholly received, it is cancelled, or its connection
 closes, a subscription once answered not among them. What this section says of a side receiving a

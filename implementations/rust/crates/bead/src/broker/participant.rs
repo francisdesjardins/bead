@@ -2314,23 +2314,12 @@ impl BrokerParticipant {
             .flatten()
     }
 
-    /// Runs `job` in its turn, and gives what it gives.
+    /// Runs `job` in its turn, behind every job queued, and gives what it gives.
     pub(crate) fn run<T: Send + 'static, J: FnOnce(&mut ParticipantState) -> T + Send + 'static>(
         &self,
         job: J,
     ) -> crate::owner::Pending<T> {
         self.inner.owner.run(job)
-    }
-
-    /// Runs `job` in its turn behind every job queued, and gives what it gives.
-    pub(crate) fn run_behind<
-        T: Send + 'static,
-        J: FnOnce(&mut ParticipantState) -> T + Send + 'static,
-    >(
-        &self,
-        job: J,
-    ) -> crate::owner::Pending<T> {
-        self.inner.owner.run_behind(job)
     }
 
     /// Posts `job`, in its turn, after what came before it.

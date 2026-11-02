@@ -344,7 +344,7 @@ async fn keeps_the_result_of_a_subscription_answered_before_a_later_turn_panics(
         .owner()
         .run(move |_| {
             transport.deliver(&result_of(1, None));
-            owner.offer_behind(Box::new(|_| panic!("a later turn breaks")));
+            owner.offer(Box::new(|_| panic!("a later turn breaks")));
         })
         .await
         .expect("the result precedes the failing turn");

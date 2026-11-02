@@ -896,8 +896,9 @@ test.describe('createRouterCore', () => {
       expect(reported).toEqual([[failure, 'a']]);
     });
 
-    // spec 9.0
-    test('lets its connections go after the turn its report listener disposes it in, the failed resolver’s answer refused as disposed and reported', async () => {
+    // spec 9.0; decision 0045: its mark set at once, what it holds let go in a later turn, behind
+    // the answer of the turn its report listener disposes it in
+    test('lets its connections go after the turn its report listener disposes it in, behind the failed resolver’s answer', async () => {
       const { port, reported, sent } = createPort();
       const core = createRouterCore(port);
       const failure = new Error('the resolver failed');
@@ -928,15 +929,13 @@ test.describe('createRouterCore', () => {
       core.receive(requestOf(5), 'a');
       await sleep(0);
 
-      // disposed at once, what it holds let go in a later turn
+      // marked at once, what it holds let go in a later turn, behind the turn's answer
       expect(disposed).toEqual([{ answering: 1, isDisposed: true }]);
-      expect(sent).toEqual([]);
-      expect(reported).toEqual([
-        [failure, 'a'],
-        [new DisconnectError('the router was disposed'), 'a'],
-      ]);
+      expect(answersOf(sent)).toEqual([['a', 'failure', 5, ProtocolCode.PROCEDURE_FAILED]]);
+      expect(reported).toEqual([[failure, 'a']]);
+      expect(core.isDisposed).toBe(true);
       expect(core.gauges().counts['answeringCalls']).toBe(0);
-      // its call closed as its answer failed, before what the dispose lets go: nothing aborted
+      // its call closed as its answer went, before what the dispose lets go: nothing aborted
       expect(requests).toHaveLength(1);
       expect(requests[0]?.signal.aborted).toBe(false);
     });
