@@ -1257,39 +1257,42 @@ async fn hears_its_transport_s_error_and_refusal_through_the_server_s_transport(
 
 #[tokio::test]
 async fn a_connection_that_closes_takes_its_session_and_a_close_that_fails_is_reported() {
-    let fixture = Fixture::new(&ServerOptions::default());
-    fixture.sessions((Some(Duration::from_millis(30)), None));
-    let errors = Arc::new(Mutex::new(Vec::new()));
-    let hearing = Arc::clone(&errors);
-    fixture
-        .server
-        .router()
-        .on_error(Arc::new(move |error, handle| {
-            locked(&hearing).push((error.to_string(), handle.cloned()));
-        }));
-    fixture.ask(1, (1, None)).await;
-    fixture.transport.close_connection(&fixture.first);
-    fixture.clock.settle().await;
-    assert!(
-        !fixture
+    for at_call in [false, true] {
+        let fixture = Fixture::new(&ServerOptions::default());
+        fixture.sessions((Some(Duration::from_millis(30)), None));
+        let errors = Arc::new(Mutex::new(Vec::new()));
+        let hearing = Arc::clone(&errors);
+        fixture
             .server
-            .sessions()
-            .has(Arc::clone(&fixture.first))
-            .await
-    );
-    fixture.ask(3, (1, None)).await;
-    fixture.transport.close_as(&ClosingOptions {
-        panicked: Some("refused".to_owned()),
-        ..ClosingOptions::default()
-    });
-    fixture.advance(30).await;
-    assert_eq!(
-        *locked(&errors),
-        [(
-            "a transport's close panicked: refused".to_owned(),
-            Some(Arc::clone(&fixture.first))
-        )]
-    );
-    assert_eq!(fixture.server.gauges().await.server.counts["closing"], 0);
-    fixture.server.dispose().await.expect("disposed");
+            .router()
+            .on_error(Arc::new(move |error, handle| {
+                locked(&hearing).push((error.to_string(), handle.cloned()));
+            }));
+        fixture.ask(1, (1, None)).await;
+        fixture.transport.close_connection(&fixture.first);
+        fixture.clock.settle().await;
+        assert!(
+            !fixture
+                .server
+                .sessions()
+                .has(Arc::clone(&fixture.first))
+                .await
+        );
+        fixture.ask(3, (1, None)).await;
+        fixture.transport.close_as(&ClosingOptions {
+            panicked: Some("refused".to_owned()),
+            at_call: Some(at_call),
+            ..ClosingOptions::default()
+        });
+        fixture.advance(30).await;
+        assert_eq!(
+            *locked(&errors),
+            [(
+                "a transport's close panicked: refused".to_owned(),
+                Some(Arc::clone(&fixture.first))
+            )]
+        );
+        assert_eq!(fixture.server.gauges().await.server.counts["closing"], 0);
+        fixture.server.dispose().await.expect("disposed");
+    }
 }

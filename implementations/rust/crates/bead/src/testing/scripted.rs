@@ -436,6 +436,8 @@ pub struct ClosingOptions {
     pub result: Option<bool>,
     /// What the close panics with as it settles, a transport that breaks.
     pub panicked: Option<String>,
+    /// Whether a panic happens as close is called, rather than as its future settles.
+    pub at_call: Option<bool>,
 }
 
 impl core::fmt::Debug for ScriptedServer {
@@ -712,6 +714,11 @@ impl ServerTransport for ScriptedServer {
         locked(&self.closed).push(Arc::clone(connection_handle));
         locked(&self.closed_after).push(locked(&self.sent).len());
         let options = locked(&self.closing).clone();
+        if options.at_call == Some(true)
+            && let Some(message) = &options.panicked
+        {
+            panic!("{message}");
+        }
         Box::pin(async move {
             if let Some(released) = options.released {
                 released.cancelled().await;
