@@ -1138,27 +1138,33 @@ impl RouterClient {
         let posted = shared.owner.post(Box::new(move |state: &mut ClientState| {
             let drawn: Arc<Mutex<Option<u32>>> = Arc::default();
             let told = Arc::clone(&drawn);
-            let mut on_call_id = hooks.on_call_id;
             let owner = state.core.owner.clone();
             let is_subscribing = subscribing.is_some();
             let paced = subscribing
                 .as_ref()
                 .is_some_and(|notification| notification.window().is_some());
 
-            crate::router::requester::request(
+            // ! bind before the request goes, including the cancel of the call it replaces
+            let on_drawn =
+                is_subscribing.then(|| -> crate::router::requester::Drawn<ClientState> {
+                    Box::new(move |state: &mut ClientState, call_id| {
+                        *locked(&told) = Some(call_id);
+                        let held = locked(&state.notifications)
+                            .get(&(address.service_id, address.procedure_id))
+                            .cloned();
+                        if let Some(notification) = held {
+                            bind(state, (notification, call_id, timeout));
+                        }
+                    })
+                });
+            crate::router::requester::request_with(
                 state,
                 (
                     payload,
                     CoreRequest {
                         connection_handle: server_handle(),
                         credential: presented.credential,
-                        on_call_id: Some(Box::new(move |call_id: u32| {
-                            *locked(&told) = Some(call_id);
-
-                            if let Some(on_call_id) = on_call_id.take() {
-                                on_call_id(call_id);
-                            }
-                        })),
+                        on_call_id: hooks.on_call_id,
                         on_sent: hooks.on_sent,
                         opens_subscription: is_subscribing,
                         paced,
@@ -1171,31 +1177,21 @@ impl RouterClient {
                         transport_credential: presented.carried,
                     },
                     Box::new(move |outcome: Result<RouterResult, CallError>| {
+                        let call_id = *locked(&drawn);
                         // settled on the owner, after the turn it came in
                         owner.offer(Box::new(move |state: &mut ClientState| {
                             settled(
                                 state,
                                 (
                                     (outcome, reply),
-                                    (subscribing, presented_default, default, listeners),
+                                    (subscribing, call_id, presented_default, default, listeners),
                                 ),
                             );
                         }));
                     }),
+                    on_drawn,
                 ),
             );
-
-            // ! bound as its call id is drawn, before the request goes out, so a notification right
-            // behind its result is heard
-            let call_id = *locked(&drawn);
-            let held = locked(&state.notifications)
-                .get(&(address.service_id, address.procedure_id))
-                .cloned()
-                .filter(|_| is_subscribing);
-
-            if let (Some(notification), Some(call_id)) = (held, call_id) {
-                bind(state, (notification, call_id, timeout));
-            }
         }));
 
         if posted.is_err() {
@@ -1368,13 +1364,14 @@ fn bind(
 )]
 fn settled(
     state: &mut ClientState,
-    ((outcome, reply), (subscribing, presented, default, listeners)): (
+    ((outcome, reply), (subscribing, bound_call_id, presented, default, listeners)): (
         (
             Result<RouterResult, CallError>,
             oneshot::Sender<Result<RouterResult, CallError>>,
         ),
         (
             Option<Arc<dyn NotificationLike>>,
+            Option<u32>,
             Option<RequestCredential>,
             Arc<Mutex<Default_>>,
             Arc<ClientListeners>,
@@ -1397,7 +1394,8 @@ fn settled(
             }
             Err(_) => {
                 // a subscription that did not take holds nothing, whatever ended it
-                if let Some(call_id) = state.call_ids.get(&key).copied()
+                if let Some(call_id) = bound_call_id
+                    && state.call_ids.get(&key) == Some(&call_id)
                     && state
                         .subscriptions
                         .get(&call_id)

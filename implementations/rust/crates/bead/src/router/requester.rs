@@ -356,13 +356,24 @@ fn on_request_refused<S: Side>(state: &mut S, (call, id, error): (&CallAddress, 
 }
 
 /// Makes a call: it settles as its answer, its timer, its signal or its connection does.
+pub(crate) fn request<S: Side>(
+    state: &mut S,
+    (payload, request, reply): (Bytes, CoreRequest, CallReply),
+) {
+    request_with(state, (payload, request, reply, None));
+}
+
+/// What a side binds as a call id is drawn, before its hook hears it and before the request goes.
+pub(crate) type Drawn<S> = Box<dyn FnOnce(&mut S, u32) + Send>;
+
+/// Makes a call, binding its call id on its side before its hook hears it or anything goes out.
 #[expect(
     clippy::too_many_lines,
     reason = "a call made through each step of spec 9.1 in its order"
 )]
-pub(crate) fn request<S: Side>(
+pub(crate) fn request_with<S: Side>(
     state: &mut S,
-    (payload, request, reply): (Bytes, CoreRequest, CallReply),
+    (payload, request, reply, drawn): (Bytes, CoreRequest, CallReply, Option<Drawn<S>>),
 ) {
     let core = state.core();
     let procedure = request.procedure;
@@ -511,9 +522,15 @@ pub(crate) fn request<S: Side>(
 
     // ! a hook that panics fails its own call, and nothing of it goes out, as one that throws
     // rejects its call on the TypeScript side
-    if let Some(on_call_id) = request.on_call_id
-        && let Err(error) = hooked(|| on_call_id(call_id))
-    {
+    let heard = hooked(|| {
+        if let Some(drawn) = drawn {
+            drawn(state, call_id);
+        }
+        if let Some(on_call_id) = request.on_call_id {
+            on_call_id(call_id);
+        }
+    });
+    if let Err(error) = heard {
         if let Some(mut request) = forget(state, (&call, Some(id))) {
             settle(&mut request, Err(error));
         }
