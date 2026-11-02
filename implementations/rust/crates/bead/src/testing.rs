@@ -28,6 +28,7 @@ pub mod mutations;
 pub mod pair;
 pub mod parcels;
 mod platform;
+mod reading_clock;
 pub mod scripted;
 #[cfg(test)]
 pub(crate) mod surface;
@@ -37,6 +38,7 @@ pub mod validations;
 pub mod vectors;
 
 pub use platform::{Instant, patience, rest, spawn, wall_now};
+pub use reading_clock::ReadingClock;
 
 /// The language a row of the support matrix names when it excuses this side from an entry.
 pub const LANGUAGE: &str = "Rust";
