@@ -3,10 +3,12 @@
 use std::sync::{Arc, Mutex};
 
 use super::locked;
-use crate::constants::{ProcedureKind, ProtocolCode};
+use crate::constants::{FailureScope, ProcedureKind, ProtocolCode, RouterSide};
 use crate::errors::{CallError, ResolverError};
+use crate::failure::FailureOrigin;
 use crate::managers::service::{
     NotificationDependencies, NotifyOptions, RequestDependencies, RequestOptions, ResolverCallback,
+    ResolverDependencies, Validate,
 };
 use crate::payloads::TextCodec;
 use crate::service::{
@@ -16,6 +18,7 @@ use crate::service::{
 };
 use crate::testing::pair::{Pair, PairOptions, echo};
 use crate::testing::surface::Consumer;
+use crate::violations::{Judged, ReadViolations, Violation, violations_of};
 
 type TextDescriptor = Descriptor<TextCodec, TextCodec>;
 
@@ -425,4 +428,220 @@ async fn lists_the_procedures_without_a_resolver_which_the_router_answers_proced
         matches!(failure, CallError::Failure(failure) if failure.protocol_code() == Some(ProtocolCode::PROCEDURE_UNKNOWN))
     );
     assert_eq!(greeter.clock.procedure().kind, Some(ProcedureKind::Command));
+}
+
+const NOT_EMPTY_DETAIL: &str = "{\"bounds\":{\"min_len\":\"1\"},\"message\":\"must be at least 1 characters\",\"ruleId\":\"string.min_len\"}\n{\"more\":0}";
+
+fn not_empty() -> Validate<String> {
+    Arc::new(|value, _| {
+        if !value.is_empty() {
+            return Judged::default();
+        }
+        Judged {
+            violations: vec![Violation {
+                bounds: Some(
+                    serde_json::json!({ "min_len": "1" })
+                        .as_object()
+                        .expect("bounds")
+                        .clone(),
+                ),
+                message: Some("must be at least 1 characters".to_owned()),
+                rule_id: "string.min_len".to_owned(),
+                value: Some(serde_json::Value::String(value.clone())),
+                ..Violation::default()
+            }],
+            ..Judged::default()
+        }
+    })
+}
+
+fn checked(validate: Validate<String>, command: bool) -> TextDescriptor {
+    let init = DescriptorInit {
+        procedure: crate::identity::Procedure {
+            service_id: 8,
+            ..init((if command { 3 } else { 1 }, "echo"), AdmissionRule::None).procedure
+        },
+        validate: Some(validate),
+        ..init((1, "echo"), AdmissionRule::None)
+    };
+    if command {
+        command_of(init).expect("a command")
+    } else {
+        request_of(init).expect("a request")
+    }
+}
+
+#[tokio::test]
+async fn answers_payload_invalid_with_its_violations_to_a_request_its_rules_refuse_before_its_resolver()
+ {
+    let pair = pair().await;
+    let descriptor = checked(not_empty(), false);
+    let service = ServiceServer::new(
+        vec![ServiceProcedure::of(&descriptor)],
+        ServiceServerOptions::default(),
+    )
+    .expect("a checked service");
+    let seen = Arc::new(Mutex::new(Vec::new()));
+    let seeing = Arc::clone(&seen);
+    service
+        .on(
+            &descriptor,
+            Arc::new(move |request, response| {
+                locked(&seeing).push(request.payload.clone());
+                response.result(request.payload)
+            }),
+        )
+        .expect("registered");
+    service.offer(&pair.server).expect("offered");
+    assert_eq!(call(&pair, (&descriptor, "hi")).await.expect("valid"), "hi");
+    let CallError::Failure(failure) = call(&pair, (&descriptor, ""))
+        .await
+        .expect_err("an empty request")
+    else {
+        panic!("a protocol failure");
+    };
+    assert_eq!(failure.protocol_code(), Some(ProtocolCode::PAYLOAD_INVALID));
+    assert_eq!(failure.scope(), FailureScope::Protocol);
+    assert_eq!(failure.origin(), FailureOrigin::Peer);
+    assert_eq!(failure.detail(), NOT_EMPTY_DETAIL);
+    assert_eq!(
+        violations_of((failure.code(), failure.scope()), failure.detail()),
+        ReadViolations {
+            violations: vec![Violation {
+                bounds: Some(
+                    serde_json::json!({ "min_len": "1" })
+                        .as_object()
+                        .expect("bounds")
+                        .clone()
+                ),
+                rule_id: "string.min_len".to_owned(),
+                message: Some("must be at least 1 characters".to_owned()),
+                ..Violation::default()
+            }],
+            more: Some(0),
+            stopped: false,
+        }
+    );
+    pair.settle().await;
+    assert_eq!(*locked(&seen), ["hi"]);
+    assert!(locked(&pair.server_reports).is_empty());
+}
+
+#[tokio::test]
+async fn answers_procedure_failed_to_a_validate_that_throws_and_reports_it() {
+    let pair = pair().await;
+    let rules = not_empty();
+    let descriptor = checked(
+        Arc::new(move |value, options| {
+            assert!(!value.is_empty(), "a rule that fails to judge");
+            rules(value, options)
+        }),
+        false,
+    );
+    let service = ServiceServer::new(
+        vec![ServiceProcedure::of(&descriptor)],
+        ServiceServerOptions::default(),
+    )
+    .expect("a checked service");
+    let seen = Arc::new(Mutex::new(Vec::new()));
+    let seeing = Arc::clone(&seen);
+    service
+        .on(
+            &descriptor,
+            Arc::new(move |request, response| {
+                locked(&seeing).push(request.payload.clone());
+                response.result(request.payload)
+            }),
+        )
+        .expect("registered");
+    service.offer(&pair.server).expect("offered");
+    assert_eq!(
+        call(&pair, (&descriptor, "hi")).await.expect("judged"),
+        "hi"
+    );
+    let CallError::Failure(failure) = call(&pair, (&descriptor, ""))
+        .await
+        .expect_err("a broken rule")
+    else {
+        panic!("a protocol failure");
+    };
+    assert_eq!(
+        failure.protocol_code(),
+        Some(ProtocolCode::PROCEDURE_FAILED)
+    );
+    assert_eq!(failure.detail(), "");
+    pair.settle().await;
+    assert_eq!(*locked(&seen), ["hi"]);
+    let reports = locked(&pair.server_reports);
+    assert_eq!(reports.len(), 1);
+    assert!(
+        reports[0]
+            .0
+            .to_string()
+            .contains("a rule that fails to judge")
+    );
+    assert_eq!(reports[0].1.as_ref(), Some(&pair.connection_handle));
+}
+
+#[tokio::test]
+async fn validates_a_command_before_it_goes_when_its_options_say_so() {
+    let pair = pair().await;
+    let descriptor = checked(not_empty(), true);
+    let service = ServiceServer::new(
+        vec![ServiceProcedure::of(&descriptor)],
+        ServiceServerOptions {
+            validates: true,
+            ..ServiceServerOptions::default()
+        },
+    )
+    .expect("a validating service");
+    let heard = Arc::new(Mutex::new(Vec::new()));
+    let hearing = Arc::clone(&heard);
+    pair.client
+        .services()
+        .get_request_resolver(
+            descriptor.procedure(),
+            ResolverDependencies::of(TextCodec, TextCodec),
+        )
+        .expect("a command resolver")
+        .register(
+            (
+                Arc::new(move |request, response| {
+                    locked(&hearing).push(request.payload.clone());
+                    response.result(request.payload.to_uppercase())
+                }),
+                None,
+            ),
+            true,
+        )
+        .expect("registered");
+    service.offer(&pair.server).expect("offered");
+    let command = service.command(&descriptor).expect("made");
+    let options = || RequestOptions {
+        connection_handle: Some(Arc::clone(&pair.connection_handle)),
+        ..RequestOptions::default()
+    };
+    let CallError::Failure(failure) = command
+        .call(String::new(), options())
+        .expect("a call")
+        .await
+        .expect_err("invalid")
+    else {
+        panic!("a protocol failure");
+    };
+    assert_eq!(failure.protocol_code(), Some(ProtocolCode::PAYLOAD_INVALID));
+    assert_eq!(failure.origin(), FailureOrigin::Local);
+    assert_eq!(failure.side(), Some(RouterSide::Server));
+    assert_eq!(failure.detail(), NOT_EMPTY_DETAIL);
+    pair.settle().await;
+    assert!(locked(&heard).is_empty());
+    assert_eq!(
+        command
+            .call("hi".to_owned(), options())
+            .expect("a call")
+            .await
+            .expect("valid"),
+        "HI"
+    );
+    assert_eq!(*locked(&heard), ["hi"]);
 }
