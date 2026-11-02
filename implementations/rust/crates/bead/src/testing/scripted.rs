@@ -174,6 +174,12 @@ impl ScriptedClient {
         locked(&self.sent).clone()
     }
 
+    /// How many listeners hold this transport.
+    #[must_use]
+    pub fn listener_count(&self) -> usize {
+        locked(&self.listeners).len()
+    }
+
     /// Each envelope its router handed it, as a server reads it.
     #[must_use]
     pub fn envelopes(&self) -> Vec<Envelope> {
