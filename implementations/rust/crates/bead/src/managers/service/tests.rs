@@ -15,6 +15,7 @@ use crate::router::types::{BoxFuture, RouterAnswer, Signal};
 use crate::testing::SteppingClock;
 use crate::testing::scripted::{ScriptedServer, handle_of};
 
+mod admissions;
 mod resolver;
 
 type Heard = Arc<Mutex<Vec<(Option<String>, DebugEvent)>>>;
