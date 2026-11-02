@@ -29,6 +29,7 @@ mod calls;
 mod client;
 mod client_credentials;
 mod client_requests;
+mod client_subscription_registration;
 mod disposal;
 mod limits;
 mod metrics;

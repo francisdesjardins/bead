@@ -1061,7 +1061,8 @@ impl RouterClient {
 
         // ! a programmer's error first, before the call starts, so it is never counted
         if let Some(subscribes) = &subscribes
-            && !self.has_notification(subscribes)
+            && (procedure.address() != subscribes.procedure().address()
+                || !self.has_notification(subscribes))
         {
             return Err(ProgrammerError::new(format!(
                 "{} is not the notification this router holds for {}",
