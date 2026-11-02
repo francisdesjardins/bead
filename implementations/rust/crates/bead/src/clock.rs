@@ -44,6 +44,11 @@ pub trait Timer: Send + Sync + fmt::Debug {
 
 /// What Bead takes its time from: the platform's, [`SystemClock`], or a test's.
 pub trait Clock: Send + Sync + fmt::Debug {
+    /// How a refusal names it: one of the application's own, or the platform's.
+    fn description(&self) -> &'static str {
+        "one of its own"
+    }
+
     /// Its monotonic reading, since an origin of its own: what a deadline of Bead's own is
     /// compared on.
     fn monotonic(&self) -> Duration;
@@ -140,6 +145,10 @@ mod native {
     }
 
     impl Clock for SystemClock {
+        fn description(&self) -> &'static str {
+            "the platform's"
+        }
+
         fn monotonic(&self) -> Duration {
             self.origin.elapsed()
         }
