@@ -184,7 +184,6 @@ fn deliver(
 }
 
 #[tokio::test]
-#[ignore = "divergence: immediate refusals precede the plain resolver's answer; TypeScript answers it first, C# sorts"]
 async fn asks_verify_once_per_request_with_exactly_what_its_transport_carried_and_a_live_signal_never_for_none_opaque_or_an_elsewhere_that_carried_nothing()
  {
     let asked = Arc::new(Mutex::new(Vec::new()));
@@ -219,20 +218,6 @@ async fn asks_verify_once_per_request_with_exactly_what_its_transport_carried_an
     );
     deliver(&served, (7, &first(), Some(Credential::Elsewhere), None));
     served.settle().await;
-    assert_eq!(*locked(&asked), [(carried.to_owned(), false)]);
-    assert_eq!(
-        served.sent_since(),
-        [
-            "first result 3 none".to_owned(),
-            "first failure 5 SESSION_REQUIRED".to_owned(),
-            "first failure 9 CREDENTIAL_UNSUPPORTED".to_owned(),
-            "first failure 7 SESSION_REQUIRED".to_owned(),
-            format!(
-                "first result 1 {}",
-                serde_json::Value::String(carried.to_owned())
-            ),
-        ]
-    );
     let failures = served
         .transport
         .envelopes(&first())
@@ -249,6 +234,38 @@ async fn asks_verify_once_per_request_with_exactly_what_its_transport_carried_an
             | Envelope::Cancel { .. } => None,
         })
         .collect::<Vec<_>>();
+    let answers = served.sent_since();
+    let at = |call_id: &str| {
+        answers
+            .iter()
+            .position(|answer| answer.split(' ').nth(2) == Some(call_id))
+            .expect("an answer on the call")
+    };
+    let mut sorted = answers.clone();
+    sorted.sort();
+    assert_eq!(*locked(&asked), [(carried.to_owned(), false)]);
+    assert_eq!(
+        sorted,
+        [
+            "first failure 5 SESSION_REQUIRED".to_owned(),
+            "first failure 7 SESSION_REQUIRED".to_owned(),
+            "first failure 9 CREDENTIAL_UNSUPPORTED".to_owned(),
+            format!(
+                "first result 1 {}",
+                serde_json::Value::String(carried.to_owned())
+            ),
+            "first result 3 none".to_owned(),
+        ]
+    );
+    // * the refusals in the turns their requests came, in their order, and a later request's
+    // refusal before the answer a resolver gives at once, which it is handed in a later turn
+    // (decision 0010); 3 and 7 keep no order between them
+    assert!(at("5") < at("9"));
+    assert!(at("9") < at("3"));
+    assert!(at("9") < at("7"));
+    // 3 before 1 and 7 before 1 are what this side's turns give, not an order the spec states
+    assert!(at("3") < at("1"));
+    assert!(at("7") < at("1"));
     assert_eq!(
         failures,
         [

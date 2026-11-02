@@ -540,7 +540,7 @@ What carries `ELSEWHERE` over a broker met the round of the broker's core, which
 [0038](0038-over-a-broker-a-connection-is-placed-once-at-its-open-named-by-both-its-ends.md) keeps.
 
 The decision met the Tenth Man ([0009](0009-conventional-commits-git-flow-and-the-tenth-man.md)) in
-ten rounds, a later one answering an earlier one's answers, the seventh and the eighth also rounds
+twelve rounds, a later one answering an earlier one's answers, the seventh and the eighth also rounds
 of [0020](0020-http-draws-a-connection-by-a-token-and-a-listen-holds-it.md)'s change; the round on a
 forwarded credential's turn and on a credential that leaves a transfer no room is kept in
 [0001](0001-the-envelope-sits-at-fixed-offsets.md), At the wire's edges, and the round on the
@@ -771,3 +771,46 @@ Its objections, each with the answer that holds:
 | `spec/transcoding.md`'s two-side passages name what the Rust side has ahead (O9)                                                                                                                                                                                                                    | Accepted: the document does not move                                                                                                                                                                                                                                                                                                                                                                                                                                         |
 | Decision 0010 is touched at one line of four that name two sides (O10)                                                                                                                                                                                                                              | Accepted in part: the line O1 changes moves; the others go to the sweep of the records, a pass of its own                                                                                                                                                                                                                                                                                                                                                                    |
 | The units and the versions: which units move, and which version moves (O11)                                                                                                                                                                                                                         | Accepted: each unit whose text moves is acknowledged; the versions move at the release, a minor of the spec since two sides' verdicts change, a patch of the companion                                                                                                                                                                                                                                                                                                       |
+
+### On a request handed to its resolver in a later turn
+
+Every side hands a request whose payload is whole to its resolver in a later turn than the one it
+came in, whether its resolver waits or not, as a `JWT` and an `ELSEWHERE` resolve in one: the C#
+side posts it to the scheduler its resolvers run on, the Rust side spawns it off its router's owner
+([0044](0044-rust-one-owner-per-router-traits-no-unsafe-two-parameters-no-warning.md)), and the
+TypeScript side queues it as a microtask, on the queue where what it defers within a telling waits
+([0045](0045-a-router-takes-what-its-application-makes-in-one-queue-behind-the-turn-that-tells-it.md)),
+so it keeps its place among them. A later request's refusal, made in its own turn, so goes before an
+answer a resolver gives at once, on every side, over every transport that keeps its order (spec
+15.1), and the order of answers turns on a resolver no more than on a verifier. Admission and the
+credential stay in the turn the request came. A call cancelled, or gone with its connection, before
+the hand-off still reaches its resolver, its signal aborted, and is answered nothing. A router's
+intake counts an envelope as it reads it, not as it hands it on
+([0046](0046-a-router-paces-each-connections-reads-by-what-it-has-not-taken.md)).
+
+The spec states no order between a resolver's answer and the refusals of the requests behind it: a
+sentence that did would have to hold every answer a side queues behind its credit and its gate. The
+twins hold it, a row of the matrix's Features: `asks verify once per request with exactly what its
+transport carried and a live signal, never for none, OPAQUE or an ELSEWHERE that carried nothing`,
+under each side's name, plays one scenario on every side. Five requests on one connection come back
+to back: 1 presenting an `ELSEWHERE` its transport carried, 3 none, 5 an `OPAQUE` that does not
+hold, 9 a `JWT` the side does not take, and 7 an `ELSEWHERE` that carried nothing; the C# side posts
+them from one job of its scheduler, so no job of its router comes between two of them. Each twin
+asserts the set of answers and a partial order: 5 before 9, 9 before 3 and before 7, 3 and 7 before
+1, the pair 3 and 7 free. 9 before 3 guards the leveling; 3 before 1 and 7 before 1 are what each
+side's turns give, not an order the spec states. No total order is asserted: under its twin's
+scheduler, the TypeScript side gives 5, 9, 3, 7, 1, the C# and Rust sides 5, 9, 7, 3, 1, the Rust
+side's owner emptying its queue before any resolver's task runs, and where resolvers run on a pool
+of threads, 3 and 7 race. Refused: a row of the differences, since the TypeScript side can
+level, at the cost of 33 of its tests in 6 files each awaiting a turn, which does not outweigh
+parity; and a row of what is leveled down, which holds a platform's limit to lift, where the C# and
+Rust sides defer by design. Its objections, each with the answer that holds:
+
+| #   | Objection                                                                                                                                                                                                                | Answer                                                                                                                                                                                                                                                                                                                                        |
+| --- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1   | The C# twin plays another scenario: it settles after request 1, its ids are swapped against the other sides', and one batch posted from the test's thread races a settled verifier's job, the two-request twin's as well | Accepted: the C# twin takes the TypeScript side's scenario and ids, its batch posted from one job of its scheduler, and the two-request twin posts its pair the same way                                                                                                                                                                      |
+| 2   | "Exactly what the spec orders" is false: refusal 7 is deferred on every side, so 7 before 1 and 3 before 1 count each side's hops                                                                                        | Accepted: each twin asserts the set and 5 before 9 before 7; 3 before 1 and 7 before 1 are kept, with a comment saying they are each side's turns, not the spec                                                                                                                                                                               |
+| 3   | The divergence is visible on the wire, and leaving each side its own order forks it against the Parity rule                                                                                                              | Accepted: the TypeScript side is leveled to a later turn by the Parity rule, as this record leveled the verifier, and the rule is a row of the matrix's Features. A row of the differences is refused: the TypeScript side can level, and its cost, 33 tests in 6 files, does not outweigh parity. Each twin's 9 before 3 guards the leveling |
+| 4   | A sentence in spec 9.2 is loose, false for the sides whose answers go through a queue, a gate and credit, and belongs in a record, since no conversation can test it                                                     | Accepted: no spec sentence; the reasoning is here                                                                                                                                                                                                                                                                                             |
+| 5   | 0045's scope is a listener's telling; this record holds the later-turn rule                                                                                                                                              | Accepted: this record                                                                                                                                                                                                                                                                                                                         |
+| 6   | Spec 15.5's "exchanges keep no order" is HTTP's alone                                                                                                                                                                    | Accepted: 15.1 is the clause that makes the difference visible                                                                                                                                                                                                                                                                                |

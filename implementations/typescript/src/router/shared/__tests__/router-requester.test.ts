@@ -1900,6 +1900,7 @@ test.describe('createRouterCore', () => {
 
       core.registerResolver(resolverOf(echo, seen));
       core.receive(requestOf(1), 'a');
+      await sleep(0);
 
       const ended: Promise<unknown>[] = [];
       const { armed, cleared } = timersBy(clock, () => {

@@ -2274,6 +2274,8 @@ test.describe('createRouterClient', () => {
         kind: EnvelopeKind.REQUEST,
         payload: Uint8Array.of(3),
       });
+      // its resolver handed it in a later turn, before the cancel comes
+      await sleep(0);
       deliver({ header: { callId: 30, kind: EnvelopeKind.CANCEL }, kind: EnvelopeKind.CANCEL });
       await sleep(0);
 
@@ -2613,7 +2615,7 @@ test.describe('createRouterClient', () => {
       ]);
     });
 
-    test('reports a resolver that throws before it returns, and keeps taking envelopes', () => {
+    test('reports a resolver that throws before it returns, and keeps taking envelopes', async () => {
       const { deliver, emitter, transport } = createScriptedTransport();
       using router = createRouterClient(transport);
       const errors = recordErrors(router);
@@ -2632,6 +2634,8 @@ test.describe('createRouterClient', () => {
           payload: new Uint8Array(0),
         });
       }).not.toThrow();
+      // its resolver handed it in a later turn
+      await sleep(0);
       emitter.emit('message', { data: Uint8Array.of(0xa1, 0x17, 0, 2, 0, 0, 0, 2) });
 
       expect(errors[0]).toBe(failure);

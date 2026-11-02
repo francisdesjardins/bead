@@ -179,6 +179,7 @@ test.describe('createRouterCore', () => {
       void ask(53);
       core.receive(requestOf(1), 'a');
       core.receive(requestOf(3), 'a');
+      await sleep(0);
       void settledOf(answerOf(answering, { payload: new Uint8Array(36) }));
       void settledOf(answerOf(answering, { index: 1, payload: new Uint8Array(37) }));
       await sleep(0);

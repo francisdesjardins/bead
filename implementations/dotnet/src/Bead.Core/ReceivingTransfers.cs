@@ -198,12 +198,25 @@ internal sealed class ReceivingTransfers(ReceivingTransfersOptions options)
         return (receiving, null);
     }
 
-    /// <summary>Places a chunk; what places bytes is progress, and sets the timer going again.</summary>
+    /// <summary>
+    /// Places a chunk; what places bytes is progress, and sets the timer going again, unless it makes
+    /// the payload whole, which stops it.
+    /// </summary>
     public (ChunkOutcome Outcome, Failure? Refusal) Place(Receiving receiving, Chunk chunk)
     {
         var placed = receiving.Incoming.Place(chunk.Bytes, (chunk.IsLast, chunk.Offset));
 
-        if (_held.TryGetValue(receiving, out var state) && placed.Outcome is ChunkOutcome.Placed or ChunkOutcome.Complete)
+        if (!_held.TryGetValue(receiving, out var state))
+        {
+            return placed;
+        }
+
+        // * the chunk that makes the payload whole leaves nothing to wait for (spec 12.6, 12.7)
+        if (placed.Outcome is ChunkOutcome.Complete)
+        {
+            Stop(state);
+        }
+        else if (placed.Outcome is ChunkOutcome.Placed)
         {
             Touch(state);
         }

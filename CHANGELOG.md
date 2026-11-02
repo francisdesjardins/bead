@@ -53,6 +53,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - A codec's refusal says its reason in spec 17.2's words on every side, its library's own words
   kept in its cause, and a request whose payload does not read is answered `PAYLOAD_UNDECODABLE`
   with that reason as its detail (spec 17.2, `spec/codecs.json`, `spec/conversations.json`).
+- The TypeScript side hands a request to its resolver in a later turn, as the C# side does, so the
+  order of answers never turns on whether a resolver answers at once: a later request's refusal
+  goes before it (spec 9.2, 15.1).
 
 ### Fixed
 
