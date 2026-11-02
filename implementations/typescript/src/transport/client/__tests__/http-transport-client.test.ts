@@ -2543,7 +2543,7 @@ test.describe('createHTTPTransportClient, a server busy or a router behind', () 
   });
 
   // spec 15.6
-  test('reads whether what it sends is a request from its bytes, given as an ArrayBuffer too', async () => {
+  test('reads whether what it sends is a request from its bytes, given as an ArrayBuffer too, and takes a Blob for one', async () => {
     const clock = createTestClock(Date.UTC(2026, 0, 1));
     const fake = createFakeFetch();
     const client = createHTTPTransportClient({ clock, fetch: fake.fetch, isListening: false });
@@ -2586,6 +2586,17 @@ test.describe('createHTTPTransportClient, a server busy or a router behind', () 
     (await posted(3))?.answer({ status: 204 });
 
     await expect(cancel).resolves.toBeUndefined();
+
+    // ! what holds bytes it does not read, a Blob, it takes for a request: refused busy, it rejects
+    const blob = client
+      .send({ data: new Blob([envelopeOf(ENVELOPE_KINDS.CANCEL, { callId: 1 }).slice()]) })
+      .catch((reason: unknown) => {
+        return reason;
+      });
+
+    (await posted(4))?.answer(busy);
+
+    expect(await blob).toEqual(new GenericError('the server refused the exchange: 429 busy'));
     await client.disconnect({ isQuick: true });
   });
 

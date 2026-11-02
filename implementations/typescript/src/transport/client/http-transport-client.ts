@@ -255,6 +255,7 @@ const envelopesOf = (
 };
 
 // whether an envelope is a request, by its prefix: what is no request may be sent again
+// ! what is not read here, a string or a Blob, is taken for a request: never sent twice
 const isRequest = (data: unknown): boolean => {
   if (data instanceof ArrayBuffer) {
     return new Uint8Array(data)[KIND_OFFSET] === REQUEST_KIND;
@@ -266,7 +267,7 @@ const isRequest = (data: unknown): boolean => {
     );
   }
 
-  return false;
+  return true;
 };
 
 /**
