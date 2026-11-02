@@ -100,10 +100,20 @@ struct JwtVector {
     verdict: Verdict,
 }
 
+fn jwt_vectors() -> (Vec<JwtVector>, usize) {
+    let entries: Vec<JwtVector> = vectors::of("jwtVerdicts").expect("the JWT verdicts");
+    let refused = entries
+        .iter()
+        .filter(|vector| vector.verdict.reason.is_some())
+        .count();
+    assert!(refused > 0, "the corpus holds refused verdicts");
+    (entries, refused)
+}
+
 #[tokio::test]
 async fn tells_a_jwt_refused_by_the_step_of_section_13_8_that_refused_it_for_every_verdict_of_spec_vectors_json_that_refuses()
  {
-    let entries: Vec<JwtVector> = vectors::of("jwtVerdicts").expect("the JWT verdicts");
+    let (entries, refused) = jwt_vectors();
     let mut played = 0;
     for vector in entries {
         let Some(reason) = vector.verdict.reason else {
@@ -202,7 +212,7 @@ async fn tells_a_jwt_refused_by_the_step_of_section_13_8_that_refused_it_for_eve
         served.router.dispose().await;
         played += 1;
     }
-    assert_eq!(played, 49, "every refused verdict");
+    assert_eq!(played, refused, "every refused verdict");
 }
 
 #[derive(Deserialize)]
