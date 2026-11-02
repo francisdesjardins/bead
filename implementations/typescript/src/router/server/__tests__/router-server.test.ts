@@ -7,6 +7,7 @@ import { allClosed, host, IMPLEMENTATIONS } from '../../../transport/shared/__te
 import { createWSTransportServer } from '../../../transport/server/ws-transport-server';
 import type { TransportServerConnectionHandle } from '../../../transport/server/types';
 import { createEmitter } from '../../../transport/shared/emitter';
+import { noop } from '../../../transport/shared/noop';
 import type { ITransportMessage } from '../../../transport/shared/types';
 import { bytesOf, readEnvelope } from '../../shared/envelope';
 import { headerBytesOf } from '../../shared/header';
@@ -20,6 +21,7 @@ import type {
   ICredentials,
   IElsewhereSession,
   IFailure,
+  IHandedRequestHeader,
   INotificationLike,
   IProcedure,
   OutgoingEnvelope,
@@ -5743,5 +5745,141 @@ test.describe('createRouterServer, the accesses it refuses', () => {
     // the listener after it told all the same
     expect(after).toHaveLength(1);
     expect(errors).toEqual([[thrown, first]]);
+  });
+});
+
+test.describe('createRouterServer, within a telling', () => {
+  /** A request of the router's own to `first`, carrying `payload`, its rejection kept apart. */
+  const askFirst = (router: ReturnType<typeof createRouterServer>, payload: string) => {
+    return router.request(text.encode(payload), {
+      options: { ...options, connectionHandle: first },
+      procedure: echo,
+    });
+  };
+
+  // spec 9.0; decision 0045
+  test('a call its report listener makes goes behind what that turn answers', async () => {
+    const { deliver, open, sent, transport } = createScriptedTransport();
+    using router = createRouterServer(transport);
+    const failure = new Error('the resolver failed');
+    const made: Promise<unknown>[] = [];
+
+    router.registerResolver(
+      Object.assign(() => {
+        throw failure;
+      }, echo)
+    );
+    router.on('error', (error) => {
+      if (error === failure) {
+        // within the reporting turn, a call on the connection it reports
+        made.push(askFirst(router, 'what time?').catch(noop));
+      }
+    });
+    open(first);
+    deliver(first, requestOf(5));
+
+    // * nothing of the call within the turn: its answer first
+    expect(answersOf(sent)).toEqual([[first, 'failure', 5, ProtocolCode.PROCEDURE_FAILED]]);
+    await sleep(0);
+
+    expect(answersOf(sent)).toEqual([
+      [first, 'failure', 5, ProtocolCode.PROCEDURE_FAILED],
+      [first, EnvelopeKind.REQUEST, 2, 'what time?'],
+    ]);
+    expect(made).toHaveLength(1);
+  });
+
+  // spec 9.0, 9.1; decision 0045: the call goes behind the turn's answer, and the dispose's turn
+  // lets go of it behind them both
+  test('a call then a dispose its report listener makes go behind that turn’s answer, the call before the dispose', async () => {
+    const { deliver, open, sent, transport } = createScriptedTransport();
+    const router = createRouterServer(transport);
+    const errors = recordErrors(router);
+    const failure = new Error('the resolver failed');
+    // why the call made before the dispose failed
+    const reasons: unknown[] = [];
+
+    router.registerResolver(
+      Object.assign(() => {
+        throw failure;
+      }, echo)
+    );
+    router.on('error', (error) => {
+      if (error === failure) {
+        askFirst(router, 'before').catch((reason: unknown) => {
+          reasons.push(reason);
+        });
+        router[Symbol.dispose]();
+      }
+    });
+    open(first);
+    deliver(first, requestOf(5));
+    await sleep(0);
+
+    expect(answersOf(sent)).toEqual([
+      [first, 'failure', 5, ProtocolCode.PROCEDURE_FAILED],
+      [first, EnvelopeKind.REQUEST, 2, 'before'],
+    ]);
+    // the failure reported, and nothing refused as disposed
+    expect(reportedOf(errors)).toEqual([['the resolver failed', first]]);
+    // it went, and the dispose's turn rejected it as it waited
+    expect(reasons).toEqual([new DisconnectError('the router was disposed before the answer')]);
+  });
+
+  // spec 9.1; decision 0045: its handle's mark at once, its state's by its own turn; each failure
+  // says which side of the dispose its call was
+  test('a call made before its router’s dispose goes, and one made after it fails unsent', async () => {
+    const { open, sent, transport } = createScriptedTransport();
+    const router = createRouterServer(transport);
+
+    open(first);
+
+    const before = askFirst(router, 'before');
+
+    router[Symbol.dispose]();
+
+    const after = askFirst(router, 'after');
+
+    await expect(before).rejects.toThrow(/^the router was disposed before the answer$/);
+    await expect(after).rejects.toThrow(/^the router was disposed$/);
+    await expect(after).rejects.toBeInstanceOf(DisconnectError);
+    expect(answersOf(sent)).toEqual([[first, EnvelopeKind.REQUEST, 2, 'before']]);
+  });
+
+  // decision 0045: the skip of an answer to a call no longer answering and the send gate read one
+  // mark, the state's, so an answer taken ahead of a dispose's turn, on a call its requester
+  // cancelled, goes nowhere, though the handle's mark is set
+  test('an answer its resolver gives after a dispose queued behind it sends nothing on a cancelled call', async () => {
+    const { deliver, emitter, open, sent, transport } = createScriptedTransport();
+    const router = createRouterServer(transport);
+    const errors = recordErrors(router);
+    const requests: { connectionHandle: Handle; header: IHandedRequestHeader }[] = [];
+    let answering: Promise<void> | undefined;
+
+    router.registerResolver(
+      Object.assign((props: { connectionHandle: Handle; header: IHandedRequestHeader }) => {
+        requests.push(props);
+
+        return new Promise<void>(noop);
+      }, echo)
+    );
+    open(first);
+    deliver(first, requestOf(5));
+    deliver(first, cancelOf(5));
+    await sleep(0);
+    sent.length = 0;
+
+    // * within a telling: the answer, then the dispose behind it, its handle's mark set at once
+    router.once('error', () => {
+      answering = router.respond({ payload: text.encode('late') }, requests[0]!);
+      router[Symbol.dispose]();
+    });
+    emitter.emit('message', { data: 'text' }, first);
+    await sleep(0);
+
+    expect(sent).toEqual([]);
+    // its answer skipped, as a cancelled call's is, never refused as disposed
+    await expect(answering).resolves.toBeUndefined();
+    expect(reportedOf(errors)).toEqual([[ProtocolCode.ENVELOPE_MALFORMED, first]]);
   });
 });

@@ -15,8 +15,9 @@ public static class InteropHandlers
 {
     // constants
 
-    // the question ask puts to its client's clock, and how long it waits for the answer
-    private const string Question = "What time is it where you are?";
+    // the question ask puts to its client's clock, and how long it waits for the answer; a
+    // conversation's listener puts it too
+    internal const string Question = "What time is it where you are?";
 
     private static readonly TimeSpan ClockTimeout = TimeSpan.FromSeconds(10);
 

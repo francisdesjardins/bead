@@ -368,10 +368,25 @@ public sealed class RouterClient : IRouterLike, IRouterTarget, IDisposable
         _core.RegisterResolver(resolver);
     }
 
-    /// <inheritdoc/>
+    /// <summary>
+    /// Answers a command, as <see cref="IRouterLike.Respond"/> says, in a turn of its own behind what
+    /// came before it (spec 9.0); once disposed, it fails unsent, a
+    /// <see cref="DisconnectException"/>.
+    /// </summary>
     public Task Respond(RouterAnswer response, AnswerTarget target)
     {
-        return _core.Respond(response, target with { ConnectionHandle = ServerConnectionHandle });
+        ArgumentNullException.ThrowIfNull(response);
+
+        // ! the handle's mark, read once, at the call (decision 0045)
+        if (_core.IsDisposed)
+        {
+            return Task.FromException(new DisconnectException(RouterCore.Disposed));
+        }
+
+        return _core.Loop.RunBehind(() =>
+        {
+            return _core.Respond(response, target with { ConnectionHandle = ServerConnectionHandle });
+        });
     }
 
     /// <summary>Only a server notifies: an <see cref="InvalidOperationException"/>.</summary>
@@ -446,7 +461,8 @@ public sealed class RouterClient : IRouterLike, IRouterTarget, IDisposable
             return Task.FromException(refused);
         }
 
-        return _core.Loop.Run(() =>
+        // ! what it holds, read in its turn: behind an unregistration made before it (spec 9.0)
+        return _core.Loop.RunBehind(() =>
         {
             var procedure = notification.Procedure;
 
@@ -478,7 +494,7 @@ public sealed class RouterClient : IRouterLike, IRouterTarget, IDisposable
     {
         ArgumentNullException.ThrowIfNull(notification);
 
-        return _core.Loop.Run(() =>
+        return _core.Loop.RunBehind(() =>
         {
             // another's of the same procedure stays: only what registered takes itself away
             if (!_notifications.TryRemove(new KeyValuePair<ProcedureAddress, INotificationLike>(notification.Procedure.Address, notification)))
@@ -505,7 +521,9 @@ public sealed class RouterClient : IRouterLike, IRouterTarget, IDisposable
     }
 
     /// <summary>
-    /// Sends a request to the server, on an odd call id, and settles with its result. With
+    /// Sends a request to the server, on an odd call id, in a turn of its own behind what came
+    /// before it (spec 9.0), and settles with its result; one made once the router was disposed
+    /// fails unsent, a <see cref="DisconnectException"/>. With
     /// <see cref="RouterRequest.Subscribes"/> — the notification the router holds for the procedure —
     /// the call subscribes it: the request opens a subscription, paced when the notification has a
     /// window, and what comes under its call id triggers the notification.
@@ -514,6 +532,23 @@ public sealed class RouterClient : IRouterLike, IRouterTarget, IDisposable
     {
         ArgumentNullException.ThrowIfNull(request);
 
+        // ! the handle's mark, read once, at the call: one made after the dispose fails unsent
+        // (spec 9.1)
+        if (_core.IsDisposed)
+        {
+            return Task.FromException<RouterResult>(new DisconnectException(RouterCore.Disposed));
+        }
+
+        return _core.Loop.RunBehind(() =>
+        {
+            return RequestOnLoop(payload, request);
+        });
+    }
+
+    // a request, in its turn: the credential it presents, as it is then, and the notification it
+    // binds, which it reads there
+    private Task<RouterResult> RequestOnLoop(ReadOnlyMemory<byte> payload, RouterRequest request)
+    {
         // a call that gives no credential of its own presents the default, as it is now
         Credential? byDefault = null;
         var isWithdrawn = false;
@@ -548,20 +583,17 @@ public sealed class RouterClient : IRouterLike, IRouterTarget, IDisposable
             return Withdrawing(_core.Request(payload, core), byDefault);
         }
 
-        return Withdrawing(
-            _core.Loop.Run(() =>
-            {
-                // only the notification held for the procedure is bound, or its notifications would
-                // reach none that is listening
-                if (!_notifications.TryGetValue(request.Procedure.Address, out var held) || !ReferenceEquals(held, subscribes))
-                {
-                    return Task.FromException<RouterResult>(new InvalidOperationException(
-                        $"{subscribes.Procedure.ProcedureName} is not the notification this router holds for {request.Procedure.ProcedureName}"));
-                }
+        // only the notification held for the procedure is bound, or its notifications would reach
+        // none that is listening
+        if (!_notifications.TryGetValue(request.Procedure.Address, out var held) || !ReferenceEquals(held, subscribes))
+        {
+            return Withdrawing(
+                Task.FromException<RouterResult>(new InvalidOperationException(
+                    $"{subscribes.Procedure.ProcedureName} is not the notification this router holds for {request.Procedure.ProcedureName}")),
+                byDefault);
+        }
 
-                return Subscribing(payload, (core, subscribes));
-            }),
-            byDefault);
+        return Withdrawing(Subscribing(payload, (core, subscribes)), byDefault);
     }
 
     // a call that presented the default, answered SESSION_REQUIRED whatever relays it crossed,
@@ -612,16 +644,24 @@ public sealed class RouterClient : IRouterLike, IRouterTarget, IDisposable
 
     /// <summary>
     /// Follows its transport no more, forgets the session, drops its notifications, rejects what
-    /// still waits and cancels the signal of each command it still answers.
+    /// still waits and cancels the signal of each command it still answers: in two steps (decision
+    /// 0045), its mark and its transport heard no more at once, so what is made after fails unsent;
+    /// the rest in a job of its own, behind what came before it, the turn it was made in included.
     /// </summary>
     public void Dispose()
     {
+        _core.MarkDisposed();
         Transport.Message -= OnMessage;
         Transport.Close -= OnClose;
         Transport.Reconnect -= OnReconnect;
-        _sessionToken = null;
-        _core.Post(DropNotifications);
-        _core.Dispose();
+        _core.Post(() =>
+        {
+            _core.DisposeOnLoop(() =>
+            {
+                _sessionToken = null;
+                DropNotifications();
+            });
+        });
     }
 
     // the call that subscribes, bound as its call id is drawn: before the request goes out, so a

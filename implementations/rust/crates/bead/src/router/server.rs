@@ -1387,8 +1387,11 @@ pub(crate) fn on_close(state: &mut ServerState, handle: &ConnectionHandle) {
     );
 }
 
-/// Disposes of the router: what each connection held is dropped, and every call ends.
+/// Disposes of the router: what each connection held is dropped, and every call ends; its state
+/// marked disposed first, so nothing of it goes out (decision 0045).
 pub(crate) fn dispose(state: &mut ServerState) {
+    state.core.mark_disposed();
+
     let followed: Vec<ConnectionHandle> = state.connections.keys().cloned().collect();
 
     for handle in &followed {
@@ -1423,22 +1426,22 @@ pub(crate) fn dispose(state: &mut ServerState) {
     }
 }
 
-// what posts a transport's events to the router's owner, in the order the transport tells them,
-// behind every job queued, one told from within its router's turn too (spec 9.0): ! a handle to
-// the owner, so a router lives as long as its transport holds it (decision 0044); its state holds
-// the bridge and its transport weakly, so neither keeps it of its own
+// what posts a transport's events at its router's owner's queue's tail, in the order the transport
+// tells them, one told from within its router's turn too, taken in a later turn (spec 9.0): ! a
+// handle to the owner, so a router lives as long as its transport holds it (decision 0044); its
+// state holds the bridge and its transport weakly, so neither keeps it of its own
 struct Bridge {
     owner: Owner<ServerState>,
     disposal: Disposal,
 }
 
 impl Bridge {
-    // ! what its transport tells once its router is disposed is dropped, as both other sides stop
+    // ! what its transport tells once its handle is disposed is dropped, as both other sides stop
     // listening within their dispose: the rest of the dispose, its unlisten among it, comes in a
-    // later turn
+    // later turn (decision 0045)
     fn offer(&self, job: Box<dyn FnOnce(&mut ServerState) + Send>) {
         if !self.disposal.is_set() {
-            self.owner.offer_behind(job);
+            self.owner.offer(job);
         }
     }
 }
@@ -1831,6 +1834,17 @@ impl RouterServer {
         payload: Bytes,
         (request, hooks): (ServerRequest, CallHooks),
     ) -> Result<Call, ProgrammerError> {
+        // ! its handle's mark, read once, as its job is posted, a programmer's error first: one
+        // made after its router's dispose fails unsent, whatever thread or turn it is made on; one
+        // made before goes (spec 9.1)
+        if self.shared.disposal.is_set() {
+            named_of(&request.options)?;
+
+            return Ok(Call::refused(CallError::Disconnected(
+                crate::router::core::DISPOSED.to_owned(),
+            )));
+        }
+
         request_on(&self.shared.owner.downgrade(), (payload, request, hooks))
     }
 
@@ -1845,6 +1859,11 @@ impl RouterServer {
             Option<NotificationKey>,
         ),
     ) -> BoxFuture<()> {
+        // ! once its handle is disposed, a notification made after it goes to nobody
+        if self.shared.disposal.is_set() {
+            return Box::pin(async {});
+        }
+
         let posted = self.shared.owner.run(move |state: &mut ServerState| {
             notify(state, (payload, procedure, (filter, key)));
         });
@@ -1856,6 +1875,11 @@ impl RouterServer {
 
     /// Ends the credential's session `identifier` names on every connection that keeps it.
     pub fn end_session(&self, identifier: SessionIdentifier) -> BoxFuture<()> {
+        // ! once its handle is disposed, the dispose's job lets every session go
+        if self.shared.disposal.is_set() {
+            return Box::pin(async {});
+        }
+
         let posted = self.shared.owner.run(move |state: &mut ServerState| {
             end_credential_session(state, &identifier);
         });
@@ -1867,6 +1891,11 @@ impl RouterServer {
 
     /// Ends every `JWT`'s session whose identifier's issuer is `issuer`.
     pub fn end_sessions_of(&self, issuer: String) -> BoxFuture<()> {
+        // ! once its handle is disposed, the dispose's job lets every session go
+        if self.shared.disposal.is_set() {
+            return Box::pin(async {});
+        }
+
         let posted = self.shared.owner.run(move |state: &mut ServerState| {
             end_sessions_of(state, &issuer);
         });
@@ -1881,6 +1910,12 @@ impl RouterServer {
         &self,
         (connection_handle, failure): (ConnectionHandle, Failure),
     ) -> BoxFuture<()> {
+        // ! once its handle is disposed, the dispose's job lets every subscription go, sending
+        // nothing
+        if self.shared.disposal.is_set() {
+            return Box::pin(async {});
+        }
+
         let posted = self.shared.owner.run(move |state: &mut ServerState| {
             end_session(state, (&connection_handle, None, Some(failure)));
         });
@@ -1921,13 +1956,13 @@ impl RouterServer {
         Box::pin(async move { gauged.await.unwrap_or_default() })
     }
 
-    /// Disposes of it: every call ends, and nothing more goes out. Disposed at once, it lets go of
-    /// what it holds in a later turn, behind what came before it, a listener's dispose too (spec
-    /// 9.0).
+    /// Disposes of it: every call ends, and nothing more goes out. Disposed at once, a call made
+    /// after it fails unsent; what it holds is let go in a later turn, behind what came before it,
+    /// a call made before it among it, and a listener's dispose too (spec 9.0, 9.1).
     pub fn dispose(&self) -> BoxFuture<()> {
         self.shared.disposal.set();
 
-        let disposed = self.shared.owner.run_behind(dispose);
+        let disposed = self.shared.owner.run(dispose);
 
         Box::pin(async move {
             disposed.await.ok();
@@ -2008,18 +2043,8 @@ pub(crate) fn gauges(state: &ServerState) -> Gauges {
     ])
 }
 
-/// Makes a call of the server's own on the owner `owner`, sent as it is made.
-pub(crate) fn request_on(
-    owner: &WeakOwner<ServerState>,
-    (payload, request, hooks): (Bytes, ServerRequest, CallHooks),
-) -> Result<Call, ProgrammerError> {
-    let ServerRequest {
-        procedure,
-        maximum_payload_bytes,
-        options,
-        series,
-        refusal,
-    } = request;
+// the connection a server's call names, once its options hold: a programmer's error otherwise
+fn named_of(options: &ResolvedRequestOptions) -> Result<ConnectionHandle, ProgrammerError> {
     let Some(named) = options.connection_handle.clone() else {
         return Err(ProgrammerError::new(
             "a server request names the connection it goes to",
@@ -2036,6 +2061,22 @@ pub(crate) fn request_on(
         ));
     }
 
+    Ok(named)
+}
+
+/// Makes a call of the server's own on the owner `owner`, sent as it is made.
+pub(crate) fn request_on(
+    owner: &WeakOwner<ServerState>,
+    (payload, request, hooks): (Bytes, ServerRequest, CallHooks),
+) -> Result<Call, ProgrammerError> {
+    let ServerRequest {
+        procedure,
+        maximum_payload_bytes,
+        options,
+        series,
+        refusal,
+    } = request;
+    let named = named_of(&options)?;
     let (reply, answer) = oneshot::channel();
     let posted = owner.post(Box::new(move |state: &mut ServerState| {
         let is_open = state.connections.contains_key(&named);
@@ -2096,6 +2137,7 @@ pub(crate) fn request_on(
                 CoreRequest {
                     connection_handle: named,
                     credential,
+                    on_drawn: None,
                     on_call_id: hooks.on_call_id,
                     on_sent: hooks.on_sent,
                     opens_subscription: false,

@@ -35,6 +35,53 @@ public sealed class SerialSchedulerTests
         Assert.Equal(1, scheduler.MaximumConcurrencyLevel);
     }
 
+    // spec 9.0; decision 0045: what an application does from within a turn joins the one queue's
+    // tail, where what the router runs of its own runs at once
+    [Fact]
+    public async Task Runs_behind_what_came_before_it_never_at_once_even_within_its_own_turn_where_a_run_is_at_once()
+    {
+        var scheduler = new SerialScheduler();
+        var order = new List<string>();
+        Task<string>? behind = null;
+
+        await scheduler.Run(() =>
+        {
+            scheduler.Post(() =>
+            {
+                order.Add("deferred by the turn");
+            });
+            behind = scheduler.RunBehind(() =>
+            {
+                order.Add("made within the turn");
+
+                return Task.FromResult("made");
+            });
+            _ = scheduler.Run(() =>
+            {
+                order.Add("run within the turn");
+
+                return Task.CompletedTask;
+            });
+            order.Add("the turn ends");
+
+            return Task.CompletedTask;
+        });
+
+        Assert.Equal("made", await behind!);
+        Assert.Equal(["run within the turn", "the turn ends", "deferred by the turn", "made within the turn"], order);
+
+        // what it throws faults what it gives
+        var broken = new InvalidOperationException("it failed");
+
+        Assert.Same(broken, await Assert.ThrowsAsync<InvalidOperationException>(() =>
+        {
+            return scheduler.RunBehind(() =>
+            {
+                return Task.FromException(broken);
+            });
+        }));
+    }
+
     [Fact]
     public async Task Hands_what_throws_to_the_one_that_hears_it_and_runs_on()
     {

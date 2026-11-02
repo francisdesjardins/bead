@@ -36,7 +36,8 @@ published test key; each blueprint of spec/ is in its form, RFC 8785's member or
 integers alone, laid out two spaces with a final newline; and interop-service.json states the
 interop blueprint's procedures, by name and in their order, what each admits where its admission is not
 none and what it notifies where it notifies, and each code it names a failure of the blueprint's
-catalogue that its procedure lists; and every count the tables of files of docs/support.md and the
+catalogue that its procedure lists; a conversation's listener calls a command of that blueprint's;
+and every count the tables of files of docs/support.md and the
 README state is what the files it counts hold, protobuf's conformance suite's tests the floor of its
 runner, and no other number stands in a row of either, a unit cited and a code span aside.
 Exit 1 on any of them.
@@ -529,6 +530,14 @@ rejection = documents['interop-service']['verifiers']['elsewhere']['rejection']
 if f'its error "{rejection}"' not in elsewhere.get('settles', ''):
     problems.append(f'interop-service.json: verifiers.elsewhere rejects with {rejection!r}, which is not the error '
                     'credentials.elsewhere.settles states')
+
+# the command a conversation's listener calls is a procedure of the interop blueprint's, of kind command
+commands = {entry['procedureName'] for entry in api if entry['procedureKind'] == 'command'}
+
+for conversation in documents['conversations']['conversations']:
+    if 'listener' in conversation and conversation['listener']['command'] not in commands:
+        problems.append(f'conversations: {conversation["name"]!r} has its listener call '
+                        f'{conversation["listener"]["command"]!r}, which is no command of interop-blueprint.json\'s')
 
 vectors = documents['vectors']
 groups = [group for group in vectors if group not in META]

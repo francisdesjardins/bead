@@ -74,9 +74,7 @@ Ahead besides: each a record binds, as it names; each no record decides, by a de
 that meets the Tenth Man:
 
 - what [0044](0044-rust-one-owner-per-router-traits-no-unsafe-two-parameters-no-warning.md) keeps
-  ahead of the routers on every side: one order for a call a listener makes within its router's
-  turn; one behaviour for a call made just before its router's dispose; and an optional bridge from
-  the Rust side's trace to `tracing`;
+  ahead of the Rust side's trace: an optional bridge from it to `tracing`;
 - **the core in a page and in a worker**, the Rust side's and the C# side's in one stage, with its
   executor, its clock and its tests, then what it serves there: the transports in a page, the Web
   Worker transport, the DevTools hook from their clients, its contract then a document every side
@@ -172,11 +170,12 @@ table.
 
 ### The envelope and its calls
 
-| #                                                           | Decision                                                                                                        | Status   |
-| ----------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------- | -------- |
-| [0001](0001-the-envelope-sits-at-fixed-offsets.md)          | The envelope sits at fixed big-endian offsets, behind an 8-byte prefix and its layout byte                      | accepted |
-| [0002](0002-a-subscription-goes-at-its-clients-pace.md)     | A client may pace its subscription, and what waits, waits by key                                                | accepted |
-| [0010](0010-a-request-presents-a-credential-of-a-scheme.md) | A request presents a credential of a scheme, in the header's last block, and runs in the session it resolves to | accepted |
+| #                                                                                                    | Decision                                                                                                        | Status   |
+| ---------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------- | -------- |
+| [0001](0001-the-envelope-sits-at-fixed-offsets.md)                                                   | The envelope sits at fixed big-endian offsets, behind an 8-byte prefix and its layout byte                      | accepted |
+| [0002](0002-a-subscription-goes-at-its-clients-pace.md)                                              | A client may pace its subscription, and what waits, waits by key                                                | accepted |
+| [0010](0010-a-request-presents-a-credential-of-a-scheme.md)                                          | A request presents a credential of a scheme, in the header's last block, and runs in the session it resolves to | accepted |
+| [0045](0045-a-router-takes-what-its-application-makes-in-one-queue-behind-the-turn-that-tells-it.md) | A router takes what its application makes in one queue, behind the turn that tells it                           | accepted |
 
 ### Payloads
 
@@ -266,7 +265,7 @@ table.
 
 ## Writing one
 
-The next decision is 0045. Its file is `NNNN-the-decision-in-a-few-words.md`, and its title states
+The next decision is 0046. Its file is `NNNN-the-decision-in-a-few-words.md`, and its title states
 the decision, not its subject. The title may grow with the record; the file's name stays, unless it
 would mislead.
 

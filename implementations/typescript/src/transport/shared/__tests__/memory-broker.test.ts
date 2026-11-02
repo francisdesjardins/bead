@@ -128,6 +128,46 @@ test.describe('memory broker', () => {
     expect(dan.unsettled).toBe(0);
   });
 
+  // spec 15.24; decision 0045: one queue of turns, the job queue, a publish made within the
+  // broker's turn at its tail, behind the one its publisher made before that turn
+  test('a publish a listener makes within the broker’s turn comes behind one its publisher made before it', async () => {
+    const broker = createMemoryBroker();
+    const [ada, bob, cid] = ['ada', 'bob', 'cid'].map((id) => {
+      return broker.adapter({ id });
+    }) as [IMemoryBrokerAdapter, IMemoryBrokerAdapter, IMemoryBrokerAdapter];
+
+    for (const adapter of [ada, bob, cid]) {
+      await adapter.start();
+    }
+
+    await ada.subscribe(INBOX);
+    await bob.subscribe(NAME);
+
+    const heard = heardBy(bob);
+
+    // what the publisher's application does as it hears "go" within the broker's turn
+    ada.on('message', ({ payload, settle }) => {
+      settle();
+
+      if (new TextDecoder().decode(payload) === 'go') {
+        void ada.publish({ payload: bytesOf('two'), topic: NAME });
+      }
+    });
+
+    // its "go" queued to reach the publisher within a turn of the broker's; meanwhile, before that
+    // turn, the publisher publishes
+    void cid.publish({ payload: bytesOf('go'), topic: INBOX });
+    void ada.publish({ payload: bytesOf('one'), topic: NAME });
+    await settled();
+
+    // in the order its publisher published, the one made within the turn behind
+    expect(
+      heard.map(({ text }) => {
+        return text;
+      })
+    ).toEqual(['one', 'two']);
+  });
+
   test('hands a group message to one member in turn, and again to another when a test asks (spec 15.24)', async () => {
     const broker = createMemoryBroker();
     const [one, two, alone, client] = ['one', 'two', 'alone', 'client'].map((id) => {

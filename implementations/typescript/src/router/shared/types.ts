@@ -26,6 +26,7 @@ import type {
   IResolverSeries,
   IRouterMetrics,
 } from './metrics-registry';
+import type { ITelling } from './telling';
 import type { IJudged, IValidateOptions } from './violations';
 
 // declarations
@@ -565,7 +566,11 @@ export interface IRouterResult {
 
 /** What both sides of a router do alike, as each side's router builds on it. */
 export interface IRouterCore<Handle extends string> {
-  /** Whether it was disposed: nothing more goes out, and nothing more waits. */
+  /**
+   * Whether it was disposed, as its dispose marks it at once: what it holds is let go then, or —
+   * disposed within a telling — in a later turn, behind what that turn sends, after which nothing
+   * more goes out and nothing more waits.
+   */
   readonly isDisposed: boolean;
   /** What it reads, writes and holds by: its options', {@link LIMIT_DEFAULTS}' where they say nothing. */
   readonly limits: IRouterLimits;
@@ -711,7 +716,8 @@ export interface IRouterCore<Handle extends string> {
   ): Promise<void>;
   /**
    * Rejects what still waits, aborts the signal of each call it still answers, and sends nothing
-   * more: no cancel either. Disposed at once, it lets go of what waits as `rejectPending` does.
+   * more: no cancel either. Marked disposed at once, it lets go of what waits as `rejectPending`
+   * does: then, or — within a telling — in a later turn, behind what that turn sends.
    */
   [Symbol.dispose](): void;
 }
@@ -738,6 +744,11 @@ export interface IRouterCoreOptions {
    * inactivity from 1 to 2³¹ − 1 milliseconds, held rounded to the nearest whole one.
    */
   limits?: RouterLimitsOptions | undefined;
+  /**
+   * The telling it shares with its router: what it tells its side runs within it, and what is
+   * handed back from within one waits for a later turn; one of its own when not given.
+   */
+  telling?: ITelling | undefined;
 }
 
 /**

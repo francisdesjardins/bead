@@ -31,7 +31,7 @@ use crate::router::core::{
     Core, Disposal, Handler, Resolution, Resolved, Resolvers, SessionRequest, Side,
 };
 use crate::router::relay::{RelayLeg, RelayRouter};
-use crate::router::requester::CoreRequest;
+use crate::router::requester::{CoreRequest, OnDrawn};
 use crate::router::server::{Call, CallHooks};
 use crate::router::types::{
     BoxFuture, CallAddress, ConnectionHandle, Gauges, RequestCredential, ResolvedRequestOptions,
@@ -252,8 +252,11 @@ impl ClientState {
         self.listeners.report(error);
     }
 
-    // lets go of what it holds: its transport's events, its session, every call
+    // lets go of what it holds: its transport's events, its session, every call; its state marked
+    // disposed first (decision 0045)
     fn dispose(&mut self) {
+        self.core.mark_disposed();
+
         if let Some(listener) = self.listener.take().and_then(|listener| listener.upgrade())
             && let Some(transport) = self.transport.upgrade()
         {
@@ -596,22 +599,22 @@ impl Side for ClientState {
     }
 }
 
-// what posts a transport's events to the router's owner, behind every job queued, a transport that
-// tells one from within its router's turn too (spec 9.0): ! a handle to the owner, so a router
-// lives as long as its transport holds it; its state holds the bridge and its transport weakly, so
-// neither keeps it of its own
+// what posts a transport's events at its router's owner's queue's tail, a transport that tells one
+// from within its router's turn too, taken in a later turn (spec 9.0): ! a handle to the owner, so
+// a router lives as long as its transport holds it; its state holds the bridge and its transport
+// weakly, so neither keeps it of its own
 struct Bridge {
     owner: Owner<ClientState>,
     disposal: Disposal,
 }
 
 impl Bridge {
-    // ! what its transport tells once its router is disposed is dropped, as both other sides stop
+    // ! what its transport tells once its handle is disposed is dropped, as both other sides stop
     // listening within their dispose: the rest of the dispose, its unlisten among it, comes in a
-    // later turn
+    // later turn (decision 0045)
     fn offer(&self, job: Box<dyn FnOnce(&mut ClientState) + Send>) {
         if !self.disposal.is_set() {
-            self.owner.offer_behind(job);
+            self.owner.offer(job);
         }
     }
 }
@@ -1015,6 +1018,12 @@ impl RouterClient {
             notifications.remove(&key);
         }
 
+        // ! its handle's mark, read as its job would be posted: once disposed, its cancel goes
+        // nowhere, and the dispose's job lets its subscription go
+        if self.shared.disposal.is_set() {
+            return Box::pin(async {});
+        }
+
         let posted = self.shared.owner.run(move |state: &mut ClientState| {
             if let Some((call_id, timeout)) = state.unbind(key) {
                 let call = CallAddress {
@@ -1129,20 +1138,38 @@ impl RouterClient {
             ));
         }
 
+        // ! its handle's mark, read once, as its job is posted: one made after its router's dispose
+        // fails unsent, whatever thread or turn it is made on; one made before goes (spec 9.1)
+        if shared.disposal.is_set() {
+            return Ok(Call::refused(CallError::Disconnected(
+                crate::router::core::DISPOSED.to_owned(),
+            )));
+        }
+
         let (reply, answer) = oneshot::channel();
         let default = Arc::clone(&shared.default);
         let listeners = Arc::clone(&shared.listeners);
         let timeout = options.timeout;
         let subscribing = subscribes.clone();
         let posted = shared.owner.post(Box::new(move |state: &mut ClientState| {
-            let drawn: Arc<Mutex<Option<u32>>> = Arc::default();
-            let told = Arc::clone(&drawn);
-            let mut on_call_id = hooks.on_call_id;
-            let owner = state.core.owner.clone();
+            let deferral = state.core.deferral.clone();
             let is_subscribing = subscribing.is_some();
             let paced = subscribing
                 .as_ref()
                 .is_some_and(|notification| notification.window().is_some());
+            // ! bound as its call id is drawn, before the request goes out, so a notification right
+            // behind its result is heard, and the call bound before is cancelled ahead of it
+            let on_drawn = is_subscribing.then(|| -> OnDrawn<ClientState> {
+                Box::new(move |state: &mut ClientState, call_id: u32| {
+                    let held = locked(&state.notifications)
+                        .get(&(address.service_id, address.procedure_id))
+                        .cloned();
+
+                    if let Some(notification) = held {
+                        bind(state, (notification, call_id, timeout));
+                    }
+                })
+            });
 
             crate::router::requester::request(
                 state,
@@ -1151,13 +1178,8 @@ impl RouterClient {
                     CoreRequest {
                         connection_handle: server_handle(),
                         credential: presented.credential,
-                        on_call_id: Some(Box::new(move |call_id: u32| {
-                            *locked(&told) = Some(call_id);
-
-                            if let Some(on_call_id) = on_call_id.take() {
-                                on_call_id(call_id);
-                            }
-                        })),
+                        on_drawn,
+                        on_call_id: hooks.on_call_id,
                         on_sent: hooks.on_sent,
                         opens_subscription: is_subscribing,
                         paced,
@@ -1170,8 +1192,9 @@ impl RouterClient {
                         transport_credential: presented.carried,
                     },
                     Box::new(move |outcome: Result<RouterResult, CallError>| {
-                        // settled on the owner, after the turn it came in
-                        owner.offer(Box::new(move |state: &mut ClientState| {
+                        // settled in a later turn than the one it came in: as its router ends
+                        // too, with what ended it for its reason
+                        deferral.offer(Box::new(move |state: &mut ClientState| {
                             settled(
                                 state,
                                 (
@@ -1183,18 +1206,6 @@ impl RouterClient {
                     }),
                 ),
             );
-
-            // ! bound as its call id is drawn, before the request goes out, so a notification right
-            // behind its result is heard
-            let call_id = *locked(&drawn);
-            let held = locked(&state.notifications)
-                .get(&(address.service_id, address.procedure_id))
-                .cloned()
-                .filter(|_| is_subscribing);
-
-            if let (Some(notification), Some(call_id)) = (held, call_id) {
-                bind(state, (notification, call_id, timeout));
-            }
         }));
 
         if posted.is_err() {
@@ -1222,16 +1233,16 @@ impl RouterClient {
         Box::pin(async move { gauged.await.unwrap_or_default() })
     }
 
-    /// Disposes of it: every call ends, and nothing more goes out. Disposed at once, it lets go of
-    /// what it holds in a later turn, behind what came before it, a listener's dispose too (spec
-    /// 9.0).
+    /// Disposes of it: every call ends, and nothing more goes out. Disposed at once, a call made
+    /// after it fails unsent; what it holds is let go in a later turn, behind what came before it,
+    /// a call made before it among it, and a listener's dispose too (spec 9.0, 9.1).
     pub fn dispose(&self) -> BoxFuture<()> {
         self.shared.disposal.set();
 
         let disposed = self
             .shared
             .owner
-            .run_behind(|state: &mut ClientState| state.dispose());
+            .run(|state: &mut ClientState| state.dispose());
 
         Box::pin(async move {
             disposed.await.ok();
@@ -1282,6 +1293,11 @@ impl RouterClient {
         let timeout = timeout
             .map(|timeout| crate::duration::hold("a call id's reservation", timeout))
             .transpose()?;
+
+        // ! its handle's mark, read as its job would be posted: once disposed, nothing goes
+        if self.shared.disposal.is_set() {
+            return Ok(Box::pin(async {}));
+        }
 
         let posted = self.shared.owner.run(move |state: &mut ClientState| {
             let call = CallAddress {
