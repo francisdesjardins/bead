@@ -36,6 +36,11 @@ interface IMessageShape {
   readonly fields: Map<number, IFieldShape>;
   /** A map's entry takes its key and its value alone (spec 17.9.6). */
   readonly isClosed: boolean;
+  /**
+   * How deep its known fields can nest a message below it, as the wire nests them, at most 101
+   * (spec 17.9.3): set once its closure is searched.
+   */
+  nesting?: number;
   /** Its walk's facts once its closure is searched: `null` where it reaches no required field. */
   required?: IRequiredShape | null;
 }
@@ -60,9 +65,13 @@ const SGROUP = 3;
 const EGROUP = 4;
 const I32 = 5;
 
-// how deep a message nests at most below the top one, a group and a map's entry each a message
-// (spec 17.9.3)
-const DEPTH = 100;
+/**
+ * How deep a message nests at most below the top one, a group and a map's entry each a message
+ * (spec 17.9.3).
+ */
+export const PROTO_DEPTH = 100;
+
+const DEPTH = PROTO_DEPTH;
 
 // a packed record not taken, and one of varints; any other is its values' fixed width
 const NOT_PACKED = 0;
@@ -106,6 +115,17 @@ const WIRE_OF_SCALAR: Readonly<Record<ScalarType, number>> = Object.freeze({
   18: VARINT,
 });
 
+/**
+ * The reasons a `proto` codec refuses with, in spec 17.2's words and no others: a refusal's message
+ * is its reason, exactly; what Bead found, the record refused or the field left unset, rides in its
+ * `cause`.
+ */
+export const PROTO_REASONS = Object.freeze({
+  nestedPast100: 'nested past 100',
+  notItsMessage: 'not its message',
+  requiredUnset: 'a required field unset',
+});
+
 // an unknown group's shape: any field, each skipped
 const ANY_FIELD: IMessageShape = Object.freeze({ fields: new Map(), isClosed: false });
 
@@ -114,9 +134,17 @@ const SHAPES = new WeakMap<DescMessage, IMessageShape>();
 
 // helpers
 
-/** A refusal of the payload: not an encoding of its message, or one spec 17.9 refuses. */
-const refuse = (reason: string): never => {
-  throw new SyntaxError(`the proto payload ${reason}`);
+/**
+ * A refusal of the payload, `reason` one of {@link PROTO_REASONS}: what the check found, `found`,
+ * in its cause.
+ */
+const refuseFor = (reason: string, found: string): never => {
+  throw new SyntaxError(reason, { cause: new SyntaxError(`the proto payload ${found}`) });
+};
+
+/** A refusal of the payload as no encoding of its message, or one spec 17.9 refuses. */
+const refuse = (found: string): never => {
+  return refuseFor(PROTO_REASONS.notItsMessage, found);
 };
 
 /** What a field's records take at `wire`, a scalar's or an enum's: a repeated one's packed too. */
@@ -300,6 +328,80 @@ const searchRequired = (root: DescMessage): void => {
   }
 };
 
+/** How deep a field of a message nests below it, by `below`, the depth of the message it holds. */
+const nestingOf = (field: DescField, below: (held: DescMessage) => number): number => {
+  const held = heldOf(field);
+
+  // * a map's entry is a message on the wire, a map of scalars' among them; its message value one more
+  if (field.fieldKind === 'map') {
+    return held === undefined ? 1 : 2 + below(held);
+  }
+
+  return held === undefined ? 0 : 1 + below(held);
+};
+
+/**
+ * Searches the closure of `root` for how deep each message's known fields can nest below it, at
+ * most `DEPTH + 1`: from 0, grown until none grows, so a cycle stops at the cap. A message searched
+ * before is taken as it was judged.
+ */
+const searchNesting = (root: DescMessage): void => {
+  const closure: DescMessage[] = [];
+  const seen = new Set<DescMessage>();
+  const pending = [root];
+
+  for (let message = pending.pop(); message !== undefined; message = pending.pop()) {
+    if (seen.has(message) || shapeOf(message).nesting !== undefined) {
+      continue;
+    }
+
+    seen.add(message);
+    closure.push(message);
+
+    for (const field of message.fields) {
+      const held = heldOf(field);
+
+      if (held !== undefined) {
+        pending.push(held);
+      }
+    }
+  }
+
+  const deepest = new Map<DescMessage, number>(
+    closure.map((message) => {
+      return [message, 0];
+    })
+  );
+  const below = (held: DescMessage): number => {
+    return deepest.get(held) ?? shapeOf(held).nesting ?? 0;
+  };
+
+  for (let isGrown = true; isGrown;) {
+    isGrown = false;
+
+    for (const message of closure) {
+      const deep = Math.min(
+        DEPTH + 1,
+        Math.max(
+          0,
+          ...message.fields.map((field) => {
+            return nestingOf(field, below);
+          })
+        )
+      );
+
+      if (deep > (deepest.get(message) ?? 0)) {
+        deepest.set(message, deep);
+        isGrown = true;
+      }
+    }
+  }
+
+  for (const message of closure) {
+    shapeOf(message).nesting = deepest.get(message) ?? 0;
+  }
+};
+
 /**
  * The varint at the reader, ten bytes at most, within 64 bits (Encoding, "Base 128 Varints") and
  * within its message; the reader moves past it.
@@ -413,7 +515,10 @@ const skipPacked = (reader: IReader, packs: number): void => {
 /** One more message below the top, or the refusal of spec 17.9.3. */
 const deeper = (reader: IReader): number => {
   if (reader.depth >= DEPTH) {
-    refuse(`nests a message more than ${String(DEPTH)} deep below the top one`);
+    refuseFor(
+      PROTO_REASONS.nestedPast100,
+      `nests a message more than ${String(DEPTH)} deep below the top one`
+    );
   }
 
   return reader.depth + 1;
@@ -518,8 +623,10 @@ const walkRecords = (reader: IReader, shape: IMessageShape): void => {
  * own end group; a message nested more than 100 deep below the top one, a group and a map's entry
  * each counting (17.9.3); a field at a wire type its type does not take, in a map's entry too
  * (17.9.5); and a map's entry with a field other than its key and its value (17.9.6).
- * It reads nothing of the message and allocates nothing per record; each message's shape is built
- * once, from its descriptor. `protoCodecOf` runs it first, as generated code reads a payload.
+ * Its message is spec 17.2's reason, `nested past 100` for the depth and `not its message` for any
+ * other, the record refused in its `cause`. It reads nothing of the message and allocates nothing
+ * per record; each message's shape is built once, from its descriptor. `protoCodecOf` runs it
+ * first, as generated code reads a payload, and again over what its writer wrote.
  *
  * @example
  * import { fromBinary } from '@bufbuild/protobuf';
@@ -531,6 +638,20 @@ const walkRecords = (reader: IReader, shape: IMessageShape): void => {
  */
 export const checkProtoRecords = (bytes: Uint8Array, message: DescMessage): void => {
   walkRecords({ at: 0, bytes, depth: 0, end: bytes.length, group: NO_GROUP }, shapeOf(message));
+};
+
+/**
+ * Whether the known fields of `message` can nest a message more than 100 deep below it (spec
+ * 17.9.3): a cycle among them, or a path that deep, a map's entry counting as a message, a map of
+ * scalars' among them. Sound for keeping a walk of a value's fields within the bound, never for the
+ * bound itself: any message holds what a reading kept. Searched once, by its descriptor.
+ */
+export const nestsPastOf = (message: DescMessage): boolean => {
+  if (shapeOf(message).nesting === undefined) {
+    searchNesting(message);
+  }
+
+  return (shapeOf(message).nesting ?? 0) > DEPTH;
 };
 
 /**

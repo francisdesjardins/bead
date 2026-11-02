@@ -5428,6 +5428,7 @@
         "7.1.1",
         "7.1.2",
         "7.1.3",
+        "7.1.4",
         "7.1.5",
         "7.1.6",
         "7.2",
@@ -5440,11 +5441,12 @@
       "failure": {
         "code": 50,
         "arose": "server",
-        "encoding": "json"
+        "encoding": "json",
+        "detail": "not JSON"
       },
       "status": 400,
       "fields": {},
-      "problem": "{\"code\":50,\"scope\":\"protocol\",\"status\":400,\"title\":\"PAYLOAD_UNDECODABLE\",\"type\":\"tag:francisdesjardins.ca,2026:bead/PAYLOAD_UNDECODABLE\"}"
+      "problem": "{\"code\":50,\"detail\":\"not JSON\",\"scope\":\"protocol\",\"status\":400,\"title\":\"PAYLOAD_UNDECODABLE\",\"type\":\"tag:francisdesjardins.ca,2026:bead/PAYLOAD_UNDECODABLE\"}"
     },
     {
       "name": "a proto request its server does not read",
@@ -5453,6 +5455,7 @@
         "7.1.1",
         "7.1.2",
         "7.1.3",
+        "7.1.4",
         "7.1.5",
         "7.1.6",
         "7.2",
@@ -5465,11 +5468,12 @@
       "failure": {
         "code": 50,
         "arose": "server",
-        "encoding": "proto"
+        "encoding": "proto",
+        "detail": "not its message"
       },
       "status": 502,
       "fields": {},
-      "problem": "{\"code\":50,\"scope\":\"protocol\",\"status\":502,\"title\":\"PAYLOAD_UNDECODABLE\",\"type\":\"tag:francisdesjardins.ca,2026:bead/PAYLOAD_UNDECODABLE\"}"
+      "problem": "{\"code\":50,\"detail\":\"not its message\",\"scope\":\"protocol\",\"status\":502,\"title\":\"PAYLOAD_UNDECODABLE\",\"type\":\"tag:francisdesjardins.ca,2026:bead/PAYLOAD_UNDECODABLE\"}"
     },
     {
       "name": "a result the gateway's client does not read",

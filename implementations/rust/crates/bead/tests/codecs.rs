@@ -2,8 +2,9 @@
 //! refused, and each value written or refused, through its encoding's codec. The `proto` entries
 //! are `bead-protobuf`'s player's, `crates/bead-protobuf/tests/codecs.rs`, since the core never
 //! depends on protobuf; an entry whose `differs` excuses Rust is not played. Every refusal is a
-//! [`CodecRefusal`], the codec trait's error, as the other sides' players hold theirs to its type: a
-//! codec that panics refuses nothing, and fails its trial.
+//! [`CodecRefusal`], the codec trait's error, as the other sides' players hold theirs to its type,
+//! its reason the entry's, exactly (spec 17.2): a codec that panics refuses nothing, and fails its
+//! trial.
 
 use std::process::ExitCode;
 
@@ -110,8 +111,11 @@ fn play_payload(payload: &Payload) -> Result<(), Failed> {
     let outcome = round_trip(&payload.encoding, &bytes)?;
 
     match (&payload.refused, &payload.written, outcome) {
-        // * a refusal, a CodecRefusal
-        (Some(_), _, Err(_refusal)) => Ok(()),
+        // * a refusal, a CodecRefusal, its reason the entry's (spec 17.2)
+        (Some(reason), _, Err(refusal)) if refusal.reason() == reason => Ok(()),
+        (Some(reason), _, Err(refusal)) => {
+            Err(format!("refused, saying {refusal:?}, where it says {reason:?}").into())
+        }
         (Some(reason), _, Ok((written, _))) => {
             Err(format!("read and wrote {written:02X?}, where it is refused: {reason}").into())
         }
@@ -188,8 +192,11 @@ fn play_value(entry: &Written) -> Result<(), Failed> {
     };
 
     match (&entry.refused, &entry.written, written) {
-        // * a refusal, a CodecRefusal
-        (Some(_), _, Err(_refusal)) => Ok(()),
+        // * a refusal, a CodecRefusal, its reason the entry's (spec 17.2)
+        (Some(reason), _, Err(refusal)) if refusal.reason() == reason => Ok(()),
+        (Some(reason), _, Err(refusal)) => {
+            Err(format!("refused, saying {refusal:?}, where it says {reason:?}").into())
+        }
         (Some(reason), _, Ok(written)) => {
             Err(format!("wrote {written:02X?}, where it is refused: {reason}").into())
         }

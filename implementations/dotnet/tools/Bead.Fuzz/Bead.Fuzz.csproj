@@ -1,8 +1,8 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <!-- Bead's parsers fed raw bytes, guided by coverage: the targets the TypeScript side's
        tools/fuzz holds, one for one. libFuzzer runs this executable as its child, one target by
-       its name, once SharpFuzz has instrumented Bead.Core and Bead.Transport.WebSockets in a copy
-       of its build; tools/fuzz.mjs at the root does both. It builds and is formatted with the
+       its name, once SharpFuzz has instrumented Bead.Core, Bead.Transport.WebSockets, Bead.Protobuf
+       and Google.Protobuf in a copy of its build; tools/fuzz.mjs at the root does both. It builds and is formatted with the
        solution, and needs neither the fuzzer nor the instrumentation to. -->
   <PropertyGroup>
     <OutputType>Exe</OutputType>
@@ -18,8 +18,22 @@
 
   <ItemGroup>
     <ProjectReference Include="../../src/Bead.Core/Bead.Core.csproj" />
+    <!-- the runtime codec of a proto message, which the proto-codecs target reads and writes through -->
+    <ProjectReference Include="../../src/Bead.Protobuf/Bead.Protobuf.csproj" />
     <ProjectReference Include="../../src/Bead.Transport.WebSockets/Bead.Transport.WebSockets.csproj" />
     <PackageReference Include="SharpFuzz" />
+    <PackageReference Include="Google.Protobuf" />
+    <PackageReference Include="Grpc.Tools" PrivateAssets="all" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Probe, the message of the codecs' proto rows, generated as each build runs -->
+    <Protobuf Include="../../../../spec/codecs.proto" ProtoRoot="../../../../spec" GrpcServices="None" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- what a broker's parcel reader and writer hold of any bytes, BrokerParcelFuzzTests's own -->
+    <Compile Include="../../tests/Shared/ParcelProperties.cs" Link="ParcelProperties.cs" />
   </ItemGroup>
 
   <ItemGroup>

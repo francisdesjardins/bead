@@ -313,7 +313,8 @@
             "failure": {
               "code": 50,
               "scope": 0,
-              "relays": 0
+              "relays": 0,
+              "detail": "not UTF-8"
             }
           }
         }
@@ -404,7 +405,8 @@
             "failure": {
               "code": 50,
               "scope": 0,
-              "relays": 0
+              "relays": 0,
+              "detail": "not UTF-8"
             }
           }
         }
@@ -526,7 +528,8 @@
             "failure": {
               "code": 50,
               "scope": 0,
-              "relays": 0
+              "relays": 0,
+              "detail": "a byte order mark"
             }
           }
         }
@@ -549,7 +552,8 @@
             "failure": {
               "code": 50,
               "scope": 0,
-              "relays": 0
+              "relays": 0,
+              "detail": "a name twice"
             }
           }
         }
@@ -572,7 +576,8 @@
             "failure": {
               "code": 50,
               "scope": 0,
-              "relays": 0
+              "relays": 0,
+              "detail": "not UTF-8"
             }
           }
         }
@@ -595,7 +600,8 @@
             "failure": {
               "code": 50,
               "scope": 0,
-              "relays": 0
+              "relays": 0,
+              "detail": "a surrogate alone"
             }
           }
         }
@@ -618,7 +624,8 @@
             "failure": {
               "code": 50,
               "scope": 0,
-              "relays": 0
+              "relays": 0,
+              "detail": "nested past 64"
             }
           }
         }
@@ -641,7 +648,8 @@
             "failure": {
               "code": 50,
               "scope": 0,
-              "relays": 0
+              "relays": 0,
+              "detail": "a number past a double"
             }
           }
         }

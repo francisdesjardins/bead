@@ -5,8 +5,9 @@ using System.Text.Json;
 namespace Bead.Tests;
 
 /// <summary>
-/// <see cref="Payloads"/>: what <c>spec/codecs.json</c> leaves to the twins — the words of each
-/// refusal, this side's own; a reader that refuses past 64 before it builds anything deeper; and
+/// <see cref="Payloads"/>: what <c>spec/codecs.json</c> leaves to the twins — each refusal's reason,
+/// in spec 17.2's words, and what its inner exception holds; a reader that refuses past 64 before it
+/// builds anything deeper; and
 /// what a <see cref="JsonElement"/> an application builds holds before the codec sees it, which
 /// the support matrix's row "A value a side's type cannot hold" names.
 /// </summary>
@@ -42,19 +43,19 @@ public sealed class PayloadsTests
 
     // definition
 
-    /// <summary>Bytes a json reader refuses, in hexadecimal, and the words it refuses them with.</summary>
+    /// <summary>Bytes a json reader refuses, in hexadecimal, and the reason it refuses them for (spec 17.2).</summary>
     public static TheoryData<string, string> Unread { get; } = new()
     {
-        { "22ff22", "a json payload is not UTF-8" },
-        { "efbbbf31", "a json payload starts with a byte order mark" },
-        { "", "a json payload is not one JSON text" },
-        { "5b312c5d", "a json payload is not one JSON text" },
-        { "7b2261223a312c2261223a327d", "a json payload names a member twice" },
-        { "22616263", "a json payload is not one JSON text" },
-        { "225c756438303022", "a json payload holds a surrogate alone" },
-        { "7b225c7564633030223a317d", "a json payload holds a surrogate alone" },
-        { "3145343030", "a json payload holds a number past the largest double" },
-        { Convert.ToHexString(Encoding.ASCII.GetBytes(new string('[', 65) + new string(']', 65))), "a json payload nests deeper than 64" },
+        { "22ff22", "not UTF-8" },
+        { "efbbbf31", "a byte order mark" },
+        { "", "not JSON" },
+        { "5b312c5d", "not JSON" },
+        { "7b2261223a312c2261223a327d", "a name twice" },
+        { "22616263", "not JSON" },
+        { "225c756438303022", "a surrogate alone" },
+        { "7b225c7564633030223a317d", "a surrogate alone" },
+        { "3145343030", "a number past a double" },
+        { Convert.ToHexString(Encoding.ASCII.GetBytes(new string('[', 65) + new string(']', 65))), "nested past 64" },
     };
 
     [Theory]
@@ -72,31 +73,36 @@ public sealed class PayloadsTests
     {
         using var deep = JsonDocument.Parse(new string('[', 65) + new string(']', 65), new JsonDocumentOptions { MaxDepth = 65 });
 
-        Assert.Equal("a json value holds a surrogate alone", RefusalOf(() =>
+        Assert.Equal("a surrogate alone", RefusalOf(() =>
         {
             return Payloads.WriteJson(JsonElement.Parse("\"a\\ud800b\""));
         }));
-        Assert.Equal("a json value holds a surrogate alone", RefusalOf(() =>
+        Assert.Equal("a surrogate alone", RefusalOf(() =>
         {
             return Payloads.WriteJson(JsonElement.Parse("{\"a\\ud800b\":1}"));
         }));
-        Assert.Equal("a json value names a member twice", RefusalOf(() =>
+        Assert.Equal("a name twice", RefusalOf(() =>
         {
             return Payloads.WriteJson(JsonElement.Parse("{\"b\":1,\"a\":2,\"b\":3}"));
         }));
-        Assert.Equal("a json value nests deeper than 64", RefusalOf(() =>
+        Assert.Equal("nested past 64", RefusalOf(() =>
         {
             return Payloads.WriteJson(deep.RootElement);
         }));
-        Assert.Equal("a json value of kind Undefined is no JSON value", RefusalOf(() =>
+
+        // * what the value is, in its inner exception
+        var undefined = Assert.Throws<FormatException>(() =>
         {
             return Payloads.WriteJson(default);
-        }));
-        Assert.Equal("a text payload is not UTF-8", RefusalOf(() =>
+        });
+
+        Assert.Equal("no JSON value", undefined.Message);
+        Assert.Equal("a json value of kind Undefined is no JSON value", undefined.InnerException?.Message);
+        Assert.Equal("not UTF-8", RefusalOf(() =>
         {
             return Payloads.ReadText(new byte[] { 0xC3 });
         }));
-        Assert.Equal("a text value holds a surrogate alone", RefusalOf(() =>
+        Assert.Equal("a surrogate alone", RefusalOf(() =>
         {
             return Payloads.WriteText("a\ud800b");
         }));
@@ -107,7 +113,7 @@ public sealed class PayloadsTests
     {
         using var document = JsonDocument.Parse("[1E400]");
 
-        Assert.Equal("a json value holds a number that is not finite", RefusalOf(() =>
+        Assert.Equal("not a finite number", RefusalOf(() =>
         {
             return Payloads.WriteJson(document.RootElement);
         }));
@@ -136,7 +142,7 @@ public sealed class PayloadsTests
             }).WaitAsync(Second, Cancelled);
         });
 
-        Assert.Equal("a json payload nests deeper than 64", refusal.Message);
+        Assert.Equal("nested past 64", refusal.Message);
     }
 
     [Fact]
@@ -181,7 +187,7 @@ public sealed class PayloadsTests
 
         Assert.Equal("22C3A93C7F22", Convert.ToHexString(Payloads.WriteJson(document.RootElement[0]).Span));
         Assert.Equal("22413E22", Convert.ToHexString(Payloads.WriteJson(document.RootElement[1]).Span));
-        Assert.Equal("a json value holds a surrogate alone", RefusalOf(() =>
+        Assert.Equal("a surrogate alone", RefusalOf(() =>
         {
             return Payloads.WriteJson(document.RootElement[2]);
         }));

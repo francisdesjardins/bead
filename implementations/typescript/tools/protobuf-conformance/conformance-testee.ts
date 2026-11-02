@@ -202,7 +202,17 @@ const answerOf = (request: ConformanceRequest): Response => {
     }
   }
 
-  return { result: { case: 'protobufPayload', value: codec.encode(message) } };
+  // * the writer refuses what its reader would (spec 17.2): a message read whole that its library
+  // writes deeper, an empty value given to an entry that held none, as the Rust side's testee says
+  try {
+    return { result: { case: 'protobufPayload', value: codec.encode(message) } };
+  } catch (error) {
+    if (error instanceof TypeError) {
+      return { result: { case: 'serializeError', value: error.message } };
+    }
+
+    throw error;
+  }
 };
 
 let pending = Buffer.alloc(0);

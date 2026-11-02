@@ -19,7 +19,7 @@ name = "bead"
 
 [features]
 # the test kit, bead::testing, which the tests alone reach: no API (decision 0044)
-testing = ["serde/derive"]
+testing = ["serde/derive", "dep:sha1"]
 
 [dependencies]
 tokio = { workspace = true, features = ["rt", "sync", "time"] }
@@ -32,6 +32,8 @@ p256 = { workspace = true }
 hmac = { workspace = true }
 sha2 = { workspace = true }
 getrandom = { workspace = true }
+# the test kit's alone: the order of the seeds its mutations draw from, by their SHA-1
+sha1 = { workspace = true, optional = true }
 
 [dev-dependencies]
 # the crate itself, with its test kit: one copy of bead for the unit tests and the players
@@ -80,6 +82,13 @@ harness = false
 [[test]]
 name = "transports"
 harness = false
+
+# seeded mutations of the conformance files' bytes, fed to the envelope readers and the parcel's
+[[test]]
+name = "envelope_fuzz"
+
+[[test]]
+name = "broker_parcel_fuzz"
 
 [lints]
 workspace = true

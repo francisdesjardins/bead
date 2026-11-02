@@ -125,7 +125,16 @@ ConformanceResponse Answer(ConformanceRequest request)
         }
     }
 
-    return new ConformanceResponse { ProtobufPayload = ByteString.CopyFrom(codec.Encode(message).Span) };
+    // * the writer refuses what its reader would (spec 17.2): a message read whole that its library
+    // writes deeper, an empty value given to an entry that held none, as the Rust side's testee says
+    try
+    {
+        return new ConformanceResponse { ProtobufPayload = ByteString.CopyFrom(codec.Encode(message).Span) };
+    }
+    catch (FormatException reason)
+    {
+        return new ConformanceResponse { SerializeError = reason.Message };
+    }
 }
 
 // a message's descriptor, and its procedure's codec, either way

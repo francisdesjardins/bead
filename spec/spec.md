@@ -2362,8 +2362,9 @@ writes one as its encoding says. A relay reads none (section 14.2).
 
 17.2. A payload that does not read, or a value that does not write, fails where it is:
 
-1. a request's payload is answered with `PAYLOAD_UNDECODABLE`, and its resolver never sees it
-   (section 9.5); a payload that reads is judged by its procedure's rules, as section 18 says;
+1. a request's payload is answered with `PAYLOAD_UNDECODABLE`, its detail the reason its codec
+   refuses it for, and its resolver never sees it (section 9.5); a payload that reads is judged by
+   its procedure's rules, as section 18 says;
 2. a result's payload fails its call at the requester with `PAYLOAD_UNDECODABLE`;
 3. a notification's payload is reported as `PAYLOAD_UNDECODABLE`, and no callback hears it;
 4. a request's value fails its call before anything goes out, and no call is made;
@@ -2371,11 +2372,22 @@ writes one as its encoding says. A relay reads none (section 14.2).
    `PROCEDURE_FAILED`, and the failure reported (section 9.5);
 6. a notification's value goes to none of its subscriptions, and the failure is reported.
 
+A codec of this section refuses with its reason, in these words and no others: a reader's
+`not UTF-8`, `a byte order mark`, `not JSON`, `a name twice`, `a surrogate alone`,
+`a number past a double` or `nested past 64`; a `proto` reader's `not its message`,
+`nested past 100` or `a required field unset`; a writer's `a surrogate alone`, `a name twice`,
+`nested past 64`, `not a finite number` or `no JSON value`; a `proto` writer's
+`a required field unset` or `nested past 100`. The refusal's words are its reason, exactly, at each
+place items 1 to 6 name. What more a side knows of a refusal — its library's own words, the record
+refused, a required field's name and path — goes with what it reports, never on the wire. A codec
+an application writes refuses in words of its own.
+
 A codec that throws other than its refusal is its side's own error, not a payload that does not
 read (section 9.0): at item 1, the request is answered with `PROCEDURE_FAILED` and the error
 reported, as a rule that fails to judge (section 18.2), never with `PAYLOAD_UNDECODABLE`, which
 would have its requester change a payload that may read; at items 2 to 6, it fails as a refusal
-does, its words the side's own. What each language's codec refuses with is the support matrix's.
+does, its words the side's own. The type each language's codec refuses with is the support
+matrix's.
 
 A writer MUST NOT write what a reader refuses, as section 4.10 has it of an envelope.
 
@@ -2455,7 +2467,8 @@ generator writes for the message. What is Bead's:
 3. A reader MUST refuse a message nested more than 100 deep below the top one, a group and a map's
    entry each counting as a message, as a map's entry is one on the wire
    ([Encoding](https://protobuf.dev/programming-guides/encoding/), "Maps"), and sets that bound in
-   its library rather than leaving it to the library's default.
+   its library rather than leaving it to the library's default. A writer MUST refuse a value so
+   nested (section 17.2).
 4. A string's leading U+FEFF is a character of it (section 17.4.2).
 5. A field the message declares, at a wire type its type does not take, does not read (section
    17.2), a map's entry's key and value among them, where protobuf's reference parsers keep it as

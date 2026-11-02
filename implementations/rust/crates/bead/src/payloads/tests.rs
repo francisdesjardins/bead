@@ -1,11 +1,16 @@
 //! The payloads' codecs: raw bytes as they are, text in UTF-8 read strictly, a JSON value in its
 //! canonical form, and a type of the application's own through it.
 
+use std::collections::BTreeMap;
+use std::error::Error;
+use std::sync::Arc;
+
 use bytes::Bytes;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 
-use super::{JsonCodec, JsonOf, PayloadCodec, RawCodec, TextCodec};
+use super::{CodecRefusal, JsonCodec, JsonOf, PayloadCodec, RawCodec, TextCodec};
+use crate::json::JsonRefusal;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 struct Reading {
@@ -108,5 +113,46 @@ fn writes_a_json_value_in_its_canonical_form_and_a_type_through_it() {
     assert!(
         codec.decode(&Bytes::from_static(br#"{"name":1}"#)).is_err(),
         "a value not of its type refused"
+    );
+}
+
+// ── The Rust side's own ───────────────────────────────────────────────────────
+
+// no counterpart: a codec of the application's own type through serde, which no other side holds;
+// its refusals say spec 17.2's reasons, serde's words in their cause, and a value not of its type,
+// the application's, says words of its own, "not its type"
+#[test]
+fn says_its_reason_alone_a_refusal_s_words_of_serde_kept_in_its_cause() {
+    let codec = JsonOf::<Reading>::new();
+    let not_its_type = codec
+        .decode(&Bytes::from_static(br#"{"name":1}"#))
+        .expect_err("a value not of its type");
+    let no_value = JsonOf::<BTreeMap<(u8, u8), u8>>::new()
+        .encode(&BTreeMap::from([((1, 2), 3)]))
+        .expect_err("a map whose keys are not strings");
+    let not_utf_8 = TextCodec
+        .decode(&Bytes::from_static(&[0xFF]))
+        .expect_err("not UTF-8");
+
+    for (refusal, reason) in [
+        (&not_its_type, "not its type"),
+        (&no_value, "no JSON value"),
+        (&not_utf_8, "not UTF-8"),
+    ] {
+        assert_eq!(refusal.to_string(), reason, "its message, its reason");
+        assert!(refusal.source().is_some(), "{reason}: a cause");
+    }
+
+    assert!(
+        no_value
+            .source()
+            .is_some_and(|cause| cause.to_string().starts_with("no JSON value: ")),
+        "serde's words in its cause: {:?}",
+        no_value.source()
+    );
+    assert_eq!(
+        CodecRefusal::new("not JSON"),
+        CodecRefusal::new("not JSON").caused_by(Arc::new(JsonRefusal::NotJson)),
+        "equal by their reasons"
     );
 }

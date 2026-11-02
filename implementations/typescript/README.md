@@ -618,7 +618,11 @@ hands out is a function that carries its procedure's members, read bare.
 
 The codecs are spec 17's, `PAYLOAD_CODECS.raw`, `.text` and `.json`, the last reading a `JsonValue`
 and writing what section 17.7 takes; `payloadCodecOf({ decode, encode })` makes one of two
-functions. A protobuf message's is `protoCodecOf(schema)` of `@francisdesjardins/bead/proto`, which
+functions. A reader refuses with a `SyntaxError`, a writer with a `TypeError`, its message the
+reason in section 17.2's words and no others, `not JSON` or `nested past 100`, say, what more the
+side knows in its `cause`; a request whose payload does not read is answered `PAYLOAD_UNDECODABLE`,
+the refusal's reason its detail
+([0016](../../docs/decisions/0016-a-json-payload-has-one-form-whichever-side-writes-it.md)). A protobuf message's is `protoCodecOf(schema)` of `@francisdesjardins/bead/proto`, which
 generated code calls and which holds section 17.9 whole. Its reader first calls
 `checkProtoRecords(bytes, schema)`, which reads the payload's records against the message's own
 descriptor and throws a `SyntaxError` where they are no encoding of it and protobuf-es would read on,
@@ -631,8 +635,12 @@ protobuf-es counts the top message, and section 17.9 bounds a message 100 deep b
 a closed enum's undeclared number setting nothing (17.9.8). Last, it walks the message for a field of
 `LEGACY_REQUIRED` presence left unset, proto2's `required`, at any depth but in an extension or an
 `Any`, and throws a `SyntaxError`; its writer walks the message it builds before `toBinary` and
-throws a `TypeError` in the same words
+throws a `TypeError` of the same reason
 ([0042](../../docs/decisions/0042-a-proto-message-that-leaves-a-required-field-unset-neither-reads-nor-writes-and-a-gateway-refuses-it-where-its-server-would.md)).
+The writer writes nothing its reader refuses (17.2): a value whose own fields nest a message past
+the bound is refused before protobuf-es builds any of it, a `Struct` held as a JSON object counted
+as the wire nests it, and the bytes it writes are checked as its reader checks them, which refuses
+what a reading kept nesting past it (0031).
 Each message's shape is built once, from its descriptor, a message that reaches no required field
 walked at the cost of one lookup; `./proto` takes `@bufbuild/protobuf` as an optional peer. Protobuf's
 conformance suite plays the generated codec through the testee in

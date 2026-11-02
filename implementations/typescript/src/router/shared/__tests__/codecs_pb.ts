@@ -14,15 +14,15 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file codecs.proto.
  */
 export const file_codecs: GenFile = /*@__PURE__*/
-  fileDesc("Cgxjb2RlY3MucHJvdG8SDmJlYWQuY29kZWNzLnYxIpoDCgVQcm9iZRIMCgR0ZXh0GAEgASgJEg4KBm51bWJlchgCIAEoDRIkCgVjaGlsZBgDIAEoCzIVLmJlYWQuY29kZWNzLnYxLlByb2JlEiQKBW5lZWRzGAcgASgLMhUuYmVhZC5jb2RlY3MudjEuTmVlZHMSKgoLbmVlZHNfaXRlbXMYCCADKAsyFS5iZWFkLmNvZGVjcy52MS5OZWVkcxIOCgZjb3VudHMYCiADKA0SDgoGc3RhbXBzGAsgAygHEjUKCGNoaWxkcmVuGAwgAygLMiMuYmVhZC5jb2RlY3MudjEuUHJvYmUuQ2hpbGRyZW5FbnRyeRIvCglkZWxpbWl0ZWQYDSABKAsyFS5iZWFkLmNvZGVjcy52MS5Qcm9iZUIFqgECKAISKwoFc2hhZGUYDiABKA4yFS5iZWFkLmNvZGVjcy52MS5TaGFkZUIFqgECCAEaRgoNQ2hpbGRyZW5FbnRyeRILCgNrZXkYASABKAkSJAoFdmFsdWUYAiABKAsyFS5iZWFkLmNvZGVjcy52MS5Qcm9iZToCOAEiSQoFTmVlZHMSEwoEbXVzdBgBIAEoDUIFqgECCAMSKwoFc2hhZGUYAiABKA4yFS5iZWFkLmNvZGVjcy52MS5TaGFkZUIFqgECCAMqLgoFU2hhZGUSDgoKU0hBREVfREFSSxAAEg8KC1NIQURFX0xJR0hUEAEaBDoCEAJCBZIDAggCYghlZGl0aW9uc3DoBw");
+  fileDesc("Cgxjb2RlY3MucHJvdG8SDmJlYWQuY29kZWNzLnYxIv8DCgVQcm9iZRIMCgR0ZXh0GAEgASgJEg4KBm51bWJlchgCIAEoDRIkCgVjaGlsZBgDIAEoCzIVLmJlYWQuY29kZWNzLnYxLlByb2JlEiQKBW5lZWRzGAcgASgLMhUuYmVhZC5jb2RlY3MudjEuTmVlZHMSKgoLbmVlZHNfaXRlbXMYCCADKAsyFS5iZWFkLmNvZGVjcy52MS5OZWVkcxIOCgZjb3VudHMYCiADKA0SDgoGc3RhbXBzGAsgAygHEjUKCGNoaWxkcmVuGAwgAygLMiMuYmVhZC5jb2RlY3MudjEuUHJvYmUuQ2hpbGRyZW5FbnRyeRIvCglkZWxpbWl0ZWQYDSABKAsyFS5iZWFkLmNvZGVjcy52MS5Qcm9iZUIFqgECKAISKwoFc2hhZGUYDiABKA4yFS5iZWFkLmNvZGVjcy52MS5TaGFkZUIFqgECCAESMwoHdGFsbGllcxgQIAMoCzIiLmJlYWQuY29kZWNzLnYxLlByb2JlLlRhbGxpZXNFbnRyeRpGCg1DaGlsZHJlbkVudHJ5EgsKA2tleRgBIAEoCRIkCgV2YWx1ZRgCIAEoCzIVLmJlYWQuY29kZWNzLnYxLlByb2JlOgI4ARouCgxUYWxsaWVzRW50cnkSCwoDa2V5GAEgASgJEg0KBXZhbHVlGAIgASgNOgI4ASJJCgVOZWVkcxITCgRtdXN0GAEgASgNQgWqAQIIAxIrCgVzaGFkZRgCIAEoDjIVLmJlYWQuY29kZWNzLnYxLlNoYWRlQgWqAQIIAyouCgVTaGFkZRIOCgpTSEFERV9EQVJLEAASDwoLU0hBREVfTElHSFQQARoEOgIQAkIFkgMCCAJiCGVkaXRpb25zcOgH");
 
 /**
  * A string, a number and a message of its own kind: what a proto row reads, refuses, or writes,
  * and how deep it nests. Then the records protobuf frames otherwise: a packed run, a repeated
  * fixed32, a map's entries, and a group, at 10 to 13. Then a message of fields protobuf requires,
  * alone and repeated, at 7 and 8, and a closed enum at 14, its presence explicit, since a closed
- * enum's field cannot be implicit. That leaves 4 to 6, 9 and 15 to the rows that read a field Probe
- * does not declare.
+ * enum's field cannot be implicit. Then a map of scalars at 16, whose entry nests as a message
+ * (spec 17.9.3). That leaves 4 to 6, 9 and 15 to the rows that read a field Probe does not declare.
  *
  * @generated from message bead.codecs.v1.Probe
  */
@@ -76,6 +76,11 @@ export type Probe = Message<"bead.codecs.v1.Probe"> & {
    * @generated from field: bead.codecs.v1.Shade shade = 14 [features.field_presence = EXPLICIT];
    */
   shade: Shade;
+
+  /**
+   * @generated from field: map<string, uint32> tallies = 16;
+   */
+  tallies: { [key: string]: number };
 };
 
 /**

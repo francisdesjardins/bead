@@ -138,6 +138,7 @@ async fn an_answer_that_does_not_decode_fails_the_call_here_with_its_header_and_
     assert_eq!(failure.origin(), FailureOrigin::Local, "raised here");
     assert_eq!(failure.scope(), FailureScope::Protocol, "the protocol's");
     assert_eq!(failure.side(), Some(RouterSide::Client), "by the client");
+    assert_eq!(failure.detail(), "not JSON", "its codec's reason");
     assert_eq!(failure.procedure(), Some(echo().address()), "its call");
     assert_eq!(failure.destination_id(), Some(4), "its call's destination");
     assert!(

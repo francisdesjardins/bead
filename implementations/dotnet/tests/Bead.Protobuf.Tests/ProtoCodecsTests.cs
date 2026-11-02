@@ -1,3 +1,4 @@
+using System.Text.RegularExpressions;
 using Bead.Codecs.V1;
 using Bead.Protobuf.Tests.Codec;
 using Bead.Transcoding.V1;
@@ -12,14 +13,101 @@ namespace Bead.Protobuf.Tests;
 
 /// <summary>
 /// <see cref="ProtoCodecs"/>: the runtime's codec of a <c>proto</c> message, its records, its bound,
-/// the read, and the walk of a required field unset both ways (spec 17.9.7) and a closed enum's
-/// undeclared number (17.9.8), on <c>spec/codecs.proto</c>'s <c>Probe</c>,
-/// <c>spec/transcoding.proto</c>'s <c>Requiring</c>, and <c>Protos/codec.proto</c>, a proto2 file of
-/// what neither reaches. The twin of the TypeScript side's <c>codec.test.ts</c>, sentence for sentence.
+/// the read, and the walk of a required field unset both ways (spec 17.9.7), a closed enum's
+/// undeclared number (17.9.8) and a writer's bound (17.2, 17.9.3), on <c>spec/codecs.proto</c>'s
+/// <c>Probe</c>, <c>spec/transcoding.proto</c>'s <c>Requiring</c> and <c>Edges</c>, and
+/// <c>Protos/codec.proto</c>, a proto2 file of what neither reaches. The twin of the TypeScript
+/// side's <c>codec.test.ts</c> and the Rust side's <c>codec/tests.rs</c>, sentence for sentence.
 /// </summary>
-public sealed class ProtoCodecsTests
+public sealed partial class ProtoCodecsTests
 {
+    // constants
+
+    // 60 groups of field 4, which Probe does not declare, one in another: what a reading keeps among
+    // its unknown fields, the same bytes on every side
+    private static readonly string Groups = string.Join(' ', Enumerable.Repeat("23", 60).Concat(Enumerable.Repeat("24", 60)));
+
     // helpers
+
+    /// <summary>
+    /// Runs <paramref name="run"/> on a thread of 1 MiB, the stack a recursion past the bound would
+    /// overflow, and throws what it throws.
+    /// </summary>
+    internal static void OnAThreadOf1MiB(Action run)
+    {
+        Exception? thrown = null;
+        var thread = new Thread(
+            () =>
+            {
+                try
+                {
+                    run();
+                }
+                catch (Exception reason)
+                {
+                    thrown = reason;
+                }
+            },
+            1 << 20);
+
+        thread.Start();
+        thread.Join();
+
+        if (thrown is not null)
+        {
+            throw new InvalidOperationException("the run on a thread of 1 MiB threw", thrown);
+        }
+    }
+
+    // `count` messages above `deepest`, each holding the one below as `link` does, built from the
+    // deepest up, so no recursion builds it
+    private static THeld Wrapped<THeld>(THeld deepest, (int Count, Func<THeld, THeld> Link) above)
+    {
+        var held = deepest;
+
+        for (var index = 0; index < above.Count; index += 1)
+        {
+            held = above.Link(held);
+        }
+
+        return held;
+    }
+
+    // a Probe that holds `inner` as its child
+    private static Probe ChildOf(Probe inner)
+    {
+        return new Probe { Child = inner };
+    }
+
+    // holds that `codec` writes `value` and reads back what it wrote
+    private static void Written<T>(IPayloadCodec<T> codec, (T Value, string What) given)
+    {
+        var (value, what) = given;
+        var thrown = Record.Exception(() =>
+        {
+            return codec.Decode(codec.Encode(value));
+        });
+
+        Assert.True(thrown is null, $"{what}: {thrown?.Message}");
+    }
+
+    // holds that `codec` refuses to write `value` for its depth: a FormatException of nested past 100
+    private static FormatException NestedPast<T>(IPayloadCodec<T> codec, (T Value, string What) given)
+    {
+        var (value, what) = given;
+        var thrown = Record.Exception(() =>
+        {
+            return codec.Encode(value);
+        });
+
+        // ! by its type and its message alone: a message this deep is never shown, whose text recurses
+        if (thrown is FormatException { Message: "nested past 100" } refused)
+        {
+            return refused;
+        }
+
+        throw new InvalidOperationException($"{what}: not refused for its depth, {thrown?.GetType().Name} {thrown?.Message}", thrown);
+    }
 
     private sealed record EditionOptions
     {
@@ -128,11 +216,23 @@ public sealed class ProtoCodecsTests
         };
     }
 
-    // the words of the refusal of a message that leaves the field `name` unset
+    // what a refusal says: its reason, then the field its inner exception names where it names one
+    private static string SaidOf(Exception thrown)
+    {
+        var inner = thrown.InnerException?.Message ?? "";
+        var named = UnsetName().Match(inner);
+
+        return $"{thrown.Message}: {(named.Success ? named.Groups["name"].Value : inner)}";
+    }
+
+    // what the refusal of a message that leaves the field `name` unset says, as SaidOf has it
     private static string WordsOf(string name)
     {
-        return $"a proto message leaves {name} unset";
+        return $"a required field unset: {name}";
     }
+
+    [GeneratedRegex(@"^a proto message leaves (?<name>\S+) unset$")]
+    private static partial Regex UnsetName();
 
     // definition
 
@@ -197,7 +297,7 @@ public sealed class ProtoCodecsTests
                 return decode(BytesOf(hexadecimal));
             });
 
-            Assert.Equal(WordsOf(name), thrown.Message);
+            Assert.Equal(WordsOf(name), SaidOf(thrown));
         }
     }
 
@@ -214,14 +314,14 @@ public sealed class ProtoCodecsTests
             return needs.Encode(new Needs { Count = 1 });
         });
 
-        Assert.Equal(WordsOf("bead.transcoding.v1.Needs.name"), read.Message);
-        Assert.Equal(read.Message, written.Message);
+        Assert.Equal(WordsOf("bead.transcoding.v1.Needs.name"), SaidOf(read));
+        Assert.Equal(SaidOf(read), SaidOf(written));
 
         // * a closed enum's number its enum does not declare is no value of a required field
-        Assert.Equal(WordsOf("bead.codecs.v1.Needs.shade"), Assert.Throws<FormatException>(() =>
+        Assert.Equal(WordsOf("bead.codecs.v1.Needs.shade"), SaidOf(Assert.Throws<FormatException>(() =>
         {
             return ProtoCodecs.Of<Probe>().Encode(new Probe { Needs = new ProbeNeeds { Must = 0, Shade = (Shade)5 } });
-        }).Message);
+        })));
     }
 
     [Fact]
@@ -233,6 +333,8 @@ public sealed class ProtoCodecsTests
             return ProtoCodecs.Of<Probe>().Decode(BytesOf("0A 01 FF"));
         });
 
+        // * its reason 17.2's words, Google.Protobuf's error its inner exception
+        Assert.Equal("not its message", thrown.Message);
         Assert.IsType<InvalidProtocolBufferException>(thrown.InnerException);
     }
 
@@ -352,16 +454,184 @@ public sealed class ProtoCodecsTests
         var update = ProtoCodecs.Of<NeedsUpdate>();
         var words = WordsOf("bead.transcoding.v1.NeedsUpdate.update_mask");
 
-        Assert.Equal(words, Assert.Throws<FormatException>(() =>
+        Assert.Equal(words, SaidOf(Assert.Throws<FormatException>(() =>
         {
             return update.Decode(BytesOf(""));
-        }).Message);
-        Assert.Equal(words, Assert.Throws<FormatException>(() =>
+        })));
+        Assert.Equal(words, SaidOf(Assert.Throws<FormatException>(() =>
         {
             return update.Encode(new NeedsUpdate());
-        }).Message);
+        })));
 
         // its mask given, empty
         Assert.Equal("12 00", HexOf(update.Encode(update.Decode(BytesOf("12 00")))));
+    }
+
+    // ── Writing within the bound (spec 17.2, 17.9.3) ──────────────────────────────
+
+    [Fact]
+    public void Refuses_to_write_a_message_nested_more_than_100_deep_below_the_top_one_through_a_child_a_group_and_a_map_s_entry()
+    {
+        var probe = ProtoCodecs.Of<Probe>();
+        var links = new (string Name, int Per, Func<Probe, Probe> Link)[]
+        {
+            ("a child", 1, ChildOf),
+            ("a group", 1, (inner) =>
+            {
+                return new Probe { Delimited = inner };
+            }),
+            ("a map's entry", 2, (inner) =>
+            {
+                return new Probe { Children = { [""] = inner } };
+            }),
+        };
+
+        foreach (var (name, per, link) in links)
+        {
+            var count = 100 / per;
+
+            Written(probe, (Wrapped(new Probe(), (count, link)), $"{count} through {name}"));
+            NestedPast(probe, (Wrapped(new Probe(), (count + 1, link)), $"{count + 1} through {name}"));
+        }
+
+        // * a map of scalars' entry is a message on the wire: 99 below the top, then its entry
+        Written(probe, (Wrapped(new Probe { Tallies = { ["a"] = 1 } }, (99, ChildOf)), "a scalar map's entry at 100"));
+        NestedPast(probe, (Wrapped(new Probe { Tallies = { ["a"] = 1 } }, (100, ChildOf)), "a scalar map's entry at 101"));
+    }
+
+    [Fact]
+    public void Refuses_to_write_a_message_101_deep_that_reaches_no_required_field()
+    {
+        var alone = ProtoCodecs.Of<Alone>();
+        static Alone Link(Alone inner)
+        {
+            return new Alone { Alone_ = inner };
+        }
+
+        // * the required walk's shortcut skips Alone: the bound holds all the same
+        Assert.False(ProtoRecords.ShapeOf(Alone.Descriptor).ReachesRequired);
+        Assert.True(ProtoRecords.ShapeOf(Alone.Descriptor).NestsPast);
+        Written(alone, (Wrapped(new Alone(), (100, Link)), "100"));
+        NestedPast(alone, (Wrapped(new Alone(), (101, Link)), "101"));
+    }
+
+    [Fact]
+    public void Refuses_a_value_10000_deep_before_its_library_writes_any_of_it()
+    {
+        // ! neither the required walk nor Google.Protobuf's CalculateSize reached: either overflows a
+        // stack of 1 MiB from about 2,500 deep, which no handler catches
+        static Loop Looped(Loop inner)
+        {
+            return new Loop { Back = new Back { Loop = inner } };
+        }
+
+        static Alone Above(Alone inner)
+        {
+            return new Alone { Alone_ = inner };
+        }
+
+        OnAThreadOf1MiB(() =>
+        {
+            NestedPast(ProtoCodecs.Of<Probe>(), (Wrapped(new Probe(), (10_000, ChildOf)), "a message"));
+            NestedPast(ProtoCodecs.Of<Loop>(), (Wrapped(new Loop(), (5_000, Looped)), "a message that reaches a required field"));
+            NestedPast(ProtoCodecs.Of<Alone>(), (Wrapped(new Alone(), (10_000, Above)), "a message that reaches no required field"));
+        });
+    }
+
+    [Fact]
+    public void Refuses_to_write_41_messages_above_60_unknown_groups_a_reading_kept()
+    {
+        var probe = ProtoCodecs.Of<Probe>();
+        var read = probe.Decode(BytesOf(Groups));
+
+        // * the depth pass sees none of them: the check over the written bytes refuses, the reader's
+        // refusal its inner exception
+        Written(probe, (Wrapped(read, (40, ChildOf)), "40"));
+
+        var refused = NestedPast(probe, (Wrapped(read, (41, ChildOf)), "41"));
+
+        Assert.IsType<FormatException>(refused.InnerException);
+        Assert.Equal("nested past 100", refused.InnerException.Message);
+    }
+
+    [Fact]
+    public void Reads_a_map_s_entry_100_deep_that_holds_no_value_and_refuses_to_write_the_value_its_library_gives_it()
+    {
+        var probe = ProtoCodecs.Of<Probe>();
+
+        // `inner` as the bytes of a Probe's child, its field 3's record
+        static byte[] ChildBytes(byte[] inner)
+        {
+            var bytes = new byte[1 + CodedOutputStream.ComputeLengthSize(inner.Length) + inner.Length];
+
+            using (var output = new CodedOutputStream(bytes))
+            {
+                output.WriteTag(3, WireFormat.WireType.LengthDelimited);
+                output.WriteLength(inner.Length);
+            }
+
+            inner.CopyTo(bytes.AsSpan(bytes.Length - inner.Length));
+
+            return bytes;
+        }
+
+        // * 99 children below the top, the last holding an entry of children with no key and no
+        // value: 100 deep on the wire, which a reader takes; its library gives the entry its value's
+        // default, a message 101 deep, which its writer refuses
+        var deepest = Wrapped(new byte[] { 0x62, 0x00 }, (99, ChildBytes));
+        var read = probe.Decode(deepest);
+        var held = (Probe)ProtoCodecs.Read(Probe.Descriptor, deepest);
+
+        NestedPast(probe, (read, "the codec's reading"));
+        NestedPast(probe, (held, "ProtoCodecs.Read's"));
+
+        var deeper = Assert.Throws<FormatException>(() =>
+        {
+            return probe.Decode(ChildBytes(deepest));
+        });
+
+        Assert.Equal("nested past 100", deeper.Message);
+    }
+
+    [Fact]
+    public void Refuses_to_write_a_Struct_nested_past_the_bound_a_member_three_messages_deep()
+    {
+        var edges = ProtoCodecs.Of<Edges>();
+
+        // a JSON object `levels` deep, its innermost {"leaf": 1}: each level a Struct, its entry and a
+        // Value, three messages
+        static Struct Above(Struct inner)
+        {
+            return new Struct { Fields = { ["k"] = Value.ForStruct(inner) } };
+        }
+
+        static Struct ObjectOf(int levels)
+        {
+            return Wrapped(new Struct { Fields = { ["leaf"] = Value.ForNumber(1) } }, (levels - 1, Above));
+        }
+
+        Written(edges, (new Edges { Extra = ObjectOf(33) }, "a JSON object 33 deep"));
+        NestedPast(edges, (new Edges { Extra = ObjectOf(34) }, "a JSON object 34 deep"));
+    }
+
+    [Fact]
+    public void Refuses_to_write_a_Value_nested_past_the_bound_through_its_lists()
+    {
+        var value = ProtoCodecs.Of<Value>();
+
+        // a Value of a list of one Value, that many lists deep, its innermost the number 1: each list
+        // two messages, a ListValue and a Value
+        static Value Listing(Value inner)
+        {
+            return Value.ForList(inner);
+        }
+
+        static Value Listed(int lists)
+        {
+            return Wrapped(Value.ForNumber(1), (lists, Listing));
+        }
+
+        Written(value, (Listed(50), "50 lists deep"));
+        NestedPast(value, (Listed(51), "51 lists deep"));
     }
 }

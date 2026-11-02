@@ -46,7 +46,8 @@ import {
   ValueSchema,
 } from '@bufbuild/protobuf/wkt';
 import { readProtoBytes } from '../proto/codec';
-import { requiredShapeOf } from '../proto/records';
+import { jsonNestsPast } from '../proto/depth';
+import { PROTO_DEPTH, requiredShapeOf } from '../proto/records';
 import { unsetPathOf } from '../proto/required';
 import { STRICT_UTF8 } from '../router/shared/payloads';
 import { ProgrammerError } from '../transport/shared/errors';
@@ -80,7 +81,7 @@ export interface IJsonFormOptions {
 // constants
 
 /** How deep a message nests below the one read or written, as spec 17.9.3 counts it. */
-export const MAXIMUM_DEPTH = 100;
+export const MAXIMUM_DEPTH = PROTO_DEPTH;
 
 /**
  * How deep a JSON text nests at most before its message is read: two levels a message, an array of
@@ -1874,12 +1875,11 @@ const structJsonOf = (struct: Message, writing: IWritingOptions): string => {
 };
 
 /**
- * A JSON value protobuf-es holds of a `Struct` of a field, as the `Value` it stands for, at
- * `depth`: an object a `Struct` below it, an array a `ListValue`, a number held finite.
+ * A JSON value protobuf-es holds of a `Struct` of a field, as the `Value` it stands for: an object
+ * a `Struct`, an array a `ListValue`, a number held finite. Its depth is counted before, by
+ * `jsonNestsPast`.
  */
-const localValueJsonOf = (value: JsonValue, depth: number): string => {
-  assertWritingDepth(depth);
-
+const localValueJsonOf = (value: JsonValue): string => {
   if (value === null || typeof value === 'boolean' || typeof value === 'string') {
     return JSON.stringify(value);
   }
@@ -1893,26 +1893,18 @@ const localValueJsonOf = (value: JsonValue, depth: number): string => {
   }
 
   if (Array.isArray(value)) {
-    assertWritingDepth(depth + 1);
-
-    return `[${value
-      .map((item) => {
-        return localValueJsonOf(item, depth + 2);
-      })
-      .join(',')}]`;
+    return `[${value.map(localValueJsonOf).join(',')}]`;
   }
 
-  return localStructJsonOf(value, depth + 1);
+  return localStructJsonOf(value);
 };
 
-/** A JSON object protobuf-es holds of a `Struct` of a field, as that `Struct` at `depth`. */
-const localStructJsonOf = (object: JsonObject, depth: number): string => {
-  assertWritingDepth(depth);
-
+/** A JSON object protobuf-es holds of a `Struct` of a field, as that `Struct`. */
+const localStructJsonOf = (object: JsonObject): string => {
   const members = Object.keys(object)
     .toSorted()
     .map((name) => {
-      return `${JSON.stringify(name)}:${localValueJsonOf(object[name] ?? null, depth + 2)}`;
+      return `${JSON.stringify(name)}:${localValueJsonOf(object[name] ?? null)}`;
     });
 
   return `{${members.join(',')}}`;
@@ -1985,8 +1977,13 @@ const fieldValueJsonOf = (field: DescField, value: unknown, writing: IWritingOpt
       return scalarJsonOf(inner.scalar, value);
     }
 
+    // * counted as a proto writer counts it, three messages a level, before any of it is written
     if (local === 'struct') {
-      return localStructJsonOf(value as JsonObject, below.depth);
+      if (jsonNestsPast(value as JsonObject, below.depth)) {
+        throw new JsonFormError(`a message nested past ${String(MAXIMUM_DEPTH)}`);
+      }
+
+      return localStructJsonOf(value as JsonObject);
     }
 
     return messageJsonOf(message, value as Message, below);
