@@ -247,8 +247,8 @@ constrained peer, takes a scheme to come.
 ([0011](0011-every-side-takes-its-time-from-a-clock-it-is-given.md)):
 
 - its end, _E_, is a whole number of milliseconds since the epoch: for a `JWT`, _X_ + 60,000, where
-  _X_ = ⌈`exp` × 1000⌉, the claim read as an IEEE 754 double, as both sides' JSON readers read it;
-  for an `ELSEWHERE`, the end its verifier gives, rounded up to a millisecond. `nbf` is held alike,
+  _X_ = ⌈`exp` × 1000⌉, the claim read as section 17.6 of the spec reads a number; for an
+  `ELSEWHERE`, the end its verifier gives, rounded up to a millisecond. `nbf` is held alike,
   _N_ = ⌈`nbf` × 1000⌉, and a claim that is not a JSON number, or whose milliseconds pass 2⁵³ − 1
   (section 1.2), does not hold;
 - the wall clock's reading, _W_, is a whole number of milliseconds since the epoch, a fraction

@@ -17,6 +17,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `bead::testing::durations::Difference`.
 - The support matrix's "A singular closed enum's undeclared number, echoed" says what protobuf-es
   writes beside another unknown field and for a wide number, and what Buffa writes.
+- A `JWT` whose header or claims set holds a number past the largest finite double, or nests deeper
+  than 64, is refused at `token` on every side, before its signature is reached, and a relay that
+  does not verify reads no `aud` from it (spec 13.8, 17.5; RFC 7493 §2.2).
 
 ### Fixed
 

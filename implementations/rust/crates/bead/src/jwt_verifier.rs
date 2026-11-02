@@ -205,8 +205,9 @@ fn string_of<'object>(object: &'object Map<String, Value>, name: &str) -> Option
     }
 }
 
-// a header or a claims set: a JSON object in UTF-8 that names each member once, a string holding a
-// surrogate alone read as a value that names nothing
+// a header or a claims set: a JSON object in UTF-8 that names each member once, bounded as spec
+// 17.5 bounds a payload, no number past a double and 64 deep at most, a string holding a surrogate
+// alone read as a value that names nothing
 fn object_of(part: &[u8]) -> Option<Map<String, Value>> {
     let bytes = base64url::decode(part)?;
     let options = ReadJsonOptions {

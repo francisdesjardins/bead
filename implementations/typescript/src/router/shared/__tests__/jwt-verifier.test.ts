@@ -52,18 +52,29 @@ const UNSHAPED: Record<string, { algorithm: string; jwk: unknown }> = {
   'a JWK that is not an object': { algorithm: 'HS256', jwk: [] },
 };
 
-/** A token of `claims` under the published HS256 key the vectors give its issuer. */
-const signed = (claims: object): string => {
+// the header these tests sign under, as its JSON text
+const HEADER = JSON.stringify({ alg: 'HS256', typ: 'at+jwt' });
+
+/**
+ * A token of `header` and `claims`, JSON texts as they are written, under the published HS256 key
+ * the vectors give its issuer: a text can hold what `JSON.stringify` never writes, `1e400`.
+ */
+const signedText = (header: string, claims: string): string => {
   const [{ jwk }] = HOLDING.keys as [IJwtKey];
-  const part = (value: object): string => {
-    return Buffer.from(JSON.stringify(value)).toString('base64url');
+  const part = (text: string): string => {
+    return Buffer.from(text).toString('base64url');
   };
-  const signingInput = `${part({ alg: 'HS256', typ: 'at+jwt' })}.${part(claims)}`;
+  const signingInput = `${part(header)}.${part(claims)}`;
   const signature = createHmac('sha256', Buffer.from(jwk.k ?? '', 'base64url')).update(
     signingInput
   );
 
   return `${signingInput}.${signature.digest('base64url')}`;
+};
+
+/** A token of `claims` under the published HS256 key the vectors give its issuer. */
+const signed = (claims: object): string => {
+  return signedText(HEADER, JSON.stringify(claims));
 };
 
 /** What reads the wall clock as `instant`: a vector's, or milliseconds since the epoch. */
@@ -155,6 +166,51 @@ test.describe('verifyJwt', () => {
       claims: JSON.parse(Buffer.from(claims, 'base64url').toString()) as unknown,
       header: JSON.parse(Buffer.from(header, 'base64url').toString()) as unknown,
     });
+  });
+
+  test('reads a token’s parts as section 17.5 bounds a payload: no number past the largest double, nested 64 deep at most', async () => {
+    const { audience, keys, now, token } = HOLDING;
+    const claims = Buffer.from(token.split('.')[1] ?? '', 'base64url').toString();
+    const holding = JSON.parse(claims) as { exp: number };
+    // a member added to a JSON object's text, its value written as it is
+    const beside = (text: string, member: string): string => {
+      return `${text.slice(0, -1)},${member}}`;
+    };
+    // arrays nested `levels` deep, below the object that holds them
+    const nested = (levels: number): string => {
+      return `${'['.repeat(levels)}${']'.repeat(levels)}`;
+    };
+    const refused = [
+      signedText(HEADER, claims.replace(`"exp":${String(holding.exp)}`, '"exp":1e400')),
+      signedText(HEADER, beside(claims, '"nbf":-1e400')),
+      signedText(HEADER, beside(claims, '"x":[[{"y":1e400}]]')),
+      signedText(beside(HEADER, '"x":-1e400'), claims),
+      signedText(HEADER, beside(claims, `"x":${nested(64)}`)),
+      signedText(beside(HEADER, `"x":${nested(64)}`), claims),
+    ];
+    const holds = [
+      signedText(HEADER, beside(claims, `"x":${nested(63)}`)),
+      signedText(beside(HEADER, `"x":${nested(63)}`), claims),
+      // * a bracket within a string opens nothing, and a number below the least double reads as 0
+      signedText(HEADER, beside(claims, `"x":"${nested(64)}","y":1e-400`)),
+    ];
+
+    expect(claims).toContain(`"exp":${String(holding.exp)}`);
+
+    for (const each of refused) {
+      expect(readJwt(each), each).toBeUndefined();
+      expect(await verifyJwt(each, { audience, keys, now: readingOf(now) }), each).toEqual({
+        holds: false,
+        reason: 'token',
+      });
+    }
+
+    for (const each of holds) {
+      expect(readJwt(each), each).toBeDefined();
+      expect(await verifyJwt(each, { audience, keys, now: readingOf(now) }), each).toMatchObject({
+        holds: true,
+      });
+    }
   });
 
   for (const { audience, keys, name, now, token, verdict } of VECTORS.jwtVerdicts) {

@@ -579,6 +579,18 @@ assert LAST_EXP * 1000 + LEEWAY <= LARGEST < (LAST_EXP + 1) * 1000 + LEEWAY
 TWIN_END = EXP * 1000 + LEEWAY
 HS_TOKEN = hs256(AT_JWT, access())
 
+# an exp that rounds past the largest finite double, written by hand, since JSON has no infinity
+PAST_A_DOUBLE = compact(access()).replace(f'"exp":{EXP}'.encode('ascii'), b'"exp":1e400')
+assert b'"exp":1e400' in PAST_A_DOUBLE and float('1e400') == math.inf
+
+
+def nested(levels):
+    """A claim's value of arrays nested levels deep, below the claims set's own depth of 1."""
+    value = []
+    for _ in range(levels - 1):
+        value = [value]
+    return value
+
 jwt_verdicts = [
     # typ: an ID token of the same issuer, under the same key, refused; its twin taken
     ('an ID token, typed JWT by its issuer', [TYP], ES256_ID_TOKEN, [ES], NOW, refused(TYP)),
@@ -699,6 +711,13 @@ jwt_verdicts = [
     ('a header naming alg twice, once escaped', [TOKEN], hs256(b'{"alg":"none","typ":"at+jwt","\\u0061lg":"HS256"}', access()), [HS],
      NOW, refused(TOKEN)),
     ('a claims set naming a member by a lone surrogate', [TOKEN], hs256(AT_JWT, access(**{'\udc00': 1})), [HS], NOW, refused(TOKEN)),
+    # its parts bounded as section 17.5's items 6 and 7 bound a payload, before its signature is
+    # reached: no number past a double (RFC 7493 §2.2), 64 deep at most, the claims set at depth 1
+    ('exp past the largest double', [TOKEN], hs256(AT_JWT, PAST_A_DOUBLE), [HS], NOW, refused(TOKEN)),
+    ('a claim nested 65 deep, which no step reads', [TOKEN], hs256(AT_JWT, access(deep=nested(64))), [HS], NOW,
+     refused(TOKEN)),
+    ('a claim nested 64 deep', ['13.8', TOKEN], hs256(AT_JWT, access(deep=nested(63))), [HS], NOW,
+     holds(hs256(AT_JWT, access(deep=nested(63))), TRUST, TWIN_END, sub='bob')),
 ]
 
 # aud against a set of audiences, as a relay that verifies holds those its destinations were

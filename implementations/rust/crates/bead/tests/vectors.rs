@@ -1,8 +1,10 @@
 //! `spec/vectors.json` played: a trial per entry, named by its own name, its group its kind; every
 //! group but those ahead, each named by its read.
 
+use std::collections::BTreeMap;
 use std::process::ExitCode;
 
+use bead::json::JsonRefusal;
 use bead::testing::instants;
 use bead::testing::parcels::{self, ParcelReading, ParcelRefusalVector, ParcelVector};
 use bead::testing::vectors::{
@@ -362,12 +364,30 @@ fn jwt_verdicts() -> Result<Vec<Trial>, String> {
                             now: &move || now,
                         },
                     )?;
-                    // * compared as their canonical forms, so a number is the double it stands for
-                    let got = json::write(&verdict_json(&verdict))?;
-                    let expected = json::write(&Value::Object(vector.verdict))?;
+                    // * compared member by member, each in its canonical form, so a number is the
+                    // double it stands for, and a claims set nested 64 deep, as a token's may be,
+                    // is written whole below no level of the verdict's own
+                    let canonical = |verdict: Map<String, Value>| {
+                        verdict
+                            .into_iter()
+                            .map(|(name, value)| Ok((name, json::write(&value)?)))
+                            .collect::<Result<BTreeMap<String, Vec<u8>>, JsonRefusal>>()
+                    };
+                    let Value::Object(given) = verdict_json(&verdict) else {
+                        return Err("a verdict is an object".into());
+                    };
+                    let got = canonical(given)?;
+                    let expected = canonical(vector.verdict)?;
 
                     hold(got == expected, || {
-                        format!("gave {}", String::from_utf8_lossy(&got))
+                        let written = got
+                            .iter()
+                            .map(|(name, value)| {
+                                format!("{name:?}: {}", String::from_utf8_lossy(value))
+                            })
+                            .collect::<Vec<String>>();
+
+                        format!("gave {{{}}}", written.join(", "))
                     })
                 },
             )
