@@ -59,6 +59,7 @@ mod server_command_credentials;
 mod server_commands;
 mod server_credential_notifications;
 mod server_credentials;
+mod server_drop;
 mod server_edges;
 mod server_elsewhere;
 mod server_failures;
@@ -72,6 +73,7 @@ mod server_requests;
 mod server_token_provider;
 mod server_unsubscribe;
 mod server_waiting;
+mod surface;
 mod timers;
 mod transfer;
 

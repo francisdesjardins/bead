@@ -27,6 +27,8 @@ pub mod pair;
 pub mod parcels;
 mod platform;
 pub mod scripted;
+#[cfg(test)]
+pub(crate) mod surface;
 pub mod validations;
 pub mod vectors;
 
