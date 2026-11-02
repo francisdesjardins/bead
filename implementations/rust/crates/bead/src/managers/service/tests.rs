@@ -16,7 +16,9 @@ use crate::testing::SteppingClock;
 use crate::testing::scripted::{ScriptedServer, handle_of};
 
 mod admissions;
+mod requester;
 mod resolver;
+mod validation;
 
 type Heard = Arc<Mutex<Vec<(Option<String>, DebugEvent)>>>;
 
@@ -33,13 +35,16 @@ struct Fixture {
 
 impl Fixture {
     fn new() -> Self {
+        Self::with(&RouterServerOptions::default())
+    }
+
+    fn with(options: &RouterServerOptions) -> Self {
         let clock = SteppingClock::new(crate::testing::instants::new_year());
         let shared: SharedClock = Arc::<SteppingClock>::clone(&clock);
         let transport = ScriptedServer::new(shared);
         let carried: Arc<dyn crate::transport::ServerTransport> =
             Arc::<ScriptedServer>::clone(&transport);
-        let router =
-            RouterServer::new(carried, &RouterServerOptions::default()).expect("a server router");
+        let router = RouterServer::new(carried, options).expect("a server router");
         let manager = ServiceManager::new(
             ServiceRouter::Server(router.clone()),
             &ServiceManagerOptions::default(),
@@ -132,5 +137,37 @@ fn props(recording: &Arc<Recording>, payload: &[u8]) -> ResolverProps {
         signal: Signal::new(),
         answerer: Arc::<Recording>::clone(recording),
         carried: None,
+    }
+}
+struct ClientFixture {
+    clock: Arc<SteppingClock>,
+    transport: Arc<crate::testing::scripted::ScriptedClient>,
+    router: crate::router::client::RouterClient,
+    manager: ServiceManager,
+}
+
+impl ClientFixture {
+    fn new() -> Self {
+        let clock = SteppingClock::new(crate::testing::instants::new_year());
+        let shared: SharedClock = Arc::<SteppingClock>::clone(&clock);
+        let transport = crate::testing::scripted::ScriptedClient::new(shared);
+        let carried: Arc<dyn crate::transport::ClientTransport> =
+            Arc::<crate::testing::scripted::ScriptedClient>::clone(&transport);
+        let router = crate::router::client::RouterClient::new(
+            carried,
+            &crate::router::client::RouterClientOptions::default(),
+        )
+        .expect("a client router");
+        let manager = ServiceManager::new(
+            ServiceRouter::Client(router.clone()),
+            &ServiceManagerOptions::default(),
+        )
+        .expect("a manager");
+        Self {
+            clock,
+            transport,
+            router,
+            manager,
+        }
     }
 }

@@ -17,7 +17,7 @@ use crate::router::types::{RouterAnswer, SignalReason};
 use crate::testing::pair::echo;
 use crate::testing::scripted::handle_of;
 
-fn resolving(
+pub(super) fn resolving(
     fixture: &Fixture,
     callback: ResolverCallback<TextCodec, TextCodec>,
 ) -> Resolving<TextCodec, TextCodec> {
