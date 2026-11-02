@@ -5,7 +5,7 @@
 use std::process::ExitCode;
 use std::sync::Arc;
 
-use bead::testing::files;
+use bead::testing::{self, Difference, files};
 use bead::{
     BoxFuture, ClientListener, ClientTransport, ConnectionHandle, IdentityRefusal, JsonCodec,
     NotificationLike, Procedure, ProcedureKind, ProgrammerError, ReadyState, Refusal,
@@ -16,9 +16,6 @@ use bead::{
 use bytes::Bytes;
 use libtest_mimic::{Arguments, Failed, Trial};
 use serde_json::Value;
-
-// the language a differs names to excuse this side
-const LANGUAGE: &str = "Rust";
 
 // the ways the file names, each by its id
 const WAYS: [&str; 6] = [
@@ -166,16 +163,21 @@ fn echo() -> Procedure {
     }
 }
 
-// whether an entry's differs names this side
+// the rows of the support matrix an entry's differs lists, none where it lists none
+fn differs_of(entry: &Value) -> Result<Vec<Difference>, String> {
+    entry.get("differs").map_or_else(
+        || Ok(Vec::new()),
+        |differs| {
+            serde_json::from_value(differs.clone())
+                .map_err(|error| format!("{}'s differs: {error}", named(entry)))
+        },
+    )
+}
+
+// whether a row of the support matrix excuses this side from an entry, its differs read whole
+// before any trial is made
 fn is_excused(entry: &Value) -> bool {
-    entry
-        .get("differs")
-        .and_then(Value::as_array)
-        .is_some_and(|differs| {
-            differs.iter().any(|difference| {
-                difference.get("language").and_then(Value::as_str) == Some(LANGUAGE)
-            })
-        })
+    differs_of(entry).is_ok_and(|differs| testing::is_excused(&differs))
 }
 
 // the reason an entry is refused for at a way: at every way, or at those its refusedAt lists
@@ -288,6 +290,14 @@ fn trials() -> Result<Vec<Trial>, String> {
         .filter_map(|way| way.as_str().map(str::to_owned))
         .collect();
     let mut trials = Vec::new();
+
+    // ! a differs malformed fails the run, rather than play an entry a row may excuse
+    for entry in ["names", "ids", "procedureKinds", "folds"]
+        .into_iter()
+        .flat_map(&group)
+    {
+        differs_of(&entry)?;
+    }
 
     trials.push(Trial::test(
         "its table declares every way the file names and no other",

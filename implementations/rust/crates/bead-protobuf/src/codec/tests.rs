@@ -443,7 +443,7 @@ fn reads_a_closed_enum_s_undeclared_number_as_setting_nothing_its_last_declared_
         "a oneof's word kept"
     );
 
-    // ! a matrix row: kept among the unknown fields, which Buffa writes back, as protobuf-es does
+    // ! a matrix row: kept among the unknown fields, which Buffa writes back
     assert_eq!(
         hex_of(&probe.encode(&kept).expect("written")),
         "70 01 70 05",
@@ -488,6 +488,25 @@ fn reads_a_closed_enum_s_undeclared_number_as_setting_nothing_its_last_declared_
         [0, 5],
         "an item holds its number"
     );
+}
+
+#[test]
+fn echoes_a_closed_enum_s_undeclared_number_beside_another_unknown_field_and_a_wide_one_as_its_library_keeps_them()
+ {
+    let probe = ProtoCodec::<Probe>::new();
+
+    // ! a matrix row: Buffa sets the record aside among the unknown fields, its bytes as they came,
+    // beside another unknown field and past 31 bits alike
+    for hex in ["70 05 20 01", "70 FF FF FF FF 0F"] {
+        let read = probe.decode(&bytes_of(hex)).expect("read");
+
+        assert_eq!(read.shade, None, "{hex} sets nothing");
+        assert_eq!(
+            hex_of(&probe.encode(&read).expect("written")),
+            hex,
+            "{hex} written back whole"
+        );
+    }
 }
 
 #[test]

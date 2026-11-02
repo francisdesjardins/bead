@@ -1016,6 +1016,7 @@ where
                                 ProtocolCode::PAYLOAD_UNDECODABLE,
                                 manager.router.side(),
                             )
+                            // ! a detail of the side's own words: the decoder's, for this side's caller alone
                             .saying(refused.reason().to_owned())
                             .about(&Header::Result(result.header.clone()))
                             .of_call(Some(procedure.address()), destination_id)

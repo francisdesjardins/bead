@@ -18,6 +18,9 @@ public sealed class JwtVerifierTests
     // a vector that holds, whose HS256 key signs the tokens these tests write
     private const string Holding = "sub alone, named by sub";
 
+    // the header these tests sign under, as its JSON text
+    private const string Header = """{"alg":"HS256","typ":"at+jwt"}""";
+
     // 32 zero bytes, and 31, in base64url
     private static readonly string Bytes32 = new('A', 43);
     private static readonly string Bytes31 = new('A', 42);
@@ -101,18 +104,25 @@ public sealed class JwtVerifierTests
         };
     }
 
-    // a token of claims under the published HS256 key the vectors give its issuer
-    private static string Signed(JsonObject claims)
+    // a token of header and claims, JSON texts as they are written, under the published HS256 key
+    // the vectors give its issuer: a text can hold what a JSON writer never writes, 1e400
+    private static string SignedText(string header, string claims)
     {
         var key = KeysOf(Vectors.Of("jwtVerdicts", Holding))[0];
         var part = (string json) =>
         {
             return Base64Url.EncodeToString(Encoding.UTF8.GetBytes(json));
         };
-        var signingInput = $$"""{{part("""{"alg":"HS256","typ":"at+jwt"}""")}}.{{part(claims.ToJsonString())}}""";
+        var signingInput = $"{part(header)}.{part(claims)}";
         var secret = Base64Url.DecodeFromChars(key.Jwk.GetProperty("k").GetString()!);
 
         return $"{signingInput}.{Base64Url.EncodeToString(HMACSHA256.HashData(secret, Encoding.ASCII.GetBytes(signingInput)))}";
+    }
+
+    // a token of claims under the published HS256 key the vectors give its issuer
+    private static string Signed(JsonObject claims)
+    {
+        return SignedText(Header, claims.ToJsonString());
     }
 
     // definition
@@ -271,6 +281,62 @@ public sealed class JwtVerifierTests
         Assert.True(verdict.Holds, $"the token does not hold: {verdict.Reason}");
         Assert.True(JsonElement.DeepEquals(ElementOf(claims.ToJsonString()), verdict.Claims), verdict.Claims.GetRawText());
         Assert.Equal("reader", verdict.Claims.GetProperty("realm").GetProperty("roles")[0].GetString());
+    }
+
+    [Fact]
+    public async Task Reads_a_token_s_parts_as_section_17_5_bounds_a_payload_no_number_past_the_largest_double_nested_64_deep_at_most()
+    {
+        var vector = Vectors.Of("jwtVerdicts", Holding);
+        var token = vector.GetProperty("token").GetString()!;
+        var claims = Encoding.UTF8.GetString(Base64Url.DecodeFromChars(token.Split('.')[1]));
+        var exp = $"\"exp\":{ElementOf(claims).GetProperty("exp").GetRawText()}";
+
+        // a member added to a JSON object's text, its value written as it is
+        var beside = (string text, string member) =>
+        {
+            return $"{text[..^1]},{member}}}";
+        };
+
+        // arrays nested levels deep, below the object that holds them
+        var nested = (int levels) =>
+        {
+            return new string('[', levels) + new string(']', levels);
+        };
+        var refused = new[]
+        {
+            SignedText(Header, claims.Replace(exp, "\"exp\":1e400", StringComparison.Ordinal)),
+            SignedText(Header, beside(claims, "\"nbf\":-1e400")),
+            SignedText(Header, beside(claims, "\"x\":[[{\"y\":1e400}]]")),
+            SignedText(beside(Header, "\"x\":-1e400"), claims),
+            SignedText(Header, beside(claims, $"\"x\":{nested(64)}")),
+            SignedText(beside(Header, $"\"x\":{nested(64)}"), claims),
+        };
+        var holds = new[]
+        {
+            SignedText(Header, beside(claims, $"\"x\":{nested(63)}")),
+            SignedText(beside(Header, $"\"x\":{nested(63)}"), claims),
+
+            // * a bracket within a string opens nothing, and a number below the least double reads as 0
+            SignedText(Header, beside(claims, $"\"x\":\"{nested(64)}\",\"y\":1e-400")),
+        };
+
+        Assert.Contains(exp, claims, StringComparison.Ordinal);
+
+        foreach (var each in refused)
+        {
+            var verdict = await JwtVerifier.VerifyJwt(each, PropsOf(vector));
+
+            Assert.Null(JwtVerifier.ReadUnverified(each));
+            Assert.Equal<(bool, JwtRefusal?)>((false, JwtRefusal.Token), (verdict.Holds, verdict.Reason));
+        }
+
+        foreach (var each in holds)
+        {
+            var verdict = await JwtVerifier.VerifyJwt(each, PropsOf(vector));
+
+            Assert.NotNull(JwtVerifier.ReadUnverified(each));
+            Assert.True(verdict.Holds, $"the token does not hold: {verdict.Reason}");
+        }
     }
 
     [Fact]

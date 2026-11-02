@@ -256,7 +256,24 @@ public sealed class ProtoCodecsTests
 
         // ! a matrix row: dropped before Google.Protobuf reads, which keeps a known field's record in
         // no unknown set a caller fills, where protobuf-es writes it back among the unknown fields
+        // where the message holds no other
         Assert.Equal("70 01", HexOf(probe.Encode(kept)));
+    }
+
+    [Fact]
+    public void Echoes_a_closed_enum_s_undeclared_number_beside_another_unknown_field_and_a_wide_one_as_its_library_keeps_them()
+    {
+        var probe = ProtoCodecs.Of<Probe>();
+        var beside = probe.Decode(BytesOf("70 05 20 01"));
+        var wide = probe.Decode(BytesOf("70 FF FF FF FF 0F"));
+
+        Assert.False(beside.HasShade);
+        Assert.False(wide.HasShade);
+
+        // ! a matrix row: dropped before Google.Protobuf reads, beside another unknown field and past
+        // 31 bits alike, the other unknown field kept
+        Assert.Equal("20 01", HexOf(probe.Encode(beside)));
+        Assert.Equal("", HexOf(probe.Encode(wide)));
     }
 
     [Fact]

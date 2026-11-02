@@ -249,15 +249,15 @@ what a procedure's name holds, and every such name is a pattern the filter reads
 _Metrics: `spec/metrics.json`._
 
 7.1. A registry counts what its side declares, for a router given one; a router given none counts
-nothing. A router takes it as its option, `metricsRegistry`, `MetricsRegistry`, which the servers
-and the clients that build a router pass on. One registry given to two routers sums them.
+nothing. A router takes it as its option, `metricsRegistry`, in its platform's case, which the
+servers and the clients that build a router pass on. One registry given to two routers sums them.
 
 7.2. A procedure is declared to the registry of the router it is declared on:
 
 1. as its resolver is registered, to the server families; and, when its procedure notifies, as the
    side that notifies, to the notification families;
-2. as a requester is made, through the router's `declareRequester`, `DeclareRequester`, which gives
-   back its series, to the client families;
+2. as a requester is made, through the router's `declareRequester`, in its platform's case, which
+   gives back its series, to the client families;
 3. as a notification is registered, on the side that hears, to the notification families.
 
 7.3. A registry keys a procedure by its address, its service id and its procedure id, whichever
@@ -494,10 +494,9 @@ subscriptions count.
 _Metrics: `spec/metrics.json`._
 
 11.1. A router reads its monotonic clock at a call's start gate and at its end gate, and observes
-the difference in whole microseconds, its fraction dropped: the TypeScript side the difference of
-its two milliseconds in nanoseconds, rounded to a whole one, then over 1,000, so that a reading's
-binary fraction drops no microsecond, 0.3 ms less 0.2 ms reading 100 µs; the C# side a `TimeSpan`'s
-ticks over 10.
+the difference in whole microseconds: the difference taken in nanoseconds, rounded to a whole one,
+then its fraction of a microsecond dropped, so that a reading held as a binary fraction drops no
+microsecond, and 0.3 ms less 0.2 ms reads 100 µs.
 
 11.2. Every call that ends is observed, whatever its outcome, so a series' `_count` is the sum of
 its handled counts, each series at one reading (section 8.5).
@@ -526,16 +525,16 @@ constants from a table, formatting no number:
 |  5,000,000 | `5.0`    |  10,000,000 | `10.0`   | 20,000,000 | `20.0`   |
 | 50,000,000 | `50.0`   | 100,000,000 | `100.0`  |            | `+Inf`   |
 
-11.4. A side reads its durations as finely as its platform's monotonic clock: a TypeScript side in a
-browser at the coarsening W3C High Resolution Time sets, 100 µs or 5 µs, its buckets under it
-holding zeros and its `_sum` a multiple of it. The trace keeps its whole milliseconds; its duration
-is the service manager's, the metrics' the router's.
+11.4. A side reads its durations as finely as its platform's monotonic clock: in a browser, at the
+coarsening W3C High Resolution Time sets, 100 µs or 5 µs, its buckets under it holding zeros and its
+`_sum` a multiple of it. The trace keeps its whole milliseconds; its duration is the service
+manager's, the metrics' the router's.
 
 ## 12. The exposition
 
 _Metrics: `spec/metrics.json`._
 
-12.1. A registry's exposition, `exposition()`, `Exposition()`, writes it in
+12.1. A registry's exposition, `exposition`, in its platform's form, writes it in
 [the Prometheus text exposition format, version 0.0.4](https://prometheus.io/docs/instrumenting/exposition_formats/),
 and gives its media type with it: `text/plain; version=0.0.4; charset=utf-8`.
 
@@ -554,10 +553,9 @@ and line feed escaped as `\\`, `\"` and `\n`, and a help with `\` and line feed 
 escapes them; a lone surrogate in a name is written U+FFFD, as `spec.md` 7.4 writes a detail.
 
 12.5. A count, and a `_count`, is written in decimal; a `le` from 11.3's table; and a `_sum` from
-its whole microseconds, held exactly, a `long` on the C# side, whole seconds and the microseconds
-under one on the TypeScript side, whose numbers stop being exact at 2⁵³ µs. A `_sum` is written as
-its whole seconds, then, when microseconds remain, a point and their six digits less their trailing
-zeros, never with an exponent: 10 µs `0.00001`, 2,500,000 µs `2.5`, 3,000,000 µs `3`.
+its whole microseconds, held exactly past 2⁵³ µs, where a double stops being exact. A `_sum` is
+written as its whole seconds, then, when microseconds remain, a point and their six digits less
+their trailing zeros, never with an exponent: 10 µs `0.00001`, 2,500,000 µs `2.5`, 3,000,000 µs `3`.
 
 12.6. A line holds no timestamp, and ends with a line feed, the last one too.
 
@@ -569,9 +567,9 @@ no port.
 ## 13. The trace of parcels
 
 13.1. A participant (spec 15.16) tells its parcels, its link's transitions, its names and its reports
-to whoever listens, through `participant.on('debug')` / `participant.Debug +=`, as
-`IParticipantDebugEvent` / `ParticipantDebugEvent`. `isDebugging` / `IsDebugging` says whether
-anyone listens. The events have the same fields on every side, each in its platform's case.
+to whoever listens to its `debug` event, as a `ParticipantDebugEvent`, and `isDebugging` says
+whether anyone listens, each in its platform's form. The events have the same fields on every side,
+each in its platform's case.
 There is no snapshot event: the state at the start of a watch is read by pull, never fabricated
 as a transition, as Redux DevTools' store initialization is no application action.
 
@@ -593,13 +591,12 @@ handle joins its envelopes (5.1). On a client, two connections over one particip
 by the ordinal alone: a client's envelope trace knows no participant ordinal, and the join is
 by time.
 
-13.4. An `rx` event gives its `verdict`, `PARCEL_VERDICTS` / `ParcelVerdict`: `taken`; `copy`,
-below the sequence awaited (spec 15.19); `loss`, with `awaited` and `came` (spec 15.19);
-`pair-not-held` (spec 15.21); `retained` (spec 15.23); `off-topic`, of no inbox, name or departure
-held; `no-parcel`; `does-not-read` (spec 15.17); or `advisory`, skipped (spec 15.17). A
-`retained`, `off-topic` or `no-parcel` event gives no prefix fields: its judgment precedes a
-prefix's reading. An incoming message is told once, with its judgment, never as a preliminary
-reading and another event after it.
+13.4. An `rx` event gives its `verdict`: `taken`; `copy`, below the sequence awaited (spec 15.19);
+`loss`, with `awaited` and `came` (spec 15.19); `pair-not-held` (spec 15.21); `retained` (spec
+15.23); `off-topic`, of no inbox, name or departure held; `no-parcel`; `does-not-read` (spec 15.17);
+or `advisory`, skipped (spec 15.17). A `retained`, `off-topic` or `no-parcel` event gives no prefix
+fields: its judgment precedes a prefix's reading. An incoming message is told once, with its
+judgment, never as a preliminary reading and another event after it.
 
 13.5. A `link` event tells a transition once complete: `state` is `up`, `down`, `taken-over`
 (spec 15.21, 0041) or `stopped`. It names its `incarnation`, the one drawn on `up`, and on a
@@ -621,26 +618,25 @@ spec 15.22 guards who subscribes an inbox, not who publishes to one. The opener'
 every member serving the name reads it in OPEN. Ids, topics and incarnations stay; a GONE is
 published by its participant's will alone, guarded by its authenticated id (spec 15.22).
 
-13.8. Levels are read by pull: `gauges()` / `Gauges()`, with their bounds, `incarnation` /
-`Incarnation`, `isLinked` / `IsLinked`, the inbox and the names held. The gauges give connections,
-half-open connections, parts held against `heldBytesBudget`, the largest parts against
-`maximumEnvelopePartsBytes`, bytes unsent and the largest unsent against `maximumUnsentBytes`,
-and departures (spec 15.20, 15.23). Transitions are pushed: a pull can miss a down and an up, or a
-name let go and held again, between two reads. A pull costs nothing while nobody reads.
+13.8. Levels are read by pull, each in its platform's form: `gauges`, with their bounds,
+`incarnation`, `isLinked`, the inbox and the names held. The gauges give connections, half-open
+connections, parts held against `heldBytesBudget`, the largest parts against
+`maximumEnvelopePartsBytes`, bytes unsent and the largest unsent against `maximumUnsentBytes`, and
+departures (spec 15.20, 15.23). Transitions are pushed: a pull can miss a down and an up, or a name
+let go and held again, between two reads. A pull costs nothing while nobody reads.
 
-13.9. While nobody listens, one check a parcel is the whole cost: no event is built, no clock
-read, no byte copied or decoded for the trace, and no topic joined. Each event is told
-synchronously at its site within a guard, ordered per participant; on the C# side that site is
-the participant's `SerialScheduler`, as an envelope is told on its router's scheduler. A
-listener's error is reported through the participant's `error` / `Error`, and the listeners
-after it are still called. The participant goes on as if nobody listens. A listener filters
-what it receives, as 0013's call listener does; there is no per-kind selection at the source.
+13.9. While nobody listens, one check a parcel is the whole cost: no event is built, no clock read,
+no byte copied or decoded for the trace, and no topic joined. Each event is told synchronously at
+its site within a guard, in the participant's own turn, one at a time, as an envelope is told in its
+router's, so ordered per participant. A listener's error is reported through the participant's
+`error` event, and the listeners after it are still called. The participant goes on as if nobody
+listens. A listener filters what it receives, as 0013's call listener does; there is no per-kind
+selection at the source.
 
-13.10. Twin tests hold each event and verdict, a takeover and no later transition, a link lost
-with the ordinals it ends and restored as another incarnation, the acceptor's half absent from
-every event, a throwing listener reported while the participant goes on, and no clock reading
-or trace construction while unwatched. Where the platform counts a thread's allocations,
-`GC.GetAllocatedBytesForCurrentThread()` around a parcel taken and one sent pins what they
-allocate while nobody listens and shows no additional trace allocation; elsewhere this part
-is held by inspection, a row of the support matrix. Like sections 4 and 5, this section has no
-conformance file.
+13.10. Twin tests hold each event and verdict, a takeover and no later transition, a link lost with
+the ordinals it ends and restored as another incarnation, the acceptor's half absent from every
+event, a throwing listener reported while the participant goes on, and no clock reading or trace
+construction while unwatched. Where the platform counts a thread's allocations, that count around a
+parcel taken and one sent pins what they allocate while nobody listens and shows no additional trace
+allocation; elsewhere this part is held by inspection, a row of the support matrix. Like sections 4
+and 5, this section has no conformance file.

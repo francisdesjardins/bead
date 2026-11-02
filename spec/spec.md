@@ -839,7 +839,8 @@ the first that fails refuses the token for the reason it names:
 1. `token`: the token is three parts apart by a period, each base64url without padding (RFC 4648
    §5) whose bits past its last byte are zero, and its header and its claims set are each a JSON
    object (RFC 8259) in UTF-8, without a byte order mark, naming each member once, by a name of
-   well-formed Unicode;
+   well-formed Unicode, holding no number that rounds past the largest finite double and nested
+   64 deep at most, the outermost at depth 1, as section 17.5's items 6 and 7 bound a payload;
 2. `crit`: its header carries no `crit`. Its `jwk`, `jku`, `x5u` and `x5c` are never read
    (RFC 8725 §3.10): a token names no key of its own;
 3. `typ`: its header's `typ` is `at+jwt` or `application/at+jwt`, as RFC 9068 §4 writes them, so a
@@ -871,9 +872,8 @@ the first that fails refuses the token for the reason it names:
 
 A string these steps read is of well-formed Unicode, which a JSON escape need not write: one that
 holds a surrogate alone names nothing, so a `sid`, a `sub` or an `aud` that holds one is no string,
-and an `aud` array holding one is no array of strings. A claim is read as an IEEE 754 double, as
-both sides' JSON readers read it, and the 60 s is a leeway for clock skew, a constant on every side,
-never an option.
+and an `aud` array holding one is no array of strings. A claim is read as section 17.6 reads a
+number, and the 60 s is a leeway for clock skew, a constant on every side, never an option.
 A token that holds gives its session: its identifier, `{ issuer, sid }`, its `iss` with its `sid`,
 else `{ issuer, sub }`, its `iss` with its `sub`; its claims set; and its end, _E_ = _X_ + 60,000.
 A key not shaped for its algorithm — an `ES256` one that is not `EC` on `P-256`, its `x` and `y` 32
@@ -2415,7 +2415,8 @@ generator writes for the message. What is Bead's:
    writer MUST refuse to write it. protobuf has such a field "required for parsing and
    serialization" ([Feature Settings](https://protobuf.dev/editions/features/#field_presence)).
    Its C++, Java and Go parsers refuse one, and so do Go's writer, upb's and protobuf-es's, while
-   C++ checks only in a debug build and Google.Protobuf reads and writes it.
+   C++ checks only in a debug build, Google.Protobuf reads and writes it, and Buffa reads it and
+   writes its default in its place.
 
    Every message the payload holds is looked into, of any syntax: a singular field's, a repeated
    field's items, a map's values, a group and a delimited field. An extension, which every side
@@ -2435,10 +2436,11 @@ generator writes for the message. What is Bead's:
    protobuf keeps it among the unknown fields
    ([Enum Behavior](https://protobuf.dev/programming-guides/enum/)). The field holds the last
    declared number its records give, or none, and a `oneof` it is a member of holds what its
-   other records give it. A repeated field's items and a map's values keep such a number, as both
-   stock libraries read them.
+   other records give it. A repeated field's items and a map's values keep such a number on every
+   side, where protobuf's Enum Behavior sets it among the unknown fields: a leveling the support
+   matrix keeps.
 
-Where two stock libraries part on what protobuf states no rule of, the support matrix says what
+Where the stock libraries part on what protobuf states no rule of, the support matrix says what
 each does. The `proto` rows of `spec/codecs.json` read and write `Probe`, the message of
 `spec/codecs.proto`.
 

@@ -12,6 +12,7 @@ use std::sync::{Arc, Mutex, PoisonError};
 use std::task::Wake;
 use std::time::SystemTime;
 
+use serde::Deserialize;
 use tokio::sync::Notify;
 
 use crate::clock::{Clock, Schedule, Timer, TimerCallback};
@@ -29,10 +30,35 @@ mod platform;
 pub mod scripted;
 #[cfg(test)]
 pub(crate) mod surface;
+#[cfg(test)]
+mod tests;
 pub mod validations;
 pub mod vectors;
 
 pub use platform::{Instant, patience, rest, spawn, wall_now};
+
+/// The language a row of the support matrix names when it excuses this side from an entry.
+pub const LANGUAGE: &str = "Rust";
+
+/// A row of the support matrix that excuses a side from an entry of a conformance file, as an
+/// entry's `differs` lists it.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Difference {
+    /// The row.
+    pub row: String,
+    /// The side it excuses.
+    pub language: String,
+}
+
+/// Whether an entry whose `differs` lists `differs` is excused on this side: one of its rows
+/// names [`LANGUAGE`]. An excused entry is left out, not played.
+#[must_use]
+pub fn is_excused(differs: &[Difference]) -> bool {
+    differs
+        .iter()
+        .any(|difference| difference.language == LANGUAGE)
+}
 
 /// What a side does on a test's clock: the jobs its owners hold queued or run, and the work they
 /// cover while it can run. The side is settled once it is none.

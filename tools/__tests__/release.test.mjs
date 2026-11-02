@@ -400,6 +400,9 @@ const TREE = {
   'spec/generators/make_vectors.py': '',
   'spec/generators/make_metrics.py': '',
   'spec/generators/spec_version.py': '',
+  // two sides' benches, which v0.1.0 holds
+  'implementations/typescript/tools/bench.mjs': '// a bench\n',
+  'implementations/dotnet/tools/Bead.Benchmarks/Program.cs': '// a bench\n',
   'CHANGELOG.md': changelog([]),
   '.gitignore': 'node_modules/\n',
 };
@@ -887,18 +890,33 @@ console.log(localDay(new Date('2026-10-08T01:30:00Z')));`;
     assert.deepEqual(owing(releasing()), []);
   });
 
-  test("it owes both benches' reports where the tree keeps their comparison, compared with the last release's, and none where it does not", () => {
+  // the lines that owe a bench's report
+  const benchesOwing = (root) => {
+    return prepared(root, { moves: { spec: 'minor' } }).logged.filter((line) => {
+      return line.includes('bench-release');
+    });
+  };
+
+  test("it owes each bench's report the tree holds, compared with the last release's or its checkout's, and none where it keeps no comparison", () => {
     const kept = releasing();
     write(kept, { 'tools/bench-compare.mjs': '// compares two reports\n' });
-    const owing = (root) => {
-      return prepared(root, { moves: { spec: 'minor' } }).logged.filter((line) => {
-        return line.includes('benches');
-      });
-    };
-    assert.deepEqual(owing(kept), [
-      `owed by hand: both benches run through tools/bench-release.mjs, their reports kept as .bench/v0.2.0-typescript.json and -csharp.json, each compared with v0.1.0's on the machine that made them; regression and inconclusive measures confirmed by interleaving before the finish (README.md, "Measurement")`,
+    assert.deepEqual(benchesOwing(kept), [
+      `owed by hand: each side's bench run through tools/bench-release.mjs, its report kept as .bench/v0.2.0-<side>.json, typescript and csharp; each compared with v0.1.0's on the machine that made it, or, where that machine keeps none, with v0.1.0's checkout by --tree; regression and inconclusive measures confirmed by interleaving before the finish (README.md, "Measurement")`,
     ]);
-    assert.deepEqual(owing(releasing()), []);
+    assert.deepEqual(benchesOwing(releasing()), []);
+  });
+
+  test("it owes a side's first report, compared with none, where the last release holds no bench of it", () => {
+    const root = releasing();
+    write(root, {
+      'tools/bench-compare.mjs': '// compares two reports\n',
+      'implementations/rust/benches/src/main.rs': '// a bench\n',
+    });
+    git(root, 'add', '-A');
+    git(root, 'commit', '-qm', 'feat: a third bench');
+    assert.deepEqual(benchesOwing(root), [
+      `owed by hand: each side's bench run through tools/bench-release.mjs, its report kept as .bench/v0.2.0-<side>.json, typescript, csharp and rust; typescript and csharp compared with v0.1.0's on the machine that made it, or, where that machine keeps none, with v0.1.0's checkout by --tree; rust's first, compared with none: the next release compares with it; regression and inconclusive measures confirmed by interleaving before the finish (README.md, "Measurement")`,
+    ]);
   });
 
   test('--dry-run prints the plan and writes nothing', () => {

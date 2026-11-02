@@ -9,20 +9,7 @@ use serde::Deserialize;
 use serde_json::Value;
 
 use crate::duration::NEVER;
-use crate::testing::files;
-
-// the language a differs names to excuse this side
-const LANGUAGE: &str = "Rust";
-
-/// A row of the support matrix that excuses a side from an entry.
-#[derive(Debug, Clone, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct Difference {
-    /// The row.
-    pub row: String,
-    /// The side it excuses.
-    pub language: String,
-}
+use crate::testing::{Difference, files, is_excused};
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -172,14 +159,6 @@ pub struct DurationPlace {
     pub is_ahead: bool,
 }
 
-fn is_excused(differs: Option<&Vec<Difference>>) -> bool {
-    differs.is_some_and(|differs| {
-        differs
-            .iter()
-            .any(|difference| difference.language == LANGUAGE)
-    })
-}
-
 // an input as a Duration is given it: from_secs_f64 of its milliseconds over 1,000, or its seconds,
 // never as Duration::MAX; NaN, a value no number is, and one under zero, none
 fn given_of(input: &FileInput) -> Option<Duration> {
@@ -222,7 +201,7 @@ impl Durations {
             .map(|input| DurationInput {
                 name: input.name.clone(),
                 given: given_of(input),
-                is_excused: is_excused(input.differs.as_ref()),
+                is_excused: is_excused(input.differs.as_deref().unwrap_or_default()),
             })
             .collect();
         let places = file
@@ -238,7 +217,7 @@ impl Durations {
                     .into_iter()
                     .map(|way| DurationWay {
                         is_required: way.required == Some(true),
-                        is_excused: is_excused(way.differs.as_ref()),
+                        is_excused: is_excused(way.differs.as_deref().unwrap_or_default()),
                         id: way.id,
                     })
                     .collect(),
@@ -251,7 +230,7 @@ impl Durations {
                     .outcomes
                     .into_iter()
                     .map(|outcome| PlaceOutcome {
-                        is_excused: is_excused(outcome.differs.as_ref()),
+                        is_excused: is_excused(outcome.differs.as_deref().unwrap_or_default()),
                         input: outcome.input,
                         outcome: outcome.outcome,
                         held: outcome.held.map(Duration::from_millis),

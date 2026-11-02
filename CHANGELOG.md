@@ -7,6 +7,28 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+
+- The gates every side shares hold the Rust side: `tools/check-details.mjs` reads its sources, the
+  differential reads one corpus through every side's testee, a release keeps each side's bench
+  report, the Rust side's included, and the Rust broker trial plays every case but those a row of
+  the matrix excuses it from.
+- `bead::testing::Difference`, with `is_excused` and `LANGUAGE` beside it, in place of
+  `bead::testing::durations::Difference`.
+- The support matrix's "A singular closed enum's undeclared number, echoed" says what protobuf-es
+  writes beside another unknown field and for a wide number, and what Buffa writes.
+- A `JWT` whose header or claims set holds a number past the largest finite double, or nests deeper
+  than 64, is refused at `token` on every side, before its signature is reached, and a relay that
+  does not verify reads no `aud` from it (spec 13.8, 17.5; RFC 7493 §2.2).
+- The spec and its companion, `spec/debugging.md`, state each rule once for every side, a name in
+  its platform's form, and name no language; the support matrix cites the Rust side's tests of a
+  duration read in a browser, and says what Buffa does with a field at another wire type.
+
+### Fixed
+
+- A `proto` payload whose varint's 10th byte sets a bit past the 64th is refused on every side, as
+  no encoding (spec 17.9.1; protobuf's Encoding guide, "Base 128 Varints").
+
 ## [0.9.0] - 2026-10-30
 
 ### Added

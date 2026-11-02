@@ -3,7 +3,9 @@
 
 use std::time::SystemTime;
 
+use hmac::{Hmac, KeyInit, Mac};
 use serde_json::{Value, json};
+use sha2::Sha256;
 
 use super::{
     JwtAgainst, JwtAlgorithm, JwtKey, JwtRefusal, JwtVerdict, assert_jwt_key, audiences_of,
@@ -239,6 +241,108 @@ fn reads_unverified_jwts_only_when_all_three_parts_decode() {
 
     assert_eq!(Value::Object(read_header), object(header), "its header");
     assert_eq!(Value::Object(read_claims), object(claims), "its claims");
+}
+
+// the header these tests sign under, as its JSON text
+const HEADER: &str = r#"{"alg":"HS256","typ":"at+jwt"}"#;
+
+// a token of header and claims, JSON texts as they are written, under the published HS256 key the
+// vectors give its issuer: a text can hold what a JSON writer never writes, 1e400
+fn signed_text(header: &str, claims: &str) -> String {
+    let (_, keys, ..) = holding();
+    let key = keys.first().expect("its HS256 key");
+    let secret = key
+        .jwk
+        .get("k")
+        .and_then(Value::as_str)
+        .and_then(|k| base64url::decode(k.as_bytes()))
+        .expect("its secret");
+    let signing_input = format!(
+        "{}.{}",
+        base64url::encode(header.as_bytes()),
+        base64url::encode(claims.as_bytes())
+    );
+    let mut mac = Hmac::<Sha256>::new_from_slice(&secret).expect("an HMAC key");
+
+    mac.update(signing_input.as_bytes());
+
+    format!(
+        "{signing_input}.{}",
+        base64url::encode(&mac.finalize().into_bytes())
+    )
+}
+
+#[test]
+fn reads_a_token_s_parts_as_section_17_5_bounds_a_payload_no_number_past_the_largest_double_nested_64_deep_at_most()
+ {
+    let (token, keys, audiences, now) = holding();
+    let claims = String::from_utf8(
+        base64url::decode(token.split('.').nth(1).expect("its claims").as_bytes())
+            .expect("base64url"),
+    )
+    .expect("UTF-8");
+    let exp = format!(
+        r#""exp":{}"#,
+        read_jwt(token.as_bytes())
+            .expect("read")
+            .1
+            .get("exp")
+            .expect("its exp")
+    );
+    // a member added to a JSON object's text, its value written as it is
+    let beside = |text: &str, member: &str| {
+        format!(
+            "{},{member}}}",
+            text.strip_suffix('}').expect("an object's text")
+        )
+    };
+    // arrays nested levels deep, below the object that holds them
+    let nested = |levels: usize| format!("{}{}", "[".repeat(levels), "]".repeat(levels));
+    let reading = move || now;
+    let against = JwtAgainst {
+        audiences: &audiences,
+        keys: &keys,
+        now: &reading,
+    };
+    let refused = [
+        signed_text(HEADER, &claims.replace(&exp, r#""exp":1e400"#)),
+        signed_text(HEADER, &beside(&claims, r#""nbf":-1e400"#)),
+        signed_text(HEADER, &beside(&claims, r#""x":[[{"y":1e400}]]"#)),
+        signed_text(&beside(HEADER, r#""x":-1e400"#), &claims),
+        signed_text(HEADER, &beside(&claims, &format!(r#""x":{}"#, nested(64)))),
+        signed_text(&beside(HEADER, &format!(r#""x":{}"#, nested(64))), &claims),
+    ];
+    let holds = [
+        signed_text(HEADER, &beside(&claims, &format!(r#""x":{}"#, nested(63)))),
+        signed_text(&beside(HEADER, &format!(r#""x":{}"#, nested(63))), &claims),
+        // * a bracket within a string opens nothing, and a number below the least double reads as 0
+        signed_text(
+            HEADER,
+            &beside(&claims, &format!(r#""x":"{}","y":1e-400"#, nested(64))),
+        ),
+    ];
+
+    assert!(claims.contains(&exp), "{claims} holds {exp}");
+
+    for each in refused {
+        assert!(read_jwt(each.as_bytes()).is_none(), "{each} not read");
+        assert_eq!(
+            verify_jwt(each.as_bytes(), &against).expect("judged"),
+            JwtVerdict::Refused(JwtRefusal::Token),
+            "{each} refused at token"
+        );
+    }
+
+    for each in holds {
+        assert!(read_jwt(each.as_bytes()).is_some(), "{each} read");
+        assert!(
+            matches!(
+                verify_jwt(each.as_bytes(), &against).expect("judged"),
+                JwtVerdict::Holds { .. }
+            ),
+            "{each} holds"
+        );
+    }
 }
 
 #[test]

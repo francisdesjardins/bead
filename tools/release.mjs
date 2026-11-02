@@ -19,7 +19,9 @@
 // on a hotfix, which starts from main, takes every waiver out of CI's `beadc breaking` step, each
 // moot since the release main holds; and lists what it owes by hand: the CHANGELOG's line on a
 // document's new tag, each of decision 0006's gates owed that names the release, the documents
-// brought to it, and both benches' reports, compared with the last release's.
+// brought to it, and a report of each side's bench the tree holds, compared with the last
+// release's, or with its checkout's by --tree; a side whose bench the last release lacks keeps its
+// first, compared with none.
 // A <move> is x.y.z, patch, minor, major or same, from the document's last release. Run again, it
 // re-dates, regenerates and checks. `tag`, after the finish, <version> defaulting to the newest v*:
 // tags spec-v…, debugging-v… and transcoding-v… at the commit v<version> tags, for each document whose version no
@@ -32,6 +34,8 @@ import { spawnSync } from 'node:child_process';
 import { existsSync, readdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { parseArgs } from 'node:util';
+
+import { SOURCES } from './bench-release.mjs';
 
 import {
   BUILDER,
@@ -324,10 +328,65 @@ export const GATES = 'docs/decisions/0006-a-rule-has-its-gate.md';
 // the records' index: a tree that keeps it owes its documents brought to each release
 export const RECORDS = 'docs/decisions/README.md';
 
-// the benches' comparison: a tree that keeps it owes each release both benches' reports, kept in
-// REPORTS, which git ignores, and compared with the last release's, made on the same machine
+// the benches' comparison: a tree that keeps it owes each release a report of each side's bench
+// the tree holds, by its source in tools/bench-release.mjs, kept in REPORTS, which git ignores, and
+// compared with the last release's made on the same machine, or with the last release's checkout
+// by --tree; a side whose bench the last release lacks has none to compare with
 export const BENCH = 'tools/bench-compare.mjs';
 export const REPORTS = '.bench';
+
+// a list's words, joined as a sentence joins them
+const listed = (words) => {
+  return words.length < 2 ? words.join('') : `${words.slice(0, -1).join(', ')} and ${words.at(-1)}`;
+};
+
+// the line that owes each side's bench report the tree holds, or null where it holds none
+//   last   the last release, or null
+export const benchesOwed = (root, { product, last }) => {
+  const sides = Object.keys(SOURCES).filter((side) => {
+    return existsSync(join(root, SOURCES[side]));
+  });
+  if (sides.length === 0) {
+    return null;
+  }
+  // a side whose bench source the last release's tag does not hold has no baseline to compare with
+  const first = sides.filter((side) => {
+    if (last === null) {
+      return true;
+    }
+    try {
+      git(root, ['cat-file', '-e', `${last.name}:${SOURCES[side]}`]);
+      return false;
+    } catch {
+      return true;
+    }
+  });
+  const compared = sides.filter((side) => {
+    return !first.includes(side);
+  });
+  const owed = [
+    `owed by hand: each side's bench run through tools/bench-release.mjs, its report kept as ${REPORTS}/v${product}-<side>.json, ${listed(sides)}`,
+  ];
+  if (compared.length > 0) {
+    owed.push(
+      `${compared.length === sides.length ? 'each' : listed(compared)} compared with ${last.name}'s on the machine that made it, or, where that machine keeps none, with ${last.name}'s checkout by --tree`
+    );
+  }
+  if (first.length > 0) {
+    owed.push(
+      first.length === sides.length
+        ? 'each its first, compared with none: the next release compares with it'
+        : `${listed(first.map((side) => `${side}'s`))} first, compared with none: the next release compares with ${first.length === 1 ? 'it' : 'them'}`
+    );
+  }
+  if (compared.length > 0) {
+    owed.push(
+      'regression and inconclusive measures confirmed by interleaving before the finish (README.md, "Measurement")'
+    );
+    return owed.join('; ');
+  }
+  return `${owed.join('; ')} (README.md, "Measurement")`;
+};
 
 // a line that runs `beadc breaking`, read whole
 const BREAKING = /\b(?:cli\.ts|beadc(?:\.sh|\.ps1)?) breaking\b/;
@@ -699,13 +758,9 @@ export const prepare = (root, options = {}) => {
       `owed by hand: the documents brought to ${product}, by the bead-release-documents workflow (.claude/workflows/README.md)`
     );
   }
-  if (existsSync(join(root, BENCH))) {
-    const kept = `${REPORTS}/v${product}-typescript.json and -csharp.json`;
-    log(
-      last === null
-        ? `owed by hand: both benches run through tools/bench-release.mjs, their reports kept as ${kept} (README.md, "Measurement")`
-        : `owed by hand: both benches run through tools/bench-release.mjs, their reports kept as ${kept}, each compared with ${last.name}'s on the machine that made them; regression and inconclusive measures confirmed by interleaving before the finish (README.md, "Measurement")`
-    );
+  const benches = existsSync(join(root, BENCH)) ? benchesOwed(root, { product, last }) : null;
+  if (benches !== null) {
+    log(benches);
   }
   if (first) {
     log(`next: git add -A && git commit -m "chore(release): ${product}"`);

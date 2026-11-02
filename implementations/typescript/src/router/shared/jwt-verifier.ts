@@ -156,7 +156,10 @@ const stringOf = (object: Record<string, unknown>, name: string): string | undef
   return isWellFormedString(value) ? value : undefined;
 };
 
-/** A header or a claims set: a JSON object in UTF-8 that names each member once; `undefined` for any other part. */
+/**
+ * A header or a claims set: a JSON object in UTF-8 that names each member once, bounded as spec
+ * 17.5 bounds a payload, no number past a double and 64 deep at most; `undefined` for any other part.
+ */
 const objectOf = (part: string): Record<string, unknown> | undefined => {
   const bytes = fromBase64url(part);
 

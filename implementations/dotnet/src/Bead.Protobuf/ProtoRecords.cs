@@ -53,13 +53,14 @@ public static class ProtoRecords
     /// <summary>
     /// Checks <paramref name="bytes"/> against the records of <paramref name="message"/>, at every
     /// depth: refused, a tag of more than 5 bytes, past 32 bits or of field number 0; a varint of
-    /// more than 10 bytes; a length past the bytes that follow it; a record past the end of its
-    /// message; a packed record whose values do not end at its length; a group closed by another
-    /// number's end group or never closed, an end group that closes none, and the wire types 6 and
-    /// 7; a message nested more than 100 deep below the top one (17.9.3); a field the message
-    /// declares at a wire type its type does not take (17.9.5); and a map's entry with a field other
-    /// than its key and its value (17.9.6). An unknown length-delimited record is opaque, as
-    /// protobuf keeps it.
+    /// more than 10 bytes, or whose 10th byte sets a bit past the 64th, its field known or not,
+    /// packed or not; a length past the bytes that follow it; a record past the end of its message;
+    /// a packed record whose values do not end at its length; a group closed by another number's
+    /// end group or never closed, an end group that closes none, and the wire types 6 and 7; a
+    /// message nested more than 100 deep below the top one (17.9.3); a field the message declares
+    /// at a wire type its type does not take (17.9.5); and a map's entry with a field other than
+    /// its key and its value (17.9.6). An unknown length-delimited record is opaque, as protobuf
+    /// keeps it.
     /// </summary>
     /// <exception cref="FormatException">The bytes are no encoding of the message, or nest too deep.</exception>
     public static void Check(ReadOnlySpan<byte> bytes, MessageDescriptor message)
@@ -525,6 +526,8 @@ public static class ProtoRecords
             return _at + (int)length;
         }
 
+        // a varint of 10 bytes at most, within 64 bits (Encoding, "Base 128 Varints"), within the
+        // message
         private ulong ReadVarint(int end)
         {
             var value = 0UL;
@@ -542,6 +545,13 @@ public static class ProtoRecords
 
                 if ((each & 0x80) == 0)
                 {
+                    // ! a 10th byte past 0x01 sets a bit past the 64th: no unsigned 64-bit integer, so
+                    // no encoding, refused here before Google.Protobuf drops those bits
+                    if (index == 9 && each > 0x01)
+                    {
+                        throw Refused("a varint past 64 bits");
+                    }
+
                     return value;
                 }
             }
