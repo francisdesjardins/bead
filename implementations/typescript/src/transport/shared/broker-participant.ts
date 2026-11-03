@@ -151,8 +151,9 @@ export interface IBrokerParticipantOptions {
    * transport client's `reconnect` takes it: `delay` 1,000 milliseconds between attempts by
    * default, a fixed one held as it is built whatever `reconnects`; `maximumAttempts` without end by
    * default; `signal` read before each attempt and during each wait, an attempt under way not cut
-   * short; `tap` told each wait. A stop ends it at its next attempt. Once it ends it is reported on
-   * `error`, what ended it the `cause`, and the next start or connect links it anew.
+   * short; `tap` told each wait. A delay of 0 waits a later task of the platform, which fake timers
+   * on the globals hold, as they hold its timers. A stop ends it at its next attempt. Once it ends it
+   * is reported on `error`, what ended it the `cause`, and the next start or connect links it anew.
    */
   reconnect?: ITransportClientReconnectOptions | undefined;
   /**

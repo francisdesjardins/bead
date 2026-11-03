@@ -322,8 +322,9 @@ that a test of each side does:
   taken from its adapter and its halves and incarnation drawn, no life given a publication of an
   adapter that offers none, a participant taken over failing each connect until it is started
   again, and a participant's reconnection: its delay held, its attempts and its signal its
-  application's, every end reported with its cause, a stop among them, and its next start linking it
-  anew, `transport/shared/__tests__/broker-participant.test.ts` and
+  application's, every end reported with its cause, a stop among them, its next start linking it
+  anew, and a turn of its platform between two attempts at a delay of 0,
+  `transport/shared/__tests__/broker-participant.test.ts` and
   `Bead.Core.Tests/BrokerParticipantTests`
   (`subscribes its inbox before anything goes, takes its id from its adapter, and draws its incarnation and each half from a cryptographic source (spec 15.24)`,
   `closes each connection as its link goes down, and connects anew as another incarnation, resetting its peers`,
@@ -336,6 +337,7 @@ that a test of each side does:
   `ends its reconnection before any attempt once its signal is aborted`,
   `links anew at its next start once its reconnection ended`,
   `reports its reconnection ended when its delay function or its tap throws`,
+  `takes a turn of its platform between two attempts at a delay of 0, over an adapter that refuses its start at once`,
   `acknowledges a message once taken or dropped as a copy, never after its router is done with it`,
   `is refused as built when its application requires delivery at least once of an adapter that gives it at most once`);
   a direction's sequence and its parts, `broker-sequence.test.ts` and `BrokerSequenceTests`

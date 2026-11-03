@@ -64,10 +64,11 @@ export interface ITransportClientReconnectOptions {
   /**
    * Milliseconds to wait after a failed attempt before the next one, or a function of the previous
    * wait and the number of the attempt that failed; 1,000 by default. The first attempt goes at
-   * once; one of 0 waits none, one from 1 to 2³¹ − 1 is rounded to the nearest whole one, which
+   * once; one of 0 arms no timer, one from 1 to 2³¹ − 1 is rounded to the nearest whole one, which
    * `tap` hears, and any other — `Infinity` among them — is a {@link ProgrammerError}: a number's
    * where it is given (spec 1.4), a function's answer at the attempt it follows, before `tap`
-   * hears it.
+   * hears it. A delay of 0 waits a later task of the platform, which fake timers on the globals
+   * hold, as they hold its timers.
    */
   delay?: TransportClientReconnectDelay | undefined;
   /**

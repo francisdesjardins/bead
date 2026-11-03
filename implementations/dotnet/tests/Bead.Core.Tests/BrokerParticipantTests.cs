@@ -1099,6 +1099,53 @@ public sealed class BrokerParticipantTests
         Assert.Equal((false, false), (throwing.IsLinked, tapping.IsLinked));
     }
 
+    // spec 1.4
+    [Fact]
+    public async Task Takes_a_turn_of_its_platform_between_two_attempts_at_a_delay_of_0_over_an_adapter_that_refuses_its_start_at_once()
+    {
+        var scheduler = new SerialScheduler();
+        var broker = new MemoryBroker();
+        var adapter = broker.Adapter(new MemoryBrokerAdapterOptions { Id = "ada" });
+        var refusing = new CallingAdapter(adapter) { Starts = 1 };
+        // the starts asked of its broker as a turn queued at its first wait ran
+        int? ranAt = null;
+        await using var participant = new BrokerParticipant(refusing, new BrokerParticipantOptions
+        {
+            Scheduler = scheduler,
+            Reconnect = new TransportClientReconnectOptions
+            {
+                Delay = Immediately,
+                MaximumAttempts = 3,
+                Tap = (_, attempt) =>
+                {
+                    // * a turn queued on the scheduler its loop runs on, as its first wait is told
+                    if (attempt == 1)
+                    {
+                        scheduler.Post(() =>
+                        {
+                            ranAt = StartsIn(refusing);
+                        });
+                    }
+                },
+            },
+        });
+        var reported = Hearing(participant);
+
+        await participant.Start();
+        adapter.Lose();
+        await BrokerPair.Until(
+            () =>
+            {
+                return !reported.IsEmpty;
+            },
+            "its attempts spent");
+        await scheduler.WhenIdle();
+
+        // * that turn ran before its second attempt
+        Assert.Equal(2, ranAt);
+        Assert.Equal(["the link of ada went down, and 3 attempts did not bring it back"], WordsOf(reported));
+    }
+
     [Fact]
     public async Task Serves_its_names_again_once_its_link_connects_anew_its_former_peers_reset()
     {
@@ -1985,12 +2032,15 @@ public sealed class BrokerParticipantTests
     }
 
     // an adapter that writes down each call its participant makes of it, in order, and passes it on,
-    // what it publishes to a topic bounded by Room when given, its leg secure as Secure says when given
+    // what it publishes to a topic bounded by Room when given, its leg secure as Secure says when given,
+    // each start after its first Starts refused as it returns when given
     private sealed class CallingAdapter(MemoryBrokerAdapter inner) : IBrokerAdapter
     {
         public long? Room { get; init; }
 
         public bool? Secure { get; init; }
+
+        public int? Starts { get; init; }
 
         public event Action<BrokerMessage>? Message
         {
@@ -2068,6 +2118,11 @@ public sealed class BrokerParticipantTests
         public Task Start(BrokerStart? start = null)
         {
             Calls.Enqueue("start");
+
+            if (Starts is { } starts && StartsIn(this) > starts)
+            {
+                return Task.FromException(new IOException("refused at once"));
+            }
 
             return inner.Start(start);
         }

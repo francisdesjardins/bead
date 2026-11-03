@@ -12,10 +12,10 @@ allow-print-in-tests = true
 # public surface too, while 0.y lets it break; missing_const_for_fn, which would push const onto it,
 # is allowed in the lints table instead
 avoid-breaking-exported-api = false
-# The core spawns and keeps time through one private module, `platform`, and the clock (decisions
-# 0044 and 0011), so that it compiles for a browser's WebAssembly as natively; what a test or a
-# native target takes from its platform goes through the test kit, or is exempted once, with its
-# reason, at its root
+# The core spawns, yields and keeps time through one private module, `platform`, and the clock
+# (decisions 0044 and 0011), so that it compiles for a browser's WebAssembly as natively; what a
+# test or a native target takes from its platform goes through the test kit, or is exempted once,
+# with its reason, at its root
 disallowed-methods = [
   { path = "tokio::runtime::Handle::spawn", reason = "spawn through crate::platform" },
   { path = "tokio::runtime::Handle::spawn_blocking", reason = "spawn through crate::platform" },
@@ -25,6 +25,7 @@ disallowed-methods = [
   { path = "tokio::task::spawn", reason = "spawn through crate::platform" },
   { path = "tokio::task::spawn_blocking", reason = "spawn through crate::platform" },
   { path = "tokio::task::spawn_local", reason = "spawn through crate::platform" },
+  { path = "tokio::task::yield_now", reason = "a turn through crate::platform, or the test kit's" },
   # reachable where tokio's rt-multi-thread is on, in a test, the benches or the interop; never in
   # the library, nor on the browser's target
   { path = "tokio::task::block_in_place", reason = "a turn awaits nothing", allow-invalid = true },

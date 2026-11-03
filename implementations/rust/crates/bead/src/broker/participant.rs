@@ -139,9 +139,9 @@ pub struct BrokerParticipantOptions {
     /// How its link connects again once lost, each time a new incarnation (spec 15.21): a second
     /// between attempts when none; its attempts without end when it names none; its fixed delay
     /// held as it is built, whatever `reconnects`. Its signal is read before each attempt and during
-    /// each wait, an attempt under way not cut short; a stop ends it at its next attempt. Once it
-    /// ends it is reported, what ended it the report's source, and the next start or connect links
-    /// it anew.
+    /// each wait, an attempt under way not cut short; a delay of 0 none, its next attempt in a later
+    /// turn of its tokio runtime; a stop ends it at its next attempt. Once it ends it is reported,
+    /// what ended it the report's source, and the next start or connect links it anew.
     pub reconnect: Option<TransportClientReconnectOptions>,
     /// Whether its link connects again once lost, as `reconnect` says: true when none; false leaves
     /// it down, reported, until a start or a connect links it anew.

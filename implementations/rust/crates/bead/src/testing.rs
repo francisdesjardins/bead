@@ -39,7 +39,7 @@ mod tests;
 pub mod validations;
 pub mod vectors;
 
-pub use platform::{Instant, patience, rest, spawn, wall_now};
+pub use platform::{Instant, patience, rest, spawn, wall_now, yield_now};
 pub use reading_clock::ReadingClock;
 
 /// The language a row of the support matrix names when it excuses this side from an entry.
@@ -102,7 +102,7 @@ impl Activity {
 
             if self.count.load(Ordering::SeqCst) == 0 {
                 // * a task woken by the last job may still run without posting: one turn more
-                tokio::task::yield_now().await;
+                yield_now().await;
 
                 if self.count.load(Ordering::SeqCst) == 0 {
                     return;

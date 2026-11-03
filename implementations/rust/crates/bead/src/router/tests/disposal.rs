@@ -185,7 +185,7 @@ async fn let_go<T: ?Sized + Send + Sync>(weak: &Weak<T>) -> bool {
             return true;
         }
 
-        tokio::task::yield_now().await;
+        crate::testing::yield_now().await;
     }
 
     weak.strong_count() == 0
