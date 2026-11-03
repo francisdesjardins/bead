@@ -232,7 +232,13 @@ fn duration_of(name: &str, given: Option<&Value>) -> Result<Option<Duration>, Pr
             ProgrammerError::new(format!("{name} is a number of milliseconds, not {given}"))
         })?;
 
-    hold_finite(name, Duration::from_secs_f64(milliseconds / 1_000.0)).map(Some)
+    let duration = Duration::try_from_secs_f64(milliseconds / 1_000.0).map_err(|_range| {
+        ProgrammerError::new(format!(
+            "{name} is a representable duration in milliseconds, not {given}"
+        ))
+    })?;
+
+    hold_finite(name, duration).map(Some)
 }
 
 fn name_of(session: Option<&CallSession>) -> Value {
