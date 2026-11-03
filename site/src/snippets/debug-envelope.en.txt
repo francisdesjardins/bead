@@ -1,0 +1,9 @@
+// the client's router, in order: its connection is always 'server'
+{ connectionHandle: 'server', direction: 'tx', header: { callId: 1, kind: 0x10, procedureId: 1, serviceId: 1 } }
+{ connectionHandle: 'server', direction: 'rx', header: { callId: 1, credentialScheme: 1, kind: 0x11 } }  // the session announced, OPAQUE
+{ connectionHandle: 'server', direction: 'tx', header: { callId: 7, kind: 0x10, opensSubscription: true, procedureId: 4, serviceId: 1 } }
+{ connectionHandle: 'server', direction: 'rx', header: { callId: 7, kind: 0x13 } }  // the notification
+{ connectionHandle: 'server', direction: 'tx', header: { callId: 7, kind: 0x16 } }  // the subscription dropped
+
+// the server's router names the client's connection
+{ connectionHandle: 'type=WS;ip=127.0.0.1;port=57218;ordinal=1', direction: 'rx', header: { callId: 1, … } }

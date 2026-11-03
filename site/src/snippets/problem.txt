@@ -1,0 +1,23 @@
+{
+  "code": 52,
+  "errors": [
+    {
+      "bounds": {"lte": 10},
+      "detail": "must be less than or equal to 10",
+      "fieldPath": "from",
+      "pointer": "#/from",
+      "ruleId": "int32.lte"
+    },
+    {
+      "bounds": {"max_len": "3"},
+      "detail": "must be at most 3 characters",
+      "fieldPath": "title",
+      "parameter": "title",
+      "ruleId": "string.max_len"
+    }
+  ],
+  "scope": "protocol",
+  "status": 422,
+  "title": "PAYLOAD_INVALID",
+  "type": "tag:francisdesjardins.ca,2026:bead/PAYLOAD_INVALID"
+}

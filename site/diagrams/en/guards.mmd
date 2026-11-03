@@ -1,0 +1,12 @@
+flowchart TB
+  rq("a request")
+  sock["address reachable?<br/>no: no socket"]
+  host["host taken?<br/>no: 403 host-refused"]
+  orig["origin taken?<br/>no: 403 origin-refused"]
+  cap["a free place?<br/>no: 35 CAPACITY_EXCEEDED"]
+  route["procedure known?<br/>no: 18 or 19, …_UNKNOWN"]
+  cred["credential holds?<br/>no: 36 or 32, like a 401"]
+  adm["admission accepted?<br/>no: 33 ACCESS_DENIED, like a 403"]
+  pay["payload read and valid?<br/>no: 50 or 52"]
+  proc("the procedure runs")
+  rq --> sock -- yes --> host -- yes --> orig -- yes --> cap -- yes --> route -- yes --> cred -- yes --> adm -- yes --> pay -- yes --> proc

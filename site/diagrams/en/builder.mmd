@@ -1,0 +1,15 @@
+flowchart TB
+  proto[".proto<br/>its bead.* and buf.validate options"] --> buf["buf<br/>compiles it into an image"]
+  buf --> fe["the front end<br/>reads the services, the options,<br/>the requests' rules<br/>and the google.api.http routes"]
+  fe --> bp["the blueprint<br/>bead-blueprint/1, JSON"]
+  bp --> chk{"beadc check<br/>its rules"}
+  chk -- refused --> err["findings<br/>file:line:column"]
+  chk -- passes --> ts["TypeScript target<br/>server, client, validators<br/>and route table"]
+  chk -- passes --> cs["C# target<br/>server, client, validators<br/>and route table"]
+  chk -- passes --> oas["an OpenAPI 3.1.1<br/>document, embedded<br/>byte for byte"]
+  oas --> ts
+  oas --> cs
+  buf --> msg["the messages<br/>protoc-gen-es, protoc C#"]
+  msg --> ts
+  msg --> cs
+  bp -. "against the last release" .-> brk["beadc breaking<br/>WIRE or API,<br/>HTTP under both"]

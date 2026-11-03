@@ -1,0 +1,15 @@
+sequenceDiagram
+  participant C as Client
+  participant B as Broker
+  participant S as Server, a member of the group
+  C->>B: OPEN · to the name interop<br/>its half A, its bound
+  B->>S: the OPEN, to a single member
+  S->>B: ACCEPT · to the client's inbox<br/>halves A and B
+  B->>C: the ACCEPT
+  C->>B: PING · sequence 2<br/>halves A and B
+  B->>S: the PING, the third leg
+  Note over S: the connection told<br/>to the router, its handle
+  C->>B: DATA · a REQUEST
+  B->>S: the DATA, inbox to inbox
+  S->>B: DATA · its RESULT
+  B->>C: the DATA

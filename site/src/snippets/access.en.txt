@@ -1,0 +1,4 @@
+server.router.on('accessRefused', ({ address, code, credentialScheme, port, procedureId, reason, serviceId, stage }) => {
+  // credential 32 exp: an expired JWT, scheme 2, service 1, procedure 4, from 203.0.113.7:53114
+  console.warn(`refused ${stage} ${code} ${reason ?? ''}: scheme ${credentialScheme}, ${serviceId}/${procedureId}, from ${address}:${port}`);
+});

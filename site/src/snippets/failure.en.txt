@@ -1,0 +1,15 @@
+import { FailureError, ProtocolCode } from '@francisdesjardins/bead/client';
+import { violationsOf } from '@francisdesjardins/bead/service';
+
+try {
+  await echo('')();
+} catch (reason) {
+  if (reason instanceof FailureError && reason.isApplication(21)) {
+    // the procedure's own code 21: it refuses an empty text
+  } else if (reason instanceof FailureError && reason.isProtocol(ProtocolCode.SESSION_REQUIRED)) {
+    // the protocol's code 32: open a session, or renew its credential, then call again
+  } else if (reason instanceof FailureError && reason.isProtocol(ProtocolCode.PAYLOAD_INVALID)) {
+    // code 52: each violation names its field and its rule, more counts those left out
+    const { more, violations } = violationsOf(reason);
+  }
+}

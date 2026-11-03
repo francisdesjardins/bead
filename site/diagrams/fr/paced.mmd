@@ -1,0 +1,11 @@
+sequenceDiagram
+  participant C as Client
+  participant S as Serveur
+  C->>S: REQUEST · callId 7 · SUBSCRIPTION, PACED
+  S-->>C: RESULT · callId 7
+  S-->>C: NOTIFICATION · callId 7 · article 7, changement 1
+  Note over C: le rappel va chercher l'article
+  Note over S: changements 2 à 45 en file,<br/>sous une clé : le dernier gardé
+  Note over C: le rappel a fini
+  C->>S: CREDIT · callId 7 · PACED · 2
+  S-->>C: NOTIFICATION · callId 7 · article 7, changement 45

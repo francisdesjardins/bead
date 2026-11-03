@@ -1,0 +1,12 @@
+flowchart TD
+  rx("message received") --> pre{"prefix<br/>readable?"}
+  pre -- no --> rep1["reported<br/>ENVELOPE_MALFORMED"]
+  pre -- yes --> rd{"envelope<br/>readable?"}
+  rd -- yes --> ok("dispatched<br/>by kind")
+  rd -- no --> gate{"REQUEST of the<br/>peer's parity,<br/>callId free?"}
+  gate -- yes --> ans["FAILURE<br/>on that callId"]
+  gate -- no --> set{"RESULT, FAILURE<br/>or CHUNK 0xA1<br/>of a pending call<br/>or of a transfer<br/>received?"}
+  set -- yes --> loc["the call or the transfer ends:<br/>local rejection and CANCEL,<br/>or FAILURE CHUNK_INVALID"]
+  set -- no --> late{"on a reserved callId<br/>or a call given up?"}
+  late -- yes --> quiet["arrived late:<br/>dropped in silence"]
+  late -- no --> rep2["reported,<br/>never answered"]

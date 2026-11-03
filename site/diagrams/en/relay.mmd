@@ -1,0 +1,13 @@
+sequenceDiagram
+  participant C as Client
+  participant R as Gateway, the relay
+  participant A as Destination 7
+  C->>R: REQUEST · callId 3 · DESTINATION 7<br/>CREDENTIAL JWT
+  Note over R: admitted on its scheme,<br/>7 registered, its audience<br/>named by aud,<br/>under both limits
+  R->>A: REQUEST · callId 1 · leg B<br/>CREDENTIAL JWT: the same bytes
+  Note over A: verifies the JWT:<br/>the call runs<br/>in its session
+  A-->>R: RESULT · callId 1
+  R-->>C: RESULT · callId 3
+  C->>R: REQUEST · callId 5 · DESTINATION 8<br/>CREDENTIAL JWT
+  R-->>C: FAILURE · callId 5<br/>DESTINATION_UNREACHABLE
+  Note over C,A: 8 verifies another audience:<br/>refused at the opening, nothing leaves for the destination

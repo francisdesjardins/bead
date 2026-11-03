@@ -1,0 +1,12 @@
+flowchart TD
+  rx("message reçu") --> pre{"préfixe<br/>lisible ?"}
+  pre -- non --> rep1["signalé<br/>ENVELOPE_MALFORMED"]
+  pre -- oui --> rd{"enveloppe<br/>lisible ?"}
+  rd -- oui --> ok("aiguillée<br/>par genre")
+  rd -- non --> gate{"REQUEST de la<br/>parité du pair,<br/>callId libre ?"}
+  gate -- oui --> ans["FAILURE<br/>sur ce callId"]
+  gate -- non --> set{"RESULT, FAILURE<br/>ou CHUNK 0xA1<br/>d’un appel en attente<br/>ou d’un transfert<br/>reçu ?"}
+  set -- oui --> loc["l'appel ou le transfert finit :<br/>rejet local et CANCEL,<br/>ou FAILURE CHUNK_INVALID"]
+  set -- non --> late{"sur un callId réservé<br/>ou un appel abandonné ?"}
+  late -- oui --> quiet["arrivé en retard :<br/>ignoré en silence"]
+  late -- non --> rep2["signalé,<br/>jamais répondu"]

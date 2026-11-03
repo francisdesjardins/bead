@@ -1,0 +1,9 @@
+sequenceDiagram
+  participant C as Client
+  participant S as Serveur
+  C->>S: REQUEST · callId 5
+  Note over C: délai écoulé
+  C->>S: CANCEL · callId 5
+  Note over C: 5 réservé : ce qui arrive<br/>en retard est ignoré
+  Note over S: l'appel oublié, son abonnement défait,<br/>puis le signal du résolveur abattu
+  S--)C: RESULT · callId 5, parti avant le CANCEL :<br/>ignoré en silence

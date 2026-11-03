@@ -1,0 +1,11 @@
+sequenceDiagram
+  participant C as Client
+  participant S as Server
+  C->>S: REQUEST · callId 9 · CountDownRequest, from 12
+  Note over S: the payload reads, then is judged:<br/>from 10 at most does not hold
+  S-->>C: FAILURE · callId 9 · PAYLOAD_INVALID<br/>one violation, then {"more":0}
+  Note over S: the resolver never saw it
+  Note over C: validates: the value judged before it goes
+  Note over C: from 11: PAYLOAD_INVALID,<br/>the same detail, nothing is sent
+  C->>S: REQUEST · callId 11 · from 3
+  S-->>C: RESULT · callId 11
