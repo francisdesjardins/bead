@@ -3763,6 +3763,51 @@ public sealed class HttpTransportClientTests
         Assert.Equal(2, failing.Fetch.Count);
     }
 
+    // spec 1.4
+    [Fact]
+    public async Task Refuses_a_fixed_delay_out_of_bounds_as_reconnect_is_called_nothing_changed()
+    {
+        await using var faked = await ConnectFake(NotListening);
+        var told = new ConcurrentQueue<string>();
+
+        ((IRouterClientTransport)faked.Client).Reconnect += () =>
+        {
+            told.Enqueue("reconnect");
+        };
+        faked.Client.Close += (_, _) =>
+        {
+            told.Enqueue("close");
+        };
+
+        // * refused as it is called: after its state's guards, before its token
+        foreach (var (delay, written) in new[]
+        {
+            (TimeSpan.FromTicks(4_000), "0.4"),
+            (TimeSpan.FromMilliseconds(2_147_483_648), "2147483648"),
+            (Timeout.InfiniteTimeSpan, "infinite"),
+        })
+        {
+            var refused = await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() =>
+            {
+                return faked.Client.Reconnect(new TransportClientReconnectOptions { Delay = new TransportClientReconnectDelay(delay), CancellationToken = new CancellationToken(true) });
+            });
+
+            Assert.Equal($"a delay is 0 for at once, or a number of milliseconds from 1 to 2147483647, not {written} (Parameter 'Delay')", refused.Message);
+        }
+
+        // nothing changed: open, no connection drawn, no reconnect told and no close
+        Assert.Equal((ReadyState.Open, 1), (faked.Client.ReadyState, faked.Fetch.Count));
+        Assert.Empty(told);
+
+        // its state's guards first: a client never connected says so
+        await using var never = new HttpTransportClient();
+
+        Assert.Equal("the transport client was never connected", (await Assert.ThrowsAsync<InvalidOperationException>(() =>
+        {
+            return never.Reconnect(new TransportClientReconnectOptions { Delay = new TransportClientReconnectDelay(Timeout.InfiniteTimeSpan) });
+        })).Message);
+    }
+
     // a connect's timeout disposal runs after its state becomes Open and before its task settles.
     private sealed class DisposingClock : TimeProvider
     {
