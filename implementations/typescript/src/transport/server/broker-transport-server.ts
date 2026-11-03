@@ -82,7 +82,8 @@ const hexOf = (bytes: Uint8Array): string => {
  * within `acceptTimeout` is forgotten, telling nothing. In a group, it lets its names go while it
  * holds `maximumConnections`. It carries no credential toward its client, and a connection is secure
  * while its own leg and its peer's are, its own as `secure` says where given, its ACCEPT marked so.
- * Its stop takes no OPEN and closes each connection with 1001; its participant's link is kept. A
+ * Its stop takes no OPEN and closes each connection with 1001; its participant's link is kept. Its
+ * start once its participant stopped is a {@link ProgrammerError}, its state kept (spec 15.21). A
  * connection its router paused is held by its participant, in order, its CLOSE behind what it
  * holds, to `maximumHeldEnvelopeBytes`, past which that connection alone is lost: nothing of a pause
  * reaches its peer over a broker, whose link carries other connections (spec 15.12, 15.23).
@@ -337,6 +338,13 @@ export const createBrokerTransportServer = (
         secure,
         type: port.adapter.type,
 
+        // ! its participant outranks it: once stopped, a start over it is a misuse, its state kept
+        // (spec 15.21)
+        assertStart: () => {
+          if (port.isStopped) {
+            throw new ProgrammerError(`the participant ${port.id} is stopped`);
+          }
+        },
         close: (connection) => {
           entryOf(connection.connectionHandle)?.connection?.close(CloseCode.NORMAL);
 

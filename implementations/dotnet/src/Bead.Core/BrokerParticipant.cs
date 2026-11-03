@@ -52,8 +52,8 @@ public sealed record BrokerParticipantOptions
     /// before each attempt and during each wait, an attempt under way not cut short; a wait of zero
     /// none, its next attempt in a later turn of its scheduler; its tap told each wait. A stop ends
     /// it at its next attempt, and at once during one. Once it ends it is reported through
-    /// <see cref="BrokerParticipant.Error"/>, what ended it the inner exception, and the next start or
-    /// connect links it anew.
+    /// <see cref="BrokerParticipant.Error"/>, what ended it the inner exception, and, unless it
+    /// stopped, the next start or connect links it anew.
     /// </summary>
     public TransportClientReconnectOptions? Reconnect { get; init; }
 
@@ -108,7 +108,8 @@ public sealed class BrokerParticipant : IAsyncDisposable
     private CancellationTokenSource? _relinking;
     private TaskCompletionSource _live = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private bool _isStopped;
-    // what its stop cancels: its adapter's start under way gives up on it; cancelled, never disposed
+    // what its stop cancels: its adapter's start under way gives up on it, and a client's reconnection
+    // under way ends; cancelled, never disposed
     private readonly CancellationTokenSource _stopping = new();
     // its adapter's start under way, which its stop awaits before it stops its adapter; touched in its turn alone
     private Task? _adapterStart;
@@ -547,7 +548,8 @@ public sealed class BrokerParticipant : IAsyncDisposable
     /// Starts its link: its incarnation drawn, its adapter started, its will set where it offers
     /// one, its inbox subscribed and the names of its server transports that serve; settles once all
     /// of it is held. A second start shares the first, or starts anew once the first failed, or once
-    /// its link was taken over.
+    /// its link was taken over. Refused with an <see cref="ObjectDisposedException"/> once stopped: a
+    /// stopped participant links no more (spec 15.21).
     /// </summary>
     public Task Start()
     {
@@ -555,7 +557,7 @@ public sealed class BrokerParticipant : IAsyncDisposable
         {
             if (_isStopped)
             {
-                return Task.FromException(new InvalidOperationException($"the participant {Id} is stopped"));
+                return Task.FromException(StoppedRefusal());
             }
 
             // * its application's start lifts the fence a takeover set
@@ -691,21 +693,43 @@ public sealed class BrokerParticipant : IAsyncDisposable
     }
 
     /// <summary>
-    /// Settles once its link is up, started or connected again; a cancel ends the wait. Its link
-    /// taken over, it fails at once with a <see cref="ConnectException"/> naming it: a connect never
-    /// lifts the fence, which its application's start alone does.
+    /// Settles once its link is up, started or connected again; a cancel ends the wait. Stopped, it
+    /// fails at once with a <see cref="ConnectException"/>, the connect overtaken by its stop; its
+    /// link taken over, with one naming it: a connect never lifts the fence, which its application's
+    /// start alone does. What its link's start fails with fails the connect: its adapter's misuse a
+    /// <see cref="ConnectException"/> with it inside, which another attempt may mend (spec 15.21).
     /// </summary>
     internal async Task WhenLinked(CancellationToken cancellationToken)
     {
         lock (_gate)
         {
+            // ! the stop first: a connect it overtook fails as one, never the takeover's words
+            if (_isStopped)
+            {
+                throw new ConnectException($"the participant {Id} stopped as it connected");
+            }
+
             if (_isTakenOver)
             {
                 throw new ConnectException($"{TakenOver}, and connects no more until it is started again");
             }
         }
 
-        await Start().WaitAsync(cancellationToken);
+        try
+        {
+            await Start().WaitAsync(cancellationToken);
+        }
+        catch (Exception reason) when (IsStopped)
+        {
+            // * the stop's refusal, racing its check, never comes through: a connect it overtook
+            throw new ConnectException($"the participant {Id} stopped as it connected", reason);
+        }
+        catch (Exception reason) when (reason is (InvalidOperationException and not ObjectDisposedException) or ArgumentException)
+        {
+            // * its adapter's misuse, a failure of this connect another attempt may mend; a
+            // disposed object's never one of its link's
+            throw new ConnectException(reason.Message, reason);
+        }
 
         Task live;
 
@@ -1122,7 +1146,8 @@ public sealed class BrokerParticipant : IAsyncDisposable
     }
 
     // its link connected again, as its reconnection says, without end unless its application bounds
-    // it; ended, reported, what ended it inside, and its next start or connect links it anew
+    // it; ended, reported, what ended it inside, and, unless it stopped, its next start or connect
+    // links it anew
     private async Task Relinking(List<(string PeerId, (ulong Opener, ulong Acceptor) Pair)> peers)
     {
         var reconnect = _options.Reconnect ?? new TransportClientReconnectOptions();
@@ -1210,8 +1235,8 @@ public sealed class BrokerParticipant : IAsyncDisposable
         });
     }
 
-    // whether it was stopped
-    private bool IsStopped
+    /// <summary>Whether it was stopped: it links no more (spec 15.21).</summary>
+    internal bool IsStopped
     {
         get
         {
@@ -1222,7 +1247,26 @@ public sealed class BrokerParticipant : IAsyncDisposable
         }
     }
 
-    // its reconnection ended: it stays down, said so, and the next start or connect links it anew
+    /// <summary>What its stop cancels: a client's reconnection under way ends as it does (spec 15.15, 15.21).</summary>
+    internal CancellationToken Stopping
+    {
+        get
+        {
+            return _stopping.Token;
+        }
+    }
+
+    /// <summary>
+    /// What a call made after its stop is refused with, its application's misuse (spec 15.21): an
+    /// <see cref="ObjectDisposedException"/>, the side's own words alone.
+    /// </summary>
+    internal ObjectDisposedException StoppedRefusal()
+    {
+        return new ObjectDisposedException(null, $"the participant {Id} is stopped");
+    }
+
+    // its reconnection ended: it stays down, said so, and, unless it stopped, the next start or
+    // connect links it anew
     private void Ended(IOException report)
     {
         lock (_gate)

@@ -359,8 +359,9 @@ crate::broker::adapter
     derives Clone
   enum BrokerError #[non_exhaustive]
     Refused(ProgrammerError)
-    Failed(String)
+    Failed { message: String, source: Option<Arc<dyn Error + Send + Sync>> } #[non_exhaustive]
     fn failed<M: Into<String>>(message: M) -> Self
+    fn caused<M: Into<String>>(message: M, source: Arc<dyn Error + Send + Sync>) -> Self
     implements Display, Error, From
     derives Clone, Debug
   trait BrokerListener: Send + Sync

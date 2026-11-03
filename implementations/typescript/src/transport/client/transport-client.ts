@@ -303,12 +303,25 @@ export const createTransportClient = <
         );
       }
 
+      // * its target held again as it is called, before anything moves: what its transport's owner
+      // refuses since, as a participant stopped, is a misuse
+      implementation.assertConnect?.(lastConnectOptions);
+
       // * held as it is called, before anything moves: a fixed delay out of bounds among it
       assertHeldReconnection({ delay, maximumAttempts });
 
+      // its own signal joined to its transport's lifetime, which ends it as its owner ends
+      const { lifetime } = implementation;
+      const ending =
+        lifetime === undefined
+          ? signal
+          : signal === undefined
+            ? lifetime
+            : AbortSignal.any([signal, lifetime]);
+
       // before the dispose below, so an already aborted signal leaves an open connection alone
-      if (signal?.aborted) {
-        throw reconnectionCancelOf(signal);
+      if (ending?.aborted) {
+        throw reconnectionCancelOf(ending);
       }
 
       const target = lastConnectOptions;
@@ -333,13 +346,13 @@ export const createTransportClient = <
               isAttempting = false;
             }
           },
-          { clock: client.clock, delay, maximumAttempts, signal, tap }
+          { clock: client.clock, delay, maximumAttempts, signal: ending, tap }
         );
 
-        if (signal?.aborted) {
+        if (ending?.aborted) {
           await client.disconnect().catch(noop);
 
-          throw reconnectionCancelOf(signal);
+          throw reconnectionCancelOf(ending);
         }
       } catch (reason) {
         setReadyStateClosed(client);

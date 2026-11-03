@@ -28,7 +28,7 @@ mod tests;
 #[derive(Debug, Clone)]
 pub struct CodecRefusal {
     reason: String,
-    cause: Option<Arc<dyn Error + Send + Sync>>,
+    source: Option<Arc<dyn Error + Send + Sync>>,
 }
 
 impl CodecRefusal {
@@ -37,14 +37,14 @@ impl CodecRefusal {
     pub fn new<R: Into<String>>(reason: R) -> Self {
         Self {
             reason: reason.into(),
-            cause: None,
+            source: None,
         }
     }
 
     /// The same refusal, caused by `cause`: what more the side knows of it.
     #[must_use]
     pub fn caused_by(mut self, cause: Arc<dyn Error + Send + Sync>) -> Self {
-        self.cause = Some(cause);
+        self.source = Some(cause);
         self
     }
 
@@ -71,9 +71,9 @@ impl fmt::Display for CodecRefusal {
 
 impl Error for CodecRefusal {
     fn source(&self) -> Option<&(dyn Error + 'static)> {
-        self.cause
+        self.source
             .as_deref()
-            .map(|cause| -> &(dyn Error + 'static) { cause })
+            .map(|source| -> &(dyn Error + 'static) { source })
     }
 }
 

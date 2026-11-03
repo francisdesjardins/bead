@@ -44,7 +44,8 @@ fn combines_capabilities_without_offering_any_that_are_absent() {
 }
 
 #[test]
-fn reports_a_refusal_as_its_cause_and_a_link_failure_as_its_message_alone() {
+fn reports_a_refusal_and_a_caused_failure_as_their_source_and_a_link_failure_as_its_message_alone()
+{
     let misuse = ProgrammerError::new("the adapter offers no groups");
     let refused = BrokerError::from(misuse.clone());
 
@@ -68,6 +69,31 @@ fn reports_a_refusal_as_its_cause_and_a_link_failure_as_its_message_alone() {
         "the failure"
     );
     assert!(failed.source().is_none(), "no fabricated cause");
+
+    // * a caused failure says its message alone, its source the one given
+    let source: Arc<dyn Error + Send + Sync> = Arc::new(BrokerError::failed("its broker hung up"));
+    let caused = BrokerError::caused(
+        "the participant ada stopped as it started",
+        Arc::clone(&source),
+    );
+
+    assert_eq!(
+        caused.to_string(),
+        "the participant ada stopped as it started",
+        "its message alone"
+    );
+    assert_eq!(
+        caused.source().map(ToString::to_string).as_deref(),
+        Some("its broker hung up"),
+        "its source"
+    );
+    assert!(
+        matches!(
+            &caused,
+            BrokerError::Failed { source: Some(given), .. } if Arc::ptr_eq(given, &source)
+        ),
+        "the source given"
+    );
 }
 
 #[test]

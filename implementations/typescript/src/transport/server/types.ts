@@ -248,6 +248,11 @@ export interface ITransportServerImplementation<Socket = unknown> {
   readonly secure?: boolean | undefined;
   readonly defaults: TransportServerResolvedStartOptions;
   readonly type: TRANSPORTS;
+  /**
+   * Refuses, by throwing, a start its owner forbids, before anything else is held and before the
+   * state moves: as a stopped broker participant's server's.
+   */
+  assertStart?(): void;
   close(connection: ITransportServerClientAware<Socket>): Promise<void>;
   /** What the transport keeps of its connections besides the registry, counted; none, when nothing. */
   gauges?(): IGauges<TransportServerConnectionHandle>;
