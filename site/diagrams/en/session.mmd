@@ -1,0 +1,12 @@
+sequenceDiagram
+  participant C as Client
+  participant S as Server
+  C->>S: REQUEST · callId 1 · open a session
+  S-->>C: RESULT · callId 1 · CREDENTIAL OPAQUE: the token
+  C->>S: REQUEST · callId 3
+  S-->>C: RESULT · callId 3 · no block: nothing changed
+  C->>S: REQUEST · callId 5 · subscribe
+  S-->>C: RESULT · callId 5
+  Note over S: session timeout expired
+  S-->>C: FAILURE · callId 5 · SESSION_REQUIRED<br/>CREDENTIAL NONE: the session has ended
+  Note over C,S: the connection stays, for another session

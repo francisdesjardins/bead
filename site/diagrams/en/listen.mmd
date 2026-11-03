@@ -1,0 +1,12 @@
+sequenceDiagram
+  participant C as Client
+  participant S as Server
+  C->>S: POST · bead-listen ?1
+  S-->>C: 201 · bead-connection-token,<br/>bead-listen ?1
+  C->>S: GET /bead · bead-after: 0<br/>bead-wait: 25000
+  Note over S: nothing to report:<br/>the listen is held
+  Note over S: a NOTIFICATION, no. 1,<br/>enters the outbox
+  S-->>C: 200 · a batch, from no. 1
+  C->>S: GET /bead · bead-after: 1<br/>bead-wait: 25000
+  Note over S: no. 1 is acknowledged, forgotten
+  S-->>C: 204 · nothing, at the end of the wait

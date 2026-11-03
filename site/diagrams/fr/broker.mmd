@@ -1,0 +1,15 @@
+sequenceDiagram
+  participant C as Client
+  participant B as Courtier
+  participant S as Serveur, un membre du groupe
+  C->>B: OPEN · au nom interop<br/>sa moitié A, sa borne
+  B->>S: l'OPEN, à un seul membre
+  S->>B: ACCEPT · à la boîte du client<br/>moitiés A et B
+  B->>C: l'ACCEPT
+  C->>B: PING · séquence 2<br/>moitiés A et B
+  B->>S: le PING, la troisième jambe
+  Note over S: la connexion dite<br/>au routeur, sa poignée
+  C->>B: DATA · une REQUEST
+  B->>S: la DATA, de boîte à boîte
+  S->>B: DATA · son RESULT
+  B->>C: la DATA

@@ -1,0 +1,15 @@
+sequenceDiagram
+  participant C as Client
+  participant S as Serveur
+  C->>S: REQUEST · callId 7 · TRANSFER de 20 Mio<br/>son premier Mio, sans crédit
+  Note over S: routée, admise,<br/>gardée dans le budget
+  S-->>C: CREDIT · callId 7 · jusqu'à 5 Mio
+  C->>S: CHUNK · callId 7 · depuis 1 Mio, MORE
+  C->>S: CHUNK · callId 7 · …
+  S-->>C: CREDIT · callId 7 · plus loin
+  C->>S: CHUNK · callId 7 · le dernier
+  Note over S: entière : la procédure répond
+  S-->>C: RESULT · callId 7
+  C->>S: REQUEST · callId 9 · TRANSFER, son premier Mio
+  S-->>C: FAILURE · callId 9 · ACCESS_DENIED
+  Note over C,S: refusée à l'ouverture :<br/>aucun crédit, aucun morceau

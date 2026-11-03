@@ -1,0 +1,15 @@
+sequenceDiagram
+  participant C as Client
+  participant S as Server
+  C->>S: REQUEST · callId 7 · TRANSFER of 20 MiB<br/>its first MiB, with no credit
+  Note over S: routed, admitted,<br/>held within the budget
+  S-->>C: CREDIT · callId 7 · up to 5 MiB
+  C->>S: CHUNK · callId 7 · from 1 MiB, MORE
+  C->>S: CHUNK · callId 7 · …
+  S-->>C: CREDIT · callId 7 · further
+  C->>S: CHUNK · callId 7 · the last
+  Note over S: whole: the procedure answers
+  S-->>C: RESULT · callId 7
+  C->>S: REQUEST · callId 9 · TRANSFER, its first MiB
+  S-->>C: FAILURE · callId 9 · ACCESS_DENIED
+  Note over C,S: refused at the opening:<br/>no credit, no chunk

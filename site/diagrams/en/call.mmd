@@ -1,0 +1,10 @@
+sequenceDiagram
+  participant C as Client
+  participant S as Server
+  C->>S: REQUEST · callId 3 · service 2, procedure 1
+  S-->>C: RESULT · callId 3
+  C->>S: REQUEST · callId 5 · service 2, procedure 9
+  S-->>C: FAILURE · callId 5 · PROCEDURE_UNKNOWN
+  S->>C: REQUEST · callId 2 · a command from the server
+  C-->>S: RESULT · callId 2
+  Note over C,S: odd, the client opened the call · even, the server
