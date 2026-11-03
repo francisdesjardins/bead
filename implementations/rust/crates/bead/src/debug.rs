@@ -132,6 +132,7 @@ impl DebugType {
 /// procedure's name matches one pattern of `include`, when there is one, and none of `exclude`,
 /// which wins.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[non_exhaustive]
 pub struct DebugFilter {
     /// The directions kept.
     pub directions: Vec<DebugDirection>,

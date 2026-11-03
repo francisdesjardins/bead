@@ -652,14 +652,11 @@ async fn refused_credential(vector: &CredentialRefusalVector) -> Result<(), Fail
     let data = echo_presenting(credential)?;
 
     transport.tell(|listener| {
-        listener.on_message(
-            TransportMessage {
-                data: data.clone(),
-                credential: carried.clone(),
-                ..TransportMessage::default()
-            },
-            &first,
-        );
+        let mut message = TransportMessage::default();
+
+        message.data = data.clone();
+        message.credential.clone_from(&carried);
+        listener.on_message(message, &first);
     });
     clock.settle().await;
 

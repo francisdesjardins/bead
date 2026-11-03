@@ -45,6 +45,7 @@ pub struct CallAddress {
 
 /// How much a router reads, writes and holds.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct RouterLimits {
     /// The bytes every transfer the router receives holds together.
     pub buffered_bytes_budget: u64,
@@ -247,6 +248,7 @@ pub(crate) fn whole_envelope_limits_of(
 /// bound or below (decision 0046). A side's own, announced to no one, unlike the limits of
 /// [`RouterLimits`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct IntakeLimits {
     /// The envelopes one connection's transport handed its router that no turn of it took yet.
     pub maximum_untaken_envelopes: u64,
@@ -356,6 +358,7 @@ pub fn session_key_of(identifier: Option<&SessionIdentifier>) -> String {
 
 /// The session a call runs in, its credential resolved (spec 13.1).
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[non_exhaustive]
 pub struct CallSession {
     /// What the session holds: a connection's session's data, a `JWT`'s claims set, or what an
     /// `ELSEWHERE`'s verifier gave.
@@ -569,6 +572,7 @@ impl NotifyRequest {
 
 /// A result, as a request resolves with it: its header, and its payload.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct RouterResult {
     /// Its header.
     pub header: ResultHeader,
@@ -588,6 +592,7 @@ pub enum RouterAnswer {
 
 /// What a transport hands its router of one message: an envelope's bytes, and what came beside it.
 #[derive(Clone, Default, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct TransportMessage {
     /// The envelope's bytes.
     pub data: Bytes,
@@ -652,6 +657,7 @@ pub enum AccessRefusalStage {
 
 /// A call a server refused as its credential resolved or as it was admitted, as it tells it.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct AccessRefusal {
     /// The stage that refused it.
     pub stage: AccessRefusalStage,
@@ -699,6 +705,7 @@ impl Error for RouterError {}
 /// What a part holds right now, for diagnosis: its counts and ceilings, the connections it keeps
 /// anything for, and what it found that should never be.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct Gauges {
     /// What it holds, by name.
     pub counts: BTreeMap<&'static str, u64>,

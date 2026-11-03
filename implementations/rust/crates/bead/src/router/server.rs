@@ -86,6 +86,7 @@ pub type SessionOf = Arc<
 
 /// A connection's request as its session provider reads it, without a transport credential.
 #[derive(Debug)]
+#[non_exhaustive]
 pub struct SessionRequest<'a> {
     /// The connection the request comes from.
     pub connection_handle: &'a ConnectionHandle,

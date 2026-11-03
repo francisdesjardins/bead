@@ -17,6 +17,7 @@ mod tests;
 
 /// What a paced subscription queues at most.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct PacingLimits {
     /// The bytes of the notifications queued.
     pub maximum_queued_notification_bytes: u64,

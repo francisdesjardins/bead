@@ -123,11 +123,12 @@ pub fn judge_checked(request: &Value, options: &ValidateOptions) -> Judged {
     };
     let stopped = judge_names(request, &mut sink) && fail_fast;
 
-    Judged {
-        violations: sink.violations,
-        more: sink.more,
-        stopped,
-    }
+    let mut judged = Judged::default();
+
+    judged.violations = sink.violations;
+    judged.more = sink.more;
+    judged.stopped = stopped;
+    judged
 }
 
 fn judge_names(request: &Value, sink: &mut Sink) -> bool {

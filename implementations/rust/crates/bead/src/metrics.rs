@@ -72,6 +72,7 @@ pub struct MetricsRegistryOptions {
 
 /// A registry's exposition: its media type, and its text.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct MetricsExposition {
     /// [`METRICS_CONTENT_TYPE`], which Prometheus 3 requires of a target.
     pub content_type: &'static str,
@@ -672,6 +673,7 @@ impl NotificationSeries {
 
 /// What a resolver declared counts into: its calls, and its notifications when it notifies.
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub struct ResolverSeries {
     /// Its calls.
     pub calls: ProcedureSeries,

@@ -123,6 +123,7 @@ pub enum RelayTarget {
     clippy::struct_field_names,
     reason = "a destination's id, as every side names it"
 )]
+#[non_exhaustive]
 pub struct Destination {
     /// Its id.
     pub destination_id: u32,

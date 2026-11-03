@@ -207,13 +207,10 @@ impl Pipe {
         let listeners = locked(&self.listeners).clone();
 
         for listener in listeners {
-            listener.on_message(
-                TransportMessage {
-                    data: data.clone(),
-                    ..TransportMessage::default()
-                },
-                &handle,
-            );
+            let mut message = TransportMessage::default();
+
+            message.data = data.clone();
+            listener.on_message(message, &handle);
         }
     }
 }

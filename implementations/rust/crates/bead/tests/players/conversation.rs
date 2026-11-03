@@ -463,14 +463,11 @@ impl Connections {
                 let handle = locked(&scripted.script).handle_of(name);
 
                 scripted.tell(|listener| {
-                    listener.on_message(
-                        TransportMessage {
-                            data: data.clone(),
-                            credential: credential.clone(),
-                            ..TransportMessage::default()
-                        },
-                        &handle,
-                    );
+                    let mut message = TransportMessage::default();
+
+                    message.data = data.clone();
+                    message.credential.clone_from(&credential);
+                    listener.on_message(message, &handle);
                 });
 
                 Ok(())
@@ -481,12 +478,12 @@ impl Connections {
                     .get(name)
                     .ok_or_else(|| format!("no step opened {name}"))?;
 
+                let mut message = TransportMessage::default();
+
+                message.data = data;
+                message.credential = credential;
                 client
-                    .send(TransportMessage {
-                        data,
-                        credential,
-                        ..TransportMessage::default()
-                    })
+                    .send(message)
                     .map(drop)
                     .map_err(|error| error.to_string())
             }
@@ -496,12 +493,12 @@ impl Connections {
                     .get(name)
                     .ok_or_else(|| format!("no step opened {name}"))?;
 
+                let mut message = TransportMessage::default();
+
+                message.data = data;
+                message.credential = credential;
                 client
-                    .send(TransportMessage {
-                        data,
-                        credential,
-                        ..TransportMessage::default()
-                    })
+                    .send(message)
                     .map(drop)
                     .map_err(|error| error.to_string())
             }

@@ -85,6 +85,7 @@ pub(crate) struct Carried {
     clippy::partial_pub_fields,
     reason = "what its transport carried, a bearer's secret, stays the router's"
 )]
+#[non_exhaustive]
 pub struct AdmissionRequest {
     /// The connection it came from.
     pub connection_handle: ConnectionHandle,
@@ -111,11 +112,20 @@ impl fmt::Debug for AdmissionRequest {
 /// An admission's refusal: its failure, and the name of the admission Bead gives that refused it,
 /// which an access refused tells (spec 13.12); none for an application's own.
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub struct AdmissionRefusal {
     /// The failure answered.
     pub failure: Failure,
     /// The admission of Bead's that refused it.
     pub by: Option<String>,
+}
+
+impl AdmissionRefusal {
+    /// Refuses admission with `failure`, without naming an admission of Bead's.
+    #[must_use]
+    pub fn new(failure: Failure) -> Self {
+        Self { failure, by: None }
+    }
 }
 
 /// An admission: none admits; a refusal refuses; an error refuses as failed, reported.
@@ -227,6 +237,7 @@ pub trait Answerer: Send + Sync {
     clippy::partial_pub_fields,
     reason = "what its transport carried, a bearer's secret, stays the router's"
 )]
+#[non_exhaustive]
 pub struct RequestResolverProps {
     /// Whether its router has admitted it; otherwise its handler asks its own admission.
     pub is_admitted: bool,
