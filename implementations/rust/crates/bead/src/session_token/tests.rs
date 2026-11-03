@@ -4,6 +4,77 @@
 use super::SessionToken;
 
 #[test]
+fn spell_16_bytes_in_unpadded_base64url_and_back() {
+    let bytes = core::array::from_fn(|index: usize| {
+        u8::try_from(index.saturating_mul(17)).expect("a byte")
+    });
+    let token = SessionToken::new(bytes).expect("the sixteen nonzero bytes");
+    let text = token.to_string();
+    assert_eq!(text, "ABEiM0RVZneImaq7zN3u_w");
+    assert!(is_session_token(&text));
+    assert_eq!(
+        text.parse::<SessionToken>()
+            .expect("the token read")
+            .bytes(),
+        &bytes
+    );
+    let high = SessionToken::new([0xFB; 16]).expect("sixteen high bytes");
+    assert_eq!(high.to_string(), "-_v7-_v7-_v7-_v7-_v7-w");
+    assert_eq!(
+        high.to_string()
+            .parse::<SessionToken>()
+            .expect("the high bytes read")
+            .bytes(),
+        &[0xFB; 16]
+    );
+}
+
+#[test]
+fn refuse_any_length_but_16_bytes_and_16_zero_bytes() {
+    for length in [0, 15, 17] {
+        SessionToken::from_slice(&vec![1; length]).expect_err("only sixteen bytes are a token");
+    }
+    SessionToken::from_slice(&[0; 16]).expect_err("sixteen zero bytes are no token");
+}
+
+#[test]
+fn are_only_what_the_wire_can_spell() {
+    // A parser takes &str: the source's number and undefined cannot be presented to it.
+    for text in [
+        "",
+        "ABEiM0RVZneImaq7zN3u_",
+        "ABEiM0RVZneImaq7zN3u_wA",
+        "ABEiM0RVZneImaq7zN3u+w",
+        "ABEiM0RVZneImaq7zN3u/w",
+        "ABEiM0RVZneImaq7zN3u w",
+        "ABEiM0RVZneImaq7zN3u_w==",
+        "ABEiM0RVZneImaq7zN3uAB",
+        "AAAAAAAAAAAAAAAAAAAAAA",
+    ] {
+        assert!(!is_session_token(text), "{text:?} is no token");
+    }
+    for last in ['A', 'Q', 'g', 'w'] {
+        assert!(is_session_token(&format!("ABEiM0RVZneImaq7zN3u_{last}")));
+    }
+    for text in ["ABEiM0RVZneImaq7zN3uAB", "AAAAAAAAAAAAAAAAAAAAAA"] {
+        text.parse::<SessionToken>()
+            .expect_err("invalid token bytes are refused");
+    }
+}
+
+#[test]
+fn are_drawn_distinct_from_crypto() {
+    let mut drawn = std::collections::HashSet::new();
+    for _ in 0..100 {
+        let token =
+            SessionToken::draw(|candidate| drawn.contains(candidate)).expect("a token from crypto");
+        assert!(is_session_token(&token.to_string()));
+        drawn.insert(token);
+    }
+    assert_eq!(drawn.len(), 100);
+}
+
+#[test]
 fn holds_16_bytes_not_all_zero_and_refuses_any_other() {
     let bytes: [u8; 16] = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15];
     let token = SessionToken::new(bytes).expect("16 bytes, not all zero");
