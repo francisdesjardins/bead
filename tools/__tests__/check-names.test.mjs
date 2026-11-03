@@ -253,6 +253,18 @@ describe('the lists', () => {
     });
   });
 
+  test('reads a TypeScript function type whose return is a union as a function type, never a choice', () => {
+    const surface = [
+      './router',
+      '  SessionOf\tsrc/router/shared/types.ts',
+      '',
+      'src/router/shared/types.ts SessionOf',
+      '  type SessionOf = (request: ISessionRequest, signal: AbortSignal) => | ICallSession | undefined | PromiseLike<ICallSession | undefined>',
+    ].join('\n');
+
+    assert.deepEqual(kindsOf(typeScriptNamesOf(surface)), { SessionOf: 'function type' });
+  });
+
   test('reads each C# type, a static class’s members and every constant, the Unshipped applied', () => {
     assert.deepEqual(kindsOf(cSharpNamesOf(publicLinesOf(CSHARP_SHIPPED, CSHARP_UNSHIPPED))), {
       Credential: 'record',

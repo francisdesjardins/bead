@@ -693,7 +693,7 @@ SessionManagerEventMap	SessionManagerEventMap [record]	-	-	alone
 SessionManagerOnInactivityTimeoutCallback	SessionManagerOnInactivityTimeoutCallback [record]	-	-	alone
 SessionManagerOnSessionCallback	SessionManagerOnSessionCallback [record]	-	-	alone
 SessionManagerTimers	ISessionManagerTimers [record]	-	-	alone
-SessionOf	SessionOf [choice]	-	SessionOf [function type]	same
+SessionOf	SessionOf [function type]	-	SessionOf [function type]	same
 SessionTimeoutIds	ISessionTimeoutIds [record]	-	-	alone
 SessionTokenProvider	-	-	SessionTokenProvider [function type]	alone
 setReadyStateClosed	setReadyStateClosed [function]	-	-	alone

@@ -17,8 +17,10 @@ import {
   ReconnectError,
   TimeoutError,
 } from '../../shared/errors';
+import { LONGEST_TIMER } from '../../shared/clock';
 import {
   createTestClock,
+  delaysOn,
   reachedByLocalhost,
   tcpSocketsClosed,
   timersUntil,
@@ -2504,6 +2506,73 @@ test.describe('createHTTPTransportClient, a server busy or a router behind', () 
     expect(await lost).toEqual(new GenericError('the server refused the exchange: 429 busy'));
     expect(await closed).toEqual([false, false]);
     expect(fake.calls.at(-1)?.init.method).toBe('DELETE');
+  });
+
+  // spec 15.6, 15.7, 15.12
+  test('a client whose exchangeTimeout is never sends again a non-request refused busy past 2³¹ − 1 ms', async () => {
+    const clock = createTestClock(Date.UTC(2026, 0, 1));
+    const fake = createFakeFetch();
+    const client = createHTTPTransportClient({
+      clock,
+      exchangeTimeout: Infinity,
+      fetch: fake.fetch,
+      isListening: false,
+    });
+    const connecting = client.connect({ host, port: 8_080 });
+    const posted = async (index: number) => {
+      await expect
+        .poll(() => {
+          return fake.calls.length;
+        })
+        .toBeGreaterThan(index);
+
+      return fake.calls[index];
+    };
+
+    (await posted(0))?.answer({
+      headers: { [CONNECTION_TOKEN_HEADER]: 'T'.repeat(22) },
+      status: 201,
+    });
+    await connecting;
+
+    // * a cancel refused busy, its Retry-After past what a timer holds: each wait the longest a
+    // timer holds, and sent again past it, its exchange never lost
+    const cancel = envelopeOf(ENVELOPE_KINDS.CANCEL, { callId: 1 });
+    let isSettled = false;
+    const sending = client.send({ data: cancel }).then(() => {
+      isSettled = true;
+    });
+
+    for (let index = 1; index < 3; index += 1) {
+      (await posted(index))?.answer({
+        headers: { [REFUSAL_HEADER]: 'busy', 'retry-after': '2147484' },
+        status: 429,
+      });
+      await expect
+        .poll(() => {
+          return delaysOn(clock);
+        })
+        .toEqual([LONGEST_TIMER]);
+      await clock.tickAsync(LONGEST_TIMER - 1);
+
+      expect([fake.calls.length, isSettled]).toEqual([index + 1, false]);
+
+      await clock.tickAsync(1);
+    }
+
+    (await posted(3))?.answer({ status: 204 });
+    await sending;
+
+    expect(client.isOpen()).toBe(true);
+    expect(
+      fake.calls.slice(1).map(({ init }) => {
+        return [init.method, [...(init.body as Uint8Array)]];
+      })
+    ).toEqual([
+      ['POST', [...cancel]],
+      ['POST', [...cancel]],
+      ['POST', [...cancel]],
+    ]);
   });
 
   // spec 15.12.17

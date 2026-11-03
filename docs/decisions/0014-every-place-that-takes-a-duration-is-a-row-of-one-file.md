@@ -13,7 +13,7 @@ less than a millisecond nor past 2³¹ − 1, and none for a fraction
 ([0011](0011-every-side-takes-its-time-from-a-clock-it-is-given.md)). The values users write do not
 reach a timer alike: 0.41 s is 410 ms in JavaScript and 409.9999 ms in .NET.
 
-Thirty-four places take such a duration, by 51 ways, from a call's timeout to a gateway's heartbeat
+Thirty-four places take such a duration, by 52 ways, from a call's timeout to a gateway's heartbeat
 and a broker's: its participant's heartbeat and `bodyGracePeriod`, its server transport's
 `acceptTimeout`, and its MQTT 5 and AMQP 1.0 adapters' keep-alive, idle-time-out and connect
 timeout. Some are reached more than one way: a reserve and a cancel, a relay's own timeout and a
@@ -82,7 +82,11 @@ and the key stays. A place carries besides:
   it holds only so — a reserve or a cancel of no call, since a cancel of a call that waits, given
   none, reserves for that call's own timeout; a session under a manager given none of its defaults;
   the server layer over a transport that gives it none;
-- `observed`: `held`, what the place holds is read, at every place on the clock a side is given;
+- `observed`: `held`, what the place holds is read, at every place on the clock a side is given:
+  an option read back, the due of the timer it arms, the wait a listen asks, or, at an HTTP
+  client's exchange timeout, which arms no timer of its own, the due of the pause a non-request
+  refused `busy` arms, its `Retry-After` past the ceiling, held where a second `busy` at that due
+  loses its exchange, and never where it pauses again, not where none is armed;
   `refusal`, whether it refuses alone, at those on the real clock (0011), whose timers no test clock
   reaches: a WebSocket's heartbeat and its close timeout, its client's and its server's, and each
   server's `sendGracePeriod` and `headersTimeout`, a gateway's among them
@@ -96,15 +100,20 @@ and the key stays. A place carries besides:
 **Two owners share a place, as its ways, when the spec names one option for both and every column
 the file holds agrees**: its kind, its never and that clause, its default and its clause, what is
 observed of it, and so its outcomes. The place's owner is then what both are, and its ways `client`
-and `server`: `httpTransport.inactivityTimeout` (15.12), `webSocketTransport.heartbeat` and
-`webSocketTransport.closeTimeout` (15.3). A place's ways share what the file observes, not
-everything the duration bounds: an HTTP client's inactivity ends its listens and a server's a
-connection drawn, and each way's harness reads its own side's timer. Where one column differs, each
-owner keeps a place of its own.
+and `server`: `httpTransport.exchangeTimeout` and `httpTransport.inactivityTimeout` (15.12),
+`webSocketTransport.heartbeat` and `webSocketTransport.closeTimeout` (15.3). A place's ways share
+what the file observes, not everything the duration bounds: an HTTP client's inactivity ends its
+listens and a server's a connection drawn; an HTTP client's exchange timeout ends its sending again
+of an envelope refused `busy` and a server's the wait for an exchange's answer; and each way's
+harness reads its own side's timer. Where one column differs, each owner keeps a place of its own.
 
 `server.connectionInactivityTimeout` is the server layer's option, which 13.7 leaves without end
 when not given; an HTTP server gives its own 30 s (15.12.10), which `spec/transports.json`'s
 `defaults` holds and the TypeScript and C# sides check, and the place's `state` says so.
+`httpTransport.exchangeTimeout` is an HTTP exchange's timeout, which 15.12 names for both ends: a
+server's wait for an exchange's answer, and a client's sending again of an envelope refused `busy`,
+from its first send (15.6, 15.7); 5 minutes by default, and without end if given so, its client's
+and its server's alike.
 `httpTransport.inactivityTimeout` is an HTTP connection's inactivity timeout, which 15.12 names for
 both ends of a connection: 5 minutes by default, and without end if given so, its client's and its
 server's alike.
@@ -232,10 +241,10 @@ duration it is given is the durations file's.
 ## The Tenth Man
 
 The decision met the Tenth Man ([0009](0009-conventional-commits-git-flow-and-the-tenth-man.md)) in
-four rounds: two on the rule; one on the file, where the user chose what it asked — the defaults no
+five rounds: two on the rule; one on the file, where the user chose what it asked — the defaults no
 clause states left out of the file, and the HTTP transports' places on the clock a side is given
-observed `held`; and one on the places two owners share. Its objections, each with the answer that
-holds:
+observed `held`; one on the places two owners share; and one on an HTTP exchange's timeout, its
+client's or its server's. Its objections, each with the answer that holds:
 
 ### On durations
 
@@ -291,3 +300,16 @@ holds:
 | A place renamed changes what a conforming harness answers to, and was told as a test                              | Accepted: the HTTP place shared is a feature of the spec; no alias and no version: both sides' harnesses read the file in the repository, and move with the name.                       |
 | The C# twin played every input of a place, whichever way it plays                                                 | Accepted: `Durations.Played(place, way)` plays nothing of a way this side is excused from, as the TypeScript twin skips it.                                                             |
 | The close timeout's place sat apart from the heartbeat's, its twin in shape                                       | Accepted: beside it, in the generator, the file and both harnesses.                                                                                                                     |
+
+### On an HTTP exchange's timeout, its client's or its server's
+
+| Objection                                                                                                                                                  | Answer                                                                                                                                |
+| ---------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
+| At never, the client way passes C# for the wrong reason, `elapsed >= InfiniteTimeSpan` always true, and fails TypeScript, whose pause is capped at 2³¹ − 1 | Accepted: the C# client holds never as TypeScript does, both sides gain a never test, and the client way has a reading of its own.    |
+| 15.12's opening sentence names `inactivityTimeout` alone for the client, and the table's row says "at both ends" of a wait the client never times          | Accepted: the sentence names `exchangeTimeout` too, and the row says what each end bounds.                                            |
+| The client way fits no observation the file defines                                                                                                        | Accepted: the probe reads the pause a `busy` arms and the loss at a second one, and the `$comment` and this record name that reading. |
+| The ways' count moves, and `check.py` holds it in the matrix and the README                                                                                | Accepted: 52 ways.                                                                                                                    |
+| The Rust side holds no list to rename                                                                                                                      | Accepted: nothing moves on the Rust side.                                                                                             |
+| It is a minor, and the CHANGELOG folds the client way into 0046's line                                                                                     | Accepted.                                                                                                                             |
+| The record is 0014                                                                                                                                         | Accepted.                                                                                                                             |
+| Nothing finds a duration check that no place covers; a broker participant's reconnection delay is a second miss, checked at different moments              | Accepted as a follow-up: a gate over each side's duration-check call sites, and a round on the participant's delay, both in the plan. |

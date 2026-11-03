@@ -147,6 +147,10 @@ const aliasKindsOf = (name, right, kindsOf) => {
   const body = right.replace(/^\|\s*/, '');
   const reference = body.match(/^([A-Za-z_$][\w$]*)(?:<.*>)?$/);
 
+  // ! a function first: a union its return type is, `(…) => | A | B`, is no choice of its own
+  if (isFunctionType(body)) {
+    return ['function type'];
+  }
   if (topLevel(body, '|').length > 1) {
     return ['choice'];
   }
@@ -155,9 +159,6 @@ const aliasKindsOf = (name, right, kindsOf) => {
   }
   if (body === `typeof ${name}`) {
     return ['constant'];
-  }
-  if (isFunctionType(body)) {
-    return ['function type'];
   }
   // a primitive branded, `string & {readonly [brand]: …}`, is a type of its own, as a newtype is
   if (/^(?:string|number) & \{/.test(body)) {

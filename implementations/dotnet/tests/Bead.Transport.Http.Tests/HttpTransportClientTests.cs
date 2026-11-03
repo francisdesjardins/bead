@@ -190,6 +190,39 @@ public sealed class HttpTransportClientTests
         return new Answer { Status = status, Headers = new Dictionary<string, string> { [HttpTransport.RefusalHeader] = refusal } };
     }
 
+    // a refusal busy, and how long its Retry-After asks to be waited
+    private static Answer BusyOf(int status, string retryAfter)
+    {
+        return new Answer
+        {
+            Status = status,
+            Headers = new Dictionary<string, string> { [HttpTransport.RefusalHeader] = HttpRefusals.Busy, ["retry-after"] = retryAfter },
+        };
+    }
+
+    // a wait armed on the clock, of the delay given, those armed before it passed over
+    private static async Task ArmedFor(ObservedClock clock, TimeSpan delay)
+    {
+        var watch = System.Diagnostics.Stopwatch.StartNew();
+
+        while (watch.Elapsed < Patience)
+        {
+            if (clock.Armed.TryDequeue(out var armed))
+            {
+                if (armed == delay)
+                {
+                    return;
+                }
+
+                continue;
+            }
+
+            await Task.Delay(TimeSpan.FromMilliseconds(5), Cancelled);
+        }
+
+        Assert.Fail($"no wait of {delay} armed");
+    }
+
     // a client that listens, its waits on a clock of the test's own
     private static HttpTransportClientOptions ListeningOn(FakeTimeProvider time)
     {
@@ -2435,56 +2468,24 @@ public sealed class HttpTransportClientTests
         var clock = new ObservedClock(time);
         await using var faked = await ConnectFake(new HttpTransportClientOptions { Clock = clock, ExchangeTimeout = TimeSpan.FromSeconds(10), IsListening = false });
 
-        static Answer Busy(int status, string retryAfter)
-        {
-            return new Answer
-            {
-                Status = status,
-                Headers = new Dictionary<string, string> { [HttpTransport.RefusalHeader] = HttpRefusals.Busy, ["retry-after"] = retryAfter },
-            };
-        }
-
-        // its wait for the Retry-After armed, of the delay given
-        async Task ArmedFor(TimeSpan delay)
-        {
-            var watch = System.Diagnostics.Stopwatch.StartNew();
-
-            while (watch.Elapsed < Patience)
-            {
-                if (clock.Armed.TryDequeue(out var armed))
-                {
-                    if (armed == delay)
-                    {
-                        return;
-                    }
-
-                    continue;
-                }
-
-                await Task.Delay(TimeSpan.FromMilliseconds(5), Cancelled);
-            }
-
-            Assert.Fail($"no wait of {delay} armed");
-        }
-
         // * a cancel refused 429, then 503 with a date: sent again each time its Retry-After passed
         var cancel = EnvelopeOf(EnvelopeKind.Cancel, (1, 0));
         var sending = faked.Client.Send(new TransportMessage(cancel, false));
 
-        (await faked.Fetch.CallOf(1)).Answer(Busy(429, "2"));
-        await ArmedFor(TimeSpan.FromSeconds(2));
+        (await faked.Fetch.CallOf(1)).Answer(BusyOf(429, "2"));
+        await ArmedFor(clock, TimeSpan.FromSeconds(2));
         time.Advance(TimeSpan.FromMilliseconds(1_999));
 
         Assert.Equal((2, false), (faked.Fetch.Count, sending.IsCompleted));
 
         time.Advance(TimeSpan.FromMilliseconds(1));
-        (await faked.Fetch.CallOf(2)).Answer(Busy(503, (time.GetUtcNow() + TimeSpan.FromSeconds(3)).ToString("R", CultureInfo.InvariantCulture)));
-        await ArmedFor(TimeSpan.FromSeconds(3));
+        (await faked.Fetch.CallOf(2)).Answer(BusyOf(503, (time.GetUtcNow() + TimeSpan.FromSeconds(3)).ToString("R", CultureInfo.InvariantCulture)));
+        await ArmedFor(clock, TimeSpan.FromSeconds(3));
         time.Advance(TimeSpan.FromSeconds(3));
 
         // * a date far off waits no longer than what is left of its exchange's time
-        (await faked.Fetch.CallOf(3)).Answer(Busy(503, "Thu, 01 Jan 2099 00:00:00 GMT"));
-        await ArmedFor(TimeSpan.FromSeconds(5));
+        (await faked.Fetch.CallOf(3)).Answer(BusyOf(503, "Thu, 01 Jan 2099 00:00:00 GMT"));
+        await ArmedFor(clock, TimeSpan.FromSeconds(5));
         time.Advance(TimeSpan.FromMilliseconds(4_999));
 
         Assert.Equal((4, false), (faked.Fetch.Count, sending.IsCompleted));
@@ -2502,7 +2503,7 @@ public sealed class HttpTransportClientTests
         // a request refused busy fails its send at once: the application decides
         var request = faked.Client.Send(new TransportMessage(EnvelopeOf(EnvelopeKind.Request, (3, 0)), false));
 
-        (await faked.Fetch.CallOf(5)).Answer(Busy(429, "1"));
+        (await faked.Fetch.CallOf(5)).Answer(BusyOf(429, "1"));
 
         Assert.Equal(
             "the server refused the exchange: 429 busy",
@@ -2521,11 +2522,11 @@ public sealed class HttpTransportClientTests
 
         for (var index = 6; index < 17; index += 1)
         {
-            (await faked.Fetch.CallOf(index)).Answer(Busy(429, "1"));
+            (await faked.Fetch.CallOf(index)).Answer(BusyOf(429, "1"));
 
             if (index < 16)
             {
-                await ArmedFor(TimeSpan.FromSeconds(1));
+                await ArmedFor(clock, TimeSpan.FromSeconds(1));
                 time.Advance(TimeSpan.FromSeconds(1));
             }
         }
@@ -2538,6 +2539,41 @@ public sealed class HttpTransportClientTests
             })).Message);
         Assert.Equal((false, false), await faked.Closed());
         Assert.Equal(HttpMethod.Delete, (await faked.Fetch.CallOf(17)).Method);
+    }
+
+    // spec 15.6, 15.7, 15.12
+    [Fact]
+    public async Task A_client_whose_exchangeTimeout_is_never_sends_again_a_non_request_refused_busy_past_2_31_minus_1_ms()
+    {
+        var time = new FakeTimeProvider(new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero));
+        var clock = new ObservedClock(time);
+        await using var faked = await ConnectFake(new HttpTransportClientOptions { Clock = clock, ExchangeTimeout = Timeout.InfiniteTimeSpan, IsListening = false });
+
+        // * a cancel refused busy, its Retry-After past what a timer holds: each wait the longest a
+        // timer holds, and sent again past it, its exchange never lost
+        var cancel = EnvelopeOf(EnvelopeKind.Cancel, (1, 0));
+        var sending = faked.Client.Send(new TransportMessage(cancel, false));
+
+        for (var index = 1; index < 3; index += 1)
+        {
+            (await faked.Fetch.CallOf(index)).Answer(BusyOf(429, "2147484"));
+            await ArmedFor(clock, Clocks.LongestTimer);
+            time.Advance(Clocks.LongestTimer - Millisecond);
+
+            Assert.Equal((index + 1, false), (faked.Fetch.Count, sending.IsCompleted));
+
+            time.Advance(Millisecond);
+        }
+
+        (await faked.Fetch.CallOf(3)).Answer(new Answer { Status = 204 });
+        await sending.WaitAsync(Patience, Cancelled);
+
+        Assert.Equal(ReadyState.Open, faked.Client.ReadyState);
+        Assert.All(faked.Fetch.Calls.Skip(1), (call) =>
+        {
+            Assert.Equal(HttpMethod.Post, call.Method);
+            Assert.Equal(cancel, call.Body);
+        });
     }
 
     // spec 15.12.17
