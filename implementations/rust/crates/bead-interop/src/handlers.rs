@@ -241,6 +241,20 @@ fn duration_of(name: &str, given: Option<&Value>) -> Result<Option<Duration>, Pr
     hold_finite(name, duration).map(Some)
 }
 
+// the C# handler reads an Int32; reserve the accepted bytes fallibly before filling them
+fn bytes_of(length: u64) -> Result<String, ResolverError> {
+    let length = i32::try_from(length).map_err(ResolverError::other)?;
+    let length = usize::try_from(length).map_err(ResolverError::other)?;
+    let mut value = String::new();
+
+    value
+        .try_reserve_exact(length)
+        .map_err(ResolverError::other)?;
+    value.extend(std::iter::repeat_n('x', length));
+
+    Ok(value)
+}
+
 fn name_of(session: Option<&CallSession>) -> Value {
     let Some(session) = session else {
         return Value::Null;
@@ -483,10 +497,12 @@ pub fn offer_interop(server: &Server) -> Result<ServiceServer, ProgrammerError> 
                 .payload
                 .get("length")
                 .and_then(Value::as_u64)
-                .and_then(|length| usize::try_from(length).ok())
                 .unwrap_or(0);
 
-            response.result(Value::String("x".repeat(length)))
+            match bytes_of(length) {
+                Ok(value) => response.result(Value::String(value)),
+                Err(refused) => Box::pin(async move { Err(refused) }),
+            }
         }),
     )?;
 

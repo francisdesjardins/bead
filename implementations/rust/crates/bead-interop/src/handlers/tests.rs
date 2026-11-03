@@ -3,6 +3,21 @@
 use serde_json::Value;
 
 #[test]
+fn bounds_the_interop_bytes_before_allocating_and_reserves_them_fallibly() {
+    for length in [2_147_483_648, 1_u64 << 40, u64::MAX] {
+        super::bytes_of(length).expect_err("outside the C# handler's Int32 range");
+    }
+    for length in [0, 1, 1_000, 3 * 1_048_576] {
+        let value = super::bytes_of(length).expect("a held length");
+        assert_eq!(u64::try_from(value.len()).expect("the length fits"), length);
+        assert!(
+            value.bytes().all(|byte| byte == b'x'),
+            "the requested bytes"
+        );
+    }
+}
+
+#[test]
 fn refuses_an_interop_duration_outside_its_range_without_panicking() {
     for given in [
         serde_json::json!(1e300),
