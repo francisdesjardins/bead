@@ -15,8 +15,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   router's turns took them down to half. A broker's participant holds a paused connection's
   envelopes to `maximumHeldEnvelopeBytes` and loses that connection past it; an HTTP server's 429
   `busy` carries `Retry-After: 1`, and an HTTP client sends a non-request refused `busy` again once
-  its `Retry-After` passed. Each transport has a required `pause` and `resume` (spec 15.5, 15.6,
-  15.7, 15.12, 15.19, 15.23).
+  its `Retry-After` passed, until its `exchangeTimeout` from its first send, without end where that
+  timeout is never, which `spec/durations.json` plays as the `client` way of
+  `httpTransport.exchangeTimeout`. Each transport has a required `pause` and `resume` (spec 15.5,
+  15.6, 15.7, 15.12, 15.19, 15.23).
 - Two fuzz targets on every side, named alike: `broker-parcel`, a broker's parcel reader (spec
   15.17), and `proto-codecs`, the `proto` codecs over `spec/codecs.proto`'s `Probe` (spec 17.9),
   which wraps what it read before it writes; seeded from `spec/vectors.json`'s parcels and
@@ -105,6 +107,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   - `TransportClientReconnectDelayOrDelayResolver` is gone;
   - `maxAttempts` becomes `maximumAttempts`.
 - On the C# side, `ViolationsRead` becomes `ReadViolations`, as on the other sides.
+- `spec/durations.json` holds an HTTP exchange's timeout as one place,
+  `httpTransport.exchangeTimeout`, by two ways, `client` and `server`, where
+  `httpTransportServer.exchangeTimeout` was the server's place alone, as 15.12 names that timeout
+  for both ends (decision 0014). The file holds 34 places, by 52 ways.
 
 ### Removed
 

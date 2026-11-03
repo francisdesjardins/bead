@@ -30,7 +30,7 @@ public sealed record HttpTransportClientOptions
     /// <summary>
     /// How long it sends again an envelope that is no request, refused <c>busy</c>, from its first
     /// send, before its exchange is lost, and its connection with it (spec 15.6, 15.7): 5 minutes by
-    /// default, a server's own exchange timeout; infinite for ever. From 1 to
+    /// default, a server's own exchange timeout (spec 15.12.8); infinite for ever. From 1 to
     /// <see cref="Clocks.LongestTimer"/> milliseconds otherwise, rounded to the nearest whole one;
     /// zero is refused.
     /// </summary>
@@ -989,7 +989,8 @@ public sealed class HttpTransportClient : IRouterClientTransport, IAsyncDisposab
 
             var elapsed = _clock.GetElapsedTime(firstAt);
 
-            if (!isResent || elapsed >= _options.ExchangeTimeout)
+            // ! never is Timeout.InfiniteTimeSpan, -1 ms, which any time elapsed passes
+            if (!isResent || (_options.ExchangeTimeout != Timeout.InfiniteTimeSpan && elapsed >= _options.ExchangeTimeout))
             {
                 // refused by the transport before the router saw it: nothing of it was tried
                 settled.SetException(busy.Refused);

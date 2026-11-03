@@ -85,10 +85,6 @@ public sealed partial class DurationsTests
         {
             ["options"] = new(nameof(ServerOptions.ConnectionInactivityTimeout), ServerInactivityByOptions),
         }),
-        ["httpTransportServer.exchangeTimeout"] = (nameof(HttpTransportServerOptions.ExchangeTimeout), new()
-        {
-            ["options"] = new(nameof(HttpTransportServerOptions.ExchangeTimeout), ExchangeTimeoutByOptions),
-        }),
         ["httpTransportServer.maximumWait"] = (nameof(HttpTransportServerOptions.MaximumWait), new()
         {
             ["options"] = new(nameof(HttpTransportServerOptions.MaximumWait), MaximumWaitByOptions),
@@ -107,6 +103,11 @@ public sealed partial class DurationsTests
         {
             ["options"] = new(nameof(HttpTransportServerOptions.BodyGracePeriod), BodyGracePeriodByOptions),
             ["gateway"] = new(nameof(HttpGatewayOptions.BodyGracePeriod), BodyGracePeriodByGateway),
+        }),
+        ["httpTransport.exchangeTimeout"] = (nameof(HttpTransportServerOptions.ExchangeTimeout), new()
+        {
+            ["client"] = new(nameof(HttpTransportClientOptions.ExchangeTimeout), ExchangeTimeoutByClient),
+            ["server"] = new(nameof(HttpTransportServerOptions.ExchangeTimeout), ExchangeTimeoutByServer),
         }),
         ["httpTransport.inactivityTimeout"] = (nameof(HttpTransportServerOptions.InactivityTimeout), new()
         {
