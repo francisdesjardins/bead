@@ -814,12 +814,13 @@ public sealed partial class RouterServerTests : IDisposable
     {
         Start();
 
-        await Assert.ThrowsAsync<ArgumentException>(() =>
+        var unnamed = await Assert.ThrowsAsync<ArgumentException>(() =>
         {
             return Router.Request(
                 ReadOnlyMemory<byte>.Empty,
                 new RouterRequest(Echo, new ResolvedRequestOptions { Timeout = TimeSpan.FromSeconds(1) })).WaitAsync(Patience, Cancelled);
         });
+        Assert.StartsWith("a server request names the connection it goes to", unnamed.Message, StringComparison.Ordinal);
         await Assert.ThrowsAsync<DisconnectException>(() =>
         {
             return Router.Request(ReadOnlyMemory<byte>.Empty, CommandOf(First)).WaitAsync(Patience, Cancelled);
