@@ -821,7 +821,7 @@ public sealed class WebSocketTransportServerTests : IAsyncLifetime
 
                 clients.Add(client);
 
-                await client.Connect(new WebSocketConnectOptions { Host = host, Port = bound.Port }, Cancelled).WaitAsync(Patience, Cancelled);
+                await client.Connect(new WebSocketTransportClientConnectOptions { Host = host, Port = bound.Port }, Cancelled).WaitAsync(Patience, Cancelled);
                 Assert.Equal((host, ReadyState.Open), (host, client.ReadyState));
 
                 var handle = await Next(connections);
@@ -1017,7 +1017,7 @@ public sealed class WebSocketTransportServerTests : IAsyncLifetime
             {
                 await using var client = new WebSocketTransportClient();
 
-                await client.Connect(new WebSocketConnectOptions { Host = host, Port = bound.Port }, Cancelled).WaitAsync(Patience, Cancelled);
+                await client.Connect(new WebSocketTransportClientConnectOptions { Host = host, Port = bound.Port }, Cancelled).WaitAsync(Patience, Cancelled);
                 Assert.Equal((host, ReadyState.Open), (host, client.ReadyState));
             }
 
@@ -2177,7 +2177,7 @@ public sealed class WebSocketTransportServerTests : IAsyncLifetime
         var bound = await server.Start(new WebSocketTransportStartOptions { FindOpenPort = true }, Cancelled);
         await using var client = new WebSocketTransportClient();
 
-        await client.Connect(new WebSocketConnectOptions { Host = "127.0.0.1", Port = bound.Port }, Cancelled).WaitAsync(Patience, Cancelled);
+        await client.Connect(new WebSocketTransportClientConnectOptions { Host = "127.0.0.1", Port = bound.Port }, Cancelled).WaitAsync(Patience, Cancelled);
 
         // where the IPv6 loopback is absent, the IPv4 one alone, reported as it is
         Assert.Equal(Addresses.HasIPv6Loopback() ? "localhost" : "127.0.0.1", bound.Address);

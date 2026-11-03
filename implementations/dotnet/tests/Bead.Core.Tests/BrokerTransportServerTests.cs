@@ -228,7 +228,7 @@ public sealed class BrokerTransportServerTests
             told.Enqueue((reason.Message, connectionHandle));
         };
         await server.Start();
-        await first.Connect(new BrokerConnectOptions { Server = "interop" }, Cancelled);
+        await first.Connect(new BrokerTransportClientConnectOptions { Server = "interop" }, Cancelled);
         await BrokerPair.Until(
             () =>
             {
@@ -239,7 +239,7 @@ public sealed class BrokerTransportServerTests
         // * past maximumConnections: refused 503, its listener's throw reported with no handle
         var refused = Assert.IsType<BrokerRefusedException>((await Assert.ThrowsAsync<ConnectException>(() =>
         {
-            return second.Connect(new BrokerConnectOptions { Server = "interop" }, Cancelled);
+            return second.Connect(new BrokerTransportClientConnectOptions { Server = "interop" }, Cancelled);
         })).InnerException);
 
         Assert.Equal(("busy", (int?)503), (refused.Refusal.Reason, refused.Refusal.Status));
@@ -265,7 +265,7 @@ public sealed class BrokerTransportServerTests
 
         server.Connection += handles.Enqueue;
         await server.Start();
-        await client.Connect(new BrokerConnectOptions { Server = "interop" }, Cancelled);
+        await client.Connect(new BrokerTransportClientConnectOptions { Server = "interop" }, Cancelled);
         await BrokerPair.Until(
             () =>
             {
@@ -424,7 +424,7 @@ public sealed class BrokerTransportServerTests
         // * full at its first connection: its name let go of, counted until its UNSUBACK came
         await using var first = clients.Client();
 
-        await first.Connect(new BrokerConnectOptions { Server = "interop" }, Cancelled);
+        await first.Connect(new BrokerTransportClientConnectOptions { Server = "interop" }, Cancelled);
         await BrokerPair.Until(
             () =>
             {
@@ -461,7 +461,7 @@ public sealed class BrokerTransportServerTests
         // * one its broker refuses to let go is reported
         await using var second = clients.Client();
 
-        await second.Connect(new BrokerConnectOptions { Server = "interop" }, Cancelled);
+        await second.Connect(new BrokerTransportClientConnectOptions { Server = "interop" }, Cancelled);
         await BrokerPair.Until(
             () =>
             {

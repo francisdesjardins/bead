@@ -77,7 +77,7 @@ public sealed class WebSocketClientTests : IAsyncLifetime
     public async ValueTask InitializeAsync()
     {
         _port = (await _transport.Start(new WebSocketTransportStartOptions { Address = "127.0.0.1", FindOpenPort = true }, Cancelled)).Port;
-        await _client.Connect(new WebSocketConnectOptions { Host = "127.0.0.1", Port = _port }, Cancelled);
+        await _client.Connect(new WebSocketTransportClientConnectOptions { Host = "127.0.0.1", Port = _port }, Cancelled);
     }
 
     public async ValueTask DisposeAsync()
@@ -105,7 +105,7 @@ public sealed class WebSocketClientTests : IAsyncLifetime
         await using var client = new WebSocketClient(new WebSocketClientOptions { Transport = new WebSocketTransportClientOptions { Clock = time } });
 
         Assert.Equal((time, time), (client.Transport.Clock, client.Router.Clock));
-        await client.Connect(new WebSocketConnectOptions { Host = "127.0.0.1", Port = _port }, Cancelled);
+        await client.Connect(new WebSocketTransportClientConnectOptions { Host = "127.0.0.1", Port = _port }, Cancelled);
 
         // its timer is armed before its request goes out
         client.Router.Debug += (direction, envelope) =>
@@ -226,7 +226,7 @@ public sealed class WebSocketClientTests : IAsyncLifetime
     {
         await Assert.ThrowsAsync<InvalidOperationException>(() =>
         {
-            return _client.Connect(new WebSocketConnectOptions { Host = "127.0.0.1", Port = _port }, Cancelled);
+            return _client.Connect(new WebSocketTransportClientConnectOptions { Host = "127.0.0.1", Port = _port }, Cancelled);
         });
         Assert.Throws<ArgumentException>(() =>
         {
@@ -258,7 +258,7 @@ public sealed class WebSocketClientTests : IAsyncLifetime
         {
             closes.Writer.TryWrite((wasClean, wasQuick));
         };
-        await _client.Disconnect(new TransportDisconnectOptions { IsClean = false }).WaitAsync(Patience, Cancelled);
+        await _client.Disconnect(new TransportClientDisconnectOptions { IsClean = false }).WaitAsync(Patience, Cancelled);
 
         Assert.Equal((false, false), await closes.Reader.ReadAsync(Cancelled).AsTask().WaitAsync(Patience, Cancelled));
         Assert.Equal(ReadyState.Closed, _client.Transport.ReadyState);
@@ -267,11 +267,11 @@ public sealed class WebSocketClientTests : IAsyncLifetime
         await cancelled.CancelAsync();
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
         {
-            return _client.Reconnect(new TransportReconnectOptions { CancellationToken = cancelled.Token });
+            return _client.Reconnect(new TransportClientReconnectOptions { CancellationToken = cancelled.Token });
         });
         Assert.Equal(ReadyState.Closed, _client.Transport.ReadyState);
 
-        await _client.Reconnect(new TransportReconnectOptions { MaximumAttempts = 1 }).WaitAsync(Patience, Cancelled);
+        await _client.Reconnect(new TransportClientReconnectOptions { MaximumAttempts = 1 }).WaitAsync(Patience, Cancelled);
 
         Assert.Equal(ReadyState.Open, _client.Transport.ReadyState);
         Assert.Same(_client.Transport, _client.Router.Transport);
@@ -283,12 +283,12 @@ public sealed class WebSocketClientTests : IAsyncLifetime
     {
         await using var other = new WebSocketClient();
         using var source = new CancellationTokenSource();
-        var reconnecting = new TransportReconnectOptions
+        var reconnecting = new TransportClientReconnectOptions
         {
-            Delay = TransportReconnectDelayOrResolver.Of(TimeSpan.FromMinutes(1)),
+            Delay = new TransportClientReconnectDelay(TimeSpan.FromMinutes(1)),
         };
 
-        await other.Connect(new WebSocketConnectOptions { Host = "127.0.0.1", Port = _port }, Cancelled);
+        await other.Connect(new WebSocketTransportClientConnectOptions { Host = "127.0.0.1", Port = _port }, Cancelled);
         // nothing listens any more: each attempt fails, then waits a minute
         await _transport.Stop().WaitAsync(Patience, Cancelled);
 

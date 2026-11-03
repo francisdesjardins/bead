@@ -75,11 +75,32 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - On the C# side `ServiceServerOptions.Admissions` is no longer `required`: none where no procedure
   names a hook, and its absence where one does is refused as the service is built.
 - A reconnection's delay is a number or a function on every side. On the C# side
-  `TransportReconnectOptions.Delay` is a `TransportReconnectDelayOrResolver`, built by `Of` from a
-  `TimeSpan` or from a `TransportReconnectDelay`, which keeps its name; a lambda assigned to `Delay`
-  is now written `TransportReconnectDelayOrResolver.Of((previousDelay, attempt) => …)` (spec 1.4,
-  `spec/durations.json`).
+  `TransportClientReconnectOptions.Delay` is a `TransportClientReconnectDelay`, built by its
+  constructor from a `TimeSpan` or from a `TransportClientReconnectDelayResolver`. A lambda assigned
+  to `Delay` is now written `new TransportClientReconnectDelay((previousDelay, attempt) => …)` (spec
+  1.4, `spec/durations.json`).
 - The C# side's `HttpPolicy.Of` takes its options as optional, as every member of them is.
+- No public item takes or gives a tuple, on any side: what a caller passes or reads is named
+  (`SurfaceTests`, `tools/check-surface.mjs`, `bead-house`). On the C# side:
+  - `FailureException` takes its cause in `FailureExceptionOptions`;
+  - `HttpEvents.EventOf` takes a `ServerSentEvent`;
+  - an event's data is `JsonForm.EventDataOf(payload, bytes)` in place of `HttpEvents.DataOf`.
+- A problem of Bead's own takes its detail as a parameter, as a refusal's does:
+  `HttpProblems.Own(failure, detail, options?)` on the C# side and `problemOfOwn(own, detail,
+  options?)` on the TypeScript side, with the challenge in the options.
+- A client transport's options and a reconnection's delay take one family of names on every side,
+  `TransportClient…`. On the C# side:
+  - `BrokerConnectOptions`, `HttpConnectOptions`, `MemoryConnectOptions` and
+    `WebSocketConnectOptions` become `…TransportClientConnectOptions`;
+  - `TransportDisconnectOptions` and `TransportReconnectOptions` become
+    `TransportClientDisconnectOptions` and `TransportClientReconnectOptions`;
+  - the delegate `TransportReconnectDelay` becomes `TransportClientReconnectDelayResolver`.
+- On the TypeScript side, with that family of names:
+  - `TransportClientReconnectDelay` is the delay, a number or a
+    `TransportClientReconnectDelayResolver`, which now returns a `number`;
+  - `TransportClientReconnectDelayOrDelayResolver` is gone;
+  - `maxAttempts` becomes `maximumAttempts`.
+- On the C# side, `ViolationsRead` becomes `ReadViolations`, as on the other sides.
 
 ### Removed
 

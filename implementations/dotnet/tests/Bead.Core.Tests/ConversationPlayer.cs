@@ -774,7 +774,7 @@ internal static class ConversationPlayer
 
             try
             {
-                await client.Connect(new MemoryConnectOptions { Server = _server, Address = "127.0.0.1", Port = port });
+                await client.Connect(new MemoryTransportClientConnectOptions { Server = _server, Address = "127.0.0.1", Port = port });
             }
             finally
             {
@@ -811,7 +811,7 @@ internal static class ConversationPlayer
         {
             if (_clients.Remove(name, out var client))
             {
-                await client.CloseConnection(new TransportDisconnectOptions { IsClean = false });
+                await client.CloseConnection(new TransportClientDisconnectOptions { IsClean = false });
                 await client.DisposeAsync();
             }
         }
@@ -928,7 +928,7 @@ internal static class ConversationPlayer
 
             try
             {
-                await client.Connect(new BrokerConnectOptions { Server = "interop" });
+                await client.Connect(new BrokerTransportClientConnectOptions { Server = "interop" });
 
                 // * told at its third leg, which follows the connect's own end
                 handle = await drawn.Task.WaitAsync(Patience);
@@ -966,7 +966,7 @@ internal static class ConversationPlayer
         {
             if (_clients.Remove(name, out var client))
             {
-                await client.CloseConnection(new TransportDisconnectOptions { IsClean = false });
+                await client.CloseConnection(new TransportClientDisconnectOptions { IsClean = false });
                 await client.DisposeAsync();
             }
         }

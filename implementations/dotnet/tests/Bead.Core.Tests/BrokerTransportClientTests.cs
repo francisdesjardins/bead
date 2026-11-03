@@ -36,7 +36,7 @@ public sealed class BrokerTransportClientTests
         // the inner exception
         var failed = await Assert.ThrowsAsync<ConnectException>(() =>
         {
-            return client.Connect(new BrokerConnectOptions { Server = "nobody" }, Cancelled);
+            return client.Connect(new BrokerTransportClientConnectOptions { Server = "nobody" }, Cancelled);
         });
         var refused = Assert.IsType<BrokerRefusedException>(failed.InnerException);
 
@@ -47,7 +47,7 @@ public sealed class BrokerTransportClientTests
         await silent.Start();
         await silent.Subscribe(["bead", "s", "interop"]);
 
-        var timing = client.Connect(new BrokerConnectOptions { Server = "interop", Timeout = TimeSpan.FromSeconds(1) }, Cancelled);
+        var timing = client.Connect(new BrokerTransportClientConnectOptions { Server = "interop", Timeout = TimeSpan.FromSeconds(1) }, Cancelled);
 
         Assert.True(SteppingClock.IsEarliest(await clock.UntilEarliest(TimeSpan.FromSeconds(1), BrokerPair.Patience), TimeSpan.FromSeconds(1)));
         await BrokerPair.Until(
@@ -61,11 +61,11 @@ public sealed class BrokerTransportClientTests
         {
             return timing.WaitAsync(BrokerPair.Patience, Cancelled);
         })).Message);
-        Assert.Equal(TimeSpan.FromSeconds(10), new BrokerConnectOptions { Server = "interop" }.Timeout);
+        Assert.Equal(TimeSpan.FromSeconds(10), new BrokerTransportClientConnectOptions { Server = "interop" }.Timeout);
 
         // then given up by its token
         using var cancelling = new CancellationTokenSource();
-        var cancelled = client.Connect(new BrokerConnectOptions { Server = "interop" }, cancelling.Token);
+        var cancelled = client.Connect(new BrokerTransportClientConnectOptions { Server = "interop" }, cancelling.Token);
 
         await BrokerPair.Until(
             () =>
@@ -85,7 +85,7 @@ public sealed class BrokerTransportClientTests
         {
             await Assert.ThrowsAsync<ArgumentException>(() =>
             {
-                return client.Connect(new BrokerConnectOptions { Server = server }, Cancelled);
+                return client.Connect(new BrokerTransportClientConnectOptions { Server = server }, Cancelled);
             });
         }
 
@@ -148,7 +148,7 @@ public sealed class BrokerTransportClientTests
             told.Enqueue((client.ReadyState, Convert.ToHexString(message.Bytes.Span)));
         };
 
-        var connecting = client.Connect(new BrokerConnectOptions { Server = "interop" }, Cancelled);
+        var connecting = client.Connect(new BrokerTransportClientConnectOptions { Server = "interop" }, Cancelled);
         var opener = await OpenerOf(heard);
 
         // * its ACCEPT and an envelope after it, published in one turn: the envelope comes before its
@@ -192,7 +192,7 @@ public sealed class BrokerTransportClientTests
         // * a pause outlasts its connection: the connection it opens is paused as it is made
         client.Pause();
 
-        var connecting = client.Connect(new BrokerConnectOptions { Server = "interop" }, Cancelled);
+        var connecting = client.Connect(new BrokerTransportClientConnectOptions { Server = "interop" }, Cancelled);
         var opener = await OpenerOf(heard);
 
         await peer.Publish(new BrokerPublication { Topic = Inbox, Payload = AcceptOf(opener) });
@@ -239,7 +239,7 @@ public sealed class BrokerTransportClientTests
         };
 
         // refused 400: its refusal the inner exception, named as section 15.6 names it
-        var refusing = client.Connect(new BrokerConnectOptions { Server = "interop" }, Cancelled);
+        var refusing = client.Connect(new BrokerTransportClientConnectOptions { Server = "interop" }, Cancelled);
 
         await peer.Publish(new BrokerPublication
         {
@@ -258,7 +258,7 @@ public sealed class BrokerTransportClientTests
         // and no close is told
         heard.Clear();
 
-        var closing = client.Connect(new BrokerConnectOptions { Server = "interop" }, Cancelled);
+        var closing = client.Connect(new BrokerTransportClientConnectOptions { Server = "interop" }, Cancelled);
         var opener = await OpenerOf(heard);
 
         await broker.Turn(() =>
@@ -281,7 +281,7 @@ public sealed class BrokerTransportClientTests
         // once it opened, its server's close is told, unclean but for 1000
         heard.Clear();
 
-        var opening = client.Connect(new BrokerConnectOptions { Server = "interop" }, Cancelled);
+        var opening = client.Connect(new BrokerTransportClientConnectOptions { Server = "interop" }, Cancelled);
         var opened = await OpenerOf(heard);
 
         await peer.Publish(new BrokerPublication { Topic = Inbox, Payload = AcceptOf(opened) });
@@ -318,7 +318,7 @@ public sealed class BrokerTransportClientTests
         Assert.Equal(ReadyState.Open, client.ReadyState);
 
         // * not clean: a RESET, its server told unclean
-        await client.CloseConnection(new TransportDisconnectOptions { IsClean = false });
+        await client.CloseConnection(new TransportClientDisconnectOptions { IsClean = false });
         await BrokerPair.Until(
             () =>
             {
@@ -339,7 +339,7 @@ public sealed class BrokerTransportClientTests
 
         // * disposed before its link is up: no OPEN goes
         var early = ada.Client();
-        var linking = early.Connect(new BrokerConnectOptions { Server = "interop" }, Cancelled);
+        var linking = early.Connect(new BrokerTransportClientConnectOptions { Server = "interop" }, Cancelled);
 
         await early.DisposeAsync();
         Assert.Equal(Disposed, (await Assert.ThrowsAsync<ConnectException>(() =>
@@ -349,7 +349,7 @@ public sealed class BrokerTransportClientTests
 
         // disposed as its OPEN awaits its answer, the one OPEN that went
         var client = ada.Client();
-        var connecting = client.Connect(new BrokerConnectOptions { Server = "interop" }, Cancelled);
+        var connecting = client.Connect(new BrokerTransportClientConnectOptions { Server = "interop" }, Cancelled);
 
         await OpenerOf(heard);
         Assert.Single(heard);
@@ -406,16 +406,16 @@ public sealed class BrokerTransportClientTests
         // given up already: refused, nothing sent
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
         {
-            return client.Connect(new BrokerConnectOptions { Server = "interop" }, new CancellationToken(true));
+            return client.Connect(new BrokerTransportClientConnectOptions { Server = "interop" }, new CancellationToken(true));
         });
         Assert.Equal(ReadyState.Uninitialized, client.ReadyState);
 
-        var connecting = client.Connect(new BrokerConnectOptions { Server = "interop" }, Cancelled);
+        var connecting = client.Connect(new BrokerTransportClientConnectOptions { Server = "interop" }, Cancelled);
 
         // * one under way: a second is refused, and the first goes on
         Assert.Equal("the transport client is already connecting", (await Assert.ThrowsAsync<InvalidOperationException>(() =>
         {
-            return client.Connect(new BrokerConnectOptions { Server = "interop" }, Cancelled);
+            return client.Connect(new BrokerTransportClientConnectOptions { Server = "interop" }, Cancelled);
         })).Message);
         await OpenerOf(heard);
         await client.DisposeAsync();
@@ -445,7 +445,7 @@ public sealed class BrokerTransportClientTests
 
         // a connect to a name nobody answers, given up once refused its reconnection
         using var giving = new CancellationTokenSource();
-        var connecting = client.Connect(new BrokerConnectOptions { Server = "quiet" }, giving.Token);
+        var connecting = client.Connect(new BrokerTransportClientConnectOptions { Server = "quiet" }, giving.Token);
 
         Assert.Equal("the transport client cannot reconnect while connecting", (await Assert.ThrowsAsync<InvalidOperationException>(() =>
         {
@@ -458,10 +458,10 @@ public sealed class BrokerTransportClientTests
         });
 
         // given up already: the open connection left alone
-        await client.Connect(new BrokerConnectOptions { Server = "interop" }, Cancelled);
+        await client.Connect(new BrokerTransportClientConnectOptions { Server = "interop" }, Cancelled);
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
         {
-            return client.Reconnect(new TransportReconnectOptions { CancellationToken = new CancellationToken(true) });
+            return client.Reconnect(new TransportClientReconnectOptions { CancellationToken = new CancellationToken(true) });
         });
         Assert.Equal(ReadyState.Open, client.ReadyState);
 
@@ -475,7 +475,7 @@ public sealed class BrokerTransportClientTests
             },
             "its server's stop closes its connection");
 
-        var reconnecting = client.Reconnect(new TransportReconnectOptions { Delay = Briefly, MaximumAttempts = 2 });
+        var reconnecting = client.Reconnect(new TransportClientReconnectOptions { Delay = Briefly, MaximumAttempts = 2 });
 
         Assert.Equal("the transport client is already reconnecting", (await Assert.ThrowsAsync<InvalidOperationException>(() =>
         {
@@ -488,7 +488,7 @@ public sealed class BrokerTransportClientTests
         Assert.Equal(ReadyState.Closed, client.ReadyState);
     }
 
-    private static readonly TransportReconnectDelayOrResolver Briefly = TransportReconnectDelayOrResolver.Of(TimeSpan.FromMilliseconds(100));
+    private static readonly TransportClientReconnectDelay Briefly = new TransportClientReconnectDelay(TimeSpan.FromMilliseconds(100));
 
     private static readonly IReadOnlyList<string> Inbox = ["bead", "i", "ada"];
 

@@ -46,7 +46,7 @@ public sealed record BeadHttpClientOptions
 /// <code>
 /// await using var client = new BeadHttpClient();
 ///
-/// await client.Connect(new HttpConnectOptions { Host = host, Port = port });
+/// await client.Connect(new HttpTransportClientConnectOptions { Host = host, Port = port });
 /// </code>
 /// </example>
 public sealed class BeadHttpClient : IClient
@@ -84,13 +84,13 @@ public sealed class BeadHttpClient : IClient
     public ServiceManager Services { get; }
 
     /// <summary>Connects its transport, as <see cref="HttpTransportClient.Connect"/> does.</summary>
-    public Task Connect(HttpConnectOptions options, CancellationToken cancellationToken = default)
+    public Task Connect(HttpTransportClientConnectOptions options, CancellationToken cancellationToken = default)
     {
         return Transport.Connect(options, cancellationToken);
     }
 
     /// <summary>Closes its transport's connection, as <see cref="HttpTransportClient.CloseConnection"/> does.</summary>
-    public Task Disconnect(TransportDisconnectOptions? options = null)
+    public Task Disconnect(TransportClientDisconnectOptions? options = null)
     {
         return Transport.CloseConnection(options);
     }
@@ -99,9 +99,9 @@ public sealed class BeadHttpClient : IClient
     /// Reconnects its transport, as <see cref="HttpTransportClient.Reconnect"/> does; a dispose
     /// cancels it, as the token given does.
     /// </summary>
-    public async Task Reconnect(TransportReconnectOptions? options = null)
+    public async Task Reconnect(TransportClientReconnectOptions? options = null)
     {
-        var reconnect = options ?? new TransportReconnectOptions();
+        var reconnect = options ?? new TransportClientReconnectOptions();
 
         using var cancelling = CancellationTokenSource.CreateLinkedTokenSource(_lifetime.Token, reconnect.CancellationToken);
 

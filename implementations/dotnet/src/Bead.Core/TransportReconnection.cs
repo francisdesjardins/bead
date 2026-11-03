@@ -26,7 +26,7 @@ internal static class TransportReconnection
     /// throws, a programmer's error no attempt after it would mend: a credential provider's value
     /// that is no field value among them.
     /// </summary>
-    public static async Task Attempting(Func<CancellationToken, Task> attempt, (TransportReconnectOptions Options, TimeProvider Clock) reconnection)
+    public static async Task Attempting(Func<CancellationToken, Task> attempt, (TransportClientReconnectOptions Options, TimeProvider Clock) reconnection)
     {
         var (reconnect, clock) = reconnection;
         var token = reconnect.CancellationToken;
@@ -68,7 +68,7 @@ internal static class TransportReconnection
 
             // held before its tap hears it: zero waits none; never, refused, would wait for ever
             // between two attempts
-            nextDelay = Clocks.AssertHeldDelay(("a delay", nameof(TransportReconnectOptions.Delay)), nextDelay);
+            nextDelay = Clocks.AssertHeldDelay(("a delay", nameof(TransportClientReconnectOptions.Delay)), nextDelay);
 
             using var pausing = CancellationTokenSource.CreateLinkedTokenSource(token);
             var waiting = Task.Delay(nextDelay, clock, pausing.Token);

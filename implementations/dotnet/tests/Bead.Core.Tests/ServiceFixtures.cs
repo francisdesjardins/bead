@@ -362,12 +362,12 @@ internal sealed class InterceptedClient(IClient client) : IClient
         }
     }
 
-    public Task Disconnect(TransportDisconnectOptions? options = null)
+    public Task Disconnect(TransportClientDisconnectOptions? options = null)
     {
         return client.Disconnect(options);
     }
 
-    public Task Reconnect(TransportReconnectOptions? options = null)
+    public Task Reconnect(TransportClientReconnectOptions? options = null)
     {
         return client.Reconnect(options);
     }

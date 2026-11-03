@@ -133,15 +133,15 @@ public sealed partial class DurationsTests
         }),
         ["transportClient.connectTimeout"] = ("a connect's timeout", new()
         {
-            ["http"] = new(nameof(HttpConnectOptions.Timeout), ConnectTimeoutByHttp),
-            ["webSocket"] = new(nameof(WebSocketConnectOptions.Timeout), ConnectTimeoutByWebSocket),
-            ["memory"] = new(nameof(MemoryConnectOptions.Timeout), ConnectTimeoutByMemory),
-            ["broker"] = new(nameof(BrokerConnectOptions.Timeout), ConnectTimeoutByBroker),
+            ["http"] = new(nameof(HttpTransportClientConnectOptions.Timeout), ConnectTimeoutByHttp),
+            ["webSocket"] = new(nameof(WebSocketTransportClientConnectOptions.Timeout), ConnectTimeoutByWebSocket),
+            ["memory"] = new(nameof(MemoryTransportClientConnectOptions.Timeout), ConnectTimeoutByMemory),
+            ["broker"] = new(nameof(BrokerTransportClientConnectOptions.Timeout), ConnectTimeoutByBroker),
         }),
         ["transportClient.reconnectionDelay"] = ("a delay", new()
         {
-            ["function"] = new(nameof(TransportReconnectOptions.Delay), ReconnectionDelayByFunction),
-            ["number"] = new(nameof(TransportReconnectOptions.Delay), ReconnectionDelayByNumber),
+            ["function"] = new(nameof(TransportClientReconnectOptions.Delay), ReconnectionDelayByFunction),
+            ["number"] = new(nameof(TransportClientReconnectOptions.Delay), ReconnectionDelayByNumber),
         }),
         ["webSocketTransportServer.sendGracePeriod"] = (nameof(WebSocketTransportServerOptions.SendGracePeriod), new()
         {

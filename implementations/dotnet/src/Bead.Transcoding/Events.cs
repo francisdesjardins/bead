@@ -1,6 +1,5 @@
 using System.Globalization;
 using System.Text;
-using Bead.Protobuf;
 
 namespace Bead.Transcoding;
 
@@ -62,40 +61,20 @@ public sealed class HttpEvents
     }
 
     /// <summary>An event's bytes: its name's line where it has one, its id's, its data's, then an empty line (8.5).</summary>
-    public static byte[] EventOf(string? name, (long Id, ReadOnlyMemory<byte> Data) at)
+    public static byte[] EventOf(ServerSentEvent sent)
     {
+        ArgumentNullException.ThrowIfNull(sent);
+
         var head = new StringBuilder();
 
-        if (name is not null)
+        if (sent.Name is { } name)
         {
             head.Append("event: ").Append(name).Append('\n');
         }
 
-        head.Append("id: ").Append(at.Id.ToString(CultureInfo.InvariantCulture)).Append("\ndata: ");
+        head.Append("id: ").Append(sent.Id.ToString(CultureInfo.InvariantCulture)).Append("\ndata: ");
 
-        return [.. Encoding.ASCII.GetBytes(head.ToString()), .. at.Data.Span, (byte)'\n', (byte)'\n'];
-    }
-
-    /// <summary>
-    /// An event's data (8.4), one JSON text: a <c>proto</c> payload by Bead's proto JSON form, a
-    /// <c>json</c> one as it is, a <c>text</c> one as a JSON string, a <c>raw</c> one as a JSON string
-    /// of its bytes in standard base64, padded. A <c>proto</c> payload is read as spec 17.9 reads one,
-    /// through <see cref="ProtoCodecs"/>: one that does not read is a <see cref="FormatException"/>,
-    /// and one Bead's proto JSON form holds none of a <see cref="JsonFormException"/>.
-    /// </summary>
-    public static ReadOnlyMemory<byte> DataOf(HttpPayload payload, (ReadOnlyMemory<byte> Bytes, JsonForm Form) of)
-    {
-        ArgumentNullException.ThrowIfNull(payload);
-
-        var (bytes, form) = of;
-
-        return payload.Encoding switch
-        {
-            HttpEncoding.Proto => form.Write(ProtoCodecs.Read(payload.Descriptor!, bytes)),
-            HttpEncoding.Json => bytes,
-            HttpEncoding.Text => Payloads.WriteJsonString(Payloads.ReadText(bytes)),
-            _ => Payloads.WriteJsonString(Convert.ToBase64String(bytes.Span)),
-        };
+        return [.. Encoding.ASCII.GetBytes(head.ToString()), .. sent.Data.Span, (byte)'\n', (byte)'\n'];
     }
 
     /// <summary>Its result: the stream's first event, then each notification it held, in their order.</summary>
@@ -112,13 +91,13 @@ public sealed class HttpEvents
             }
 
             _isAnswered = true;
-            written = Enqueue(EventOf("result", (++_count, data)));
+            written = Enqueue(EventOf(new ServerSentEvent { Id = ++_count, Data = data, Name = "result" }));
             held = [.. _held];
             _held.Clear();
 
             foreach (var (notification, taken) in held)
             {
-                Settle(Enqueue(EventOf(null, (++_count, notification))), taken);
+                Settle(Enqueue(EventOf(new ServerSentEvent { Id = ++_count, Data = notification })), taken);
             }
         }
 
@@ -150,7 +129,7 @@ public sealed class HttpEvents
 
             var settled = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
 
-            Settle(Enqueue(EventOf(null, (++_count, data))), settled);
+            Settle(Enqueue(EventOf(new ServerSentEvent { Id = ++_count, Data = data })), settled);
 
             return settled.Task;
         }
@@ -187,7 +166,7 @@ public sealed class HttpEvents
                 return false;
             }
 
-            written = Enqueue(EventOf("failure", (++_count, problem)));
+            written = Enqueue(EventOf(new ServerSentEvent { Id = ++_count, Data = problem, Name = "failure" }));
 
             return true;
         }
@@ -235,4 +214,17 @@ public sealed class HttpEvents
         await previous.ConfigureAwait(ConfigureAwaitOptions.SuppressThrowing);
         await _write(bytes);
     }
+}
+
+/// <summary>An event as a stream writes it (8.5): its data, its id, and its name where it has one.</summary>
+public sealed record ServerSentEvent
+{
+    /// <summary>One JSON text.</summary>
+    public required ReadOnlyMemory<byte> Data { get; init; }
+
+    /// <summary>Its count in the stream, from 1.</summary>
+    public required long Id { get; init; }
+
+    /// <summary><c>result</c> or <c>failure</c>; none for a notification, a plain event.</summary>
+    public string? Name { get; init; }
 }

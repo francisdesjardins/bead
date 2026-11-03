@@ -45,7 +45,7 @@ public sealed record BrokerParticipantOptions
     public BrokerDelivery? RequireDelivery { get; init; }
 
     /// <summary>How its link connects again once lost, each time a new incarnation (spec 15.21): a second between attempts, without end, unless told.</summary>
-    public TransportReconnectOptions? Reconnect { get; init; }
+    public TransportClientReconnectOptions? Reconnect { get; init; }
 
     /// <summary>
     /// Whether its link connects again once lost, as <see cref="Reconnect"/> says: true unless told;
@@ -1027,7 +1027,7 @@ public sealed class BrokerParticipant : IAsyncDisposable
 
     private async Task Relinking(List<(string PeerId, (ulong Opener, ulong Acceptor) Pair)> peers)
     {
-        var reconnect = _options.Reconnect ?? new TransportReconnectOptions { MaximumAttempts = int.MaxValue };
+        var reconnect = _options.Reconnect ?? new TransportClientReconnectOptions { MaximumAttempts = int.MaxValue };
         using var fenced = new CancellationTokenSource();
         using var relinking = CancellationTokenSource.CreateLinkedTokenSource(reconnect.CancellationToken, fenced.Token);
 
@@ -1052,7 +1052,7 @@ public sealed class BrokerParticipant : IAsyncDisposable
         }
         catch (ReconnectException reason)
         {
-            var attempts = (_options.Reconnect ?? new TransportReconnectOptions { MaximumAttempts = int.MaxValue }).MaximumAttempts;
+            var attempts = (_options.Reconnect ?? new TransportClientReconnectOptions { MaximumAttempts = int.MaxValue }).MaximumAttempts;
 
             Report(new IOException(string.Create(CultureInfo.InvariantCulture, $"the link of {Id} went down, and {attempts} attempts did not bring it back"), reason));
 

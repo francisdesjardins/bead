@@ -161,7 +161,7 @@ public sealed class EventsTests
     {
         static string Data(HttpPayload payload, byte[] bytes)
         {
-            return Encoding.UTF8.GetString(HttpEvents.DataOf(payload, (bytes, TranscodingFile.Form)).Span);
+            return Encoding.UTF8.GetString(TranscodingFile.Form.EventDataOf(payload, bytes).Span);
         }
 
         // * a proto one in Bead's proto JSON form, a json one as it is, a text one a JSON string, a raw one its base64

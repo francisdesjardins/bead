@@ -134,8 +134,8 @@ one link of a side to its broker, through an `IBrokerAdapter` of that broker's c
 identity the broker authenticates the link by and its inbox, `bead/i/<id>`, every parcel of its
 connections' topic. `participant.Server(new BrokerTransportServerOptions { Names = ["interop"] })`
 serves names, alone or, with `IsInGroup`, in a group its broker places each OPEN with;
-`participant.Client()` holds one connection at a time, `Connect(new BrokerConnectOptions { Server =
-"interop" })` opening it through a name.
+`participant.Client()` holds one connection at a time, `Connect(new
+BrokerTransportClientConnectOptions { Server = "interop" })` opening it through a name.
 
 ```csharp
 var broker = new MemoryBroker();
@@ -145,7 +145,7 @@ await using var transport = serving.Server(new BrokerTransportServerOptions { Na
 var client = calling.Client();
 
 await transport.Start();
-await client.Connect(new BrokerConnectOptions { Server = "interop" });
+await client.Connect(new BrokerTransportClientConnectOptions { Server = "interop" });
 ```
 
 A connection is placed once, at its open, and named by both its ends: the client's OPEN to the name,
@@ -455,9 +455,10 @@ the listens, the outboxes and the server's life, under one lock on the C# side.
   stands for: over HTTP, each `POST`'s `Authorization`; over a WebSocket, its upgrade's, for every
   envelope of the connection, toward its server alone (spec 15.2, [decision
   0032](../../docs/decisions/0032-a-websocket-upgrade-from-no-page-carries-its-credential-beside-every-envelope.md)).
-  `WebSocketConnectOptions` takes it as `Credential`, a string, or as `CredentialProvider`, whose
-  value each attempt awaits, a reconnection's included, with the attempt's token, as SignalR's
-  `AccessTokenProvider` is: where a credential past its end is renewed. A client asks one credential
+  `WebSocketTransportClientConnectOptions` takes it as `Credential`, a string, or as
+  `CredentialProvider`, whose value each attempt awaits, a reconnection's included, with the
+  attempt's token, as SignalR's `AccessTokenProvider` is: where a credential past its end is
+  renewed. A client asks one credential
   at a time of each provider, identified by its delegate's reference identity. Its attempts are
   sequential: an attempt using the same provider waits for its earlier
   call to settle, then asks anew; a different provider asks at once. An answer from an earlier
@@ -496,7 +497,7 @@ the listens, the outboxes and the server's life, under one lock on the C# side.
       // a new connection, whose upgrade the provider gives the new credential
       await client.Reconnect();
   };
-  await client.Connect(new WebSocketConnectOptions
+  await client.Connect(new WebSocketTransportClientConnectOptions
   {
       Host = "localhost",
       Port = port,

@@ -22,7 +22,7 @@ public sealed record MemoryTransportClientOptions
 /// Where an in-memory client connects — a server of the same process — who it says it is there,
 /// and how long it waits.
 /// </summary>
-public sealed record MemoryConnectOptions
+public sealed record MemoryTransportClientConnectOptions
 {
     /// <summary>The server it connects to.</summary>
     public required MemoryTransportServer Server { get; init; }
@@ -70,7 +70,7 @@ public sealed class MemoryTransportClient : IRouterClientTransport, IAsyncDispos
     private readonly Lock _gate = new();
     private volatile ReadyState _readyState = ReadyState.Uninitialized;
     // the options of the last connect its guard let through, which a reconnection connects with
-    private MemoryConnectOptions? _lastConnectOptions;
+    private MemoryTransportClientConnectOptions? _lastConnectOptions;
     // what a dispose cancels the connect under way by
     private CancellationTokenSource? _connecting;
     // the open connection; one this side let go of is none, and its end tells nothing
@@ -165,9 +165,9 @@ public sealed class MemoryTransportClient : IRouterClientTransport, IAsyncDispos
     /// <summary>
     /// Connects to its server; settles once its server drew the connection and told it, in a turn
     /// of the server's own. Refused with an <see cref="ArgumentOutOfRangeException"/> for a timeout
-    /// <see cref="MemoryConnectOptions.Timeout"/> does not take, zero among them, or a port past its
+    /// <see cref="MemoryTransportClientConnectOptions.Timeout"/> does not take, zero among them, or a port past its
     /// range, and with an <see cref="ArgumentException"/> for an address
-    /// <see cref="MemoryConnectOptions.Address"/> does not take, each of which leaves the state, and
+    /// <see cref="MemoryTransportClientConnectOptions.Address"/> does not take, each of which leaves the state, and
     /// the target a reconnection replays, as they were; with an
     /// <see cref="InvalidOperationException"/> unless Uninitialized or Closed; and with an
     /// <see cref="OperationCanceledException"/>, nothing changed, when its token is cancelled
@@ -175,7 +175,7 @@ public sealed class MemoryTransportClient : IRouterClientTransport, IAsyncDispos
     /// dispose gave up on it, a <see cref="TimeoutException"/> past its timeout, and an
     /// <see cref="OperationCanceledException"/> once its token is cancelled, ending Closed.
     /// </summary>
-    public Task Connect(MemoryConnectOptions options, CancellationToken cancellationToken = default)
+    public Task Connect(MemoryTransportClientConnectOptions options, CancellationToken cancellationToken = default)
     {
         return Connecting(options, (cancellationToken, false));
     }
@@ -257,12 +257,12 @@ public sealed class MemoryTransportClient : IRouterClientTransport, IAsyncDispos
 
     /// <summary>
     /// Closes the connection and raises its close, which says it was clean as
-    /// <see cref="TransportDisconnectOptions.IsClean"/> does, and quick as
-    /// <see cref="TransportDisconnectOptions.IsQuick"/> does, both alike in memory, where no
+    /// <see cref="TransportClientDisconnectOptions.IsClean"/> does, and quick as
+    /// <see cref="TransportClientDisconnectOptions.IsQuick"/> does, both alike in memory, where no
     /// handshake waits; its server is told in a later turn, after what was sent before. Refused with
     /// a <see cref="DisconnectException"/> unless Open. It ends Closed.
     /// </summary>
-    public Task CloseConnection(TransportDisconnectOptions? options = null)
+    public Task CloseConnection(TransportClientDisconnectOptions? options = null)
     {
         var isClean = options?.IsClean ?? true;
         var isQuick = options?.IsQuick ?? false;
@@ -299,18 +299,18 @@ public sealed class MemoryTransportClient : IRouterClientTransport, IAsyncDispos
     /// Connects again with the options of the last connect its guard let through, replacing an open
     /// connection without a close, and raises <see cref="IRouterClientTransport.Reconnect"/> as it
     /// starts. The first attempt goes at once, each next one after its
-    /// <see cref="TransportReconnectOptions.Delay"/>. Attempts that run out end Closed without a
+    /// <see cref="TransportClientReconnectOptions.Delay"/>. Attempts that run out end Closed without a
     /// close, with a <see cref="ReconnectException"/>; a cancel stops them with an
     /// <see cref="OperationCanceledException"/>, ending Closed, and one after a success disconnects,
     /// which raises a close. A reconnection under way, never connected, connecting or closing is an
     /// <see cref="InvalidOperationException"/>, and so is a delay that throws, ending Closed; a misuse
     /// or a token cancelled already leaves the state as it was. What its tap throws passes through.
     /// </summary>
-    public async Task Reconnect(TransportReconnectOptions? options = null)
+    public async Task Reconnect(TransportClientReconnectOptions? options = null)
     {
-        var reconnect = options ?? new TransportReconnectOptions();
+        var reconnect = options ?? new TransportClientReconnectOptions();
         var token = reconnect.CancellationToken;
-        MemoryConnectOptions target;
+        MemoryTransportClientConnectOptions target;
         MemoryConnection? replaced;
         Action? starting;
 
@@ -427,7 +427,7 @@ public sealed class MemoryTransportClient : IRouterClientTransport, IAsyncDispos
 
     // who a connect says its client is, refused before anything moves: an address a handle can
     // name, and a port of the range
-    private static void AssertClient(MemoryConnectOptions options)
+    private static void AssertClient(MemoryTransportClientConnectOptions options)
     {
         if (options.Address is { } address && !IsHandlePart(address))
         {
@@ -460,7 +460,7 @@ public sealed class MemoryTransportClient : IRouterClientTransport, IAsyncDispos
 
     // a connect, or a reconnection's attempt, which its guard alone tells apart: an attempt passes
     // only while the client reconnects, and leaves the state to its reconnection when it fails
-    private async Task Connecting(MemoryConnectOptions given, (CancellationToken Token, bool IsAttempt) call)
+    private async Task Connecting(MemoryTransportClientConnectOptions given, (CancellationToken Token, bool IsAttempt) call)
     {
         ArgumentNullException.ThrowIfNull(given);
         ArgumentNullException.ThrowIfNull(given.Server, nameof(given));
@@ -469,7 +469,7 @@ public sealed class MemoryTransportClient : IRouterClientTransport, IAsyncDispos
         // held before anything moves or is kept, so a reconnection connects again with it held
         var options = given with
         {
-            Timeout = Clocks.AssertHeld(("a connect's timeout", nameof(MemoryConnectOptions.Timeout)), given.Timeout),
+            Timeout = Clocks.AssertHeld(("a connect's timeout", nameof(MemoryTransportClientConnectOptions.Timeout)), given.Timeout),
         };
         var (token, isAttempt) = call;
         var connecting = new CancellationTokenSource();

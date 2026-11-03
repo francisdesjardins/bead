@@ -45,7 +45,8 @@ public sealed class FailureExceptionTests
         var cause = new InvalidOperationException("underneath");
         var error = new FailureException(
             Failure.OfProtocol(ProtocolCode.ProcedureUnknown, "no procedure 1 in service 2"),
-            (new FailureException.Raised(FailureOrigin.Peer, RouterSide.Server), cause))
+            new FailureException.Raised(FailureOrigin.Peer, RouterSide.Server),
+            new FailureExceptionOptions { Cause = cause })
         {
             DestinationId = 5,
             Header = new FailureHeader { CallId = 3, Credential = Credential.Opaque(token) },

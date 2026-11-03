@@ -367,7 +367,10 @@ public sealed class TranscodingTests
 
             if (StringOf(given, "own") is { } own)
             {
-                problem = HttpProblems.Own(Enum.Parse<OwnFailure>(own, true), (StringOf(given, "detail")!, StringOf(given, "challenge") ?? Root.GetProperty("defaults").GetProperty("challenge").GetString()!));
+                problem = HttpProblems.Own(Enum.Parse<OwnFailure>(own, true), StringOf(given, "detail") ?? "", new OwnProblemOptions
+                {
+                    Challenge = StringOf(given, "challenge") ?? Root.GetProperty("defaults").GetProperty("challenge").GetString()!,
+                });
             }
             else
             {
@@ -493,15 +496,15 @@ public sealed class TranscodingTests
     {
         if (value.ValueKind == JsonValueKind.String)
         {
-            return HttpEvents.DataOf(HttpPayload.Json, (Encoding.UTF8.GetBytes(value.GetString()!), Form));
+            return Form.EventDataOf(HttpPayload.Json, Encoding.UTF8.GetBytes(value.GetString()!));
         }
 
         if (value.TryGetProperty("text", out var text))
         {
-            return HttpEvents.DataOf(HttpPayload.Text, (Encoding.UTF8.GetBytes(text.GetString()!), Form));
+            return Form.EventDataOf(HttpPayload.Text, Encoding.UTF8.GetBytes(text.GetString()!));
         }
 
-        return HttpEvents.DataOf(HttpPayload.Raw, (Hex(value.GetProperty("raw").GetString()!), Form));
+        return Form.EventDataOf(HttpPayload.Raw, Hex(value.GetProperty("raw").GetString()!));
     }
 
     // the words `act` is refused in, as its refusal's message; none where it is taken
