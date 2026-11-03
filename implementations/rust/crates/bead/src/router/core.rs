@@ -2174,13 +2174,22 @@ fn resolve_session<S: Side>(
         }),
         Resolution::Later(resolving) => {
             let owner = state.core().owner.clone();
+            let token = signal.token().clone();
 
             state.core().owner.cover(async move {
                 // ! what a resolution panics is its throw, as a resolver's is: the call answered
                 // PROCEDURE_FAILED and the panic reported (decision 0044)
-                let resolved = caught_future(("a credential's resolution", resolving))
-                    .await
-                    .unwrap_or_else(|panicked| Err(Unresolved::Other(Arc::new(panicked))));
+                let mut resolving =
+                    Box::pin(caught_future(("a credential's resolution", resolving)));
+                let Some(resolved) = token.run_until_cancelled(resolving.as_mut()).await else {
+                    // ! the verifier may ignore its signal: its task keeps no cancelled call's
+                    // payload, which belongs to the settlement alone
+                    drop(settle);
+                    drop(resolving.await);
+                    return;
+                };
+                let resolved =
+                    resolved.unwrap_or_else(|panicked| Err(Unresolved::Other(Arc::new(panicked))));
                 owner.offer(Box::new(move |state: &mut S| {
                     if !signal.is_aborted() {
                         settle(state, resolved);
