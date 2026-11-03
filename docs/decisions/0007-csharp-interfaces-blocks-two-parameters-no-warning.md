@@ -37,21 +37,27 @@ states them, its rules at `warning`, and the build holds them (`EnforceCodeStyle
 **At most two parameters, then the options.** A function takes at most two parameters, and after
 them at most one options record, always last:
 `FindIn(haystack, needle, new FindOptions { FromIndex = 10 })`, as the TypeScript side writes
-`findIn(haystack, needle, { fromIndex: 10 })`. The count is Deno's, and Bead holds it for every
-function, not only the public ones. The options record is a sealed record of `init` properties, its
-name ending in `Options`; it is optional, `TOptions? options = null`, when every member is, and
-required when one is, as a connect's `Host` and `Port` are. An optional parameter goes in the
-options; one alone may stay positional where no second could come, as
-`Fail(failure, string detail = "")`. A third essential thing is a design to revisit — a record of
-the call, or a type that holds two of the things — and never a third positional parameter. A
-`CancellationToken` goes in the options record whenever the function takes one, as
-`RequestOptions.CancellationToken` does and the TypeScript side's `signal` is; it is positional only
-as one of the two essentials, as in `SessionOf(request, signal)`. An event carries at most two
-values, and a listener takes what its event carries. A record of more than two members is a record
-of `init` properties, built by name as an object is on the TypeScript side. A parameter that is a
-union on the TypeScript side, as a debug filter given as it is, as its spec, or by a function that
-gives either, is an overload for each. A signature .NET imposes, an override's or a platform
-interface's, takes what it takes.
+`findIn(haystack, needle, { fromIndex: 10 })`, where a required member is one without `?`, its
+options parameter then without `?` or a default, and one required in some instantiations alone a
+conditional parameter type, as `RequestOptionsParameters` is. The count is Deno's, and Bead holds it
+for every function, not only the public ones. The options record is a sealed record of `init`
+properties, its name ending in `Options`; a setting the record cannot be built without is
+`required`, at most two of them and never the call's operand, the record then a required parameter,
+as a connect's `Host` and `Port` make it; with none, the record is optional,
+`TOptions? options = null`, or an overload without it where a platform rule asks for one (CA1032's
+exception constructors) or where a member is required in some instantiations alone (a service with
+no hook); a callback's options, which Bead hands, are always given
+([0004](0004-one-behaviour-in-every-language.md)). An optional parameter goes in the options; one
+alone may stay positional where no second could come, as `Fail(failure, string detail = "")`. A
+third essential thing is a design to revisit — a record of the call, or a type that holds two of the
+things — and never a third positional parameter. A `CancellationToken` goes in the options record
+whenever the function takes one, as `RequestOptions.CancellationToken` does and the TypeScript
+side's `signal` is; it is positional only as one of the two essentials, as in
+`SessionOf(request, signal)`. An event carries at most two values, and a listener takes what its
+event carries. A record of more than two members is a record of `init` properties, built by name as
+an object is on the TypeScript side. A parameter that is a union on the TypeScript side, as a debug
+filter given as it is, as its spec, or by a function that gives either, is an overload for each. A
+signature .NET imposes, an override's or a platform interface's, takes what it takes.
 
 **Every warning is an error, and the analyzers run at `latest-recommended`.**
 `Directory.Build.props` holds every project to `net10.0`, the latest language version, nullable
@@ -107,9 +113,13 @@ field that may be absent, `null` or a value, as a header's credential, is a null
 record of its `CredentialScheme` and what that scheme holds — an `OPAQUE` one's `SessionToken`, a
 `JWT`'s token, a scheme to come's bytes — where the TypeScript side's is a union of its schemes;
 both name the field `credential`, `Credential`, on a request and on an answer alike
-([0010](0010-a-request-presents-a-credential-of-a-scheme.md)). A name is one name on both sides, in
-each language's case, but where .NET names otherwise: a `[Flags]` enum is plural, `EnvelopeFlags`,
-and the HTTP client is `BeadHttpClient`, as .NET's own is `HttpClient`. A time in milliseconds is a
+([0010](0010-a-request-presents-a-credential-of-a-scheme.md)). A TypeScript union an option carries
+is one member, a sealed record holding one of its arms, as `Credential` holds its scheme's and
+`TransportReconnectOptions.Delay` a wait or a function; the adapters' `Password` and
+`PasswordProvider` are the one such option still in two members, work to do
+([0004](0004-one-behaviour-in-every-language.md)). A name is one name on both sides, in each
+language's case, but where .NET names otherwise: a `[Flags]` enum is plural, `EnvelopeFlags`, and
+the HTTP client is `BeadHttpClient`, as .NET's own is `HttpClient`. A time in milliseconds is a
 `TimeSpan`, and the clock a layer takes and exposes, the TypeScript side's `IClock`, is a
 `TimeProvider`, named `Clock` ([0011](0011-every-side-takes-its-time-from-a-clock-it-is-given.md)),
 so a test moves it itself. A synchronous question of a router's state is a `Task`, since the state
@@ -131,22 +141,34 @@ held to the side's floor, then the interop ([0006](0006-a-rule-has-its-gate.md))
 
 ## Consequences
 
-- **The parameter rule has no gate in the build**: no analyzer of .NET's recommended set counts
-  parameters, so review holds it, and a test over the built assemblies that holds the public surface
-  is among [0006](0006-a-rule-has-its-gate.md)'s gates owed. Its first piece holds a part of that
-  surface by reflection, `RouterCoreTests.Sessions.cs`'s
-  `Keeps_the_router_core_and_the_transport_s_credential_out_of_the_public_surface`: the router's
-  core and four types of its own stay out of it, the transport's credential out of what an
+- **The options rule has its gate in the build, the parameter count none.**
+  `Bead.Transport.Http.Tests/SurfaceTests` reads, over the eight built `src` assemblies, three facts
+  the compiler writes into them — `RequiredMemberAttribute`, the `IsExternalInit` modifier and
+  `HasDefaultValue` — and holds every public options record a sealed record of `init` properties,
+  taken required exactly when one of its members is `required`, a callback's argument and an
+  overload's optional form apart, with two required members at most
+  ([0004](0004-one-behaviour-in-every-language.md)). The reflection the round below refused was a
+  count of parameters; this one reads what the compiler marks, and runs in seconds. The public
+  surface is pinned, members included, by PublicApiAnalyzers: each `src` project's
+  `PublicAPI.Shipped.txt` and `PublicAPI.Unshipped.txt`, under RS0016 and RS0017, which
+  `tools/release.mjs prepare` brings up to date at a release; RS0026, which reads this side's own
+  form, a union's overloads with the options optional and last, as a fault, is off in
+  `.editorconfig` with its reason. No analyzer of .NET's recommended set counts parameters, so
+  review holds the count, and its test is among [0006](0006-a-rule-has-its-gate.md)'s gates owed.
+  `RouterCoreTests.Sessions.cs`'s
+  `Keeps_the_router_core_the_envelope_codec_and_the_transport_s_credential_out_of_the_public_surface`
+  names what the list keeps out: the router's core and four types of its own, the envelope's codec,
+  its envelope, its prefix and the options of its reading, the transport's credential out of what an
   admission, a resolver and a session's resolution are handed, and a credential's forwarding out of
-  a handler's and a resolver's interfaces; the whole surface's gate, its parameters among it, is
-  still owed. Past the rule, each work to do: eight functions of `src/` take three — two private
-  static methods, a private class's constructor, an internal class's constructor (`Notification`'s),
-  an internal class's method, `AmqpManagement.Request`, whose third is its `CancellationToken`,
-  `FailureException.OfProtocol`, whose third, its detail, is a positional optional, and the
-  gateway's two `Refuse`, whose third, its fields, is one too; the transports' `Connect`, the
-  broker's among them, and `Start`, and the gateway's `Start`, take their `CancellationToken` after
-  their options; the session manager's four events of a change carry three values; and twenty-five
-  positional records take more than two members, `TransportServerRefusal` six.
+  a handler's and a resolver's interfaces. Past the rule, each work to do: eight functions of `src/`
+  take three — two private static methods, a private class's constructor, an internal class's
+  constructor (`Notification`'s), an internal class's method, `AmqpManagement.Request`, whose third
+  is its `CancellationToken`, `FailureException.OfProtocol`, whose third, its detail, is a
+  positional optional, and the gateway's two `Refuse`, whose third, its fields, is one too; the
+  transports' `Connect`, the broker's among them, and `Start`, and the gateway's `Start`, take their
+  `CancellationToken` after their options; the session manager's four events of a change carry three
+  values; and twenty-five positional records take more than two members, `TransportServerRefusal`
+  six.
 - Nothing in the build forbids a base class either; review holds that too, and every class and
   record of `src/` and `interop/` is sealed or static.
 - An event a router raises, an error or a trace, runs on its scheduler, as a listener runs in

@@ -4109,13 +4109,7 @@
         },
         {
           "id": "number",
-          "name": "a number",
-          "differs": [
-            {
-              "row": "A reconnection's delay given as a number",
-              "language": "C#"
-            }
-          ]
+          "name": "a number"
         }
       ],
       "observed": "held",

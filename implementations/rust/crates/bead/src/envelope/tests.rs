@@ -277,3 +277,21 @@ fn writes_a_lone_surrogate_as_u_fffd() {
         "the surrogate written as U+FFFD"
     );
 }
+
+// the envelope's codec is internal on every side (decision 0004): the root offers none of it, and
+// the workspace's own members reach it through `internal`
+#[test]
+fn refuses_the_envelope_codec_at_the_root() {
+    let consumer = crate::testing::surface::Consumer::new();
+
+    for name in ["read_envelope", "write_envelope"] {
+        consumer.refuses(
+            &format!("pub fn check() {{ let _ = bead::{name}; }}"),
+            ("E0425", name),
+        );
+    }
+
+    consumer.accepts(
+        "pub fn check() { let _ = (bead::internal::read_envelope, bead::internal::write_envelope); let _ = bead::internal::ReadEnvelopeOptions::default(); }",
+    );
+}

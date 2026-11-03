@@ -208,4 +208,4 @@ public sealed record CancelHeader : IEnvelopeHeader
 /// <param name="CallId">The call id, bytes 4 to 7.</param>
 /// <param name="Kind">The kind, as it came: any byte.</param>
 /// <param name="Layout">The layout, from 0xA1 to 0xAF.</param>
-public readonly record struct EnvelopePrefix(uint CallId, byte Kind, byte Layout);
+internal readonly record struct EnvelopePrefix(uint CallId, byte Kind, byte Layout);

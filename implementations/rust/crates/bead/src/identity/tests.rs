@@ -190,16 +190,16 @@ async fn a_refused_declaration_declares_nothing_its_registry_holding_no_series_o
     use std::sync::Arc;
 
     let registry = MetricsRegistry::new(&MetricsRegistryOptions::default()).expect("a registry");
-    let pair = Pair::connected((
+    let pair = Pair::connected(
         crate::testing::instants::new_year(),
-        PairOptions {
-            client: ClientOptions {
+        &PairOptions {
+            client: Some(ClientOptions {
                 metrics_registry: Some(registry.clone()),
                 ..ClientOptions::default()
-            },
+            }),
             ..PairOptions::default()
         },
-    ))
+    )
     .await
     .expect("connected");
     let router = pair.client.router();
@@ -244,19 +244,19 @@ async fn checks_a_declaration_before_the_router_s_reasons_and_its_registry_s() {
     use std::sync::Arc;
 
     let registry = || MetricsRegistry::new(&MetricsRegistryOptions::default()).expect("a registry");
-    let pair = Pair::connected((
+    let pair = Pair::connected(
         crate::testing::instants::new_year(),
-        PairOptions {
-            client: ClientOptions {
+        &PairOptions {
+            client: Some(ClientOptions {
                 metrics_registry: Some(registry()),
                 ..ClientOptions::default()
-            },
-            server: ServerOptions {
+            }),
+            server: Some(ServerOptions {
                 metrics_registry: Some(registry()),
                 ..ServerOptions::default()
-            },
+            }),
         },
-    ))
+    )
     .await
     .expect("connected");
     let handler = || Handler {

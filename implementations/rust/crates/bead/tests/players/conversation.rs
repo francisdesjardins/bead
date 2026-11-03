@@ -9,17 +9,18 @@ use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::SystemTime;
 
+use bead::internal::{Envelope, ReadEnvelopeOptions, read_envelope};
 use bead::testing::{SteppingClock, hexadecimal};
 use bead::{
     BoxFuture, BrokerAdapter, BrokerClient, BrokerClientOptions, BrokerConnectOptions,
     BrokerParticipant, BrokerParticipantOptions, BrokerServer, BrokerServerOptions, ClientListener,
     ClientTransport, ConnectionHandle, Credential, CredentialScheme, DebugDirection,
-    DisconnectOptions, Envelope, EnvelopeKind, MemoryBroker, MemoryBrokerAdapterOptions,
-    MemoryBrokerOptions, MemoryClient, MemoryClientOptions, MemoryConnectOptions, MemoryServer,
-    MemoryServerOptions, MetricsRegistry, NEVER, PacingLimitsOptions, ReadEnvelopeOptions,
-    RelayOptions, RequestOptions, RouterError, RouterLimitsOptions, RouterSide, Sent, Server,
-    ServerListener, ServerOptions, ServerTransport, ServiceServer, SharedClock, TracedEnvelope,
-    TransportMessage, read_envelope, require_credential, require_session, share_leg_b_session,
+    DisconnectOptions, EnvelopeKind, MemoryBroker, MemoryBrokerAdapterOptions, MemoryBrokerOptions,
+    MemoryClient, MemoryClientOptions, MemoryConnectOptions, MemoryServer, MemoryServerOptions,
+    MetricsRegistry, NEVER, PacingLimitsOptions, RelayOptions, RequestOptions, RouterError,
+    RouterLimitsOptions, RouterSide, Sent, Server, ServerListener, ServerOptions, ServerTransport,
+    ServiceServer, SharedClock, TracedEnvelope, TransportMessage, require_credential,
+    require_session, share_leg_b_session,
 };
 use bytes::Bytes;
 use serde_json::{Map, Value, json};
@@ -317,7 +318,7 @@ impl OverBroker {
             .ok_or_else(|| format!("no client for {name}"))?;
 
         client
-            .connect(BrokerConnectOptions::of("interop"))
+            .connect(&BrokerConnectOptions::of("interop"))
             .await
             .map_err(|error| format!("{name} did not connect: {error}"))?;
         clock.settle().await;
@@ -413,7 +414,7 @@ impl Connections {
                     .or_insert_with(|| 50_001_u16.saturating_add(next));
 
                 if !memory.clients.contains_key(name) {
-                    let mut options = MemoryClientOptions::of(memory.server.clone());
+                    let mut options = MemoryClientOptions::default();
 
                     options.clock = Some(Arc::clone(&memory.clock));
 
@@ -430,12 +431,12 @@ impl Connections {
                     .clients
                     .get(name)
                     .ok_or_else(|| format!("no client for {name}"))?;
-                let mut options = MemoryConnectOptions::default();
+                let mut options = MemoryConnectOptions::of(memory.server.clone());
 
                 options.address = Some("127.0.0.1".to_owned());
                 options.port = Some(port);
                 client
-                    .connect(options)
+                    .connect(&options)
                     .await
                     .map_err(|error| format!("{name} did not connect: {error}"))?;
 
@@ -531,7 +532,7 @@ impl Connections {
                 options.is_clean = Some(false);
 
                 client
-                    .disconnect(options)
+                    .disconnect(&options)
                     .map_err(|error| error.to_string())
             }
             // unclean, as the scripted connections close
@@ -545,7 +546,7 @@ impl Connections {
                 options.is_clean = Some(false);
 
                 client
-                    .disconnect(options)
+                    .disconnect(&options)
                     .map_err(|error| error.to_string())
             }
         }
@@ -865,10 +866,12 @@ fn relay_of(conversation: &Value) -> Result<Option<RelayOptions>, String> {
     };
     let mut relay = RelayOptions::default();
 
-    relay.verifies = given
-        .get("verifies")
-        .and_then(Value::as_bool)
-        .unwrap_or(false);
+    relay.verifies = Some(
+        given
+            .get("verifies")
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
+    );
     relay.before_route = match given.get("beforeRoute").and_then(Value::as_str) {
         None => None,
         Some("requireCredential") => Some(require_credential()),
@@ -938,7 +941,7 @@ fn listen(
         let mut options = RequestOptions::default();
 
         options.connection_handle = Some(Arc::clone(handle));
-        drop(asking.call(Value::String(QUESTION.to_owned()), options));
+        drop(asking.call(Value::String(QUESTION.to_owned()), &options));
     };
 
     if telling == "report" {
@@ -1031,7 +1034,7 @@ fn hold<S: FnOnce() -> String>(holds: bool, said: S) -> Result<(), String> {
 
 /// Plays `conversation` against a server of the interop service, on a stepping clock only its
 /// steps move.
-pub(crate) async fn play(conversation: &Value, options: PlayOptions) -> Result<(), String> {
+pub(crate) async fn play(conversation: &Value, options: &PlayOptions) -> Result<(), String> {
     let steps = conversation
         .get("steps")
         .and_then(Value::as_array)
@@ -1075,7 +1078,7 @@ pub(crate) async fn play(conversation: &Value, options: PlayOptions) -> Result<(
     server_options.clock = Some(Arc::clone(&shared));
     // the interop service's, none of a JWT under limits that hold none
     server_options.credentials = Some(
-        bead_interop::interop_credentials_of(&shared, Some(&limits))
+        bead_interop::interop_credentials_of(&shared, &limits)
             .map_err(|error| error.to_string())?,
     );
     server_options.limits = Some(limits);

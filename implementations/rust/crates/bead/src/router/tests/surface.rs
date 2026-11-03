@@ -3,7 +3,8 @@
 use crate::testing::surface::Consumer;
 
 #[test]
-fn keeps_the_router_core_and_the_transports_credential_out_of_the_public_surface() {
+fn keeps_the_router_core_the_envelope_codec_and_the_transports_credential_out_of_the_public_surface()
+ {
     let consumer = Consumer::new();
     for item in [
         "core::Core",
@@ -25,6 +26,11 @@ fn keeps_the_router_core_and_the_transports_credential_out_of_the_public_surface
         "CoreRequest",
         "BeforeAnswer",
         "SessionRequest",
+        "Envelope",
+        "Prefix",
+        "ReadEnvelopeOptions",
+        "read_envelope",
+        "write_envelope",
     ] {
         consumer.refuses(
             &format!("use bead::{item};"),

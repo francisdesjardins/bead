@@ -15,7 +15,12 @@ import {
   setReadyStateOpen,
 } from '../shared/ready-state';
 import { transferableOf } from '../shared/transferable';
-import type { IMemoryEndLike, IMemoryPeerLike, ITransportMessage } from '../shared/types';
+import type {
+  IMemoryEndLike,
+  IMemoryPeerLike,
+  IMemoryTransportServerLike,
+  ITransportMessage,
+} from '../shared/types';
 import { dispose } from './symbols';
 import { createTransportClient, DISCONNECT_DEFAULTS, isFieldValue } from './transport-client';
 import type {
@@ -43,7 +48,7 @@ export type {
 export const CONNECT_DEFAULTS = Object.freeze({
   address: 'local',
   timeout: 10_000,
-} satisfies IMemoryTransportClientConnectOptions);
+} satisfies Omit<IMemoryTransportClientConnectOptions, 'server'>);
 
 // an address a handle can name: visible ASCII but `;`, which ends a handle's part
 const ADDRESS = /^[!-:<-~]+$/u;
@@ -52,10 +57,11 @@ const ADDRESS = /^[!-:<-~]+$/u;
 
 /**
  * A transport client to an in-memory transport server of the same process (spec 15.13): `connect`
- * hands its server an end of its own, with the address and port it is given, and opens once the
- * server drew the connection. Each envelope crosses as a copy, whole, once and in order, in a later
- * turn than its send, with the credential a request presents beside it, any field value; nothing
- * the server sends carries one.
+ * hands the server it is given an end of its own, with the address and port it is given, and opens
+ * once the server drew the connection; a reconnection connects to that server again, as every
+ * transport connects again where its last connect went. Each envelope crosses as a copy, whole,
+ * once and in order, in a later turn than its send, with the credential a request presents beside
+ * it, any field value; nothing the server sends carries one.
  *
  * It never leaves the process, so it is secure; it holds no bound or heartbeat of its own, and a
  * connect's timeout alone. Paused by its router, it holds what its server sends, in order, without
@@ -63,16 +69,15 @@ const ADDRESS = /^[!-:<-~]+$/u;
  * clean as the close said; a server that closes it is heard as a `close`, not clean at this end.
  *
  * @example
- * const client = createMemoryTransportClient({ server });
+ * const client = createMemoryTransportClient();
  * client.on('message', ({ data }) => {});
- * await client.connect({ address: '192.0.2.7', port: 50_000 });
+ * await client.connect({ address: '192.0.2.7', port: 50_000, server });
  * await client.send({ credential: 'Bearer token', data: envelope });
  * await client.disconnect();
  */
 export const createMemoryTransportClient = ({
   clock,
-  server,
-}: IMemoryTransportClientOptions): MemoryTransportClient => {
+}: IMemoryTransportClientOptions = {}): MemoryTransportClient => {
   return createTransportClient<IMemoryEndLike, IMemoryTransportClientConnectOptions>(
     (client, { tell }) => {
       // the open connection: this client's end, and its server's
@@ -100,7 +105,14 @@ export const createMemoryTransportClient = ({
         clock,
         isSecure: true,
 
-        assertConnect: ({ address = CONNECT_DEFAULTS.address, port }) => {
+        assertConnect: ({ address = CONNECT_DEFAULTS.address, port, server }) => {
+          // what its type requires, and a caller in JavaScript may still leave out
+          if (typeof (server as IMemoryTransportServerLike | undefined)?.accept !== 'function') {
+            throw new ProgrammerError(
+              "an in-memory connect's server is an in-memory transport server"
+            );
+          }
+
           if (typeof address !== 'string' || !ADDRESS.test(address)) {
             throw new ProgrammerError(
               "an in-memory connect's address is visible ASCII but ';', at least one character"
@@ -118,6 +130,7 @@ export const createMemoryTransportClient = ({
         connect: async ({
           address = CONNECT_DEFAULTS.address,
           port,
+          server,
           signal,
           timeout = CONNECT_DEFAULTS.timeout,
         }) => {

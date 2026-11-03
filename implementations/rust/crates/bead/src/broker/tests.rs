@@ -341,7 +341,7 @@ pub(super) async fn accepted_of(
     bound: u64,
 ) -> (MemoryBrokerAdapter, Arc<Heard>, u64) {
     let (acceptor, heard) = peer_of(broker, ("acceptor", &[&["bead", "s", "interop"]])).await;
-    let connecting = crate::testing::spawn(client.connect(BrokerConnectOptions::of("interop")));
+    let connecting = crate::testing::spawn(client.connect(&BrokerConnectOptions::of("interop")));
 
     until(|| heard.parcels().len() == 1, "its OPEN reaches the name").await;
 
@@ -486,7 +486,7 @@ pub(super) struct BrokerPair {
 }
 
 impl BrokerPair {
-    pub(super) async fn of(options: BrokerPairOptions) -> Self {
+    pub(super) async fn of(options: &BrokerPairOptions) -> Self {
         let broker = MemoryBroker::new(&MemoryBrokerOptions {
             maximum_message_bytes: options.maximum_message_bytes,
             ..MemoryBrokerOptions::default()
@@ -546,7 +546,7 @@ impl BrokerPair {
             .expect("a client");
 
         client
-            .connect(BrokerConnectOptions::of("interop"))
+            .connect(&BrokerConnectOptions::of("interop"))
             .await
             .expect("connected");
         until(
@@ -645,7 +645,7 @@ mod held {
     #[tokio::test]
     async fn holds_what_comes_for_a_paused_connection_in_order_and_loses_it_alone_past_maximum_held_envelope_bytes()
      {
-        let pair = BrokerPair::of(BrokerPairOptions {
+        let pair = BrokerPair::of(&BrokerPairOptions {
             maximum_held_envelope_bytes: Some(100),
             ..BrokerPairOptions::default()
         })
@@ -729,7 +729,7 @@ mod held {
     // its envelope behind what is held
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
     async fn a_resume_with_a_hand_already_queued_keeps_the_order_of_what_is_held() {
-        let pair = BrokerPair::of(BrokerPairOptions::default()).await;
+        let pair = BrokerPair::of(&BrokerPairOptions::default()).await;
         let log = logged(&pair);
         let first = pair.connect().await;
         let handles = handles_of(&pair);
@@ -777,7 +777,7 @@ mod held {
     // RESET drops them"
     #[tokio::test]
     async fn a_close_behind_held_envelopes_comes_after_them_and_a_reset_drops_them() {
-        let pair = BrokerPair::of(BrokerPairOptions::default()).await;
+        let pair = BrokerPair::of(&BrokerPairOptions::default()).await;
         let log = logged(&pair);
         let first = pair.connect().await;
         let second = pair.connect().await;
@@ -791,7 +791,7 @@ mod held {
 
         until_held(&pair.server_participant, &[(2, false), (0, false)]).await;
         first
-            .disconnect(DisconnectOptions::default())
+            .disconnect(&DisconnectOptions::default())
             .expect("disconnected");
         until_held(&pair.server_participant, &[(2, true), (0, false)]).await;
 
@@ -832,7 +832,7 @@ mod held {
     // other connection": what a connection holds paused is charged to no budget of the parts
     #[tokio::test]
     async fn one_connection_held_to_its_bound_fails_the_parts_of_no_other_connection() {
-        let pair = BrokerPair::of(BrokerPairOptions {
+        let pair = BrokerPair::of(&BrokerPairOptions {
             maximum_message_bytes: Some(1_024),
             held_bytes_budget: Some(4_096),
             ..BrokerPairOptions::default()

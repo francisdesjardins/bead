@@ -24,6 +24,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Each side's suite reads seeded mutations of the parcels, as it reads the envelope's, the Rust
   side's the envelope's too, the same inputs on every side; the `proto` differential takes
   `spec/codecs.json`'s payloads among its seeds.
+- Each side's public surface is pinned, members included, to a list its gate holds: the TypeScript
+  package's exports by `tools/check-surface.mjs`, the C# side's by PublicApiAnalyzers'
+  `PublicAPI.Shipped.txt` and `PublicAPI.Unshipped.txt`, which `tools/release.mjs prepare` brings up
+  to date, and the Rust crates' by `bead-house`.
 
 ### Changed
 
@@ -56,6 +60,30 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - The TypeScript side hands a request to its resolver in a later turn, as the C# side does, so the
   order of answers never turns on whether a resolver answers at once: a later request's refusal
   goes before it (spec 9.2, 15.1).
+- An options object marks a setting it cannot be built without as required, at most two and never
+  the call's operand, in its language's form on every side — a member without `?`, a `required`
+  member, a field its constructor of the required members takes — and is then a required parameter;
+  one required in some instantiations alone is a conditional parameter type on the TypeScript side.
+- On the TypeScript side a transport client's `connect` takes its options as optional where every
+  member is: the worker transport's and the worker client's.
+- The in-memory transport client takes its server at each connect, on every side, as every other
+  transport takes where it connects: on the TypeScript side `server` moves from
+  `createMemoryTransportClient`'s options to `connect`'s, and a reconnection replays it.
+- On the C# side `ServiceServerOptions.Admissions` is no longer `required`: none where no procedure
+  names a hook, and its absence where one does is refused as the service is built.
+- A reconnection's delay is a number or a function on every side. On the C# side
+  `TransportReconnectOptions.Delay` is a `TransportReconnectDelayOrResolver`, built by `Of` from a
+  `TimeSpan` or from a `TransportReconnectDelay`, which keeps its name; a lambda assigned to `Delay`
+  is now written `TransportReconnectDelayOrResolver.Of((previousDelay, attempt) => …)` (spec 1.4,
+  `spec/durations.json`).
+- The C# side's `HttpPolicy.Of` takes its options as optional, as every member of them is.
+
+### Removed
+
+- The envelope's codec is internal on every side, as the TypeScript side keeps it: on the C# side
+  `EnvelopeCodec`, `Envelope`, `EnvelopePrefix` and `EnvelopeReadOptions` leave the public surface.
+  An envelope's headers stay public where an event, a hook or a result carries them. With the codec,
+  `Health.Of`, `LayerGauges.Of` and `RouterLimits.WholeEnvelopeOf` leave the C# side's surface.
 
 ### Fixed
 

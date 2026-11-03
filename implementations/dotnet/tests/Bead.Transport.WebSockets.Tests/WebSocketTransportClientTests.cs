@@ -149,12 +149,9 @@ public sealed class WebSocketTransportClientTests : IAsyncLifetime
     }
 
     // the same wait after every failed attempt
-    private static TransportReconnectDelay DelayOf(TimeSpan delay)
+    private static TransportReconnectDelayOrResolver DelayOf(TimeSpan delay)
     {
-        return (_, _) =>
-        {
-            return delay;
-        };
+        return TransportReconnectDelayOrResolver.Of(delay);
     }
 
     // each close the client raises, in order
@@ -2525,10 +2522,10 @@ public sealed class WebSocketTransportClientTests : IAsyncLifetime
 
         var reconnecting = client.Reconnect(new TransportReconnectOptions
         {
-            Delay = (_, _) =>
+            Delay = TransportReconnectDelayOrResolver.Of((_, _) =>
             {
                 throw new FormatException("decay_error");
-            },
+            }),
         });
         var (refused, _) = await listener.Next();
 
@@ -2742,12 +2739,12 @@ public sealed class WebSocketTransportClientTests : IAsyncLifetime
 
         var reconnecting = client.Reconnect(new TransportReconnectOptions
         {
-            Delay = (previousDelay, attempt) =>
+            Delay = TransportReconnectDelayOrResolver.Of((previousDelay, attempt) =>
             {
                 seen.Enqueue((previousDelay, attempt));
 
                 return (previousDelay ?? TimeSpan.FromMilliseconds(5)) * 2;
-            },
+            }),
             MaximumAttempts = 4,
         });
 

@@ -5,13 +5,14 @@
 use std::process::ExitCode;
 use std::sync::Arc;
 
+use bead::internal::are_one_name;
 use bead::testing::{self, Difference, files};
 use bead::{
     BoxFuture, ClientListener, ClientTransport, ConnectionHandle, IdentityRefusal, JsonCodec,
     NotificationLike, Procedure, ProcedureKind, ProgrammerError, ReadyState, Refusal,
     ResolverDependencies, Response, RouterClient, RouterClientOptions, RouterError, RouterServer,
     RouterServerOptions, Sent, ServerListener, ServerTransport, ServiceManager,
-    ServiceManagerOptions, ServiceRouter, TransportMessage, are_one_name,
+    ServiceManagerOptions, ServiceRouter, TransportMessage,
 };
 use bytes::Bytes;
 use libtest_mimic::{Arguments, Failed, Trial};

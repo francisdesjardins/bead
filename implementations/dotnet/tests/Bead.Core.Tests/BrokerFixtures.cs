@@ -115,8 +115,5 @@ internal sealed class BrokerPair : IAsyncDisposable
         await ServerParticipant.DisposeAsync();
     }
 
-    private static TimeSpan Immediately(TimeSpan? previousDelay, int attempt)
-    {
-        return TimeSpan.Zero;
-    }
+    private static readonly TransportReconnectDelayOrResolver Immediately = TransportReconnectDelayOrResolver.Of(TimeSpan.Zero);
 }

@@ -1753,7 +1753,7 @@ impl RouterServer {
 
         let relay = crate::router::relay::Relay::new(
             (RouterSide::Server, limits),
-            options.relay.clone().unwrap_or_default(),
+            &options.relay.clone().unwrap_or_default(),
         )?;
         let metrics = options
             .metrics_registry
@@ -2072,10 +2072,8 @@ impl RouterServer {
     /// A [`ProgrammerError`] as the relay refuses it.
     pub fn register_destination(
         &self,
-        (target, options): (
-            crate::router::relay::RelayTarget,
-            crate::router::relay::DestinationOptions,
-        ),
+        target: crate::router::relay::RelayTarget,
+        options: &crate::router::relay::DestinationOptions,
     ) -> Result<crate::router::relay::DestinationRegistration, ProgrammerError> {
         crate::router::relay::register(&self.shared.relay, (target, options))
     }

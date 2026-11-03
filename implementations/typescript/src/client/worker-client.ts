@@ -36,7 +36,7 @@ export type WorkerClient = IClient<WorkerTransportClient>;
  *
  * const client = createWorkerClient({ transport: { worker } });
  *
- * void client.connect({});
+ * void client.connect();
  */
 export const createWorkerClient = (options: IWorkerClientOptions): WorkerClient => {
   return createClient(

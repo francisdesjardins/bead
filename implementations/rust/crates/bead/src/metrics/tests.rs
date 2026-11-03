@@ -479,16 +479,16 @@ async fn counts_exactly_under_calls_made_at_once_from_many_threads() {
 
     let registry = MetricsRegistry::new(&MetricsRegistryOptions::default()).expect("a registry");
     let options = PairOptions {
-        server: ServerOptions {
+        server: Some(ServerOptions {
             metrics_registry: Some(registry.clone()),
             ..ServerOptions::default()
-        },
-        client: ClientOptions {
+        }),
+        client: Some(ClientOptions {
             metrics_registry: Some(registry.clone()),
             ..ClientOptions::default()
-        },
+        }),
     };
-    let pair = Pair::connected((crate::testing::instants::new_year(), options))
+    let pair = Pair::connected(crate::testing::instants::new_year(), &options)
         .await
         .expect("a pair connected");
 
@@ -513,7 +513,7 @@ async fn counts_exactly_under_calls_made_at_once_from_many_threads() {
             crate::testing::spawn(async move {
                 for _ in 0..CALLS {
                     asking
-                        .call(json!(thread.to_string()), RequestOptions::default())
+                        .call(json!(thread.to_string()), &RequestOptions::default())
                         .expect("echo called")
                         .await
                         .expect("echo answered");

@@ -88,7 +88,7 @@ pub(super) async fn subscribed(
 ) -> NotificationRegistration {
     let mut registering = notification.on(
         ("subscribe".to_owned(), callback),
-        RequestOptions::default(),
+        &RequestOptions::default(),
     );
     pending(&mut registering).await;
     fixture.clock.settle().await;
@@ -125,7 +125,7 @@ async fn its_request_takes_the_destination_and_the_timeout_it_is_given_and_names
     let notification = notification(&fixture);
     let mut registering = notification.on(
         ("s".to_owned(), callback(&Heard::default(), "")),
-        RequestOptions {
+        &RequestOptions {
             destination_id: Some(3),
             timeout: Some(Duration::from_millis(50)),
             ..RequestOptions::default()
@@ -155,7 +155,7 @@ async fn the_router_holds_it_before_its_request_goes_out_so_a_notification_right
     let heard = Heard::default();
     let mut registering = notification.on(
         ("s".to_owned(), callback(&heard, "")),
-        RequestOptions::default(),
+        &RequestOptions::default(),
     );
     pending(&mut registering).await;
     fixture.clock.settle().await;
@@ -188,7 +188,7 @@ async fn once_registered_another_callback_joins_without_a_request() {
     let second = notification
         .on(
             ("subscribe".to_owned(), callback(&heard, "second ")),
-            RequestOptions::default(),
+            &RequestOptions::default(),
         )
         .await
         .expect("joined");
@@ -207,11 +207,11 @@ async fn callbacks_registering_at_once_share_one_request_and_one_registration() 
     let heard = Heard::default();
     let mut first = notification.on(
         ("a".to_owned(), callback(&heard, "a ")),
-        RequestOptions::default(),
+        &RequestOptions::default(),
     );
     let mut second = notification.on(
         ("b".to_owned(), callback(&heard, "b ")),
-        RequestOptions::default(),
+        &RequestOptions::default(),
     );
     pending(&mut first).await;
     pending(&mut second).await;
@@ -235,7 +235,7 @@ async fn a_failed_request_rejects_and_keeps_nothing_the_next_registration_asks_a
     let heard = Heard::default();
     let mut first = notification.on(
         ("a".to_owned(), callback(&heard, "a ")),
-        RequestOptions::default(),
+        &RequestOptions::default(),
     );
     pending(&mut first).await;
     fixture.clock.settle().await;
@@ -276,7 +276,7 @@ async fn an_answer_to_its_subscription_that_does_not_decode_lets_go_of_it_the_ro
             serde_json::json!({ "text": "a" }),
             Arc::new(|_| Box::pin(async { Ok(()) })),
         ),
-        RequestOptions::default(),
+        &RequestOptions::default(),
     );
     pending(&mut registering).await;
     fixture.clock.settle().await;
@@ -300,7 +300,7 @@ async fn the_last_callback_taken_away_unregisters_the_notification_taking_one_aw
     let second = notification
         .on(
             ("s".to_owned(), callback(&heard, "second ")),
-            RequestOptions::default(),
+            &RequestOptions::default(),
         )
         .await
         .expect("joined");
@@ -349,7 +349,7 @@ async fn the_last_callback_out_unsubscribes_with_the_call_id_and_the_answer_that
     let second = notification
         .on(
             ("s".to_owned(), callback(&Heard::default(), "")),
-            RequestOptions::default(),
+            &RequestOptions::default(),
         )
         .await
         .expect("joined");
@@ -369,7 +369,7 @@ async fn taking_the_same_registration_away_twice_leaves_another_of_the_same_call
     let callback = callback(&heard, "");
     let first = subscribed(&fixture, (&notification, Arc::clone(&callback))).await;
     let second = notification
-        .on(("s".to_owned(), callback), RequestOptions::default())
+        .on(("s".to_owned(), callback), &RequestOptions::default())
         .await
         .expect("joined");
     first.unregister().await.expect("first out");
@@ -395,7 +395,7 @@ async fn the_same_procedure_gives_the_same_notification_so_every_callback_is_hea
     let two = second
         .on(
             ("s".to_owned(), callback(&heard, "second ")),
-            RequestOptions::default(),
+            &RequestOptions::default(),
         )
         .await
         .expect("joined");

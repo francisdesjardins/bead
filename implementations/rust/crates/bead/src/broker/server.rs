@@ -49,7 +49,7 @@ fn locked<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
 }
 
 /// How a broker's server transport is built (spec 15.12, 15.18, 15.23).
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 #[non_exhaustive]
 pub struct BrokerServerOptions {
     /// The names it serves, each a token, a server's as a host name is (spec 15.16): its clients'
@@ -83,7 +83,12 @@ impl BrokerServerOptions {
     pub fn of<N: Into<String>, I: IntoIterator<Item = N>>(names: I) -> Self {
         Self {
             names: names.into_iter().map(Into::into).collect(),
-            ..Self::default()
+            is_in_group: None,
+            maximum_connections: None,
+            maximum_connections_per_address: None,
+            maximum_unsent_bytes: None,
+            accept_timeout: None,
+            secure: None,
         }
     }
 }

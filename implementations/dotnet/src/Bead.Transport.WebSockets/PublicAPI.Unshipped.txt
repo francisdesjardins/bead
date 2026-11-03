@@ -1,0 +1,7 @@
+#nullable enable
+Bead.Transport.WebSockets.WebSocketClientOptions.Intake.get -> Bead.IntakeLimits?
+Bead.Transport.WebSockets.WebSocketClientOptions.Intake.init -> void
+Bead.Transport.WebSockets.WebSocketTransportClient.Pause() -> void
+Bead.Transport.WebSockets.WebSocketTransportClient.Resume() -> void
+Bead.Transport.WebSockets.WebSocketTransportServer.Pause(string! connectionHandle) -> void
+Bead.Transport.WebSockets.WebSocketTransportServer.Resume(string! connectionHandle) -> void

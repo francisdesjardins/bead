@@ -266,23 +266,23 @@ async fn answers_a_jwt_call_past_the_calls_its_key_set_lets_wait_for_an_issuers_
     let (mut key_set, asks) = key_set();
     key_set.maximum_waiting_calls = Some(1);
     let credential = RequestCredential::Jwt(jwt_with_kid(&json!({}), "set-2"));
-    let pair = Pair::connected((
+    let pair = Pair::connected(
         crate::testing::instants::new_year(),
-        PairOptions {
-            server: crate::server::ServerOptions {
+        &PairOptions {
+            server: Some(crate::server::ServerOptions {
                 credentials: Some(Credentials {
                     audience: Some(AUDIENCE.to_owned()),
                     key_set: Some(key_set),
                     ..Credentials::default()
                 }),
                 ..crate::server::ServerOptions::default()
-            },
-            client: crate::client::ClientOptions {
+            }),
+            client: Some(crate::client::ClientOptions {
                 credential: Some(credential.clone()),
                 ..crate::client::ClientOptions::default()
-            },
+            }),
         },
-    ))
+    )
     .await
     .expect("a connected pair");
     let ran = Arc::new(AtomicUsize::new(0));
@@ -447,10 +447,10 @@ async fn answers_a_subscribing_call_whose_jwts_end_passes_before_its_answer_with
 
     for (seconds, advance_clock) in [(120, false), (1, true)] {
         let credential = RequestCredential::Jwt(jwt_of(&json!({"exp": NOW + seconds - 60})));
-        let pair = Pair::connected((
+        let pair = Pair::connected(
             crate::testing::instants::new_year(),
-            PairOptions {
-                server: crate::server::ServerOptions {
+            &PairOptions {
+                server: Some(crate::server::ServerOptions {
                     credentials: Some(Credentials {
                         audience: Some(AUDIENCE.to_owned()),
                         keys: vec![JwtKey {
@@ -461,13 +461,13 @@ async fn answers_a_subscribing_call_whose_jwts_end_passes_before_its_answer_with
                         ..Credentials::default()
                     }),
                     ..crate::server::ServerOptions::default()
-                },
-                client: crate::client::ClientOptions {
+                }),
+                client: Some(crate::client::ClientOptions {
                     credential: Some(credential.clone()),
                     ..crate::client::ClientOptions::default()
-                },
+                }),
             },
-        ))
+        )
         .await
         .expect("a connected pair");
         let released = CancellationToken::new();
@@ -765,10 +765,10 @@ async fn dispatches_nothing_and_runs_no_resolver_for_a_jwt_call_that_waits_on_it
 async fn answers_session_required_from_the_admission_of_a_resolver_registered_on_it_access_denied_to_a_call_that_presented_a_jwt_that_holds_whose_client_keeps_its_default_and_session_required_to_one_that_presented_none()
  {
     let credential = RequestCredential::Jwt(jwt());
-    let pair = Pair::connected((
+    let pair = Pair::connected(
         crate::testing::instants::new_year(),
-        PairOptions {
-            server: crate::server::ServerOptions {
+        &PairOptions {
+            server: Some(crate::server::ServerOptions {
                 credentials: Some(Credentials {
                     audience: Some(AUDIENCE.to_owned()),
                     keys: vec![JwtKey {
@@ -779,13 +779,13 @@ async fn answers_session_required_from_the_admission_of_a_resolver_registered_on
                     ..Credentials::default()
                 }),
                 ..crate::server::ServerOptions::default()
-            },
-            client: crate::client::ClientOptions {
+            }),
+            client: Some(crate::client::ClientOptions {
                 credential: Some(credential.clone()),
                 ..crate::client::ClientOptions::default()
-            },
+            }),
         },
-    ))
+    )
     .await
     .expect("a connected pair");
     pair.server

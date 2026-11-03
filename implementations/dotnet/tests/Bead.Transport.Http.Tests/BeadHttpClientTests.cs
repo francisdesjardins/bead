@@ -302,10 +302,7 @@ public sealed class BeadHttpClientTests
         {
             return client.Reconnect(new TransportReconnectOptions
             {
-                Delay = (_, _) =>
-                {
-                    return TimeSpan.Zero;
-                },
+                Delay = TransportReconnectDelayOrResolver.Of(TimeSpan.Zero),
                 MaximumAttempts = 2,
             }).WaitAsync(Patience, Cancelled);
         })).Message);

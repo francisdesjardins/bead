@@ -35,7 +35,7 @@ async fn through_own(
 
 #[tokio::test]
 async fn passes_nothing_on_to_a_connection_of_its_own_that_takes_no_request_of_the_relays() {
-    let (served, relay) = fixture(admitting()).await;
+    let (served, relay) = fixture(&admitting()).await;
     served.transport.open(&second(), false);
     served.settle().await;
     register(&relay, (RelayTarget::Connection(second()), 7));
@@ -66,7 +66,7 @@ async fn passes_nothing_on_to_a_connection_of_its_own_that_takes_no_request_of_t
 #[tokio::test]
 async fn leaves_a_connection_of_its_own_unreachable_once_it_closed_until_registered_anew_on_another_connection()
  {
-    let (served, relay) = fixture(admitting()).await;
+    let (served, relay) = fixture(&admitting()).await;
     let target = Target::plain();
     let closed = register(&relay, (RelayTarget::Connection(second()), 7));
     register(&relay, (RelayTarget::Connection(first()), 8));
@@ -120,7 +120,7 @@ async fn leaves_a_connection_of_its_own_unreachable_once_it_closed_until_registe
         &relay,
         (
             target.as_target(),
-            DestinationOptions {
+            &DestinationOptions {
                 destination_id: Some(7),
                 ..DestinationOptions::default()
             },
@@ -153,7 +153,7 @@ async fn leaves_a_connection_of_its_own_unreachable_once_it_closed_until_registe
 #[tokio::test]
 async fn answers_leg_a_payload_too_large_the_relays_own_and_not_reported_for_a_jwt_that_came_whole_and_leaves_leg_bs_opening_no_room()
  {
-    let (served, relay) = fixture(admitting()).await;
+    let (served, relay) = fixture(&admitting()).await;
     let leg_b = super::Scripted::with(&crate::router::client::RouterClientOptions {
         limits: Some(RouterLimitsOptions {
             chunk_bytes: Some(1_024),
@@ -167,7 +167,7 @@ async fn answers_leg_a_payload_too_large_the_relays_own_and_not_reported_for_a_j
         &relay,
         (
             leg_b.router.as_relay_target(),
-            DestinationOptions {
+            &DestinationOptions {
                 audience: Some("bead-interop".to_owned()),
                 destination_id: Some(7),
                 ..DestinationOptions::default()
@@ -343,9 +343,9 @@ fn admission(header: RequestHeader) -> AdmissionRequest {
     }
 }
 
-async fn fixture(options: RelayOptions) -> (Served, Relay) {
+async fn fixture(options: &RelayOptions) -> (Served, Relay) {
     let served = Served::new(&RouterServerOptions {
-        relay: Some(options),
+        relay: Some(options.clone()),
         ..RouterServerOptions::default()
     });
     served.transport.open(&first(), true);
@@ -381,7 +381,7 @@ fn register(relay: &Relay, (target, id): (RelayTarget, u32)) -> DestinationRegis
         relay,
         (
             target,
-            DestinationOptions {
+            &DestinationOptions {
                 destination_id: Some(id),
                 ..DestinationOptions::default()
             },
@@ -398,7 +398,7 @@ fn refusal(handler: &Handler, request: &AdmissionRequest) -> Option<Failure> {
 
 #[tokio::test]
 async fn relays_nothing_while_no_destination_is_registered_and_every_destination_once_one_is() {
-    let (served, relay) = fixture(admitting()).await;
+    let (served, relay) = fixture(&admitting()).await;
     served
         .router
         .owner()
@@ -423,7 +423,7 @@ async fn asks_before_route_first_then_whether_the_destination_is_known_then_refu
 {
     let asked = Arc::new(Mutex::new(Vec::new()));
     let asking = Arc::clone(&asked);
-    let (served, relay) = fixture(RelayOptions {
+    let (served, relay) = fixture(&RelayOptions {
         before_route: Some(BeforeRequest::new(
             move |request| {
                 locked(&asking).push((
@@ -482,7 +482,7 @@ async fn asks_before_route_first_then_whether_the_destination_is_known_then_refu
 #[tokio::test]
 async fn admits_nobody_without_before_route_throws_what_before_route_throws_and_takes_an_admissions_refusal_alone()
  {
-    let (served, relay) = fixture(RelayOptions::default()).await;
+    let (served, relay) = fixture(&RelayOptions::default()).await;
     register(&relay, (Target::plain().as_target(), 7));
     let denied =
         refusal(handler(&served, 7).await.as_ref(), &admission(header(1, 7))).expect("nobody");
@@ -492,7 +492,7 @@ async fn admits_nobody_without_before_route_throws_what_before_route_throws_and_
         "this relay admits nobody: it has no beforeRoute"
     );
     served.router.dispose().await;
-    let (served, relay) = fixture(RelayOptions {
+    let (served, relay) = fixture(&RelayOptions {
         before_route: Some(BeforeRequest::new(|_| panic!("no routing today"), None)),
         ..RelayOptions::default()
     })
@@ -512,7 +512,7 @@ async fn admits_nobody_without_before_route_throws_what_before_route_throws_and_
                 RouterSide::Server,
                 limits_of(&RouterLimitsOptions::default()).expect("limits"),
             ),
-            RelayOptions {
+            &RelayOptions {
                 before_route: Some(BeforeRequest::new(|_| false, Some(failure))),
                 ..RelayOptions::default()
             },
@@ -524,7 +524,7 @@ async fn admits_nobody_without_before_route_throws_what_before_route_throws_and_
 #[tokio::test]
 async fn holds_a_payload_to_the_smaller_of_the_two_legs_limits_and_to_one_envelope_of_a_target_that_takes_no_transfer()
  {
-    let (served, relay) = fixture(admitting()).await;
+    let (served, relay) = fixture(&admitting()).await;
     for (id, limits, expected) in [
         (
             7,
@@ -580,7 +580,7 @@ async fn holds_a_payload_to_the_smaller_of_the_two_legs_limits_and_to_one_envelo
 #[tokio::test]
 async fn asks_leg_b_the_same_service_and_procedure_with_the_payloads_bytes_leg_as_signal_and_no_destination()
  {
-    let (served, relay) = fixture(admitting()).await;
+    let (served, relay) = fixture(&admitting()).await;
     let target = Target::new(&RouterLimitsOptions {
         maximum_payload_bytes: Some(1_000),
         ..RouterLimitsOptions::default()
@@ -635,13 +635,13 @@ async fn asks_leg_b_the_same_service_and_procedure_with_the_payloads_bytes_leg_a
 #[tokio::test]
 async fn registers_a_destination_given_or_drawn_never_0_nor_one_taken_lists_them_and_takes_out_its_own_alone()
  {
-    let (served, relay) = fixture(admitting()).await;
+    let (served, relay) = fixture(&admitting()).await;
     let target = Target::plain();
     let seven = relay::register(
         &relay,
         (
             target.as_target(),
-            DestinationOptions {
+            &DestinationOptions {
                 destination_id: Some(7),
                 label: Some("north".to_owned()),
                 ..DestinationOptions::default()
@@ -649,7 +649,7 @@ async fn registers_a_destination_given_or_drawn_never_0_nor_one_taken_lists_them
         ),
     )
     .expect("seven");
-    let drawn = relay::register(&relay, (target.as_target(), DestinationOptions::default()))
+    let drawn = relay::register(&relay, (target.as_target(), &DestinationOptions::default()))
         .expect("drawn")
         .destination_id();
     assert_ne!(drawn, 0);
@@ -660,7 +660,7 @@ async fn registers_a_destination_given_or_drawn_never_0_nor_one_taken_lists_them
             &relay,
             (
                 target.as_target(),
-                DestinationOptions {
+                &DestinationOptions {
                     destination_id: Some(id),
                     ..DestinationOptions::default()
                 },
@@ -700,7 +700,7 @@ async fn registers_a_destination_given_or_drawn_never_0_nor_one_taken_lists_them
 #[tokio::test]
 async fn binds_a_call_to_its_destination_as_it_opens_one_registered_in_its_place_later_takes_nothing_of_it()
  {
-    let (served, relay) = fixture(admitting()).await;
+    let (served, relay) = fixture(&admitting()).await;
     let (before, after) = (Target::plain(), Target::plain());
     let registration = register(&relay, (before.as_target(), 7));
     let bound = handler(&served, 7).await;
@@ -722,8 +722,8 @@ async fn waits_on_leg_b_as_long_as_the_destination_says_the_relays_timeout_at_mo
     let target = Target::plain();
     let answers = Arc::new(Answers::default());
     for timeout in [Duration::from_secs(5), NEVER] {
-        let (served, relay) = fixture(RelayOptions {
-            timeout,
+        let (served, relay) = fixture(&RelayOptions {
+            timeout: Some(timeout),
             ..admitting()
         })
         .await;
@@ -736,7 +736,7 @@ async fn waits_on_leg_b_as_long_as_the_destination_says_the_relays_timeout_at_mo
                 &relay,
                 (
                     target.as_target(),
-                    DestinationOptions {
+                    &DestinationOptions {
                         destination_id: Some(id),
                         timeout: own,
                         ..DestinationOptions::default()
@@ -774,14 +774,14 @@ async fn waits_on_leg_b_as_long_as_the_destination_says_the_relays_timeout_at_mo
 
 #[tokio::test]
 async fn lists_whether_each_destinations_connection_closed_as_its_registration_says_it_now() {
-    let (served, relay) = fixture(admitting()).await;
+    let (served, relay) = fixture(&admitting()).await;
     let on_second = register(&relay, (RelayTarget::Connection(second()), 3));
     let on_first = register(&relay, (RelayTarget::Connection(first()), 5));
     let behind = relay::register(
         &relay,
         (
             Target::plain().as_target(),
-            DestinationOptions {
+            &DestinationOptions {
                 destination_id: Some(7),
                 label: Some("behind".to_owned()),
                 ..DestinationOptions::default()
@@ -831,7 +831,7 @@ async fn lists_whether_each_destinations_connection_closed_as_its_registration_s
 
 #[tokio::test]
 async fn registers_a_connection_its_router_no_longer_holds_closed_and_forwards_nothing_to_it() {
-    let (served, relay) = fixture(admitting()).await;
+    let (served, relay) = fixture(&admitting()).await;
     relay::close_connection(&relay, &second());
     let registration = register(&relay, (RelayTarget::Connection(second()), 7));
     assert!(registration.is_closed());
@@ -857,13 +857,13 @@ async fn registers_a_connection_its_router_no_longer_holds_closed_and_forwards_n
 #[tokio::test]
 async fn refuses_an_id_taken_while_the_close_of_its_connection_is_not_heard_yet_and_closes_with_it_a_registration_that_replaced_it_then()
  {
-    let (served, relay) = fixture(admitting()).await;
+    let (served, relay) = fixture(&admitting()).await;
     let first = register(&relay, (RelayTarget::Connection(second()), 7));
     relay::register(
         &relay,
         (
             RelayTarget::Connection(second()),
-            DestinationOptions {
+            &DestinationOptions {
                 destination_id: Some(7),
                 ..DestinationOptions::default()
             },
@@ -874,7 +874,7 @@ async fn refuses_an_id_taken_while_the_close_of_its_connection_is_not_heard_yet_
         &relay,
         (
             RelayTarget::Connection(second()),
-            DestinationOptions {
+            &DestinationOptions {
                 replaces: Some(first.clone()),
                 ..DestinationOptions::default()
             },
@@ -900,8 +900,8 @@ async fn refuses_an_id_taken_while_the_close_of_its_connection_is_not_heard_yet_
 async fn forwards_a_credential_unresolved_unless_it_verifies_as_each_of_its_handlers_says_to_a_destination_registered_or_not()
  {
     for verifies in [false, true] {
-        let (served, relay) = fixture(RelayOptions {
-            verifies,
+        let (served, relay) = fixture(&RelayOptions {
+            verifies: Some(verifies),
             ..admitting()
         })
         .await;
@@ -919,7 +919,7 @@ async fn forwards_a_credential_unresolved_unless_it_verifies_as_each_of_its_hand
 #[tokio::test]
 async fn counts_its_destinations_those_whose_connection_closed_among_them_and_keeps_none_for_a_connection()
  {
-    let (served, relay) = fixture(admitting()).await;
+    let (served, relay) = fixture(&admitting()).await;
     register(&relay, (RelayTarget::Connection(first()), 7));
     register(&relay, (RelayTarget::Connection(second()), 8));
     register(&relay, (Target::plain().as_target(), 9));
@@ -933,7 +933,7 @@ async fn counts_its_destinations_those_whose_connection_closed_among_them_and_ke
 
 #[tokio::test]
 async fn passes_on_a_failure_of_the_targets_one_relay_more_saturated_at_255_as_it_came() {
-    let (served, relay) = fixture(admitting()).await;
+    let (served, relay) = fixture(&admitting()).await;
     let target = Target::plain();
     register(&relay, (target.as_target(), 7));
     let answers = Arc::new(Answers::default());
@@ -970,7 +970,7 @@ async fn passes_on_a_failure_of_the_targets_one_relay_more_saturated_at_255_as_i
 
 #[tokio::test]
 async fn answers_nothing_once_leg_a_ended_leg_b_cancelled_by_the_same_signal_rejects() {
-    let (served, relay) = fixture(admitting()).await;
+    let (served, relay) = fixture(&admitting()).await;
     let target = Target::plain();
     register(&relay, (target.as_target(), 7));
     let answers = Arc::new(Answers::default());
@@ -1001,7 +1001,7 @@ async fn presents_on_leg_b_what_leg_a_does_a_jwts_same_bytes_an_elsewhere_with_w
     use crate::router::core::Carried;
     use crate::router::types::RequestCredential;
 
-    let (served, relay) = fixture(admitting()).await;
+    let (served, relay) = fixture(&admitting()).await;
     let target = Target::plain();
     register(&relay, (target.as_target(), 7));
     let answers = Arc::new(Answers::default());
@@ -1090,12 +1090,12 @@ async fn presents_on_leg_b_what_leg_a_does_a_jwts_same_bytes_an_elsewhere_with_w
 #[tokio::test]
 async fn takes_the_place_of_the_registration_it_replaces_at_once_which_takes_nothing_out_after_and_refuses_one_that_does_not_hold_its_destination()
  {
-    let (served, relay) = fixture(admitting()).await;
+    let (served, relay) = fixture(&admitting()).await;
     let replaced = relay::register(
         &relay,
         (
             RelayTarget::Connection(second()),
-            DestinationOptions {
+            &DestinationOptions {
                 destination_id: Some(7),
                 label: Some("a".to_owned()),
                 ..DestinationOptions::default()
@@ -1110,7 +1110,7 @@ async fn takes_the_place_of_the_registration_it_replaces_at_once_which_takes_not
         &relay,
         (
             target.as_target(),
-            DestinationOptions {
+            &DestinationOptions {
                 label: Some("b".to_owned()),
                 replaces: Some(replaced.clone()),
                 ..DestinationOptions::default()
@@ -1150,7 +1150,7 @@ async fn takes_the_place_of_the_registration_it_replaces_at_once_which_takes_not
         &relay,
         (
             RelayTarget::Connection(first()),
-            DestinationOptions {
+            &DestinationOptions {
                 replaces: Some(replacing.clone()),
                 ..DestinationOptions::default()
             },
@@ -1166,7 +1166,7 @@ async fn takes_the_place_of_the_registration_it_replaces_at_once_which_takes_not
             &relay,
             (
                 target.as_target(),
-                DestinationOptions {
+                &DestinationOptions {
                     destination_id: id,
                     replaces: Some(replaces),
                     ..DestinationOptions::default()
@@ -1180,7 +1180,7 @@ async fn takes_the_place_of_the_registration_it_replaces_at_once_which_takes_not
         &relay,
         (
             target.as_target(),
-            DestinationOptions {
+            &DestinationOptions {
                 replaces: Some(again),
                 ..DestinationOptions::default()
             },
@@ -1193,7 +1193,7 @@ async fn takes_the_place_of_the_registration_it_replaces_at_once_which_takes_not
 
 #[tokio::test]
 async fn asks_a_connection_of_its_own_by_its_own_routers_request_naming_that_connection() {
-    let (served, relay) = fixture(admitting()).await;
+    let (served, relay) = fixture(&admitting()).await;
     register(&relay, (RelayTarget::Connection(second()), 7));
     let answers = Arc::new(Answers::default());
     let handled = (handler(&served, 7).await.resolve)(props(&answers, header(1, 7)));
@@ -1271,7 +1271,7 @@ impl Answerer for Fallback {
 #[tokio::test]
 async fn keeps_the_first_response_error_when_its_detail_free_fallback_succeeds_or_fails() {
     for fails in [false, true] {
-        let (served, relay) = fixture(admitting()).await;
+        let (served, relay) = fixture(&admitting()).await;
         let target = Target::plain();
         register(&relay, (target.as_target(), 7));
         let (reply, outcome) = oneshot::channel();
@@ -1322,7 +1322,7 @@ async fn keeps_the_first_response_error_when_its_detail_free_fallback_succeeds_o
 )]
 async fn passes_on_a_limit_of_leg_bs_before_the_hand_off_as_its_own_and_tells_a_request_never_tried_from_one_lost_after()
  {
-    let (served, relay) = fixture(admitting()).await;
+    let (served, relay) = fixture(&admitting()).await;
     let target = Target::plain();
     register(&relay, (target.as_target(), 7));
     let answers = Arc::new(Answers::default());
@@ -1443,7 +1443,7 @@ async fn passes_on_a_limit_of_leg_bs_before_the_hand_off_as_its_own_and_tells_a_
 #[tokio::test]
 async fn takes_the_audience_each_destination_verifies_gives_the_set_of_them_and_refuses_one_not_of_well_formed_unicode()
  {
-    let (served, relay) = fixture(admitting()).await;
+    let (served, relay) = fixture(&admitting()).await;
     for (id, target, audience) in [
         (3, RelayTarget::Connection(second()), Some("bead-interop")),
         (5, RelayTarget::Connection(first()), Some("bead-interop")),
@@ -1454,7 +1454,7 @@ async fn takes_the_audience_each_destination_verifies_gives_the_set_of_them_and_
             &relay,
             (
                 target,
-                DestinationOptions {
+                &DestinationOptions {
                     destination_id: Some(id),
                     audience: audience.map(str::to_owned),
                     ..DestinationOptions::default()
@@ -1503,7 +1503,7 @@ fn presenting(credential: Credential, (id, carried): (u32, Option<&str>)) -> Adm
 #[tokio::test]
 async fn refuses_bearer_credentials_when_a_destination_supplies_no_carriage_metadata_and_still_forwards_none_or_opaque()
  {
-    let (served, relay) = fixture(admitting()).await;
+    let (served, relay) = fixture(&admitting()).await;
     let target = Target::plain();
     for (id, target) in [
         (7, RelayTarget::Connection(second())),
@@ -1513,7 +1513,7 @@ async fn refuses_bearer_credentials_when_a_destination_supplies_no_carriage_meta
             &relay,
             (
                 target,
-                DestinationOptions {
+                &DestinationOptions {
                     audience: Some("bead-interop".to_owned()),
                     destination_id: Some(id),
                     ..DestinationOptions::default()
@@ -1591,7 +1591,7 @@ async fn refuses_bearer_credentials_when_a_destination_supplies_no_carriage_meta
 #[tokio::test]
 async fn answers_a_call_leg_b_cannot_carry_destination_unreachable_nothing_tried_a_jwt_whose_aud_names_not_its_destinations_audience_or_to_one_of_none_an_elsewhere_to_one_of_none_or_over_a_leg_b_that_carries_none_either_in_the_clear()
  {
-    let (served, relay) = fixture(admitting()).await;
+    let (served, relay) = fixture(&admitting()).await;
     let plain = crate::testing::scripted::handle_of(3);
     served.transport.open(&plain, true);
     served.transport.carry(&plain, true);
@@ -1609,7 +1609,7 @@ async fn answers_a_call_leg_b_cannot_carry_destination_unreachable_nothing_tried
             &relay,
             (
                 RelayTarget::Connection(handle),
-                DestinationOptions {
+                &DestinationOptions {
                     destination_id: Some(id),
                     audience: audience.map(str::to_owned),
                     ..DestinationOptions::default()
@@ -1681,7 +1681,7 @@ async fn answers_a_call_leg_b_cannot_carry_destination_unreachable_nothing_tried
 #[tokio::test]
 async fn answers_an_elsewhere_whose_transport_carried_nothing_destination_unreachable_to_a_leg_b_that_carries_a_credential_as_to_any_other()
  {
-    let (served, relay) = fixture(admitting()).await;
+    let (served, relay) = fixture(&admitting()).await;
     let target = Target::plain();
     *locked(&target.carriage) = (true, true);
     served.transport.secure(&second(), true);
@@ -1694,7 +1694,7 @@ async fn answers_an_elsewhere_whose_transport_carried_nothing_destination_unreac
             &relay,
             (
                 target,
-                DestinationOptions {
+                &DestinationOptions {
                     destination_id: Some(id),
                     audience: Some("bead-interop".to_owned()),
                     ..DestinationOptions::default()
@@ -1721,7 +1721,7 @@ async fn answers_an_elsewhere_whose_transport_carried_nothing_destination_unreac
 #[tokio::test]
 async fn counts_elsewhere_in_leg_bs_payload_bound_and_forwards_its_carried_credential_at_the_boundary()
  {
-    let (served, relay) = fixture(admitting()).await;
+    let (served, relay) = fixture(&admitting()).await;
     let target = Target::new(&RouterLimitsOptions {
         chunk_bytes: Some(1_024),
         maximum_envelope_bytes: Some(1_024),
@@ -1734,7 +1734,7 @@ async fn counts_elsewhere_in_leg_bs_payload_bound_and_forwards_its_carried_crede
         &relay,
         (
             target.as_target(),
-            DestinationOptions {
+            &DestinationOptions {
                 destination_id: Some(7),
                 audience: Some("bead-interop".to_owned()),
                 ..DestinationOptions::default()
@@ -1779,7 +1779,7 @@ async fn counts_elsewhere_in_leg_bs_payload_bound_and_forwards_its_carried_crede
 #[tokio::test]
 async fn holds_a_payload_to_what_one_envelope_holds_behind_leg_bs_header_with_its_credential_call_by_call_for_a_target_that_takes_no_transfer()
  {
-    let (served, relay) = fixture(admitting()).await;
+    let (served, relay) = fixture(&admitting()).await;
     let target = Target::new(&RouterLimitsOptions {
         chunk_bytes: Some(1_024),
         maximum_transfers: Some(0),
@@ -1790,7 +1790,7 @@ async fn holds_a_payload_to_what_one_envelope_holds_behind_leg_bs_header_with_it
         &relay,
         (
             target.as_target(),
-            DestinationOptions {
+            &DestinationOptions {
                 destination_id: Some(7),
                 audience: Some("bead-interop".to_owned()),
                 ..DestinationOptions::default()

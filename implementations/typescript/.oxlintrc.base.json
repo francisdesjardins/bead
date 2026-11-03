@@ -297,6 +297,8 @@
     "**/*_pb.ts",
     // the plugin's cases, refused on purpose: `tools/check-oxlint-plugin.mjs` lints them apart
     "tools/oxlint-plugin.cases.ts",
+    // the surface's cases, refused on purpose: `tools/check-surface.mjs --cases` reads them apart
+    "tools/surface.cases.ts",
     // protobuf's conformance testee, read with the code generated into it at run time alone:
     // `tools/protobuf-conformance.mjs` type-checks it then
     "tools/protobuf-conformance/**",

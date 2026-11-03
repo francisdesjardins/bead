@@ -583,11 +583,29 @@ public sealed partial class DurationsTests
 
     // transportClient.reconnectionDelay
 
-    // a function of the previous delay and the attempt, on a WebSocket client whose connect was
-    // refused, after a first attempt refused again: the delay its tap hears and the due of its wait,
-    // the attempt at it and not before; at once, no wait and the attempt at once; refused, before
-    // its tap hears it, no attempt more, and the client closed
-    private static async Task<Observed> ReconnectionDelayByFunction(TimeSpan? given)
+    // a function of the previous delay and the attempt
+    private static Task<Observed> ReconnectionDelayByFunction(TimeSpan? given)
+    {
+        return ReconnectionDelayBy(given, (delay) =>
+        {
+            return TransportReconnectDelayOrResolver.Of((_, _) =>
+            {
+                return delay;
+            });
+        });
+    }
+
+    // a number: the wait itself
+    private static Task<Observed> ReconnectionDelayByNumber(TimeSpan? given)
+    {
+        return ReconnectionDelayBy(given, TransportReconnectDelayOrResolver.Of);
+    }
+
+    // the delay in the form given, on a WebSocket client whose connect was refused, after a first
+    // attempt refused again: the delay its tap hears and the due of its wait, the attempt at it and
+    // not before; at once, no wait and the attempt at once; refused, before its tap hears it, no
+    // attempt more, and the client closed
+    private static async Task<Observed> ReconnectionDelayBy(TimeSpan? given, Func<TimeSpan, TransportReconnectDelayOrResolver> delayOf)
     {
         var delay = Assert.NotNull(given);
         var clock = new SteppingClock(Epoch);
@@ -604,10 +622,7 @@ public sealed partial class DurationsTests
 
         var reconnecting = client.Reconnect(new TransportReconnectOptions
         {
-            Delay = (_, _) =>
-            {
-                return delay;
-            },
+            Delay = delayOf(delay),
             Tap = (heard, _) =>
             {
                 taps.Writer.TryWrite(heard);

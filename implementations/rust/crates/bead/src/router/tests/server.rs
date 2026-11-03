@@ -622,8 +622,8 @@ struct Relayed {
     _device: Pair,
 }
 
-async fn relayed(limits: Option<RouterLimitsOptions>) -> Relayed {
-    let device = Pair::connected((super::january_first(), PairOptions::default()))
+async fn relayed(limits: &RouterLimitsOptions) -> Relayed {
+    let device = Pair::connected(super::january_first(), &PairOptions::default())
         .await
         .expect("a device connected");
 
@@ -641,7 +641,7 @@ async fn relayed(limits: Option<RouterLimitsOptions>) -> Relayed {
     let served = Served::on(
         (shared, Arc::clone(&device.clock)),
         &RouterServerOptions {
-            limits,
+            limits: Some(limits.clone()),
             relay: Some(RelayOptions {
                 before_route: Some(BeforeRequest::new(|_request| true, None)),
                 ..RelayOptions::default()
@@ -653,14 +653,14 @@ async fn relayed(limits: Option<RouterLimitsOptions>) -> Relayed {
     served.transport.open(&first(), true);
     served
         .router
-        .register_destination((
+        .register_destination(
             device.client.router().as_relay_target(),
-            DestinationOptions {
+            &DestinationOptions {
                 destination_id: Some(7),
                 label: Some("the device".to_owned()),
                 ..DestinationOptions::default()
             },
-        ))
+        )
         .expect("the device registered");
 
     Relayed {
@@ -684,7 +684,7 @@ fn to_device((call_id, payload): (u32, &str)) -> Envelope {
 #[tokio::test]
 async fn hands_leg_a_s_transport_the_relayed_result_once_answers_nothing_after_it_refuses_it_and_reports_why_with_leg_a_s_connection()
  {
-    let relayed = relayed(None).await;
+    let relayed = relayed(&RouterLimitsOptions::default()).await;
     let served = &relayed.served;
 
     served
@@ -708,12 +708,12 @@ async fn answers_a_relayed_result_past_leg_a_s_limit_procedure_failed_with_no_de
  {
     // 8 bytes of prefix, 20 of an announcement and 36 of payload fill leg A's chunk of 64; one more
     // would need a transfer, which this relay sends none of
-    let relayed = relayed(Some(RouterLimitsOptions {
+    let relayed = relayed(&RouterLimitsOptions {
         chunk_bytes: Some(64),
         window_bytes: Some(128),
         maximum_transfers: Some(0),
         ..RouterLimitsOptions::default()
-    }))
+    })
     .await;
     let served = &relayed.served;
 

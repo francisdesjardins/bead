@@ -1,14 +1,16 @@
 // The lint's own rules, an oxlint JS plugin named `bead`, which `.oxlintrc.base.json` loads.
 //
-// `bead/options-last` holds the parameter rule (decision 0007): a function takes at most two
-// parameters, then at most one options object, always last, optional when every member is and
+// `bead/options-last` holds the parameter rule (decisions 0004 and 0007): a function takes at most
+// two parameters, then at most one options object, always last, optional when every member is and
 // required when one is; an event carries at most two values. `max-params` counts the parameters
 // written; this judges what a third may be, and counts where `max-params` does not read: a rest
 // tuple, a type's signature, an event map.
 //
-// It reads syntax alone, never what a name resolves to: a callback type aliased under a name ending
-// in `Options` passes as an options object, and stays review's (decision 0006), as the one optional
-// positional where no second could come does. `oxlint-plugin.cases.ts` beside it holds a line for
+// It reads syntax alone, never what a name resolves to: a type literal's members it sees, a named
+// type's it does not. `check-surface.mjs` judges a named options type through the checker, over
+// what the package exports; a callback type aliased under a name ending in `Options` passes here as
+// an options object, and stays review's (decision 0006), as the one optional positional where no
+// second could come does. `oxlint-plugin.cases.ts` beside it holds a line for
 // each verdict, and `check-oxlint-plugin.mjs` fails unless exactly its marked lines are refused.
 
 // ── Known exceptions ─────────────────────────────────────────────────────────
@@ -23,6 +25,10 @@ const LISTED_RESTS = Object.freeze({
   'createServiceServer(...ServiceServerOptions<S>)':
     "a server side's options, one element, required when a procedure names a hook",
   'EmitterListener(...P)': "an event's values, judged at its map",
+  "IClient.connect(...Parameters<Transport['connect']>)":
+    "its transport's connect options, one element, as `ITransportClient.connect` takes them",
+  'ITransportClient.connect(...ConnectParameters<ConnectOptions>)':
+    "a connect's options, one element, required when one of its members is",
   'INotificationContext.named(...never[])':
     'the bound of any callable, which a function named after its procedure keeps whole',
   'nameAfter(...never[])':

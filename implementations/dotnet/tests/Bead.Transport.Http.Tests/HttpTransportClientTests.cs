@@ -232,12 +232,9 @@ public sealed class HttpTransportClientTests
     }
 
     // the same wait after every failed attempt
-    private static TransportReconnectDelay DelayOf(TimeSpan delay)
+    private static TransportReconnectDelayOrResolver DelayOf(TimeSpan delay)
     {
-        return (_, _) =>
-        {
-            return delay;
-        };
+        return TransportReconnectDelayOrResolver.Of(delay);
     }
 
     // a handler on which every listen is lost: it draws a listening connection, and takes its DELETE

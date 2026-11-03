@@ -45,7 +45,9 @@ pub struct PacingLimitsOptions {
 /// # Errors
 ///
 /// A [`ProgrammerError`] for a limit of 0.
-pub fn pacing_limits_of(options: &PacingLimitsOptions) -> Result<PacingLimits, ProgrammerError> {
+pub(crate) fn pacing_limits_of(
+    options: &PacingLimitsOptions,
+) -> Result<PacingLimits, ProgrammerError> {
     let limits = PacingLimits {
         maximum_queued_notification_bytes: options
             .maximum_queued_notification_bytes

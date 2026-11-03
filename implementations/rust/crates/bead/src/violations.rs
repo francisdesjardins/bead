@@ -144,7 +144,7 @@ pub fn detail_bound_of(maximum_detail_bytes: usize, maximum_envelope_bytes: usiz
 
 /// Whether a judging refuses its request: a violation held, or one counted past its bound.
 #[must_use]
-pub fn is_refused(judged: &Judged) -> bool {
+pub(crate) fn is_refused(judged: &Judged) -> bool {
     !judged.violations.is_empty() || judged.more > 0
 }
 

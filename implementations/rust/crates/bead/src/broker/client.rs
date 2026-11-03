@@ -522,7 +522,7 @@ impl BrokerClient {
     /// its half came, its third leg sent. It fails naming the REFUSE it read, or `no-subscriber`
     /// when its broker says nothing serves the name, or a dispose that gave up on it; past its
     /// timeout; once its signal is cancelled; each ending closed.
-    pub fn connect(&self, options: BrokerConnectOptions) -> Connect {
+    pub fn connect(&self, options: &BrokerConnectOptions) -> Connect {
         match self.start_connect(options) {
             Ok(outcome) => Connect::of(outcome),
             Err(error) => Connect::refused(error),
@@ -531,7 +531,7 @@ impl BrokerClient {
 
     fn start_connect(
         &self,
-        options: BrokerConnectOptions,
+        options: &BrokerConnectOptions,
     ) -> Result<oneshot::Receiver<Result<(), TransportError>>, TransportError> {
         let inner = &self.inner;
 
@@ -616,7 +616,7 @@ impl BrokerClient {
         }
 
         // its signal: cancelled, the connect gives up
-        if let Some(signal) = options.signal {
+        if let Some(signal) = options.signal.clone() {
             let client = Arc::downgrade(inner);
             let cancelled = Arc::clone(&attempt);
 
@@ -637,7 +637,7 @@ impl BrokerClient {
 
         inner.participant.cover(opening(
             (Arc::clone(inner), attempt),
-            (options.server, timeout, started),
+            (options.server.clone(), timeout, started),
         ));
 
         Ok(reply)
@@ -649,7 +649,7 @@ impl BrokerClient {
     /// # Errors
     ///
     /// A [`TransportError`] when it is not open.
-    pub fn disconnect(&self, options: DisconnectOptions) -> Result<(), TransportError> {
+    pub fn disconnect(&self, options: &DisconnectOptions) -> Result<(), TransportError> {
         let inner = &self.inner;
         let is_clean = options.is_clean.unwrap_or(true);
         let is_quick = options.is_quick.unwrap_or(false);
@@ -714,7 +714,7 @@ impl BrokerClient {
     /// Closes its connection cleanly when it is open, then lets go of everything.
     pub fn close(&self) {
         if self.ready_state() == ReadyState::Open {
-            drop(self.disconnect(DisconnectOptions::default()));
+            drop(self.disconnect(&DisconnectOptions::default()));
         }
 
         self.dispose();
@@ -729,7 +729,7 @@ impl BrokerClient {
     /// or closing, or a signal cancelled already.
     pub fn reconnect(
         &self,
-        options: ReconnectOptions,
+        options: &ReconnectOptions,
     ) -> Result<BoxFuture<Result<(), TransportError>>, TransportError> {
         let inner = &self.inner;
         let (target, replaced) = {
@@ -780,6 +780,7 @@ impl BrokerClient {
 
         let (reply, outcome) = oneshot::channel();
         let client = self.clone();
+        let options = options.clone();
 
         inner.participant.cover(async move {
             let reconnected = client.reconnecting((target, options)).await;
@@ -808,7 +809,7 @@ impl BrokerClient {
         attempting((&clock, &options), |signal| {
             locked(&inner.state).is_attempting = true;
 
-            let connecting = self.connect(BrokerConnectOptions {
+            let connecting = self.connect(&BrokerConnectOptions {
                 signal,
                 ..target.clone()
             });
@@ -824,7 +825,7 @@ impl BrokerClient {
             .as_ref()
             .is_some_and(CancellationToken::is_cancelled)
         {
-            drop(self.disconnect(DisconnectOptions::default()));
+            drop(self.disconnect(&DisconnectOptions::default()));
 
             return Err(TransportError::Cancelled(RECONNECTION_CANCELLED.to_owned()));
         }

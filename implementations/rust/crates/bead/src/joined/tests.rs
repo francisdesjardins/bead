@@ -276,10 +276,9 @@ async fn memory_on(clock: &SharedClock) -> MemoryServer {
     server
 }
 
-fn memory_client_of((server, clock): (&MemoryServer, &SharedClock)) -> MemoryClient {
+fn memory_client_of(clock: &SharedClock) -> MemoryClient {
     MemoryClient::new(&MemoryClientOptions {
         clock: Some(Arc::clone(clock)),
-        server: server.clone(),
     })
     .expect("a client")
 }
@@ -436,10 +435,10 @@ async fn hands_on_each_transport_s_events_with_the_handle_it_drew() {
     brokered.server.start().await.expect("started");
 
     // the in-memory transport's
-    let client = memory_client_of((&memory, &shared));
+    let client = memory_client_of(&shared);
 
     client
-        .connect(MemoryConnectOptions::default())
+        .connect(&MemoryConnectOptions::of(memory.clone()))
         .await
         .expect("connected");
     clock.settle().await;
@@ -458,7 +457,7 @@ async fn hands_on_each_transport_s_events_with_the_handle_it_drew() {
         .expect("sent");
     clock.settle().await;
     client
-        .disconnect(DisconnectOptions::default())
+        .disconnect(&DisconnectOptions::default())
         .expect("closed");
     clock.settle().await;
 
@@ -466,7 +465,7 @@ async fn hands_on_each_transport_s_events_with_the_handle_it_drew() {
     let broker_client = broker_client_of(&brokered);
 
     broker_client
-        .connect(BrokerConnectOptions::of("interop"))
+        .connect(&BrokerConnectOptions::of("interop"))
         .await
         .expect("connected");
     clock.settle().await;
@@ -486,7 +485,7 @@ async fn hands_on_each_transport_s_events_with_the_handle_it_drew() {
         .expect("sent");
     clock.settle().await;
     broker_client
-        .disconnect(DisconnectOptions::default())
+        .disconnect(&DisconnectOptions::default())
         .expect("closed");
     clock.settle().await;
 
@@ -560,17 +559,17 @@ async fn asks_each_connection_s_flags_of_the_transport_that_drew_it_and_sends_an
 
     brokered.server.start().await.expect("started");
 
-    let client = memory_client_of((&memory, &shared));
+    let client = memory_client_of(&shared);
     let broker_client = broker_client_of(&brokered);
 
     client.listen(Arc::new(Hearing(Arc::clone(&heard))));
     broker_client.listen(Arc::new(Hearing(Arc::clone(&heard))));
     client
-        .connect(MemoryConnectOptions::default())
+        .connect(&MemoryConnectOptions::of(memory.clone()))
         .await
         .expect("connected");
     broker_client
-        .connect(BrokerConnectOptions::of("interop"))
+        .connect(&BrokerConnectOptions::of("interop"))
         .await
         .expect("connected");
     clock.settle().await;
@@ -779,15 +778,15 @@ async fn stops_every_transport_it_joined_and_sums_their_gauges() {
         Arc::<Paired>::clone(&uncounted),
     ])
     .expect("a join");
-    let first = memory_client_of((&memory, &shared));
-    let second = memory_client_of((&memory, &shared));
+    let first = memory_client_of(&shared);
+    let second = memory_client_of(&shared);
 
     first
-        .connect(MemoryConnectOptions::default())
+        .connect(&MemoryConnectOptions::of(memory.clone()))
         .await
         .expect("connected");
     second
-        .connect(MemoryConnectOptions::default())
+        .connect(&MemoryConnectOptions::of(memory.clone()))
         .await
         .expect("connected");
     clock.settle().await;
@@ -897,7 +896,7 @@ async fn serves_one_service_offered_once_to_a_client_of_each_transport() {
     ));
     brokered.server.start().await.expect("started");
 
-    let in_memory = memory_client_of((&memory, &shared));
+    let in_memory = memory_client_of(&shared);
     let by_broker = broker_client_of(&brokered);
     let by_memory =
         Client::new(Arc::new(in_memory.clone()), &ClientOptions::default()).expect("a client");
@@ -905,11 +904,11 @@ async fn serves_one_service_offered_once_to_a_client_of_each_transport() {
         Client::new(Arc::new(by_broker.clone()), &ClientOptions::default()).expect("a client");
 
     in_memory
-        .connect(MemoryConnectOptions::default())
+        .connect(&MemoryConnectOptions::of(memory.clone()))
         .await
         .expect("connected");
     by_broker
-        .connect(BrokerConnectOptions::of("interop"))
+        .connect(&BrokerConnectOptions::of("interop"))
         .await
         .expect("connected");
     clock.settle().await;
@@ -919,7 +918,7 @@ async fn serves_one_service_offered_once_to_a_client_of_each_transport() {
             .services()
             .get_request(&echo(), RequestDependencies::of(TextCodec, TextCodec))
             .expect("echo asked")
-            .call(text.to_owned(), RequestOptions::default())
+            .call(text.to_owned(), &RequestOptions::default())
             .expect("echo called")
     };
     let from_memory = call(&by_memory, "from memory");
@@ -996,8 +995,8 @@ async fn a_joined_transport_pauses_the_connection_on_the_transport_that_drew_it(
 
     joined.listen(Arc::new(Messages(Arc::clone(&told))));
 
-    let client = memory_client_of((&memory, &shared));
-    let connecting = client.connect(MemoryConnectOptions::default());
+    let client = memory_client_of(&shared);
+    let connecting = client.connect(&MemoryConnectOptions::of(memory.clone()));
 
     clock.settle().await;
     connecting.await.expect("connected");

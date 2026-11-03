@@ -29,7 +29,7 @@ public sealed record LayerGauges(
     int Orphans)
 {
     /// <summary><paramref name="gauges"/> for leaving the process: its handles gone, each one <paramref name="held"/> does not hold an orphan.</summary>
-    public static LayerGauges Of(Gauges gauges, IReadOnlySet<string> held)
+    internal static LayerGauges Of(Gauges gauges, IReadOnlySet<string> held)
     {
         ArgumentNullException.ThrowIfNull(gauges);
         ArgumentNullException.ThrowIfNull(held);
@@ -69,7 +69,7 @@ public sealed record Health(IReadOnlyDictionary<string, IReadOnlyList<HealthChec
     /// <see cref="HealthStatus.Warn"/> for a count at <see cref="WarningRatio"/> of its ceiling or
     /// past it, <see cref="HealthStatus.Pass"/> otherwise; the server's, the worst.
     /// </summary>
-    public static Health Of(ServerGauges gauges)
+    internal static Health Of(ServerGauges gauges)
     {
         ArgumentNullException.ThrowIfNull(gauges);
 

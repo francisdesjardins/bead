@@ -1,0 +1,9 @@
+#nullable enable
+Bead.Transport.Http.BeadHttpClientOptions.Intake.get -> Bead.IntakeLimits?
+Bead.Transport.Http.BeadHttpClientOptions.Intake.init -> void
+Bead.Transport.Http.HttpTransportClient.Pause() -> void
+Bead.Transport.Http.HttpTransportClient.Resume() -> void
+Bead.Transport.Http.HttpTransportClientOptions.ExchangeTimeout.get -> System.TimeSpan
+Bead.Transport.Http.HttpTransportClientOptions.ExchangeTimeout.init -> void
+Bead.Transport.Http.HttpTransportServer.Pause(string! connectionHandle) -> void
+Bead.Transport.Http.HttpTransportServer.Resume(string! connectionHandle) -> void

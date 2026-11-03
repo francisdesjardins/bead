@@ -19,18 +19,18 @@ use crate::session_token::SessionToken;
 mod tests;
 
 /// The bytes a header takes at most: the 255 words its fourth byte counts.
-pub const MAXIMUM_HEADER_BYTES: usize = 1_020;
+pub(crate) const MAXIMUM_HEADER_BYTES: usize = 1_020;
 
 /// The largest value a 64-bit field holds: 2⁵³ − 1, the largest integer every side holds exactly,
 /// as JavaScript's numbers do.
-pub const LARGEST_64_BIT_FIELD: u64 = 0x001f_ffff_ffff_ffff;
+pub(crate) const LARGEST_64_BIT_FIELD: u64 = 0x001f_ffff_ffff_ffff;
 
 /// How many bytes of a failure's detail a reader keeps, and a writer writes, when nothing else is
 /// given (spec 7.3).
 pub const MAXIMUM_DETAIL_BYTES: usize = 1_024;
 
 /// How many bytes a whole envelope holds at most, when nothing else is given (spec 12.2).
-pub const MAXIMUM_ENVELOPE_BYTES: usize = 16_778_240;
+pub(crate) const MAXIMUM_ENVELOPE_BYTES: usize = 16_778_240;
 
 // the prefix: layout, kind, flags, header words, then the call id at bytes 4 to 7
 const PREFIX_BYTES: usize = 8;
@@ -405,7 +405,7 @@ impl Envelope {
     reason = "the spec's names of its bounds, each in bytes"
 )]
 pub struct ReadEnvelopeOptions {
-    /// The bytes a whole envelope holds at most; [`MAXIMUM_ENVELOPE_BYTES`] when none.
+    /// The bytes a whole envelope holds at most; `MAXIMUM_ENVELOPE_BYTES`, 16,778,240, when none.
     pub maximum_envelope_bytes: Option<usize>,
     /// The bytes a request holds at most, whole or a transfer's opening, as its requester sends
     /// one (spec 12.2); the envelope's bound when none.
@@ -1234,7 +1234,7 @@ fn unbounded_layout_of(header: &Header) -> Result<(u8, Option<Written>, usize), 
 /// # Errors
 ///
 /// As [`write_header`] refuses, but for its bound.
-pub fn unbounded_header_bytes_of(header: &Header) -> Result<usize, ProgrammerError> {
+pub(crate) fn unbounded_header_bytes_of(header: &Header) -> Result<usize, ProgrammerError> {
     unbounded_layout_of(header).map(|(_, _, header_bytes)| header_bytes)
 }
 
@@ -1357,7 +1357,7 @@ pub fn write_header(header: &Header, bytes: &mut Vec<u8>) -> Result<usize, Progr
 /// A failure's record, to send: its code, the relays it crossed, its scope, and its detail cut to
 /// `maximum_detail_bytes` at a character's boundary.
 #[must_use]
-pub fn write_failure(record: &FailureRecord, maximum_detail_bytes: usize) -> Vec<u8> {
+pub(crate) fn write_failure(record: &FailureRecord, maximum_detail_bytes: usize) -> Vec<u8> {
     let mut end = record.detail.len().min(maximum_detail_bytes);
 
     while !record.detail.is_char_boundary(end) {

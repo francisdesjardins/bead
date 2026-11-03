@@ -777,13 +777,13 @@ async fn detaches_calls_before_settling_an_incoming_resolver_awaiting_an_outgoin
 
     let registry = MetricsRegistry::new(&MetricsRegistryOptions::default()).expect("a registry");
     let options = PairOptions {
-        server: ServerOptions {
+        server: Some(ServerOptions {
             metrics_registry: Some(registry.clone()),
             ..ServerOptions::default()
-        },
-        client: ClientOptions::default(),
+        }),
+        client: Some(ClientOptions::default()),
     };
-    let pair = Pair::connected((crate::testing::instants::new_year(), options))
+    let pair = Pair::connected(crate::testing::instants::new_year(), &options)
         .await
         .expect("a pair connected");
     let hold = Procedure {
@@ -824,7 +824,7 @@ async fn detaches_calls_before_settling_an_incoming_resolver_awaiting_an_outgoin
             Box::pin(async move {
                 let called = holding.call(
                     request.payload.clone(),
-                    RequestOptions {
+                    &RequestOptions {
                         connection_handle: Some(connection_handle),
                         ..RequestOptions::default()
                     },
@@ -854,7 +854,7 @@ async fn detaches_calls_before_settling_an_incoming_resolver_awaiting_an_outgoin
         .services()
         .get_request(&echo(), RequestDependencies::of(JsonCodec, JsonCodec))
         .expect("echo asked")
-        .call(serde_json::json!("hello"), RequestOptions::default())
+        .call(serde_json::json!("hello"), &RequestOptions::default())
         .expect("echo called");
 
     pair.settle().await;
@@ -871,7 +871,7 @@ async fn detaches_calls_before_settling_an_incoming_resolver_awaiting_an_outgoin
     );
 
     pair.transport
-        .disconnect(DisconnectOptions::default())
+        .disconnect(&DisconnectOptions::default())
         .expect("disconnected");
     pair.settle().await;
 

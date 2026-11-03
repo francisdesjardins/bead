@@ -77,7 +77,9 @@ crates/
                                 until beadc's Rust target generates them; its resolvers and its
                                 credentials
   bead-house/                   the side's own checks that no lint holds: the parameter rule, the
-                                comment tags, every member under the workspace's lints
+                                options struct's shape, each library crate's public surface
+                                against its list under surfaces/, the comment tags, every member
+                                under the workspace's lints
 benches/                        bead-bench, the in-memory bench, written as bead-bench/1
 fuzz/                           cargo-fuzz's targets, a project outside the workspace
 tools/protobuf-conformance/     the testee of protobuf's conformance suite, which
@@ -164,7 +166,11 @@ the side, the conformance files' typed readers, the durations' helper, a pair of
 transport, the scripted transports the unit tests write bytes on, the seeded mutations the suite's
 readers are fed, and what a test takes from its platform: a task spawned, a rest, a patience, a
 monotonic instant and the wall clock's reading. It is no API: an application never turns the feature
-on.
+on. What the conformance players, the fuzz targets, the interop service and the bench reach that the
+API does not offer, the envelope's codec among it, is `bead::internal`, hidden from the docs and
+outside SemVer, as the C# side's members reach theirs by `InternalsVisibleTo`; no feature turns it
+on. `BEAD_HOUSE_WRITE=1 cargo test -p francisdesjardins-bead-house` writes each crate's list of its
+public items anew, its diff the change's to review.
 
 ## Fuzzing and the bench
 
@@ -174,8 +180,9 @@ with cargo-fuzz on the nightly the tool pins by its date, on Linux or WSL; the t
 with them. `crates/bead/tests/envelope_fuzz.rs` and `broker_parcel_fuzz.rs` feed the envelope
 readers and the parcel's seeded mutations of `spec/vectors.json` in the suite, from
 `bead::testing::mutations`, the generator every side shares. `node ../../tools/bench-release.mjs
-rust` runs bead-bench in fresh processes, from its release build: calls on one in-memory connection
-kept, and exchanges, each a client and its connection drawn, called once and closed. `cargo run
+rust` runs bead-bench in fresh processes, from its release build: the envelope's codec, a request
+written and read back, calls on one in-memory connection kept, and exchanges, each a client and its
+connection drawn, called once and closed. `cargo run
 --release --locked --manifest-path benches/Cargo.toml -- --scale` measures instead a message's cost
 through a router alone and through a `Server`, each holding 1, 1,000 and 10,000 connections, and
 fails unless it holds flat.

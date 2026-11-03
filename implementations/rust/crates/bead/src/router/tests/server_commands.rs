@@ -72,7 +72,7 @@ async fn tells_a_command_made_with_the_call_id_its_router_drew_on_its_connection
     let running = command
         .call(
             "run".to_owned(),
-            RequestOptions {
+            &RequestOptions {
                 connection_handle: Some(second()),
                 timeout: Some(Duration::from_secs(1)),
                 ..RequestOptions::default()

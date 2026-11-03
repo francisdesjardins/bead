@@ -28,7 +28,10 @@ import type {
 } from '../../router/shared/types';
 import { envelopeOf } from '../../router/shared/__tests__/fixtures';
 import { createHTTPTransportClient } from '../../transport/client/http-transport-client';
-import { createMemoryTransportClient } from '../../transport/client/memory-transport-client';
+import {
+  createMemoryTransportClient,
+  type IMemoryTransportServerLike,
+} from '../../transport/client/memory-transport-client';
 import {
   createTransportClient,
   dispose,
@@ -1191,22 +1194,20 @@ const connectOfWebSocket: Way = (given) => {
 const connectOfMemory: Way = (given) => {
   const clock = createTestClock();
   const accepted: unknown[] = [];
-  const client = createMemoryTransportClient({
-    clock,
-    server: {
-      accept: (peer) => {
-        accepted.push(peer);
+  const client = createMemoryTransportClient({ clock });
+  const server: IMemoryTransportServerLike = {
+    accept: (peer) => {
+      accepted.push(peer);
 
-        return new Promise(() => {});
-      },
+      return new Promise(() => {});
     },
-  });
+  };
 
   return connectTimed(
     { client, clock },
     {
       connect: (options) => {
-        return client.connect(options);
+        return client.connect({ server, ...options });
       },
       given,
       hasMoved: () => {

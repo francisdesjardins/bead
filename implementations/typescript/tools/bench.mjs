@@ -250,10 +250,11 @@ const startInterop = async () => {
   }
 };
 
-// A client of the in-memory transport to `server`'s, announced to no DevTools, as a gateway's is.
-const memoryClientOf = (reader, { limits, server }) => {
+// A client of the in-memory transport, announced to no DevTools, as a gateway's is; its connect
+// names the server.
+const memoryClientOf = (reader, { limits } = {}) => {
   return reader.createClient(
-    { transport: reader.createMemoryTransportClient({ server: server.transport }) },
+    { transport: reader.createMemoryTransportClient() },
     { devtools: false, limits }
   );
 };
@@ -286,9 +287,11 @@ const connect = async (reader, transport, settings = {}) => {
       transport === 'http'
         ? reader.createHTTPClient({ limits })
         : transport === 'memory'
-          ? memoryClientOf(reader, { limits, server })
+          ? memoryClientOf(reader, { limits })
           : reader.createWSClient({ limits, transport: { WebSocket: reader.WebSocket } });
-    await client.connect(transport === 'memory' ? {} : { host: '127.0.0.1', port });
+    await client.connect(
+      transport === 'memory' ? { server: server.transport } : { host: '127.0.0.1', port }
+    );
     return {
       client,
       server,
@@ -611,9 +614,9 @@ try {
         await calls(
           (body) => {
             return async () => {
-              const client = memoryClientOf(reader, { server: connection.server });
+              const client = memoryClientOf(reader);
               try {
-                await client.connect({});
+                await client.connect({ server: connection.server.transport });
                 return await new reader.InteropClient(client).echo(body)();
               } finally {
                 await client[Symbol.asyncDispose]();

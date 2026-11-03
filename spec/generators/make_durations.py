@@ -40,7 +40,6 @@ MINUS_ONE = 'A duration of -1 ms'
 NOT_A_NUMBER = 'A duration that is not a number'
 UNDER_ZERO = 'A duration under zero'
 WEB_WORKER = 'The Web Worker transport'
-DELAY_AS_A_NUMBER = "A reconnection's delay given as a number"
 
 # what a value is beside a number of milliseconds
 NEVER = 'never'
@@ -514,7 +513,7 @@ places = [
         'never': 'refused',
         'ways': [
             way('function', 'a function of the previous delay and the attempt, its answer'),
-            way('number', 'a number', differs=(('C#', DELAY_AS_A_NUMBER),)),
+            way('number', 'a number'),
         ],
         'observed': 'held',
     },

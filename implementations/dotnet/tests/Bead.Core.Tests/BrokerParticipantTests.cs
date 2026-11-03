@@ -814,10 +814,7 @@ public sealed class BrokerParticipantTests
         {
             Reconnect = new TransportReconnectOptions
             {
-                Delay = (_, _) =>
-                {
-                    return TimeSpan.FromMinutes(1);
-                },
+                Delay = TransportReconnectDelayOrResolver.Of(TimeSpan.FromMinutes(1)),
                 CancellationToken = cancelling.Token,
             },
         });
@@ -1141,10 +1138,7 @@ public sealed class BrokerParticipantTests
         await peer.DisposeAsync();
     }
 
-    private static TimeSpan Immediately(TimeSpan? previousDelay, int attempt)
-    {
-        return TimeSpan.Zero;
-    }
+    private static readonly TransportReconnectDelayOrResolver Immediately = TransportReconnectDelayOrResolver.Of(TimeSpan.Zero);
 
     // the acceptor's half, a test's own peer's
     private const ulong AcceptorHalf = 0xA1_00_00_00_00_00_00_01;

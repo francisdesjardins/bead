@@ -352,7 +352,7 @@ impl BrokerState {
                 }
             })),
         };
-        let message = BrokerMessage::new(next.publication, options);
+        let message = BrokerMessage::new(next.publication, &options);
 
         adapter.listeners.each((
             |listener: &(dyn BrokerListener + 'static)| listener.on_message(&message),

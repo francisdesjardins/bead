@@ -19,7 +19,7 @@ const DETAIL: &str = "{\"bounds\":{\"min_len\":\"1\"},\"fieldPath\":\"text\",\"m
 fn rules(given: &Arc<Mutex<Vec<ValidateOptions>>>) -> Validate<String> {
     let given = Arc::clone(given);
     Arc::new(move |value, options| {
-        locked(&given).push(options);
+        locked(&given).push(options.clone());
         if !value.is_empty() {
             return Judged::default();
         }
@@ -37,7 +37,7 @@ fn rules(given: &Arc<Mutex<Vec<ValidateOptions>>>) -> Validate<String> {
                 value: Some(serde_json::Value::String(value.clone())),
                 ..Violation::default()
             }],
-            stopped: options.fail_fast,
+            stopped: options.fail_fast.unwrap_or(false),
             ..Judged::default()
         }
     })
@@ -84,10 +84,16 @@ async fn answers_payload_invalid_to_a_request_its_rules_refuse_before_its_callba
     );
     assert_eq!(
         *locked(&given),
-        [ValidateOptions {
-            fail_fast: true,
-            maximum_bytes: 512
-        }; 2]
+        [
+            ValidateOptions {
+                fail_fast: Some(true),
+                maximum_bytes: Some(512)
+            },
+            ValidateOptions {
+                fail_fast: Some(true),
+                maximum_bytes: Some(512)
+            }
+        ]
     );
 }
 
@@ -191,5 +197,21 @@ async fn answers_procedure_failed_to_rules_that_throw_and_hands_why_on_for_its_r
             .as_ref()
             .expect("why beside the answer")
             .contains("a rule that fails to judge")
+    );
+}
+
+// the parity gap the other sides close by an initializer and a literal: built outside its crate by
+// assignment over its default, as an options struct with no required member is; one with a required
+// member has no default to start from
+#[test]
+fn builds_validate_options_from_another_crate() {
+    let consumer = crate::testing::surface::Consumer::new();
+
+    consumer.accepts(
+        "pub fn check() -> bead::ValidateOptions { let mut o = bead::ValidateOptions::default(); o.fail_fast = Some(true); o.maximum_bytes = Some(512); o }",
+    );
+    consumer.refuses(
+        "pub fn check() { let _ = bead::BrokerConnectOptions::default(); }",
+        ("E0599", "default"),
     );
 }

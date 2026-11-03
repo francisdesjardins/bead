@@ -117,7 +117,7 @@ export const createClient = <Transport extends IClientTransportLike>(
     services,
     transport,
 
-    connect: (options) => {
+    connect: (...[options]) => {
       return transport.connect(options);
     },
     disconnect: (options) => {

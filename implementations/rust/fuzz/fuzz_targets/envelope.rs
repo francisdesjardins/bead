@@ -4,7 +4,8 @@
 
 #![no_main]
 
-use bead::{ReadEnvelopeOptions, RouterSide, read_envelope, read_failure, write_envelope};
+use bead::RouterSide;
+use bead::internal::{ReadEnvelopeOptions, read_envelope, read_failure, write_envelope};
 use bytes::Bytes;
 use libfuzzer_sys::fuzz_target;
 

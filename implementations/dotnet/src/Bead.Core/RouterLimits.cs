@@ -23,7 +23,7 @@ public sealed record RouterLimits
     /// <paramref name="limits"/> say, where the TypeScript side refuses others given: a record's
     /// default cannot tell given from not.
     /// </summary>
-    public static RouterLimits WholeEnvelopeOf(RouterLimits? limits)
+    internal static RouterLimits WholeEnvelopeOf(RouterLimits? limits)
     {
         var given = limits ?? Default;
 
