@@ -1,5 +1,56 @@
 //! Relay admission, destination registrations and the calls bound to them.
 
+#[tokio::test]
+async fn answers_by_itself_a_call_a_router_hands_it_unasked_as_a_resolver_does() {
+    let (served, relay) = fixture(RelayOptions {
+        before_route: Some(BeforeRequest::new(
+            |request| request.header.call_id != 1,
+            None,
+        )),
+        ..RelayOptions::default()
+    })
+    .await;
+    let target = Target::plain();
+    register(&relay, (target.as_target(), 7));
+    let answers = Arc::new(Answers::default());
+
+    for (call_id, destination_id) in [(1, 7), (3, 8), (5, 7)] {
+        let request = ResolverProps {
+            is_admitted: false,
+            ..props(&answers, header(call_id, destination_id))
+        };
+        (handler(&served, destination_id).await.resolve)(request)
+            .await
+            .expect("the handler answers its own admission");
+    }
+
+    assert_eq!(
+        *locked(&answers.0),
+        [
+            RouterAnswer::Failure(
+                Failure::protocol(ProtocolCode::ACCESS_DENIED, RouterSide::Server).record()
+            ),
+            RouterAnswer::Failure(
+                Failure::protocol(ProtocolCode::DESTINATION_UNKNOWN, RouterSide::Server)
+                    .saying("no destination 8 behind this relay")
+                    .record()
+            ),
+            RouterAnswer::Result(Bytes::from_static(&[9])),
+        ]
+    );
+    assert_eq!(locked(&target.asked).len(), 1);
+
+    (handler(&served, 7).await.resolve)(props(&answers, header(1, 7)))
+        .await
+        .expect("its router already admitted this request");
+    assert_eq!(locked(&target.asked).len(), 2);
+    assert_eq!(
+        locked(&answers.0).last(),
+        Some(&RouterAnswer::Result(Bytes::from_static(&[9])))
+    );
+    served.router.dispose().await;
+}
+
 #[test]
 fn draws_a_destination_again_when_0_or_in_use() {
     let fills = Arc::new(crate::testing::scripted::DestinationFills::new(
