@@ -134,7 +134,7 @@ public sealed class BrokerParticipantTests
 
         // without a reconnection, a link lost stays down, and says so
         var lone = pair.Broker.Adapter(new MemoryBrokerAdapterOptions { Id = "bob" });
-        await using var alone = new BrokerParticipant(lone, new BrokerParticipantOptions { IsReconnecting = false });
+        await using var alone = new BrokerParticipant(lone, new BrokerParticipantOptions { Reconnects = false });
         var reported = new ConcurrentQueue<string>();
 
         alone.Error += (reason) =>
@@ -834,6 +834,271 @@ public sealed class BrokerParticipantTests
         Assert.False(participant.IsLinked);
     }
 
+    // spec 1.4, 15.21
+    [Fact]
+    public async Task Refuses_a_fixed_reconnection_delay_out_of_bounds_as_it_is_built_and_ends_its_reconnection_reported_on_a_function_s_answer_out_of_bounds()
+    {
+        var broker = new MemoryBroker();
+        var adapter = broker.Adapter(new MemoryBrokerAdapterOptions { Id = "ada" });
+
+        // * a fixed delay held as it is built, whether or not it reconnects
+        foreach (var (delay, reconnects, written) in new[]
+        {
+            (TimeSpan.FromTicks(4_000), true, "0.4"),
+            (TimeSpan.FromMilliseconds(2_147_483_648), true, "2147483648"),
+            (Timeout.InfiniteTimeSpan, false, "infinite"),
+        })
+        {
+            var refused = Assert.Throws<ArgumentOutOfRangeException>(() =>
+            {
+                return new BrokerParticipant(adapter, new BrokerParticipantOptions
+                {
+                    Reconnect = new TransportClientReconnectOptions { Delay = new TransportClientReconnectDelay(delay) },
+                    Reconnects = reconnects,
+                });
+            });
+
+            Assert.Equal($"a delay is 0 for at once, or a number of milliseconds from 1 to 2147483647, not {written} (Parameter 'Delay')", refused.Message);
+        }
+
+        Assert.False(adapter.IsLinked);
+
+        // a function's answer held at each attempt: out of bounds, its reconnection ends, reported,
+        // its refusal the report's inner exception
+        await using var participant = new BrokerParticipant(adapter, new BrokerParticipantOptions
+        {
+            Reconnect = new TransportClientReconnectOptions
+            {
+                Delay = new TransportClientReconnectDelay((_, _) =>
+                {
+                    return Timeout.InfiniteTimeSpan;
+                }),
+            },
+        });
+        var reported = Hearing(participant);
+
+        await participant.Start();
+        adapter.Lose();
+        await adapter.Start();
+        await BrokerPair.Until(
+            () =>
+            {
+                return !reported.IsEmpty;
+            },
+            "its reconnection ended");
+        await participant.Scheduler.WhenIdle();
+
+        Assert.Equal(["the link of ada went down, and its reconnection ended: a delay is 0 for at once, or a number of milliseconds from 1 to 2147483647, not infinite (Parameter 'Delay')"], WordsOf(reported));
+        Assert.IsType<ArgumentOutOfRangeException>(reported.Single().InnerException);
+        Assert.False(participant.IsLinked);
+    }
+
+    // spec 15.21
+    [Fact]
+    public async Task Reconnects_without_end_when_given_a_delay_alone()
+    {
+        var broker = new MemoryBroker();
+        var adapter = broker.Adapter(new MemoryBrokerAdapterOptions { Id = "ada" });
+        var recording = new CallingAdapter(adapter);
+        await using var participant = new BrokerParticipant(recording, new BrokerParticipantOptions
+        {
+            Reconnect = new TransportClientReconnectOptions { Delay = new TransportClientReconnectDelay(TimeSpan.FromMilliseconds(1)) },
+        });
+        var reported = Hearing(participant);
+
+        await participant.Start();
+        adapter.Lose();
+        await adapter.Start();
+
+        // * past the 5 attempts a transport client's reconnection makes when it names none
+        await BrokerPair.Until(
+            () =>
+            {
+                return StartsIn(recording) > 8;
+            },
+            "its attempts past five");
+        Assert.Equal(([], false), (WordsOf(reported), participant.IsLinked));
+
+        // its broker lets it through: linked again, by its own reconnection
+        await adapter.Stop();
+        await BrokerPair.Until(
+            () =>
+            {
+                return participant.IsLinked;
+            },
+            "linked again");
+        Assert.Empty(reported);
+    }
+
+    // spec 15.21
+    [Fact]
+    public async Task Ends_its_reconnection_once_it_is_stopped_told_so_and_links_no_more()
+    {
+        var broker = new MemoryBroker();
+        var adapter = broker.Adapter(new MemoryBrokerAdapterOptions { Id = "ada" });
+        var recording = new CallingAdapter(adapter);
+        var participant = new BrokerParticipant(recording, new BrokerParticipantOptions
+        {
+            Reconnect = new TransportClientReconnectOptions { Delay = new TransportClientReconnectDelay(TimeSpan.FromMilliseconds(10)) },
+        });
+        var reported = Hearing(participant);
+
+        await participant.Start();
+        adapter.Lose();
+        await adapter.Start();
+        await BrokerPair.Until(
+            () =>
+            {
+                return StartsIn(recording) > 2;
+            },
+            "its attempts refused");
+
+        // * its stop ends its link, the test's own among it: its broker would let it through now
+        await participant.Stop();
+
+        var stopped = StartsIn(recording);
+
+        await BrokerPair.Until(
+            () =>
+            {
+                return !reported.IsEmpty;
+            },
+            "its reconnection ended");
+        await Task.Delay(50, Cancelled);
+
+        Assert.Equal(["the link of ada went down, and its reconnection ended: the participant ada is stopped"], WordsOf(reported));
+        Assert.Equal(stopped, StartsIn(recording));
+        Assert.Equal((false, false), (participant.IsLinked, adapter.IsLinked));
+    }
+
+    // spec 15.21
+    [Fact]
+    public async Task Ends_its_reconnection_before_any_attempt_once_its_signal_is_aborted()
+    {
+        var broker = new MemoryBroker();
+        var adapter = broker.Adapter(new MemoryBrokerAdapterOptions { Id = "ada" });
+        var recording = new CallingAdapter(adapter);
+        using var cancelling = new CancellationTokenSource();
+        await using var participant = new BrokerParticipant(recording, new BrokerParticipantOptions
+        {
+            Reconnect = new TransportClientReconnectOptions { Delay = Immediately, CancellationToken = cancelling.Token },
+        });
+        var reported = Hearing(participant);
+
+        await participant.Start();
+
+        // * aborted before its link goes down, its broker letting it through
+        await cancelling.CancelAsync();
+        adapter.Lose();
+        await BrokerPair.Until(
+            () =>
+            {
+                return !reported.IsEmpty;
+            },
+            "its reconnection ended");
+        await participant.Scheduler.WhenIdle();
+
+        Assert.Equal(["the link of ada went down, and its reconnection ended: the reconnection was cancelled"], WordsOf(reported));
+        Assert.Equal(1, StartsIn(recording));
+        Assert.False(participant.IsLinked);
+    }
+
+    // spec 15.21
+    [Fact]
+    public async Task Links_anew_at_its_next_start_once_its_reconnection_ended()
+    {
+        var broker = new MemoryBroker();
+        var adapter = broker.Adapter(new MemoryBrokerAdapterOptions { Id = "ada" });
+        await using var participant = new BrokerParticipant(adapter, new BrokerParticipantOptions
+        {
+            Reconnect = new TransportClientReconnectOptions { Delay = Immediately, MaximumAttempts = 2 },
+        });
+        var reported = Hearing(participant);
+
+        await participant.Start();
+
+        var former = participant.Incarnation;
+
+        adapter.Lose();
+        await adapter.Start();
+        await BrokerPair.Until(
+            () =>
+            {
+                return !reported.IsEmpty;
+            },
+            "given up on");
+        Assert.Equal(["the link of ada went down, and 2 attempts did not bring it back"], WordsOf(reported));
+
+        // its broker lets it through: it stays down until it is started
+        await adapter.Stop();
+        await participant.Scheduler.WhenIdle();
+        Assert.False(participant.IsLinked);
+
+        // * its next start links it anew, another incarnation, not the first start's outcome
+        await participant.Start().WaitAsync(BrokerPair.Patience, Cancelled);
+        Assert.Equal((true, true), (participant.IsLinked, adapter.IsLinked));
+        Assert.NotEqual(former, participant.Incarnation);
+    }
+
+    // spec 15.21
+    [Fact]
+    public async Task Reports_its_reconnection_ended_when_its_delay_function_or_its_tap_throws()
+    {
+        var broker = new MemoryBroker();
+        var ada = broker.Adapter(new MemoryBrokerAdapterOptions { Id = "ada" });
+        var bob = broker.Adapter(new MemoryBrokerAdapterOptions { Id = "bob" });
+        var delayBroke = new InvalidOperationException("its delay broke");
+        var tapBroke = new InvalidOperationException("its tap broke");
+        await using var throwing = new BrokerParticipant(ada, new BrokerParticipantOptions
+        {
+            Reconnect = new TransportClientReconnectOptions
+            {
+                Delay = new TransportClientReconnectDelay((_, _) =>
+                {
+                    throw delayBroke;
+                }),
+            },
+        });
+        await using var tapping = new BrokerParticipant(bob, new BrokerParticipantOptions
+        {
+            Reconnect = new TransportClientReconnectOptions
+            {
+                Delay = Immediately,
+                Tap = (_, _) =>
+                {
+                    throw tapBroke;
+                },
+            },
+        });
+        ConcurrentQueue<Exception>[] reported = [Hearing(throwing), Hearing(tapping)];
+
+        await throwing.Start();
+        await tapping.Start();
+        ada.Lose();
+        await ada.Start();
+        bob.Lose();
+        await bob.Start();
+        await BrokerPair.Until(
+            () =>
+            {
+                return reported.All((each) =>
+                {
+                    return !each.IsEmpty;
+                });
+            },
+            "each reconnection ended");
+        await throwing.Scheduler.WhenIdle();
+        await tapping.Scheduler.WhenIdle();
+
+        // * each told once, what it threw inside
+        Assert.Equal(
+            [["the link of ada went down, and its reconnection ended: its delay broke"], ["the link of bob went down, and its reconnection ended: its tap broke"]],
+            reported.Select(WordsOf));
+        Assert.Same(delayBroke, Assert.IsType<InvalidOperationException>(reported[0].Single().InnerException).InnerException);
+        Assert.Same(tapBroke, reported[1].Single().InnerException);
+        Assert.Equal((false, false), (throwing.IsLinked, tapping.IsLinked));
+    }
+
     [Fact]
     public async Task Serves_its_names_again_once_its_link_connects_anew_its_former_peers_reset()
     {
@@ -1139,6 +1404,34 @@ public sealed class BrokerParticipantTests
     }
 
     private static readonly TransportClientReconnectDelay Immediately = new TransportClientReconnectDelay(TimeSpan.Zero);
+
+    // what a participant reports, each kept whole, its inner exception among it
+    private static ConcurrentQueue<Exception> Hearing(BrokerParticipant participant)
+    {
+        var reported = new ConcurrentQueue<Exception>();
+
+        participant.Error += reported.Enqueue;
+
+        return reported;
+    }
+
+    // the words of each report
+    private static string[] WordsOf(ConcurrentQueue<Exception> reported)
+    {
+        return [.. reported.Select((reason) =>
+        {
+            return reason.Message;
+        })];
+    }
+
+    // the starts of its link an adapter wrote down, its first among them
+    private static int StartsIn(CallingAdapter recording)
+    {
+        return recording.Calls.Count((call) =>
+        {
+            return call == "start";
+        });
+    }
 
     // the acceptor's half, a test's own peer's
     private const ulong AcceptorHalf = 0xA1_00_00_00_00_00_00_01;

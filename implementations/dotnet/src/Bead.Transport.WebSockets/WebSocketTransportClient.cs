@@ -463,8 +463,10 @@ public sealed class WebSocketTransportClient : IRouterClientTransport, IAsyncDis
     /// close, with a <see cref="ReconnectException"/>; a cancel stops them with an
     /// <see cref="OperationCanceledException"/>, ending Closed, and one after a success disconnects,
     /// which raises a close. A reconnection under way, never connected, connecting or closing is an
-    /// <see cref="InvalidOperationException"/>, and so is a delay that throws, ending Closed; a misuse
-    /// or a token cancelled already leaves the state as it was. What its tap throws passes through.
+    /// <see cref="InvalidOperationException"/>, and so is a delay that throws, ending Closed; a fixed
+    /// delay out of bounds is an <see cref="ArgumentOutOfRangeException"/> as it is called, after
+    /// those and before the token; a misuse, such a delay or a token cancelled already leaves the
+    /// state as it was. What its tap throws passes through.
     /// </summary>
     public async Task Reconnect(TransportClientReconnectOptions? options = null)
     {
@@ -490,6 +492,10 @@ public sealed class WebSocketTransportClient : IRouterClientTransport, IAsyncDis
             {
                 throw new InvalidOperationException($"the transport client cannot reconnect while {NameOf(_readyState)}");
             }
+
+            // * a fixed delay held as it is called, after the state's guards and before its token,
+            // so a refused one moves nothing (spec 1.4)
+            TransportReconnection.Held(reconnect);
 
             // before the drop below, so a token cancelled already leaves an open connection alone
             if (token.IsCancellationRequested)

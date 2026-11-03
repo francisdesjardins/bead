@@ -420,7 +420,7 @@ public sealed class WebSocketTransportClientTests : IAsyncLifetime
         Assert.Equal(("/", false, TimeSpan.FromSeconds(30)), (target.Pathname, target.Secured, target.Timeout));
         Assert.Null(target.Protocols);
         Assert.Equal((true, false), (disconnect.IsClean, disconnect.IsQuick));
-        Assert.Equal((5, false), (reconnect.MaximumAttempts, reconnect.CancellationToken.CanBeCanceled));
+        Assert.Equal(((int?)null, false), (reconnect.MaximumAttempts, reconnect.CancellationToken.CanBeCanceled));
         Assert.Null(reconnect.Delay);
         Assert.Null(reconnect.Tap);
     }

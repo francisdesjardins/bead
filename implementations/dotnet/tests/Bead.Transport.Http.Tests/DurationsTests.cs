@@ -164,6 +164,11 @@ public sealed partial class DurationsTests
         {
             ["options"] = new(nameof(BrokerParticipantOptions.Heartbeat), BrokerHeartbeatByOptions),
         }),
+        ["brokerParticipant.reconnectionDelay"] = ("a delay", new()
+        {
+            ["function"] = new(nameof(TransportClientReconnectOptions.Delay), ParticipantReconnectionDelayByFunction),
+            ["number"] = new(nameof(TransportClientReconnectOptions.Delay), ParticipantReconnectionDelayByNumber),
+        }),
         ["brokerTransportServer.acceptTimeout"] = (nameof(BrokerTransportServerOptions.AcceptTimeout), new()
         {
             ["options"] = new(nameof(BrokerTransportServerOptions.AcceptTimeout), AcceptTimeoutByOptions),

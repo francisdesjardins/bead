@@ -44,14 +44,23 @@ public sealed record BrokerParticipantOptions
     /// <summary>The delivery its application requires: an adapter that gives less is refused as it is built (spec 15.19); none when none.</summary>
     public BrokerDelivery? RequireDelivery { get; init; }
 
-    /// <summary>How its link connects again once lost, each time a new incarnation (spec 15.21): a second between attempts, without end, unless told.</summary>
+    /// <summary>
+    /// How its link connects again once lost, each time a new incarnation (spec 15.21), as a
+    /// transport client's reconnection takes it: a second between attempts unless told, a fixed
+    /// delay held as it is built whatever <see cref="Reconnects"/>; its attempts without end unless
+    /// <see cref="TransportClientReconnectOptions.MaximumAttempts"/> bounds them; its token read
+    /// before each attempt and during each wait, an attempt under way not cut short; its tap told
+    /// each wait. A stop ends it at its next attempt. Once it ends it is reported through
+    /// <see cref="BrokerParticipant.Error"/>, what ended it the inner exception, and the next start or
+    /// connect links it anew.
+    /// </summary>
     public TransportClientReconnectOptions? Reconnect { get; init; }
 
     /// <summary>
     /// Whether its link connects again once lost, as <see cref="Reconnect"/> says: true unless told;
     /// false leaves it down, reported, until a start or a connect links it anew.
     /// </summary>
-    public bool IsReconnecting { get; init; } = true;
+    public bool Reconnects { get; init; } = true;
 
     /// <summary>Where its state is touched, one turn at a time: one of its own when none; the tests' way to share one with a broker in memory.</summary>
     internal SerialScheduler? Scheduler { get; init; }
@@ -106,8 +115,8 @@ public sealed class BrokerParticipant : IAsyncDisposable
     /// <summary>
     /// A participant over <paramref name="adapter"/>, not yet started. An adapter whose id is no
     /// token, a root that is none, or an adapter that delivers at most once where at least once is
-    /// required, is an <see cref="ArgumentException"/>; a bound out of its range, an
-    /// <see cref="ArgumentOutOfRangeException"/> naming it.
+    /// required, is an <see cref="ArgumentException"/>; a bound out of its range, or a fixed
+    /// reconnection delay out of bounds, an <see cref="ArgumentOutOfRangeException"/> naming it.
     /// </summary>
     public BrokerParticipant(IBrokerAdapter adapter, BrokerParticipantOptions? options = null)
     {
@@ -147,6 +156,9 @@ public sealed class BrokerParticipant : IAsyncDisposable
         {
             throw new ArgumentException(string.Create(CultureInfo.InvariantCulture, $"a participant's inbox takes a parcel of 1,024 bytes at least, and the adapter of {adapter.Id} takes {receiveBound}"), nameof(adapter));
         }
+
+        // * a fixed delay held as it is given, whether or not it reconnects (spec 1.4)
+        TransportReconnection.Held(given.Reconnect ?? new TransportClientReconnectOptions());
 
         _options = given with
         {
@@ -868,6 +880,7 @@ public sealed class BrokerParticipant : IAsyncDisposable
     // anything goes; then each peer of a former incarnation reset
     private async Task Link()
     {
+        AssertNotStopped();
         _isDownAsItLinks = false;
         _linkEpoch += 1;
 
@@ -908,9 +921,27 @@ public sealed class BrokerParticipant : IAsyncDisposable
 
         lock (_gate)
         {
+            // ! stopped as it connected: what its stop let go of stays let go, and it links no more
+            if (_isStopped)
+            {
+                throw new InvalidOperationException($"the participant {Id} is stopped");
+            }
+
             _live.TrySetResult();
         }
         Transition("up");
+    }
+
+    // in its turn: a stop ends what links it, a reconnection at its next attempt
+    private void AssertNotStopped()
+    {
+        lock (_gate)
+        {
+            if (_isStopped)
+            {
+                throw new InvalidOperationException($"the participant {Id} is stopped");
+            }
+        }
     }
 
     // in its turn: its link lost: each connection closed, unclean, each connect to send its OPEN
@@ -992,7 +1023,7 @@ public sealed class BrokerParticipant : IAsyncDisposable
         }
 
         // * no reconnection: it stays down, said so, and the next start or connect links it anew
-        if (!_options.IsReconnecting)
+        if (!_options.Reconnects)
         {
             lock (_gate)
             {
@@ -1025,11 +1056,17 @@ public sealed class BrokerParticipant : IAsyncDisposable
         });
     }
 
+    // its link connected again, as its reconnection says, without end unless its application bounds
+    // it; ended, reported, what ended it inside, and its next start or connect links it anew
     private async Task Relinking(List<(string PeerId, (ulong Opener, ulong Acceptor) Pair)> peers)
     {
-        var reconnect = _options.Reconnect ?? new TransportClientReconnectOptions { MaximumAttempts = int.MaxValue };
+        var reconnect = _options.Reconnect ?? new TransportClientReconnectOptions();
         using var fenced = new CancellationTokenSource();
-        using var relinking = CancellationTokenSource.CreateLinkedTokenSource(reconnect.CancellationToken, fenced.Token);
+        // cancelled by an attempt that found it stopped, so that none follows it
+        using var stopping = new CancellationTokenSource();
+        using var relinking = CancellationTokenSource.CreateLinkedTokenSource(reconnect.CancellationToken, fenced.Token, stopping.Token);
+        // the attempts made, which its end's words count
+        var attempts = 0;
 
         lock (_gate)
         {
@@ -1039,28 +1076,50 @@ public sealed class BrokerParticipant : IAsyncDisposable
         try
         {
             await TransportReconnection.Attempting(
-                (_) =>
+                async (_) =>
                 {
-                    return _scheduler.Run(Link);
+                    attempts += 1;
+
+                    try
+                    {
+                        await _scheduler.Run(Link);
+                    }
+                    catch (Exception reason) when (IsStopped)
+                    {
+                        // * stopped: it ends here, no attempt after it, in the other sides' words
+                        await stopping.CancelAsync();
+
+                        throw new OperationCanceledException(reason.Message, reason, stopping.Token);
+                    }
+                    catch (ArgumentException reason)
+                    {
+                        // * a failure another attempt may mend, an adapter's misuse among them
+                        throw new IOException(reason.Message, reason);
+                    }
                 },
-                (reconnect with { CancellationToken = relinking.Token }, _clock));
+                (reconnect with { CancellationToken = relinking.Token, MaximumAttempts = reconnect.MaximumAttempts ?? int.MaxValue }, _clock));
+        }
+        catch (OperationCanceledException reason) when (stopping.IsCancellationRequested)
+        {
+            Ended(new IOException($"the link of {Id} went down, and its reconnection ended: the participant {Id} is stopped", reason));
+
+            return;
         }
         catch (OperationCanceledException) when (fenced.IsCancellationRequested)
         {
-            // taken over as it connected again: its fence reported it
+            // taken over as it connected again: its fence reported it, and let go of its start
             return;
         }
         catch (ReconnectException reason)
         {
-            var attempts = (_options.Reconnect ?? new TransportClientReconnectOptions { MaximumAttempts = int.MaxValue }).MaximumAttempts;
-
-            Report(new IOException(string.Create(CultureInfo.InvariantCulture, $"the link of {Id} went down, and {attempts} attempts did not bring it back"), reason));
+            Ended(new IOException(string.Create(CultureInfo.InvariantCulture, $"the link of {Id} went down, and {attempts} attempts did not bring it back"), reason));
 
             return;
         }
-        catch (Exception reason) when (reason is OperationCanceledException or InvalidOperationException)
+        catch (Exception reason)
         {
-            Report(new IOException($"the link of {Id} went down, and its reconnection ended: {reason.Message}", reason));
+            // a delay refused or that threw, a tap that threw, or a cancel
+            Ended(new IOException($"the link of {Id} went down, and its reconnection ended: {reason.Message}", reason));
 
             return;
         }
@@ -1084,6 +1143,29 @@ public sealed class BrokerParticipant : IAsyncDisposable
 
             return Task.CompletedTask;
         });
+    }
+
+    // whether it was stopped
+    private bool IsStopped
+    {
+        get
+        {
+            lock (_gate)
+            {
+                return _isStopped;
+            }
+        }
+    }
+
+    // its reconnection ended: it stays down, said so, and the next start or connect links it anew
+    private void Ended(IOException report)
+    {
+        lock (_gate)
+        {
+            _starting = null;
+        }
+
+        Report(report);
     }
 
     // in its turn: a message its adapter received, taken, then acknowledged — never once its

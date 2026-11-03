@@ -682,8 +682,9 @@ public sealed partial class DurationsTests
 
     // the delay in the form given, on a WebSocket client whose connect was refused, after a first
     // attempt refused again: the delay its tap hears and the due of its wait, the attempt at it and
-    // not before; at once, no wait and the attempt at once; refused, before its tap hears it, no
-    // attempt more, and the client closed
+    // not before; at once, no wait and the attempt at once; refused, a number as reconnect is called,
+    // no attempt, no reconnect told and the client as it was, and a function's answer before its tap
+    // hears it, no attempt more, and the client closed
     private static async Task<Observed> ReconnectionDelayBy(TimeSpan? given, Func<TimeSpan, TransportClientReconnectDelay> delayOf)
     {
         var delay = Assert.NotNull(given);
@@ -692,21 +693,42 @@ public sealed partial class DurationsTests
         await using var client = new WebSocketTransportClient(new WebSocketTransportClientOptions { Clock = clock });
         var taps = Channel.CreateUnbounded<TimeSpan>();
         var connecting = client.Connect(new WebSocketTransportClientConnectOptions { Host = Host, Port = listener.Port }, Cancelled);
+        var told = 0;
 
         await Listener.Refuse((await Reached(listener, connecting)).Peer);
         await Assert.ThrowsAsync<WebSocketException>(() =>
         {
             return connecting.WaitAsync(Patience, Cancelled);
         });
-
-        var reconnecting = client.Reconnect(new TransportClientReconnectOptions
+        ((IRouterClientTransport)client).Reconnect += () =>
         {
-            Delay = delayOf(delay),
+            Interlocked.Increment(ref told);
+        };
+
+        var before = client.ReadyState;
+        var form = delayOf(delay);
+        var reconnect = new TransportClientReconnectOptions
+        {
+            Delay = form,
             Tap = (heard, _) =>
             {
                 taps.Writer.TryWrite(heard);
             },
-        });
+        };
+        var reconnecting = client.Reconnect(reconnect);
+
+        // * a number refused as reconnect is called: nothing moved
+        if (reconnecting.IsCompleted && form.Fixed is not null)
+        {
+            var refusal = await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() =>
+            {
+                return reconnecting;
+            });
+
+            Assert.Equal((before, 0, false), (client.ReadyState, Volatile.Read(ref told), listener.IsPending));
+
+            return Refused(refusal);
+        }
 
         await Listener.Refuse((await Reached(listener, Task.WhenAny(reconnecting, taps.Reader.WaitToReadAsync(Cancelled).AsTask()).Unwrap())).Peer);
         await Task.WhenAny(reconnecting, taps.Reader.WaitToReadAsync(Cancelled).AsTask()).WaitAsync(Patience, Cancelled);
@@ -718,7 +740,9 @@ public sealed partial class DurationsTests
                 return reconnecting;
             });
 
-            Assert.Equal((ReadyState.Closed, false), (client.ReadyState, listener.IsPending));
+            // ! a number's refusal comes as reconnect is called, never at its attempt
+            Assert.Null(form.Fixed);
+            Assert.Equal((ReadyState.Closed, 1, false), (client.ReadyState, Volatile.Read(ref told), listener.IsPending));
 
             return Refused(refused);
         }

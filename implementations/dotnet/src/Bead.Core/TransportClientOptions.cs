@@ -22,7 +22,9 @@ public delegate TimeSpan TransportClientReconnectDelayResolver(TimeSpan? previou
 /// A reconnection's delay, as every side takes one: a wait, the same after each failed attempt, or a
 /// <see cref="TransportClientReconnectDelayResolver"/> that resolves each, as the TypeScript side's
 /// <c>TransportClientReconnectDelay</c> is a number or a function (0004). It holds one of the two,
-/// built by the constructor of each, and judges neither: the reconnection holds the wait it comes to.
+/// built by the constructor of each; its owner holds a fixed wait where it is given, as a transport
+/// client's reconnection is called or a broker participant is built, and a resolver's answer at each
+/// attempt (spec 1.4).
 /// </summary>
 public sealed record TransportClientReconnectDelay
 {
@@ -53,7 +55,7 @@ public sealed record TransportClientReconnectDelay
     }
 }
 
-/// <summary>How a transport client connects again.</summary>
+/// <summary>How a transport client connects again, or a broker participant's link.</summary>
 public sealed record TransportClientReconnectOptions
 {
     /// <summary>
@@ -61,17 +63,24 @@ public sealed record TransportClientReconnectOptions
     /// the number of the attempt that failed: a second each unless told. The first attempt goes at
     /// once; a wait of zero is none, one from 1 to 2³¹ − 1 milliseconds is rounded to the nearest
     /// whole one, which its tap hears, and any other — <see cref="Timeout.InfiniteTimeSpan"/> among
-    /// them — ends the reconnection with an <see cref="ArgumentOutOfRangeException"/>, before its tap
-    /// hears it.
+    /// them — is an <see cref="ArgumentOutOfRangeException"/>: a fixed one where it is given, as a
+    /// transport client's reconnection is called or a broker participant is built, and a resolver's
+    /// answer at its attempt, before its tap hears it, ending the reconnection (spec 1.4).
     /// </summary>
     public TransportClientReconnectDelay? Delay { get; init; }
 
-    /// <summary>The attempts before it gives up with a <see cref="ReconnectException"/>; there is always one at least.</summary>
-    public int MaximumAttempts { get; init; } = 5;
+    /// <summary>
+    /// The attempts before it gives up with a <see cref="ReconnectException"/>, there being always one
+    /// at least: its owner's default when none, 5 for a transport client's reconnection, without end
+    /// for a broker participant's.
+    /// </summary>
+    public int? MaximumAttempts { get; init; }
 
     /// <summary>
-    /// Cancelling it stops the attempts, the one connecting included, or disconnects a success,
-    /// with an <see cref="OperationCanceledException"/>.
+    /// Read before each attempt, the first included, and during each wait: cancelling it stops the
+    /// attempts with an <see cref="OperationCanceledException"/>, a transport client's attempt under
+    /// way included, where a broker participant's is not cut short, or disconnects a transport
+    /// client's success.
     /// </summary>
     public CancellationToken CancellationToken { get; init; }
 

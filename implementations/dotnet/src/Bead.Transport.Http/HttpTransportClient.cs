@@ -466,6 +466,10 @@ public sealed class HttpTransportClient : IRouterClientTransport, IAsyncDisposab
                 throw new InvalidOperationException($"the transport client cannot reconnect while {NameOf(_readyState)}");
             }
 
+            // * a fixed delay held as it is called, after the state's guards and before its token,
+            // so a refused one moves nothing (spec 1.4)
+            TransportReconnection.Held(reconnect);
+
             // before the drop below, so a token cancelled already leaves an open connection alone
             if (token.IsCancellationRequested)
             {
