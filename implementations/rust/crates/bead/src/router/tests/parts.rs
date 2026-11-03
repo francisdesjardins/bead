@@ -89,6 +89,39 @@ fn handles_of(gauges: &Gauges) -> Vec<String> {
 
 // ── The call ids a side draws ────────────────────────────────────────────────────────────────
 
+// spec 9.1
+#[test]
+fn draws_a_side_s_own_range_by_default_to_its_last_unsigned() {
+    assert_eq!(RouterSide::Client.call_ids(), (1, u32::MAX));
+    assert_eq!(RouterSide::Server.call_ids(), (2, u32::MAX - 1));
+    let a = handle("a");
+    assert_eq!(
+        PendingCalls::new(RouterSide::Client).draw((&a, free)),
+        Some(1)
+    );
+    assert_eq!(
+        PendingCalls::new(RouterSide::Server).draw((&a, free)),
+        Some(2)
+    );
+}
+
+// spec 9.1
+#[test]
+fn refuses_a_last_call_id_of_the_other_parity_or_before_its_first() {
+    for (side, last) in [
+        (RouterSide::Client, 4),
+        (RouterSide::Client, 0),
+        (RouterSide::Server, 3),
+        (RouterSide::Server, 0),
+    ] {
+        let error = PendingCalls::bounded(side, last).expect_err("the last id is not of its side");
+        assert_eq!(
+            error.to_string(),
+            format!("the last call id of a {side} has its own parity and is not 0, not {last}")
+        );
+    }
+}
+
 #[test]
 fn refuses_a_last_call_id_of_zero_or_its_peer_s_parity_before_a_router_starts() {
     use crate::router::client::{RouterClient, RouterClientOptions};
