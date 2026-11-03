@@ -63,13 +63,17 @@ fn hold<S: FnOnce() -> String>(holds: bool, said: S) -> Result<(), Failed> {
 }
 
 // a refusal of the protocol's, raised here by `side`, of `code`
-fn refused(failure: &Failure, (code, side): (u16, RouterSide)) -> Result<(), Failed> {
+fn refused(
+    failure: &Failure,
+    (code, side, detail): (u16, RouterSide, Option<&str>),
+) -> Result<(), Failed> {
     hold(
         failure.code().get() == code
             && failure.scope() == FailureScope::Protocol
             && failure.origin() == FailureOrigin::Local
-            && failure.side() == Some(side),
-        || format!("refused with {failure:?}, not code {code} of the {side}"),
+            && failure.side() == Some(side)
+            && detail.is_none_or(|detail| failure.detail() == detail),
+        || format!("refused with {failure:?}, not code {code} of the {side}, detail {detail:?}"),
     )
 }
 
@@ -166,7 +170,10 @@ fn prefixes() -> Result<Vec<Trial>, String> {
 
             match read_prefix(&bytes, RouterSide::Client) {
                 Ok(prefix) => Err(format!("read {prefix:?}").into()),
-                Err(failure) => refused(&failure, (vector.code, RouterSide::Client)),
+                Err(failure) => refused(
+                    &failure,
+                    (vector.code, RouterSide::Client, vector.detail.as_deref()),
+                ),
             }
         })
         .with_kind("prefixRefusals")
@@ -189,7 +196,10 @@ fn header_refusals() -> Result<Vec<Trial>, String> {
                 format!("a header's read refuses {}", vector.name),
                 move || match read_header(&vectors::bytes_of(&vector.bytes)?, RouterSide::Server) {
                     Ok(read) => Err(format!("read {read:?}").into()),
-                    Err(failure) => refused(&failure, (vector.code, RouterSide::Server)),
+                    Err(failure) => refused(
+                        &failure,
+                        (vector.code, RouterSide::Server, vector.detail.as_deref()),
+                    ),
                 },
             )
             .with_kind("headerRefusals")
@@ -236,7 +246,10 @@ fn envelopes() -> Result<Vec<Trial>, String> {
                 &options,
             ) {
                 Ok(read) => Err(format!("read {read:?}").into()),
-                Err(failure) => refused(&failure, (vector.code, RouterSide::Server)),
+                Err(failure) => refused(
+                    &failure,
+                    (vector.code, RouterSide::Server, vector.detail.as_deref()),
+                ),
             }
         })
         .with_kind("envelopeRefusals")
@@ -278,7 +291,7 @@ fn failures() -> Result<Vec<Trial>, String> {
                 &ReadEnvelopeOptions::default(),
             ) {
                 Ok(read) => Err(format!("read {read:?}").into()),
-                Err(failure) => refused(&failure, (vector.code, RouterSide::Server)),
+                Err(failure) => refused(&failure, (vector.code, RouterSide::Server, None)),
             },
         )
         .with_kind("failureRefusals")
