@@ -60,6 +60,7 @@ pub(crate) struct State {
     pub(crate) before_sent: Vec<usize>,
     pub(crate) undone: Vec<u32>,
     pub(crate) notifications: Vec<(ConnectionHandle, NotificationHeader, Bytes)>,
+    pub(crate) cancels: Vec<(u32, ConnectionHandle)>,
     pub(crate) credits: Vec<(ConnectionHandle, CreditHeader)>,
     pub(crate) unpaired: Vec<(ConnectionHandle, FailureHeader, FailureRecord)>,
     pub(crate) traces: Vec<(DebugDirection, TracedEnvelope)>,
@@ -162,6 +163,10 @@ impl Side for State {
         self.unpaired
             .push((Arc::clone(handle), header.clone(), failure.clone()));
         self.takes_unpaired
+    }
+
+    fn on_cancel(&mut self, call_id: u32, handle: &ConnectionHandle) {
+        self.cancels.push((call_id, Arc::clone(handle)));
     }
 
     fn is_tracing(&self) -> bool {
@@ -306,6 +311,7 @@ impl Peer {
             undone: Vec::new(),
             notifications: Vec::new(),
             credits: Vec::new(),
+            cancels: Vec::new(),
             unpaired: Vec::new(),
             traces: Vec::new(),
             activity: Vec::new(),

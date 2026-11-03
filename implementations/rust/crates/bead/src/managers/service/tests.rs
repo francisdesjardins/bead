@@ -25,6 +25,7 @@ mod requester;
 mod resolver;
 mod resolver_edges;
 mod sessions;
+pub(crate) mod trace_clocks;
 mod validation;
 
 type Heard = Arc<Mutex<Vec<(Option<String>, DebugEvent)>>>;

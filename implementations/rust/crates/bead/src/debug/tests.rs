@@ -651,14 +651,20 @@ async fn a_notification_starts_as_it_is_heard_or_sent_and_a_failed_notify_tells_
 #[tokio::test]
 async fn reads_no_clock_for_a_call_made_a_request_answered_a_notification_sent_and_one_heard_while_nobody_listens_and_three_for_a_call_with_a_listener()
  {
+    use crate::managers::service::tests::trace_clocks::{ReadClock, clocked};
+
     async fn readings_of(
-        pair: &Pair,
-        (manager_notifier, ask): (
-            &crate::managers::service::Notifier<JsonCodec>,
-            &crate::managers::service::Request<JsonCodec, JsonCodec>,
+        (pair, hearing, notifying): (&Pair, &ReadClock, &ReadClock),
+        (notifier, ask): (
+            &crate::Notifier<JsonCodec>,
+            &crate::Request<JsonCodec, JsonCodec>,
         ),
-    ) -> [(usize, usize); 2] {
-        let (walls, monotonics) = pair.clock.readings();
+    ) -> [(usize, usize); 4] {
+        fn since(after: (usize, usize), before: (usize, usize)) -> (usize, usize) {
+            (after.0 - before.0, after.1 - before.1)
+        }
+
+        let before = [hearing.readings(), notifying.readings()];
         let call = ask
             .call(json!({ "text": "x" }), &RequestOptions::default())
             .expect("a call");
@@ -666,31 +672,36 @@ async fn reads_no_clock_for_a_call_made_a_request_answered_a_notification_sent_a
         pair.settle().await;
         call.await.expect("an answer");
 
-        let (called_walls, called_monotonics) = pair.clock.readings();
+        let called = [hearing.readings(), notifying.readings()];
 
-        manager_notifier
+        notifier
             .notify(json!({ "text": "news" }), &NotifyOptions::default())
             .await;
         pair.settle().await;
 
-        let (notified_walls, notified_monotonics) = pair.clock.readings();
-
         [
-            (called_walls - walls, called_monotonics - monotonics),
-            (
-                notified_walls - called_walls,
-                notified_monotonics - called_monotonics,
-            ),
+            since(called[0], before[0]),
+            since(called[1], before[1]),
+            since(notifying.readings(), called[1]),
+            since(hearing.readings(), called[0]),
         ]
     }
 
     let pair = pair().await;
+    let (hearing, heard_clock) = clocked(pair.client.services());
+    let (notifying, sent_clock) = clocked(pair.server.services());
 
-    serve_echo(&pair, None);
-
-    let notifier = pair
-        .server
-        .services()
+    notifying
+        .get_request_resolver(
+            &echo(),
+            RequestResolverDependencies::new(JsonCodec, JsonCodec),
+        )
+        .expect("echo resolved")
+        .on(Arc::new(|request, response: Response<JsonCodec>| {
+            response.result(request.payload)
+        }))
+        .expect("echo registered");
+    let notifier = notifying
         .get_notification_resolver(
             &ticks(),
             NotificationResolverDependencies::new(
@@ -703,9 +714,7 @@ async fn reads_no_clock_for_a_call_made_a_request_answered_a_notification_sent_a
             response.result(Value::Null)
         }))
         .expect("ticks registered");
-    let notification = pair
-        .client
-        .services()
+    let notification = hearing
         .get_notification(
             &ticks(),
             NotificationDependencies::new(
@@ -723,24 +732,22 @@ async fn reads_no_clock_for_a_call_made_a_request_answered_a_notification_sent_a
     pair.settle().await;
     registering.await.expect("subscribed");
 
-    let ask = asking(pair.client.services());
-    let unheard = readings_of(&pair, (&notifier, &ask)).await;
+    let ask = asking(&hearing);
 
-    for manager in [pair.client.services(), pair.server.services()] {
+    assert_eq!(
+        readings_of((&pair, &heard_clock, &sent_clock), (&notifier, &ask)).await,
+        [(0, 0); 4],
+        "no trace reads either clock while nobody listens"
+    );
+
+    for manager in [&hearing, &notifying] {
         manager.on_debug(Arc::new(|_error, _event| {}));
     }
 
-    let heard = readings_of(&pair, (&notifier, &ask)).await;
-
-    // a call's start on both clocks, and its end on the monotonic one, at each end; a
-    // notification's on the wall clock alone, at each end (spec/debugging.md 3.2)
     assert_eq!(
-        [
-            (heard[0].0 - unheard[0].0, heard[0].1 - unheard[0].1),
-            (heard[1].0 - unheard[1].0, heard[1].1 - unheard[1].1),
-        ],
-        [(2, 4), (2, 0)],
-        "three readings a call made and three a request answered, one a notification sent and one heard"
+        readings_of((&pair, &heard_clock, &sent_clock), (&notifier, &ask)).await,
+        [(1, 2), (1, 2), (1, 0), (1, 0)],
+        "each call reads three times and each notification once"
     );
 }
 

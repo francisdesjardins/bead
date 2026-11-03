@@ -41,7 +41,7 @@ use crate::violations::{Judged, detail_bound_of, is_refused, violations_detail_o
 
 mod notification;
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;
 
 pub use notification::{
     Notification, NotificationCallback, NotificationDependencies, NotificationRegistration,

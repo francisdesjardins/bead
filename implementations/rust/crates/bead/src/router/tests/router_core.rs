@@ -655,19 +655,33 @@ async fn forgets_a_call_its_requester_cancels_then_cancels_its_signal_nothing_an
 #[tokio::test]
 async fn takes_a_cancel_of_no_call_in_silence_offered_to_the_side_and_reports_one_of_its_own_parity()
  {
-    let served = Served::new(&RouterServerOptions::default());
-
-    served.transport.open(&first(), true);
-    // crossed its answer, say
-    served.transport.deliver(&cancel_of(7), &first());
-    // a call this side opened is not the peer's to cancel
-    served.transport.deliver(&cancel_of(2), &first());
-    served.settle().await;
-
-    assert_eq!(
-        served.reported(),
-        ["ENVELOPE_MALFORMED first"],
-        "its own parity reported"
+    let peer = crate::testing::core_port::Peer::new(
+        crate::RouterSide::Server,
+        &RouterLimitsOptions::default(),
     );
-    assert!(served.transport.take().is_empty(), "nothing sent");
+
+    peer.receive((cancel_of(7), first()));
+    peer.receive((cancel_of(2), first()));
+    peer.settle().await;
+    peer.owner
+        .run(|state| {
+            assert_eq!(
+                state.cancels,
+                [(7, first())],
+                "the peer's cancel offered, even without a call"
+            );
+            assert_eq!(state.reports.len(), 1, "its own parity reported once");
+            let (handle, crate::RouterError::Failure(failure)) = &state.reports[0] else {
+                panic!("a malformed envelope reported")
+            };
+            assert_eq!(handle, &first(), "the connection");
+            assert_eq!(
+                failure.protocol_code(),
+                Some(ProtocolCode::ENVELOPE_MALFORMED),
+                "its own parity refused"
+            );
+            assert!(state.sent.is_empty(), "nothing sent");
+        })
+        .await
+        .expect("the side's cancel observed");
 }
