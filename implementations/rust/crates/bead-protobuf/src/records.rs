@@ -1,20 +1,24 @@
 //! A `proto` payload's records, read against its message before Buffa reads them (spec 17.9,
 //! decision 0028): the check that refuses what protobuf refuses where a stock library reads on, and
 //! reads nothing in the library's place. It walks the payload once, by its message's schema, and
-//! allocates nothing per record. The schema holds what the required walk takes too (17.9.7): each
-//! message's fields protobuf requires, and those that hold a message reaching one. The TypeScript
-//! side's twin is `checkProtoRecords`, the C# side's `ProtoRecords`.
+//! allocates nothing per record. Where the walk meets a singular closed enum's record of a number
+//! its enum does not declare, the reader is given the payload without it, each enclosing length
+//! written again (17.9.8): what protobuf keeps among the unknown fields, Buffa then never reads, as
+//! every side drops it. The schema holds what the required walk takes too (17.9.7): each message's
+//! fields protobuf requires, and those that hold a message reaching one. The TypeScript side's twin
+//! is `checkProtoRecords`, the C# side's `ProtoRecords`.
 
 use core::fmt;
+use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use bead::CodecRefusal;
-use buffa::editions::FieldPresence;
+use buffa::editions::{EnumType, FieldPresence};
 use buffa_descriptor::generated::descriptor::feature_set;
 use buffa_descriptor::reflect::ReflectMessage;
 use buffa_descriptor::{
-    DescriptorPool, FieldDescriptor, FieldKind, MessageIndex, ScalarType, SingularKind,
+    DescriptorPool, EnumIndex, FieldDescriptor, FieldKind, MessageIndex, ScalarType, SingularKind,
 };
 
 use crate::refusal::{NESTED_PAST_100, NOT_ITS_MESSAGE, found};
@@ -373,13 +377,17 @@ pub(crate) enum Form {
 }
 
 /// What a record of a field takes: its own wire type, the length-delimited one besides where it
-/// packs, and the message it holds, an entry's of a map's among them.
+/// packs, the message it holds, an entry's of a map's among them, and the enum whose numbers alone
+/// set it, where it is a singular field of a closed enum.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct FieldShape {
     own: u32,
     packs: Packs,
     /// The message a record of it holds, or a map's entry; none for a scalar or an enum.
     pub(crate) holds: Option<Holds>,
+    /// The enum of a singular field of a closed enum, a map's value apart, whose record of a number
+    /// it declares no value of sets nothing (17.9.8); none otherwise.
+    declared: Option<EnumIndex>,
 }
 
 /// What a packed record of a field holds: none, varints, or values of a fixed width.
@@ -414,8 +422,20 @@ impl FieldShape {
                 own: LEN,
                 packs: Packs::No,
                 holds: Some(Holds::Entry { key, value }),
+                declared: None,
             },
         };
+
+        // * spec 17.9.8: a singular field of a closed enum, as Buffa reads the field, which keeps
+        // the generator's opening of a repeated or map field apart
+        if let FieldKind::Singular(SingularKind::Enum(index)) = field.kind()
+            && field.enum_type() == Some(EnumType::Closed)
+        {
+            return Self {
+                declared: Some(index),
+                ..shape
+            };
+        }
 
         // * a message of DELIMITED encoding, a proto2 group among them, is a group on the wire
         if field.is_delimited() && matches!(shape.holds, Some(Holds::Message(_))) {
@@ -436,6 +456,7 @@ impl FieldShape {
                 own: LEN,
                 packs: Packs::No,
                 holds: Some(Holds::Message(index)),
+                declared: None,
             },
         }
     }
@@ -454,6 +475,7 @@ impl FieldShape {
             own,
             packs,
             holds: None,
+            declared: None,
         }
     }
 
@@ -478,6 +500,25 @@ fn wire_of(scalar: ScalarType) -> u32 {
     }
 }
 
+// a length as a varint's shortest form (Encoding, "Base 128 Varints")
+fn length_into(output: &mut Vec<u8>, length: usize) {
+    let mut value = u64::try_from(length).unwrap_or(u64::MAX);
+
+    loop {
+        let low = u8::try_from(value & 0x7F).unwrap_or_default();
+
+        value >>= 7;
+
+        if value == 0 {
+            output.push(low);
+
+            return;
+        }
+
+        output.push(low | 0x80);
+    }
+}
+
 // ── The check ─────────────────────────────────────────────────────────────────
 
 /// Checks `bytes` against the records of `schema`'s message, at every depth.
@@ -496,11 +537,13 @@ fn wire_of(scalar: ScalarType) -> u32 {
 /// A [`CodecRefusal`] for bytes that are no encoding of the message, its reason `not its message`,
 /// or that nest too deep, `nested past 100`: spec 17.2's words, the record refused in its cause.
 pub fn check_records(bytes: &[u8], schema: &ProtoSchema) -> Result<(), CodecRefusal> {
-    let mut reader = Reader {
-        schema,
-        bytes,
-        at: 0,
-    };
+    checked(bytes, schema).map(|_| ())
+}
+
+/// Checks `bytes` as [`check_records`] does: whether they hold a singular closed enum's record of
+/// a number its enum declares no value of (17.9.8), which [`filtered`] drops.
+pub(crate) fn checked(bytes: &[u8], schema: &ProtoSchema) -> Result<bool, CodecRefusal> {
+    let mut reader = Reader::of(bytes, schema);
 
     reader.message(
         Some(Holds::Message(schema.message)),
@@ -509,7 +552,32 @@ pub fn check_records(bytes: &[u8], schema: &ProtoSchema) -> Result<(), CodecRefu
             depth: 0,
             group: NO_GROUP,
         },
-    )
+    )?;
+
+    Ok(reader.undeclared)
+}
+
+/// `bytes`, checked as [`check_records`] checks them, without each singular closed enum's record of
+/// a number its enum declares no value of, the length of each record that held one written again
+/// (17.9.8): what protobuf keeps among the unknown fields, Buffa then never reads as the field's,
+/// which holds the last declared number its records give, or none. Borrowed where they hold none.
+pub(crate) fn filtered<'a>(
+    bytes: &'a [u8],
+    schema: &ProtoSchema,
+) -> Result<Cow<'a, [u8]>, CodecRefusal> {
+    if !checked(bytes, schema)? {
+        return Ok(Cow::Borrowed(bytes));
+    }
+
+    let mut reader = Reader::of(bytes, schema);
+    let mut output = Vec::with_capacity(bytes.len());
+
+    reader.rewrite(
+        Some(Holds::Message(schema.message)),
+        ((bytes.len(), NO_GROUP), &mut output),
+    )?;
+
+    Ok(Cow::Owned(output))
 }
 
 // where a message's records end, how deep it is below the top one, and the number of the group it
@@ -540,14 +608,41 @@ fn refused(record: &str) -> CodecRefusal {
     found(NOT_ITS_MESSAGE, record)
 }
 
-// one walk of a payload, its position moving over its bytes
+// one walk of a payload, its position moving over its bytes, and whether it met a singular closed
+// enum's record of a number its enum does not declare
 struct Reader<'a> {
     schema: &'a ProtoSchema,
     bytes: &'a [u8],
     at: usize,
+    undeclared: bool,
 }
 
-impl Reader<'_> {
+impl<'a> Reader<'a> {
+    fn of(bytes: &'a [u8], schema: &'a ProtoSchema) -> Self {
+        Self {
+            schema,
+            bytes,
+            at: 0,
+            undeclared: false,
+        }
+    }
+
+    // whether a varint record of the field sets nothing: a singular closed enum's number, its
+    // varint's low 32 bits as protobuf reads an int32, that its enum declares no value of
+    fn sets_nothing(&self, field: Option<FieldShape>, value: u64) -> bool {
+        let Some(index) = field.and_then(|field| field.declared) else {
+            return false;
+        };
+        let [first, second, third, fourth, ..] = value.to_le_bytes();
+        let number = i32::from_le_bytes([first, second, third, fourth]);
+
+        self.schema
+            .pool()
+            .enumeration(index)
+            .value(number)
+            .is_none()
+    }
+
     // the records of a message, up to its end or to the end group that closes it; within an
     // unknown group where it holds no message the schema knows
     fn message(&mut self, within: Option<Holds>, frame: Frame) -> Result<(), CodecRefusal> {
@@ -612,7 +707,16 @@ impl Reader<'_> {
         (tag, frame): (u32, Frame),
     ) -> Result<(), CodecRefusal> {
         match tag & 7 {
-            VARINT => self.varint(frame.end).map(|_| ()),
+            VARINT => {
+                let value = self.varint(frame.end)?;
+
+                // * spec 17.9.8: a record that sets nothing, which filtered drops
+                if self.sets_nothing(field, value) {
+                    self.undeclared = true;
+                }
+
+                Ok(())
+            }
             I64 => self.skip(8, frame.end),
             I32 => self.skip(4, frame.end),
             LEN => {
@@ -650,6 +754,77 @@ impl Reader<'_> {
             ),
             wire => Err(refused(&format!("the wire type {wire}"))),
         }
+    }
+
+    // the records of a message the walk took, up to its end or through the end group that closes
+    // it, written to `output` without each record that sets nothing, each message record's length
+    // written again
+    fn rewrite(
+        &mut self,
+        within: Option<Holds>,
+        ((end, group), output): ((usize, u32), &mut Vec<u8>),
+    ) -> Result<(), CodecRefusal> {
+        while self.at < end {
+            let start = self.at;
+            let tag = self.tag(end)?;
+            let after_tag = self.at;
+            let field = self.field_of(within, tag >> 3);
+
+            match tag & 7 {
+                EGROUP if tag >> 3 == group => {
+                    output.extend_from_slice(self.span(start));
+
+                    return Ok(());
+                }
+                VARINT => {
+                    let value = self.varint(end)?;
+
+                    if self.sets_nothing(field, value) {
+                        continue;
+                    }
+                }
+                I64 => self.skip(8, end)?,
+                I32 => self.skip(4, end)?,
+                LEN => {
+                    let delimited = self.length(end)?;
+
+                    if let Some(holds) = field.and_then(|field| field.holds) {
+                        let mut inner = Vec::with_capacity(delimited.saturating_sub(self.at));
+
+                        output.extend_from_slice(
+                            self.bytes.get(start..after_tag).unwrap_or_default(),
+                        );
+                        self.rewrite(Some(holds), ((delimited, NO_GROUP), &mut inner))?;
+                        length_into(output, inner.len());
+                        output.extend_from_slice(&inner);
+
+                        continue;
+                    }
+
+                    self.at = delimited;
+                }
+                SGROUP => {
+                    // * a group: its tag, then its records through its end group
+                    output.extend_from_slice(self.span(start));
+                    self.rewrite(
+                        field.and_then(|field| field.holds),
+                        ((end, tag >> 3), output),
+                    )?;
+
+                    continue;
+                }
+                wire => return Err(refused(&format!("the wire type {wire}"))),
+            }
+
+            output.extend_from_slice(self.span(start));
+        }
+
+        Ok(())
+    }
+
+    // the bytes from `start` to the reader
+    fn span(&self, start: usize) -> &'a [u8] {
+        self.bytes.get(start..self.at).unwrap_or_default()
     }
 
     // the values of a packed record, which end exactly at its end

@@ -50,19 +50,22 @@
 // implementations/dotnet/Directory.Packages.props differ, v36.2 against 3.36.2.
 //
 // The differential feeds every side's testee the same payloads of Probe, `CORPUS_SIZE` of them
-// from `CORPUS_SEED`: Probe's own records, mutated by cuts, lengths, wire types, tags and nesting,
-// its packed runs, its map's entries and its group among them; then spec/codecs.json's `proto`
-// payloads as seeds, each as it is and mutated by the same steps, drawn after the others. Each side
-// reads or refuses each, and writes back what it read or refuses to, as its writer refuses what
-// its reader would (spec 17.2); the sides are compared two by two; where two write back, what each
-// writes is compared as what it reads, the choices protobuf leaves to a writer aside, at every
-// depth: the order of a message's unknown fields, which Google.Protobuf writes by number and wire
-// type (a platform row of docs/support.md), and an unknown varint's form, which protobuf-es keeps
-// as it read it; the order of a map's entries, and an entry's key at its default, which
-// protobuf-es writes and Google.Protobuf leaves out. Any other parting fails, one line a payload,
-// every side's verdict on it. The corpus writes no record of `needs`, `needs_items` or `shade`,
-// Probe's fields 7, 8 and 14, and takes no seed that holds one, nor one a `differs` of the file
-// excuses a side from.
+// from `CORPUS_SEED`: records of every field Probe declares, among them a Needs that leaves a field
+// it requires unset and a closed enum's number declared, undeclared, past 31 and 32 bits, of ten
+// bytes and overlong, mutated by cuts, lengths, wire types, tags and nesting, its packed runs, its
+// maps' entries and its group among them; then spec/codecs.json's `proto` payloads as seeds, but
+// those a `differs` of the file excuses a side from, each as it is and mutated by the same steps,
+// drawn after the others. Each side reads or refuses each, and writes back what it read or refuses
+// to, as its writer refuses what its reader would (spec 17.2); the sides are compared two by two;
+// where two write back, what each writes is compared as what it reads, at every depth, a closed
+// enum's number by its low 32 bits as protobuf reads an enum, declared or not, like any declared
+// field: every side drops an undeclared one before its library reads (spec 17.9.8), so a side that
+// writes one back parts. The choices protobuf leaves to a writer are aside, each a row of
+// docs/support.md: the order of a message's unknown fields, which Google.Protobuf writes by number
+// and wire type, and an unknown varint's form, which protobuf-es keeps as it read it; the order of
+// a map's entries, and an entry's key or scalar value at its default, which protobuf-es and Buffa
+// write and Google.Protobuf leaves out. Any other parting fails, one line a payload, every side's
+// verdict on it.
 //
 // The runner ships linux-x64 and darwin-x64 binaries alone, and asks glibc 2.38 or later, Debian 13's:
 // the suite runs in CI and, on Windows, in a Linux container that recent; the differential runs
@@ -467,33 +470,59 @@ const skipOne = (bytes, at) => {
 
 // ── Probe, compared ───────────────────────────────────────────────────────────
 
-// Probe's fields (spec/codecs.proto): its messages, its map, and every number it declares
-const PROBE_MESSAGES = new Set([3, 13]);
-const PROBE_MAP = 12;
-const PROBE_FIELDS = new Set([1, 2, 3, 10, 11, 12, 13]);
+// what the form reads of each message of spec/codecs.proto: the numbers it declares; a message's
+// field, by that message's own; a map's, by its value's, a scalar's where none; and a closed
+// enum's, by its number
+const NEEDS = Object.freeze({
+  declared: new Set([1, 2]),
+  messages: new Map(),
+  maps: new Map(),
+  enums: new Set([2]),
+});
+const PROBE = Object.freeze({
+  declared: new Set([1, 2, 3, 7, 8, 10, 11, 12, 13, 14, 16]),
+  messages: new Map([
+    [7, NEEDS],
+    [8, NEEDS],
+  ]),
+  maps: new Map([[16, undefined]]),
+  enums: new Set([14]),
+});
+
+// * Probe holds itself: a child, a group and a map's value
+PROBE.messages.set(3, PROBE).set(13, PROBE);
+PROBE.maps.set(12, PROBE);
 
 const hexOf = (bytes) => {
   return Buffer.from(bytes).toString('hex');
 };
 
+// a record's body: a length-delimited record's or a group's payload, or what follows its tag
+const bodyOf = ({ whole, payload }) => {
+  // * a tag ends at its first byte under 0x80, however long its form
+  return payload ?? whole.subarray(whole.findIndex((byte) => byte < 0x80) + 1);
+};
+
 // an unknown field's record in that form: its number, its wire type, and its value, a varint's
 // read, so an overlong form kept as read, as protobuf-es keeps one, and the minimal form
 // Google.Protobuf and Buffa write give alike
-const canonicalUnknown = ({ field, wireType, whole, payload }) => {
-  // * a tag ends at its first byte under 0x80, however long its form
-  const body = payload ?? whole.subarray(whole.findIndex((byte) => byte < 0x80) + 1);
-  const value = wireType === VARINT ? String(readVarint(body, 0)?.value) : hexOf(body);
+const canonicalUnknown = (record) => {
+  const body = bodyOf(record);
+  const value = record.wireType === VARINT ? String(readVarint(body, 0)?.value) : hexOf(body);
 
-  return `${String(field)}:${String(wireType)}:${value}`;
+  return `${String(record.field)}:${String(record.wireType)}:${value}`;
 };
 
 /**
- * A Probe's bytes in a form two writers that differ only where protobuf leaves the form to a
- * writer give alike: its declared records in their order, each message among them in this form;
- * its map's entries, then its unknown fields, each set sorted, an unknown varint by its value.
- * Bytes that do not read as records keep their own form.
+ * A message's bytes in a form two writers that differ only where protobuf leaves the form to a
+ * writer, or where a row of docs/support.md says each side writes its own, give alike: its
+ * declared records in their order, each message among them in this form, a closed enum's by the
+ * number an int32 reads of it, declared or not, at every depth, since every side drops an
+ * undeclared one before its library reads (spec 17.9.8); each map's entries, then its unknown
+ * fields, each set sorted, an unknown varint by its value. Bytes that do not read as records keep
+ * their own form.
  */
-export const canonicalProbe = (bytes) => {
+const canonicalOf = (bytes, shape) => {
   const records = recordsOf(bytes);
 
   if (records === undefined) {
@@ -505,13 +534,21 @@ export const canonicalProbe = (bytes) => {
   const unknown = [];
 
   for (const record of records) {
-    if (!PROBE_FIELDS.has(record.field)) {
+    const { field, wireType, payload } = record;
+
+    if (!shape.declared.has(field)) {
       unknown.push(canonicalUnknown(record));
-    } else if (record.field === PROBE_MAP && record.wireType === LEN) {
-      entries.push(canonicalEntry(record.payload));
-    } else if (PROBE_MESSAGES.has(record.field) && record.payload !== undefined) {
+    } else if (shape.enums.has(field) && wireType === VARINT) {
+      // * an enum's number is its varint's low 32 bits, as protobuf reads an int32; one its enum
+      // does not declare is compared as any other, a side that writes it back parting
+      const number = BigInt.asIntN(32, readVarint(bodyOf(record), 0)?.value ?? 0n);
+
+      declared.push(`${String(field)}=${String(number)}`);
+    } else if (shape.maps.has(field) && wireType === LEN) {
+      entries.push(`${String(field)}:${canonicalEntry(payload, shape.maps.get(field))}`);
+    } else if (shape.messages.has(field) && payload !== undefined) {
       declared.push(
-        `${String(record.field)}:${String(record.wireType)}{${canonicalProbe(record.payload)}}`
+        `${String(field)}:${String(wireType)}{${canonicalOf(payload, shape.messages.get(field))}}`
       );
     } else {
       declared.push(hexOf(record.whole));
@@ -521,27 +558,40 @@ export const canonicalProbe = (bytes) => {
   return `${declared.join(',')}|${entries.sort().join(',')}|${unknown.sort().join(',')}`;
 };
 
-// a map entry's bytes in that form: what it reads as, its key and its value, each its last record
-// or its default where the entry leaves it out, as a writer may: protobuf-es writes an empty key,
-// Google.Protobuf leaves it out
-const canonicalEntry = (bytes) => {
+/** A Probe's bytes in the form of `canonicalOf`. */
+export const canonicalProbe = (bytes) => {
+  return canonicalOf(bytes, PROBE);
+};
+
+// a map's entry's bytes in that form: what it reads as, its key and its value, each its last record
+// or its default where the entry leaves it out, as a writer may: protobuf-es and Buffa write a key
+// and a scalar value at their default, Google.Protobuf leaves them out; a message's value by
+// `value`, a scalar's, a uint32, by its varint's value
+const canonicalEntry = (bytes, value) => {
   const records = recordsOf(bytes);
 
   if (records === undefined) {
     return `raw:${hexOf(bytes)}`;
   }
 
-  const key = records.findLast((record) => {
+  const isKey = (record) => {
     return record.field === 1 && record.wireType === LEN;
-  });
-  const value = records.findLast((record) => {
-    return record.field === 2 && record.wireType === LEN;
-  });
+  };
+  const isValue = (record) => {
+    return record.field === 2 && record.wireType === (value === undefined ? VARINT : LEN);
+  };
+  const key = records.findLast(isKey);
+  const held = records.findLast(isValue);
+  // * a key's or a value's record of another wire type is kept as any other, not forgiven
   const others = records.filter((record) => {
-    return record.field !== 1 && record.field !== 2;
+    return !isKey(record) && !isValue(record);
   });
+  const read =
+    value === undefined
+      ? String(held === undefined ? 0n : readVarint(bodyOf(held), 0)?.value)
+      : `{${canonicalOf(held?.payload ?? new Uint8Array(), value)}}`;
 
-  return `${hexOf(key?.payload ?? [])}:{${canonicalProbe(value?.payload ?? new Uint8Array())}}${others
+  return `${hexOf(key?.payload ?? [])}:${read}${others
     .map((record) => {
       return `,${hexOf(record.whole)}`;
     })
@@ -552,7 +602,7 @@ const canonicalEntry = (bytes) => {
 
 /** The corpus's seed, and its size: a change of either is a change of the gate. */
 export const CORPUS_SEED = 0x0bead028;
-export const CORPUS_SIZE = 10_000;
+export const CORPUS_SIZE = 12_500;
 
 // Probe's nesting the corpus reaches around: 17.9.3's bound, 100 below the top
 const DEPTH_BOUND = 100;
@@ -691,6 +741,78 @@ const writerOf = (random) => {
       },
     ])();
   };
+  // a Shade's number as a writer may give one (spec 17.9.8): one its enum declares, one it does
+  // not, one past 31 bits, one past 32 bits whose low 32 bits it declares or not, one of ten
+  // bytes, or one in an overlong form
+  const shadeNumber = () => {
+    return pick([
+      () => {
+        return varint(pick([0, 1]));
+      },
+      () => {
+        return varint(pick([0, 1]));
+      },
+      () => {
+        return varint(pick([2, 5, 127, 128]));
+      },
+      () => {
+        return varint(pick([2 ** 31, 2 ** 32 - 1]));
+      },
+      () => {
+        return varint(pick([1n << 32n, (1n << 32n) + 1n, (1n << 32n) + 5n]));
+      },
+      () => {
+        return varint(pick([(1n << 64n) - 1n, (1n << 63n) + 1n]));
+      },
+      () => {
+        return [pick([0x80, 0x81, 0x85]), 0x00];
+      },
+    ])();
+  };
+  // a Needs (spec 17.9.7), its records in any order: each field it requires given, now and then
+  // twice, or left out; its `must` now and then past 32 bits; an unknown field now and then
+  const needs = (faults) => {
+    const parts = [];
+
+    for (const field of [1, 2]) {
+      const given = chance(0.95) ? 1 + Number(chance(0.2)) : 0;
+
+      for (let index = 0; index < given; index += 1) {
+        const value =
+          field === 2
+            ? chance(0.6)
+              ? varint(pick([0, 1]))
+              : shadeNumber()
+            : varint(chance(0.9) ? below(2 ** 32) : (1n << 32n) + BigInt(below(2 ** 32)));
+
+        parts.push(record(field, VARINT, value, faults));
+      }
+    }
+
+    if (chance(0.2)) {
+      parts.push(unknownField(faults));
+    }
+
+    // * in any order, shuffled by the corpus's own numbers (Fisher and Yates)
+    for (let index = parts.length - 1; index > 0; index -= 1) {
+      const other = below(index + 1);
+
+      [parts[index], parts[other]] = [parts[other], parts[index]];
+    }
+
+    return parts.flat();
+  };
+  // an entry of `tallies`, a map of scalars: its key and its value each now and then left out or
+  // at its default, its value now and then before its key, an unknown field in it now and then
+  const tally = (faults) => {
+    const key = chance(0.85) ? record(1, LEN, text(), faults) : [];
+    const value = chance(0.85)
+      ? record(2, VARINT, varint(chance(0.2) ? 0 : below(2 ** 32)), faults)
+      : [];
+    const entry = chance(0.3) ? [...value, ...key] : [...key, ...value];
+
+    return record(16, LEN, chance(0.1) ? [...entry, ...unknownField(0)] : entry, faults);
+  };
   // a Probe `depth` below the top, its records in any order, some repeated
   const probe = (depth, faults) => {
     const parts = [];
@@ -735,6 +857,20 @@ const writerOf = (random) => {
           },
           () => {
             return nested ? record(13, SGROUP, probe(depth + 1, faults), faults) : [];
+          },
+          () => {
+            return record(7, LEN, needs(faults), faults);
+          },
+          () => {
+            return Array.from({ length: 1 + below(3) }, () => {
+              return record(8, LEN, needs(faults), faults);
+            }).flat();
+          },
+          () => {
+            return record(14, VARINT, shadeNumber(), faults);
+          },
+          () => {
+            return tally(faults);
           },
           () => {
             return unknownField(faults);
@@ -787,42 +923,9 @@ const writerOf = (random) => {
   return { below, chance, pick, probe, refaulted, deep };
 };
 
-// the fields the corpus writes no record of: Probe's `needs`, `needs_items` and `shade`, where
-// protobuf-es parts from Buffa, a round of its own (decision 0006)
-const UNWRITTEN = new Set([7, 8, 14]);
-
-/**
- * Whether a Probe's bytes hold a record of `needs`, `needs_items` or `shade` in any Probe they
- * nest, through a child, a group and a map's value; bytes that do not read as records hold none
- * a reader reaches, since its check refuses them first.
- */
-export const holdsUnwritten = (bytes) => {
-  return (recordsOf(bytes) ?? []).some(({ field, wireType, payload }) => {
-    if (UNWRITTEN.has(field)) {
-      return true;
-    }
-
-    if (payload === undefined || !(PROBE_MESSAGES.has(field) || field === PROBE_MAP)) {
-      return false;
-    }
-
-    if (field !== PROBE_MAP) {
-      return holdsUnwritten(payload);
-    }
-
-    return (
-      wireType === LEN &&
-      (recordsOf(payload) ?? []).some((entry) => {
-        return entry.field === 2 && entry.payload !== undefined && holdsUnwritten(entry.payload);
-      })
-    );
-  });
-};
-
 /**
  * The corpus's seeds from `spec/codecs.json`, parsed: the bytes of its `proto` payloads, but those
- * that hold a record of a field the corpus writes none of, and those a `differs` excuses a side
- * from, which part by design.
+ * a `differs` excuses a side from, which part by design.
  */
 export const codecsSeedsOf = (codecs) => {
   return codecs.payloads
@@ -831,9 +934,6 @@ export const codecsSeedsOf = (codecs) => {
     })
     .map((entry) => {
       return Uint8Array.from(Buffer.from(entry.bytes.replaceAll(/[\s|]/gu, ''), 'hex'));
-    })
-    .filter((bytes) => {
-      return !holdsUnwritten(bytes);
     });
 };
 
@@ -841,8 +941,7 @@ export const codecsSeedsOf = (codecs) => {
  * The corpus: `size` payloads of Probe from `seed`, each a byte array; then each of `seeds` as it
  * is and mutated by the same steps, drawn after them so the first `size` stay what the seed gives:
  * its records written again with a fault now and then, cut short anywhere, a byte changed
- * anywhere, and nested around the depth bound, each one that holds no record of a field the corpus
- * writes none of.
+ * anywhere, and nested around the depth bound.
  */
 export const corpusOf = ({ seed = CORPUS_SEED, size = CORPUS_SIZE, seeds = [] } = {}) => {
   const random = randomOf(seed);
@@ -896,11 +995,7 @@ export const corpusOf = ({ seed = CORPUS_SEED, size = CORPUS_SIZE, seeds = [] } 
       return Uint8Array.from(bytes);
     });
 
-    payloads.push(
-      ...mutated.filter((bytes) => {
-        return !holdsUnwritten(bytes);
-      })
-    );
+    payloads.push(...mutated);
   }
 
   return payloads;

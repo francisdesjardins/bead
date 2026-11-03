@@ -8,9 +8,9 @@
 //!    [`check_records`]), which refuses what protobuf refuses where Buffa reads on: a tag of more
 //!    than 5 bytes, a map's entry with a field it does not declare, a message nested past the
 //!    bound through a map's entries;
-//! 2. Buffa's view of it, decoded within the bound of 17.9.3, 100 messages below the top one,
-//!    which sets a singular closed enum's undeclared number aside among the unknown fields, its
-//!    last declared number kept (17.9.8);
+//! 2. Buffa's view of it, decoded within the bound of 17.9.3, 100 messages below the top one; Bead
+//!    drops a singular closed enum's undeclared number before Buffa reads (17.9.8), its last
+//!    declared number kept, as every side does;
 //! 3. the walk of its fields protobuf requires over the view (17.9.7, [`check_required`]), whose
 //!    presence is the wire's: an owned message holds such a field bare, its value no witness of
 //!    whether it was given;

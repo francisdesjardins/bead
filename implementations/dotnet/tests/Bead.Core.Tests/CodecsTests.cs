@@ -14,7 +14,7 @@ namespace Bead.Tests;
 /// raw text those very bytes, so that the value handed on is the canonical form's; a <c>proto</c>
 /// payload read as <c>Probe</c>, of <c>spec/codecs.proto</c>, through the runtime codec generated
 /// code names, <see cref="ProtoCodecs"/>: its records checked first (decision 0028), a closed enum's
-/// undeclared number set aside (17.9.8), its required fields judged once it is read (17.9.7,
+/// undeclared number dropped (17.9.8), its required fields judged once it is read (17.9.7,
 /// decision 0042), then refused, or its fields those read; each value built from its form and
 /// written, to its bytes or refused, a chain of probes among them, built from the deepest up. An
 /// entry a row of the support matrix excuses this side from, a value no <see cref="JsonElement"/>
@@ -461,12 +461,28 @@ public sealed class CodecsTests
     }
 
     [Fact]
-    public void A_proto_maps_entry_its_key_at_its_default_as_Google_Protobuf_writes_it()
+    public void A_proto_maps_entry_its_key_or_its_value_at_its_default_as_Google_Protobuf_writes_it()
     {
-        var probe = new Probe { Children = { [""] = new Probe() } };
+        var keyed = new Probe { Children = { [""] = new Probe() } };
+        var valued = new Probe { Tallies = { ["a"] = 0 } };
 
-        // * the empty key left out, as any field at its default, where protobuf-es writes it
-        Assert.Equal(Convert.FromHexString("62021200"), ProbeCodec.Encode(probe).ToArray());
+        // * the empty key and the value 0 left out, as any field at its default, where protobuf-es
+        // writes them
+        Assert.Equal(Convert.FromHexString("62021200"), ProbeCodec.Encode(keyed).ToArray());
+        Assert.Equal(Convert.FromHexString("8201030A0161"), ProbeCodec.Encode(valued).ToArray());
+    }
+
+    [Fact]
+    public void A_proto_maps_entries_in_the_order_its_library_writes_them()
+    {
+        // tallies keyed b, 1, a, 0, each entry its key then its value
+        var written = Convert.FromHexString("8201050A016210018201050A013110028201050A016110038201050A01301004");
+        var built = new Probe { Tallies = { ["b"] = 1, ["1"] = 2, ["a"] = 3, ["0"] = 4 } };
+
+        // * in the order read or set, where protobuf-es writes integer keys first and Buffa in its
+        // hash's order
+        Assert.Equal(written, ProbeCodec.Encode(built).ToArray());
+        Assert.Equal(written, ProbeCodec.Encode(ProbeCodec.Decode(written)).ToArray());
     }
 
     [Fact]

@@ -471,23 +471,47 @@ test.describe("a proto payload's codec of its schema", () => {
     expect(isFieldSet(nothing, ProbeSchema.field.shade)).toBe(false);
     expect(kept.shade).toBe(1);
     expect(toned.pick).toEqual({ case: 'word', value: 'a' });
-    // * kept among the unknown fields, which protobuf-es writes back where the message holds no other
-    expect(hexOf(probe.encode(kept))).toBe('70 01 70 05');
+    // ! a matrix row of "Leveled down": dropped before protobuf-es reads, as every side drops it,
+    // where protobuf keeps it among the unknown fields
+    expect(hexOf(probe.encode(kept))).toBe('70 01');
   });
 
-  test('echoes a closed enum’s undeclared number beside another unknown field, and a wide one, as its library keeps them', () => {
+  test('drops a closed enum’s undeclared number before its library reads, beside another unknown field, wide or overlong', () => {
     const probe = protoCodecOf(ProbeSchema);
-    const beside = probe.decode(bytesOf('70 05 20 01'));
-    const wide = probe.decode(bytesOf('70 FF FF FF FF 0F'));
+    // a text of 128 bytes, so its child's length takes two
+    const long = '61 '.repeat(128).trimEnd();
 
-    expect(isFieldSet(beside, ProbeSchema.field.shade)).toBe(false);
-    expect(isFieldSet(wide, ProbeSchema.field.shade)).toBe(false);
-    // ! a matrix row: protobuf-es's reader replaces the number it set among the unknown fields
-    // with the message's other unknown fields, so the number is dropped
-    expect(hexOf(probe.encode(beside))).toBe('20 01');
-    // ! a matrix row: written again as an int32 varint, a number past 31 bits in ten bytes
-    // (Encoding, "Signed Integers")
-    expect(hexOf(probe.encode(wide))).toBe('70 FF FF FF FF FF FF FF FF FF 01');
+    // ! a matrix row of "Leveled down": dropped before protobuf-es reads, at every depth, beside
+    // any other unknown field, wide or overlong alike, each enclosing length written again
+    for (const [hex, written, shade] of [
+      ['70 05', '', undefined],
+      ['70 05 70 01', '70 01', 1],
+      ['70 01 70 05', '70 01', 1],
+      ['70 05 20 01', '20 01', undefined],
+      ['70 05 20 01 70 06', '20 01', undefined],
+      ['1A 02 20 01 1A 04 70 05 28 01', '1A 04 20 01 28 01', undefined],
+      ['1A 02 20 01 1A 02 70 05', '1A 02 20 01', undefined],
+      ['6B 3A 08 08 07 10 01 10 05 20 01 6C', '6B 3A 06 08 07 10 01 20 01 6C', undefined],
+      ['3A 06 08 07 10 01 10 05', '3A 04 08 07 10 01', undefined],
+      ['70 FF FF FF FF 0F', '', undefined],
+      ['70 85 80 80 80 10', '', undefined],
+      ['70 85 00', '', undefined],
+      [
+        '70 05 25 01 02 03 04 29 01 02 03 04 05 06 07 08',
+        '25 01 02 03 04 29 01 02 03 04 05 06 07 08',
+        undefined,
+      ],
+      ['70 05 2B 08 01 2C', '2B 08 01 2C', undefined],
+      [`1A 85 01 0A 80 01 ${long} 70 05`, `1A 83 01 0A 80 01 ${long}`, undefined],
+    ] as const) {
+      const read = probe.decode(bytesOf(hex));
+
+      expect(
+        isFieldSet(read, ProbeSchema.field.shade) ? read.shade : undefined,
+        `${hex} read`
+      ).toBe(shade);
+      expect(hexOf(probe.encode(read)), `${hex} written back`).toBe(written);
+    }
   });
 
   test('looks into no extension and no Any’s message', () => {

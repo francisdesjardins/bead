@@ -503,19 +503,74 @@ fn play_value(entry: &Written) -> Result<(), Failed> {
 
 // ── Buffa's own forms, where Bead states no rule ──────────────────────────────
 
-// a matrix row: the empty key written, as the TypeScript side writes it, where Google.Protobuf
-// leaves it out as any field at its default
-fn a_proto_map_s_entry_its_key_at_its_default_as_buffa_writes_it() -> Result<(), Failed> {
-    let mut probe = Probe::default();
+// a matrix row: the empty key and the value 0 written, as the TypeScript side writes them, where
+// Google.Protobuf leaves each out as any field at its default
+fn a_proto_map_s_entry_its_key_or_its_value_at_its_default_as_buffa_writes_it() -> Result<(), Failed>
+{
+    let mut keyed = Probe::default();
+    let mut valued = Probe::default();
 
-    probe.children.insert(String::new(), Probe::default());
+    keyed.children.insert(String::new(), Probe::default());
+    valued.tallies.insert("a".to_owned(), 0);
 
+    for (probe, expected) in [
+        (keyed, "62 04 0A 00 12 00"),
+        (valued, "82 01 05 0A 01 61 10 00"),
+    ] {
+        let written = typed()
+            .encode(&probe)
+            .map_err(|refusal| refusal.to_string())?;
+
+        if written != bytes_of(expected)? {
+            return Err(format!("wrote {written:02X?}, where {expected} is Buffa's form").into());
+        }
+    }
+
+    Ok(())
+}
+
+// a matrix row: the entries read back, order aside, since hashbrown writes them in an order of its
+// own on each run, where the TypeScript side writes integer keys first and the C# side the order
+// read; each written entry one of those given, none twice
+fn a_proto_map_s_entries_in_the_order_its_library_writes_them() -> Result<(), Failed> {
+    // * tallies keyed b, 1, a, 0, in that order, each entry of 8 bytes
+    let entries = [
+        "82 01 05 0A 01 62 10 01",
+        "82 01 05 0A 01 31 10 02",
+        "82 01 05 0A 01 61 10 03",
+        "82 01 05 0A 01 30 10 04",
+    ];
+    let read = typed()
+        .decode(&bytes_of(&entries.join(" "))?)
+        .map_err(|refusal| refusal.to_string())?;
     let written = typed()
-        .encode(&probe)
+        .encode(&read)
+        .map_err(|refusal| refusal.to_string())?;
+    let mut left = entries
+        .iter()
+        .map(|entry| bytes_of(entry))
+        .collect::<Result<Vec<Bytes>, Failed>>()?;
+    let mut rest: &[u8] = &written;
+
+    while let Some((entry, after)) = rest.split_at_checked(8) {
+        let Some(at) = left.iter().position(|each| each.as_ref() == entry) else {
+            return Err(format!("wrote {written:02X?}, an entry not given among them").into());
+        };
+
+        left.remove(at);
+        rest = after;
+    }
+
+    if !rest.is_empty() || !left.is_empty() {
+        return Err(format!("wrote {written:02X?}, not the entries given").into());
+    }
+
+    let again = typed()
+        .decode(&written)
         .map_err(|refusal| refusal.to_string())?;
 
-    if written != bytes_of("62 04 0A 00 12 00")? {
-        return Err(format!("wrote {written:02X?}").into());
+    if again.tallies != read.tallies {
+        return Err("read back other entries".into());
     }
 
     Ok(())
@@ -524,10 +579,16 @@ fn a_proto_map_s_entry_its_key_at_its_default_as_buffa_writes_it() -> Result<(),
 fn trials() -> Result<Vec<Trial>, String> {
     // * read by Bead's own reader, as the core's player reads it
     let codecs: Codecs = files::read_by_bead("codecs.json")?;
-    let mut trials = vec![Trial::test(
-        "a_proto_map_s_entry_its_key_at_its_default_as_buffa_writes_it",
-        a_proto_map_s_entry_its_key_at_its_default_as_buffa_writes_it,
-    )];
+    let mut trials = vec![
+        Trial::test(
+            "a_proto_map_s_entry_its_key_or_its_value_at_its_default_as_buffa_writes_it",
+            a_proto_map_s_entry_its_key_or_its_value_at_its_default_as_buffa_writes_it,
+        ),
+        Trial::test(
+            "a_proto_map_s_entries_in_the_order_its_library_writes_them",
+            a_proto_map_s_entries_in_the_order_its_library_writes_them,
+        ),
+    ];
 
     for payload in codecs.payloads {
         if payload.encoding != "proto" || is_excused(payload.differs.as_deref().unwrap_or_default())
