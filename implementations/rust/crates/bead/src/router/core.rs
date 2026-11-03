@@ -253,6 +253,15 @@ pub(crate) type Undo<S> = Box<dyn FnOnce(&mut S) + Send>;
 
 /// What sets one side of a router apart, for its core: its port.
 pub(crate) trait Side: Sized + Send + 'static {
+    /// Reads an envelope with this side's codec, past its prefix.
+    fn read_envelope(
+        &mut self,
+        data: &Bytes,
+        options: &ReadEnvelopeOptions,
+    ) -> Result<Option<Envelope>, Failure> {
+        read_envelope(data, self.core().side, options)
+    }
+
     /// Its core.
     fn core(&mut self) -> &mut Core<Self>;
 
@@ -878,11 +887,24 @@ pub(crate) fn receive<S: Side>(
         maximum_envelope_bytes: usize::try_from(limits.maximum_envelope_bytes).ok(),
     };
 
-    let envelope = match read_envelope(&data, side, &options) {
-        Ok(Some(envelope)) => envelope,
+    let envelope = match caught(("an envelope codec", || state.read_envelope(&data, &options))) {
+        Ok(Ok(Some(envelope))) => envelope,
         // an advisory kind is skipped
-        Ok(None) => return,
-        Err(failure) => return gate(state, ((failure, handle, prefix), false)),
+        Ok(Ok(None)) => return,
+        Ok(Err(failure)) => return gate(state, ((failure, handle, prefix), false)),
+        Err(panicked) => {
+            let failure = state.core().failure(ProtocolCode::ENVELOPE_MALFORMED);
+            state.report(
+                reported(
+                    failure
+                        .clone()
+                        .saying(panicked.message())
+                        .caused_by(Arc::new(panicked)),
+                ),
+                handle,
+            );
+            return gate(state, ((failure, handle, prefix), true));
+        }
     };
 
     if state.is_tracing() {

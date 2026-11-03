@@ -13,8 +13,10 @@ use crate::constants::{CredentialScheme, RouterSide};
 use crate::debug::{DebugDirection, TracedEnvelope};
 use crate::envelope::{
     CreditHeader, Envelope, FailureHeader, FailureRecord, Header, NotificationHeader,
+    ReadEnvelopeOptions,
 };
 use crate::errors::{CallError, ProgrammerError};
+use crate::failure::Failure;
 use crate::owner::Owner;
 use crate::router::core::{
     self as router_core, BeforeAnswer, Core, Dispatch, Handler, Resolution, Resolved,
@@ -35,6 +37,7 @@ pub(crate) type TransmitHook = Box<dyn FnMut(&mut State, &Envelope) + Send>;
 pub(crate) type TokenHook =
     Box<dyn FnMut(&ConnectionHandle) -> Result<Option<SessionToken>, RouterError> + Send>;
 pub(crate) type SessionHook = Box<dyn FnMut(&SessionRequest, &Signal) -> Resolution + Send>;
+pub(crate) type ReadHook = Box<dyn FnOnce(&Bytes) -> Result<Option<Envelope>, Failure> + Send>;
 
 #[expect(
     clippy::struct_excessive_bools,
@@ -47,6 +50,7 @@ pub(crate) struct State {
     pub(crate) sending: VecDeque<Result<Sent, RouterError>>,
     pub(crate) on_transmit: Option<TransmitHook>,
     pub(crate) session: Option<SessionHook>,
+    pub(crate) reader: Option<ReadHook>,
     pub(crate) schemes: Vec<CredentialScheme>,
     pub(crate) destination: Option<Arc<Handler>>,
     pub(crate) held: Vec<u32>,
@@ -78,6 +82,17 @@ impl core::fmt::Debug for State {
 }
 
 impl Side for State {
+    fn read_envelope(
+        &mut self,
+        data: &Bytes,
+        options: &ReadEnvelopeOptions,
+    ) -> Result<Option<Envelope>, Failure> {
+        self.reader.take().map_or_else(
+            || crate::envelope::read_envelope(data, self.core.side, options),
+            |read| read(data),
+        )
+    }
+
     fn core(&mut self) -> &mut Core<Self> {
         &mut self.core
     }
@@ -276,6 +291,7 @@ impl Peer {
             sending: VecDeque::new(),
             on_transmit: None,
             session: None,
+            reader: None,
             schemes: Vec::new(),
             destination: None,
             held: Vec::new(),
