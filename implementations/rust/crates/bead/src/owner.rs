@@ -23,7 +23,7 @@ use std::sync::{Arc, Mutex, MutexGuard, PoisonError, Weak};
 use tokio::sync::{mpsc, oneshot};
 
 use crate::clock::{Clock, Schedule, SharedClock, Timer};
-use crate::errors::Disposed;
+use crate::errors::{Disposed, ProgrammerError};
 use crate::platform::{self, Handle, JoinHandle};
 
 #[cfg(test)]
@@ -201,7 +201,7 @@ impl<S: Send + 'static> WeakOwner<S> {
         &self,
         (clock, due): (&SharedClock, Duration),
         job: J,
-    ) -> Arc<dyn Timer> {
+    ) -> Result<Arc<dyn Timer>, ProgrammerError> {
         let owner = self.clone();
         let cancelled = Arc::new(AtomicBool::new(false));
         let is_cancelled = Arc::clone(&cancelled);
@@ -220,9 +220,9 @@ impl<S: Send + 'static> WeakOwner<S> {
                     }));
                 }
             }),
-        );
+        )?;
 
-        Arc::new(OwnedTimer { timer, cancelled })
+        Ok(Arc::new(OwnedTimer { timer, cancelled }))
     }
 
     /// Spawns `future`, as [`Owner::cover`] does, for an owner not gone.

@@ -243,7 +243,11 @@ impl Clock for RecordedClock {
         self.clock.wall()
     }
 
-    fn arm(&self, schedule: Schedule, callback: TimerCallback) -> Arc<dyn Timer> {
+    fn arm(
+        &self,
+        schedule: Schedule,
+        callback: TimerCallback,
+    ) -> Result<Arc<dyn Timer>, ProgrammerError> {
         let (Schedule::Once(delay) | Schedule::Every(delay)) = schedule;
         self.armed.lock().expect("timer history").push(delay);
         self.clock.arm(schedule, callback)

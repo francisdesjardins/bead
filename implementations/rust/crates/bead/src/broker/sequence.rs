@@ -324,8 +324,9 @@ impl Parts {
 
         if is_more {
             // * armed at the grace by the first part; judged then, and armed again while on time
-            if self.timer.is_none() {
-                self.rearm();
+            if self.timer.is_none() && self.rearm().is_err() {
+                self.stop();
+                return PartTaking::Lost(codes::LOST, "the clock refused a timer".to_owned());
             }
 
             return PartTaking::Held;
@@ -381,9 +382,9 @@ impl Parts {
 
     /// The one timer, armed at the grace first, then at the deadline the parts so far give, from
     /// now.
-    pub(crate) fn rearm(&mut self) {
+    pub(crate) fn rearm(&mut self) -> Result<(), crate::errors::ProgrammerError> {
         let Some(first) = self.first_at else {
-            return;
+            return Ok(());
         };
         // the first at the grace itself, as a body's rate is held from its grace (spec 15.12)
         let deadline = if self.timer.is_none() {
@@ -403,7 +404,7 @@ impl Parts {
             timer.cancel();
         }
 
-        self.timer = Some(self.bounds.clock.arm(
+        let timer = self.bounds.clock.arm(
             Schedule::Once(due),
             Box::new(move || {
                 if fired
@@ -415,6 +416,8 @@ impl Parts {
                     late();
                 }
             }),
-        ));
+        );
+        self.timer = Some(timer?);
+        Ok(())
     }
 }

@@ -552,7 +552,7 @@ crate::clock
     fn description(&self) -> &'static str
     fn monotonic(&self) -> Duration
     fn wall(&self) -> SystemTime
-    fn arm(&self, schedule: Schedule, callback: TimerCallback) -> Arc<dyn Timer>
+    fn arm(&self, schedule: Schedule, callback: TimerCallback) -> Result<Arc<dyn Timer>, ProgrammerError>
     fn activity(&self) -> Option<Arc<crate::testing::Activity>>
   type SharedClock = Arc<dyn Clock>
 crate::clock::native

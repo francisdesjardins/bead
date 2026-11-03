@@ -2,7 +2,7 @@
 //! it tells as each changes, and its two timers kept in step with the timeouts it stores, armed
 //! through an arming that records them.
 
-use core::sync::atomic::{AtomicBool, Ordering};
+use core::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use core::time::Duration;
 use std::collections::BTreeSet;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
@@ -13,7 +13,7 @@ use serde_json::{Value, json};
 use super::{Arming, Inactivity, Session, SessionEvent, SessionManagerOptions, SessionState};
 use crate::clock::{SharedClock, Timer};
 use crate::duration::{LONGEST_TIMER, NEVER};
-use crate::errors::CallError;
+use crate::errors::{CallError, ProgrammerError};
 use crate::router::types::ConnectionHandle;
 use crate::session_token::SessionToken;
 use crate::testing::SteppingClock;
@@ -82,7 +82,7 @@ impl Arming for Recorder {
         &self,
         due: Duration,
         (inactivity, connection_handle): (Inactivity, ConnectionHandle),
-    ) -> Arc<dyn Timer> {
+    ) -> Result<Arc<dyn Timer>, ProgrammerError> {
         let armed = Arc::new(Armed {
             due,
             inactivity,
@@ -92,7 +92,7 @@ impl Arming for Recorder {
 
         locked(&self.armed).push(Arc::clone(&armed));
 
-        armed
+        Ok(armed)
     }
 }
 
@@ -187,6 +187,7 @@ impl SessionManager {
     fn touch(&mut self, (connection, now): (&str, SystemTime)) -> Option<Session> {
         self.manager
             .touch((&handle(connection), now), (&self.arming, &mut self.told))
+            .expect("held timers")
     }
 
     fn tokens_of_both(&self) -> [Option<SessionToken>; 2] {
@@ -1256,4 +1257,90 @@ fn activity_restarts_both_timers_on_its_clock_and_emits_last_activity_changed() 
     // the first two stopped, two more of the same delay going
     assert_eq!(sessions.arming.dues(), [milliseconds(200); 4], "four armed");
     assert_eq!(sessions.arming.live().len(), 2, "two going");
+}
+
+struct RefusingArming<'recorder> {
+    recorder: &'recorder Recorder,
+    refuse_at: usize,
+    calls: AtomicUsize,
+}
+
+impl Arming for RefusingArming<'_> {
+    fn arm(
+        &self,
+        due: Duration,
+        timer: (Inactivity, ConnectionHandle),
+    ) -> Result<Arc<dyn Timer>, ProgrammerError> {
+        if self.calls.fetch_add(1, Ordering::SeqCst) == self.refuse_at {
+            return Err(ProgrammerError::new("the clock refuses this timer"));
+        }
+        self.recorder.arm(due, timer)
+    }
+}
+
+#[test]
+fn a_timer_refusal_stores_no_session_and_cancels_every_timer_prepared_for_it() {
+    for refuse_at in 0..2 {
+        let mut sessions = SessionManager::new();
+        let arming = RefusingArming {
+            recorder: &sessions.arming,
+            refuse_at,
+            calls: AtomicUsize::new(0),
+        };
+        let outcome = sessions.manager.set(
+            Session {
+                connection_inactivity_timeout: Some(Duration::from_millis(10)),
+                session_inactivity_timeout: Some(Duration::from_millis(20)),
+                ..SessionManager::create(FIRST)
+            },
+            (&arming, &mut sessions.told),
+        );
+        assert_eq!(
+            outcome.expect_err("the timer refused").to_string(),
+            "the clock refuses this timer"
+        );
+        assert!(!sessions.manager.has(&handle(FIRST)), "no session stored");
+        assert_eq!(sessions.manager.all(), [], "no token held");
+        assert!(sessions.told.is_empty(), "nothing told");
+        assert_eq!(sessions.arming.live(), [], "prepared timers cancelled");
+    }
+}
+
+#[test]
+fn a_timer_refusal_keeps_a_stored_timeout_and_its_live_timer_and_tells_nothing() {
+    for inactivity in [Inactivity::Connection, Inactivity::Session] {
+        let mut sessions = SessionManager::new();
+        let stored = sessions.stored(Session {
+            connection_inactivity_timeout: Some(Duration::from_millis(10)),
+            session_inactivity_timeout: Some(Duration::from_millis(20)),
+            ..SessionManager::create(FIRST)
+        });
+        sessions.taken();
+        let live = sessions.arming.live();
+        let arming = RefusingArming {
+            recorder: &sessions.arming,
+            refuse_at: 0,
+            calls: AtomicUsize::new(0),
+        };
+        let update = match inactivity {
+            Inactivity::Connection => SessionState::update_connection_inactivity_timeout,
+            Inactivity::Session => SessionState::update_session_inactivity_timeout,
+        };
+        let refused = update(
+            &mut sessions.manager,
+            (&handle(FIRST), Some(Duration::from_millis(30))),
+            (&arming, &mut sessions.told),
+        );
+        assert_eq!(
+            refused.expect_err("the timer refused").message(),
+            "the clock refuses this timer"
+        );
+        assert_eq!(
+            sessions.manager.get(&handle(FIRST)),
+            Some(stored),
+            "the stored timeout held"
+        );
+        assert_eq!(sessions.arming.live(), live, "the live timers held");
+        assert!(sessions.told.is_empty(), "nothing told");
+    }
 }

@@ -691,6 +691,9 @@ fn time(state: &mut ServerState, (handle, key): (&ConnectionHandle, &str)) {
         }
     });
 
+    let Some(timer) = super::core::timer_of(state, (timer, &handle)) else {
+        return;
+    };
     match state
         .kept
         .get_mut(&handle)

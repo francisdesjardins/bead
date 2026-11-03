@@ -429,6 +429,7 @@ pub fn offer_interop(server: &Server) -> Result<ServiceServer, ProgrammerError> 
                 );
 
                 Box::pin(async move {
+                    let timer = timer.map_err(ResolverError::other)?;
                     let signal = request.signal.token().clone();
                     let mut wait = core::pin::pin!(wait);
                     let mut cancelled = core::pin::pin!(signal.cancelled());

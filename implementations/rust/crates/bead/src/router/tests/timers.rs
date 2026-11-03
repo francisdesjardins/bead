@@ -89,7 +89,11 @@ impl Clock for HandFired {
         self.clock.wall()
     }
 
-    fn arm(&self, schedule: Schedule, callback: TimerCallback) -> Arc<dyn Timer> {
+    fn arm(
+        &self,
+        schedule: Schedule,
+        callback: TimerCallback,
+    ) -> Result<Arc<dyn Timer>, crate::errors::ProgrammerError> {
         let cancelled = Arc::new(AtomicBool::new(false));
 
         locked(&self.armed).push(Armed {
@@ -98,7 +102,7 @@ impl Clock for HandFired {
             cancelled: Arc::clone(&cancelled),
         });
 
-        Arc::new(HandTimer(cancelled))
+        Ok(Arc::new(HandTimer(cancelled)))
     }
 
     fn activity(&self) -> Option<Arc<crate::testing::Activity>> {

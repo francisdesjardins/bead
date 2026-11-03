@@ -35,15 +35,19 @@ async fn counts_a_due_in_whole_milliseconds_a_fraction_dropped_from_1_to_the_cei
     for due in [Duration::from_micros(1_900), LONGEST_TIMER] {
         let reading = Arc::clone(&clock);
         let firing = Arc::clone(&fired);
-        timers.push(clock.arm(
-            Schedule::Once(due),
-            Box::new(move || {
-                firing
-                    .lock()
-                    .expect("the readings")
-                    .push(reading.monotonic().as_millis());
-            }),
-        ));
+        timers.push(
+            clock
+                .arm(
+                    Schedule::Once(due),
+                    Box::new(move || {
+                        firing
+                            .lock()
+                            .expect("the readings")
+                            .push(reading.monotonic().as_millis());
+                    }),
+                )
+                .expect("a held timer"),
+        );
     }
     clock.advance(Duration::from_millis(1)).await;
     clock

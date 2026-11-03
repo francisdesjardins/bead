@@ -161,7 +161,11 @@ impl Clock for DelayedClock {
         SystemTime::UNIX_EPOCH
     }
 
-    fn arm(&self, schedule: Schedule, callback: TimerCallback) -> Arc<dyn Timer> {
+    fn arm(
+        &self,
+        schedule: Schedule,
+        callback: TimerCallback,
+    ) -> Result<Arc<dyn Timer>, crate::errors::ProgrammerError> {
         let Schedule::Once(due) = schedule else {
             panic!("a heartbeat arms a timer once");
         };
@@ -176,7 +180,8 @@ impl Clock for DelayedClock {
 
         state.dues.push(due);
         state.pending = Some((Arc::clone(&timer), callback));
-        timer
+        drop(state);
+        Ok(timer)
     }
 }
 

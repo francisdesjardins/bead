@@ -131,6 +131,13 @@ pub(crate) fn progress<S: Side>(state: &mut S, (_call, id): (&CallAddress, u64))
         );
     });
 
+    let timer = match timer {
+        Ok(timer) => timer,
+        Err(error) => {
+            fail(state, (id, CallError::Refused(error)));
+            return;
+        }
+    };
     if let Some(sending) = state.core().results.get_mut(&id) {
         cancel_timer(&mut sending.timer);
         sending.timer = Some(timer);

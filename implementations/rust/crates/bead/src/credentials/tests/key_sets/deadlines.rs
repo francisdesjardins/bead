@@ -36,7 +36,11 @@ impl Clock for LateClock {
         self.base.wall()
     }
 
-    fn arm(&self, schedule: Schedule, callback: TimerCallback) -> Arc<dyn Timer> {
+    fn arm(
+        &self,
+        schedule: Schedule,
+        callback: TimerCallback,
+    ) -> Result<Arc<dyn Timer>, crate::errors::ProgrammerError> {
         self.base.arm(schedule, callback)
     }
 
@@ -227,4 +231,49 @@ async fn lets_no_ask_go_as_the_last_call_that_waits_for_a_deadline_leaves_past_i
     assert_eq!(fixture.clock.dues(), []);
     fixture.clock.advance(Duration::from_mins(1)).await;
     assert_eq!(fixture.count(), 1);
+}
+
+#[derive(Debug)]
+struct RefusingClock(Arc<SteppingClock>);
+
+impl Clock for RefusingClock {
+    fn monotonic(&self) -> Duration {
+        self.0.monotonic()
+    }
+    fn wall(&self) -> SystemTime {
+        self.0.wall()
+    }
+    fn arm(
+        &self,
+        _schedule: Schedule,
+        _callback: TimerCallback,
+    ) -> Result<Arc<dyn Timer>, crate::errors::ProgrammerError> {
+        Err(crate::errors::ProgrammerError::new(
+            "the clock refuses this timer",
+        ))
+    }
+    fn activity(&self) -> Option<Arc<crate::testing::Activity>> {
+        self.0.activity()
+    }
+}
+
+#[tokio::test]
+async fn a_timer_refusal_releases_the_waiting_call_without_starting_an_unbounded_key_set_ask() {
+    let mut fixture = Fixture::with(vec![], None);
+    Arc::get_mut(&mut fixture.resolver.inner)
+        .expect("not shared")
+        .clock = Arc::new(RefusingClock(Arc::clone(&fixture.clock)));
+    let Err(Unresolved::Other(error)) = done(fixture.named("a key")).await else {
+        panic!("the timer refusal fails the call");
+    };
+    assert_eq!(
+        error.to_string(),
+        format!("the key set's ask for {SET_ISSUER} failed")
+    );
+    assert_eq!(
+        error.source().expect("the clock's cause").to_string(),
+        "the clock refuses this timer"
+    );
+    assert_eq!(fixture.count(), 0, "no ask started without its deadline");
+    assert_eq!(fixture.clock.dues(), [], "no timer held");
 }

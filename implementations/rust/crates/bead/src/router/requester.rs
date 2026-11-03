@@ -148,7 +148,12 @@ pub(crate) fn reserve<S: Side>(state: &mut S, (call, timeout): (&CallAddress, Op
         state.core().pending.forget_reservation(&forgotten, id);
     });
 
-    core.pending
+    let Some(timer) = super::core::timer_of(state, (timer, &call.connection_handle)) else {
+        return;
+    };
+    state
+        .core()
+        .pending
         .reservations
         .entry(Arc::clone(&call.connection_handle))
         .or_default()
@@ -256,6 +261,13 @@ fn wait<S: Side>(state: &mut S, (delay, call, id): (Option<Duration>, &CallAddre
             })
         });
 
+    let timer = match timer.transpose() {
+        Ok(timer) => timer,
+        Err(error) => {
+            end_pending(state, (CallError::Refused(error), call, id));
+            return;
+        }
+    };
     if let Some(request) = state.core().pending.get_mut(call) {
         cancel_timer(&mut request.timer);
         request.timer = timer;

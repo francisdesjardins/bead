@@ -621,7 +621,7 @@ impl<S: Side> Core<S> {
         &self,
         due: Duration,
         job: J,
-    ) -> Arc<dyn Timer> {
+    ) -> Result<Arc<dyn Timer>, ProgrammerError> {
         self.owner.after((&self.clock, due), job)
     }
 
@@ -1381,7 +1381,12 @@ fn abandon<S: Side>(state: &mut S, (call, credit_end): (&CallAddress, u64)) {
             .forget_abandoned(&forgotten, Some(id));
     });
 
-    core.answering
+    let Some(timer) = timer_of(state, (timer, &call.connection_handle)) else {
+        return;
+    };
+    state
+        .core()
+        .answering
         .abandoned
         .entry(Arc::clone(&call.connection_handle))
         .or_default()
@@ -2020,6 +2025,15 @@ fn touch_request_transfer<S: Side>(state: &mut S, (transfer, timeout): (u64, Dur
         refuse(state, (failure, &dispatch));
     });
 
+    let Some((dispatch, _)) = state.core().receiving_requests.get(&transfer).cloned() else {
+        if let Ok(timer) = timer {
+            timer.cancel();
+        }
+        return;
+    };
+    let Some(timer) = timer_of(state, (timer, &dispatch.connection_handle)) else {
+        return;
+    };
     if let Some(receiving) = state.core().receivings.get_mut(transfer) {
         cancel_timer(&mut receiving.timer);
         receiving.timer = Some(timer);
@@ -2699,6 +2713,21 @@ impl<S: Side> Owned for S {
 pub(crate) fn dispose<S: Side>(state: &mut S) {
     state.core().mark_disposed();
     reject_pending(state, (&format!("{DISPOSED} before the answer"), None));
+}
+
+// a clock that refuses a deadline cannot keep this router's calls bounded
+pub(crate) fn timer_of<S: Side>(
+    state: &mut S,
+    (armed, connection): (Result<Arc<dyn Timer>, ProgrammerError>, &ConnectionHandle),
+) -> Option<Arc<dyn Timer>> {
+    match armed {
+        Ok(timer) => Some(timer),
+        Err(error) => {
+            state.report(reported_call(CallError::Refused(error)), connection);
+            dispose(state);
+            None
+        }
+    }
 }
 
 /// Sends a notification to one subscription, counted: sent once its transport has it, whatever the
