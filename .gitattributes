@@ -6,6 +6,7 @@
 /implementations/typescript/.yarn/releases/** binary
 /builder/.yarn/releases/** binary
 /examples/hello/typescript/.yarn/releases/** binary
+/site/.yarn/releases/** binary
 
 # Binary by nature, should one ever be committed.
 *.png binary
