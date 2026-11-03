@@ -48,10 +48,11 @@ export const PLATFORM_CLOCK: IClock = globalThis;
 
 // helpers
 
-// whether every platform's timers hold `duration` alike once rounded: from 1 to the ceiling, read
-// before rounding, so that neither 0.5 nor the ceiling and a half rounds into it
-const isHeld = (duration: unknown): duration is number => {
-  return typeof duration === 'number' && duration >= 1 && duration <= LONGEST_TIMER;
+// whether every platform's timers hold `duration` alike once rounded: from 1 to the ceiling, a
+// timer's unless its place holds a narrower one, read before rounding, so that neither 0.5 nor the
+// ceiling and a half rounds into it
+const isHeld = (duration: unknown, ceiling = LONGEST_TIMER): duration is number => {
+  return typeof duration === 'number' && duration >= 1 && duration <= ceiling;
 };
 
 // a duration as a refusal writes it: a string quoted, so `'1000'` reads apart from 1000
@@ -84,17 +85,21 @@ export const clockOf = (
   );
 };
 
-// the one refusal of a duration, which offers what its place takes besides: 0, a delay's, and
-// `Infinity` where never is taken
+// the one refusal of a duration, which offers what its place takes besides — 0, a delay's, and
+// `Infinity` where never is taken — and writes its ceiling
 const refusalOf = (
   name: string,
-  { duration, offered }: { duration: unknown; offered: { never: boolean; zero: boolean } }
+  {
+    ceiling,
+    duration,
+    offered,
+  }: { ceiling: number; duration: unknown; offered: { never: boolean; zero: boolean } }
 ): ProgrammerError => {
   const zero = offered.zero ? '0 for at once, or ' : '';
   const never = offered.never ? ', or Infinity for never' : '';
 
   return new ProgrammerError(
-    `${name} is ${zero}a number of milliseconds from 1 to ${String(LONGEST_TIMER)}${never}, not ${writtenOf(duration)}`
+    `${name} is ${zero}a number of milliseconds from 1 to ${String(ceiling)}${never}, not ${writtenOf(duration)}`
   );
 };
 
@@ -113,7 +118,11 @@ export const assertHeld = (name: string, duration: unknown): number => {
   }
 
   if (!isHeld(duration)) {
-    throw refusalOf(name, { duration, offered: { never: true, zero: false } });
+    throw refusalOf(name, {
+      ceiling: LONGEST_TIMER,
+      duration,
+      offered: { never: true, zero: false },
+    });
   }
 
   return Math.round(duration);
@@ -121,8 +130,21 @@ export const assertHeld = (name: string, duration: unknown): number => {
 
 /** As {@link assertHeld}, where never has no meaning: `Infinity` is refused too. */
 export const assertHeldFinite = (name: string, duration: unknown): number => {
-  if (!isHeld(duration)) {
-    throw refusalOf(name, { duration, offered: { never: false, zero: false } });
+  return assertHeldWithin(name, duration, { ceiling: LONGEST_TIMER });
+};
+
+/**
+ * As {@link assertHeldFinite}, under a `ceiling` of its place's own below {@link LONGEST_TIMER}, a
+ * whole number of milliseconds: what a protocol's field holds, as MQTT 5's Keep Alive holds 65,535
+ * seconds. Its refusal writes that ceiling.
+ */
+export const assertHeldWithin = (
+  name: string,
+  duration: unknown,
+  { ceiling }: { ceiling: number }
+): number => {
+  if (!isHeld(duration, ceiling)) {
+    throw refusalOf(name, { ceiling, duration, offered: { never: false, zero: false } });
   }
 
   return Math.round(duration);
@@ -138,7 +160,11 @@ export const assertHeldDelay = (name: string, duration: unknown): number => {
   }
 
   if (!isHeld(duration)) {
-    throw refusalOf(name, { duration, offered: { never: false, zero: true } });
+    throw refusalOf(name, {
+      ceiling: LONGEST_TIMER,
+      duration,
+      offered: { never: false, zero: true },
+    });
   }
 
   return Math.round(duration);

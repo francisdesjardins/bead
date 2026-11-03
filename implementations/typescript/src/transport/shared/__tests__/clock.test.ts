@@ -4,6 +4,7 @@ import {
   assertHeld,
   assertHeldDelay,
   assertHeldFinite,
+  assertHeldWithin,
   clockOf,
   type IClock,
   LONGEST_TIMER,
@@ -92,6 +93,51 @@ test.describe('the clock', () => {
       ],
     ] as const) {
       expect(refusalOf(policy, { given, phrase: 'a duration' })).toBe(sentence);
+    }
+  });
+
+  test('holds a duration under a ceiling of its own as under the timer’s, refusing one past it in the same message', () => {
+    // * MQTT 5's Keep Alive, a Two Byte Integer of seconds
+    const ceiling = 65_535_000;
+    const policy = { kind: 'timeout', never: 'refused' } as const;
+    const place = placeHolding(policy);
+
+    // over every input of the durations file, as the timer's own assertion holds it
+    for (const input of DURATIONS.inputs) {
+      if (isExcused(place, { input })) {
+        continue;
+      }
+
+      const given = givenOf(input);
+      const { held, outcome } = outcomeOf(place, input);
+      const holding = (): number => {
+        return assertHeldWithin('a duration', given, { ceiling });
+      };
+
+      if (outcome === 'refused' || (typeof given === 'number' && given > ceiling)) {
+        expect(holding, input.name).toThrow(
+          new ProgrammerError(refusalOf(policy, { ceiling, given, phrase: 'a duration' }))
+        );
+      } else {
+        expect(holding(), input.name).toBe(held);
+      }
+    }
+
+    // the ceiling held, and one past it refused, a half past it too, in the one sentence
+    expect(assertHeldWithin('a duration', ceiling, { ceiling })).toBe(ceiling);
+    expect(assertHeldWithin('a duration', ceiling - 0.5, { ceiling })).toBe(ceiling);
+
+    for (const [given, written] of [
+      [ceiling + 0.5, '65535000.5'],
+      [ceiling + 1, '65535001'],
+    ] as const) {
+      expect(() => {
+        assertHeldWithin('a duration', given, { ceiling });
+      }, written).toThrow(
+        new ProgrammerError(
+          `a duration is a number of milliseconds from 1 to 65535000, not ${written}`
+        )
+      );
     }
   });
 

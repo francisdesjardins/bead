@@ -93,16 +93,19 @@ public sealed partial class DurationsTests
         {
             ["options"] = new(nameof(HttpTransportServerOptions.SendGracePeriod), SendGracePeriodByHttpOptions),
             ["gateway"] = new(nameof(HttpGatewayOptions.SendGracePeriod), SendGracePeriodByGateway),
+            ["policy"] = new(nameof(HttpPolicyOptions.SendGracePeriod), SendGracePeriodByPolicy),
         }),
         ["httpTransportServer.headersTimeout"] = (nameof(HttpTransportServerOptions.HeadersTimeout), new()
         {
             ["options"] = new(nameof(HttpTransportServerOptions.HeadersTimeout), HeadersTimeoutByHttpOptions),
             ["gateway"] = new(nameof(HttpGatewayOptions.HeadersTimeout), HeadersTimeoutByGateway),
+            ["policy"] = new(nameof(HttpPolicyOptions.HeadersTimeout), HeadersTimeoutByPolicy),
         }),
         ["httpTransportServer.bodyGracePeriod"] = (nameof(HttpTransportServerOptions.BodyGracePeriod), new()
         {
             ["options"] = new(nameof(HttpTransportServerOptions.BodyGracePeriod), BodyGracePeriodByOptions),
             ["gateway"] = new(nameof(HttpGatewayOptions.BodyGracePeriod), BodyGracePeriodByGateway),
+            ["policy"] = new(nameof(HttpPolicyOptions.BodyGracePeriod), BodyGracePeriodByPolicy),
         }),
         ["httpTransport.exchangeTimeout"] = (nameof(HttpTransportServerOptions.ExchangeTimeout), new()
         {

@@ -654,7 +654,9 @@ impl Future for Connect {
 /// # Errors
 ///
 /// A [`ProgrammerError`] whose reason is a duration's refusal.
-pub(crate) fn held(options: &TransportClientReconnectOptions) -> Result<(), ProgrammerError> {
+pub(crate) fn hold_reconnection(
+    options: &TransportClientReconnectOptions,
+) -> Result<(), ProgrammerError> {
     match &options.delay {
         Some(TransportClientReconnectDelay::Fixed(delay)) => {
             hold_delay("a delay", *delay).map(drop)

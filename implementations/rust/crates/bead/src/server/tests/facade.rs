@@ -157,7 +157,7 @@ impl Fixture {
     }
 
     async fn listen(&self, held: bool) {
-        self.transport.hold_listen(held, &self.first);
+        self.transport.tell_listen(held, &self.first);
         self.clock.settle().await;
     }
 
@@ -466,7 +466,7 @@ async fn ignores_listens_outside_a_connection_and_unmatched_endings_without_chan
     assert_eq!(fixture.clock.dues().len(), 0);
     let second = handle_of(2);
     fixture.transport.open(&second, true);
-    fixture.transport.hold_listen(true, &second);
+    fixture.transport.tell_listen(true, &second);
     fixture.advance(1_000).await;
     assert_eq!(fixture.transport.closed(), [Arc::clone(&fixture.first)]);
     let counts = fixture
@@ -477,7 +477,7 @@ async fn ignores_listens_outside_a_connection_and_unmatched_endings_without_chan
         .server
         .counts;
     assert_eq!((counts["connections"], counts["listening"]), (1, 1));
-    fixture.transport.hold_listen(false, &second);
+    fixture.transport.tell_listen(false, &second);
     fixture.advance(59).await;
     assert_eq!(fixture.transport.closed(), [Arc::clone(&fixture.first)]);
     fixture.advance(1).await;

@@ -50,7 +50,9 @@ use crate::duration::{NEVER, hold, hold_finite};
 use crate::errors::{ConnectError, ProgrammerError, TransportError};
 use crate::owner::{Owner, WeakOwner};
 use crate::router::types::{BoxFuture, ConnectionHandle, Gauges, RouterError, TransportMessage};
-use crate::transport::{ListenerId, Listeners, TransportClientReconnectOptions, attempting, held};
+use crate::transport::{
+    ListenerId, Listeners, TransportClientReconnectOptions, attempting, hold_reconnection,
+};
 
 /// How long a connection is silent before it is pinged, and a ping unanswered before it is closed,
 /// by default (spec 15.23): 30 seconds.
@@ -2128,7 +2130,7 @@ impl BrokerParticipant {
         let reconnect = options.reconnect.clone().unwrap_or_default();
 
         // * a fixed delay held as it is given, whether or not it reconnects (spec 1.4)
-        held(&reconnect)?;
+        hold_reconnection(&reconnect)?;
 
         let inbox = vec![root.clone(), "i".to_owned(), id.clone()];
         // * asked by its inbox's topic, which a broker that counts a packet's every byte needs

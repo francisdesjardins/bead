@@ -11,7 +11,7 @@ import mqtt, {
   type MqttClient,
   type Packet,
 } from 'mqtt';
-import { assertHeldFinite, LONGEST_TIMER, PLATFORM_CLOCK } from './clock';
+import { assertHeldFinite, assertHeldWithin, LONGEST_TIMER, PLATFORM_CLOCK } from './clock';
 import { BROKER_DELIVERIES, BROKER_PUBLISHED, TRANSPORT_MQTT } from './constants';
 import { createEmitter } from './emitter';
 import { GenericError, ProgrammerError, toCancelError, toError } from './errors';
@@ -181,19 +181,6 @@ const secondsOf = (milliseconds: number): number => {
   return Math.min(LONGEST_LIFE_SECONDS, Math.max(1, Math.ceil(milliseconds / 1_000)));
 };
 
-/** `keepAlive` held: a number of milliseconds from 1 to 65,535 seconds, never 0 nor without end. */
-const assertKeepAlive = (duration: unknown): number => {
-  if (typeof duration !== 'number' || !(duration >= 1 && duration <= LONGEST_KEEP_ALIVE)) {
-    const written = typeof duration === 'string' ? JSON.stringify(duration) : String(duration);
-
-    throw new ProgrammerError(
-      `keepAlive is a number of milliseconds from 1 to ${String(LONGEST_KEEP_ALIVE)}, not ${written}`
-    );
-  }
-
-  return Math.round(duration);
-};
-
 // ! no refusal names the password it refuses: a word never carries the secret
 const NOT_A_PASSWORD = 'a password is a non-empty string holding no NUL';
 
@@ -258,7 +245,9 @@ export const createMqttBrokerAdapter = (options: IMqttBrokerAdapterOptions): IMq
     tls,
     url,
   } = options;
-  const keepAlive = assertKeepAlive(options.keepAlive ?? KEEP_ALIVE);
+  const keepAlive = assertHeldWithin('keepAlive', options.keepAlive ?? KEEP_ALIVE, {
+    ceiling: LONGEST_KEEP_ALIVE,
+  });
   const connectTimeout = assertHeldFinite(
     'connectTimeout',
     options.connectTimeout ?? CONNECT_TIMEOUT

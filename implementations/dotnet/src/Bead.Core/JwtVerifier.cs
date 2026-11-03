@@ -580,7 +580,7 @@ internal static class JwtVerifier
     {
         ArgumentNullException.ThrowIfNull(token);
 
-        AssertHeld((props.Keys, props.Audiences));
+        AssertJwtKey((props.Keys, props.Audiences));
 
         return ValueTask.FromResult(Verdict(token, props));
     }
@@ -590,7 +590,7 @@ internal static class JwtVerifier
     /// audience that is not a string of well-formed Unicode: what a verifier holds a token to, held
     /// as a side's credentials are given, or as a key set answers.
     /// </summary>
-    internal static void AssertHeld((IReadOnlyList<JwtKey> Keys, IReadOnlyCollection<string> Audiences) held)
+    internal static void AssertJwtKey((IReadOnlyList<JwtKey> Keys, IReadOnlyCollection<string> Audiences) held)
     {
         if (held.Keys is null || held.Audiences is null || held.Audiences.Any((audience) =>
         {

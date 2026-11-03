@@ -31,7 +31,7 @@ use crate::router::types::{BoxFuture, ConnectionHandle, RouterError, TransportMe
 use crate::transport::{
     CONNECT_TIMEOUT, ClientListener, Connect, Listeners, RECONNECTION_CANCELLED, ReadyState,
     RouterClientTransport, Sent, TransportClientDisconnectOptions, TransportClientReconnectOptions,
-    attempting, first_of, held, is_field_value,
+    attempting, first_of, hold_reconnection, is_field_value,
 };
 
 /// What may wait on a connection for its broker, by default: a WebSocket's own bound, since a
@@ -759,7 +759,7 @@ impl BrokerTransportClient {
             }
 
             // * a fixed delay out of bounds refused as it is given, before anything moves
-            held(options)?;
+            hold_reconnection(options)?;
 
             if options
                 .signal
