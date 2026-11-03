@@ -224,6 +224,11 @@ network's.
 reconnect, a new pair, possibly to another member. A will makes a crashed participant's end known
 at once where its broker leaves one; elsewhere the heartbeat finds it.
 
+**A participant's stop is final**: its link, its incarnation and its announcement end once, as an
+MQTT client's close ends it where its disconnect lets it connect again. A participant's link ended
+by its application and started again in place, its transports and routers kept, apart from its
+stop, is ahead.
+
 **Who may accept is the broker's access control** on subscribing a server's name, as a DNS name and
 its certificate place a socket's server. An acceptor that proves itself to its opener is ahead.
 
