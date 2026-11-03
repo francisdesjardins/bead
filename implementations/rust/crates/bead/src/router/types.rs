@@ -605,6 +605,20 @@ pub struct Gauges {
 }
 
 impl Gauges {
+    /// A part's counts and the connections it keeps, each connection held once. Ceilings and
+    /// anomalies are empty; a reader borrows the snapshot to inspect it.
+    #[must_use]
+    pub fn new<Handles: IntoIterator<Item = ConnectionHandle>>(
+        counts: BTreeMap<&'static str, u64>,
+        connection_handles: Handles,
+    ) -> Self {
+        Self {
+            counts,
+            connection_handles: connection_handles.into_iter().collect(),
+            ..Self::default()
+        }
+    }
+
     /// The gauges of several parts as one.
     #[must_use]
     pub fn merged(parts: Vec<Self>) -> Self {
