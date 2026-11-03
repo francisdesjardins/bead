@@ -80,15 +80,18 @@ test('answers each protocol code with its status by where it arose, and its prob
   );
 
   // the gateway's own
-  expect(problemOfOwn('timeout', { detail: 'no answer' })).toEqual({
+  expect(problemOfOwn('timeout', 'no answer')).toEqual({
     body: '{"detail":"no answer","status":504,"title":"Gateway Timeout","type":"about:blank"}',
     fields: {},
     status: 504,
   });
-  expect(problemOfOwn('scheme', { detail: 'x' }).fields).toEqual({
+  expect(problemOfOwn('scheme', 'x').fields).toEqual({
     'www-authenticate': 'Bearer error="invalid_request"',
   });
-  expect(problemOfOwn('jwt', { detail: 'x' }).status).toBe(431);
+  expect(problemOfOwn('scheme', 'x', { challenge: 'Bearer realm="bead"' }).fields).toEqual({
+    'www-authenticate': 'Bearer realm="bead", error="invalid_request"',
+  });
+  expect(problemOfOwn('jwt', 'x').status).toBe(431);
   expect(problemOfRefusal(404, 'no route').body).toBe(
     '{"detail":"no route","status":404,"title":"Not Found","type":"about:blank"}'
   );

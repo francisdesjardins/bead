@@ -28,6 +28,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   package's exports by `tools/check-surface.mjs`, the C# side's by PublicApiAnalyzers'
   `PublicAPI.Shipped.txt` and `PublicAPI.Unshipped.txt`, which `tools/release.mjs prepare` brings up
   to date, and the Rust crates' by `bead-house`.
+- The TypeScript side exports the types of the objects its calls take: `INotifyRequest`,
+  `IRouterRequest`, `IUnregisterNotificationOptions`, `IBrokerRefusal`, `IServerSentEvent` and
+  `IOwnProblemOptions`.
 
 ### Changed
 

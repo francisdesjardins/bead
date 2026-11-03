@@ -1,10 +1,11 @@
-// ── The cases of `check-surface.mjs`'s options rule ──────────────────────────
-// A line for each verdict: a line the rule refuses follows a comment of its own, `// refused:` and
+// ── The cases of `check-surface.mjs`'s options and tuple rules ───────────────
+// A line for each verdict: a line a rule refuses follows a comment of its own, `// refused:` and
 // why, and every other line is one it accepts. `check-surface.mjs --cases` reads this file alone,
 // through `surface.cases.tsconfig.json`, and fails unless the lines refused are exactly the ones
 // marked: an exported function's or method's options parameter is required exactly when a member
-// of its type is, a conditional one by each arm, at most two required. The package's own lint and
-// `tsconfig` leave it out.
+// of its type is, a conditional one by each arm, at most two required; and no export takes or
+// gives a tuple, at any depth, but a parameter list, every element labeled, or a rest's own. The
+// package's own lint and `tsconfig` leave it out.
 
 export interface IAllOptionalOptions {
   a?: number;
@@ -158,4 +159,63 @@ export const createClient = () => {
       return options.a ?? 0;
     },
   };
+};
+
+// ── A tuple taken or given, and a parameter list ─────────────────────────────
+
+export interface IHeld {
+  // refused: a member holding tuples
+  pairs: [number, number][];
+}
+
+// refused: a tuple named on its own, no element labeled
+export type Pair = [number, number];
+
+// refused: an array taken apart, its type a tuple
+export const pair = ([a, b]: [number, number]): number => {
+  return a + b;
+};
+// refused: a parameter's own type a tuple, labeled though it is
+export const labeled = (pair: [a: number, b: number]): number => {
+  return pair[0] + pair[1];
+};
+// refused: a tuple given
+export const twice = (): [number, number] => {
+  return [1, 2];
+};
+// refused: a tuple given at depth
+export const later = (): Promise<[number, number]> => {
+  return Promise.resolve([1, 2]);
+};
+// refused: a labeled tuple given, a tuple all the same
+export const labeledBack = (): [a: number, b: number] => {
+  return [1, 2];
+};
+// refused: a tuple given that the checker infers, none written
+export const inferred = () => {
+  return [1, 2] as const;
+};
+
+// refused: an alias of ours judged by what it names, where an export takes it
+type Hidden = [number, number];
+
+export const first = (pair: Hidden): number => {
+  return pair[0];
+};
+
+export const createPairs = () => {
+  return {
+    // refused: a factory's method giving a tuple
+    first: (): [number, number] => {
+      return [1, 2];
+    },
+  };
+};
+
+export const rest = (...[options]: [options?: IAllOptionalOptions]): number => {
+  return options?.a ?? 0;
+};
+export type EventMap = { changed: [settings: ISettings, newValue: number] };
+export const mapped = (pairs: ReadonlyMap<string, number>): number => {
+  return pairs.size;
 };

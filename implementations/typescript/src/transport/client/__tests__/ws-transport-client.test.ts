@@ -209,7 +209,7 @@ for (const [label, TrackedWebSocket] of IMPLEMENTATIONS satisfies readonly (read
       };
 
       const cancelled: unknown = await client
-        .reconnect({ maxAttempts: 1, signal: cancelling.signal })
+        .reconnect({ maximumAttempts: 1, signal: cancelling.signal })
         .catch((error: unknown) => {
           return error;
         });
@@ -890,7 +890,7 @@ for (const [label, TrackedWebSocket] of IMPLEMENTATIONS satisfies readonly (read
       test('reconnects after a disconnect', async () => {
         await client.connect({ host, port });
         await client.disconnect();
-        await client.reconnect({ delay: 10, maxAttempts: 1 });
+        await client.reconnect({ delay: 10, maximumAttempts: 1 });
         expect(client.isOpen()).toBe(true);
       });
 
@@ -910,7 +910,7 @@ for (const [label, TrackedWebSocket] of IMPLEMENTATIONS satisfies readonly (read
 
         await client.connect({ host, port });
         await client.disconnect();
-        await client.reconnect({ delay: 10, maxAttempts: 1 });
+        await client.reconnect({ delay: 10, maximumAttempts: 1 });
 
         expect(client.isOpen()).toBe(true);
         expect(told).toBe(1);
@@ -974,7 +974,7 @@ for (const [label, TrackedWebSocket] of IMPLEMENTATIONS satisfies readonly (read
       test('rejects with a ReconnectError caused by a ConnectError when the server is gone', async () => {
         const reconnectOutcome = new Promise<unknown>((resolve) => {
           client.once('close', () => {
-            client.reconnect({ delay: 10, maxAttempts: 2 }).then(resolve, resolve);
+            client.reconnect({ delay: 10, maximumAttempts: 2 }).then(resolve, resolve);
           });
         });
 
@@ -1978,7 +1978,7 @@ test.describe('WSTransportClient, what it carries', () => {
       1,
     ]);
 
-    await client.reconnect({ delay: 0, maxAttempts: 2 });
+    await client.reconnect({ delay: 0, maximumAttempts: 2 });
 
     // the failed attempt went nowhere: the next one carries what the provider handed it
     expect([
@@ -2092,7 +2092,7 @@ test.describe('WSTransportClient, what it carries', () => {
     });
     handed = `${BEARER} `;
 
-    await expect(provided.reconnect({ delay: 0, maxAttempts: 3 })).rejects.toThrow(
+    await expect(provided.reconnect({ delay: 0, maximumAttempts: 3 })).rejects.toThrow(
       new ProgrammerError(
         'a credential holds visible ASCII, spaces and tabs alone, none first or last'
       )
@@ -2981,7 +2981,7 @@ test.describe('WSTransportClient, an upgrade refused', () => {
     });
     const reconnectOutcome = new Promise<unknown>((resolve) => {
       client.once('close', () => {
-        client.reconnect({ delay: 10, maxAttempts: 2 }).then(resolve, resolve);
+        client.reconnect({ delay: 10, maximumAttempts: 2 }).then(resolve, resolve);
       });
     });
 

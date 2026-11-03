@@ -49,6 +49,7 @@
   BrokerRefusedError	src/transport/client/broker-transport-client.ts
   BrokerTransportClient	src/transport/client/types.ts
   CONNECT_DEFAULTS	src/transport/client/broker-transport-client.ts
+  IBrokerRefusal	src/transport/client/types.ts
   IBrokerTransportClientConnectOptions	src/transport/client/types.ts
   IBrokerTransportClientOptions	src/transport/client/types.ts
   MAXIMUM_UNSENT_BYTES	src/transport/client/broker-transport-client.ts
@@ -688,6 +689,7 @@
   INotificationSerializerClient	src/router/shared/types.ts
   INotificationSerializerServer	src/router/shared/types.ts
   INotifyOptions	src/router/shared/types.ts
+  INotifyRequest	src/router/shared/types.ts
   IProcedure	src/router/shared/types.ts
   IProcedureAddress	src/router/shared/types.ts
   IProcedureSeries	src/router/shared/metrics-registry.ts
@@ -709,10 +711,12 @@
   IResultHeader	src/router/shared/types.ts
   IRouterFailures	src/router/shared/types.ts
   IRouterLike	src/router/shared/types.ts
+  IRouterRequest	src/router/shared/types.ts
   IRouterResult	src/router/shared/types.ts
   IServiceManager	src/router/shared/types.ts
   IServiceManagerOptions	src/router/shared/types.ts
   ISubscriber	src/router/shared/types.ts
+  IUnregisterNotificationOptions	src/router/shared/types.ts
   METRICS_CONTENT_TYPE	src/router/shared/metrics-registry.ts
   METRICS_REGISTRY_DEFAULTS	src/router/shared/metrics-registry.ts
   NotificationKey	src/router/shared/types.ts
@@ -868,10 +872,12 @@
   IJsonFormOptions	src/transcoding/json-form.ts
   IJsonPlace	src/transcoding/json-form.ts
   IJsonToken	src/transcoding/json-form.ts
+  IOwnProblemOptions	src/transcoding/problems.ts
   IProblem	src/transcoding/problems.ts
   IProblemOptions	src/transcoding/problems.ts
   IProblemRoute	src/transcoding/problems.ts
   IRawPath	src/transcoding/templates.ts
+  IServerSentEvent	src/transcoding/events.ts
   ITemplate	src/transcoding/templates.ts
   ITypeRegistry	src/transcoding/json-form.ts
   IVariable	src/transcoding/templates.ts
@@ -949,7 +955,6 @@
   TransportClientOnErrorCallback	src/transport/client/types.ts
   TransportClientOnMessageCallback	src/transport/client/types.ts
   TransportClientReconnectDelay	src/transport/client/types.ts
-  TransportClientReconnectDelayOrDelayResolver	src/transport/client/types.ts
   TransportClientReconnectDelayResolver	src/transport/client/types.ts
   TransportClientReconnectTapCallback	src/transport/client/types.ts
   TransportClientToldEvent	src/transport/client/types.ts
@@ -1501,20 +1506,20 @@ src/router/client/types.ts IRouterClient
     on<K extends ROUTER_CLIENT_EVENTS>(event: K, listener: EmitterListener<RouterClientEventMap[K]>): this
     once<K extends ROUTER_CLIENT_EVENTS>(event: K, listener: EmitterListener<RouterClientEventMap[K]>): this
     removeAllListeners(event?: ROUTER_CLIENT_EVENTS): this
-    request(payload: Uint8Array, request: {onCallId?: ((callId: CallId) => void) | undefined; onSent?: ((isHanded: boolean) => void) | undefined; options: IResolvedRequestOptions; procedure: IProcedure; refusal?: Error | undefined; series?: IProcedureSeries | undefined; subscribes?: INotificationLike | undefined}): Promise<IRouterResult>
+    request(payload: Uint8Array, request: IRouterRequest): Promise<IRouterResult>
     [Symbol.dispose](): void
     readonly clock: IClock
     readonly failures: IRouterFailures
     answeredOf(request: Pick<IRequestResolverProps<Handle>, 'connectionHandle' | 'header'>): IFailure | undefined
     declareRequester(procedure: IProcedure): IProcedureSeries | undefined
     hasNotification(notification: INotificationLike): boolean
-    notify(payload: Uint8Array | Error, notification: {filter?: ((subscriber: ISubscriber<Handle>) => boolean) | undefined; key?: NotificationKey | undefined; procedure: IProcedureAddress}): Promise<unknown>
+    notify(payload: Uint8Array | Error, notification: INotifyRequest<Handle>): Promise<unknown>
     registerNotification(notification: INotificationLike): Promise<unknown>
     registerResolver(resolver: IRequestResolver<Handle>): unknown
     report(error: Error, connectionHandle?: Handle): void
     respond(response: RouterAnswer, request: Pick<IRequestResolverProps<Handle>, 'connectionHandle' | 'header'>): Promise<void>
     subscribe(request: Pick<IRequestResolverProps<Handle>, 'connectionHandle' | 'header' | 'session'>): CallId
-    unregisterNotification(notification: INotificationLike, options?: {cancel?: boolean | undefined}): Promise<unknown>
+    unregisterNotification(notification: INotificationLike, options?: IUnregisterNotificationOptions): Promise<unknown>
 src/router/client/types.ts IRouterClientOptions
   interface IRouterClientOptions
     clock?: IClock | undefined
@@ -1656,7 +1661,7 @@ src/router/server/types.ts IRouterServer
     once<K extends ROUTER_SERVER_EVENTS>(event: K, listener: EmitterListener<RouterServerEventMap[K]>): this
     removeAllListeners(event?: ROUTER_SERVER_EVENTS): this
     registerDestination(target: RelayTarget, options?: IDestinationOptions): IDestinationRegistration
-    request(payload: Uint8Array, request: {onCallId?: ((callId: CallId) => void) | undefined; onSent?: ((isHanded: boolean) => void) | undefined; options: IResolvedRequestOptions; procedure: IProcedure; refusal?: Error | undefined; series?: IProcedureSeries | undefined; subscribes?: INotificationLike | undefined}): Promise<IRouterResult>
+    request(payload: Uint8Array, request: IRouterRequest): Promise<IRouterResult>
     unsubscribe(subscription: ICallAddress<TransportServerConnectionHandle>): boolean
     [Symbol.dispose](): void
     readonly clock: IClock
@@ -1664,13 +1669,13 @@ src/router/server/types.ts IRouterServer
     answeredOf(request: Pick<IRequestResolverProps<Handle>, 'connectionHandle' | 'header'>): IFailure | undefined
     declareRequester(procedure: IProcedure): IProcedureSeries | undefined
     hasNotification(notification: INotificationLike): boolean
-    notify(payload: Uint8Array | Error, notification: {filter?: ((subscriber: ISubscriber<Handle>) => boolean) | undefined; key?: NotificationKey | undefined; procedure: IProcedureAddress}): Promise<unknown>
+    notify(payload: Uint8Array | Error, notification: INotifyRequest<Handle>): Promise<unknown>
     registerNotification(notification: INotificationLike): Promise<unknown>
     registerResolver(resolver: IRequestResolver<Handle>): unknown
     report(error: Error, connectionHandle?: Handle): void
     respond(response: RouterAnswer, request: Pick<IRequestResolverProps<Handle>, 'connectionHandle' | 'header'>): Promise<void>
     subscribe(request: Pick<IRequestResolverProps<Handle>, 'connectionHandle' | 'header' | 'session'>): CallId
-    unregisterNotification(notification: INotificationLike, options?: {cancel?: boolean | undefined}): Promise<unknown>
+    unregisterNotification(notification: INotificationLike, options?: IUnregisterNotificationOptions): Promise<unknown>
 src/router/server/types.ts IRouterServerDebugInfo
   interface IRouterServerDebugInfo
     connectionHandle: TransportServerConnectionHandle
@@ -2120,6 +2125,11 @@ src/router/shared/types.ts INotifyOptions
     exclude?: Handle | undefined
     filter?: ((subscriber: ISubscriber<Handle>) => boolean) | undefined
     key?: NotificationKey | undefined
+src/router/shared/types.ts INotifyRequest
+  interface INotifyRequest<Handle extends string = ConnectionHandle>
+    filter?: ((subscriber: ISubscriber<Handle>) => boolean) | undefined
+    key?: NotificationKey | undefined
+    procedure: IProcedureAddress
 src/router/shared/types.ts IProcedure
   interface IProcedure extends IProcedureAddress
     deprecation?: {message?: string | undefined} | undefined
@@ -2272,14 +2282,14 @@ src/router/shared/types.ts IRouterLike
     answeredOf(request: Pick<IRequestResolverProps<Handle>, 'connectionHandle' | 'header'>): IFailure | undefined
     declareRequester(procedure: IProcedure): IProcedureSeries | undefined
     hasNotification(notification: INotificationLike): boolean
-    notify(payload: Uint8Array | Error, notification: {filter?: ((subscriber: ISubscriber<Handle>) => boolean) | undefined; key?: NotificationKey | undefined; procedure: IProcedureAddress}): Promise<unknown>
+    notify(payload: Uint8Array | Error, notification: INotifyRequest<Handle>): Promise<unknown>
     registerNotification(notification: INotificationLike): Promise<unknown>
     registerResolver(resolver: IRequestResolver<Handle>): unknown
     report(error: Error, connectionHandle?: Handle): void
-    request(payload: Uint8Array, request: {onCallId?: ((callId: CallId) => void) | undefined; options: IResolvedRequestOptions; procedure: IProcedure; refusal?: Error | undefined; series?: IProcedureSeries | undefined; subscribes?: INotificationLike | undefined}): Promise<IRouterResult>
+    request(payload: Uint8Array, request: IRouterRequest): Promise<IRouterResult>
     respond(response: RouterAnswer, request: Pick<IRequestResolverProps<Handle>, 'connectionHandle' | 'header'>): Promise<void>
     subscribe(request: Pick<IRequestResolverProps<Handle>, 'connectionHandle' | 'header' | 'session'>): CallId
-    unregisterNotification(notification: INotificationLike, options?: {cancel?: boolean | undefined}): Promise<unknown>
+    unregisterNotification(notification: INotificationLike, options?: IUnregisterNotificationOptions): Promise<unknown>
 src/router/shared/types.ts IRouterLimits
   interface IRouterLimits
     bufferedBytesBudget: number
@@ -2292,6 +2302,15 @@ src/router/shared/types.ts IRouterLimits
     maximumTransfers: number
     transferInactivityTimeout: number
     windowBytes: number
+src/router/shared/types.ts IRouterRequest
+  interface IRouterRequest
+    onCallId?: ((callId: CallId) => void) | undefined
+    onSent?: ((isHanded: boolean) => void) | undefined
+    options: IResolvedRequestOptions
+    procedure: IProcedure
+    refusal?: Error | undefined
+    series?: IProcedureSeries | undefined
+    subscribes?: INotificationLike | undefined
 src/router/shared/types.ts IRouterResult
   interface IRouterResult
     header: IResultHeader
@@ -2324,6 +2343,9 @@ src/router/shared/types.ts ISubscriber
   interface ISubscriber<Handle extends string = ConnectionHandle>
     readonly connectionHandle: Handle
     readonly identifier?: SessionIdentifier | undefined
+src/router/shared/types.ts IUnregisterNotificationOptions
+  interface IUnregisterNotificationOptions
+    cancel?: boolean | undefined
 src/router/shared/types.ts IntakeLimitsOptions
   type IntakeLimitsOptions = {[Key in keyof IIntakeLimits]?: IIntakeLimits[Key] | undefined}
 src/router/shared/types.ts NotificationKey
@@ -2684,12 +2706,17 @@ src/transcoding/events.ts IEventStreamOptions
   interface IEventStreamOptions
     readonly clock: IClock
     readonly heartbeat: number
+src/transcoding/events.ts IServerSentEvent
+  interface IServerSentEvent
+    readonly data: string
+    readonly id: number
+    readonly name?: 'failure' | 'result' | undefined
 src/transcoding/events.ts createEventStream
   const createEventStream(sink: IEventSink, {clock, heartbeat}: IEventStreamOptions): IEventStream
 src/transcoding/events.ts eventDataOf
   const eventDataOf(payload: {bytes: Uint8Array; encoding: 'raw'} | {encoding: 'text'; text: string}): string
 src/transcoding/events.ts eventOf
-  const eventOf({data, id, name}: {data: string; id: number; name?: 'failure' | 'result' | undefined}): string
+  const eventOf({data, id, name}: IServerSentEvent): string
 src/transcoding/http-caller.ts HTTPEvent
   type HTTPEvent<Result, Notification> = | {readonly kind: 'result'; readonly value: Result} | {readonly kind: 'notification'; readonly value: Notification}
 src/transcoding/http-caller.ts IHTTPCallOptions
@@ -2827,6 +2854,9 @@ src/transcoding/problems.ts ICallFailure
     readonly encoding?: Encoding | undefined
     readonly place?: RequestPlace | undefined
     readonly scope: 'application' | 'protocol'
+src/transcoding/problems.ts IOwnProblemOptions
+  interface IOwnProblemOptions
+    readonly challenge?: string | undefined
 src/transcoding/problems.ts IProblem
   interface IProblem
     readonly body: string
@@ -2854,7 +2884,7 @@ src/transcoding/problems.ts STATUS_PHRASES
 src/transcoding/problems.ts problemOfFailure
   const problemOfFailure(failure: ICallFailure, options: IProblemOptions = {}): IProblem
 src/transcoding/problems.ts problemOfOwn
-  const problemOfOwn(own: OwnFailure, {challenge = DEFAULT_CHALLENGE, detail}: {challenge?: string | undefined; detail: string}): IProblem
+  const problemOfOwn(own: OwnFailure, detail: string, {challenge = DEFAULT_CHALLENGE}: IOwnProblemOptions = {}): IProblem
 src/transcoding/problems.ts problemOfRefusal
   const problemOfRefusal(status: number, detail: string): IProblem
 src/transcoding/routes.ts GENERATED_CODE_SUPPORTS_VERSION_5
@@ -2929,7 +2959,7 @@ src/transport/client/broker-transport-client.ts BrokerRefusedError
     layouts: readonly number[] | undefined
     reason: string
     status: number | undefined
-    constructor({layouts, reason, status}: {layouts?: readonly number[] | undefined; reason: string; status?: number | undefined})
+    constructor({layouts, reason, status}: IBrokerRefusal)
 src/transport/client/broker-transport-client.ts CONNECT_DEFAULTS
   const CONNECT_DEFAULTS: Readonly<{timeout: 10000}>
 src/transport/client/broker-transport-client.ts MAXIMUM_UNSENT_BYTES
@@ -2978,6 +3008,11 @@ src/transport/client/types.ts FetchLike
   type FetchLike = (url: string, init: IFetchInit) => Promise<IFetchResponseLike>
 src/transport/client/types.ts HTTPTransportClient
   type HTTPTransportClient = ITransportClient<IHTTPClientConnection, IHTTPTransportClientConnectOptions>
+src/transport/client/types.ts IBrokerRefusal
+  interface IBrokerRefusal
+    layouts?: readonly number[] | undefined
+    reason: string
+    status?: number | undefined
 src/transport/client/types.ts IBrokerTransportClientConnectOptions
   interface IBrokerTransportClientConnectOptions extends ITransportClientConnectOptions
     server: string
@@ -3124,8 +3159,8 @@ src/transport/client/types.ts ITransportClientOptions
     clock?: IClock | undefined
 src/transport/client/types.ts ITransportClientReconnectOptions
   interface ITransportClientReconnectOptions
-    delay?: TransportClientReconnectDelayOrDelayResolver | undefined
-    maxAttempts?: number | undefined
+    delay?: TransportClientReconnectDelay | undefined
+    maximumAttempts?: number | undefined
     signal?: AbortSignal | undefined
     tap?: TransportClientReconnectTapCallback | undefined
 src/transport/client/types.ts IUpgradeResponseLike
@@ -3206,11 +3241,9 @@ src/transport/client/types.ts TransportClientOnErrorCallback
 src/transport/client/types.ts TransportClientOnMessageCallback
   type TransportClientOnMessageCallback = EmitterListener<TransportClientEventMap[MESSAGE_EVENT]>
 src/transport/client/types.ts TransportClientReconnectDelay
-  type TransportClientReconnectDelay = number
-src/transport/client/types.ts TransportClientReconnectDelayOrDelayResolver
-  type TransportClientReconnectDelayOrDelayResolver = | TransportClientReconnectDelay | TransportClientReconnectDelayResolver
+  type TransportClientReconnectDelay = number | TransportClientReconnectDelayResolver
 src/transport/client/types.ts TransportClientReconnectDelayResolver
-  type TransportClientReconnectDelayResolver = (previousDelay: number | undefined, attempt: number) => TransportClientReconnectDelay
+  type TransportClientReconnectDelayResolver = (previousDelay: number | undefined, attempt: number) => number
 src/transport/client/types.ts TransportClientReconnectTapCallback
   type TransportClientReconnectTapCallback = (nextDelay: number, attempt: number) => void
 src/transport/client/types.ts TransportClientToldEvent
@@ -3767,7 +3800,7 @@ src/transport/shared/broker-participant.ts IBrokerParticipantOptions
     maximumHeldEnvelopeBytes?: number | undefined
     maximumEnvelopePartsBytes?: number | undefined
     minimumBodyBytesPerSecond?: number | undefined
-    reconnect?: | false | {delay?: number | undefined; maxAttempts?: number | undefined; signal?: AbortSignal | undefined} | undefined
+    reconnect?: | false | {delay?: number | undefined; maximumAttempts?: number | undefined; signal?: AbortSignal | undefined} | undefined
     requireDelivery?: BrokerDelivery | undefined
     root?: string | undefined
 src/transport/shared/broker-participant.ts IBrokerParticipantPort

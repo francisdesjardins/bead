@@ -1367,7 +1367,7 @@ test.describe('broker participant', () => {
     });
     const participant = createBrokerParticipant({
       adapter: granting,
-      reconnect: { delay: 0, maxAttempts: 5 },
+      reconnect: { delay: 0, maximumAttempts: 5 },
     });
     const reported: string[] = [];
     const asked = async (): Promise<void> => {
@@ -1426,7 +1426,7 @@ test.describe('broker participant', () => {
     const adapter = broker.adapter({ id: 'ada' });
     const participant = createBrokerParticipant({
       adapter,
-      reconnect: { delay: 0, maxAttempts: 2 },
+      reconnect: { delay: 0, maximumAttempts: 2 },
     });
     const reported = new Promise<Error>((resolve) => {
       participant.on('error', resolve);

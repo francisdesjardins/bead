@@ -495,7 +495,7 @@ test.describe('createTransportClient #reconnect', () => {
           seen.push([previousDelay, attempt]);
           return (previousDelay ?? 5) * 2;
         },
-        maxAttempts: 4,
+        maximumAttempts: 4,
       })
     ).rejects.toBeInstanceOf(ReconnectError);
 
@@ -511,7 +511,7 @@ test.describe('createTransportClient #reconnect', () => {
 
     await expect(client.connect(target)).rejects.toBeInstanceOf(ConnectError);
 
-    const reconnecting = client.reconnect({ delay: 0, maxAttempts: 2 });
+    const reconnecting = client.reconnect({ delay: 0, maximumAttempts: 2 });
 
     await expect(reconnecting).rejects.toBeInstanceOf(ReconnectError);
     await expect(reconnecting).rejects.toHaveProperty('cause', expect.any(ConnectError));
@@ -520,11 +520,11 @@ test.describe('createTransportClient #reconnect', () => {
     expect(client.isClosed()).toBe(true);
   });
 
-  test('always makes one attempt, even with a maxAttempts of 0', async () => {
+  test('always makes one attempt, even with a maximum of zero', async () => {
     const { calls, client } = createStubClient({ failures: 5 });
 
     await expect(client.connect(target)).rejects.toBeInstanceOf(ConnectError);
-    await expect(client.reconnect({ delay: 0, maxAttempts: 0 })).rejects.toBeInstanceOf(
+    await expect(client.reconnect({ delay: 0, maximumAttempts: 0 })).rejects.toBeInstanceOf(
       ReconnectError
     );
 
@@ -558,11 +558,11 @@ test.describe('createTransportClient #reconnect', () => {
     expect(delaysOn(clock)).toEqual([]);
   });
 
-  test('rejects a maxAttempts that is not a number, leaving the state as it was', async () => {
+  test('rejects a maximumAttempts that is not a number, leaving the state as it was', async () => {
     const { calls, client } = createStubClient();
 
     await client.connect(target);
-    await expect(client.reconnect({ maxAttempts: Number.NaN })).rejects.toBeInstanceOf(
+    await expect(client.reconnect({ maximumAttempts: Number.NaN })).rejects.toBeInstanceOf(
       ProgrammerError
     );
 
@@ -575,10 +575,10 @@ test.describe('createTransportClient #reconnect', () => {
 
     await expect(client.connect(target)).rejects.toBeInstanceOf(ConnectError);
     await expect(
-      client.reconnect({ delay: 0, maxAttempts: undefined, tap: undefined, signal: undefined })
+      client.reconnect({ delay: 0, maximumAttempts: undefined, tap: undefined, signal: undefined })
     ).rejects.toBeInstanceOf(ReconnectError);
 
-    expect(calls).toHaveLength(1 + entry.RECONNECT_DEFAULTS.maxAttempts);
+    expect(calls).toHaveLength(1 + entry.RECONNECT_DEFAULTS.maximumAttempts);
   });
 
   test('rejects with a CancelError, without waiting out the delay, when the signal aborts mid-wait', async () => {

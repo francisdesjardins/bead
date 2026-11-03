@@ -430,7 +430,7 @@ test('cancels a reconnection whose last attempt closes before cancellation is ch
   };
 
   const cancelled: unknown = await client
-    .reconnect({ maxAttempts: 1, signal: cancelling.signal })
+    .reconnect({ maximumAttempts: 1, signal: cancelling.signal })
     .catch((error: unknown) => {
       return error;
     });
@@ -1305,7 +1305,7 @@ test.describe('createHTTPTransportClient', () => {
     await server.stop();
 
     // one attempt, for a port nothing listens on takes some systems two seconds to refuse
-    const reason = await client.reconnect({ maxAttempts: 1 }).catch((error: unknown) => {
+    const reason = await client.reconnect({ maximumAttempts: 1 }).catch((error: unknown) => {
       return error;
     });
 

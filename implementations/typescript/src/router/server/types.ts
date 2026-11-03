@@ -9,11 +9,7 @@ import type {
   ITransportMessage,
 } from '../../transport/shared/types';
 import type { IRouterClient } from '../client/types';
-import type {
-  IMetricsRegistry,
-  INotifyingSeries,
-  IProcedureSeries,
-} from '../shared/metrics-registry';
+import type { IMetricsRegistry, INotifyingSeries } from '../shared/metrics-registry';
 import type {
   CallId,
   DebugDirection,
@@ -23,14 +19,12 @@ import type {
   ICallAddress,
   ICredentials,
   IFailure,
-  INotificationLike,
-  IProcedure,
   IProcedureAddress,
   IntakeLimitsOptions,
-  IResolvedRequestOptions,
   IRouterResult,
   IRouterLike,
   IRouterLimits,
+  IRouterRequest,
   ISubscriber,
   NotificationKey,
   ProcedureId,
@@ -524,34 +518,7 @@ export interface IRouterServer<
    * failure answered, a payload too large or every call id in use; a {@link TimeoutError}, a
    * {@link CancelError}, or what the transport's `send` throws.
    */
-  request(
-    payload: Uint8Array,
-    request: {
-      /**
-       * Hears the call's id once the router drew it, before the request goes; a call refused before
-       * it draws one is never heard.
-       */
-      onCallId?: ((callId: CallId) => void) | undefined;
-      /**
-       * Hears `true` as the request is handed to the transport, and `false` should the transport
-       * refuse it: before `true`, or after `false`, nothing of it was tried.
-       */
-      onSent?: ((isHanded: boolean) => void) | undefined;
-      options: IResolvedRequestOptions;
-      procedure: IProcedure;
-      /**
-       * What refuses the call once it started, before it goes, as its requester judged it: a value
-       * its rules refuse (spec 18.2). It draws no call id, and its payload goes nowhere.
-       */
-      refusal?: Error | undefined;
-      /**
-       * The series its requester's declaration gave, which a counted call counts into; `_OTHER`'s
-       * when none is given, as a relay's leg B.
-       */
-      series?: IProcedureSeries | undefined;
-      subscribes?: INotificationLike | undefined;
-    }
-  ): Promise<IRouterResult>;
+  request(payload: Uint8Array, request: IRouterRequest): Promise<IRouterResult>;
   /**
    * Takes a connection's subscription away, as its request to unsubscribe asks with the call id of
    * the request that subscribed it; whether it held that one.

@@ -582,7 +582,7 @@ test.describe('createBrokerTransportClient', () => {
     await turn();
 
     const reconnecting = client
-      .reconnect({ delay: 100, maxAttempts: 2 })
+      .reconnect({ delay: 100, maximumAttempts: 2 })
       .catch((reason: unknown) => {
         return reason;
       });

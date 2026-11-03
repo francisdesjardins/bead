@@ -982,13 +982,13 @@ export const createHTTPGateway = (given: IHTTPGatewayOptions): IHTTPGateway => {
 
     if (token === undefined) {
       return {
-        problem: problemOfOwn('scheme', { challenge, detail: 'an auth-scheme but Bearer' }),
+        problem: problemOfOwn('scheme', 'an auth-scheme but Bearer', { challenge }),
       };
     }
 
     if (ENCODER.encode(token).length > JWT_BYTES) {
       return {
-        problem: problemOfOwn('jwt', { detail: `a token past ${String(JWT_BYTES)} bytes` }),
+        problem: problemOfOwn('jwt', `a token past ${String(JWT_BYTES)} bytes`),
       };
     }
 
@@ -1096,7 +1096,7 @@ export const createHTTPGateway = (given: IHTTPGatewayOptions): IHTTPGateway => {
     if (reason instanceof TimeoutError) {
       report(reason);
 
-      return problemOfOwn('timeout', { detail: `no answer within ${String(timeout)} ms` });
+      return problemOfOwn('timeout', `no answer within ${String(timeout)} ms`);
     }
 
     // * the mapping's own words of the result it holds no form of, fixed in transcoding.json
@@ -1104,7 +1104,7 @@ export const createHTTPGateway = (given: IHTTPGatewayOptions): IHTTPGateway => {
       report(reason);
 
       // ! a detail of the side's own words: the mapping's own, fixed in transcoding.json
-      return problemOfOwn('unwritable', { detail: reason.message });
+      return problemOfOwn('unwritable', reason.message);
     }
 
     if (reason instanceof CancelError) {
@@ -1114,7 +1114,7 @@ export const createHTTPGateway = (given: IHTTPGatewayOptions): IHTTPGateway => {
     if (reason instanceof DisconnectError) {
       report(reason);
 
-      return problemOfOwn('closed', { detail: 'the connection closed' });
+      return problemOfOwn('closed', 'the connection closed');
     }
 
     // the stock library's refusal of a result, or a notification, the server answered: its words
@@ -1131,7 +1131,7 @@ export const createHTTPGateway = (given: IHTTPGatewayOptions): IHTTPGateway => {
     // ! what no gate foresaw: its words are reported, never the gateway's
     report(reason);
 
-    return problemOfOwn('failed', { detail: '' });
+    return problemOfOwn('failed', '');
   };
 
   /** Serves an exchange its routes take, past the gates of 10.1's steps 8 to 11. */
@@ -1358,7 +1358,7 @@ export const createHTTPGateway = (given: IHTTPGatewayOptions): IHTTPGateway => {
                   },
                   { challenge }
                 )
-              : problemOfOwn('failed', { detail: '' }),
+              : problemOfOwn('failed', ''),
         }),
         undefined
       );
@@ -1440,7 +1440,7 @@ export const createHTTPGateway = (given: IHTTPGatewayOptions): IHTTPGateway => {
         drop: (failure?: IReceivedFailure) => {
           end(
             failure === undefined
-              ? problemOfOwn('closed', { detail: 'the connection closed' })
+              ? problemOfOwn('closed', 'the connection closed')
               : problemOfFailure(
                   {
                     arose: 'server',
@@ -1472,7 +1472,7 @@ export const createHTTPGateway = (given: IHTTPGatewayOptions): IHTTPGateway => {
                 encoding,
                 isHanded: true,
                 variables,
-              }) ?? problemOfOwn('closed', { detail: 'the connection closed' })
+              }) ?? problemOfOwn('closed', 'the connection closed')
             );
 
             return [];
@@ -1541,7 +1541,7 @@ export const createHTTPGateway = (given: IHTTPGatewayOptions): IHTTPGateway => {
           encoding,
           isHanded: true,
           variables,
-        }) ?? problemOfOwn('closed', { detail: 'the connection closed' });
+        }) ?? problemOfOwn('closed', 'the connection closed');
 
       if (stream === undefined) {
         answerProblem(exchange, { problem });
@@ -1769,7 +1769,7 @@ export const createHTTPGateway = (given: IHTTPGatewayOptions): IHTTPGateway => {
       // ! what no gate foresaw: its exchange ends, never the gateway, and its words are reported
       report(error);
       answerProblem(exchange, {
-        problem: problemOfOwn('failed', { detail: '' }),
+        problem: problemOfOwn('failed', ''),
       });
     });
 

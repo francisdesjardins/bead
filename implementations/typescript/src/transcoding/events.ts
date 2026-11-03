@@ -50,6 +50,16 @@ export interface IEventStream {
   result: (data: string) => void;
 }
 
+/** An event as a stream writes it (8.5): its data, its id, and its name where it has one. */
+export interface IServerSentEvent {
+  /** One JSON text. */
+  readonly data: string;
+  /** Its count in the stream, from 1. */
+  readonly id: number;
+  /** `result` or `failure`; none for a notification, a plain event. */
+  readonly name?: 'failure' | 'result' | undefined;
+}
+
 /** How often a quiet stream writes its comment, on the clock it runs on. */
 export interface IEventStreamOptions {
   readonly clock: IClock;
@@ -68,15 +78,7 @@ export const HEARTBEAT_COMMENT = ':\n';
 // helpers
 
 /** An event's lines (8.5): its name where it has one, its id, its data, then the empty line. */
-export const eventOf = ({
-  data,
-  id,
-  name,
-}: {
-  data: string;
-  id: number;
-  name?: 'failure' | 'result' | undefined;
-}): string => {
+export const eventOf = ({ data, id, name }: IServerSentEvent): string => {
   return `${name === undefined ? '' : `event: ${name}\n`}id: ${String(id)}\ndata: ${data}\n\n`;
 };
 
