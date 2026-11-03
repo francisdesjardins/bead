@@ -13,15 +13,15 @@ less than a millisecond nor past 2³¹ − 1, and none for a fraction
 ([0011](0011-every-side-takes-its-time-from-a-clock-it-is-given.md)). The values users write do not
 reach a timer alike: 0.41 s is 410 ms in JavaScript and 409.9999 ms in .NET.
 
-Thirty-four places take such a duration, by 52 ways, from a call's timeout to a gateway's heartbeat
-and a broker's: its participant's heartbeat and `bodyGracePeriod`, its server transport's
-`acceptTimeout`, and its MQTT 5 and AMQP 1.0 adapters' keep-alive, idle-time-out and connect
-timeout. Some are reached more than one way: a reserve and a cancel, a relay's own timeout and a
-destination's, every transport's connect, the in-memory client's and the broker client's among them,
-a client and its server over HTTP and over WebSocket, and an HTTP server and a gateway at three of
-15.12's places. Few inputs tell two readings of 1.4 apart — a half up from a half to the even, a
-value as given from as rounded at the ceiling, −1 ms, NaN — and a table of inputs that misses them
-proves neither reading.
+Thirty-five places take such a duration, by 54 ways, from a call's timeout to a gateway's heartbeat
+and a broker's: its participant's heartbeat, `bodyGracePeriod` and reconnection delay, its server
+transport's `acceptTimeout`, and its MQTT 5 and AMQP 1.0 adapters' keep-alive, idle-time-out and
+connect timeout. Some are reached more than one way: a reserve and a cancel, a relay's own timeout
+and a destination's, every transport's connect, the in-memory client's and the broker client's
+among them, a client and its server over HTTP and over WebSocket, a reconnection's delay as a
+number and as a function, and an HTTP server and a gateway at three of 15.12's places. Few inputs
+tell two readings of 1.4 apart — a half up from a half to the even, a value as given from as
+rounded at the ceiling, −1 ms, NaN — and a table of inputs that misses them proves neither reading.
 
 A file must not pin what the spec leaves to each side. A refusal's words are each side's: the C#
 side's message carries .NET's ` (Parameter '…')`, which its tests skip; each side names an option in
@@ -119,6 +119,11 @@ both ends of a connection: 5 minutes by default, and without end if given so, it
 server's alike.
 `httpTransportClient.pause`'s at once is 15.10's "listen again at once", stated with a schedule no
 file checks: the file leaves it out, as it leaves out the defaults no clause states.
+`brokerParticipant.reconnectionDelay` is a broker participant's reconnection delay, a place of its
+own beside `transportClient.reconnectionDelay`: the spec names one option for neither, so the two
+share no place, though each takes a number or a function and holds it alike, a number as it is
+given and a function's answer at each attempt
+([0038](0038-over-a-broker-a-connection-is-placed-once-at-its-open-named-by-both-its-ends.md)).
 `webSocketTransport.closeTimeout` is a WebSocket's close timeout by two ways, its client's and its
 server's, as `webSocketTransport.heartbeat` is: each harness plays both, and each WebSocket client's
 tests play its client's way besides.
@@ -303,13 +308,13 @@ client's or its server's. Its objections, each with the answer that holds:
 
 ### On an HTTP exchange's timeout, its client's or its server's
 
-| Objection                                                                                                                                                  | Answer                                                                                                                                |
-| ---------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
-| At never, the client way passes C# for the wrong reason, `elapsed >= InfiniteTimeSpan` always true, and fails TypeScript, whose pause is capped at 2³¹ − 1 | Accepted: the C# client holds never as TypeScript does, both sides gain a never test, and the client way has a reading of its own.    |
-| 15.12's opening sentence names `inactivityTimeout` alone for the client, and the table's row says "at both ends" of a wait the client never times          | Accepted: the sentence names `exchangeTimeout` too, and the row says what each end bounds.                                            |
-| The client way fits no observation the file defines                                                                                                        | Accepted: the probe reads the pause a `busy` arms and the loss at a second one, and the `$comment` and this record name that reading. |
-| The ways' count moves, and `check.py` holds it in the matrix and the README                                                                                | Accepted: 52 ways.                                                                                                                    |
-| The Rust side holds no list to rename                                                                                                                      | Accepted: nothing moves on the Rust side.                                                                                             |
-| It is a minor, and the CHANGELOG folds the client way into 0046's line                                                                                     | Accepted.                                                                                                                             |
-| The record is 0014                                                                                                                                         | Accepted.                                                                                                                             |
-| Nothing finds a duration check that no place covers; a broker participant's reconnection delay is a second miss, checked at different moments              | Accepted as a follow-up: a gate over each side's duration-check call sites, and a round on the participant's delay, both in the plan. |
+| Objection                                                                                                                                                  | Answer                                                                                                                                                                                       |
+| ---------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| At never, the client way passes C# for the wrong reason, `elapsed >= InfiniteTimeSpan` always true, and fails TypeScript, whose pause is capped at 2³¹ − 1 | Accepted: the C# client holds never as TypeScript does, both sides gain a never test, and the client way has a reading of its own.                                                           |
+| 15.12's opening sentence names `inactivityTimeout` alone for the client, and the table's row says "at both ends" of a wait the client never times          | Accepted: the sentence names `exchangeTimeout` too, and the row says what each end bounds.                                                                                                   |
+| The client way fits no observation the file defines                                                                                                        | Accepted: the probe reads the pause a `busy` arms and the loss at a second one, and the `$comment` and this record name that reading.                                                        |
+| The ways' count moves, and `check.py` holds it in the matrix and the README                                                                                | Accepted: 52 ways.                                                                                                                                                                           |
+| The Rust side holds no list to rename                                                                                                                      | Accepted: nothing moves on the Rust side.                                                                                                                                                    |
+| It is a minor, and the CHANGELOG folds the client way into 0046's line                                                                                     | Accepted.                                                                                                                                                                                    |
+| The record is 0014                                                                                                                                         | Accepted.                                                                                                                                                                                    |
+| Nothing finds a duration check that no place covers; a broker participant's reconnection delay is a second miss, checked at different moments              | Accepted: the participant's delay is a place of its own, `brokerParticipant.reconnectionDelay`, held alike on every side (0038); a gate over each side's duration-check call sites is ahead. |

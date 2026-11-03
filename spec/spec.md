@@ -1954,11 +1954,14 @@ behind what was sent before it. The heartbeat runs on the platform's clock, as a
 participant draws an incarnation, 16 bytes from a cryptographic source; each connection is bound
 to its peer's. A participant whose link goes down closes each of its connections, unclean, and
 connects anew as another incarnation, its inbox and its names subscribed again before anything
-goes, then sends a RESET to each peer it held a connection with. A participant whose link its broker
-ends for another link of its id, a takeover, closes each of its connections, unclean, reports it,
-and connects no more until its application starts it again: its server's transports take no OPEN
-and its clients' connects fail, naming it, so that two holders of one id never take each other over
-without end; the later link keeps the id. A participant whose adapter leaves
+goes, then sends a RESET to each peer it held a connection with. Its reconnection is its
+application's to bound, by its attempts, by a signal, or not at all, and ends when the participant
+stops; once it ends, the participant reports it, and its next start or connect links it anew. A
+participant whose link its broker ends for another link of its id, a takeover, closes each of its
+connections, unclean, reports it, and connects no more until its application starts it again: its
+server's transports take no OPEN and its clients' connects fail, naming it, so that two holders of
+one id never take each other over without end; the later link keeps the id. A participant whose
+adapter leaves
 a will has its broker publish, once it loses the link without a clean end, a GONE of its
 incarnation to its departure; it subscribes the departure of each peer it holds a connection with
 while it holds one, and closes, unclean, each connection bound to the id and incarnation a GONE
