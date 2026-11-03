@@ -453,6 +453,10 @@ impl fmt::Debug for NotificationRegistration {
 
 impl NotificationRegistration {
     /// Takes its callback away; the last out leaves the subscription.
+    ///
+    /// # Errors
+    ///
+    /// A [`CallError`] when its router cannot end the subscription.
     pub fn unregister(&self) -> BoxFuture<Result<(), CallError>> {
         self.shared.unregister((self.id, self.own))
     }
@@ -510,6 +514,10 @@ where
 
     /// Registers `callback`, listening first: its subscribing call goes with `payload` when no
     /// subscription is held, and the registration waits for it.
+    ///
+    /// # Errors
+    ///
+    /// A [`CallError`] when the subscribing call is refused, cancelled, disconnected or fails.
     pub fn register(
         &self,
         payload: Req::Value,

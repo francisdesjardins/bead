@@ -6,8 +6,47 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use bead_house::{
-    Finding, crate_tuples_of, members_of, options_of, parameters_of, surface_of, tags_of, tuples_of,
+    Finding, crate_tuples_of, futures_of, members_of, options_of, parameters_of, surface_of,
+    tags_of, tuples_of,
 };
+
+#[test]
+fn every_public_future_of_a_result_documents_its_errors() {
+    let refused: Vec<String> = sources()
+        .iter()
+        .filter(|path| {
+            let path = path.to_string_lossy().replace('\\', "/");
+            !path.contains("/tests/")
+                && !path.contains("/testing/")
+                && !path.ends_with("/tests.rs")
+                && !path.ends_with("/testing.rs")
+        })
+        .flat_map(|path| {
+            let file =
+                syn::parse_file(&read(path).expect("its source read")).expect("its source parsed");
+            said(path, &futures_of(&file))
+        })
+        .collect();
+
+    assert!(
+        refused.is_empty(),
+        "future errors are undocumented:\n{}",
+        refused.join("\n")
+    );
+}
+
+#[test]
+fn future_errors_are_checked_on_the_declaration() {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("cases/futures.rs");
+    let source = read(&path).expect("the cases read");
+    let file = syn::parse_file(&source).expect("the cases parsed");
+
+    assert_eq!(
+        lines_of(&futures_of(&file)),
+        marked(&source),
+        "each undocumented future refused"
+    );
+}
 
 // the Rust side's folder, implementations/rust
 fn root() -> PathBuf {

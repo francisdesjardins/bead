@@ -2486,6 +2486,10 @@ impl BrokerParticipant {
     /// one, its inbox subscribed and the names of its server transports that serve; settles once
     /// all of it is held. A second start shares the first, or starts anew once the first failed, or
     /// once its link was taken over: its application's start lifts the fence a takeover set.
+    ///
+    /// # Errors
+    ///
+    /// A [`BrokerError`] when its adapter cannot start or subscribe its inbox, or it is stopped as it starts.
     pub fn start(&self) -> BoxFuture<Result<(), BrokerError>> {
         let starting = {
             let config = &self.inner.config;

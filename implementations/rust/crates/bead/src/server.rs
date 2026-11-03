@@ -867,6 +867,10 @@ impl SessionManager {
     }
 
     /// The session of `connection_handle`, stored first, its activity now, when it has none.
+    ///
+    /// # Errors
+    ///
+    /// A [`CallError`] when the connection or the sessions are gone, or its token cannot be drawn.
     pub fn get_or_else_set(
         &self,
         connection_handle: ConnectionHandle,

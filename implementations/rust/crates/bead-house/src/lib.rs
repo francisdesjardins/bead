@@ -26,3 +26,5 @@ pub struct Finding {
     /// Why it was refused.
     pub reason: &'static str,
 }
+mod futures;
+pub use futures::futures_of;

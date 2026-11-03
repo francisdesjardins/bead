@@ -203,6 +203,10 @@ fn locked<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
 /// What a request's handler answers its call by, from off the router's owner.
 pub trait Answerer: Send + Sync {
     /// Answers the call; settles once the answer went, or as it could not.
+    ///
+    /// # Errors
+    ///
+    /// A [`CallError`] when its answer is refused, its call is cancelled, its connection ends, or its transport fails.
     fn respond(&self, answer: RouterAnswer) -> BoxFuture<Result<(), CallError>>;
 
     /// The failure the router answered the call with in its handler's place, read as it answers.
@@ -210,6 +214,10 @@ pub trait Answerer: Send + Sync {
 
     /// Subscribes the call's connection to its procedure, on a server's router: the subscription's
     /// call id.
+    ///
+    /// # Errors
+    ///
+    /// A [`CallError`] when its request opens no subscription, or its call or connection ends.
     fn subscribe(&self) -> BoxFuture<Result<u32, CallError>>;
 }
 

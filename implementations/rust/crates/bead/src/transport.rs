@@ -225,6 +225,10 @@ pub trait ServerTransport: Send + Sync + fmt::Debug {
     }
 
     /// Starts it.
+    ///
+    /// # Errors
+    ///
+    /// A [`RouterError`] when its options or state are refused, or its listener cannot start.
     fn start(&self) -> BoxFuture<Result<(), RouterError>>;
 
     /// Stops it, closing every connection; settles at once when it never started or stopped
