@@ -3122,6 +3122,7 @@ src/transport/client/types.ts ITransportClientImplementation
     carries?(credential: string): boolean
     readonly clock?: IClock | undefined
     readonly isSecure?: boolean | undefined
+    readonly lifetime?: AbortSignal | undefined
     connect(options: ConnectOptions): Promise<void>
     disconnect(options?: ITransportClientDisconnectOptions): Promise<void>
     pause(): void
@@ -3814,6 +3815,7 @@ src/transport/shared/broker-participant.ts IBrokerParticipantPort
     readonly isSecure: boolean
     readonly isStopped: boolean
     readonly names: ReadonlySet<string>
+    readonly stopped: AbortSignal
     awaitAnswers(opener: Uint8Array, answers: IBrokerAnswers): () => void
     connect(pair: {acceptor: Uint8Array; isOpener: boolean; opener: Uint8Array; peer: IBrokerPeer}, options: {isSecure?: boolean | undefined; maximumUnsentBytes: number; owner: IBrokerConnectionOwner}): IBrokerConnection
     drawHalf(): Uint8Array

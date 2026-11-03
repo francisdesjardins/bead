@@ -294,6 +294,8 @@ export interface IBrokerParticipantPort {
   readonly isStopped: boolean;
   /** The names it holds a subscription to. */
   readonly names: ReadonlySet<string>;
+  /** Aborted as it stops, apart from its adapter's start's signal: a client's reconnection ends by it. */
+  readonly stopped: AbortSignal;
   /** Waits for answers naming `opener`'s half, until the returned function lets it go. */
   awaitAnswers(opener: Uint8Array, answers: IBrokerAnswers): () => void;
   /**
@@ -526,6 +528,8 @@ export const createBrokerParticipant = (options: IBrokerParticipantOptions): IBr
   let epoch = 0;
   // * what its stop aborts: its adapter's start under way gives up on it
   const stopping = new AbortController();
+  // what its stop aborts for its clients' reconnections, apart from its adapter's start's
+  const ending = new AbortController();
   // its adapter's start under way, which its stop awaits before it stops its adapter
   let starting: Promise<void> | undefined;
   // its stop's end, which every later stop shares
@@ -1747,6 +1751,7 @@ export const createBrokerParticipant = (options: IBrokerParticipantOptions): IBr
           })
       );
     },
+    stopped: ending.signal,
     awaitAnswers: (opener, answers) => {
       const key = keyOf(opener);
 
@@ -1908,6 +1913,7 @@ export const createBrokerParticipant = (options: IBrokerParticipantOptions): IBr
         // * its adapter's start under way, given up, settles before its stop: the two never overlap,
         // and what that start brought up after the stop ends with it
         stopping.abort(stoppedAsItStarted());
+        ending.abort(new GenericError(`the participant ${id} stopped`));
         await starting?.catch(noop);
         await adapter.stop();
         for (const entry of names.values()) {

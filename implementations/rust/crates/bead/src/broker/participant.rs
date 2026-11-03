@@ -672,6 +672,12 @@ impl Config {
     pub(crate) fn is_stopped(&self) -> bool {
         locked(&self.status).is_stopped
     }
+
+    /// A signal its stop cancels, a child of its own: what ends a client's reconnection under way
+    /// as it stops.
+    pub(crate) fn stopping(&self) -> CancellationToken {
+        self.stopping.child_token()
+    }
 }
 
 // an adapter's start under way, counted from its link's first step to the start's end, whatever

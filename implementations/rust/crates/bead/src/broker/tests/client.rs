@@ -9,14 +9,15 @@ use bytes::Bytes;
 use tokio_util::sync::CancellationToken;
 
 use super::{
-    AtClient, BrokerPair, BrokerPairOptions, ClientTold, Heard, adapter_of, broker, locked,
-    participant_of, peer_of, publish_to, settle, until,
+    AtClient, BrokerPair, BrokerPairOptions, Calling, ClientTold, Heard, adapter_of, broker,
+    locked, participant_of, peer_of, publish_to, settle, until,
 };
 use crate::broker::adapter::{BrokerAdapter, BrokerPublication};
 use crate::broker::client::{BrokerTransportClientConnectOptions, BrokerTransportClientOptions};
 use crate::broker::memory::{MemoryBroker, MemoryBrokerOptions};
 use crate::broker::parcel::{Parcel, flags, kinds, write_parcel};
-use crate::broker::participant::{BrokerParticipantOptions, BrokerRefusedError};
+use crate::broker::participant::{BrokerParticipant, BrokerParticipantOptions, BrokerRefusedError};
+use crate::broker::server::{BrokerTransportServer, BrokerTransportServerOptions};
 use crate::clock::SharedClock;
 use crate::duration::{DurationRefusal, NEVER};
 use crate::errors::{Refusal, TransportError};
@@ -887,6 +888,21 @@ fn tapping() -> (Arc<Mutex<Vec<Duration>>>, TransportClientReconnectOptions) {
     (tapped, options)
 }
 
+// a server's transport serving `interop` over `broker`, started, and its participant
+async fn serving(broker: &MemoryBroker) -> (BrokerParticipant, BrokerTransportServer) {
+    let participant = participant_of(
+        &adapter_of(broker, "server"),
+        &BrokerParticipantOptions::default(),
+    );
+    let server = participant
+        .server(&BrokerTransportServerOptions::new(["interop"]))
+        .expect("a server");
+
+    server.start().await.expect("started");
+
+    (participant, server)
+}
+
 // spec 15.21
 #[tokio::test]
 async fn refuses_a_connect_or_a_reconnect_once_its_participant_stopped_its_state_kept_no_reconnect_told()
@@ -957,4 +973,141 @@ async fn refuses_a_connect_or_a_reconnect_once_its_participant_stopped_its_state
     );
     assert!(locked(&tapped).is_empty(), "no wait told");
     pair.stop().await;
+}
+
+// spec 15.15, 15.21
+#[tokio::test]
+#[expect(
+    clippy::too_many_lines,
+    reason = "a twin plays its sentence whole, as the other sides' twins do"
+)]
+async fn ends_its_reconnection_as_its_participant_stops_in_a_wait_or_in_an_attempt_no_wait_told_after_it()
+ {
+    // in a wait: on the test's clock, its first attempt refused at once, nothing serving the name
+    let clock = SteppingClock::new(SystemTime::UNIX_EPOCH);
+    let shared: SharedClock = Arc::<SteppingClock>::clone(&clock);
+    let broker = MemoryBroker::new(&MemoryBrokerOptions {
+        clock: Some(Arc::clone(&shared)),
+        ..MemoryBrokerOptions::default()
+    })
+    .expect("a broker");
+    let (server_participant, server) = serving(&broker).await;
+    let ada = participant_of(
+        &adapter_of(&broker, "ada"),
+        &BrokerParticipantOptions {
+            clock: Some(Arc::clone(&shared)),
+            ..BrokerParticipantOptions::default()
+        },
+    );
+    let client = ada
+        .client(&BrokerTransportClientOptions::default())
+        .expect("a client");
+
+    client
+        .connect(&BrokerTransportClientConnectOptions::new("interop"))
+        .await
+        .expect("connected");
+    server.stop().await.expect("stopped");
+    until(
+        || client.ready_state() == ReadyState::Closed,
+        "closed as its server stops",
+    )
+    .await;
+
+    let (tapped, options) = tapping();
+    let reconnecting = crate::testing::spawn(client.reconnect(&options).expect("reconnecting"));
+
+    until(|| locked(&tapped).len() == 1, "its first wait told").await;
+
+    let before = shared.monotonic();
+
+    ada.stop().await;
+    until(
+        || reconnecting.is_finished(),
+        "ended without the clock moved",
+    )
+    .await;
+
+    // * ended at once, cancelled, its wait not waited out
+    let ended = reconnecting.await.expect("joined");
+
+    assert!(
+        matches!(
+            &ended,
+            Err(TransportError::Cancelled(reason)) if reason == "the reconnection was cancelled"
+        ),
+        "cancelled: {ended:?}"
+    );
+    assert_eq!(shared.monotonic(), before, "the clock not moved");
+    assert_eq!(
+        *locked(&tapped),
+        [Duration::from_secs(60)],
+        "no wait told after its stop"
+    );
+    assert_eq!(client.ready_state(), ReadyState::Closed, "closed");
+    assert!(!ada.is_linked(), "not linked");
+    server_participant.stop().await;
+
+    // in an attempt: its link's start held as it connects again, its participant's own
+    // reconnection off
+    let broker = super::broker();
+    let (server_participant, _server) = serving(&broker).await;
+    let bob = adapter_of(&broker, "bob");
+    let holding = Arc::new(Calling {
+        holds: Some(1),
+        ..Calling::of(bob.clone())
+    });
+    let adapter: Arc<dyn BrokerAdapter> = Arc::<Calling>::clone(&holding);
+    let participant = BrokerParticipant::new(
+        adapter,
+        &BrokerParticipantOptions {
+            reconnects: Some(false),
+            ..BrokerParticipantOptions::default()
+        },
+    )
+    .expect("a participant");
+    let client = participant
+        .client(&BrokerTransportClientOptions::default())
+        .expect("a client");
+
+    client
+        .connect(&BrokerTransportClientConnectOptions::new("interop"))
+        .await
+        .expect("connected");
+    bob.lose();
+    until(
+        || client.ready_state() == ReadyState::Closed,
+        "closed as its link goes down",
+    )
+    .await;
+
+    let (tapped, options) = tapping();
+    let reconnecting = crate::testing::spawn(client.reconnect(&options).expect("reconnecting"));
+
+    until(|| holding.holding() == 1, "its attempt's link held").await;
+
+    let stopping = crate::testing::spawn(participant.stop());
+
+    until(|| reconnecting.is_finished(), "its reconnection ended").await;
+
+    // * its attempt fails, and its reconnection ends, cancelled, no wait told after its stop
+    let ended = reconnecting.await.expect("joined");
+
+    assert!(
+        matches!(
+            &ended,
+            Err(TransportError::Cancelled(reason)) if reason == "the reconnection was cancelled"
+        ),
+        "cancelled: {ended:?}"
+    );
+    assert!(holding.release(), "released");
+    stopping.await.expect("joined");
+    settle().await;
+    assert!(locked(&tapped).is_empty(), "no wait told");
+    assert_eq!(client.ready_state(), ReadyState::Closed, "closed");
+    assert!(
+        !participant.is_linked() && !bob.is_linked(),
+        "neither linked"
+    );
+    server_participant.stop().await;
 }

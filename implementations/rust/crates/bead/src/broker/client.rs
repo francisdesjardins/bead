@@ -741,7 +741,8 @@ impl BrokerTransportClient {
     ///
     /// A [`TransportError`] for a reconnection under way, a client never connected, one connecting
     /// or closing, its participant stopped (spec 15.21), a fixed delay out of bounds (spec 1.4), or
-    /// a signal cancelled already: each refused before anything moves, in that order.
+    /// a signal cancelled already: each refused before anything moves, in that order. A
+    /// reconnection under way ends, cancelled, as its participant stops.
     pub fn reconnect(
         &self,
         options: &TransportClientReconnectOptions,
@@ -833,8 +834,28 @@ impl BrokerTransportClient {
     ) -> Result<(), TransportError> {
         let inner = &self.inner;
         let clock = inner.participant.clock();
+        // * its own signal joined with its participant's stop, as a dispose ends one: the stop ends
+        // it at once in a wait, or once its attempt under way failed, no wait told after it
+        let joined = inner.participant.config().stopping();
+        // ! cancelled as it returns, which ends the watcher of its application's signal
+        let _ended = joined.clone().drop_guard();
 
-        attempting((&clock, &options), |signal| {
+        if let Some(signal) = options.signal.clone() {
+            let joining = joined.clone();
+
+            inner.participant.cover(async move {
+                if first_of((signal.cancelled(), joining.cancelled())).await {
+                    joining.cancel();
+                }
+            });
+        }
+
+        let joined_options = TransportClientReconnectOptions {
+            signal: Some(joined.clone()),
+            ..options
+        };
+
+        attempting((&clock, &joined_options), |signal| {
             locked(&inner.state).is_attempting = true;
 
             let connecting = self.connect(&BrokerTransportClientConnectOptions {
@@ -844,15 +865,24 @@ impl BrokerTransportClient {
 
             locked(&inner.state).is_attempting = false;
 
-            connecting
+            let participant = inner.participant.clone();
+            let ending = joined.clone();
+
+            async move {
+                let connected = connecting.await;
+
+                // ! its stop is marked before its signal is cancelled: an attempt that failed
+                // with its participant stopped cancels it itself, so no wait is told after it
+                if connected.is_err() && participant.is_stopped() {
+                    ending.cancel();
+                }
+
+                connected
+            }
         })
         .await?;
 
-        if options
-            .signal
-            .as_ref()
-            .is_some_and(CancellationToken::is_cancelled)
-        {
+        if joined.is_cancelled() {
             drop(self.disconnect(&TransportClientDisconnectOptions::default()));
 
             return Err(TransportError::Cancelled(RECONNECTION_CANCELLED.to_owned()));

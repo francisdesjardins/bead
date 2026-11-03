@@ -125,8 +125,8 @@ const refusedOf = (refusal: BrokerRefusedError): ConnectError => {
  * through the same name, possibly to another participant. Paused by its router, whole, a pause that
  * outlasts its connection, its participant holds what comes on it, in order, to
  * `maximumHeldEnvelopeBytes`, and never pauses its link (spec 15.12, 15.23). Once its participant
- * stopped, a connect or a reconnect is a {@link ProgrammerError}, its state and its target kept
- * (spec 15.21).
+ * stopped, a connect or a reconnect is a {@link ProgrammerError}, its state and its target kept, and
+ * a reconnection under way ends as it stops, cancelled (spec 15.21).
  *
  * @example
  * const client = participant.transportClient();
@@ -244,6 +244,8 @@ export const createBrokerTransportClient = (
           }
         },
         carries: isFieldValue,
+        // a reconnection under way ends as its participant stops, cancelled
+        lifetime: port.stopped,
 
         connect: async ({ server, signal, timeout = CONNECT_DEFAULTS.timeout }) => {
           const attempt: IAttempt = {

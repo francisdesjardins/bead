@@ -22,7 +22,8 @@ import {
   type IMemoryBroker,
   type IMemoryBrokerAdapter,
 } from '../../shared/memory-broker';
-import type { BrokerTopic } from '../../shared/types';
+import { noop } from '../../shared/noop';
+import type { BrokerTopic, IBrokerAdapter } from '../../shared/types';
 import { createTestClock } from '../../shared/__tests__/fixtures';
 import {
   BrokerRefusedError,
@@ -79,6 +80,17 @@ const acceptOf = (opener: Uint8Array): Uint8Array => {
   });
 };
 
+/** Waits, a millisecond at a time, until `condition` holds; past two seconds, fails naming `what`. */
+const until = async (condition: () => boolean, what: string): Promise<void> => {
+  for (let count = 0; count < 2_000 && !condition(); count += 1) {
+    await new Promise((resolve) => {
+      setTimeout(resolve, 1);
+    });
+  }
+
+  expect(condition(), what).toBe(true);
+};
+
 /** A participant `server` over `broker` whose server transport serves `interop`, started. */
 const servingOf = async (broker: IMemoryBroker) => {
   const participant = createBrokerParticipant({ adapter: broker.adapter({ id: 'server' }) });
@@ -100,6 +112,30 @@ const tapping = () => {
   };
 
   return { options, tapped };
+};
+
+/**
+ * An adapter whose every start, once `holding.isHolding`, waits for the test to release it, its
+ * signal unheard, as a CONNACK that comes after its participant's stop went.
+ */
+const heldOf = (adapter: IBrokerAdapter) => {
+  const releases: (() => void)[] = [];
+  const holding = { isHolding: false };
+  const held = Object.assign(Object.create(adapter) as IBrokerAdapter, {
+    start: (options?: Parameters<IBrokerAdapter['start']>[0]) => {
+      if (!holding.isHolding) {
+        return adapter.start(options);
+      }
+
+      return new Promise<void>((resolve, reject) => {
+        releases.push(() => {
+          adapter.start(options).then(resolve, reject);
+        });
+      });
+    },
+  });
+
+  return { held, holding, releases };
 };
 
 // definition
@@ -713,5 +749,89 @@ test.describe('createBrokerTransportClient', () => {
 
     await server.stop();
     await participant.stop();
+  });
+
+  // spec 15.15, 15.21
+  test('ends its reconnection as its participant stops, in a wait or in an attempt, no wait told after it', async () => {
+    // in a wait: on the test's clock, its first attempt refused, nothing serving the name
+    const clock = createTestClock();
+    const broker = createMemoryBroker({ clock });
+    const serving = await servingOf(broker);
+    const ada = createBrokerParticipant({ adapter: broker.adapter({ id: 'ada' }), clock });
+    const client = ada.transportClient();
+
+    await client.connect({ server: 'interop' });
+    await serving.server.stop();
+    await until(() => {
+      return client.isClosed();
+    }, 'closed as its server stops');
+
+    const waiting = tapping();
+    const reconnecting = client.reconnect(waiting.options).catch((reason: unknown) => {
+      return reason;
+    });
+
+    await until(() => {
+      return waiting.tapped.length === 1;
+    }, 'its first wait told');
+
+    const before = clock.now;
+
+    await ada.stop();
+
+    // * ended at once, cancelled, its wait not waited out
+    const ended = await reconnecting;
+
+    expect(ended, 'cancelled').toBeInstanceOf(CancelError);
+    expect(ended).toMatchObject({ message: 'the reconnection was cancelled' });
+    expect(clock.now, 'the clock not moved').toBe(before);
+    expect(waiting.tapped, 'no wait told after its stop').toEqual([60_000]);
+    expect([client.isClosed(), ada.isLinked], 'closed, not linked').toEqual([true, false]);
+    await serving.participant.stop();
+
+    // in an attempt: its link's start held as it connects again, its participant's own
+    // reconnection off
+    const other = createMemoryBroker();
+    const otherServing = await servingOf(other);
+    const bob = other.adapter({ id: 'bob' });
+    const holding = heldOf(bob);
+    const participant = createBrokerParticipant({ adapter: holding.held, reconnects: false });
+    const attempting = participant.transportClient();
+
+    participant.on('error', noop);
+    await attempting.connect({ server: 'interop' });
+    bob.lose();
+    await until(() => {
+      return attempting.isClosed();
+    }, 'closed as its link goes down');
+
+    holding.holding.isHolding = true;
+
+    const attempt = tapping();
+    const held = attempting.reconnect(attempt.options).catch((reason: unknown) => {
+      return reason;
+    });
+
+    await until(() => {
+      return holding.releases.length === 1;
+    }, 'the link of its attempt held');
+
+    const stopping = participant.stop();
+
+    // * its attempt fails, and its reconnection ends, cancelled, no wait told after its stop
+    const failed = await held;
+
+    expect(failed, 'cancelled').toBeInstanceOf(CancelError);
+    expect(failed).toMatchObject({ message: 'the reconnection was cancelled' });
+    holding.releases.shift()?.();
+    await stopping;
+    await turn();
+    expect(attempt.tapped, 'no wait told').toEqual([]);
+    expect(
+      [attempting.isClosed(), participant.isLinked, bob.isLinked],
+      'closed, neither linked'
+    ).toEqual([true, false, false]);
+    await otherServing.server.stop();
+    await otherServing.participant.stop();
   });
 });

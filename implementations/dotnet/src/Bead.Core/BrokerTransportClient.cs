@@ -383,7 +383,9 @@ public sealed class BrokerTransportClient : IRouterClientTransport, IAsyncDispos
     /// those, an <see cref="ObjectDisposedException"/>, no reconnect raised (spec 15.21); a fixed
     /// delay out of bounds is an <see cref="ArgumentOutOfRangeException"/> as it is called, after
     /// those and before the token; a misuse, such a delay or a token cancelled already leaves the
-    /// state as it was.
+    /// state as it was. A reconnection under way ends as its participant stops, at once in a wait
+    /// or once its attempt under way failed, no wait told after it, an
+    /// <see cref="OperationCanceledException"/> as any cancel (spec 15.15).
     /// </summary>
     public async Task Reconnect(TransportClientReconnectOptions? options = null)
     {
@@ -432,6 +434,9 @@ public sealed class BrokerTransportClient : IRouterClientTransport, IAsyncDispos
             starting = _reconnect;
         }
 
+        // * its own token joined to its participant's stop: a stop ends it as a cancel does (spec 15.15)
+        using var reconnecting = CancellationTokenSource.CreateLinkedTokenSource(token, _participant.Stopping);
+
         try
         {
             try
@@ -450,13 +455,24 @@ public sealed class BrokerTransportClient : IRouterClientTransport, IAsyncDispos
             }
 
             await TransportReconnection.Attempting(
-                (token) =>
+                async (attempting) =>
                 {
-                    return Connecting(target, (token, true));
-                },
-                (reconnect, _participant.Clock));
+                    try
+                    {
+                        await Connecting(target, (attempting, true));
+                    }
+                    catch (Exception) when (_participant.IsStopped)
+                    {
+                        // ! its stop marked before its token is cancelled: cancelled here, so no
+                        // wait is told after it
+                        await reconnecting.CancelAsync();
 
-            if (token.IsCancellationRequested)
+                        throw;
+                    }
+                },
+                (reconnect with { CancellationToken = reconnecting.Token }, _participant.Clock));
+
+            if (reconnecting.IsCancellationRequested)
             {
                 try
                 {
@@ -467,7 +483,7 @@ public sealed class BrokerTransportClient : IRouterClientTransport, IAsyncDispos
                     // closed meanwhile: there is nothing left to close
                 }
 
-                throw new OperationCanceledException(TransportReconnection.Cancelled, token);
+                throw new OperationCanceledException(TransportReconnection.Cancelled, reconnecting.Token);
             }
         }
         catch

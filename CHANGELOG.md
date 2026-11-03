@@ -226,6 +226,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   no wait told after it; a stop called again settles with the first. On the TypeScript side such a
   start succeeded and the participant called itself linked after its stop; on every side its
   adapter stayed linked and its inbox subscribed (spec 15.21; debugging 13.5).
+- A client's reconnection over a broker participant ends as the participant stops, cancelled, at
+  once in a wait or once its attempt under way failed, no wait told after it, where it spent all its
+  attempts on both sides (spec 15.21).
 
 ### Security
 

@@ -108,7 +108,8 @@ public sealed class BrokerParticipant : IAsyncDisposable
     private CancellationTokenSource? _relinking;
     private TaskCompletionSource _live = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private bool _isStopped;
-    // what its stop cancels: its adapter's start under way gives up on it; cancelled, never disposed
+    // what its stop cancels: its adapter's start under way gives up on it, and a client's reconnection
+    // under way ends; cancelled, never disposed
     private readonly CancellationTokenSource _stopping = new();
     // its adapter's start under way, which its stop awaits before it stops its adapter; touched in its turn alone
     private Task? _adapterStart;
@@ -1236,6 +1237,15 @@ public sealed class BrokerParticipant : IAsyncDisposable
             {
                 return _isStopped;
             }
+        }
+    }
+
+    /// <summary>What its stop cancels: a client's reconnection under way ends as it does (spec 15.15, 15.21).</summary>
+    internal CancellationToken Stopping
+    {
+        get
+        {
+            return _stopping.Token;
         }
     }
 
