@@ -843,10 +843,11 @@ jobs:
   # ── Commits ──────────────────────────────────────────────────────────────────
   # Every commit subject the push or the pull request brings is a Conventional Commit; merges are
   # left out, git-flow writes them. Then every relative link of the repository's Markdown, and its
-  # anchor, resolves; every version agrees with itself, and a release moves each as its changes owe;
-  # the root's tools pass their own tests: here, since the job runs once, on the Node it already
-  # has; and the supply chain holds: every action pinned by its commit, no dependency under a known
-  # advisory, no code under a blocking rule of Semgrep's. `fetch-depth: 0` brings the whole history and every tag, which the subjects' range and each
+  # anchor, resolves; the page site/ builds is the one committed; every version agrees with itself,
+  # and a release moves each as its changes owe; the root's tools pass their own tests: here, since
+  # the job runs once, on the Node it already has; and the supply chain holds: every action pinned
+  # by its commit, no dependency under a known advisory, no code under a blocking rule of Semgrep's.
+  # `fetch-depth: 0` brings the whole history and every tag, which the subjects' range and each
   # version's last release are read from: a clone without its tags fails the versions' floors.
   commits:
     name: Commits
@@ -883,6 +884,11 @@ jobs:
         run: node tools/check-links.mjs
       - name: Check the details
         run: node tools/check-details.mjs
+      # The page francisdesjardins.ca serves at /bead/ is what its build writes from site/, byte for
+      # byte, and each diagram's SVG its source's render, by the hash it records: no browser, nothing
+      # installed.
+      - name: Check the page
+        run: node site/check.mjs
       # Each side's public names, read from its committed surface list, are one on every side or a
       # row of tools/names.tsv says how they render, why one is a side's own, or which row of the
       # support matrix's Differences holds it; the names no reading placed only fall (decision 0004).
@@ -913,7 +919,7 @@ jobs:
             echo "::error title=actions::an action above is not pinned by a commit's full sha"
             exit 1
           fi
-      # Every dependency of every lockfile, the five yarn.lock, the C# side's packages.lock.json,
+      # Every dependency of every lockfile, the six yarn.lock, the C# side's packages.lock.json,
       # the Rust side's Cargo.lock and the spec's requirements.txt, against the advisories OSV
       # knows, the scanner at its digest. A known vulnerability fails the job.
       - name: The dependencies, against the known advisories
