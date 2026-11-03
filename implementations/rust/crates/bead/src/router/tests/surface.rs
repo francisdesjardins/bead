@@ -110,3 +110,14 @@ fn exposes_the_runtime_types_its_options_name_and_owns_a_draws_error() {
     consumer.accepts("pub fn check(runtime: Option<bead::Handle>, signal: Option<bead::CancellationToken>) { let mut clock = bead::SystemClockOptions::default(); clock.runtime = runtime; let mut request = bead::RequestOptions::default(); request.signal = signal; }");
     consumer.accepts("pub fn check() -> Result<bead::SessionToken, bead::SessionTokenDrawError> { bead::SessionToken::draw(|_| false) }");
 }
+#[test]
+fn seals_an_answerer_types_a_listed_code_and_exposes_each_refusal_as_an_error() {
+    let consumer = Consumer::new();
+
+    consumer.accepts("fn error<E: std::error::Error>() {} pub fn check() { error::<bead::DurationRefusal>(); error::<bead::IdentityRefusal>(); error::<bead::FilterRefusal>(); error::<bead::JwtRefusal>(); let _failure = bead::ListedFailure::new(\"CODE\", core::num::NonZeroU16::MIN); }");
+    consumer.refuses(
+        "pub fn check() { let _failure = bead::ListedFailure::new(\"CODE\", 0); }",
+        ("E0308", "mismatched types"),
+    );
+    consumer.refuses("pub struct Outside; impl bead::Answerer for Outside { fn respond(&self, _: bead::RouterAnswer) -> bead::BoxFuture<Result<(), bead::CallError>> { Box::pin(async { Ok(()) }) } fn answered(&self) -> bead::BoxFuture<Option<bead::FailureRecord>> { Box::pin(async { None }) } fn subscribe(&self) -> bead::BoxFuture<Result<u32, bead::CallError>> { Box::pin(async { Ok(1) }) } }", ("E0277", "sealed::Answerer"));
+}

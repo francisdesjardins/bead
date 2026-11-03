@@ -243,3 +243,5 @@ pub(crate) fn hold_delay(name: &str, duration: Duration) -> Result<Duration, Pro
 
     held_of(duration).map_err(|reason| refusal_of(name, (duration, (reason, offered))))
 }
+
+impl std::error::Error for DurationRefusal {}

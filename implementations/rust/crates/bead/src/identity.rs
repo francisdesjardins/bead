@@ -247,3 +247,5 @@ pub(crate) fn check_procedure_kind(
         ),
     ))
 }
+
+impl std::error::Error for IdentityRefusal {}

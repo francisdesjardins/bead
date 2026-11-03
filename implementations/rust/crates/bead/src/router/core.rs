@@ -210,8 +210,19 @@ fn locked<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
     mutex.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
+pub(crate) mod sealed {
+    /// The answerer's seal: only this crate supplies one.
+    #[expect(
+        unnameable_types,
+        reason = "a sealed trait is public only as an unnameable supertrait"
+    )]
+    pub trait Answerer {}
+}
+
 /// What a request's handler answers its call by, from off the router's owner.
-pub trait Answerer: Send + Sync {
+///
+/// Implemented by Bead alone: an answer always goes through its owning router.
+pub trait Answerer: sealed::Answerer + Send + Sync {
     /// Answers the call; settles once the answer went, or as it could not.
     ///
     /// # Errors
@@ -1715,6 +1726,8 @@ struct CallAnswerer<S> {
     owner: WeakOwner<S>,
     dispatch: Arc<Dispatch>,
 }
+
+impl<S: Side> sealed::Answerer for CallAnswerer<S> {}
 
 impl<S: Side> Answerer for CallAnswerer<S> {
     fn respond(&self, answer: RouterAnswer) -> BoxFuture<Result<(), CallError>> {

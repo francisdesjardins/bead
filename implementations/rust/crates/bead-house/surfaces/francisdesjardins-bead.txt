@@ -710,7 +710,7 @@ crate::debug
     NamesNothing
     HoldsAParenthesis
     fn as_str(self) -> &'static str
-    implements Display
+    implements Display, Error
     derives Clone, Copy, Debug, Eq, Hash, PartialEq
   fn parse_debug_filter(spec: &str) -> Result<DebugFilter, ProgrammerError>
   struct CallAsked<'name>
@@ -793,7 +793,7 @@ crate::duration
     NeverRefused
     NotANumber
     fn as_str(self) -> &'static str
-    implements Display
+    implements Display, Error
     derives Clone, Copy, Debug, Eq, Hash, PartialEq
   fn hold(name: &str, duration: Duration) -> Result<Duration, ProgrammerError>
   fn hold_finite(name: &str, duration: Duration) -> Result<Duration, ProgrammerError>
@@ -1000,7 +1000,7 @@ crate::identity
     OffItsForm
     AgainstItsKind
     fn as_str(self) -> &'static str
-    implements Display
+    implements Display, Error
     derives Clone, Copy, Debug, Eq, Hash, PartialEq
   enum DeclarationWay #[non_exhaustive]
     ClientResolver
@@ -1090,7 +1090,7 @@ crate::jwt_verifier
     Sid
     Sub
     fn as_str(self) -> &'static str
-    implements Display
+    implements Display, Error
     derives Clone, Copy, Debug, Eq, Hash, PartialEq
   enum JwtSessionIdentifier #[non_exhaustive]
     Sid { issuer: String, sid: String }
@@ -1493,7 +1493,7 @@ crate::router::core
     fn new(failure: Failure) -> Self
     derives Clone, Debug
   type AdmitFn = Arc<dyn Fn(&AdmissionRequest) -> Result<Option<AdmissionRefusal>, ResolverError> + Send + Sync>
-  trait Answerer: Send + Sync
+  trait Answerer: sealed::Answerer + Send + Sync
     fn respond(&self, answer: RouterAnswer) -> BoxFuture<Result<(), CallError>>
     fn answered(&self) -> BoxFuture<Option<FailureRecord>>
     fn subscribe(&self) -> BoxFuture<Result<u32, CallError>>
@@ -1507,6 +1507,8 @@ crate::router::core
     pub answerer: Arc<dyn Answerer>
     implements Debug
     derives Clone
+crate::router::core::sealed
+  trait Answerer
 crate::router::relay
   struct RelayOptions #[non_exhaustive]
     pub before_route: Option<BeforeRequest>
@@ -1827,7 +1829,7 @@ crate::server
     derives Clone
 crate::service
   struct ListedFailure
-    const fn new(name: &'static str, code: u16) -> Self
+    const fn new(name: &'static str, code: NonZeroU16) -> Self
     const fn name(&self) -> &'static str
     const fn code(&self) -> u16
     fn of(&self, detail: &str) -> Failure

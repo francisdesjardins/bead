@@ -555,3 +555,5 @@ impl FilterKeeper {
         self.now().keeps_envelope(asked)
     }
 }
+
+impl std::error::Error for FilterRefusal {}

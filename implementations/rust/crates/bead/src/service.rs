@@ -31,13 +31,13 @@ mod tests;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ListedFailure {
     name: &'static str,
-    code: u16,
+    code: NonZeroU16,
 }
 
 impl ListedFailure {
     /// The failure `name`, of `code`.
     #[must_use]
-    pub const fn new(name: &'static str, code: u16) -> Self {
+    pub const fn new(name: &'static str, code: NonZeroU16) -> Self {
         Self { name, code }
     }
 
@@ -50,16 +50,13 @@ impl ListedFailure {
     /// Its code.
     #[must_use]
     pub const fn code(&self) -> u16 {
-        self.code
+        self.code.get()
     }
 
     /// The failure a resolver answers, saying `detail`.
     #[must_use]
     pub fn of(&self, detail: &str) -> Failure {
-        NonZeroU16::new(self.code).map_or_else(
-            || Failure::protocol(ProtocolCode::PROCEDURE_FAILED, RouterSide::Server),
-            |code| Failure::application(code, detail),
-        )
+        Failure::application(self.code, detail)
     }
 }
 
@@ -74,7 +71,7 @@ pub struct FailureCatalogue {
 ///
 /// # Errors
 ///
-/// A [`ProgrammerError`] for a service's id of 0, a code of 0, or two failures of one code.
+/// A [`ProgrammerError`] for a service's id of 0, or two failures of one code.
 pub fn failures_of(
     service_id: u16,
     failures: &[ListedFailure],
@@ -88,14 +85,7 @@ pub fn failures_of(
     let mut named: BTreeMap<u16, &'static str> = BTreeMap::new();
 
     for failure in failures {
-        if failure.code == 0 {
-            return Err(ProgrammerError::new(format!(
-                "a failure's code is a whole number from 1 to 65535, not 0 for {}",
-                failure.name
-            )));
-        }
-
-        if let Some(other) = named.insert(failure.code, failure.name) {
+        if let Some(other) = named.insert(failure.code.get(), failure.name) {
             return Err(ProgrammerError::new(format!(
                 "{} and {other} are both failure {}",
                 failure.name, failure.code
@@ -127,7 +117,7 @@ impl FailureCatalogue {
     pub fn is(&self, error: &CallError, listed: &ListedFailure) -> bool {
         matches!(error, CallError::Failure(failure)
             if failure.is_application()
-                && failure.code().get() == listed.code
+                && failure.code() == listed.code
                 && failure.procedure().is_some_and(|address| address.service_id == self.service_id))
     }
 }

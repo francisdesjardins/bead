@@ -92,6 +92,8 @@ impl Recording {
     }
 }
 
+impl crate::router::core::sealed::Answerer for Recording {}
+
 impl Answerer for Recording {
     fn respond(&self, answer: RouterAnswer) -> BoxFuture<Result<(), CallError>> {
         locked(&self.attempts).push(answer.clone());

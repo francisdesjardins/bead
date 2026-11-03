@@ -373,6 +373,8 @@ impl RelayRouter for Target {
 #[derive(Debug, Default)]
 struct Answers(Mutex<Vec<RouterAnswer>>);
 
+impl crate::router::core::sealed::Answerer for Answers {}
+
 impl Answerer for Answers {
     fn respond(&self, answer: RouterAnswer) -> BoxFuture<Result<(), CallError>> {
         locked(&self.0).push(answer);
@@ -1312,6 +1314,8 @@ struct Fallback {
     attempts: Mutex<Vec<RouterAnswer>>,
     outcome: Mutex<Option<oneshot::Receiver<Result<(), CallError>>>>,
 }
+
+impl crate::router::core::sealed::Answerer for Fallback {}
 
 impl Answerer for Fallback {
     fn respond(&self, answer: RouterAnswer) -> BoxFuture<Result<(), CallError>> {
