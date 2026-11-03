@@ -206,7 +206,7 @@ pub fn interop_verifier_of(clock: &SharedClock) -> ElsewhereVerifier {
                     let session = ElsewhereSession {
                         id: sub.clone(),
                         data: Some(serde_json::json!({ "sub": sub })),
-                        end: end.and_then(|end| i64::try_from(end).ok()),
+                        end: end.and_then(|end| Value::from(end).as_f64()),
                     };
                     let held = after_on(&clock, (after, session));
 

@@ -234,7 +234,7 @@ fn credentials_for(situation: &str) -> Credentials {
                         _ => Some(ElsewhereSession {
                             id: "ada".to_owned(),
                             data: None,
-                            end: (carried == "ended").then_some(1_767_225_600_000),
+                            end: (carried == "ended").then_some(1_767_225_600_000.0),
                         }),
                     })
                 })

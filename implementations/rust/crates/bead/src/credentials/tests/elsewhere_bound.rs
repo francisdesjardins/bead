@@ -11,13 +11,16 @@ use crate::testing::surface::Consumer;
 
 #[tokio::test]
 async fn fails_a_session_whose_end_is_not_a_number_within_2_53_and_one_whose_id_is_no_string() {
-    for end in [
-        9_007_199_254_740_992_i64,
-        -9_007_199_254_740_992,
-        i64::MAX,
-        i64::MIN,
-        9_007_199_254_740_991,
-        -9_007_199_254_740_991,
+    for (end, whole) in [
+        (9_007_199_254_740_992.0, None),
+        (-9_007_199_254_740_992.0, None),
+        (f64::MAX, None),
+        (f64::MIN, None),
+        (f64::NAN, None),
+        (f64::INFINITY, None),
+        (f64::NEG_INFINITY, None),
+        (9_007_199_254_740_991.0, Some(9_007_199_254_740_991_i64)),
+        (-9_007_199_254_740_991.0, Some(-9_007_199_254_740_991)),
     ] {
         let (_clock, resolver) = super::resolver_of(&Credentials {
             verify: Some(Arc::new(move |_, _| {
@@ -41,9 +44,9 @@ async fn fails_a_session_whose_end_is_not_a_number_within_2_53_and_one_whose_id_
                 CancellationToken::new(),
             ))
             .await;
-        if end == 9_007_199_254_740_991 {
-            assert!(matches!(outcome, Ok(Resolved::Session(session)) if session.end == Some(end)));
-        } else if end == -9_007_199_254_740_991 {
+        if whole == Some(9_007_199_254_740_991) {
+            assert!(matches!(outcome, Ok(Resolved::Session(session)) if session.end == whole));
+        } else if whole == Some(-9_007_199_254_740_991) {
             assert!(matches!(outcome, Ok(Resolved::Refused(reason)) if reason == "end"));
         } else {
             let Err(Unresolved::Other(error)) = outcome else {
@@ -61,7 +64,7 @@ async fn fails_a_session_whose_end_is_not_a_number_within_2_53_and_one_whose_id_
         }
     }
     let consumer = Consumer::new();
-    consumer.accepts("pub fn check() { let _ = bead::ElsewhereSession { id: String::from(\"ada\"), data: None, end: Some(1) }; }");
+    consumer.accepts("pub fn check() { let _ = bead::ElsewhereSession { id: String::from(\"ada\"), data: None, end: Some(1.0) }; }");
     consumer.refuses(
         "pub fn check(mut session: bead::ElsewhereSession) { session.id = 7; }",
         ("E0308", "mismatched types"),
@@ -70,7 +73,7 @@ async fn fails_a_session_whose_end_is_not_a_number_within_2_53_and_one_whose_id_
         "pub fn check() { let _: bead::ElsewhereSession = \"ada\"; }",
         ("E0308", "mismatched types"),
     );
-    for invalid in ["f64::NAN", "f64::INFINITY", "f64::NEG_INFINITY", "\"1\""] {
+    for invalid in ["true", "()", "\"1\""] {
         consumer.refuses(&format!("pub fn check(mut session: bead::ElsewhereSession) {{ session.end = Some({invalid}); }}"), ("E0308", "mismatched types"));
     }
 }
