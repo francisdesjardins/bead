@@ -57,7 +57,7 @@ pub(super) async fn until<F: Fn() -> bool>(holds: F, what: &str) {
 /// one.
 pub(super) async fn settle() {
     for _ in 0..20 {
-        tokio::task::yield_now().await;
+        crate::testing::yield_now().await;
     }
 
     crate::testing::rest(Duration::from_millis(20)).await;

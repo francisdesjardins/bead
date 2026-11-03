@@ -190,13 +190,13 @@ impl TracePair {
 async fn settle(clock: &SteppingClock, server_clock: &SteppingClock) {
     // * the server's owner has its own clock: settle across both owners and the broker
     for _ in 0..50 {
-        tokio::task::yield_now().await;
+        crate::testing::yield_now().await;
     }
     clock.settle().await;
     server_clock.settle().await;
     clock.settle().await;
     for _ in 0..50 {
-        tokio::task::yield_now().await;
+        crate::testing::yield_now().await;
     }
 }
 

@@ -447,7 +447,7 @@ fn failing(waits: bool) -> ResolveFn {
     Arc::new(move |_props: RequestResolverProps| {
         Box::pin(async move {
             if waits {
-                tokio::task::yield_now().await;
+                crate::testing::yield_now().await;
 
                 return Err(crate::errors::ResolverError::other(std::io::Error::other(
                     "rejected",
