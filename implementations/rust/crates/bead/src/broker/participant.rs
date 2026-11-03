@@ -651,9 +651,14 @@ impl Config {
     }
 
     // a link its stop met as it connected: a failure of that link's, never a misuse, which a call
-    // made once stopped is
-    fn stopped_as_it_started(&self) -> BrokerError {
-        BrokerError::failed(format!("the participant {} stopped as it started", self.id))
+    // made once stopped is; what its adapter failed with as it stopped, its source
+    fn stopped_as_it_started(&self, source: Option<BrokerError>) -> BrokerError {
+        let message = format!("the participant {} stopped as it started", self.id);
+
+        match source {
+            Some(source) => BrokerError::caused(message, Arc::new(source)),
+            None => BrokerError::failed(message),
+        }
     }
 
     /// A connect its stop met before it reached its link: a failure of that connect's, never the
@@ -690,7 +695,7 @@ impl<'config> UnderWay<'config> {
         let status = locked(&config.status);
 
         if status.is_stopped {
-            return Err(config.stopped_as_it_started());
+            return Err(config.stopped_as_it_started(None));
         }
 
         // ! the count under the status lock, the watch's own lock after it and never before it
@@ -1899,12 +1904,19 @@ impl ParticipantState {
     }
 }
 
-/// What a link's failure fails a connect with, hoisted, never nested: a failure's message, or a
-/// misuse's words and the misuse its source, so that its kind is found.
+/// What a link's failure fails a connect with, hoisted, never nested: a failure's message and its
+/// source, or a misuse's words and the misuse its source, so that its kind is found.
 pub(crate) fn connect_error_of(error: BrokerError) -> ConnectError {
     match error {
         BrokerError::Refused(misuse) => ConnectError::caused(misuse.to_string(), Arc::new(misuse)),
-        BrokerError::Failed(message) => ConnectError::new(message),
+        BrokerError::Failed {
+            message,
+            source: Some(source),
+        } => ConnectError::caused(message, source),
+        BrokerError::Failed {
+            message,
+            source: None,
+        } => ConnectError::new(message),
     }
 }
 
@@ -2057,9 +2069,9 @@ async fn link(inner: &Arc<ParticipantInner>) -> Result<(), BrokerError> {
     drop(under_way);
 
     // ! stopped as it started: its inbox never subscribed, and its stop ends what that start
-    // brought up
+    // brought up; what its start failed with, its source
     if config.is_stopped() {
-        return Err(config.stopped_as_it_started());
+        return Err(config.stopped_as_it_started(started.err()));
     }
 
     started?;
@@ -2070,7 +2082,7 @@ async fn link(inner: &Arc<ParticipantInner>) -> Result<(), BrokerError> {
         .await;
 
     if config.is_stopped() {
-        return Err(config.stopped_as_it_started());
+        return Err(config.stopped_as_it_started(subscribed.err()));
     }
 
     subscribed?;
@@ -2102,7 +2114,7 @@ async fn link(inner: &Arc<ParticipantInner>) -> Result<(), BrokerError> {
 
             // * never up once its stop is marked: its stop tells none after its stopped
             if is_stopped {
-                return Err(state.config.stopped_as_it_started());
+                return Err(state.config.stopped_as_it_started(None));
             }
 
             if is_down {
@@ -2515,7 +2527,7 @@ impl BrokerParticipant {
     ///
     /// A [`BrokerError::Refused`] once stopped, refused before anything moves: a stopped
     /// participant links no more (spec 15.21). A [`BrokerError::Failed`] for a link that failed,
-    /// its stop met as it started among them.
+    /// what failed it its source where it knows, its stop met as it started among them.
     pub fn start(&self) -> BoxFuture<Result<(), BrokerError>> {
         let starting = {
             let config = &self.inner.config;
@@ -2590,11 +2602,20 @@ impl BrokerParticipant {
         let waiting = async move {
             started.await.map_err(|error| {
                 // ! its stop met as it linked, the stop's own refusal racing this check among it:
-                // stopped as it connected, and the stop's misuse never carried as a link's failure
+                // stopped as it connected, hoisted, what its adapter failed with its source, and
+                // the stop's misuse never carried as a link's failure
                 if stopped.is_stopped() {
-                    return TransportError::Connect(ConnectError::new(
-                        stopped.stopped_as_it_connected(),
-                    ));
+                    let message = stopped.stopped_as_it_connected();
+
+                    return TransportError::Connect(match error {
+                        BrokerError::Failed {
+                            source: Some(source),
+                            ..
+                        } => ConnectError::caused(message, source),
+                        BrokerError::Failed { .. } | BrokerError::Refused(_) => {
+                            ConnectError::new(message)
+                        }
+                    });
                 }
 
                 TransportError::Connect(connect_error_of(error))

@@ -240,7 +240,7 @@ fn locked(inner: &Inner) -> MutexGuard<'_, KeySetState> {
 fn failure_of(message: String) -> Unresolved {
     Unresolved::Other(Arc::new(KeySetError {
         message,
-        cause: None,
+        source: None,
     }))
 }
 
@@ -248,7 +248,7 @@ fn failure_of(message: String) -> Unresolved {
 #[derive(Debug, Clone)]
 struct KeySetError {
     message: String,
-    cause: Option<Arc<dyn Error + Send + Sync>>,
+    source: Option<Arc<dyn Error + Send + Sync>>,
 }
 
 impl fmt::Display for KeySetError {
@@ -259,16 +259,16 @@ impl fmt::Display for KeySetError {
 
 impl Error for KeySetError {
     fn source(&self) -> Option<&(dyn Error + 'static)> {
-        self.cause
+        self.source
             .as_ref()
-            .map(|cause| -> &(dyn Error + 'static) { cause.as_ref() })
+            .map(|source| -> &(dyn Error + 'static) { source.as_ref() })
     }
 }
 
-fn ask_failed(issuer: &str, cause: Arc<dyn Error + Send + Sync>) -> Unresolved {
+fn ask_failed(issuer: &str, source: Arc<dyn Error + Send + Sync>) -> Unresolved {
     Unresolved::Other(Arc::new(KeySetError {
         message: format!("the key set's ask for {issuer} failed"),
-        cause: Some(cause),
+        source: Some(source),
     }))
 }
 

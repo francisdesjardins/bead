@@ -7,7 +7,8 @@ namespace Bead.Tests;
 /// what it publishes to a topic bounded by <see cref="Room"/> when given; its leg secure as
 /// <see cref="Secure"/> says when given; each start after its first <see cref="Starts"/> refused as
 /// it returns when given; its first <see cref="Refuses"/> starts refused as a misuse, as an adapter
-/// whose link is up already refuses one, when given; and each start after its first
+/// whose link is up already refuses one, when given; each start waiting for its stop's token, then
+/// failing, where <see cref="GivesUp"/> says so; and each start after its first
 /// <see cref="HoldsStart"/> held, heeding no token, until the test releases it, when given.
 /// </summary>
 internal sealed class CallingAdapter(MemoryBrokerAdapter inner) : IBrokerAdapter
@@ -22,6 +23,8 @@ internal sealed class CallingAdapter(MemoryBrokerAdapter inner) : IBrokerAdapter
     public int? Starts { get; init; }
 
     public int? Refuses { get; init; }
+
+    public bool GivesUp { get; init; }
 
     public int? HoldsStart { get; init; }
 
@@ -127,6 +130,11 @@ internal sealed class CallingAdapter(MemoryBrokerAdapter inner) : IBrokerAdapter
             return Task.FromException(new InvalidOperationException($"the link of {Id} is up already"));
         }
 
+        if (GivesUp)
+        {
+            return GivingUp(start);
+        }
+
         if (HoldsStart is { } holds && started > holds)
         {
             return Held(start);
@@ -139,6 +147,16 @@ internal sealed class CallingAdapter(MemoryBrokerAdapter inner) : IBrokerAdapter
     public bool Release()
     {
         return _held.TryDequeue(out var release) && release.TrySetResult();
+    }
+
+    // * it waits for its stop's token, then fails, saying so
+    private static async Task GivingUp(BrokerStart? start)
+    {
+        var stopping = start?.CancellationToken ?? CancellationToken.None;
+
+        await Task.Delay(Timeout.InfiniteTimeSpan, stopping).ConfigureAwait(ConfigureAwaitOptions.SuppressThrowing);
+
+        throw new IOException("the adapter gave up its start");
     }
 
     // * held as it is asked, its token unheard: it goes on once the test releases it

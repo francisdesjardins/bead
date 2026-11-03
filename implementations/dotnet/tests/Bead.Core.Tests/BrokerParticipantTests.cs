@@ -629,6 +629,34 @@ public sealed class BrokerParticipantTests
         })).Message);
     }
 
+    // spec 15.21
+    [Fact]
+    public async Task Fails_a_start_its_stop_overtakes_what_its_adapter_s_start_failed_with_as_its_cause()
+    {
+        var broker = new MemoryBroker();
+        var giving = new CallingAdapter(broker.Adapter(new MemoryBrokerAdapterOptions { Id = "ada" })) { GivesUp = true };
+        var participant = new BrokerParticipant(giving);
+        var starting = participant.Start();
+
+        await BrokerPair.Until(
+            () =>
+            {
+                return giving.Calls.SequenceEqual(["start"]);
+            },
+            "its start asked");
+        await participant.Stop().WaitAsync(BrokerPair.Patience, Cancelled);
+
+        // * its start fails as a link fails, its adapter's failure its cause, by its words
+        var failed = await Assert.ThrowsAsync<IOException>(() =>
+        {
+            return starting.WaitAsync(BrokerPair.Patience, Cancelled);
+        });
+
+        Assert.Equal("the participant ada stopped as it started", failed.Message);
+        Assert.Equal("the adapter gave up its start", failed.InnerException?.Message);
+        Assert.Equal(["start", "stop"], giving.Calls);
+    }
+
     [Fact]
     public async Task Closes_a_connection_with_1002_for_a_parcel_of_a_layout_to_come_an_ACCEPT_on_it_open_or_another_kind_between_an_envelope_s_parts_and_with_4000_at_a_gap_a_kind_to_come_leaves()
     {

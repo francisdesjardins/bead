@@ -1227,6 +1227,49 @@ test.describe('broker participant', () => {
     await expect(refused, "the stop's words").rejects.toThrow('the participant cat is stopped');
   });
 
+  test('fails a start its stop overtakes, what its adapter’s start failed with as its cause', async () => {
+    const broker = createMemoryBroker();
+    const calls: string[] = [];
+    const ada = broker.adapter({ id: 'ada' });
+    // an adapter whose start waits for its stop's signal, then gives up
+    const giving = Object.assign(Object.create(ada) as IBrokerAdapter, {
+      start: (options?: Parameters<IBrokerAdapter['start']>[0]) => {
+        calls.push('start');
+
+        return new Promise<void>((_resolve, reject) => {
+          options?.signal?.addEventListener('abort', () => {
+            reject(new GenericError('the adapter gave up its start'));
+          });
+        });
+      },
+      stop: () => {
+        calls.push('stop');
+
+        return ada.stop();
+      },
+    });
+    const participant = createBrokerParticipant({ adapter: giving });
+    const starting = participant.start().catch((reason: unknown) => {
+      return reason;
+    });
+
+    await until(() => {
+      return calls.length > 0;
+    }, 'its start asked');
+    await participant.stop();
+
+    // * its start fails as a link fails, its adapter's failure its cause, by its words
+    const failed = await starting;
+
+    expect(failed, "a link's failure").toBeInstanceOf(GenericError);
+    expect(failed, 'not a misuse').not.toBeInstanceOf(ProgrammerError);
+    expect(failed).toMatchObject({
+      cause: { message: 'the adapter gave up its start' },
+      message: 'the participant ada stopped as it started',
+    });
+    expect(calls, 'its adapter stopped once').toEqual(['start', 'stop']);
+  });
+
   test('closes a connection with 1002 for a parcel of a layout to come, an ACCEPT on it open, or another kind between an envelope’s parts, and with 4000 at a gap a kind to come leaves', async () => {
     const opened = { acceptor: HALF, sequence: 2 };
     const part = {

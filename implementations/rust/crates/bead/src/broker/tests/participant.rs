@@ -1190,6 +1190,49 @@ async fn lets_a_listener_go_fails_a_connect_awaiting_its_answer_as_it_stops_refu
     );
 }
 
+// spec 15.21
+#[tokio::test]
+async fn fails_a_start_its_stop_overtakes_what_its_adapter_s_start_failed_with_as_its_cause() {
+    let broker = broker();
+    let giving = Arc::new(Calling {
+        gives_up: true,
+        ..Calling::of(adapter_of(&broker, "ada"))
+    });
+    let adapter: Arc<dyn BrokerAdapter> = Arc::<Calling>::clone(&giving);
+    let participant = BrokerParticipant::new(adapter, &BrokerParticipantOptions::default())
+        .expect("a participant");
+    let starting = crate::testing::spawn(participant.start());
+
+    until(|| giving.calls() == ["start"], "its start asked").await;
+    participant.stop().await;
+
+    // * its start fails as a link fails, its adapter's failure its cause, by its words
+    let failed = starting.await.expect("joined").expect_err("failed");
+
+    assert!(
+        matches!(failed, BrokerError::Failed { .. }),
+        "a link's failure"
+    );
+    assert_eq!(
+        failed.to_string(),
+        "the participant ada stopped as it started",
+        "its words"
+    );
+    assert_eq!(
+        std::error::Error::source(&failed)
+            .and_then(|source| source.downcast_ref::<BrokerError>())
+            .map(ToString::to_string)
+            .as_deref(),
+        Some("the adapter gave up its start"),
+        "its cause"
+    );
+    assert_eq!(
+        giving.calls(),
+        ["start", "stop"],
+        "its adapter stopped once"
+    );
+}
+
 #[tokio::test]
 async fn closes_a_connection_with_1002_for_a_parcel_of_a_layout_to_come_an_accept_on_it_open_or_another_kind_between_an_envelope_s_parts_and_with_4000_at_a_gap_a_kind_to_come_leaves()
  {
