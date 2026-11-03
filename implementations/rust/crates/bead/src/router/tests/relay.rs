@@ -2,7 +2,7 @@
 
 #[tokio::test]
 async fn answers_by_itself_a_call_a_router_hands_it_unasked_as_a_resolver_does() {
-    let (served, relay) = fixture(RelayOptions {
+    let (served, relay) = fixture(&RelayOptions {
         before_route: Some(BeforeRequest::new(
             |request| request.header.call_id != 1,
             None,
@@ -59,14 +59,14 @@ fn draws_a_destination_again_when_0_or_in_use() {
     ));
     let mut relay = Relay::new(
         (RouterSide::Server, crate::router::types::LIMIT_DEFAULTS),
-        admitting(),
+        &admitting(),
     )
     .expect("a relay");
     relay.fills = Some(Arc::clone(&fills));
     let target = Target::plain();
     register(&relay, (target.as_target(), 5));
     assert_eq!(fills.remaining(), 3, "an explicit id draws nothing");
-    let drawn = relay::register(&relay, (target.as_target(), DestinationOptions::default()))
+    let drawn = relay::register(&relay, (target.as_target(), &DestinationOptions::default()))
         .expect("a drawn destination");
     assert_eq!(drawn.destination_id(), 263);
     assert_eq!(fills.remaining(), 0);

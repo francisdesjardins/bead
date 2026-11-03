@@ -125,7 +125,7 @@ async fn raises_deprecated_before_the_call_s_tx_step() {
         .get_request(&procedure, RequestDependencies::of(JsonCodec, JsonCodec))
         .expect("echo requested");
     let call = request
-        .call(json!({ "text": "a" }), RequestOptions::default())
+        .call(json!({ "text": "a" }), &RequestOptions::default())
         .expect("a call");
     pair.settle().await;
     assert_eq!(call.await.expect("an answer"), json!({ "text": "a" }));

@@ -192,16 +192,16 @@ async fn makes_each_command_s_requester_once_as_it_is_offered_and_refuses_one_ca
     let registry =
         crate::metrics::MetricsRegistry::new(&crate::metrics::MetricsRegistryOptions::default())
             .expect("a registry");
-    let pair = Pair::connected((
+    let pair = Pair::connected(
         crate::testing::instants::new_year(),
-        PairOptions {
-            server: crate::server::ServerOptions {
+        &PairOptions {
+            server: Some(crate::server::ServerOptions {
                 metrics_registry: Some(registry),
                 ..crate::server::ServerOptions::default()
-            },
+            }),
             ..PairOptions::default()
         },
-    ))
+    )
     .await
     .expect("a pair with metrics");
     let greeter = Greeter::new();
@@ -265,7 +265,7 @@ async fn makes_each_command_s_requester_once_as_it_is_offered_and_refuses_one_ca
         let call = requester
             .call(
                 asked.to_owned(),
-                RequestOptions {
+                &RequestOptions {
                     connection_handle: Some(Arc::clone(&pair.connection_handle)),
                     ..RequestOptions::default()
                 },

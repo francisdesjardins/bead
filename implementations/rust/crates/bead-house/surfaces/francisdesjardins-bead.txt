@@ -221,6 +221,7 @@ crate
   use router::server::RouterServer
   use router::server::RouterServerOptions
   use router::server::ServerRequest
+  use router::server::SessionProvider
   use router::server::SessionTokenProvider
   use router::types::AccessRefusal
   use router::types::AccessRefusalStage
@@ -653,8 +654,8 @@ crate::credentials
   struct ElsewhereSession
     pub id: String
     pub data: Option<Value>
-    pub end: Option<i64>
-    derives Clone, Debug, Eq, PartialEq
+    pub end: Option<f64>
+    derives Clone, Debug, PartialEq
   type ElsewhereVerdict = Result<Option<ElsewhereSession>, Box<dyn Error + Send + Sync>>
   type ElsewhereVerifier = Arc<dyn Fn(String, CancellationToken) -> BoxFuture<ElsewhereVerdict> + Send + Sync>
   struct Credentials #[non_exhaustive]
@@ -1415,6 +1416,7 @@ crate::router::client
     pub credential: Option<RequestCredential>
     pub credentials: Option<Credentials>
     pub limits: Option<RouterLimitsOptions>
+    pub last_call_id: Option<u32>
     pub metrics_registry: Option<MetricsRegistry>
     pub intake: Option<IntakeLimitsOptions>
     implements Debug
@@ -1449,7 +1451,7 @@ crate::router::client
     fn register_notification(&self, notification: Arc<dyn NotificationLike>) -> Result<(), ProgrammerError>
     fn unregister_notification(&self, (notification, cancel): (&Arc<dyn NotificationLike>, bool)) -> BoxFuture<()>
     fn request(&self, payload: Bytes, (request, hooks): (ClientRequest, CallHooks)) -> Result<Call, ProgrammerError>
-    fn gauges(&self) -> BoxFuture<Gauges>
+    fn gauges(&self) -> BoxFuture<Result<Gauges, ProgrammerError>>
     fn dispose(&self) -> BoxFuture<()>
     fn reserve(&self, (call_id, timeout): (u32, Option<Duration>)) -> Result<BoxFuture<()>, ProgrammerError>
     fn cancel(&self, (call_id, timeout): (u32, Option<Duration>)) -> Result<BoxFuture<()>, ProgrammerError>
@@ -1474,6 +1476,7 @@ crate::router::core
     fn answered(&self) -> BoxFuture<Option<FailureRecord>>
     fn subscribe(&self) -> BoxFuture<Result<u32, CallError>>
   struct ResolverProps
+    pub is_admitted: bool
     pub connection_handle: ConnectionHandle
     pub header: RequestHeader
     pub payload: Bytes
@@ -1527,14 +1530,17 @@ crate::router::server
   type RefusalListener = Arc<dyn Fn(&AccessRefusal) + Send + Sync>
   type ActivityListener = Arc<dyn Fn(RouterActivity, &ConnectionHandle) + Send + Sync>
   type SessionTokenProvider = Arc<dyn Fn(&ConnectionHandle) -> Result<Option<SessionToken>, RouterError> + Send + Sync>
+  type SessionProvider = Arc<dyn Fn((&ConnectionHandle, &RequestHeader), &Signal) -> Result<Option<CallSession>, RouterError> + Send + Sync,>
   struct RouterServerOptions #[non_exhaustive]
     pub clock: Option<SharedClock>
     pub runtime: Option<Handle>
     pub limits: Option<RouterLimitsOptions>
+    pub last_call_id: Option<u32>
     pub metrics_registry: Option<MetricsRegistry>
     pub pacing: Option<PacingLimitsOptions>
     pub intake: Option<IntakeLimitsOptions>
     pub credentials: Option<Credentials>
+    pub session_of: Option<SessionProvider>
     pub session_token_of: Option<SessionTokenProvider>
     pub relay: Option<crate::router::relay::RelayOptions>
     implements Debug
@@ -1576,7 +1582,7 @@ crate::router::server
     fn drop_subscriptions(&self, (connection_handle, failure): (ConnectionHandle, Failure)) -> BoxFuture<()>
     fn register_destination(&self, target: crate::router::relay::RelayTarget, options: &crate::router::relay::DestinationOptions) -> Result<crate::router::relay::DestinationRegistration, ProgrammerError>
     fn destinations(&self) -> Vec<crate::router::relay::Destination>
-    fn gauges(&self) -> BoxFuture<Gauges>
+    fn gauges(&self) -> BoxFuture<Result<Gauges, ProgrammerError>>
     fn dispose(&self) -> BoxFuture<()>
     async fn settle(&self)
     implements Debug
@@ -1709,7 +1715,8 @@ crate::router::types
     pub ceilings: BTreeMap<&'static str, u64>
     pub connection_handles: BTreeSet<ConnectionHandle>
     pub anomalies: Vec<String>
-    fn merged(parts: Vec<Self>) -> Self
+    fn new<Handles: IntoIterator<Item = ConnectionHandle>>(counts: BTreeMap<&'static str, u64>, connection_handles: Handles) -> Self
+    fn merged(parts: Vec<Self>) -> Result<Self, ProgrammerError>
     derives Clone, Debug, Default, Eq, PartialEq
 crate::server
   type SessionListener = Arc<dyn Fn(&SessionEvent) + Send + Sync>
@@ -1773,7 +1780,7 @@ crate::server
     fn update_session_inactivity_timeout(&self, (connection_handle, timeout): (ConnectionHandle, Option<Duration>)) -> Result<BoxFuture<Option<Session>>, ProgrammerError>
     fn reset_connection_inactivity_timeout(&self, (connection_handle, timeout): (ConnectionHandle, Duration)) -> Result<BoxFuture<()>, ProgrammerError>
     fn reset_session_inactivity_timeout(&self, (connection_handle, timeout): (ConnectionHandle, Duration)) -> Result<BoxFuture<()>, ProgrammerError>
-    fn gauges(&self) -> BoxFuture<Gauges>
+    fn gauges(&self) -> BoxFuture<Result<Gauges, ProgrammerError>>
     implements Debug
     derives Clone
   struct Server
@@ -1782,8 +1789,8 @@ crate::server
     fn services(&self) -> &ServiceManager
     fn sessions(&self) -> &Sessions
     fn transport(&self) -> Arc<dyn ServerTransport>
-    fn gauges(&self) -> BoxFuture<ServerGauges>
-    fn health(&self) -> BoxFuture<Health>
+    fn gauges(&self) -> BoxFuture<Result<ServerGauges, ProgrammerError>>
+    fn health(&self) -> BoxFuture<Result<Health, ProgrammerError>>
     fn dispose(&self) -> BoxFuture<Result<(), RouterError>>
     fn report(&self, error: &RouterError, connection_handle: Option<&ConnectionHandle>)
     implements Debug

@@ -80,7 +80,7 @@ async fn declares_its_requester_to_its_router_as_it_is_made_and_hands_each_of_it
         let answer = request
             .call(
                 payload.to_owned(),
-                RequestOptions {
+                &RequestOptions {
                     connection_handle: Some(handle_of(1)),
                     ..RequestOptions::default()
                 },
