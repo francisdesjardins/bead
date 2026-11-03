@@ -2,7 +2,8 @@
 
 - **Status**: accepted
 - **Scope**: spec 1.4, 15.9, 15.10 and 15.12, and the line naming the file; `spec/durations.json`,
-  its schema, its generator and its gate; every implementation's harness; the support matrix. The
+  its schema, its generator and its gates, `spec/check.py` and `tools/check-durations.mjs` with
+  `tools/durations.tsv`; every implementation's harness; the support matrix. The
   clock a duration runs on, its floor and its ceiling are
   [0011](0011-every-side-takes-its-time-from-a-clock-it-is-given.md)'s.
 
@@ -231,11 +232,25 @@ only what it observes, every `differs` naming a row that names the file and what
 each side, the helper alone reading the file and the harness naming every place's id. The check does
 not compute 1.4 again: the generator does, and the regeneration holds the file to it.
 
+**Every duration a side's surface takes is a row.** `tools/durations.tsv` names, for each place
+and way of the file, the member of each side's surface list that takes it, the row of the matrix
+that excuses the side or holds it ahead, or the reason the side takes it inside its library alone,
+where its harness reaches it, as every side takes a call id's reservation; and each member that
+carries a duration no application gives Bead — a value given back, a constant, a clock's own, the
+test kit's reach — with its reason.
+`tools/check-durations.mjs` holds the table to the file both ways and to the three lists both
+ways, every member that takes or gives a duration on a row, and every member typed by a type that
+holds a place's member on a row too; `spec/check.py` holds its `ahead:` cells to `AHEAD`. The
+gate fails on a duration a surface takes with no row, and on a row the file or the list lacks;
+it never proves a row's place the right one, which each harness holds where what it builds
+differs, and review where it does not. Bead's own waits — a pause, a jittered back-off, a
+peer's `Retry-After` — are no application's, and no row's: what holds them is the clock's.
+
 ## Consequences
 
-**A place added is a row of the file and a way in each table**, which the gate finds missing from a
-harness. Nothing finds a place that calls the assertion with no row: review holds it, as a
-preference (0006).
+**A place added is a row of the file, a way in each harness's table and a row of
+`tools/durations.tsv`**, which the gates find missing: a member that takes a duration with no row
+fails `check-durations`, a way no harness plays fails `spec/check.py`.
 
 **Each side keeps a phrase a place and a words function**, and a language that reports codes maps
 each reason to one.
@@ -247,10 +262,11 @@ duration it is given is the durations file's.
 ## The Tenth Man
 
 The decision met the Tenth Man ([0009](0009-conventional-commits-git-flow-and-the-tenth-man.md)) in
-five rounds: two on the rule; one on the file, where the user chose what it asked — the defaults no
+six rounds: two on the rule; one on the file, where the user chose what it asked — the defaults no
 clause states left out of the file, and the HTTP transports' places on the clock a side is given
-observed `held`; one on the places two owners share; and one on an HTTP exchange's timeout, its
-client's or its server's. Its objections, each with the answer that holds:
+observed `held`; one on the places two owners share; one on an HTTP exchange's timeout, its
+client's or its server's; and one on the gate over the surfaces. Its objections, each with the
+answer that holds:
 
 ### On durations
 
@@ -309,13 +325,28 @@ client's or its server's. Its objections, each with the answer that holds:
 
 ### On an HTTP exchange's timeout, its client's or its server's
 
-| Objection                                                                                                                                                  | Answer                                                                                                                                                                                       |
-| ---------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| At never, the client way passes C# for the wrong reason, `elapsed >= InfiniteTimeSpan` always true, and fails TypeScript, whose pause is capped at 2³¹ − 1 | Accepted: the C# client holds never as TypeScript does, both sides gain a never test, and the client way has a reading of its own.                                                           |
-| 15.12's opening sentence names `inactivityTimeout` alone for the client, and the table's row says "at both ends" of a wait the client never times          | Accepted: the sentence names `exchangeTimeout` too, and the row says what each end bounds.                                                                                                   |
-| The client way fits no observation the file defines                                                                                                        | Accepted: the probe reads the pause a `busy` arms and the loss at a second one, and the `$comment` and this record name that reading.                                                        |
-| The ways' count moves, and `check.py` holds it in the matrix and the README                                                                                | Accepted: 52 ways.                                                                                                                                                                           |
-| The Rust side holds no list to rename                                                                                                                      | Accepted: nothing moves on the Rust side.                                                                                                                                                    |
-| It is a minor, and the CHANGELOG folds the client way into 0046's line                                                                                     | Accepted.                                                                                                                                                                                    |
-| The record is 0014                                                                                                                                         | Accepted.                                                                                                                                                                                    |
-| Nothing finds a duration check that no place covers; a broker participant's reconnection delay is a second miss, checked at different moments              | Accepted: the participant's delay is a place of its own, `brokerParticipant.reconnectionDelay`, held alike on every side (0038); a gate over each side's duration-check call sites is ahead. |
+| Objection                                                                                                                                                  | Answer                                                                                                                                                                                                                                                       |
+| ---------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| At never, the client way passes C# for the wrong reason, `elapsed >= InfiniteTimeSpan` always true, and fails TypeScript, whose pause is capped at 2³¹ − 1 | Accepted: the C# client holds never as TypeScript does, both sides gain a never test, and the client way has a reading of its own.                                                                                                                           |
+| 15.12's opening sentence names `inactivityTimeout` alone for the client, and the table's row says "at both ends" of a wait the client never times          | Accepted: the sentence names `exchangeTimeout` too, and the row says what each end bounds.                                                                                                                                                                   |
+| The client way fits no observation the file defines                                                                                                        | Accepted: the probe reads the pause a `busy` arms and the loss at a second one, and the `$comment` and this record name that reading.                                                                                                                        |
+| The ways' count moves, and `check.py` holds it in the matrix and the README                                                                                | Accepted: 52 ways.                                                                                                                                                                                                                                           |
+| The Rust side holds no list to rename                                                                                                                      | Accepted: nothing moves on the Rust side.                                                                                                                                                                                                                    |
+| It is a minor, and the CHANGELOG folds the client way into 0046's line                                                                                     | Accepted.                                                                                                                                                                                                                                                    |
+| The record is 0014                                                                                                                                         | Accepted.                                                                                                                                                                                                                                                    |
+| Nothing finds a duration check that no place covers; a broker participant's reconnection delay is a second miss, checked at different moments              | Accepted: the participant's delay is a place of its own, `brokerParticipant.reconnectionDelay`, held alike on every side (0038); `tools/check-durations.mjs` holds every member of each side's surface that takes a duration to a place and way of the file. |
+
+### On the gate over the surfaces
+
+| Objection                                                                                                                                                                                   | Answer                                                                                                                                                                                                                                                                                                                                                                     |
+| ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| A gate over the checks reads a stand-in: the rule is about what a surface takes, which every side pins, and a check gate never sees a duration nothing holds                                | Accepted: the gate reads the three surface lists `check-names` reads, every member that takes or gives a duration a row of `tools/durations.tsv`, a place's way or a reason why none, and a member typed by a type that holds a place's member a row too. It replaces the markers.                                                                                         |
+| The gate would not have caught the broker participant's reconnection delay, a new owner calling a helper whose siblings carry a valid marker, yet the record said a check with no row fails | Accepted: that miss is the new member `BrokerParticipantOptions.Reconnect`; whichever type it takes, that type's duration lines and the member typed by it have no row, so it fails. The record states the reach exactly: a duration with no row fails, a row the file or the list lacks fails, a wrong place is the harness's where what it builds differs, and review's. |
+| The typed place was refused for a reason that fits the marker word for word, on two premises that do not hold                                                                               | In part: the premises are corrected, the C# family keeping two parameters and each side its words. The typed place is not taken: it alone could prove a place right, through a refusal that names it, which changes every duration's refusal on three sides, and it misses a place no one wrote. The surface gate is chosen for what it reads, not its cost.               |
+| The C# side has no site no place covers: its policy's holds are its gateway's, which the gateway way plays                                                                                  | Accepted: the findings are one TypeScript site, `httpPolicyOf`'s hold of its three durations, which kept each as given; on the C# side the `policy` way's worth is the twin and the surface's row. The TypeScript gateway holds its three durations through `httpPolicyOf`, as the C# one through `HttpPolicy.Of`.                                                         |
+| The reverse direction finds nothing the harness misses, and splits one rule across two tools, one of them untested Python reading library sources                                           | Accepted: one tool holds the table both ways, tested under `tools/__tests__`; `spec/check.py` keeps `AHEAD`'s own, its `ahead:` cells and the Rust harness's `ahead_of`, and reads no library source. `assertHeldWithin` stays as the twin of `AssertHeldWithin`, not as a finding.                                                                                        |
+| "Relay" names a concept of the protocol, and resolving helpers by regular expressions is the fragile part                                                                                   | Accepted: no relay and no resolver remain, the gate reading no source. The homonyms are parted by 0003 alone: `AssertJwtKey`, `hold_reconnection`, and new names for the two Rust functions that hold no duration.                                                                                                                                                         |
+| Some 180 `// !` lines would mark routine sites with the tag kept for alerts                                                                                                                 | Accepted: no marker lands; a reason lives on its row of the table.                                                                                                                                                                                                                                                                                                         |
+| A one-line hold fixes `createEventStream`'s heartbeat, and its export's removal is a decision of its own                                                                                    | Accepted: `createEventStream` holds `heartbeat` by the gateway's check and words; its member is a `no place` row until its export is settled in its own change.                                                                                                                                                                                                            |
+| The exemption's reason was false: `createPromise` also takes a jittered back-off and a peer's `Retry-After`, which no place held                                                            | Accepted: no exemption remains, and this record says that Bead's own waits — a pause, a back-off, a peer's `Retry-After` — are no application's and no row's.                                                                                                                                                                                                              |
+| The lists of gates kept by hand outside the files the change edits miss the new tool                                                                                                        | Accepted: the implementation workflow's gate list and 0044's sentence on the gates every side shares name it, in the commit that adds it.                                                                                                                                                                                                                                  |

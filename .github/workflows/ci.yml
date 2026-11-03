@@ -888,6 +888,10 @@ jobs:
       # support matrix's Differences holds it; the names no reading placed only fall (decision 0004).
       - name: Check the names
         run: node tools/check-names.mjs
+      # Every duration an application gives a side through its surface is a place and a way of
+      # spec/durations.json, or says why none, in tools/durations.tsv (decision 0014).
+      - name: Check the durations' members
+        run: node tools/check-durations.mjs
       # Each version agrees with itself, the C# lock files' project ranges included, and a released
       # section of the CHANGELOG stays as its tag shipped it; on a release branch, a pull request
       # into main and main, the release moved each version its changes owe, dated its section, and

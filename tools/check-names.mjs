@@ -4,7 +4,7 @@
 // it (decision 0004). The rows are read against the surface lists each side pins: the TypeScript
 // side's `implementations/typescript/surface.txt`, each C# project's `PublicAPI.Shipped.txt` with
 // its `PublicAPI.Unshipped.txt` applied, and the Rust side's lists under
-// `implementations/rust/crates/bead-house/surfaces/`.
+// `implementations/rust/crates/bead-house/surfaces/`, which `tools/surface-lists.mjs` reads.
 //
 //   node tools/check-names.mjs           the rows against the three lists
 //   node tools/check-names.mjs --seed    writes tools/names.tsv anew from the lists
@@ -43,17 +43,22 @@
 // a Rust newtype whose associated constants are its values a choice, the open code space 0044
 // states, and an alias of a primitive a scalar. Exit 1 on a problem, each with its line.
 
-import { existsSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
+import { writeFileSync } from 'node:fs';
 
-export const SIDES = Object.freeze(['typescript', 'csharp', 'rust']);
+import {
+  differencesOf,
+  listsOf,
+  publicLinesOf,
+  readOf,
+  ROOT,
+  SIDES,
+  SUPPORT,
+  topLevel,
+} from './surface-lists.mjs';
 
-const ROOT = fileURLToPath(new URL('..', import.meta.url));
+export { differencesOf, publicLinesOf, SIDES };
+
 const NAMES = 'tools/names.tsv';
-const SUPPORT = 'docs/support.md';
-const TYPESCRIPT = 'implementations/typescript/surface.txt';
-const CSHARP = 'implementations/dotnet/src';
-const RUST = 'implementations/rust/crates/bead-house/surfaces';
 
 // ── Kinds ──────────────────────────────────────────────────────────────────────
 
@@ -97,40 +102,6 @@ export const kindsRender = (kinds) => {
 };
 
 // ── TypeScript ─────────────────────────────────────────────────────────────────
-
-// the right side of a type alias split at its top level, outside brackets, braces, parentheses,
-// angle brackets and template literals
-const topLevel = (text, separator) => {
-  const parts = [];
-  let depth = 0;
-  let quote = null;
-  let start = 0;
-
-  for (let index = 0; index < text.length; index++) {
-    const char = text[index];
-
-    if (quote !== null) {
-      if (char === quote && text[index - 1] !== '\\') {
-        quote = null;
-      }
-    } else if (char === "'" || char === '"' || char === '`') {
-      quote = char;
-    } else if ('([{<'.includes(char)) {
-      depth++;
-    } else if (')]}'.includes(char) || (char === '>' && text[index - 1] !== '=')) {
-      depth--;
-    } else if (depth === 0 && text.startsWith(separator, index)) {
-      parts.push(text.slice(start, index));
-      start = index + separator.length;
-      index += separator.length - 1;
-    }
-  }
-  parts.push(text.slice(start));
-
-  return parts.map((part) => {
-    return part.trim();
-  });
-};
 
 const PRIMITIVE =
   /^(?:number|string|boolean|bigint|symbol|'[^']*'|"[^"]*"|`[^`]*`|-?\d+(?:\.\d+)?)$/;
@@ -268,27 +239,6 @@ export const typeScriptNamesOf = (text) => {
 };
 
 // ── C# ─────────────────────────────────────────────────────────────────────────
-
-/** One project's public lines: its Shipped list with its Unshipped applied. */
-export const publicLinesOf = (shipped, unshipped = '') => {
-  const lines = new Set(
-    shipped.split('\n').filter((line) => {
-      return line.trim() !== '' && !line.startsWith('#');
-    })
-  );
-
-  for (const line of unshipped.split('\n')) {
-    if (line.startsWith('*REMOVED*')) {
-      lines.delete(line.slice('*REMOVED*'.length));
-    } else if (line.trim() !== '' && !line.startsWith('#')) {
-      lines.add(line);
-    }
-  }
-
-  return [...lines].map((line) => {
-    return line.trimEnd();
-  });
-};
 
 const MODIFIERS = /^~?(?:(?:abstract|static|virtual|override|const|sealed|readonly) )*/;
 
@@ -562,61 +512,15 @@ export const rustNamesOf = (texts) => {
 
 // ── The lists ──────────────────────────────────────────────────────────────────
 
-const readOf = (root) => {
-  return (path) => {
-    return readFileSync(`${root}/${path}`, 'utf8').replace(/\r\n/g, '\n');
-  };
-};
-
 /** The three sides' names, read from the lists under `root`. */
 export const surfacesOf = (root = ROOT) => {
-  const read = readOf(root);
-  const lines = readdirSync(`${root}/${CSHARP}`)
-    .sort()
-    .filter((project) => {
-      return existsSync(`${root}/${CSHARP}/${project}/PublicAPI.Shipped.txt`);
-    })
-    .flatMap((project) => {
-      const unshipped = `${CSHARP}/${project}/PublicAPI.Unshipped.txt`;
-
-      return publicLinesOf(
-        read(`${CSHARP}/${project}/PublicAPI.Shipped.txt`),
-        existsSync(`${root}/${unshipped}`) ? read(unshipped) : ''
-      );
-    });
-  const rust = readdirSync(`${root}/${RUST}`)
-    .filter((file) => {
-      return file.endsWith('.txt');
-    })
-    .sort()
-    .map((file) => {
-      return read(`${RUST}/${file}`);
-    });
+  const lists = listsOf(root);
 
   return {
-    typescript: typeScriptNamesOf(read(TYPESCRIPT)),
-    csharp: cSharpNamesOf(lines),
-    rust: rustNamesOf(rust),
+    typescript: typeScriptNamesOf(lists.typescript),
+    csharp: cSharpNamesOf(lists.csharp),
+    rust: rustNamesOf(lists.rust),
   };
-};
-
-/** The titles of the rows of `docs/support.md`'s Differences, each its row's first cell. */
-export const differencesOf = (text) => {
-  const section = text.split(/^## /m).find((part) => {
-    return part.startsWith('Differences\n');
-  });
-
-  return new Set(
-    (section ?? '')
-      .split('\n')
-      .filter((line) => {
-        return line.startsWith('| ') && !/^\| -/.test(line);
-      })
-      .slice(1)
-      .map((line) => {
-        return line.split(' | ')[0].slice(2).trim();
-      })
-  );
 };
 
 // ── The case rules ─────────────────────────────────────────────────────────────

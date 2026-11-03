@@ -34,6 +34,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   name with its kind. A row gives the same name in each language's case, a rendering a record
   names, one side's own with its reason, or a difference the support matrix holds.
   `tools/check-names.mjs` holds the three sides' surface lists to it.
+- `tools/check-durations.mjs`, in CI's Commits job, with `tools/durations.tsv`: every duration an
+  application gives a side through its surface is a place and a way of `spec/durations.json`, or a
+  row says why none (decision 0014).
 - The TypeScript side exports the types of the objects its calls take: `INotifyRequest`,
   `IRouterRequest`, `IUnregisterNotificationOptions`, `IBrokerRefusal`, `IServerSentEvent` and
   `IOwnProblemOptions`.

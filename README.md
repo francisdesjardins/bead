@@ -822,6 +822,9 @@ against each server.
   word for a number, a delegate and an enum would. The names no reading has
   placed, `alone`, are counted against the pin on the file's first line, which only falls.
   `--seed` writes the file anew from the lists.
+- `node tools/check-durations.mjs`: every member of each side's surface list that takes a duration
+  an application gives is a place and a way of `spec/durations.json` in `tools/durations.tsv`, or a
+  row says why none; `--seed` starts the table.
 - `node tools/check-versions.mjs`: on every ref, each version agrees with itself — the TypeScript
   package's and the builder's, the C# side's and the project ranges of the C# lock files, an
   example's among them, the Rust workspace's and its lock's members, and each conformance file's
