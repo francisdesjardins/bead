@@ -109,7 +109,9 @@ of the two inside the side, the one given and the other none, and on its surface
 values, as `ChunkOutcome.Refused` does. A send on a connection not open throws a
 `DisconnectException`; an error's `cause` is its `InnerException`; a programmer's error is an
 `ArgumentException`, or an `InvalidOperationException` where the state, not an argument, is wrong,
-and a failure a `FailureException`. Data alike, which the TypeScript side compares by their
+an `ObjectDisposedException`, one still, for a member used after its owner's dispose, its message
+the side's own words (the Framework Design Guidelines' Dispose pattern), and a failure a
+`FailureException`. Data alike, which the TypeScript side compares by their
 structure, is the data's own `Equals`, or the comparer `SessionManagerOptions.DataComparer` names. A
 field that may be absent, `null` or a value, as a header's credential, is a nullable `Credential`, a
 record of its `CredentialScheme` and what that scheme holds — an `OPAQUE` one's `SessionToken`, a

@@ -153,8 +153,8 @@ export interface IBrokerParticipantOptions {
    * default; `signal` read before each attempt and during each wait, an attempt under way not cut
    * short; `tap` told each wait. A delay of 0 waits a later task of the platform, which fake timers
    * on the globals hold, as they hold its timers. A stop ends it at its next attempt, and at once
-   * during one. Once it ends it is reported on `error`, what ended it the `cause`, and the next start
-   * or connect links it anew.
+   * during one. Once it ends it is reported on `error`, what ended it the `cause`, and, unless it
+   * stopped, the next start or connect links it anew.
    */
   reconnect?: ITransportClientReconnectOptions | undefined;
   /**
@@ -203,7 +203,10 @@ export interface IBrokerParticipant {
   on(event: 'error', listener: (error: Error) => void): this;
   /** Each parcel's verdict, its link's transitions, its names and its reports. */
   on(event: 'debug', listener: (event: IParticipantDebugEvent) => void): this;
-  /** Starts its link, once: its incarnation drawn, its inbox subscribed. */
+  /**
+   * Starts its link, once: its incarnation drawn, its inbox subscribed; a {@link ProgrammerError}
+   * once stopped: a stopped participant links no more (spec 15.21).
+   */
   start(options?: { signal?: AbortSignal | undefined }): Promise<void>;
   /**
    * Gives up its link's start under way and awaits it, closes each of its connections with 1001,
@@ -287,6 +290,8 @@ export interface IBrokerParticipantPort {
   readonly id: string;
   /** Its own leg, as an OPEN or an ACCEPT marks it. */
   readonly isSecure: boolean;
+  /** Whether it stopped: a call over it since is its application's misuse (spec 15.21). */
+  readonly isStopped: boolean;
   /** The names it holds a subscription to. */
   readonly names: ReadonlySet<string>;
   /** Waits for answers naming `opener`'s half, until the returned function lets it go. */
@@ -308,7 +313,8 @@ export interface IBrokerParticipantPort {
   drawHalf(): Uint8Array;
   /**
    * Resolves once its link is up, starting it the first time; `isStart`, its application's start,
-   * links anew a participant whose link was taken over, which nothing else does.
+   * links anew a participant whose link was taken over, which nothing else does. Once stopped, a
+   * start is refused as a misuse and a connect fails, stopped as it connected.
    */
   linked(options?: {
     isStart?: boolean | undefined;
@@ -1522,11 +1528,18 @@ export const createBrokerParticipant = (options: IBrokerParticipantOptions): IBr
     isStart?: boolean | undefined;
     signal?: AbortSignal | undefined;
   }): Promise<void> => {
+    const isStart = linkOptions?.isStart === true;
+
+    // ! the stop first: a start since is a misuse; a connect reaches here only as the stop overtook it
     if (isStopped) {
-      return Promise.reject(new GenericError(`the participant ${id} is stopped`));
+      return Promise.reject(
+        isStart
+          ? new ProgrammerError(`the participant ${id} is stopped`)
+          : new ConnectError(`the participant ${id} stopped as it connected`)
+      );
     }
 
-    if (isTakenOver && linkOptions?.isStart !== true) {
+    if (isTakenOver && !isStart) {
       return Promise.reject(
         new GenericError(
           `the link of ${id} was taken over by another link of its id, and connects no more until it is started again`
@@ -1695,7 +1708,7 @@ export const createBrokerParticipant = (options: IBrokerParticipantOptions): IBr
     relinking = fencing;
 
     const relinked = relink(former, fencing.signal).catch((reason: unknown) => {
-      // * ended: it stays down, and the next start or connect links it anew
+      // * ended: it stays down, and, unless it stopped, the next start or connect links it anew
       if (linking === relinked) {
         linking = undefined;
       }
@@ -1720,6 +1733,9 @@ export const createBrokerParticipant = (options: IBrokerParticipantOptions): IBr
     clock,
     id,
     isSecure: adapter.isSecure,
+    get isStopped() {
+      return isStopped;
+    },
     get names() {
       return new Set(
         [...names.entries()]

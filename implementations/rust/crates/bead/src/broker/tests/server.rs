@@ -28,7 +28,7 @@ use crate::broker::server::BrokerTransportServerOptions;
 use crate::call_session::{Carriage, uncarried_of};
 use crate::constants::{ProtocolCode, RouterSide};
 use crate::envelope::Credential;
-use crate::errors::TransportError;
+use crate::errors::{ProgrammerError, TransportError};
 use crate::router::types::{BoxFuture, ConnectionHandle, RouterError, TransportMessage};
 use crate::transport::{
     ReadyState, RouterClientTransport, ServerListener, ServerTransport,
@@ -864,6 +864,43 @@ async fn rejects_a_stop_while_starting() {
         .expect("stopped once it opened");
     assert_eq!(server.ready_state(), ReadyState::Closed, "closed");
     participant.stop().await;
+}
+
+// spec 15.21
+#[tokio::test]
+async fn refuses_its_start_once_its_participant_stopped_its_state_kept() {
+    let broker = broker();
+    let participant = participant_of(
+        &adapter_of(&broker, "ada"),
+        &BrokerParticipantOptions::default(),
+    );
+    let server = participant
+        .server(&BrokerTransportServerOptions::new(["interop"]))
+        .expect("a server");
+
+    participant.start().await.expect("started");
+    participant.stop().await;
+
+    // * a misuse, refused before anything moves: its state kept
+    let refused = server.start().await.expect_err("refused");
+
+    assert!(
+        matches!(
+            &refused,
+            RouterError::Other(error) if error.downcast_ref::<ProgrammerError>().is_some()
+        ),
+        "a misuse"
+    );
+    assert_eq!(
+        refused.to_string(),
+        "the participant ada is stopped",
+        "its words"
+    );
+    assert_eq!(
+        server.ready_state(),
+        ReadyState::Uninitialized,
+        "its state kept"
+    );
 }
 
 #[tokio::test]

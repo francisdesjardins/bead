@@ -1186,21 +1186,45 @@ test.describe('broker participant', () => {
 
     await participant.stop();
 
-    // * the connect fails as its participant stops; a start since is refused, a second stop does nothing
+    // * the connect fails as its participant stops; a start since is a misuse, refused, a second
+    // stop does nothing
     expect(await pending).toMatchObject({
       message: 'the participant ada stopped as it connected',
       name: 'ConnectError',
     });
-    await expect(participant.start()).rejects.toThrow('the participant ada is stopped');
-    await expect(participant.transportClient().connect({ server: 'interop' })).rejects.toThrow(
-      'the participant ada is stopped'
-    );
+
+    const started = participant.start();
+
+    await expect(started, 'a misuse').rejects.toBeInstanceOf(ProgrammerError);
+    await expect(started).rejects.toThrow('the participant ada is stopped');
+
+    const connected = participant.transportClient().connect({ server: 'interop' });
+
+    await expect(connected, 'a misuse').rejects.toBeInstanceOf(ProgrammerError);
+    await expect(connected).rejects.toThrow('the participant ada is stopped');
     await participant[Symbol.asyncDispose]();
 
     expect([participant.isLinked, reported]).toEqual([
       false,
       ["a message to the inbox of ada is no parcel: 1 bytes, under a parcel's 28"],
     ]);
+
+    // * taken over, then stopped: a connect is the stop's misuse, never the takeover's words
+    const cat = broker.adapter({ id: 'cat' });
+    const fenced = createBrokerParticipant({ adapter: cat, reconnects: false });
+    const fencing = hearing(fenced);
+
+    await fenced.start();
+    cat.takeOver();
+    await until(() => {
+      return fencing.length > 0;
+    }, 'its takeover reported');
+    await fenced.stop();
+
+    const refused = fenced.transportClient().connect({ server: 'interop' });
+
+    await expect(refused, 'a misuse').rejects.toBeInstanceOf(ProgrammerError);
+    await expect(refused, "the stop's words").rejects.toThrow('the participant cat is stopped');
   });
 
   test('closes a connection with 1002 for a parcel of a layout to come, an ACCEPT on it open, or another kind between an envelope’s parts, and with 4000 at a gap a kind to come leaves', async () => {

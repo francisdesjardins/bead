@@ -1301,12 +1301,14 @@ is reported, and connects no more until its application starts it again — its 
 without end; any other link lost connects anew, as its `reconnect` says, a transport client's
 reconnection options, its attempts without end unless it bounds them, or stays down where
 `reconnects` is false. Its reconnection ends by its attempts, its signal or its stop, reported on
-`error`, what ended it the `cause`, and its next start or connect links it anew. A server's
-transport starts once its broker holds each name it serves, failing on one refused, and stops once
-it let each go, its gauge `names` counting a name from its subscription's acknowledgement to its
-release's. Where the adapter offers a
-message's life, an OPEN lives in its broker its connect's time left, and a DATA that carries a
-credential twice `heartbeat`; nothing else has a life.
+`error`, what ended it the `cause`, and, unless it stopped, its next start or connect links it
+anew. A participant stopped links no more: its `start()`, or a connect, reconnect or server's start
+over it, made after its stop, is refused as a misuse, a `ProgrammerError`, before anything moves. A
+server's transport starts once its broker holds each name it serves, failing on one refused, and
+stops once it let each go, its gauge `names` counting a name from its subscription's acknowledgement
+to its release's. Where the adapter offers a message's life, an OPEN lives in its broker its
+connect's time left, and a DATA that carries a credential twice `heartbeat`; nothing else has a
+life.
 
 #### MQTT 5
 

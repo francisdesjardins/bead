@@ -18,11 +18,11 @@ use tokio_util::sync::CancellationToken;
 
 use super::{
     ACCEPTOR_HALF, AtClient, AtServer, BrokerPair, BrokerPairOptions, Calling, ClientTold,
-    ServerTold, accepted_of, adapter_of, broker, locked, participant_of, peer_of, publish_to,
-    settle, until,
+    ServerTold, accepted_of, adapter_of, broker, locked, misuse_in, participant_of, peer_of,
+    publish_to, settle, until,
 };
 use crate::broker::adapter::{
-    BrokerAdapter, BrokerCapabilities, BrokerDelivery, BrokerListener, BrokerMessage,
+    BrokerAdapter, BrokerCapabilities, BrokerDelivery, BrokerError, BrokerListener, BrokerMessage,
     BrokerPublished, BrokerStart,
 };
 use crate::broker::client::{BrokerTransportClientConnectOptions, BrokerTransportClientOptions};
@@ -103,17 +103,8 @@ fn misuse_of(error: &RouterError) -> Option<ProgrammerError> {
     let RouterError::Other(error) = error else {
         return None;
     };
-    let mut source = error.source();
 
-    while let Some(cause) = source {
-        if let Some(misuse) = cause.downcast_ref::<ProgrammerError>() {
-            return Some(misuse.clone());
-        }
-
-        source = cause.source();
-    }
-
-    None
+    error.source().and_then(misuse_in)
 }
 
 // a participant of `inner`'s id, through an adapter that writes down each call: what it asks of its
@@ -1126,26 +1117,35 @@ async fn lets_a_listener_go_fails_a_connect_awaiting_its_answer_as_it_stops_refu
 
     participant.stop().await;
 
-    // * the connect fails as its participant stops; a start since is refused, a second stop does
-    // nothing
+    // * the connect fails as its participant stops; a start since is a misuse, refused, a second
+    // stop does nothing
     assert_eq!(
         error_of(pending.await.expect("joined")),
         "the participant ada stopped as it connected",
         "the connect fails"
     );
+
+    let refused = participant.start().await.expect_err("refused");
+
+    assert!(matches!(refused, BrokerError::Refused(_)), "a misuse");
     assert_eq!(
-        participant.start().await.expect_err("refused").to_string(),
+        refused.to_string(),
         "the participant ada is stopped",
         "a start refused"
     );
+
+    let connected = participant
+        .client(&BrokerTransportClientOptions::default())
+        .expect("a client")
+        .connect(&BrokerTransportClientConnectOptions::new("interop"))
+        .await;
+
+    assert!(
+        matches!(connected, Err(TransportError::Refused(_))),
+        "a misuse"
+    );
     assert_eq!(
-        error_of(
-            participant
-                .client(&BrokerTransportClientOptions::default())
-                .expect("a client")
-                .connect(&BrokerTransportClientConnectOptions::new("interop"))
-                .await
-        ),
+        error_of(connected),
         "the participant ada is stopped",
         "a connect refused"
     );
@@ -1155,6 +1155,38 @@ async fn lets_a_listener_go_fails_a_connect_awaiting_its_answer_as_it_stops_refu
         *locked(&reported),
         ["a message to the inbox of ada is no parcel: 1 bytes, under a parcel's 28"],
         "heard once"
+    );
+
+    // * taken over, then stopped: a connect is the stop's misuse, never the takeover's words
+    let cat = adapter_of(&broker, "cat");
+    let fenced = participant_of(
+        &cat,
+        &BrokerParticipantOptions {
+            reconnects: Some(false),
+            ..BrokerParticipantOptions::default()
+        },
+    );
+    let fencing = reporting(&fenced);
+
+    fenced.start().await.expect("started");
+    cat.take_over();
+    until(|| !locked(&fencing).is_empty(), "its takeover reported").await;
+    fenced.stop().await;
+
+    let connected = fenced
+        .client(&BrokerTransportClientOptions::default())
+        .expect("a client")
+        .connect(&BrokerTransportClientConnectOptions::new("interop"))
+        .await;
+
+    assert!(
+        matches!(connected, Err(TransportError::Refused(_))),
+        "a misuse"
+    );
+    assert_eq!(
+        error_of(connected),
+        "the participant cat is stopped",
+        "the stop's words"
     );
 }
 

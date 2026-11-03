@@ -303,6 +303,10 @@ export const createTransportClient = <
         );
       }
 
+      // * its target held again as it is called, before anything moves: what its transport's owner
+      // refuses since, as a participant stopped, is a misuse
+      implementation.assertConnect?.(lastConnectOptions);
+
       // * held as it is called, before anything moves: a fixed delay out of bounds among it
       assertHeldReconnection({ delay, maximumAttempts });
 

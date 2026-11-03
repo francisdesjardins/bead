@@ -869,3 +869,92 @@ async fn refuses_a_reconnection_never_connected_under_way_while_it_connects_or_g
     assert_eq!(client.ready_state(), ReadyState::Closed, "closed");
     pair.stop().await;
 }
+
+// the delays its reconnection told, each as it told it, at a delay of 60 s
+fn tapping() -> (Arc<Mutex<Vec<Duration>>>, TransportClientReconnectOptions) {
+    let tapped: Arc<Mutex<Vec<Duration>>> = Arc::default();
+    let told = Arc::clone(&tapped);
+    let options = TransportClientReconnectOptions {
+        delay: Some(TransportClientReconnectDelay::Fixed(Duration::from_secs(
+            60,
+        ))),
+        tap: Some(Arc::new(move |delay, _attempt| {
+            locked(&told).push(delay);
+        })),
+        ..TransportClientReconnectOptions::default()
+    };
+
+    (tapped, options)
+}
+
+// spec 15.21
+#[tokio::test]
+async fn refuses_a_connect_or_a_reconnect_once_its_participant_stopped_its_state_kept_no_reconnect_told()
+ {
+    let pair = BrokerPair::of(&BrokerPairOptions::default()).await;
+    let never = pair
+        .client_participant
+        .client(&BrokerTransportClientOptions::default())
+        .expect("a client");
+    let connected = pair.connect().await;
+    let told = Arc::new(ClientTold::default());
+    let (tapped, options) = tapping();
+
+    connected.listen(Arc::new(AtClient(Arc::clone(&told))));
+    pair.client_participant.stop().await;
+    until(
+        || connected.ready_state() == ReadyState::Closed,
+        "closed as its participant stops",
+    )
+    .await;
+
+    // * a client never connected: its connect a misuse, its state and its target kept
+    let refused = never
+        .connect(&BrokerTransportClientConnectOptions::new("interop"))
+        .await;
+
+    assert!(
+        matches!(&refused, Err(TransportError::Refused(_))),
+        "a misuse"
+    );
+    assert_eq!(
+        refused.expect_err("refused").to_string(),
+        "the participant client is stopped",
+        "its words"
+    );
+    assert_eq!(
+        never.ready_state(),
+        ReadyState::Uninitialized,
+        "its state kept"
+    );
+    assert_eq!(
+        never
+            .reconnect(&TransportClientReconnectOptions::default())
+            .map(drop)
+            .expect_err("refused")
+            .to_string(),
+        "the transport client was never connected",
+        "no target kept"
+    );
+
+    // * a client its participant's stop closed: its reconnect a misuse, no reconnect told
+    let refused = connected.reconnect(&options).map(drop);
+
+    assert!(
+        matches!(&refused, Err(TransportError::Refused(_))),
+        "a misuse"
+    );
+    assert_eq!(
+        refused.expect_err("refused").to_string(),
+        "the participant client is stopped",
+        "its words"
+    );
+    settle().await;
+    assert_eq!(
+        (connected.ready_state(), *locked(&told.reconnects)),
+        (ReadyState::Closed, 0),
+        "closed still, no reconnect told"
+    );
+    assert!(locked(&tapped).is_empty(), "no wait told");
+    pair.stop().await;
+}

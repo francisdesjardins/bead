@@ -4,6 +4,7 @@
 //! sentences.
 
 use core::time::Duration;
+use std::error::Error;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 use bytes::Bytes;
@@ -18,6 +19,7 @@ use super::memory::{
 use super::parcel::{Parcel, ParcelRead, read_parcel};
 use super::participant::{BrokerParticipant, BrokerParticipantOptions};
 use super::server::{BrokerTransportServer, BrokerTransportServerOptions};
+use crate::errors::ProgrammerError;
 use crate::router::types::{ConnectionHandle, RouterError, TransportMessage};
 use crate::testing::Instant;
 use crate::transport::{
@@ -61,6 +63,21 @@ pub(super) async fn settle() {
     }
 
     crate::testing::rest(Duration::from_millis(20)).await;
+}
+
+/// The misuse `error` is, or the first its sources carry.
+pub(super) fn misuse_in(error: &(dyn Error + 'static)) -> Option<ProgrammerError> {
+    let mut source = Some(error);
+
+    while let Some(cause) = source {
+        if let Some(misuse) = cause.downcast_ref::<ProgrammerError>() {
+            return Some(misuse.clone());
+        }
+
+        source = cause.source();
+    }
+
+    None
 }
 
 /// A broker of the test's own, on the platform's clock.

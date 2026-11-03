@@ -538,6 +538,65 @@ public sealed class BrokerTransportClientTests
         Assert.Equal(ReadyState.Closed, client.ReadyState);
     }
 
+    // spec 15.21
+    [Fact]
+    public async Task Refuses_a_connect_or_a_reconnect_once_its_participant_stopped_its_state_kept_no_reconnect_told()
+    {
+        await using var pair = await BrokerPair.Of();
+        await using var never = pair.ClientParticipant.Client();
+        await using var connected = await pair.Connect();
+        var (tapped, reconnect) = Tapping(TimeSpan.FromSeconds(60));
+        var told = new ConcurrentQueue<string>();
+
+        ((IRouterClientTransport)connected).Reconnect += () =>
+        {
+            told.Enqueue("reconnect");
+        };
+        await pair.ClientParticipant.Stop();
+        await BrokerPair.Until(
+            () =>
+            {
+                return connected.ReadyState == ReadyState.Closed;
+            },
+            "closed as its participant stops");
+
+        // * a client never connected: its connect a misuse, its state and its target kept
+        Assert.Equal("the participant client is stopped", (await Assert.ThrowsAsync<ObjectDisposedException>(() =>
+        {
+            return never.Connect(new BrokerTransportClientConnectOptions { Server = "interop" }, Cancelled);
+        })).Message);
+        Assert.Equal(ReadyState.Uninitialized, never.ReadyState);
+        Assert.Equal("the transport client was never connected", (await Assert.ThrowsAsync<InvalidOperationException>(() =>
+        {
+            return never.Reconnect();
+        })).Message);
+
+        // * a client its participant's stop closed: its reconnect a misuse, no reconnect told
+        Assert.Equal("the participant client is stopped", (await Assert.ThrowsAsync<ObjectDisposedException>(() =>
+        {
+            return connected.Reconnect(reconnect);
+        })).Message);
+        await pair.Scheduler.WhenIdle();
+        Assert.Equal(ReadyState.Closed, connected.ReadyState);
+        Assert.Empty(told);
+        Assert.Empty(tapped);
+    }
+
+    // the delays a reconnection told, each as it told it, and its options at a fixed delay
+    private static (ConcurrentQueue<TimeSpan> Tapped, TransportClientReconnectOptions Options) Tapping(TimeSpan delay)
+    {
+        var tapped = new ConcurrentQueue<TimeSpan>();
+
+        return (tapped, new TransportClientReconnectOptions
+        {
+            Delay = new TransportClientReconnectDelay(delay),
+            Tap = (told, _) =>
+            {
+                tapped.Enqueue(told);
+            },
+        });
+    }
+
     private static readonly TransportClientReconnectDelay Briefly = new TransportClientReconnectDelay(TimeSpan.FromMilliseconds(100));
 
     private static readonly IReadOnlyList<string> Inbox = ["bead", "i", "ada"];

@@ -323,9 +323,10 @@ that a test of each side does:
   adapter that offers none, a participant taken over failing each connect until it is started
   again, and a participant's reconnection: its delay held, its attempts and its signal its
   application's, every end reported with its cause, a stop among them, its next start linking it
-  anew, a turn of its platform between two attempts at a delay of 0, and a stop that meets its link
-  as it connects failing that link and stopping its adapter once its start settled, a later stop
-  settling with the first, `transport/shared/__tests__/broker-participant.test.ts` and
+  anew unless it stopped, a turn of its platform between two attempts at a delay of 0, and a stop
+  that meets its link as it connects failing that link and stopping its adapter once its start
+  settled, a later stop settling with the first, a participant stopped done, and a call after its
+  stop a misuse, `transport/shared/__tests__/broker-participant.test.ts` and
   `Bead.Core.Tests/BrokerParticipantTests`
   (`subscribes its inbox before anything goes, takes its id from its adapter, and draws its incarnation and each half from a cryptographic source (spec 15.24)`,
   `closes each connection as its link goes down, and connects anew as another incarnation, resetting its peers`,
@@ -353,7 +354,9 @@ that a test of each side does:
   (`reconnects through the name it serves, a pair drawn anew`,
   `starts once its broker holds each name it serves, fails its start on a name refused, and stops once it let each go`,
   `draws a handle of its adapter type for each connection at its third leg, and gives none twice`,
-  `carries no credential toward its client, and its command presenting ELSEWHERE fails before it goes`);
+  `carries no credential toward its client, and its command presenting ELSEWHERE fails before it goes`,
+  `refuses a connect or a reconnect once its participant stopped, its state kept, no reconnect told`,
+  `refuses its start once its participant stopped, its state kept`);
   the in-memory broker, which the cases play over, `memory-broker.test.ts` and `MemoryBrokerTests`
   (`hands each message on once, in a later turn, in the order its publisher published to that topic (spec 15.24)`,
   `hands a group message to one member in turn, and again to another when a test asks (spec 15.24)`,

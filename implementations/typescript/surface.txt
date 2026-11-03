@@ -3587,6 +3587,7 @@ src/transport/server/types.ts ITransportServerImplementation
     readonly secure?: boolean | undefined
     readonly defaults: TransportServerResolvedStartOptions
     readonly type: TRANSPORTS
+    assertStart?(): void
     close(connection: ITransportServerClientAware<Socket>): Promise<void>
     gauges?(): IGauges<TransportServerConnectionHandle>
     pause(connection: ITransportServerClientAware<Socket>): void
@@ -3811,6 +3812,7 @@ src/transport/shared/broker-participant.ts IBrokerParticipantPort
     readonly clock: IClock
     readonly id: string
     readonly isSecure: boolean
+    readonly isStopped: boolean
     readonly names: ReadonlySet<string>
     awaitAnswers(opener: Uint8Array, answers: IBrokerAnswers): () => void
     connect(pair: {acceptor: Uint8Array; isOpener: boolean; opener: Uint8Array; peer: IBrokerPeer}, options: {isSecure?: boolean | undefined; maximumUnsentBytes: number; owner: IBrokerConnectionOwner}): IBrokerConnection

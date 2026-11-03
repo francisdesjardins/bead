@@ -677,4 +677,21 @@ test.describe('createBrokerTransportServer', () => {
     expect(server.gauges().counts['names']).toBe(0);
     await Promise.all([clients.stop(), participant.stop()]);
   });
+
+  // spec 15.21
+  test('refuses its start once its participant stopped, its state kept', async () => {
+    const broker = createMemoryBroker();
+    const participant = createBrokerParticipant({ adapter: broker.adapter({ id: 'ada' }) });
+    const server = participant.transportServer({ names: ['interop'] });
+
+    await participant.start();
+    await participant.stop();
+
+    // * a misuse, refused before anything moves: its state kept
+    const refused = server.start();
+
+    await expect(refused, 'a misuse').rejects.toBeInstanceOf(ProgrammerError);
+    await expect(refused, 'its words').rejects.toThrow('the participant ada is stopped');
+    expect(server.isUninitialized(), 'its state kept').toBe(true);
+  });
 });

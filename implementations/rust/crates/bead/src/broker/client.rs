@@ -521,7 +521,9 @@ impl BrokerTransportClient {
     /// Connects through a server's name, started as it is called: open once the first ACCEPT naming
     /// its half came, its third leg sent. It fails naming the REFUSE it read, or `no-subscriber`
     /// when its broker says nothing serves the name, or a dispose that gave up on it; past its
-    /// timeout; once its signal is cancelled; each ending closed.
+    /// timeout; once its signal is cancelled; each ending closed. Its participant stopped, it is
+    /// refused, a [`TransportError::Refused`], after its options' own checks and before anything
+    /// moves, its state and its target kept: a stopped participant links no more (spec 15.21).
     pub fn connect(&self, options: &BrokerTransportClientConnectOptions) -> Connect {
         match self.start_connect(options) {
             Ok(outcome) => Connect::of(outcome),
@@ -547,6 +549,15 @@ impl BrokerTransportClient {
             "a connect's timeout",
             options.timeout.unwrap_or(CONNECT_TIMEOUT),
         )?;
+
+        // * its participant outranks it: a connect once it stopped is a misuse, refused before its
+        // state is read, nothing kept
+        if inner.participant.is_stopped() {
+            return Err(TransportError::Refused(
+                inner.participant.config().stopped(),
+            ));
+        }
+
         let (attempt, reply) = {
             let mut state = locked(&inner.state);
             let is_refused = if state.is_attempting {
@@ -729,8 +740,8 @@ impl BrokerTransportClient {
     /// # Errors
     ///
     /// A [`TransportError`] for a reconnection under way, a client never connected, one connecting
-    /// or closing, a fixed delay out of bounds (spec 1.4), or a signal cancelled already: each
-    /// refused before anything moves, in that order.
+    /// or closing, its participant stopped (spec 15.21), a fixed delay out of bounds (spec 1.4), or
+    /// a signal cancelled already: each refused before anything moves, in that order.
     pub fn reconnect(
         &self,
         options: &TransportClientReconnectOptions,
@@ -756,6 +767,13 @@ impl BrokerTransportClient {
                     "the transport client cannot reconnect while {}",
                     state.ready.said()
                 ))));
+            }
+
+            // * its participant stopped: a misuse, no reconnect told, nothing moved
+            if inner.participant.is_stopped() {
+                return Err(TransportError::Refused(
+                    inner.participant.config().stopped(),
+                ));
             }
 
             // * a fixed delay out of bounds refused as it is given, before anything moves

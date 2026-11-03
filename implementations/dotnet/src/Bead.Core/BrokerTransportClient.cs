@@ -234,6 +234,8 @@ public sealed class BrokerTransportClient : IRouterClientTransport, IAsyncDispos
     /// third leg sent. Refused with an <see cref="ArgumentOutOfRangeException"/> for a timeout
     /// <see cref="BrokerTransportClientConnectOptions.Timeout"/> does not take, and an <see cref="ArgumentException"/>
     /// for a name that is no token, each leaving its state as it was; with an
+    /// <see cref="ObjectDisposedException"/> once its participant stopped, its state and its target
+    /// kept, before its state's guard (spec 15.21); with an
     /// <see cref="InvalidOperationException"/> unless Uninitialized or Closed; with an
     /// <see cref="OperationCanceledException"/>, nothing changed, when its token is cancelled
     /// already. Then it throws a <see cref="ConnectException"/> naming the REFUSE it read, its
@@ -377,9 +379,11 @@ public sealed class BrokerTransportClient : IRouterClientTransport, IAsyncDispos
     /// each next one after its <see cref="TransportClientReconnectOptions.Delay"/>. Attempts that run out
     /// end Closed with a <see cref="ReconnectException"/>; a cancel stops them with an
     /// <see cref="OperationCanceledException"/>. A reconnection under way, never connected, or
-    /// connecting is an <see cref="InvalidOperationException"/>; a fixed delay out of bounds is an
-    /// <see cref="ArgumentOutOfRangeException"/> as it is called, after those and before the token;
-    /// a misuse, such a delay or a token cancelled already leaves the state as it was.
+    /// connecting is an <see cref="InvalidOperationException"/>; once its participant stopped, after
+    /// those, an <see cref="ObjectDisposedException"/>, no reconnect raised (spec 15.21); a fixed
+    /// delay out of bounds is an <see cref="ArgumentOutOfRangeException"/> as it is called, after
+    /// those and before the token; a misuse, such a delay or a token cancelled already leaves the
+    /// state as it was.
     /// </summary>
     public async Task Reconnect(TransportClientReconnectOptions? options = null)
     {
@@ -404,6 +408,12 @@ public sealed class BrokerTransportClient : IRouterClientTransport, IAsyncDispos
             if (_readyState is ReadyState.Connecting or ReadyState.Closing)
             {
                 throw new InvalidOperationException($"the transport client cannot reconnect while {NameOf(_readyState)}");
+            }
+
+            // ! its participant stopped: its application's misuse, nothing moved (spec 15.21)
+            if (_participant.IsStopped)
+            {
+                throw _participant.StoppedRefusal();
             }
 
             // * a fixed delay held as it is called, after the state's guards and before its token,
@@ -598,6 +608,14 @@ public sealed class BrokerTransportClient : IRouterClientTransport, IAsyncDispos
             Timeout = Clocks.AssertHeld(("a connect's timeout", nameof(BrokerTransportClientConnectOptions.Timeout)), given.Timeout),
         };
         var (token, isAttempt) = call;
+
+        // ! its participant stopped: its application's misuse, before its state and its target
+        // move; an attempt it overtook fails at its link instead (spec 15.21)
+        if (!isAttempt && _participant.IsStopped)
+        {
+            throw _participant.StoppedRefusal();
+        }
+
         var connecting = new CancellationTokenSource();
 
         lock (_gate)

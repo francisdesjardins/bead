@@ -79,6 +79,29 @@ const acceptOf = (opener: Uint8Array): Uint8Array => {
   });
 };
 
+/** A participant `server` over `broker` whose server transport serves `interop`, started. */
+const servingOf = async (broker: IMemoryBroker) => {
+  const participant = createBrokerParticipant({ adapter: broker.adapter({ id: 'server' }) });
+  const server = participant.transportServer({ names: ['interop'] });
+
+  await server.start();
+
+  return { participant, server };
+};
+
+/** The waits a reconnection told, each as it told it, at a delay of 60 seconds. */
+const tapping = () => {
+  const tapped: number[] = [];
+  const options = {
+    delay: 60_000,
+    tap: (delay: number) => {
+      tapped.push(delay);
+    },
+  };
+
+  return { options, tapped };
+};
+
 // definition
 
 test.describe('createBrokerTransportClient', () => {
@@ -648,5 +671,47 @@ test.describe('createBrokerTransportClient', () => {
     expect(client.isClosed()).toBe(true);
 
     await Promise.all([participant.stop(), ada.stop()]);
+  });
+
+  // spec 15.21
+  test('refuses a connect or a reconnect once its participant stopped, its state kept, no reconnect told', async () => {
+    const broker = createMemoryBroker();
+    const { participant, server } = await servingOf(broker);
+    const ada = createBrokerParticipant({ adapter: broker.adapter({ id: 'ada' }) });
+    const never = ada.transportClient();
+    const connected = ada.transportClient();
+    const { options, tapped } = tapping();
+    let reconnects = 0;
+
+    connected.on('reconnect', () => {
+      reconnects += 1;
+    });
+    await connected.connect({ server: 'interop' });
+    await ada.stop();
+    expect(connected.isClosed(), 'closed as its participant stops').toBe(true);
+
+    // * a client never connected: its connect a misuse, its state and its target kept
+    const refused = never.connect({ server: 'interop' });
+
+    await expect(refused, 'a misuse').rejects.toBeInstanceOf(ProgrammerError);
+    await expect(refused, 'its words').rejects.toThrow('the participant ada is stopped');
+    expect(never.isUninitialized(), 'its state kept').toBe(true);
+    await expect(never.reconnect(), 'no target kept').rejects.toThrow(
+      'the transport client was never connected'
+    );
+
+    // * a client its participant's stop closed: its reconnect a misuse, no reconnect told
+    const reconnecting = connected.reconnect(options);
+
+    await expect(reconnecting, 'a misuse').rejects.toBeInstanceOf(ProgrammerError);
+    await expect(reconnecting, 'its words').rejects.toThrow('the participant ada is stopped');
+    await turn();
+    expect(
+      [connected.isClosed(), reconnects, tapped],
+      'closed still, no reconnect told, no wait told'
+    ).toEqual([true, 0, []]);
+
+    await server.stop();
+    await participant.stop();
   });
 });

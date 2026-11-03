@@ -161,6 +161,12 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - A reconnection of a delay of 0 waits a later task of the platform between two attempts, on the
   TypeScript side `setImmediate`'s, which fake timers installed on the globals hold, as they hold
   its timers: a test that installs them moves its clock to let the next attempt go.
+- A call made after a broker participant's stop is its application's misuse, refused before
+  anything moves, on every side: its start, a client's connect or reconnect over it and its server
+  transport's start. On the TypeScript side it is a `ProgrammerError`, where it was a
+  `GenericError`; on the C# side an `ObjectDisposedException`, still an
+  `InvalidOperationException`. A client or a server so refused keeps its state, where it went Closed
+  and kept its target (spec 15.21; decision 0007).
 
 ### Removed
 

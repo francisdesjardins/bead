@@ -166,8 +166,11 @@ over without end. Any other link lost connects anew as its `Reconnect` says, a t
 `TransportClientReconnectOptions`, its attempts without end unless it bounds them, or stays down
 where `Reconnects` is false; a fixed delay out of bounds is refused as it is built. Its
 reconnection ends by its attempts, its token or its stop, reported through `Error`, what ended it
-the inner exception, and its next start or connect links it anew. An OPEN lives in its broker its connect's time left, and a DATA that carries a
-credential twice the heartbeat, where the adapter offers a message's life. A server's transport
+the inner exception, and, unless it stopped, its next start or connect links it anew. A participant
+stopped links no more: its start, or a connect, reconnect or server's start over it, made after its
+stop, is refused as a misuse, an `ObjectDisposedException`, before anything moves. An OPEN lives in
+its broker its connect's time left, and a DATA that carries a credential twice the heartbeat, where
+the adapter offers a message's life. A server's transport
 starts once its broker holds each name it serves and stops once it let each go, its gauge `names`
 its broker's word. `MemoryBroker` offers every capability an adapter may, and copies, holds, drops
 and redelivers a message as a test asks (`Fault`), bounds each subscriber's queue, and loses a link
