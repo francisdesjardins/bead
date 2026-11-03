@@ -79,6 +79,7 @@ mod router_core_transfer_malformed;
 mod router_core_transfer_reentry;
 mod router_core_transfer_refusals;
 mod router_core_transfer_results;
+mod router_core_transfer_shuffle;
 mod router_core_transfer_timeouts;
 mod router_core_writer;
 mod server;
