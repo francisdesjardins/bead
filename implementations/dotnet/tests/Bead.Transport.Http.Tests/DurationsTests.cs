@@ -141,6 +141,7 @@ public sealed partial class DurationsTests
         ["transportClient.reconnectionDelay"] = ("a delay", new()
         {
             ["function"] = new(nameof(TransportReconnectOptions.Delay), ReconnectionDelayByFunction),
+            ["number"] = new(nameof(TransportReconnectOptions.Delay), ReconnectionDelayByNumber),
         }),
         ["webSocketTransportServer.sendGracePeriod"] = (nameof(WebSocketTransportServerOptions.SendGracePeriod), new()
         {

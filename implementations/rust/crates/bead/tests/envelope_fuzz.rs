@@ -9,9 +9,10 @@ use std::panic::{self, AssertUnwindSafe};
 use std::sync::LazyLock;
 use std::time::Duration;
 
+use bead::internal::{ReadEnvelopeOptions, read_envelope, read_failure};
 use bead::testing::mutations::{self, Generator, digest_of, first_inputs, lower_hex_of, mutate};
 use bead::testing::{Instant, files};
-use bead::{Failure, ReadEnvelopeOptions, RouterSide, read_envelope, read_failure};
+use bead::{Failure, RouterSide};
 use bytes::Bytes;
 use serde_json::Value;
 

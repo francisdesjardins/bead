@@ -419,9 +419,12 @@ fn keeps_each_connection_to_its_token_through_every_change_and_no_update_changes
 
 #[tokio::test]
 async fn get_or_else_set_stores_a_session_once_then_returns_it() {
-    let pair = Pair::connected((crate::testing::instants::new_year(), PairOptions::default()))
-        .await
-        .expect("a pair connected");
+    let pair = Pair::connected(
+        crate::testing::instants::new_year(),
+        &PairOptions::default(),
+    )
+    .await
+    .expect("a pair connected");
     let sessions = pair.server.sessions();
     let created = Arc::new(Mutex::new(0_usize));
     let hearing = Arc::clone(&created);
@@ -735,9 +738,12 @@ fn activity_within_the_same_millisecond_restarts_both_timers_and_emits_nothing()
 async fn the_activity_it_reports_reads_the_wall_clock_which_a_clock_set_by_hand_moves_alone() {
     const DAY: i64 = 86_400_000;
 
-    let pair = Pair::connected((crate::testing::instants::new_year(), PairOptions::default()))
-        .await
-        .expect("a pair connected");
+    let pair = Pair::connected(
+        crate::testing::instants::new_year(),
+        &PairOptions::default(),
+    )
+    .await
+    .expect("a pair connected");
     let sessions = pair.server.sessions();
     let told: Arc<Mutex<Vec<(i64, i64)>>> = Arc::default();
     let hearing = Arc::clone(&told);

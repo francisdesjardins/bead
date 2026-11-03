@@ -89,9 +89,10 @@ jobs:
 
   # ── TypeScript ───────────────────────────────────────────────────────────────
   # The TypeScript side's own gate: types, lint and its plugin's cases, format, comment budget, doc
-  # examples, the generated `Probe` held to its generator, the generated interop's types and lint,
-  # then its tests, on the current line under coverage, held to the side's floor. The interop
-  # against the C# server runs in the .NET job. On the current line and on the floor
+  # examples, the generated `Probe` held to its generator, its public surface held to
+  # `surface.txt` with its options parameters, the generated interop's types and lint, then its
+  # tests, on the current line under coverage, held to the side's floor. The interop against the C#
+  # server runs in the .NET job. On the current line and on the floor
   # `engines.node` declares, so the floor holds by a run.
   typescript:
     name: TypeScript (Node ${{ matrix.node }})
@@ -166,7 +167,9 @@ jobs:
   # The C# side's gate — `dotnet format --verify-no-changes` holds the layout, the code style and
   # the analyzers, the generated folders left to their generator; `dotnet build` builds every
   # project with every warning an error, the builder's C# goldens among them, which `Bead.Goldens`
-  # compiles under this side's rules as a consumer compiles them; `dotnet test` runs the tests under
+  # compiles under this side's rules as a consumer compiles them, and holds each `src` project's
+  # public surface to its `PublicAPI.Shipped.txt` and `PublicAPI.Unshipped.txt` by
+  # PublicApiAnalyzers; `dotnet test` runs the tests under
   # coverage, held to the side's floor — and the interop, both ways: the C# client against the
   # TypeScript server, which `dotnet test` starts with Node, then the TypeScript client against the
   # C# server; then a page of another origin in Chromium against both sides' HTTP servers, what
@@ -236,9 +239,10 @@ jobs:
   # an error by its .cargo/config.toml, `[build] warnings = "deny"`; its format, its lints, the
   # core's lints on the browser's WebAssembly target, its documentation, a build on the default
   # features alone, where what the test kit alone reaches is left out, its dependencies' advisories,
-  # licences, bans and sources, then its tests and its conformance players under coverage, lines and
-  # regions on the pinned stable, held to the side's floor in tools/coverage-floors.json; and its
-  # fuzz targets built on the nightly pinned by its date, never run. On Windows, its tests alone, as
+  # licences, bans and sources, then its tests, bead-house's holding each library crate's public
+  # surface to its list, and its conformance players under coverage, lines and regions on the pinned
+  # stable, held to the side's floor in tools/coverage-floors.json; and its fuzz targets built on
+  # the nightly pinned by its date, never run. On Windows, its tests alone, as
   # the user's MSVC toolchain builds them. The registry and the target are cached by the lock and
   # the toolchain; every build is `--locked`.
   rust:

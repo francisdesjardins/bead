@@ -193,12 +193,12 @@ impl fmt::Debug for BrokerMessage {
 impl BrokerMessage {
     /// A message of `publication`'s topic and payload, and what acknowledges it to its broker.
     #[must_use]
-    pub fn new(publication: BrokerPublication, options: BrokerMessageOptions) -> Self {
+    pub fn new(publication: BrokerPublication, options: &BrokerMessageOptions) -> Self {
         Self {
             topic: publication.topic,
             payload: publication.payload,
             is_retained: options.is_retained.unwrap_or(false),
-            settle: options.settle,
+            settle: options.settle.clone(),
             is_settled: Arc::new(AtomicBool::new(false)),
         }
     }

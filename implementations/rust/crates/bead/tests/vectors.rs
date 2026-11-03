@@ -4,6 +4,10 @@
 use std::collections::BTreeMap;
 use std::process::ExitCode;
 
+use bead::internal::{
+    MAXIMUM_DETAIL_BYTES, ReadEnvelopeOptions, ReadHeader, header_bytes_of, read_envelope,
+    read_failure, read_header, read_prefix, verify_jwt, write_envelope, write_header,
+};
 use bead::json::JsonRefusal;
 use bead::testing::instants;
 use bead::testing::parcels::{self, ParcelReading, ParcelRefusalVector, ParcelVector};
@@ -13,16 +17,15 @@ use bead::testing::vectors::{
 };
 use bead::{
     Failure, FailureOrigin, FailureScope, JwtAgainst, JwtAlgorithm, JwtKey, JwtSessionIdentifier,
-    JwtVerdict, MAXIMUM_DETAIL_BYTES, ReadEnvelopeOptions, ReadHeader, RouterSide, header_bytes_of,
-    json, read_envelope, read_failure, read_header, read_prefix, verify_jwt, write_envelope,
-    write_header,
+    JwtVerdict, RouterSide, json,
 };
 use std::sync::Arc;
 
+use bead::internal::Envelope;
 use bead::testing::SteppingClock;
 use bead::{
     AccessRefusal, AccessRefusalStage, BoxFuture, ConnectionHandle, Credential, CredentialScheme,
-    Credentials, ElsewhereSession, ElsewhereVerdict, Envelope, JsonCodec, Procedure, RequestHeader,
+    Credentials, ElsewhereSession, ElsewhereVerdict, JsonCodec, Procedure, RequestHeader,
     ResolverDependencies, RouterError, Sent, Server, ServerListener, ServerOptions,
     ServerTransport, SessionToken, SharedClock, TransportMessage,
 };

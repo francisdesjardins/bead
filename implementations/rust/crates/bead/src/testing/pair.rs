@@ -23,10 +23,10 @@ pub type ServerReports = Arc<Mutex<Vec<(RouterError, Option<ConnectionHandle>)>>
 #[derive(Debug, Clone, Default)]
 #[non_exhaustive]
 pub struct PairOptions {
-    /// The server's.
-    pub server: ServerOptions,
-    /// The client's.
-    pub client: ClientOptions,
+    /// The server's: its defaults when none.
+    pub server: Option<ServerOptions>,
+    /// The client's: its defaults when none.
+    pub client: Option<ClientOptions>,
 }
 
 // the handle the server drew last
@@ -82,7 +82,7 @@ impl Pair {
     /// # Errors
     ///
     /// What building, starting or connecting it refuses.
-    pub async fn connected((start, options): (SystemTime, PairOptions)) -> Result<Self, String> {
+    pub async fn connected(start: SystemTime, options: &PairOptions) -> Result<Self, String> {
         let clock = SteppingClock::new(start);
         let shared: SharedClock = Arc::<SteppingClock>::clone(&clock);
         let memory = MemoryServer::new(&MemoryServerOptions {
@@ -96,7 +96,7 @@ impl Pair {
             last: Arc::clone(&drawn),
         }));
 
-        let mut server_options = options.server;
+        let mut server_options = options.server.clone().unwrap_or_default();
 
         server_options.clock = Some(Arc::clone(&shared));
 
@@ -104,11 +104,13 @@ impl Pair {
             .map_err(|error| error.to_string())?;
         let transport = MemoryClient::new(&MemoryClientOptions {
             clock: Some(Arc::clone(&shared)),
-            server: memory.clone(),
         })
         .map_err(|error| error.to_string())?;
-        let client = Client::new(Arc::new(transport.clone()), &options.client)
-            .map_err(|error| error.to_string())?;
+        let client = Client::new(
+            Arc::new(transport.clone()),
+            &options.client.clone().unwrap_or_default(),
+        )
+        .map_err(|error| error.to_string())?;
         let server_reports: ServerReports = Arc::default();
         let client_reports: Arc<Mutex<Vec<RouterError>>> = Arc::default();
         let (to_server, to_client) = (Arc::clone(&server_reports), Arc::clone(&client_reports));
@@ -131,11 +133,10 @@ impl Pair {
             }));
         memory.start().await.map_err(|error| error.to_string())?;
         transport
-            .connect(MemoryConnectOptions {
+            .connect(&MemoryConnectOptions {
                 address: Some("127.0.0.1".to_owned()),
                 port: Some(50_001),
-                signal: None,
-                timeout: None,
+                ..MemoryConnectOptions::of(memory.clone())
             })
             .await
             .map_err(|error| error.to_string())?;

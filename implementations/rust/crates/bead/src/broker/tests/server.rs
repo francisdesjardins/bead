@@ -185,7 +185,7 @@ fn open_of(opener: u64) -> Vec<u8> {
 #[tokio::test]
 async fn draws_a_handle_of_its_adapter_type_for_each_connection_at_its_third_leg_and_gives_none_twice()
  {
-    let pair = BrokerPair::of(BrokerPairOptions::default()).await;
+    let pair = BrokerPair::of(&BrokerPairOptions::default()).await;
     let (peer, heard) = peer_of(&pair.broker, ("peer", &[])).await;
     let taken = std::sync::atomic::AtomicUsize::new(0);
     let next = || async {
@@ -542,7 +542,7 @@ async fn reports_what_a_listener_of_its_events_threw_with_its_connection_s_handl
     server.listen(Arc::new(AtServer(Arc::clone(&told))));
     server.start().await.expect("started");
     first
-        .connect(BrokerConnectOptions::of("interop"))
+        .connect(&BrokerConnectOptions::of("interop"))
         .await
         .expect("connected");
     until(
@@ -552,7 +552,7 @@ async fn reports_what_a_listener_of_its_events_threw_with_its_connection_s_handl
     .await;
 
     // * past maximumConnections: refused 503, its listener's panic reported with no handle
-    let refused = second.connect(BrokerConnectOptions::of("interop")).await;
+    let refused = second.connect(&BrokerConnectOptions::of("interop")).await;
     let refusal = match &refused {
         Err(TransportError::Connect(error)) => std::error::Error::source(error)
             .and_then(|source| source.downcast_ref::<BrokerRefusedError>())
@@ -617,7 +617,7 @@ async fn refuses_to_send_what_is_no_envelope_keeping_the_connection_and_holds_a_
     server.listen(Arc::new(AtServer(Arc::clone(&told))));
     server.start().await.expect("started");
     client
-        .connect(BrokerConnectOptions::of("interop"))
+        .connect(&BrokerConnectOptions::of("interop"))
         .await
         .expect("connected");
     until(
@@ -657,7 +657,7 @@ async fn refuses_to_send_what_is_no_envelope_keeping_the_connection_and_holds_a_
 #[tokio::test]
 async fn carries_no_credential_toward_its_client_and_its_command_presenting_elsewhere_fails_before_it_goes()
  {
-    let pair = BrokerPair::of(BrokerPairOptions::default()).await;
+    let pair = BrokerPair::of(&BrokerPairOptions::default()).await;
     let client = pair.connect().await;
     let handle = locked(&pair.told.opened)
         .first()
@@ -902,7 +902,7 @@ async fn serves_its_name_again_in_its_group_once_a_connection_closes_as_its_brok
         .expect("a client");
 
     first
-        .connect(BrokerConnectOptions::of("interop"))
+        .connect(&BrokerConnectOptions::of("interop"))
         .await
         .expect("connected");
     until(
@@ -914,7 +914,7 @@ async fn serves_its_name_again_in_its_group_once_a_connection_closes_as_its_brok
     // a connection that closes meanwhile asks nothing of a name its broker still holds, and asks it
     // anew once its broker let it go
     first
-        .disconnect(DisconnectOptions::default())
+        .disconnect(&DisconnectOptions::default())
         .expect("closed");
     until(|| !locked(&told.closed).is_empty(), "the connection closed").await;
     super::settle().await;
@@ -934,7 +934,7 @@ async fn serves_its_name_again_in_its_group_once_a_connection_closes_as_its_brok
         .expect("a client");
 
     second
-        .connect(BrokerConnectOptions::of("interop"))
+        .connect(&BrokerConnectOptions::of("interop"))
         .await
         .expect("connected");
     until(
@@ -952,7 +952,7 @@ async fn serves_its_name_again_in_its_group_once_a_connection_closes_as_its_brok
 
     // and one its broker refuses to serve again is reported, and left unheld
     second
-        .disconnect(DisconnectOptions::default())
+        .disconnect(&DisconnectOptions::default())
         .expect("closed");
     until(
         || locked(&holding.subscribing).len() == 1,

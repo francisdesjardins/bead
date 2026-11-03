@@ -1,0 +1,108 @@
+#nullable enable
+Bead.BrokerParticipantOptions.MaximumHeldEnvelopeBytes.get -> long?
+Bead.BrokerParticipantOptions.MaximumHeldEnvelopeBytes.init -> void
+Bead.BrokerTransportClient.Pause() -> void
+Bead.BrokerTransportClient.Resume() -> void
+Bead.BrokerTransportServer.Pause(string! connectionHandle) -> void
+Bead.BrokerTransportServer.Resume(string! connectionHandle) -> void
+*REMOVED*Bead.Envelope
+*REMOVED*Bead.Envelope.Envelope() -> void
+*REMOVED*Bead.Envelope.Failure.get -> Bead.Failure?
+*REMOVED*Bead.Envelope.Failure.init -> void
+*REMOVED*Bead.Envelope.Header.get -> Bead.IEnvelopeHeader!
+*REMOVED*Bead.Envelope.Header.init -> void
+*REMOVED*Bead.Envelope.Kind.get -> Bead.EnvelopeKind
+*REMOVED*Bead.Envelope.Payload.get -> System.ReadOnlyMemory<byte>
+*REMOVED*Bead.Envelope.Payload.init -> void
+*REMOVED*Bead.EnvelopeCodec
+*REMOVED*Bead.EnvelopePrefix
+*REMOVED*Bead.EnvelopePrefix.CallId.get -> uint
+*REMOVED*Bead.EnvelopePrefix.CallId.init -> void
+*REMOVED*Bead.EnvelopePrefix.Deconstruct(out uint CallId, out byte Kind, out byte Layout) -> void
+*REMOVED*Bead.EnvelopePrefix.EnvelopePrefix() -> void
+*REMOVED*Bead.EnvelopePrefix.EnvelopePrefix(uint CallId, byte Kind, byte Layout) -> void
+*REMOVED*Bead.EnvelopePrefix.Equals(Bead.EnvelopePrefix other) -> bool
+*REMOVED*Bead.EnvelopePrefix.Kind.get -> byte
+*REMOVED*Bead.EnvelopePrefix.Kind.init -> void
+*REMOVED*Bead.EnvelopePrefix.Layout.get -> byte
+*REMOVED*Bead.EnvelopePrefix.Layout.init -> void
+*REMOVED*Bead.EnvelopeReadOptions
+*REMOVED*Bead.EnvelopeReadOptions.<Clone>$() -> Bead.EnvelopeReadOptions!
+*REMOVED*Bead.EnvelopeReadOptions.EnvelopeReadOptions() -> void
+*REMOVED*Bead.EnvelopeReadOptions.Equals(Bead.EnvelopeReadOptions? other) -> bool
+*REMOVED*Bead.EnvelopeReadOptions.MaximumDetailBytes.get -> int
+*REMOVED*Bead.EnvelopeReadOptions.MaximumDetailBytes.init -> void
+*REMOVED*Bead.EnvelopeReadOptions.MaximumEnvelopeBytes.get -> int
+*REMOVED*Bead.EnvelopeReadOptions.MaximumEnvelopeBytes.init -> void
+*REMOVED*Bead.EnvelopeReadOptions.Side.get -> Bead.RouterSide
+*REMOVED*Bead.EnvelopeReadOptions.Side.init -> void
+Bead.IRouterClientTransport.Pause() -> void
+Bead.IRouterClientTransport.Resume() -> void
+Bead.IRouterServerTransport.Pause(string! connectionHandle) -> void
+Bead.IRouterServerTransport.Resume(string! connectionHandle) -> void
+Bead.IntakeLimits
+Bead.IntakeLimits.<Clone>$() -> Bead.IntakeLimits!
+Bead.IntakeLimits.Equals(Bead.IntakeLimits? other) -> bool
+Bead.IntakeLimits.IntakeLimits() -> void
+Bead.IntakeLimits.MaximumUntakenBytes.get -> long
+Bead.IntakeLimits.MaximumUntakenBytes.init -> void
+Bead.IntakeLimits.MaximumUntakenEnvelopes.get -> int
+Bead.IntakeLimits.MaximumUntakenEnvelopes.init -> void
+Bead.IntakeLimits.Validate() -> Bead.IntakeLimits!
+Bead.JoinedServerTransport.Pause(string! connectionHandle) -> void
+Bead.JoinedServerTransport.Resume(string! connectionHandle) -> void
+Bead.MemoryTransportClient.Pause() -> void
+Bead.MemoryTransportClient.Resume() -> void
+Bead.MemoryTransportServer.Pause(string! connectionHandle) -> void
+Bead.MemoryTransportServer.Resume(string! connectionHandle) -> void
+Bead.RouterClientOptions.Intake.get -> Bead.IntakeLimits?
+Bead.RouterClientOptions.Intake.init -> void
+Bead.RouterServerOptions.Intake.get -> Bead.IntakeLimits?
+Bead.RouterServerOptions.Intake.init -> void
+Bead.ServerOptions.Intake.get -> Bead.IntakeLimits?
+Bead.ServerOptions.Intake.init -> void
+*REMOVED*Bead.ServiceServerOptions<TService>.Admissions.get -> Bead.IServiceAdmissions<TService>!
+Bead.ServiceServerOptions<TService>.Admissions.get -> Bead.IServiceAdmissions<TService>?
+Bead.TransportReconnectDelayOrResolver
+Bead.TransportReconnectDelayOrResolver.<Clone>$() -> Bead.TransportReconnectDelayOrResolver!
+Bead.TransportReconnectDelayOrResolver.Equals(Bead.TransportReconnectDelayOrResolver? other) -> bool
+Bead.TransportReconnectDelayOrResolver.Fixed.get -> System.TimeSpan?
+Bead.TransportReconnectDelayOrResolver.Resolver.get -> Bead.TransportReconnectDelay?
+*REMOVED*Bead.TransportReconnectOptions.Delay.get -> Bead.TransportReconnectDelay?
+Bead.TransportReconnectOptions.Delay.get -> Bead.TransportReconnectDelayOrResolver?
+*REMOVED*override Bead.EnvelopePrefix.GetHashCode() -> int
+*REMOVED*override Bead.EnvelopeReadOptions.Equals(object? obj) -> bool
+*REMOVED*override Bead.EnvelopeReadOptions.GetHashCode() -> int
+*REMOVED*override Bead.EnvelopeReadOptions.ToString() -> string!
+override Bead.IntakeLimits.Equals(object? obj) -> bool
+override Bead.IntakeLimits.GetHashCode() -> int
+override Bead.IntakeLimits.ToString() -> string!
+override Bead.TransportReconnectDelayOrResolver.Equals(object? obj) -> bool
+override Bead.TransportReconnectDelayOrResolver.GetHashCode() -> int
+override Bead.TransportReconnectDelayOrResolver.ToString() -> string!
+*REMOVED*static Bead.EnvelopeCodec.HeaderBytesOf(Bead.IEnvelopeHeader! header) -> int
+*REMOVED*static Bead.EnvelopeCodec.ReadEnvelope(System.ReadOnlySpan<byte> bytes, Bead.EnvelopeReadOptions! options) -> Bead.Envelope?
+*REMOVED*static Bead.EnvelopeCodec.ReadFailure(System.ReadOnlySpan<byte> payload, Bead.EnvelopeReadOptions! options) -> Bead.Failure!
+*REMOVED*static Bead.EnvelopeCodec.ReadHeader(System.ReadOnlySpan<byte> bytes, Bead.RouterSide side) -> (Bead.IEnvelopeHeader! Header, int HeaderBytes)?
+*REMOVED*static Bead.EnvelopeCodec.ReadPrefix(System.ReadOnlySpan<byte> bytes, Bead.RouterSide side) -> Bead.EnvelopePrefix
+*REMOVED*static Bead.EnvelopeCodec.WriteEnvelope(Bead.Envelope! envelope, int maximumDetailBytes = 1024) -> byte[]!
+*REMOVED*static Bead.EnvelopeCodec.WriteFailure(Bead.Failure! failure, int maximumDetailBytes = 1024) -> byte[]!
+*REMOVED*static Bead.EnvelopeCodec.WriteHeader(Bead.IEnvelopeHeader! header, System.Span<byte> bytes) -> int
+*REMOVED*static Bead.EnvelopePrefix.operator !=(Bead.EnvelopePrefix left, Bead.EnvelopePrefix right) -> bool
+*REMOVED*static Bead.EnvelopePrefix.operator ==(Bead.EnvelopePrefix left, Bead.EnvelopePrefix right) -> bool
+*REMOVED*static Bead.EnvelopeReadOptions.operator !=(Bead.EnvelopeReadOptions? left, Bead.EnvelopeReadOptions? right) -> bool
+*REMOVED*static Bead.EnvelopeReadOptions.operator ==(Bead.EnvelopeReadOptions? left, Bead.EnvelopeReadOptions? right) -> bool
+*REMOVED*static Bead.Health.Of(Bead.ServerGauges! gauges) -> Bead.Health!
+*REMOVED*static Bead.HttpPolicy.Of(Bead.HttpPolicyOptions! given) -> Bead.HttpPolicy!
+static Bead.HttpPolicy.Of(Bead.HttpPolicyOptions? given = null) -> Bead.HttpPolicy!
+static Bead.IntakeLimits.Default.get -> Bead.IntakeLimits!
+static Bead.IntakeLimits.operator !=(Bead.IntakeLimits? left, Bead.IntakeLimits? right) -> bool
+static Bead.IntakeLimits.operator ==(Bead.IntakeLimits? left, Bead.IntakeLimits? right) -> bool
+*REMOVED*static Bead.LayerGauges.Of(Bead.Gauges! gauges, System.Collections.Generic.IReadOnlySet<string!>! held) -> Bead.LayerGauges!
+*REMOVED*static Bead.RouterLimits.WholeEnvelopeOf(Bead.RouterLimits? limits) -> Bead.RouterLimits!
+static Bead.TransportReconnectDelayOrResolver.Of(Bead.TransportReconnectDelay! resolver) -> Bead.TransportReconnectDelayOrResolver!
+static Bead.TransportReconnectDelayOrResolver.Of(System.TimeSpan delay) -> Bead.TransportReconnectDelayOrResolver!
+static Bead.TransportReconnectDelayOrResolver.operator !=(Bead.TransportReconnectDelayOrResolver? left, Bead.TransportReconnectDelayOrResolver? right) -> bool
+static Bead.TransportReconnectDelayOrResolver.operator ==(Bead.TransportReconnectDelayOrResolver? left, Bead.TransportReconnectDelayOrResolver? right) -> bool
+*REMOVED*~override Bead.EnvelopePrefix.Equals(object obj) -> bool
+*REMOVED*~override Bead.EnvelopePrefix.ToString() -> string

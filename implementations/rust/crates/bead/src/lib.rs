@@ -57,12 +57,9 @@ pub use broker::server::{
     ACCEPT_TIMEOUT, BrokerServer, BrokerServerOptions, MAXIMUM_CONNECTIONS,
     MAXIMUM_CONNECTIONS_PER_ADDRESS,
 };
-pub use call_session::{
-    Carriage, Presented, connection_session_of, presented_credential_of, uncarried_of,
-};
 pub use client::{Client, ClientOptions};
 pub use clock::{
-    Clock, Schedule, SharedClock, SystemClock, SystemClockOptions, Timer, TimerCallback, clock_of,
+    Clock, Schedule, SharedClock, SystemClock, SystemClockOptions, Timer, TimerCallback,
 };
 pub use constants::{
     CredentialScheme, EnvelopeFlag, EnvelopeKind, EnvelopeLayout, FailureScope, ProcedureKind,
@@ -70,7 +67,7 @@ pub use constants::{
 };
 pub use credentials::{
     Credentials, ElsewhereSession, ElsewhereVerdict, ElsewhereVerifier, JWT_LIMIT_BYTES, JwtKeySet,
-    JwtSetKey, KeySetAnswer, KeySetAsk, assert_limits_hold_jwt,
+    JwtSetKey, KeySetAnswer, KeySetAsk,
 };
 pub use debug::participant::{ParcelVerdict, ParticipantDebugEvent, ParticipantDebugListener};
 pub use debug::{
@@ -78,30 +75,23 @@ pub use debug::{
     FilterGiven, FilterKeeper, FilterRefusal, GivenFilter, TracedEnvelope, filter_debug,
     parse_debug_filter,
 };
-pub use duration::{DurationRefusal, LONGEST_TIMER, NEVER, hold, hold_delay, hold_finite};
+pub use duration::{DurationRefusal, LONGEST_TIMER, NEVER};
 pub use envelope::{
-    CancelHeader, ChunkHeader, Credential, CreditHeader, Envelope, FailureHeader, FailureRecord,
-    Header, LARGEST_64_BIT_FIELD, MAXIMUM_DETAIL_BYTES, MAXIMUM_ENVELOPE_BYTES,
-    MAXIMUM_HEADER_BYTES, NotificationHeader, Prefix, ReadEnvelopeOptions, ReadHeader,
-    RequestHeader, ResultHeader, header_bytes_of, read_envelope, read_failure, read_header,
-    read_prefix, unbounded_header_bytes_of, write_envelope, write_failure, write_header,
+    CancelHeader, ChunkHeader, Credential, CreditHeader, FailureHeader, FailureRecord, Header,
+    NotificationHeader, RequestHeader, ResultHeader,
 };
 pub use errors::{
     CallError, CapacityError, ConnectError, Disposed, ProgrammerError, ReadyStateError,
     ReconnectError, Refusal, ResolverError, TransportError,
 };
 pub use failure::{Failure, FailureOrigin, ProcedureAddress};
-pub use identity::{
-    DeclarationWay, Deprecation, IdentityRefusal, Procedure, are_one_name, check_declaration,
-    check_procedure_kind, is_procedure_name,
-};
+pub use identity::{DeclarationWay, Deprecation, IdentityRefusal, Procedure};
 pub use joined::JoinedServerTransport;
 pub use jwt_verifier::{
     JWT_LEEWAY, JwtAgainst, JwtAlgorithm, JwtKey, JwtRefusal, JwtSessionIdentifier, JwtVerdict,
-    assert_jwt_key, audiences_of, read_jwt, verify_jwt,
 };
 pub use managers::notification::{
-    NotificationKey, PACING_DEFAULTS, PacingLimits, PacingLimitsOptions, pacing_limits_of,
+    NotificationKey, PACING_DEFAULTS, PacingLimits, PacingLimitsOptions,
 };
 pub use managers::service::{
     CloseConnection, DEFAULT_TIMEOUT, DebugEvent, DebugListener, DeprecatedListener,
@@ -129,10 +119,7 @@ pub use router::client::{
     ClientActivityListener, ClientEnvelopeListener, ClientErrorListener, ClientRequest,
     NotificationLike, RouterClient, RouterClientOptions, Settled, WithdrawnListener,
 };
-pub use router::core::{
-    AdmissionRefusal, AdmissionRequest, AdmitFn, Answerer, ResolverProps,
-    credential_schemes_detail_of,
-};
+pub use router::core::{AdmissionRefusal, AdmissionRequest, AdmitFn, Answerer, ResolverProps};
 pub use router::relay::{
     Destination, DestinationOptions, DestinationRegistration, RelayLeg, RelayOptions, RelayRouter,
     RelayTarget,
@@ -147,16 +134,15 @@ pub use router::types::{
     Gauges, INTAKE_DEFAULTS, IntakeLimits, IntakeLimitsOptions, LIMIT_DEFAULTS, RequestCredential,
     ResolvedRequestOptions, RouterActivity, RouterAnswer, RouterError, RouterLimits,
     RouterLimitsOptions, RouterResult, SessionIdentifier, Signal, SignalReason, TransportMessage,
-    intake_limits_of, limits_of, session_key_of, whole_envelope_limits_of,
 };
 pub use server::{
     Health, HealthCheck, HealthStatus, LayerGauges, Server, ServerGauges, ServerOptions,
-    SessionListener, Sessions, WARNING_RATIO, health_of, layer_gauges_of,
+    SessionListener, Sessions, WARNING_RATIO,
 };
 pub use service::{
     AdmissionHook, AdmissionRule, Descriptor, DescriptorInit, FailureCatalogue, ListedFailure,
     NotifyingDescriptor, ServiceProcedure, ServiceServer, ServiceServerOptions, command_of,
-    failures_of, listed_failure_of, notifying_of, request_of,
+    failures_of, notifying_of, request_of,
 };
 pub use session_token::SessionToken;
 pub use transport::{
@@ -165,9 +151,25 @@ pub use transport::{
     ServerListener, ServerTransport, TransportServerRefusal, is_field_value,
 };
 pub use violations::{
-    CLOSING_BYTES, Judged, ReadViolations, Violation, ViolationHolder, detail_bound_of, is_refused,
+    CLOSING_BYTES, Judged, ReadViolations, Violation, ViolationHolder, detail_bound_of,
     violations_detail_of, violations_of, words_of,
 };
+
+/// What the workspace's own members — the interop service, the bench, the conformance players and
+/// the fuzz targets — reach that the API does not offer: outside SemVer, and no road for another
+/// crate. The envelope's codec is here, internal on every side as a router's core is (decision
+/// 0004), as the C# side's members reach theirs by `InternalsVisibleTo`.
+#[doc(hidden)]
+pub mod internal {
+    pub use crate::duration::{hold, hold_finite};
+    pub use crate::envelope::{
+        Envelope, MAXIMUM_DETAIL_BYTES, Prefix, ReadEnvelopeOptions, ReadHeader, header_bytes_of,
+        read_envelope, read_failure, read_header, read_prefix, write_envelope, write_header,
+    };
+    pub use crate::identity::{are_one_name, is_procedure_name};
+    pub use crate::jwt_verifier::{read_jwt, verify_jwt};
+    pub use crate::router::types::{limits_of, session_key_of};
+}
 
 #[cfg(any(test, feature = "testing"))]
 #[doc(hidden)]

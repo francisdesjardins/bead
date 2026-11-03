@@ -84,7 +84,7 @@ fn shaped(parcels: &[Parcel]) -> Vec<(u8, u64, Option<u16>)> {
 #[tokio::test]
 async fn subscribes_its_inbox_before_anything_goes_takes_its_id_from_its_adapter_and_draws_its_incarnation_and_each_half_from_a_cryptographic_source()
  {
-    let pair = BrokerPair::of(BrokerPairOptions::default()).await;
+    let pair = BrokerPair::of(&BrokerPairOptions::default()).await;
     let recording = Arc::new(Calling::of(adapter_of(&pair.broker, "ada")));
     let adapter: Arc<dyn BrokerAdapter> = Arc::<Calling>::clone(&recording);
     let participant = BrokerParticipant::new(adapter, &BrokerParticipantOptions::default())
@@ -94,7 +94,7 @@ async fn subscribes_its_inbox_before_anything_goes_takes_its_id_from_its_adapter
         .expect("a client");
 
     client
-        .connect(BrokerConnectOptions::of("interop"))
+        .connect(&BrokerConnectOptions::of("interop"))
         .await
         .expect("connected");
 
@@ -153,7 +153,7 @@ async fn subscribes_its_inbox_before_anything_goes_takes_its_id_from_its_adapter
 async fn closes_each_connection_as_its_link_goes_down_and_connects_anew_as_another_incarnation_resetting_its_peers()
  {
     // ! no will: what closes the server's end is the RESET its participant sends once linked again
-    let pair = BrokerPair::of(BrokerPairOptions {
+    let pair = BrokerPair::of(&BrokerPairOptions {
         client_capabilities: Some(BrokerCapabilities::GROUPS | BrokerCapabilities::NO_SUBSCRIBER),
         ..BrokerPairOptions::default()
     })
@@ -172,7 +172,7 @@ async fn closes_each_connection_as_its_link_goes_down_and_connects_anew_as_anoth
         .client_participant
         .client(&BrokerClientOptions::default())
         .expect("a client");
-    let pending = crate::testing::spawn(waiting.connect(BrokerConnectOptions::of("quiet")));
+    let pending = crate::testing::spawn(waiting.connect(&BrokerConnectOptions::of("quiet")));
 
     until(
         || heard.parcels().len() == 1,
@@ -400,7 +400,7 @@ async fn refuses_a_send_whose_room_fits_no_part_and_keeps_the_connection_on_the_
     server.listen(Arc::new(AtServer(Arc::clone(&told))));
     server.start().await.expect("started");
     client
-        .connect(BrokerConnectOptions::of("interop"))
+        .connect(&BrokerConnectOptions::of("interop"))
         .await
         .expect("connected");
     until(
@@ -538,7 +538,7 @@ async fn refuses_a_server_transport_a_name_another_of_its_server_transports_serv
 
 #[tokio::test]
 async fn closes_each_connection_bound_to_the_incarnation_a_gone_names_and_none_bound_to_another() {
-    let pair = BrokerPair::of(BrokerPairOptions::default()).await;
+    let pair = BrokerPair::of(&BrokerPairOptions::default()).await;
     let _first = pair.connect().await;
     let _second = pair.connect().await;
     let bob = participant_of(
@@ -556,7 +556,7 @@ async fn closes_each_connection_bound_to_the_incarnation_a_gone_names_and_none_b
     };
 
     third
-        .connect(BrokerConnectOptions::of("interop"))
+        .connect(&BrokerConnectOptions::of("interop"))
         .await
         .expect("connected");
     publisher
@@ -636,7 +636,7 @@ async fn acknowledges_a_message_once_taken_or_dropped_as_a_copy_never_after_its_
         }
     }
 
-    let pair = BrokerPair::of(BrokerPairOptions::default()).await;
+    let pair = BrokerPair::of(&BrokerPairOptions::default()).await;
     let client = pair.connect().await;
     let unsettled_as_told: Arc<Mutex<Vec<u64>>> = Arc::default();
 
@@ -743,7 +743,7 @@ async fn holds_a_connection_secure_only_while_both_its_legs_are() {
         server.listen(Arc::new(AtServer(Arc::clone(&told))));
         server.start().await.expect("started");
         client
-            .connect(BrokerConnectOptions::of("interop"))
+            .connect(&BrokerConnectOptions::of("interop"))
             .await
             .expect("connected");
         until(
@@ -1004,7 +1004,7 @@ async fn lets_a_listener_go_fails_a_connect_awaiting_its_answer_as_it_stops_refu
     let waiting = participant
         .client(&BrokerClientOptions::default())
         .expect("a client");
-    let pending = crate::testing::spawn(waiting.connect(BrokerConnectOptions::of("interop")));
+    let pending = crate::testing::spawn(waiting.connect(&BrokerConnectOptions::of("interop")));
 
     until(|| heard.parcels().len() == 1, "its OPEN reaches the name").await;
 
@@ -1051,7 +1051,7 @@ async fn lets_a_listener_go_fails_a_connect_awaiting_its_answer_as_it_stops_refu
             participant
                 .client(&BrokerClientOptions::default())
                 .expect("a client")
-                .connect(BrokerConnectOptions::of("interop"))
+                .connect(&BrokerConnectOptions::of("interop"))
                 .await
         ),
         "the participant ada is stopped",
@@ -1424,7 +1424,7 @@ async fn reports_its_reconnection_ended_once_its_signal_is_aborted() {
 
 #[tokio::test]
 async fn serves_its_names_again_once_its_link_connects_anew_its_former_peers_reset() {
-    let pair = BrokerPair::of(BrokerPairOptions::default()).await;
+    let pair = BrokerPair::of(&BrokerPairOptions::default()).await;
     let first = pair.connect().await;
     let former = pair.server_participant.incarnation();
 
@@ -1468,7 +1468,7 @@ async fn serves_its_names_again_once_its_link_connects_anew_its_former_peers_res
 async fn reports_what_reaches_a_name_but_a_parcel_and_an_open_that_does_not_read_and_drops_in_silence_any_other_parcel_there_a_parcel_at_its_inbox_that_names_no_connection_and_anything_but_a_gone_at_a_departure()
  {
     const HALF: u64 = 0xA100_0000_0000_0001;
-    let pair = BrokerPair::of(BrokerPairOptions::default()).await;
+    let pair = BrokerPair::of(&BrokerPairOptions::default()).await;
     let client = pair.connect().await;
     let (tester, heard) = peer_of(&pair.broker, ("tester", &[])).await;
     let reported = reporting(&pair.server_participant);
@@ -1599,7 +1599,7 @@ async fn gives_no_life_to_a_publication_of_an_adapter_that_offers_none() {
         .expect("a client");
 
     client
-        .connect(BrokerConnectOptions::of("interop"))
+        .connect(&BrokerConnectOptions::of("interop"))
         .await
         .expect("connected");
     client
@@ -1638,7 +1638,7 @@ async fn gives_no_life_to_a_publication_of_an_adapter_that_offers_none() {
 #[tokio::test]
 async fn a_participant_taken_over_reports_it_connects_no_more_and_fails_each_connect_naming_it_until_it_is_started_again()
  {
-    let pair = BrokerPair::of(BrokerPairOptions::default()).await;
+    let pair = BrokerPair::of(&BrokerPairOptions::default()).await;
     let client = pair.connect().await;
     let told = Arc::new(ClientTold::default());
     let reported = reporting(&pair.client_participant);
@@ -1652,7 +1652,7 @@ async fn a_participant_taken_over_reports_it_connects_no_more_and_fails_each_con
         .client_participant
         .client(&BrokerClientOptions::default())
         .expect("a client");
-    let pending = crate::testing::spawn(waiting.connect(BrokerConnectOptions::of("silent")));
+    let pending = crate::testing::spawn(waiting.connect(&BrokerConnectOptions::of("silent")));
 
     until(|| heard.parcels().len() == 1, "its OPEN reaches the name").await;
     pair.client_adapter.take_over();
@@ -1681,7 +1681,7 @@ async fn a_participant_taken_over_reports_it_connects_no_more_and_fails_each_con
             pair.client_participant
                 .client(&BrokerClientOptions::default())
                 .expect("a client")
-                .connect(BrokerConnectOptions::of("interop"))
+                .connect(&BrokerConnectOptions::of("interop"))
                 .await
         ),
         "the link of client was taken over by another link of its id, and connects no more until it is started again",
@@ -1790,7 +1790,7 @@ async fn fails_a_link_that_goes_down_as_it_connects_at_its_start_or_as_it_links_
             participant
                 .client(&BrokerClientOptions::default())
                 .expect("a client")
-                .connect(BrokerConnectOptions::of("interop"))
+                .connect(&BrokerConnectOptions::of("interop"))
                 .await
         ),
         "the link of ada was taken over by another link of its id, and connects no more until it is started again",

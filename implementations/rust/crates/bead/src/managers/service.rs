@@ -286,17 +286,17 @@ pub struct RequestOptions {
 }
 
 /// How a manager judges a value by its rules (spec 18.2).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct ValidateOptions {
-    /// Whether it stops at the first violation.
-    pub fail_fast: bool,
-    /// The bytes a refusal's detail holds at most.
-    pub maximum_bytes: usize,
+    /// Whether it stops at the first violation: `false` when none.
+    pub fail_fast: Option<bool>,
+    /// The bytes a refusal's detail holds at most: no bound when none.
+    pub maximum_bytes: Option<usize>,
 }
 
 /// The rules a value is judged by.
-pub type Validate<T> = Arc<dyn Fn(&T, ValidateOptions) -> Judged + Send + Sync>;
+pub type Validate<T> = Arc<dyn Fn(&T, &ValidateOptions) -> Judged + Send + Sync>;
 
 /// What a requester reads and writes by, and judges its request by.
 pub struct RequestDependencies<Req: PayloadCodec, Res: PayloadCodec> {
@@ -877,7 +877,7 @@ where
     pub fn call(
         &self,
         payload: Req::Value,
-        options: RequestOptions,
+        options: &RequestOptions,
     ) -> Result<ServiceCall<Res::Value>, ProgrammerError> {
         self.call_with(payload, (options, None))
     }
@@ -890,25 +890,24 @@ where
     pub(crate) fn call_with(
         &self,
         payload: Req::Value,
-        (options, subscribes): (RequestOptions, Option<Arc<dyn NotificationLike>>),
+        (options, subscribes): (&RequestOptions, Option<Arc<dyn NotificationLike>>),
     ) -> Result<ServiceCall<Res::Value>, ProgrammerError> {
         let shared = &self.shared;
         let manager = &shared.manager;
         let procedure = &shared.procedure;
-        let resolved = ResolvedRequestOptions {
-            timeout: hold(
-                "a call's timeout",
-                options.timeout.unwrap_or(manager.timeout),
-            )?,
-            destination_id: options.destination_id,
-            connection_handle: options.connection_handle.clone(),
-            credential: options.credential,
-            signal: options.signal,
-            close_on_timeout: options
-                .close_on_timeout
-                .or(manager.close_on_timeout)
-                .unwrap_or(false),
-        };
+        let mut resolved = ResolvedRequestOptions::of(hold(
+            "a call's timeout",
+            options.timeout.unwrap_or(manager.timeout),
+        )?);
+
+        resolved.destination_id = options.destination_id;
+        resolved
+            .connection_handle
+            .clone_from(&options.connection_handle);
+        resolved.credential.clone_from(&options.credential);
+        resolved.signal.clone_from(&options.signal);
+        resolved.close_on_timeout = options.close_on_timeout.or(manager.close_on_timeout);
+
         // * judged before it is written: PAYLOAD_INVALID, its detail under this side's bound
         let refusal = refusal_of(shared, (&payload, resolved.destination_id));
         let encoded = match &refusal {
@@ -941,7 +940,7 @@ where
         }
 
         let (on_call_id, call_id) = oneshot::channel::<u32>();
-        let close_on_timeout = resolved.close_on_timeout;
+        let close_on_timeout = resolved.close_on_timeout.unwrap_or(false);
         let destination_id = resolved.destination_id;
         let requested = manager.router.request(
             encoded,
@@ -958,7 +957,7 @@ where
         )?;
         let (reply, outcome) = oneshot::channel();
         let shared = Arc::clone(&self.shared);
-        let connection_handle = options.connection_handle;
+        let connection_handle = options.connection_handle.clone();
 
         manager.router.cover(async move {
             let manager = &shared.manager;
@@ -1084,9 +1083,9 @@ fn refusal_of<Req: PayloadCodec, Res: PayloadCodec>(
     );
     let judged = validate(
         payload,
-        ValidateOptions {
-            fail_fast: shared.dependencies.fail_fast,
-            maximum_bytes,
+        &ValidateOptions {
+            fail_fast: Some(shared.dependencies.fail_fast),
+            maximum_bytes: Some(maximum_bytes),
         },
     );
 
@@ -1538,14 +1537,12 @@ where
                 usize::try_from(limits.maximum_detail_bytes).unwrap_or(usize::MAX),
                 usize::try_from(limits.maximum_envelope_bytes).unwrap_or(usize::MAX),
             );
+            let options = ValidateOptions {
+                fail_fast: Some(self.fail_fast),
+                maximum_bytes: Some(maximum_bytes),
+            };
             let judging = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                validate(
-                    &value,
-                    ValidateOptions {
-                        fail_fast: self.fail_fast,
-                        maximum_bytes,
-                    },
-                )
+                validate(&value, &options)
             }));
             let judged = match judging {
                 Ok(judged) => judged,

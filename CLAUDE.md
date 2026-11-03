@@ -118,8 +118,9 @@ titles that hold one write it `’`, and the citation does the same.
 - every body is a block: methods, constructors, operators, local functions, properties, accessors,
   indexers and lambdas, never an expression body; a block for every branch;
 - at most two parameters to a function, then at most one options record, always last (`TOptions?
-  options = null` when every member is optional, a `CancellationToken` inside it); a third
-  essential thing is a design to revisit, never a third parameter;
+  options = null` when every member is optional, a `required` member — a setting, at most two —
+  making it a required parameter, a `CancellationToken` inside it); a third essential thing is a
+  design to revisit, never a third parameter;
 - `TreatWarningsAsErrors`, the analyzers at `latest-recommended`, the code style enforced in the
   build, a doc comment on every public member;
 - `_camelCase` private fields; PascalCase constants and static readonly fields;
@@ -130,7 +131,9 @@ titles that hold one write it `’`, and the citation does the same.
 
 - oxlint and oxfmt as configured there, and `yarn check` passes;
 - the author's style: section comments, `I`-prefixed interfaces, block-bodied arrow functions, at
-  most two parameters then at most one options object, always last, frozen objects over `enum`;
+  most two parameters then at most one options object, always last, optional unless a member of it
+  is required (no `?`, at most two, never the operand), a conditional type where that depends on a
+  type parameter, frozen objects over `enum`;
 - one test file per module, named after it, in a `__tests__/` folder beside it
   (`src/transport/shared/create-promise.ts` →
   `src/transport/shared/__tests__/create-promise.test.ts`).
@@ -144,9 +147,10 @@ titles that hold one write it `’`, and the citation does the same.
 - every warning an error by `[build] warnings = "deny"` in `.cargo/config.toml`, never by
   `RUSTFLAGS`; the toolchain `rust-toolchain.toml` pins, edition 2024;
 - beside the receiver, at most two parameters, then at most one options struct, always last: named
-  `…Options`, `#[non_exhaustive]`, `Default`, its fields public, each an `Option`, set by
-  assignment over its default and taken by `&`; a third essential thing is a design to revisit,
-  never a third parameter;
+  `…Options`, `#[non_exhaustive]`, never `Copy`, its fields public, each an `Option` but a required
+  setting, at most two, which its constructor of the required members sets, the struct then
+  without `Default`, and with `Default` otherwise; set by assignment over what that gives, and
+  taken by `&`; a third essential thing is a design to revisit, never a third parameter;
 - traits and composition, no `I` prefix; a `Result` for every refusal, never a panic in the
   library;
 - one owner per router, its state one task's, a turn awaiting nothing; an operation takes effect as

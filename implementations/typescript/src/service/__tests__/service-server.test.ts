@@ -197,6 +197,26 @@ test.describe('createServiceServer', () => {
         });
       }).toThrow(/^the hook loud admits by a function/u);
     });
+
+    // decision 0004: the hooks are required exactly when a procedure names one, which the types hold
+    test('refuses options without admissions where a procedure names a hook', () => {
+      const refusal = new ProgrammerError(
+        'shout is admitted by the hook loud, which the options do not give'
+      );
+
+      expect(() => {
+        // @ts-expect-error: a procedure names a hook, so the options and their admissions are required
+        return createServiceServer(GreeterProcedures);
+      }).toThrow(refusal);
+      expect(() => {
+        // @ts-expect-error: a procedure names a hook, so the admissions are required
+        return createServiceServer(GreeterProcedures, {});
+      }).toThrow(refusal);
+      expect(() => {
+        // @ts-expect-error: a procedure names a hook, so the admissions are required
+        return createServiceServer(GreeterProcedures, { failFast: true });
+      }).toThrow(refusal);
+    });
   });
 
   test('answers a failure its procedure lists', async () => {

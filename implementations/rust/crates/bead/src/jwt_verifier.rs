@@ -225,7 +225,7 @@ fn object_of(part: &[u8]) -> Option<Map<String, Value>> {
 /// # Errors
 ///
 /// A [`ProgrammerError`] naming the key's issuer.
-pub fn assert_jwt_key(key: &JwtKey) -> Result<(), ProgrammerError> {
+pub(crate) fn assert_jwt_key(key: &JwtKey) -> Result<(), ProgrammerError> {
     let fault = |what: &str| {
         ProgrammerError::new(format!(
             "a JWT's key {what}, for the issuer {:?}",
@@ -404,7 +404,7 @@ fn milliseconds_of(value: Option<&Value>) -> Option<i64> {
 /// The audiences a token's `aud` names (RFC 7519 §4.1.3): itself, a string; each of an array of
 /// strings; none for anything else.
 #[must_use]
-pub fn audiences_of(aud: Option<&Value>) -> Vec<String> {
+pub(crate) fn audiences_of(aud: Option<&Value>) -> Vec<String> {
     match aud {
         Some(Value::String(audience)) => vec![audience.clone()],
         Some(Value::Array(items)) => items

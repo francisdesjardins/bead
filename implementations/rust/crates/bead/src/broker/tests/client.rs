@@ -96,7 +96,7 @@ async fn fails_a_connect_refused_or_past_its_time_or_cancelled_and_refuses_what_
 
     // nothing serves the name: its broker says so, and the connect fails at once, its refusal the
     // source
-    let failed = client.connect(BrokerConnectOptions::of("nobody")).await;
+    let failed = client.connect(&BrokerConnectOptions::of("nobody")).await;
     let refused = refusal_of(&failed).expect("a refusal");
 
     assert_eq!(
@@ -112,7 +112,7 @@ async fn fails_a_connect_refused_or_past_its_time_or_cancelled_and_refuses_what_
 
     // one that serves it and never answers: past its time, on the clock given
     let (_silent, heard) = peer_of(&broker, ("silent", &[&["bead", "s", "interop"]])).await;
-    let timing = crate::testing::spawn(client.connect(BrokerConnectOptions {
+    let timing = crate::testing::spawn(client.connect(&BrokerConnectOptions {
         timeout: Some(Duration::from_secs(1)),
         ..BrokerConnectOptions::of("interop")
     }));
@@ -130,7 +130,7 @@ async fn fails_a_connect_refused_or_past_its_time_or_cancelled_and_refuses_what_
 
     // then given up by its signal
     let cancelling = CancellationToken::new();
-    let cancelled = crate::testing::spawn(client.connect(BrokerConnectOptions {
+    let cancelled = crate::testing::spawn(client.connect(&BrokerConnectOptions {
         signal: Some(cancelling.clone()),
         ..BrokerConnectOptions::of("interop")
     }));
@@ -152,7 +152,7 @@ async fn fails_a_connect_refused_or_past_its_time_or_cancelled_and_refuses_what_
     for server in ["", "a.b", &longest] {
         assert!(
             matches!(
-                client.connect(BrokerConnectOptions::of(server)).await,
+                client.connect(&BrokerConnectOptions::of(server)).await,
                 Err(TransportError::Refused(_))
             ),
             "{server} refused"
@@ -161,7 +161,7 @@ async fn fails_a_connect_refused_or_past_its_time_or_cancelled_and_refuses_what_
 
     assert!(client.send(data(&[1])).is_err(), "nothing to send on");
     assert!(
-        client.disconnect(DisconnectOptions::default()).is_err(),
+        client.disconnect(&DisconnectOptions::default()).is_err(),
         "nothing to close"
     );
     assert_eq!(
@@ -175,14 +175,14 @@ async fn fails_a_connect_refused_or_past_its_time_or_cancelled_and_refuses_what_
 
 #[tokio::test]
 async fn reconnects_through_the_name_it_serves_a_pair_drawn_anew() {
-    let pair = BrokerPair::of(BrokerPairOptions::default()).await;
+    let pair = BrokerPair::of(&BrokerPairOptions::default()).await;
     let client = pair.connect().await;
     let before = client.pair().expect("a pair");
     let told = Arc::new(ClientTold::default());
 
     client.listen(Arc::new(AtClient(Arc::clone(&told))));
     client
-        .reconnect(ReconnectOptions::default())
+        .reconnect(&ReconnectOptions::default())
         .expect("reconnecting")
         .await
         .expect("reconnected");
@@ -263,7 +263,7 @@ async fn paused_before_its_connect_opened_holds_what_its_server_sent_and_hands_i
     }));
     client.pause();
 
-    let connecting = crate::testing::spawn(client.connect(BrokerConnectOptions::of("interop")));
+    let connecting = crate::testing::spawn(client.connect(&BrokerConnectOptions::of("interop")));
     let opener = opener_of(&heard).await;
 
     publish_to(&peer, (INBOX, accept_of(opener))).await;
@@ -335,7 +335,7 @@ async fn hands_on_an_envelope_its_server_sent_as_it_accepted_once_its_connect_op
         told: Arc::clone(&told),
     }));
 
-    let connecting = crate::testing::spawn(client.connect(BrokerConnectOptions::of("interop")));
+    let connecting = crate::testing::spawn(client.connect(&BrokerConnectOptions::of("interop")));
     let opener = opener_of(&heard).await;
 
     // * its ACCEPT and an envelope after it, published in one turn: the envelope comes before its
@@ -386,7 +386,7 @@ async fn fails_a_connect_its_server_refused_as_malformed_or_closed_as_it_opened_
     client.listen(Arc::new(AtClient(Arc::clone(&told))));
 
     // refused 400: its refusal the source, named as section 15.6 names it
-    let refusing = crate::testing::spawn(client.connect(BrokerConnectOptions::of("interop")));
+    let refusing = crate::testing::spawn(client.connect(&BrokerConnectOptions::of("interop")));
     let opener = opener_of(&heard).await;
 
     publish_to(
@@ -421,7 +421,7 @@ async fn fails_a_connect_its_server_refused_as_malformed_or_closed_as_it_opened_
     // no close is told
     locked(&heard.messages).clear();
 
-    let closing = crate::testing::spawn(client.connect(BrokerConnectOptions::of("interop")));
+    let closing = crate::testing::spawn(client.connect(&BrokerConnectOptions::of("interop")));
     let opener = opener_of(&heard).await;
     // each publish takes effect as it is made: both go before either is awaited
     let accepting = peer.publish(BrokerPublication::of(INBOX, Bytes::from(accept_of(opener))));
@@ -455,7 +455,7 @@ async fn fails_a_connect_its_server_refused_as_malformed_or_closed_as_it_opened_
     // once it opened, its server's close is told, unclean but for 1000
     locked(&heard.messages).clear();
 
-    let opening = crate::testing::spawn(client.connect(BrokerConnectOptions::of("interop")));
+    let opening = crate::testing::spawn(client.connect(&BrokerConnectOptions::of("interop")));
     let lasting = opener_of(&heard).await;
 
     publish_to(&peer, (INBOX, accept_of(lasting))).await;
@@ -485,7 +485,7 @@ async fn fails_a_connect_its_server_refused_as_malformed_or_closed_as_it_opened_
 #[tokio::test]
 async fn refuses_to_send_a_credential_no_field_carries_or_what_is_no_envelope_keeping_its_connection_and_closes_it_by_a_reset_where_its_disconnect_is_not_clean()
  {
-    let pair = BrokerPair::of(BrokerPairOptions::default()).await;
+    let pair = BrokerPair::of(&BrokerPairOptions::default()).await;
     let client = pair.connect().await;
 
     assert_eq!(
@@ -503,7 +503,7 @@ async fn refuses_to_send_a_credential_no_field_carries_or_what_is_no_envelope_ke
 
     // * not clean: a RESET, its server told unclean
     client
-        .disconnect(DisconnectOptions {
+        .disconnect(&DisconnectOptions {
             is_clean: Some(false),
             ..DisconnectOptions::default()
         })
@@ -539,7 +539,7 @@ async fn fails_a_connect_under_way_once_disposed_its_link_up_or_not_yet() {
     let early = ada
         .client(&BrokerClientOptions::default())
         .expect("a client");
-    let linking = early.connect(BrokerConnectOptions::of("interop"));
+    let linking = early.connect(&BrokerConnectOptions::of("interop"));
 
     early.dispose();
     assert_eq!(
@@ -552,7 +552,7 @@ async fn fails_a_connect_under_way_once_disposed_its_link_up_or_not_yet() {
     let client = ada
         .client(&BrokerClientOptions::default())
         .expect("a client");
-    let connecting = crate::testing::spawn(client.connect(BrokerConnectOptions::of("interop")));
+    let connecting = crate::testing::spawn(client.connect(&BrokerConnectOptions::of("interop")));
 
     opener_of(&heard).await;
     assert_eq!(heard.parcels().len(), 1, "one OPEN went");
@@ -579,7 +579,7 @@ async fn reports_what_a_listener_of_its_events_threw_and_tells_the_listeners_aft
         }
     }
 
-    let pair = BrokerPair::of(BrokerPairOptions::default()).await;
+    let pair = BrokerPair::of(&BrokerPairOptions::default()).await;
     let client = pair.connect().await;
     let told = Arc::new(ClientTold::default());
 
@@ -645,7 +645,7 @@ async fn refuses_a_connect_while_one_is_under_way_or_one_given_up_already() {
     assert!(
         matches!(
             client
-                .connect(BrokerConnectOptions {
+                .connect(&BrokerConnectOptions {
                     signal: Some(given_up),
                     ..BrokerConnectOptions::of("interop")
                 })
@@ -660,12 +660,12 @@ async fn refuses_a_connect_while_one_is_under_way_or_one_given_up_already() {
         "nothing moved"
     );
 
-    let connecting = crate::testing::spawn(client.connect(BrokerConnectOptions::of("interop")));
+    let connecting = crate::testing::spawn(client.connect(&BrokerConnectOptions::of("interop")));
 
     // * one under way: a second is refused, and the first goes on
     assert_eq!(
         client
-            .connect(BrokerConnectOptions::of("interop"))
+            .connect(&BrokerConnectOptions::of("interop"))
             .await
             .expect_err("refused")
             .to_string(),
@@ -687,7 +687,7 @@ async fn refuses_a_connect_while_one_is_under_way_or_one_given_up_already() {
 #[tokio::test]
 async fn refuses_a_reconnection_never_connected_under_way_while_it_connects_or_given_up_already_and_ends_closed_once_its_attempts_run_out()
  {
-    let pair = BrokerPair::of(BrokerPairOptions::default()).await;
+    let pair = BrokerPair::of(&BrokerPairOptions::default()).await;
     let client = pair
         .client_participant
         .client(&BrokerClientOptions::default())
@@ -697,21 +697,21 @@ async fn refuses_a_reconnection_never_connected_under_way_while_it_connects_or_g
         |outcome: Result<_, TransportError>| outcome.map(drop).expect_err("refused").to_string();
 
     assert_eq!(
-        refusal(client.reconnect(ReconnectOptions::default())),
+        refusal(client.reconnect(&ReconnectOptions::default())),
         "the transport client was never connected",
         "never connected"
     );
 
     // a connect to a name nobody answers, given up once refused its reconnection
     let giving = CancellationToken::new();
-    let connecting = crate::testing::spawn(client.connect(BrokerConnectOptions {
+    let connecting = crate::testing::spawn(client.connect(&BrokerConnectOptions {
         signal: Some(giving.clone()),
         ..BrokerConnectOptions::of("quiet")
     }));
 
     tokio::task::yield_now().await;
     assert_eq!(
-        refusal(client.reconnect(ReconnectOptions::default())),
+        refusal(client.reconnect(&ReconnectOptions::default())),
         "the transport client cannot reconnect while connecting",
         "while it connects"
     );
@@ -726,7 +726,7 @@ async fn refuses_a_reconnection_never_connected_under_way_while_it_connects_or_g
 
     // given up already: the open connection left alone
     client
-        .connect(BrokerConnectOptions::of("interop"))
+        .connect(&BrokerConnectOptions::of("interop"))
         .await
         .expect("connected");
 
@@ -735,7 +735,7 @@ async fn refuses_a_reconnection_never_connected_under_way_while_it_connects_or_g
     given_up.cancel();
     assert!(
         matches!(
-            client.reconnect(ReconnectOptions {
+            client.reconnect(&ReconnectOptions {
                 signal: Some(given_up),
                 ..ReconnectOptions::default()
             }),
@@ -755,7 +755,7 @@ async fn refuses_a_reconnection_never_connected_under_way_while_it_connects_or_g
     .await;
 
     let reconnecting = client
-        .reconnect(ReconnectOptions {
+        .reconnect(&ReconnectOptions {
             delay: Some(ReconnectDelay::Fixed(Duration::from_millis(100))),
             maximum_attempts: Some(2),
             ..ReconnectOptions::default()
@@ -763,7 +763,7 @@ async fn refuses_a_reconnection_never_connected_under_way_while_it_connects_or_g
         .expect("reconnecting");
 
     assert_eq!(
-        refusal(client.reconnect(ReconnectOptions::default())),
+        refusal(client.reconnect(&ReconnectOptions::default())),
         "the transport client is already reconnecting",
         "under way"
     );

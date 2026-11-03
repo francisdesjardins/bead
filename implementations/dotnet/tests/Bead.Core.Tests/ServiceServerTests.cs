@@ -210,6 +210,35 @@ public sealed class ServiceServerTests
         Assert.StartsWith("the hook loud admits by a function", first.Message, StringComparison.Ordinal);
     }
 
+    // decision 0004: the hooks are required exactly when a procedure names one, refused as the
+    // service is built where the TypeScript side's types refuse them
+    [Fact]
+    public void Refuses_options_without_admissions_where_a_procedure_names_a_hook()
+    {
+        const string Refusal = "shout is admitted by the hook loud, which the options do not give";
+
+        Assert.All(
+            new Func<ServiceServer<GreeterProcedures, string>>[]
+            {
+                () =>
+                {
+                    return new ServiceServer<GreeterProcedures, string>(GreeterProcedures.All);
+                },
+                () =>
+                {
+                    return new ServiceServer<GreeterProcedures, string>(GreeterProcedures.All, new ServiceServerOptions<GreeterProcedures>());
+                },
+                () =>
+                {
+                    return new ServiceServer<GreeterProcedures, string>(GreeterProcedures.All, new ServiceServerOptions<GreeterProcedures> { FailFast = true });
+                },
+            },
+            (building) =>
+            {
+                Assert.StartsWith(Refusal, Assert.Throws<ArgumentException>(building).Message, StringComparison.Ordinal);
+            });
+    }
+
     [Fact]
     public async Task Answers_a_failure_its_procedure_lists()
     {

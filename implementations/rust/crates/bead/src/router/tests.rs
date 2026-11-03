@@ -180,14 +180,10 @@ async fn answered(call: Call) -> Result<RouterResult, CallError> {
 }
 
 fn options_of(timeout: Duration) -> ResolvedRequestOptions {
-    ResolvedRequestOptions {
-        timeout,
-        destination_id: None,
-        connection_handle: None,
-        credential: None,
-        signal: None,
-        close_on_timeout: false,
-    }
+    let mut options = ResolvedRequestOptions::of(timeout);
+
+    options.close_on_timeout = Some(false);
+    options
 }
 
 // echo, as a procedure that notifies
@@ -975,10 +971,10 @@ impl crate::transport::ServerListener for Panicking {
 
 #[tokio::test]
 async fn a_listener_s_panic_is_reported_and_the_transport_goes_on() {
-    let pair = crate::testing::pair::Pair::connected((
+    let pair = crate::testing::pair::Pair::connected(
         january_first(),
-        crate::testing::pair::PairOptions::default(),
-    ))
+        &crate::testing::pair::PairOptions::default(),
+    )
     .await
     .expect("a pair connected");
 
@@ -1019,7 +1015,7 @@ async fn a_listener_s_panic_is_reported_and_the_transport_goes_on() {
         .expect("echo asked")
         .call(
             "hi".to_owned(),
-            crate::managers::service::RequestOptions::default(),
+            &crate::managers::service::RequestOptions::default(),
         )
         .expect("echo called");
 
@@ -1269,12 +1265,11 @@ mod intake {
         let shared: SharedClock = Arc::<SteppingClock>::clone(clock);
         let client = MemoryClient::new(&MemoryClientOptions {
             clock: Some(shared),
-            server: memory.clone(),
         })
         .expect("a client");
-        let connecting = client.connect(MemoryConnectOptions {
+        let connecting = client.connect(&MemoryConnectOptions {
             address: Some(address.to_owned()),
-            ..MemoryConnectOptions::default()
+            ..MemoryConnectOptions::of(memory.clone())
         });
 
         clock.settle().await;
@@ -1707,9 +1702,15 @@ mod intake {
         client.limits = Some(limits);
         client.intake = Some(intake);
 
-        let pair = Pair::connected((january_first(), PairOptions { server, client }))
-            .await
-            .expect("a pair connected");
+        let pair = Pair::connected(
+            january_first(),
+            &PairOptions {
+                server: Some(server),
+                client: Some(client),
+            },
+        )
+        .await
+        .expect("a pair connected");
         let credits: Arc<Mutex<Vec<bool>>> = Arc::default();
         let (seeing, memory) = (Arc::clone(&credits), pair.memory.clone());
 
@@ -1739,7 +1740,7 @@ mod intake {
             .services()
             .get_request(&echo(), RequestDependencies::of(RawCodec, RawCodec))
             .expect("echo asked")
-            .call(payload.clone(), RequestOptions::default())
+            .call(payload.clone(), &RequestOptions::default())
             .expect("echo called");
 
         pair.settle().await;

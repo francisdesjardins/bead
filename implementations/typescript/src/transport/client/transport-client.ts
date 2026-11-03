@@ -67,6 +67,7 @@ export {
 export type { Data, IEventIteratorOptions, ITransportMessage } from '../shared/types';
 export { dispose } from './symbols';
 export type {
+  ConnectParameters,
   ITransportClient,
   ITransportClientAddressOptions,
   ITransportClientConnectOptions,
@@ -234,7 +235,9 @@ export const createTransportClient = <
     carries: (credential) => {
       return implementation.carries?.(credential) === true;
     },
-    connect: (given) => {
+    connect: (...[maybe]) => {
+      // ! none given only where every member is optional, which the type of its parameters holds
+      const given = maybe ?? ({} as ConnectOptions);
       // held here, so by every transport, before anything moves or is kept for a reconnection, which
       // connects again with the timeout held; and what its transport refuses of the options alike
       let options: ConnectOptions;

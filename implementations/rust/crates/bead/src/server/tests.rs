@@ -16,9 +16,12 @@ use crate::testing::pair::{Pair, PairOptions};
 mod facade;
 
 async fn pair() -> Pair {
-    Pair::connected((crate::testing::instants::new_year(), PairOptions::default()))
-        .await
-        .expect("a pair connected")
+    Pair::connected(
+        crate::testing::instants::new_year(),
+        &PairOptions::default(),
+    )
+    .await
+    .expect("a pair connected")
 }
 
 #[tokio::test]

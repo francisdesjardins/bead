@@ -223,23 +223,17 @@ pub fn interop_verifier_of(clock: &SharedClock) -> ElsewhereVerifier {
 /// # Errors
 ///
 /// A [`ProgrammerError`] for a `spec/interop-service.json` that does not read.
-#[expect(
-    clippy::too_many_lines,
-    reason = "the interop service's keys, key set and verifier, read from its file in one place"
-)]
 pub fn interop_credentials_of(
     clock: &SharedClock,
-    limits: Option<&RouterLimitsOptions>,
+    limits: &RouterLimitsOptions,
 ) -> Result<Credentials, ProgrammerError> {
     let service = service()?;
     let jwt = object_at(&service, &["credentials", "jwt"]).ok_or_else(|| {
         ProgrammerError::new("spec/interop-service.json holds its JWT's credentials")
     })?;
-    let chunk_bytes = limits
-        .and_then(|limits| limits.chunk_bytes)
-        .unwrap_or(LIMIT_DEFAULTS.chunk_bytes);
+    let chunk_bytes = limits.chunk_bytes.unwrap_or(LIMIT_DEFAULTS.chunk_bytes);
     let maximum_envelope_bytes = limits
-        .and_then(|limits| limits.maximum_envelope_bytes)
+        .maximum_envelope_bytes
         .unwrap_or(LIMIT_DEFAULTS.maximum_envelope_bytes);
     let mut credentials = Credentials::default();
 

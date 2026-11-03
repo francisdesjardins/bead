@@ -68,7 +68,7 @@ async fn a_second_manager_on_the_same_router_cannot_take_its_procedure_over_nor_
         second
             .on(
                 ("s".to_owned(), callback(&Heard::default(), "")),
-                RequestOptions::default()
+                &RequestOptions::default()
             )
             .await,
         Err(CallError::Refused(_))
@@ -144,7 +144,7 @@ async fn a_registration_under_way_when_its_notification_is_dropped_fails_with_a_
     let heard = Heard::default();
     let mut registering = notification.on(
         ("s".to_owned(), callback(&heard, "")),
-        RequestOptions::default(),
+        &RequestOptions::default(),
     );
     pending(&mut registering).await;
     fixture.clock.settle().await;
@@ -184,7 +184,7 @@ async fn a_registration_while_the_last_one_is_leaving_waits_for_it_then_register
     let heard = Heard::default();
     let mut joining = notification.on(
         ("s".to_owned(), callback(&heard, "")),
-        RequestOptions::default(),
+        &RequestOptions::default(),
     );
     pending(&mut joining).await;
     fixture.clock.settle().await;

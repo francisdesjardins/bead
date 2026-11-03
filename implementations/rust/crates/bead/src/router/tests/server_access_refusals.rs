@@ -147,7 +147,7 @@ async fn tells_a_jwt_refused_by_the_step_of_section_13_8_that_refused_it_for_eve
                     ..Credentials::default()
                 }),
                 relay: audiences.as_ref().map(|_| RelayOptions {
-                    verifies: true,
+                    verifies: Some(true),
                     before_route: Some(BeforeRequest::new(|_| true, None)),
                     ..RelayOptions::default()
                 }),
@@ -160,16 +160,16 @@ async fn tells_a_jwt_refused_by_the_step_of_section_13_8_that_refused_it_for_eve
             for (index, audience) in audiences.into_iter().enumerate() {
                 served
                     .router
-                    .register_destination((
+                    .register_destination(
                         RelayTarget::Connection(second()),
-                        DestinationOptions {
+                        &DestinationOptions {
                             destination_id: Some(
                                 7 + u32::try_from(index).expect("a destination id"),
                             ),
                             audience: Some(audience),
                             ..DestinationOptions::default()
                         },
-                    ))
+                    )
                     .expect("the audience's destination registered");
             }
             7

@@ -4,7 +4,7 @@ namespace Bead;
 /// An envelope: its header, then its payload — a failure's record, read, for a failure; nothing, for
 /// a credit or a cancel. The same type is read and written.
 /// </summary>
-public sealed class Envelope
+internal sealed class Envelope
 {
     /// <summary>The envelope's header, whose kind is the envelope's.</summary>
     public required IEnvelopeHeader Header { get; init; }

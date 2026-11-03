@@ -178,7 +178,7 @@ pub fn hold_finite(name: &str, duration: Duration) -> Result<Duration, Programme
 ///
 /// A [`ProgrammerError`] naming the duration `name`, its reason under the floor, past the ceiling,
 /// or never refused.
-pub fn hold_delay(name: &str, duration: Duration) -> Result<Duration, ProgrammerError> {
+pub(crate) fn hold_delay(name: &str, duration: Duration) -> Result<Duration, ProgrammerError> {
     let offered = Offered {
         never: false,
         zero: true,

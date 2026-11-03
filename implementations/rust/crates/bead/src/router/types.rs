@@ -210,7 +210,9 @@ pub fn limits_of(given: &RouterLimitsOptions) -> Result<RouterLimits, Programmer
 /// # Errors
 ///
 /// A [`ProgrammerError`] for a transfer asked for.
-pub fn whole_envelope_limits_of(
+// its one caller its unit test, until the HTTP transport, a feature of the core, calls it
+#[cfg(test)]
+pub(crate) fn whole_envelope_limits_of(
     limits: &RouterLimitsOptions,
 ) -> Result<RouterLimitsOptions, ProgrammerError> {
     let maximum_envelope_bytes = limits
@@ -269,7 +271,9 @@ pub struct IntakeLimitsOptions {
 /// # Errors
 ///
 /// A [`ProgrammerError`] for a bound below 1.
-pub fn intake_limits_of(options: &IntakeLimitsOptions) -> Result<IntakeLimits, ProgrammerError> {
+pub(crate) fn intake_limits_of(
+    options: &IntakeLimitsOptions,
+) -> Result<IntakeLimits, ProgrammerError> {
     let limits = IntakeLimits {
         maximum_untaken_envelopes: options
             .maximum_untaken_envelopes
@@ -446,6 +450,7 @@ impl Signal {
 
 /// A request's options, with its manager's defaults applied.
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub struct ResolvedRequestOptions {
     /// The call's timeout, held; [`crate::NEVER`] waits on.
     pub timeout: Duration,
@@ -457,8 +462,24 @@ pub struct ResolvedRequestOptions {
     pub credential: Option<RequestCredential>,
     /// What cancels it.
     pub signal: Option<CancellationToken>,
-    /// Whether the connection it names is closed when it goes unanswered past its timeout.
-    pub close_on_timeout: bool,
+    /// Whether the connection it names is closed when it goes unanswered past its timeout: `false`
+    /// when none.
+    pub close_on_timeout: Option<bool>,
+}
+
+impl ResolvedRequestOptions {
+    /// A request's options of `timeout`, held, every other option none.
+    #[must_use]
+    pub const fn of(timeout: Duration) -> Self {
+        Self {
+            timeout,
+            destination_id: None,
+            connection_handle: None,
+            credential: None,
+            signal: None,
+            close_on_timeout: None,
+        }
+    }
 }
 
 /// A result, as a request resolves with it: its header, and its payload.

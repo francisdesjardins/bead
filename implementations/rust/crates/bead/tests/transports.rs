@@ -848,7 +848,7 @@ async fn case_of((case, wall): (&Value, SystemTime)) -> Result<Case, String> {
 
         server_options.clock = Some(Arc::clone(&shared));
         server_options.credentials = Some(
-            bead_interop::interop_credentials_of(&shared, Some(&limits))
+            bead_interop::interop_credentials_of(&shared, &limits)
                 .map_err(|error| error.to_string())?,
         );
         server_options.limits = Some(limits);
@@ -1234,7 +1234,7 @@ async fn play_steps(case: &mut Case, steps: &[Value]) -> Result<(), String> {
             let mut options = BrokerConnectOptions::of(server);
 
             options.timeout = case.timeout;
-            case.connecting = Some(tokio::spawn(client.connect(options)));
+            case.connecting = Some(tokio::spawn(client.connect(&options)));
         }
 
         if let Some(send) = step.get("transportSend")

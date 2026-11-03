@@ -60,11 +60,12 @@ public interface IServiceAdmissions<TService>
 public sealed record ServiceServerOptions<TService>
 {
     /// <summary>
-    /// The hooks its procedures name, an empty record where they name none: a hook a procedure
-    /// names that they lack, one they give that no procedure names, and one that is null, are an
-    /// <see cref="ArgumentException"/>.
+    /// The hooks its procedures name, none where they name none: required exactly when a procedure
+    /// names a hook (0004), so that their absence then, a hook a procedure names that they lack, one
+    /// they give that no procedure names, and one that is null, are an
+    /// <see cref="ArgumentException"/> as the service is built.
     /// </summary>
-    public required IServiceAdmissions<TService> Admissions { get; init; }
+    public IServiceAdmissions<TService>? Admissions { get; init; }
 
     /// <summary>
     /// Whether the judging of a request by its procedure's rules stops at its first violation,
@@ -148,7 +149,8 @@ public sealed class ServiceServer<TService, TData>
     {
         ArgumentNullException.ThrowIfNull(options);
 
-        // ! a record past the types, null, gives no hook, as the TypeScript side reads admissions undefined
+        // none given gives no hook, as the TypeScript side reads admissions undefined: a procedure that
+        // names one is refused by the check that follows
         return options.Admissions?.ToDictionary() ?? new Dictionary<string, AdmissionHook>();
     }
 
@@ -425,7 +427,7 @@ internal static class ServiceLayer
             {
                 if (!hooks.ContainsKey(name))
                 {
-                    throw new ArgumentException($"a procedure names the hook {name}, which the options lack", nameof(hooks));
+                    throw new ArgumentException($"{procedure.Procedure.ProcedureName} is admitted by the hook {name}, which the options do not give", nameof(hooks));
                 }
 
                 named.Add(name);
@@ -436,7 +438,7 @@ internal static class ServiceLayer
         {
             if (!named.Contains(name))
             {
-                throw new ArgumentException($"the options give the hook {name}, which no procedure names", nameof(hooks));
+                throw new ArgumentException($"the hook {name} is given, and no procedure names it", nameof(hooks));
             }
 
             if (hook?.Admits is null)

@@ -4,7 +4,7 @@ using System.Text;
 namespace Bead;
 
 /// <summary>What reading an envelope refuses with, and how much it reads.</summary>
-public sealed record EnvelopeReadOptions
+internal sealed record EnvelopeReadOptions
 {
     /// <summary>The side that reads: the failures it raises say so.</summary>
     public required RouterSide Side { get; init; }
@@ -16,7 +16,7 @@ public sealed record EnvelopeReadOptions
     public int MaximumDetailBytes { get; init; } = LimitDefaults.MaximumDetailBytes;
 }
 
-public static partial class EnvelopeCodec
+internal static partial class EnvelopeCodec
 {
     // constants
 

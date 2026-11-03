@@ -9,7 +9,8 @@
 use std::sync::OnceLock;
 use std::time::{Duration, SystemTime};
 
-use bead::{JwtAgainst, JwtAlgorithm, JwtKey, read_jwt, verify_jwt};
+use bead::internal::{read_jwt, verify_jwt};
+use bead::{JwtAgainst, JwtAlgorithm, JwtKey};
 use hmac::{Hmac, KeyInit, Mac};
 use libfuzzer_sys::fuzz_target;
 use serde_json::{Map, Value};

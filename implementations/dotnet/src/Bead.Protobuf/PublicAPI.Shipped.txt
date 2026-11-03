@@ -1,0 +1,70 @@
+#nullable enable
+Bead.Protobuf.IViolationSink
+Bead.Protobuf.IViolationSink.Add(Bead.Protobuf.ViolationRule! rule, object? value) -> bool
+Bead.Protobuf.IViolationSink.Enter(string! name) -> void
+Bead.Protobuf.IViolationSink.EnterIndex(string! name, int index) -> void
+Bead.Protobuf.IViolationSink.EnterKey(string! name, bool key) -> void
+Bead.Protobuf.IViolationSink.EnterKey(string! name, long key) -> void
+Bead.Protobuf.IViolationSink.EnterKey(string! name, string! key) -> void
+Bead.Protobuf.IViolationSink.EnterKey(string! name, ulong key) -> void
+Bead.Protobuf.IViolationSink.Leave() -> void
+Bead.Protobuf.Pattern
+Bead.Protobuf.PatternTable
+Bead.Protobuf.PatternTable.<Clone>$() -> Bead.Protobuf.PatternTable!
+Bead.Protobuf.PatternTable.Accepting.get -> System.Collections.Immutable.ImmutableArray<int>
+Bead.Protobuf.PatternTable.Accepting.init -> void
+Bead.Protobuf.PatternTable.Bounds.get -> System.Collections.Immutable.ImmutableArray<int>
+Bead.Protobuf.PatternTable.Bounds.init -> void
+Bead.Protobuf.PatternTable.ClassCount.get -> int
+Bead.Protobuf.PatternTable.ClassCount.init -> void
+Bead.Protobuf.PatternTable.Classes.get -> System.Collections.Immutable.ImmutableArray<ushort>
+Bead.Protobuf.PatternTable.Classes.init -> void
+Bead.Protobuf.PatternTable.Dead.get -> int
+Bead.Protobuf.PatternTable.Dead.init -> void
+Bead.Protobuf.PatternTable.Equals(Bead.Protobuf.PatternTable? other) -> bool
+Bead.Protobuf.PatternTable.Matched.get -> int
+Bead.Protobuf.PatternTable.Matched.init -> void
+Bead.Protobuf.PatternTable.PatternTable() -> void
+Bead.Protobuf.PatternTable.StateCount.get -> int
+Bead.Protobuf.PatternTable.StateCount.init -> void
+Bead.Protobuf.PatternTable.Transitions.get -> System.Collections.Immutable.ImmutableArray<ushort>
+Bead.Protobuf.PatternTable.Transitions.init -> void
+Bead.Protobuf.ProtoCodecs
+Bead.Protobuf.ProtoRecords
+Bead.Protobuf.ProtoRequired
+Bead.Protobuf.Validators
+Bead.Protobuf.ViolationRule
+Bead.Protobuf.ViolationRule.<Clone>$() -> Bead.Protobuf.ViolationRule!
+Bead.Protobuf.ViolationRule.Bounds.get -> System.Text.Json.JsonElement?
+Bead.Protobuf.ViolationRule.Bounds.init -> void
+Bead.Protobuf.ViolationRule.Equals(Bead.Protobuf.ViolationRule? other) -> bool
+Bead.Protobuf.ViolationRule.ForKey.get -> bool
+Bead.Protobuf.ViolationRule.ForKey.init -> void
+Bead.Protobuf.ViolationRule.Message.get -> string!
+Bead.Protobuf.ViolationRule.Message.init -> void
+Bead.Protobuf.ViolationRule.RuleId.get -> string!
+Bead.Protobuf.ViolationRule.RuleId.init -> void
+Bead.Protobuf.ViolationRule.ViolationRule() -> void
+override Bead.Protobuf.PatternTable.Equals(object? obj) -> bool
+override Bead.Protobuf.PatternTable.GetHashCode() -> int
+override Bead.Protobuf.PatternTable.ToString() -> string!
+override Bead.Protobuf.ViolationRule.Equals(object? obj) -> bool
+override Bead.Protobuf.ViolationRule.GetHashCode() -> int
+override Bead.Protobuf.ViolationRule.ToString() -> string!
+static Bead.Protobuf.Pattern.Matches(Bead.Protobuf.PatternTable! table, string! text) -> bool
+static Bead.Protobuf.PatternTable.operator !=(Bead.Protobuf.PatternTable? left, Bead.Protobuf.PatternTable? right) -> bool
+static Bead.Protobuf.PatternTable.operator ==(Bead.Protobuf.PatternTable? left, Bead.Protobuf.PatternTable? right) -> bool
+static Bead.Protobuf.ProtoCodecs.Of<T>() -> Bead.IPayloadCodec<T>!
+static Bead.Protobuf.ProtoCodecs.Read(Google.Protobuf.Reflection.MessageDescriptor! descriptor, System.ReadOnlyMemory<byte> bytes) -> Google.Protobuf.IMessage!
+static Bead.Protobuf.ProtoRecords.Check(System.ReadOnlySpan<byte> bytes, Google.Protobuf.Reflection.MessageDescriptor! message) -> void
+static Bead.Protobuf.ProtoRequired.Check(Google.Protobuf.IMessage! message) -> void
+static Bead.Protobuf.Validators.BoundsOf(string! json) -> System.Text.Json.JsonElement
+static Bead.Protobuf.Validators.ByKey<TKey, TValue>(System.Collections.Generic.IReadOnlyDictionary<TKey, TValue>! map) -> System.Collections.Generic.IReadOnlyList<System.Collections.Generic.KeyValuePair<TKey, TValue>>!
+static Bead.Protobuf.Validators.CodePointLength(string! text) -> int
+static Bead.Protobuf.Validators.IsUnique(System.Collections.Generic.IReadOnlyList<double>! items) -> bool
+static Bead.Protobuf.Validators.IsUnique(System.Collections.Generic.IReadOnlyList<float>! items) -> bool
+static Bead.Protobuf.Validators.IsUnique<T>(System.Collections.Generic.IReadOnlyList<T>! items) -> bool
+static Bead.Protobuf.Validators.Of<TMessage>(System.Func<TMessage, Bead.Protobuf.IViolationSink!, bool>! rules) -> Bead.RequestValidator<TMessage>!
+static Bead.Protobuf.Validators.Utf8Length(string! text) -> int
+static Bead.Protobuf.ViolationRule.operator !=(Bead.Protobuf.ViolationRule? left, Bead.Protobuf.ViolationRule? right) -> bool
+static Bead.Protobuf.ViolationRule.operator ==(Bead.Protobuf.ViolationRule? left, Bead.Protobuf.ViolationRule? right) -> bool

@@ -31,28 +31,18 @@ use crate::router::types::{
 use crate::transport::ServerTransport;
 
 /// How a server's router relays the requests that name a destination.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 #[non_exhaustive]
 pub struct RelayOptions {
     /// Whether a request may be relayed, asked on its header and the call's session, before its
     /// destination is looked up. Without it, the relay admits nobody.
     pub before_route: Option<BeforeRequest>,
-    /// How long leg B waits for its answer at most, whatever a destination says; [`NEVER`] by
-    /// default.
-    pub timeout: Duration,
+    /// How long leg B waits for its answer at most, whatever a destination says: [`NEVER`] when
+    /// none.
+    pub timeout: Option<Duration>,
     /// Whether it verifies what it forwards besides (spec 14.3, step 1), with its router's
-    /// credentials, before `before_route`.
-    pub verifies: bool,
-}
-
-impl Default for RelayOptions {
-    fn default() -> Self {
-        Self {
-            before_route: None,
-            timeout: NEVER,
-            verifies: false,
-        }
-    }
+    /// credentials, before `before_route`: `false` when none.
+    pub verifies: Option<bool>,
 }
 
 /// A destination's registration, as it is asked.
@@ -252,7 +242,7 @@ impl Relay {
     /// not hold.
     pub(crate) fn new(
         (side, limits): (RouterSide, RouterLimits),
-        options: RelayOptions,
+        options: &RelayOptions,
     ) -> Result<Self, ProgrammerError> {
         if let Some(refusal) = options
             .before_route
@@ -266,7 +256,7 @@ impl Relay {
             )));
         }
 
-        let timeout = hold("a relay's timeout", options.timeout)?;
+        let timeout = hold("a relay's timeout", options.timeout.unwrap_or(NEVER))?;
 
         Ok(Self {
             #[cfg(test)]
@@ -275,9 +265,9 @@ impl Relay {
                 registrations: Vec::new(),
                 open: BTreeSet::new(),
             })),
-            before_route: options.before_route,
+            before_route: options.before_route.clone(),
             timeout,
-            verifies: options.verifies,
+            verifies: options.verifies.unwrap_or(false),
             side,
             limits,
             serials: Arc::new(AtomicU64::new(1)),
@@ -401,7 +391,7 @@ fn fill_destination(relay: &Relay, bytes: &mut [u8; 4]) -> Result<(), getrandom:
 /// hold, or a timeout spec 1.4 does not hold.
 pub(crate) fn register(
     relay: &Relay,
-    (target, options): (RelayTarget, DestinationOptions),
+    (target, options): (RelayTarget, &DestinationOptions),
 ) -> Result<DestinationRegistration, ProgrammerError> {
     let DestinationOptions {
         audience,
@@ -409,7 +399,7 @@ pub(crate) fn register(
         label,
         replaces,
         timeout,
-    } = options;
+    } = options.clone();
     let given =
         destination_id.or_else(|| replaces.as_ref().map(|replaced| replaced.destination_id));
     let timeout = hold("a relay's timeout", timeout.unwrap_or(NEVER))?;
@@ -787,14 +777,11 @@ async fn answer_of(route: &Route, props: &ResolverProps) -> Option<RouterAnswer>
 
         Box::new(move |is_handed: bool| is_sent.store(is_handed, Ordering::Release))
     };
-    let options = ResolvedRequestOptions {
-        timeout: route.registration.timeout,
-        destination_id: None,
-        connection_handle: None,
-        credential: Some(leg_credential_of(props)),
-        signal: Some(props.signal.token().clone()),
-        close_on_timeout: false,
-    };
+    let mut options = ResolvedRequestOptions::of(route.registration.timeout);
+
+    options.credential = Some(leg_credential_of(props));
+    options.signal = Some(props.signal.token().clone());
+
     let made = match &route.registration.target {
         RelayTarget::Connection(handle) => request_on(
             &route.owner,
@@ -806,9 +793,11 @@ async fn answer_of(route: &Route, props: &ResolverProps) -> Option<RouterAnswer>
                         procedure_id: procedure.id,
                     },
                     maximum_payload_bytes: procedure.maximum_payload_bytes,
-                    options: ResolvedRequestOptions {
-                        connection_handle: Some(Arc::clone(handle)),
-                        ..options
+                    options: {
+                        let mut options = options.clone();
+
+                        options.connection_handle = Some(Arc::clone(handle));
+                        options
                     },
                     series: None,
                     refusal: None,

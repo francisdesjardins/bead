@@ -105,9 +105,11 @@ export interface ITransportClient<
    * reconnection replays, as they were; with a {@link ProgrammerError} unless UNINITIALIZED or
    * CLOSED; and with a
    * {@link CancelError}, nothing changed, when its signal is aborted already. Then it rejects with a
-   * {@link ConnectError} when it cannot open, a {@link TimeoutError}, or a {@link CancelError}.
+   * {@link ConnectError} when it cannot open, a {@link TimeoutError}, or a {@link CancelError}. Its
+   * options are optional where every member of them is, as a worker's are, and required where one
+   * is, as where an address or a server is.
    */
-  connect(options: ConnectOptions): Promise<void>;
+  connect(...[options]: ConnectParameters<ConnectOptions>): Promise<void>;
   /**
    * Closes the connection and emits `close`. Rejects with a {@link ReadyStateError} unless OPEN, or a
    * {@link ProgrammerError} when the socket's close throws; the socket is then dropped, as
@@ -237,6 +239,16 @@ export interface ITransportClientDefineOptions {
 }
 
 // types
+
+/**
+ * What a connect takes: its options, optional where every member of them is and required where one
+ * is (decision 0004), as a call's `RequestOptionsParameters` is written.
+ */
+export type ConnectParameters<ConnectOptions extends ITransportClientConnectOptions> =
+  // an object of no member is options of which every member is optional
+  Record<never, never> extends ConnectOptions
+    ? [options?: ConnectOptions]
+    : [options: ConnectOptions];
 
 /** Event name → the arguments its listeners receive. */
 export type TransportClientEventMap = {
@@ -578,7 +590,10 @@ export type BrokerTransportClient = ITransportClient<
 
 // interfaces
 
-/** What an in-memory connect takes besides: who connects, as its server's router is to see it. */
+/**
+ * What an in-memory connect takes besides: the server it connects to, and who connects, as its
+ * server's router is to see it. A reconnection connects to the same server.
+ */
 export interface IMemoryTransportClientConnectOptions extends ITransportClientConnectOptions {
   /**
    * The address its server hands with each envelope and names its connection by (spec 15.13): the
@@ -588,12 +603,12 @@ export interface IMemoryTransportClientConnectOptions extends ITransportClientCo
   address?: string | undefined;
   /** The port its server hands beside the address: a whole number from 0 to 65535; none by default. */
   port?: number | undefined;
-}
-
-export interface IMemoryTransportClientOptions extends ITransportClientOptions {
   /** What it connects to: an in-memory transport server of the same process. */
   server: IMemoryTransportServerLike;
 }
+
+/** What an in-memory transport client takes: what every transport client does. */
+export type IMemoryTransportClientOptions = ITransportClientOptions;
 
 // types
 

@@ -22,9 +22,14 @@ dotnet test --solution Bead.slnx
 
 `dotnet format` leaves the generated code to its generator. `dotnet build` builds every project,
 the builder's C# goldens among them, which `dotnet test` does not: it builds the test projects
-alone. With `CI=true`, a restore that would change a `packages.lock.json` fails. The interop against
-the TypeScript server needs that side installed; with `BEAD_INTEROP_REQUIRED=1`, an interop that
-would skip fails instead.
+alone. Each `src` project's public surface, its members included, is pinned to its
+`PublicAPI.Shipped.txt`, what the last release shipped, and its `PublicAPI.Unshipped.txt`, what
+changed since: the build fails on a public symbol neither lists (RS0016) and on one listed that is
+gone (RS0017), so a change of the surface writes its line in `PublicAPI.Unshipped.txt`, `*REMOVED*`
+before a symbol it takes away, and `tools/release.mjs prepare` moves them into
+`PublicAPI.Shipped.txt` (decision 0006). With `CI=true`, a restore that would change a
+`packages.lock.json` fails. The interop against the TypeScript server needs that side installed;
+with `BEAD_INTEROP_REQUIRED=1`, an interop that would skip fails instead.
 
 What plays against a real broker of MQTT 5 — the cases over MQTT 5, the adapter's link over a
 WebSocket, the interop over MQTT 5 — needs one given by `BEAD_MQTT_URL`, and is skipped, saying so,
@@ -79,6 +84,8 @@ src/
   Bead.Transcoding.Http/        the gateway on Kestrel, which answers a service's procedures as
                                 HTTP routes, one more client of the application's server
   BannedSymbols.txt             what the banned-API analyzer refuses: the clock is given
+  Directory.Build.props         the public-API analyzer over each project here, whose surface is
+                                its PublicAPI.Shipped.txt and PublicAPI.Unshipped.txt
 interop/
   Bead.Interop/                 the interop service, which every side serves alike
     Generated/                  its server and client, what beadc generates from the interop's

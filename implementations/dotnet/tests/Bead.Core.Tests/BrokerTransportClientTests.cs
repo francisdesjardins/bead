@@ -488,10 +488,7 @@ public sealed class BrokerTransportClientTests
         Assert.Equal(ReadyState.Closed, client.ReadyState);
     }
 
-    private static TimeSpan Briefly(TimeSpan? previousDelay, int attempt)
-    {
-        return TimeSpan.FromMilliseconds(100);
-    }
+    private static readonly TransportReconnectDelayOrResolver Briefly = TransportReconnectDelayOrResolver.Of(TimeSpan.FromMilliseconds(100));
 
     private static readonly IReadOnlyList<string> Inbox = ["bead", "i", "ada"];
 

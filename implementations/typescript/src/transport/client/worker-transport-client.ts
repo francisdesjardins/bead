@@ -74,7 +74,7 @@ const erredOf = ({ colno, filename, lineno, message }: IWorkerErrorEventLike): s
  * @example
  * const client = createWorkerTransportClient({ worker });
  * client.on('message', ({ data }) => {});
- * await client.connect({});
+ * await client.connect();
  * await client.send({ data: envelope });
  * await client.disconnect();
  */

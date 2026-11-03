@@ -110,7 +110,7 @@ const connectWorker = async (
     return response(request.payload.slice().reverse());
   });
   await server.transport.start();
-  await client.connect({});
+  await client.connect();
 
   return {
     client,

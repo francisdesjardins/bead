@@ -1207,10 +1207,7 @@ public sealed class InteropTests(InteropTests.TypeScriptServer server, InteropTe
                     {
                         Reconnect = new TransportReconnectOptions
                         {
-                            Delay = (_, _) =>
-                            {
-                                return TimeSpan.FromMilliseconds(100);
-                            },
+                            Delay = TransportReconnectDelayOrResolver.Of(TimeSpan.FromMilliseconds(100)),
                             MaximumAttempts = int.MaxValue,
                         },
                     });

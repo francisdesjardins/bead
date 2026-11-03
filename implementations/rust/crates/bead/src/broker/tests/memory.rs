@@ -32,10 +32,10 @@ fn topic_of(tokens: [&str; 3]) -> Vec<String> {
 }
 
 // a broker on a stepping clock, whose turns it settles on
-fn broker_on(options: MemoryBrokerOptions) -> (MemoryBroker, Arc<SteppingClock>) {
+fn broker_on(options: &MemoryBrokerOptions) -> (MemoryBroker, Arc<SteppingClock>) {
     let clock = SteppingClock::new(SystemTime::UNIX_EPOCH);
     let shared: SharedClock = Arc::<SteppingClock>::clone(&clock);
-    let mut options = options;
+    let mut options = options.clone();
 
     options.clock = Some(shared);
 
@@ -110,7 +110,7 @@ fn taken(heard: &Heard) -> Vec<String> {
 #[tokio::test]
 async fn hands_each_message_on_once_in_a_later_turn_in_the_order_its_publisher_published_to_that_topic()
  {
-    let (broker, clock) = broker_on(MemoryBrokerOptions::default());
+    let (broker, clock) = broker_on(&MemoryBrokerOptions::default());
     let (publisher, _) = linked_of((&broker, "ada")).await;
     let (subscriber, heard) = linked_of((&broker, "bob")).await;
 
@@ -190,7 +190,7 @@ impl BrokerListener for Reacting {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_publish_a_listener_makes_within_the_broker_s_turn_comes_behind_one_its_publisher_made_before_it()
  {
-    let (broker, clock) = broker_on(MemoryBrokerOptions::default());
+    let (broker, clock) = broker_on(&MemoryBrokerOptions::default());
     let (entered, entering) = std::sync::mpsc::channel();
     let (releasing, released) = std::sync::mpsc::channel();
     let publisher = broker
@@ -241,7 +241,7 @@ async fn a_publish_a_listener_makes_within_the_broker_s_turn_comes_behind_one_it
 // spec 15.24
 #[tokio::test]
 async fn hands_a_group_message_to_one_member_in_turn_and_again_to_another_when_a_test_asks() {
-    let (broker, clock) = broker_on(MemoryBrokerOptions::default());
+    let (broker, clock) = broker_on(&MemoryBrokerOptions::default());
     let (publisher, _) = linked_of((&broker, "ada")).await;
     let (first, first_heard) = linked_of((&broker, "bob")).await;
     let (second, second_heard) = linked_of((&broker, "cid")).await;
@@ -327,7 +327,7 @@ async fn hands_a_group_message_to_one_member_in_turn_and_again_to_another_when_a
 #[tokio::test]
 async fn copies_reorders_and_drops_a_message_as_a_test_asks_drops_past_a_subscriber_s_queue_bound_and_publishes_a_will_as_a_link_is_lost()
  {
-    let (broker, clock) = broker_on(MemoryBrokerOptions {
+    let (broker, clock) = broker_on(&MemoryBrokerOptions {
         maximum_queued_messages: Some(2),
         ..MemoryBrokerOptions::default()
     });
@@ -433,7 +433,7 @@ async fn copies_reorders_and_drops_a_message_as_a_test_asks_drops_past_a_subscri
 #[tokio::test]
 async fn takes_a_link_over_as_a_test_asks_as_a_second_link_of_its_id_would_its_subscriptions_dropped_its_will_published_its_down_told_taken_over()
  {
-    let (broker, clock) = broker_on(MemoryBrokerOptions::default());
+    let (broker, clock) = broker_on(&MemoryBrokerOptions::default());
     let (ada, heard) = linked_of((&broker, "ada")).await;
     let bob = broker
         .adapter(&MemoryBrokerAdapterOptions::of("bob"))
@@ -483,7 +483,7 @@ async fn takes_a_link_over_as_a_test_asks_as_a_second_link_of_its_id_would_its_s
 
 #[tokio::test]
 async fn refuses_a_second_adapter_of_one_id_and_a_will_asked_of_an_adapter_that_takes_none() {
-    let (broker, _clock) = broker_on(MemoryBrokerOptions::default());
+    let (broker, _clock) = broker_on(&MemoryBrokerOptions::default());
     let mut options = MemoryBrokerAdapterOptions::of("ada");
 
     options.capabilities = Some(BrokerCapabilities::NONE);
@@ -518,7 +518,7 @@ async fn refuses_a_second_adapter_of_one_id_and_a_will_asked_of_an_adapter_that_
 
 #[tokio::test]
 async fn refuses_a_publication_given_up_on_before_it_goes() {
-    let (broker, clock) = broker_on(MemoryBrokerOptions::default());
+    let (broker, clock) = broker_on(&MemoryBrokerOptions::default());
     let (publisher, _) = linked_of((&broker, "ada")).await;
     let (subscriber, heard) = linked_of((&broker, "bob")).await;
     let given_up = CancellationToken::new();
@@ -546,7 +546,7 @@ async fn refuses_a_publication_given_up_on_before_it_goes() {
 #[tokio::test]
 async fn refuses_a_start_of_a_link_up_already_and_a_publication_past_maximum_message_bytes_or_of_a_link_not_up_drops_what_a_link_lost_held_and_a_loss_of_a_link_not_up_does_nothing()
  {
-    let (broker, clock) = broker_on(MemoryBrokerOptions {
+    let (broker, clock) = broker_on(&MemoryBrokerOptions {
         maximum_message_bytes: Some(4),
         ..MemoryBrokerOptions::default()
     });

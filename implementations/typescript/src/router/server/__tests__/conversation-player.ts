@@ -388,7 +388,7 @@ const createMemoryConnections = (clock: TestClock) => {
       _flags: { carriesCredential: boolean; isSecure: boolean; isTwoWay: boolean }
     ): Promise<void> => {
       const port = ports.get(name) ?? 50_001 + ports.size;
-      const client = clients.get(name) ?? createMemoryTransportClient({ clock, server: transport });
+      const client = clients.get(name) ?? createMemoryTransportClient({ clock });
 
       if (!clients.has(name)) {
         client.on('message', ({ credential, data }) => {
@@ -401,7 +401,7 @@ const createMemoryConnections = (clock: TestClock) => {
       transport.once('connection', (...[, , connectionHandle]) => {
         handles.set(name, connectionHandle);
       });
-      await client.connect({ address: '127.0.0.1', port });
+      await client.connect({ address: '127.0.0.1', port, server: transport });
     },
     start: async (): Promise<void> => {
       await transport.start();

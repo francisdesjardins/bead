@@ -600,7 +600,7 @@ pub struct Health {
 
 /// A layer's gauges, set against `held`, the connections its transport holds.
 #[must_use]
-pub fn layer_gauges_of(gauges: Gauges, held: &BTreeSet<ConnectionHandle>) -> LayerGauges {
+pub(crate) fn layer_gauges_of(gauges: Gauges, held: &BTreeSet<ConnectionHandle>) -> LayerGauges {
     let orphans = gauges
         .connection_handles
         .iter()
@@ -617,7 +617,7 @@ pub fn layer_gauges_of(gauges: Gauges, held: &BTreeSet<ConnectionHandle>) -> Lay
 
 /// The health its gauges give.
 #[must_use]
-pub fn health_of(gauges: &ServerGauges) -> Health {
+pub(crate) fn health_of(gauges: &ServerGauges) -> Health {
     let mut checks = BTreeMap::new();
     let mut status = HealthStatus::Pass;
     let mut check = |name: String, found: HealthCheck| {

@@ -155,7 +155,7 @@ test.describe('joinTransports', () => {
     const memory = createMemoryTransportServer();
     const http = createFake('HTTP', { flags: {} });
     const joined = joinTransports([memory, worker.server, http.transport]);
-    await using byMemory = createMemoryTransportClient({ server: memory });
+    await using byMemory = createMemoryTransportClient();
     await using byWorker = createWorkerTransportClient({ worker: worker.worker });
     const heard: unknown[][] = [];
     const thrown = new Error('a listener that throws');
@@ -193,7 +193,7 @@ test.describe('joinTransports', () => {
 
     await memory.start();
     await worker.server.start();
-    await byMemory.connect({});
+    await byMemory.connect({ server: memory });
     await byWorker.connect({});
     await byMemory.send({ data: new Uint8Array([1]) });
     await byWorker.send({ data: new Uint8Array([2]) });
@@ -272,7 +272,7 @@ test.describe('joinTransports', () => {
     const silent = createFake('WORKER', { flags: {} });
     const memory = createMemoryTransportServer();
     const joined = joinTransports([webSocket.transport, http.transport, silent.transport, memory]);
-    await using client = createMemoryTransportClient({ server: memory });
+    await using client = createMemoryTransportClient();
     const heard: unknown[] = [];
     const toWebSocket = 'type=WS;ip=127.0.0.1;port=50000;ordinal=1';
     const toHTTP = 'type=HTTP;ip=127.0.0.1;ordinal=1';
@@ -286,7 +286,7 @@ test.describe('joinTransports', () => {
       heard.push([...new Uint8Array(data as ArrayBuffer)]);
     });
     await memory.start();
-    await client.connect({});
+    await client.connect({ server: memory });
 
     const flagsOf = (connectionHandle: TransportServerConnectionHandle) => {
       return [
@@ -403,15 +403,15 @@ test.describe('joinTransports', () => {
       on: uncountedEmitter.on,
     };
     const joined = joinTransports([memory, worker.server, http.transport, counting]);
-    await using first = createMemoryTransportClient({ server: memory });
-    await using second = createMemoryTransportClient({ server: memory });
+    await using first = createMemoryTransportClient();
+    await using second = createMemoryTransportClient();
     await using third = createWorkerTransportClient({ worker: worker.worker });
     const webSocketHandle = 'type=WS;ip=127.0.0.1;port=50000;ordinal=1';
 
     await memory.start();
     await worker.server.start();
-    await first.connect({});
-    await second.connect({});
+    await first.connect({ server: memory });
+    await second.connect({ server: memory });
     await third.connect({});
     uncountedEmitter.emit('connection', {}, {}, webSocketHandle);
 
@@ -487,7 +487,7 @@ test.describe('joinTransports', () => {
     const http = createFake('HTTP', { flags: {} });
     const memory = createMemoryTransportServer();
     const joined = joinTransports([webSocket.transport, http.transport, memory]);
-    await using client = createMemoryTransportClient({ server: memory });
+    await using client = createMemoryTransportClient();
     const heard: number[] = [];
     const toWebSocket = 'type=WS;ip=127.0.0.1;port=50000;ordinal=1';
     const toHTTP = 'type=HTTP;ip=127.0.0.1;ordinal=1';
@@ -499,7 +499,7 @@ test.describe('joinTransports', () => {
       heard.push(...new Uint8Array(data as ArrayBuffer));
     });
     await memory.start();
-    await client.connect({});
+    await client.connect({ server: memory });
 
     joined.pause(toWebSocket);
     joined.pause(toHTTP);
@@ -532,7 +532,7 @@ test.describe('joinTransports', () => {
     const memory = createMemoryTransportServer({ clock });
     const joined = joinTransports([memory, worker.server]);
     await using server = createServer({ transport: joined });
-    await using byMemory = createMemoryTransportClient({ clock, server: memory });
+    await using byMemory = createMemoryTransportClient({ clock });
     await using byWorker = createWorkerTransportClient({ clock, worker: worker.worker });
     using memoryRouter = createRouterClient(byMemory);
     using workerRouter = createRouterClient(byWorker);
@@ -547,7 +547,7 @@ test.describe('joinTransports', () => {
     );
     await memory.start();
     await worker.server.start();
-    await byMemory.connect({});
+    await byMemory.connect({ server: memory });
     await byWorker.connect({});
 
     const call = (router: typeof memoryRouter | typeof workerRouter, payload: string) => {

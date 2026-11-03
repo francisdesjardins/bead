@@ -95,7 +95,7 @@ fn serve_echo(pair: &Pair, delay: Option<Duration>) {
 }
 
 async fn pair() -> Pair {
-    Pair::connected((january_first(), PairOptions::default()))
+    Pair::connected(january_first(), &PairOptions::default())
         .await
         .expect("a pair connected")
 }
@@ -165,7 +165,7 @@ async fn reads_no_clock_for_a_call_once_its_last_debug_listener_went() {
     ) -> (usize, usize) {
         let (walls, monotonics) = pair.clock.readings();
         let call = ask
-            .call(json!({ "text": "x" }), RequestOptions::default())
+            .call(json!({ "text": "x" }), &RequestOptions::default())
             .expect("a call");
 
         pair.settle().await;
@@ -211,7 +211,7 @@ async fn tells_each_step_of_a_request_and_once_answered_its_duration() {
     serve_echo(&pair, Some(Duration::from_millis(30)));
 
     let call = asking(manager)
-        .call(json!({ "text": "hello" }), RequestOptions::default())
+        .call(json!({ "text": "hello" }), &RequestOptions::default())
         .expect("echo called");
 
     pair.clock.advance(Duration::from_millis(30)).await;
@@ -303,7 +303,7 @@ async fn tells_a_call_made_and_its_answer_with_the_call_id_its_router_drew_and_t
         .expect("a command registered");
 
     let asked = asking(pair.client.services())
-        .call(json!({ "text": "a" }), RequestOptions::default())
+        .call(json!({ "text": "a" }), &RequestOptions::default())
         .expect("a call");
 
     pair.settle().await;
@@ -317,7 +317,7 @@ async fn tells_a_call_made_and_its_answer_with_the_call_id_its_router_drew_and_t
     let commanding = command
         .call(
             json!({ "text": "b" }),
-            RequestOptions {
+            &RequestOptions {
                 connection_handle: Some(Arc::clone(&pair.connection_handle)),
                 ..RequestOptions::default()
             },
@@ -376,7 +376,7 @@ async fn tells_a_call_its_router_refuses_before_drawing_an_id_with_none_its_tx_s
     let refused = asking(pair.client.services())
         .call(
             json!({ "text": "x" }),
-            RequestOptions {
+            &RequestOptions {
                 credential: Some(RequestCredential::Opaque),
                 ..RequestOptions::default()
             },
@@ -423,7 +423,7 @@ async fn reads_its_router_s_clock_a_call_s_start_on_the_wall_clock_its_duration_
     serve_echo(&pair, Some(Duration::from_millis(250)));
 
     let answering = asking(pair.client.services())
-        .call(json!({ "text": "hello" }), RequestOptions::default())
+        .call(json!({ "text": "hello" }), &RequestOptions::default())
         .expect("a call");
 
     // a wall clock set back by hand moves no duration
@@ -471,7 +471,7 @@ async fn tells_a_duration_in_whole_milliseconds_its_fraction_dropped() {
 
     let before = pair.clock.monotonic();
     let answering = asking(pair.client.services())
-        .call(json!({ "text": "hello" }), RequestOptions::default())
+        .call(json!({ "text": "hello" }), &RequestOptions::default())
         .expect("a call");
 
     pair.settle().await;
@@ -568,7 +568,7 @@ async fn a_notification_starts_as_it_is_heard_or_sent_and_a_failed_notify_tells_
         .expect("ticks heard");
     let registering = notification.on(
         (Value::Null, Arc::new(|_value| Box::pin(async { Ok(()) }))),
-        RequestOptions::default(),
+        &RequestOptions::default(),
     );
 
     pair.settle().await;
@@ -640,7 +640,7 @@ async fn reads_no_clock_for_a_call_made_a_request_answered_a_notification_sent_a
     ) -> [(usize, usize); 2] {
         let (walls, monotonics) = pair.clock.readings();
         let call = ask
-            .call(json!({ "text": "x" }), RequestOptions::default())
+            .call(json!({ "text": "x" }), &RequestOptions::default())
             .expect("a call");
 
         pair.settle().await;
@@ -690,7 +690,7 @@ async fn reads_no_clock_for_a_call_made_a_request_answered_a_notification_sent_a
         .expect("ticks heard");
     let registering = notification.on(
         (Value::Null, Arc::new(|_value| Box::pin(async { Ok(()) }))),
-        RequestOptions::default(),
+        &RequestOptions::default(),
     );
 
     pair.settle().await;
@@ -739,7 +739,7 @@ async fn a_debug_listener_that_throws_on_the_answer_is_reported_through_the_rout
     }));
 
     let call = asking(manager)
-        .call(json!({ "text": "x" }), RequestOptions::default())
+        .call(json!({ "text": "x" }), &RequestOptions::default())
         .expect("a call");
 
     pair.settle().await;
@@ -780,7 +780,7 @@ async fn a_request_is_answered_as_a_debug_listener_throws_on_its_rx_step_the_err
         }));
 
     let call = asking(pair.client.services())
-        .call(json!({ "text": "hi" }), RequestOptions::default())
+        .call(json!({ "text": "hi" }), &RequestOptions::default())
         .expect("a call");
 
     pair.settle().await;
@@ -812,7 +812,7 @@ async fn hands_its_router_the_credential_a_call_presents_and_leaves_it_out_of_it
     let call = asking(pair.client.services())
         .call(
             json!({ "text": "x" }),
-            RequestOptions {
+            &RequestOptions {
                 credential: Some(RequestCredential::Jwt("a.b.c".to_owned())),
                 ..RequestOptions::default()
             },
@@ -843,7 +843,7 @@ async fn rethrows_what_the_router_rejects_with_and_tells_debug_its_failure_and_o
 
     // no resolver: the server answers PROCEDURE_UNKNOWN
     let unknown = asking(pair.client.services())
-        .call(json!({ "text": "x" }), RequestOptions::default())
+        .call(json!({ "text": "x" }), &RequestOptions::default())
         .expect("a call");
 
     pair.settle().await;
@@ -861,7 +861,7 @@ async fn rethrows_what_the_router_rejects_with_and_tells_debug_its_failure_and_o
     let late = asking(pair.client.services())
         .call(
             json!({ "text": "y" }),
-            RequestOptions {
+            &RequestOptions {
                 timeout: Some(Duration::from_millis(10)),
                 ..RequestOptions::default()
             },
@@ -924,7 +924,7 @@ async fn tells_a_notification_sent_or_heard_with_no_call_id() {
         .expect("ticks heard");
     let registering = notification.on(
         (Value::Null, Arc::new(|_value| Box::pin(async { Ok(()) }))),
-        RequestOptions::default(),
+        &RequestOptions::default(),
     );
 
     pair.settle().await;
@@ -969,7 +969,7 @@ async fn tells_the_request_it_received_and_the_answer_it_sent_with_that_request_
     serve_echo(&pair, None);
 
     let call = asking(pair.client.services())
-        .call(json!({ "text": "x" }), RequestOptions::default())
+        .call(json!({ "text": "x" }), &RequestOptions::default())
         .expect("a call");
 
     pair.settle().await;
@@ -1022,7 +1022,7 @@ async fn tells_a_callback_that_fails_before_it_answers_as_an_answer_that_did_not
 
     for payload in ["before", "after"] {
         let call = asking(pair.client.services())
-            .call(json!(payload), RequestOptions::default())
+            .call(json!(payload), &RequestOptions::default())
             .expect("a call");
 
         pair.settle().await;

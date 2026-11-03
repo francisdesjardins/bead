@@ -146,7 +146,7 @@ async fn one_unanswered_in_time_closes_its_connection_as_the_call_or_else_the_ma
             .expect("declared")
             .call(
                 "run".to_owned(),
-                RequestOptions {
+                &RequestOptions {
                     connection_handle: Some(handle_of(1)),
                     timeout: Some(Duration::from_millis(10)),
                     close_on_timeout: own,
@@ -222,7 +222,7 @@ async fn one_unanswered_in_time_closes_its_connection_as_the_call_or_else_the_ma
         .expect("declared")
         .call(
             "run".to_owned(),
-            RequestOptions {
+            &RequestOptions {
                 timeout: Some(Duration::from_millis(10)),
                 ..RequestOptions::default()
             },
@@ -279,7 +279,7 @@ async fn fills_what_the_options_leave_out_and_passes_a_destination_as_it_is() {
         let call = manager
             .get_command(&command(), RequestDependencies::of(TextCodec, TextCodec))
             .expect("declared")
-            .call("hi".to_owned(), options.clone())
+            .call("hi".to_owned(), &options.clone())
             .expect("called");
         fixture.clock.settle().await;
         let sent = fixture.transport.take();
@@ -305,7 +305,7 @@ async fn fills_what_the_options_leave_out_and_passes_a_destination_as_it_is() {
                 seen[0].connection_handle.clone(),
                 seen[0].destination_id,
                 seen[0].timeout,
-                seen[0].close_on_timeout
+                seen[0].close_on_timeout.unwrap_or(false)
             ),
             (
                 Some(handle_of(1)),
@@ -327,6 +327,51 @@ async fn fills_what_the_options_leave_out_and_passes_a_destination_as_it_is() {
     fixture.router.dispose().await;
 }
 
+// decision 0004: a server's call names its connection, refused at the call without one where the
+// TypeScript side's types refuse it
+#[tokio::test]
+async fn on_a_server_router_names_the_connection_it_goes_to() {
+    let fixture = Fixture::new();
+    fixture.transport.open(&handle_of(1), true);
+    let requester = fixture
+        .manager
+        .get_command(&command(), RequestDependencies::of(TextCodec, TextCodec))
+        .expect("declared");
+    let options = RequestOptions {
+        connection_handle: Some(handle_of(1)),
+        ..RequestOptions::default()
+    };
+    let call = requester.call("a".to_owned(), &options).expect("called");
+    fixture.clock.settle().await;
+    let sent = fixture.transport.take();
+    assert_eq!(sent.len(), 1);
+    assert_eq!(sent[0].0, handle_of(1));
+    let Envelope::Request { header, .. } = &sent[0].1 else {
+        panic!("a request")
+    };
+    fixture.transport.deliver(
+        &result(header.call_id, Bytes::from_static(b"a")),
+        &handle_of(1),
+    );
+    assert_eq!(
+        crate::testing::patience(Duration::from_secs(10), call)
+            .await
+            .expect("answered")
+            .expect("result"),
+        "a"
+    );
+    assert_eq!(
+        requester
+            .call("b".to_owned(), &RequestOptions::default())
+            .expect_err("no connection named")
+            .message(),
+        "a server request names the connection it goes to"
+    );
+    fixture.clock.settle().await;
+    assert_eq!(fixture.transport.take().len(), 0);
+    fixture.router.dispose().await;
+}
+
 #[tokio::test]
 async fn sends_the_encoded_payload_with_the_resolved_options_and_decodes_the_answer() {
     let fixture = ClientFixture::new();
@@ -337,7 +382,7 @@ async fn sends_the_encoded_payload_with_the_resolved_options_and_decodes_the_ans
     let call = requester
         .call(
             serde_json::json!({ "text": "hello" }),
-            RequestOptions {
+            &RequestOptions {
                 timeout: Some(Duration::from_millis(100)),
                 ..RequestOptions::default()
             },
@@ -379,13 +424,13 @@ async fn takes_the_managers_defaults_where_the_call_says_nothing_and_its_signal_
         .get_request(&echo(), RequestDependencies::of(TextCodec, TextCodec))
         .expect("declared");
     let first = requester
-        .call("a".to_owned(), RequestOptions::default())
+        .call("a".to_owned(), &RequestOptions::default())
         .expect("called");
     let signal = CancellationToken::new();
     let second = requester
         .call(
             "b".to_owned(),
-            RequestOptions {
+            &RequestOptions {
                 destination_id: Some(2),
                 signal: Some(signal.clone()),
                 timeout: Some(Duration::from_millis(9)),
@@ -397,7 +442,7 @@ async fn takes_the_managers_defaults_where_the_call_says_nothing_and_its_signal_
         .manager
         .get_request(&echo(), RequestDependencies::of(TextCodec, TextCodec))
         .expect("declared")
-        .call("c".to_owned(), RequestOptions::default())
+        .call("c".to_owned(), &RequestOptions::default())
         .expect("called");
     fixture.clock.settle().await;
     assert_eq!(
@@ -472,22 +517,22 @@ async fn a_deprecated_procedure_raises_deprecated_at_each_call_and_only_a_deprec
         .expect("declared");
     let calls = [
         requester
-            .call("a".to_owned(), RequestOptions::default())
+            .call("a".to_owned(), &RequestOptions::default())
             .expect("called"),
         requester
-            .call("b".to_owned(), RequestOptions::default())
+            .call("b".to_owned(), &RequestOptions::default())
             .expect("called"),
         fixture
             .manager
             .get_request(&echo(), RequestDependencies::of(TextCodec, TextCodec))
             .expect("declared")
-            .call("c".to_owned(), RequestOptions::default())
+            .call("c".to_owned(), &RequestOptions::default())
             .expect("called"),
         fixture
             .manager
             .get_request(&empty, RequestDependencies::of(TextCodec, TextCodec))
             .expect("declared")
-            .call("d".to_owned(), RequestOptions::default())
+            .call("d".to_owned(), &RequestOptions::default())
             .expect("called"),
     ];
     fixture.clock.settle().await;
@@ -516,7 +561,7 @@ async fn get_command_asks_one_connection_as_a_servers_request_does_and_tells_deb
     let call = requester
         .call(
             "run".to_owned(),
-            RequestOptions {
+            &RequestOptions {
                 connection_handle: Some(handle_of(1)),
                 ..RequestOptions::default()
             },
@@ -545,7 +590,7 @@ async fn get_command_asks_one_connection_as_a_servers_request_does_and_tells_deb
         ]
     );
     requester
-        .call("run".to_owned(), RequestOptions::default())
+        .call("run".to_owned(), &RequestOptions::default())
         .expect_err("a command names a connection");
     fixture.router.dispose().await;
 }
@@ -580,7 +625,7 @@ async fn tells_debug_the_close_on_timeout_that_applies_the_calls_or_else_the_man
         let call = requester
             .call(
                 "run".to_owned(),
-                RequestOptions {
+                &RequestOptions {
                     connection_handle: Some(handle_of(1)),
                     close_on_timeout: close,
                     ..RequestOptions::default()
@@ -596,6 +641,6 @@ async fn tells_debug_the_close_on_timeout_that_applies_the_calls_or_else_the_man
             .expect("answered")
             .expect("result");
     }
-    assert_eq!(*locked(&seen), [true, false]);
+    assert_eq!(*locked(&seen), [Some(true), Some(false)]);
     fixture.router.dispose().await;
 }

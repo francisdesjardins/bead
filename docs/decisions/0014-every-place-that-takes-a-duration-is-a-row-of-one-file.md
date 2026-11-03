@@ -167,9 +167,7 @@ the language the row excuses, as in every file of entries
   `TimeSpan` or a `Duration` holds, and cross "A duration that is not a number", a platform row;
   −2 ms and −1 ms are no `Duration`, and cross "A duration under zero" for the Rust side;
 - on a way the language lacks: the Web Worker's connect, which crosses "The Web Worker transport"
-  for the C# and the Rust sides, and a reconnection's delay given as a number, which crosses "A
-  reconnection's delay given as a number" for the C# side, an open row, since the Rust side takes
-  both ways;
+  for the C# and the Rust sides;
 - on an outcome the language reaches otherwise: −1 ms crosses "A duration of -1 ms" at every place,
   the ten that refuse never among them, where the C# side refuses it as never rather than under the
   floor; the two inputs finer than a tick cross "A duration finer than a tick" at every place.

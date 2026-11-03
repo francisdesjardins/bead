@@ -192,7 +192,7 @@ mod native {
 ///
 /// A [`ProgrammerError`] naming both layers and describing each clock when one given differs from
 /// the one beneath.
-pub fn clock_of(
+pub(crate) fn clock_of(
     (beneath, given): (Option<&SharedClock>, Option<&SharedClock>),
     (layer, below): (&str, &str),
 ) -> Result<Option<SharedClock>, ProgrammerError> {
