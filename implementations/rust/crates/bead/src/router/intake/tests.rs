@@ -39,6 +39,39 @@ fn intake_of((envelopes, bytes): (u64, u64)) -> Arc<Intake> {
     })
 }
 
+#[test]
+fn pauses_a_connection_once_what_it_handed_within_one_task_reaches_either_bound_once() {
+    let intake = intake_of((3, 100));
+    let calls = Calls::default();
+    let (a, b) = (handle("a"), handle("b"));
+    for (connection, bytes) in [(&a, 10), (&a, 10), (&b, 100)] {
+        assert!(intake.handed((connection, bytes), |held| calls.pause(held)));
+    }
+    assert_eq!(*locked(&calls.0), ["pause b"]);
+    assert_eq!(intake.paused(), [Arc::clone(&b)]);
+    // The source's ArrayBuffer and ASCII text carry ten and four bytes here.
+    for (connection, bytes) in [(&a, 10), (&a, 4), (&b, 1)] {
+        assert!(intake.handed((connection, bytes), |held| calls.pause(held)));
+    }
+    assert_eq!(*locked(&calls.0), ["pause b", "pause a"]);
+    assert_eq!(intake.paused(), [Arc::clone(&a), Arc::clone(&b)]);
+    intake.end(|held| calls.resume(held));
+}
+
+#[tokio::test]
+async fn resumes_what_it_paused_as_it_ends_and_counts_nothing_after() {
+    let intake = intake_of((1, 1_048_576));
+    let calls = Calls::default();
+    let (a, b) = (handle("a"), handle("b"));
+    assert!(intake.handed((&a, 1), |held| calls.pause(held)));
+    intake.end(|held| calls.resume(held));
+    intake.end(|held| calls.resume(held));
+    assert!(!intake.handed((&b, 1), |held| calls.pause(held)));
+    crate::testing::rest(core::time::Duration::ZERO).await;
+    assert_eq!(*locked(&calls.0), ["pause a", "resume a"]);
+    assert_eq!(intake.paused(), Vec::<ConnectionHandle>::new());
+}
+
 // spec 15.12.17, 15.12.18
 #[test]
 fn pauses_at_the_envelope_that_reaches_a_bound_and_resumes_once_both_counts_are_at_half() {

@@ -64,6 +64,7 @@ impl fmt::Display for DurationRefusal {
 struct Offered {
     never: bool,
     zero: bool,
+    ceiling: Duration,
 }
 
 // the one refusal of a duration, which offers what its place takes besides
@@ -91,7 +92,7 @@ fn refusal_of(
         Refusal::Duration(reason),
         format!(
             "{name} is {zero}a duration of whole milliseconds from 1 to {}{never}, not {written}",
-            LONGEST_TIMER.as_millis()
+            offered.ceiling.as_millis()
         ),
     )
 }
@@ -99,11 +100,15 @@ fn refusal_of(
 // `duration` rounded to the nearest whole millisecond, a half up, from 1 ms to the ceiling, both
 // read as given before rounding; the reason it is not otherwise
 fn held_of(duration: Duration) -> Result<Duration, DurationRefusal> {
+    held_within(duration, LONGEST_TIMER)
+}
+
+fn held_within(duration: Duration, ceiling: Duration) -> Result<Duration, DurationRefusal> {
     if duration < MILLISECOND {
         return Err(DurationRefusal::UnderTheFloor);
     }
 
-    if duration > LONGEST_TIMER {
+    if duration > ceiling {
         return Err(DurationRefusal::PastTheCeiling);
     }
 
@@ -126,6 +131,7 @@ pub fn hold(name: &str, duration: Duration) -> Result<Duration, ProgrammerError>
     let offered = Offered {
         never: true,
         zero: false,
+        ceiling: LONGEST_TIMER,
     };
 
     if duration == NEVER {
@@ -149,9 +155,32 @@ pub fn hold(name: &str, duration: Duration) -> Result<Duration, ProgrammerError>
 /// A [`ProgrammerError`] naming the duration `name`, its reason under the floor, past the ceiling,
 /// 0 refused, or never refused.
 pub fn hold_finite(name: &str, duration: Duration) -> Result<Duration, ProgrammerError> {
+    hold_within(name, duration, &HoldWithinOptions::new(LONGEST_TIMER))
+}
+
+/// The whole-millisecond ceiling of a place, no higher than the timer's ceiling.
+#[derive(Debug)]
+#[non_exhaustive]
+pub(crate) struct HoldWithinOptions {
+    pub(crate) ceiling: Duration,
+}
+
+impl HoldWithinOptions {
+    pub(crate) fn new(ceiling: Duration) -> Self {
+        Self { ceiling }
+    }
+}
+
+/// Holds a finite duration under its place's ceiling, naming that ceiling in every refusal.
+pub(crate) fn hold_within(
+    name: &str,
+    duration: Duration,
+    options: &HoldWithinOptions,
+) -> Result<Duration, ProgrammerError> {
     let offered = Offered {
         never: false,
         zero: false,
+        ceiling: options.ceiling,
     };
 
     if duration == NEVER {
@@ -168,7 +197,8 @@ pub fn hold_finite(name: &str, duration: Duration) -> Result<Duration, Programme
         ));
     }
 
-    held_of(duration).map_err(|reason| refusal_of(name, (duration, (reason, offered))))
+    held_within(duration, options.ceiling)
+        .map_err(|reason| refusal_of(name, (duration, (reason, offered))))
 }
 
 /// As [`hold_finite`], for a delay: 0 is at once, held as 0, for which no timer is armed; never is
@@ -182,6 +212,7 @@ pub(crate) fn hold_delay(name: &str, duration: Duration) -> Result<Duration, Pro
     let offered = Offered {
         never: false,
         zero: true,
+        ceiling: LONGEST_TIMER,
     };
 
     if duration.is_zero() {

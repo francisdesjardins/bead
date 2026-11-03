@@ -53,6 +53,19 @@ fn stop<S: Side>(state: &mut S, id: u64) -> Option<ResultSending<S>> {
     Some(sending)
 }
 
+/// Stops a result as its requester cancels, before another queued credit can send more.
+pub(crate) fn cancel<S: Side>(state: &mut S, call: &CallAddress) {
+    let Some(SendingFor::Result(id)) = state.core().sendings.purpose_of(call) else {
+        return;
+    };
+
+    if let Some(sending) = stop(state, id)
+        && let Some(done) = sending.done
+    {
+        done(state, Err(CallError::Cancelled));
+    }
+}
+
 // the call goes with it: its call id is the peer's to open again; what did not go out is undone
 fn fail<S: Side>(state: &mut S, (id, error): (u64, CallError)) {
     let Some(sending) = stop(state, id) else {

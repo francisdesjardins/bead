@@ -1199,6 +1199,8 @@ fn receive_cancel<S: Side>(state: &mut S, (header, handle): (CancelHeader, &Conn
     if let Some(answering) = taken {
         answering.signal.abort(SignalReason::Cancelled);
     }
+
+    crate::router::answers::cancel(state, &call);
 }
 
 fn receive_notification<S: Side>(

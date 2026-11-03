@@ -5,6 +5,92 @@ use core::time::Duration;
 use super::{LONGEST_TIMER, NEVER, hold, hold_delay, hold_finite};
 
 #[test]
+fn holds_a_duration_under_a_ceiling_of_its_own_as_under_the_timers_refusing_one_past_it_in_the_same_message()
+ {
+    use super::{HoldWithinOptions, hold_within};
+    use crate::duration::DurationRefusal;
+    use crate::errors::Refusal;
+    let ceiling = Duration::from_secs(65_535);
+    let options = HoldWithinOptions::new(ceiling);
+    let file = crate::testing::durations::Durations::read().expect("the shared durations");
+    let place = file
+        .places
+        .iter()
+        .find(|place| place.id == "mqttBrokerAdapter.keepAlive")
+        .expect("the source's ceiling policy");
+    let timer = file
+        .places
+        .iter()
+        .find(|place| place.id == "router.transferInactivityTimeout")
+        .expect("the same policy under the timer's ceiling");
+    for ((input, outcome), timer_outcome) in
+        file.inputs.iter().zip(&place.outcomes).zip(&timer.outcomes)
+    {
+        if input.is_excused || outcome.is_excused {
+            continue;
+        }
+        let given = input.given.expect("an input a Duration holds");
+        let held = hold_within("a duration", given, &options);
+        if outcome.outcome == "refused" || given > ceiling {
+            let refused = held.expect_err("the policy refuses this input");
+            let reason = if given == NEVER {
+                DurationRefusal::NeverRefused
+            } else if given.is_zero() {
+                DurationRefusal::ZeroRefused
+            } else if given < Duration::from_millis(1) {
+                DurationRefusal::UnderTheFloor
+            } else {
+                DurationRefusal::PastTheCeiling
+            };
+            assert_eq!(refused.reason(), Some(Refusal::Duration(reason)));
+            let written = if given == NEVER {
+                "Duration::MAX".to_owned()
+            } else {
+                format!("{given:?}")
+            };
+            assert_eq!(
+                refused.message(),
+                format!(
+                    "a duration is a duration of whole milliseconds from 1 to 65535000, not {written}"
+                ),
+                "{}",
+                input.name
+            );
+        } else {
+            assert_eq!(
+                held.expect("the duration held"),
+                timer_outcome
+                    .held
+                    .expect("the timer policy's held milliseconds"),
+                "{}",
+                input.name
+            );
+            assert_eq!(
+                hold_within("a duration", given, &options),
+                hold_finite("a duration", given)
+            );
+        }
+    }
+    for given in [ceiling, ceiling.saturating_sub(Duration::from_micros(500))] {
+        assert_eq!(
+            hold_within("a duration", given, &options).expect("the ceiling held after rounding"),
+            ceiling
+        );
+    }
+    for extra in [Duration::from_micros(500), Duration::from_millis(1)] {
+        let given = ceiling.saturating_add(extra);
+        assert_eq!(
+            hold_within("a duration", given, &options)
+                .expect_err("past the ceiling before rounding")
+                .message(),
+            format!(
+                "a duration is a duration of whole milliseconds from 1 to 65535000, not {given:?}"
+            )
+        );
+    }
+}
+
+#[test]
 fn holds_a_duration_to_the_nearest_millisecond_from_1_ms_to_its_ceiling_never_and_0_as_each_place_takes_them()
  {
     assert_eq!(
