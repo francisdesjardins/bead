@@ -1920,8 +1920,11 @@ where
                 request.key.clone_from(&options.key);
                 request
             }),
-            // * only a server notifies; a client asks with a request
-            ServiceRouter::Client(_) => Box::pin(async { Ok(()) }),
+            ServiceRouter::Client(_) => Box::pin(async {
+                Err(RouterError::Other(Arc::new(ProgrammerError::new(
+                    "only a server notifies; a client asks with a request",
+                ))))
+            }),
         };
         let shared = Arc::clone(&self.shared);
 
