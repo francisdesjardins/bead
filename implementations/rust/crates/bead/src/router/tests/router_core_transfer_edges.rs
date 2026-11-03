@@ -17,13 +17,13 @@ use crate::testing::core_port::{Peer, scripted_header};
 use crate::testing::pair::echo;
 
 #[derive(Debug, PartialEq, Eq)]
-enum Outgoing {
+pub(super) enum Outgoing {
     Credit(u32, u64),
     Result(u32, Bytes),
     Failure(u32, u16),
 }
 
-fn limits() -> RouterLimitsOptions {
+pub(super) fn limits() -> RouterLimitsOptions {
     RouterLimitsOptions {
         buffered_bytes_budget: Some(1_024),
         maximum_payload_bytes: Some(1_024),
@@ -31,7 +31,7 @@ fn limits() -> RouterLimitsOptions {
     }
 }
 
-async fn serving(unresolved: bool, options: &RouterLimitsOptions) -> (Peer, Handed) {
+pub(super) async fn serving(unresolved: bool, options: &RouterLimitsOptions) -> (Peer, Handed) {
     let peer = Peer::new(RouterSide::Server, options);
     let handed = Handed::default();
     let mut handler = handler((&handed, &Arc::default()));
@@ -52,7 +52,7 @@ async fn serving(unresolved: bool, options: &RouterLimitsOptions) -> (Peer, Hand
     (peer, handed)
 }
 
-fn opening(call_id: u32, (payload, total): (Bytes, u64)) -> Envelope {
+pub(super) fn opening(call_id: u32, (payload, total): (Bytes, u64)) -> Envelope {
     Envelope::Request {
         header: RequestHeader {
             total: Some(total),
@@ -62,7 +62,7 @@ fn opening(call_id: u32, (payload, total): (Bytes, u64)) -> Envelope {
     }
 }
 
-fn chunk(call_id: u32, (offset, payload, total): (u64, Bytes, u64)) -> Envelope {
+pub(super) fn chunk(call_id: u32, (offset, payload, total): (u64, Bytes, u64)) -> Envelope {
     Envelope::Chunk {
         header: ChunkHeader {
             call_id,
@@ -74,7 +74,7 @@ fn chunk(call_id: u32, (offset, payload, total): (u64, Bytes, u64)) -> Envelope 
     }
 }
 
-async fn outgoing(peer: &Peer) -> Vec<(String, Outgoing)> {
+pub(super) async fn outgoing(peer: &Peer) -> Vec<(String, Outgoing)> {
     peer.sent()
         .await
         .into_iter()
@@ -105,7 +105,7 @@ async fn outgoing(peer: &Peer) -> Vec<(String, Outgoing)> {
         .collect()
 }
 
-fn narrow() -> RouterLimitsOptions {
+pub(super) fn narrow() -> RouterLimitsOptions {
     RouterLimitsOptions {
         buffered_bytes_budget: Some(200),
         maximum_payload_bytes: Some(200),
