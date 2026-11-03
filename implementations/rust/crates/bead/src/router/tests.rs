@@ -50,6 +50,7 @@ mod parts;
 mod receiving_transfers;
 mod relay;
 mod requester;
+mod requester_edges;
 mod router_core;
 mod router_core_answering;
 mod router_core_credentials;
