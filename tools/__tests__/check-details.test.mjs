@@ -249,7 +249,7 @@ describe('problemsOf', () => {
     );
   });
 
-  test('accepts the Rust side’s allowed site and reports one gone', () => {
+  test('accepts the Rust side’s allowed sites and reports one gone', () => {
     const core = 'implementations/rust/crates/bead/src/router/core.rs';
     const site = [
       'let failure = state',
@@ -259,12 +259,12 @@ describe('problemsOf', () => {
       '    .saying(error.message().to_owned());',
     ].join('\n');
 
-    assert.equal(ALLOWED[core], 1);
+    assert.equal(ALLOWED[core], 2);
     assert.deepEqual(
-      problemsOf([core], () => site),
+      problemsOf([core], () => `${site}\n${site}`),
       []
     );
-    assert.match(problemsOf([core], () => '')[0], /1 allowed site\(s\) gone/);
+    assert.match(problemsOf([core], () => site)[0], /1 allowed site\(s\) gone/);
   });
 
   test('refuses a marker that holds no site, by its line', () => {
