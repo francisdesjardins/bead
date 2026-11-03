@@ -5,19 +5,20 @@
   the credential a broker's transport carries, its security and who may serve a name, in 15.22; a
   broker that paces no call, what waits for it, nothing retained, and the bounds of a participant and
   its server's transport, in 15.23; the adapter's contract and the in-memory broker, in 15.24; the
-  heartbeat of 15.21, and its participant fenced once its link is taken over; the life the core
-  gives an OPEN, in 15.18, and a DATA that carries a credential, in 15.22; what 13.4, 13.7 and
-  14.3's step 5 count of a broker; the broker cases of
+  password an adapter is given or asks, in 15.26 and 15.33, and the rows of `connectTimeout` in
+  15.30 and 15.37, which bound its ask; the heartbeat of 15.21, and its participant fenced once its
+  link is taken over; the life the core gives an OPEN, in 15.18, and a DATA that carries a
+  credential, in 15.22; what 13.4, 13.7 and 14.3's step 5 count of a broker; the broker cases of
   [`spec/transports.json`](../../spec/transports.json) of a credential, security, notifications, a
   transfer, a retained message, the heartbeat, a queue's overrun, the lives a client asks and a
-  link taken over; the place
-  `brokerParticipant.heartbeat` and the way `broker` of `transportClient.connectTimeout` in
-  [`spec/durations.json`](../../spec/durations.json); the twins of the participant, the in-memory
-  broker and the heartbeat. A credential's scheme is
-  [0010](0010-a-request-presents-a-credential-of-a-scheme.md)'s; the clock
+  link taken over; the place `brokerParticipant.heartbeat` and the way `broker` of
+  `transportClient.connectTimeout` in [`spec/durations.json`](../../spec/durations.json), and the
+  names of `mqttBrokerAdapter.connectTimeout` and `amqpBrokerAdapter.connectTimeout`; the twins of
+  the participant, the in-memory broker, the heartbeat and the adapters' password. A credential's
+  scheme is [0010](0010-a-request-presents-a-credential-of-a-scheme.md)'s; the clock
   [0011](0011-every-side-takes-its-time-from-a-clock-it-is-given.md)'s; placement and the open
   [0038](0038-over-a-broker-a-connection-is-placed-once-at-its-open-named-by-both-its-ends.md)'s,
-  which keeps this record's round of the Tenth Man; parcels and parts
+  which keeps this record's first round of the Tenth Man; parcels and parts
   [0039](0039-a-brokers-transport-numbers-its-parcels-and-sends-an-envelope-in-parts-under-its-peers-bound.md)'s;
   the in-memory transport beside the in-memory broker
   [0036](0036-an-in-memory-transport-joins-two-routers-of-one-process-and-a-server-takes-several-transports-through-one.md)'s.
@@ -123,6 +124,42 @@ rest. An OPEN lives its connect's time left alike, so that one no participant to
 deleted in its broker rather than taken late; no other parcel has a life, a parcel deleted unsent
 being a loss the heartbeat finds.
 
+**A link authenticates by a password or by its client certificate, never both** (spec 15.26,
+15.33). An adapter takes a password, or a provider it asks at each link's start, two members of one
+name as a WebSocket client's credential and its provider are
+([0032](0032-a-websocket-upgrade-from-no-page-carries-its-credential-beside-every-envelope.md)):
+`password` and `passwordProvider` on the TypeScript side, the provider handed `{ signal }` and
+answering a string or a promise of one; `Password` and `PasswordProvider` on the C# side, a
+`Func<CancellationToken, ValueTask<string>>`. The ask counts in its start's `connectTimeout`, from
+the start's call, with the CONNACK, or with the OPEN, the sessions and the inbox, one budget on
+every side. It is raced against that timeout, the start's own signal and the link's stop, as the
+WebSocket client races its provider, so a provider deaf to its signal still ends its start, its
+late answer dropped; and its signal is aborted once the start ends, linked or not. Each path has
+its words on every side:
+
+- the ask outlives its time: `the link of {id} had no password within {N} ms, its connectTimeout`;
+- a stop meets it: `the link of {id} stopped as it started`, whether or not the provider hears its
+  signal;
+- the start's own signal: its cancellation, as on every other path of a start;
+- the provider throws: `the password provider failed`, its throw the cause, as 0032's
+  `the credential provider failed`;
+- and beside them, `the link of {id} had no CONNACK within {N} ms, its connectTimeout` and
+  `the link of {id} had no OPEN and no sessions within {N} ms, its connectTimeout`.
+
+As it is built, after its id, its URL and its TLS, an adapter refuses as a programmer's error, in
+this order: a password beside its provider; either beside a client certificate; neither, over AMQP
+1.0, whose PLAIN takes a password of one octet at least
+([RFC 4616 §2](https://www.rfc-editor.org/rfc/rfc4616#section-2)) and whose ANONYMOUS is no
+mechanism of its link; and a password that is empty or holds a NUL, which a provider's answer meets
+at its start, an empty answer never taken as none, since none would lower the authentication. Over
+MQTT 5 an adapter given neither sends its id as its User Name, with no Password. A password is
+text, as SASL PLAIN's is: MQTT 5's Password, Binary Data
+([MQTT 5.0 §3.1.3.6](https://docs.oasis-open.org/mqtt/mqtt/v5.0/os/mqtt-v5.0-os.html)), is kept
+to UTF-8, a row of [`docs/support.md`](../support.md)'s "Leveled down". No word carries the secret,
+and an adapter's options write a password or a provider in no string: the C# side's options say
+that one is set, never its value, as `Credential` does. The Rust side's adapters, ahead, take this
+form.
+
 **A server's transport serves by its broker's word**: it starts once its broker holds each name
 it serves, a name refused failing its start, and stops once it let each go; its gauge `names`
 counts a name from its broker's acknowledgement of the subscription to its acknowledgement of the
@@ -186,8 +223,8 @@ its DATA's credential and without, a client not secure by its acceptor's leg, a 
 server's credential, notifications to two subscribers at their own credit, a transfer under credit,
 a retained message, the heartbeat in real time and a queue's overrun; the place
 `brokerParticipant.heartbeat` and the way `broker` of `transportClient.connectTimeout`; and the
-twins of the participant, the in-memory broker and the heartbeat, those holding 15.24 naming it,
-each named by one sentence on every side.
+twins of the participant, the in-memory broker, the heartbeat and each adapter's password, those
+holding 15.24 naming it, each named by one sentence on every side.
 
 ## The Tenth Man
 
@@ -196,3 +233,29 @@ the round of the broker's core, which
 [0038](0038-over-a-broker-a-connection-is-placed-once-at-its-open-named-by-both-its-ends.md) keeps:
 its objections on a security by both legs, on the heartbeat's clock and its cost, on a broker's
 queue the in-memory broker lacked and on the broker's word are answered there.
+
+A broker adapter's password met it at xhigh effort, against a proposal of one option on every
+side, a union named by its concept. Each claim was checked against each side's code and against
+probes of the TypeScript and C# adapters, which ask a password before any broker is reached.
+Thirteen objections: twelve accepted, one in part, none refused. The form, the one dilemma the
+round named, is
+[0032](0032-a-websocket-upgrade-from-no-page-carries-its-credential-beside-every-envelope.md)'s,
+which decided it for the same concept. The objections, with the answers that hold:
+
+### On a broker adapter's password
+
+| Objection                                                                                                                                                                                                                                                                               | Answer                                                                                                                                                                                                                                                                          |
+| --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| A union named by its concept takes the form 0032 refused for this very concept, a secret given or asked at each attempt, and [0007](0007-csharp-interfaces-blocks-two-parameters-no-warning.md)'s sentence that the adapters' pair is the one such option still in two members is false | Accepted: 0032's form, the union refused. Two members of one name on every side, `password` and `passwordProvider`, `Password` and `PasswordProvider`, the TypeScript side's function form of `password` gone, no new public type; 0007 says so                                 |
+| Handing the provider a signal or a token bounds nothing: a provider deaf to it holds its start, on the C# side as well, and after a stop                                                                                                                                                | Accepted: each side waits on the ask under its start's bound and drops a late answer, as the WebSocket client does with its credential's provider                                                                                                                               |
+| On the TypeScript side a stop during an ask that never answers leaves the adapter unable to start again, and its participant retrying without end                                                                                                                                       | Accepted: a stop during the ask settles that start, so the next start links, its provider asked anew                                                                                                                                                                            |
+| Each failure of the ask reports something different, between the C# side's own two adapters too, and the CONNACK's and the OPEN's timeouts are worded differently on each side                                                                                                          | Accepted: one outcome for each path, each side's own exception or error, in one set of words; the CONNACK's and the OPEN's aligned; the C# MQTT 5 adapter asks within the same guard as its AMQP 1.0 adapter                                                                    |
+| Bounding the ask changes what `connectTimeout` means, the sides budget it differently, and the spec and `spec/durations.json` name the CONNACK alone                                                                                                                                    | Accepted: one budget from the start's call, the ask and the CONNACK, or the OPEN, the sessions and the inbox; 15.26, 15.33 and the rows of 15.30 and 15.37 say so, and the two places' names. A place of its own is refused: a knob nobody asked for                            |
+| A C# options record holding a password prints it in its string                                                                                                                                                                                                                          | Accepted: both options records write that a password or a provider is set, never its value, as `Credential` writes its scheme alone; a fix of a released leak                                                                                                                   |
+| The provider's type departs from its sibling's: a `Task`, and a bare signal                                                                                                                                                                                                             | Accepted: `Func<CancellationToken, ValueTask<string>>`, and `(options: { signal: AbortSignal }) => string \| Promise<string>`, the credential provider's own; a synchronous answer through `ValueTask`                                                                          |
+| The real "both given" is a password beside a client certificate, where the sides diverge and one fails every start; neither given falls to ANONYMOUS on one side and to a PLAIN of an empty password on the other                                                                       | Accepted: a password or a provider beside a client certificate is refused as it is built, and neither over AMQP 1.0; over MQTT 5 neither is a User Name, the id, with no Password, on every side                                                                                |
+| An empty, a NUL-holding or a missing answer is undefined, and the sides diverge, one lowering the authentication in silence                                                                                                                                                             | Accepted: one check, of a password as built and of an answer at the start: a non-empty string holding no NUL. An empty answer is refused, never taken as none                                                                                                                   |
+| MQTT 5's Password is Binary Data (§3.1.3.6)                                                                                                                                                                                                                                             | Accepted: the password stays text, which SASL PLAIN is, and every deployment's is; a row of "Leveled down", to lift when a binary credential is asked                                                                                                                           |
+| Under the union, every C# site that sets a string breaks unless a conversion keeps it, and the TypeScript type reaches no entry                                                                                                                                                         | Accepted, and moot under 0032's form: every C# site that sets a string compiles as it is, and no type is exported                                                                                                                                                               |
+| The round owes a twin for each path, on both adapters and both sides                                                                                                                                                                                                                    | Accepted: eight on each adapter, each named by one sentence on every side, and the C# side's string a row of "Differences", since no TypeScript object writes one of its own                                                                                                    |
+| The members shipped in 0.8.0, not 0.9.0; the order of the checks is unstated; a participant retries a provider's programmer's error without end                                                                                                                                         | Accepted in part: 0.8.0, a minor before 1.0.0 changing them ([0008](0008-three-version-axes-and-names-qualified-by-their-owner.md)); the checks in one order on every side, after the id, the URL and the TLS. The participant's retry is its own rule, work outside this round |

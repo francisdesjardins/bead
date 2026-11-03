@@ -127,6 +127,28 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   for both ends, and a broker participant's reconnection delay as a place of its own,
   `brokerParticipant.reconnectionDelay`, by `function` and `number` (decision 0014). The file holds
   35 places, by 54 ways.
+- A broker adapter takes its password as a string, or from a provider asked at each link's start,
+  two members of one name on every side, as a WebSocket client's credential and its provider are
+  (decisions 0032, 0040). On the TypeScript side `password` is a string alone and
+  `passwordProvider` takes the function, handed `{ signal }`: `password: () => readPassword()` is
+  now written `passwordProvider: () => readPassword()`. On the C# side `PasswordProvider`, shipped
+  in 0.8.0, returns a `ValueTask<string>`, as `CredentialProvider` does.
+- A broker adapter is refused as it is built, a programmer's error on every side, after its id, URL
+  and TLS checks and in this order, given a password and a provider both, either beside a TLS client
+  certificate, neither over AMQP 1.0, or a password that is empty or holds a NUL; a provider's
+  answer that is no such password fails its start alike (spec 15.26, 15.33; RFC 4616 §2).
+- An MQTT 5 link given neither a password nor a client certificate carries its id as its User Name,
+  with no Password, on the C# side as on the TypeScript side, where it carried no User Name (spec
+  15.26).
+- A broker adapter's `connectTimeout` bounds its start from its call, the ask of its password
+  included, with the CONNACK, or with the OPEN, the sessions and the inbox, on every side, where the
+  TypeScript side began it after the ask; `spec/durations.json` names
+  `mqttBrokerAdapter.connectTimeout` and `amqpBrokerAdapter.connectTimeout` so (spec 15.30, 15.37).
+- A broker adapter's start fails in one set of words on every side: `the link of {id} had no
+  password within {N} ms, its connectTimeout`, `the link of {id} stopped as it started`, `the
+  password provider failed`, its throw the cause, `the link of {id} had no CONNACK within {N} ms,
+  its connectTimeout` and `the link of {id} had no OPEN and no sessions within {N} ms, its
+  connectTimeout`.
 
 ### Removed
 
@@ -159,6 +181,22 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   attempt, the first included (spec 15.21).
 - Once a broker participant's reconnection ended, its next start or connect links it anew, where the
   C# side kept it down (spec 15.21).
+- A broker adapter's password provider is bounded on every side: one that never answers, or does
+  not hear its signal, fails its start at `connectTimeout` or at a stop, its late answer dropped,
+  and its signal is aborted once the start ends, where it held its start without end (spec 15.26,
+  15.33).
+- On the TypeScript side a broker adapter stopped while it asks its password starts again, its
+  provider asked anew, where its next start was refused as up already.
+- On the TypeScript side an MQTT 5 adapter given a password beside a client certificate failed
+  every start; it is refused as it is built.
+- On the TypeScript side an AMQP 1.0 adapter falls to SASL ANONYMOUS no more: given neither a
+  password nor a client certificate it is refused as it is built, and a provider's empty answer
+  fails its start.
+
+### Security
+
+- On the C# side `MqttBrokerAdapterOptions` and `AmqpBrokerAdapterOptions` write in their string
+  whether a password or a provider is set, never the password, which they wrote.
 
 ## [0.9.0] - 2026-10-30
 
