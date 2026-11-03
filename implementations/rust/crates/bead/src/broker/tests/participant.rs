@@ -26,14 +26,15 @@ use crate::broker::adapter::{
 };
 use crate::broker::client::{BrokerTransportClientConnectOptions, BrokerTransportClientOptions};
 use crate::broker::memory::{
-    MemoryBroker, MemoryBrokerAdapterOptions, MemoryBrokerFault, MemoryBrokerFaultOptions,
-    MemoryBrokerOptions,
+    MemoryBroker, MemoryBrokerAdapter, MemoryBrokerAdapterOptions, MemoryBrokerFault,
+    MemoryBrokerFaultOptions, MemoryBrokerOptions,
 };
 use crate::broker::parcel::{Parcel, encode_parcel, flags, kinds, write_parcel};
 use crate::broker::participant::{BrokerParticipant, BrokerParticipantOptions};
 use crate::broker::server::BrokerTransportServerOptions;
 use crate::clock::SharedClock;
-use crate::errors::TransportError;
+use crate::duration::{DurationRefusal, NEVER};
+use crate::errors::{ProgrammerError, Refusal, TransportError};
 use crate::router::types::{RouterError, TransportMessage};
 use crate::testing::SteppingClock;
 use crate::transport::{
@@ -65,6 +66,75 @@ fn reporting(participant: &BrokerParticipant) -> Arc<Mutex<Vec<String>>> {
     }));
 
     reported
+}
+
+// what it reports, each kept whole, its source among it
+fn hearing(participant: &BrokerParticipant) -> Arc<Mutex<Vec<RouterError>>> {
+    let reported: Arc<Mutex<Vec<RouterError>>> = Arc::default();
+    let hearing = Arc::clone(&reported);
+
+    participant.on_error(Arc::new(move |error: &RouterError| {
+        locked(&hearing).push(error.clone());
+    }));
+
+    reported
+}
+
+// the misuse a report's sources carry, the first of them
+fn misuse_of(error: &RouterError) -> Option<ProgrammerError> {
+    let RouterError::Other(error) = error else {
+        return None;
+    };
+    let mut source = error.source();
+
+    while let Some(cause) = source {
+        if let Some(misuse) = cause.downcast_ref::<ProgrammerError>() {
+            return Some(misuse.clone());
+        }
+
+        source = cause.source();
+    }
+
+    None
+}
+
+// a participant of `inner`'s id, through an adapter that writes down each call: what it asks of its
+// broker counted
+fn calling_of(
+    inner: &MemoryBrokerAdapter,
+    reconnect: &TransportClientReconnectOptions,
+) -> (BrokerParticipant, Arc<Calling>) {
+    let recording = Arc::new(Calling::of(inner.clone()));
+    let adapter: Arc<dyn BrokerAdapter> = Arc::<Calling>::clone(&recording);
+    let participant = BrokerParticipant::new(
+        adapter,
+        &BrokerParticipantOptions {
+            reconnect: Some(reconnect.clone()),
+            ..BrokerParticipantOptions::default()
+        },
+    )
+    .expect("a participant");
+
+    (participant, recording)
+}
+
+// the starts of its link asked of its broker, its first among them
+fn starts_of(recording: &Calling) -> usize {
+    recording
+        .calls()
+        .iter()
+        .filter(|call| *call == "start")
+        .count()
+}
+
+// its link lost, and its broker holding its id's link of another start already: each attempt is
+// refused until the test lets it through
+async fn lost_and_held(adapter: &MemoryBrokerAdapter) {
+    adapter.lose();
+    adapter
+        .start(BrokerStart::default())
+        .await
+        .expect("started");
 }
 
 fn immediately() -> TransportClientReconnectOptions {
@@ -240,7 +310,7 @@ async fn closes_each_connection_as_its_link_goes_down_and_connects_anew_as_anoth
     let alone = participant_of(
         &lone,
         &BrokerParticipantOptions {
-            is_reconnecting: Some(false),
+            reconnects: Some(false),
             ..BrokerParticipantOptions::default()
         },
     );
@@ -624,7 +694,7 @@ async fn acknowledges_a_message_once_taken_or_dropped_as_a_copy_never_after_its_
  {
     // a router that takes its time: told, and done much later
     struct Slow {
-        adapter: crate::broker::memory::MemoryBrokerAdapter,
+        adapter: MemoryBrokerAdapter,
         unsettled_as_told: Arc<Mutex<Vec<u64>>>,
     }
 
@@ -1424,6 +1494,303 @@ async fn reports_its_reconnection_ended_once_its_signal_is_aborted() {
     );
     assert!(!participant.is_linked(), "down");
     participant.stop().await;
+}
+
+// spec 1.4, 15.21
+#[tokio::test]
+async fn refuses_a_fixed_reconnection_delay_out_of_bounds_as_it_is_built_and_ends_its_reconnection_reported_on_a_function_s_answer_out_of_bounds()
+ {
+    let broker = broker();
+    let adapter = adapter_of(&broker, "ada");
+
+    // * a fixed delay held as it is built, whether or not it reconnects
+    for (delay, reconnects, reason) in [
+        (
+            Duration::from_micros(500),
+            None,
+            DurationRefusal::UnderTheFloor,
+        ),
+        (
+            Duration::from_millis(2_147_483_648),
+            Some(true),
+            DurationRefusal::PastTheCeiling,
+        ),
+        (NEVER, Some(false), DurationRefusal::NeverRefused),
+    ] {
+        let refused = BrokerParticipant::new(
+            Arc::new(adapter.clone()),
+            &BrokerParticipantOptions {
+                reconnect: Some(TransportClientReconnectOptions {
+                    delay: Some(TransportClientReconnectDelay::Fixed(delay)),
+                    ..TransportClientReconnectOptions::default()
+                }),
+                reconnects,
+                ..BrokerParticipantOptions::default()
+            },
+        )
+        .err();
+
+        assert_eq!(
+            refused.and_then(|refused| refused.reason()),
+            Some(Refusal::Duration(reason)),
+            "{delay:?} refused as it is built"
+        );
+    }
+
+    // a function's answer held at each attempt: out of bounds, its reconnection ends, reported,
+    // its refusal the report's source
+    let participant = participant_of(
+        &adapter,
+        &BrokerParticipantOptions {
+            reconnect: Some(TransportClientReconnectOptions {
+                delay: Some(TransportClientReconnectDelay::Resolver(Arc::new(
+                    |_previous, _attempt| NEVER,
+                ))),
+                ..TransportClientReconnectOptions::default()
+            }),
+            ..BrokerParticipantOptions::default()
+        },
+    );
+    let reported = hearing(&participant);
+
+    participant.start().await.expect("started");
+    lost_and_held(&adapter).await;
+    until(|| !locked(&reported).is_empty(), "its reconnection ended").await;
+    settle().await;
+
+    let reports = locked(&reported).clone();
+
+    assert_eq!(
+        reports.iter().map(ToString::to_string).collect::<Vec<_>>(),
+        [
+            "the link of ada went down, and its reconnection ended: a delay is 0 for at once, or a duration of whole milliseconds from 1 to 2147483647, not Duration::MAX"
+        ],
+        "reported once"
+    );
+    assert_eq!(
+        reports
+            .first()
+            .and_then(misuse_of)
+            .and_then(|misuse| misuse.reason()),
+        Some(Refusal::Duration(DurationRefusal::NeverRefused)),
+        "its refusal the report's source, by its code"
+    );
+    assert!(!participant.is_linked(), "down");
+    participant.stop().await;
+}
+
+// spec 15.21
+#[tokio::test]
+async fn reconnects_without_end_when_given_a_delay_alone() {
+    let broker = broker();
+    let adapter = adapter_of(&broker, "ada");
+    let (participant, recording) = calling_of(
+        &adapter,
+        &TransportClientReconnectOptions {
+            delay: Some(TransportClientReconnectDelay::Fixed(Duration::from_millis(
+                1,
+            ))),
+            ..TransportClientReconnectOptions::default()
+        },
+    );
+    let reported = reporting(&participant);
+
+    participant.start().await.expect("started");
+    lost_and_held(&adapter).await;
+
+    // * past the 5 attempts a transport client's reconnection makes when it names none
+    until(|| starts_of(&recording) > 8, "its attempts past five").await;
+    assert!(locked(&reported).is_empty(), "nothing reported");
+    assert!(!participant.is_linked(), "down");
+
+    // its broker lets it through: linked again, by its own reconnection
+    adapter.stop().await;
+    until(|| participant.is_linked(), "linked again").await;
+    assert!(locked(&reported).is_empty(), "nothing reported");
+    participant.stop().await;
+}
+
+// spec 15.21
+#[tokio::test]
+async fn ends_its_reconnection_once_it_is_stopped_told_so_and_links_no_more() {
+    let broker = broker();
+    let adapter = adapter_of(&broker, "ada");
+    let (participant, recording) = calling_of(
+        &adapter,
+        &TransportClientReconnectOptions {
+            delay: Some(TransportClientReconnectDelay::Fixed(Duration::from_millis(
+                10,
+            ))),
+            ..TransportClientReconnectOptions::default()
+        },
+    );
+    let reported = reporting(&participant);
+
+    participant.start().await.expect("started");
+    lost_and_held(&adapter).await;
+    until(|| starts_of(&recording) > 2, "its attempts refused").await;
+
+    // * its stop ends its link, the test's own among it: its broker would let it through now
+    participant.stop().await;
+
+    let stopped = starts_of(&recording);
+
+    until(|| !locked(&reported).is_empty(), "its reconnection ended").await;
+    crate::testing::rest(Duration::from_millis(50)).await;
+    assert_eq!(
+        *locked(&reported),
+        ["the link of ada went down, and its reconnection ended: the participant ada is stopped"],
+        "told so, once"
+    );
+    assert_eq!(starts_of(&recording), stopped, "no attempt after its stop");
+    assert!(
+        !participant.is_linked() && !adapter.is_linked(),
+        "linked no more"
+    );
+}
+
+// spec 15.21
+#[tokio::test]
+async fn ends_its_reconnection_before_any_attempt_once_its_signal_is_aborted() {
+    let broker = broker();
+    let adapter = adapter_of(&broker, "ada");
+    let cancelling = CancellationToken::new();
+    let (participant, recording) = calling_of(
+        &adapter,
+        &TransportClientReconnectOptions {
+            signal: Some(cancelling.clone()),
+            ..immediately()
+        },
+    );
+    let reported = reporting(&participant);
+
+    participant.start().await.expect("started");
+
+    // * aborted before its link goes down, its broker letting it through
+    cancelling.cancel();
+    adapter.lose();
+    until(|| !locked(&reported).is_empty(), "its reconnection ended").await;
+    settle().await;
+    assert_eq!(
+        *locked(&reported),
+        ["the link of ada went down, and its reconnection ended: the reconnection was cancelled"],
+        "reported once"
+    );
+    assert_eq!(starts_of(&recording), 1, "no attempt, its start alone");
+    assert!(!participant.is_linked(), "down");
+    participant.stop().await;
+}
+
+// spec 15.21
+#[tokio::test]
+async fn links_anew_at_its_next_start_once_its_reconnection_ended() {
+    let broker = broker();
+    let adapter = adapter_of(&broker, "ada");
+    let participant = participant_of(
+        &adapter,
+        &BrokerParticipantOptions {
+            reconnect: Some(TransportClientReconnectOptions {
+                maximum_attempts: Some(2),
+                ..immediately()
+            }),
+            ..BrokerParticipantOptions::default()
+        },
+    );
+    let reported = reporting(&participant);
+
+    participant.start().await.expect("started");
+
+    let former = participant.incarnation();
+
+    lost_and_held(&adapter).await;
+    until(|| !locked(&reported).is_empty(), "given up on").await;
+    assert_eq!(
+        *locked(&reported),
+        ["the link of ada went down, and 2 attempts did not bring it back"],
+        "reported"
+    );
+
+    // its broker lets it through: it stays down until it is started
+    adapter.stop().await;
+    settle().await;
+    assert!(!participant.is_linked(), "down");
+
+    // * its next start links it anew, another incarnation, not the first start's outcome
+    participant.start().await.expect("started");
+    assert!(participant.is_linked(), "linked anew");
+    assert!(adapter.is_linked(), "its link up at its broker");
+    assert_ne!(former, participant.incarnation(), "another incarnation");
+    participant.stop().await;
+}
+
+// spec 15.21
+#[tokio::test]
+async fn reports_its_reconnection_ended_when_its_delay_function_or_its_tap_throws() {
+    let broker = broker();
+    let ada = adapter_of(&broker, "ada");
+    let bob = adapter_of(&broker, "bob");
+    let throwing = participant_of(
+        &ada,
+        &BrokerParticipantOptions {
+            reconnect: Some(TransportClientReconnectOptions {
+                delay: Some(TransportClientReconnectDelay::Resolver(Arc::new(
+                    |_previous, _attempt| panic!("its delay broke"),
+                ))),
+                ..TransportClientReconnectOptions::default()
+            }),
+            ..BrokerParticipantOptions::default()
+        },
+    );
+    let tapping = participant_of(
+        &bob,
+        &BrokerParticipantOptions {
+            reconnect: Some(TransportClientReconnectOptions {
+                tap: Some(Arc::new(|_delay, _attempt| panic!("its tap broke"))),
+                ..immediately()
+            }),
+            ..BrokerParticipantOptions::default()
+        },
+    );
+    let reported = [hearing(&throwing), hearing(&tapping)];
+
+    throwing.start().await.expect("started");
+    tapping.start().await.expect("started");
+    lost_and_held(&ada).await;
+    lost_and_held(&bob).await;
+    until(
+        || reported.iter().all(|reported| !locked(reported).is_empty()),
+        "each reconnection ended",
+    )
+    .await;
+    settle().await;
+
+    let reports: Vec<Vec<RouterError>> = reported
+        .iter()
+        .map(|reported| locked(reported).clone())
+        .collect();
+
+    // * each told once, in the other sides' words, what it panicked with its source
+    assert_eq!(
+        reports
+            .iter()
+            .map(|reports| reports.iter().map(ToString::to_string).collect::<Vec<_>>())
+            .collect::<Vec<_>>(),
+        [
+            ["the link of ada went down, and its reconnection ended: its delay broke"],
+            ["the link of bob went down, and its reconnection ended: its tap broke"]
+        ],
+        "each reported once"
+    );
+    assert!(
+        reports
+            .iter()
+            .flatten()
+            .all(|report| misuse_of(report).is_some()),
+        "what ended it, its source"
+    );
+    assert!(!throwing.is_linked() && !tapping.is_linked(), "each down");
+    throwing.stop().await;
+    tapping.stop().await;
 }
 
 #[tokio::test]

@@ -801,7 +801,7 @@ async fn case_of((case, wall): (&Value, SystemTime)) -> Result<Case, String> {
     participant_options.minimum_body_bytes_per_second = options
         .get("minimumBodyBytesPerSecond")
         .and_then(Value::as_u64);
-    participant_options.is_reconnecting = Some(!is_client);
+    participant_options.reconnects = Some(!is_client);
 
     let adapter: Arc<dyn BrokerAdapter> = Arc::<Recording>::clone(&recording);
     let participant =

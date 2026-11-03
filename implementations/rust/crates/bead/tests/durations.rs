@@ -8,6 +8,7 @@
     reason = "a native target: its calls wait on tokio's tasks while the stepping clock settles"
 )]
 
+use core::sync::atomic::{AtomicUsize, Ordering};
 use core::time::Duration;
 use std::collections::BTreeMap;
 use std::process::ExitCode;
@@ -48,7 +49,7 @@ const OTHER_TIMEOUT: Duration = Duration::from_secs(1);
 
 // the places this side plays, by the id the file keys them by; every other is ahead, with the
 // stage that brings it: its transports over HTTP and WebSocket, its broker bindings, its gateway
-const PLACES: [&str; 16] = [
+const PLACES: [&str; 17] = [
     "call.timeout",
     "serviceManager.defaultTimeout",
     "router.reservation",
@@ -65,6 +66,7 @@ const PLACES: [&str; 16] = [
     "brokerParticipant.heartbeat",
     "brokerTransportServer.acceptTimeout",
     "brokerParticipant.bodyGracePeriod",
+    "brokerParticipant.reconnectionDelay",
 ];
 
 // the ways of each place this side has, the others its rows excuse it from
@@ -90,7 +92,9 @@ fn ways_of(place: &str) -> &'static [&'static str] {
         "sessionManager.resetConnectionInactivityTimeout"
         | "sessionManager.resetSessionInactivityTimeout" => &["reset"],
         "transportClient.connectTimeout" => &["memory", "broker"],
-        "transportClient.reconnectionDelay" => &["function", "number"],
+        "transportClient.reconnectionDelay" | "brokerParticipant.reconnectionDelay" => {
+            &["function", "number"]
+        }
         _ => &[],
     }
 }
@@ -1045,13 +1049,24 @@ async fn connect_timeout_by_memory(given: Option<Duration>) -> Played {
     }
 }
 
-// a reconnection whose first attempt fails: the delay its tap hears; refused, its reconnection
-// refused with it
+// what a client's listener is told of its reconnections, counted
+struct Reconnects(Arc<AtomicUsize>);
+
+impl ClientListener for Reconnects {
+    fn on_reconnect(&self) {
+        self.0.fetch_add(1, Ordering::SeqCst);
+    }
+}
+
+// a reconnection whose first attempt fails: the delay its tap hears; a fixed one refused as
+// reconnect is called, nothing moved, and a function's answer refused with its reconnection
 async fn reconnection_delay_of(delay: TransportClientReconnectDelay) -> Played {
     let clock = SteppingClock::new(epoch());
     let (server, client) = memory_of(&clock)?;
     let tapped: Arc<Mutex<Vec<Duration>>> = Arc::default();
     let tapping = Arc::clone(&tapped);
+    let reconnects = Arc::new(AtomicUsize::new(0));
+    let is_fixed = matches!(delay, TransportClientReconnectDelay::Fixed(_));
 
     // its server never started: the connect fails, and is kept for the reconnection
     drop(
@@ -1059,6 +1074,7 @@ async fn reconnection_delay_of(delay: TransportClientReconnectDelay) -> Played {
             .connect(&MemoryTransportClientConnectOptions::new(server))
             .await,
     );
+    client.listen(Arc::new(Reconnects(Arc::clone(&reconnects))));
 
     let mut options = TransportClientReconnectOptions::default();
 
@@ -1068,9 +1084,28 @@ async fn reconnection_delay_of(delay: TransportClientReconnectDelay) -> Played {
         locked(&tapping).push(delay);
     }));
 
-    let reconnecting = client
-        .reconnect(&options)
-        .map_err(|error| error.to_string())?;
+    let before = client.ready_state();
+    let reconnecting = match client.reconnect(&options) {
+        Ok(reconnecting) => reconnecting,
+        Err(error) => {
+            // * as it is called: a fixed delay alone, nothing moved, no reconnect told
+            hold(is_fixed, || {
+                format!("a function's delay refused as reconnect is called: {error:?}")
+            })?;
+            hold(
+                client.ready_state() == before && reconnects.load(Ordering::SeqCst) == 0,
+                || {
+                    format!(
+                        "a refused reconnect moved: {:?}, {} reconnects told",
+                        client.ready_state(),
+                        reconnects.load(Ordering::SeqCst)
+                    )
+                },
+            )?;
+
+            return Ok(Observed::Refused(refused_of(error)?));
+        }
+    };
     let reconnected = tokio::spawn(reconnecting);
 
     clock.settle().await;
@@ -1088,7 +1123,14 @@ async fn reconnection_delay_of(delay: TransportClientReconnectDelay) -> Played {
     let outcome = reconnected.await.map_err(|error| error.to_string())?;
 
     match outcome {
-        Err(error) => Ok(Observed::Refused(refused_of(error)?)),
+        // * at an attempt: a function's answer alone, a fixed delay refused as reconnect is called
+        Err(error) => {
+            hold(!is_fixed, || {
+                format!("a fixed delay refused past its call: {error:?}")
+            })?;
+
+            Ok(Observed::Refused(refused_of(error)?))
+        }
         Ok(()) => Err("reconnected with a server never started".to_owned()),
     }
 }
@@ -1401,6 +1443,127 @@ async fn connect_timeout_by_broker(given: Option<Duration>) -> Played {
     observed
 }
 
+// ── brokerParticipant.reconnectionDelay ──────────────────────────────────────────────────────
+
+// the misuse a report's sources carry, the first of them
+fn misuse_in(error: &RouterError) -> Option<ProgrammerError> {
+    let RouterError::Other(error) = error else {
+        return None;
+    };
+    let mut source = error.source();
+
+    while let Some(cause) = source {
+        if let Some(misuse) = cause.downcast_ref::<ProgrammerError>() {
+            return Some(misuse.clone());
+        }
+
+        source = cause.source();
+    }
+
+    None
+}
+
+// a participant on a stepping clock whose link goes down and whose first attempt is refused: the
+// delay its tap hears, and the due of the timer it arms; a fixed one refused as it is built, and a
+// function's answer as its reconnection ends, reported, its refusal the report's source
+async fn participant_reconnection_delay_of(delay: TransportClientReconnectDelay) -> Played {
+    let clock = SteppingClock::new(epoch());
+    let broker = broker_on(&clock)?;
+    let adapter = broker
+        .adapter(&MemoryBrokerAdapterOptions::new("ada"))
+        .map_err(|error| error.to_string())?;
+    let tapped: Arc<Mutex<Vec<Duration>>> = Arc::default();
+    let tapping = Arc::clone(&tapped);
+    let reported: Arc<Mutex<Vec<RouterError>>> = Arc::default();
+    let reporting = Arc::clone(&reported);
+    let is_fixed = matches!(delay, TransportClientReconnectDelay::Fixed(_));
+    let mut reconnect = TransportClientReconnectOptions::default();
+
+    reconnect.delay = Some(delay);
+    // ! bounded: at once, it would attempt without end
+    reconnect.maximum_attempts = Some(2);
+    reconnect.tap = Some(Arc::new(move |delay: Duration, _attempt: u32| {
+        locked(&tapping).push(delay);
+    }));
+
+    let mut options = BrokerParticipantOptions::default();
+
+    options.clock = Some(shared_of(&clock));
+    options.reconnect = Some(reconnect);
+
+    let participant = match BrokerParticipant::new(Arc::new(adapter.clone()), &options) {
+        Ok(participant) => participant,
+        Err(refused) => {
+            // * as it is built: a fixed delay alone
+            hold(is_fixed, || {
+                format!("a function's delay refused as it is built: {refused:?}")
+            })?;
+
+            return Ok(Observed::Refused(refused));
+        }
+    };
+
+    participant.on_error(Arc::new(move |error: &RouterError| {
+        locked(&reporting).push(error.clone());
+    }));
+    participant
+        .start()
+        .await
+        .map_err(|error| error.to_string())?;
+    adapter.lose();
+    // its broker holds its id's link of another start already: its first attempt is refused
+    adapter
+        .start(BrokerStart::default())
+        .await
+        .map_err(|error| error.to_string())?;
+    clock.settle().await;
+
+    let heard = locked(&tapped).clone();
+    let reports = locked(&reported).clone();
+    let dues = clock.dues();
+
+    participant.stop().await;
+
+    if let [held] = heard.as_slice() {
+        // * on the clock it is given: a timer armed at the due its tap heard, none for at once
+        let armed: &[Duration] = if held.is_zero() {
+            &[]
+        } else {
+            core::slice::from_ref(held)
+        };
+
+        hold(dues == armed, || format!("tapped {held:?}, armed {dues:?}"))?;
+
+        return Ok(Observed::Held(*held));
+    }
+
+    hold(heard.is_empty() && !is_fixed, || {
+        format!("tapped {heard:?}, reported {reports:?}")
+    })?;
+
+    match reports.as_slice() {
+        [report] => misuse_in(report)
+            .map(Observed::Refused)
+            .ok_or_else(|| format!("{report}: no misuse its source")),
+        _ => Err(format!("reported {reports:?}")),
+    }
+}
+
+async fn participant_reconnection_delay_by_function(given: Option<Duration>) -> Played {
+    let given = given.ok_or("a delay's function gives one")?;
+
+    participant_reconnection_delay_of(TransportClientReconnectDelay::Resolver(Arc::new(
+        move |_previous, _attempt| given,
+    )))
+    .await
+}
+
+async fn participant_reconnection_delay_by_number(given: Option<Duration>) -> Played {
+    let given = given.ok_or("a delay's number is given")?;
+
+    participant_reconnection_delay_of(TransportClientReconnectDelay::Fixed(given)).await
+}
+
 // ── The table ────────────────────────────────────────────────────────────────────────────────
 
 async fn play_way((place, way): (&str, &str), given: Option<Duration>) -> Played {
@@ -1454,6 +1617,12 @@ async fn play_way((place, way): (&str, &str), given: Option<Duration>) -> Played
         }
         ("transportClient.reconnectionDelay", "number") => {
             reconnection_delay_by_number(given).await
+        }
+        ("brokerParticipant.reconnectionDelay", "function") => {
+            participant_reconnection_delay_by_function(given).await
+        }
+        ("brokerParticipant.reconnectionDelay", "number") => {
+            participant_reconnection_delay_by_number(given).await
         }
         _ => Err(format!("{place} has no way {way} here")),
     }

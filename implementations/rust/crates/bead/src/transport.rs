@@ -361,18 +361,22 @@ pub const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 /// The delay between two attempts when none is given.
 pub const RECONNECT_DELAY: Duration = Duration::from_secs(1);
 
-/// The attempts a reconnection makes when none is given.
+/// The attempts a transport client's reconnection makes when none is given; a broker participant's
+/// goes without end.
 pub const RECONNECT_ATTEMPTS: u32 = 5;
 
-/// How a transport client reconnects.
+/// How a transport client reconnects, or a broker participant's link.
 #[derive(Clone, Default)]
 #[non_exhaustive]
 pub struct TransportClientReconnectOptions {
-    /// The delay between two attempts: [`RECONNECT_DELAY`] when none.
+    /// The delay between two attempts: [`RECONNECT_DELAY`] when none. A fixed one out of bounds is
+    /// refused where it is given (spec 1.4); a resolver's answer is held at each attempt.
     pub delay: Option<TransportClientReconnectDelay>,
-    /// The attempts it makes at most: [`RECONNECT_ATTEMPTS`] when none.
+    /// The attempts it makes at most: its owner's default when none, [`RECONNECT_ATTEMPTS`] for a
+    /// transport client's reconnection, without end for a broker participant's.
     pub maximum_attempts: Option<u32>,
-    /// What cancels it.
+    /// What cancels it, read before each attempt and during each wait: a transport client's attempt
+    /// under way is handed it, a broker participant's is not cut short.
     pub signal: Option<CancellationToken>,
     /// Hears each delay as it is armed, and the attempt it follows.
     pub tap: Option<Arc<dyn Fn(Duration, u32) + Send + Sync>>,
@@ -644,6 +648,21 @@ impl Future for Connect {
     }
 }
 
+/// Holds the delay `options` gives, where it is given: a fixed one out of bounds is refused (spec
+/// 1.4); a resolver's answer is held at each attempt.
+///
+/// # Errors
+///
+/// A [`ProgrammerError`] whose reason is a duration's refusal.
+pub(crate) fn held(options: &TransportClientReconnectOptions) -> Result<(), ProgrammerError> {
+    match &options.delay {
+        Some(TransportClientReconnectDelay::Fixed(delay)) => {
+            hold_delay("a delay", *delay).map(drop)
+        }
+        Some(TransportClientReconnectDelay::Resolver(_)) | None => Ok(()),
+    }
+}
+
 /// Whether `first` settles before `second`.
 pub(crate) async fn first_of<A: Future, B: Future>((first, second): (A, B)) -> bool {
     let mut first = core::pin::pin!(first);
@@ -664,9 +683,10 @@ pub(crate) async fn first_of<A: Future, B: Future>((first, second): (A, B)) -> b
 }
 
 /// A reconnection's attempts, on `clock`, as `options` says: the first at once, each next one after
-/// its delay, each made by `attempt`, given the reconnection's signal. It ends once one opened; with
-/// a [`TransportError::Reconnect`] once its attempts ran out; at once for a misuse an attempt met,
-/// which the next would meet again; and cancelled once its signal is.
+/// its delay, each made by `attempt`, given the reconnection's signal, which is read before each. It
+/// ends once one opened; with a [`TransportError::Reconnect`] once its attempts ran out; at once for
+/// a misuse an attempt met, which the next would meet again, or a delay or a tap that panicked; and
+/// cancelled once its signal is.
 ///
 /// # Errors
 ///
@@ -690,6 +710,11 @@ where
     let mut number = 0_u32;
 
     loop {
+        // * read before each attempt, the first included: an attempt under way is not cut short
+        if is_cancelled() {
+            return Err(TransportError::Cancelled(RECONNECTION_CANCELLED.to_owned()));
+        }
+
         number = number.saturating_add(1);
 
         match attempt(signal.clone()).await {
@@ -716,11 +741,10 @@ where
         let next = match &delay {
             TransportClientReconnectDelay::Fixed(delay) => *delay,
             TransportClientReconnectDelay::Resolver(delay_of) => {
-                let computed = catch_unwind(AssertUnwindSafe(|| delay_of(previous, number)));
-
-                computed.map_err(|_panicked| {
-                    TransportError::Refused(ProgrammerError::new("a reconnection's delay panicked"))
-                })?
+                // * what it panicked with alone, as the other sides report what it throws
+                caught(("a reconnection's delay", || delay_of(previous, number))).map_err(
+                    |panicked| TransportError::Refused(ProgrammerError::new(panicked.message())),
+                )?
             }
         };
         // held before tap hears it: 0 waits none, and never would wait for ever
@@ -751,16 +775,14 @@ where
             }
         };
 
-        if let Some(tap) = &options.tap {
-            let tapped = catch_unwind(AssertUnwindSafe(|| tap(next, number)));
+        if let Some(tap) = &options.tap
+            && let Err(panicked) = caught(("a reconnection's tap", || tap(next, number)))
+        {
+            cancel_timer();
 
-            if tapped.is_err() {
-                cancel_timer();
-
-                return Err(TransportError::Refused(ProgrammerError::new(
-                    "a reconnection's tap panicked",
-                )));
-            }
+            return Err(TransportError::Refused(ProgrammerError::new(
+                panicked.message(),
+            )));
         }
 
         previous = Some(next);

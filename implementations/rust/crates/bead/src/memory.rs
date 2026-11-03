@@ -26,7 +26,8 @@ use crate::router::types::{BoxFuture, ConnectionHandle, Gauges, RouterError, Tra
 use crate::transport::{
     CONNECT_TIMEOUT, ClientListener, Connect, Listeners, RECONNECTION_CANCELLED, ReadyState,
     RouterClientTransport, Sent, ServerListener, ServerTransport, TransportClientDisconnectOptions,
-    TransportClientReconnectOptions, TransportServerClient, attempting, first_of, is_field_value,
+    TransportClientReconnectOptions, TransportServerClient, attempting, first_of, held,
+    is_field_value,
 };
 
 #[cfg(test)]
@@ -1249,7 +1250,8 @@ impl MemoryTransportClient {
     /// # Errors
     ///
     /// A [`TransportError`] for a reconnection under way, a client never connected, one connecting
-    /// or closing, or a signal cancelled already.
+    /// or closing, a fixed delay out of bounds (spec 1.4), or a signal cancelled already: each
+    /// refused before anything moves, in that order.
     pub fn reconnect(
         &self,
         options: &TransportClientReconnectOptions,
@@ -1277,6 +1279,8 @@ impl MemoryTransportClient {
                 ))));
             }
 
+            // * a fixed delay out of bounds refused as it is given, before anything moves
+            held(options)?;
             drop(state);
 
             target
