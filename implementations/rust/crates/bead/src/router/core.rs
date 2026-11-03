@@ -940,6 +940,7 @@ pub(crate) fn receive<S: Side>(
                 reported(
                     failure
                         .clone()
+                        // ! a detail of the side's own words: the report alone takes the panic; the peer gets the failure cloned before it
                         .saying(panicked.message())
                         .caused_by(Arc::new(panicked)),
                 ),
