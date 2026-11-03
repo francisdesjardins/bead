@@ -85,6 +85,7 @@ mod router_core_transfer_timeouts;
 mod router_core_writer;
 mod server;
 mod server_access_refusals;
+mod server_admissions;
 mod server_command_credentials;
 mod server_commands;
 mod server_credential_notifications;
