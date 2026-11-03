@@ -184,6 +184,108 @@ async fn accepts_a_cloned_descriptor_and_refuses_a_distinct_one_at_its_address_b
     );
 }
 
+#[tokio::test]
+async fn makes_each_command_s_requester_once_as_it_is_offered_and_refuses_one_called_before() {
+    let registry =
+        crate::metrics::MetricsRegistry::new(&crate::metrics::MetricsRegistryOptions::default())
+            .expect("a registry");
+    let pair = Pair::connected((
+        crate::testing::instants::new_year(),
+        PairOptions {
+            server: crate::server::ServerOptions {
+                metrics_registry: Some(registry),
+                ..crate::server::ServerOptions::default()
+            },
+            ..PairOptions::default()
+        },
+    ))
+    .await
+    .expect("a pair with metrics");
+    let greeter = Greeter::new();
+    let service = greeter.service(loud());
+    let declared = Arc::new(Mutex::new(Vec::new()));
+    let declaring = Arc::clone(&declared);
+    let clock_series = Arc::new(Mutex::new(None::<crate::metrics::ProcedureSeries>));
+    let declaring_series = Arc::clone(&clock_series);
+    let called = Arc::new(Mutex::new(Vec::new()));
+    let calling = Arc::clone(&called);
+    pair.server
+        .router()
+        .observe_requester(crate::testing::scripted::RequesterProbe {
+            declared: Arc::new(move |procedure, series| {
+                locked(&declaring).push(procedure.clone());
+                if procedure.name == "clock" {
+                    *locked(&declaring_series) = Some(series.expect("clock's series").clone());
+                }
+            }),
+            called: Arc::new(move |series| {
+                locked(&calling).push(
+                    locked(&clock_series)
+                        .as_ref()
+                        .expect("clock declared before its calls")
+                        .is_same(series.expect("clock's handed series")),
+                );
+            }),
+        });
+    pair.client
+        .services()
+        .get_request_resolver(
+            greeter.clock.procedure(),
+            ResolverDependencies::of(TextCodec, TextCodec),
+        )
+        .expect("clock resolver")
+        .register(
+            (
+                Arc::new(|request, response| response.result(format!("noon, {}", request.payload))),
+                None,
+            ),
+            true,
+        )
+        .expect("clock registered");
+
+    service.command(&greeter.clock).expect_err("not offered");
+    assert!(locked(&declared).is_empty());
+    assert!(locked(&called).is_empty());
+    service.offer(&pair.server).expect("offered");
+    assert_eq!(
+        *locked(&declared),
+        [
+            greeter.clock.procedure().clone(),
+            greeter.guarded.procedure().clone()
+        ]
+    );
+    let requester = service.command(&greeter.clock).expect("clock requester");
+    assert_eq!(requester.procedure(), greeter.clock.procedure());
+    assert!(locked(&called).is_empty(), "offering makes no call");
+    for asked in ["now", "again"] {
+        let requester = service.command(&greeter.clock).expect("the same requester");
+        let call = requester
+            .call(
+                asked.to_owned(),
+                RequestOptions {
+                    connection_handle: Some(Arc::clone(&pair.connection_handle)),
+                    ..RequestOptions::default()
+                },
+            )
+            .expect("clock called");
+        assert_eq!(
+            crate::testing::patience(core::time::Duration::from_secs(10), call)
+                .await
+                .expect("answered")
+                .expect("a result"),
+            format!("noon, {asked}")
+        );
+    }
+    assert_eq!(
+        *locked(&declared),
+        [
+            greeter.clock.procedure().clone(),
+            greeter.guarded.procedure().clone()
+        ]
+    );
+    assert_eq!(*locked(&called), [true, true]);
+}
+
 async fn call(
     pair: &Pair,
     (descriptor, payload): (&TextDescriptor, &str),
