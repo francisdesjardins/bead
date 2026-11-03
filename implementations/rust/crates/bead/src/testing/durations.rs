@@ -11,6 +11,9 @@ use serde_json::Value;
 use crate::duration::NEVER;
 use crate::testing::{Difference, files, is_excused};
 
+#[cfg(test)]
+mod tests;
+
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct FileInput {
@@ -178,6 +181,25 @@ fn given_of(input: &FileInput) -> Option<Duration> {
     Duration::try_from_secs_f64(seconds).ok()
 }
 
+fn read_file() -> Result<File, String> {
+    files::read("durations.json")
+}
+
+fn input_of(input: &FileInput) -> Result<DurationInput, String> {
+    let given = given_of(input);
+    let is_excused = is_excused(input.differs.as_deref().unwrap_or_default());
+
+    if given.is_none() && !is_excused {
+        return Err(format!("{} has no Rust duration and no excuse", input.name));
+    }
+
+    Ok(DurationInput {
+        name: input.name.clone(),
+        given,
+        is_excused,
+    })
+}
+
 /// Bead's durations, read whole: its inputs and its places.
 #[derive(Debug, Clone)]
 pub struct Durations {
@@ -194,16 +216,12 @@ impl Durations {
     ///
     /// What reading it or its form refuses.
     pub fn read() -> Result<Self, String> {
-        let file: File = files::read("durations.json")?;
+        let file = read_file()?;
         let inputs = file
             .inputs
             .iter()
-            .map(|input| DurationInput {
-                name: input.name.clone(),
-                given: given_of(input),
-                is_excused: is_excused(input.differs.as_deref().unwrap_or_default()),
-            })
-            .collect();
+            .map(input_of)
+            .collect::<Result<Vec<_>, String>>()?;
         let places = file
             .places
             .into_iter()
@@ -257,9 +275,7 @@ impl Durations {
             .iter()
             .cloned()
             .zip(place.outcomes.iter().cloned())
-            .filter(|(input, outcome)| {
-                !input.is_excused && !outcome.is_excused && input.given.is_some()
-            })
+            .filter(|(input, outcome)| !input.is_excused && !outcome.is_excused)
             .collect()
     }
 }

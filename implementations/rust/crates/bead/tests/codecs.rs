@@ -41,8 +41,7 @@ struct Given {
     number: Option<String>,
     text: Option<String>,
     bytes: Option<String>,
-    #[serde(rename = "form")]
-    _form: Option<String>,
+    form: Option<String>,
     nested: Option<usize>,
     #[serde(rename = "probe")]
     _probe: Option<Value>,
@@ -216,6 +215,66 @@ fn trials() -> Result<Vec<Trial>, String> {
     // * read by Bead's own reader, so a value's numbers keep the form the file writes them in
     let codecs: Codecs = files::read_by_bead("codecs.json")?;
     let mut trials = Vec::new();
+    let skipped: Vec<_> = codecs
+        .values
+        .iter()
+        .filter(|entry| is_excused(entry.differs.as_deref().unwrap_or_default()))
+        .map(|entry| {
+            let rows: Vec<_> = entry
+                .differs
+                .as_deref()
+                .unwrap_or_default()
+                .iter()
+                .filter(|difference| difference.language == "Rust")
+                .map(|difference| difference.row.clone())
+                .collect();
+            (
+                entry.name.clone(),
+                entry.encoding.clone(),
+                entry.value.form.clone(),
+                rows,
+            )
+        })
+        .collect();
+
+    trials.push(Trial::test(
+        "pins each value its type cannot hold and its reason",
+        move || {
+            let expected: Vec<_> = [
+                ("a surrogate alone", "json", "loneSurrogate"),
+                ("a surrogate alone in a name", "json", "loneSurrogateName"),
+                ("an object naming a member twice", "json", "nameTwice"),
+                ("undefined", "json", "undefined"),
+                ("a surrogate alone in a text", "text", "loneSurrogate"),
+            ]
+            .into_iter()
+            .map(|(name, encoding, form)| {
+                (
+                    name.to_owned(),
+                    encoding.to_owned(),
+                    Some(form.to_owned()),
+                    vec!["A value a side's type cannot hold".to_owned()],
+                )
+            })
+            .collect();
+
+            if skipped != expected {
+                return Err(format!("excused values: {skipped:?}, expected {expected:?}").into());
+            }
+
+            for text in [r#""\ud800""#, r#"{"\ud800":0}"#, "undefined"] {
+                if serde_json::from_str::<Value>(text).is_ok() {
+                    return Err(format!("{text} built as a JSON value").into());
+                }
+            }
+            let twice: Value = serde_json::from_str(r#"{"name":1,"name":2}"#)?;
+            if twice.as_object().map(serde_json::Map::len) != Some(1) {
+                return Err("a JSON object holds each name once".into());
+            }
+
+            Ok(())
+        },
+    ));
 
     for payload in codecs.payloads {
         if payload.encoding == "proto" || is_excused(payload.differs.as_deref().unwrap_or_default())

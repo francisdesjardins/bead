@@ -641,7 +641,12 @@ async fn refused_credential(vector: &CredentialRefusalVector) -> Result<(), Fail
             scheme,
             bytes: Bytes::new(),
         },
-        _ => Credential::Elsewhere,
+        "nothing-carried" | "no-verifier" | "verifier-makes-none" | "end-come" => {
+            Credential::Elsewhere
+        }
+        other => {
+            return Err(format!("{other} is no credential situation this player plays").into());
+        }
     };
     let carried = (situation != "nothing-carried").then(|| "Interop sub=ada".to_owned());
     let data = echo_presenting(credential)?;
