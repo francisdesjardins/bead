@@ -1,0 +1,20 @@
+const webSocket = createWSTransportServer({ WebSocketServer });
+const memory = createMemoryTransportServer();
+const server = createServer({ transport: joinTransports([webSocket, memory]) });
+
+offerHello(server);
+
+// ce que beadc génère : la table des routes, le document, la base des types de problème
+const gateway = createHTTPGateway({
+  createServer: (listener) => {
+    return createNodeServer(listener);
+  },
+  document: OPENAPI_DOCUMENT,
+  problemTypes: HTTP_PROBLEM_TYPES,
+  routes: HTTP_ROUTES,
+  transport: memory,
+});
+
+await memory.start();
+await webSocket.start({ port: 8080 });
+await gateway.start({ port: 8081 }); // localhost : les deux boucles locales

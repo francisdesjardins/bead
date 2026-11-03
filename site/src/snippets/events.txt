@@ -1,0 +1,13 @@
+event: result
+id: 1
+data: {"ticks":2}
+
+id: 2
+data: {"remaining":1}
+
+id: 3
+data: {}
+
+event: failure
+id: 4
+data: {"code":2,"scope":"application","status":400,"title":"COUNTED","type":"https://example.com/problems/COUNTED"}

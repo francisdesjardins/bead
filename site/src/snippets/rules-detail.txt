@@ -1,0 +1,2 @@
+{"bounds":{"lte":10},"fieldPath":"from","message":"must be less than or equal to 10","ruleId":"int32.lte"}
+{"more":0}

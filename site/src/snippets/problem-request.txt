@@ -1,0 +1,4 @@
+POST /v1/ruled/Bead HTTP/1.1
+content-type: application/json
+
+{"from":12}

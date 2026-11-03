@@ -1,0 +1,34 @@
+// echo('fail') : le serveur répond l'échec 21 de la procédure
+FailureError {
+  code: 21,
+  detail: 'nothing to echo',
+  header: { callId: 5, kind: 0x12 },
+  origin: 'peer',
+  procedureAddress: { procedureId: 2, serviceId: 1 },
+  relays: 0,
+  scope: 1, // APPLICATION
+  side: 'server',
+}, {
+  direction: 'rx',
+  duration: 1,
+  options: { timeout: 5000 },
+  procedureName: 'echo',
+  rx: { code: 21, detail: 'nothing to echo', scope: 1 },
+  startedAt: 1790700108978,
+  tx: 'fail',
+  type: 'request',
+  …
+}
+
+// une notification : ni aller, ni options, ni durée ; son début, quand elle arrive
+null, {
+  direction: 'rx',
+  duration: undefined,
+  options: undefined,
+  procedureName: 'news',
+  rx: 'flash',
+  startedAt: 1790700108981,
+  tx: undefined,
+  type: 'notification',
+  …
+}

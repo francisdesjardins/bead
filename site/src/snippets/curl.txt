@@ -1,0 +1,2 @@
+$ curl -H 'content-type: application/json' -d '{"name":"Ada"}' http://localhost:8081/api/Hello/sayHello
+{"greeting":"Hello, Ada!"}
