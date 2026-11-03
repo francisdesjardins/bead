@@ -12,15 +12,15 @@ namespace Bead.Transport.Mqtt;
 /// <summary>
 /// One link of a participant to a broker of MQTT 5 (spec 15.25 to 15.31), over MQTTnet, as its
 /// participant takes it: a network connection that keeps no session, its Client Identifier the
-/// participant's id, authenticated by a Password under its id or by a TLS client certificate; a
-/// subscription of QoS 1 and Retain Handling 2 for each topic, a name in a group as its shared
-/// subscription; a publication of QoS 1, RETAIN 0, counted to its byte before it goes and held to
-/// its CONNACK's Receive Maximum, its PUBACK's 0x10 read as no subscriber; each message handed on
-/// before its PUBACK, which goes once its participant settled it; a will of its GONE; a DISCONNECT of
-/// 0x00 at a stop, and one of 0x8E read as its link taken over. MQTTnet's automation is off: no
-/// reconnection, resubscription, offline queue or alias; each incarnation is a client of its own,
-/// every late callback of a former one doing nothing. The TypeScript side's adapter over MQTT.js
-/// does the same.
+/// participant's id, authenticated by a Password under its id, given or asked at each start, by a
+/// TLS client certificate, or by its User Name alone; a subscription of QoS 1 and Retain Handling 2
+/// for each topic, a name in a group as its shared subscription; a publication of QoS 1, RETAIN 0,
+/// counted to its byte before it goes and held to its CONNACK's Receive Maximum, its PUBACK's 0x10
+/// read as no subscriber; each message handed on before its PUBACK, which goes once its participant
+/// settled it; a will of its GONE; a DISCONNECT of 0x00 at a stop, and one of 0x8E read as its link
+/// taken over. MQTTnet's automation is off: no reconnection, resubscription, offline queue or alias;
+/// each incarnation is a client of its own, every late callback of a former one doing nothing. The
+/// TypeScript side's adapter over MQTT.js does the same.
 /// </summary>
 public sealed class MqttBrokerAdapter : IBrokerAdapter, IAsyncDisposable
 {
@@ -46,8 +46,10 @@ public sealed class MqttBrokerAdapter : IBrokerAdapter, IAsyncDisposable
     /// <summary>
     /// An adapter of <see cref="MqttBrokerAdapterOptions.Id"/> to the broker at
     /// <see cref="MqttBrokerAdapterOptions.Uri"/>, not yet started. A scheme but <c>mqtt</c>,
-    /// <c>mqtts</c>, <c>ws</c> or <c>wss</c>, or an empty id, is an <see cref="ArgumentException"/>;
-    /// a bound or a duration out of its range an <see cref="ArgumentOutOfRangeException"/> naming it.
+    /// <c>mqtts</c>, <c>ws</c> or <c>wss</c>, an empty id, or a password refused (a password and its
+    /// provider both, either beside a client certificate, or one that is empty or holds a NUL), is an
+    /// <see cref="ArgumentException"/>; a bound or a duration out of its range an
+    /// <see cref="ArgumentOutOfRangeException"/> naming it.
     /// </summary>
     public MqttBrokerAdapter(MqttBrokerAdapterOptions options)
     {
@@ -71,6 +73,13 @@ public sealed class MqttBrokerAdapter : IBrokerAdapter, IAsyncDisposable
         }
 
         AssertPacketSize((nameof(MqttBrokerAdapterOptions.MaximumPacketSize), options.MaximumPacketSize));
+
+        // * what its link authenticates by, held in one order on every side; with neither a password
+        // nor a provider, its User Name alone, or its certificate
+        if (BrokerPasswords.RefusalOf((options.Password, options.PasswordProvider is not null), options.Tls?.ClientCertificates is not null) is { } refusal)
+        {
+            throw new ArgumentException(refusal, nameof(options));
+        }
 
         _options = options with
         {
@@ -198,10 +207,12 @@ public sealed class MqttBrokerAdapter : IBrokerAdapter, IAsyncDisposable
     /// <summary>
     /// Connects a link that keeps no session (spec 15.26): its CONNECT of Protocol Version 5, Clean
     /// Start 1, Session Expiry 0, Receive Maximum 65,535, Topic Alias Maximum 0, its Maximum Packet
-    /// Size and its Keep Alive, its will the GONE given, of QoS 1, RETAIN 0 and Will Delay 0; settles
-    /// once its CONNACK said 0x00. A CONNACK of any other code, or of Maximum QoS 0, fails it naming
-    /// it, a <see cref="IOException"/>; none within its connect timeout, a <see cref="TimeoutException"/>;
-    /// a link up already, an <see cref="InvalidOperationException"/>.
+    /// Size and its Keep Alive, its will the GONE given, of QoS 1, RETAIN 0 and Will Delay 0, its User
+    /// Name its id, and its Password the one given or its provider's answer, where its certificate
+    /// does not authenticate it; settles once its CONNACK said 0x00. A CONNACK of any other code, or of
+    /// Maximum QoS 0, fails it naming it, a <see cref="IOException"/>; no password nor CONNACK within
+    /// its connect timeout, a <see cref="TimeoutException"/>; a link up already, an
+    /// <see cref="InvalidOperationException"/>.
     /// </summary>
     public async Task Start(BrokerStart? start = null)
     {
@@ -224,11 +235,26 @@ public sealed class MqttBrokerAdapter : IBrokerAdapter, IAsyncDisposable
 
         var token = start?.CancellationToken ?? CancellationToken.None;
 
+        // * one connectTimeout from its call: its password's ask, then its CONNACK
+        using var timeout = new CancellationTokenSource(_options.ConnectTimeout, TimeProvider.System);
+
+        // its provider's token, its start's, its timeout's and its stop's, cancelled once its start ends, linked or not
+        var asking = _options.PasswordProvider is null ? null : CancellationTokenSource.CreateLinkedTokenSource(token, timeout.Token, link.Life.Token);
+
         try
         {
-            using var timeout = new CancellationTokenSource(_options.ConnectTimeout, TimeProvider.System);
             using var linked = CancellationTokenSource.CreateLinkedTokenSource(token, timeout.Token, link.Life.Token);
-            var password = _options.PasswordProvider is { } provider ? await provider(linked.Token) : _options.Password;
+            var password = asking is not null && _options.PasswordProvider is { } provider
+                ? await BrokerPasswords.Asked(provider, new BrokerPasswordAsk
+                {
+                    Id = Id,
+                    ConnectTimeout = _options.ConnectTimeout,
+                    Start = token,
+                    Stop = link.Life.Token,
+                    Timeout = timeout.Token,
+                    Provider = asking.Token,
+                })
+                : _options.Password;
 
             // ! stopped as it asked its password: no CONNECT goes
             if (link.IsEnded)
@@ -287,6 +313,10 @@ public sealed class MqttBrokerAdapter : IBrokerAdapter, IAsyncDisposable
             End((link, null), reason);
 
             throw;
+        }
+        finally
+        {
+            BrokerPasswords.Release(asking);
         }
     }
 
@@ -654,7 +684,9 @@ public sealed class MqttBrokerAdapter : IBrokerAdapter, IAsyncDisposable
             });
         }
 
-        if (password is not null)
+        // * its User Name its id, with its Password where it has one; neither under its certificate,
+        // which a password never stands beside
+        if (_options.Tls?.ClientCertificates is null)
         {
             builder = builder.WithCredentials(Id, password);
         }

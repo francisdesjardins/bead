@@ -1,4 +1,6 @@
+using System.Globalization;
 using System.Security.Cryptography.X509Certificates;
+using System.Text;
 
 namespace Bead.Transport.Amqp;
 
@@ -11,11 +13,27 @@ public sealed record AmqpBrokerAdapterOptions
     /// <summary>Its participant's id: the user its broker authenticates it as, and its OPEN's container-id.</summary>
     public required string Id { get; init; }
 
-    /// <summary>Its password, SASL PLAIN's under its id; none where its TLS client certificate authenticates it, or its provider gives it.</summary>
+    /// <summary>
+    /// Its password, SASL PLAIN's under its id, as given: UTF-8 text, never empty and holding no NUL
+    /// (spec 15.33, RFC 4616 §2). Refused with an <see cref="ArgumentException"/> as it is built when
+    /// it is not, beside a <see cref="PasswordProvider"/>, and beside a TLS client certificate; and so
+    /// is its adapter given neither it, its provider nor a certificate, since its link never
+    /// authenticates as ANONYMOUS. None when none.
+    /// </summary>
     public string? Password { get; init; }
 
-    /// <summary>Its password asked at each link's start, so that one that expires renews with each incarnation; none when none.</summary>
-    public Func<CancellationToken, Task<string>>? PasswordProvider { get; init; }
+    /// <summary>
+    /// What hands its password at each link's start, before its connection opens, with a token
+    /// cancelled as its start's own token is, as its link is stopped, as its
+    /// <see cref="ConnectTimeout"/> passes, and once its start ends, linked or not: so that one that
+    /// expires renews with each incarnation. Refused as <see cref="Password"/> is, and beside it. Its
+    /// start fails as it outlives that <see cref="ConnectTimeout"/>, a <see cref="TimeoutException"/>,
+    /// or as a stop meets it, an <see cref="IOException"/>, whether or not it hears its token, a later
+    /// answer serving nothing; what it throws fails its start, an <see cref="IOException"/> its cause;
+    /// an answer that is no password fails it with an <see cref="ArgumentException"/> (spec 15.33).
+    /// None when none.
+    /// </summary>
+    public Func<CancellationToken, ValueTask<string>>? PasswordProvider { get; init; }
 
     /// <summary>Its leg's TLS, over <c>amqps</c>: its client certificate, SASL EXTERNAL's, and the authorities it trusts; the system's when none.</summary>
     public AmqpBrokerTlsOptions? Tls { get; init; }
@@ -41,7 +59,8 @@ public sealed record AmqpBrokerAdapterOptions
     public TimeSpan IdleTimeout { get; init; } = TimeSpan.FromSeconds(30);
 
     /// <summary>
-    /// How long its start waits for its broker's OPEN, its sessions and its inbox, and its inbox's
+    /// How long its start waits, from its call, for its password, where it asks its
+    /// <see cref="PasswordProvider"/>, its broker's OPEN, its sessions and its inbox, and its inbox's
     /// deletion; how long a name's let-go waits for what it handed on to be settled and its DETACH
     /// answered, past which its link is lost; and its stop: 30 seconds unless told, never without end
     /// (spec 15.34, 15.37).
@@ -53,6 +72,15 @@ public sealed record AmqpBrokerAdapterOptions
 
     /// <summary>Its broker's virtual host, its OPEN's hostname <c>vhost:</c> and it; its broker's default when none.</summary>
     public string? VirtualHost { get; init; }
+
+    // every member as the compiler writes it, but its password and its provider, of which whether one is set
+    private bool PrintMembers(StringBuilder builder)
+    {
+        // ! a password reaches no log, no exception's message and no debugger (spec 15.1)
+        builder.Append(CultureInfo.InvariantCulture, $"Uri = {Uri}, Id = {Id}, Password = {(Password is null ? "none" : "set")}, PasswordProvider = {(PasswordProvider is null ? "none" : "set")}, Tls = {Tls}, MaximumMessageSize = {MaximumMessageSize}, LinkCredit = {LinkCredit}, IdleTimeout = {IdleTimeout}, ConnectTimeout = {ConnectTimeout}, Delivery = {Delivery}, VirtualHost = {VirtualHost}");
+
+        return true;
+    }
 }
 
 /// <summary>An AMQP 1.0 adapter's TLS (spec 15.33, 15.38).</summary>
