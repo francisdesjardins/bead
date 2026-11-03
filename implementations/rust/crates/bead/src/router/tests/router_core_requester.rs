@@ -696,7 +696,10 @@ async fn end_a_results_transfer_the_peer_fails_giving_the_budget_back_and_drop_w
         })
         .await
         .expect("second cancelled");
-    assert!(matches!(completed(second).await, Err(CallError::Cancelled)));
+    assert!(matches!(
+        completed(second).await,
+        Err(CallError::Cancelled(_))
+    ));
 }
 
 // spec 9.2, 12

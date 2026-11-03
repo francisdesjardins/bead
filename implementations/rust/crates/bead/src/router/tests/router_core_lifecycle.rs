@@ -63,7 +63,7 @@ async fn send_no_cancel_for_a_request_the_transport_never_had_though_given_up_at
             .expect("the caller gives up before the refusal");
         assert!(matches!(
             completed(peer.request((Bytes::new(), request_of("a")))).await,
-            Err(CallError::Cancelled)
+            Err(CallError::Cancelled(_))
         ));
         peer.settle().await;
         assert_eq!(
@@ -282,7 +282,10 @@ async fn draws_no_call_id_reserved_and_none_at_all_when_every_one_is() {
         let given = peer.request((Bytes::new(), request_of("a")));
         peer.settle().await;
         cancel(&peer, 2).await;
-        assert!(matches!(completed(given).await, Err(CallError::Cancelled)));
+        assert!(matches!(
+            completed(given).await,
+            Err(CallError::Cancelled(_))
+        ));
         if last == 4 {
             for _ in 0..2 {
                 let next = peer.request((Bytes::new(), request_of("a")));
@@ -395,7 +398,7 @@ async fn stops_a_request_the_peer_answers_or_its_caller_gives_up_and_sends_nothi
                 matches!(outcome, Err(CallError::Failure(failure)) if failure.code().get() == code && failure.origin() == crate::failure::FailureOrigin::Peer)
             );
         } else {
-            assert!(matches!(outcome, Err(CallError::Cancelled)));
+            assert!(matches!(outcome, Err(CallError::Cancelled(_))));
         }
         peer.receive((
             credit(call_id, u64::try_from(total).expect("a small payload")),
@@ -570,7 +573,7 @@ async fn stops_a_calls_timer_as_the_call_leaves_whichever_way_so_none_keeps_the_
     completed(result).await.expect("result received");
     assert!(matches!(
         completed(cancelled).await,
-        Err(CallError::Cancelled)
+        Err(CallError::Cancelled(_))
     ));
     assert!(
         matches!(completed(failure).await, Err(CallError::Failure(failure)) if failure.code().get() == 21)
@@ -622,7 +625,7 @@ async fn ends_a_result_it_receives_as_its_caller_ends_the_call_its_budget_and_pl
                 matches!(outcome, Err(CallError::TimedOut(delay)) if delay == Duration::from_millis(250))
             );
         } else {
-            assert!(matches!(outcome, Err(CallError::Cancelled)));
+            assert!(matches!(outcome, Err(CallError::Cancelled(_))));
         }
         peer.owner
             .run(|state| {
@@ -647,7 +650,10 @@ async fn ends_a_result_it_receives_as_its_caller_ends_the_call_its_budget_and_pl
         peer.receive((opening(4, (pattern(32), 200)), Arc::from("a")));
         peer.settle().await;
         cancel(&peer, 4).await;
-        assert!(matches!(completed(next).await, Err(CallError::Cancelled)));
+        assert!(matches!(
+            completed(next).await,
+            Err(CallError::Cancelled(_))
+        ));
         assert_eq!(
             pieces(&peer).await,
             [
@@ -739,7 +745,7 @@ async fn reserves_the_call_id_of_a_result_it_received_in_part_as_long_as_the_pee
                     matches!(outcome, Err(CallError::Failure(failure)) if failure.code().get() == code && failure.origin() == origin)
                 );
             }
-            _ => assert!(matches!(outcome, Err(CallError::Cancelled))),
+            _ => assert!(matches!(outcome, Err(CallError::Cancelled(_)))),
         }
         peer.settle().await;
         assert_eq!(
@@ -773,7 +779,10 @@ async fn reserves_the_call_id_of_a_result_it_received_in_part_as_long_as_the_pee
     client.receive((opening(1, (pattern(32), 300)), Arc::from("a")));
     client.settle().await;
     signal.cancel();
-    assert!(matches!(completed(asked).await, Err(CallError::Cancelled)));
+    assert!(matches!(
+        completed(asked).await,
+        Err(CallError::Cancelled(_))
+    ));
     client.clock.advance(Duration::from_millis(1_500)).await;
     client.receive((chunk(1, (pattern(48), 32, false)), Arc::from("a")));
     client.settle().await;

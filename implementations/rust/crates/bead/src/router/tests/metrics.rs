@@ -255,7 +255,7 @@ async fn counts_a_call_refused_before_it_goes_session_required_or_destination_un
         Err(CallError::Failure(failure)) => Some(failure.code().get()),
         Ok(_)
         | Err(
-            CallError::Cancelled
+            CallError::Cancelled(_)
             | CallError::Disconnected(_)
             | CallError::TimedOut(_)
             | CallError::Refused(_)
@@ -302,7 +302,10 @@ async fn counts_a_call_refused_before_it_goes_session_required_or_destination_un
     let cancelled = call_of(&scripted, cancelled).expect("a call aborted already");
 
     assert!(
-        matches!(super::answered(cancelled).await, Err(CallError::Cancelled)),
+        matches!(
+            super::answered(cancelled).await,
+            Err(CallError::Cancelled(_))
+        ),
         "an aborted signal cancels it"
     );
     scripted.settle().await;
@@ -373,7 +376,10 @@ async fn counts_a_call_its_caller_cancels_as_cancelled_and_one_its_transport_ref
     cancelling.cancel();
 
     assert!(
-        matches!(super::answered(cancelled).await, Err(CallError::Cancelled)),
+        matches!(
+            super::answered(cancelled).await,
+            Err(CallError::Cancelled(_))
+        ),
         "cancelled by its caller"
     );
 

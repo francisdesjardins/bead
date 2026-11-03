@@ -77,7 +77,7 @@ fn resolve(
                 }
                 if matches!(outcome, Outcome::Cancel) {
                     request.signal.token().cancelled().await;
-                    return Err(ResolverError::other(CallError::Cancelled));
+                    return Err(ResolverError::other(CallError::Cancelled(None)));
                 }
                 released.cancelled().await;
                 match outcome {

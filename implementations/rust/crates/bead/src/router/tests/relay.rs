@@ -1050,7 +1050,7 @@ async fn answers_nothing_once_leg_a_ended_leg_b_cancelled_by_the_same_signal_rej
     let answers = Arc::new(Answers::default());
     let props = props(&answers, header(1, 7));
     *locked(&target.abort) = Some(props.signal.clone());
-    *locked(&target.outcome) = Some(CallError::Cancelled);
+    *locked(&target.outcome) = Some(CallError::Cancelled(Some(1)));
     (handler(&served, 7).await.resolve)(props)
         .await
         .expect("cancelled in silence");

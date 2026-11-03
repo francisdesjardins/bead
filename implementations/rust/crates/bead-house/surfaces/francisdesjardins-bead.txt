@@ -908,7 +908,7 @@ crate::errors
     derives Clone, Debug, Eq, PartialEq
   enum CallError #[non_exhaustive]
     Failure(Failure)
-    Cancelled
+    Cancelled(Option<u32>)
     Disconnected(String)
     TimedOut(Duration)
     Refused(ProgrammerError)

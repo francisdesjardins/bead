@@ -218,7 +218,10 @@ async fn stop_a_result_the_peer_cancels_and_send_nothing_more_of_it_whatever_cre
             Arc::from("a"),
         ));
         let outcome = responding.await;
-        assert!(matches!(outcome, Err(CallError::Cancelled)), "{outcome:?}");
+        assert!(
+            matches!(outcome, Err(CallError::Cancelled(_))),
+            "{outcome:?}"
+        );
         peer.settle().await;
         assert!(locked(&handed)[0].signal.is_aborted());
         let envelopes = sent(&peer).await;

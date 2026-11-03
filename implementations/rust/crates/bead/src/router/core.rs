@@ -651,7 +651,7 @@ pub(crate) fn reported_call(error: CallError) -> RouterError {
     match error {
         CallError::Failure(failure) => RouterError::Failure(failure),
         CallError::Other(error) => RouterError::Other(error),
-        other @ (CallError::Cancelled
+        other @ (CallError::Cancelled(_)
         | CallError::Disconnected(_)
         | CallError::TimedOut(_)
         | CallError::Refused(_)) => RouterError::Other(Arc::new(other)),

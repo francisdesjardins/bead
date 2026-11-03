@@ -365,7 +365,7 @@ async fn late_subscription(ending: End) {
     served.settle().await;
     assert!(matches!(
         (ending, locked(&thrown).as_slice()),
-        (End::Close, [CallError::Disconnected(_)]) | (End::Cancel, [CallError::Cancelled])
+        (End::Close, [CallError::Disconnected(_)]) | (End::Cancel, [CallError::Cancelled(_)])
     ));
     assert_eq!(subscriptions(&served).await, Vec::new());
     assert_eq!(served.transport.take(), Vec::new());

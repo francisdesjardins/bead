@@ -529,7 +529,7 @@ impl RelayRouter for Target {
     fn request(&self, _payload: Bytes, leg: RelayLeg) -> Result<Call, ProgrammerError> {
         locked(&self.asked).push(leg.options.timeout);
 
-        Ok(Call::refused(CallError::Cancelled))
+        Ok(Call::refused(CallError::Cancelled(None)))
     }
 }
 

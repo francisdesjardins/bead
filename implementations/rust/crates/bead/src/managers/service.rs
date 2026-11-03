@@ -460,7 +460,7 @@ pub type CloseConnection = Arc<dyn Fn(&ConnectionHandle) + Send + Sync>;
 fn traced_failure_of(error: &CallError) -> Option<Traced> {
     match error {
         CallError::Failure(failure) => Some(Arc::new(failure.record())),
-        CallError::Cancelled
+        CallError::Cancelled(_)
         | CallError::Disconnected(_)
         | CallError::TimedOut(_)
         | CallError::Refused(_)

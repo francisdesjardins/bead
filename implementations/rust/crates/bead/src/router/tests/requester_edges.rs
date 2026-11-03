@@ -101,7 +101,10 @@ async fn refused_cancel() {
             .await
             .expect("the next send refuses");
         token.cancel();
-        assert!(matches!(completed(asked).await, Err(CallError::Cancelled)));
+        assert!(matches!(
+            completed(asked).await,
+            Err(CallError::Cancelled(_))
+        ));
         peer.settle().await;
         assert_eq!(
             peer.sent()
@@ -165,7 +168,10 @@ async fn answered_as_cancelled() {
             })
             .await
             .expect("cancelled and answered within one turn");
-        assert!(matches!(completed(asked).await, Err(CallError::Cancelled)));
+        assert!(matches!(
+            completed(asked).await,
+            Err(CallError::Cancelled(_))
+        ));
         peer.settle().await;
         assert_eq!(
             peer.sent()
@@ -313,7 +319,10 @@ async fn signal_cancellation() {
         let asked = peer.request((Bytes::new(), cancellable()));
         peer.settle().await;
         token.cancel();
-        assert!(matches!(completed(asked).await, Err(CallError::Cancelled)));
+        assert!(matches!(
+            completed(asked).await,
+            Err(CallError::Cancelled(_))
+        ));
         assert_eq!(
             peer.sent().await,
             [
@@ -344,7 +353,7 @@ async fn signal_cancellation() {
         let already = peer.request((Bytes::new(), cancellable()));
         assert!(matches!(
             completed(already).await,
-            Err(CallError::Cancelled)
+            Err(CallError::Cancelled(_))
         ));
         peer.settle().await;
         assert_eq!(peer.sent().await, []);
@@ -439,7 +448,10 @@ async fn cancel_a_call_still_waiting_once_rejected_told_and_its_call_id_reserved
         })
         .await
         .expect("cancelled twice");
-    assert!(matches!(completed(asked).await, Err(CallError::Cancelled)));
+    assert!(matches!(
+        completed(asked).await,
+        Err(CallError::Cancelled(_))
+    ));
     assert_eq!(
         peer.sent().await,
         [

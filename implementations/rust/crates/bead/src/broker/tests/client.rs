@@ -124,13 +124,15 @@ async fn fails_a_connect_refused_or_past_its_time_or_cancelled_and_refuses_what_
     assert_eq!(clock.dues(), [Duration::from_secs(1)], "its time armed");
     until(|| heard.parcels().len() == 1, "its OPEN reaches the name").await;
     clock.advance(Duration::from_secs(1)).await;
+    let timed_out = timing.await.expect("joined").expect_err("past its time");
     assert!(
         matches!(
-            timing.await.expect("joined"),
-            Err(TransportError::TimedOut(timeout)) if timeout == Duration::from_secs(1)
+            timed_out,
+            TransportError::TimedOut(timeout) if timeout == Duration::from_secs(1)
         ),
         "timed out"
     );
+    assert_eq!(timed_out.to_string(), "timed out after 1000ms");
 
     // then given up by its signal
     let cancelling = CancellationToken::new();

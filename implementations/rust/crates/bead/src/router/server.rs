@@ -1192,7 +1192,7 @@ fn subscribe(state: &mut ServerState, dispatch: &Arc<Dispatch>) -> Result<u32, C
     }
 
     if !is_answering(state, dispatch) {
-        return Err(CallError::Cancelled);
+        return Err(CallError::Cancelled(Some(header.call_id)));
     }
 
     let procedure = ProcedureAddress {
