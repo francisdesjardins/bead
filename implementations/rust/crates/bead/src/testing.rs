@@ -31,6 +31,8 @@ mod platform;
 mod reading_clock;
 pub mod scripted;
 #[cfg(test)]
+pub(crate) mod sessions;
+#[cfg(test)]
 pub(crate) mod surface;
 #[cfg(test)]
 mod tests;

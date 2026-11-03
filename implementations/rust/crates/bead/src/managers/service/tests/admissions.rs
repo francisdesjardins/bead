@@ -41,7 +41,7 @@ fn failure(envelope: Envelope) -> FailureRecord {
     failure
 }
 
-async fn handler(fixture: &Fixture, procedure_id: u16) -> Arc<Handler> {
+pub(super) async fn handler(fixture: &Fixture, procedure_id: u16) -> Arc<Handler> {
     fixture
         .router
         .owner()

@@ -24,6 +24,7 @@ mod notifier;
 mod requester;
 mod resolver;
 mod resolver_edges;
+mod sessions;
 mod validation;
 
 type Heard = Arc<Mutex<Vec<(Option<String>, DebugEvent)>>>;
