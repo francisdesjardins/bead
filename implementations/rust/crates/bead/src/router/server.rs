@@ -38,7 +38,8 @@ use crate::ordered::Ordered;
 use crate::owner::{Owner, WeakOwner};
 use crate::router::core::{
     BeforeAnswer, Core, Dispatch, Disposal, Handler, Resolution, Resolved, Resolvers, Responded,
-    SessionRequest, Side, Undo, Unresolved, is_answering, reported, reported_call, respond,
+    SessionRequest as CoreSessionRequest, Side, Undo, Unresolved, is_answering, reported,
+    reported_call, respond,
 };
 use crate::router::intake::Intake;
 use crate::router::requester::CoreRequest;
@@ -79,15 +80,13 @@ pub type SessionTokenProvider =
 
 /// Resolves a connection's session for NONE or OPAQUE in the request's turn, before admission.
 /// The header and signal belong to the call; no transport credential is handed to it.
-pub type SessionProvider = Arc<
-    dyn Fn(&SessionProviderRequest<'_>, &Signal) -> Result<Option<CallSession>, RouterError>
-        + Send
-        + Sync,
+pub type SessionOf = Arc<
+    dyn Fn(&SessionRequest<'_>, &Signal) -> Result<Option<CallSession>, RouterError> + Send + Sync,
 >;
 
 /// A connection's request as its session provider reads it, without a transport credential.
 #[derive(Debug)]
-pub struct SessionProviderRequest<'a> {
+pub struct SessionRequest<'a> {
     /// The connection the request comes from.
     pub connection_handle: &'a ConnectionHandle,
     /// Its request header, before its credential is resolved.
@@ -116,7 +115,7 @@ pub struct RouterServerOptions {
     /// What resolves a `JWT` and an `ELSEWHERE`.
     pub credentials: Option<Credentials>,
     /// Resolves NONE and OPAQUE synchronously; the server's session manager supplies it when none.
-    pub session_of: Option<SessionProvider>,
+    pub session_of: Option<SessionOf>,
     /// The connection's token: the server's session manager supplies it when none is given.
     pub session_token_of: Option<SessionTokenProvider>,
     /// Its relay's options.
@@ -185,7 +184,7 @@ pub(crate) struct ServerState {
     pub(crate) relay: crate::router::relay::Relay,
     pub(crate) listeners: Arc<ServerListeners>,
     pub(crate) facade: Option<crate::server::Facade>,
-    session_of: Option<SessionProvider>,
+    session_of: Option<SessionOf>,
     session_token_of: Option<SessionTokenProvider>,
 }
 
@@ -433,7 +432,7 @@ impl Side for ServerState {
         );
     }
 
-    fn session_of(&mut self, request: &SessionRequest, signal: &Signal) -> Resolution {
+    fn session_of(&mut self, request: &CoreSessionRequest, signal: &Signal) -> Resolution {
         let handle = &request.connection_handle;
         let header = &request.carried.header;
         let credential = header.credential.clone();
@@ -458,7 +457,7 @@ impl Side for ServerState {
         let session = if let Some(provider) = &self.session_of {
             match caught(("a session provider", || {
                 provider(
-                    &SessionProviderRequest {
+                    &SessionRequest {
                         connection_handle: handle,
                         header,
                     },

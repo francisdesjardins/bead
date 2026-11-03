@@ -221,8 +221,8 @@ crate
   use router::server::RefusalListener
   use router::server::RouterServer
   use router::server::RouterServerOptions
-  use router::server::SessionProvider
-  use router::server::SessionProviderRequest
+  use router::server::SessionOf
+  use router::server::SessionRequest
   use router::server::SessionTokenProvider
   use router::types::AccessRefusal
   use router::types::AccessRefusalStage
@@ -1548,8 +1548,8 @@ crate::router::server
   type RefusalListener = Arc<dyn Fn(&AccessRefusal) + Send + Sync>
   type ActivityListener = Arc<dyn Fn(RouterActivity, &ConnectionHandle) + Send + Sync>
   type SessionTokenProvider = Arc<dyn Fn(&ConnectionHandle) -> Result<Option<SessionToken>, RouterError> + Send + Sync>
-  type SessionProvider = Arc<dyn Fn(&SessionProviderRequest<'_>, &Signal) -> Result<Option<CallSession>, RouterError> + Send + Sync,>
-  struct SessionProviderRequest<'a>
+  type SessionOf = Arc<dyn Fn(&SessionRequest<'_>, &Signal) -> Result<Option<CallSession>, RouterError> + Send + Sync,>
+  struct SessionRequest<'a>
     pub connection_handle: &'a ConnectionHandle
     pub header: &'a RequestHeader
     derives Debug
@@ -1562,7 +1562,7 @@ crate::router::server
     pub pacing: Option<PacingLimitsOptions>
     pub intake: Option<IntakeLimitsOptions>
     pub credentials: Option<Credentials>
-    pub session_of: Option<SessionProvider>
+    pub session_of: Option<SessionOf>
     pub session_token_of: Option<SessionTokenProvider>
     pub relay: Option<crate::router::relay::RelayOptions>
     implements Debug
