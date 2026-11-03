@@ -493,6 +493,7 @@ pub(crate) fn request<S: Side>(
         call_id,
     };
     let (ended, watched) = oneshot::channel::<()>();
+    let signal = request.options.signal.clone();
 
     core.pending.add(
         &call,
@@ -506,7 +507,15 @@ pub(crate) fn request<S: Side>(
             receiving: None,
             reply: Some(Box::new(move |outcome| {
                 drop(ended);
-                reply(outcome);
+                // ! cancellation settles the caller before its deferred cleanup; an answer read
+                // in that turn takes the pending call out, but cannot change that settlement
+                reply(
+                    if signal.as_ref().is_some_and(CancellationToken::is_cancelled) {
+                        Err(CallError::Cancelled)
+                    } else {
+                        outcome
+                    },
+                );
             })),
             sending: false,
             timeout: Some(timeout),
