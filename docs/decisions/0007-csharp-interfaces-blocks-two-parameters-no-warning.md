@@ -40,7 +40,8 @@ them at most one options record, always last:
 `findIn(haystack, needle, { fromIndex: 10 })`, where a required member is one without `?`, its
 options parameter then without `?` or a default, and one required in some instantiations alone a
 conditional parameter type, as `RequestOptionsParameters` is. The count is Deno's, and Bead holds it
-for every function, not only the public ones. The options record is a sealed record of `init`
+for every function, not only the public ones; inside a side a tuple counts as one parameter, and on
+the surface none is taken or given ([0004](0004-one-behaviour-in-every-language.md)). The options record is a sealed record of `init`
 properties, its name ending in `Options`; a setting the record cannot be built without is
 `required`, at most two of them and never the call's operand, the record then a required parameter,
 as a connect's `Host` and `Port` make it; with none, the record is optional,
@@ -49,8 +50,8 @@ exception constructors) or where a member is required in some instantiations alo
 no hook); a callback's options, which Bead hands, are always given
 ([0004](0004-one-behaviour-in-every-language.md)). An optional parameter goes in the options; one
 alone may stay positional where no second could come, as `Fail(failure, string detail = "")`. A
-third essential thing is a design to revisit — a record of the call, or a type that holds two of the
-things — and never a third positional parameter. A `CancellationToken` goes in the options record
+third essential thing is a design to revisit — a record of the call, `…Request`, as `RouterRequest`
+and `NotifyRequest` are, or a type that holds two of the things — and never a third positional parameter. A `CancellationToken` goes in the options record
 whenever the function takes one, as `RequestOptions.CancellationToken` does and the TypeScript
 side's `signal` is; it is positional only as one of the two essentials, as in
 `SessionOf(request, signal)`. An event carries at most two values, and a listener takes what its
@@ -103,7 +104,8 @@ waiting on a call of its own, a relay's leg B, hears its caller gone before its 
 `Symbol.asyncDispose` an `IAsyncDisposable`, a frozen table an `enum`, a `WeakMap` a
 `ConditionalWeakTable`. A union is an interface its sealed records implement: `IEnvelopeHeader`, and
 a record per kind. A value or the failure that refuses it, a transfer opened or refused, is a tuple
-of the two, the one given and the other none; an outcome that may be a refusal says so among its own
+of the two inside the side, the one given and the other none, and on its surface a record
+([0004](0004-one-behaviour-in-every-language.md)); an outcome that may be a refusal says so among its own
 values, as `ChunkOutcome.Refused` does. A send on a connection not open throws a
 `DisconnectException`; an error's `cause` is its `InnerException`; a programmer's error is an
 `ArgumentException`, or an `InvalidOperationException` where the state, not an argument, is wrong,
@@ -115,11 +117,22 @@ record of its `CredentialScheme` and what that scheme holds — an `OPAQUE` one'
 both name the field `credential`, `Credential`, on a request and on an answer alike
 ([0010](0010-a-request-presents-a-credential-of-a-scheme.md)). A TypeScript union an option carries
 is one member, a sealed record holding one of its arms, as `Credential` holds its scheme's and
-`TransportReconnectOptions.Delay` a wait or a function; the adapters' `Password` and
-`PasswordProvider` are the one such option still in two members, work to do
-([0004](0004-one-behaviour-in-every-language.md)). A name is one name on both sides, in each
-language's case, but where .NET names otherwise: a `[Flags]` enum is plural, `EnvelopeFlags`, and
-the HTTP client is `BeadHttpClient`, as .NET's own is `HttpClient`. A time in milliseconds is a
+`TransportClientReconnectOptions.Delay`, a `TransportClientReconnectDelay`, a wait or a
+`TransportClientReconnectDelayResolver`; the adapters' `Password` and `PasswordProvider` are the
+one such option still in two members, work to do ([0004](0004-one-behaviour-in-every-language.md)).
+**A type is built by its constructor; a factory converts or derives.** That is the Framework Design
+Guidelines' "Do prefer constructors over Factories" and "Do use a Factory for conversion style
+operations". So a union record of a TypeScript option is built by a constructor for each arm, as
+`TransportClientReconnectDelay` is. A TypeScript function `nounOf` is C#'s `Noun.Of`, or `NounOf`
+on a static class that holds several, and Rust's `noun_of`: `Violations.Of`, `PayloadCodecs.Of`,
+`HttpPath.Of`. A name is one name on every side, in each language's case, but where .NET names
+otherwise: a `[Flags]` enum is plural, `EnvelopeFlags`, and the HTTP client is `BeadHttpClient`, as
+.NET's own is `HttpClient`. A TypeScript `…Error` is C#'s `…Exception`. A TypeScript constant
+`HOLDER_NAME` is C#'s `Holder.Name`, a constant in PascalCase. A TypeScript interface that an object
+meets by its shape, which the other sides hold as a type of their own, is named `I…Like`:
+`IServerTransportLike` is C#'s `IServerTransport`. Where every side writes the word, as
+`INotificationLike`, `NotificationLike`, it is the concept's own. `tools/names.tsv` holds each
+public name's rendering ([0004](0004-one-behaviour-in-every-language.md)). A time in milliseconds is a
 `TimeSpan`, and the clock a layer takes and exposes, the TypeScript side's `IClock`, is a
 `TimeProvider`, named `Clock` ([0011](0011-every-side-takes-its-time-from-a-clock-it-is-given.md)),
 so a test moves it itself. A synchronous question of a router's state is a `Task`, since the state
