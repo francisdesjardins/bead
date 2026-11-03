@@ -43,7 +43,10 @@ export type { BrokerDelivery, BrokerPublished, BrokerTopic, IBrokerAdapter } fro
 // interfaces
 
 export interface IMqttBrokerAdapterOptions {
-  /** How long its start waits for its CONNACK, in milliseconds (spec 15.30). Defaults to {@link CONNECT_TIMEOUT}. */
+  /**
+   * How long its start waits for its password, where it asks its provider, and its CONNACK, in
+   * milliseconds (spec 15.30). Defaults to {@link CONNECT_TIMEOUT}.
+   */
   connectTimeout?: number | undefined;
   /** At least once by default, each publication of QoS 1; at most once, of QoS 0 (spec 15.28). */
   delivery?: BrokerDelivery | undefined;
@@ -62,10 +65,21 @@ export interface IMqttBrokerAdapterOptions {
    */
   maximumPacketSize?: number | undefined;
   /**
-   * Its Password, under its id as User Name; or asked at each link's start, so that one that expires
-   * renews with each incarnation. None where its TLS client certificate authenticates it.
+   * Its Password, under its id as User Name, as given: UTF-8 text, never empty and holding no NUL
+   * (spec 15.26). Refused with a {@link ProgrammerError} as it is built when it is not, beside a
+   * `passwordProvider`, and beside `tls`. With neither, its CONNECT carries its User Name alone.
    */
-  password?: string | (() => Promise<string> | string) | undefined;
+  password?: string | undefined;
+  /**
+   * What hands its Password at each link's start, before its network connection opens, with a signal
+   * aborted as its start's own signal aborts, as its link is stopped, as its `connectTimeout` passes,
+   * and once its start ends, linked or not: so that one that expires renews with each incarnation.
+   * Refused as `password` is, and beside it. Its start fails as it outlives that `connectTimeout`,
+   * or as a stop meets it, whether or not it hears its signal, a later answer serving nothing; what it
+   * throws fails its start, its cause; an answer that is no password fails it with a
+   * {@link ProgrammerError} (spec 15.26).
+   */
+  passwordProvider?: ((options: { signal: AbortSignal }) => string | Promise<string>) | undefined;
   /**
    * Its TLS client certificate and key, which its broker ties to its id, over `mqtts` or `wss` in
    * Node, never in a page; and the authority its broker's own certificate is trusted by, where not
@@ -118,7 +132,7 @@ interface IIncarnation {
 
 // constants
 
-/** How long a start waits for its CONNACK, by default: 30 seconds (spec 15.30). */
+/** How long a start waits for its password, where it asks its provider, and its CONNACK, by default: 30 seconds (spec 15.30). */
 export const CONNECT_TIMEOUT = 30_000;
 
 /** Its Keep Alive, by default: 30 seconds, its will inside two heartbeats (spec 15.30). */
@@ -180,6 +194,35 @@ const assertKeepAlive = (duration: unknown): number => {
   return Math.round(duration);
 };
 
+// ! no refusal names the password it refuses: a word never carries the secret
+const NOT_A_PASSWORD = 'a password is a non-empty string holding no NUL';
+
+/** Whether `password` is one: UTF-8 text, never empty and holding no NUL (spec 15.26). */
+const isPassword = (password: unknown): password is string => {
+  return typeof password === 'string' && password.length > 0 && !password.includes('\0');
+};
+
+/** What its link authenticates by, held as it is built: a password, its provider, or `tls` alone. */
+const assertAuthentication = ({
+  password,
+  passwordProvider,
+  tls,
+}: Pick<IMqttBrokerAdapterOptions, 'password' | 'passwordProvider' | 'tls'>): void => {
+  if (password !== undefined && passwordProvider !== undefined) {
+    throw new ProgrammerError('a link takes a password or a password provider, not both');
+  }
+
+  if ((password !== undefined || passwordProvider !== undefined) && tls !== undefined) {
+    throw new ProgrammerError(
+      'a link authenticates by its client certificate or by a password, not both'
+    );
+  }
+
+  if (password !== undefined && !isPassword(password)) {
+    throw new ProgrammerError(NOT_A_PASSWORD);
+  }
+};
+
 // definition
 
 /**
@@ -211,6 +254,7 @@ export const createMqttBrokerAdapter = (options: IMqttBrokerAdapterOptions): IMq
     id,
     maximumPacketSize = MAXIMUM_PACKET_SIZE,
     password,
+    passwordProvider,
     tls,
     url,
   } = options;
@@ -258,6 +302,8 @@ export const createMqttBrokerAdapter = (options: IMqttBrokerAdapterOptions): IMq
     throw new ProgrammerError(`a TLS client certificate is carried over mqtts or wss, not ${url}`);
   }
 
+  assertAuthentication({ password, passwordProvider, tls });
+
   const isAtMostOnce = delivery === BROKER_DELIVERIES.AT_MOST_ONCE;
   const emitter = createEmitter<{ down: [IBrokerDown]; message: [IBrokerMessage] }>();
   const capabilities = Object.freeze({
@@ -270,6 +316,8 @@ export const createMqttBrokerAdapter = (options: IMqttBrokerAdapterOptions): IMq
   // each start and each stop its own, so that a stop as a start asks its password ends that start
   let starts = 0;
   let isStarting = false;
+  // the start under way's ask, its provider's signal, which its stop aborts
+  let asking: AbortController | undefined;
   // what its last link's CONNACK said, read while it is down
   let lastMaximumPacketSize = LARGEST_PACKET_SIZE;
   let unsettled = 0;
@@ -423,16 +471,98 @@ export const createMqttBrokerAdapter = (options: IMqttBrokerAdapterOptions): IMq
     });
   };
 
+  // * its password asked of its provider, raced against its start's own signal, its stop and its
+  // connectTimeout: whichever ends the ask aborts its provider's signal with that start's outcome,
+  // and a later answer serves nothing (spec 15.26)
+  const askPassword = (
+    provider: NonNullable<IMqttBrokerAdapterOptions['passwordProvider']>,
+    { ask, signal }: { ask: AbortController; signal: AbortSignal | undefined }
+  ): Promise<string> => {
+    return new Promise<string>((resolve, reject) => {
+      let isSettled = false;
+      const settle = (): boolean => {
+        if (isSettled) {
+          return false;
+        }
+
+        isSettled = true;
+        PLATFORM_CLOCK.clearTimeout(timer);
+        signal?.removeEventListener('abort', cancel);
+        ask.signal.removeEventListener('abort', giveUp);
+
+        return true;
+      };
+      const giveUp = (): void => {
+        if (settle()) {
+          reject(toError(ask.signal.reason));
+        }
+      };
+      const cancel = (): void => {
+        ask.abort(toCancelError(signal as AbortSignal));
+      };
+      const timer = PLATFORM_CLOCK.setTimeout(
+        () => {
+          ask.abort(
+            new GenericError(
+              `the link of ${id} had no password within ${String(connectTimeout)} ms, its connectTimeout`
+            )
+          );
+        },
+        Math.min(connectTimeout, LONGEST_TIMER)
+      );
+
+      ask.signal.addEventListener('abort', giveUp, { once: true });
+
+      if (signal?.aborted === true) {
+        cancel();
+
+        return;
+      }
+
+      signal?.addEventListener('abort', cancel, { once: true });
+      // * a throw as it is called fails its start as a rejection does
+      void Promise.resolve()
+        .then(() => {
+          return provider({ signal: ask.signal });
+        })
+        .then(
+          (answer: unknown) => {
+            if (!settle()) {
+              return;
+            }
+
+            if (isPassword(answer)) {
+              resolve(answer);
+            } else {
+              reject(new ProgrammerError(NOT_A_PASSWORD));
+            }
+          },
+          (reason: unknown) => {
+            if (settle()) {
+              reject(new GenericError('the password provider failed', { cause: reason }));
+            }
+          }
+        );
+    });
+  };
+
   const linkWith = async (
     will: IBrokerStart['will'],
-    signal: AbortSignal | undefined
+    { ask, signal }: { ask: AbortController; signal: AbortSignal | undefined }
   ): Promise<void> => {
     const asked = starts;
-    const secret = typeof password === 'function' ? await password() : password;
+    // * one connectTimeout from its start's call: its password's ask, then its CONNACK
+    const deadline = PLATFORM_CLOCK.performance.now() + connectTimeout;
+    const secret =
+      passwordProvider === undefined
+        ? password
+        : await askPassword(passwordProvider, { ask, signal });
 
     if (asked !== starts) {
       throw new GenericError(`the link of ${id} stopped as it started`);
     }
+
+    const left = Math.max(0, Math.min(deadline - PLATFORM_CLOCK.performance.now(), LONGEST_TIMER));
 
     // the incarnation its hook hands messages on in, once its client is built
     const hooked: { incarnation?: IIncarnation | undefined } = {};
@@ -441,7 +571,7 @@ export const createMqttBrokerAdapter = (options: IMqttBrokerAdapterOptions): IMq
       autoUseTopicAlias: false,
       clean: true,
       clientId: id,
-      connectTimeout,
+      connectTimeout: Math.max(1, Math.ceil(left)),
       // ! in a page alone, each message one frame (spec 15.25): in Node, `ws` fragments none, and
       // its stream sends with a callback, which the sliced send would drop
       ...(isNode()
@@ -541,16 +671,13 @@ export const createMqttBrokerAdapter = (options: IMqttBrokerAdapterOptions): IMq
     try {
       await new Promise<void>((resolve, reject) => {
         let lastError: Error | undefined;
-        const timer = PLATFORM_CLOCK.setTimeout(
-          () => {
-            fail(
-              new GenericError(
-                `the link of ${id} had no CONNACK within ${String(connectTimeout)} ms`
-              )
-            );
-          },
-          Math.min(connectTimeout, LONGEST_TIMER)
-        );
+        const timer = PLATFORM_CLOCK.setTimeout(() => {
+          fail(
+            new GenericError(
+              `the link of ${id} had no CONNACK within ${String(connectTimeout)} ms, its connectTimeout`
+            )
+          );
+        }, left);
         const fail = (error: Error): void => {
           PLATFORM_CLOCK.clearTimeout(timer);
           signal?.removeEventListener('abort', abort);
@@ -785,16 +912,40 @@ export const createMqttBrokerAdapter = (options: IMqttBrokerAdapterOptions): IMq
 
       isStarting = true;
 
+      const ask = new AbortController();
+
+      asking = ask;
+
       try {
-        await linkWith(startOptions?.will, startOptions?.signal);
+        await linkWith(startOptions?.will, { ask, signal: startOptions?.signal });
       } finally {
-        isStarting = false;
+        // * a start its stop ended no longer holds the next
+        if (asking === ask) {
+          asking = undefined;
+          isStarting = false;
+        }
+
+        // ! its provider's signal aborted once its start ended, linked or not, in a later turn,
+        // so that its listeners run outside the start's own stack
+        if (passwordProvider !== undefined) {
+          PLATFORM_CLOCK.setTimeout(() => {
+            ask.abort();
+          }, 0);
+        }
       }
     },
     stop: async () => {
       const incarnation = current;
 
       starts += 1;
+
+      // * a start that asks its password ends at once, whether or not its provider hears its
+      // signal, and the next start links and asks anew
+      if (asking !== undefined) {
+        asking.abort(new GenericError(`the link of ${id} stopped as it started`));
+        asking = undefined;
+        isStarting = false;
+      }
 
       if (incarnation === undefined) {
         return;

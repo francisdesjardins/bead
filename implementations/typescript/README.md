@@ -1319,7 +1319,7 @@ MQTT.js's browser build.
 ```ts
 const adapter = createMqttBrokerAdapter({
   id: 'server',
-  password: () => readPassword(),
+  passwordProvider: () => readPassword(),
   url: 'mqtts://broker.example:8883',
 });
 const participant = createBrokerParticipant({ adapter });
@@ -1328,15 +1328,22 @@ const transport = participant.transportServer({ group: true, names: ['interop'] 
 await transport.start();
 ```
 
-Each link is one network connection that keeps no session — Clean Start 1, a Session Expiry
-Interval of 0 — its Client Identifier the participant's id, authenticated by a Password under its id
-as User Name, a string or asked at each link's start, or by a TLS client certificate, `tls: { cert,
-key }`, over `mqtts` or `wss` in Node alone: a page chooses none, and the adapter refuses one there.
-Its CONNECT says a Receive Maximum of 65,535, a Topic Alias Maximum of 0, its `maximumPacketSize`,
-16,777,216 bytes by default, and its `keepAlive`, 30 s by default; its start waits `connectTimeout`,
-30 s by default, for a CONNACK of Reason Code 0x00 whose Maximum QoS is not 0. Its will is the
-participant's GONE, QoS 1, RETAIN 0, a Will Delay Interval of 0; its stop sends a DISCONNECT of
-0x00, so that none goes; a DISCONNECT of 0x8E from its broker is its link taken over. MQTT.js
+Each link is one network connection that keeps no session — Clean Start 1, a Session Expiry Interval
+of 0 — its Client Identifier the participant's id, authenticated by a Password under its id as User
+Name, `password` as given or what `passwordProvider` hands at each link's start, or by a TLS client
+certificate, `tls: { cert, key }`, over `mqtts` or `wss` in Node alone: a page chooses none, and the
+adapter refuses one there; with neither, its CONNECT carries its User Name alone. A password is
+UTF-8 text, never empty and holding no NUL; the adapter is refused as it is built given one that is
+not, a password and a provider both, or either beside a certificate, and its start fails on an
+answer that is not. Its provider is asked with a signal its start's own signal, its stop and its
+`connectTimeout` abort, and that is aborted once its start ends, linked or not: an ask that outlives
+the `connectTimeout`, or that a stop meets, fails that start whether or not it hears its signal, a
+later answer serving nothing; what it throws fails it, its cause. Its CONNECT says a Receive Maximum
+of 65,535, a Topic Alias Maximum of 0, its `maximumPacketSize`, 16,777,216 bytes by default, and its
+`keepAlive`, 30 s by default; its start waits `connectTimeout`, 30 s by default, for its password,
+where it asks its provider, and a CONNACK of Reason Code 0x00 whose Maximum QoS is not 0. Its will
+is the participant's GONE, QoS 1, RETAIN 0, a Will Delay Interval of 0; its stop sends a DISCONNECT
+of 0x00, so that none goes; a DISCONNECT of 0x8E from its broker is its link taken over. MQTT.js
 reconnects nothing, subscribes nothing again and holds nothing while down: what is asked of a link
 that is down is refused at once.
 
@@ -1372,7 +1379,7 @@ page, naming why.
 ```ts
 const adapter = createAmqpBrokerAdapter({
   id: 'server',
-  password: () => readPassword(),
+  passwordProvider: () => readPassword(),
   url: 'amqps://broker.example:5671',
 });
 const participant = createBrokerParticipant({ adapter });
@@ -1382,18 +1389,21 @@ await transport.start();
 ```
 
 Each link is one fresh network connection, its OPEN's container-id the participant's id, its
-`hostname` `vhost:` and its `virtualHost` where one is given, its idle-time-out its `idleTimeout`, 30
-s by default, its link counted lost silent for twice it; authenticated by SASL PLAIN under its id, a
-password a string or asked at each link's start, or by SASL EXTERNAL under a TLS client certificate,
-`tls: { cert, key }`, over `amqps`. Its start waits `connectTimeout`, 30 s by default, for its
-broker's OPEN and its sessions, and its inbox's subscription as long for its declaration, its
-binding and its receiver. On it a session holds its inbox's receiver, one each name it serves, one
-sends to inboxes and one to names, each sender to the anonymous terminus; a name past what its
-broker's channel-max leaves is refused. Its inbox is a queue `<root>.i.<id>` declared exclusive,
-classic and not durable through RabbitMQ's management on that connection (`amqp-management`), then
-bound to its root's topic exchange by its name, so that it ends with the connection; a second link
-of its id is refused it while the first holds it. rhea reconnects nothing, recovers nothing and
-holds nothing while down: what is asked of a link that is down is refused at once.
+`hostname` `vhost:` and its `virtualHost` where one is given, its idle-time-out its `idleTimeout`,
+30 s by default, its link counted lost silent for twice it; authenticated by SASL PLAIN under its
+id, `password` as given or what `passwordProvider` hands at each link's start, or by SASL EXTERNAL
+under a TLS client certificate, `tls: { cert, key }`, over `amqps`, never ANONYMOUS: the adapter is
+refused as it is built given neither, and its password is given, asked and refused as an MQTT 5
+link's is. Its start waits `connectTimeout`, 30 s by default, for its password, where it asks its
+provider, its broker's OPEN and its sessions, and its inbox's subscription as long for its
+declaration, its binding and its receiver. On it a session holds its inbox's receiver, one each name
+it serves, one sends to inboxes and one to names, each sender to the anonymous terminus; a name past
+what its broker's channel-max leaves is refused. Its inbox is a queue `<root>.i.<id>` declared
+exclusive, classic and not durable through RabbitMQ's management on that connection
+(`amqp-management`), then bound to its root's topic exchange by its name, so that it ends with the
+connection; a second link of its id is refused it while the first holds it. rhea reconnects nothing,
+recovers nothing and holds nothing while down: what is asked of a link that is down is refused at
+once.
 
 A name is its queue `<root>.s.<name>`, which the deployment provisions and every participant serving
 it consumes, the queue its group. Each receiver is unsettled, first, of no max-message-size, its
