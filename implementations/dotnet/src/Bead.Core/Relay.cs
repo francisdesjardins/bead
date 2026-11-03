@@ -356,7 +356,7 @@ internal sealed class Relay
 
         if (options?.Audience is { } audience)
         {
-            JwtVerifier.AssertHeld(([], [audience]));
+            JwtVerifier.AssertJwtKey(([], [audience]));
         }
 
         var replaces = options?.Replaces;

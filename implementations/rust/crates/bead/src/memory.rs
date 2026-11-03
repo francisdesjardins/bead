@@ -26,8 +26,8 @@ use crate::router::types::{BoxFuture, ConnectionHandle, Gauges, RouterError, Tra
 use crate::transport::{
     CONNECT_TIMEOUT, ClientListener, Connect, Listeners, RECONNECTION_CANCELLED, ReadyState,
     RouterClientTransport, Sent, ServerListener, ServerTransport, TransportClientDisconnectOptions,
-    TransportClientReconnectOptions, TransportServerClient, attempting, first_of, held,
-    is_field_value,
+    TransportClientReconnectOptions, TransportServerClient, attempting, first_of,
+    hold_reconnection, is_field_value,
 };
 
 #[cfg(test)]
@@ -1280,7 +1280,7 @@ impl MemoryTransportClient {
             }
 
             // * a fixed delay out of bounds refused as it is given, before anything moves
-            held(options)?;
+            hold_reconnection(options)?;
             drop(state);
 
             target
