@@ -73,7 +73,7 @@ internal static class TranscodingFile
     }
 
     // a writing's result, from its binary payload as the gateway reads it, through the runtime
-    // reader (spec 17.9): a closed enum's undeclared number set aside among them
+    // reader (spec 17.9): a closed enum's undeclared number dropped
     public static IMessage Answered(MessageDescriptor descriptor, byte[] payload)
     {
         return Bead.Protobuf.ProtoCodecs.Read(descriptor, payload);

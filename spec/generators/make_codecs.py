@@ -1082,9 +1082,19 @@ PAYLOADS = [
      bytes.fromhex('3A 04 08 00 10 05')),
     ('a required closed enum given a declared number, then one it does not declare', 'proto', ['17.9.7'],
      bytes.fromhex('3A 06 08 00 10 01 10 05')),
+    # * an enum's number is its varint's low 32 bits, as protobuf reads an int32: past 32 bits, a
+    # number may be one its enum declares
+    ('a required closed enum given a number past 32 bits, whose low 32 bits it declares', 'proto', ['17.9.7'],
+     bytes.fromhex('3A 08 08 00 10 81 80 80 80 10')),
+    ('a required closed enum given a number past 32 bits, whose low 32 bits it does not declare', 'proto',
+     ['17.9.7'], bytes.fromhex('3A 08 08 00 10 85 80 80 80 10')),
     # a closed enum's undeclared number sets nothing on a singular field (17.9.8)
     ("a closed enum's number its enum does not declare, which sets nothing", 'proto', ['17.9.8'], bytes.fromhex('70 05')),
     ("a closed enum's declared number, then one it does not declare", 'proto', ['17.9.8'], bytes.fromhex('70 01 70 05')),
+    ("a closed enum's number past 32 bits, whose low 32 bits it declares", 'proto', ['17.9.8'],
+     bytes.fromhex('70 81 80 80 80 10')),
+    ("a closed enum's number past 32 bits, whose low 32 bits it does not declare", 'proto', ['17.9.8'],
+     bytes.fromhex('70 85 80 80 80 10')),
 ]
 
 # the payloads a stock library reads otherwise than 17.9 says, each by the rows it crosses and the
@@ -1334,7 +1344,7 @@ assert declared_values('Shade') == (SHADES, True), declared_values('Shade')
 payloads = [payload_entry(*entry) for entry in PAYLOADS]
 values = [value_entry(*entry) for entry in VALUES]
 
-assert len(payloads) == 155 and len(values) == 54
+assert len(payloads) == 159 and len(values) == 54
 
 
 
@@ -1404,8 +1414,12 @@ PROTO_RECORD = {
     'a group that leaves a required field unset': REQUIRED_UNSET, 'a child that leaves a required field unset': REQUIRED_UNSET,
     "a required closed enum's number its enum does not declare": REQUIRED_UNSET,
     'a required closed enum given a declared number, then one it does not declare': ('', 0, 0),
+    'a required closed enum given a number past 32 bits, whose low 32 bits it declares': ('', 0, 0),
+    'a required closed enum given a number past 32 bits, whose low 32 bits it does not declare': REQUIRED_UNSET,
     "a closed enum's number its enum does not declare, which sets nothing": ('', 0, 0),
     "a closed enum's declared number, then one it does not declare": taken('', 0, 0, shade=1),
+    "a closed enum's number past 32 bits, whose low 32 bits it declares": taken('', 0, 0, shade=1),
+    "a closed enum's number past 32 bits, whose low 32 bits it does not declare": ('', 0, 0),
 }
 PROTO_RECORD = {name: taken(*outcome) if isinstance(outcome, tuple) else outcome for name, outcome in PROTO_RECORD.items()}
 outcomes = {entry['name']: entry.get('refused') or entry['read'] for entry in payloads if entry['encoding'] == 'proto'}
@@ -1434,7 +1448,7 @@ document = {
     '$comment': [
         "Bead's codecs: what each encoding of spec section 17 reads and writes, raw, text and json (decision 0016) and proto (decision 0031), which every implementation's harness plays through its side's codecs.",
         'payloads are bytes read, in an encoding: written is the bytes its writer writes back of the value its reader read, the same bytes where they are canonical already; read, of a proto payload, what its reader read of them; refused, the reason its reader refuses them for. A harness checks the refusal, or that the bytes written are those given and that the value read equals the value its reader reads of them, or that what it read is read.',
-        "proto: a Probe, the message of spec/codecs.proto, read and written through the code each side's stock generator writes for it over its stock library, as generated code reads one: its records checked against Probe's descriptor before the library reads them (decision 0028), the bound of 17.9.3 set in the call, a closed enum's record of a number it does not declare set aside before the library reads it where the library would take it (17.9.8), and each message it holds judged by its required fields once it is read (17.9.7, decision 0042), as the runtime's codec reads one. read is what was read of the top Probe: text, its string as UTF-16 code units in hexadecimal, four capital digits each and a space between; number; nested, how deep messages nest below it, through child, delimited, children and tallies, a map's entry counting as a message and a value of children as another; counts and stamps, where it holds any, their values in their order; children, where it holds any, each key, its code units as text gives them, to what was read of its value, its text, number and nested; delimited, where it is set, what was read of it, its text, number and nested; and shade, where a record set it, its number. A harness checks these and nothing else, since protobuf fixes no message's bytes whole: needs and needs_items, of Needs, whose fields protobuf requires, are judged and not read back.",
+        "proto: a Probe, the message of spec/codecs.proto, read and written through the code each side's stock generator writes for it over its stock library, as generated code reads one: its records checked against Probe's descriptor before the library reads them (decision 0028), the bound of 17.9.3 set in the call, a singular closed enum's record of a number it does not declare dropped before the library reads it (17.9.8), and each message it holds judged by its required fields once it is read (17.9.7, decision 0042), as the runtime's codec reads one. read is what was read of the top Probe: text, its string as UTF-16 code units in hexadecimal, four capital digits each and a space between; number; nested, how deep messages nest below it, through child, delimited, children and tallies, a map's entry counting as a message and a value of children as another; counts and stamps, where it holds any, their values in their order; children, where it holds any, each key, its code units as text gives them, to what was read of its value, its text, number and nested; delimited, where it is set, what was read of it, its text, number and nested; and shade, where a record set it, its number. A harness checks these and nothing else, since protobuf fixes no message's bytes whole: needs and needs_items, of Needs, whose fields protobuf requires, are judged and not read back.",
         'values are a value given to a writer, in an encoding: written is the bytes it writes; refused, the reason it refuses the value for. A value is given in one of eight forms.',
         'json: a JSON value, as the file holds it: on the TypeScript side JSON.parse of the file, so that a member named __proto__ is a member; on the C# side a JsonElement of the file; on the Rust side a serde_json::Value that Bead\'s own reader reads of the file\'s text.',
         'double: a double by its 64 bits, in hexadecimal: on the TypeScript side read through a DataView; on the C# side a JsonElement of JsonSerializer.SerializeToElement(BitConverter.Int64BitsToDouble(bits)), which holds no NaN and no infinity; on the Rust side f64::from_bits(bits) given through bead::json::to_value, which refuses a double that is not finite.',

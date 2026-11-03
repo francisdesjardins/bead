@@ -11,7 +11,6 @@ import {
   DIFFERENTIAL_SIDES,
   floorBreaches,
   googleProtobufOf,
-  holdsUnwritten,
   integrityOf,
   LEN,
   lengthDelimited,
@@ -312,6 +311,168 @@ describe('the comparison', () => {
     );
   });
 
+  test('reads a closed enum’s number by its low 32 bits, as an int32, declared or not, at every depth', () => {
+    // * 2³² + 1 reads 1, as protobuf's ValidDataScalar.ENUM tests read kInt64Min + 1
+    assert.equal(
+      canonicalProbe(bytesOf([0x70, 0x81, 0x80, 0x80, 0x80, 0x10])),
+      canonicalProbe(bytesOf([0x70, 0x01]))
+    );
+    assert.equal(
+      canonicalProbe(bytesOf([0x70, 0x81, 0x00])),
+      canonicalProbe(bytesOf([0x70, 0x01]))
+    );
+    assert.notEqual(canonicalProbe(bytesOf([0x70, 0x01])), canonicalProbe(bytesOf([0x70, 0x00])));
+    assert.notEqual(canonicalProbe(bytesOf([0x70, 0x00])), canonicalProbe(bytesOf()));
+
+    // * every side drops an undeclared number before its library reads (spec 17.9.8): a side that
+    // writes one back parts
+    assert.notEqual(canonicalProbe(bytesOf([0x70, 0x05])), canonicalProbe(bytesOf()));
+    assert.notEqual(
+      canonicalProbe(bytesOf([0x70, 0x01, 0x70, 0x05])),
+      canonicalProbe(bytesOf([0x70, 0x01]))
+    );
+
+    // * however wide: 2³² − 1 in five bytes, as Buffa writes the value read, and in ten, as
+    // protobuf-es writes the int32 it reads
+    assert.equal(
+      canonicalProbe(bytesOf([0x70, 0xff, 0xff, 0xff, 0xff, 0x0f])),
+      canonicalProbe(bytesOf([0x70, ...Array.from({ length: 9 }, () => 0xff), 0x01]))
+    );
+
+    // in a Needs, in needs_items, and through a child, a group and a map's value
+    const needs = (field, shade) => {
+      return lengthDelimited(field, [0x08, 0x07, 0x10, ...shade]);
+    };
+
+    for (const field of [7, 8]) {
+      assert.equal(
+        canonicalProbe(bytesOf(needs(field, [0x81, 0x80, 0x80, 0x80, 0x10]))),
+        canonicalProbe(bytesOf(needs(field, [0x01])))
+      );
+      assert.notEqual(
+        canonicalProbe(bytesOf(needs(field, [0x05]))),
+        canonicalProbe(bytesOf(lengthDelimited(field, [0x08, 0x07])))
+      );
+    }
+
+    for (const wrap of [
+      (inner) => {
+        return lengthDelimited(3, inner);
+      },
+      (inner) => {
+        return [...tag(13, SGROUP), ...inner, ...tag(13, 4)];
+      },
+      (inner) => {
+        return lengthDelimited(12, [...lengthDelimited(1, [0x61]), ...lengthDelimited(2, inner)]);
+      },
+    ]) {
+      assert.equal(
+        canonicalProbe(bytesOf(wrap([0x70, 0x81, 0x80, 0x80, 0x80, 0x10]))),
+        canonicalProbe(bytesOf(wrap([0x70, 0x01])))
+      );
+      assert.notEqual(
+        canonicalProbe(bytesOf(wrap([0x70, 0x01, 0x70, 0x05]))),
+        canonicalProbe(bytesOf(wrap([0x70, 0x01])))
+      );
+      assert.notEqual(
+        canonicalProbe(bytesOf(wrap(needs(7, [0x05])))),
+        canonicalProbe(bytesOf(wrap(lengthDelimited(7, [0x08, 0x07]))))
+      );
+    }
+  });
+
+  test('reads a Needs by its fields, its unknown fields in any order, and needs_items’ items in theirs', () => {
+    const item = (must) => {
+      return lengthDelimited(8, [0x08, must, 0x10, 0x01]);
+    };
+
+    assert.equal(
+      canonicalProbe(bytesOf(lengthDelimited(7, [0x08, 0x07, 0x10, 0x01, 0x20, 0x01, 0x18, 0x02]))),
+      canonicalProbe(bytesOf(lengthDelimited(7, [0x08, 0x07, 0x10, 0x01, 0x18, 0x02, 0x20, 0x01])))
+    );
+    assert.notEqual(
+      canonicalProbe(bytesOf(lengthDelimited(7, [0x08, 0x07, 0x10, 0x01]))),
+      canonicalProbe(bytesOf(lengthDelimited(7, [0x08, 0x08, 0x10, 0x01])))
+    );
+    assert.notEqual(
+      canonicalProbe(bytesOf(item(0x07), item(0x08))),
+      canonicalProbe(bytesOf(item(0x08), item(0x07)))
+    );
+  });
+
+  test('reads a tallies entry as its key and its value, either written at its default or left out', () => {
+    // * protobuf-es and Buffa write 82 01 04 0a 00 10 00 for "" to 0, Google.Protobuf 82 01 00
+    const tally = (...records) => {
+      return [...tag(16, LEN), ...varint(records.flat().length), ...records.flat()];
+    };
+
+    assert.equal(
+      canonicalProbe(bytesOf(tally([0x0a, 0x00, 0x10, 0x00]))),
+      canonicalProbe(bytesOf(tally()))
+    );
+    assert.equal(
+      canonicalProbe(bytesOf(tally(lengthDelimited(1, [0x61]), [0x10, 0x00]))),
+      canonicalProbe(bytesOf(tally(lengthDelimited(1, [0x61]))))
+    );
+    assert.equal(
+      canonicalProbe(
+        bytesOf(
+          tally(lengthDelimited(1, [0x62]), [0x10, 0x02]),
+          tally(lengthDelimited(1, [0x61]), [0x10, 0x01])
+        )
+      ),
+      canonicalProbe(
+        bytesOf(
+          tally(lengthDelimited(1, [0x61]), [0x10, 0x01]),
+          tally(lengthDelimited(1, [0x62]), [0x10, 0x02])
+        )
+      )
+    );
+    assert.notEqual(
+      canonicalProbe(bytesOf(tally(lengthDelimited(1, [0x61]), [0x10, 0x01]))),
+      canonicalProbe(bytesOf(tally(lengthDelimited(1, [0x61]), [0x10, 0x02])))
+    );
+  });
+
+  test('forgives a map’s entries in any order, and nothing else of a map', () => {
+    // an entry of `children`, a message its value, and one of `tallies`, a uint32 its value
+    const child = (key, value) => {
+      return lengthDelimited(12, [...lengthDelimited(1, [key]), ...lengthDelimited(2, value)]);
+    };
+    const tally = (key, ...value) => {
+      return lengthDelimited(16, [...lengthDelimited(1, [key]), ...value.flat()]);
+    };
+
+    for (const [a, b, other] of [
+      [child(0x61, [0x10, 0x01]), child(0x62, [0x10, 0x02]), child(0x61, [0x10, 0x02])],
+      [tally(0x61, [0x10, 0x01]), tally(0x62, [0x10, 0x02]), tally(0x61, [0x10, 0x02])],
+    ]) {
+      assert.equal(canonicalProbe(bytesOf(a, b)), canonicalProbe(bytesOf(b, a)));
+      // * a value, an entry left out, an entry written twice
+      assert.notEqual(canonicalProbe(bytesOf(a, b)), canonicalProbe(bytesOf(other, b)));
+      assert.notEqual(canonicalProbe(bytesOf(a, b)), canonicalProbe(bytesOf(a)));
+      assert.notEqual(canonicalProbe(bytesOf(a, b)), canonicalProbe(bytesOf(a, a, b)));
+    }
+
+    // * a key, an entry's unknown field, and a value of another wire type than its own
+    assert.notEqual(
+      canonicalProbe(bytesOf(tally(0x61, [0x10, 0x01]))),
+      canonicalProbe(bytesOf(tally(0x62, [0x10, 0x01])))
+    );
+    assert.notEqual(
+      canonicalProbe(bytesOf(tally(0x61, [0x10, 0x01], [0x18, 0x01]))),
+      canonicalProbe(bytesOf(tally(0x61, [0x10, 0x01])))
+    );
+    assert.notEqual(
+      canonicalProbe(bytesOf(tally(0x61, lengthDelimited(2, [])))),
+      canonicalProbe(bytesOf(tally(0x61)))
+    );
+    assert.notEqual(
+      canonicalProbe(bytesOf(lengthDelimited(12, [...lengthDelimited(1, [0x61]), 0x10, 0x00]))),
+      canonicalProbe(bytesOf(lengthDelimited(12, lengthDelimited(1, [0x61]))))
+    );
+  });
+
   test('reads an unknown varint by its value, an overlong form kept or made minimal, and its tag by its number', () => {
     // * protobuf-es writes back an unknown varint of 10 bytes as it read it, Google.Protobuf and
     // Buffa its value in one
@@ -442,7 +603,7 @@ describe('the corpus', () => {
     assert.ok(readable.length > CORPUS_SIZE / 4, `${String(readable.length)} read as records`);
     assert.ok(readable.length < CORPUS_SIZE, 'some do not read');
 
-    for (const field of [1, 2, 3, 10, 11, 12, 13]) {
+    for (const field of [1, 2, 3, 7, 8, 10, 11, 12, 13, 14, 16]) {
       assert.ok(
         readable.some((payload) => fieldsOf(payload).has(field)),
         `field ${String(field)} is reached`
@@ -454,11 +615,11 @@ describe('the corpus', () => {
     // * a change of this digest is a change of the gate
     assert.equal(
       lineDigestOf(corpusOf()),
-      '7b1e5a69e6e423f8869c98047f5b7116e22e6dfbb6ba472126e5c32f18719ca4'
+      'cc6551dd32a3b3b50dfd0198e93c93c178892f8dd7c45773bc1f5ee9e0005633'
     );
   });
 
-  test("seeds itself from codecs.json's proto payloads, but those that hold needs, needs_items or shade and those a differs excuses", () => {
+  test('seeds itself from codecs.json’s proto payloads, but those a differs excuses', () => {
     const codecs = JSON.parse(
       readFileSync(new URL('../../spec/codecs.json', import.meta.url), 'utf8')
     );
@@ -476,16 +637,27 @@ describe('the corpus', () => {
       });
     };
 
-    assert.equal(seeds.length, 67);
+    assert.equal(seeds.length, 87);
     assert.ok(has(named('an empty payload')));
     assert.ok(has(named('100 groups below the top')));
     assert.ok(has(named('a varint of 10 bytes')));
-    assert.ok(!has(named('a required field unset, one below the top')));
-    assert.ok(!has(named("a map's value whose message leaves a required field unset")));
+    assert.ok(has(named('a required field unset, one below the top')));
+    assert.ok(has(named("a map's value whose message leaves a required field unset")));
+    assert.ok(has(named("a closed enum's declared number, then one it does not declare")));
+    assert.ok(
+      has(named("a closed enum's number past 32 bits, whose low 32 bits it does not declare"))
+    );
+    assert.ok(
+      has(
+        named(
+          'a required closed enum given a number past 32 bits, whose low 32 bits it does not declare'
+        )
+      )
+    );
     assert.ok(!has(named("a string's leading U+FEFF")));
   });
 
-  test('draws its seeds after its own payloads, each as it is and mutated, none holding a field it writes none of', () => {
+  test('draws its seeds after its own payloads, each as it is and mutated', () => {
     const seeds = [
       bytesOf(lengthDelimited(1, [0x61]), [0x10, 0x07]),
       bytesOf(lengthDelimited(3, [0x10, 0x01])),
@@ -497,27 +669,44 @@ describe('the corpus', () => {
     assert.deepEqual(corpus[50], seeds[0]);
     assert.deepEqual(corpus[55], seeds[1]);
     assert.deepEqual(corpusOf({ size: 50, seeds }), corpus);
-    assert.ok(
-      corpus.every((payload) => {
-        return !holdsUnwritten(payload);
-      })
-    );
   });
 
-  test('finds needs, needs_items and shade through a child, a group and a map’s value, and in nothing else', () => {
-    const needs = lengthDelimited(7, [0x08, 0x01]);
+  test('writes a Needs that leaves a required field unset, and a closed enum’s number of each kind, at the top and in a Needs', () => {
+    // every record of a field of `fields` a payload holds, through a child, a group and a Needs
+    const recordsAt = (bytes, fields) => {
+      return (recordsOf(bytes) ?? []).flatMap((record) => {
+        const below =
+          record.payload !== undefined && [3, 7, 8, 13].includes(record.field)
+            ? recordsAt(record.payload, record.field === 7 || record.field === 8 ? [2] : fields)
+            : [];
 
-    assert.ok(holdsUnwritten(bytesOf(needs)));
-    assert.ok(holdsUnwritten(bytesOf([0x70, 0x01])));
-    assert.ok(holdsUnwritten(bytesOf(lengthDelimited(3, needs))));
-    assert.ok(holdsUnwritten(bytesOf(tag(13, SGROUP), needs, tag(13, 4))));
-    assert.ok(
-      holdsUnwritten(
-        bytesOf(lengthDelimited(12, [...lengthDelimited(1, [0x61]), ...lengthDelimited(2, needs)]))
-      )
+        return [...(fields.includes(record.field) ? [record] : []), ...below];
+      });
+    };
+    const corpus = corpusOf();
+    const shades = new Set(
+      corpus.flatMap((payload) => {
+        return recordsAt(payload, [14]).map((record) => {
+          return Buffer.from(record.whole.subarray(1)).toString('hex');
+        });
+      })
     );
-    assert.ok(!holdsUnwritten(bytesOf(lengthDelimited(9, needs))));
-    assert.ok(!holdsUnwritten(bytesOf(lengthDelimited(1, [0x61]))));
-    assert.ok(!holdsUnwritten(bytesOf([0x0a, 0x05, 0x61])));
+    const unset = corpus.some((payload) => {
+      return (recordsOf(payload) ?? []).some((record) => {
+        return (
+          record.field === 7 &&
+          record.payload !== undefined &&
+          !recordsOf(record.payload)?.some((each) => each.field === 1)
+        );
+      });
+    });
+
+    assert.ok(unset, 'a Needs without its must');
+
+    // * declared, undeclared, past 31 bits, past 32 bits declared by its low bits, ten bytes,
+    // overlong
+    for (const shade of ['01', '05', '8080808008', '8180808010', 'ffffffffffffffffff01', '8100']) {
+      assert.ok(shades.has(shade), `shade ${shade} is reached`);
+    }
   });
 });
