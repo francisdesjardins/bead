@@ -16,6 +16,10 @@ use bead::{
 use serde_json::{Map, Value};
 use tokio::sync::oneshot;
 
+#[cfg(test)]
+#[path = "credentials/tests.rs"]
+mod twin_tests;
+
 /// The interop service's behaviour, as every implementation's interop server reads it.
 pub const INTEROP_SERVICE: &str = include_str!("../../../../../spec/interop-service.json");
 
