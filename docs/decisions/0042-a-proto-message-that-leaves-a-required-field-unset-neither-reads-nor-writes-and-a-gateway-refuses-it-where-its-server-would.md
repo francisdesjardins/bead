@@ -209,7 +209,8 @@ and 48 skipped, stays, played through the runtime codecs.
 `spec/transcoding.json`'s readings, bindings, writings and exchanges of 5.2's step 4, 5.6, 7.4 and
 17.9.8, each player reading a writing's payload through its side's runtime reader; the twin tests
 of the codec, the service client and server, the gateway and the HTTP caller, one sentence each
-pair; beadc's tests of the blueprint, the document and the two rules.
+pair; beadc's tests of the blueprint, the document and the two rules; and the `protobuf-conformance`
+differential, whose corpus writes fields 7, 8 and 14.
 
 **Out of scope**: a pointer written by the name the body used, so that one resolves in a body that
 named a member by its proto name, which would change the TypeScript and C# sides' readers and the

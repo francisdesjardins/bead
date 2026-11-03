@@ -312,14 +312,17 @@ moves `runner.json`, the failure lists and the floor in one commit. Where the tw
 releases, the runner follows the older, and the newer library's bump waits for the other.
 
 **The differential.** `tools/protobuf-conformance.mjs differential` feeds every side's testee the
-same 10,000 payloads from a fixed seed: `Probe`'s own records, mutated by cuts, lengths, wire types
-and nesting, maps and groups among them; beside them, `spec/codecs.json`'s `proto` payloads, each
-mutated by the same steps, those that hold a record of fields 7, 8 or 14 left out; a record of
-`needs`, `needs_items` and `shade` is written by none of its payloads. It compares the sides two by
-two, each one's verdict, read or refused, and the bytes each writes back as what they read, at every
-depth, the choices protobuf leaves to a writer aside: the order of unknown fields, the order of a
-map's entries, and an entry's key at its default, which protobuf-es writes and Google.Protobuf
-leaves out. The first and the last are the platform rows; any other parting fails it.
+same 12,500 payloads from a fixed seed: `Probe`'s own records, mutated by cuts, lengths, wire types
+and nesting, maps and groups among them, and records of every field of `Probe`: a `Needs` that
+leaves a required field unset, and a closed enum's number declared, undeclared, past 31 and 32 bits,
+of ten bytes and overlong. Beside them, it takes `spec/codecs.json`'s `proto` payloads but those a
+`differs` excuses, each mutated by the same steps. It compares the sides two by two, each one's
+verdict, read or refused, and the bytes each writes back as what they read, at every depth, a closed
+enum's number by its low 32 bits, declared or not, since every side drops an undeclared one before
+its library reads (spec 17.9.8). The choices protobuf leaves to a writer are forgiven, each a
+platform row: the order of unknown fields, the order of a map's entries, and an entry's key or
+scalar value at its default, which protobuf-es and Buffa write and Google.Protobuf leaves out. Any
+other parting fails it.
 
 ## Consequences
 

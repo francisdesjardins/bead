@@ -54,6 +54,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Every side drops a singular closed enum's undeclared number before its library reads, as the C#
   side did. A message the TypeScript or Rust side reads and writes again no longer carries it (spec
   17.9.8; a row of the support matrix's "Leveled down").
+- The `proto` differential writes every field of `Probe`, `needs`, `needs_items`, `shade` and
+  `tallies` among them, takes every `spec/codecs.json` `proto` payload but those a `differs` excuses
+  as a seed, and draws 12,500 payloads.
 - A `JWT` whose header or claims set holds a number past the largest finite double, or nests deeper
   than 64, is refused at `token` on every side, before its signature is reached, and a relay that
   does not verify reads no `aud` from it (spec 13.8, 17.5; RFC 7493 §2.2).
