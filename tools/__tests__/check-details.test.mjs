@@ -20,6 +20,14 @@ describe('sitesOf', () => {
     assert.deepEqual(sitesOf('const detail = reason.message;', TS), [1]);
   });
 
+  test('finds a TypeScript problem of a gateway built from an error message', () => {
+    const text =
+      "return problemOfOwn('unwritable', reason.message);\n" +
+      "return problemOfOwn('closed', 'the connection closed');";
+
+    assert.deepEqual(sitesOf(text, TS), [1]);
+  });
+
   test('finds a C# failure built from an exception message', () => {
     const text = 'return Failure.OfProtocol(ProtocolCode.PayloadUndecodable, reason.Message);';
 
@@ -28,7 +36,7 @@ describe('sitesOf', () => {
 
   test('finds a C# problem of a gateway built from an exception message', () => {
     const text =
-      'return HttpProblems.Own(OwnFailure.Unwritable, (reason.Message, _options.Challenge));\n' +
+      'return HttpProblems.Own(OwnFailure.Unwritable, reason.Message);\n' +
       'var field = descriptor is { FieldType: FieldType.Message };';
 
     assert.deepEqual(sitesOf(text, CS), [1]);
