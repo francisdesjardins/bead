@@ -23,7 +23,7 @@ use crate::constants::{
 };
 use crate::debug::DebugDirection;
 use crate::envelope::{
-    CancelHeader, Credential, CreditHeader, Envelope, FailureHeader, FailureRecord, Header,
+    CancelHeader, Credential, CreditHeader, Envelope, EnvelopeHeader, FailureHeader, FailureRecord,
     NotificationHeader, Prefix, ReadEnvelopeOptions, RequestHeader, ResultHeader, read_envelope,
     read_prefix, write_envelope,
 };
@@ -124,7 +124,7 @@ pub type AdmitFn =
 
 /// What answers a request once its payload is whole: a resolver, or a destination's handler.
 pub(crate) type ResolveFn =
-    Arc<dyn Fn(ResolverProps) -> BoxFuture<Result<(), ResolverError>> + Send + Sync>;
+    Arc<dyn Fn(RequestResolverProps) -> BoxFuture<Result<(), ResolverError>> + Send + Sync>;
 
 /// A request's handler, as a router keeps it: what answers it, its admission, its payload's
 /// limit, whether it forwards a credential unresolved, and whether it notifies.
@@ -184,7 +184,7 @@ pub trait Answerer: Send + Sync {
     clippy::partial_pub_fields,
     reason = "what its transport carried, a bearer's secret, stays the router's"
 )]
-pub struct ResolverProps {
+pub struct RequestResolverProps {
     /// The connection it came from.
     pub connection_handle: ConnectionHandle,
     /// Its header, a `JWT`'s token left out (spec 13.1).
@@ -200,10 +200,10 @@ pub struct ResolverProps {
     pub(crate) carried: Option<Carried>,
 }
 
-impl fmt::Debug for ResolverProps {
+impl fmt::Debug for RequestResolverProps {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter
-            .debug_struct("ResolverProps")
+            .debug_struct("RequestResolverProps")
             .field("connection_handle", &self.connection_handle)
             .field("header", &self.header)
             .finish_non_exhaustive()
@@ -314,7 +314,12 @@ pub(crate) trait Side: Sized + Send + 'static {
     }
 
     /// Every result and failure received, before it is paired with its call.
-    fn on_answer_received(&mut self, _header: &Header, _connection_handle: &ConnectionHandle) {}
+    fn on_answer_received(
+        &mut self,
+        _header: &EnvelopeHeader,
+        _connection_handle: &ConnectionHandle,
+    ) {
+    }
 
     /// A failure that answers no call waiting, which it takes or not.
     fn on_unpaired_failure(
@@ -334,7 +339,7 @@ pub(crate) trait Side: Sized + Send + 'static {
     fn trace(
         &mut self,
         _direction: DebugDirection,
-        (_connection_handle, _header): (&ConnectionHandle, &Header),
+        (_connection_handle, _header): (&ConnectionHandle, &EnvelopeHeader),
     ) {
     }
 
@@ -845,7 +850,7 @@ pub(crate) fn send_reporting<S: Side>(
 // a failure the core raises itself, on what came in, for the side to hear
 fn report_failure<S: Side>(
     state: &mut S,
-    (failure, (handle, header)): (Failure, (&ConnectionHandle, &Header)),
+    (failure, (handle, header)): (Failure, (&ConnectionHandle, &EnvelopeHeader)),
 ) {
     state.report(reported(failure.about(header)), handle);
 }
@@ -942,7 +947,7 @@ pub(crate) fn receive<S: Side>(
                         .failure(ProtocolCode::KIND_UNSUPPORTED)
                         .saying("this side sends no notification");
 
-                    report_failure(state, (failure, (handle, &Header::Credit(header))));
+                    report_failure(state, (failure, (handle, &EnvelopeHeader::Credit(header))));
                 }
             } else {
                 credit_sending(state, (handle, header.call_id, header.credit_end));
@@ -1120,7 +1125,7 @@ fn receive_cancel<S: Side>(state: &mut S, (header, handle): (CancelHeader, &Conn
                 "call {call_id} is this side's, which the peer cannot cancel"
             ));
 
-        return report_failure(state, (failure, (handle, &Header::Cancel(header))));
+        return report_failure(state, (failure, (handle, &EnvelopeHeader::Cancel(header))));
     }
 
     let call = CallAddress {
@@ -1146,7 +1151,10 @@ fn receive_notification<S: Side>(
             .failure(ProtocolCode::KIND_UNSUPPORTED)
             .saying("this side takes no notification");
 
-        return report_failure(state, (failure, (handle, &Header::Notification(header))));
+        return report_failure(
+            state,
+            (failure, (handle, &EnvelopeHeader::Notification(header))),
+        );
     }
 
     // one on a call id reserved was on its way, and is dropped in silence
@@ -1442,7 +1450,7 @@ pub(crate) fn respond<S: Side>(
             match core.placement.transfer_of(
                 payload,
                 (
-                    &Header::Result(result_header.clone()),
+                    &EnvelopeHeader::Result(result_header.clone()),
                     maximum_payload_bytes,
                 ),
             ) {
@@ -1455,7 +1463,7 @@ pub(crate) fn respond<S: Side>(
                                 "a subscription's result goes in one envelope, of {} bytes at most",
                                 core.placement.whole_bytes
                             ))
-                            .about(&Header::Result(result_header));
+                            .about(&EnvelopeHeader::Result(result_header));
 
                         return finish(state, Err(CallError::Failure(failure)), done);
                     }
@@ -1463,7 +1471,7 @@ pub(crate) fn respond<S: Side>(
                     Some(outgoing)
                 }
                 Err(failure) => {
-                    let failure = failure.about(&Header::Result(result_header));
+                    let failure = failure.about(&EnvelopeHeader::Result(result_header));
 
                     return finish(state, Err(CallError::Failure(failure)), done);
                 }
@@ -1692,7 +1700,7 @@ fn dispatch_to<S: Side>(
     let core = state.core();
     let owner = core.owner.clone();
     let session = locked(&dispatch.session).clone();
-    let props = ResolverProps {
+    let props = RequestResolverProps {
         connection_handle: Arc::clone(&dispatch.connection_handle),
         header: dispatch.header.clone(),
         payload,
@@ -2144,7 +2152,7 @@ fn receive_request<S: Side>(
                 "call {call_id} is this side's to open, not the peer's"
             ));
 
-        return report_failure(state, (failure, (handle, &Header::Request(header))));
+        return report_failure(state, (failure, (handle, &EnvelopeHeader::Request(header))));
     }
 
     let is_open = core.answering.has(&call);
@@ -2155,7 +2163,7 @@ fn receive_request<S: Side>(
             .failure(ProtocolCode::ENVELOPE_MALFORMED)
             .saying(format!("call {call_id} is open already"));
 
-        return report_failure(state, (failure, (handle, &Header::Request(header))));
+        return report_failure(state, (failure, (handle, &EnvelopeHeader::Request(header))));
     }
 
     let core = state.core();
@@ -2344,7 +2352,7 @@ fn carrying_of(handler: &Handler, carried: &Carried) -> ResolveFn {
     let resolve = Arc::clone(&handler.resolve);
     let carried = carried.clone();
 
-    Arc::new(move |mut props: ResolverProps| {
+    Arc::new(move |mut props: RequestResolverProps| {
         props.carried = Some(carried.clone());
         resolve(props)
     })
@@ -2382,7 +2390,7 @@ pub(crate) fn receive_unplaced<S: Side>(
             "bytes from {offset} run past the credit's end of {credit_end}"
         ));
 
-        return report_failure(state, (failure, (handle, &Header::Chunk(header))));
+        return report_failure(state, (failure, (handle, &EnvelopeHeader::Chunk(header))));
     }
 
     let failure = if is_open {
@@ -2392,7 +2400,7 @@ pub(crate) fn receive_unplaced<S: Side>(
         core.failure(ProtocolCode::CALL_UNKNOWN)
     };
 
-    report_failure(state, (failure, (handle, &Header::Chunk(header))));
+    report_failure(state, (failure, (handle, &EnvelopeHeader::Chunk(header))));
 }
 
 // a chunk of a request's payload: the call is the peer's
@@ -2427,7 +2435,7 @@ fn receive_request_chunk<S: Side>(
     match outcome {
         Err(failure) => {
             if was_whole {
-                report_failure(state, (failure, (&handle, &Header::Chunk(header))));
+                report_failure(state, (failure, (&handle, &EnvelopeHeader::Chunk(header))));
             } else {
                 refuse(state, (failure, &dispatch));
             }
@@ -2466,12 +2474,12 @@ pub(crate) fn register_resolver(
     resolvers: &Resolvers,
     (procedure, handler, metrics): (&crate::identity::Procedure, Handler, Option<&RouterMetrics>),
 ) -> Result<Option<ResolverSeries>, ProgrammerError> {
-    let address = (procedure.service_id, procedure.id);
+    let address = (procedure.service_id, procedure.procedure_id);
 
     if handler.maximum_payload_bytes == Some(0) {
         return Err(ProgrammerError::new(format!(
             "{}'s payload limit is a whole number above 0, not 0",
-            procedure.name
+            procedure.procedure_name
         )));
     }
 
@@ -2480,7 +2488,7 @@ pub(crate) fn register_resolver(
     if registered.contains_key(&address) {
         return Err(ProgrammerError::new(format!(
             "{} is already a registered resolver",
-            procedure.name
+            procedure.procedure_name
         )));
     }
 

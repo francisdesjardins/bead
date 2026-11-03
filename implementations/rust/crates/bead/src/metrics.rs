@@ -9,6 +9,7 @@ use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 use crate::constants::{FailureScope, ProtocolCode, RouterSide};
 use crate::errors::ProgrammerError;
+use crate::failure::Failure;
 use crate::identity::{Procedure, are_one_name};
 
 #[cfg(test)]
@@ -452,18 +453,18 @@ impl State {
         procedure: &Procedure,
         groups: &[Group],
     ) -> Result<(u16, u16), ProgrammerError> {
-        let key = (procedure.service_id, procedure.id);
-        let at = format!("{}/{}", procedure.service_id, procedure.id);
+        let key = (procedure.service_id, procedure.procedure_id);
+        let at = format!("{}/{}", procedure.service_id, procedure.procedure_id);
         let quoted = |name: &str| serde_json::to_string(name).unwrap_or_default();
 
         // * a name held at its address is taken as it is, exactly, with no fold
         if let Some(held) = self.entries.get(&key)
-            && held.name != procedure.name
+            && held.name != procedure.procedure_name
         {
             return Err(ProgrammerError::new(format!(
                 "the metrics registry holds {at} as {}, and is given {}: another name at its address",
                 quoted(&held.name),
-                quoted(&procedure.name)
+                quoted(&procedure.procedure_name)
             )));
         }
 
@@ -472,14 +473,14 @@ impl State {
                 self.names.get(&procedure.service_id).and_then(|named| {
                     named
                         .iter()
-                        .find(|(name, _)| are_one_name(name, &procedure.name))
+                        .find(|(name, _)| are_one_name(name, &procedure.procedure_name))
                 })
         {
             return Err(ProgrammerError::new(format!(
                 "the metrics registry holds {} at {}/{procedure_id}, and is given {} at {at}: its name at another address",
                 quoted(name),
                 procedure.service_id,
-                quoted(&procedure.name)
+                quoted(&procedure.procedure_name)
             )));
         }
 
@@ -508,11 +509,11 @@ impl State {
             self.names
                 .entry(procedure.service_id)
                 .or_default()
-                .push((procedure.name.clone(), procedure.id));
+                .push((procedure.procedure_name.clone(), procedure.procedure_id));
             self.entries.insert(
                 key,
                 Entry {
-                    name: procedure.name.clone(),
+                    name: procedure.procedure_name.clone(),
                     ..Entry::default()
                 },
             );
@@ -622,8 +623,8 @@ impl NotificationSeries {
 
     /// Counts a subscription ended, other than by its client's cancel, by the code and the scope
     /// of its failure, or with none.
-    pub fn dropped(&self, failure: Option<(NonZeroU16, FailureScope)>) {
-        let slot = drop_slot_of(failure);
+    pub fn dropped(&self, failure: Option<&Failure>) {
+        let slot = drop_slot_of(failure.map(|failure| (failure.code(), failure.scope())));
 
         self.with(|entry| {
             if let Some(dropped) = entry

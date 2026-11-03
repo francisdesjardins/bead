@@ -9,13 +9,14 @@ use tokio_util::sync::CancellationToken;
 
 use super::server::{Served, first, news, second};
 use super::{cancel_of, locked};
+use crate::NotificationResolverDependencies;
 use crate::constants::{ProtocolCode, RouterSide};
 use crate::debug::DebugDirection;
 use crate::envelope::{CreditHeader, Envelope, RequestHeader};
 use crate::errors::{CallError, ResolverError};
 use crate::failure::{Failure, FailureOrigin};
 use crate::managers::notification::{NotificationKey, PacingLimitsOptions};
-use crate::managers::service::{Notifier, NotifyOptions, ResolverDependencies, Response};
+use crate::managers::service::{Notifier, NotifyOptions, RequestResolverDependencies, Response};
 use crate::payloads::TextCodec;
 use crate::router::server::RouterServerOptions;
 use crate::testing::scripted::Sending;
@@ -43,7 +44,10 @@ impl Paced {
             .services
             .get_notification_resolver(
                 &news(),
-                (ResolverDependencies::of(TextCodec, TextCodec), TextCodec),
+                NotificationResolverDependencies::new(
+                    RequestResolverDependencies::new(TextCodec, TextCodec),
+                    TextCodec,
+                ),
             )
             .expect("a resolver")
             .on(Arc::new(move |request, response: Response<TextCodec>| {
@@ -338,7 +342,7 @@ async fn tells_the_failure_its_router_answered_in_the_resolvers_place() {
                     assert_eq!(failure.origin(), FailureOrigin::Local);
                     assert_eq!(
                         failure.header(),
-                        Some(&crate::envelope::Header::Failure(
+                        Some(&crate::envelope::EnvelopeHeader::Failure(
                             crate::envelope::FailureHeader {
                                 call_id: 3,
                                 credential: None

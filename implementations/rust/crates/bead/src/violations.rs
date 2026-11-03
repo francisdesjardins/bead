@@ -4,11 +4,10 @@
 //! the detail's bound and read back line by line, each through the `json` codec, so a cut keeps
 //! every whole line.
 
-use core::num::NonZeroU16;
-
 use serde_json::{Map, Value};
 
 use crate::constants::{FailureScope, ProtocolCode};
+use crate::failure::Failure;
 use crate::json;
 
 #[cfg(test)]
@@ -502,11 +501,12 @@ fn as_violation(value: &Value) -> Option<Violation> {
 /// given the words its rule and its bounds give; then its closing line's count, or that its side
 /// stopped. A failure of another code gives none.
 #[must_use]
-pub fn violations_of((code, scope): (NonZeroU16, FailureScope), detail: &str) -> ReadViolations {
+pub fn violations_of(failure: &Failure) -> ReadViolations {
     let mut read = ReadViolations::default();
+    let detail = failure.detail();
 
-    if code != ProtocolCode::PAYLOAD_INVALID.get()
-        || scope != FailureScope::Protocol
+    if failure.code() != ProtocolCode::PAYLOAD_INVALID.get()
+        || failure.scope() != FailureScope::Protocol
         || detail.is_empty()
     {
         return read;

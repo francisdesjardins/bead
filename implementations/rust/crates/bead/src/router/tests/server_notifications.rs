@@ -8,10 +8,11 @@ use tokio_util::sync::CancellationToken;
 
 use super::server::{Served, first, news, request_of, second, subscribing_of};
 use super::{cancel_of, locked};
+use crate::NotificationResolverDependencies;
 use crate::envelope::{Envelope, RequestHeader};
 use crate::errors::{CallError, ResolverError};
 use crate::managers::service::{
-    Notifier, NotifyOptions, ResolverCallback, ResolverDependencies, Response,
+    Notifier, NotifyOptions, RequestResolverDependencies, ResolverCallback, Response,
 };
 use crate::payloads::TextCodec;
 use crate::router::server::RouterServerOptions;
@@ -33,7 +34,10 @@ fn resolving(
         .services
         .get_notification_resolver(
             &news(),
-            (ResolverDependencies::of(TextCodec, TextCodec), TextCodec),
+            NotificationResolverDependencies::new(
+                RequestResolverDependencies::new(TextCodec, TextCodec),
+                TextCodec,
+            ),
         )
         .expect("news resolved")
         .on(callback)

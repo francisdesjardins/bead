@@ -9,6 +9,7 @@ use super::notifications::{
     Heard, callback, deliver, notification, pending, procedure, requests, result, subscribed,
 };
 use super::{ClientFixture, locked};
+use crate::RequestDependencies;
 use crate::envelope::Envelope;
 use crate::errors::CallError;
 use crate::managers::service::{NotificationCallback, NotificationDependencies, RequestOptions};
@@ -24,12 +25,14 @@ async fn is_held_by_the_router_before_its_one_request_goes_out_however_many_regi
         locked(&hearing).push((error.map(ToString::to_string), event.clone()));
     }));
     let notification = notification(&fixture);
-    let mut first = notification.on(
-        ("first".to_owned(), callback(&heard, "a ")),
+    let mut first = notification.register(
+        "first".to_owned(),
+        callback(&heard, "a "),
         &RequestOptions::default(),
     );
-    let mut second = notification.on(
-        ("second".to_owned(), callback(&heard, "b ")),
+    let mut second = notification.register(
+        "second".to_owned(),
+        callback(&heard, "b "),
         &RequestOptions::default(),
     );
     pending(&mut first).await;
@@ -64,7 +67,8 @@ async fn the_last_callback_out_unsubscribes_then_unregisters_the_notification_wi
     let fixture = ClientFixture::new();
     let unsubscribed = Arc::new(Mutex::new(Vec::new()));
     let heard = Arc::clone(&unsubscribed);
-    let mut dependencies = NotificationDependencies::of((TextCodec, TextCodec, TextCodec));
+    let mut dependencies =
+        NotificationDependencies::new(RequestDependencies::new(TextCodec, TextCodec), TextCodec);
     dependencies.unsubscribe = Some(Arc::new(move |call_id, response| {
         locked(&heard).push((call_id, response));
         Box::pin(async { Ok(()) })
@@ -75,8 +79,9 @@ async fn the_last_callback_out_unsubscribes_then_unregisters_the_notification_wi
         .expect("declared");
     let first = subscribed(&fixture, (&notification, callback(&Heard::default(), ""))).await;
     let second = notification
-        .on(
-            ("s".to_owned(), callback(&Heard::default(), "")),
+        .register(
+            "s".to_owned(),
+            callback(&Heard::default(), ""),
             &RequestOptions::default(),
         )
         .await
@@ -114,8 +119,9 @@ async fn a_drop_silences_the_callbacks_tells_the_manager_and_fails_a_registratio
             ));
         }));
     let notification = notification(&fixture);
-    let mut registering = notification.on(
-        ("held".to_owned(), callback(&heard, "")),
+    let mut registering = notification.register(
+        "held".to_owned(),
+        callback(&heard, ""),
         &RequestOptions::default(),
     );
     pending(&mut registering).await;
@@ -154,21 +160,19 @@ async fn a_trigger_settles_as_every_callback_did_the_tasks_they_returned_too() {
         })
     });
     let second = notification
-        .on(("s".to_owned(), fetching), &RequestOptions::default())
+        .register("s".to_owned(), fetching, &RequestOptions::default())
         .await
         .expect("second subscribed");
     let failure: Arc<dyn std::error::Error + Send + Sync> =
         Arc::new(std::io::Error::other("fetch failed"));
     let failing = Arc::clone(&failure);
     let third = notification
-        .on(
-            (
-                "s".to_owned(),
-                Arc::new(move |_| {
-                    let failure = Arc::clone(&failing);
-                    Box::pin(async move { Err(failure) })
-                }),
-            ),
+        .register(
+            "s".to_owned(),
+            Arc::new(move |_| {
+                let failure = Arc::clone(&failing);
+                Box::pin(async move { Err(failure) })
+            }),
             &RequestOptions::default(),
         )
         .await
@@ -197,7 +201,10 @@ async fn a_trigger_settles_as_every_callback_did_the_tasks_they_returned_too() {
 async fn carries_its_window_and_refuses_one_that_is_not_a_whole_number_above_0() {
     for window in [Some(3), None, Some(0)] {
         let fixture = ClientFixture::new();
-        let mut dependencies = NotificationDependencies::of((TextCodec, TextCodec, TextCodec));
+        let mut dependencies = NotificationDependencies::new(
+            RequestDependencies::new(TextCodec, TextCodec),
+            TextCodec,
+        );
         dependencies.window = window;
         let notification = fixture.manager.get_notification(&procedure(), dependencies);
         if window == Some(0) {
@@ -225,7 +232,7 @@ async fn the_same_callback_registered_twice_is_heard_twice_and_its_registrations
     let callback = callback(&heard, "");
     let first = subscribed(&fixture, (&notification, Arc::clone(&callback))).await;
     let second = notification
-        .on(("s".to_owned(), callback), &RequestOptions::default())
+        .register("s".to_owned(), callback, &RequestOptions::default())
         .await
         .expect("second subscribed");
     let trigger = |payload| {

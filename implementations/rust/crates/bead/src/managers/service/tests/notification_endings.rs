@@ -16,6 +16,7 @@ use crate::managers::service::{
     NotificationDependencies, RequestOptions, ServiceManager, ServiceManagerOptions, ServiceRouter,
 };
 use crate::payloads::TextCodec;
+use crate::{RequestDependencies, UnregisterNotificationOptions};
 
 #[tokio::test]
 async fn an_unsubscription_that_fails_rejects_the_last_unregister_once_the_router_let_go_all_the_same()
@@ -24,7 +25,8 @@ async fn an_unsubscription_that_fails_rejects_the_last_unregister_once_the_route
     let refusal: Arc<dyn std::error::Error + Send + Sync> =
         Arc::new(std::io::Error::other("refused"));
     let failure = Arc::clone(&refusal);
-    let mut dependencies = NotificationDependencies::of((TextCodec, TextCodec, TextCodec));
+    let mut dependencies =
+        NotificationDependencies::new(RequestDependencies::new(TextCodec, TextCodec), TextCodec);
     dependencies.unsubscribe = Some(Arc::new(move |_, _| {
         let failure = Arc::clone(&failure);
         Box::pin(async move { Err(CallError::Other(failure)) })
@@ -61,13 +63,17 @@ async fn a_second_manager_on_the_same_router_cannot_take_its_procedure_over_nor_
     let second = second
         .get_notification(
             &procedure(),
-            NotificationDependencies::of((TextCodec, TextCodec, TextCodec)),
+            NotificationDependencies::new(
+                RequestDependencies::new(TextCodec, TextCodec),
+                TextCodec,
+            ),
         )
         .expect("declared");
     assert!(matches!(
         second
-            .on(
-                ("s".to_owned(), callback(&Heard::default(), "")),
+            .register(
+                "s".to_owned(),
+                callback(&Heard::default(), ""),
                 &RequestOptions::default()
             )
             .await,
@@ -96,7 +102,8 @@ async fn dropped_with_its_connection_it_tells_dropped_hears_nothing_more_has_not
         }));
     let unsubscribed = Arc::new(Mutex::new(Vec::new()));
     let hearing = Arc::clone(&unsubscribed);
-    let mut dependencies = NotificationDependencies::of((TextCodec, TextCodec, TextCodec));
+    let mut dependencies =
+        NotificationDependencies::new(RequestDependencies::new(TextCodec, TextCodec), TextCodec);
     dependencies.unsubscribe = Some(Arc::new(move |_, response| {
         locked(&hearing).push(response);
         Box::pin(async { Ok(()) })
@@ -142,15 +149,21 @@ async fn a_registration_under_way_when_its_notification_is_dropped_fails_with_a_
     let fixture = ClientFixture::new();
     let notification = notification(&fixture);
     let heard = Heard::default();
-    let mut registering = notification.on(
-        ("s".to_owned(), callback(&heard, "")),
+    let mut registering = notification.register(
+        "s".to_owned(),
+        callback(&heard, ""),
         &RequestOptions::default(),
     );
     pending(&mut registering).await;
     fixture.clock.settle().await;
     fixture
         .router
-        .unregister_notification((&notification.as_like(), false))
+        .unregister_notification(
+            &notification.as_like(),
+            &UnregisterNotificationOptions {
+                cancel: Some(false),
+            },
+        )
         .await;
     notification.as_like().drop_with(None);
     fixture.transport.deliver(&result(1, b"ok"));
@@ -166,7 +179,8 @@ async fn a_registration_while_the_last_one_is_leaving_waits_for_it_then_register
     let fixture = ClientFixture::new();
     let (release, held) = oneshot::channel();
     let gate = Arc::new(Mutex::new(Some(held)));
-    let mut dependencies = NotificationDependencies::of((TextCodec, TextCodec, TextCodec));
+    let mut dependencies =
+        NotificationDependencies::new(RequestDependencies::new(TextCodec, TextCodec), TextCodec);
     dependencies.unsubscribe = Some(Arc::new(move |_, _| {
         let gate = locked(&gate).take().expect("one unsubscription held");
         Box::pin(async move {
@@ -182,8 +196,9 @@ async fn a_registration_while_the_last_one_is_leaving_waits_for_it_then_register
     let mut left = leaving.unregister();
     pending(&mut left).await;
     let heard = Heard::default();
-    let mut joining = notification.on(
-        ("s".to_owned(), callback(&heard, "")),
+    let mut joining = notification.register(
+        "s".to_owned(),
+        callback(&heard, ""),
         &RequestOptions::default(),
     );
     pending(&mut joining).await;

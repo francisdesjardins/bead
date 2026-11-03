@@ -49,7 +49,7 @@ impl Consumer {
             dependencies,
             library,
         };
-        consumer.accepts("pub fn check(_: &bead::RouterServer, _: &bead::ResolverProps) {}");
+        consumer.accepts("pub fn check(_: &bead::RouterServer, _: &bead::RequestResolverProps) {}");
         consumer
     }
 

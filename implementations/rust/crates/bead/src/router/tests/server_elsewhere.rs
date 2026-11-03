@@ -8,6 +8,7 @@ use tokio_util::sync::CancellationToken;
 
 use super::server::{Served, first, second};
 use super::{cancel_of, locked, request_header_of, token};
+use crate::NotificationResolverDependencies;
 use crate::constants::{CredentialScheme, ProtocolCode};
 use crate::credentials::{Credentials, ElsewhereSession, ElsewhereVerdict, ElsewhereVerifier};
 use crate::envelope::{Credential, Envelope, RequestHeader};
@@ -32,7 +33,7 @@ async fn moves_the_end_of_a_session_kept_by_a_call_whose_credential_renews_it_an
     use std::collections::BTreeMap;
 
     use super::server::{news, subscribing_of};
-    use crate::managers::service::{ResolverDependencies, Response};
+    use crate::managers::service::{RequestResolverDependencies, Response};
     use crate::payloads::TextCodec;
 
     let settling = Arc::new(Mutex::new(BTreeMap::new()));
@@ -46,7 +47,10 @@ async fn moves_the_end_of_a_session_kept_by_a_call_whose_credential_renews_it_an
         .services
         .get_notification_resolver(
             &news(),
-            (ResolverDependencies::of(TextCodec, TextCodec), TextCodec),
+            NotificationResolverDependencies::new(
+                RequestResolverDependencies::new(TextCodec, TextCodec),
+                TextCodec,
+            ),
         )
         .expect("news resolved")
         .on(Arc::new(|_, response: Response<TextCodec>| {

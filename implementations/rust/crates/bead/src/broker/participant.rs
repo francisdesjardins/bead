@@ -34,7 +34,7 @@ use crate::broker::adapter::{
     BrokerAdapter, BrokerCapabilities, BrokerDelivery, BrokerDown, BrokerError, BrokerListener,
     BrokerMessage, BrokerPublication, BrokerPublished, BrokerStart, BrokerSubscription,
 };
-use crate::broker::client::{BrokerClient, BrokerClientOptions};
+use crate::broker::client::{BrokerTransportClient, BrokerTransportClientOptions};
 use crate::broker::heartbeat::{Heartbeat, HeartbeatHooks};
 use crate::broker::parcel::{
     LARGEST_BOUND, LARGEST_SEQUENCE, LAYOUT, LEAST_BOUND, Parcel, ParcelRead, codes, flags,
@@ -42,7 +42,7 @@ use crate::broker::parcel::{
     write_parcel,
 };
 use crate::broker::sequence::{Budget, PartTaking, Parts, PartsBounds, Sequence, Taking, cut};
-use crate::broker::server::{BrokerServer, BrokerServerOptions, ServerInner};
+use crate::broker::server::{BrokerTransportServer, BrokerTransportServerOptions, ServerInner};
 use crate::clock::{SharedClock, SystemClock};
 use crate::debug::DebugDirection;
 use crate::debug::participant::{ParcelVerdict, ParticipantDebugEvent, ParticipantDebugListener};
@@ -50,7 +50,7 @@ use crate::duration::{NEVER, hold, hold_finite};
 use crate::errors::{ConnectError, ProgrammerError, TransportError};
 use crate::owner::{Owner, WeakOwner};
 use crate::router::types::{BoxFuture, ConnectionHandle, Gauges, RouterError, TransportMessage};
-use crate::transport::{ListenerId, Listeners, ReconnectOptions, attempting};
+use crate::transport::{ListenerId, Listeners, TransportClientReconnectOptions, attempting};
 
 /// How long a connection is silent before it is pinged, and a ping unanswered before it is closed,
 /// by default (spec 15.23): 30 seconds.
@@ -116,7 +116,7 @@ pub struct BrokerParticipantOptions {
     pub require_delivery: Option<BrokerDelivery>,
     /// How its link connects again once lost, each time a new incarnation (spec 15.21): a second
     /// between attempts, without end, when none.
-    pub reconnect: Option<ReconnectOptions>,
+    pub reconnect: Option<TransportClientReconnectOptions>,
     /// Whether its link connects again once lost, as `reconnect` says: true when none; false leaves
     /// it down, reported, until a start or a connect links it anew.
     pub is_reconnecting: Option<bool>,
@@ -249,6 +249,32 @@ pub(crate) struct PendingConnect {
     pub(crate) settled: oneshot::Sender<Result<Pair, TransportError>>,
 }
 
+/// What a broker's refusal of a connect says (spec 15.18): the REFUSE's reason, its status and a
+/// 426's layouts its server reads; or `no-subscriber` alone, its broker saying no participant serves
+/// the name.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct BrokerRefusal {
+    /// `malformed`, `layout-refused`, `busy`, or [`BrokerRefusedError::NO_SUBSCRIBER`].
+    pub reason: String,
+    /// The REFUSE's status: 400, 426 or 503; none for [`BrokerRefusedError::NO_SUBSCRIBER`].
+    pub status: Option<u16>,
+    /// The layouts a 426 names, those its server reads; none for any other.
+    pub layouts: Option<Vec<u8>>,
+}
+
+impl BrokerRefusal {
+    /// A refusal for `reason`, of no status and no layouts.
+    #[must_use]
+    pub fn new<R: Into<String>>(reason: R) -> Self {
+        Self {
+            reason: reason.into(),
+            status: None,
+            layouts: None,
+        }
+    }
+}
+
 /// A connect's refusal (spec 15.18), named as section 15.6 names a refusal.
 ///
 /// The REFUSE's status and reason, and a 426's layouts its server reads; or `no-subscriber`, its
@@ -265,14 +291,17 @@ impl BrokerRefusedError {
     /// The reason a broker that says nothing serves the name gives.
     pub const NO_SUBSCRIBER: &str = "no-subscriber";
 
-    /// A refusal of `status` for `reason`, the layouts a 426 names.
+    /// The connect's failure `refusal` says.
     #[must_use]
-    pub fn new<R: Into<String>>(
-        reason: R,
-        (status, layouts): (Option<u16>, Option<Vec<u8>>),
-    ) -> Self {
+    pub fn new(refusal: BrokerRefusal) -> Self {
+        let BrokerRefusal {
+            reason,
+            status,
+            layouts,
+        } = refusal;
+
         Self {
-            reason: reason.into(),
+            reason,
             status,
             layouts,
         }
@@ -368,7 +397,7 @@ pub(crate) struct Config {
     pub(crate) parts_bounds: Arc<PartsBounds>,
     // what it holds of one connection paused, past which it loses it; none, its maximumUnsentBytes
     maximum_held_envelope_bytes: Option<u64>,
-    reconnect: ReconnectOptions,
+    reconnect: TransportClientReconnectOptions,
     is_reconnecting: bool,
     status: Mutex<Status>,
     live: watch::Sender<bool>,
@@ -531,7 +560,7 @@ impl Config {
         &self,
         (topic, payload, expires_after): (Vec<String>, Bytes, Option<Duration>),
     ) -> BoxFuture<Result<BrokerPublished, BrokerError>> {
-        let mut publication = BrokerPublication::of(topic, payload);
+        let mut publication = BrokerPublication::new(topic, payload);
 
         if self
             .adapter
@@ -1545,10 +1574,13 @@ impl ParticipantState {
 
                             pending
                                 .settled
-                                .send(Err(BrokerRefusedError::new(
-                                    reason,
-                                    (Some(status), parcel.layouts),
-                                )
+                                .send(Err(BrokerRefusedError::new({
+                                    let mut refusal = BrokerRefusal::new(reason);
+
+                                    refusal.status = Some(status);
+                                    refusal.layouts = parcel.layouts;
+                                    refusal
+                                })
                                 .connect_error()))
                                 .ok();
                         }
@@ -1874,7 +1906,7 @@ async fn link(inner: &Arc<ParticipantInner>) -> Result<(), BrokerError> {
 
         gone.incarnation = Some(incarnation);
         gone.id = Some(config.id.clone());
-        start.will = Some(BrokerPublication::of(
+        start.will = Some(BrokerPublication::new(
             config.departure_of(&config.id),
             write_parcel(&gone)?,
         ));
@@ -2257,8 +2289,11 @@ impl BrokerParticipant {
     ///
     /// A [`ProgrammerError`] for a name another of its server transports serves, or for options it
     /// refuses.
-    pub fn server(&self, options: &BrokerServerOptions) -> Result<BrokerServer, ProgrammerError> {
-        BrokerServer::new(self, options)
+    pub fn server(
+        &self,
+        options: &BrokerTransportServerOptions,
+    ) -> Result<BrokerTransportServer, ProgrammerError> {
+        BrokerTransportServer::new(self, options)
     }
 
     /// A client transport over it, of one connection at a time.
@@ -2266,8 +2301,11 @@ impl BrokerParticipant {
     /// # Errors
     ///
     /// A [`ProgrammerError`] for options it refuses.
-    pub fn client(&self, options: &BrokerClientOptions) -> Result<BrokerClient, ProgrammerError> {
-        BrokerClient::new(self, options)
+    pub fn client(
+        &self,
+        options: &BrokerTransportClientOptions,
+    ) -> Result<BrokerTransportClient, ProgrammerError> {
+        BrokerTransportClient::new(self, options)
     }
 
     /// Holds `names` for `server`, each served by one server transport of it alone.

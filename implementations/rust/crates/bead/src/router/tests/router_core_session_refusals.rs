@@ -194,7 +194,7 @@ async fn answers_an_admissions_session_required_to_a_request_that_presented_a_cr
                         (7, "", true),
                     ] {
                         let mut procedure = echo();
-                        procedure.id = id;
+                        procedure.procedure_id = id;
                         let mut refusing = handler((&Handed::default(), &Arc::default()));
                         let counting = Arc::clone(&counting);
                         refusing.admit = Some(Arc::new(move |_| {

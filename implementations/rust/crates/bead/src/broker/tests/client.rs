@@ -13,7 +13,7 @@ use super::{
     participant_of, peer_of, publish_to, settle, until,
 };
 use crate::broker::adapter::{BrokerAdapter, BrokerPublication};
-use crate::broker::client::{BrokerClientOptions, BrokerConnectOptions};
+use crate::broker::client::{BrokerTransportClientConnectOptions, BrokerTransportClientOptions};
 use crate::broker::memory::{MemoryBroker, MemoryBrokerOptions};
 use crate::broker::parcel::{Parcel, flags, kinds, write_parcel};
 use crate::broker::participant::{BrokerParticipantOptions, BrokerRefusedError};
@@ -22,8 +22,9 @@ use crate::errors::TransportError;
 use crate::router::types::TransportMessage;
 use crate::testing::SteppingClock;
 use crate::transport::{
-    ClientListener, ClientTransport, DisconnectOptions, ReadyState, ReconnectDelay,
-    ReconnectOptions, ServerTransport,
+    ClientListener, ReadyState, RouterClientTransport, ServerTransport,
+    TransportClientDisconnectOptions, TransportClientReconnectDelay,
+    TransportClientReconnectOptions,
 };
 
 const INBOX: [&str; 3] = ["bead", "i", "ada"];
@@ -91,12 +92,14 @@ async fn fails_a_connect_refused_or_past_its_time_or_cancelled_and_refuses_what_
         },
     );
     let client = ada
-        .client(&BrokerClientOptions::default())
+        .client(&BrokerTransportClientOptions::default())
         .expect("a client");
 
     // nothing serves the name: its broker says so, and the connect fails at once, its refusal the
     // source
-    let failed = client.connect(&BrokerConnectOptions::of("nobody")).await;
+    let failed = client
+        .connect(&BrokerTransportClientConnectOptions::new("nobody"))
+        .await;
     let refused = refusal_of(&failed).expect("a refusal");
 
     assert_eq!(
@@ -112,9 +115,9 @@ async fn fails_a_connect_refused_or_past_its_time_or_cancelled_and_refuses_what_
 
     // one that serves it and never answers: past its time, on the clock given
     let (_silent, heard) = peer_of(&broker, ("silent", &[&["bead", "s", "interop"]])).await;
-    let timing = crate::testing::spawn(client.connect(&BrokerConnectOptions {
+    let timing = crate::testing::spawn(client.connect(&BrokerTransportClientConnectOptions {
         timeout: Some(Duration::from_secs(1)),
-        ..BrokerConnectOptions::of("interop")
+        ..BrokerTransportClientConnectOptions::new("interop")
     }));
 
     assert_eq!(clock.dues(), [Duration::from_secs(1)], "its time armed");
@@ -130,9 +133,9 @@ async fn fails_a_connect_refused_or_past_its_time_or_cancelled_and_refuses_what_
 
     // then given up by its signal
     let cancelling = CancellationToken::new();
-    let cancelled = crate::testing::spawn(client.connect(&BrokerConnectOptions {
+    let cancelled = crate::testing::spawn(client.connect(&BrokerTransportClientConnectOptions {
         signal: Some(cancelling.clone()),
-        ..BrokerConnectOptions::of("interop")
+        ..BrokerTransportClientConnectOptions::new("interop")
     }));
 
     until(|| heard.parcels().len() == 2, "its OPEN reaches the name").await;
@@ -152,7 +155,9 @@ async fn fails_a_connect_refused_or_past_its_time_or_cancelled_and_refuses_what_
     for server in ["", "a.b", &longest] {
         assert!(
             matches!(
-                client.connect(&BrokerConnectOptions::of(server)).await,
+                client
+                    .connect(&BrokerTransportClientConnectOptions::new(server))
+                    .await,
                 Err(TransportError::Refused(_))
             ),
             "{server} refused"
@@ -161,7 +166,9 @@ async fn fails_a_connect_refused_or_past_its_time_or_cancelled_and_refuses_what_
 
     assert!(client.send(data(&[1])).is_err(), "nothing to send on");
     assert!(
-        client.disconnect(&DisconnectOptions::default()).is_err(),
+        client
+            .disconnect(&TransportClientDisconnectOptions::default())
+            .is_err(),
         "nothing to close"
     );
     assert_eq!(
@@ -182,7 +189,7 @@ async fn reconnects_through_the_name_it_serves_a_pair_drawn_anew() {
 
     client.listen(Arc::new(AtClient(Arc::clone(&told))));
     client
-        .reconnect(&ReconnectOptions::default())
+        .reconnect(&TransportClientReconnectOptions::default())
         .expect("reconnecting")
         .await
         .expect("reconnected");
@@ -254,7 +261,7 @@ async fn paused_before_its_connect_opened_holds_what_its_server_sent_and_hands_i
     );
     let (peer, heard) = peer_of(&broker, ("acceptor", &[&["bead", "s", "interop"]])).await;
     let client = ada
-        .client(&BrokerClientOptions::default())
+        .client(&BrokerTransportClientOptions::default())
         .expect("a client");
     let told: Arc<Mutex<Vec<Vec<u8>>>> = Arc::default();
 
@@ -263,7 +270,8 @@ async fn paused_before_its_connect_opened_holds_what_its_server_sent_and_hands_i
     }));
     client.pause();
 
-    let connecting = crate::testing::spawn(client.connect(&BrokerConnectOptions::of("interop")));
+    let connecting =
+        crate::testing::spawn(client.connect(&BrokerTransportClientConnectOptions::new("interop")));
     let opener = opener_of(&heard).await;
 
     publish_to(&peer, (INBOX, accept_of(opener))).await;
@@ -309,7 +317,7 @@ async fn hands_on_an_envelope_its_server_sent_as_it_accepted_once_its_connect_op
     type Told = Arc<Mutex<Vec<(ReadyState, Vec<u8>)>>>;
 
     struct Standing {
-        client: crate::broker::client::BrokerClient,
+        client: crate::broker::client::BrokerTransportClient,
         told: Told,
     }
 
@@ -326,7 +334,7 @@ async fn hands_on_an_envelope_its_server_sent_as_it_accepted_once_its_connect_op
     );
     let (peer, heard) = peer_of(&broker, ("acceptor", &[&["bead", "s", "interop"]])).await;
     let client = ada
-        .client(&BrokerClientOptions::default())
+        .client(&BrokerTransportClientOptions::default())
         .expect("a client");
     let told: Told = Arc::default();
 
@@ -335,7 +343,8 @@ async fn hands_on_an_envelope_its_server_sent_as_it_accepted_once_its_connect_op
         told: Arc::clone(&told),
     }));
 
-    let connecting = crate::testing::spawn(client.connect(&BrokerConnectOptions::of("interop")));
+    let connecting =
+        crate::testing::spawn(client.connect(&BrokerTransportClientConnectOptions::new("interop")));
     let opener = opener_of(&heard).await;
 
     // * its ACCEPT and an envelope after it, published in one turn: the envelope comes before its
@@ -379,14 +388,15 @@ async fn fails_a_connect_its_server_refused_as_malformed_or_closed_as_it_opened_
     );
     let (peer, heard) = peer_of(&broker, ("acceptor", &[&["bead", "s", "interop"]])).await;
     let client = ada
-        .client(&BrokerClientOptions::default())
+        .client(&BrokerTransportClientOptions::default())
         .expect("a client");
     let told = Arc::new(ClientTold::default());
 
     client.listen(Arc::new(AtClient(Arc::clone(&told))));
 
     // refused 400: its refusal the source, named as section 15.6 names it
-    let refusing = crate::testing::spawn(client.connect(&BrokerConnectOptions::of("interop")));
+    let refusing =
+        crate::testing::spawn(client.connect(&BrokerTransportClientConnectOptions::new("interop")));
     let opener = opener_of(&heard).await;
 
     publish_to(
@@ -421,11 +431,15 @@ async fn fails_a_connect_its_server_refused_as_malformed_or_closed_as_it_opened_
     // no close is told
     locked(&heard.messages).clear();
 
-    let closing = crate::testing::spawn(client.connect(&BrokerConnectOptions::of("interop")));
+    let closing =
+        crate::testing::spawn(client.connect(&BrokerTransportClientConnectOptions::new("interop")));
     let opener = opener_of(&heard).await;
     // each publish takes effect as it is made: both go before either is awaited
-    let accepting = peer.publish(BrokerPublication::of(INBOX, Bytes::from(accept_of(opener))));
-    let closed = peer.publish(BrokerPublication::of(
+    let accepting = peer.publish(BrokerPublication::new(
+        INBOX,
+        Bytes::from(accept_of(opener)),
+    ));
+    let closed = peer.publish(BrokerPublication::new(
         INBOX,
         write_parcel(&Parcel {
             opener,
@@ -455,7 +469,8 @@ async fn fails_a_connect_its_server_refused_as_malformed_or_closed_as_it_opened_
     // once it opened, its server's close is told, unclean but for 1000
     locked(&heard.messages).clear();
 
-    let opening = crate::testing::spawn(client.connect(&BrokerConnectOptions::of("interop")));
+    let opening =
+        crate::testing::spawn(client.connect(&BrokerTransportClientConnectOptions::new("interop")));
     let lasting = opener_of(&heard).await;
 
     publish_to(&peer, (INBOX, accept_of(lasting))).await;
@@ -503,9 +518,9 @@ async fn refuses_to_send_a_credential_no_field_carries_or_what_is_no_envelope_ke
 
     // * not clean: a RESET, its server told unclean
     client
-        .disconnect(&DisconnectOptions {
+        .disconnect(&TransportClientDisconnectOptions {
             is_clean: Some(false),
-            ..DisconnectOptions::default()
+            ..TransportClientDisconnectOptions::default()
         })
         .expect("closed");
     until(
@@ -537,9 +552,9 @@ async fn fails_a_connect_under_way_once_disposed_its_link_up_or_not_yet() {
 
     // * disposed before its link is up: no OPEN goes
     let early = ada
-        .client(&BrokerClientOptions::default())
+        .client(&BrokerTransportClientOptions::default())
         .expect("a client");
-    let linking = early.connect(&BrokerConnectOptions::of("interop"));
+    let linking = early.connect(&BrokerTransportClientConnectOptions::new("interop"));
 
     early.dispose();
     assert_eq!(
@@ -550,9 +565,10 @@ async fn fails_a_connect_under_way_once_disposed_its_link_up_or_not_yet() {
 
     // disposed as its OPEN awaits its answer, the one OPEN that went
     let client = ada
-        .client(&BrokerClientOptions::default())
+        .client(&BrokerTransportClientOptions::default())
         .expect("a client");
-    let connecting = crate::testing::spawn(client.connect(&BrokerConnectOptions::of("interop")));
+    let connecting =
+        crate::testing::spawn(client.connect(&BrokerTransportClientConnectOptions::new("interop")));
 
     opener_of(&heard).await;
     assert_eq!(heard.parcels().len(), 1, "one OPEN went");
@@ -628,7 +644,7 @@ async fn refuses_a_connect_while_one_is_under_way_or_one_given_up_already() {
     );
     let (_peer, heard) = peer_of(&broker, ("acceptor", &[&["bead", "s", "interop"]])).await;
     let client = ada
-        .client(&BrokerClientOptions::default())
+        .client(&BrokerTransportClientOptions::default())
         .expect("a client");
 
     // none held: not secure
@@ -645,9 +661,9 @@ async fn refuses_a_connect_while_one_is_under_way_or_one_given_up_already() {
     assert!(
         matches!(
             client
-                .connect(&BrokerConnectOptions {
+                .connect(&BrokerTransportClientConnectOptions {
                     signal: Some(given_up),
-                    ..BrokerConnectOptions::of("interop")
+                    ..BrokerTransportClientConnectOptions::new("interop")
                 })
                 .await,
             Err(TransportError::Cancelled(_))
@@ -660,12 +676,13 @@ async fn refuses_a_connect_while_one_is_under_way_or_one_given_up_already() {
         "nothing moved"
     );
 
-    let connecting = crate::testing::spawn(client.connect(&BrokerConnectOptions::of("interop")));
+    let connecting =
+        crate::testing::spawn(client.connect(&BrokerTransportClientConnectOptions::new("interop")));
 
     // * one under way: a second is refused, and the first goes on
     assert_eq!(
         client
-            .connect(&BrokerConnectOptions::of("interop"))
+            .connect(&BrokerTransportClientConnectOptions::new("interop"))
             .await
             .expect_err("refused")
             .to_string(),
@@ -690,28 +707,28 @@ async fn refuses_a_reconnection_never_connected_under_way_while_it_connects_or_g
     let pair = BrokerPair::of(&BrokerPairOptions::default()).await;
     let client = pair
         .client_participant
-        .client(&BrokerClientOptions::default())
+        .client(&BrokerTransportClientOptions::default())
         .expect("a client");
     let (_silent, _heard) = peer_of(&pair.broker, ("silent", &[&["bead", "s", "quiet"]])).await;
     let refusal =
         |outcome: Result<_, TransportError>| outcome.map(drop).expect_err("refused").to_string();
 
     assert_eq!(
-        refusal(client.reconnect(&ReconnectOptions::default())),
+        refusal(client.reconnect(&TransportClientReconnectOptions::default())),
         "the transport client was never connected",
         "never connected"
     );
 
     // a connect to a name nobody answers, given up once refused its reconnection
     let giving = CancellationToken::new();
-    let connecting = crate::testing::spawn(client.connect(&BrokerConnectOptions {
+    let connecting = crate::testing::spawn(client.connect(&BrokerTransportClientConnectOptions {
         signal: Some(giving.clone()),
-        ..BrokerConnectOptions::of("quiet")
+        ..BrokerTransportClientConnectOptions::new("quiet")
     }));
 
     tokio::task::yield_now().await;
     assert_eq!(
-        refusal(client.reconnect(&ReconnectOptions::default())),
+        refusal(client.reconnect(&TransportClientReconnectOptions::default())),
         "the transport client cannot reconnect while connecting",
         "while it connects"
     );
@@ -726,7 +743,7 @@ async fn refuses_a_reconnection_never_connected_under_way_while_it_connects_or_g
 
     // given up already: the open connection left alone
     client
-        .connect(&BrokerConnectOptions::of("interop"))
+        .connect(&BrokerTransportClientConnectOptions::new("interop"))
         .await
         .expect("connected");
 
@@ -735,9 +752,9 @@ async fn refuses_a_reconnection_never_connected_under_way_while_it_connects_or_g
     given_up.cancel();
     assert!(
         matches!(
-            client.reconnect(&ReconnectOptions {
+            client.reconnect(&TransportClientReconnectOptions {
                 signal: Some(given_up),
-                ..ReconnectOptions::default()
+                ..TransportClientReconnectOptions::default()
             }),
             Err(TransportError::Cancelled(_))
         ),
@@ -755,15 +772,17 @@ async fn refuses_a_reconnection_never_connected_under_way_while_it_connects_or_g
     .await;
 
     let reconnecting = client
-        .reconnect(&ReconnectOptions {
-            delay: Some(ReconnectDelay::Fixed(Duration::from_millis(100))),
+        .reconnect(&TransportClientReconnectOptions {
+            delay: Some(TransportClientReconnectDelay::Fixed(Duration::from_millis(
+                100,
+            ))),
             maximum_attempts: Some(2),
-            ..ReconnectOptions::default()
+            ..TransportClientReconnectOptions::default()
         })
         .expect("reconnecting");
 
     assert_eq!(
-        refusal(client.reconnect(&ReconnectOptions::default())),
+        refusal(client.reconnect(&TransportClientReconnectOptions::default())),
         "the transport client is already reconnecting",
         "under way"
     );

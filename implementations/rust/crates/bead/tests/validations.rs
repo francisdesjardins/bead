@@ -5,7 +5,9 @@
 use std::process::ExitCode;
 
 use bead::testing::validations;
-use bead::{FailureScope, Judged, ProtocolCode, Violation, violations_detail_of, violations_of};
+use bead::{
+    Failure, Judged, ProtocolCode, RouterSide, Violation, violations_detail_of, violations_of,
+};
 use libtest_mimic::{Arguments, Failed, Trial};
 use serde::Deserialize;
 use serde_json::{Map, Value};
@@ -83,8 +85,8 @@ fn play(entry: &Detail) -> Result<(), Failed> {
 
     if let Some(read) = &entry.read {
         let got = violations_of(
-            (ProtocolCode::PAYLOAD_INVALID.get(), FailureScope::Protocol),
-            &entry.detail,
+            &Failure::protocol(ProtocolCode::PAYLOAD_INVALID, RouterSide::Client)
+                .saying(entry.detail.as_str()),
         );
         let violations: Vec<Violation> = read.violations.iter().map(violation_of).collect();
 

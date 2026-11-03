@@ -14,7 +14,7 @@ use crate::router::client::{RouterClient, RouterClientOptions};
 use crate::router::types::{
     BoxFuture, IntakeLimitsOptions, RequestCredential, RouterLimitsOptions,
 };
-use crate::transport::ClientTransport;
+use crate::transport::RouterClientTransport;
 
 /// How a client is built, beyond its transport.
 #[derive(Clone, Default)]
@@ -49,7 +49,7 @@ impl fmt::Debug for ClientOptions {
 pub struct Client {
     router: RouterClient,
     services: ServiceManager,
-    transport: Arc<dyn ClientTransport>,
+    transport: Arc<dyn RouterClientTransport>,
 }
 
 impl fmt::Debug for Client {
@@ -65,7 +65,7 @@ impl Client {
     ///
     /// A [`ProgrammerError`] as its router or its services refuse their options.
     pub fn new(
-        transport: Arc<dyn ClientTransport>,
+        transport: Arc<dyn RouterClientTransport>,
         options: &ClientOptions,
     ) -> Result<Self, ProgrammerError> {
         let clock: Option<SharedClock> = transport.clock();
@@ -106,7 +106,7 @@ impl Client {
 
     /// Its transport.
     #[must_use]
-    pub fn transport(&self) -> Arc<dyn ClientTransport> {
+    pub fn transport(&self) -> Arc<dyn RouterClientTransport> {
         Arc::clone(&self.transport)
     }
 

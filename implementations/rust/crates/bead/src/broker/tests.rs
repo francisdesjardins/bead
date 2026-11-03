@@ -9,18 +9,20 @@ use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use bytes::Bytes;
 
 use super::adapter::{BrokerAdapter, BrokerCapabilities, BrokerListener, BrokerMessage};
-use super::client::{BrokerClient, BrokerClientOptions, BrokerConnectOptions};
+use super::client::{
+    BrokerTransportClient, BrokerTransportClientConnectOptions, BrokerTransportClientOptions,
+};
 use super::memory::{
     MemoryBroker, MemoryBrokerAdapter, MemoryBrokerAdapterOptions, MemoryBrokerOptions,
 };
 use super::parcel::{Parcel, ParcelRead, read_parcel};
 use super::participant::{BrokerParticipant, BrokerParticipantOptions};
-use super::server::{BrokerServer, BrokerServerOptions};
+use super::server::{BrokerTransportServer, BrokerTransportServerOptions};
 use crate::router::types::{ConnectionHandle, RouterError, TransportMessage};
 use crate::testing::Instant;
 use crate::transport::{
-    ClientListener, ReconnectDelay, ReconnectOptions, ServerListener, ServerTransport,
-    TransportServerRefusal,
+    ClientListener, ServerListener, ServerTransport, TransportClientReconnectDelay,
+    TransportClientReconnectOptions, TransportServerRefusal,
 };
 
 mod adapter;
@@ -69,7 +71,7 @@ pub(super) fn broker() -> MemoryBroker {
 /// An adapter of `broker` of `id`.
 pub(super) fn adapter_of(broker: &MemoryBroker, id: &str) -> MemoryBrokerAdapter {
     broker
-        .adapter(&MemoryBrokerAdapterOptions::of(id))
+        .adapter(&MemoryBrokerAdapterOptions::new(id))
         .expect("an adapter")
 }
 
@@ -337,11 +339,12 @@ pub(super) const ACCEPTOR_HALF: u64 = 0xA100_0000_0000_0001;
 /// participant of the id `ada`, its bound given:
 /// what it hears from then on, and the client's half.
 pub(super) async fn accepted_of(
-    (broker, client): (&MemoryBroker, &BrokerClient),
+    (broker, client): (&MemoryBroker, &BrokerTransportClient),
     bound: u64,
 ) -> (MemoryBrokerAdapter, Arc<Heard>, u64) {
     let (acceptor, heard) = peer_of(broker, ("acceptor", &[&["bead", "s", "interop"]])).await;
-    let connecting = crate::testing::spawn(client.connect(&BrokerConnectOptions::of("interop")));
+    let connecting =
+        crate::testing::spawn(client.connect(&BrokerTransportClientConnectOptions::new("interop")));
 
     until(|| heard.parcels().len() == 1, "its OPEN reaches the name").await;
 
@@ -361,7 +364,7 @@ pub(super) async fn accepted_of(
     };
 
     acceptor
-        .publish(super::adapter::BrokerPublication::of(
+        .publish(super::adapter::BrokerPublication::new(
             ["bead", "i", "ada"],
             super::parcel::write_parcel(&accept).expect("written"),
         ))
@@ -388,7 +391,7 @@ pub(super) async fn publish_to(
     (topic, payload): ([&str; 3], Vec<u8>),
 ) -> super::adapter::BrokerPublished {
     adapter
-        .publish(super::adapter::BrokerPublication::of(
+        .publish(super::adapter::BrokerPublication::new(
             topic,
             Bytes::from(payload),
         ))
@@ -481,7 +484,7 @@ pub(super) struct BrokerPair {
     pub(super) client_adapter: MemoryBrokerAdapter,
     pub(super) server_participant: BrokerParticipant,
     pub(super) client_participant: BrokerParticipant,
-    pub(super) server: BrokerServer,
+    pub(super) server: BrokerTransportServer,
     pub(super) told: Arc<ServerTold>,
 }
 
@@ -493,7 +496,7 @@ impl BrokerPair {
         })
         .expect("a broker");
         let server_adapter = adapter_of(&broker, "server");
-        let mut client_options = MemoryBrokerAdapterOptions::of("client");
+        let mut client_options = MemoryBrokerAdapterOptions::new("client");
 
         client_options.capabilities = options.client_capabilities;
 
@@ -507,17 +510,17 @@ impl BrokerPair {
         let server_participant = participant_of(&server_adapter, &server_participant_options);
         let client_participant_options = BrokerParticipantOptions {
             heartbeat: options.heartbeat,
-            reconnect: Some(ReconnectOptions {
-                delay: Some(ReconnectDelay::Fixed(Duration::ZERO)),
+            reconnect: Some(TransportClientReconnectOptions {
+                delay: Some(TransportClientReconnectDelay::Fixed(Duration::ZERO)),
                 maximum_attempts: Some(u32::MAX),
-                ..ReconnectOptions::default()
+                ..TransportClientReconnectOptions::default()
             }),
             ..BrokerParticipantOptions::default()
         };
 
         let client_participant = participant_of(&client_adapter, &client_participant_options);
         let server = server_participant
-            .server(&BrokerServerOptions::of(["interop"]))
+            .server(&BrokerTransportServerOptions::new(["interop"]))
             .expect("a server");
         let told = Arc::new(ServerTold::default());
 
@@ -538,15 +541,15 @@ impl BrokerPair {
 
     /// A client of the clients' participant, connected to `interop`, its connection told open at
     /// the server.
-    pub(super) async fn connect(&self) -> BrokerClient {
+    pub(super) async fn connect(&self) -> BrokerTransportClient {
         let before = locked(&self.told.opened).len();
         let client = self
             .client_participant
-            .client(&BrokerClientOptions::default())
+            .client(&BrokerTransportClientOptions::default())
             .expect("a client");
 
         client
-            .connect(&BrokerConnectOptions::of("interop"))
+            .connect(&BrokerTransportClientConnectOptions::new("interop"))
             .await
             .expect("connected");
         until(
@@ -579,7 +582,9 @@ mod held {
     use crate::broker::participant::BrokerParticipant;
     use crate::router::types::{ConnectionHandle, TransportMessage};
     use crate::testing::Instant;
-    use crate::transport::{ClientTransport, DisconnectOptions, ServerListener, ServerTransport};
+    use crate::transport::{
+        RouterClientTransport, ServerListener, ServerTransport, TransportClientDisconnectOptions,
+    };
 
     // an envelope of `length` bytes, each `byte`
     fn data_of(byte: u8, length: usize) -> TransportMessage {
@@ -791,7 +796,7 @@ mod held {
 
         until_held(&pair.server_participant, &[(2, false), (0, false)]).await;
         first
-            .disconnect(&DisconnectOptions::default())
+            .disconnect(&TransportClientDisconnectOptions::default())
             .expect("disconnected");
         until_held(&pair.server_participant, &[(2, true), (0, false)]).await;
 

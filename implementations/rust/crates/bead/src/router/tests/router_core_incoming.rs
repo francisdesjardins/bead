@@ -10,7 +10,7 @@ use super::server::{first, request_of, second};
 use super::{Handed, answer, answered, locked};
 use crate::envelope::{ChunkHeader, CreditHeader, Envelope};
 use crate::errors::CallError;
-use crate::router::core::ResolverProps;
+use crate::router::core::RequestResolverProps;
 use crate::router::types::{CallAddress, RouterAnswer, SignalReason};
 use crate::testing::pair::echo;
 
@@ -78,7 +78,7 @@ async fn abort_the_signal_of_each_call_a_closing_connection_opened_and_of_no_oth
     let keeping = Arc::clone(&handed);
     let answers = Arc::new(Mutex::new(Vec::new()));
     let answering = Arc::clone(&answers);
-    let served = serving(Arc::new(move |props: ResolverProps| {
+    let served = serving(Arc::new(move |props: RequestResolverProps| {
         let signal = props.signal.clone();
         let answerer = Arc::clone(&props.answerer);
         let answering = Arc::clone(&answering);

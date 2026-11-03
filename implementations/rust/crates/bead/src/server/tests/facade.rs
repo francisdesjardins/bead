@@ -6,13 +6,14 @@ use std::sync::{Arc, Mutex, PoisonError};
 use bytes::Bytes;
 use tokio_util::sync::CancellationToken;
 
+use crate::NotificationResolverDependencies;
 use crate::clock::SharedClock;
 use crate::constants::{EnvelopeKind, ProcedureKind, ProtocolCode, RouterSide};
 use crate::envelope::{Credential, Envelope, RequestHeader};
 use crate::errors::{CallError, ResolverError};
 use crate::identity::Procedure;
 use crate::managers::service::{
-    Request, RequestDependencies, RequestOptions, ResolverDependencies,
+    Request, RequestDependencies, RequestOptions, RequestResolverDependencies,
 };
 use crate::router::admissions::require_session;
 use crate::router::core::AdmissionRequest;
@@ -30,8 +31,8 @@ fn locked<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
 fn procedure(id: u16) -> Procedure {
     Procedure {
         service_id: 1,
-        id,
-        name: match id {
+        procedure_id: id,
+        procedure_name: match id {
             1 => "openSession",
             2 => "echo",
             3 => "closeSession",
@@ -41,7 +42,7 @@ fn procedure(id: u16) -> Procedure {
         }
         .to_owned(),
         service_revision: 1,
-        kind: Some(ProcedureKind::Request),
+        procedure_kind: Some(ProcedureKind::Request),
         maximum_payload_bytes: None,
         deprecation: None,
     }
@@ -82,7 +83,10 @@ impl Fixture {
             .services()
             .get_request_resolver(
                 &procedure(1),
-                ResolverDependencies::of(crate::payloads::TextCodec, crate::payloads::TextCodec),
+                RequestResolverDependencies::new(
+                    crate::payloads::TextCodec,
+                    crate::payloads::TextCodec,
+                ),
             )
             .expect("openSession")
             .register(
@@ -108,9 +112,9 @@ impl Fixture {
             .services()
             .get_request_resolver(
                 &procedure(2),
-                ResolverDependencies {
+                RequestResolverDependencies {
                     before_request: Some(require_session()),
-                    ..ResolverDependencies::of(
+                    ..RequestResolverDependencies::new(
                         crate::payloads::TextCodec,
                         crate::payloads::TextCodec,
                     )
@@ -166,10 +170,10 @@ impl Fixture {
             .services()
             .get_command(
                 &Procedure {
-                    kind: Some(ProcedureKind::Command),
+                    procedure_kind: Some(ProcedureKind::Command),
                     ..procedure(3)
                 },
-                RequestDependencies::of(crate::payloads::TextCodec, crate::payloads::TextCodec),
+                RequestDependencies::new(crate::payloads::TextCodec, crate::payloads::TextCodec),
             )
             .expect("a command")
     }
@@ -186,13 +190,13 @@ impl Fixture {
             .services()
             .get_notification_resolver(
                 &Procedure {
-                    kind: Some(ProcedureKind::Notifies),
+                    procedure_kind: Some(ProcedureKind::Notifies),
                     ..procedure(5)
                 },
-                (
-                    ResolverDependencies {
+                NotificationResolverDependencies::new(
+                    RequestResolverDependencies {
                         before_request: Some(require_session()),
-                        ..ResolverDependencies::of(
+                        ..RequestResolverDependencies::new(
                             crate::payloads::TextCodec,
                             crate::payloads::TextCodec,
                         )
@@ -264,7 +268,10 @@ async fn the_end_of_a_session_is_announced_on_the_next_answer_and_a_session_repl
         .services()
         .get_request_resolver(
             &procedure(3),
-            ResolverDependencies::of(crate::payloads::TextCodec, crate::payloads::TextCodec),
+            RequestResolverDependencies::new(
+                crate::payloads::TextCodec,
+                crate::payloads::TextCodec,
+            ),
         )
         .expect("logout")
         .register(
@@ -849,7 +856,10 @@ async fn a_request_runs_in_its_connection_s_session_presenting_none_or_its_token
         .services()
         .get_request_resolver(
             &procedure(4),
-            ResolverDependencies::of(crate::payloads::TextCodec, crate::payloads::TextCodec),
+            RequestResolverDependencies::new(
+                crate::payloads::TextCodec,
+                crate::payloads::TextCodec,
+            ),
         )
         .expect("whoami")
         .register(
@@ -884,10 +894,12 @@ async fn a_request_runs_in_its_connection_s_session_presenting_none_or_its_token
         .await
         .expect("opened");
     sessions
-        .update_data((
-            Arc::clone(&fixture.first),
-            Some(serde_json::json!({ "name": "ada" })),
-        ))
+        .update_data({
+            let mut session = sessions.create(Arc::clone(&fixture.first));
+
+            session.data = Some(serde_json::json!({ "name": "ada" }));
+            session
+        })
         .await
         .expect("updated");
     fixture.ask(5, (4, None)).await;
@@ -914,10 +926,12 @@ async fn a_request_runs_in_its_connection_s_session_presenting_none_or_its_token
     fixture.ask(11, (4, Some(Credential::Opaque(token)))).await;
     fixture.ask(13, (4, None)).await;
     sessions
-        .update_data((
-            Arc::clone(&fixture.first),
-            Some(serde_json::json!({ "name": "eve" })),
-        ))
+        .update_data({
+            let mut session = sessions.create(Arc::clone(&fixture.first));
+
+            session.data = Some(serde_json::json!({ "name": "eve" }));
+            session
+        })
         .await
         .expect("changed while held");
     release.cancel();
@@ -1232,8 +1246,8 @@ async fn hears_its_transport_s_error_and_refusal_through_the_server_s_transport(
     let cause: Arc<dyn std::error::Error + Send + Sync> =
         Arc::new(std::io::Error::other("a listener that throws"));
     let error = RouterError::Other(Arc::clone(&cause));
-    let mut refusal =
-        TransportServerRefusal::of((403, "host-refused"), Some("127.0.0.1".to_owned()));
+    let mut refusal = TransportServerRefusal::new(403, "host-refused");
+    refusal.address = Some("127.0.0.1".to_owned());
     refusal.authority = Some("rebind.example:8080".to_owned());
     refusal.port = Some(50_000);
     fixture.transport.report(&error, Some(&fixture.first));

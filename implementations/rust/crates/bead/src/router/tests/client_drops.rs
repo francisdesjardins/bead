@@ -7,6 +7,7 @@ use bytes::Bytes;
 
 use super::client::Notified;
 use super::{Scripted, answered, failure_of, result_of};
+use crate::UnregisterNotificationOptions;
 use crate::constants::ProtocolCode;
 use crate::failure::Failure;
 use crate::identity::Procedure;
@@ -74,7 +75,10 @@ async fn clears_the_timers_of_its_reservations_with_the_connection() {
     assert_eq!(scripted.clock.dues(), Vec::<Duration>::new());
     scripted
         .router
-        .unregister_notification((&notification.like(), true))
+        .unregister_notification(
+            &notification.like(),
+            &UnregisterNotificationOptions::default(),
+        )
         .await;
     assert_eq!(scripted.clock.dues(), [timeout]);
     scripted.transport.close_connection();
@@ -92,7 +96,7 @@ async fn drops_every_notification_though_one_of_them_throws_and_keeps_what_a_dro
     let router = scripted.router.clone();
     let reregistering: Arc<dyn NotificationLike> = Arc::new(Dropping {
         procedure: Procedure {
-            id: 7,
+            procedure_id: 7,
             ..super::notifying()
         },
         drop: Box::new(move || {

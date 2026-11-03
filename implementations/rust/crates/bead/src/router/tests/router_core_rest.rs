@@ -12,12 +12,13 @@ use tokio::sync::oneshot;
 
 use super::server::{Served, first, header_of, request_of, second};
 use super::{Handed, Scripted, answer, answered, cancel_of, keeping, locked, options_of};
+use crate::RouterRequest;
 use crate::constants::{EnvelopeKind, ProtocolCode, RouterSide};
 use crate::envelope::{ChunkHeader, Envelope, RequestHeader};
 use crate::errors::{CallError, ResolverError};
 use crate::failure::{Failure, FailureOrigin};
-use crate::router::core::{AdmissionRefusal, Handler, ResolveFn, ResolverProps};
-use crate::router::server::{Call, CallHooks, RouterServerOptions, ServerRequest};
+use crate::router::core::{AdmissionRefusal, Handler, RequestResolverProps, ResolveFn};
+use crate::router::server::{Call, RouterServerOptions};
 use crate::router::types::{RouterAnswer, RouterLimitsOptions, TransportMessage};
 use crate::testing::pair::echo;
 use crate::testing::scripted::Sending;
@@ -76,7 +77,7 @@ fn gated(releases: Vec<oneshot::Receiver<ResolverEnd>>) -> (ResolveFn, Handed) {
     let releases = Mutex::new(VecDeque::from(releases));
     let handed = Handed::default();
     let keeping = Arc::clone(&handed);
-    let resolve: ResolveFn = Arc::new(move |props: ResolverProps| {
+    let resolve: ResolveFn = Arc::new(move |props: RequestResolverProps| {
         locked(&keeping).push(props);
         let release = locked(&releases).pop_front();
 
@@ -105,16 +106,15 @@ pub(super) fn asking(served: &Served, timeout: Duration) -> Call {
         .router
         .request(
             Bytes::new(),
-            (
-                ServerRequest {
-                    procedure: echo().address(),
-                    maximum_payload_bytes: None,
-                    options,
-                    series: None,
-                    refusal: None,
-                },
-                CallHooks::default(),
-            ),
+            RouterRequest {
+                procedure: echo(),
+                options,
+                series: None,
+                refusal: None,
+                subscribes: None,
+                on_call_id: None,
+                on_sent: None,
+            },
         )
         .expect("a call made")
 }
@@ -224,10 +224,7 @@ async fn settles_a_call_with_an_answer_of_this_layout_that_does_not_read_and_nev
         .router
         .request(
             Bytes::from_static(&[1]),
-            (
-                super::request_of((None, Duration::from_secs(5))),
-                CallHooks::default(),
-            ),
+            super::request_of((None, Duration::from_secs(5))),
         )
         .expect("client asks");
     let mut call = Box::pin(call);

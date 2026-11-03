@@ -9,11 +9,11 @@ use super::client::Notified;
 use super::{
     Scripted, TIMEOUT, answered, failure_of, locked, notification_of, request_of, result_of,
 };
+use crate::UnregisterNotificationOptions;
 use crate::constants::{EnvelopeKind, ProtocolCode};
 use crate::duration::NEVER;
 use crate::envelope::Envelope;
 use crate::errors::CallError;
-use crate::router::server::CallHooks;
 use crate::router::types::RouterActivity;
 use crate::testing::surface::Consumer;
 
@@ -61,7 +61,10 @@ async fn triggers_the_notification_whose_subscription_opened_their_call_one_ahea
     );
     scripted
         .router
-        .unregister_notification((&notification.like(), true))
+        .unregister_notification(
+            &notification.like(),
+            &UnregisterNotificationOptions::default(),
+        )
         .await;
     assert!(!scripted.router.has_notification(&notification.like()));
 }
@@ -73,10 +76,7 @@ async fn a_request_that_subscribes_says_it_opens_a_subscription_and_an_ordinary_
     let subscribing = scripted.subscribe((&notification.like(), TIMEOUT)).await;
     let ordinary = scripted
         .router
-        .request(
-            Bytes::new(),
-            (request_of((None, TIMEOUT)), CallHooks::default()),
-        )
+        .request(Bytes::new(), request_of((None, TIMEOUT)))
         .expect("an ordinary request");
     scripted.settle().await;
     scripted.transport.deliver(&result_of(1, None));
@@ -106,10 +106,7 @@ async fn an_ordinary_request_to_the_procedure_never_moves_the_subscription() {
     subscribed(&scripted, (&notification, 1)).await;
     let ordinary = scripted
         .router
-        .request(
-            Bytes::new(),
-            (request_of((None, TIMEOUT)), CallHooks::default()),
-        )
+        .request(Bytes::new(), request_of((None, TIMEOUT)))
         .expect("an ordinary request");
     scripted.settle().await;
     scripted.transport.deliver(&result_of(3, None));
@@ -172,7 +169,10 @@ async fn a_subscription_that_waits_without_end_let_go_of_is_cancelled_and_its_ca
     answered(subscribing).await.expect("subscribed");
     scripted
         .router
-        .unregister_notification((&notification.like(), true))
+        .unregister_notification(
+            &notification.like(),
+            &UnregisterNotificationOptions::default(),
+        )
         .await;
     scripted.transport.deliver(&notification_of(1, 5));
     scripted.settle().await;
@@ -197,12 +197,20 @@ async fn a_notification_let_go_of_is_cancelled_unless_its_subscription_was_taken
     subscribed(&scripted, (&notification, 1)).await;
     scripted
         .router
-        .unregister_notification((&notification.like(), true))
+        .unregister_notification(
+            &notification.like(),
+            &UnregisterNotificationOptions::default(),
+        )
         .await;
     subscribed(&scripted, (&notification, 3)).await;
     scripted
         .router
-        .unregister_notification((&notification.like(), false))
+        .unregister_notification(
+            &notification.like(),
+            &UnregisterNotificationOptions {
+                cancel: Some(false),
+            },
+        )
         .await;
     scripted
         .router
@@ -210,11 +218,17 @@ async fn a_notification_let_go_of_is_cancelled_unless_its_subscription_was_taken
         .expect("registered without a call");
     scripted
         .router
-        .unregister_notification((&notification.like(), true))
+        .unregister_notification(
+            &notification.like(),
+            &UnregisterNotificationOptions::default(),
+        )
         .await;
     scripted
         .router
-        .unregister_notification((&Notified::new(None).like(), true))
+        .unregister_notification(
+            &Notified::new(None).like(),
+            &UnregisterNotificationOptions::default(),
+        )
         .await;
     scripted.transport.deliver(&notification_of(1, 5));
     scripted.transport.deliver(&notification_of(3, 5));
@@ -237,7 +251,10 @@ async fn takes_away_only_the_notification_that_asks_not_another_of_its_procedure
     subscribed(&scripted, (&held, 1)).await;
     scripted
         .router
-        .unregister_notification((&Notified::new(None).like(), true))
+        .unregister_notification(
+            &Notified::new(None).like(),
+            &UnregisterNotificationOptions::default(),
+        )
         .await;
     scripted.transport.deliver(&notification_of(1, 5));
     scripted.settle().await;

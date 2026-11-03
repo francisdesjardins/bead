@@ -18,7 +18,7 @@ use crate::constants::{EnvelopeKind, RouterSide};
 use crate::envelope::{Envelope, ReadEnvelopeOptions, read_envelope, write_envelope};
 use crate::router::types::{BoxFuture, ConnectionHandle, Gauges, RouterError, TransportMessage};
 use crate::transport::{
-    ClientListener, ClientTransport, ReadyState, Sent, ServerListener, ServerTransport,
+    ClientListener, ReadyState, RouterClientTransport, Sent, ServerListener, ServerTransport,
     TransportServerRefusal,
 };
 
@@ -347,7 +347,7 @@ impl ScriptedClient {
     }
 }
 
-impl ClientTransport for ScriptedClient {
+impl RouterClientTransport for ScriptedClient {
     fn send(&self, message: TransportMessage) -> Result<Sent, RouterError> {
         let sending = locked(&self.sending).clone();
 

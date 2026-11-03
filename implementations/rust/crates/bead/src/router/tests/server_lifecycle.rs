@@ -8,12 +8,13 @@ use super::server::{Served, first, header_of, news, request_of, subscribing_of};
 use super::{answered, locked, options_of, token};
 use crate::constants::CredentialScheme;
 use crate::debug::DebugDirection;
-use crate::envelope::{Credential, Envelope, Header, RequestHeader, ResultHeader};
+use crate::envelope::{Credential, Envelope, EnvelopeHeader, RequestHeader, ResultHeader};
 use crate::errors::CallError;
-use crate::managers::service::{NotifyOptions, ResolverDependencies, Response};
+use crate::managers::service::{NotifyOptions, RequestResolverDependencies, Response};
 use crate::payloads::TextCodec;
-use crate::router::server::{CallHooks, RouterServerOptions, ServerRequest};
+use crate::router::server::RouterServerOptions;
 use crate::testing::pair::echo;
+use crate::{NotificationResolverDependencies, RouterRequest};
 
 #[tokio::test]
 async fn dispose_lets_go_of_the_transport_rejects_what_waits_forgets_every_connection_and_sends_nothing_more()
@@ -24,15 +25,18 @@ async fn dispose_lets_go_of_the_transport_rejects_what_waits_forgets_every_conne
     let late_subscription = Arc::new(Mutex::new(Vec::new()));
     let hearing = Arc::clone(&late_subscription);
     let other = crate::identity::Procedure {
-        id: 7,
-        name: "other".to_owned(),
+        procedure_id: 7,
+        procedure_name: "other".to_owned(),
         ..news()
     };
     served
         .services
         .get_notification_resolver(
             &other,
-            (ResolverDependencies::of(TextCodec, TextCodec), TextCodec),
+            NotificationResolverDependencies::new(
+                RequestResolverDependencies::new(TextCodec, TextCodec),
+                TextCodec,
+            ),
         )
         .expect("other resolved")
         .on(Arc::new(move |request, response: Response<TextCodec>| {
@@ -58,18 +62,23 @@ async fn dispose_lets_go_of_the_transport_rejects_what_waits_forgets_every_conne
         },
         &first(),
     );
-    let mut options = options_of(super::TIMEOUT);
-    options.connection_handle = Some(first());
-    let request = ServerRequest {
-        procedure: echo().address(),
-        maximum_payload_bytes: None,
-        options,
-        series: None,
-        refusal: None,
+    // the same command, each time anew
+    let request = || {
+        let mut options = options_of(super::TIMEOUT);
+        options.connection_handle = Some(first());
+        RouterRequest {
+            procedure: echo(),
+            options,
+            series: None,
+            refusal: None,
+            subscribes: None,
+            on_call_id: None,
+            on_sent: None,
+        }
     };
     let waiting = served
         .router
-        .request(Bytes::new(), (request.clone(), CallHooks::default()))
+        .request(Bytes::new(), request())
         .expect("a command waits");
     served.settle().await;
     assert_eq!(served.sent_since(), ["first request 2 "]);
@@ -96,7 +105,7 @@ async fn dispose_lets_go_of_the_transport_rejects_what_waits_forgets_every_conne
         .await;
     let after = served
         .router
-        .request(Bytes::new(), (request, CallHooks::default()))
+        .request(Bytes::new(), request())
         .expect("a disposed call has its failure");
     assert!(matches!(
         answered(after).await,
@@ -121,7 +130,10 @@ async fn tells_debug_each_envelope_with_its_connection_and_a_copy_of_its_header_
     });
     served
         .services
-        .get_request_resolver(&echo(), ResolverDependencies::of(TextCodec, TextCodec))
+        .get_request_resolver(
+            &echo(),
+            RequestResolverDependencies::new(TextCodec, TextCodec),
+        )
         .expect("echo resolved")
         .on(Arc::new(|_, response: Response<TextCodec>| {
             response.result("ok".to_owned())
@@ -134,13 +146,13 @@ async fn tells_debug_each_envelope_with_its_connection_and_a_copy_of_its_header_
         // A listener owns only its copy; its change cannot reach the envelope sent.
         let mut changed = envelope.clone();
         match &mut changed.header {
-            Header::Request(header) => header.call_id = 0,
-            Header::Result(header) => header.call_id = 0,
-            Header::Failure(_)
-            | Header::Notification(_)
-            | Header::Chunk(_)
-            | Header::Credit(_)
-            | Header::Cancel(_) => panic!("the request and its result alone"),
+            EnvelopeHeader::Request(header) => header.call_id = 0,
+            EnvelopeHeader::Result(header) => header.call_id = 0,
+            EnvelopeHeader::Failure(_)
+            | EnvelopeHeader::Notification(_)
+            | EnvelopeHeader::Chunk(_)
+            | EnvelopeHeader::Credit(_)
+            | EnvelopeHeader::Cancel(_) => panic!("the request and its result alone"),
         }
         assert_eq!(changed.header.call_id(), 0);
     }));
@@ -152,13 +164,16 @@ async fn tells_debug_each_envelope_with_its_connection_and_a_copy_of_its_header_
     assert_eq!(seen.len(), 2);
     assert_eq!(seen[0].0, DebugDirection::Rx);
     assert_eq!(seen[0].1.connection_handle, first());
-    assert_eq!(seen[0].1.header, Header::Request(header_of((9, &echo()))));
+    assert_eq!(
+        seen[0].1.header,
+        EnvelopeHeader::Request(header_of((9, &echo())))
+    );
     assert_eq!(seen[0].1.credential_scheme, None);
     assert_eq!(seen[1].0, DebugDirection::Tx);
     assert_eq!(seen[1].1.connection_handle, first());
     assert_eq!(
         seen[1].1.header,
-        Header::Result(ResultHeader {
+        EnvelopeHeader::Result(ResultHeader {
             call_id: 9,
             total: None,
             credential: None

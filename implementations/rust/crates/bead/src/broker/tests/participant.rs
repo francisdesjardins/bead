@@ -24,20 +24,21 @@ use super::{
 use crate::broker::adapter::{
     BrokerAdapter, BrokerCapabilities, BrokerDelivery, BrokerListener, BrokerMessage, BrokerStart,
 };
-use crate::broker::client::{BrokerClientOptions, BrokerConnectOptions};
+use crate::broker::client::{BrokerTransportClientConnectOptions, BrokerTransportClientOptions};
 use crate::broker::memory::{
     MemoryBroker, MemoryBrokerAdapterOptions, MemoryBrokerFault, MemoryBrokerFaultOptions,
     MemoryBrokerOptions,
 };
 use crate::broker::parcel::{Parcel, encode_parcel, flags, kinds, write_parcel};
 use crate::broker::participant::{BrokerParticipant, BrokerParticipantOptions};
-use crate::broker::server::BrokerServerOptions;
+use crate::broker::server::BrokerTransportServerOptions;
 use crate::clock::SharedClock;
 use crate::errors::TransportError;
 use crate::router::types::{RouterError, TransportMessage};
 use crate::testing::SteppingClock;
 use crate::transport::{
-    ClientTransport, ReadyState, ReconnectDelay, ReconnectOptions, ServerListener, ServerTransport,
+    ReadyState, RouterClientTransport, ServerListener, ServerTransport,
+    TransportClientReconnectDelay, TransportClientReconnectOptions,
 };
 
 // what a case's acceptor publishes to its opener's inbox, each parcel's bytes, given the opener's
@@ -66,10 +67,10 @@ fn reporting(participant: &BrokerParticipant) -> Arc<Mutex<Vec<String>>> {
     reported
 }
 
-fn immediately() -> ReconnectOptions {
-    ReconnectOptions {
-        delay: Some(ReconnectDelay::Fixed(Duration::ZERO)),
-        ..ReconnectOptions::default()
+fn immediately() -> TransportClientReconnectOptions {
+    TransportClientReconnectOptions {
+        delay: Some(TransportClientReconnectDelay::Fixed(Duration::ZERO)),
+        ..TransportClientReconnectOptions::default()
     }
 }
 
@@ -90,11 +91,11 @@ async fn subscribes_its_inbox_before_anything_goes_takes_its_id_from_its_adapter
     let participant = BrokerParticipant::new(adapter, &BrokerParticipantOptions::default())
         .expect("a participant");
     let client = participant
-        .client(&BrokerClientOptions::default())
+        .client(&BrokerTransportClientOptions::default())
         .expect("a client");
 
     client
-        .connect(&BrokerConnectOptions::of("interop"))
+        .connect(&BrokerTransportClientConnectOptions::new("interop"))
         .await
         .expect("connected");
 
@@ -170,9 +171,10 @@ async fn closes_each_connection_as_its_link_goes_down_and_connects_anew_as_anoth
     let (_silent, heard) = peer_of(&pair.broker, ("silent", &[&["bead", "s", "quiet"]])).await;
     let waiting = pair
         .client_participant
-        .client(&BrokerClientOptions::default())
+        .client(&BrokerTransportClientOptions::default())
         .expect("a client");
-    let pending = crate::testing::spawn(waiting.connect(&BrokerConnectOptions::of("quiet")));
+    let pending =
+        crate::testing::spawn(waiting.connect(&BrokerTransportClientConnectOptions::new("quiet")));
 
     until(
         || heard.parcels().len() == 1,
@@ -266,7 +268,7 @@ async fn a_parcel_that_would_pass_maximum_unsent_bytes_loses_its_connection_with
         &BrokerParticipantOptions::default(),
     );
     let client = participant
-        .client(&BrokerClientOptions {
+        .client(&BrokerTransportClientOptions {
             maximum_unsent_bytes: Some(2_048),
         })
         .expect("a client");
@@ -313,7 +315,7 @@ async fn a_parcel_that_does_not_read_closes_its_connection_with_1002_at_once_but
         &BrokerParticipantOptions::default(),
     );
     let client = participant
-        .client(&BrokerClientOptions::default())
+        .client(&BrokerTransportClientOptions::default())
         .expect("a client");
     let told = Arc::new(ClientTold::default());
 
@@ -389,10 +391,10 @@ async fn refuses_a_send_whose_room_fits_no_part_and_keeps_the_connection_on_the_
     let serving = narrow("server");
     let connecting = narrow("ada");
     let server = serving
-        .server(&BrokerServerOptions::of(["interop"]))
+        .server(&BrokerTransportServerOptions::new(["interop"]))
         .expect("a server");
     let client = connecting
-        .client(&BrokerClientOptions::default())
+        .client(&BrokerTransportClientOptions::default())
         .expect("a client");
     let told = Arc::new(ServerTold::default());
     let refusal = "a parcel of 28 bytes leaves no byte of an envelope beside its credential";
@@ -400,7 +402,7 @@ async fn refuses_a_send_whose_room_fits_no_part_and_keeps_the_connection_on_the_
     server.listen(Arc::new(AtServer(Arc::clone(&told))));
     server.start().await.expect("started");
     client
-        .connect(&BrokerConnectOptions::of("interop"))
+        .connect(&BrokerTransportClientConnectOptions::new("interop"))
         .await
         .expect("connected");
     until(
@@ -515,12 +517,12 @@ async fn refuses_a_server_transport_a_name_another_of_its_server_transports_serv
         &BrokerParticipantOptions::default(),
     );
     let _first = participant
-        .server(&BrokerServerOptions::of(["interop", "echo"]))
+        .server(&BrokerTransportServerOptions::new(["interop", "echo"]))
         .expect("a server");
 
     assert_eq!(
         participant
-            .server(&BrokerServerOptions::of(["other", "echo"]))
+            .server(&BrokerTransportServerOptions::new(["other", "echo"]))
             .expect_err("refused")
             .message(),
         "the name echo is served already by a server transport of this participant",
@@ -530,7 +532,7 @@ async fn refuses_a_server_transport_a_name_another_of_its_server_transports_serv
     // the one refused holds none of its names
     assert!(
         participant
-            .server(&BrokerServerOptions::of(["other"]))
+            .server(&BrokerTransportServerOptions::new(["other"]))
             .is_ok(),
         "its names free"
     );
@@ -546,7 +548,7 @@ async fn closes_each_connection_bound_to_the_incarnation_a_gone_names_and_none_b
         &BrokerParticipantOptions::default(),
     );
     let third = bob
-        .client(&BrokerClientOptions::default())
+        .client(&BrokerTransportClientOptions::default())
         .expect("a client");
     let publisher = adapter_of(&pair.broker, "will");
     let counted = |name: &str| {
@@ -556,7 +558,7 @@ async fn closes_each_connection_bound_to_the_incarnation_a_gone_names_and_none_b
     };
 
     third
-        .connect(&BrokerConnectOptions::of("interop"))
+        .connect(&BrokerTransportClientConnectOptions::new("interop"))
         .await
         .expect("connected");
     publisher
@@ -685,7 +687,7 @@ async fn is_refused_as_built_when_its_application_requires_delivery_at_least_onc
     let at_most_once = broker
         .adapter(&MemoryBrokerAdapterOptions {
             delivery: Some(BrokerDelivery::AtMostOnce),
-            ..MemoryBrokerAdapterOptions::of("ada")
+            ..MemoryBrokerAdapterOptions::new("ada")
         })
         .expect("an adapter");
     let requiring = |delivery: Option<BrokerDelivery>| BrokerParticipantOptions {
@@ -729,21 +731,21 @@ async fn holds_a_connection_secure_only_while_both_its_legs_are() {
         let serving = participant_of("server");
         // its application saying its own leg secure changes nothing of its peer's
         let server = serving
-            .server(&BrokerServerOptions {
+            .server(&BrokerTransportServerOptions {
                 secure: (insecure == "ada").then_some(true),
-                ..BrokerServerOptions::of(["interop"])
+                ..BrokerTransportServerOptions::new(["interop"])
             })
             .expect("a server");
         let connecting = participant_of("ada");
         let client = connecting
-            .client(&BrokerClientOptions::default())
+            .client(&BrokerTransportClientOptions::default())
             .expect("a client");
         let told = Arc::new(ServerTold::default());
 
         server.listen(Arc::new(AtServer(Arc::clone(&told))));
         server.start().await.expect("started");
         client
-            .connect(&BrokerConnectOptions::of("interop"))
+            .connect(&BrokerTransportClientConnectOptions::new("interop"))
             .await
             .expect("connected");
         until(
@@ -807,10 +809,10 @@ async fn counts_its_connections_half_open_among_them_what_they_hold_in_parts_and
         },
     );
     let server = participant
-        .server(&BrokerServerOptions {
+        .server(&BrokerTransportServerOptions {
             maximum_connections: Some(8),
             maximum_unsent_bytes: Some(65_536),
-            ..BrokerServerOptions::of(["interop"])
+            ..BrokerTransportServerOptions::new(["interop"])
         })
         .expect("a server");
     let (peer, heard) = peer_of(&broker, ("peer", &[])).await;
@@ -1002,9 +1004,11 @@ async fn lets_a_listener_go_fails_a_connect_awaiting_its_answer_as_it_stops_refu
 
     // a connect whose OPEN reached a name nobody answers
     let waiting = participant
-        .client(&BrokerClientOptions::default())
+        .client(&BrokerTransportClientOptions::default())
         .expect("a client");
-    let pending = crate::testing::spawn(waiting.connect(&BrokerConnectOptions::of("interop")));
+    let pending = crate::testing::spawn(
+        waiting.connect(&BrokerTransportClientConnectOptions::new("interop")),
+    );
 
     until(|| heard.parcels().len() == 1, "its OPEN reaches the name").await;
 
@@ -1049,9 +1053,9 @@ async fn lets_a_listener_go_fails_a_connect_awaiting_its_answer_as_it_stops_refu
     assert_eq!(
         error_of(
             participant
-                .client(&BrokerClientOptions::default())
+                .client(&BrokerTransportClientOptions::default())
                 .expect("a client")
-                .connect(&BrokerConnectOptions::of("interop"))
+                .connect(&BrokerTransportClientConnectOptions::new("interop"))
                 .await
         ),
         "the participant ada is stopped",
@@ -1197,7 +1201,7 @@ async fn closes_a_connection_with_1002_for_a_parcel_of_a_layout_to_come_an_accep
             &BrokerParticipantOptions::default(),
         );
         let client = participant
-            .client(&BrokerClientOptions::default())
+            .client(&BrokerTransportClientOptions::default())
             .expect("a client");
         let told = Arc::new(ClientTold::default());
 
@@ -1244,7 +1248,7 @@ async fn ends_a_connection_unclean_reporting_nothing_once_its_broker_refuses_a_p
         let adapter = adapter_of(&broker, "ada");
         let participant = participant_of(&adapter, &BrokerParticipantOptions::default());
         let client = participant
-            .client(&BrokerClientOptions::default())
+            .client(&BrokerTransportClientOptions::default())
             .expect("a client");
         let told = Arc::new(ClientTold::default());
 
@@ -1294,7 +1298,7 @@ async fn keeps_a_connection_whose_parts_come_at_their_rate_past_the_grace_and_ha
         },
     );
     let client = participant
-        .client(&BrokerClientOptions::default())
+        .client(&BrokerTransportClientOptions::default())
         .expect("a client");
     let told = Arc::new(ClientTold::default());
 
@@ -1355,7 +1359,7 @@ async fn reports_its_link_given_up_on_once_its_reconnection_s_attempts_run_out()
     let participant = participant_of(
         &adapter,
         &BrokerParticipantOptions {
-            reconnect: Some(ReconnectOptions {
+            reconnect: Some(TransportClientReconnectOptions {
                 maximum_attempts: Some(2),
                 ..immediately()
             }),
@@ -1390,12 +1394,12 @@ async fn reports_its_reconnection_ended_once_its_signal_is_aborted() {
     let participant = participant_of(
         &adapter,
         &BrokerParticipantOptions {
-            reconnect: Some(ReconnectOptions {
-                delay: Some(ReconnectDelay::Computed(Arc::new(|_previous, _attempt| {
-                    Duration::from_secs(60)
-                }))),
+            reconnect: Some(TransportClientReconnectOptions {
+                delay: Some(TransportClientReconnectDelay::Resolver(Arc::new(
+                    |_previous, _attempt| Duration::from_secs(60),
+                ))),
                 signal: Some(cancelling.clone()),
-                ..ReconnectOptions::default()
+                ..TransportClientReconnectOptions::default()
             }),
             ..BrokerParticipantOptions::default()
         },
@@ -1456,7 +1460,7 @@ async fn serves_its_names_again_once_its_link_connects_anew_its_former_peers_res
         pair.server
             .clients()
             .into_iter()
-            .map(|(handle, ..)| handle.to_string())
+            .map(|client| client.connection_handle.to_string())
             .collect::<Vec<_>>(),
         ["type=BROKER;participant=client;ordinal=2"],
         "served anew"
@@ -1576,7 +1580,7 @@ async fn gives_no_life_to_a_publication_of_an_adapter_that_offers_none() {
                         | BrokerCapabilities::WILL
                         | BrokerCapabilities::NO_SUBSCRIBER,
                 ),
-                ..MemoryBrokerAdapterOptions::of("client")
+                ..MemoryBrokerAdapterOptions::new("client")
             })
             .expect("an adapter"),
     ));
@@ -1587,7 +1591,7 @@ async fn gives_no_life_to_a_publication_of_an_adapter_that_offers_none() {
     let participant = BrokerParticipant::new(client_adapter, &BrokerParticipantOptions::default())
         .expect("a participant");
     let transport = server
-        .server(&BrokerServerOptions::of(["interop"]))
+        .server(&BrokerTransportServerOptions::new(["interop"]))
         .expect("a server");
     let told = Arc::new(ServerTold::default());
 
@@ -1595,11 +1599,11 @@ async fn gives_no_life_to_a_publication_of_an_adapter_that_offers_none() {
     transport.start().await.expect("started");
 
     let client = participant
-        .client(&BrokerClientOptions::default())
+        .client(&BrokerTransportClientOptions::default())
         .expect("a client");
 
     client
-        .connect(&BrokerConnectOptions::of("interop"))
+        .connect(&BrokerTransportClientConnectOptions::new("interop"))
         .await
         .expect("connected");
     client
@@ -1650,9 +1654,10 @@ async fn a_participant_taken_over_reports_it_connects_no_more_and_fails_each_con
     let (_silent, heard) = peer_of(&pair.broker, ("silent", &[&["bead", "s", "silent"]])).await;
     let waiting = pair
         .client_participant
-        .client(&BrokerClientOptions::default())
+        .client(&BrokerTransportClientOptions::default())
         .expect("a client");
-    let pending = crate::testing::spawn(waiting.connect(&BrokerConnectOptions::of("silent")));
+    let pending =
+        crate::testing::spawn(waiting.connect(&BrokerTransportClientConnectOptions::new("silent")));
 
     until(|| heard.parcels().len() == 1, "its OPEN reaches the name").await;
     pair.client_adapter.take_over();
@@ -1679,9 +1684,9 @@ async fn a_participant_taken_over_reports_it_connects_no_more_and_fails_each_con
     assert_eq!(
         error_of(
             pair.client_participant
-                .client(&BrokerClientOptions::default())
+                .client(&BrokerTransportClientOptions::default())
                 .expect("a client")
-                .connect(&BrokerConnectOptions::of("interop"))
+                .connect(&BrokerTransportClientConnectOptions::new("interop"))
                 .await
         ),
         "the link of client was taken over by another link of its id, and connects no more until it is started again",
@@ -1730,7 +1735,7 @@ async fn fails_a_link_that_goes_down_as_it_connects_at_its_start_or_as_it_links_
     let participant = BrokerParticipant::new(
         adapter,
         &BrokerParticipantOptions {
-            reconnect: Some(ReconnectOptions {
+            reconnect: Some(TransportClientReconnectOptions {
                 maximum_attempts: Some(5),
                 ..immediately()
             }),
@@ -1788,9 +1793,9 @@ async fn fails_a_link_that_goes_down_as_it_connects_at_its_start_or_as_it_links_
     assert_eq!(
         error_of(
             participant
-                .client(&BrokerClientOptions::default())
+                .client(&BrokerTransportClientOptions::default())
                 .expect("a client")
-                .connect(&BrokerConnectOptions::of("interop"))
+                .connect(&BrokerTransportClientConnectOptions::new("interop"))
                 .await
         ),
         "the link of ada was taken over by another link of its id, and connects no more until it is started again",

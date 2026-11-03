@@ -7,8 +7,8 @@ use serde_json::Value;
 
 use crate::constants::{CredentialScheme, FailureScope, RouterSide};
 use crate::envelope::{
-    CancelHeader, ChunkHeader, Credential, CreditHeader, Envelope, FailureHeader, FailureRecord,
-    Header, NotificationHeader, RequestHeader, ResultHeader,
+    CancelHeader, ChunkHeader, Credential, CreditHeader, Envelope, EnvelopeHeader, FailureHeader,
+    FailureRecord, NotificationHeader, RequestHeader, ResultHeader,
 };
 use crate::session_token::SessionToken;
 use crate::testing::files;
@@ -297,12 +297,12 @@ pub fn latin1_bytes_of(text: &str) -> Result<Vec<u8>, String> {
 /// # Errors
 ///
 /// For a header of no kind this side reads, or missing a field its kind holds.
-pub fn header_of(header: &VectorHeader) -> Result<Header, String> {
+pub fn header_of(header: &VectorHeader) -> Result<EnvelopeHeader, String> {
     let credential = header.credential.as_ref().map(credential_of).transpose()?;
     let missing = |field: &str| format!("a header of kind {} holds its {field}", header.kind);
 
     Ok(match header.kind {
-        0x10 => Header::Request(RequestHeader {
+        0x10 => EnvelopeHeader::Request(RequestHeader {
             call_id: header.call_id,
             service_id: header.service_id.ok_or_else(|| missing("serviceId"))?,
             procedure_id: header.procedure_id.ok_or_else(|| missing("procedureId"))?,
@@ -312,29 +312,29 @@ pub fn header_of(header: &VectorHeader) -> Result<Header, String> {
             total: header.total,
             credential,
         }),
-        0x11 => Header::Result(ResultHeader {
+        0x11 => EnvelopeHeader::Result(ResultHeader {
             call_id: header.call_id,
             total: header.total,
             credential,
         }),
-        0x12 => Header::Failure(FailureHeader {
+        0x12 => EnvelopeHeader::Failure(FailureHeader {
             call_id: header.call_id,
             credential,
         }),
-        0x13 => Header::Notification(NotificationHeader {
+        0x13 => EnvelopeHeader::Notification(NotificationHeader {
             call_id: header.call_id,
         }),
-        0x14 => Header::Chunk(ChunkHeader {
+        0x14 => EnvelopeHeader::Chunk(ChunkHeader {
             call_id: header.call_id,
             offset: header.offset.ok_or_else(|| missing("offset"))?,
             is_last: header.is_last.ok_or_else(|| missing("isLast"))?,
         }),
-        0x15 => Header::Credit(CreditHeader {
+        0x15 => EnvelopeHeader::Credit(CreditHeader {
             call_id: header.call_id,
             credit_end: header.credit_end.ok_or_else(|| missing("creditEnd"))?,
             paced: header.paced.unwrap_or(false),
         }),
-        0x16 => Header::Cancel(CancelHeader {
+        0x16 => EnvelopeHeader::Cancel(CancelHeader {
             call_id: header.call_id,
         }),
         kind => return Err(format!("{kind} is no kind this side reads")),
@@ -373,15 +373,15 @@ pub fn envelope_of(envelope: &VectorEnvelope) -> Result<Envelope, String> {
     }
 
     Ok(match header {
-        Header::Request(header) => Envelope::Request {
+        EnvelopeHeader::Request(header) => Envelope::Request {
             header,
             payload: payload()?,
         },
-        Header::Result(header) => Envelope::Result {
+        EnvelopeHeader::Result(header) => Envelope::Result {
             header,
             payload: payload()?,
         },
-        Header::Failure(header) => Envelope::Failure {
+        EnvelopeHeader::Failure(header) => Envelope::Failure {
             header,
             failure: record_of(
                 envelope
@@ -390,15 +390,15 @@ pub fn envelope_of(envelope: &VectorEnvelope) -> Result<Envelope, String> {
                     .ok_or("a failure holds its record")?,
             )?,
         },
-        Header::Notification(header) => Envelope::Notification {
+        EnvelopeHeader::Notification(header) => Envelope::Notification {
             header,
             payload: payload()?,
         },
-        Header::Chunk(header) => Envelope::Chunk {
+        EnvelopeHeader::Chunk(header) => Envelope::Chunk {
             header,
             payload: payload()?,
         },
-        Header::Credit(header) => Envelope::Credit { header },
-        Header::Cancel(header) => Envelope::Cancel { header },
+        EnvelopeHeader::Credit(header) => Envelope::Credit { header },
+        EnvelopeHeader::Cancel(header) => Envelope::Cancel { header },
     })
 }

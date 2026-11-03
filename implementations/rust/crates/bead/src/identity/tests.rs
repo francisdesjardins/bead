@@ -16,7 +16,10 @@ fn refuses_an_id_or_a_revision_out_of_its_range_service_0_and_revision_0_among_t
             service_id: 0,
             ..echo()
         },
-        Procedure { id: 0, ..echo() },
+        Procedure {
+            procedure_id: 0,
+            ..echo()
+        },
         Procedure {
             service_revision: 0,
             ..echo()
@@ -38,8 +41,8 @@ fn refuses_an_id_or_a_revision_out_of_its_range_service_0_and_revision_0_among_t
         );
     }
     let consumer = crate::testing::surface::Consumer::new();
-    consumer.accepts("pub fn check(p: &mut bead::Procedure) { p.id = 65535; p.service_id = 65535; p.service_revision = 2147483647; }");
-    for field in ["id", "service_id"] {
+    consumer.accepts("pub fn check(p: &mut bead::Procedure) { p.procedure_id = 65535; p.service_id = 65535; p.service_revision = 2147483647; }");
+    for field in ["procedure_id", "service_id"] {
         consumer.refuses(
             &format!("pub fn check(p: &mut bead::Procedure) {{ p.{field} = 65536; }}"),
             ("overflowing_literals", "u16"),
@@ -56,7 +59,7 @@ fn refuses_a_name_off_its_form_and_refuses_out_of_its_range_first() {
     for name in ["", "Echo", "_OTHER", &"a".repeat(64), "get_thing"] {
         assert_eq!(
             check_declaration(&Procedure {
-                name: name.to_owned(),
+                procedure_name: name.to_owned(),
                 ..echo()
             })
             .expect_err("off its form")
@@ -66,7 +69,7 @@ fn refuses_a_name_off_its_form_and_refuses_out_of_its_range_first() {
     }
     assert_eq!(
         check_declaration(&Procedure {
-            name: "Echo".to_owned(),
+            procedure_name: "Echo".to_owned(),
             service_id: 0,
             ..echo()
         })
@@ -75,7 +78,7 @@ fn refuses_a_name_off_its_form_and_refuses_out_of_its_range_first() {
         Some(Refusal::Identity(IdentityRefusal::OutOfItsRange))
     );
     crate::testing::surface::Consumer::new().refuses(
-        "pub fn check(p: &mut bead::Procedure) { p.name = 1; }",
+        "pub fn check(p: &mut bead::Procedure) { p.procedure_name = 1; }",
         ("E0308", "mismatched types"),
     );
 }
@@ -93,7 +96,7 @@ fn says_which_ids_revision_and_name_it_was_given() {
     );
     assert_eq!(
         check_declaration(&Procedure {
-            name: "_OTHER".to_owned(),
+            procedure_name: "_OTHER".to_owned(),
             ..echo()
         })
         .expect_err("off its form")
@@ -154,7 +157,7 @@ fn refuses_a_kind_its_way_does_not_take_against_its_kind_and_takes_a_procedure_t
     ] {
         check_procedure_kind(
             &Procedure {
-                kind: None,
+                procedure_kind: None,
                 ..echo()
             },
             way,
@@ -217,7 +220,7 @@ async fn a_refused_declaration_declares_nothing_its_registry_holding_no_series_o
     assert!(
         router
             .register_notification(Arc::new(Notification(Procedure {
-                name: "Echo".to_owned(),
+                procedure_name: "Echo".to_owned(),
                 ..echo()
             })))
             .expect_err("off its form")
@@ -269,7 +272,7 @@ async fn checks_a_declaration_before_the_router_s_reasons_and_its_registry_s() {
     let server = pair.server.router();
     let client = pair.client.router();
     let procedure = Procedure {
-        kind: None,
+        procedure_kind: None,
         ..echo()
     };
     server
@@ -278,7 +281,7 @@ async fn checks_a_declaration_before_the_router_s_reasons_and_its_registry_s() {
     server.declare_requester(&procedure).expect("a requester");
     client.declare_requester(&procedure).expect("a requester");
     let named = Procedure {
-        name: "Echo".to_owned(),
+        procedure_name: "Echo".to_owned(),
         ..procedure
     };
     for refusal in [
@@ -338,7 +341,7 @@ fn refuses_a_declaration_out_of_its_range_then_off_its_form_then_against_its_kin
     assert_eq!(
         reason_of(&Procedure {
             service_id: 0,
-            name: "Off".to_owned(),
+            procedure_name: "Off".to_owned(),
             ..echo()
         }),
         Some(Refusal::Identity(IdentityRefusal::OutOfItsRange)),
@@ -346,7 +349,7 @@ fn refuses_a_declaration_out_of_its_range_then_off_its_form_then_against_its_kin
     );
     assert_eq!(
         reason_of(&Procedure {
-            name: "Off".to_owned(),
+            procedure_name: "Off".to_owned(),
             ..echo()
         }),
         Some(Refusal::Identity(IdentityRefusal::OffItsForm)),
@@ -354,7 +357,7 @@ fn refuses_a_declaration_out_of_its_range_then_off_its_form_then_against_its_kin
     );
 
     let command = Procedure {
-        kind: Some(ProcedureKind::Command),
+        procedure_kind: Some(ProcedureKind::Command),
         ..echo()
     };
 
@@ -372,7 +375,7 @@ fn refuses_a_declaration_out_of_its_range_then_off_its_form_then_against_its_kin
     assert!(
         check_procedure_kind(
             &Procedure {
-                kind: None,
+                procedure_kind: None,
                 ..echo()
             },
             DeclarationWay::ClientRequester

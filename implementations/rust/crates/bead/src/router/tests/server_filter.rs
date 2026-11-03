@@ -9,6 +9,7 @@ use super::locked;
 use super::server::{Served, first, news, second, subscribing_of};
 use crate::managers::service::NotifyOptions;
 use crate::router::server::RouterServerOptions;
+use crate::router::types::NotifyRequest;
 
 // spec 11.7
 #[tokio::test]
@@ -53,17 +54,15 @@ async fn notify_sends_to_none_when_its_filter_throws_on_any() {
 
         let error = served
             .router
-            .notify(
-                Ok(Bytes::from_static(b"flash")),
-                (
-                    news().address(),
-                    Some(Arc::new(move |handle, _| {
-                        assert!(*handle != failing, "no such user");
-                        true
-                    })),
-                    None,
-                ),
-            )
+            .notify(Ok(Bytes::from_static(b"flash")), {
+                let mut request = NotifyRequest::new(news().address());
+
+                request.filter = Some(Arc::new(move |handle, _| {
+                    assert!(*handle != failing, "no such user");
+                    true
+                }));
+                request
+            })
             .await
             .expect_err("the router gives its caller the failure");
         assert_eq!(

@@ -8,6 +8,7 @@ use bytes::Bytes;
 
 use super::server::{Served, first, news, second};
 use super::{answered, failure_of, locked, options_of, result_of};
+use crate::RouterRequest;
 use crate::constants::{EnvelopeKind, ProcedureKind, ProtocolCode, RouterSide};
 use crate::debug::{DebugDirection, DebugType};
 use crate::envelope::{Envelope, RequestHeader, ResultHeader};
@@ -16,36 +17,35 @@ use crate::failure::FailureOrigin;
 use crate::identity::Procedure;
 use crate::managers::service::{NotificationDependencies, RequestDependencies, RequestOptions};
 use crate::payloads::TextCodec;
-use crate::router::server::{Call, CallHooks, RouterServerOptions, ServerRequest};
+use crate::router::server::{Call, RouterServerOptions};
 use crate::router::types::{ConnectionHandle, TransportMessage};
 use crate::testing::pair::echo;
 
 fn command() -> Procedure {
     Procedure {
-        kind: Some(ProcedureKind::Command),
+        procedure_kind: Some(ProcedureKind::Command),
         ..echo()
     }
 }
 
-fn request(handle: Option<&ConnectionHandle>, timeout: Duration) -> ServerRequest {
+fn request(handle: Option<&ConnectionHandle>, timeout: Duration) -> RouterRequest {
     let mut options = options_of(timeout);
     options.connection_handle = handle.cloned();
-    ServerRequest {
-        procedure: command().address(),
-        maximum_payload_bytes: None,
+    RouterRequest {
+        procedure: command(),
         options,
         series: None,
         refusal: None,
+        subscribes: None,
+        on_call_id: None,
+        on_sent: None,
     }
 }
 
 fn ask(served: &Served, (handle, timeout): (&ConnectionHandle, Duration)) -> Call {
     served
         .router
-        .request(
-            Bytes::new(),
-            (request(Some(handle), timeout), CallHooks::default()),
-        )
+        .request(Bytes::new(), request(Some(handle), timeout))
         .expect("a command")
 }
 
@@ -67,7 +67,7 @@ async fn tells_a_command_made_with_the_call_id_its_router_drew_on_its_connection
     served.transport.open(&second(), true);
     let command = served
         .services
-        .get_command(&command(), RequestDependencies::of(TextCodec, TextCodec))
+        .get_command(&command(), RequestDependencies::new(TextCodec, TextCodec))
         .expect("the command declared");
     let running = command
         .call(
@@ -129,10 +129,7 @@ async fn commands_go_to_the_connection_their_options_name_on_even_call_ids_and_r
         .router
         .request(
             Bytes::from_static(b"ping"),
-            (
-                request(Some(&first()), Duration::from_secs(1)),
-                CallHooks::default(),
-            ),
+            request(Some(&first()), Duration::from_secs(1)),
         )
         .expect("the command made");
     served.settle().await;
@@ -188,10 +185,7 @@ async fn commands_name_their_connection_and_it_must_be_open_a_server_holds_no_su
     let served = Served::new(&RouterServerOptions::default());
     served
         .router
-        .request(
-            Bytes::new(),
-            (request(None, Duration::from_secs(1)), CallHooks::default()),
-        )
+        .request(Bytes::new(), request(None, Duration::from_secs(1)))
         .expect_err("a command must name its connection");
     assert!(matches!(
         answered(ask(&served, (&first(), Duration::from_secs(1)))).await,
@@ -199,13 +193,27 @@ async fn commands_name_their_connection_and_it_must_be_open_a_server_holds_no_su
     ));
     served.transport.open(&first(), true);
     served.settle().await;
-    // A Rust server request has no subscribes member. Its service API refuses a subscriber
-    // before making a call, the same refusal the other sides' router request checks.
+    // a server's request that subscribes is refused, open connection or not, as on the other sides
+    let mut subscribing = request(Some(&first()), Duration::from_secs(1));
+    subscribing.procedure = news();
+    subscribing.subscribes = Some(super::client::Notified::of(news()).like());
+    assert_eq!(
+        served
+            .router
+            .request(Bytes::new(), subscribing)
+            .expect_err("a server does not subscribe")
+            .message(),
+        "a server does not subscribe to notifications; it sends them"
+    );
+    // its service layer refuses a subscriber before any call is made
     let refused = served
         .services
         .get_notification(
             &news(),
-            NotificationDependencies::of((TextCodec, TextCodec, TextCodec)),
+            NotificationDependencies::new(
+                RequestDependencies::new(TextCodec, TextCodec),
+                TextCodec,
+            ),
         )
         .expect_err("a server cannot subscribe");
     assert_eq!(
@@ -296,10 +304,7 @@ async fn commands_refuse_a_payload_too_large_here() {
         .router
         .request(
             Bytes::from(vec![0; 0x100_0001]),
-            (
-                request(Some(&first()), Duration::from_secs(1)),
-                CallHooks::default(),
-            ),
+            request(Some(&first()), Duration::from_secs(1)),
         )
         .expect("the command made");
     assert!(

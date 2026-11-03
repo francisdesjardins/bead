@@ -11,6 +11,7 @@ use core::task::{Context, Poll};
 use core::time::Duration;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::{Arc, Mutex, PoisonError};
+use std::time::SystemTime;
 
 use tokio::sync::oneshot;
 use tokio_util::sync::CancellationToken;
@@ -112,11 +113,11 @@ pub struct TransportServerRefusal {
 }
 
 impl TransportServerRefusal {
-    /// A refusal of `status` and `reason` of the client at `address`, nothing else of it told.
+    /// A refusal of `status` and `reason`, nothing else of it told.
     #[must_use]
-    pub fn of<R: Into<String>>((status, reason): (u16, R), address: Option<String>) -> Self {
+    pub fn new<R: Into<String>>(status: u16, reason: R) -> Self {
         Self {
-            address,
+            address: None,
             authority: None,
             origin: None,
             port: None,
@@ -124,6 +125,23 @@ impl TransportServerRefusal {
             status,
         }
     }
+}
+
+/// A connection a transport server holds, as it tells it: its handle, the address and the port its
+/// client gave, when it last delivered an envelope, and its transport's type.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct TransportServerClient {
+    /// The handle its transport drew.
+    pub connection_handle: ConnectionHandle,
+    /// The client's address, as its transport read it: over a broker, its participant's id.
+    pub address: String,
+    /// The client's port; none when its transport gives none, as over a broker.
+    pub port: Option<u16>,
+    /// When it last delivered an envelope, as its server's clock read it; none before its first.
+    pub last_activity: Option<SystemTime>,
+    /// Its transport's type: [`crate::TRANSPORT_MEMORY`] or [`crate::TRANSPORT_BROKER`].
+    pub transport_type: &'static str,
 }
 
 /// What hears a transport server's events.
@@ -247,7 +265,7 @@ pub trait ClientListener: Send + Sync {
 }
 
 /// A transport client, as a router reaches it.
-pub trait ClientTransport: Send + Sync + fmt::Debug {
+pub trait RouterClientTransport: Send + Sync + fmt::Debug {
     /// Hands an envelope's bytes over, with the credential it carries beside it.
     ///
     /// # Errors
@@ -274,7 +292,7 @@ pub trait ClientTransport: Send + Sync + fmt::Debug {
 
     /// Resumes it: what it holds it hands on, in order, from a later step of its own, never within
     /// this call, asking before each hand whether it was paused again. As
-    /// [`ClientTransport::pause`], idempotent, never blocking, telling no listener within it, and
+    /// [`RouterClientTransport::pause`], idempotent, never blocking, telling no listener within it, and
     /// taking no lock this transport holds while it tells one.
     fn resume(&self);
 
@@ -305,29 +323,34 @@ pub trait ClientTransport: Send + Sync + fmt::Debug {
 /// How a transport client's connection closes.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 #[non_exhaustive]
-pub struct DisconnectOptions {
+pub struct TransportClientDisconnectOptions {
     /// Whether by its own word: `true` when none.
     pub is_clean: Option<bool>,
     /// Whether without a wait: `false` when none.
     pub is_quick: Option<bool>,
 }
 
-/// The delay between two attempts of a reconnection: one for all, or one each attempt gives,
-/// from the delay before it and its number.
+/// What gives the delay before an attempt of a reconnection, from the delay before it, none before
+/// the first, and the attempt's number, from 1.
+pub type TransportClientReconnectDelayResolver =
+    Arc<dyn Fn(Option<Duration>, u32) -> Duration + Send + Sync>;
+
+/// The delay between two attempts of a reconnection: one for all, or one its resolver gives each
+/// attempt.
 #[derive(Clone)]
 #[non_exhaustive]
-pub enum ReconnectDelay {
+pub enum TransportClientReconnectDelay {
     /// The same delay each time.
     Fixed(Duration),
-    /// A delay each attempt gives.
-    Computed(Arc<dyn Fn(Option<Duration>, u32) -> Duration + Send + Sync>),
+    /// A delay its resolver gives each attempt.
+    Resolver(TransportClientReconnectDelayResolver),
 }
 
-impl fmt::Debug for ReconnectDelay {
+impl fmt::Debug for TransportClientReconnectDelay {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Fixed(delay) => formatter.debug_tuple("Fixed").field(delay).finish(),
-            Self::Computed(_) => formatter.write_str("Computed"),
+            Self::Resolver(_) => formatter.write_str("Resolver"),
         }
     }
 }
@@ -344,9 +367,9 @@ pub const RECONNECT_ATTEMPTS: u32 = 5;
 /// How a transport client reconnects.
 #[derive(Clone, Default)]
 #[non_exhaustive]
-pub struct ReconnectOptions {
+pub struct TransportClientReconnectOptions {
     /// The delay between two attempts: [`RECONNECT_DELAY`] when none.
-    pub delay: Option<ReconnectDelay>,
+    pub delay: Option<TransportClientReconnectDelay>,
     /// The attempts it makes at most: [`RECONNECT_ATTEMPTS`] when none.
     pub maximum_attempts: Option<u32>,
     /// What cancels it.
@@ -355,10 +378,10 @@ pub struct ReconnectOptions {
     pub tap: Option<Arc<dyn Fn(Duration, u32) + Send + Sync>>,
 }
 
-impl fmt::Debug for ReconnectOptions {
+impl fmt::Debug for TransportClientReconnectOptions {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter
-            .debug_struct("ReconnectOptions")
+            .debug_struct("TransportClientReconnectOptions")
             .field("delay", &self.delay)
             .field("maximum_attempts", &self.maximum_attempts)
             .finish_non_exhaustive()
@@ -643,7 +666,7 @@ pub(crate) async fn first_of<A: Future, B: Future>((first, second): (A, B)) -> b
 ///
 /// As above.
 pub(crate) async fn attempting<A, F>(
-    (clock, options): (&SharedClock, &ReconnectOptions),
+    (clock, options): (&SharedClock, &TransportClientReconnectOptions),
     mut attempt: A,
 ) -> Result<(), TransportError>
 where
@@ -653,7 +676,7 @@ where
     let delay = options
         .delay
         .clone()
-        .unwrap_or(ReconnectDelay::Fixed(RECONNECT_DELAY));
+        .unwrap_or(TransportClientReconnectDelay::Fixed(RECONNECT_DELAY));
     let maximum_attempts = options.maximum_attempts.unwrap_or(RECONNECT_ATTEMPTS);
     let signal = options.signal.clone();
     let is_cancelled = || signal.as_ref().is_some_and(CancellationToken::is_cancelled);
@@ -685,8 +708,8 @@ where
         }
 
         let next = match &delay {
-            ReconnectDelay::Fixed(delay) => *delay,
-            ReconnectDelay::Computed(delay_of) => {
+            TransportClientReconnectDelay::Fixed(delay) => *delay,
+            TransportClientReconnectDelay::Resolver(delay_of) => {
                 let computed = catch_unwind(AssertUnwindSafe(|| delay_of(previous, number)));
 
                 computed.map_err(|_panicked| {

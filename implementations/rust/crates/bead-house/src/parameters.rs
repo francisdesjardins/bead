@@ -1,8 +1,9 @@
 //! The parameter rule (decision 0044, as 0007 holds it on the other sides, and 0004 on every side):
 //! beside its receiver, a function takes at most two parameters, then at most one options struct,
 //! always last, its type named `…Options`, taken by `&`: never by value, by `&mut` or in an
-//! `Option`, since `&…Options::default()` stands for none. A tuple taken whole is one parameter, as
-//! a written tuple is one on the TypeScript side. A trait's methods are judged where the trait
+//! `Option`, since `&…Options::default()` stands for none. The count binds every function: inside
+//! a crate a tuple taken whole is one parameter, as a written tuple is one on the TypeScript side,
+//! and on the surface `tuples.rs` refuses it. A trait's methods are judged where the trait
 //! declares them, never where a type implements them, so a trait of another crate's, `serde`'s
 //! among them, writes its own; a callback a type alias declares, by `Fn(…)`'s sugar or a function
 //! pointer, is judged as a function is.

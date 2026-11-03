@@ -125,10 +125,10 @@ fn series_of(notifications: &NotificationManager, (call_id, connection): (u32, &
 fn news(id: u16) -> Procedure {
     Procedure {
         service_id: 10,
-        id,
+        procedure_id: id,
         service_revision: 1,
-        name: if id == 1 { "news" } else { "other" }.to_owned(),
-        kind: None,
+        procedure_name: if id == 1 { "news" } else { "other" }.to_owned(),
+        procedure_kind: None,
         maximum_payload_bytes: None,
         deprecation: None,
     }

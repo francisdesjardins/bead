@@ -12,7 +12,7 @@ use crate::clock::{Clock, Schedule, SharedClock, Timer, TimerCallback};
 use crate::debug::DebugDirection;
 use crate::envelope::Envelope;
 use crate::managers::service::{
-    ResolverDependencies, ServiceManager, ServiceManagerOptions, ServiceRouter,
+    RequestResolverDependencies, ServiceManager, ServiceManagerOptions, ServiceRouter,
 };
 use crate::payloads::{CodecRefusal, PayloadCodec, TextCodec};
 use crate::router::admissions::BeforeRequest;
@@ -102,7 +102,7 @@ async fn a_received_call_starts_as_it_arrives_its_admission_and_its_decoding_cou
             assert!(error.is_none());
             locked(&seeing).push((event.direction, event.started_at, event.duration));
         }));
-        let mut dependencies = ResolverDependencies::of(
+        let mut dependencies = RequestResolverDependencies::new(
             Decoding {
                 clock: Arc::clone(&clock),
                 delay: decoding,

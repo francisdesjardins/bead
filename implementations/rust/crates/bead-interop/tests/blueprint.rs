@@ -81,11 +81,11 @@ fn holds_each_interop_procedure_to_its_blueprint_in_its_order() {
     for ((procedure, admission, failures, _validates), blueprinted) in
         described.iter().zip(&procedures)
     {
-        let name = &procedure.name;
-        let kind = procedure.kind.map(ProcedureKind::as_str);
+        let name = &procedure.procedure_name;
+        let kind = procedure.procedure_kind.map(ProcedureKind::as_str);
 
         assert_eq!(
-            Some(&json!(procedure.id)),
+            Some(&json!(procedure.procedure_id)),
             blueprinted.get("procedureId"),
             "{name}: its id"
         );
@@ -139,7 +139,9 @@ fn holds_each_interop_procedure_to_its_blueprint_in_its_order() {
             .filter(|blueprinted| blueprinted.get("notification").is_some())
             .filter_map(|blueprinted| blueprinted.get("procedureName"))
             .collect::<Vec<_>>(),
-        [&json!(interop.ticks.descriptor().procedure().name)],
+        [&json!(
+            interop.ticks.descriptor().procedure().procedure_name
+        )],
         "ticks alone notifies"
     );
     assert_eq!(

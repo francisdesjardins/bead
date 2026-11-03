@@ -185,6 +185,19 @@ mod native {
     }
 }
 
+/// A layer built on another, as its clock is chosen: the clock beneath it and the one it was given,
+/// each by its name, and the two layers' names.
+pub(crate) struct LayeredClocks<'clocks> {
+    /// The clock of the layer beneath, when it has one.
+    pub(crate) beneath: Option<&'clocks SharedClock>,
+    /// The clock the layer was given, when it was.
+    pub(crate) given: Option<&'clocks SharedClock>,
+    /// The layer's name, as a refusal names it.
+    pub(crate) layer: &'clocks str,
+    /// The layer beneath's name, as a refusal names it.
+    pub(crate) below: &'clocks str,
+}
+
 /// The clock of a layer built on another: the one beneath it, unless it was given one — the one
 /// given when there is none beneath.
 ///
@@ -193,9 +206,15 @@ mod native {
 /// A [`ProgrammerError`] naming both layers and describing each clock when one given differs from
 /// the one beneath.
 pub(crate) fn clock_of(
-    (beneath, given): (Option<&SharedClock>, Option<&SharedClock>),
-    (layer, below): (&str, &str),
+    layered: &LayeredClocks<'_>,
 ) -> Result<Option<SharedClock>, ProgrammerError> {
+    let LayeredClocks {
+        beneath,
+        given,
+        layer,
+        below,
+    } = *layered;
+
     match (beneath, given) {
         (Some(beneath), Some(given)) if !Arc::ptr_eq(beneath, given) => {
             Err(ProgrammerError::new(format!(

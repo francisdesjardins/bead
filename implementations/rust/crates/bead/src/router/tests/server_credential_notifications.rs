@@ -4,10 +4,11 @@ use std::sync::{Arc, Mutex};
 
 use super::locked;
 use super::server::{Served, first, news, subscribing_of};
+use crate::NotificationResolverDependencies;
 use crate::credentials::{Credentials, ElsewhereSession};
 use crate::envelope::{Credential, Envelope};
 use crate::managers::service::{
-    Notifier, NotifyOptions, ResolverDependencies, Response, Subscriber,
+    Notifier, NotifyOptions, RequestResolverDependencies, Response, Subscriber,
 };
 use crate::payloads::TextCodec;
 use crate::router::server::RouterServerOptions;
@@ -35,7 +36,10 @@ fn serving() -> (Served, Notifier<TextCodec>) {
         .services
         .get_notification_resolver(
             &news(),
-            (ResolverDependencies::of(TextCodec, TextCodec), TextCodec),
+            NotificationResolverDependencies::new(
+                RequestResolverDependencies::new(TextCodec, TextCodec),
+                TextCodec,
+            ),
         )
         .expect("news resolved")
         .on(Arc::new(|_, response: Response<TextCodec>| {

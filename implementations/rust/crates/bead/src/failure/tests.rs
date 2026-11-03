@@ -4,7 +4,7 @@ use core::num::NonZeroU16;
 
 use super::{Failure, FailureOrigin, ProcedureAddress};
 use crate::constants::{FailureScope, ProtocolCode, RouterSide};
-use crate::envelope::{Credential, FailureHeader, FailureRecord, Header};
+use crate::envelope::{Credential, EnvelopeHeader, FailureHeader, FailureRecord};
 
 fn received((code, scope, relays): (u16, FailureScope, u8)) -> Failure {
     Failure::received(
@@ -85,7 +85,7 @@ fn carries_no_header_when_none_is_supplied_explicitly() {
 #[ignore = "divergence: Failure::about keeps the OPAQUE token in its header; TypeScript and C# keep its scheme alone"]
 fn carries_the_failure_and_where_it_belongs_and_keeps_a_redacted_copy_of_the_header() {
     let token = crate::session_token::SessionToken::new([7; 16]).expect("a token");
-    let mut header = Header::Failure(FailureHeader {
+    let mut header = EnvelopeHeader::Failure(FailureHeader {
         call_id: 3,
         credential: Some(Credential::Opaque(token)),
     });
@@ -102,7 +102,7 @@ fn carries_the_failure_and_where_it_belongs_and_keeps_a_redacted_copy_of_the_hea
         )
         .about(&header)
         .caused_by(std::sync::Arc::clone(&cause));
-    if let Header::Failure(header) = &mut header {
+    if let EnvelopeHeader::Failure(header) = &mut header {
         header.call_id = 99;
     }
     assert_eq!(error.code().get(), 19);
@@ -205,14 +205,14 @@ fn is_the_peer_s_of_the_other_side_through_no_relay_when_received() {
 }
 
 #[test]
-#[ignore = "divergence: Header::redacted keeps an OPAQUE token; TypeScript and C# keep its scheme alone"]
+#[ignore = "divergence: EnvelopeHeader::redacted keeps an OPAQUE token; TypeScript and C# keep its scheme alone"]
 fn leaves_the_credential_out_and_says_its_scheme_alone_when_there_was_one() {
     use crate::constants::CredentialScheme;
     use crate::envelope::{NotificationHeader, RequestHeader, ResultHeader};
     use bytes::Bytes;
 
     let token = crate::session_token::SessionToken::new([9; 16]).expect("a token");
-    let result = Header::Result(ResultHeader {
+    let result = EnvelopeHeader::Result(ResultHeader {
         call_id: 2,
         total: None,
         credential: Some(Credential::Opaque(token)),
@@ -228,13 +228,13 @@ fn leaves_the_credential_out_and_says_its_scheme_alone_when_there_was_one() {
         result.credential(),
         "a token is left out"
     );
-    let ended = Header::Result(ResultHeader {
+    let ended = EnvelopeHeader::Result(ResultHeader {
         call_id: 2,
         total: None,
         credential: Some(Credential::None),
     });
     assert_eq!(ended.redacted(), ended);
-    let notification = Header::Notification(NotificationHeader { call_id: 3 });
+    let notification = EnvelopeHeader::Notification(NotificationHeader { call_id: 3 });
     assert_eq!(notification.redacted(), notification);
     for (credential, expected) in [
         (
@@ -252,7 +252,7 @@ fn leaves_the_credential_out_and_says_its_scheme_alone_when_there_was_one() {
             },
         ),
     ] {
-        let request = Header::Request(RequestHeader {
+        let request = EnvelopeHeader::Request(RequestHeader {
             call_id: 1,
             service_id: 2,
             procedure_id: 1,

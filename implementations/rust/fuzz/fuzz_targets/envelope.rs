@@ -33,6 +33,9 @@ fuzz_target!(|data: &[u8]| {
             }
         }
 
-        drop(read_failure(data, (side, 1_024)));
+        let mut options = ReadEnvelopeOptions::default();
+
+        options.maximum_detail_bytes = Some(1_024);
+        drop(read_failure(data, side, &options));
     }
 });

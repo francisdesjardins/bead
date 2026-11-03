@@ -13,7 +13,7 @@ use crate::errors::CallError;
 use crate::failure::{Failure, FailureOrigin};
 use crate::jwt_verifier::{JwtAlgorithm, JwtKey};
 use crate::router::client::{RouterClient, RouterClientOptions};
-use crate::router::server::{Call, CallHooks};
+use crate::router::server::Call;
 use crate::router::types::{RequestCredential, RouterLimitsOptions, TransportMessage};
 use crate::testing::scripted::{ScriptedClient, bytes_of, envelope_of};
 use crate::testing::surface::Consumer;
@@ -42,7 +42,7 @@ fn ask(scripted: &Scripted, credential: Option<RequestCredential>) -> Call {
     request.options.credential = credential;
     scripted
         .router
-        .request(Bytes::new(), (request, CallHooks::default()))
+        .request(Bytes::new(), request)
         .expect("a request")
 }
 
@@ -411,11 +411,15 @@ async fn after_a_withdrawal_a_call_that_gives_its_own_credential_or_none_goes_an
 async fn withdraws_its_default_alike_when_the_refusal_crossed_a_relay() {
     let scripted = scripted(elsewhere());
     let withdrawn = withdrawals(&scripted);
-    let mut request = request_of((None, TIMEOUT));
-    request.options.destination_id = Some(7);
+    // the same request, each time anew
+    let request = || {
+        let mut request = request_of((None, TIMEOUT));
+        request.options.destination_id = Some(7);
+        request
+    };
     let first = scripted
         .router
-        .request(Bytes::new(), (request.clone(), CallHooks::default()))
+        .request(Bytes::new(), request())
         .expect("a relayed request");
     scripted.settle().await;
     let Envelope::Failure {
@@ -434,7 +438,7 @@ async fn withdraws_its_default_alike_when_the_refusal_crossed_a_relay() {
     assert_eq!(scripted.router.credential(), None);
     let second = scripted
         .router
-        .request(Bytes::new(), (request, CallHooks::default()))
+        .request(Bytes::new(), request())
         .expect("a request future");
     let failure = required(second).await;
     assert_eq!(

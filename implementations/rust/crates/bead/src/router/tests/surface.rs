@@ -37,7 +37,7 @@ fn keeps_the_router_core_the_envelope_codec_and_the_transports_credential_out_of
             ("E0432", "unresolved import"),
         );
     }
-    for item in ["ResolverProps", "AdmissionRequest"] {
+    for item in ["RequestResolverProps", "AdmissionRequest"] {
         consumer.refuses(
             &format!("pub fn check(props: &bead::{item}) {{ let _secret = &props.carried; }}"),
             ("E0616", "field `carried`"),

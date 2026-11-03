@@ -7,7 +7,7 @@ use bytes::Bytes;
 use super::{Scripted, failure_of, locked, notification_of};
 use crate::constants::{EnvelopeKind, ProtocolCode};
 use crate::debug::{DebugDirection, DebugType};
-use crate::envelope::{Envelope, Header, ResultHeader};
+use crate::envelope::{Envelope, EnvelopeHeader, ResultHeader};
 use crate::errors::CallError;
 use crate::managers::service::{
     NotificationDependencies, RequestDependencies, RequestOptions, ServiceManager,
@@ -50,7 +50,7 @@ async fn tells_a_calls_steps_with_the_call_id_its_request_carries() {
     });
     let services = services(&scripted);
     let asking = services
-        .get_request(&echo(), RequestDependencies::of(TextCodec, TextCodec))
+        .get_request(&echo(), RequestDependencies::new(TextCodec, TextCodec))
         .expect("echo declared");
     let envelopes = Arc::new(Mutex::new(Vec::new()));
     let hearing = Arc::clone(&envelopes);
@@ -59,7 +59,7 @@ async fn tells_a_calls_steps_with_the_call_id_its_request_carries() {
             direction,
             event.header.kind(),
             event.header.call_id(),
-            matches!(&event.header, Header::Request(header) if header.total.is_some()),
+            matches!(&event.header, EnvelopeHeader::Request(header) if header.total.is_some()),
         ));
     }));
     let steps = Arc::new(Mutex::new(Vec::new()));
@@ -116,7 +116,7 @@ async fn two_calls_to_one_procedure_started_in_one_millisecond_and_answered_in_o
     let scripted = Scripted::new();
     let services = services(&scripted);
     let asking = services
-        .get_request(&echo(), RequestDependencies::of(TextCodec, TextCodec))
+        .get_request(&echo(), RequestDependencies::new(TextCodec, TextCodec))
         .expect("echo declared");
     let steps = Arc::new(Mutex::new(Vec::new()));
     let hearing = Arc::clone(&steps);
@@ -204,7 +204,10 @@ async fn a_subscribing_call_binds_its_subscription_before_debug_hears_its_tx_ste
     let notification = services
         .get_notification(
             &super::notifying(),
-            NotificationDependencies::of((TextCodec, TextCodec, TextCodec)),
+            NotificationDependencies::new(
+                RequestDependencies::new(TextCodec, TextCodec),
+                TextCodec,
+            ),
         )
         .expect("notification declared");
     let heard = Arc::new(Mutex::new(Vec::new()));
@@ -225,14 +228,12 @@ async fn a_subscribing_call_binds_its_subscription_before_debug_hears_its_tx_ste
             });
         }
     }));
-    let mut registering = notification.on(
-        (
-            "subscribe".to_owned(),
-            Arc::new(move |news| {
-                locked(&hearing).push(news);
-                Box::pin(async { Ok(()) })
-            }),
-        ),
+    let mut registering = notification.register(
+        "subscribe".to_owned(),
+        Arc::new(move |news| {
+            locked(&hearing).push(news);
+            Box::pin(async { Ok(()) })
+        }),
         &RequestOptions::default(),
     );
     core::future::poll_fn(|context| {

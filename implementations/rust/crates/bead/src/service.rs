@@ -13,8 +13,8 @@ use crate::errors::{CallError, ProgrammerError};
 use crate::failure::Failure;
 use crate::identity::Procedure;
 use crate::managers::service::{
-    NotificationResolverOf, Notifier, NotifyOptions, Request, RequestDependencies,
-    ResolverCallback, ResolverDependencies, Validate,
+    NotificationResolverDependencies, NotificationResolverOf, Notifier, NotifyOptions, Request,
+    RequestDependencies, RequestResolverDependencies, ResolverCallback, Validate,
 };
 use crate::payloads::PayloadCodec;
 use crate::router::admissions::{BeforeRequest, require_session};
@@ -229,9 +229,9 @@ fn describe<Req: PayloadCodec, Res: PayloadCodec>(
     mut init: DescriptorInit<Req, Res>,
     kind: ProcedureKind,
 ) -> Result<Descriptor<Req, Res>, ProgrammerError> {
-    let name = &init.procedure.name;
+    let name = &init.procedure.procedure_name;
 
-    if let Some(stated) = init.procedure.kind
+    if let Some(stated) = init.procedure.procedure_kind
         && stated != kind
     {
         return Err(ProgrammerError::new(format!(
@@ -249,7 +249,7 @@ fn describe<Req: PayloadCodec, Res: PayloadCodec>(
         )));
     }
 
-    init.procedure.kind = Some(kind);
+    init.procedure.procedure_kind = Some(kind);
 
     Ok(Descriptor {
         init: Arc::new(init),
@@ -371,7 +371,7 @@ impl fmt::Debug for AdmissionHook {
 pub struct ServiceServerOptions {
     /// The hooks its procedures are admitted by, by name: none when no procedure names a hook, and
     /// refused as the server is built when one does and finds none.
-    pub admissions: Option<Vec<(&'static str, AdmissionHook)>>,
+    pub admissions: Option<BTreeMap<&'static str, AdmissionHook>>,
     /// Whether its rules stop at the first violation: `false` when none.
     pub fail_fast: Option<bool>,
     /// Whether its commands judge their requests by their rules: `false` when none.
@@ -406,44 +406,44 @@ impl fmt::Debug for ServiceProcedure {
     }
 }
 
-impl ServiceProcedure {
-    /// The procedure `descriptor` describes: a request, or a command its server makes as it is
-    /// offered.
-    #[must_use]
-    pub fn of<Req, Res>(descriptor: &Descriptor<Req, Res>) -> Self
-    where
-        Req: PayloadCodec + Clone,
-        Res: PayloadCodec + Clone,
-        Req::Value: Clone + fmt::Debug + Sync,
-        Res::Value: Clone + fmt::Debug + Sync,
-    {
-        let command = (descriptor.procedure().kind == Some(ProcedureKind::Command)).then(|| {
-            let descriptor = descriptor.clone();
-            let maker: CommandMaker = Arc::new(
-                move |server: &Server, (validates, fail_fast): (bool, bool)| {
-                    let init = &descriptor.init;
-                    let requester = server.services().get_command(
-                        &init.procedure,
-                        RequestDependencies {
-                            request: init.request.clone(),
-                            result: init.result.clone(),
-                            validate: if validates {
-                                init.validate.clone()
-                            } else {
-                                None
+/// The procedure a descriptor describes: a request, or a command its server makes as it is
+/// offered.
+impl<Req, Res> From<&Descriptor<Req, Res>> for ServiceProcedure
+where
+    Req: PayloadCodec + Clone,
+    Res: PayloadCodec + Clone,
+    Req::Value: Clone + fmt::Debug + Sync,
+    Res::Value: Clone + fmt::Debug + Sync,
+{
+    fn from(descriptor: &Descriptor<Req, Res>) -> Self {
+        let command =
+            (descriptor.procedure().procedure_kind == Some(ProcedureKind::Command)).then(|| {
+                let descriptor = descriptor.clone();
+                let maker: CommandMaker = Arc::new(
+                    move |server: &Server, (validates, fail_fast): (bool, bool)| {
+                        let init = &descriptor.init;
+                        let requester = server.services().get_command(
+                            &init.procedure,
+                            RequestDependencies {
+                                request: init.request.clone(),
+                                result: init.result.clone(),
+                                validate: if validates {
+                                    init.validate.clone()
+                                } else {
+                                    None
+                                },
+                                fail_fast,
                             },
-                            fail_fast,
-                        },
-                    )?;
+                        )?;
 
-                    let made: Made = Arc::new(requester);
+                        let made: Made = Arc::new(requester);
 
-                    Ok(made)
-                },
-            );
+                        Ok(made)
+                    },
+                );
 
-            maker
-        });
+                maker
+            });
 
         Self {
             procedure: descriptor.procedure().clone(),
@@ -451,19 +451,22 @@ impl ServiceProcedure {
             command,
         }
     }
+}
 
-    /// The procedure `descriptor` describes, which notifies.
-    #[must_use]
-    pub fn of_notifying<Req: PayloadCodec, Res: PayloadCodec, Not: PayloadCodec>(
-        descriptor: &NotifyingDescriptor<Req, Res, Not>,
-    ) -> Self {
+/// The procedure a notifying descriptor describes.
+impl<Req: PayloadCodec, Res: PayloadCodec, Not: PayloadCodec>
+    From<&NotifyingDescriptor<Req, Res, Not>> for ServiceProcedure
+{
+    fn from(descriptor: &NotifyingDescriptor<Req, Res, Not>) -> Self {
         Self {
             procedure: descriptor.descriptor.procedure().clone(),
             admission: descriptor.descriptor.admission(),
             command: None,
         }
     }
+}
 
+impl ServiceProcedure {
     /// Its procedure.
     #[must_use]
     pub const fn procedure(&self) -> &Procedure {
@@ -531,11 +534,11 @@ fn admission_of(admission: AdmissionRule, bound: &Bound) -> Option<BeforeRequest
 fn dependencies_of<Req: PayloadCodec + Clone, Res: PayloadCodec + Clone>(
     descriptor: &Descriptor<Req, Res>,
     bound: &Bound,
-) -> (ResolverDependencies<Req, Res>, Arc<[u16]>) {
+) -> (RequestResolverDependencies<Req, Res>, Arc<[u16]>) {
     let init = &descriptor.init;
 
     (
-        ResolverDependencies {
+        RequestResolverDependencies {
             request: init.request.clone(),
             result: init.result.clone(),
             before_request: admission_of(init.admission, bound),
@@ -557,8 +560,7 @@ impl ServiceServer {
         procedures: Vec<ServiceProcedure>,
         options: &ServiceServerOptions,
     ) -> Result<Self, ProgrammerError> {
-        let given: BTreeMap<&'static str, AdmissionHook> =
-            options.admissions.iter().flatten().cloned().collect();
+        let given = options.admissions.clone().unwrap_or_default();
         let mut named: Vec<&'static str> = Vec::new();
 
         for described in &procedures {
@@ -566,7 +568,7 @@ impl ServiceServer {
                 if !given.contains_key(hook) {
                     return Err(ProgrammerError::new(format!(
                         "{} is admitted by the hook {hook}, which the options do not give",
-                        described.procedure.name
+                        described.procedure.procedure_name
                     )));
                 }
 
@@ -606,30 +608,30 @@ impl ServiceServer {
             let mut inner = locked(&self.inner);
             let is_answered = inner.procedures.iter().any(|known| {
                 known.procedure.address() == procedure.address()
-                    && known.procedure.kind == Some(kind)
+                    && known.procedure.procedure_kind == Some(kind)
             });
 
             if !is_answered {
                 return Err(ProgrammerError::new(format!(
                     "{} is no procedure this service's server answers",
-                    procedure.name
+                    procedure.procedure_name
                 )));
             }
 
             if inner
                 .binders
                 .iter()
-                .any(|(name, _)| *name == procedure.name)
+                .any(|(name, _)| *name == procedure.procedure_name)
             {
                 return Err(ProgrammerError::new(format!(
                     "{} is already a registered resolver",
-                    procedure.name
+                    procedure.procedure_name
                 )));
             }
 
             inner
                 .binders
-                .push((procedure.name.clone(), Arc::clone(binder)));
+                .push((procedure.procedure_name.clone(), Arc::clone(binder)));
 
             (inner.offered.clone(), inner.bound.clone())
         };
@@ -639,7 +641,7 @@ impl ServiceServer {
         {
             locked(&self.inner)
                 .notifiers
-                .insert(procedure.name.clone(), notifier);
+                .insert(procedure.procedure_name.clone(), notifier);
         }
 
         Ok(())
@@ -705,7 +707,10 @@ impl ServiceServer {
             let resolver: NotificationResolverOf<Req, Res, Not> =
                 server.services().get_notification_resolver(
                     descriptor.descriptor.procedure(),
-                    (dependencies, (*descriptor.notification).clone()),
+                    NotificationResolverDependencies::new(
+                        dependencies,
+                        (*descriptor.notification).clone(),
+                    ),
                 )?;
             let notifier: Notifier<Not> =
                 resolver.register((Arc::clone(&callback), Some(listed)))?;
@@ -749,7 +754,7 @@ impl ServiceServer {
 
                 locked(&self.inner)
                     .commands
-                    .insert(described.procedure.name.clone(), made);
+                    .insert(described.procedure.procedure_name.clone(), made);
             }
         }
 
@@ -779,13 +784,13 @@ impl ServiceServer {
 
         locked(&self.inner)
             .commands
-            .get(&procedure.name)
+            .get(&procedure.procedure_name)
             .and_then(|made| made.downcast_ref::<Request<Req, Res>>())
             .cloned()
             .ok_or_else(|| {
                 ProgrammerError::new(format!(
                     "{} is a command made as its service is offered, not before",
-                    procedure.name
+                    procedure.procedure_name
                 ))
             })
     }
@@ -795,7 +800,8 @@ impl ServiceServer {
     pub fn notify<Req, Res, Not>(
         &self,
         descriptor: &NotifyingDescriptor<Req, Res, Not>,
-        (notification, options): (Not::Value, &NotifyOptions),
+        notification: Not::Value,
+        options: &NotifyOptions,
     ) -> BoxFuture<()>
     where
         Req: PayloadCodec,
@@ -805,7 +811,7 @@ impl ServiceServer {
     {
         let notifier = locked(&self.inner)
             .notifiers
-            .get(&descriptor.descriptor.procedure().name)
+            .get(&descriptor.descriptor.procedure().procedure_name)
             .and_then(|made| made.downcast_ref::<Notifier<Not>>())
             .cloned();
 
@@ -825,11 +831,11 @@ impl ServiceServer {
             .procedures
             .iter()
             .filter(|described| {
-                described.procedure.kind != Some(ProcedureKind::Command)
+                described.procedure.procedure_kind != Some(ProcedureKind::Command)
                     && !inner
                         .binders
                         .iter()
-                        .any(|(name, _)| *name == described.procedure.name)
+                        .any(|(name, _)| *name == described.procedure.procedure_name)
             })
             .map(|described| described.procedure.clone())
             .collect()

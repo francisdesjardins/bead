@@ -20,18 +20,19 @@ use crate::broker::adapter::{
     BrokerAdapter, BrokerCapabilities, BrokerDelivery, BrokerError, BrokerListener,
     BrokerPublication, BrokerPublished, BrokerStart, BrokerSubscription,
 };
-use crate::broker::client::{BrokerClientOptions, BrokerConnectOptions};
-use crate::broker::memory::{MemoryBrokerAdapter, MemoryBrokerAdapterOptions};
+use crate::broker::client::{BrokerTransportClientConnectOptions, BrokerTransportClientOptions};
+use crate::broker::memory::{MemoryBrokerAdapter, MemoryBrokerAdapterOptions, TRANSPORT_BROKER};
 use crate::broker::parcel::{Parcel, encode_parcel, kinds, write_parcel};
 use crate::broker::participant::{BrokerParticipant, BrokerParticipantOptions, BrokerRefusedError};
-use crate::broker::server::BrokerServerOptions;
+use crate::broker::server::BrokerTransportServerOptions;
 use crate::call_session::{Carriage, uncarried_of};
 use crate::constants::{ProtocolCode, RouterSide};
 use crate::envelope::Credential;
 use crate::errors::TransportError;
 use crate::router::types::{BoxFuture, ConnectionHandle, RouterError, TransportMessage};
 use crate::transport::{
-    ClientTransport, DisconnectOptions, ReadyState, ServerListener, ServerTransport,
+    ReadyState, RouterClientTransport, ServerListener, ServerTransport,
+    TransportClientDisconnectOptions,
 };
 
 type Settled = oneshot::Sender<Result<(), BrokerError>>;
@@ -163,7 +164,7 @@ impl BrokerAdapter for Holding {
     }
 }
 
-fn names_of(server: &crate::broker::server::BrokerServer) -> Option<u64> {
+fn names_of(server: &crate::broker::server::BrokerTransportServer) -> Option<u64> {
     server
         .gauges()
         .and_then(|gauges| gauges.counts.get("names").copied())
@@ -296,18 +297,25 @@ async fn draws_a_handle_of_its_adapter_type_for_each_connection_at_its_third_leg
         pair.server
             .clients()
             .into_iter()
-            .map(|(handle, address, port, _)| (handle.to_string(), address, port))
+            .map(|client| (
+                client.connection_handle.to_string(),
+                client.address,
+                client.port,
+                client.transport_type
+            ))
             .collect::<Vec<_>>(),
         [
             (
                 "type=BROKER;participant=peer;ordinal=2".to_owned(),
                 "peer".to_owned(),
-                None
+                None,
+                TRANSPORT_BROKER
             ),
             (
                 "type=BROKER;participant=peer;ordinal=3".to_owned(),
                 "peer".to_owned(),
-                None
+                None,
+                TRANSPORT_BROKER
             )
         ],
         "its clients"
@@ -315,15 +323,15 @@ async fn draws_a_handle_of_its_adapter_type_for_each_connection_at_its_third_leg
 
     // its bounds held as it is built
     for options in [
-        BrokerServerOptions::of(Vec::<String>::new()),
-        BrokerServerOptions::of(["a.b"]),
-        BrokerServerOptions {
+        BrokerTransportServerOptions::new(Vec::<String>::new()),
+        BrokerTransportServerOptions::new(["a.b"]),
+        BrokerTransportServerOptions {
             accept_timeout: Some(crate::duration::NEVER),
-            ..BrokerServerOptions::of(["other"])
+            ..BrokerTransportServerOptions::new(["other"])
         },
-        BrokerServerOptions {
+        BrokerTransportServerOptions {
             maximum_connections: Some(0),
-            ..BrokerServerOptions::of(["other"])
+            ..BrokerTransportServerOptions::new(["other"])
         },
     ] {
         assert!(
@@ -337,7 +345,7 @@ async fn draws_a_handle_of_its_adapter_type_for_each_connection_at_its_third_leg
             pair.broker
                 .adapter(&MemoryBrokerAdapterOptions {
                     capabilities: Some(BrokerCapabilities::WILL),
-                    ..MemoryBrokerAdapterOptions::of("plain")
+                    ..MemoryBrokerAdapterOptions::new("plain")
                 })
                 .expect("an adapter"),
         ),
@@ -347,9 +355,9 @@ async fn draws_a_handle_of_its_adapter_type_for_each_connection_at_its_third_leg
 
     assert_eq!(
         plain
-            .server(&BrokerServerOptions {
+            .server(&BrokerTransportServerOptions {
                 is_in_group: Some(true),
-                ..BrokerServerOptions::of(["interop"])
+                ..BrokerTransportServerOptions::new(["interop"])
             })
             .expect_err("refused")
             .message(),
@@ -367,7 +375,7 @@ async fn refuses_400_malformed_an_open_whose_id_is_empty_or_no_token_and_tells_i
         &BrokerParticipantOptions::default(),
     );
     let server = participant
-        .server(&BrokerServerOptions::of(["interop"]))
+        .server(&BrokerTransportServerOptions::new(["interop"]))
         .expect("a server");
     let (peer, heard) = peer_of(
         &broker,
@@ -448,9 +456,9 @@ async fn reports_a_half_open_connection_it_lost_of_its_own_by_its_opener_s_id_wi
         &BrokerParticipantOptions::default(),
     );
     let server = participant
-        .server(&BrokerServerOptions {
+        .server(&BrokerTransportServerOptions {
             maximum_unsent_bytes: Some(1),
-            ..BrokerServerOptions::of(["interop"])
+            ..BrokerTransportServerOptions::new(["interop"])
         })
         .expect("a server");
     let (peer, heard) = peer_of(&broker, ("peer", &[])).await;
@@ -521,9 +529,9 @@ async fn reports_what_a_listener_of_its_events_threw_with_its_connection_s_handl
         &BrokerParticipantOptions::default(),
     );
     let server = participant
-        .server(&BrokerServerOptions {
+        .server(&BrokerTransportServerOptions {
             maximum_connections: Some(1),
-            ..BrokerServerOptions::of(["interop"])
+            ..BrokerTransportServerOptions::new(["interop"])
         })
         .expect("a server");
     let ada = participant_of(
@@ -531,10 +539,10 @@ async fn reports_what_a_listener_of_its_events_threw_with_its_connection_s_handl
         &BrokerParticipantOptions::default(),
     );
     let first = ada
-        .client(&BrokerClientOptions::default())
+        .client(&BrokerTransportClientOptions::default())
         .expect("a client");
     let second = ada
-        .client(&BrokerClientOptions::default())
+        .client(&BrokerTransportClientOptions::default())
         .expect("a client");
     let told = Arc::new(ServerTold::default());
 
@@ -542,7 +550,7 @@ async fn reports_what_a_listener_of_its_events_threw_with_its_connection_s_handl
     server.listen(Arc::new(AtServer(Arc::clone(&told))));
     server.start().await.expect("started");
     first
-        .connect(&BrokerConnectOptions::of("interop"))
+        .connect(&BrokerTransportClientConnectOptions::new("interop"))
         .await
         .expect("connected");
     until(
@@ -552,7 +560,9 @@ async fn reports_what_a_listener_of_its_events_threw_with_its_connection_s_handl
     .await;
 
     // * past maximumConnections: refused 503, its listener's panic reported with no handle
-    let refused = second.connect(&BrokerConnectOptions::of("interop")).await;
+    let refused = second
+        .connect(&BrokerTransportClientConnectOptions::new("interop"))
+        .await;
     let refusal = match &refused {
         Err(TransportError::Connect(error)) => std::error::Error::source(error)
             .and_then(|source| source.downcast_ref::<BrokerRefusedError>())
@@ -600,9 +610,9 @@ async fn refuses_to_send_what_is_no_envelope_keeping_the_connection_and_holds_a_
         &BrokerParticipantOptions::default(),
     );
     let server = participant
-        .server(&BrokerServerOptions {
+        .server(&BrokerTransportServerOptions {
             secure: Some(false),
-            ..BrokerServerOptions::of(["interop"])
+            ..BrokerTransportServerOptions::new(["interop"])
         })
         .expect("a server");
     let ada = participant_of(
@@ -610,14 +620,14 @@ async fn refuses_to_send_what_is_no_envelope_keeping_the_connection_and_holds_a_
         &BrokerParticipantOptions::default(),
     );
     let client = ada
-        .client(&BrokerClientOptions::default())
+        .client(&BrokerTransportClientOptions::default())
         .expect("a client");
     let told = Arc::new(ServerTold::default());
 
     server.listen(Arc::new(AtServer(Arc::clone(&told))));
     server.start().await.expect("started");
     client
-        .connect(&BrokerConnectOptions::of("interop"))
+        .connect(&BrokerTransportClientConnectOptions::new("interop"))
         .await
         .expect("connected");
     until(
@@ -706,7 +716,7 @@ async fn starts_once_its_broker_holds_each_name_it_serves_fails_its_start_on_a_n
     let participant = BrokerParticipant::new(adapter, &BrokerParticipantOptions::default())
         .expect("a participant");
     let server = participant
-        .server(&BrokerServerOptions::of(["interop", "echo"]))
+        .server(&BrokerTransportServerOptions::new(["interop", "echo"]))
         .expect("a server");
     let told = Arc::new(ServerTold::default());
 
@@ -811,7 +821,7 @@ async fn rejects_a_stop_while_starting() {
     let participant = BrokerParticipant::new(adapter, &BrokerParticipantOptions::default())
         .expect("a participant");
     let server = participant
-        .server(&BrokerServerOptions::of(["echo"]))
+        .server(&BrokerTransportServerOptions::new(["echo"]))
         .expect("a server");
     let starting = crate::testing::spawn(server.start());
 
@@ -865,10 +875,10 @@ async fn serves_its_name_again_in_its_group_once_a_connection_closes_as_its_brok
     let participant = BrokerParticipant::new(adapter, &BrokerParticipantOptions::default())
         .expect("a participant");
     let server = participant
-        .server(&BrokerServerOptions {
+        .server(&BrokerTransportServerOptions {
             is_in_group: Some(true),
             maximum_connections: Some(1),
-            ..BrokerServerOptions::of(["interop"])
+            ..BrokerTransportServerOptions::new(["interop"])
         })
         .expect("a server");
     let clients = participant_of(
@@ -898,11 +908,11 @@ async fn serves_its_name_again_in_its_group_once_a_connection_closes_as_its_brok
 
     // * full at its first connection: its name let go of, counted until its UNSUBACK came
     let first = clients
-        .client(&BrokerClientOptions::default())
+        .client(&BrokerTransportClientOptions::default())
         .expect("a client");
 
     first
-        .connect(&BrokerConnectOptions::of("interop"))
+        .connect(&BrokerTransportClientConnectOptions::new("interop"))
         .await
         .expect("connected");
     until(
@@ -914,7 +924,7 @@ async fn serves_its_name_again_in_its_group_once_a_connection_closes_as_its_brok
     // a connection that closes meanwhile asks nothing of a name its broker still holds, and asks it
     // anew once its broker let it go
     first
-        .disconnect(&DisconnectOptions::default())
+        .disconnect(&TransportClientDisconnectOptions::default())
         .expect("closed");
     until(|| !locked(&told.closed).is_empty(), "the connection closed").await;
     super::settle().await;
@@ -930,11 +940,11 @@ async fn serves_its_name_again_in_its_group_once_a_connection_closes_as_its_brok
 
     // * one its broker refuses to let go is reported
     let second = clients
-        .client(&BrokerClientOptions::default())
+        .client(&BrokerTransportClientOptions::default())
         .expect("a client");
 
     second
-        .connect(&BrokerConnectOptions::of("interop"))
+        .connect(&BrokerTransportClientConnectOptions::new("interop"))
         .await
         .expect("connected");
     until(
@@ -952,7 +962,7 @@ async fn serves_its_name_again_in_its_group_once_a_connection_closes_as_its_brok
 
     // and one its broker refuses to serve again is reported, and left unheld
     second
-        .disconnect(&DisconnectOptions::default())
+        .disconnect(&TransportClientDisconnectOptions::default())
         .expect("closed");
     until(
         || locked(&holding.subscribing).len() == 1,

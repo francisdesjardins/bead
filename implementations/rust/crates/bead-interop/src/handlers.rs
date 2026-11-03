@@ -347,13 +347,13 @@ pub fn offer_interop(server: &Server) -> Result<ServiceServer, ProgrammerError> 
     let procedures = Arc::new(interop_procedures(Some(validate))?);
     let mut options = ServiceServerOptions::default();
 
-    options.admissions = Some(vec![(
+    options.admissions = Some(BTreeMap::from([(
         "nobody",
         AdmissionHook {
             admits: Arc::new(|_request| false),
             detail: Some("this procedure admits nobody".to_owned()),
         },
-    )]);
+    )]));
 
     let interop = ServiceServer::new(procedures.all(), &options)?;
     let kept = Arc::new(Kept {
@@ -573,7 +573,7 @@ pub fn offer_interop(server: &Server) -> Result<ServiceServer, ProgrammerError> 
                     }));
                     options.key = key.map(bead::NotificationKey::Text);
 
-                    interop.notify(&ticks, (value, &options)).await;
+                    interop.notify(&ticks, value, &options).await;
 
                     let due: Vec<Hold> = {
                         let mut holds = locked(&kept.holds);

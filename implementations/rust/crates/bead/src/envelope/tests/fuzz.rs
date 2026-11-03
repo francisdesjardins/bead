@@ -209,7 +209,7 @@ fn reads_or_refuses_with_a_failure_every_mutation_of_a_vector() {
                     "seed {seed}, input {index}, {side:?}, envelope"
                 );
                 assert_eq!(
-                    defect(|| read_failure(&input, (side, 1_024)), &input),
+                    defect(|| read_failure(&input, side, &options), &input),
                     None,
                     "seed {seed}, input {index}, {side:?}, failure record"
                 );

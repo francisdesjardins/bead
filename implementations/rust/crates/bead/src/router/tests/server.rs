@@ -14,18 +14,19 @@ use crate::envelope::{Envelope, RequestHeader};
 use crate::errors::CallError;
 use crate::identity::Procedure;
 use crate::managers::service::{
-    DebugEvent, NotifyOptions, RequestDependencies, ResolverDependencies, Response, ServiceManager,
-    ServiceManagerOptions, ServiceRouter, TracedError,
+    DebugEvent, NotifyOptions, RequestDependencies, RequestResolverDependencies, Response,
+    ServiceManager, ServiceManagerOptions, ServiceRouter, TracedError,
 };
 use crate::metrics::{MetricsRegistry, MetricsRegistryOptions};
 use crate::payloads::{CodecRefusal, PayloadCodec, TextCodec};
 use crate::router::admissions::BeforeRequest;
 use crate::router::relay::{DestinationOptions, RelayOptions};
-use crate::router::server::{CallHooks, RouterServer, RouterServerOptions, ServerRequest};
+use crate::router::server::{RouterServer, RouterServerOptions};
 use crate::router::types::{ConnectionHandle, RouterActivity, RouterError, RouterLimitsOptions};
 use crate::testing::SteppingClock;
 use crate::testing::pair::{Pair, PairOptions, echo};
 use crate::testing::scripted::{ScriptedServer, Sending, handle_of};
+use crate::{NotificationResolverDependencies, RouterRequest};
 
 pub(super) fn first() -> ConnectionHandle {
     handle_of(1)
@@ -38,9 +39,9 @@ pub(super) fn second() -> ConnectionHandle {
 // the notifying procedure the tests subscribe to: procedure 5 of service 2
 pub(super) fn news() -> Procedure {
     Procedure {
-        id: 5,
-        name: "news".to_owned(),
-        kind: Some(ProcedureKind::Notifies),
+        procedure_id: 5,
+        procedure_name: "news".to_owned(),
+        procedure_kind: Some(ProcedureKind::Notifies),
         ..echo()
     }
 }
@@ -86,7 +87,7 @@ type Reports = Arc<Mutex<Vec<(RouterError, Option<ConnectionHandle>)>>>;
 pub(super) fn header_of((call_id, procedure): (u32, &Procedure)) -> RequestHeader {
     RequestHeader {
         service_id: procedure.service_id,
-        procedure_id: procedure.id,
+        procedure_id: procedure.procedure_id,
         ..request_header_of(call_id)
     }
 }
@@ -222,7 +223,10 @@ impl Served {
         self.services
             .get_notification_resolver(
                 &news(),
-                (ResolverDependencies::of(TextCodec, TextCodec), TextCodec),
+                NotificationResolverDependencies::new(
+                    RequestResolverDependencies::new(TextCodec, TextCodec),
+                    TextCodec,
+                ),
             )
             .expect("news resolved")
             .on(Arc::new(|_request, response: Response<TextCodec>| {
@@ -374,7 +378,10 @@ async fn counts_a_notification_whose_value_does_not_write_as_failed_for_each_sub
         .services
         .get_notification_resolver(
             &news(),
-            (ResolverDependencies::of(TextCodec, TextCodec), Unwritable),
+            NotificationResolverDependencies::new(
+                RequestResolverDependencies::new(TextCodec, TextCodec),
+                Unwritable,
+            ),
         )
         .expect("news resolved")
         .on(Arc::new(|_request, response: Response<TextCodec>| {
@@ -437,12 +444,12 @@ async fn counts_a_call_whose_admission_fails_procedure_failed_and_one_whose_subs
         .services
         .get_request_resolver(
             &echo(),
-            ResolverDependencies {
+            RequestResolverDependencies {
                 before_request: Some(BeforeRequest::new(
                     |_request| panic!("this admission fails, on purpose"),
                     None,
                 )),
-                ..ResolverDependencies::of(TextCodec, TextCodec)
+                ..RequestResolverDependencies::new(TextCodec, TextCodec)
             },
         )
         .expect("echo resolved")
@@ -502,7 +509,7 @@ async fn counts_a_command_to_a_connection_not_open_as_started_and_closed_in_the_
     let registry = registry();
     let served = Served::new(&counted_options(&registry));
     let command = Procedure {
-        kind: Some(ProcedureKind::Command),
+        procedure_kind: Some(ProcedureKind::Command),
         ..echo()
     };
     let series = served
@@ -517,16 +524,15 @@ async fn counts_a_command_to_a_connection_not_open_as_started_and_closed_in_the_
         .router
         .request(
             Bytes::from_static(b"x"),
-            (
-                ServerRequest {
-                    procedure: command.address(),
-                    maximum_payload_bytes: None,
-                    options,
-                    series,
-                    refusal: None,
-                },
-                CallHooks::default(),
-            ),
+            RouterRequest {
+                procedure: command,
+                options,
+                series,
+                refusal: None,
+                subscribes: None,
+                on_call_id: None,
+                on_sent: None,
+            },
         )
         .expect("a command");
 
@@ -555,7 +561,10 @@ async fn a_router_refuses_a_resolver_its_registry_refuses_registering_nothing_an
     let resolve = |procedure: &Procedure, answer: &'static str| {
         served
             .services
-            .get_request_resolver(procedure, ResolverDependencies::of(TextCodec, TextCodec))
+            .get_request_resolver(
+                procedure,
+                RequestResolverDependencies::new(TextCodec, TextCodec),
+            )
             .and_then(|resolver| {
                 resolver.on(Arc::new(move |_request, response: Response<TextCodec>| {
                     response.result(answer.to_owned())
@@ -568,8 +577,8 @@ async fn a_router_refuses_a_resolver_its_registry_refuses_registering_nothing_an
     // the same procedure under its name, at another address, its case another: one name (spec 16.6)
     let renamed = resolve(
         &Procedure {
-            id: 2,
-            name: "eCHO".to_owned(),
+            procedure_id: 2,
+            procedure_name: "eCHO".to_owned(),
             ..echo()
         },
         "again",
@@ -585,8 +594,8 @@ async fn a_router_refuses_a_resolver_its_registry_refuses_registering_nothing_an
     // registered nothing: its address is free, for its own name
     resolve(
         &Procedure {
-            id: 2,
-            name: "twice".to_owned(),
+            procedure_id: 2,
+            procedure_name: "twice".to_owned(),
             ..echo()
         },
         "twice",
@@ -597,11 +606,11 @@ async fn a_router_refuses_a_resolver_its_registry_refuses_registering_nothing_an
         .services
         .get_command(
             &Procedure {
-                name: "clock".to_owned(),
-                kind: Some(ProcedureKind::Command),
+                procedure_name: "clock".to_owned(),
+                procedure_kind: Some(ProcedureKind::Command),
                 ..echo()
             },
-            RequestDependencies::of(TextCodec, TextCodec),
+            RequestDependencies::new(TextCodec, TextCodec),
         )
         .expect_err("another name at its address refused");
 
@@ -630,7 +639,10 @@ async fn relayed(limits: &RouterLimitsOptions) -> Relayed {
     device
         .server
         .services()
-        .get_request_resolver(&echo(), ResolverDependencies::of(TextCodec, TextCodec))
+        .get_request_resolver(
+            &echo(),
+            RequestResolverDependencies::new(TextCodec, TextCodec),
+        )
         .expect("echo resolved")
         .on(Arc::new(|request, response: Response<TextCodec>| {
             response.result(request.payload.to_uppercase())

@@ -7,9 +7,10 @@ use bytes::Bytes;
 
 use super::server::{Served, first, news, request_of, second, subscribing_of};
 use super::{locked, result_of};
+use crate::NotificationResolverDependencies;
 use crate::constants::{ProtocolCode, RouterSide};
 use crate::envelope::{Envelope, NotificationHeader, RequestHeader};
-use crate::managers::service::{ResolverDependencies, Response};
+use crate::managers::service::{RequestResolverDependencies, Response};
 use crate::payloads::{CodecRefusal, PayloadCodec, TextCodec};
 use crate::router::admissions::BeforeRequest;
 use crate::router::core::Handler;
@@ -80,7 +81,8 @@ async fn requests_are_asked_their_admission_once_on_their_header_before_their_pa
     let asked = Arc::new(Mutex::new(Vec::new()));
     let asking = Arc::clone(&asked);
     let decoded = Arc::default();
-    let mut dependencies = ResolverDependencies::of(NonEmptyText(Arc::clone(&decoded)), TextCodec);
+    let mut dependencies =
+        RequestResolverDependencies::new(NonEmptyText(Arc::clone(&decoded)), TextCodec);
     dependencies.before_request = Some(BeforeRequest::new(
         move |request| {
             locked(&asking).push((
@@ -129,11 +131,14 @@ async fn requests_refused_their_admission_never_reach_a_callback_which_would_sub
     let served = Served::new(&RouterServerOptions::default());
     let reached = Arc::new(Mutex::new(Vec::new()));
     let reaching = Arc::clone(&reached);
-    let mut dependencies = ResolverDependencies::of(TextCodec, TextCodec);
+    let mut dependencies = RequestResolverDependencies::new(TextCodec, TextCodec);
     dependencies.before_request = Some(BeforeRequest::new(|_| false, None));
     served
         .services
-        .get_notification_resolver(&news(), (dependencies, TextCodec))
+        .get_notification_resolver(
+            &news(),
+            NotificationResolverDependencies::new(dependencies, TextCodec),
+        )
         .expect("news resolved")
         .on(Arc::new(move |request, response: Response<TextCodec>| {
             locked(&reaching).push(request.payload);
@@ -168,7 +173,10 @@ async fn requests_refused_their_admission_never_reach_a_callback_which_would_sub
 async fn requests_are_refused_when_nobody_answers_them_or_they_name_a_destination_this_router_relays_nothing()
  {
     let served = Served::new(&RouterServerOptions::default());
-    let other = crate::identity::Procedure { id: 9, ..echo() };
+    let other = crate::identity::Procedure {
+        procedure_id: 9,
+        ..echo()
+    };
     served
         .router
         .register_resolver((&other, idle()))

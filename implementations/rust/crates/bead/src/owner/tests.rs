@@ -10,22 +10,22 @@ use std::time::UNIX_EPOCH;
 use bytes::Bytes;
 use serde_json::Value;
 
+use crate::RouterRequest;
 use crate::clock::SharedClock;
 use crate::constants::{EnvelopeKind, ProcedureKind};
 use crate::debug::{DebugDirection, TracedEnvelope};
 use crate::envelope::{Envelope, ResultHeader};
 use crate::identity::Procedure;
 use crate::managers::service::{
-    RequestDependencies, RequestOptions, ResolverDependencies, Response,
+    RequestDependencies, RequestOptions, RequestResolverDependencies, Response,
 };
 use crate::payloads::JsonCodec;
-use crate::router::client::{ClientRequest, RouterClient, RouterClientOptions};
-use crate::router::server::CallHooks;
+use crate::router::client::{RouterClient, RouterClientOptions};
 use crate::router::types::{ResolvedRequestOptions, RouterError};
 use crate::testing::SteppingClock;
 use crate::testing::pair::{Pair, PairOptions, echo};
 use crate::testing::scripted::ScriptedClient;
-use crate::transport::{ClientTransport, ReadyState};
+use crate::transport::{ReadyState, RouterClientTransport};
 
 fn locked<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
     mutex.lock().unwrap_or_else(PoisonError::into_inner)
@@ -35,20 +35,22 @@ fn scripted() -> (Arc<SteppingClock>, Arc<ScriptedClient>, RouterClient) {
     let clock = SteppingClock::new(crate::testing::instants::new_year());
     let shared: SharedClock = Arc::<SteppingClock>::clone(&clock);
     let transport = ScriptedClient::new(shared);
-    let carried: Arc<dyn ClientTransport> = Arc::<ScriptedClient>::clone(&transport);
+    let carried: Arc<dyn RouterClientTransport> = Arc::<ScriptedClient>::clone(&transport);
     let router =
         RouterClient::new(carried, &RouterClientOptions::default()).expect("a router built");
 
     (clock, transport, router)
 }
 
-fn request() -> ClientRequest {
-    ClientRequest {
+fn request() -> RouterRequest {
+    RouterRequest {
         procedure: echo(),
-        options: ResolvedRequestOptions::of(Duration::from_secs(1)),
+        options: ResolvedRequestOptions::new(Duration::from_secs(1)),
         series: None,
         refusal: None,
         subscribes: None,
+        on_call_id: None,
+        on_sent: None,
     }
 }
 
@@ -86,10 +88,7 @@ async fn sends_each_call_in_the_order_it_is_made_whatever_order_it_is_awaited_in
         .into_iter()
         .map(|payload| {
             router
-                .request(
-                    Bytes::copy_from_slice(payload),
-                    (request(), CallHooks::default()),
-                )
+                .request(Bytes::copy_from_slice(payload), request())
                 .expect("a call")
         })
         .collect();
@@ -130,7 +129,7 @@ async fn a_call_s_future_dropped_unpolled_still_sends_its_call() {
     }));
 
     let call = router
-        .request(Bytes::from_static(&[7]), (request(), CallHooks::default()))
+        .request(Bytes::from_static(&[7]), request())
         .expect("a call");
 
     drop(call);
@@ -166,7 +165,7 @@ async fn a_call_a_listener_makes_within_a_turn_goes_behind_every_call_made_befor
             // within its router's turn: a call, then a job queued after it
             let before = carried.sent().len();
             let call = within
-                .request(Bytes::from_static(&[3]), (request(), CallHooks::default()))
+                .request(Bytes::from_static(&[3]), request())
                 .expect("a call within a turn");
 
             drop(call);
@@ -187,7 +186,7 @@ async fn a_call_a_listener_makes_within_a_turn_goes_behind_every_call_made_befor
     ));
 
     let first = router
-        .request(Bytes::from_static(&[1]), (request(), CallHooks::default()))
+        .request(Bytes::from_static(&[1]), request())
         .expect("a call");
 
     clock.settle().await;
@@ -196,7 +195,7 @@ async fn a_call_a_listener_makes_within_a_turn_goes_behind_every_call_made_befor
     transport.deliver(&result_of(1, b"a"));
 
     let made_before = router
-        .request(Bytes::from_static(&[2]), (request(), CallHooks::default()))
+        .request(Bytes::from_static(&[2]), request())
         .expect("a call");
 
     drop(made_before);
@@ -246,10 +245,7 @@ async fn an_envelope_a_listener_hands_its_router_within_a_turn_is_taken_behind_w
         .into_iter()
         .map(|payload| {
             router
-                .request(
-                    Bytes::copy_from_slice(payload),
-                    (request(), CallHooks::default()),
-                )
+                .request(Bytes::copy_from_slice(payload), request())
                 .expect("a call")
         })
         .collect();
@@ -280,15 +276,18 @@ async fn keeps_its_connection_when_the_application_drops_its_last_handle() {
     .await
     .expect("a pair connected");
     let command = Procedure {
-        id: 9,
-        name: "clock".to_owned(),
-        kind: Some(ProcedureKind::Command),
+        procedure_id: 9,
+        procedure_name: "clock".to_owned(),
+        procedure_kind: Some(ProcedureKind::Command),
         ..echo()
     };
 
     pair.client
         .services()
-        .get_command_resolver(&command, ResolverDependencies::of(JsonCodec, JsonCodec))
+        .get_command_resolver(
+            &command,
+            RequestResolverDependencies::new(JsonCodec, JsonCodec),
+        )
         .expect("clock resolved")
         .on(Arc::new(|_request, response: Response<JsonCodec>| {
             response.result(Value::from("noon"))
@@ -323,7 +322,7 @@ async fn keeps_its_connection_when_the_application_drops_its_last_handle() {
 
     let asked = server
         .services()
-        .get_command(&command, RequestDependencies::of(JsonCodec, JsonCodec))
+        .get_command(&command, RequestDependencies::new(JsonCodec, JsonCodec))
         .expect("clock asked")
         .call(Value::Null, &options)
         .expect("clock called");
@@ -343,7 +342,7 @@ async fn keeps_its_connection_when_the_application_drops_its_last_handle() {
 #[test]
 fn a_router_built_outside_a_runtime_is_refused() {
     let clock: SharedClock = SteppingClock::new(UNIX_EPOCH);
-    let transport: Arc<dyn ClientTransport> = ScriptedClient::new(clock);
+    let transport: Arc<dyn RouterClientTransport> = ScriptedClient::new(clock);
     let refused = RouterClient::new(transport, &RouterClientOptions::default())
         .expect_err("refused outside a runtime");
 
@@ -360,7 +359,7 @@ fn a_router_on_a_runtime_without_its_time_driver_is_refused() {
         .build()
         .expect("a runtime without its time driver");
     let clock: SharedClock = SteppingClock::new(UNIX_EPOCH);
-    let transport: Arc<dyn ClientTransport> = ScriptedClient::new(clock);
+    let transport: Arc<dyn RouterClientTransport> = ScriptedClient::new(clock);
     let options = RouterClientOptions {
         runtime: Some(runtime.handle().clone()),
         ..RouterClientOptions::default()

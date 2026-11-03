@@ -20,7 +20,8 @@ use crate::credentials::{
 };
 use crate::debug::{DebugDirection, TracedEnvelope};
 use crate::envelope::{
-    Credential, CreditHeader, Envelope, FailureHeader, FailureRecord, Header, NotificationHeader,
+    Credential, CreditHeader, Envelope, EnvelopeHeader, FailureHeader, FailureRecord,
+    NotificationHeader,
 };
 use crate::errors::{CallError, ProgrammerError};
 use crate::failure::{Failure, FailureOrigin};
@@ -33,15 +34,15 @@ use crate::router::core::{
 use crate::router::intake::Intake;
 use crate::router::relay::{RelayLeg, RelayRouter};
 use crate::router::requester::{CoreRequest, OnDrawn};
-use crate::router::server::{Call, CallHooks};
+use crate::router::server::Call;
 use crate::router::types::{
     BoxFuture, CallAddress, ConnectionHandle, Gauges, IntakeLimitsOptions, RequestCredential,
-    ResolvedRequestOptions, RouterActivity, RouterError, RouterLimits, RouterLimitsOptions,
-    RouterResult, Signal, TransportMessage, intake_limits_of, limits_of,
+    RouterActivity, RouterError, RouterLimits, RouterLimitsOptions, RouterRequest, RouterResult,
+    Signal, TransportMessage, intake_limits_of, limits_of,
 };
 use crate::session_token::SessionToken;
 use crate::transport::{
-    ClientListener, ClientTransport, Listened, ListenerId, Panicked, Sent, caught,
+    ClientListener, Listened, ListenerId, Panicked, RouterClientTransport, Sent, caught,
 };
 
 /// A notification a client's router hears: its procedure, its window, and what hears each payload
@@ -114,43 +115,12 @@ impl fmt::Debug for RouterClientOptions {
     }
 }
 
-/// A call a client's router makes.
-#[derive(Clone)]
+/// How a client's router unregisters a notification.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 #[non_exhaustive]
-pub struct ClientRequest {
-    /// The procedure it calls.
-    pub procedure: Procedure,
-    /// Its options, resolved.
-    pub options: ResolvedRequestOptions,
-    /// The series it counts into: its requester's.
-    pub series: Option<ProcedureSeries>,
-    /// What refuses it once it started, as its requester judged it.
-    pub refusal: Option<CallError>,
-    /// The notification it subscribes, the one its router holds for its procedure.
-    pub subscribes: Option<Arc<dyn NotificationLike>>,
-}
-
-impl fmt::Debug for ClientRequest {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter
-            .debug_struct("ClientRequest")
-            .field("procedure", &self.procedure)
-            .finish_non_exhaustive()
-    }
-}
-
-impl ClientRequest {
-    /// A call of `procedure`, under `options`.
-    #[must_use]
-    pub fn of(procedure: Procedure, options: &ResolvedRequestOptions) -> Self {
-        Self {
-            procedure,
-            options: options.clone(),
-            series: None,
-            refusal: None,
-            subscribes: None,
-        }
-    }
+pub struct UnregisterNotificationOptions {
+    /// Whether its subscription is cancelled at the server, or only forgotten: `true` when none.
+    pub cancel: Option<bool>,
 }
 
 // a paced subscription's credit, and what its callbacks settled
@@ -215,7 +185,7 @@ struct Default_ {
 fn key_of(notification: &dyn NotificationLike) -> (u16, u16) {
     let procedure = notification.procedure();
 
-    (procedure.service_id, procedure.id)
+    (procedure.service_id, procedure.procedure_id)
 }
 
 /// What a client's router holds, in its owner.
@@ -224,7 +194,7 @@ pub(crate) struct ClientState {
     // ! its transport and its bridge held weakly: the transport holds the bridge, which holds the
     // owner, so a strong edge back would keep the owner of its own (decision 0044); the handle holds
     // the transport strongly, so it goes only once nothing holds the router
-    transport: Weak<dyn ClientTransport>,
+    transport: Weak<dyn RouterClientTransport>,
     listener: Option<Weak<dyn ClientListener>>,
     // what its transport handed it that no turn took yet, its bridge's count, which its end resumes
     // (decision 0046)
@@ -409,7 +379,7 @@ impl Side for ClientState {
                 .core
                 .failure(ProtocolCode::SUBSCRIPTION_UNKNOWN)
                 .saying(format!("no subscription under call {call_id}"))
-                .about(&Header::Notification(header));
+                .about(&EnvelopeHeader::Notification(header));
 
             return self.report_error(&RouterError::Failure(failure));
         };
@@ -488,7 +458,7 @@ impl Side for ClientState {
 
         // * dropped at this end once answered; one refused in its own answer is its call's failure
         if is_answered && let Some(hearing) = hearing {
-            hearing.dropped(Some((received.code(), received.scope())));
+            hearing.dropped(Some(&received));
         }
 
         {
@@ -528,7 +498,11 @@ impl Side for ClientState {
     }
 
     // the session is the server's to give: an answer announces it when it changes
-    fn on_answer_received(&mut self, header: &Header, _connection_handle: &ConnectionHandle) {
+    fn on_answer_received(
+        &mut self,
+        header: &EnvelopeHeader,
+        _connection_handle: &ConnectionHandle,
+    ) {
         if let Some(credential) = header.credential() {
             *locked(&self.session_token) = match credential {
                 Credential::Opaque(token) => Some(*token),
@@ -547,10 +521,10 @@ impl Side for ClientState {
     fn trace(
         &mut self,
         direction: DebugDirection,
-        (connection_handle, header): (&ConnectionHandle, &Header),
+        (connection_handle, header): (&ConnectionHandle, &EnvelopeHeader),
     ) {
         let listeners = Arc::clone(&self.listeners);
-        let traced = TracedEnvelope::of(connection_handle, header);
+        let traced = TracedEnvelope::new(connection_handle, header);
 
         listeners.guarded((&listeners.debug, |listener: &ClientEnvelopeListener| {
             listener(direction, &traced);
@@ -626,7 +600,7 @@ struct Bridge {
     // what its transport handed and no turn took yet, under its one connection's name; its
     // transport, held weakly as its state holds it, paused and resumed by it (decision 0046)
     intake: Arc<Intake>,
-    transport: Weak<dyn ClientTransport>,
+    transport: Weak<dyn RouterClientTransport>,
 }
 
 impl Bridge {
@@ -643,7 +617,7 @@ impl Bridge {
 // the transport paused or resumed whole, what it panicked with given back to be reported as its
 // error, as the other sides report a pause that throws: what the count decided holds whatever it
 // does
-fn paced(transport: &Weak<dyn ClientTransport>, is_paused: bool) -> Option<Panicked> {
+fn paced(transport: &Weak<dyn RouterClientTransport>, is_paused: bool) -> Option<Panicked> {
     let transport = transport.upgrade()?;
 
     caught(("a transport", || {
@@ -732,7 +706,7 @@ struct Shared {
     clock: SharedClock,
     limits: RouterLimits,
     metrics: Option<RouterMetrics>,
-    transport: Arc<dyn ClientTransport>,
+    transport: Arc<dyn RouterClientTransport>,
     listeners: Arc<ClientListeners>,
     resolvers: Resolvers,
     notifications: Registered,
@@ -794,14 +768,16 @@ impl RouterClient {
     /// given that differs from its transport's, limits that do not hold together, credentials that
     /// do not hold, or a default credential that is no `JWT` or `ELSEWHERE`.
     pub fn new(
-        transport: Arc<dyn ClientTransport>,
+        transport: Arc<dyn RouterClientTransport>,
         options: &RouterClientOptions,
     ) -> Result<Self, ProgrammerError> {
         let runtime = crate::platform::runtime_of(options.runtime.as_ref(), "a router")?;
-        let clock = crate::clock::clock_of(
-            (transport.clock().as_ref(), options.clock.as_ref()),
-            ("a client's router", "its transport"),
-        )?
+        let clock = crate::clock::clock_of(&crate::clock::LayeredClocks {
+            beneath: transport.clock().as_ref(),
+            given: options.clock.as_ref(),
+            layer: "a client's router",
+            below: "its transport",
+        })?
         .unwrap_or_else(|| {
             let platform: SharedClock = Arc::new(crate::clock::SystemClock::on(runtime.clone()));
 
@@ -919,7 +895,7 @@ impl RouterClient {
 
     /// The transport it is over.
     #[must_use]
-    pub fn transport(&self) -> Arc<dyn ClientTransport> {
+    pub fn transport(&self) -> Arc<dyn RouterClientTransport> {
         Arc::clone(&self.shared.transport)
     }
 
@@ -1066,7 +1042,7 @@ impl RouterClient {
 
             return Err(ProgrammerError::new(format!(
                 "{} is already a registered notification",
-                procedure.name
+                procedure.procedure_name
             )));
         }
 
@@ -1084,12 +1060,14 @@ impl RouterClient {
     }
 
     /// Unregisters `notification`, its subscription cancelled at the server, or only forgotten when
-    /// `cancel` is false.
+    /// its options' `cancel` is false.
     pub fn unregister_notification(
         &self,
-        (notification, cancel): (&Arc<dyn NotificationLike>, bool),
+        notification: &Arc<dyn NotificationLike>,
+        options: &UnregisterNotificationOptions,
     ) -> BoxFuture<()> {
         let key = key_of(notification.as_ref());
+        let cancel = options.cancel.unwrap_or(true);
 
         {
             let mut notifications = locked(&self.shared.notifications);
@@ -1141,18 +1119,16 @@ impl RouterClient {
         clippy::too_many_lines,
         reason = "a call held to its credential, its subscription and its refusals, as the other sides hold it"
     )]
-    pub fn request(
-        &self,
-        payload: Bytes,
-        (request, hooks): (ClientRequest, CallHooks),
-    ) -> Result<Call, ProgrammerError> {
+    pub fn request(&self, payload: Bytes, request: RouterRequest) -> Result<Call, ProgrammerError> {
         let shared = &self.shared;
-        let ClientRequest {
+        let RouterRequest {
             procedure,
             options,
             series,
             refusal: judged,
             subscribes,
+            on_call_id,
+            on_sent,
         } = request;
 
         // ! a programmer's error first, before the call starts, so it is never counted
@@ -1162,8 +1138,8 @@ impl RouterClient {
         {
             return Err(ProgrammerError::new(format!(
                 "{} is not the notification this router holds for {}",
-                subscribes.procedure().name,
-                procedure.name
+                subscribes.procedure().procedure_name,
+                procedure.procedure_name
             )));
         }
 
@@ -1270,8 +1246,8 @@ impl RouterClient {
                         connection_handle: server_handle(),
                         credential: presented.credential,
                         on_drawn,
-                        on_call_id: hooks.on_call_id,
-                        on_sent: hooks.on_sent,
+                        on_call_id,
+                        on_sent,
                         opens_subscription: is_subscribing,
                         paced,
                         options,
@@ -1359,7 +1335,8 @@ impl RouterClient {
     #[doc(hidden)]
     pub fn reserve(
         &self,
-        (call_id, timeout): (u32, Option<Duration>),
+        call_id: u32,
+        timeout: Option<Duration>,
     ) -> Result<BoxFuture<()>, ProgrammerError> {
         let timeout = timeout
             .map(|timeout| crate::duration::hold("a call id's reservation", timeout))
@@ -1388,7 +1365,8 @@ impl RouterClient {
     #[doc(hidden)]
     pub fn cancel(
         &self,
-        (call_id, timeout): (u32, Option<Duration>),
+        call_id: u32,
+        timeout: Option<Duration>,
     ) -> Result<BoxFuture<()>, ProgrammerError> {
         let timeout = timeout
             .map(|timeout| crate::duration::hold("a call id's reservation", timeout))
@@ -1597,17 +1575,12 @@ impl RelayRouter for Through {
             on_sent,
         } = leg;
 
-        RouterClient::request(
-            &self.0,
-            payload,
-            (
-                ClientRequest::of(procedure, &options),
-                CallHooks {
-                    on_call_id: None,
-                    on_sent: Some(on_sent),
-                },
-            ),
-        )
+        RouterClient::request(&self.0, payload, {
+            let mut request = RouterRequest::new(procedure, &options);
+
+            request.on_sent = Some(on_sent);
+            request
+        })
     }
 
     fn carries(&self, credential: &str) -> bool {

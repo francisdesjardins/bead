@@ -32,7 +32,7 @@ fn result(call_id: u32, payload: Bytes) -> Envelope {
 
 fn command() -> Procedure {
     Procedure {
-        kind: Some(ProcedureKind::Command),
+        procedure_kind: Some(ProcedureKind::Command),
         ..echo()
     }
 }
@@ -80,7 +80,7 @@ async fn one_unanswered_in_time_closes_its_connection_as_the_call_or_else_the_ma
         .expect("a manager");
         let signal = CancellationToken::new();
         let call = manager
-            .get_command(&command(), RequestDependencies::of(TextCodec, TextCodec))
+            .get_command(&command(), RequestDependencies::new(TextCodec, TextCodec))
             .expect("declared")
             .call(
                 "run".to_owned(),
@@ -156,7 +156,7 @@ async fn one_unanswered_in_time_closes_its_connection_as_the_call_or_else_the_ma
     )
     .expect("a manager");
     let call = manager
-        .get_request(&echo(), RequestDependencies::of(TextCodec, TextCodec))
+        .get_request(&echo(), RequestDependencies::new(TextCodec, TextCodec))
         .expect("declared")
         .call(
             "run".to_owned(),
@@ -215,7 +215,7 @@ async fn fills_what_the_options_leave_out_and_passes_a_destination_as_it_is() {
             ..RequestOptions::default()
         };
         let call = manager
-            .get_command(&command(), RequestDependencies::of(TextCodec, TextCodec))
+            .get_command(&command(), RequestDependencies::new(TextCodec, TextCodec))
             .expect("declared")
             .call("hi".to_owned(), &options.clone())
             .expect("called");
@@ -273,7 +273,7 @@ async fn on_a_server_router_names_the_connection_it_goes_to() {
     fixture.transport.open(&handle_of(1), true);
     let requester = fixture
         .manager
-        .get_command(&command(), RequestDependencies::of(TextCodec, TextCodec))
+        .get_command(&command(), RequestDependencies::new(TextCodec, TextCodec))
         .expect("declared");
     let options = RequestOptions {
         connection_handle: Some(handle_of(1)),
@@ -315,7 +315,7 @@ async fn sends_the_encoded_payload_with_the_resolved_options_and_decodes_the_ans
     let fixture = ClientFixture::new();
     let requester = fixture
         .manager
-        .get_request(&echo(), RequestDependencies::of(JsonCodec, JsonCodec))
+        .get_request(&echo(), RequestDependencies::new(JsonCodec, JsonCodec))
         .expect("declared");
     let call = requester
         .call(
@@ -359,7 +359,7 @@ async fn takes_the_managers_defaults_where_the_call_says_nothing_and_its_signal_
     )
     .expect("a manager");
     let requester = manager
-        .get_request(&echo(), RequestDependencies::of(TextCodec, TextCodec))
+        .get_request(&echo(), RequestDependencies::new(TextCodec, TextCodec))
         .expect("declared");
     let first = requester
         .call("a".to_owned(), &RequestOptions::default())
@@ -378,7 +378,7 @@ async fn takes_the_managers_defaults_where_the_call_says_nothing_and_its_signal_
         .expect("called");
     let third = fixture
         .manager
-        .get_request(&echo(), RequestDependencies::of(TextCodec, TextCodec))
+        .get_request(&echo(), RequestDependencies::new(TextCodec, TextCodec))
         .expect("declared")
         .call("c".to_owned(), &RequestOptions::default())
         .expect("called");
@@ -451,7 +451,7 @@ async fn a_deprecated_procedure_raises_deprecated_at_each_call_and_only_a_deprec
     };
     let requester = fixture
         .manager
-        .get_request(&old, RequestDependencies::of(TextCodec, TextCodec))
+        .get_request(&old, RequestDependencies::new(TextCodec, TextCodec))
         .expect("declared");
     let calls = [
         requester
@@ -462,13 +462,13 @@ async fn a_deprecated_procedure_raises_deprecated_at_each_call_and_only_a_deprec
             .expect("called"),
         fixture
             .manager
-            .get_request(&echo(), RequestDependencies::of(TextCodec, TextCodec))
+            .get_request(&echo(), RequestDependencies::new(TextCodec, TextCodec))
             .expect("declared")
             .call("c".to_owned(), &RequestOptions::default())
             .expect("called"),
         fixture
             .manager
-            .get_request(&empty, RequestDependencies::of(TextCodec, TextCodec))
+            .get_request(&empty, RequestDependencies::new(TextCodec, TextCodec))
             .expect("declared")
             .call("d".to_owned(), &RequestOptions::default())
             .expect("called"),
@@ -493,9 +493,9 @@ async fn get_command_asks_one_connection_as_a_servers_request_does_and_tells_deb
     fixture.transport.open(&handle_of(1), true);
     let requester = fixture
         .manager
-        .get_command(&command(), RequestDependencies::of(TextCodec, TextCodec))
+        .get_command(&command(), RequestDependencies::new(TextCodec, TextCodec))
         .expect("declared");
-    assert_eq!(requester.procedure().name, "echo");
+    assert_eq!(requester.procedure().procedure_name, "echo");
     let call = requester
         .call(
             "run".to_owned(),
@@ -557,7 +557,7 @@ async fn tells_debug_the_close_on_timeout_that_applies_the_calls_or_else_the_man
         }
     }));
     let requester = manager
-        .get_command(&command(), RequestDependencies::of(TextCodec, TextCodec))
+        .get_command(&command(), RequestDependencies::new(TextCodec, TextCodec))
         .expect("declared");
     for (call_id, close) in [(2, None), (4, Some(false))] {
         let call = requester
