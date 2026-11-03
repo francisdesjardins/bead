@@ -356,6 +356,34 @@ public sealed class MqttBrokerAdapterTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Ends_a_participant_s_link_with_a_DISCONNECT_of_0x00_when_its_stop_meets_its_inbox_s_SUBSCRIBE_spec_15_21()
+    {
+        await using var participant = new BrokerParticipant(AdapterOf());
+        var starting = participant.Start();
+        var link = await _script.Link();
+
+        // its CONNACK granted, its inbox's SUBSCRIBE left unanswered
+        await link.Send(ScriptedLink.ConnAck());
+        await link.Next<MqttSubscribePacket>();
+        await participant.Stop().WaitAsync(Patience, Cancelled);
+
+        // * its adapter's stop ends that SUBSCRIBE, cleanly: no will goes
+        Assert.Equal("the participant ada stopped as it started", (await FailureOf(() =>
+        {
+            return starting;
+        })).Message);
+
+        var disconnect = await link.Next<MqttDisconnectPacket>();
+
+        Assert.Equal(MqttDisconnectReasonCode.NormalDisconnection, disconnect.ReasonCode);
+        await link.Closed.WaitAsync(Patience, Cancelled);
+        Assert.Equal([typeof(MqttConnectPacket), typeof(MqttSubscribePacket), typeof(MqttDisconnectPacket)], link.Packets.Select((packet) =>
+        {
+            return packet.GetType();
+        }));
+    }
+
+    [Fact]
     public async Task Tells_its_link_taken_over_on_a_DISCONNECT_of_0x8E_and_lost_on_any_other_end_spec_15_26()
     {
         await using var adapter = AdapterOf();

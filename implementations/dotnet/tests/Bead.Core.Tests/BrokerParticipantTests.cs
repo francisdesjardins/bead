@@ -1147,6 +1147,115 @@ public sealed class BrokerParticipantTests
     }
 
     [Fact]
+    public async Task Fails_a_link_its_stop_meets_as_it_connects_at_its_start_or_as_it_links_anew_and_stops_its_adapter_once_that_start_settles_nothing_left_subscribed_spec_15_21()
+    {
+        var broker = new MemoryBroker();
+        var peer = broker.Adapter(new MemoryBrokerAdapterOptions { Id = "peer" });
+
+        await peer.Start();
+
+        // at its start: held, then two stops, neither settled while it runs
+        var ada = broker.Adapter(new MemoryBrokerAdapterOptions { Id = "ada" });
+        var holding = new CallingAdapter(ada) { HoldsStart = 0 };
+        var participant = new BrokerParticipant(holding);
+        var links = LinksOf(participant);
+        var starting = participant.Start();
+
+        await BrokerPair.Until(
+            () =>
+            {
+                return holding.Holding == 1;
+            },
+            "its start held");
+
+        Task[] stops = [participant.Stop(), participant.Stop()];
+
+        await Task.Delay(50, Cancelled);
+        Assert.DoesNotContain(stops, (stop) =>
+        {
+            return stop.IsCompleted;
+        });
+        Assert.Equal(["start"], holding.Calls);
+        Assert.True(holding.Release());
+        await Task.WhenAll(stops).WaitAsync(BrokerPair.Patience, Cancelled);
+
+        // * its start fails, stopped as it started, and its adapter stops once that start settled
+        Assert.Equal("the participant ada stopped as it started", (await Assert.ThrowsAsync<IOException>(() =>
+        {
+            return starting.WaitAsync(BrokerPair.Patience, Cancelled);
+        })).Message);
+        Assert.Equal(["start", "stop"], holding.Calls);
+        Assert.Equal((false, false), (participant.IsLinked, ada.IsLinked));
+        Assert.Equal(["stopped"], links);
+        Assert.Equal(BrokerPublished.NoSubscriber, await peer.Publish(new BrokerPublication { Topic = ["bead", "i", "ada"], Payload = (byte[])[0xB1] }));
+
+        // * with no turn between them: its posted turn may link it whole before its stop is marked,
+        // so its start's outcome is not pinned, but nothing outlives its stop
+        var cy = broker.Adapter(new MemoryBrokerAdapterOptions { Id = "cy" });
+        var racing = new BrokerParticipant(cy);
+        var raced = LinksOf(racing);
+        var racingStart = racing.Start();
+
+        _ = racing.Stop();
+        await racing.Stop().WaitAsync(BrokerPair.Patience, Cancelled);
+        await Task.WhenAny(racingStart).WaitAsync(BrokerPair.Patience, Cancelled);
+        Assert.Equal((false, false), (racing.IsLinked, cy.IsLinked));
+        Assert.Equal(BrokerPublished.NoSubscriber, await peer.Publish(new BrokerPublication { Topic = ["bead", "i", "cy"], Payload = (byte[])[0xB1] }));
+        Assert.Equal(["stopped"], raced.SkipWhile((state) =>
+        {
+            return state != "stopped";
+        }));
+
+        // as it links anew, at a delay of 0 with a tap: its attempt's start held, then its stop
+        var bob = broker.Adapter(new MemoryBrokerAdapterOptions { Id = "bob" });
+        var anew = new CallingAdapter(bob) { HoldsStart = 1 };
+        var tapped = new ConcurrentQueue<TimeSpan>();
+        var linking = new BrokerParticipant(anew, new BrokerParticipantOptions
+        {
+            Reconnect = new TransportClientReconnectOptions
+            {
+                Delay = Immediately,
+                Tap = (delay, _) =>
+                {
+                    tapped.Enqueue(delay);
+                },
+            },
+        });
+        var reported = Hearing(linking);
+
+        await linking.Start();
+        bob.Lose();
+        await BrokerPair.Until(
+            () =>
+            {
+                return anew.Holding == 1;
+            },
+            "its attempt's start held");
+
+        var stopping = linking.Stop();
+
+        await Task.Delay(50, Cancelled);
+        Assert.False(stopping.IsCompleted);
+        Assert.Equal(["start", "subscribe bead/i/bob", "start"], anew.Calls);
+        Assert.True(anew.Release());
+        await stopping.WaitAsync(BrokerPair.Patience, Cancelled);
+        await BrokerPair.Until(
+            () =>
+            {
+                return !reported.IsEmpty;
+            },
+            "its reconnection ended");
+        await linking.Scheduler.WhenIdle();
+
+        // * its attempt fails, and its reconnection ends at once, no wait told after it
+        Assert.Equal(["the link of bob went down, and its reconnection ended: the participant bob is stopped"], WordsOf(reported));
+        Assert.Empty(tapped);
+        Assert.Equal(["start", "subscribe bead/i/bob", "start", "stop"], anew.Calls);
+        Assert.Equal((false, false), (linking.IsLinked, bob.IsLinked));
+        Assert.Equal(BrokerPublished.NoSubscriber, await peer.Publish(new BrokerPublication { Topic = ["bead", "i", "bob"], Payload = (byte[])[0xB1] }));
+    }
+
+    [Fact]
     public async Task Serves_its_names_again_once_its_link_connects_anew_its_former_peers_reset()
     {
         await using var pair = await BrokerPair.Of();
@@ -1460,6 +1569,22 @@ public sealed class BrokerParticipantTests
         participant.Error += reported.Enqueue;
 
         return reported;
+    }
+
+    // the states its link told its trace, as they come
+    private static ConcurrentQueue<string> LinksOf(BrokerParticipant participant)
+    {
+        var links = new ConcurrentQueue<string>();
+
+        participant.Debug += (debugEvent) =>
+        {
+            if (debugEvent.Event == "link")
+            {
+                links.Enqueue(debugEvent.State!);
+            }
+        };
+
+        return links;
     }
 
     // the words of each report
@@ -2033,14 +2158,29 @@ public sealed class BrokerParticipantTests
 
     // an adapter that writes down each call its participant makes of it, in order, and passes it on,
     // what it publishes to a topic bounded by Room when given, its leg secure as Secure says when given,
-    // each start after its first Starts refused as it returns when given
+    // each start after its first Starts refused as it returns when given, and each start after its
+    // first HoldsStart held, heeding no token, until the test releases it, when given
     private sealed class CallingAdapter(MemoryBrokerAdapter inner) : IBrokerAdapter
     {
+        // the starts it holds, unreleased, the first asked first
+        private readonly ConcurrentQueue<TaskCompletionSource> _held = new();
+
         public long? Room { get; init; }
 
         public bool? Secure { get; init; }
 
         public int? Starts { get; init; }
+
+        public int? HoldsStart { get; init; }
+
+        // the starts it holds, unreleased
+        public int Holding
+        {
+            get
+            {
+                return _held.Count;
+            }
+        }
 
         public event Action<BrokerMessage>? Message
         {
@@ -2124,7 +2264,28 @@ public sealed class BrokerParticipantTests
                 return Task.FromException(new IOException("refused at once"));
             }
 
+            if (HoldsStart is { } holds && StartsIn(this) > holds)
+            {
+                return Held(start);
+            }
+
             return inner.Start(start);
+        }
+
+        // releases the start its participant asked first of those it holds
+        public bool Release()
+        {
+            return _held.TryDequeue(out var release) && release.TrySetResult();
+        }
+
+        // * held as it is asked, its token unheard: it goes on once the test releases it
+        private async Task Held(BrokerStart? start)
+        {
+            var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+
+            _held.Enqueue(release);
+            await release.Task;
+            await inner.Start(start);
         }
 
         public Task Subscribe(IReadOnlyList<string> topic, BrokerSubscription? subscription = null)

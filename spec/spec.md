@@ -1958,7 +1958,12 @@ connects anew as another incarnation, its inbox and its names subscribed again b
 goes, then sends a RESET to each peer it held a connection with. Its reconnection is its
 application's to bound, by its attempts, by a signal, or not at all, and ends when the participant
 stops; once it ends, the participant reports it, and its next start or connect links it anew. A
-participant whose link its broker ends for another link of its id, a takeover, closes each of its
+participant that stops as its link connects, at its start or at an attempt of its reconnection,
+fails that link, stopped as it started, and ends its reconnection with no wait after it: it gives
+up its adapter's start under way and ends its link once that start settled, never while it runs,
+so that nothing that start linked or subscribed outlives the stop, nor meets its id's next link; a
+stop called again settles with the first. A participant whose link its broker ends for another
+link of its id, a takeover, closes each of its
 connections, unclean, reports it, and connects no more until its application starts it again: its
 server's transports take no OPEN and its clients' connects fail, naming it, so that two holders of
 one id never take each other over without end; the later link keeps the id. A participant whose
@@ -2011,7 +2016,8 @@ name:
 `heartbeat` may be without end; `acceptTimeout` never is.
 
 15.24. An adapter brings one broker's client, and offers its participant: the identity its broker
-authenticates its link by; to start a link that keeps no broker session; to publish a payload to a
+authenticates its link by; to start a link that keeps no broker session, which a signal gives up;
+to publish a payload to a
 topic, said taken or refused by its broker; to subscribe a topic, said held by its broker; each
 message it receives, with the topic it came to, and its acknowledgement; its link lost, and whether
 another link of its identity took it over; the largest payload a message to a topic carries, its

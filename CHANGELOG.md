@@ -207,6 +207,13 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   its platform between two attempts on every side (spec 1.4). Over an adapter that refused its start
   at once, the TypeScript side's ran on microtasks alone, starving every timer and every I/O, the C#
   side's ran within one turn of its participant's scheduler, and the Rust side's back to back.
+- A broker participant's stop ends a link under way, its start's or an attempt of its
+  reconnection's: it gives up its adapter's start, awaits it, then ends the link, so that the two
+  never overlap and nothing that start linked or subscribed outlives the stop. The start fails, "the
+  participant … stopped as it started", its inbox never subscribed, and its reconnection ends with
+  no wait told after it; a stop called again settles with the first. On the TypeScript side such a
+  start succeeded and the participant called itself linked after its stop; on every side its
+  adapter stayed linked and its inbox subscribed (spec 15.21; debugging 13.5).
 
 ### Security
 

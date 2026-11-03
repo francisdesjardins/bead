@@ -360,6 +360,29 @@ test.describe('createMqttBrokerAdapter', () => {
     expect(downs).toEqual([]);
   });
 
+  test('ends a participant’s link with a DISCONNECT of 0x00 when its stop meets its inbox’s SUBSCRIBE (spec 15.21)', async () => {
+    const adapter = adapterOf(script);
+    const participant = createBrokerParticipant({ adapter, heartbeat: Infinity });
+    const starting = failureOf(participant.start());
+    const link = await script.link();
+
+    link.send({ cmd: 'connack', properties: {}, reasonCode: 0, sessionPresent: false });
+    // * its inbox's SUBSCRIBE left unanswered: its adapter's stop ends it, no signal of the stop
+    await link.next('subscribe');
+    await participant.stop();
+    expect(await starting).toMatchObject({ message: 'the participant ada stopped as it started' });
+
+    const disconnect = await link.next('disconnect');
+
+    expect((disconnect as { reasonCode?: number }).reasonCode ?? 0).toBe(0);
+    await link.closed;
+    expect(
+      link.packets.map(({ cmd }) => {
+        return cmd;
+      })
+    ).toEqual(['connect', 'subscribe', 'disconnect']);
+  });
+
   test('tells its link taken over on a DISCONNECT of 0x8E, and lost on any other end (spec 15.26)', async () => {
     const adapter = adapterOf(script);
     const { downs } = heardOf(adapter);
