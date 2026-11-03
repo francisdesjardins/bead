@@ -1,0 +1,9 @@
+sequenceDiagram
+  participant C as Client
+  participant S as Server
+  C->>S: REQUEST · callId 5
+  Note over C: timeout expired
+  C->>S: CANCEL · callId 5
+  Note over C: 5 reserved: what arrives<br/>late is dropped
+  Note over S: the call forgotten, its subscription undone,<br/>then the resolver's signal aborted
+  S--)C: RESULT · callId 5, sent before the CANCEL:<br/>dropped in silence

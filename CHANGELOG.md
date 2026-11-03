@@ -9,6 +9,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- The page francisdesjardins.ca serves at `/bead/`, in `site/`: Bead presented in English and in
+  French, one document that shows the language the site chooses, in the site's two themes, with its
+  diagrams rendered from Mermaid at build time into SVGs that follow both themes. CI's Commits job
+  holds the committed page to its build, byte for byte, and each SVG to its source's hash.
 - A router paces each connection's reads by what it has not taken yet, on every side: past
   `maximumUntakenEnvelopes` envelopes (64) or `maximumUntakenBytes` bytes (1 MiB) of one
   connection, its transport hands no more of it, holding in order what it received, until its

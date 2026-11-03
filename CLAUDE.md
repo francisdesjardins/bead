@@ -4,17 +4,16 @@ Bead is a binary wire protocol: its spec and conformance files in `spec/`, a Typ
 implementation in `implementations/typescript` and a C# one in `implementations/dotnet`, at
 behavioural parity, and a Rust one in `implementations/rust`, its core, each part it lacks a
 row of `docs/support.md` ahead (decision 0044), the builder, `beadc`, in `builder/`, an example in
-`examples/hello`, the demo and the DevTools extension. `README.md` says how each part builds and
-tests.
+`examples/hello`, the demo, the DevTools extension, and the page francisdesjardins.ca serves at
+`/bead/`, in `site/`. `README.md` says how each part builds and tests.
 
 What a session needs beyond this file lives in `.claude/`:
 
 - `.claude/workflows/`: the workflow scripts, launched by their script's path. Committed.
 - `.claude/local/`: what this clone keeps for itself and git ignores, never to be committed: the
   plan (`plan.md`), the rules on names and their check (`rules.md`, `check.mjs`), the inputs of the
-  builder's design (`builder/`), the generator of the Bead page made for the user's colleague
-  (`page/`), and the scripts that replay CI on Linux in Docker (`tools/`). Read `plan.md` before a
-  change of any size.
+  builder's design (`builder/`), and the scripts that replay CI on Linux in Docker (`tools/`). Read
+  `plan.md` before a change of any size.
 
 The repository's documentation looks forward: it states what holds and where the project goes,
 in the present tense. Where something came from, and how it was before, stays out of it. What is ahead is said plainly,
@@ -29,9 +28,10 @@ number never given to another.
 
 - Replies to the user are in French.
 - Public pages are in English: what francisdesjardins.ca serves, the demo included, its messages and
-  refusals.
-- The repository's files are in English. What `.claude/local/` keeps may be in French: the plans,
-  and the Bead page for the colleague.
+  refusals. The Bead page at `/bead/` is also in French, the language chosen as the site chooses it:
+  `?lng=`, then the choice the site stored, then the browser's languages, then English.
+- The repository's files are in English, but the Bead page's French. What `.claude/local/` keeps
+  may be in French: the plans.
 
 ## Commits, changelog and branches
 
@@ -170,10 +170,12 @@ titles that hold one write it `’`, and the citation does the same.
 
 ## The Bead page
 
-The page that presents Bead to the user's colleague, in French, is built by
-`.claude/local/page/build-page.py` from `implementations/typescript/src`. After any change to the
-wire or to what the page states, rebuild it, check its diagrams, and republish it to the same URL:
-see `.claude/local/page/README.md`.
+The page francisdesjardins.ca serves at `/bead/`, in English and in French, is built from `site/`:
+its content in both languages, its diagrams' Mermaid sources, rendered into SVGs by
+`site/render.mjs`, and `site/build.mjs`, which writes `site/dist/index.html`; `site/check.mjs` holds
+both in CI. After any change to the wire or to what the page states, change both languages alike,
+render the diagrams that moved, rebuild it, and look at it in both themes, on a desktop and a phone:
+see the README's "The page". The private page `.claude/local/page/` held is retired.
 
 ## The agents' effort
 

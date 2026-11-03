@@ -1,0 +1,28 @@
+// le serveur : ses admissions, par les noms que le .proto leur donne, et un résolveur
+// qui demande quelque chose à son appelant avant de répondre
+const hello = new HelloServer({ admissions: { greeted } });
+
+hello.on('sayHello', async ({ connectionHandle, payload }, response) => {
+  const name =
+    payload.name === ''
+      ? (await hello.command.askName({ question: 'What is your name?' })({ connectionHandle })).name
+      : payload.name;
+
+  return response({ greeting: `Hello, ${name}!` });
+});
+hello.offer(server);
+
+// le client : répond à la commande du serveur, appelle, et suit un abonnement à son rythme
+await using client = createWSClient();
+const greeter = new HelloClient(client, { windows: { countDown: 1 } });
+
+greeter.on('askName', (_request, response) => {
+  return response({ name: 'Ada' });
+});
+await client.connect({ host: '127.0.0.1', port });
+
+const { greeting } = await greeter.sayHello({ name: '' })(); // 'Hello, Ada!'
+
+await greeter.notifications.countDown({ from: 3 }, async ({ remaining }) => {
+  // une fenêtre de 1 : le tic suivant attend que ce rappel ait fini
+})();

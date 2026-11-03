@@ -1,0 +1,4 @@
+transport.on('refusal', ({ address, authority, origin, port, reason, status }) => {
+  // 403 host-refused : autorité "rebind.example:8080", origine "http://rebind.example:8080", de 127.0.0.1:53114
+  console.warn(`refusé ${status} ${reason} : autorité ${JSON.stringify(authority)}, origine ${JSON.stringify(origin)}, de ${address}:${port}`);
+});

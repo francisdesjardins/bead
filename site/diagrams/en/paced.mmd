@@ -1,0 +1,11 @@
+sequenceDiagram
+  participant C as Client
+  participant S as Server
+  C->>S: REQUEST · callId 7 · SUBSCRIPTION, PACED
+  S-->>C: RESULT · callId 7
+  S-->>C: NOTIFICATION · callId 7 · article 7, change 1
+  Note over C: the callback fetches the article
+  Note over S: changes 2 to 45 queued,<br/>under one key: the last kept
+  Note over C: the callback is done
+  C->>S: CREDIT · callId 7 · PACED · 2
+  S-->>C: NOTIFICATION · callId 7 · article 7, change 45

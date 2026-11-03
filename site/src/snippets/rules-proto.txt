@@ -1,0 +1,6 @@
+import "buf/validate/validate.proto";
+
+// Where the count starts, 10 at most.
+message CountDownRequest {
+  int32 from = 1 [(buf.validate.field).int32.lte = 10];
+}

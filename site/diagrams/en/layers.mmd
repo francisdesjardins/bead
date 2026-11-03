@@ -1,0 +1,8 @@
+flowchart TB
+  subgraph client["Client"]
+    s1["Services<br/>what is called"] --> r1["Router<br/>writes and reads Bead"] --> t1["Transport<br/>bytes"]
+  end
+  subgraph server["Server"]
+    t2["Transport<br/>bytes"] --> r2["Router<br/>writes and reads Bead"] --> s2["Services<br/>what answers"]
+  end
+  t1 <--> wire("one envelope<br/>per WebSocket message") <--> t2

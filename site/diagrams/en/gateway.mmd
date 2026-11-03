@@ -1,0 +1,15 @@
+sequenceDiagram
+  participant H as HTTP client
+  participant G as HTTP/JSON gateway
+  participant S as Server
+  H->>G: POST /api/Hello/sayHello<br/>{"name":"Ada"}
+  Note over G: its gates passed:<br/>a connection drawn, in memory
+  G->>S: REQUEST · callId 1 · the proto payload
+  S-->>G: RESULT · callId 1
+  G-->>H: 200 · application/json<br/>{"greeting":"Hello, Ada!"}
+  Note over G,S: the connection closed,<br/>and what it held with it
+  H->>G: POST /api/Hello/countDown<br/>{"from":3}
+  G->>S: REQUEST · callId 1 · a fresh connection
+  Note over S: the admission wants a connection<br/>sayHello greeted
+  S-->>G: FAILURE · callId 1 · ACCESS_DENIED
+  G-->>H: 403 · application/problem+json<br/>"detail":"say hello first"

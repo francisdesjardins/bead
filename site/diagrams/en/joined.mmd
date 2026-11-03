@@ -1,0 +1,7 @@
+flowchart TB
+  ws["a WebSocket client"] --> wst["the WebSocket<br/>transport"]
+  http["curl, a page,<br/>an OpenAPI client"] -->|"HTTP and JSON"| gw["the HTTP/JSON gateway<br/>one more client"]
+  gw -->|"one connection<br/>per exchange"| mem["the in-memory<br/>transport"]
+  wst --> join["the joined transport<br/>ties each handle<br/>to its transport"]
+  mem --> join
+  join --> srv["the server<br/>one router, one admission,<br/>sessions, each<br/>service offered once"]

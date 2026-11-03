@@ -1,0 +1,11 @@
+sequenceDiagram
+  participant C as Client
+  participant S as Serveur
+  C->>S: REQUEST · callId 9 · CountDownRequest, from 12
+  Note over S: la charge se lit, puis se juge :<br/>from au plus 10 ne tient pas
+  S-->>C: FAILURE · callId 9 · PAYLOAD_INVALID<br/>une violation, puis {"more":0}
+  Note over S: le résolveur ne l'a jamais vue
+  Note over C: validates : la valeur jugée avant de partir
+  Note over C: from 11 : PAYLOAD_INVALID,<br/>le même détail, rien n'est envoyé
+  C->>S: REQUEST · callId 11 · from 3
+  S-->>C: RESULT · callId 11
