@@ -10,6 +10,15 @@ use crate::session_token::SessionToken;
 
 mod twins;
 
+#[test]
+fn a_redacted_opaque_scheme_never_selects_a_connections_session() {
+    let token = token();
+    let redacted = Credential::Redacted {
+        scheme: crate::constants::CredentialScheme::OPAQUE,
+    };
+    assert!(connection_session_of(Some(&redacted), (Some(&token), None)).is_none());
+}
+
 fn token() -> SessionToken {
     SessionToken::new([3; 16]).expect("a token")
 }

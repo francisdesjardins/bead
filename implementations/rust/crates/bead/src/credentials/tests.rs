@@ -27,6 +27,25 @@ use crate::transport::ClientTransport;
 mod elsewhere_bound;
 mod key_sets;
 
+#[tokio::test]
+async fn a_redacted_credential_has_no_token_to_resolve() {
+    let (_clock, resolver) = resolver_of(&Credentials::default());
+    let request = super::CredentialRequest {
+        audiences: None,
+        credential: Credential::Redacted {
+            scheme: crate::constants::CredentialScheme::OPAQUE,
+        },
+        transport_credential: None,
+    };
+    let outcome = resolver
+        .resolve((request, tokio_util::sync::CancellationToken::new()))
+        .await;
+    assert_eq!(
+        failed_with(outcome),
+        "a redacted credential has no token to resolve"
+    );
+}
+
 #[test]
 fn holds_a_jwt_s_header_in_a_chunk_and_an_envelope_of_1_024_bytes_at_least() {
     assert_eq!(JWT_LIMIT_BYTES, 1_024, "its bound");

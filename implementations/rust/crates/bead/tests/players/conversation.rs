@@ -669,6 +669,7 @@ fn announcement_of(credential: &Credential) -> Value {
         Credential::Opaque(_)
         | Credential::Jwt(_)
         | Credential::Elsewhere
+        | Credential::Redacted { .. }
         | Credential::ToCome { .. }
         | _ => {
             json!("OPAQUE")
@@ -692,7 +693,7 @@ fn presented_of(credential: &Credential) -> Value {
             "bytes": hexadecimal::text_of(bytes),
             "scheme": scheme.get(),
         }),
-        _ => Value::Null,
+        Credential::Redacted { .. } | _ => Value::Null,
     }
 }
 

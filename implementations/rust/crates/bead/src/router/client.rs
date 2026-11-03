@@ -537,6 +537,7 @@ impl Side for ClientState {
                 Credential::None
                 | Credential::Jwt(_)
                 | Credential::Elsewhere
+                | Credential::Redacted { .. }
                 | Credential::ToCome { .. } => None,
             };
         }

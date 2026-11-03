@@ -423,6 +423,11 @@ impl CredentialResolver {
             Credential::None | Credential::Opaque(_) | Credential::ToCome { .. } => {
                 Box::pin(async { Ok(Resolved::None) })
             }
+            Credential::Redacted { .. } => Box::pin(async {
+                Err(Unresolved::Other(Arc::new(ProgrammerError::new(
+                    "a redacted credential has no token to resolve",
+                ))))
+            }),
         }
     }
 }

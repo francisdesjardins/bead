@@ -32,6 +32,7 @@ pub(crate) fn connection_session_of(
             Credential::None
             | Credential::Jwt(_)
             | Credential::Elsewhere
+            | Credential::Redacted { .. }
             | Credential::ToCome { .. } => false,
         };
 

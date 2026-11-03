@@ -792,6 +792,7 @@ crate::envelope
     Jwt(Bytes)
     Elsewhere
     ToCome { scheme: CredentialScheme, bytes: Bytes }
+    Redacted { scheme: CredentialScheme }
     fn scheme(&self) -> CredentialScheme
     implements Debug
     derives Clone, Eq, Hash, PartialEq
