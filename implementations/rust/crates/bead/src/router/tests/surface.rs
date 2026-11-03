@@ -94,3 +94,10 @@ fn refuses_end_sessions_of_an_issuer_that_is_no_string_ending_nothing() {
         consumer.refuses(&format!("pub fn check(router: &bead::RouterServer) {{ drop(router.end_sessions_of({value})); }}"), ("E0308", "mismatched types"));
     }
 }
+#[test]
+fn exposes_the_runtime_types_its_options_name_and_owns_a_draws_error() {
+    let consumer = Consumer::new();
+
+    consumer.accepts("pub fn check(runtime: Option<bead::Handle>, signal: Option<bead::CancellationToken>) { let mut clock = bead::SystemClockOptions::default(); clock.runtime = runtime; let mut request = bead::RequestOptions::default(); request.signal = signal; }");
+    consumer.accepts("pub fn check() -> Result<bead::SessionToken, bead::SessionTokenDrawError> { bead::SessionToken::draw(|_| false) }");
+}

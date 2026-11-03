@@ -1,5 +1,7 @@
 crate
   mod json
+  use tokio::runtime::Handle
+  use tokio_util::sync::CancellationToken
   use broker::adapter::BrokerAdapter
   use broker::adapter::BrokerCapabilities
   use broker::adapter::BrokerDelivery
@@ -274,6 +276,7 @@ crate
   use service::notifying_of
   use service::request_of
   use session_token::SessionToken
+  use session_token::SessionTokenDrawError
   use transport::CONNECT_TIMEOUT
   use transport::ClientListener
   use transport::Connect
@@ -1887,10 +1890,13 @@ crate::service
     implements Debug
     derives Clone
 crate::session_token
+  struct SessionTokenDrawError #[non_exhaustive]
+    implements Display, Error
+    derives Clone, Copy, Debug, Eq, PartialEq
   struct SessionToken([u8; SESSION_TOKEN_BYTES]);
     fn new(bytes: [u8; SESSION_TOKEN_BYTES]) -> Result<Self, ProgrammerError>
     fn from_slice(bytes: &[u8]) -> Result<Self, ProgrammerError>
-    fn draw<F: Fn(&Self) -> bool>(is_in_use: F) -> Result<Self, getrandom::Error>
+    fn draw<F: Fn(&Self) -> bool>(is_in_use: F) -> Result<Self, SessionTokenDrawError>
     fn bytes(&self) -> &[u8; SESSION_TOKEN_BYTES]
     fn is(&self, presented: &Self) -> bool
     implements Debug, Display, FromStr

@@ -36,6 +36,11 @@ mod session_token;
 mod transport;
 mod violations;
 
+/// The runtime handle accepted by Bead's runtime options.
+pub use tokio::runtime::Handle;
+/// The cancellation token accepted and handed by Bead's operations.
+pub use tokio_util::sync::CancellationToken;
+
 pub use broker::adapter::{
     BrokerAdapter, BrokerCapabilities, BrokerDelivery, BrokerDown, BrokerError, BrokerListener,
     BrokerMessage, BrokerMessageOptions, BrokerPublication, BrokerPublished, BrokerStart,
@@ -148,7 +153,7 @@ pub use service::{
     NotifyingDescriptor, ServiceProcedure, ServiceServer, ServiceServerOptions, command_of,
     failures_of, notifying_of, request_of,
 };
-pub use session_token::SessionToken;
+pub use session_token::{SessionToken, SessionTokenDrawError};
 pub use transport::{
     CONNECT_TIMEOUT, ClientListener, Connect, ListenerId, RECONNECT_ATTEMPTS, RECONNECT_DELAY,
     ReadyState, RouterClientTransport, Sent, ServerListener, ServerTransport,

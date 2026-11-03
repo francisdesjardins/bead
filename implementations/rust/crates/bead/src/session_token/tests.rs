@@ -233,3 +233,25 @@ fn writes_none_of_its_bytes_in_its_debug_nor_in_a_debug_that_holds_it() {
     );
     assert_eq!(token.to_string(), TEXT, "its Display spells it still");
 }
+#[test]
+fn a_draws_error_names_bead_and_keeps_the_systems_cause() {
+    use std::error::Error;
+
+    let error = super::SessionTokenDrawError {
+        cause: getrandom::Error::UNSUPPORTED,
+    };
+
+    assert_eq!(
+        error.to_string(),
+        "the system could not draw a session token"
+    );
+    let cause = error
+        .source()
+        .expect("the system's cause")
+        .downcast_ref::<getrandom::Error>()
+        .expect("the random source's error type");
+    assert!(
+        std::ptr::eq(cause, &raw const error.cause),
+        "the exact cause"
+    );
+}
