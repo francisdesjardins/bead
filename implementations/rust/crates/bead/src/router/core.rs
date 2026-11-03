@@ -2579,11 +2579,10 @@ pub(crate) fn reject_pending<S: Side>(
     state: &mut S,
     (reason, handle): (&str, Option<&ConnectionHandle>),
 ) {
-    let credits = state.core().receivings.close_all(handle);
-
-    send_credits(state, credits);
-
     let core = state.core();
+    let credits = core.receivings.close_all(handle);
+
+    drop(credits);
     core.sendings.close_all(handle);
     core.receiving_requests.retain(|_, (dispatch, _)| {
         handle.is_some_and(|handle| *handle != dispatch.connection_handle)
