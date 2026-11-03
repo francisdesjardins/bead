@@ -126,7 +126,7 @@ impl TracePair {
 
         server.start().await.expect("started");
         client
-            .connect(BrokerConnectOptions::of("interop"))
+            .connect(&BrokerConnectOptions::of("interop"))
             .await
             .expect("connected");
         settle(&clock, &server_clock).await;
@@ -529,7 +529,7 @@ async fn tells_completed_link_transitions_and_held_names_by_push_and_keeps_level
         "levels by pull"
     );
     pair.client
-        .connect(BrokerConnectOptions::of("interop"))
+        .connect(&BrokerConnectOptions::of("interop"))
         .await
         .expect("connected");
     settle(&pair.clock, &pair.server_clock).await;

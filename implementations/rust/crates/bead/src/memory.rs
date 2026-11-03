@@ -605,35 +605,32 @@ impl ServerEnd {
     fn pipe(&self) -> Option<WeakOwner<Pipe>> {
         self.server.upgrade().map(|server| server.pipe.downgrade())
     }
+
+    // closed by its client in a later turn of its server's pipe; nothing once that server is gone,
+    // whose ends went with it
+    fn close_later(self, was_clean: bool) {
+        if let Some(pipe) = self.pipe() {
+            later_on(&pipe, move || self.close(was_clean));
+        }
+    }
 }
 
 // ── The client ───────────────────────────────────────────────────────────────────────────────
 
 /// How an in-memory transport client is built.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 #[non_exhaustive]
 pub struct MemoryClientOptions {
     /// The clock it runs on: its connect's timeout and its reconnection's delays.
     pub clock: Option<SharedClock>,
-    /// The server it connects to.
-    pub server: MemoryServer,
 }
 
-impl MemoryClientOptions {
-    /// A client of `server`, on the platform's clock.
-    #[must_use]
-    pub const fn of(server: MemoryServer) -> Self {
-        Self {
-            clock: None,
-            server,
-        }
-    }
-}
-
-/// How an in-memory client connects.
-#[derive(Debug, Clone, Default)]
+/// How an in-memory client connects: to its server, which a reconnection connects to again.
+#[derive(Debug, Clone)]
 #[non_exhaustive]
 pub struct MemoryConnectOptions {
+    /// The server it connects to.
+    pub server: MemoryServer,
     /// The address it gives its server: [`MEMORY_ADDRESS`] when none.
     pub address: Option<String>,
     /// The port it gives its server.
@@ -642,6 +639,20 @@ pub struct MemoryConnectOptions {
     pub signal: Option<CancellationToken>,
     /// How long it waits for its server: [`CONNECT_TIMEOUT`] when none.
     pub timeout: Option<Duration>,
+}
+
+impl MemoryConnectOptions {
+    /// A connect to `server`, every other option its default.
+    #[must_use]
+    pub const fn of(server: MemoryServer) -> Self {
+        Self {
+            server,
+            address: None,
+            port: None,
+            signal: None,
+            timeout: None,
+        }
+    }
 }
 
 // a connect under way
@@ -680,7 +691,6 @@ struct ClientInner {
     given: Option<SharedClock>,
     clock: SharedClock,
     runtime: Handle,
-    server: MemoryServer,
     state: Mutex<ClientState>,
     listeners: Listeners<dyn ClientListener>,
 }
@@ -768,10 +778,6 @@ impl ClientInner {
         ));
     }
 
-    fn later<J: FnOnce() + Send + 'static>(&self, job: J) {
-        later_on(&self.server.inner.pipe.downgrade(), job);
-    }
-
     // a message of the connection `serial` names told, or held behind what is held while its
     // router paused it or anything is held (spec 15.12); given back when that connection is not
     // the current one
@@ -835,7 +841,7 @@ impl ClientInner {
                 // settled already: a connection drawn after is closed at once, unclean
                 if let Ok(end) = outcome {
                     drop(held);
-                    self.later(move || end.close(false));
+                    end.close_later(false);
                 }
 
                 return;
@@ -878,7 +884,7 @@ impl ClientInner {
                 let accepted = locked(&attempt.state).accepted.take();
 
                 if let Some(accepted) = accepted {
-                    self.later(move || accepted.close(false));
+                    accepted.close_later(false);
                 }
 
                 {
@@ -969,7 +975,7 @@ fn is_address(address: &str) -> bool {
 }
 
 impl MemoryClient {
-    /// A client of `options.server`, not connected.
+    /// A client, not connected: its connect names its server.
     ///
     /// # Errors
     ///
@@ -986,7 +992,6 @@ impl MemoryClient {
                 given: options.clock.clone(),
                 clock,
                 runtime,
-                server: options.server.clone(),
                 state: Mutex::new(ClientState {
                     ready: ReadyState::Uninitialized,
                     current: None,
@@ -1003,7 +1008,7 @@ impl MemoryClient {
     }
 
     /// Connects to its server, started as it is called: open once its server drew the connection.
-    pub fn connect(&self, options: MemoryConnectOptions) -> Connect {
+    pub fn connect(&self, options: &MemoryConnectOptions) -> Connect {
         match self.start_connect(options) {
             Ok(outcome) => Connect::of(outcome),
             Err(error) => Connect::refused(error),
@@ -1016,7 +1021,7 @@ impl MemoryClient {
     )]
     fn start_connect(
         &self,
-        options: MemoryConnectOptions,
+        options: &MemoryConnectOptions,
     ) -> Result<oneshot::Receiver<Result<(), TransportError>>, TransportError> {
         let inner = &self.inner;
         // held here, before anything moves or is kept for a reconnection
@@ -1111,7 +1116,7 @@ impl MemoryClient {
         }
 
         // its signal: cancelled, the connect gives up
-        if let Some(signal) = options.signal {
+        if let Some(signal) = options.signal.clone() {
             let client = Arc::downgrade(inner);
             let attempt = Arc::clone(&attempt);
 
@@ -1136,9 +1141,9 @@ impl MemoryClient {
             address,
             port: options.port,
         });
-        let accepting = inner.server.inner.accept(peer, attempt.given_up.clone());
+        let accepting = options.server.inner.accept(peer, attempt.given_up.clone());
         let client = Arc::downgrade(inner);
-        let pipe = inner.server.inner.pipe.downgrade();
+        let pipe = options.server.inner.pipe.downgrade();
 
         crate::owner::spawn_counted((&inner.runtime, &inner.clock), async move {
             let accepted = accepting.await.unwrap_or_else(|_dropped| {
@@ -1164,7 +1169,7 @@ impl MemoryClient {
                     let end = end.clone();
 
                     drop(held);
-                    client.later(move || end.close(false));
+                    end.close_later(false);
                 } else {
                     held.accepted = Some(end.clone());
                 }
@@ -1181,7 +1186,7 @@ impl MemoryClient {
     /// # Errors
     ///
     /// A [`TransportError`] when it is not open.
-    pub fn disconnect(&self, options: DisconnectOptions) -> Result<(), TransportError> {
+    pub fn disconnect(&self, options: &DisconnectOptions) -> Result<(), TransportError> {
         let inner = &self.inner;
         let is_clean = options.is_clean.unwrap_or(true);
         let is_quick = options.is_quick.unwrap_or(false);
@@ -1206,7 +1211,7 @@ impl MemoryClient {
         };
 
         if let Some(end) = end {
-            inner.later(move || end.close(is_clean));
+            end.close_later(is_clean);
         }
 
         inner.tell(|listener: &dyn ClientListener| listener.on_close(is_clean, is_quick));
@@ -1226,7 +1231,7 @@ impl MemoryClient {
         let end = inner.drop_current();
 
         if let Some(end) = end {
-            inner.later(move || end.close(false));
+            end.close_later(false);
         }
 
         let mut state = locked(&inner.state);
@@ -1239,7 +1244,7 @@ impl MemoryClient {
     /// Closes its connection cleanly when it is open, then lets go of everything.
     pub fn close(&self) {
         if self.ready_state() == ReadyState::Open {
-            drop(self.disconnect(DisconnectOptions::default()));
+            drop(self.disconnect(&DisconnectOptions::default()));
         }
 
         self.dispose();
@@ -1253,7 +1258,7 @@ impl MemoryClient {
     /// or closing, or a signal cancelled already.
     pub fn reconnect(
         &self,
-        options: ReconnectOptions,
+        options: &ReconnectOptions,
     ) -> Result<BoxFuture<Result<(), TransportError>>, TransportError> {
         let inner = &self.inner;
         let target = {
@@ -1303,6 +1308,7 @@ impl MemoryClient {
 
         let (reply, outcome) = oneshot::channel();
         let client = self.clone();
+        let options = options.clone();
 
         crate::owner::spawn_counted((&inner.runtime, &inner.clock), async move {
             let reconnected = client.reconnecting((target, options)).await;
@@ -1330,7 +1336,7 @@ impl MemoryClient {
         attempting((&inner.clock, &options), |signal| {
             locked(&inner.state).is_attempting = true;
 
-            let connecting = self.connect(MemoryConnectOptions {
+            let connecting = self.connect(&MemoryConnectOptions {
                 signal,
                 ..target.clone()
             });
@@ -1346,7 +1352,7 @@ impl MemoryClient {
             .as_ref()
             .is_some_and(CancellationToken::is_cancelled)
         {
-            drop(self.disconnect(DisconnectOptions::default()));
+            drop(self.disconnect(&DisconnectOptions::default()));
 
             return Err(TransportError::Cancelled(RECONNECTION_CANCELLED.to_owned()));
         }
@@ -1419,18 +1425,24 @@ impl ClientTransport for MemoryClient {
     // ! its state's lock alone, as `pause`: what it holds is handed on in a later turn of the pipe,
     // behind what is queued there, never within this call
     fn resume(&self) {
-        let is_holding = {
+        // the pipe of its connection's server, when it holds anything: what it held went with
+        // any connection before it
+        let pipe = {
             let mut state = locked(&self.inner.state);
 
             state.is_paused = false;
 
-            !state.held.is_empty()
+            if state.held.is_empty() {
+                None
+            } else {
+                state.current.as_ref().and_then(|(end, _)| end.pipe())
+            }
         };
 
-        if is_holding {
+        if let Some(pipe) = pipe {
             let inner = Arc::clone(&self.inner);
 
-            self.inner.later(move || inner.release());
+            later_on(&pipe, move || inner.release());
         }
     }
 

@@ -16,9 +16,10 @@ pub fn two(a: u32, b: u32) {}
 
 pub fn two_then_options(a: u32, b: u32, options: &GoodOptions) {}
 
-pub fn options_alone(options: GoodOptions) {}
+pub fn options_alone(options: &GoodOptions) {}
 
-pub fn options_given(a: u32, options: Option<&GoodOptions>) {}
+// a reference to a struct no options name is judged by no form
+pub fn others(a: &Other, b: Option<&Other>) {}
 
 // refused: a third positional
 pub fn third_positional(a: u32, b: u32, c: u32) {}
@@ -42,7 +43,7 @@ pub struct Router;
 impl Router {
     pub fn two(&self, a: u32, b: u32) {}
 
-    pub fn two_then_options(&mut self, a: u32, b: u32, options: GoodOptions) {}
+    pub fn two_then_options(&mut self, a: u32, b: u32, options: &GoodOptions) {}
 
     // refused: a third positional beside its receiver
     pub fn third(self, a: u32, b: u32, c: u32) {}
@@ -56,7 +57,37 @@ pub trait Side {
 }
 
 // refused: one options struct, at most
-pub fn twice(a: u32, first: GoodOptions, second: GoodOptions) {}
+pub fn twice(a: u32, first: &GoodOptions, second: &GoodOptions) {}
+
+// ── Taken by `&` ─────────────────────────────────────────────────────────────
+
+// refused: by value
+pub fn by_value(options: GoodOptions) {}
+
+// refused: by `&mut`
+pub fn by_mut(a: u32, options: &mut GoodOptions) {}
+
+// refused: in an `Option`, where `&GoodOptions::default()` stands for none
+pub fn in_option(a: u32, options: Option<&GoodOptions>) {}
+
+// refused: under two references
+pub fn twice_borrowed(options: &&GoodOptions) {}
+
+// a tuple taken whole is judged by no form of its own
+pub fn tupled_options((a, options): (u32, GoodOptions)) {}
+
+// ── A callback a type alias declares ─────────────────────────────────────────
+
+pub type Judge<T> = Arc<dyn Fn(&T, &GoodOptions) -> bool + Send + Sync>;
+
+// refused: a callback's options by value
+pub type ByValue<T> = Arc<dyn Fn(&T, GoodOptions) -> bool + Send + Sync>;
+
+// refused: a callback's third positional and its fourth
+pub type Fourth = Box<dyn Fn(u32, u32, u32, u32) + Send>;
+
+// refused: a callback's options not last
+pub type NotLast = fn(&GoodOptions, u32);
 
 // a trait's method is judged where its trait declares it, a trait of another crate's among them
 impl Side for Router {

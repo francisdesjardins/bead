@@ -141,7 +141,7 @@ impl fmt::Debug for Credentials {
 /// # Errors
 ///
 /// A [`ProgrammerError`] for a chunk or an envelope under 1,024 bytes.
-pub fn assert_limits_hold_jwt(limits: &RouterLimits) -> Result<(), ProgrammerError> {
+pub(crate) fn assert_limits_hold_jwt(limits: &RouterLimits) -> Result<(), ProgrammerError> {
     if limits.chunk_bytes < JWT_LIMIT_BYTES || limits.maximum_envelope_bytes < JWT_LIMIT_BYTES {
         return Err(ProgrammerError::new(
             "the router's limits do not hold together: a side that takes or presents a JWT holds a chunk's envelope and an envelope of 1,024 bytes at least",

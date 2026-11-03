@@ -6,12 +6,13 @@ use core::time::Duration;
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
+use bead::internal::{hold_finite, session_key_of};
 use bead::{
     AdmissionHook, BoxFuture, CallSession, ConnectionHandle, DestinationOptions,
     DestinationRegistration, Failure, JsonCodec, Judged, NotifyOptions, ProgrammerError,
     ProtocolCode, RelayTarget, RequestOptions, RequestProps, ResolverCallback, ResolverError,
     Response, RouterSide, Schedule, Server, ServiceServer, ServiceServerOptions, SessionIdentifier,
-    Validate, ValidateOptions, Violation, ViolationHolder, hold_finite, session_key_of,
+    Validate, ValidateOptions, Violation, ViolationHolder,
 };
 use serde_json::{Map, Value, json};
 use tokio::sync::oneshot;
@@ -106,16 +107,17 @@ fn names_of(request: &Value) -> Option<Vec<String>> {
 
 /// `checked`'s rules, judged of `request`.
 #[must_use]
-pub fn judge_checked(request: &Value, options: ValidateOptions) -> Judged {
+pub fn judge_checked(request: &Value, options: &ValidateOptions) -> Judged {
+    let fail_fast = options.fail_fast.unwrap_or(false);
     let mut sink = Sink {
-        fail_fast: options.fail_fast,
-        holder: ViolationHolder::new(options.maximum_bytes),
+        fail_fast,
+        holder: ViolationHolder::new(options.maximum_bytes.unwrap_or(usize::MAX)),
         path: Vec::new(),
         violations: Vec::new(),
         more: 0,
         is_full: false,
     };
-    let stopped = judge_names(request, &mut sink) && options.fail_fast;
+    let stopped = judge_names(request, &mut sink) && fail_fast;
 
     Judged {
         violations: sink.violations,
@@ -345,15 +347,15 @@ pub fn offer_interop(server: &Server) -> Result<ServiceServer, ProgrammerError> 
     let procedures = Arc::new(interop_procedures(Some(validate))?);
     let mut options = ServiceServerOptions::default();
 
-    options.admissions = vec![(
+    options.admissions = Some(vec![(
         "nobody",
         AdmissionHook {
             admits: Arc::new(|_request| false),
             detail: Some("this procedure admits nobody".to_owned()),
         },
-    )];
+    )]);
 
-    let interop = ServiceServer::new(procedures.all(), options)?;
+    let interop = ServiceServer::new(procedures.all(), &options)?;
     let kept = Arc::new(Kept {
         cancellations: Mutex::new(BTreeMap::new()),
         destinations: Mutex::new(Vec::new()),
@@ -697,7 +699,7 @@ pub fn offer_interop(server: &Server) -> Result<ServiceServer, ProgrammerError> 
                     let time = interop
                         .command(&clock)
                         .map_err(failed)?
-                        .call(Value::String(QUESTION.to_owned()), options)
+                        .call(Value::String(QUESTION.to_owned()), &options)
                         .map_err(failed)?
                         .await
                         .map_err(ResolverError::other)?;
@@ -764,10 +766,10 @@ pub fn offer_interop(server: &Server) -> Result<ServiceServer, ProgrammerError> 
                     options.timeout = timeout;
 
                     let registration = router
-                        .register_destination((
+                        .register_destination(
                             RelayTarget::Connection(Arc::clone(&request.connection_handle)),
-                            options,
-                        ))
+                            &options,
+                        )
                         .map_err(failed)?;
 
                     // ! taken out first, so the order kept is the order registered

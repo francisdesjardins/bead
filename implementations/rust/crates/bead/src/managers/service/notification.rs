@@ -186,7 +186,7 @@ where
 
             let (call_id, response) = self
                 .requester
-                .call_with(payload, (asked, Some(Arc::clone(&liked))))
+                .call_with(payload, (&asked, Some(Arc::clone(&liked))))
                 .map_err(CallError::Refused)?
                 .with_call_id()
                 .await?;
@@ -501,7 +501,7 @@ where
     pub fn on(
         &self,
         (payload, callback): (Req::Value, NotificationCallback<Not::Value>),
-        options: RequestOptions,
+        options: &RequestOptions,
     ) -> BoxFuture<Result<NotificationRegistration, CallError>> {
         let shared = Arc::clone(&self.shared);
         let (id, own, unregistering) = {
@@ -514,6 +514,7 @@ where
 
             (id, state.generation, state.unregistering.clone())
         };
+        let options = options.clone();
 
         Box::pin(async move {
             if let Some(unregistering) = unregistering {

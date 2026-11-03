@@ -142,10 +142,10 @@ impl fmt::Debug for ClientRequest {
 impl ClientRequest {
     /// A call of `procedure`, under `options`.
     #[must_use]
-    pub const fn of(procedure: Procedure, options: ResolvedRequestOptions) -> Self {
+    pub fn of(procedure: Procedure, options: &ResolvedRequestOptions) -> Self {
         Self {
             procedure,
-            options,
+            options: options.clone(),
             series: None,
             refusal: None,
             subscribes: None,
@@ -1601,7 +1601,7 @@ impl RelayRouter for Through {
             &self.0,
             payload,
             (
-                ClientRequest::of(procedure, options),
+                ClientRequest::of(procedure, &options),
                 CallHooks {
                     on_call_id: None,
                     on_sent: Some(on_sent),

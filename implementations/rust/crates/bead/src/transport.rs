@@ -303,7 +303,7 @@ pub trait ClientTransport: Send + Sync + fmt::Debug {
 }
 
 /// How a transport client's connection closes.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct DisconnectOptions {
     /// Whether by its own word: `true` when none.

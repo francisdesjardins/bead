@@ -72,7 +72,7 @@ fn reports_a_refusal_as_its_cause_and_a_link_failure_as_its_message_alone() {
 
 #[test]
 fn describes_a_message_by_its_topic_and_size_without_its_payload() {
-    let message = BrokerMessage::new(publication(), BrokerMessageOptions::default());
+    let message = BrokerMessage::new(publication(), &BrokerMessageOptions::default());
 
     assert_eq!(message.topic(), ["bead", "i", "ada"], "the topic tokens");
     assert_eq!(
@@ -109,8 +109,8 @@ fn describes_a_settle_without_calling_it_and_shares_it_through_cloned_options() 
         "absent options"
     );
     let copy = options.clone();
-    let first = BrokerMessage::new(publication(), options);
-    let second = BrokerMessage::new(publication(), copy);
+    let first = BrokerMessage::new(publication(), &options);
+    let second = BrokerMessage::new(publication(), &copy);
 
     assert_eq!(
         settles.load(Ordering::SeqCst),
@@ -148,7 +148,7 @@ impl BrokerListener for DownsOnly {
 
 #[test]
 fn lets_a_listener_hear_messages_or_link_loss_alone() {
-    let message = BrokerMessage::new(publication(), BrokerMessageOptions::default());
+    let message = BrokerMessage::new(publication(), &BrokerMessageOptions::default());
     let messages = MessagesOnly::default();
     let downs = DownsOnly::default();
 

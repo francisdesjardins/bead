@@ -1,0 +1,4 @@
+crate
+  use buffa_build::Config
+  fn config_of(set: &Path, files: &[&str]) -> Result<Config, Box<dyn Error>>
+  fn opened_of(pool: &DescriptorPool, files: &[&str]) -> Vec<String>

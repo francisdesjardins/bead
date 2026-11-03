@@ -162,7 +162,7 @@ pub fn are_one_name(one: &str, other: &str) -> bool {
 /// # Errors
 ///
 /// A [`ProgrammerError`] whose reason is the first of 16.10 that applies.
-pub fn check_declaration(procedure: &Procedure) -> Result<(), ProgrammerError> {
+pub(crate) fn check_declaration(procedure: &Procedure) -> Result<(), ProgrammerError> {
     let Procedure {
         service_id,
         id: procedure_id,
@@ -213,7 +213,7 @@ fn words_of(kind: ProcedureKind) -> &'static str {
 /// # Errors
 ///
 /// A [`ProgrammerError`] whose reason is [`IdentityRefusal::AgainstItsKind`].
-pub fn check_procedure_kind(
+pub(crate) fn check_procedure_kind(
     procedure: &Procedure,
     way: DeclarationWay,
 ) -> Result<(), ProgrammerError> {

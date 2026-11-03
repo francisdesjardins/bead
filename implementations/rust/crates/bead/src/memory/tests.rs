@@ -162,7 +162,6 @@ impl Ends {
     fn client(&self) -> (MemoryClient, Told) {
         let client = MemoryClient::new(&MemoryClientOptions {
             clock: Some(Arc::clone(&self.shared)),
-            server: self.server.clone(),
         })
         .expect("a client");
         let told: Told = Arc::default();
@@ -179,11 +178,10 @@ impl Ends {
         (address, port): (Option<&str>, Option<u16>),
     ) -> (MemoryClient, Told) {
         let (client, told) = self.client();
-        let connecting = client.connect(MemoryConnectOptions {
+        let connecting = client.connect(&MemoryConnectOptions {
             address: address.map(str::to_owned),
             port,
-            signal: None,
-            timeout: None,
+            ..MemoryConnectOptions::of(self.server.clone())
         });
 
         self.clock.settle().await;
@@ -468,15 +466,14 @@ async fn draws_a_handle_of_type_memory_for_each_connect_and_gives_none_twice() {
     // a client connected again is a new connection, drawn at the next rank; so is one after a stop
     // and a start, which reset no rank
     first
-        .disconnect(DisconnectOptions::default())
+        .disconnect(&DisconnectOptions::default())
         .expect("closed");
     ends.clock.settle().await;
 
-    let again = first.connect(MemoryConnectOptions {
+    let again = first.connect(&MemoryConnectOptions {
         address: Some("127.0.0.1".to_owned()),
         port: Some(50_001),
-        signal: None,
-        timeout: None,
+        ..MemoryConnectOptions::of(ends.server.clone())
     });
 
     ends.clock.settle().await;
@@ -485,7 +482,7 @@ async fn draws_a_handle_of_type_memory_for_each_connect_and_gives_none_twice() {
     ends.clock.settle().await;
     ends.server.start().await.expect("started again");
 
-    let after = third.connect(MemoryConnectOptions::default());
+    let after = third.connect(&MemoryConnectOptions::of(ends.server.clone()));
 
     ends.clock.settle().await;
     after.await.expect("connected after a start");
@@ -514,9 +511,9 @@ async fn draws_a_handle_of_type_memory_for_each_connect_and_gives_none_twice() {
 
     for address in ["", "a;ordinal=1", "a b"] {
         let refused = named
-            .connect(MemoryConnectOptions {
+            .connect(&MemoryConnectOptions {
                 address: Some(address.to_owned()),
-                ..MemoryConnectOptions::default()
+                ..MemoryConnectOptions::of(ends.server.clone())
             })
             .await
             .expect_err("an address no handle names");
@@ -548,7 +545,7 @@ async fn tells_the_other_end_of_a_close_in_a_later_turn_the_closer_s_clean() {
     // after what it sent before, clean as the closer's
     client.send(message_of(&[1], None)).expect("sent");
     client
-        .disconnect(DisconnectOptions::default())
+        .disconnect(&DisconnectOptions::default())
         .expect("closed");
 
     assert_eq!(
@@ -618,7 +615,7 @@ async fn tells_the_other_end_of_a_close_in_a_later_turn_the_closer_s_clean() {
 
     ends.server_told();
     unclean
-        .disconnect(DisconnectOptions {
+        .disconnect(&DisconnectOptions {
             is_clean: Some(false),
             is_quick: None,
         })
@@ -652,7 +649,6 @@ async fn closes_each_connection_as_it_stops_and_takes_no_connect_after() {
     let client_of = || {
         MemoryClient::new(&MemoryClientOptions {
             clock: Some(Arc::clone(&shared)),
-            server: server.clone(),
         })
         .expect("a client")
     };
@@ -660,7 +656,7 @@ async fn closes_each_connection_as_it_stops_and_takes_no_connect_after() {
 
     // a connect before its start fails before anything goes
     let early = first
-        .connect(MemoryConnectOptions::default())
+        .connect(&MemoryConnectOptions::of(server.clone()))
         .await
         .expect_err("refused before its start");
 
@@ -684,7 +680,7 @@ async fn closes_each_connection_as_it_stops_and_takes_no_connect_after() {
     server.start().await.expect("started");
 
     for client in [&first, &second] {
-        let connecting = client.connect(MemoryConnectOptions::default());
+        let connecting = client.connect(&MemoryConnectOptions::of(server.clone()));
 
         clock.settle().await;
         connecting.await.expect("connected");
@@ -716,7 +712,7 @@ async fn closes_each_connection_as_it_stops_and_takes_no_connect_after() {
     assert!(server.clients().is_empty(), "no connection held");
 
     let late = first
-        .connect(MemoryConnectOptions::default())
+        .connect(&MemoryConnectOptions::of(server.clone()))
         .await
         .expect_err("refused once stopped");
 
@@ -745,12 +741,12 @@ async fn carries_a_transfer_under_its_routers_credit() {
     client.limits = Some(limits);
 
     let options = PairOptions {
-        server,
-        client,
+        server: Some(server),
+        client: Some(client),
         ..PairOptions::default()
     };
 
-    let pair = Pair::connected((crate::testing::instants::new_year(), options))
+    let pair = Pair::connected(crate::testing::instants::new_year(), &options)
         .await
         .expect("a pair connected");
     let kinds: Arc<Mutex<Vec<String>>> = Arc::default();
@@ -780,7 +776,7 @@ async fn carries_a_transfer_under_its_routers_credit() {
         .services()
         .get_request(&echo(), RequestDependencies::of(RawCodec, RawCodec))
         .expect("echo asked")
-        .call(payload.clone(), RequestOptions::default())
+        .call(payload.clone(), &RequestOptions::default())
         .expect("echo called");
 
     pair.settle().await;
@@ -817,9 +813,9 @@ async fn gives_up_a_connect_its_dispose_its_token_or_its_clock_ends_before_its_s
     // its token cancelled before its server drew it
     let (cancelled, _) = ends.client();
     let token = CancellationToken::new();
-    let connecting = cancelled.connect(MemoryConnectOptions {
+    let connecting = cancelled.connect(&MemoryConnectOptions {
         signal: Some(token.clone()),
-        ..MemoryConnectOptions::default()
+        ..MemoryConnectOptions::of(ends.server.clone())
     });
 
     token.cancel();
@@ -829,7 +825,7 @@ async fn gives_up_a_connect_its_dispose_its_token_or_its_clock_ends_before_its_s
 
     // disposed before its server drew it
     let (disposed, _) = ends.client();
-    let connecting = disposed.connect(MemoryConnectOptions::default());
+    let connecting = disposed.connect(&MemoryConnectOptions::of(ends.server.clone()));
 
     disposed.dispose();
     ends.clock.settle().await;
@@ -868,13 +864,12 @@ async fn never_started() -> (Arc<SteppingClock>, MemoryClient) {
     .expect("a server");
     let client = MemoryClient::new(&MemoryClientOptions {
         clock: Some(shared),
-        server,
     })
     .expect("a client");
 
     assert!(
         client
-            .connect(MemoryConnectOptions::default())
+            .connect(&MemoryConnectOptions::of(server.clone()))
             .await
             .is_err(),
         "its server never started"
@@ -895,7 +890,7 @@ fn reconnecting((delay, maximum_attempts): (Duration, u32)) -> ReconnectOptions 
 async fn rejects_with_a_reconnect_error_carrying_the_last_failure_as_cause_ending_closed() {
     let (clock, client) = never_started().await;
     let reconnection = client
-        .reconnect(reconnecting((Duration::from_secs(1), 2)))
+        .reconnect(&reconnecting((Duration::from_secs(1), 2)))
         .expect("a reconnection");
 
     assert_eq!(
@@ -927,7 +922,7 @@ async fn refuses_a_second_reconnection_leaving_the_first_alone() {
     let (clock, client) = never_started().await;
     let first = crate::testing::spawn(
         client
-            .reconnect(reconnecting((Duration::from_secs(1), 2)))
+            .reconnect(&reconnecting((Duration::from_secs(1), 2)))
             .expect("a reconnection"),
     );
 
@@ -935,7 +930,7 @@ async fn refuses_a_second_reconnection_leaving_the_first_alone() {
 
     assert!(
         matches!(
-            client.reconnect(ReconnectOptions::default()),
+            client.reconnect(&ReconnectOptions::default()),
             Err(TransportError::Refused(_))
         ),
         "a second refused"
@@ -1035,7 +1030,7 @@ async fn fails_a_connect_its_server_closed_as_it_opened_what_it_sent_before_unhe
         })));
 
     let (client, at_client) = ends.client();
-    let connecting = client.connect(MemoryConnectOptions::default());
+    let connecting = client.connect(&MemoryConnectOptions::of(ends.server.clone()));
 
     ends.clock.settle().await;
 
@@ -1074,7 +1069,7 @@ async fn closes_at_once_unclean_a_connection_its_server_draws_once_a_dispose_gav
             server.send(message_of(&[1], None), handle).expect("sent");
         })));
 
-    let connecting = client.connect(MemoryConnectOptions::default());
+    let connecting = client.connect(&MemoryConnectOptions::of(ends.server.clone()));
 
     ends.clock.settle().await;
 
@@ -1120,7 +1115,7 @@ async fn a_connect_given_up_its_client_let_go_as_its_server_draws_it_leaves_no_c
             }
         })));
 
-    let connecting = client.connect(MemoryConnectOptions::default());
+    let connecting = client.connect(&MemoryConnectOptions::of(ends.server.clone()));
 
     drop(client);
     ends.clock.settle().await;
@@ -1167,7 +1162,7 @@ async fn refuses_a_send_or_a_disconnect_unless_open_and_a_send_of_what_is_no_byt
     );
 
     let unclosed = client
-        .disconnect(DisconnectOptions::default())
+        .disconnect(&DisconnectOptions::default())
         .expect_err("never connected");
 
     assert!(
@@ -1201,7 +1196,7 @@ async fn refuses_a_reconnect_never_connected_and_a_connect_unless_closed_nothing
 
     // * never connected: nothing to connect again to
     assert_eq!(
-        refusal_of(client.reconnect(ReconnectOptions::default())).as_deref(),
+        refusal_of(client.reconnect(&ReconnectOptions::default())).as_deref(),
         Some("the transport client was never connected"),
         "said why"
     );
@@ -1209,9 +1204,9 @@ async fn refuses_a_reconnect_never_connected_and_a_connect_unless_closed_nothing
     // its token cancelled already, and a server not started: refused, the first leaving its state
     // as it was
     let refused = client
-        .connect(MemoryConnectOptions {
+        .connect(&MemoryConnectOptions {
             signal: Some(cancelled.clone()),
-            ..MemoryConnectOptions::default()
+            ..MemoryConnectOptions::of(ends.server.clone())
         })
         .await
         .expect_err("cancelled already");
@@ -1223,7 +1218,7 @@ async fn refuses_a_reconnect_never_connected_and_a_connect_unless_closed_nothing
     assert_eq!(client.ready_state(), ReadyState::Uninitialized, "as it was");
 
     let refused = client
-        .connect(MemoryConnectOptions::default())
+        .connect(&MemoryConnectOptions::of(ends.server.clone()))
         .await
         .expect_err("its server not started");
 
@@ -1238,13 +1233,13 @@ async fn refuses_a_reconnect_never_connected_and_a_connect_unless_closed_nothing
     // it open
     ends.server.start().await.expect("started");
 
-    let connecting = client.connect(MemoryConnectOptions::default());
+    let connecting = client.connect(&MemoryConnectOptions::of(ends.server.clone()));
 
     ends.clock.settle().await;
     connecting.await.expect("connected");
 
     let again = client
-        .connect(MemoryConnectOptions::default())
+        .connect(&MemoryConnectOptions::of(ends.server.clone()))
         .await
         .expect_err("open already");
 
@@ -1256,7 +1251,7 @@ async fn refuses_a_reconnect_never_connected_and_a_connect_unless_closed_nothing
     assert!(
         matches!(
             client
-                .reconnect(ReconnectOptions {
+                .reconnect(&ReconnectOptions {
                     signal: Some(cancelled),
                     ..ReconnectOptions::default()
                 })
@@ -1278,7 +1273,7 @@ async fn refuses_a_second_connect_or_reconnect_while_one_is_pending() {
         let (client, at_client) = ends.client();
 
         if is_reconnect {
-            let connecting = client.connect(MemoryConnectOptions::default());
+            let connecting = client.connect(&MemoryConnectOptions::of(ends.server.clone()));
 
             ends.clock.settle().await;
             connecting.await.expect("connected");
@@ -1287,13 +1282,13 @@ async fn refuses_a_second_connect_or_reconnect_while_one_is_pending() {
 
         let pending: BoxFuture<Result<(), TransportError>> = if is_reconnect {
             client
-                .reconnect(ReconnectOptions {
+                .reconnect(&ReconnectOptions {
                     maximum_attempts: Some(1),
                     ..ReconnectOptions::default()
                 })
                 .expect("a reconnection")
         } else {
-            Box::pin(client.connect(MemoryConnectOptions::default()))
+            Box::pin(client.connect(&MemoryConnectOptions::of(ends.server.clone())))
         };
         let state = if is_reconnect {
             "reconnecting"
@@ -1303,7 +1298,7 @@ async fn refuses_a_second_connect_or_reconnect_while_one_is_pending() {
 
         assert_eq!(
             client
-                .connect(MemoryConnectOptions::default())
+                .connect(&MemoryConnectOptions::of(ends.server.clone()))
                 .await
                 .err()
                 .map(|refused| refused.to_string()),
@@ -1311,7 +1306,7 @@ async fn refuses_a_second_connect_or_reconnect_while_one_is_pending() {
             "a second connect refused"
         );
         assert_eq!(
-            refusal_of(client.reconnect(ReconnectOptions::default())).as_deref(),
+            refusal_of(client.reconnect(&ReconnectOptions::default())).as_deref(),
             Some(if is_reconnect {
                 "the transport client is already reconnecting"
             } else {
@@ -1349,7 +1344,7 @@ async fn refuses_a_second_connect_or_reconnect_while_one_is_pending() {
         assert_eq!(ends.server.clients().len(), 1, "one connection held");
 
         client
-            .disconnect(DisconnectOptions::default())
+            .disconnect(&DisconnectOptions::default())
             .expect("closed");
         ends.clock.settle().await;
 
@@ -1391,17 +1386,17 @@ async fn reconnects_with_its_last_connect_s_options_replacing_its_connection_wit
     // * each listener of its start told, the one that panics reported, and the reconnection goes on
     client.listen(Arc::new(Breaking));
 
-    let connecting = client.connect(MemoryConnectOptions {
+    let connecting = client.connect(&MemoryConnectOptions {
         address: Some("10.0.0.1".to_owned()),
         port: Some(4_000),
-        ..MemoryConnectOptions::default()
+        ..MemoryConnectOptions::of(ends.server.clone())
     });
 
     ends.clock.settle().await;
     connecting.await.expect("connected");
 
     let reconnection = client
-        .reconnect(ReconnectOptions::default())
+        .reconnect(&ReconnectOptions::default())
         .expect("a reconnection");
 
     ends.clock.settle().await;
@@ -1434,7 +1429,7 @@ async fn reconnects_with_its_last_connect_s_options_replacing_its_connection_wit
     );
 
     let reconnection = client
-        .reconnect(ReconnectOptions {
+        .reconnect(&ReconnectOptions {
             maximum_attempts: Some(1),
             ..ReconnectOptions::default()
         })
@@ -1472,7 +1467,7 @@ async fn cancels_a_reconnection_before_its_first_attempt_when_its_start_listener
     ends.server_told();
 
     let reconnection = client
-        .reconnect(ReconnectOptions {
+        .reconnect(&ReconnectOptions {
             maximum_attempts: Some(1),
             signal: Some(cancelling),
             ..ReconnectOptions::default()
@@ -1529,7 +1524,7 @@ async fn closes_a_successful_last_attempt_when_its_reconnection_is_cancelled_aft
             locked(&seen).push(seam.ready_state());
 
             if is_closed_before_cancel {
-                seam.disconnect(DisconnectOptions::default())
+                seam.disconnect(&DisconnectOptions::default())
                     .expect("closed");
             }
 
@@ -1538,7 +1533,7 @@ async fn closes_a_successful_last_attempt_when_its_reconnection_is_cancelled_aft
         ends.server_told();
 
         let reconnection = client
-            .reconnect(ReconnectOptions {
+            .reconnect(&ReconnectOptions {
                 maximum_attempts: Some(1),
                 signal: Some(cancelling),
                 ..ReconnectOptions::default()
@@ -1597,7 +1592,7 @@ async fn closes_what_its_last_attempt_opened_as_its_reconnection_was_cancelled()
     ends.server_told();
 
     let reconnection = client
-        .reconnect(ReconnectOptions {
+        .reconnect(&ReconnectOptions {
             signal: Some(cancelling),
             ..ReconnectOptions::default()
         })
@@ -1646,7 +1641,7 @@ async fn hears_nothing_once_it_let_go_of_its_connection_and_tells_one_close_at_e
     let ending = ends.server.close(&handle);
 
     client
-        .disconnect(DisconnectOptions::default())
+        .disconnect(&DisconnectOptions::default())
         .expect("closed");
     ends.clock.settle().await;
 
@@ -1718,9 +1713,9 @@ async fn draws_no_connection_for_a_connect_cancelled_as_it_held_it_and_reports_w
     // * a connect whose token is cancelled as its server holds it, before the turn it would be
     // drawn in: no connection drawn
     let cancelling = CancellationToken::new();
-    let connecting = client.connect(MemoryConnectOptions {
+    let connecting = client.connect(&MemoryConnectOptions {
         signal: Some(cancelling.clone()),
-        ..MemoryConnectOptions::default()
+        ..MemoryConnectOptions::of(ends.server.clone())
     });
 
     cancelling.cancel();
@@ -1737,7 +1732,7 @@ async fn draws_no_connection_for_a_connect_cancelled_as_it_held_it_and_reports_w
     assert!(ends.server.clients().is_empty(), "none held");
 
     // a listener's panic reported with its connection, the transport going on
-    let connecting = client.connect(MemoryConnectOptions::default());
+    let connecting = client.connect(&MemoryConnectOptions::of(ends.server.clone()));
 
     ends.clock.settle().await;
     connecting.await.expect("connected");
@@ -1772,7 +1767,6 @@ async fn calls_each_listener_though_one_throws_reporting_the_throw_with_its_conn
     .expect("a server");
     let client = MemoryClient::new(&MemoryClientOptions {
         clock: Some(shared),
-        server: server.clone(),
     })
     .expect("a client");
     let told: Told = Arc::default();
@@ -1788,7 +1782,7 @@ async fn calls_each_listener_though_one_throws_reporting_the_throw_with_its_conn
     }));
     server.start().await.expect("started");
 
-    let connecting = client.connect(MemoryConnectOptions::default());
+    let connecting = client.connect(&MemoryConnectOptions::of(server.clone()));
 
     clock.settle().await;
     connecting.await.expect("connected");
@@ -1797,7 +1791,7 @@ async fn calls_each_listener_though_one_throws_reporting_the_throw_with_its_conn
 
     // a client's events carry no connection: its panics are reported with none
     let reconnection = client
-        .reconnect(ReconnectOptions::default())
+        .reconnect(&ReconnectOptions::default())
         .expect("a reconnection");
 
     clock.settle().await;
@@ -1951,7 +1945,7 @@ async fn a_paused_in_memory_transport_holds_what_it_is_sent_in_order_and_hands_i
     client.send(message_of_bytes(&[11])).expect("sent");
     ends.clock.settle().await;
     client
-        .disconnect(DisconnectOptions::default())
+        .disconnect(&DisconnectOptions::default())
         .expect("disconnected");
     ends.clock.settle().await;
     ends.server.resume(&handle);

@@ -68,7 +68,7 @@ async fn tells_a_calls_steps_with_the_call_id_its_request_carries() {
         locked(&hearing).push((event.direction, event.call_id));
     }));
     let whole = asking
-        .call("a".to_owned(), RequestOptions::default())
+        .call("a".to_owned(), &RequestOptions::default())
         .expect("a call");
     scripted.settle().await;
     scripted.transport.deliver(&result(1, "b"));
@@ -80,7 +80,7 @@ async fn tells_a_calls_steps_with_the_call_id_its_request_carries() {
         "b"
     );
     let opening = asking
-        .call("x".repeat(3_000), RequestOptions::default())
+        .call("x".repeat(3_000), &RequestOptions::default())
         .expect("a transfer");
     scripted.settle().await;
     scripted
@@ -137,10 +137,10 @@ async fn two_calls_to_one_procedure_started_in_one_millisecond_and_answered_in_o
         locked(&hearing).push((event.direction, event.call_id, event.started_at, text));
     }));
     let first = asking
-        .call("a".to_owned(), RequestOptions::default())
+        .call("a".to_owned(), &RequestOptions::default())
         .expect("first call");
     let second = asking
-        .call("b".to_owned(), RequestOptions::default())
+        .call("b".to_owned(), &RequestOptions::default())
         .expect("second call");
     scripted.settle().await;
     let transport = Arc::clone(&scripted.transport);
@@ -233,7 +233,7 @@ async fn a_subscribing_call_binds_its_subscription_before_debug_hears_its_tx_ste
                 Box::pin(async { Ok(()) })
             }),
         ),
-        RequestOptions::default(),
+        &RequestOptions::default(),
     );
     core::future::poll_fn(|context| {
         assert!(registering.as_mut().poll(context).is_pending());

@@ -83,8 +83,8 @@ impl Greeter {
     fn service(&self, hook: AdmissionHook) -> ServiceServer {
         ServiceServer::new(
             self.procedures(),
-            ServiceServerOptions {
-                admissions: vec![("loud", hook)],
+            &ServiceServerOptions {
+                admissions: Some(vec![("loud", hook)]),
                 ..ServiceServerOptions::default()
             },
         )
@@ -104,9 +104,12 @@ fn answer() -> ResolverCallback<TextCodec, TextCodec> {
 }
 
 async fn pair() -> Pair {
-    Pair::connected((crate::testing::instants::new_year(), PairOptions::default()))
-        .await
-        .expect("a connected pair")
+    Pair::connected(
+        crate::testing::instants::new_year(),
+        &PairOptions::default(),
+    )
+    .await
+    .expect("a connected pair")
 }
 
 async fn call(
@@ -120,7 +123,7 @@ async fn call(
             RequestDependencies::of(TextCodec, TextCodec),
         )
         .expect("a requester")
-        .call(payload.to_owned(), RequestOptions::default())
+        .call(payload.to_owned(), &RequestOptions::default())
         .expect("a call")
         .await
 }
@@ -240,7 +243,7 @@ async fn answers_procedure_failed_to_a_hook_that_throws_and_reports_it() {
 fn refuses_a_hook_the_options_lack_one_no_procedure_names_and_one_that_is_no_hook() {
     let greeter = Greeter::new();
     assert_eq!(
-        ServiceServer::new(greeter.procedures(), ServiceServerOptions::default())
+        ServiceServer::new(greeter.procedures(), &ServiceServerOptions::default())
             .expect_err("a hook missing")
             .message(),
         "shout is admitted by the hook loud, which the options do not give"
@@ -248,8 +251,8 @@ fn refuses_a_hook_the_options_lack_one_no_procedure_names_and_one_that_is_no_hoo
     assert_eq!(
         ServiceServer::new(
             greeter.procedures(),
-            ServiceServerOptions {
-                admissions: vec![("loud", loud()), ("quiet", loud())],
+            &ServiceServerOptions {
+                admissions: Some(vec![("loud", loud()), ("quiet", loud())]),
                 ..ServiceServerOptions::default()
             }
         )
@@ -258,12 +261,35 @@ fn refuses_a_hook_the_options_lack_one_no_procedure_names_and_one_that_is_no_hoo
         "the hook quiet is given, and no procedure names it"
     );
     let consumer = Consumer::new();
-    consumer.accepts("pub fn check(mut options: bead::ServiceServerOptions, hook: bead::AdmissionHook) { options.admissions = vec![(\"loud\", hook)]; }");
-    consumer.refuses("pub fn check(mut options: bead::ServiceServerOptions) { options.admissions = vec![(\"loud\", None)]; }", ("E0308", "mismatched types"));
+    consumer.accepts("pub fn check(mut options: bead::ServiceServerOptions, hook: bead::AdmissionHook) { options.admissions = Some(vec![(\"loud\", hook)]); }");
+    consumer.refuses("pub fn check(mut options: bead::ServiceServerOptions) { options.admissions = Some(vec![(\"loud\", None)]); }", ("E0308", "mismatched types"));
     consumer.refuses(
         "pub fn check() { let _ = bead::AdmissionHook { admits: None, detail: None }; }",
         ("E0308", "mismatched types"),
     );
+}
+
+// decision 0004: the hooks are required exactly when a procedure names one, refused as the
+// service is built where the TypeScript side's types refuse them
+#[test]
+fn refuses_options_without_admissions_where_a_procedure_names_a_hook() {
+    let greeter = Greeter::new();
+    let none_listed = ServiceServerOptions {
+        admissions: Some(Vec::new()),
+        ..ServiceServerOptions::default()
+    };
+    let failing_fast = ServiceServerOptions {
+        fail_fast: Some(true),
+        ..ServiceServerOptions::default()
+    };
+    for options in [ServiceServerOptions::default(), none_listed, failing_fast] {
+        assert_eq!(
+            ServiceServer::new(greeter.procedures(), &options)
+                .expect_err("the admissions missing")
+                .message(),
+            "shout is admitted by the hook loud, which the options do not give"
+        );
+    }
 }
 
 #[tokio::test]
@@ -386,7 +412,7 @@ async fn notifies_nothing_before_it_is_offered_and_resolves() {
                     Box::pin(async { Ok(()) })
                 }),
             ),
-            RequestOptions::default(),
+            &RequestOptions::default(),
         )
         .await
         .expect("subscribed");
@@ -478,7 +504,7 @@ async fn answers_payload_invalid_with_its_violations_to_a_request_its_rules_refu
     let descriptor = checked(not_empty(), false);
     let service = ServiceServer::new(
         vec![ServiceProcedure::of(&descriptor)],
-        ServiceServerOptions::default(),
+        &ServiceServerOptions::default(),
     )
     .expect("a checked service");
     let seen = Arc::new(Mutex::new(Vec::new()));
@@ -540,7 +566,7 @@ async fn answers_procedure_failed_to_a_validate_that_throws_and_reports_it() {
     );
     let service = ServiceServer::new(
         vec![ServiceProcedure::of(&descriptor)],
-        ServiceServerOptions::default(),
+        &ServiceServerOptions::default(),
     )
     .expect("a checked service");
     let seen = Arc::new(Mutex::new(Vec::new()));
@@ -589,8 +615,8 @@ async fn validates_a_command_before_it_goes_when_its_options_say_so() {
     let descriptor = checked(not_empty(), true);
     let service = ServiceServer::new(
         vec![ServiceProcedure::of(&descriptor)],
-        ServiceServerOptions {
-            validates: true,
+        &ServiceServerOptions {
+            validates: Some(true),
             ..ServiceServerOptions::default()
         },
     )
@@ -622,7 +648,7 @@ async fn validates_a_command_before_it_goes_when_its_options_say_so() {
         ..RequestOptions::default()
     };
     let CallError::Failure(failure) = command
-        .call(String::new(), options())
+        .call(String::new(), &options())
         .expect("a call")
         .await
         .expect_err("invalid")
@@ -637,7 +663,7 @@ async fn validates_a_command_before_it_goes_when_its_options_say_so() {
     assert!(locked(&heard).is_empty());
     assert_eq!(
         command
-            .call("hi".to_owned(), options())
+            .call("hi".to_owned(), &options())
             .expect("a call")
             .await
             .expect("valid"),

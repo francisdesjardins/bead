@@ -45,14 +45,7 @@ fn scripted() -> (Arc<SteppingClock>, Arc<ScriptedClient>, RouterClient) {
 fn request() -> ClientRequest {
     ClientRequest {
         procedure: echo(),
-        options: ResolvedRequestOptions {
-            timeout: Duration::from_secs(1),
-            destination_id: None,
-            connection_handle: None,
-            credential: None,
-            signal: None,
-            close_on_timeout: false,
-        },
+        options: ResolvedRequestOptions::of(Duration::from_secs(1)),
         series: None,
         refusal: None,
         subscribes: None,
@@ -280,9 +273,12 @@ async fn an_envelope_a_listener_hands_its_router_within_a_turn_is_taken_behind_w
 
 #[tokio::test]
 async fn keeps_its_connection_when_the_application_drops_its_last_handle() {
-    let pair = Pair::connected((crate::testing::instants::new_year(), PairOptions::default()))
-        .await
-        .expect("a pair connected");
+    let pair = Pair::connected(
+        crate::testing::instants::new_year(),
+        &PairOptions::default(),
+    )
+    .await
+    .expect("a pair connected");
     let command = Procedure {
         id: 9,
         name: "clock".to_owned(),
@@ -329,7 +325,7 @@ async fn keeps_its_connection_when_the_application_drops_its_last_handle() {
         .services()
         .get_command(&command, RequestDependencies::of(JsonCodec, JsonCodec))
         .expect("clock asked")
-        .call(Value::Null, options)
+        .call(Value::Null, &options)
         .expect("clock called");
 
     clock.settle().await;

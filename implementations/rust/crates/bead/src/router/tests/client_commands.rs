@@ -262,7 +262,7 @@ async fn fails_a_command_to_no_connection_or_to_none_named() {
     use crate::payloads::TextCodec;
     use crate::testing::pair::{Pair, PairOptions};
 
-    let pair = Pair::connected((super::january_first(), PairOptions::default()))
+    let pair = Pair::connected(super::january_first(), &PairOptions::default())
         .await
         .expect("connected");
     let command = pair
@@ -273,7 +273,7 @@ async fn fails_a_command_to_no_connection_or_to_none_named() {
     let missing = command
         .call(
             "now".to_owned(),
-            RequestOptions {
+            &RequestOptions {
                 connection_handle: Some(Arc::from("type=WS;ip=127.0.0.1;port=1;ordinal=1")),
                 timeout: Some(super::TIMEOUT),
                 ..RequestOptions::default()
@@ -289,7 +289,7 @@ async fn fails_a_command_to_no_connection_or_to_none_named() {
     command
         .call(
             "now".to_owned(),
-            RequestOptions {
+            &RequestOptions {
                 timeout: Some(super::TIMEOUT),
                 ..RequestOptions::default()
             },

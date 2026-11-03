@@ -28,9 +28,12 @@ fn locked<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
 }
 
 async fn pair() -> Pair {
-    Pair::connected((crate::testing::instants::new_year(), PairOptions::default()))
-        .await
-        .expect("a pair connected")
+    Pair::connected(
+        crate::testing::instants::new_year(),
+        &PairOptions::default(),
+    )
+    .await
+    .expect("a pair connected")
 }
 
 // a client over the test kit's scripted transport, on a stepping clock: what it sends read, what it
@@ -106,7 +109,7 @@ async fn an_answer_that_does_not_decode_fails_the_call_here_with_its_header_and_
     let call = manager
         .get_request(&echo(), RequestDependencies::of(JsonCodec, JsonCodec))
         .expect("echo asked")
-        .call(Value::from("x"), options)
+        .call(Value::from("x"), &options)
         .expect("echo called");
 
     clock.settle().await;
@@ -197,7 +200,7 @@ async fn a_notification_that_does_not_decode_fails_here_for_the_router_to_report
                 Box::pin(async { Ok(()) })
             }),
         ),
-        RequestOptions::default(),
+        &RequestOptions::default(),
     );
 
     pair.settle().await;
@@ -281,7 +284,7 @@ async fn a_call_whose_value_does_not_write_fails_before_anything_goes_nothing_re
 
     // * written before its trace and its deprecation: no call is made (spec 17.2, item 4)
     let refused = requester
-        .call(Value::from("x"), RequestOptions::default())
+        .call(Value::from("x"), &RequestOptions::default())
         .expect("a call");
     let refused = crate::testing::patience(Duration::from_secs(10), refused)
         .await
@@ -328,7 +331,7 @@ async fn a_notification_whose_value_does_not_write_goes_to_its_router_in_its_pay
             Value::Null,
             Arc::new(|_value: Value| Box::pin(async { Ok(()) })),
         ),
-        RequestOptions::default(),
+        &RequestOptions::default(),
     );
 
     pair.settle().await;
@@ -441,7 +444,7 @@ async fn a_request_whose_codec_panics_as_it_reads_is_answered_procedure_failed_w
         .services()
         .get_request(&echo(), RequestDependencies::of(JsonCodec, JsonCodec))
         .expect("echo asked")
-        .call(Value::from("x"), RequestOptions::default())
+        .call(Value::from("x"), &RequestOptions::default())
         .expect("echo called");
 
     pair.settle().await;
@@ -505,7 +508,7 @@ async fn an_answer_whose_codec_panics_as_it_reads_fails_the_call_here_undecodabl
             ),
         )
         .expect("echo asked")
-        .call(Value::from("x"), RequestOptions::default())
+        .call(Value::from("x"), &RequestOptions::default())
         .expect("echo called");
 
     pair.settle().await;
@@ -532,7 +535,7 @@ async fn an_answer_whose_codec_panics_as_it_reads_fails_the_call_here_undecodabl
     let next = manager
         .get_request(&echo(), RequestDependencies::of(JsonCodec, JsonCodec))
         .expect("echo asked")
-        .call(Value::from("y"), RequestOptions::default())
+        .call(Value::from("y"), &RequestOptions::default())
         .expect("echo called");
 
     pair.settle().await;
@@ -566,7 +569,7 @@ async fn a_call_whose_codec_panics_as_it_writes_fails_with_its_throw_and_nothing
             ),
         )
         .expect("echo asked")
-        .call(Value::from("x"), RequestOptions::default())
+        .call(Value::from("x"), &RequestOptions::default())
         .expect("a call made, its throw its outcome");
 
     pair.settle().await;

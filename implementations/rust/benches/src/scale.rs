@@ -6,10 +6,11 @@
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::{Duration, Instant};
 
+use bead::internal::{Envelope, write_envelope};
 use bead::{
-    BoxFuture, CancelHeader, ConnectionHandle, Envelope, RouterError, RouterServer,
-    RouterServerOptions, Sent, Server, ServerListener, ServerOptions, ServerTransport, SharedClock,
-    SystemClock, TransportMessage, write_envelope,
+    BoxFuture, CancelHeader, ConnectionHandle, RouterError, RouterServer, RouterServerOptions,
+    Sent, Server, ServerListener, ServerOptions, ServerTransport, SharedClock, SystemClock,
+    TransportMessage,
 };
 
 // the messages a round hands its server

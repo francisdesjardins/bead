@@ -369,12 +369,13 @@ impl fmt::Debug for AdmissionHook {
 #[derive(Debug, Clone, Default)]
 #[non_exhaustive]
 pub struct ServiceServerOptions {
-    /// The hooks its procedures are admitted by, by name.
-    pub admissions: Vec<(&'static str, AdmissionHook)>,
-    /// Whether its rules stop at the first violation.
-    pub fail_fast: bool,
-    /// Whether its commands judge their requests by their rules.
-    pub validates: bool,
+    /// The hooks its procedures are admitted by, by name: none when no procedure names a hook, and
+    /// refused as the server is built when one does and finds none.
+    pub admissions: Option<Vec<(&'static str, AdmissionHook)>>,
+    /// Whether its rules stop at the first violation: `false` when none.
+    pub fail_fast: Option<bool>,
+    /// Whether its commands judge their requests by their rules: `false` when none.
+    pub validates: Option<bool>,
 }
 
 // what a requester or a notifier is, kept by name and found again by its type
@@ -554,9 +555,10 @@ impl ServiceServer {
     /// given that no procedure names.
     pub fn new(
         procedures: Vec<ServiceProcedure>,
-        options: ServiceServerOptions,
+        options: &ServiceServerOptions,
     ) -> Result<Self, ProgrammerError> {
-        let given: BTreeMap<&'static str, AdmissionHook> = options.admissions.into_iter().collect();
+        let given: BTreeMap<&'static str, AdmissionHook> =
+            options.admissions.iter().flatten().cloned().collect();
         let mut named: Vec<&'static str> = Vec::new();
 
         for described in &procedures {
@@ -583,9 +585,9 @@ impl ServiceServer {
                 procedures,
                 bound: Bound {
                     hooks: given,
-                    fail_fast: options.fail_fast,
+                    fail_fast: options.fail_fast.unwrap_or(false),
                 },
-                validates: options.validates,
+                validates: options.validates.unwrap_or(false),
                 binders: Vec::new(),
                 offered: None,
                 commands: BTreeMap::new(),
@@ -832,16 +834,4 @@ impl ServiceServer {
             .map(|described| described.procedure.clone())
             .collect()
     }
-}
-
-/// The failure of `catalogue` that `error` is, as its caller tells a service's failures apart.
-#[must_use]
-pub fn listed_failure_of<'catalogue>(
-    catalogue: &'catalogue FailureCatalogue,
-    error: &CallError,
-) -> Option<&'catalogue ListedFailure> {
-    catalogue
-        .failures
-        .iter()
-        .find(|listed| catalogue.is(error, listed))
 }

@@ -37,7 +37,7 @@ fn locked<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
 }
 
 async fn pair() -> Result<Pair, String> {
-    Pair::connected((new_year(), PairOptions::default())).await
+    Pair::connected(new_year(), &PairOptions::default()).await
 }
 
 fn typed() -> ProtoCodec<Probe> {
@@ -120,7 +120,7 @@ async fn fails_a_call_whose_request_leaves_a_required_field_unset_before_anythin
         .expect("echo asked")
         .call(
             unset().expect("a Probe left unset"),
-            RequestOptions::default(),
+            &RequestOptions::default(),
         )
         .expect("a call");
     let refused = tokio::time::timeout(PATIENCE, refused)
@@ -142,7 +142,7 @@ async fn fails_a_call_whose_request_leaves_a_required_field_unset_before_anythin
     let answered = manager
         .get_request(&echo(), RequestDependencies::of(typed(), typed()))
         .expect("echo asked")
-        .call(whole(), RequestOptions::default())
+        .call(whole(), &RequestOptions::default())
         .expect("a call");
     let answered = tokio::time::timeout(PATIENCE, answered)
         .await
@@ -175,7 +175,7 @@ async fn fails_a_call_whose_result_leaves_a_required_field_unset_with_payload_un
         .services()
         .get_request(&echo(), RequestDependencies::of(typed(), typed()))
         .expect("echo asked")
-        .call(Probe::default(), RequestOptions::default())
+        .call(Probe::default(), &RequestOptions::default())
         .expect("a call");
     let failed = tokio::time::timeout(PATIENCE, failed)
         .await
@@ -226,7 +226,7 @@ async fn answers_payload_undecodable_to_a_request_that_leaves_a_required_field_u
         .services()
         .get_request(&echo(), RequestDependencies::of(RawCodec, RawCodec))
         .expect("echo asked")
-        .call(unset_bytes(), RequestOptions::default())
+        .call(unset_bytes(), &RequestOptions::default())
         .expect("a call");
     let failed = tokio::time::timeout(PATIENCE, failed)
         .await
@@ -262,7 +262,7 @@ async fn answers_procedure_failed_to_a_result_that_leaves_a_required_field_unset
         .services()
         .get_request(&echo(), RequestDependencies::of(typed(), typed()))
         .expect("echo asked")
-        .call(Probe::default(), RequestOptions::default())
+        .call(Probe::default(), &RequestOptions::default())
         .expect("a call");
     let failed = tokio::time::timeout(PATIENCE, failed)
         .await

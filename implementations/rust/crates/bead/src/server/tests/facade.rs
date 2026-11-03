@@ -591,10 +591,10 @@ async fn a_connection_is_asked_to_close_once_however_many_times_it_earns_it() {
     fixture.open().await;
     let command = fixture.command();
     let first = command
-        .call("ping".to_owned(), fixture.options())
+        .call("ping".to_owned(), &fixture.options())
         .expect("a call");
     let second = command
-        .call("ping".to_owned(), fixture.options())
+        .call("ping".to_owned(), &fixture.options())
         .expect("a call");
     fixture.advance(10).await;
     assert!(matches!(first.await, Err(CallError::TimedOut(_))));
@@ -623,7 +623,7 @@ async fn a_command_unanswered_in_time_closes_its_connection_as_the_server_s_defa
             .command()
             .call(
                 "ping".to_owned(),
-                RequestOptions {
+                &RequestOptions {
                     close_on_timeout: override_value,
                     ..fixture.options()
                 },
@@ -717,7 +717,7 @@ async fn dispose_lets_go_of_the_transport_rejects_what_waits_forgets_the_session
     );
     let waiting = fixture
         .command()
-        .call("ping".to_owned(), fixture.options())
+        .call("ping".to_owned(), &fixture.options())
         .expect("a call");
     fixture.clock.settle().await;
     fixture.server.dispose().await.expect("disposed");
@@ -1094,7 +1094,7 @@ async fn a_command_whose_timeout_passes_is_cancelled_before_its_connection_is_cl
     fixture.open().await;
     let waiting = fixture
         .command()
-        .call("ping".to_owned(), fixture.options())
+        .call("ping".to_owned(), &fixture.options())
         .expect("a call");
     fixture.advance(10).await;
     assert!(matches!(waiting.await, Err(CallError::TimedOut(_))));
@@ -1121,7 +1121,7 @@ async fn relays_as_its_options_say_its_own_admission_and_timeout_kept_require_cr
             relay: Some(RelayOptions {
                 before_route: admits
                     .then(|| crate::router::admissions::BeforeRequest::new(|_| true, None)),
-                timeout: Duration::from_millis(250),
+                timeout: Some(Duration::from_millis(250)),
                 ..RelayOptions::default()
             }),
             ..ServerOptions::default()
@@ -1134,13 +1134,13 @@ async fn relays_as_its_options_say_its_own_admission_and_timeout_kept_require_cr
         let _registered = fixture
             .server
             .router()
-            .register_destination((
+            .register_destination(
                 RelayTarget::Connection(Arc::clone(&device)),
-                DestinationOptions {
+                &DestinationOptions {
                     destination_id: Some(7),
                     ..DestinationOptions::default()
                 },
-            ))
+            )
             .expect("registered");
         let request = |call_id, credential| Envelope::Request {
             header: RequestHeader {

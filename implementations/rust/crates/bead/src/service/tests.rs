@@ -75,7 +75,7 @@ fn keeps_a_catalogue_of_failures_each_of_its_own_code_refusing_one_of_0_or_one_t
 }
 
 // a string empty breaks the rule that it holds one character at least
-fn judge(value: &Value, _options: ValidateOptions) -> Judged {
+fn judge(value: &Value, _options: &ValidateOptions) -> Judged {
     if value.as_str().is_some_and(|text| !text.is_empty()) {
         return Judged::default();
     }
@@ -102,11 +102,11 @@ async fn counts_a_call_its_rules_refuse_before_it_goes_as_payload_invalid_starte
     };
 
     let options = PairOptions {
-        client,
+        client: Some(client),
         ..PairOptions::default()
     };
 
-    let pair = Pair::connected((crate::testing::instants::new_year(), options))
+    let pair = Pair::connected(crate::testing::instants::new_year(), &options)
         .await
         .expect("a pair connected");
 
@@ -142,7 +142,7 @@ async fn counts_a_call_its_rules_refuse_before_it_goes_as_payload_invalid_starte
     // * the call queued on its router's owner, then a read queued right behind it: what the call
     // did in its own turn is counted by then, and nothing after
     let refusing = validating
-        .call(Value::from(""), RequestOptions::default())
+        .call(Value::from(""), &RequestOptions::default())
         .expect("a call");
     let reading = registry.clone();
     let in_its_turn = pair
@@ -189,9 +189,12 @@ async fn counts_a_call_its_rules_refuse_before_it_goes_as_payload_invalid_starte
 
 #[tokio::test]
 async fn sends_an_unlisted_code_as_written_and_reports_it() {
-    let pair = Pair::connected((crate::testing::instants::new_year(), PairOptions::default()))
-        .await
-        .expect("a pair connected");
+    let pair = Pair::connected(
+        crate::testing::instants::new_year(),
+        &PairOptions::default(),
+    )
+    .await
+    .expect("a pair connected");
     let descriptor = request_of(DescriptorInit {
         procedure: echo(),
         admission: AdmissionRule::None,
@@ -203,7 +206,7 @@ async fn sends_an_unlisted_code_as_written_and_reports_it() {
     .expect("echo described");
     let service = ServiceServer::new(
         vec![ServiceProcedure::of(&descriptor)],
-        ServiceServerOptions::default(),
+        &ServiceServerOptions::default(),
     )
     .expect("its server");
 
@@ -228,7 +231,7 @@ async fn sends_an_unlisted_code_as_written_and_reports_it() {
         .services()
         .get_request(&echo(), RequestDependencies::of(JsonCodec, JsonCodec))
         .expect("echo asked")
-        .call(json!("hello"), RequestOptions::default())
+        .call(json!("hello"), &RequestOptions::default())
         .expect("echo called")
         .await;
 

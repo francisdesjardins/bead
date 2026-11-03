@@ -2097,12 +2097,6 @@ fn schemes_detail_of(schemes: &BTreeSet<u16>) -> String {
         .join(", ")
 }
 
-/// `CREDENTIAL_UNSUPPORTED`'s detail, as a 401 names its schemes (RFC 9110 §11.6.1).
-#[must_use]
-pub fn credential_schemes_detail_of(schemes: &[CredentialScheme]) -> String {
-    schemes_detail_of(&schemes.iter().map(|scheme| scheme.get()).collect())
-}
-
 // a request's header as its side hands it to a procedure and its admission (spec 13.1): a `JWT`'s
 // credential says its scheme alone
 pub(crate) fn handed_header_of(header: &RequestHeader) -> RequestHeader {

@@ -283,7 +283,7 @@ fn exited(exit: &Value, wall_clock: std::time::SystemTime) -> Result<(), Failed>
     runtime
         .block_on(conversation::play(
             exit,
-            conversation::PlayOptions {
+            &conversation::PlayOptions {
                 in_memory: false,
                 over_broker: false,
                 metrics_registry: Some(registry),

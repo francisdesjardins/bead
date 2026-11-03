@@ -29,7 +29,7 @@ fn played(
     runtime
         .block_on(play(
             conversation,
-            PlayOptions {
+            &PlayOptions {
                 in_memory,
                 over_broker,
                 metrics_registry: None,

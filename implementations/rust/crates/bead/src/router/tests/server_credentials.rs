@@ -103,7 +103,7 @@ async fn refuses_as_it_is_built_keys_or_a_key_set_without_an_audience_whatever_i
                 &RouterServerOptions {
                     credentials: Some(credentials.clone()),
                     relay: verifies.map(|verifies| RelayOptions {
-                        verifies,
+                        verifies: Some(verifies),
                         ..RelayOptions::default()
                     }),
                     ..RouterServerOptions::default()

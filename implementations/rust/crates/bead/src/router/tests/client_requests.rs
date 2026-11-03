@@ -414,7 +414,7 @@ async fn refuses_a_payload_that_would_go_as_a_transfer_where_it_sends_none_befor
         .get_request(&echo(), RequestDependencies::of(TextCodec, TextCodec))
         .expect("echo's requester");
     let asking = requester
-        .call("x".repeat(2 * 1_048_576), RequestOptions::default())
+        .call("x".repeat(2 * 1_048_576), &RequestOptions::default())
         .expect("a request");
     let CallError::Failure(failure) = crate::testing::patience(super::PATIENCE, asking)
         .await

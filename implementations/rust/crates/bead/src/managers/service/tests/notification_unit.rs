@@ -26,11 +26,11 @@ async fn is_held_by_the_router_before_its_one_request_goes_out_however_many_regi
     let notification = notification(&fixture);
     let mut first = notification.on(
         ("first".to_owned(), callback(&heard, "a ")),
-        RequestOptions::default(),
+        &RequestOptions::default(),
     );
     let mut second = notification.on(
         ("second".to_owned(), callback(&heard, "b ")),
-        RequestOptions::default(),
+        &RequestOptions::default(),
     );
     pending(&mut first).await;
     pending(&mut second).await;
@@ -77,7 +77,7 @@ async fn the_last_callback_out_unsubscribes_then_unregisters_the_notification_wi
     let second = notification
         .on(
             ("s".to_owned(), callback(&Heard::default(), "")),
-            RequestOptions::default(),
+            &RequestOptions::default(),
         )
         .await
         .expect("second subscribed");
@@ -116,7 +116,7 @@ async fn a_drop_silences_the_callbacks_tells_the_manager_and_fails_a_registratio
     let notification = notification(&fixture);
     let mut registering = notification.on(
         ("held".to_owned(), callback(&heard, "")),
-        RequestOptions::default(),
+        &RequestOptions::default(),
     );
     pending(&mut registering).await;
     fixture.clock.settle().await;
@@ -154,7 +154,7 @@ async fn a_trigger_settles_as_every_callback_did_the_tasks_they_returned_too() {
         })
     });
     let second = notification
-        .on(("s".to_owned(), fetching), RequestOptions::default())
+        .on(("s".to_owned(), fetching), &RequestOptions::default())
         .await
         .expect("second subscribed");
     let failure: Arc<dyn std::error::Error + Send + Sync> =
@@ -169,7 +169,7 @@ async fn a_trigger_settles_as_every_callback_did_the_tasks_they_returned_too() {
                     Box::pin(async move { Err(failure) })
                 }),
             ),
-            RequestOptions::default(),
+            &RequestOptions::default(),
         )
         .await
         .expect("third subscribed");
@@ -225,7 +225,7 @@ async fn the_same_callback_registered_twice_is_heard_twice_and_its_registrations
     let callback = callback(&heard, "");
     let first = subscribed(&fixture, (&notification, Arc::clone(&callback))).await;
     let second = notification
-        .on(("s".to_owned(), callback), RequestOptions::default())
+        .on(("s".to_owned(), callback), &RequestOptions::default())
         .await
         .expect("second subscribed");
     let trigger = |payload| {

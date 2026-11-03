@@ -290,7 +290,6 @@ async fn routers_never_disposed_over_the_in_memory_transport_end_once_nothing_ho
 
         let transport = crate::memory::MemoryClient::new(&crate::memory::MemoryClientOptions {
             clock: Some(Arc::clone(&shared)),
-            server: memory.clone(),
         })
         .expect("a client transport");
         let client = crate::router::client::RouterClient::new(
@@ -306,12 +305,13 @@ async fn routers_never_disposed_over_the_in_memory_transport_end_once_nothing_ho
             drop(Arc::clone(&client_held));
         }));
 
-        let connecting = transport.connect(crate::memory::MemoryConnectOptions::default());
+        let connecting =
+            transport.connect(&crate::memory::MemoryConnectOptions::of(memory.clone()));
 
         clock.settle().await;
         connecting.await.expect("connected");
         transport
-            .disconnect(crate::transport::DisconnectOptions::default())
+            .disconnect(&crate::transport::DisconnectOptions::default())
             .expect("closed");
         clock.settle().await;
     }
