@@ -696,7 +696,8 @@ public sealed class BrokerParticipant : IAsyncDisposable
     /// Settles once its link is up, started or connected again; a cancel ends the wait. Stopped, it
     /// fails at once with a <see cref="ConnectException"/>, the connect overtaken by its stop; its
     /// link taken over, with one naming it: a connect never lifts the fence, which its application's
-    /// start alone does.
+    /// start alone does. What its link's start fails with fails the connect: its adapter's misuse a
+    /// <see cref="ConnectException"/> with it inside, which another attempt may mend (spec 15.21).
     /// </summary>
     internal async Task WhenLinked(CancellationToken cancellationToken)
     {
@@ -722,6 +723,12 @@ public sealed class BrokerParticipant : IAsyncDisposable
         {
             // * the stop's refusal, racing its check, never comes through: a connect it overtook
             throw new ConnectException($"the participant {Id} stopped as it connected", reason);
+        }
+        catch (Exception reason) when (reason is (InvalidOperationException and not ObjectDisposedException) or ArgumentException)
+        {
+            // * its adapter's misuse, a failure of this connect another attempt may mend; a
+            // disposed object's never one of its link's
+            throw new ConnectException(reason.Message, reason);
         }
 
         Task live;

@@ -21,7 +21,7 @@ use crate::broker::adapter::BrokerPublished;
 use crate::broker::parcel::{Parcel, flags, is_token, kinds, write_parcel};
 use crate::broker::participant::{
     BrokerParticipant, BrokerRefusal, BrokerRefusedError, ConnectionOwner, End, Pair,
-    ParticipantState, Peer, PendingConnect, Setup,
+    ParticipantState, Peer, PendingConnect, Setup, connect_error_of,
 };
 use crate::broker::sequence::fits;
 use crate::clock::{Schedule, SharedClock, Timer};
@@ -418,9 +418,7 @@ async fn opening(
         Err(error) => {
             return client.settle((
                 &attempt,
-                Err(TransportError::Connect(ConnectError::new(
-                    error.to_string(),
-                ))),
+                Err(TransportError::Connect(connect_error_of(error))),
             ));
         }
         Ok(_) => {}

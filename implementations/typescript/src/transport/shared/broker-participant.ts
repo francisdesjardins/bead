@@ -316,7 +316,8 @@ export interface IBrokerParticipantPort {
   /**
    * Resolves once its link is up, starting it the first time; `isStart`, its application's start,
    * links anew a participant whose link was taken over, which nothing else does. Once stopped, a
-   * start is refused as a misuse and a connect fails, stopped as it connected.
+   * start is refused as a misuse and a connect fails, stopped as it connected; a connect's misuse
+   * its adapter meets fails it as a {@link ConnectError}, which another attempt may mend.
    */
   linked(options?: {
     isStart?: boolean | undefined;
@@ -1565,7 +1566,13 @@ export const createBrokerParticipant = (options: IBrokerParticipantOptions): IBr
       throw toError(reason);
     });
 
-    return linking;
+    // * an adapter's misuse fails a connect, which another attempt may mend, as its own reconnection
+    // takes it; the start its application called meets it as it is
+    return isStart
+      ? linking
+      : linking.catch((reason: unknown) => {
+          throw reason instanceof ProgrammerError ? wrapReason(ConnectError, reason) : reason;
+        });
   };
 
   // * its link lost: each connection closed, unclean, unreported; a new incarnation connected by

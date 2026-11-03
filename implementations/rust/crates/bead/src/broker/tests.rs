@@ -200,6 +200,8 @@ pub(super) struct Calling {
     pub(super) secure: Option<bool>,
     pub(super) starts: Option<usize>,
     pub(super) holds: Option<usize>,
+    // its first starts refused as a misuse, as an adapter whose link is up already refuses one
+    pub(super) refuses: Option<usize>,
     pub(super) grants: bool,
     pub(super) calls: Mutex<Vec<String>>,
     pub(super) lives: Mutex<Vec<(&'static str, Option<Duration>)>>,
@@ -215,6 +217,7 @@ impl Calling {
             secure: None,
             starts: None,
             holds: None,
+            refuses: None,
             grants: false,
             calls: Mutex::default(),
             lives: Mutex::default(),
@@ -310,6 +313,12 @@ impl BrokerAdapter for Calling {
 
         if self.starts.is_some_and(|starts| started > starts) {
             return Box::pin(async { Err(super::adapter::BrokerError::failed("refused at once")) });
+        }
+
+        if self.refuses.is_some_and(|refuses| started <= refuses) {
+            let refused = ProgrammerError::new(format!("the link of {} is up already", self.id()));
+
+            return Box::pin(async move { Err(super::adapter::BrokerError::from(refused)) });
         }
 
         if self.holds.is_some_and(|holds| started > holds) {

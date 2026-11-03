@@ -10,7 +10,7 @@ use tokio_util::sync::CancellationToken;
 
 use super::{
     AtClient, BrokerPair, BrokerPairOptions, Calling, ClientTold, Heard, adapter_of, broker,
-    locked, participant_of, peer_of, publish_to, settle, until,
+    locked, misuse_in, participant_of, peer_of, publish_to, settle, until,
 };
 use crate::broker::adapter::{BrokerAdapter, BrokerPublication};
 use crate::broker::client::{BrokerTransportClientConnectOptions, BrokerTransportClientOptions};
@@ -1109,5 +1109,62 @@ async fn ends_its_reconnection_as_its_participant_stops_in_a_wait_or_in_an_attem
         !participant.is_linked() && !bob.is_linked(),
         "neither linked"
     );
+    server_participant.stop().await;
+}
+
+// spec 15.21
+#[tokio::test]
+async fn retries_its_connect_when_its_adapter_refuses_its_link_s_start_as_its_participant_s_own_reconnection_does()
+ {
+    let broker = broker();
+    let (server_participant, server) = serving(&broker).await;
+    let refusing = Arc::new(Calling {
+        refuses: Some(2),
+        ..Calling::of(adapter_of(&broker, "fli"))
+    });
+    let adapter: Arc<dyn BrokerAdapter> = Arc::<Calling>::clone(&refusing);
+    let participant = BrokerParticipant::new(adapter, &BrokerParticipantOptions::default())
+        .expect("a participant");
+    let client = participant
+        .client(&BrokerTransportClientOptions::default())
+        .expect("a client");
+
+    // * its connect fails as a connect, the adapter's misuse its source
+    let failed = client
+        .connect(&BrokerTransportClientConnectOptions::new("interop"))
+        .await;
+
+    assert!(
+        matches!(&failed, Err(TransportError::Connect(_))),
+        "a connect's failure: {failed:?}"
+    );
+    assert_eq!(
+        failed
+            .as_ref()
+            .err()
+            .and_then(|error| misuse_in(error))
+            .map(|misuse| misuse.to_string())
+            .as_deref(),
+        Some("the link of fli is up already"),
+        "its cause"
+    );
+    assert_eq!(client.ready_state(), ReadyState::Closed, "closed");
+
+    // * then its reconnection tries again, and connects after one wait
+    let (tapped, options) = tapping();
+    let options = TransportClientReconnectOptions {
+        delay: Some(TransportClientReconnectDelay::Fixed(Duration::ZERO)),
+        ..options
+    };
+
+    client
+        .reconnect(&options)
+        .expect("reconnecting")
+        .await
+        .expect("connected");
+    assert_eq!(locked(&tapped).len(), 1, "one wait");
+    assert_eq!(client.ready_state(), ReadyState::Open, "open");
+    participant.stop().await;
+    server.stop().await.expect("stopped");
     server_participant.stop().await;
 }

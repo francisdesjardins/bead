@@ -6,8 +6,9 @@ namespace Bead.Tests;
 /// An adapter that writes down each call its participant makes of it, in order, and passes it on:
 /// what it publishes to a topic bounded by <see cref="Room"/> when given; its leg secure as
 /// <see cref="Secure"/> says when given; each start after its first <see cref="Starts"/> refused as
-/// it returns when given; and each start after its first <see cref="HoldsStart"/> held, heeding no
-/// token, until the test releases it, when given.
+/// it returns when given; its first <see cref="Refuses"/> starts refused as a misuse, as an adapter
+/// whose link is up already refuses one, when given; and each start after its first
+/// <see cref="HoldsStart"/> held, heeding no token, until the test releases it, when given.
 /// </summary>
 internal sealed class CallingAdapter(MemoryBrokerAdapter inner) : IBrokerAdapter
 {
@@ -19,6 +20,8 @@ internal sealed class CallingAdapter(MemoryBrokerAdapter inner) : IBrokerAdapter
     public bool? Secure { get; init; }
 
     public int? Starts { get; init; }
+
+    public int? Refuses { get; init; }
 
     public int? HoldsStart { get; init; }
 
@@ -117,6 +120,11 @@ internal sealed class CallingAdapter(MemoryBrokerAdapter inner) : IBrokerAdapter
         if (Starts is { } starts && started > starts)
         {
             return Task.FromException(new IOException("refused at once"));
+        }
+
+        if (Refuses is { } refuses && started <= refuses)
+        {
+            return Task.FromException(new InvalidOperationException($"the link of {Id} is up already"));
         }
 
         if (HoldsStart is { } holds && started > holds)

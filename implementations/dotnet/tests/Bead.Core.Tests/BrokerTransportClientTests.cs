@@ -673,6 +673,37 @@ public sealed class BrokerTransportClientTests
         Assert.Equal((false, false), (participant.IsLinked, bob.IsLinked));
     }
 
+    // spec 15.21
+    [Fact]
+    public async Task Retries_its_connect_when_its_adapter_refuses_its_link_s_start_as_its_participant_s_own_reconnection_does()
+    {
+        var broker = new MemoryBroker();
+        await using var serving = new BrokerParticipant(broker.Adapter(new MemoryBrokerAdapterOptions { Id = "server" }));
+        await using var server = serving.Server(new BrokerTransportServerOptions { Names = ["interop"] });
+        var refusing = new CallingAdapter(broker.Adapter(new MemoryBrokerAdapterOptions { Id = "fli" })) { Refuses = 2 };
+        await using var participant = new BrokerParticipant(refusing);
+        await using var client = participant.Client();
+
+        await server.Start();
+
+        // * its connect fails as a connect, the adapter's misuse inside
+        var failed = await Assert.ThrowsAsync<ConnectException>(() =>
+        {
+            return client.Connect(new BrokerTransportClientConnectOptions { Server = "interop" }, Cancelled);
+        });
+
+        Assert.Equal("the link of fli is up already", failed.Message);
+        Assert.Equal("the link of fli is up already", Assert.IsType<InvalidOperationException>(failed.InnerException).Message);
+        Assert.Equal(ReadyState.Closed, client.ReadyState);
+
+        // * then its reconnection tries again, and connects after one wait
+        var (tapped, reconnect) = Tapping(TimeSpan.Zero);
+
+        await client.Reconnect(reconnect).WaitAsync(BrokerPair.Patience, Cancelled);
+        Assert.Single(tapped);
+        Assert.Equal(ReadyState.Open, client.ReadyState);
+    }
+
     // the delays a reconnection told, each as it told it, and its options at a fixed delay
     private static (ConcurrentQueue<TimeSpan> Tapped, TransportClientReconnectOptions Options) Tapping(TimeSpan delay)
     {

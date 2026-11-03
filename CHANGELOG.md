@@ -167,6 +167,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `GenericError`; on the C# side an `ObjectDisposedException`, still an
   `InvalidOperationException`. A client or a server so refused keeps its state, where it went Closed
   and kept its target (spec 15.21; decision 0007).
+- A broker client's connect that its adapter refuses as a misuse fails as a connect, a
+  `ConnectError` or a `ConnectException` with the misuse as its cause, and its reconnection tries
+  again, as the participant's own does: on the TypeScript side it ended at once, and on the C# side
+  the misuse came through as it was (spec 15.21).
 
 ### Removed
 

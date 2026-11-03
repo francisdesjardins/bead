@@ -357,6 +357,7 @@ that a test of each side does:
   `carries no credential toward its client, and its command presenting ELSEWHERE fails before it goes`,
   `refuses a connect or a reconnect once its participant stopped, its state kept, no reconnect told`,
   `ends its reconnection as its participant stops, in a wait or in an attempt, no wait told after it`,
+  `retries its connect when its adapter refuses its link’s start, as its participant’s own reconnection does`,
   `refuses its start once its participant stopped, its state kept`);
   the in-memory broker, which the cases play over, `memory-broker.test.ts` and `MemoryBrokerTests`
   (`hands each message on once, in a later turn, in the order its publisher published to that topic (spec 15.24)`,

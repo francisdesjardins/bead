@@ -1899,6 +1899,15 @@ impl ParticipantState {
     }
 }
 
+/// What a link's failure fails a connect with, hoisted, never nested: a failure's message, or a
+/// misuse's words and the misuse its source, so that its kind is found.
+pub(crate) fn connect_error_of(error: BrokerError) -> ConnectError {
+    match error {
+        BrokerError::Refused(misuse) => ConnectError::caused(misuse.to_string(), Arc::new(misuse)),
+        BrokerError::Failed(message) => ConnectError::new(message),
+    }
+}
+
 // its link connected again as another incarnation, by its own reconnection; then a RESET to each
 // peer it held a connection with
 async fn relinking(
@@ -1942,7 +1951,7 @@ async fn relinking(
                     return stopped();
                 }
 
-                TransportError::Connect(ConnectError::new(error.to_string()))
+                TransportError::Connect(connect_error_of(error))
             })
         }
     })
@@ -2548,7 +2557,8 @@ impl BrokerParticipant {
     /// Settles once its link is up, started or connected again; its signal ends the wait. Stopped
     /// since its connect was called, it fails, stopped as it connected, before its takeover is
     /// read; its link taken over, it fails at once naming it: a connect never lifts the fence,
-    /// which its application's start alone does.
+    /// which its application's start alone does. A failure its link meets, its adapter's misuse
+    /// among them, fails the connect, which another attempt may mend.
     pub(crate) async fn linked(
         &self,
         signal: Option<CancellationToken>,
@@ -2587,7 +2597,7 @@ impl BrokerParticipant {
                     ));
                 }
 
-                TransportError::Connect(ConnectError::new(error.to_string()))
+                TransportError::Connect(connect_error_of(error))
             })?;
             live.wait_for(|is_live| *is_live)
                 .await

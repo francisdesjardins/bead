@@ -138,6 +138,23 @@ const heldOf = (adapter: IBrokerAdapter) => {
   return { held, holding, releases };
 };
 
+/** An adapter whose first `count` starts are refused as a misuse, a link of its id up already. */
+const refusingOf = (adapter: IBrokerAdapter, count: number): IBrokerAdapter => {
+  let refusals = count;
+
+  return Object.assign(Object.create(adapter) as IBrokerAdapter, {
+    start: (options?: Parameters<IBrokerAdapter['start']>[0]) => {
+      if (refusals > 0) {
+        refusals -= 1;
+
+        return Promise.reject(new ProgrammerError(`the link of ${adapter.id} is up already`));
+      }
+
+      return adapter.start(options);
+    },
+  });
+};
+
 // definition
 
 test.describe('createBrokerTransportClient', () => {
@@ -833,5 +850,41 @@ test.describe('createBrokerTransportClient', () => {
     ).toEqual([true, false, false]);
     await otherServing.server.stop();
     await otherServing.participant.stop();
+  });
+
+  // spec 15.21
+  test('retries its connect when its adapter refuses its link’s start, as its participant’s own reconnection does', async () => {
+    const broker = createMemoryBroker();
+    const { participant, server } = await servingOf(broker);
+    const fli = createBrokerParticipant({
+      adapter: refusingOf(broker.adapter({ id: 'fli' }), 2),
+    });
+    const client = fli.transportClient();
+
+    // * its connect fails as a connect, the adapter's misuse its cause
+    const failed = await client.connect({ server: 'interop' }).catch((reason: unknown) => {
+      return reason;
+    });
+
+    expect(failed, 'the failure of a connect').toBeInstanceOf(ConnectError);
+    expect((failed as Error).cause, 'its cause, a misuse').toBeInstanceOf(ProgrammerError);
+    expect(failed).toMatchObject({ cause: { message: 'the link of fli is up already' } });
+    expect(client.isClosed(), 'closed').toBe(true);
+
+    // * then its reconnection tries again, and connects after one wait
+    const tapped: number[] = [];
+
+    await client.reconnect({
+      delay: 0,
+      tap: (delay) => {
+        tapped.push(delay);
+      },
+    });
+    expect([tapped, client.isOpen()], 'open after one wait').toEqual([[0], true]);
+
+    await client.disconnect();
+    await fli.stop();
+    await server.stop();
+    await participant.stop();
   });
 });
