@@ -10,6 +10,50 @@ use crate::router::types::{
 // the words that open each refusal of limits that do not hold together
 const HOLD: &str = "the router's limits do not hold together:";
 
+#[test]
+fn holds_the_limits_given_over_the_defaults_frozen_and_refuses_limits_that_do_not_hold_together() {
+    use crate::router::types::RouterLimits;
+
+    let given = RouterLimitsOptions {
+        buffered_bytes_budget: Some(1_024),
+        chunk_bytes: Some(64),
+        maximum_envelope_bytes: Some(64),
+        maximum_payload_bytes: Some(1_024),
+        window_bytes: Some(128),
+        ..RouterLimitsOptions::default()
+    };
+    let held = limits_of(&given).expect("the fixture's limits hold");
+    assert_eq!(
+        limits_of(&RouterLimitsOptions::default()),
+        Ok(LIMIT_DEFAULTS)
+    );
+    assert_eq!(
+        held,
+        RouterLimits {
+            buffered_bytes_budget: 1_024,
+            chunk_bytes: 64,
+            maximum_envelope_bytes: 64,
+            maximum_payload_bytes: 1_024,
+            window_bytes: 128,
+            ..LIMIT_DEFAULTS
+        }
+    );
+    // A held value is immutable through a shared reference; a caller may change its own copy.
+    crate::testing::surface::Consumer::new().refuses(
+        "pub fn check(held: &bead::RouterLimits) { held.window_bytes = 64; }",
+        ("E0594", "cannot assign"),
+    );
+    assert_eq!(
+        refusal_of(&RouterLimitsOptions {
+            window_bytes: Some(64),
+            ..given
+        }),
+        format!(
+            "{HOLD} a window holds two chunks at least, so a sender waits for no credit it is owed"
+        )
+    );
+}
+
 fn refusal_of(limits: &RouterLimitsOptions) -> String {
     limits_of(limits).map_or_else(|error| error.to_string(), |_| String::new())
 }
