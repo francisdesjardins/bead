@@ -72,7 +72,7 @@ async fn a_routers_own_handle_type_reaches_the_callback_for_the_session_manager_
 }
 
 #[tokio::test]
-async fn self_admission_and_callbacks_keep_the_session_values_the_caller_hands_them() {
+async fn reads_the_calls_session_its_router_resolved_and_so_does_the_callback_whoever_asks_it() {
     let fixture = Fixture::new();
     let ada = Arc::new(CallSession {
         data: Some(json!("ada")),
@@ -137,6 +137,9 @@ async fn self_admission_and_callbacks_keep_the_session_values_the_caller_hands_t
             ("admission", None),
         ]
     );
+    for (_, session) in locked(&read).iter().take(4) {
+        assert!(Arc::ptr_eq(session.as_ref().expect("ada's session"), &ada));
+    }
     assert_eq!(
         recording.answers(),
         [
@@ -201,5 +204,20 @@ async fn permissive_sessions(fixture: &Fixture, (ada, bob): (Arc<CallSession>, A
         .expect("permissive answered");
     }
     assert_eq!(*locked(&admitted), [Some(Arc::clone(&ada)), None]);
-    assert_eq!(*locked(&received), [Some(ada), None, Some(bob)]);
+    assert_eq!(
+        *locked(&received),
+        [Some(Arc::clone(&ada)), None, Some(Arc::clone(&bob))]
+    );
+    assert!(Arc::ptr_eq(
+        locked(&admitted)[0].as_ref().expect("ada admitted"),
+        &ada,
+    ));
+    assert!(Arc::ptr_eq(
+        locked(&received)[0].as_ref().expect("ada received"),
+        &ada,
+    ));
+    assert!(Arc::ptr_eq(
+        locked(&received)[2].as_ref().expect("bob received"),
+        &bob,
+    ));
 }

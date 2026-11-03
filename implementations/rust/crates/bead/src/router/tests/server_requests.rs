@@ -55,8 +55,8 @@ fn idle() -> Handler {
 #[derive(Debug, PartialEq, Eq)]
 enum SessionStep {
     Session(ConnectionHandle, u32, bool),
-    Admit(u32, Option<CallSession>),
-    Callback(u32, Option<CallSession>),
+    Admit(u32, Option<Arc<CallSession>>),
+    Callback(u32, Option<Arc<CallSession>>),
 }
 
 #[tokio::test]
@@ -156,7 +156,7 @@ async fn are_each_asked_their_session_of_its_session_of_once_their_call_id_held_
         move |request| {
             locked(&admitting).push(SessionStep::Admit(
                 request.header.call_id,
-                request.session.as_deref().cloned(),
+                request.session.clone(),
             ));
             true
         },
@@ -170,7 +170,7 @@ async fn are_each_asked_their_session_of_its_session_of_once_their_call_id_held_
         .on(Arc::new(move |request, response| {
             locked(&callbacks).push(SessionStep::Callback(
                 request.header.call_id,
-                request.session.as_deref().cloned(),
+                request.session,
             ));
             response.result("ok".to_owned())
         }))
@@ -203,12 +203,22 @@ async fn are_each_asked_their_session_of_its_session_of_once_their_call_id_held_
             SessionStep::Session(first(), 31, false),
             SessionStep::Admit(31, None),
             SessionStep::Session(first(), 33, false),
-            SessionStep::Admit(33, Some(session.clone())),
+            SessionStep::Admit(33, Some(Arc::new(session.clone()))),
             SessionStep::Session(first(), 35, false),
             SessionStep::Callback(31, None),
-            SessionStep::Callback(33, Some(session)),
+            SessionStep::Callback(33, Some(Arc::new(session))),
         ]
     );
+    {
+        let steps = locked(&order);
+        let (SessionStep::Admit(_, Some(admitted)), SessionStep::Callback(_, Some(received))) =
+            (&steps[3], &steps[6])
+        else {
+            panic!("the admitted call reaches its callback with its session");
+        };
+        assert!(Arc::ptr_eq(admitted, received));
+        drop(steps);
+    }
     assert_eq!(
         served.sent_since(),
         [
