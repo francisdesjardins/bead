@@ -60,6 +60,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - The TypeScript side hands a request to its resolver in a later turn, as the C# side does, so the
   order of answers never turns on whether a resolver answers at once: a later request's refusal
   goes before it (spec 9.2, 15.1).
+- An options object marks a setting it cannot be built without as required, at most two and never
+  the call's operand, in its language's form on every side — a member without `?`, a `required`
+  member, a field its constructor of the required members takes — and is then a required parameter;
+  one required in some instantiations alone is a conditional parameter type on the TypeScript side.
 - On the TypeScript side a transport client's `connect` takes its options as optional where every
   member is: the worker transport's and the worker client's.
 - The in-memory transport client takes its server at each connect, on every side, as every other

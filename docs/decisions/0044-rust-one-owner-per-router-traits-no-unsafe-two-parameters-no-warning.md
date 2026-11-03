@@ -156,7 +156,8 @@ comment on a source's item never stands for a twin.
   `bead-house`, dev only, holds the house's own checks. The crates of the stages ahead are named
   already, so no rename follows: `bead-transport-websocket`, `bead-transport-http`,
   `bead-transport-mqtt`, `bead-transport-amqp`, `bead-transcoding`, `bead-transcoding-http`,
-  `bead-interop-server`.
+  `bead-interop-server`; a part that needs the core's inside and ships to applications, a transport,
+  comes instead as a feature of the core ([0004](0004-one-behaviour-in-every-language.md)).
 - **Packages qualified by their owner, libraries short**, as NuGet's `FrancisDesjardins.Bead.*`
   over the assemblies `Bead.*`
   ([0008](0008-three-version-axes-and-names-qualified-by-their-owner.md)): the package
@@ -267,14 +268,19 @@ lets it break. `rustfmt.toml`, stable options only: `edition` and `style_edition
 and `multiple-versions = "deny"`, each duplicate a listed exception with its reason.
 
 **`bead-house`**, a dev-only crate whose test reads every crate's source with `syn`, holds what no
-lint does, as `tools/oxlint-plugin.mjs` holds the TypeScript side's: the parameter rule below, its
-cases listed as `oxlint-plugin.cases.ts` lists its own; the comment tags of `CLAUDE.md` on plain
-comments alone, none on a doc comment, a doc comment being what rustc's tokenizer reads as one
-(`///`, `//!`, `/** */`, `/*! */`), so `//!` is never taken for the `!` tag; and every member's
-`[lints] workspace = true`, so no crate leaves the policy. **`//!` is kept**, Rust's inner doc
-comment, the language's and its standard library's form for a module's and a crate's documentation:
-the one exception to the `!` tag, a doc comment, never the tag, though Better Comments shows it as
-one.
+lint does, as `tools/oxlint-plugin.mjs` and `tools/check-surface.mjs` hold the TypeScript side's:
+the parameter rule below, each options parameter taken by `&` and each public `…Options` struct's
+shape, its cases listed as `oxlint-plugin.cases.ts` lists its own; each library crate's public
+items, every `pub` one with its declaration, its fields, its variants, its inherent methods and the
+traits it derives or implements, its bodies not, pinned to its list in
+`crates/bead-house/surfaces/`, `internal` a section of its own and the test kit left out by name, so
+the surface grows by a decision ([0004](0004-one-behaviour-in-every-language.md)); the comment tags
+of `CLAUDE.md` on plain comments alone, none on a doc comment, a doc comment being what rustc's
+tokenizer reads as one (`///`, `//!`, `/** */`, `/*! */`), so `//!` is never taken for the `!` tag;
+and every member's `[lints] workspace = true`, so no crate leaves the policy. **`//!` is kept**,
+Rust's inner doc comment, the language's and its standard library's form for a module's and a
+crate's documentation: the one exception to the `!` tag, a doc comment, never the tag, though Better
+Comments shows it as one.
 
 ### One owner per router
 
@@ -380,13 +386,14 @@ carries one `#[expect]` at its root with its reason.
 **The core compiles for the browser's target**, `wasm32-unknown-unknown`: CI runs clippy over its
 library there, so a dependency or an API that does not build in a page (tokio's `net` or
 `rt-multi-thread`, a native TLS stack, `std::os`) fails the change that brings it, and the socket
-transports and the broker bindings sit in crates or features that the check leaves out by name. The
-target is checked, never run: the folder's `.cargo/config.toml` gives getrandom its `unsupported`
-backend on it, `--cfg getrandom_backend="unsupported"`, the backend getrandom names for this case,
-which adds no dependency and no lock entry, keeps `wasm_js` out of the library as getrandom asks,
-and has no effect on a crate that depends on Bead. A draw there is an error, which each of Bead's
-draws already takes as a `Result`. What would trap there at run time, a clock or a thread, the
-disallowed lists hold.
+transports and the broker bindings sit in features of the core that the check leaves out by name,
+each reaching the core's inside by `pub(crate)`. The target is checked, never run: the folder's
+`.cargo/config.toml` gives getrandom its `unsupported` backend on it,
+`--cfg getrandom_backend="unsupported"`, the backend getrandom names for this case, which adds no
+dependency and no lock entry, keeps `wasm_js` out of the library as getrandom asks, and has no
+effect on a crate that depends on Bead. A draw there is an error, which each of Bead's draws already
+takes as a `Result`. What would trap there at run time, a clock or a thread, the disallowed lists
+hold.
 
 ### The clock and the durations
 
@@ -406,8 +413,9 @@ own never; held as spec 1.4 holds one, from the nanoseconds; `LONGEST_TIMER` a `
 ms. A refusal is an `Err` whose reason is a code, `DurationRefusal::{UnderTheFloor, PastTheCeiling,
 ZeroRefused, NeverRefused, NotANumber}`, which the harness checks against the file's derived
 reason; the words stay Rust's. A `Duration` holds no value under zero, no NaN and nothing that is
-no number: those inputs are played at no place, each by its row. A reconnection's delay takes both
-ways, a `Duration` and a function of the previous delay and the attempt.
+no number: those inputs are played at no place, each by its row. A reconnection's delay is a
+`ReconnectDelay`, `Fixed(Duration)` or `Computed`, a function of the previous delay and the attempt,
+as every side takes a number or a function ([0004](0004-one-behaviour-in-every-language.md)).
 
 ### Failures and errors
 
@@ -460,8 +468,13 @@ enum**, `#[non_exhaustive]`, `TryFrom` the wire's width: an envelope's kind, a f
 **Beside the receiver** — `self`, `&self`, `&mut self`, as C#'s `this` is no parameter — **at most
 two parameters, then at most one options struct, always last**; a third essential thing is a design
 to revisit. The options struct is named `…Options`, **`#[non_exhaustive]` from its first commit**,
-its fields public, every member an `Option`, `Debug + Clone + Default`, taken by `&`, and set as C#'s
-object initializer sets one, by assignment over its default:
+its fields public, `Debug + Clone` and **never `Copy`**, **taken by `&`**. **Every field is an
+`Option`, with the default its doc states, but a setting the rule marks required
+([0004](0004-one-behaviour-in-every-language.md)): such a field is plain, at most two of them, and
+the struct's constructor of its required members — an associated function that takes them and
+nothing else — sets them; the struct then has no `Default`. With none required it derives
+`Default`.** It is set as C#'s object initializer sets one, by assignment over what `default()` or
+that constructor gives:
 
 ```rust
 let mut options = RouterClientOptions::default();
@@ -470,10 +483,20 @@ let router = RouterClient::new(transport, &options)?;
 ```
 
 From another crate the fields stay assignable and only the literal is refused, so an option added
-later breaks no caller. One form: no `with_*` setters beside it, no builder where the other sides
-take an options object. Clippy's `too_many_arguments` at 4, since it counts the receiver, and
-`bead-house`'s test for the rule itself hold it, as `max-params` and `bead/options-last` hold the
-TypeScript side's.
+later breaks no caller: C-STRUCT-PRIVATE's aim, reached by RFC 2008's attribute rather than
+accessors, and the constructor of the required members is C-BUILDER's. One form: no `with_*` setters
+beside it, no builder where the other sides take an options object. `&` lets a caller keep and reuse
+its options, as the other sides' callers keep their object, where C-CALLER-CONTROL would hand
+ownership over: a function that keeps a part clones it, a count or a few words. An options struct is
+never `Copy`, since clippy's `trivially_copy_pass_by_ref` refuses `&` of a small `Copy` one and
+`needless_pass_by_value` refuses one taken by value and only read. Where a member is required in
+some instantiations alone, the side states it by a type of its own where the type names the case,
+and otherwise takes it as an `Option` refused where the object is used, a row of the matrix. A
+callback Bead declares takes its options as `&…Options` too. Clippy's `too_many_arguments` at 4,
+since it counts the receiver, and `bead-house`'s tests hold it: the parameters, each public
+`…Options` struct's shape, and each options parameter by `&`, as `max-params`, `bead/options-last`
+and `tools/check-surface.mjs` hold the TypeScript side's. The constructor's word is for the round on
+names, C-CTOR's `new` the default to beat; the code writes `of`.
 
 ### Names, side by side
 
@@ -585,17 +608,26 @@ byte, and **always built**: no Cargo feature leaves debugging out, which would b
 
 - **A module's unit tests in a file beside it**: `src/envelope.rs` declares `#[cfg(test)] mod
   tests;`, its tests in `src/envelope/tests.rs`, with the module's private items at hand.
-- **The test kit is inside the core**, as tokio keeps its `test-util`: `#[cfg(any(test, feature =
-  "testing"))] #[doc(hidden)] pub mod testing`, holding the stepping clock, each conformance file's
-  typed reader, `deny_unknown_fields` and never by index, the durations' helper and what the players
-  reach that the public API does not, as the C# players reach it by `InternalsVisibleTo`; and what
-  a test takes from its platform, each the kit's own funnel under one `#[expect]`: `spawn`, `rest`
-  (tokio's sleep), `patience` (tokio's timeout, its `Result` the same), `Instant`, a newtype of the
-  kit's over std's, never a re-export, which the gate would flag at each `Instant::now()`, and
-  `wall_now`. The core takes itself as a dev-dependency with the feature, so a unit test and a
-  player share one copy of it; resolver 3 keeps the feature out of every build that is not a
-  test's. Every item of the core that the kit alone reaches carries the kit's `cfg`, or it is dead
-  code in a build without it, which `build.warnings` fails.
+- **The test kit is inside the core**, as tokio keeps its `test-util`:
+  `#[cfg(any(test, feature = "testing"))] #[doc(hidden)] pub mod testing`, holding the stepping
+  clock, each conformance file's typed reader, `deny_unknown_fields` and never by index, the
+  durations' helper, the scripted transports and the parcels' readers: what only a test has; and
+  what a test takes from its platform, each the kit's own funnel under one `#[expect]`: `spawn`,
+  `rest` (tokio's sleep), `patience` (tokio's timeout, its `Result` the same), `Instant`, a newtype
+  of the kit's over std's, never a re-export, which the gate would flag at each `Instant::now()`,
+  and `wall_now`. The core takes itself as a dev-dependency with the feature, so a unit test and a
+  player share one copy of it; resolver 3 keeps the feature out of every build that is not a test's.
+  Every item of the core that the kit alone reaches carries the kit's `cfg`, or it is dead code in a
+  build without it, which `build.warnings` fails.
+- **What the workspace's own members reach that the API does not offer** — the envelope's codec, and
+  what the conformance players, the fuzz targets, the interop service and the bench call — goes
+  through one `#[doc(hidden)] pub mod internal` of the core, with no feature, as the C# players and
+  the C# bench reach theirs by `InternalsVisibleTo`
+  ([0004](0004-one-behaviour-in-every-language.md)): outside SemVer, as its documentation says and
+  as cargo-semver-checks reads a hidden item, and no road for another crate. The codec's items are
+  `pub` in their private module and re-exported by `internal` alone, which `unreachable_pub`
+  accepts; an item no member calls stays `pub(crate)`, and the kit's `testing::scripted` names the
+  codec's real types through `internal`.
 - **The conformance players** in `crates/bead/tests/`, one file a conformance file, `harness =
   false` under `libtest-mimic`, a trial per entry named by its own name.
 - **Twin tests** carry the other sides' sentence in snake case, the unit named in a comment just
@@ -736,10 +768,10 @@ scheduler, the clocks, the codec, the in-memory transport or the broker: the mat
 
 **Its gates**: clippy's denied table and `build.warnings`; clippy's `disallowed-methods` and
 `disallowed-types`, which hold every spawn and every reading of time to the funnel; the core's
-clippy for `wasm32-unknown-unknown`; rustfmt; cargo-deny; `bead-house`'s parameter rule, comment
-tags and lints' inheritance; the players of every conformance file the core reaches and the twins,
-which `spec/check.py` holds by Rust's row of `SIDES` and its `AHEAD`; the coverage floor of lines
-and regions; and CI's `rust` job, on Linux and on Windows.
+clippy for `wasm32-unknown-unknown`; rustfmt; cargo-deny; `bead-house`'s parameter rule, options
+structs, surfaces, comment tags and lints' inheritance; the players of every conformance file the
+core reaches and the twins, which `spec/check.py` holds by Rust's row of `SIDES` and its `AHEAD`;
+the coverage floor of lines and regions; and CI's `rust` job, on Linux and on Windows.
 
 ## The Tenth Man
 
