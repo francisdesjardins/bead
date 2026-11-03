@@ -142,8 +142,10 @@ group, whatever its side, consumes it, its broker handing each message to one. I
 **A link is one fresh connection, and its incarnation ends with it** (spec 15.33). Its OPEN names
 the id as its container-id, its virtual host as `vhost:<it>` and its `idleTimeout`, 30 s by default,
 as its idle-time-out, the link lost once nothing came for twice that. It authenticates by SASL PLAIN,
-the id its user, the password asked anew at each link where it is a function, or by SASL EXTERNAL
-under a client certificate RabbitMQ maps to the id's user. Its inbox is an exclusive, classic, not
+the id its user, its password given or asked of its provider anew at each link's start
+([0040](0040-a-brokers-adapter-offers-bytes-at-topics-and-bead-keeps-its-own-credit-credential-and-heartbeat.md)),
+or by SASL EXTERNAL under a client certificate RabbitMQ maps to the id's user: never both, and never
+ANONYMOUS, which no adapter given neither falls to. Its inbox is an exclusive, classic, not
 durable queue of its name, declared through the management on that connection, 201 or 200, then
 bound to the root's exchange by its own name, 204: so it ends with the connection, and a start that
 fails between the two leaves no queue, since it closes its connection. While another connection of

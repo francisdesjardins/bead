@@ -1355,12 +1355,14 @@ const ofMqttAdapter = (name: 'connectTimeout' | 'keepAlive'): Way => {
   };
 };
 
-// an AMQP 1.0 adapter built with `name`: on its library's timers, so held to its refusal alone
+// an AMQP 1.0 adapter built with `name`: on its library's timers, so held to its refusal alone;
+// given a password, which an AMQP 1.0 link authenticates by where it holds no client certificate
 const ofAmqpAdapter = (name: 'connectTimeout' | 'idleTimeout'): Way => {
   return (given) => {
     const building = attempt(() => {
       return createAmqpBrokerAdapter({
         id: 'ada',
+        password: 'secret',
         url: 'amqp://127.0.0.1:5672',
         ...optionOf(name, given),
       });

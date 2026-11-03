@@ -118,8 +118,12 @@ both name the field `credential`, `Credential`, on a request and on an answer al
 ([0010](0010-a-request-presents-a-credential-of-a-scheme.md)). A TypeScript union an option carries
 is one member, a sealed record holding one of its arms, as `Credential` holds its scheme's and
 `TransportClientReconnectOptions.Delay`, a `TransportClientReconnectDelay`, a wait or a
-`TransportClientReconnectDelayResolver`; the adapters' `Password` and `PasswordProvider` are the
-one such option still in two members, work to do ([0004](0004-one-behaviour-in-every-language.md)).
+`TransportClientReconnectDelayResolver` ([0004](0004-one-behaviour-in-every-language.md)). A secret
+given or asked at each attempt is two members of one name on every side, by
+[0032](0032-a-websocket-upgrade-from-no-page-carries-its-credential-beside-every-envelope.md):
+a WebSocket client's `Credential` and `CredentialProvider`, a broker adapter's `Password` and
+`PasswordProvider`
+([0040](0040-a-brokers-adapter-offers-bytes-at-topics-and-bead-keeps-its-own-credit-credential-and-heartbeat.md)).
 **A type is built by its constructor; a factory converts or derives.** That is the Framework Design
 Guidelines' "Do prefer constructors over Factories" and "Do use a Factory for conversion style
 operations". So a union record of a TypeScript option is built by a constructor for each arm, as

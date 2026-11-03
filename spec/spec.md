@@ -2048,15 +2048,24 @@ alone (section 15.18). Its connections' handles' type is `MQTT` (section 15.1).
 15.26. A participant's link is one network connection. Its CONNECT carries Protocol Version 5;
 Clean Start 1 and a Session Expiry Interval of 0, so that its broker keeps no session past it and
 each link is a new incarnation (section 15.21); its participant's id as its Client Identifier; the
-deployment's authentication, a User Name, the id, with a Password, or none where its TLS client
+deployment's authentication, a User Name, the id, with its password as its Password, or without one
+where its adapter is given neither a password nor a TLS client certificate, or none where its client
 certificate authenticates it; a Receive Maximum of 65,535; a Topic Alias Maximum of 0, so that its
 broker sends no alias; its `maximumPacketSize` as its Maximum Packet Size; its `keepAlive`, in whole
 seconds rounded up, as its Keep Alive. Where its adapter leaves a will, the will is its
 participant's GONE to its departure, of QoS 1, RETAIN 0 and a Will Delay Interval of 0, so that its
 broker publishes it as it sees the link close without a clean end, a takeover by another link of
 its Client Identifier among them. A link is up once its CONNACK's Reason Code is 0x00; any other
-fails its start, as do a Maximum QoS of 0 and no CONNACK within `connectTimeout`. It sends a packet
-within each Keep Alive in force, the Server Keep Alive its CONNACK names where it names one. A
+fails its start, as do a Maximum QoS of 0 and no CONNACK within `connectTimeout` of its start. Its
+password is one its adapter is given, or one a provider it is given answers, asked anew at each
+link's start before its network connection opens, under that start's signal and its stop, and
+within the same `connectTimeout`: an ask that outlives it, or that a stop meets, fails that start
+whether or not its provider hears its signal, a later answer serving nothing, and its provider's
+signal is aborted once that start ends, linked or not. A password is UTF-8 text, never empty and
+holding no NUL ([`docs/support.md`](../docs/support.md), "Leveled down"): its adapter is refused as
+it is built given one that is not, a password and a provider both, or either beside a TLS client
+certificate, and its start fails on a provider's answer that is not. It sends a packet within each
+Keep Alive in force, the Server Keep Alive its CONNACK names where it names one. A
 participant's stop ends its link with a DISCONNECT of Reason Code 0x00, so that no will goes. A
 DISCONNECT its broker sends of Reason Code 0x8E is its link taken over (section 15.21); any other
 end of its network connection is its link lost. Nothing of a link reaches another: no library
@@ -2106,7 +2115,7 @@ Packet Size of 4,096, a message to `bead/i/peer` carries 4,072.
 | ------------------- | ---------- | ------------------------------------------------------------------------------------------------------------ |
 | `maximumPacketSize` | 16,777,216 | its CONNECT's Maximum Packet Size, the largest packet its broker sends it                                    |
 | `keepAlive`         | 30 s       | its CONNECT's Keep Alive, 1 to 65,535 seconds: its broker counts its link lost silent for half again as long |
-| `connectTimeout`    | 30 s       | how long its start waits for its CONNACK                                                                     |
+| `connectTimeout`    | 30 s       | how long its start waits for its password, where it asks its provider, and its CONNACK                       |
 
 Neither `keepAlive` nor `connectTimeout` is ever without end or 0, and a `keepAlive` past 65,535
 seconds is refused.
@@ -2150,10 +2159,14 @@ departure. Its connections' handles' type is `AMQP` (section 15.1).
 carries its id as its container-id, `vhost:` and its virtual host as its hostname where it is given
 one, and its `idleTimeout` as its idle-time-out; it counts its link lost once nothing came for twice
 that ([AMQP 1.0 §2.4.5](https://docs.oasis-open.org/amqp/core/v1.0/os/amqp-core-transport-v1.0-os.html#doc-doc-idle-time-out)).
-Its SASL is PLAIN, its id the user, with a password, or EXTERNAL where its TLS client certificate
-authenticates it. On it a participant holds a session for its inbox's receiver, one for each name
-it serves, holding that name's receiver, one sending to inboxes and one sending to names, each
-sending one to the anonymous terminus
+Its SASL is PLAIN, its id the user, with its password, or EXTERNAL where its TLS client certificate
+authenticates it, and never ANONYMOUS: its adapter is refused as it is built given neither a
+password nor a client certificate, since PLAIN's password is one octet at least
+([RFC 4616 §2](https://www.rfc-editor.org/rfc/rfc4616#section-2)). Its password is given or asked,
+and refused, as an MQTT 5 link's is (section 15.26), asked before its connection opens and within
+the `connectTimeout` that bounds its start. On it a participant holds a session for its inbox's
+receiver, one for each name it serves, holding that name's receiver, one sending to inboxes and one
+sending to names, each sending one to the anonymous terminus
 ([Anonymous Terminus v1.0](https://docs.oasis-open.org/amqp/anonterm/v1.0/anonterm-v1.0.html)); a
 name past what its broker's channel-max leaves is refused. It declares its inbox through its
 broker's management on that connection
@@ -2229,12 +2242,12 @@ payload of a message to that topic within its own `maximumMessageSize`. Under it
 `bead.i.server` takes a payload of 16,777,156 bytes; under a max-message-size of 4,096, a message to
 `bead.i.peer` carries 4,038.
 
-| Bound                | By default | Bounds                                                                                                                                                                                            |
-| -------------------- | ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `maximumMessageSize` | 16,777,216 | the largest message, as its publisher writes it, whose payload it takes, 1 to 4,294,967,295 bytes: its receive bound                                                                              |
-| `linkCredit`         | 1,000      | the messages its broker may deliver its inbox's receiver before it settles one, 1 to 2,147,483,647                                                                                                |
-| `idleTimeout`        | 30 s       | its OPEN's idle-time-out, 1 ms to 1,073,741,823 ms: it counts its link lost silent for twice it                                                                                                   |
-| `connectTimeout`     | 30 s       | how long its start waits for its broker's OPEN, its sessions and its inbox; its inbox's deletion, for its answer; a name let go, for what it handed on to be settled and its DETACH; and its stop |
+| Bound                | By default | Bounds                                                                                                                                                                                                                                      |
+| -------------------- | ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `maximumMessageSize` | 16,777,216 | the largest message, as its publisher writes it, whose payload it takes, 1 to 4,294,967,295 bytes: its receive bound                                                                                                                        |
+| `linkCredit`         | 1,000      | the messages its broker may deliver its inbox's receiver before it settles one, 1 to 2,147,483,647                                                                                                                                          |
+| `idleTimeout`        | 30 s       | its OPEN's idle-time-out, 1 ms to 1,073,741,823 ms: it counts its link lost silent for twice it                                                                                                                                             |
+| `connectTimeout`     | 30 s       | how long its start waits for its password, where it asks its provider, its broker's OPEN, its sessions and its inbox; its inbox's deletion, for its answer; a name let go, for what it handed on to be settled and its DETACH; and its stop |
 
 None of them is ever without end or 0. A Data section's payload is a `vbin32` of 4,294,967,295 bytes
 at most ([AMQP 1.0 §1.6.19](https://docs.oasis-open.org/amqp/core/v1.0/os/amqp-core-types-v1.0-os.html#type-binary)),

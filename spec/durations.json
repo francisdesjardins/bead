@@ -3862,7 +3862,7 @@
     },
     {
       "id": "mqttBrokerAdapter.connectTimeout",
-      "name": "how long an MQTT 5 adapter's start waits for its CONNACK",
+      "name": "how long an MQTT 5 adapter's start waits for its password, where it asks its provider, and its CONNACK",
       "clauses": [
         "1.4",
         "15.30"
@@ -4109,7 +4109,7 @@
     },
     {
       "id": "amqpBrokerAdapter.connectTimeout",
-      "name": "how long an AMQP 1.0 adapter waits on its broker: its start, for its OPEN, its sessions and its inbox; its inbox's deletion; a name let go; and its stop",
+      "name": "how long an AMQP 1.0 adapter waits: its start, for its password, where it asks its provider, its broker's OPEN, its sessions and its inbox; its inbox's deletion; a name let go; and its stop",
       "clauses": [
         "1.4",
         "15.37"

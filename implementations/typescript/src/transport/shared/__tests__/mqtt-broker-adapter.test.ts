@@ -13,7 +13,7 @@ import type { IPublishPacket, ISubscribePacket, Packet } from 'mqtt-packet';
 import { ParcelKind, readParcel, writeParcel } from '../broker-parcel';
 import { createBrokerParticipant } from '../broker-participant';
 import { BROKER_DELIVERIES, BROKER_PUBLISHED } from '../constants';
-import { GenericError, ProgrammerError } from '../errors';
+import { CancelError, GenericError, ProgrammerError } from '../errors';
 import {
   createMqttBrokerAdapter,
   type IMqttBrokerAdapter,
@@ -44,12 +44,38 @@ const FIXTURE_USER = 'fixture';
 
 // helpers
 
-/** An adapter of `ID` to `script`, its password `PASSWORD` unless told. */
+/** An adapter of `ID` to `script`, its password `PASSWORD` unless a provider or a certificate is told. */
 const adapterOf = (
   script: IMqttScript,
   options?: Partial<IMqttBrokerAdapterOptions>
 ): IMqttBrokerAdapter => {
-  return createMqttBrokerAdapter({ id: ID, password: PASSWORD, url: script.url, ...options });
+  const password =
+    options?.passwordProvider === undefined && options?.tls === undefined ? PASSWORD : undefined;
+
+  return createMqttBrokerAdapter({ id: ID, password, url: script.url, ...options });
+};
+
+/** What `build` throws, or nothing. */
+const refusalOf = (build: () => unknown): unknown => {
+  try {
+    build();
+  } catch (error) {
+    return error;
+  }
+
+  return undefined;
+};
+
+/** What `pending` fails with, or nothing. */
+const failureOf = (pending: Promise<unknown>): Promise<unknown> => {
+  return pending.then(
+    () => {
+      return undefined;
+    },
+    (error: unknown) => {
+      return error;
+    }
+  );
 };
 
 /** `adapter` started, its link the script's next, answered by a CONNACK of `properties`. */
@@ -145,7 +171,7 @@ test.describe('createMqttBrokerAdapter', () => {
     const adapter = adapterOf(script, {
       keepAlive: 1_500,
       maximumPacketSize: 2_048,
-      password: () => {
+      passwordProvider: () => {
         asked += 1;
 
         return `${PASSWORD}-${String(asked)}`;
@@ -897,7 +923,7 @@ test.describe('createMqttBrokerAdapter', () => {
 
     const asking = Promise.withResolvers<string>();
     const asked = adapterOf(script, {
-      password: () => {
+      passwordProvider: () => {
         return asking.promise;
       },
     });
@@ -979,6 +1005,246 @@ test.describe('createMqttBrokerAdapter', () => {
     expect(downs).toEqual([{ isTakenOver: false }, { isTakenOver: false }]);
     await again.closed;
     await adapter.stop();
+  });
+
+  test('fails its start once its password provider outlives its connect timeout, and takes no late answer', async () => {
+    const late = Promise.withResolvers<string>();
+    const adapter = adapterOf(script, {
+      connectTimeout: 200,
+      passwordProvider: () => {
+        return late.promise;
+      },
+    });
+    const { downs } = heardOf(adapter);
+    const error = await failureOf(adapter.start());
+
+    expect(error).toBeInstanceOf(GenericError);
+    expect((error as Error).message).toBe(
+      'the link of ada had no password within 200 ms, its connectTimeout'
+    );
+
+    // * its answer, come too late, opens no network connection
+    late.resolve(PASSWORD);
+    await expect(script.link({ within: 300 })).rejects.toThrow('no link came');
+    expect([adapter.isLinked, downs]).toEqual([false, []]);
+
+    // * one connectTimeout from its start's call: its CONNACK waits what its ask left of it
+    const slow = adapterOf(script, {
+      connectTimeout: 600,
+      passwordProvider: async () => {
+        await sleep(450);
+
+        return PASSWORD;
+      },
+    });
+    const began = performance.now();
+    const waiting = failureOf(slow.start());
+
+    await script.link();
+    expect(String(await waiting)).toContain(
+      'the link of ada had no CONNACK within 600 ms, its connectTimeout'
+    );
+    expect(performance.now() - began).toBeLessThan(900);
+  });
+
+  test('ends its start once stopped as its password is asked, and links at the next start, asked anew', async () => {
+    let asked = 0;
+    const adapter = adapterOf(script, {
+      passwordProvider: () => {
+        asked += 1;
+
+        // * the first ask never answers, nor hears its signal
+        return asked === 1
+          ? new Promise<string>(() => {
+              // it never settles
+            })
+          : `${PASSWORD}-${String(asked)}`;
+      },
+    });
+    const starting = failureOf(adapter.start());
+
+    await until(() => {
+      return asked === 1;
+    });
+    await adapter.stop();
+
+    const error = await starting;
+
+    expect(error).toBeInstanceOf(GenericError);
+    expect((error as Error).message).toBe('the link of ada stopped as it started');
+    await expect(script.link({ within: 200 })).rejects.toThrow('no link came');
+
+    const { connect } = await linkUp({ adapter, script });
+
+    expect(String((connect as { password?: Buffer }).password)).toBe(`${PASSWORD}-2`);
+    expect([asked, adapter.isLinked]).toEqual([2, true]);
+    await adapter.stop();
+  });
+
+  test('ends its start at its own cancellation as its password is asked', async () => {
+    const signals: AbortSignal[] = [];
+    const adapter = adapterOf(script, {
+      passwordProvider: ({ signal }) => {
+        signals.push(signal);
+
+        return new Promise<string>(() => {
+          // it never settles
+        });
+      },
+    });
+    const given = new AbortController();
+    const starting = failureOf(adapter.start({ signal: given.signal }));
+
+    await until(() => {
+      return signals.length === 1;
+    });
+    expect(signals[0]?.aborted).toBe(false);
+    given.abort();
+    expect(await starting).toBeInstanceOf(CancelError);
+    // * its provider's signal aborted with it
+    expect(signals[0]?.aborted).toBe(true);
+    await expect(script.link({ within: 200 })).rejects.toThrow('no link came');
+
+    // and a signal aborted already asks nothing
+    expect(await failureOf(adapter.start({ signal: AbortSignal.abort() }))).toBeInstanceOf(
+      CancelError
+    );
+    expect(signals).toHaveLength(1);
+  });
+
+  test('fails its start when its password provider throws, its throw the cause', async () => {
+    const thrown = new Error('the vault is down');
+
+    // * as it is called, or as it answers
+    for (const passwordProvider of [
+      (): string => {
+        throw thrown;
+      },
+      (): Promise<string> => {
+        return Promise.reject(thrown);
+      },
+    ]) {
+      const adapter = adapterOf(script, { passwordProvider });
+      const error = await failureOf(adapter.start());
+
+      expect(error).toBeInstanceOf(GenericError);
+      expect(error).toMatchObject({ cause: thrown, message: 'the password provider failed' });
+      expect(adapter.isLinked).toBe(false);
+    }
+
+    await expect(script.link({ within: 200 })).rejects.toThrow('no link came');
+  });
+
+  test('refuses a password that is empty or holds a NUL, as built or as answered', async () => {
+    const refusal = 'a password is a non-empty string holding no NUL';
+
+    for (const password of ['', `${PASSWORD}\0`]) {
+      const built = refusalOf(() => {
+        return createMqttBrokerAdapter({ id: ID, password, url: script.url });
+      });
+
+      expect(built).toBeInstanceOf(ProgrammerError);
+      expect((built as Error).message).toBe(refusal);
+
+      const answered = await failureOf(
+        adapterOf(script, {
+          passwordProvider: () => {
+            return password;
+          },
+        }).start()
+      );
+
+      expect(answered).toBeInstanceOf(ProgrammerError);
+      expect((answered as Error).message).toBe(refusal);
+    }
+
+    // * and an answer that is no string: none is never taken for no password
+    const unanswered = await failureOf(
+      adapterOf(script, {
+        passwordProvider: () => {
+          return undefined as unknown as string;
+        },
+      }).start()
+    );
+
+    expect(unanswered).toBeInstanceOf(ProgrammerError);
+    expect((unanswered as Error).message).toBe(refusal);
+    await expect(script.link({ within: 200 })).rejects.toThrow('no link came');
+  });
+
+  test('aborts its password provider’s signal once its start ends, linked or not', async () => {
+    const signals: AbortSignal[] = [];
+    const adapter = adapterOf(script, {
+      passwordProvider: ({ signal }) => {
+        signals.push(signal);
+
+        return PASSWORD;
+      },
+    });
+    const starting = adapter.start();
+    const link = await script.link();
+
+    // * live while its start is under way
+    expect(signals[0]?.aborted).toBe(false);
+    link.send({ cmd: 'connack', properties: {}, reasonCode: 0, sessionPresent: false });
+    await starting;
+    await until(() => {
+      return signals[0]?.aborted === true;
+    });
+    expect([signals[0]?.aborted, adapter.isLinked]).toEqual([true, true]);
+    await adapter.stop();
+
+    // and a start its CONNACK refuses
+    const refusing = failureOf(adapter.start());
+    const refused = await script.link();
+
+    refused.send({ cmd: 'connack', reasonCode: 0x86, sessionPresent: false });
+    expect(String(await refusing)).toContain('Bad User Name or Password');
+    await until(() => {
+      return signals[1]?.aborted === true;
+    });
+    expect(
+      signals.map(({ aborted }) => {
+        return aborted;
+      })
+    ).toEqual([true, true]);
+  });
+
+  test('refuses a password beside a client certificate, and both a password and its provider', async () => {
+    const secured = 'mqtts://127.0.0.1:8883';
+    const provider = (): string => {
+      return PASSWORD;
+    };
+    const refusals = [
+      { password: PASSWORD, tls: TLS_FIXTURE },
+      { passwordProvider: provider, tls: TLS_FIXTURE },
+      { password: PASSWORD, passwordProvider: provider },
+      // * both, and a certificate: the first refusal, in one order on every side
+      { password: PASSWORD, passwordProvider: provider, tls: TLS_FIXTURE },
+    ].map((given) => {
+      const refusal = refusalOf(() => {
+        return createMqttBrokerAdapter({ id: ID, url: secured, ...given });
+      });
+
+      expect(refusal).toBeInstanceOf(ProgrammerError);
+
+      return (refusal as Error).message;
+    });
+
+    expect(refusals).toEqual([
+      'a link authenticates by its client certificate or by a password, not both',
+      'a link authenticates by its client certificate or by a password, not both',
+      'a link takes a password or a password provider, not both',
+      'a link takes a password or a password provider, not both',
+    ]);
+
+    // neither: its User Name, its id, with no Password
+    const bare = createMqttBrokerAdapter({ id: ID, url: script.url });
+    const { connect } = await linkUp({ adapter: bare, script });
+
+    expect((connect as { username?: string }).username).toBe(ID);
+    expect((connect as { password?: Buffer }).password).toBeUndefined();
+    await bare.stop();
   });
 
   test('is secure over mqtts and wss, and over mqtt and ws to the loopback alone', () => {

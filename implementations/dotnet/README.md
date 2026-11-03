@@ -188,13 +188,13 @@ A binding to a real broker is a project of its own, beside its adapter. `Bead.Tr
 `MqttBrokerAdapter` links a participant to a broker of MQTT 5 over MQTTnet (spec 15.25 to 15.31,
 decision 0041): `mqtt://`, `mqtts://`, or a WebSocket of subprotocol `mqtt`, `ws://` or `wss://`;
 one network connection that keeps no session, its Client Identifier the participant's id,
-authenticated by a `Password` under its id, or a `PasswordProvider` asked at each link's start, or a
-TLS client certificate (`Tls`); a subscription of QoS 1 and Retain Handling 2 for each topic, a
-name in a group as its shared subscription `$share/<name>/<root>/s/<name>`; each publication of QoS 1
-counted to its byte by `MqttPackets` before it goes and held to its CONNACK's Receive Maximum,
-PUBACK 0x10 read as no subscriber; each message handed on before its PUBACK, which goes once the
-core settled it; a will of the participant's GONE; a DISCONNECT of 0x00 at a stop, one of 0x8E read
-as the link taken over. MQTTnet's automation is off: no reconnection, resubscription, offline queue
+authenticated by a `Password` under its id, as given or what its `PasswordProvider` hands at each
+link's start, by a TLS client certificate (`Tls`), or with neither by its User Name alone; a
+subscription of QoS 1 and Retain Handling 2 for each topic, a name in a group as its shared
+subscription `$share/<name>/<root>/s/<name>`; each publication of QoS 1 counted to its byte by
+`MqttPackets` before it goes and held to its CONNACK's Receive Maximum, PUBACK 0x10 read as no
+subscriber; each message handed on before its PUBACK, which goes once the core settled it; a will of
+the participant's GONE; a DISCONNECT of 0x00 at a stop, one of 0x8E read as the link taken over. MQTTnet's automation is off: no reconnection, resubscription, offline queue
 or alias, each incarnation a client of its own. Its handles' type is `MQTT`.
 
 ```csharp
@@ -209,6 +209,16 @@ await using var transport = participant.Server(new BrokerTransportServerOptions 
 await transport.Start();
 ```
 
+A password is UTF-8 text, never empty and holding no NUL; the adapter is refused as it is built, an
+`ArgumentException`, given one that is not, a password and a provider both, or either beside a
+certificate, and its start fails on an answer that is not. Its provider is asked with a token its
+start's own token, its stop and its `ConnectTimeout` cancel, and that is cancelled once its start
+ends, linked or not: an ask that outlives the `ConnectTimeout` fails that start, a
+`TimeoutException`, and one a stop meets an `IOException`, whether or not it hears its token, a
+later answer serving nothing; what it throws fails it, an `IOException` its cause. Its start waits
+`ConnectTimeout`, 30 s by default, for its password, where it asks its provider, and its CONNACK.
+The options' string says whether a password or a provider is set, never its value.
+
 `MqttBrokerAdapterTests` play its every packet against a scripted MQTT 5 peer, `MqttScript`, and
 `MqttTransportsTests` the cases over MQTT 5 against the broker a run gives, each participant through
 a relay of its own that a case's `lose` cuts.
@@ -216,8 +226,11 @@ a relay of its own that a case's `lose` cuts.
 `Bead.Transport.Amqp`'s `AmqpBrokerAdapter` links a participant to a RabbitMQ 4 over AMQP 1.0, on
 AMQPNetLite (spec 15.32 to 15.38, decision 0043): `amqp://` or `amqps://`; one network connection
 opened anew at each start, its container-id the participant's id, authenticated by SASL PLAIN under
-its id, its `Password` or `PasswordProvider`, or by EXTERNAL under a TLS client certificate
-(`Tls`), its idle-time-out its `IdleTimeout`; its inbox an exclusive queue declared through
+its id, its `Password` as given or what its `PasswordProvider` hands at each link's start, or by
+EXTERNAL under a TLS client certificate (`Tls`), never ANONYMOUS: the adapter is refused as it is
+built given neither, and its password is given, asked and refused as an MQTT 5 link's is; its start
+waits `ConnectTimeout` for its password, where it asks its provider, its broker's OPEN and its
+sessions; its idle-time-out its `IdleTimeout`; its inbox an exclusive queue declared through
 RabbitMQ's management on that connection, so that it ends with it (`AmqpManagement`); a session for
 its inbox's receiver, one for each name, a name's queue its members compete on, and one for each of
 its two senders, to inboxes and to names, each to the anonymous terminus, through the topic
