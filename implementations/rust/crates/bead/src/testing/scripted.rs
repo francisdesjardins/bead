@@ -604,7 +604,7 @@ impl ScriptedServer {
     }
 
     /// Tells its listeners a listen is held on `connection_handle`, or has ended.
-    pub fn hold_listen(&self, is_held: bool, connection_handle: &ConnectionHandle) {
+    pub fn tell_listen(&self, is_held: bool, connection_handle: &ConnectionHandle) {
         self.tell(|listener| listener.on_listen(is_held, connection_handle));
     }
 

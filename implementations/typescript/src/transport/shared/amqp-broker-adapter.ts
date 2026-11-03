@@ -30,7 +30,7 @@ import {
   queueAddressOf,
   topicOf,
 } from './amqp-messages';
-import { assertHeldFinite, LONGEST_TIMER, PLATFORM_CLOCK } from './clock';
+import { assertHeldFinite, assertHeldWithin, LONGEST_TIMER, PLATFORM_CLOCK } from './clock';
 import { BROKER_DELIVERIES, BROKER_PUBLISHED, TRANSPORT_AMQP } from './constants';
 import { createEmitter } from './emitter';
 import { GenericError, ProgrammerError, toCancelError, toError } from './errors';
@@ -275,19 +275,6 @@ const boundOf = (named: unknown): number => {
   return typeof named === 'number' && named > 0 ? named : LARGEST_UINT;
 };
 
-/** `idleTimeout` held: a number of milliseconds from 1 to 1,073,741,823, never 0 nor without end. */
-const assertIdleTimeout = (duration: unknown): number => {
-  if (typeof duration !== 'number' || !(duration >= 1 && duration <= LONGEST_IDLE_TIMEOUT)) {
-    const written = typeof duration === 'string' ? JSON.stringify(duration) : String(duration);
-
-    throw new ProgrammerError(
-      `idleTimeout is a number of milliseconds from 1 to ${String(LONGEST_IDLE_TIMEOUT)}, not ${written}`
-    );
-  }
-
-  return Math.round(duration);
-};
-
 /** A count held: a whole number from 1 to `largest`. */
 const assertCount = (name: string, { largest, value }: { largest: number; value: unknown }) => {
   if (!Number.isSafeInteger(value) || (value as number) < 1 || (value as number) > largest) {
@@ -395,7 +382,9 @@ export const createAmqpBrokerAdapter = (options: IAmqpBrokerAdapterOptions): IAm
     url,
     virtualHost,
   } = options;
-  const idleTimeout = assertIdleTimeout(options.idleTimeout ?? IDLE_TIMEOUT);
+  const idleTimeout = assertHeldWithin('idleTimeout', options.idleTimeout ?? IDLE_TIMEOUT, {
+    ceiling: LONGEST_IDLE_TIMEOUT,
+  });
   const connectTimeout = assertHeldFinite(
     'connectTimeout',
     options.connectTimeout ?? CONNECT_TIMEOUT

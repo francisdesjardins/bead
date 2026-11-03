@@ -1,6 +1,6 @@
 import { fromBinary } from '@bufbuild/protobuf';
 import { expect, test } from '@playwright/test';
-import { createTestClock } from '../../transport/shared/__tests__/fixtures';
+import { createTestClock, delaysOn } from '../../transport/shared/__tests__/fixtures';
 import { ProgrammerError } from '../../transport/shared/errors';
 import {
   createEventStream,
@@ -98,6 +98,32 @@ test('writes the result, then each notification as a message, then the failure t
   open.close();
   await clock.tickAsync(HEARTBEAT * 2);
   expect(quiet.written.length).toBe(2);
+});
+
+test('refuses a heartbeat of 0, -1 or NaN in the gateway’s words, and holds 1.5 as 2', () => {
+  const clock = createTestClock();
+
+  for (const [heartbeat, written] of [
+    [0, '0'],
+    [-1, '-1'],
+    [Number.NaN, 'NaN'],
+  ] as const) {
+    expect(() => {
+      return createEventStream(createSink().sink, { clock, heartbeat });
+    }, written).toThrow(
+      new ProgrammerError(
+        `heartbeat is a number of milliseconds from 1 to 2147483647, or Infinity for never, not ${written}`
+      )
+    );
+  }
+
+  // * its comment armed at the whole millisecond, as a timer holds it on every platform
+  const stream = createEventStream(createSink().sink, { clock, heartbeat: 1.5 });
+
+  stream.result('{}');
+  expect(delaysOn(clock)).toEqual([2]);
+  stream.close();
+  expect(delaysOn(clock)).toEqual([]);
 });
 
 test('credits each notification once the event before it was taken', async () => {

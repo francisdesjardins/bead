@@ -248,7 +248,7 @@ fn stored(state: &mut ServerState, handle: &ConnectionHandle) {
         .is_some_and(|facade| facade.listens.contains_key(handle));
 
     if is_listening {
-        hold_session(state, handle);
+        keep_session(state, handle);
     }
 }
 
@@ -346,7 +346,7 @@ fn wait(state: &mut ServerState, handle: &ConnectionHandle) {
 }
 
 // a session's connection timer, stopped while a listen is held; its session timer runs on
-fn hold_session(state: &mut ServerState, handle: &ConnectionHandle) {
+fn keep_session(state: &mut ServerState, handle: &ConnectionHandle) {
     let arming = arming_of(state);
 
     if let Some(facade) = state.facade.as_mut() {
@@ -393,7 +393,7 @@ pub(crate) fn on_message(state: &mut ServerState, handle: &ConnectionHandle) {
     if !touched {
         wait(state, handle);
     } else if is_listening {
-        hold_session(state, handle);
+        keep_session(state, handle);
     }
 
     told(state, events);
@@ -456,7 +456,7 @@ pub(crate) fn on_listen(state: &mut ServerState, (is_held, handle): (bool, &Conn
     if before == 0 && is_idle {
         wait(state, handle);
     } else if before == 0 {
-        hold_session(state, handle);
+        keep_session(state, handle);
     }
 }
 

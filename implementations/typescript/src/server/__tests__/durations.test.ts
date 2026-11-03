@@ -62,6 +62,7 @@ import {
   BEAD_MEDIA_TYPE,
   CONNECTION_TOKEN_HEADER,
   createHTTPTransportServer,
+  httpPolicyOf,
   type IHTTPTransportServerOptions,
   LISTEN_HEADER,
   REFUSAL_HEADER,
@@ -910,8 +911,9 @@ const maximumWaitOfOptions: Way = (given) => {
   );
 };
 
-// a POST declaring a body that has not come: its body's pace, armed at its head
-const bodyGraceOfOptions: Way = (given) => {
+// an HTTP server of `options` and a POST declaring a body that has not come: its body's pace,
+// armed at its head
+const bodyGraceOfServer = (options: Partial<IHTTPTransportServerOptions>): Promise<IReport> => {
   return heldByHTTPServer(
     {
       drawn: (fake) => {
@@ -927,12 +929,13 @@ const bodyGraceOfOptions: Way = (given) => {
         });
       },
     },
-    {
-      exchangeTimeout: Infinity,
-      inactivityTimeout: Infinity,
-      ...optionOf('bodyGracePeriod', given),
-    }
+    { exchangeTimeout: Infinity, inactivityTimeout: Infinity, ...options }
   );
+};
+
+// a POST declaring a body that has not come: its body's pace, armed at its head
+const bodyGraceOfOptions: Way = (given) => {
+  return bodyGraceOfServer(optionOf('bodyGracePeriod', given));
 };
 
 // an HTTP server's option `name`, on the real clock, as it is built
@@ -955,6 +958,40 @@ const ofHTTPServer = (name: 'headersTimeout' | 'sendGracePeriod'): Way => {
         : {}
     );
   };
+};
+
+// an HTTP policy's member `name`, as it is made
+const ofHTTPPolicy = (name: 'headersTimeout' | 'sendGracePeriod'): Way => {
+  return (given) => {
+    const making = attempt(() => {
+      return httpPolicyOf(optionOf(name, given));
+    });
+
+    return Promise.resolve('refusal' in making ? { moved: [], refusal: making.refusal } : {});
+  };
+};
+
+// a policy's body grace, as it is made: what it keeps, which an HTTP server built on it arms at a
+// POST's head as it is
+const bodyGraceOfPolicy: Way = async (given) => {
+  const making = attempt(() => {
+    return httpPolicyOf(optionOf('bodyGracePeriod', given));
+  });
+
+  if ('refusal' in making) {
+    return { moved: [], refusal: making.refusal };
+  }
+
+  const policy = making.built;
+  const armed = await bodyGraceOfServer({ policy });
+
+  // ! the policy keeps the held value: a server built on it holds it again, which would hide one
+  // kept as given
+  expect(armed, 'what the policy keeps, its server arms').toEqual({
+    held: policy.bodyGracePeriod,
+  });
+
+  return { held: policy.bodyGracePeriod };
 };
 
 /**
@@ -1941,15 +1978,23 @@ const PLAYED: Readonly<Record<string, IPlayed>> = Object.freeze({
   },
   'httpTransportServer.sendGracePeriod': {
     phrase: 'sendGracePeriod',
-    ways: { gateway: ofGateway('sendGracePeriod'), options: ofHTTPServer('sendGracePeriod') },
+    ways: {
+      gateway: ofGateway('sendGracePeriod'),
+      options: ofHTTPServer('sendGracePeriod'),
+      policy: ofHTTPPolicy('sendGracePeriod'),
+    },
   },
   'httpTransportServer.headersTimeout': {
     phrase: 'headersTimeout',
-    ways: { gateway: ofGateway('headersTimeout'), options: ofHTTPServer('headersTimeout') },
+    ways: {
+      gateway: ofGateway('headersTimeout'),
+      options: ofHTTPServer('headersTimeout'),
+      policy: ofHTTPPolicy('headersTimeout'),
+    },
   },
   'httpTransportServer.bodyGracePeriod': {
     phrase: 'bodyGracePeriod',
-    ways: { gateway: bodyGraceOfGateway, options: bodyGraceOfOptions },
+    ways: { gateway: bodyGraceOfGateway, options: bodyGraceOfOptions, policy: bodyGraceOfPolicy },
   },
   'gateway.timeout': {
     phrase: 'timeout',

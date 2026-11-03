@@ -6,7 +6,7 @@
 
 // dependencies
 
-import type { IClock, TimeoutId } from '../transport/shared/clock';
+import { assertHeld, type IClock, type TimeoutId } from '../transport/shared/clock';
 import { ProgrammerError } from '../transport/shared/errors';
 
 export { HEARTBEAT } from '../transport/shared/heartbeat';
@@ -100,12 +100,15 @@ export const eventDataOf = (
  * A stream's call written on `sink` as Server-Sent Events (transcoding 8): nothing before its
  * result; a notification that comes first held, then written after it, or dropped by a failure; each
  * event an id, its count from 1; a comment every `heartbeat` while nothing else goes; each
- * notification settled once its event was taken, the subscription's credit.
+ * notification settled once its event was taken, the subscription's credit. Its `heartbeat` is held
+ * as a gateway's is (spec 1.4): one that does not hold is a {@link ProgrammerError}.
  */
 export const createEventStream = (
   sink: IEventSink,
   { clock, heartbeat }: IEventStreamOptions
 ): IEventStream => {
+  // held as a gateway holds its own, in its words: 0, a negative or NaN would beat at every turn
+  const every = assertHeld('heartbeat', heartbeat);
   // notifications that came before the result, each with what settles its credit
   const held: { data: string; settle: () => void }[] = [];
   let count = 0;
@@ -124,7 +127,7 @@ export const createEventStream = (
   const beat = (): void => {
     stopBeating();
 
-    if (!Number.isFinite(heartbeat) || isEnded) {
+    if (every === Infinity || isEnded) {
       return;
     }
 
@@ -135,7 +138,7 @@ export const createEventStream = (
         void sink.write(HEARTBEAT_COMMENT);
         beat();
       }
-    }, heartbeat);
+    }, every);
     (timer as { unref?: () => unknown }).unref?.();
   };
 

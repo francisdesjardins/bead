@@ -25,13 +25,7 @@ import type {
 } from '../router/shared/types';
 import { PAYLOAD_CODECS } from '../router/shared/payloads';
 import { createMemoryTransportClient } from '../transport/client/memory-transport-client';
-import {
-  assertHeld,
-  assertHeldFinite,
-  type IClock,
-  PLATFORM_CLOCK,
-  type TimeoutId,
-} from '../transport/shared/clock';
+import { assertHeld, type IClock, PLATFORM_CLOCK, type TimeoutId } from '../transport/shared/clock';
 import { REFUSAL_HEADER } from '../transport/shared/constants';
 import { createEmitter } from '../transport/shared/emitter';
 import {
@@ -57,6 +51,8 @@ import {
   requestTargetOf,
 } from '../transport/server/hosts-and-origins';
 import {
+  httpPolicyOf,
+  type IHTTPPolicy,
   type IHTTPPolicyInit,
   type IHTTPPolicyOption,
   withPolicy,
@@ -535,12 +531,14 @@ export const createHTTPGateway = (given: IHTTPGatewayOptions): IHTTPGateway => {
 
   const timeout = assertHeld('timeout', givenTimeout);
   const heartbeat = assertHeld('heartbeat', givenHeartbeat);
-  const headersTimeout = assertHeldFinite('headersTimeout', givenHeadersTimeout);
-  const bodyGracePeriod = assertHeldFinite('bodyGracePeriod', givenBodyGracePeriod);
-  const pace = {
-    minimumSendBytesPerSecond,
-    sendGracePeriod: assertHeldFinite('sendGracePeriod', givenSendGracePeriod),
-  };
+  // 15.12's three durations, held once by the policy's own check and in its words, as an HTTP
+  // server built on a policy holds them: each given, so each kept
+  const { bodyGracePeriod, headersTimeout, sendGracePeriod } = httpPolicyOf({
+    bodyGracePeriod: givenBodyGracePeriod,
+    headersTimeout: givenHeadersTimeout,
+    sendGracePeriod: givenSendGracePeriod,
+  }) as IHTTPPolicy & Record<'bodyGracePeriod' | 'headersTimeout' | 'sendGracePeriod', number>;
+  const pace = { minimumSendBytesPerSecond, sendGracePeriod };
 
   assertHosts(hosts);
   assertOrigins(origins);

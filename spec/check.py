@@ -29,7 +29,8 @@ transcoding.md names each .proto of spec/, and no other; the durations name each
 name, give every place an outcome for every input in their order, cite at each place only what it
 observes, and name, where they cross a row of docs/support.md, a row that names the file and them;
 each implementation plays them in one harness, which names every place, through one helper, which
-alone reads the file; what a side does not play yet, AHEAD, each part a row of docs/support.md's
+alone reads the file; tools/durations.tsv holds a place or a way ahead for a side exactly where AHEAD
+does, under its row, and the Rust harness's ahead_of AHEAD's ways of the places it plays; what a side does not play yet, AHEAD, each part a row of docs/support.md's
 differences, open, which its steps and stages delete as they land, never a part the side plays, each
 row of those differences holding as many cells as their header; and no file git lists outside spec/, the tests and the interop service names a
 published test key; each blueprint of spec/ is in its form, RFC 8785's member order and string escapes,
@@ -1656,6 +1657,89 @@ for side, (folder, language, tests, group_pattern, file_pattern) in SIDES.items(
                                 'it out of AHEAD')
             elif place['id'] not in places_ahead(side) and not named_there:
                 problems.append(f'{side}: its harness, {harness}, plays no {place["id"]}')
+
+# ── The durations' members, ahead ───────────────────────────────────────────────────────────────
+
+# tools/durations.tsv names the member of each side's surface that takes each place by each way, or the
+# row that holds it ahead, which AHEAD owns: a cell is `- ahead: <title>` exactly where AHEAD holds the
+# place or the way for its side, under that title (0014). tools/check-durations.mjs holds the rest of
+# the table; the Rust harness's `ahead_of`, the ways ahead of the places it plays, is AHEAD's own
+MEMBERS = os.path.join(ROOT, 'tools', 'durations.tsv')
+MEMBER_COLUMNS = {'TypeScript': 2, 'C#': 3, 'Rust': 4}
+
+
+def ahead_title(side, place_id, way_id):
+    """The row of AHEAD that holds a place by a way ahead for a side: the row that holds the way, or else
+    the row that holds its place's owner; None where none does."""
+    rows = AHEAD.get(side, {})
+
+    for title, parts in rows.items():
+        if (place_id, way_id) in parts.get('ways', ()):
+            return title
+
+    for title, parts in rows.items():
+        if place_id.split('.')[0] in parts.get('places', ()):
+            return title
+
+    return None
+
+
+if not os.path.isfile(MEMBERS):
+    problems.append('tools/durations.tsv, the durations\' members, is missing')
+else:
+    with open(MEMBERS, encoding='utf-8') as file:
+        member_rows = [line.split('\t') for line in file.read().splitlines()
+                       if line and not line.startswith('#')]
+
+    held = {(fields[0], fields[1]): fields for fields in member_rows if len(fields) == 5}
+
+    for side, column in MEMBER_COLUMNS.items():
+        for place_id, way_id in sorted(place_ways):
+            fields = held.get((place_id, way_id))
+
+            if fields is None:
+                continue
+
+            cell = fields[column].strip()
+            written = cell[len('- ahead: '):].strip() if cell.startswith('- ahead: ') else None
+            title = ahead_title(side, place_id, way_id)
+
+            if written is not None and written != title:
+                problems.append(f'{side}: tools/durations.tsv holds {place_id} by {way_id} ahead under {written}, '
+                                f'which AHEAD does not' + (f': AHEAD holds it under {title}' if title else ''))
+            elif written is None and title is not None:
+                problems.append(f'{side}: AHEAD holds {place_id} by {way_id} ahead under {title}, which '
+                                'tools/durations.tsv does not')
+
+        for (place_id, way_id) in sorted(set(held) - place_ways):
+            if place_id != 'no place' and held[(place_id, way_id)][column].strip().startswith('- ahead: '):
+                problems.append(f'{side}: tools/durations.tsv holds {place_id} by {way_id} ahead, which '
+                                'spec/durations.json does not hold')
+
+# the Rust harness's ways ahead of the places it plays, by their quoted ids, are AHEAD's
+rust_harness = os.path.join(ROOT, DURATIONS_HARNESSES['Rust'][0])
+
+if os.path.isfile(rust_harness):
+    with open(rust_harness, encoding='utf-8') as file:
+        found = re.search(r'\nfn ahead_of\(.*?\n\}', file.read(), re.S)
+
+    if found is None:
+        problems.append(f'Rust: its harness, {DURATIONS_HARNESSES["Rust"][0]}, has no ahead_of')
+    else:
+        harness_ahead = {(place_id, way_id)
+                         for arm in re.finditer(r'((?:"[^"]+"\s*\|?\s*)+)=>\s*&\[([^\]]*)\]', found.group(0))
+                         for place_id in re.findall(r'"([^"]+)"', arm.group(1))
+                         for way_id in re.findall(r'"([^"]+)"', arm.group(2))}
+        ahead_ways = {(place_id, way_id) for place_id, way_id in ahead('Rust', 'ways')
+                      if place_id not in places_ahead('Rust')}
+
+        for place_id, way_id in sorted(harness_ahead - ahead_ways):
+            problems.append(f'Rust: its harness\'s ahead_of holds {place_id} by {way_id} ahead, which AHEAD does '
+                            'not')
+
+        for place_id, way_id in sorted(ahead_ways - harness_ahead):
+            problems.append(f'Rust: AHEAD holds {place_id} by {way_id} ahead, which its harness\'s ahead_of does '
+                            'not')
 
 # ── The counts the tables of files state ────────────────────────────────────────────────────────
 
