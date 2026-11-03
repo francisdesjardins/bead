@@ -23,6 +23,7 @@ pub(super) fn resolving(
 ) -> Resolving<TextCodec, TextCodec> {
     Resolving {
         manager: Arc::clone(&fixture.manager.inner),
+        admit: None,
         procedure: echo(),
         request: TextCodec,
         result: Arc::new(TextCodec),
@@ -156,6 +157,7 @@ async fn a_payload_that_does_not_decode_is_answered_as_undecodable_its_reason_as
     let recording = Arc::new(Recording::default());
     let resolver = Resolving {
         manager: Arc::clone(&fixture.manager.inner),
+        admit: None,
         procedure: echo(),
         request: JsonCodec,
         result: Arc::new(TextCodec),
@@ -431,6 +433,7 @@ async fn an_answer_that_cannot_go_out_leaves_the_request_to_be_answered_as_faile
     let recording = Arc::new(Recording::default());
     let resolver = Resolving {
         manager: Arc::clone(&fixture.manager.inner),
+        admit: None,
         procedure: echo(),
         request: TextCodec,
         result: Arc::new(Unwritable),

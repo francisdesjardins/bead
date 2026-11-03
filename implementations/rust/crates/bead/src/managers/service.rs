@@ -29,7 +29,7 @@ use crate::metrics::ProcedureSeries;
 use crate::payloads::{PayloadCodec, decoded, encoded, refusal_saying};
 use crate::router::admissions::BeforeRequest;
 use crate::router::client::{ClientRequest, NotificationLike, RouterClient};
-use crate::router::core::{Answerer, Handler, ResolverProps};
+use crate::router::core::{AdmissionRequest, AdmitFn, Answerer, Handler, ResolverProps};
 use crate::router::server::{CallHooks, NotifyFilter, RouterServer, ServerRequest};
 use crate::router::types::{
     BoxFuture, CallSession, ConnectionHandle, RequestCredential, ResolvedRequestOptions,
@@ -1410,6 +1410,7 @@ where
             .map(|before_request| before_request.admission(side));
         let resolving = Arc::new(Resolving {
             manager: Arc::clone(&manager.inner),
+            admit: admit.clone(),
             procedure: procedure.clone(),
             request: dependencies.request,
             result: Arc::new(dependencies.result),
@@ -1429,8 +1430,7 @@ where
             maximum_payload_bytes: procedure.maximum_payload_bytes,
             forwards_credentials: false,
             notifies,
-        }
-        .self_admitting();
+        };
 
         manager
             .inner
@@ -1441,6 +1441,7 @@ where
 
 struct Resolving<Req: PayloadCodec, Res: PayloadCodec> {
     manager: Arc<Inner>,
+    admit: Option<AdmitFn>,
     procedure: Procedure,
     request: Req,
     result: Arc<Res>,
@@ -1467,6 +1468,43 @@ where
         reason = "a request decoded, judged, handed and answered, its steps told in their order"
     )]
     async fn resolve(&self, props: ResolverProps) -> Result<(), ResolverError> {
+        let manager = &self.manager;
+        // * the one check a request makes while nobody listens; traced, the call starts as it
+        // arrives, its admission and its decoding counting in its duration
+        let started = manager.is_debugging().then(|| manager.started_now());
+
+        if !props.is_admitted
+            && let Some(admit) = &self.admit
+        {
+            let request = AdmissionRequest {
+                connection_handle: Arc::clone(&props.connection_handle),
+                header: props.header.clone(),
+                session: props.session.clone(),
+                carried: props.carried.clone(),
+            };
+            match admit(&request) {
+                Ok(None) => {}
+                Ok(Some(refused)) => {
+                    return props
+                        .answerer
+                        .respond(RouterAnswer::Failure(refused.failure.record()))
+                        .await
+                        .map_err(ResolverError::other);
+                }
+                Err(error) => {
+                    drop(
+                        props
+                            .answerer
+                            .respond(RouterAnswer::Failure(
+                                self.failure(ProtocolCode::PROCEDURE_FAILED),
+                            ))
+                            .await,
+                    );
+                    return Err(error);
+                }
+            }
+        }
+
         let ResolverProps {
             connection_handle,
             header,
@@ -1476,10 +1514,6 @@ where
             answerer,
             ..
         } = props;
-        let manager = &self.manager;
-        // * the one check a request makes while nobody listens; traced, the call starts as it
-        // arrives, its decoding counting in its duration
-        let started = manager.is_debugging().then(|| manager.started_now());
         // a payload that does not decode never reaches the callback: its codec's refusal is the
         // payload's, answered with its reason as its detail; its panic is its side's own error,
         // answered as a resolver's that panics, and why goes on for the router to report (spec
