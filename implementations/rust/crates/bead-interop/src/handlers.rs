@@ -17,6 +17,10 @@ use bead::{
 use serde_json::{Map, Value, json};
 use tokio::sync::oneshot;
 
+#[cfg(test)]
+#[path = "handlers/tests.rs"]
+mod tests;
+
 use crate::descriptors::{InteropProcedures, ON_PURPOSE, REGISTERED_ALREADY, interop_procedures};
 
 const QUESTION: &str = "What time is it where you are?";

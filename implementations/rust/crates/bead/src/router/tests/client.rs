@@ -26,6 +26,7 @@ pub(super) struct Notified {
     is_held: bool,
     failing: Mutex<Option<String>>,
     triggered: Mutex<Vec<u8>>,
+    payloads: Mutex<Vec<Bytes>>,
     held: Mutex<Vec<Option<oneshot::Sender<Settled>>>>,
     dropped: Mutex<Vec<Option<u16>>>,
 }
@@ -53,6 +54,7 @@ impl Notified {
             is_held: window.is_some(),
             failing: Mutex::default(),
             triggered: Mutex::default(),
+            payloads: Mutex::default(),
             held: Mutex::default(),
             dropped: Mutex::default(),
         })
@@ -70,6 +72,10 @@ impl Notified {
 
     pub(super) fn triggered(&self) -> Vec<u8> {
         locked(&self.triggered).clone()
+    }
+
+    pub(super) fn payloads(&self) -> Vec<Bytes> {
+        locked(&self.payloads).clone()
     }
 
     pub(super) fn dropped(&self) -> Vec<Option<u16>> {
@@ -99,6 +105,7 @@ impl NotificationLike for Notified {
 
     fn trigger(&self, payload: Bytes) -> Result<BoxFuture<Settled>, RouterError> {
         locked(&self.triggered).push(payload.first().copied().unwrap_or_default());
+        locked(&self.payloads).push(payload);
 
         let failing = locked(&self.failing).clone();
 
