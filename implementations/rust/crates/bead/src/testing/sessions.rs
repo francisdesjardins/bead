@@ -1,4 +1,4 @@
-//! Sessions whose timeouts are NEVER: arming any timer fails the test.
+//! A clock that refuses every timer: sessions use NEVER for their timeouts.
 
 use core::time::Duration;
 use std::sync::Arc;

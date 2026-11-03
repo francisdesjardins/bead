@@ -69,7 +69,7 @@ public static class Calling
             return response.Answer(new AskNameResponse { Name = Interlocked.Increment(ref asked) == 1 ? Name : "" });
         });
 
-        await client.Connect(new WebSocketConnectOptions { Host = "127.0.0.1", Port = port });
+        await client.Connect(new WebSocketTransportClientConnectOptions { Host = "127.0.0.1", Port = port });
 
         try
         {

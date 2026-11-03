@@ -17,8 +17,8 @@ use crate::debug::DebugDirection;
 use crate::errors::CallError;
 use crate::failure::Failure;
 use crate::managers::service::{
-    DebugEvent, RequestDependencies, RequestOptions, ResolverDependencies, Response, TracedError,
-    ValidateOptions,
+    DebugEvent, RequestDependencies, RequestOptions, RequestResolverDependencies, Response,
+    TracedError, ValidateOptions,
 };
 use crate::metrics::{MetricsRegistry, MetricsRegistryOptions};
 use crate::payloads::JsonCodec;
@@ -112,7 +112,10 @@ async fn counts_a_call_its_rules_refuse_before_it_goes_as_payload_invalid_starte
 
     pair.server
         .services()
-        .get_request_resolver(&echo(), ResolverDependencies::of(JsonCodec, JsonCodec))
+        .get_request_resolver(
+            &echo(),
+            RequestResolverDependencies::new(JsonCodec, JsonCodec),
+        )
         .expect("echo resolved")
         .on(Arc::new(|request, response: Response<JsonCodec>| {
             response.result(request.payload)
@@ -134,7 +137,7 @@ async fn counts_a_call_its_rules_refuse_before_it_goes_as_payload_invalid_starte
             &echo(),
             RequestDependencies {
                 validate: Some(Arc::new(judge)),
-                ..RequestDependencies::of(JsonCodec, JsonCodec)
+                ..RequestDependencies::new(JsonCodec, JsonCodec)
             },
         )
         .expect("echo asked");
@@ -205,7 +208,7 @@ async fn sends_an_unlisted_code_as_written_and_reports_it() {
     })
     .expect("echo described");
     let service = ServiceServer::new(
-        vec![ServiceProcedure::of(&descriptor)],
+        vec![ServiceProcedure::from(&descriptor)],
         &ServiceServerOptions::default(),
     )
     .expect("its server");
@@ -229,7 +232,7 @@ async fn sends_an_unlisted_code_as_written_and_reports_it() {
     let answered = pair
         .client
         .services()
-        .get_request(&echo(), RequestDependencies::of(JsonCodec, JsonCodec))
+        .get_request(&echo(), RequestDependencies::new(JsonCodec, JsonCodec))
         .expect("echo asked")
         .call(json!("hello"), &RequestOptions::default())
         .expect("echo called")

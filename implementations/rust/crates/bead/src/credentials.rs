@@ -20,8 +20,8 @@ use crate::constants::CredentialScheme;
 use crate::envelope::Credential;
 use crate::errors::{CapacityError, ProgrammerError};
 use crate::jwt_verifier::{
-    JwtAgainst, JwtAlgorithm, JwtKey, JwtRefusal, JwtSessionIdentifier, JwtVerdict, assert_jwt_key,
-    read_jwt, verify_jwt,
+    JwtAgainst, JwtAlgorithm, JwtKey, JwtRefusal, JwtSessionIdentifier, JwtVerdict, ReadJwt,
+    assert_jwt_key, read_jwt, verify_jwt,
 };
 use crate::router::core::{Resolved, Unresolved};
 use crate::router::types::{BoxFuture, CallSession, RouterLimits, SessionIdentifier};
@@ -727,7 +727,7 @@ fn wait_of(
     inner: &Arc<Inner>,
     (token, judged, signal): (&[u8], &[JwtKey], &CancellationToken),
 ) -> Result<Option<Wait>, Unresolved> {
-    let Some((header, claims)) = read_jwt(token) else {
+    let Some(ReadJwt { header, claims }) = read_jwt(token) else {
         return Ok(None);
     };
     let Some(issuer) = string_of(&claims, "iss").map(str::to_owned) else {

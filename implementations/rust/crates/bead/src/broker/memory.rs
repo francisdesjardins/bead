@@ -67,7 +67,7 @@ pub struct MemoryBrokerAdapterOptions {
 impl MemoryBrokerAdapterOptions {
     /// An adapter of `id`, offering every capability, giving its broker's delivery.
     #[must_use]
-    pub fn of<I: Into<String>>(id: I) -> Self {
+    pub fn new<I: Into<String>>(id: I) -> Self {
         Self {
             id: id.into(),
             capabilities: None,
@@ -649,7 +649,7 @@ impl MemoryBrokerAdapter {
             .broker
             .owner
             .offer(Box::new(move |state: &mut BrokerState| {
-                state.lost((index, BrokerDown::of(false)));
+                state.lost((index, BrokerDown::new(false)));
             }));
     }
 
@@ -663,7 +663,7 @@ impl MemoryBrokerAdapter {
             .broker
             .owner
             .offer(Box::new(move |state: &mut BrokerState| {
-                state.lost((index, BrokerDown::of(true)));
+                state.lost((index, BrokerDown::new(true)));
             }));
     }
 }

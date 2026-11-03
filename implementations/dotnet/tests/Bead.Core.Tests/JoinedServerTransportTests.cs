@@ -101,7 +101,7 @@ public sealed class JoinedServerTransportTests
         };
 
         await memory.Start();
-        await client.Connect(new MemoryConnectOptions { Server = memory }, Cancelled);
+        await client.Connect(new MemoryTransportClientConnectOptions { Server = memory }, Cancelled);
 
         var drawn = Assert.Single(memory.ConnectionHandles);
 
@@ -154,7 +154,7 @@ public sealed class JoinedServerTransportTests
             heard.Add(Convert.ToHexString(message.Bytes.Span));
         };
         await memory.Start();
-        await client.Connect(new MemoryConnectOptions { Server = memory }, Cancelled);
+        await client.Connect(new MemoryTransportClientConnectOptions { Server = memory }, Cancelled);
         paired.Open();
 
         var drawn = Assert.Single(memory.ConnectionHandles);
@@ -211,7 +211,7 @@ public sealed class JoinedServerTransportTests
             heard.AddRange(message.Bytes.ToArray());
         };
         await memory.Start();
-        await client.Connect(new MemoryConnectOptions { Server = memory }, Cancelled);
+        await client.Connect(new MemoryTransportClientConnectOptions { Server = memory }, Cancelled);
 
         var toMemory = Assert.Single(memory.ConnectionHandles);
 
@@ -299,8 +299,8 @@ public sealed class JoinedServerTransportTests
         await using var second = new MemoryTransportClient(new MemoryTransportClientOptions { Scheduler = scheduler });
 
         await memory.Start();
-        await first.Connect(new MemoryConnectOptions { Server = memory }, Cancelled);
-        await second.Connect(new MemoryConnectOptions { Server = memory }, Cancelled);
+        await first.Connect(new MemoryTransportClientConnectOptions { Server = memory }, Cancelled);
+        await second.Connect(new MemoryTransportClientConnectOptions { Server = memory }, Cancelled);
         uncounted.Open();
 
         var gauges = joined.Gauges();
@@ -391,7 +391,7 @@ public sealed class JoinedServerTransportTests
             }
         };
         await memory.Start();
-        await inMemory.Connect(new MemoryConnectOptions { Server = memory }, Cancelled);
+        await inMemory.Connect(new MemoryTransportClientConnectOptions { Server = memory }, Cancelled);
         paired.Open();
 
         var echoed = await Task.WhenAll(

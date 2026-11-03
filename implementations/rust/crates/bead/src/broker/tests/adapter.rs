@@ -13,7 +13,7 @@ use crate::broker::adapter::{
 use crate::errors::ProgrammerError;
 
 fn publication() -> BrokerPublication {
-    BrokerPublication::of(["bead", "i", "ada"], Bytes::from_static(b"private payload"))
+    BrokerPublication::new(["bead", "i", "ada"], Bytes::from_static(b"private payload"))
 }
 
 #[test]
@@ -152,11 +152,11 @@ fn lets_a_listener_hear_messages_or_link_loss_alone() {
     let messages = MessagesOnly::default();
     let downs = DownsOnly::default();
 
-    messages.on_down(BrokerDown::of(true));
+    messages.on_down(BrokerDown::new(true));
     messages.on_message(&message);
     downs.on_message(&message);
-    downs.on_down(BrokerDown::of(false));
-    downs.on_down(BrokerDown::of(true));
+    downs.on_down(BrokerDown::new(false));
+    downs.on_down(BrokerDown::new(true));
     assert_eq!(messages.0.load(Ordering::SeqCst), 1, "one message");
     assert_eq!(downs.0.load(Ordering::SeqCst), 1, "one takeover");
 }

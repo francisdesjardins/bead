@@ -5,6 +5,7 @@ use std::sync::{Arc, Mutex};
 use bytes::Bytes;
 
 use super::{Fixture, Recording, header, locked, props};
+use crate::NotificationResolverDependencies;
 use crate::clock::SharedClock;
 use crate::debug::{DebugDirection, DebugType};
 use crate::envelope::{CreditHeader, Envelope, RequestHeader};
@@ -12,7 +13,7 @@ use crate::errors::{CallError, ResolverError};
 use crate::identity::Procedure;
 use crate::managers::notification::NotificationKey;
 use crate::managers::service::{
-    Notifier, NotifyOptions, ResolverDependencies, ServiceManager, ServiceManagerOptions,
+    Notifier, NotifyOptions, RequestResolverDependencies, ServiceManager, ServiceManagerOptions,
     ServiceRouter, Subscriber, filter_of,
 };
 use crate::payloads::TextCodec;
@@ -22,9 +23,9 @@ use crate::testing::{SteppingClock, instants};
 
 fn news() -> Procedure {
     Procedure {
-        id: 2,
-        name: "news".to_owned(),
-        kind: Some(crate::constants::ProcedureKind::Notifies),
+        procedure_id: 2,
+        procedure_name: "news".to_owned(),
+        procedure_kind: Some(crate::constants::ProcedureKind::Notifies),
         ..echo()
     }
 }
@@ -34,7 +35,10 @@ fn notifier(fixture: &Fixture) -> Notifier<TextCodec> {
         .manager
         .get_notification_resolver(
             &news(),
-            (ResolverDependencies::of(TextCodec, TextCodec), TextCodec),
+            NotificationResolverDependencies::new(
+                RequestResolverDependencies::new(TextCodec, TextCodec),
+                TextCodec,
+            ),
         )
         .expect("defined")
         .on(Arc::new(|request, response| {
@@ -96,7 +100,10 @@ async fn registers_its_resolver_with_its_notify_for_its_router_to_declare_it_as_
     let fixture = Fixture::new();
     fixture
         .manager
-        .get_request_resolver(&echo(), ResolverDependencies::of(TextCodec, TextCodec))
+        .get_request_resolver(
+            &echo(),
+            RequestResolverDependencies::new(TextCodec, TextCodec),
+        )
         .expect("defined")
         .on(Arc::new(|_, _| Box::pin(async { Ok(()) })))
         .expect("registered");

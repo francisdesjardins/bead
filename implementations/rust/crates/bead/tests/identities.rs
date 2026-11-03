@@ -5,12 +5,13 @@
 use std::process::ExitCode;
 use std::sync::Arc;
 
+use bead::NotificationResolverDependencies;
 use bead::internal::are_one_name;
 use bead::testing::{self, Difference, files};
 use bead::{
-    BoxFuture, ClientListener, ClientTransport, ConnectionHandle, IdentityRefusal, JsonCodec,
-    NotificationLike, Procedure, ProcedureKind, ProgrammerError, ReadyState, Refusal,
-    ResolverDependencies, Response, RouterClient, RouterClientOptions, RouterError, RouterServer,
+    BoxFuture, ClientListener, ConnectionHandle, IdentityRefusal, JsonCodec, NotificationLike,
+    Procedure, ProcedureKind, ProgrammerError, ReadyState, Refusal, RequestResolverDependencies,
+    Response, RouterClient, RouterClientOptions, RouterClientTransport, RouterError, RouterServer,
     RouterServerOptions, Sent, ServerListener, ServerTransport, ServiceManager,
     ServiceManagerOptions, ServiceRouter, TransportMessage,
 };
@@ -32,7 +33,7 @@ const WAYS: [&str; 6] = [
 #[derive(Debug)]
 struct Unconnected;
 
-impl ClientTransport for Unconnected {
+impl RouterClientTransport for Unconnected {
     fn send(&self, _message: TransportMessage) -> Result<Sent, RouterError> {
         Ok(Sent::Done)
     }
@@ -139,17 +140,26 @@ fn declare(way: &str, (procedure, routers): (&Procedure, &Routers)) -> Result<()
     match way {
         "client-resolver" => routers
             .client_services
-            .get_command_resolver(procedure, ResolverDependencies::of(JsonCodec, JsonCodec))?
+            .get_command_resolver(
+                procedure,
+                RequestResolverDependencies::new(JsonCodec, JsonCodec),
+            )?
             .on(answering()),
         "server-resolver" => routers
             .server_services
-            .get_request_resolver(procedure, ResolverDependencies::of(JsonCodec, JsonCodec))?
+            .get_request_resolver(
+                procedure,
+                RequestResolverDependencies::new(JsonCodec, JsonCodec),
+            )?
             .on(answering()),
         "server-notification-resolver" => routers
             .server_services
             .get_notification_resolver(
                 procedure,
-                (ResolverDependencies::of(JsonCodec, JsonCodec), JsonCodec),
+                NotificationResolverDependencies::new(
+                    RequestResolverDependencies::new(JsonCodec, JsonCodec),
+                    JsonCodec,
+                ),
             )?
             .on(answering())
             .map(drop),
@@ -165,10 +175,10 @@ fn declare(way: &str, (procedure, routers): (&Procedure, &Routers)) -> Result<()
 fn echo() -> Procedure {
     Procedure {
         service_id: 1,
-        id: 1,
+        procedure_id: 1,
         service_revision: 1,
-        name: "echo".to_owned(),
-        kind: None,
+        procedure_name: "echo".to_owned(),
+        procedure_kind: None,
         maximum_payload_bytes: None,
         deprecation: None,
     }
@@ -364,7 +374,7 @@ fn trials() -> Result<Vec<Trial>, String> {
         trials.push(
             Trial::test(named(&entry), move || {
                 let procedure = Procedure {
-                    name: entry
+                    procedure_name: entry
                         .get("procedureName")
                         .and_then(Value::as_str)
                         .unwrap_or_default()
@@ -385,9 +395,9 @@ fn trials() -> Result<Vec<Trial>, String> {
                     ids_of(&entry).ok_or("ids a Rust type holds")?;
                 let procedure = Procedure {
                     service_id,
-                    id,
+                    procedure_id: id,
                     service_revision,
-                    name: entry
+                    procedure_name: entry
                         .get("procedureName")
                         .and_then(Value::as_str)
                         .unwrap_or("echo")
@@ -408,11 +418,11 @@ fn trials() -> Result<Vec<Trial>, String> {
         trials.push(
             Trial::test(named(&entry), move || {
                 let procedure = Procedure {
-                    kind: entry
+                    procedure_kind: entry
                         .get("procedureKind")
                         .and_then(Value::as_str)
                         .and_then(kind_of),
-                    name: entry
+                    procedure_name: entry
                         .get("procedureName")
                         .and_then(Value::as_str)
                         .unwrap_or("echo")

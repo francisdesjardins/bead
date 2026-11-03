@@ -37,7 +37,10 @@ const serializer = {
 /** The echo transport's own options, which the client reads back from it. */
 interface IEchoTransport extends IClientTransportLike {
   connect(options: { host: string }): Promise<void>;
-  reconnect(options?: { maxAttempts?: number; signal?: AbortSignal | undefined }): Promise<void>;
+  reconnect(options?: {
+    maximumAttempts?: number;
+    signal?: AbortSignal | undefined;
+  }): Promise<void>;
 }
 
 /** A transport that records its calls, and answers each request with its own payload. */
@@ -72,7 +75,7 @@ const createEchoTransport = () => {
           reject(reason instanceof Error ? reason : new Error('aborted'));
         });
         queueMicrotask(() => {
-          if (options?.maxAttempts !== undefined) {
+          if (options?.maximumAttempts !== undefined) {
             reject(new Error('given up'));
           }
         });
@@ -121,12 +124,12 @@ test.describe('createClient', () => {
 
     await client.connect({ host: 'h' });
     await client.disconnect({ isClean: false });
-    await expect(client.reconnect({ maxAttempts: 2 })).rejects.toThrow('given up');
+    await expect(client.reconnect({ maximumAttempts: 2 })).rejects.toThrow('given up');
 
     expect(calls).toEqual([
       ['connect', { host: 'h' }],
       ['disconnect', { isClean: false }],
-      ['reconnect', { maxAttempts: 2, signal: expect.any(AbortSignal) }],
+      ['reconnect', { maximumAttempts: 2, signal: expect.any(AbortSignal) }],
     ]);
     expect(client.transport).toBe(transport);
     expect(client.router.transport).toBe(transport);

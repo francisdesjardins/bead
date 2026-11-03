@@ -10,7 +10,8 @@ use bytes::Bytes;
 use crate::clock::Timer;
 use crate::constants::{ProtocolCode, RouterSide};
 use crate::envelope::{
-    ChunkHeader, Envelope, Header, MAXIMUM_HEADER_BYTES, header_bytes_of, unbounded_header_bytes_of,
+    ChunkHeader, Envelope, EnvelopeHeader, MAXIMUM_HEADER_BYTES, header_bytes_of,
+    unbounded_header_bytes_of,
 };
 use crate::errors::ProgrammerError;
 use crate::failure::{Failure, ProcedureAddress};
@@ -68,7 +69,7 @@ pub(crate) enum Placed {
 impl Placement {
     pub(crate) fn new(side: RouterSide, limits: RouterLimits) -> Self {
         let whole_bytes = limits.chunk_bytes.min(limits.maximum_envelope_bytes);
-        let chunk_header = header_bytes_of(&Header::Chunk(ChunkHeader {
+        let chunk_header = header_bytes_of(&EnvelopeHeader::Chunk(ChunkHeader {
             call_id: 1,
             offset: 0,
             is_last: true,
@@ -101,10 +102,10 @@ impl Placement {
     pub(crate) fn transfer_of(
         &self,
         payload: &Bytes,
-        (header, maximum_payload_bytes): (&Header, u64),
+        (header, maximum_payload_bytes): (&EnvelopeHeader, u64),
     ) -> Result<Placed, Failure> {
         let length = length_of(payload);
-        let announcement = if matches!(header, Header::Result(_)) {
+        let announcement = if matches!(header, EnvelopeHeader::Result(_)) {
             ANNOUNCEMENT_BYTES
         } else {
             0
@@ -177,25 +178,25 @@ impl Placement {
 }
 
 /// `header`, a request's or a result's, declaring a transfer's `total`.
-pub(crate) fn with_total(header: &Header, total: u64) -> Header {
+pub(crate) fn with_total(header: &EnvelopeHeader, total: u64) -> EnvelopeHeader {
     match header {
-        Header::Request(request) => {
+        EnvelopeHeader::Request(request) => {
             let mut opening = request.clone();
 
             opening.total = Some(total);
-            Header::Request(opening)
+            EnvelopeHeader::Request(opening)
         }
-        Header::Result(result) => {
+        EnvelopeHeader::Result(result) => {
             let mut opening = result.clone();
 
             opening.total = Some(total);
-            Header::Result(opening)
+            EnvelopeHeader::Result(opening)
         }
-        Header::Failure(_)
-        | Header::Notification(_)
-        | Header::Chunk(_)
-        | Header::Credit(_)
-        | Header::Cancel(_) => header.clone(),
+        EnvelopeHeader::Failure(_)
+        | EnvelopeHeader::Notification(_)
+        | EnvelopeHeader::Chunk(_)
+        | EnvelopeHeader::Credit(_)
+        | EnvelopeHeader::Cancel(_) => header.clone(),
     }
 }
 

@@ -1835,14 +1835,14 @@ public sealed class HttpGatewayTests
         Assert.Null(Edges.Parser.ParseFrom(varintAt).At);
 
         // HttpEvents.DataOf, as a stream's writer calls it: through the runtime reader, its records checked
-        Assert.Equal("{\"ints\":[1]}", Text(HttpEvents.DataOf(HttpPayload.Of(Edges.Descriptor), (new byte[] { 0x70, 1 }, Form))));
+        Assert.Equal("{\"ints\":[1]}", Text(Form.EventDataOf(HttpPayload.Of(Edges.Descriptor), new byte[] { 0x70, 1 })));
         Assert.Throws<FormatException>(() =>
         {
-            return HttpEvents.DataOf(HttpPayload.Of(Edges.Descriptor), (varintAt, Form));
+            return Form.EventDataOf(HttpPayload.Of(Edges.Descriptor), varintAt);
         });
         Assert.Equal("a required field unset", Assert.Throws<FormatException>(() =>
         {
-            return HttpEvents.DataOf(HttpPayload.Of(Needs.Descriptor), (new byte[] { 0x10, 1 }, Form));
+            return Form.EventDataOf(HttpPayload.Of(Needs.Descriptor), new byte[] { 0x10, 1 });
         }).Message);
 
         // and the gateway's stream, its notifications read so

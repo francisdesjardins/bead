@@ -13,7 +13,7 @@ use crate::constants::{CredentialScheme, ProtocolCode};
 use crate::credentials::{Credentials, ElsewhereSession};
 use crate::envelope::{Credential, Envelope, RequestHeader};
 use crate::jwt_verifier::{JwtAlgorithm, JwtKey};
-use crate::managers::service::{ResolverDependencies, Response};
+use crate::managers::service::{RequestResolverDependencies, Response};
 use crate::payloads::TextCodec;
 use crate::router::admissions::{BeforeRequest, require_session};
 use crate::router::relay::{DestinationOptions, RelayOptions, RelayTarget};
@@ -63,7 +63,10 @@ fn message(envelope: &Envelope, carried: Option<String>) -> TransportMessage {
 fn echoed(server: &Server) {
     server
         .services()
-        .get_request_resolver(&echo(), ResolverDependencies::of(TextCodec, TextCodec))
+        .get_request_resolver(
+            &echo(),
+            RequestResolverDependencies::new(TextCodec, TextCodec),
+        )
         .expect("echo resolved")
         .on(Arc::new(|_, response: Response<TextCodec>| {
             response.result("ran".to_owned())
@@ -110,6 +113,10 @@ fn jwt_vectors() -> (Vec<JwtVector>, usize) {
     (entries, refused)
 }
 
+#[expect(
+    clippy::too_many_lines,
+    reason = "the twin plays every refusing verdict of the vectors in one pass"
+)]
 #[tokio::test]
 async fn tells_a_jwt_refused_by_the_step_of_section_13_8_that_refused_it_for_every_verdict_of_spec_vectors_json_that_refuses()
  {
@@ -176,7 +183,10 @@ async fn tells_a_jwt_refused_by_the_step_of_section_13_8_that_refused_it_for_eve
         });
         served
             .services
-            .get_request_resolver(&echo(), ResolverDependencies::of(TextCodec, TextCodec))
+            .get_request_resolver(
+                &echo(),
+                RequestResolverDependencies::new(TextCodec, TextCodec),
+            )
             .expect("echo resolved")
             .on(Arc::new(|_, response: Response<TextCodec>| {
                 response.result("ran".to_owned())
@@ -341,11 +351,11 @@ async fn refuses_as_it_would_though_an_access_refused_listener_throws_the_throw_
         let served = Served::new(&RouterServerOptions::default());
         served.transport.open(&first(), true);
         let guarded = crate::identity::Procedure {
-            id: 2,
-            name: "guarded".to_owned(),
+            procedure_id: 2,
+            procedure_name: "guarded".to_owned(),
             ..echo()
         };
-        let mut dependencies = ResolverDependencies::of(TextCodec, TextCodec);
+        let mut dependencies = RequestResolverDependencies::new(TextCodec, TextCodec);
         dependencies.before_request = Some(require_session());
         served
             .services
@@ -357,7 +367,10 @@ async fn refuses_as_it_would_though_an_access_refused_listener_throws_the_throw_
             .expect("guarded registered");
         served
             .services
-            .get_request_resolver(&echo(), ResolverDependencies::of(TextCodec, TextCodec))
+            .get_request_resolver(
+                &echo(),
+                RequestResolverDependencies::new(TextCodec, TextCodec),
+            )
             .expect("echo resolved")
             .on(Arc::new(|_, response: Response<TextCodec>| {
                 response.result("ok".to_owned())

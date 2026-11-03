@@ -16,8 +16,13 @@ use tokio_util::sync::CancellationToken;
 use crate::constants::CredentialScheme;
 use crate::duration::{LONGEST_TIMER, hold_finite};
 use crate::envelope::{FailureRecord, MAXIMUM_DETAIL_BYTES, MAXIMUM_ENVELOPE_BYTES, ResultHeader};
-use crate::errors::ProgrammerError;
-use crate::failure::Failure;
+use crate::errors::{CallError, ProgrammerError};
+use crate::failure::{Failure, ProcedureAddress};
+use crate::identity::Procedure;
+use crate::managers::notification::NotificationKey;
+use crate::metrics::ProcedureSeries;
+use crate::router::client::NotificationLike;
+use crate::router::server::NotifyFilter;
 
 #[cfg(test)]
 mod tests;
@@ -470,7 +475,7 @@ pub struct ResolvedRequestOptions {
 impl ResolvedRequestOptions {
     /// A request's options of `timeout`, held, every other option none.
     #[must_use]
-    pub const fn of(timeout: Duration) -> Self {
+    pub const fn new(timeout: Duration) -> Self {
         Self {
             timeout,
             destination_id: None,
@@ -478,6 +483,86 @@ impl ResolvedRequestOptions {
             credential: None,
             signal: None,
             close_on_timeout: None,
+        }
+    }
+}
+
+/// A call a router makes: a client's, or a server's own to the connection its options name.
+#[non_exhaustive]
+pub struct RouterRequest {
+    /// The procedure it calls.
+    pub procedure: Procedure,
+    /// Its options, resolved: on a server's, the connection it goes to among them.
+    pub options: ResolvedRequestOptions,
+    /// The series it counts into: its requester's.
+    pub series: Option<ProcedureSeries>,
+    /// What refuses it once it started, as its requester judged it.
+    pub refusal: Option<CallError>,
+    /// The notification it subscribes, the one its router holds for its procedure; a client's
+    /// alone, since a server's router refuses one.
+    pub subscribes: Option<Arc<dyn NotificationLike>>,
+    /// Hears the call's id once its router drew it.
+    pub on_call_id: Option<Box<dyn FnOnce(u32) + Send>>,
+    /// Hears whether its transport took it.
+    pub on_sent: Option<Box<dyn FnMut(bool) + Send>>,
+}
+
+impl fmt::Debug for RouterRequest {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("RouterRequest")
+            .field("procedure", &self.procedure)
+            .finish_non_exhaustive()
+    }
+}
+
+impl RouterRequest {
+    /// A call of `procedure`, under `options`, nothing else told.
+    #[must_use]
+    pub fn new(procedure: Procedure, options: &ResolvedRequestOptions) -> Self {
+        Self {
+            procedure,
+            options: options.clone(),
+            series: None,
+            refusal: None,
+            subscribes: None,
+            on_call_id: None,
+            on_sent: None,
+        }
+    }
+}
+
+/// What a server's router notifies: the procedure whose subscriptions hear it, what keeps each, and
+/// the key its notifications are told apart by.
+#[non_exhaustive]
+pub struct NotifyRequest {
+    /// The procedure whose subscriptions hear it.
+    pub procedure: ProcedureAddress,
+    /// What keeps each subscription that hears it: every one when none.
+    pub filter: Option<NotifyFilter>,
+    /// The key a notification of its procedure is told apart by, which its subscription's window
+    /// keeps the latest of.
+    pub key: Option<NotificationKey>,
+}
+
+impl fmt::Debug for NotifyRequest {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("NotifyRequest")
+            .field("procedure", &self.procedure)
+            .field("key", &self.key)
+            .finish_non_exhaustive()
+    }
+}
+
+impl NotifyRequest {
+    /// A notification of `procedure`, to every subscription of it, under no key.
+    #[must_use]
+    pub const fn new(procedure: ProcedureAddress) -> Self {
+        Self {
+            procedure,
+            filter: None,
+            key: None,
         }
     }
 }

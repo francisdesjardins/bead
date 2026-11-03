@@ -3,15 +3,15 @@
 use super::{request, result};
 use crate::constants::{CredentialScheme, ProtocolCode, RouterSide};
 use crate::envelope::{
-    Credential, FailureHeader, Header, header_bytes_of, read_header, write_header,
+    Credential, EnvelopeHeader, FailureHeader, header_bytes_of, read_header, write_header,
 };
 use crate::session_token::SessionToken;
 
-fn headers(credential: &Credential) -> [Header; 3] {
+fn headers(credential: &Credential) -> [EnvelopeHeader; 3] {
     [
-        Header::Request(request(Some(credential.clone()))),
-        Header::Result(result(Some(credential.clone()))),
-        Header::Failure(FailureHeader {
+        EnvelopeHeader::Request(request(Some(credential.clone()))),
+        EnvelopeHeader::Result(result(Some(credential.clone()))),
+        EnvelopeHeader::Failure(FailureHeader {
             call_id: 3,
             credential: Some(credential.clone()),
         }),
@@ -73,7 +73,11 @@ fn a_wire_opaque_credential_reads_with_its_token_and_never_as_a_redacted_value()
     }
     // ! a scheme alone on the wire is malformed, never a redacted credential to retain
     let mut bytes = Vec::new();
-    write_header(&Header::Result(result(Some(credential))), &mut bytes).expect("a result");
+    write_header(
+        &EnvelopeHeader::Result(result(Some(credential))),
+        &mut bytes,
+    )
+    .expect("a result");
     bytes.truncate(12);
     bytes[3] = 3;
     bytes[10] = 0;

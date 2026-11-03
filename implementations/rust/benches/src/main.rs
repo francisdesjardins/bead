@@ -27,9 +27,10 @@ use std::time::{Duration, Instant};
 
 use bead::internal::{Envelope, ReadEnvelopeOptions, read_envelope, write_envelope};
 use bead::{
-    Client, ClientOptions, MemoryClient, MemoryClientOptions, MemoryConnectOptions, MemoryServer,
-    MemoryServerOptions, Procedure, RequestDependencies, RequestHeader, RequestOptions, RouterSide,
-    Server, ServerOptions, ServerTransport,
+    Client, ClientOptions, MemoryTransportClient, MemoryTransportClientConnectOptions,
+    MemoryTransportClientOptions, MemoryTransportServer, MemoryTransportServerOptions, Procedure,
+    RequestDependencies, RequestHeader, RequestOptions, RouterSide, Server, ServerOptions,
+    ServerTransport,
 };
 use bead_interop::{interop_procedures, offer_interop};
 use serde_json::{Value, json};
@@ -207,15 +208,15 @@ fn double_of(count: usize) -> f64 {
 
 /// The interop service on an in-memory server, and a client of it connected.
 struct Stand {
-    memory: MemoryServer,
+    memory: MemoryTransportServer,
     server: Server,
     client: Client,
     echo: Procedure,
 }
 
 async fn stand() -> Result<Stand, String> {
-    let memory =
-        MemoryServer::new(&MemoryServerOptions::default()).map_err(|error| error.to_string())?;
+    let memory = MemoryTransportServer::new(&MemoryTransportServerOptions::default())
+        .map_err(|error| error.to_string())?;
     let server = Server::new(Arc::new(memory.clone()), &ServerOptions::default())
         .map_err(|error| error.to_string())?;
 
@@ -238,14 +239,16 @@ async fn stand() -> Result<Stand, String> {
 }
 
 // a client of `memory`, connected, and its transport
-async fn connected(memory: &MemoryServer) -> Result<(Client, MemoryClient), String> {
-    let transport =
-        MemoryClient::new(&MemoryClientOptions::default()).map_err(|error| error.to_string())?;
+async fn connected(
+    memory: &MemoryTransportServer,
+) -> Result<(Client, MemoryTransportClient), String> {
+    let transport = MemoryTransportClient::new(&MemoryTransportClientOptions::default())
+        .map_err(|error| error.to_string())?;
     let client = Client::new(Arc::new(transport.clone()), &ClientOptions::default())
         .map_err(|error| error.to_string())?;
 
     transport
-        .connect(&MemoryConnectOptions::of(memory.clone()))
+        .connect(&MemoryTransportClientConnectOptions::new(memory.clone()))
         .await
         .map_err(|error| error.to_string())?;
 
@@ -257,7 +260,7 @@ async fn echo_on(client: &Client, (echo, body): (&Procedure, &str)) -> Result<()
         .services()
         .get_request(
             echo,
-            RequestDependencies::of(bead::JsonCodec, bead::JsonCodec),
+            RequestDependencies::new(bead::JsonCodec, bead::JsonCodec),
         )
         .map_err(|error| error.to_string())?
         .call(Value::from(body), &RequestOptions::default())

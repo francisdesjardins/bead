@@ -6,6 +6,7 @@ use std::sync::{Arc, Mutex};
 use bytes::Bytes;
 
 use super::{ClientFixture, locked};
+use crate::RequestDependencies;
 use crate::constants::{ProcedureKind, ProtocolCode, RouterSide};
 use crate::envelope::{Envelope, FailureHeader, NotificationHeader, ResultHeader};
 use crate::errors::CallError;
@@ -24,7 +25,7 @@ pub(super) type Heard = Arc<Mutex<Vec<String>>>;
 
 pub(super) fn procedure() -> Procedure {
     Procedure {
-        kind: None,
+        procedure_kind: None,
         ..echo()
     }
 }
@@ -34,7 +35,10 @@ pub(super) fn notification(fixture: &ClientFixture) -> News {
         .manager
         .get_notification(
             &procedure(),
-            NotificationDependencies::of((TextCodec, TextCodec, TextCodec)),
+            NotificationDependencies::new(
+                RequestDependencies::new(TextCodec, TextCodec),
+                TextCodec,
+            ),
         )
         .expect("declared")
 }
@@ -86,10 +90,8 @@ pub(super) async fn subscribed(
     fixture: &ClientFixture,
     (notification, callback): (&News, NotificationCallback<String>),
 ) -> NotificationRegistration {
-    let mut registering = notification.on(
-        ("subscribe".to_owned(), callback),
-        &RequestOptions::default(),
-    );
+    let mut registering =
+        notification.register("subscribe".to_owned(), callback, &RequestOptions::default());
     pending(&mut registering).await;
     fixture.clock.settle().await;
     let call_id = requests(fixture).last().expect("a request").call_id();
@@ -123,8 +125,9 @@ async fn its_request_takes_the_destination_and_the_timeout_it_is_given_and_names
  {
     let fixture = ClientFixture::new();
     let notification = notification(&fixture);
-    let mut registering = notification.on(
-        ("s".to_owned(), callback(&Heard::default(), "")),
+    let mut registering = notification.register(
+        "s".to_owned(),
+        callback(&Heard::default(), ""),
         &RequestOptions {
             destination_id: Some(3),
             timeout: Some(Duration::from_millis(50)),
@@ -153,8 +156,9 @@ async fn the_router_holds_it_before_its_request_goes_out_so_a_notification_right
     let fixture = ClientFixture::new();
     let notification = notification(&fixture);
     let heard = Heard::default();
-    let mut registering = notification.on(
-        ("s".to_owned(), callback(&heard, "")),
+    let mut registering = notification.register(
+        "s".to_owned(),
+        callback(&heard, ""),
         &RequestOptions::default(),
     );
     pending(&mut registering).await;
@@ -186,8 +190,9 @@ async fn once_registered_another_callback_joins_without_a_request() {
     let heard = Heard::default();
     let first = subscribed(&fixture, (&notification, callback(&heard, "first "))).await;
     let second = notification
-        .on(
-            ("subscribe".to_owned(), callback(&heard, "second ")),
+        .register(
+            "subscribe".to_owned(),
+            callback(&heard, "second "),
             &RequestOptions::default(),
         )
         .await
@@ -205,12 +210,14 @@ async fn callbacks_registering_at_once_share_one_request_and_one_registration() 
     let fixture = ClientFixture::new();
     let notification = notification(&fixture);
     let heard = Heard::default();
-    let mut first = notification.on(
-        ("a".to_owned(), callback(&heard, "a ")),
+    let mut first = notification.register(
+        "a".to_owned(),
+        callback(&heard, "a "),
         &RequestOptions::default(),
     );
-    let mut second = notification.on(
-        ("b".to_owned(), callback(&heard, "b ")),
+    let mut second = notification.register(
+        "b".to_owned(),
+        callback(&heard, "b "),
         &RequestOptions::default(),
     );
     pending(&mut first).await;
@@ -233,8 +240,9 @@ async fn a_failed_request_rejects_and_keeps_nothing_the_next_registration_asks_a
     let fixture = ClientFixture::new();
     let notification = notification(&fixture);
     let heard = Heard::default();
-    let mut first = notification.on(
-        ("a".to_owned(), callback(&heard, "a ")),
+    let mut first = notification.register(
+        "a".to_owned(),
+        callback(&heard, "a "),
         &RequestOptions::default(),
     );
     pending(&mut first).await;
@@ -268,14 +276,15 @@ async fn an_answer_to_its_subscription_that_does_not_decode_lets_go_of_it_the_ro
         .manager
         .get_notification(
             &procedure(),
-            NotificationDependencies::of((JsonCodec, JsonCodec, JsonCodec)),
+            NotificationDependencies::new(
+                RequestDependencies::new(JsonCodec, JsonCodec),
+                JsonCodec,
+            ),
         )
         .expect("declared");
-    let mut registering = notification.on(
-        (
-            serde_json::json!({ "text": "a" }),
-            Arc::new(|_| Box::pin(async { Ok(()) })),
-        ),
+    let mut registering = notification.register(
+        serde_json::json!({ "text": "a" }),
+        Arc::new(|_| Box::pin(async { Ok(()) })),
         &RequestOptions::default(),
     );
     pending(&mut registering).await;
@@ -298,8 +307,9 @@ async fn the_last_callback_taken_away_unregisters_the_notification_taking_one_aw
     let heard = Heard::default();
     let first = subscribed(&fixture, (&notification, callback(&heard, "first "))).await;
     let second = notification
-        .on(
-            ("s".to_owned(), callback(&heard, "second ")),
+        .register(
+            "s".to_owned(),
+            callback(&heard, "second "),
             &RequestOptions::default(),
         )
         .await
@@ -330,7 +340,8 @@ async fn the_last_callback_out_unsubscribes_with_the_call_id_and_the_answer_that
         None::<std::sync::Weak<dyn crate::router::client::NotificationLike>>,
     ));
     let reading = Arc::clone(&liked);
-    let mut dependencies = NotificationDependencies::of((TextCodec, TextCodec, TextCodec));
+    let mut dependencies =
+        NotificationDependencies::new(RequestDependencies::new(TextCodec, TextCodec), TextCodec);
     dependencies.unsubscribe = Some(Arc::new(move |call_id, response| {
         let notification = locked(&reading)
             .as_ref()
@@ -347,8 +358,9 @@ async fn the_last_callback_out_unsubscribes_with_the_call_id_and_the_answer_that
     *locked(&liked) = Some(Arc::downgrade(&notification.as_like()));
     let first = subscribed(&fixture, (&notification, callback(&Heard::default(), ""))).await;
     let second = notification
-        .on(
-            ("s".to_owned(), callback(&Heard::default(), "")),
+        .register(
+            "s".to_owned(),
+            callback(&Heard::default(), ""),
             &RequestOptions::default(),
         )
         .await
@@ -369,7 +381,7 @@ async fn taking_the_same_registration_away_twice_leaves_another_of_the_same_call
     let callback = callback(&heard, "");
     let first = subscribed(&fixture, (&notification, Arc::clone(&callback))).await;
     let second = notification
-        .on(("s".to_owned(), callback), &RequestOptions::default())
+        .register("s".to_owned(), callback, &RequestOptions::default())
         .await
         .expect("joined");
     first.unregister().await.expect("first out");
@@ -393,8 +405,9 @@ async fn the_same_procedure_gives_the_same_notification_so_every_callback_is_hea
     let heard = Heard::default();
     let one = subscribed(&fixture, (&first, callback(&heard, "first "))).await;
     let two = second
-        .on(
-            ("s".to_owned(), callback(&heard, "second ")),
+        .register(
+            "s".to_owned(),
+            callback(&heard, "second "),
             &RequestOptions::default(),
         )
         .await
@@ -413,11 +426,11 @@ async fn the_same_procedure_under_another_kind_name_revision_deprecation_or_limi
     let held = notification(&fixture);
     for asked in [
         Procedure {
-            kind: Some(ProcedureKind::Notifies),
+            procedure_kind: Some(ProcedureKind::Notifies),
             ..procedure()
         },
         Procedure {
-            name: "echo2".to_owned(),
+            procedure_name: "echo2".to_owned(),
             ..procedure()
         },
         Procedure {
@@ -443,12 +456,15 @@ async fn the_same_procedure_under_another_kind_name_revision_deprecation_or_limi
             .manager
             .get_notification(
                 &asked,
-                NotificationDependencies::of((TextCodec, TextCodec, TextCodec)),
+                NotificationDependencies::new(
+                    RequestDependencies::new(TextCodec, TextCodec),
+                    TextCodec,
+                ),
             )
             .expect_err("another declaration");
     }
     let deprecated = Procedure {
-        id: 70,
+        procedure_id: 70,
         deprecation: Some(Deprecation {
             message: Some("use news2".to_owned()),
         }),
@@ -458,7 +474,10 @@ async fn the_same_procedure_under_another_kind_name_revision_deprecation_or_limi
         .manager
         .get_notification(
             &deprecated,
-            NotificationDependencies::of((TextCodec, TextCodec, TextCodec)),
+            NotificationDependencies::new(
+                RequestDependencies::new(TextCodec, TextCodec),
+                TextCodec,
+            ),
         )
         .expect("declared");
     let second = fixture
@@ -470,7 +489,10 @@ async fn the_same_procedure_under_another_kind_name_revision_deprecation_or_limi
                 }),
                 ..deprecated
             },
-            NotificationDependencies::of((TextCodec, TextCodec, TextCodec)),
+            NotificationDependencies::new(
+                RequestDependencies::new(TextCodec, TextCodec),
+                TextCodec,
+            ),
         )
         .expect("declared again");
     assert!(Arc::ptr_eq(&first.as_like(), &second.as_like()));
@@ -486,15 +508,18 @@ async fn refuses_a_notification_asked_for_again_at_another_window_none_against_o
     for (paced_id, unpaced_id) in [(71, 1), (1, 9)] {
         let fixture = ClientFixture::new();
         let paced = Procedure {
-            id: paced_id,
+            procedure_id: paced_id,
             ..procedure()
         };
         let unpaced = Procedure {
-            id: unpaced_id,
+            procedure_id: unpaced_id,
             ..procedure()
         };
         let dependencies = |window| {
-            let mut dependencies = NotificationDependencies::of((TextCodec, TextCodec, TextCodec));
+            let mut dependencies = NotificationDependencies::new(
+                RequestDependencies::new(TextCodec, TextCodec),
+                TextCodec,
+            );
             dependencies.window = window;
             dependencies
         };
@@ -542,7 +567,8 @@ async fn refuses_a_notification_asked_for_again_at_another_window_none_against_o
 #[tokio::test]
 async fn makes_a_notification_with_the_window_its_dependencies_give_paced_by_it() {
     let fixture = ClientFixture::new();
-    let mut dependencies = NotificationDependencies::of((TextCodec, TextCodec, TextCodec));
+    let mut dependencies =
+        NotificationDependencies::new(RequestDependencies::new(TextCodec, TextCodec), TextCodec);
     dependencies.window = Some(2);
     let notification = fixture
         .manager
@@ -553,10 +579,13 @@ async fn makes_a_notification_with_the_window_its_dependencies_give_paced_by_it(
         .manager
         .get_notification(
             &Procedure {
-                id: 9,
+                procedure_id: 9,
                 ..procedure()
             },
-            NotificationDependencies::of((TextCodec, TextCodec, TextCodec)),
+            NotificationDependencies::new(
+                RequestDependencies::new(TextCodec, TextCodec),
+                TextCodec,
+            ),
         )
         .expect("declared");
     assert_eq!(unpaced.as_like().window(), None);

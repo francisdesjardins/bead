@@ -11,11 +11,11 @@ use super::{Fixture, Recording, header, locked, props};
 use crate::clock::SharedClock;
 use crate::constants::{ProtocolCode, RouterSide};
 use crate::failure::Failure;
-use crate::managers::service::ResolverDependencies;
-use crate::managers::sessions::{SessionManager, SessionManagerOptions};
+use crate::managers::service::RequestResolverDependencies;
+use crate::managers::sessions::{SessionManagerOptions, SessionState};
 use crate::payloads::{JsonCodec, TextCodec};
 use crate::router::admissions::BeforeRequest;
-use crate::router::core::{AdmissionRequest, ResolverProps};
+use crate::router::core::{AdmissionRequest, RequestResolverProps};
 use crate::router::types::{CallSession, RouterAnswer};
 use crate::testing::pair::echo;
 use crate::testing::scripted::handle_of;
@@ -26,7 +26,7 @@ async fn a_routers_own_handle_type_reaches_the_callback_for_the_session_manager_
     let fixture = Fixture::new();
     let connection = handle_of(1);
     let clock: SharedClock = Arc::<crate::testing::SteppingClock>::clone(&fixture.clock);
-    let mut sessions = SessionManager::new(&SessionManagerOptions {
+    let mut sessions = SessionState::new(&SessionManagerOptions {
         clock: Some(clock),
         ..SessionManagerOptions::default()
     })
@@ -34,7 +34,7 @@ async fn a_routers_own_handle_type_reaches_the_callback_for_the_session_manager_
     sessions
         .get_or_else_set(&connection, (&NeverArming, &mut Vec::new()))
         .expect("the router's handle stores a session");
-    let mut dependencies = ResolverDependencies::of(TextCodec, TextCodec);
+    let mut dependencies = RequestResolverDependencies::new(TextCodec, TextCodec);
     let admissions = Arc::new(AtomicUsize::new(0));
     let admitting = Arc::clone(&admissions);
     dependencies.before_request = Some(BeforeRequest::new(
@@ -55,7 +55,7 @@ async fn a_routers_own_handle_type_reaches_the_callback_for_the_session_manager_
         }))
         .expect("echo registered");
     let recording = Arc::new(Recording::default());
-    let request = ResolverProps {
+    let request = RequestResolverProps {
         is_admitted: false,
         connection_handle: connection,
         ..props(&recording, b"hi")
@@ -84,7 +84,7 @@ async fn reads_the_calls_session_its_router_resolved_and_so_does_the_callback_wh
     });
     let read = Arc::new(Mutex::new(Vec::new()));
     let reading = Arc::clone(&read);
-    let mut dependencies = ResolverDependencies::of(JsonCodec, JsonCodec);
+    let mut dependencies = RequestResolverDependencies::new(JsonCodec, JsonCodec);
     dependencies.before_request = Some(BeforeRequest::new(
         move |request| {
             locked(&reading).push(("admission", request.session.clone()));
@@ -119,7 +119,7 @@ async fn reads_the_calls_session_its_router_resolved_and_so_does_the_callback_wh
         (false, Some(Arc::clone(&ada))),
         (false, None),
     ] {
-        (resolver.resolve)(ResolverProps {
+        (resolver.resolve)(RequestResolverProps {
             is_admitted,
             session,
             ..props(&recording, br#"{"text":"hi"}"#)
@@ -160,7 +160,7 @@ async fn permissive_sessions(fixture: &Fixture, (ada, bob): (Arc<CallSession>, A
     let admitted = Arc::new(Mutex::new(Vec::new()));
     let received = Arc::new(Mutex::new(Vec::new()));
     let reading = Arc::clone(&admitted);
-    let mut dependencies = ResolverDependencies::of(JsonCodec, JsonCodec);
+    let mut dependencies = RequestResolverDependencies::new(JsonCodec, JsonCodec);
     dependencies.before_request = Some(BeforeRequest::new(
         move |request| {
             locked(&reading).push(request.session.clone());
@@ -173,8 +173,8 @@ async fn permissive_sessions(fixture: &Fixture, (ada, bob): (Arc<CallSession>, A
         .manager
         .get_request_resolver(
             &crate::identity::Procedure {
-                id: 2,
-                name: "permissive".to_owned(),
+                procedure_id: 2,
+                procedure_name: "permissive".to_owned(),
                 ..echo()
             },
             dependencies,
@@ -191,7 +191,7 @@ async fn permissive_sessions(fixture: &Fixture, (ada, bob): (Arc<CallSession>, A
         (false, None),
         (true, Some(Arc::clone(&bob))),
     ] {
-        (resolver.resolve)(ResolverProps {
+        (resolver.resolve)(RequestResolverProps {
             is_admitted,
             session,
             header: crate::envelope::RequestHeader {

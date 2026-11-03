@@ -9,12 +9,13 @@ use tokio_util::sync::CancellationToken;
 
 use super::cancel_of;
 use super::server::{Served, first, news};
+use crate::NotificationResolverDependencies;
 use crate::constants::{ProtocolCode, RouterSide};
 use crate::envelope::{Envelope, RequestHeader};
 use crate::errors::{CallError, ResolverError};
 use crate::failure::Failure;
 use crate::identity::Procedure;
-use crate::managers::service::{Notifier, NotifyOptions, ResolverDependencies, Response};
+use crate::managers::service::{Notifier, NotifyOptions, RequestResolverDependencies, Response};
 use crate::payloads::TextCodec;
 use crate::router::server::RouterServerOptions;
 use crate::router::types::{CallAddress, ConnectionHandle};
@@ -33,8 +34,8 @@ fn failure() -> Failure {
 
 fn other() -> Procedure {
     Procedure {
-        id: 7,
-        name: "other".to_owned(),
+        procedure_id: 7,
+        procedure_name: "other".to_owned(),
         ..news()
     }
 }
@@ -58,7 +59,10 @@ fn resolve(
         .services
         .get_notification_resolver(
             procedure,
-            (ResolverDependencies::of(TextCodec, TextCodec), TextCodec),
+            NotificationResolverDependencies::new(
+                RequestResolverDependencies::new(TextCodec, TextCodec),
+                TextCodec,
+            ),
         )
         .expect("a resolver")
         .on(Arc::new(move |request, response: Response<TextCodec>| {
@@ -283,10 +287,10 @@ async fn is_ended_as_an_established_one_when_the_session_ends_and_takes_nothing_
     holding
         .served
         .router
-        .drop_subscriptions((
+        .drop_subscriptions(
             first(),
             Failure::protocol(ProtocolCode::SESSION_REQUIRED, RouterSide::Server),
-        ))
+        )
         .await;
     holding.release().await;
     let sent = holding.served.transport.take();
@@ -344,10 +348,10 @@ async fn drop_subscriptions_ends_the_established_and_the_waiting_never_one_in_fl
     holding
         .served
         .router
-        .drop_subscriptions((
+        .drop_subscriptions(
             first(),
             Failure::protocol(ProtocolCode::SESSION_REQUIRED, RouterSide::Server),
-        ))
+        )
         .await;
     assert_eq!(
         holding.served.sent_since(),

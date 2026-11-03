@@ -12,6 +12,7 @@ use tokio_util::sync::CancellationToken;
 
 use super::server::{Served, first};
 use super::{answered, cancel_of, locked, request_header_of};
+use crate::NotificationResolverDependencies;
 use crate::constants::{ProtocolCode, RouterSide};
 use crate::credentials::{Credentials, JwtKeySet, JwtSetKey, KeySetAnswer};
 use crate::envelope::{Credential, Envelope, RequestHeader};
@@ -19,7 +20,7 @@ use crate::errors::CallError;
 use crate::failure::Failure;
 use crate::jwt_verifier::{JwtAlgorithm, JwtKey};
 use crate::router::core::Handler;
-use crate::router::server::{CallHooks, RouterServerOptions};
+use crate::router::server::RouterServerOptions;
 use crate::router::types::{RequestCredential, RouterAnswer};
 use crate::testing::pair::{Pair, PairOptions, echo};
 
@@ -36,7 +37,7 @@ const SECRET: [u8; 32] = [2; 32];
 async fn answers_an_admission_s_session_required_to_a_call_that_presented_a_credential_access_denied_and_to_one_that_presented_none_session_required()
  {
     use crate::credentials::ElsewhereSession;
-    use crate::managers::service::{ResolverDependencies, Response};
+    use crate::managers::service::{RequestResolverDependencies, Response};
     use crate::payloads::TextCodec;
     use crate::router::admissions::BeforeRequest;
     use crate::router::types::TransportMessage;
@@ -88,7 +89,7 @@ async fn answers_an_admission_s_session_required_to_a_call_that_presented_a_cred
     }));
     let admitted = Arc::new(Mutex::new(Vec::new()));
     let admitting = Arc::clone(&admitted);
-    let mut dependencies = ResolverDependencies::of(TextCodec, TextCodec);
+    let mut dependencies = RequestResolverDependencies::new(TextCodec, TextCodec);
     dependencies.before_request = Some(BeforeRequest::new(
         move |request| {
             locked(&admitting).push((request.header.call_id, request.session.is_some()));
@@ -300,7 +301,7 @@ async fn answers_a_jwt_call_past_the_calls_its_key_set_lets_wait_for_an_issuers_
     let holding = pair
         .client
         .router()
-        .request(Bytes::new(), (holding, CallHooks::default()))
+        .request(Bytes::new(), holding)
         .expect("a holding call");
     pair.settle().await;
     assert_eq!(locked(&asks).len(), 1);
@@ -318,10 +319,7 @@ async fn answers_a_jwt_call_past_the_calls_its_key_set_lets_wait_for_an_issuers_
             .router()
             .request(
                 Bytes::new(),
-                (
-                    super::request_of((None, core::time::Duration::from_secs(120))),
-                    CallHooks::default(),
-                ),
+                super::request_of((None, core::time::Duration::from_secs(120))),
             )
             .expect("a call using its default")
     };
@@ -442,7 +440,7 @@ async fn answers_a_subscribing_call_whose_jwts_end_passes_before_its_answer_with
     use super::server::news;
     use crate::constants::EnvelopeKind;
     use crate::debug::DebugDirection;
-    use crate::managers::service::{ResolverDependencies, Response};
+    use crate::managers::service::{RequestResolverDependencies, Response};
     use crate::payloads::TextCodec;
 
     for (seconds, advance_clock) in [(120, false), (1, true)] {
@@ -473,8 +471,8 @@ async fn answers_a_subscribing_call_whose_jwts_end_passes_before_its_answer_with
         let released = CancellationToken::new();
         let entered = Arc::new(AtomicUsize::new(0));
         let flash = crate::identity::Procedure {
-            id: 7,
-            name: "flash".to_owned(),
+            procedure_id: 7,
+            procedure_name: "flash".to_owned(),
             ..news()
         };
         for (procedure, explicit) in [(news(), true), (flash.clone(), false)] {
@@ -484,7 +482,10 @@ async fn answers_a_subscribing_call_whose_jwts_end_passes_before_its_answer_with
                 .services()
                 .get_notification_resolver(
                     &procedure,
-                    (ResolverDependencies::of(TextCodec, TextCodec), TextCodec),
+                    NotificationResolverDependencies::new(
+                        RequestResolverDependencies::new(TextCodec, TextCodec),
+                        TextCodec,
+                    ),
                 )
                 .expect("the notification resolved")
                 .on(Arc::new(move |_, response: Response<TextCodec>| {
@@ -534,7 +535,7 @@ async fn answers_a_subscribing_call_whose_jwts_end_passes_before_its_answer_with
             calls.push(
                 pair.client
                     .router()
-                    .request(Bytes::new(), (request, CallHooks::default()))
+                    .request(Bytes::new(), request)
                     .expect("a subscribing call"),
             );
         }
@@ -563,7 +564,7 @@ async fn answers_a_subscribing_call_whose_jwts_end_passes_before_its_answer_with
             assert_eq!(
                 sent.iter()
                     .filter(|header| header.call_id() == call_id)
-                    .map(crate::envelope::Header::kind)
+                    .map(crate::envelope::EnvelopeHeader::kind)
                     .collect::<Vec<_>>(),
                 [EnvelopeKind::Result, EnvelopeKind::Failure]
             );
@@ -829,7 +830,7 @@ async fn answers_session_required_from_the_admission_of_a_resolver_registered_on
         let call = pair
             .client
             .router()
-            .request(Bytes::new(), (request, CallHooks::default()))
+            .request(Bytes::new(), request)
             .expect("a request");
         pair.settle().await;
         let error = answered(call).await.expect_err("the admission refuses");

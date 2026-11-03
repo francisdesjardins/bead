@@ -41,6 +41,7 @@ import { dispose } from './symbols';
 import { createTransportClient, DISCONNECT_DEFAULTS, isFieldValue } from './transport-client';
 import type {
   BrokerTransportClient,
+  IBrokerRefusal,
   IBrokerTransportClientConnectOptions,
   IBrokerTransportClientOptions,
 } from './types';
@@ -48,6 +49,7 @@ import type {
 export { TRANSPORT_BROKER } from '../shared/constants';
 export type {
   BrokerTransportClient,
+  IBrokerRefusal,
   IBrokerTransportClientConnectOptions,
   IBrokerTransportClientOptions,
 } from './types';
@@ -93,15 +95,7 @@ export class BrokerRefusedError extends GenericError {
   /** The REFUSE's status; none for `no-subscriber`. */
   public readonly status: number | undefined;
 
-  public constructor({
-    layouts,
-    reason,
-    status,
-  }: {
-    layouts?: readonly number[] | undefined;
-    reason: string;
-    status?: number | undefined;
-  }) {
+  public constructor({ layouts, reason, status }: IBrokerRefusal) {
     super(
       status === undefined
         ? `no participant serves the name: ${reason}`

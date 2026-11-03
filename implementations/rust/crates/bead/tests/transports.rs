@@ -28,14 +28,14 @@ use std::time::{Instant, SystemTime};
 use bead::testing::parcels::{self, ParcelFields, ParcelReading};
 use bead::testing::{Difference, SteppingClock, files, hexadecimal, instants, is_excused};
 use bead::{
-    BoxFuture, BrokerAdapter, BrokerCapabilities, BrokerClient, BrokerClientOptions,
-    BrokerConnectOptions, BrokerDelivery, BrokerError, BrokerListener, BrokerMessage,
-    BrokerParticipant, BrokerParticipantOptions, BrokerPublication, BrokerPublished,
-    BrokerRefusedError, BrokerServer, BrokerServerOptions, BrokerStart, BrokerSubscription,
-    ClientListener, ClientTransport, ConnectionHandle, MemoryBroker, MemoryBrokerAdapter,
-    MemoryBrokerAdapterOptions, MemoryBrokerOptions, RouterError, Server, ServerListener,
-    ServerOptions, ServerTransport, SharedClock, TransportError, TransportMessage,
-    TransportServerRefusal,
+    BoxFuture, BrokerAdapter, BrokerCapabilities, BrokerDelivery, BrokerError, BrokerListener,
+    BrokerMessage, BrokerParticipant, BrokerParticipantOptions, BrokerPublication, BrokerPublished,
+    BrokerRefusedError, BrokerStart, BrokerSubscription, BrokerTransportClient,
+    BrokerTransportClientConnectOptions, BrokerTransportClientOptions, BrokerTransportServer,
+    BrokerTransportServerOptions, ClientListener, ConnectionHandle, MemoryBroker,
+    MemoryBrokerAdapter, MemoryBrokerAdapterOptions, MemoryBrokerOptions, RouterClientTransport,
+    RouterError, Server, ServerListener, ServerOptions, ServerTransport, SharedClock,
+    TransportError, TransportMessage, TransportServerRefusal,
 };
 use bytes::Bytes;
 use libtest_mimic::{Arguments, Failed, Trial};
@@ -350,7 +350,7 @@ async fn peer_of(
     (id, under, is_client, will): (&str, &str, bool, Option<&str>),
 ) -> Result<Peer, String> {
     let adapter = broker
-        .adapter(&MemoryBrokerAdapterOptions::of(id))
+        .adapter(&MemoryBrokerAdapterOptions::new(id))
         .map_err(|error| error.to_string())?;
     let heard = Arc::new(Heard::default());
 
@@ -380,7 +380,7 @@ async fn peer_of(
             code: None,
         };
 
-        start.will = Some(BrokerPublication::of(
+        start.will = Some(BrokerPublication::new(
             [ROOT, "d", id],
             Bytes::from(parcels::encode(&gone)?),
         ));
@@ -741,8 +741,8 @@ struct Case {
     clock: Arc<SteppingClock>,
     recording: Arc<Recording>,
     participant: BrokerParticipant,
-    server: Option<(Server, BrokerServer)>,
-    client: Option<BrokerClient>,
+    server: Option<(Server, BrokerTransportServer)>,
+    client: Option<BrokerTransportClient>,
     connecting: Option<tokio::task::JoinHandle<Result<(), TransportError>>>,
     peers: HashMap<String, Peer>,
     twin: Option<Peer>,
@@ -777,7 +777,7 @@ async fn case_of((case, wall): (&Value, SystemTime)) -> Result<Case, String> {
 
     let broker = MemoryBroker::new(&broker_options).map_err(|error| error.to_string())?;
     let inner = broker
-        .adapter(&MemoryBrokerAdapterOptions::of(under))
+        .adapter(&MemoryBrokerAdapterOptions::new(under))
         .map_err(|error| error.to_string())?;
     let mut adapters = HashMap::new();
 
@@ -813,7 +813,7 @@ async fn case_of((case, wall): (&Value, SystemTime)) -> Result<Case, String> {
 
     if is_client {
         let built = participant
-            .client(&BrokerClientOptions::default())
+            .client(&BrokerTransportClientOptions::default())
             .map_err(|error| error.to_string())?;
 
         built.listen(Arc::new(AtClient(Arc::clone(&told))));
@@ -829,7 +829,7 @@ async fn case_of((case, wall): (&Value, SystemTime)) -> Result<Case, String> {
                     .collect()
             },
         );
-        let mut transport_options = BrokerServerOptions::of(names.clone());
+        let mut transport_options = BrokerTransportServerOptions::new(names.clone());
 
         transport_options.accept_timeout = duration_of(&options, "acceptTimeout");
         transport_options.is_in_group = options.get("group").and_then(Value::as_bool);
@@ -1004,7 +1004,7 @@ impl Case {
                     ));
                 }
             };
-            let publication = BrokerPublication::of(topic.clone(), Bytes::from(payload));
+            let publication = BrokerPublication::new(topic.clone(), Bytes::from(payload));
 
             publishing.push(if is_retained {
                 peer.adapter.publish_retained(publication)
@@ -1231,7 +1231,7 @@ async fn play_steps(case: &mut Case, steps: &[Value]) -> Result<(), String> {
         if let Some(server) = step.get("connect").and_then(Value::as_str)
             && let Some(client) = &case.client
         {
-            let mut options = BrokerConnectOptions::of(server);
+            let mut options = BrokerTransportClientConnectOptions::new(server);
 
             options.timeout = case.timeout;
             case.connecting = Some(tokio::spawn(client.connect(&options)));
@@ -1388,7 +1388,7 @@ async fn play_steps(case: &mut Case, steps: &[Value]) -> Result<(), String> {
         }
 
         if let Some(secure) = expectation.and_then(|expected| expected.get("secure")) {
-            let seen = case.client.as_ref().map(ClientTransport::is_secure);
+            let seen = case.client.as_ref().map(RouterClientTransport::is_secure);
 
             hold(seen.as_ref() == secure.as_bool().as_ref(), || {
                 format!("{at}: secure {seen:?}, not {secure}")

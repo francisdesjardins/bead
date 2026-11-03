@@ -150,7 +150,7 @@ async fn requests_run_in_none_without_a_session_of_and_one_presenting_a_credenti
         .services
         .get_request_resolver(
             &crate::testing::pair::echo(),
-            crate::managers::service::ResolverDependencies::of(
+            crate::managers::service::RequestResolverDependencies::new(
                 crate::payloads::TextCodec,
                 crate::payloads::TextCodec,
             ),

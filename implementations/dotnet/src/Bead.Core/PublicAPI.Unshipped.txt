@@ -1,8 +1,32 @@
 #nullable enable
+*REMOVED*Bead.BrokerConnectOptions
+*REMOVED*Bead.BrokerConnectOptions.<Clone>$() -> Bead.BrokerConnectOptions!
+*REMOVED*Bead.BrokerConnectOptions.BrokerConnectOptions() -> void
+*REMOVED*Bead.BrokerConnectOptions.Equals(Bead.BrokerConnectOptions? other) -> bool
+*REMOVED*Bead.BrokerConnectOptions.Server.get -> string!
+*REMOVED*Bead.BrokerConnectOptions.Server.init -> void
+*REMOVED*Bead.BrokerConnectOptions.Timeout.get -> System.TimeSpan
+*REMOVED*Bead.BrokerConnectOptions.Timeout.init -> void
 Bead.BrokerParticipantOptions.MaximumHeldEnvelopeBytes.get -> long?
 Bead.BrokerParticipantOptions.MaximumHeldEnvelopeBytes.init -> void
+Bead.BrokerParticipantOptions.Reconnect.get -> Bead.TransportClientReconnectOptions?
+*REMOVED*Bead.BrokerParticipantOptions.Reconnect.get -> Bead.TransportReconnectOptions?
+Bead.BrokerTransportClient.CloseConnection(Bead.TransportClientDisconnectOptions? options = null) -> System.Threading.Tasks.Task!
+*REMOVED*Bead.BrokerTransportClient.CloseConnection(Bead.TransportDisconnectOptions? options = null) -> System.Threading.Tasks.Task!
+*REMOVED*Bead.BrokerTransportClient.Connect(Bead.BrokerConnectOptions! options, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task!
+Bead.BrokerTransportClient.Connect(Bead.BrokerTransportClientConnectOptions! options, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task!
 Bead.BrokerTransportClient.Pause() -> void
+Bead.BrokerTransportClient.Reconnect(Bead.TransportClientReconnectOptions? options = null) -> System.Threading.Tasks.Task!
+*REMOVED*Bead.BrokerTransportClient.Reconnect(Bead.TransportReconnectOptions? options = null) -> System.Threading.Tasks.Task!
 Bead.BrokerTransportClient.Resume() -> void
+Bead.BrokerTransportClientConnectOptions
+Bead.BrokerTransportClientConnectOptions.<Clone>$() -> Bead.BrokerTransportClientConnectOptions!
+Bead.BrokerTransportClientConnectOptions.BrokerTransportClientConnectOptions() -> void
+Bead.BrokerTransportClientConnectOptions.Equals(Bead.BrokerTransportClientConnectOptions? other) -> bool
+Bead.BrokerTransportClientConnectOptions.Server.get -> string!
+Bead.BrokerTransportClientConnectOptions.Server.init -> void
+Bead.BrokerTransportClientConnectOptions.Timeout.get -> System.TimeSpan
+Bead.BrokerTransportClientConnectOptions.Timeout.init -> void
 Bead.BrokerTransportServer.Pause(string! connectionHandle) -> void
 Bead.BrokerTransportServer.Resume(string! connectionHandle) -> void
 *REMOVED*Bead.Envelope
@@ -36,6 +60,18 @@ Bead.BrokerTransportServer.Resume(string! connectionHandle) -> void
 *REMOVED*Bead.EnvelopeReadOptions.MaximumEnvelopeBytes.init -> void
 *REMOVED*Bead.EnvelopeReadOptions.Side.get -> Bead.RouterSide
 *REMOVED*Bead.EnvelopeReadOptions.Side.init -> void
+*REMOVED*Bead.FailureException.FailureException(Bead.Failure! failure, (Bead.FailureException.Raised Raised, System.Exception! Cause) raising) -> void
+Bead.FailureException.FailureException(Bead.Failure! failure, Bead.FailureException.Raised raised, Bead.FailureExceptionOptions! options) -> void
+Bead.FailureExceptionOptions
+Bead.FailureExceptionOptions.<Clone>$() -> Bead.FailureExceptionOptions!
+Bead.FailureExceptionOptions.Cause.get -> System.Exception?
+Bead.FailureExceptionOptions.Cause.init -> void
+Bead.FailureExceptionOptions.Equals(Bead.FailureExceptionOptions? other) -> bool
+Bead.FailureExceptionOptions.FailureExceptionOptions() -> void
+Bead.IClient.Disconnect(Bead.TransportClientDisconnectOptions? options = null) -> System.Threading.Tasks.Task!
+*REMOVED*Bead.IClient.Disconnect(Bead.TransportDisconnectOptions? options = null) -> System.Threading.Tasks.Task!
+Bead.IClient.Reconnect(Bead.TransportClientReconnectOptions? options = null) -> System.Threading.Tasks.Task!
+*REMOVED*Bead.IClient.Reconnect(Bead.TransportReconnectOptions? options = null) -> System.Threading.Tasks.Task!
 Bead.IRouterClientTransport.Pause() -> void
 Bead.IRouterClientTransport.Resume() -> void
 Bead.IRouterServerTransport.Pause(string! connectionHandle) -> void
@@ -51,10 +87,50 @@ Bead.IntakeLimits.MaximumUntakenEnvelopes.init -> void
 Bead.IntakeLimits.Validate() -> Bead.IntakeLimits!
 Bead.JoinedServerTransport.Pause(string! connectionHandle) -> void
 Bead.JoinedServerTransport.Resume(string! connectionHandle) -> void
+*REMOVED*Bead.MemoryConnectOptions
+*REMOVED*Bead.MemoryConnectOptions.<Clone>$() -> Bead.MemoryConnectOptions!
+*REMOVED*Bead.MemoryConnectOptions.Address.get -> string?
+*REMOVED*Bead.MemoryConnectOptions.Address.init -> void
+*REMOVED*Bead.MemoryConnectOptions.Equals(Bead.MemoryConnectOptions? other) -> bool
+*REMOVED*Bead.MemoryConnectOptions.MemoryConnectOptions() -> void
+*REMOVED*Bead.MemoryConnectOptions.Port.get -> int?
+*REMOVED*Bead.MemoryConnectOptions.Port.init -> void
+*REMOVED*Bead.MemoryConnectOptions.Server.get -> Bead.MemoryTransportServer!
+*REMOVED*Bead.MemoryConnectOptions.Server.init -> void
+*REMOVED*Bead.MemoryConnectOptions.Timeout.get -> System.TimeSpan
+*REMOVED*Bead.MemoryConnectOptions.Timeout.init -> void
+Bead.MemoryTransportClient.CloseConnection(Bead.TransportClientDisconnectOptions? options = null) -> System.Threading.Tasks.Task!
+*REMOVED*Bead.MemoryTransportClient.CloseConnection(Bead.TransportDisconnectOptions? options = null) -> System.Threading.Tasks.Task!
+*REMOVED*Bead.MemoryTransportClient.Connect(Bead.MemoryConnectOptions! options, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task!
+Bead.MemoryTransportClient.Connect(Bead.MemoryTransportClientConnectOptions! options, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task!
 Bead.MemoryTransportClient.Pause() -> void
+Bead.MemoryTransportClient.Reconnect(Bead.TransportClientReconnectOptions? options = null) -> System.Threading.Tasks.Task!
+*REMOVED*Bead.MemoryTransportClient.Reconnect(Bead.TransportReconnectOptions? options = null) -> System.Threading.Tasks.Task!
 Bead.MemoryTransportClient.Resume() -> void
+Bead.MemoryTransportClientConnectOptions
+Bead.MemoryTransportClientConnectOptions.<Clone>$() -> Bead.MemoryTransportClientConnectOptions!
+Bead.MemoryTransportClientConnectOptions.Address.get -> string?
+Bead.MemoryTransportClientConnectOptions.Address.init -> void
+Bead.MemoryTransportClientConnectOptions.Equals(Bead.MemoryTransportClientConnectOptions? other) -> bool
+Bead.MemoryTransportClientConnectOptions.MemoryTransportClientConnectOptions() -> void
+Bead.MemoryTransportClientConnectOptions.Port.get -> int?
+Bead.MemoryTransportClientConnectOptions.Port.init -> void
+Bead.MemoryTransportClientConnectOptions.Server.get -> Bead.MemoryTransportServer!
+Bead.MemoryTransportClientConnectOptions.Server.init -> void
+Bead.MemoryTransportClientConnectOptions.Timeout.get -> System.TimeSpan
+Bead.MemoryTransportClientConnectOptions.Timeout.init -> void
 Bead.MemoryTransportServer.Pause(string! connectionHandle) -> void
 Bead.MemoryTransportServer.Resume(string! connectionHandle) -> void
+Bead.ReadViolations
+Bead.ReadViolations.<Clone>$() -> Bead.ReadViolations!
+Bead.ReadViolations.Equals(Bead.ReadViolations? other) -> bool
+Bead.ReadViolations.More.get -> long?
+Bead.ReadViolations.More.init -> void
+Bead.ReadViolations.ReadViolations() -> void
+Bead.ReadViolations.Stopped.get -> bool
+Bead.ReadViolations.Stopped.init -> void
+Bead.ReadViolations.Violations.get -> System.Collections.Generic.IReadOnlyList<Bead.Violation!>!
+Bead.ReadViolations.Violations.init -> void
 Bead.RouterClientOptions.Intake.get -> Bead.IntakeLimits?
 Bead.RouterClientOptions.Intake.init -> void
 Bead.RouterServerOptions.Intake.get -> Bead.IntakeLimits?
@@ -63,23 +139,112 @@ Bead.ServerOptions.Intake.get -> Bead.IntakeLimits?
 Bead.ServerOptions.Intake.init -> void
 *REMOVED*Bead.ServiceServerOptions<TService>.Admissions.get -> Bead.IServiceAdmissions<TService>!
 Bead.ServiceServerOptions<TService>.Admissions.get -> Bead.IServiceAdmissions<TService>?
-Bead.TransportReconnectDelayOrResolver
-Bead.TransportReconnectDelayOrResolver.<Clone>$() -> Bead.TransportReconnectDelayOrResolver!
-Bead.TransportReconnectDelayOrResolver.Equals(Bead.TransportReconnectDelayOrResolver? other) -> bool
-Bead.TransportReconnectDelayOrResolver.Fixed.get -> System.TimeSpan?
-Bead.TransportReconnectDelayOrResolver.Resolver.get -> Bead.TransportReconnectDelay?
+Bead.TransportClientDisconnectOptions
+Bead.TransportClientDisconnectOptions.<Clone>$() -> Bead.TransportClientDisconnectOptions!
+Bead.TransportClientDisconnectOptions.Equals(Bead.TransportClientDisconnectOptions? other) -> bool
+Bead.TransportClientDisconnectOptions.IsClean.get -> bool
+Bead.TransportClientDisconnectOptions.IsClean.init -> void
+Bead.TransportClientDisconnectOptions.IsQuick.get -> bool
+Bead.TransportClientDisconnectOptions.IsQuick.init -> void
+Bead.TransportClientDisconnectOptions.TransportClientDisconnectOptions() -> void
+Bead.TransportClientReconnectDelay
+Bead.TransportClientReconnectDelay.<Clone>$() -> Bead.TransportClientReconnectDelay!
+Bead.TransportClientReconnectDelay.Equals(Bead.TransportClientReconnectDelay? other) -> bool
+Bead.TransportClientReconnectDelay.Fixed.get -> System.TimeSpan?
+Bead.TransportClientReconnectDelay.Resolver.get -> Bead.TransportClientReconnectDelayResolver?
+Bead.TransportClientReconnectDelay.TransportClientReconnectDelay(Bead.TransportClientReconnectDelayResolver! resolver) -> void
+Bead.TransportClientReconnectDelay.TransportClientReconnectDelay(System.TimeSpan delay) -> void
+Bead.TransportClientReconnectDelayResolver
+Bead.TransportClientReconnectOptions
+Bead.TransportClientReconnectOptions.<Clone>$() -> Bead.TransportClientReconnectOptions!
+Bead.TransportClientReconnectOptions.CancellationToken.get -> System.Threading.CancellationToken
+Bead.TransportClientReconnectOptions.CancellationToken.init -> void
+Bead.TransportClientReconnectOptions.Delay.get -> Bead.TransportClientReconnectDelay?
+Bead.TransportClientReconnectOptions.Delay.init -> void
+Bead.TransportClientReconnectOptions.Equals(Bead.TransportClientReconnectOptions? other) -> bool
+Bead.TransportClientReconnectOptions.MaximumAttempts.get -> int
+Bead.TransportClientReconnectOptions.MaximumAttempts.init -> void
+Bead.TransportClientReconnectOptions.Tap.get -> System.Action<System.TimeSpan, int>?
+Bead.TransportClientReconnectOptions.Tap.init -> void
+Bead.TransportClientReconnectOptions.TransportClientReconnectOptions() -> void
+*REMOVED*Bead.TransportDisconnectOptions
+*REMOVED*Bead.TransportDisconnectOptions.<Clone>$() -> Bead.TransportDisconnectOptions!
+*REMOVED*Bead.TransportDisconnectOptions.Equals(Bead.TransportDisconnectOptions? other) -> bool
+*REMOVED*Bead.TransportDisconnectOptions.IsClean.get -> bool
+*REMOVED*Bead.TransportDisconnectOptions.IsClean.init -> void
+*REMOVED*Bead.TransportDisconnectOptions.IsQuick.get -> bool
+*REMOVED*Bead.TransportDisconnectOptions.IsQuick.init -> void
+*REMOVED*Bead.TransportDisconnectOptions.TransportDisconnectOptions() -> void
+*REMOVED*Bead.TransportReconnectDelay
+*REMOVED*Bead.TransportReconnectOptions
+*REMOVED*Bead.TransportReconnectOptions.<Clone>$() -> Bead.TransportReconnectOptions!
+*REMOVED*Bead.TransportReconnectOptions.CancellationToken.get -> System.Threading.CancellationToken
+*REMOVED*Bead.TransportReconnectOptions.CancellationToken.init -> void
 *REMOVED*Bead.TransportReconnectOptions.Delay.get -> Bead.TransportReconnectDelay?
-Bead.TransportReconnectOptions.Delay.get -> Bead.TransportReconnectDelayOrResolver?
+*REMOVED*Bead.TransportReconnectOptions.Delay.init -> void
+*REMOVED*Bead.TransportReconnectOptions.Equals(Bead.TransportReconnectOptions? other) -> bool
+*REMOVED*Bead.TransportReconnectOptions.MaximumAttempts.get -> int
+*REMOVED*Bead.TransportReconnectOptions.MaximumAttempts.init -> void
+*REMOVED*Bead.TransportReconnectOptions.Tap.get -> System.Action<System.TimeSpan, int>?
+*REMOVED*Bead.TransportReconnectOptions.Tap.init -> void
+*REMOVED*Bead.TransportReconnectOptions.TransportReconnectOptions() -> void
+*REMOVED*Bead.ViolationsRead
+*REMOVED*Bead.ViolationsRead.<Clone>$() -> Bead.ViolationsRead!
+*REMOVED*Bead.ViolationsRead.Equals(Bead.ViolationsRead? other) -> bool
+*REMOVED*Bead.ViolationsRead.More.get -> long?
+*REMOVED*Bead.ViolationsRead.More.init -> void
+*REMOVED*Bead.ViolationsRead.Stopped.get -> bool
+*REMOVED*Bead.ViolationsRead.Stopped.init -> void
+*REMOVED*Bead.ViolationsRead.Violations.get -> System.Collections.Generic.IReadOnlyList<Bead.Violation!>!
+*REMOVED*Bead.ViolationsRead.Violations.init -> void
+*REMOVED*Bead.ViolationsRead.ViolationsRead() -> void
+*REMOVED*override Bead.BrokerConnectOptions.Equals(object? obj) -> bool
+*REMOVED*override Bead.BrokerConnectOptions.GetHashCode() -> int
+*REMOVED*override Bead.BrokerConnectOptions.ToString() -> string!
+override Bead.BrokerTransportClientConnectOptions.Equals(object? obj) -> bool
+override Bead.BrokerTransportClientConnectOptions.GetHashCode() -> int
+override Bead.BrokerTransportClientConnectOptions.ToString() -> string!
 *REMOVED*override Bead.EnvelopePrefix.GetHashCode() -> int
 *REMOVED*override Bead.EnvelopeReadOptions.Equals(object? obj) -> bool
 *REMOVED*override Bead.EnvelopeReadOptions.GetHashCode() -> int
 *REMOVED*override Bead.EnvelopeReadOptions.ToString() -> string!
+override Bead.FailureExceptionOptions.Equals(object? obj) -> bool
+override Bead.FailureExceptionOptions.GetHashCode() -> int
+override Bead.FailureExceptionOptions.ToString() -> string!
 override Bead.IntakeLimits.Equals(object? obj) -> bool
 override Bead.IntakeLimits.GetHashCode() -> int
 override Bead.IntakeLimits.ToString() -> string!
-override Bead.TransportReconnectDelayOrResolver.Equals(object? obj) -> bool
-override Bead.TransportReconnectDelayOrResolver.GetHashCode() -> int
-override Bead.TransportReconnectDelayOrResolver.ToString() -> string!
+*REMOVED*override Bead.MemoryConnectOptions.Equals(object? obj) -> bool
+*REMOVED*override Bead.MemoryConnectOptions.GetHashCode() -> int
+*REMOVED*override Bead.MemoryConnectOptions.ToString() -> string!
+override Bead.MemoryTransportClientConnectOptions.Equals(object? obj) -> bool
+override Bead.MemoryTransportClientConnectOptions.GetHashCode() -> int
+override Bead.MemoryTransportClientConnectOptions.ToString() -> string!
+override Bead.ReadViolations.Equals(object? obj) -> bool
+override Bead.ReadViolations.GetHashCode() -> int
+override Bead.ReadViolations.ToString() -> string!
+override Bead.TransportClientDisconnectOptions.Equals(object? obj) -> bool
+override Bead.TransportClientDisconnectOptions.GetHashCode() -> int
+override Bead.TransportClientDisconnectOptions.ToString() -> string!
+override Bead.TransportClientReconnectDelay.Equals(object? obj) -> bool
+override Bead.TransportClientReconnectDelay.GetHashCode() -> int
+override Bead.TransportClientReconnectDelay.ToString() -> string!
+override Bead.TransportClientReconnectOptions.Equals(object? obj) -> bool
+override Bead.TransportClientReconnectOptions.GetHashCode() -> int
+override Bead.TransportClientReconnectOptions.ToString() -> string!
+*REMOVED*override Bead.TransportDisconnectOptions.Equals(object? obj) -> bool
+*REMOVED*override Bead.TransportDisconnectOptions.GetHashCode() -> int
+*REMOVED*override Bead.TransportDisconnectOptions.ToString() -> string!
+*REMOVED*override Bead.TransportReconnectOptions.Equals(object? obj) -> bool
+*REMOVED*override Bead.TransportReconnectOptions.GetHashCode() -> int
+*REMOVED*override Bead.TransportReconnectOptions.ToString() -> string!
+*REMOVED*override Bead.ViolationsRead.Equals(object? obj) -> bool
+*REMOVED*override Bead.ViolationsRead.GetHashCode() -> int
+*REMOVED*override Bead.ViolationsRead.ToString() -> string!
+*REMOVED*static Bead.BrokerConnectOptions.operator !=(Bead.BrokerConnectOptions? left, Bead.BrokerConnectOptions? right) -> bool
+*REMOVED*static Bead.BrokerConnectOptions.operator ==(Bead.BrokerConnectOptions? left, Bead.BrokerConnectOptions? right) -> bool
+static Bead.BrokerTransportClientConnectOptions.operator !=(Bead.BrokerTransportClientConnectOptions? left, Bead.BrokerTransportClientConnectOptions? right) -> bool
+static Bead.BrokerTransportClientConnectOptions.operator ==(Bead.BrokerTransportClientConnectOptions? left, Bead.BrokerTransportClientConnectOptions? right) -> bool
 *REMOVED*static Bead.EnvelopeCodec.HeaderBytesOf(Bead.IEnvelopeHeader! header) -> int
 *REMOVED*static Bead.EnvelopeCodec.ReadEnvelope(System.ReadOnlySpan<byte> bytes, Bead.EnvelopeReadOptions! options) -> Bead.Envelope?
 *REMOVED*static Bead.EnvelopeCodec.ReadFailure(System.ReadOnlySpan<byte> payload, Bead.EnvelopeReadOptions! options) -> Bead.Failure!
@@ -92,6 +257,8 @@ override Bead.TransportReconnectDelayOrResolver.ToString() -> string!
 *REMOVED*static Bead.EnvelopePrefix.operator ==(Bead.EnvelopePrefix left, Bead.EnvelopePrefix right) -> bool
 *REMOVED*static Bead.EnvelopeReadOptions.operator !=(Bead.EnvelopeReadOptions? left, Bead.EnvelopeReadOptions? right) -> bool
 *REMOVED*static Bead.EnvelopeReadOptions.operator ==(Bead.EnvelopeReadOptions? left, Bead.EnvelopeReadOptions? right) -> bool
+static Bead.FailureExceptionOptions.operator !=(Bead.FailureExceptionOptions? left, Bead.FailureExceptionOptions? right) -> bool
+static Bead.FailureExceptionOptions.operator ==(Bead.FailureExceptionOptions? left, Bead.FailureExceptionOptions? right) -> bool
 *REMOVED*static Bead.Health.Of(Bead.ServerGauges! gauges) -> Bead.Health!
 *REMOVED*static Bead.HttpPolicy.Of(Bead.HttpPolicyOptions! given) -> Bead.HttpPolicy!
 static Bead.HttpPolicy.Of(Bead.HttpPolicyOptions? given = null) -> Bead.HttpPolicy!
@@ -99,10 +266,32 @@ static Bead.IntakeLimits.Default.get -> Bead.IntakeLimits!
 static Bead.IntakeLimits.operator !=(Bead.IntakeLimits? left, Bead.IntakeLimits? right) -> bool
 static Bead.IntakeLimits.operator ==(Bead.IntakeLimits? left, Bead.IntakeLimits? right) -> bool
 *REMOVED*static Bead.LayerGauges.Of(Bead.Gauges! gauges, System.Collections.Generic.IReadOnlySet<string!>! held) -> Bead.LayerGauges!
+*REMOVED*static Bead.MemoryConnectOptions.operator !=(Bead.MemoryConnectOptions? left, Bead.MemoryConnectOptions? right) -> bool
+*REMOVED*static Bead.MemoryConnectOptions.operator ==(Bead.MemoryConnectOptions? left, Bead.MemoryConnectOptions? right) -> bool
+static Bead.MemoryTransportClientConnectOptions.operator !=(Bead.MemoryTransportClientConnectOptions? left, Bead.MemoryTransportClientConnectOptions? right) -> bool
+static Bead.MemoryTransportClientConnectOptions.operator ==(Bead.MemoryTransportClientConnectOptions? left, Bead.MemoryTransportClientConnectOptions? right) -> bool
+static Bead.ReadViolations.None.get -> Bead.ReadViolations!
+static Bead.ReadViolations.operator !=(Bead.ReadViolations? left, Bead.ReadViolations? right) -> bool
+static Bead.ReadViolations.operator ==(Bead.ReadViolations? left, Bead.ReadViolations? right) -> bool
 *REMOVED*static Bead.RouterLimits.WholeEnvelopeOf(Bead.RouterLimits? limits) -> Bead.RouterLimits!
-static Bead.TransportReconnectDelayOrResolver.Of(Bead.TransportReconnectDelay! resolver) -> Bead.TransportReconnectDelayOrResolver!
-static Bead.TransportReconnectDelayOrResolver.Of(System.TimeSpan delay) -> Bead.TransportReconnectDelayOrResolver!
-static Bead.TransportReconnectDelayOrResolver.operator !=(Bead.TransportReconnectDelayOrResolver? left, Bead.TransportReconnectDelayOrResolver? right) -> bool
-static Bead.TransportReconnectDelayOrResolver.operator ==(Bead.TransportReconnectDelayOrResolver? left, Bead.TransportReconnectDelayOrResolver? right) -> bool
+static Bead.TransportClientDisconnectOptions.operator !=(Bead.TransportClientDisconnectOptions? left, Bead.TransportClientDisconnectOptions? right) -> bool
+static Bead.TransportClientDisconnectOptions.operator ==(Bead.TransportClientDisconnectOptions? left, Bead.TransportClientDisconnectOptions? right) -> bool
+static Bead.TransportClientReconnectDelay.operator !=(Bead.TransportClientReconnectDelay? left, Bead.TransportClientReconnectDelay? right) -> bool
+static Bead.TransportClientReconnectDelay.operator ==(Bead.TransportClientReconnectDelay? left, Bead.TransportClientReconnectDelay? right) -> bool
+static Bead.TransportClientReconnectOptions.operator !=(Bead.TransportClientReconnectOptions? left, Bead.TransportClientReconnectOptions? right) -> bool
+static Bead.TransportClientReconnectOptions.operator ==(Bead.TransportClientReconnectOptions? left, Bead.TransportClientReconnectOptions? right) -> bool
+*REMOVED*static Bead.TransportDisconnectOptions.operator !=(Bead.TransportDisconnectOptions? left, Bead.TransportDisconnectOptions? right) -> bool
+*REMOVED*static Bead.TransportDisconnectOptions.operator ==(Bead.TransportDisconnectOptions? left, Bead.TransportDisconnectOptions? right) -> bool
+*REMOVED*static Bead.TransportReconnectOptions.operator !=(Bead.TransportReconnectOptions? left, Bead.TransportReconnectOptions? right) -> bool
+*REMOVED*static Bead.TransportReconnectOptions.operator ==(Bead.TransportReconnectOptions? left, Bead.TransportReconnectOptions? right) -> bool
+static Bead.Violations.Of(Bead.Failure! failure) -> Bead.ReadViolations!
+*REMOVED*static Bead.Violations.Of(Bead.Failure! failure) -> Bead.ViolationsRead!
+static Bead.Violations.Read(string! detail) -> Bead.ReadViolations!
+*REMOVED*static Bead.Violations.Read(string! detail) -> Bead.ViolationsRead!
+*REMOVED*static Bead.ViolationsRead.None.get -> Bead.ViolationsRead!
+*REMOVED*static Bead.ViolationsRead.operator !=(Bead.ViolationsRead? left, Bead.ViolationsRead? right) -> bool
+*REMOVED*static Bead.ViolationsRead.operator ==(Bead.ViolationsRead? left, Bead.ViolationsRead? right) -> bool
+virtual Bead.TransportClientReconnectDelayResolver.Invoke(System.TimeSpan? previousDelay, int attempt) -> System.TimeSpan
+*REMOVED*virtual Bead.TransportReconnectDelay.Invoke(System.TimeSpan? previousDelay, int attempt) -> System.TimeSpan
 *REMOVED*~override Bead.EnvelopePrefix.Equals(object obj) -> bool
 *REMOVED*~override Bead.EnvelopePrefix.ToString() -> string

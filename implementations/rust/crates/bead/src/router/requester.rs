@@ -12,7 +12,7 @@ use tokio_util::sync::CancellationToken;
 use crate::constants::{CredentialScheme, ProtocolCode};
 use crate::duration::{NEVER, hold};
 use crate::envelope::{
-    CancelHeader, ChunkHeader, Credential, Envelope, Header, RequestHeader, header_bytes_of,
+    CancelHeader, ChunkHeader, Credential, Envelope, EnvelopeHeader, RequestHeader, header_bytes_of,
 };
 use crate::errors::{CallError, ProgrammerError};
 use crate::failure::{Failure, ProcedureAddress};
@@ -89,7 +89,7 @@ pub(crate) fn assert_header_holds<S>(request: &CoreRequest<S>) -> Result<(), Pro
         )
     });
 
-    header_bytes_of(&Header::Request(RequestHeader {
+    header_bytes_of(&EnvelopeHeader::Request(RequestHeader {
         call_id: 1,
         service_id: request.procedure.service_id.max(1),
         procedure_id: request.procedure.procedure_id.max(1),
@@ -479,10 +479,13 @@ pub(crate) fn request<S: Side>(
         .payload_limit_of(request.maximum_payload_bytes);
     let placed = match core.placement.transfer_of(
         &payload,
-        (&Header::Request(header.clone()), maximum_payload_bytes),
+        (
+            &EnvelopeHeader::Request(header.clone()),
+            maximum_payload_bytes,
+        ),
     ) {
         Ok(placed) => placed,
-        Err(failure) => return reply(Err(fail(failure.about(&Header::Request(header))))),
+        Err(failure) => return reply(Err(fail(failure.about(&EnvelopeHeader::Request(header))))),
     };
     let id = core.draw_id();
     let call = CallAddress {
@@ -805,8 +808,8 @@ pub(crate) fn receive_answer<S: Side>(
     (answer, handle, may_overtake): (Answer, &ConnectionHandle, bool),
 ) {
     let header = match &answer {
-        Answer::Result(header, _) => Header::Result(header.clone()),
-        Answer::Failure(header, _) => Header::Failure(header.clone()),
+        Answer::Result(header, _) => EnvelopeHeader::Result(header.clone()),
+        Answer::Failure(header, _) => EnvelopeHeader::Failure(header.clone()),
     };
     let call = CallAddress {
         connection_handle: Arc::clone(handle),
@@ -861,7 +864,7 @@ pub(crate) fn receive_answer<S: Side>(
                 let failure = Failure::received(&record, side)
                     .of_call(Some(procedure), destination_id)
                     .overtaking(may_overtake)
-                    .about(&Header::Failure(failure_header));
+                    .about(&EnvelopeHeader::Failure(failure_header));
 
                 settle(&mut request, Err(CallError::Failure(failure)));
                 state.activity(RouterActivity::Response, handle);
@@ -911,7 +914,7 @@ pub(crate) fn receive_answer<S: Side>(
                     let reason = CallError::Failure(
                         failure
                             .of_call(Some(procedure), destination_id)
-                            .about(&Header::Result(result_header)),
+                            .about(&EnvelopeHeader::Result(result_header)),
                     );
 
                     return end_pending(state, (reason, &call, id));

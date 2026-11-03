@@ -1,11 +1,13 @@
 //! The house's checks over the Rust side, and over the cases of each verdict: every function's
-//! parameters, every options struct's shape, each library crate's surface against its list, every
-//! doc comment's opening, and every member's lints.
+//! parameters, every options struct's shape, each library crate's surface against its list and
+//! without a tuple, every doc comment's opening, and every member's lints.
 
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use bead_house::{Finding, members_of, options_of, parameters_of, surface_of, tags_of};
+use bead_house::{
+    Finding, crate_tuples_of, members_of, options_of, parameters_of, surface_of, tags_of, tuples_of,
+};
 
 // the Rust side's folder, implementations/rust
 fn root() -> PathBuf {
@@ -183,6 +185,24 @@ fn each_crate_exposes_its_list() {
     }
 }
 
+#[test]
+fn takes_and_gives_no_tuple_on_the_public_surface() {
+    let refused: Vec<String> = LIBRARIES
+        .iter()
+        .flat_map(|(_, folder)| crate_tuples_of(&root().join(folder)).expect("its sources read"))
+        .collect();
+
+    assert!(
+        refused.is_empty(),
+        "the surface takes or gives a tuple:
+{}",
+        refused.join(
+            "
+"
+        )
+    );
+}
+
 // a list, its line endings as git may have checked them out
 fn read_list(path: &Path) -> Result<String, String> {
     read(path).map(|list| list.replace("\r\n", "\n"))
@@ -235,6 +255,7 @@ fn refuses_exactly_the_lines_its_cases_mark() {
     let parameters = read(&cases.join("parameters.rs")).expect("the parameter cases read");
     let options = read(&cases.join("options.rs")).expect("the options cases read");
     let tags = read(&cases.join("tags.rs")).expect("the tag cases read");
+    let tuples = read(&cases.join("tuples.rs")).expect("the tuple cases read");
     let file = syn::parse_file(&parameters).expect("the parameter cases parsed");
 
     assert_eq!(
@@ -253,5 +274,12 @@ fn refuses_exactly_the_lines_its_cases_mark() {
         lines_of(&tags_of(&tags)),
         marked(&tags),
         "the comment tags' cases"
+    );
+    assert_eq!(
+        lines_of(&tuples_of(
+            &syn::parse_file(&tuples).expect("the tuple cases parsed")
+        )),
+        marked(&tuples),
+        "the tuple cases"
     );
 }

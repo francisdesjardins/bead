@@ -83,7 +83,6 @@ export type {
   TransportClientOnErrorCallback,
   TransportClientOnMessageCallback,
   TransportClientReconnectDelay,
-  TransportClientReconnectDelayOrDelayResolver,
   TransportClientReconnectDelayResolver,
   TransportClientReconnectTapCallback,
   TransportClientToldEvent,
@@ -111,7 +110,7 @@ export const DISCONNECT_DEFAULTS = Object.freeze({
 /** What an omitted reconnect option resolves to. */
 export const RECONNECT_DEFAULTS = Object.freeze({
   delay: 1_000,
-  maxAttempts: 5,
+  maximumAttempts: 5,
 } satisfies ITransportClientReconnectOptions);
 
 /** What a reconnection its signal ended rejects with, as the C# side words it. */
@@ -308,7 +307,7 @@ export const createTransportClient = <
     reconnect: async (options) => {
       const {
         delay = RECONNECT_DEFAULTS.delay,
-        maxAttempts = RECONNECT_DEFAULTS.maxAttempts,
+        maximumAttempts = RECONNECT_DEFAULTS.maximumAttempts,
         signal,
         tap,
       } = options ?? {};
@@ -327,8 +326,8 @@ export const createTransportClient = <
         );
       }
 
-      if (Number.isNaN(maxAttempts)) {
-        throw new ProgrammerError('maxAttempts is not a number');
+      if (Number.isNaN(maximumAttempts)) {
+        throw new ProgrammerError('maximumAttempts is not a number');
       }
 
       // before the dispose below, so an already aborted signal leaves an open connection alone
@@ -377,8 +376,8 @@ export const createTransportClient = <
               throw reason;
             }
 
-            if (attempt >= maxAttempts) {
-              throw new ReconnectError(`attempt ${String(maxAttempts)} reached`, {
+            if (attempt >= maximumAttempts) {
+              throw new ReconnectError(`attempt ${String(maximumAttempts)} reached`, {
                 cause: reason,
               });
             }

@@ -9,7 +9,7 @@ use super::{DebugEvent, ServiceManager, ServiceManagerOptions, ServiceRouter, Tr
 use crate::clock::SharedClock;
 use crate::envelope::{FailureRecord, RequestHeader};
 use crate::errors::CallError;
-use crate::router::core::{Answerer, ResolverProps};
+use crate::router::core::{Answerer, RequestResolverProps};
 use crate::router::server::{RouterServer, RouterServerOptions};
 use crate::router::types::{BoxFuture, RouterAnswer, Signal};
 use crate::testing::SteppingClock;
@@ -139,8 +139,8 @@ fn header() -> RequestHeader {
     }
 }
 
-fn props(recording: &Arc<Recording>, payload: &[u8]) -> ResolverProps {
-    ResolverProps {
+fn props(recording: &Arc<Recording>, payload: &[u8]) -> RequestResolverProps {
+    RequestResolverProps {
         is_admitted: true,
         connection_handle: handle_of(1),
         header: header(),
@@ -163,7 +163,7 @@ impl ClientFixture {
         let clock = SteppingClock::new(crate::testing::instants::new_year());
         let shared: SharedClock = Arc::<SteppingClock>::clone(&clock);
         let transport = crate::testing::scripted::ScriptedClient::new(shared);
-        let carried: Arc<dyn crate::transport::ClientTransport> =
+        let carried: Arc<dyn crate::transport::RouterClientTransport> =
             Arc::<crate::testing::scripted::ScriptedClient>::clone(&transport);
         let router = crate::router::client::RouterClient::new(
             carried,

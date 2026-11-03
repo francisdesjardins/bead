@@ -12,7 +12,7 @@ use crate::clock::{Clock, Schedule, SharedClock, Timer, TimerCallback};
 use crate::constants::{CredentialScheme, RouterSide};
 use crate::debug::{DebugDirection, TracedEnvelope};
 use crate::envelope::{
-    CreditHeader, Envelope, FailureHeader, FailureRecord, Header, NotificationHeader,
+    CreditHeader, Envelope, EnvelopeHeader, FailureHeader, FailureRecord, NotificationHeader,
     ReadEnvelopeOptions,
 };
 use crate::errors::{CallError, ProgrammerError};
@@ -176,9 +176,13 @@ impl Side for State {
         self.activity.push((activity, Arc::clone(handle)));
     }
 
-    fn trace(&mut self, direction: DebugDirection, (handle, header): (&ConnectionHandle, &Header)) {
+    fn trace(
+        &mut self,
+        direction: DebugDirection,
+        (handle, header): (&ConnectionHandle, &EnvelopeHeader),
+    ) {
         self.traces
-            .push((direction, TracedEnvelope::of(handle, header)));
+            .push((direction, TracedEnvelope::new(handle, header)));
     }
 
     fn report(&mut self, error: RouterError, handle: &ConnectionHandle) {
@@ -452,7 +456,7 @@ pub(crate) fn request_of(handle: &str) -> CoreRequest<State> {
         on_sent: None,
         opens_subscription: false,
         paced: false,
-        options: crate::router::types::ResolvedRequestOptions::of(Duration::from_secs(1)),
+        options: crate::router::types::ResolvedRequestOptions::new(Duration::from_secs(1)),
         procedure: crate::testing::pair::echo().address(),
         maximum_payload_bytes: None,
         refusal: None,

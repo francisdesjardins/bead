@@ -17,14 +17,14 @@ use crate::testing::scripted::bytes_of;
 
 fn echo() -> crate::identity::Procedure {
     crate::identity::Procedure {
-        kind: Some(ProcedureKind::Command),
+        procedure_kind: Some(ProcedureKind::Command),
         ..crate::testing::pair::echo()
     }
 }
 
-type Sessions = Arc<Mutex<Vec<(u32, Option<CallSession>)>>>;
+type SessionManager = Arc<Mutex<Vec<(u32, Option<CallSession>)>>>;
 
-fn answering(sessions: &Sessions) -> ResolveFn {
+fn answering(sessions: &SessionManager) -> ResolveFn {
     let sessions = Arc::clone(sessions);
     Arc::new(move |props| {
         locked(&sessions).push((props.header.call_id, props.session.as_deref().cloned()));

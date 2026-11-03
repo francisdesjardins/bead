@@ -26,7 +26,7 @@ use bead::testing::SteppingClock;
 use bead::{
     AccessRefusal, AccessRefusalStage, BoxFuture, ConnectionHandle, Credential, CredentialScheme,
     Credentials, ElsewhereSession, ElsewhereVerdict, JsonCodec, Procedure, RequestHeader,
-    ResolverDependencies, RouterError, Sent, Server, ServerListener, ServerOptions,
+    RequestResolverDependencies, RouterError, Sent, Server, ServerListener, ServerOptions,
     ServerTransport, SessionToken, SharedClock, TransportMessage,
 };
 use bytes::Bytes;
@@ -252,12 +252,14 @@ fn failures() -> Result<Vec<Trial>, String> {
         .into_iter()
         .map(|vector| {
             Trial::test(format!("reads {}", vector.name), move || {
+                let mut options = ReadEnvelopeOptions::default();
+
+                options.maximum_detail_bytes = vector.maximum_detail_bytes;
+
                 let record = read_failure(
                     &vectors::bytes_of(&vector.record)?,
-                    (
-                        RouterSide::Server,
-                        vector.maximum_detail_bytes.unwrap_or(MAXIMUM_DETAIL_BYTES),
-                    ),
+                    RouterSide::Server,
+                    &options,
                 )?;
                 let expected = vectors::record_of(&vector.failure)?;
 
@@ -272,7 +274,8 @@ fn failures() -> Result<Vec<Trial>, String> {
             format!("refuses {}", vector.name),
             move || match read_failure(
                 &vectors::bytes_of(&vector.record)?,
-                (RouterSide::Server, MAXIMUM_DETAIL_BYTES),
+                RouterSide::Server,
+                &ReadEnvelopeOptions::default(),
             ) {
                 Ok(read) => Err(format!("read {read:?}").into()),
                 Err(failure) => refused(&failure, (vector.code, RouterSide::Server)),
@@ -584,17 +587,20 @@ async fn refused_credential(vector: &CredentialRefusalVector) -> Result<(), Fail
 
     let echo = Procedure {
         service_id: 1,
-        id: 1,
+        procedure_id: 1,
         service_revision: 1,
-        name: "echo".to_owned(),
-        kind: Some(bead::ProcedureKind::Request),
+        procedure_name: "echo".to_owned(),
+        procedure_kind: Some(bead::ProcedureKind::Request),
         maximum_payload_bytes: None,
         deprecation: None,
     };
 
     server
         .services()
-        .get_request_resolver(&echo, ResolverDependencies::of(JsonCodec, JsonCodec))?
+        .get_request_resolver(
+            &echo,
+            RequestResolverDependencies::new(JsonCodec, JsonCodec),
+        )?
         .on(Arc::new(|request, response: bead::Response<JsonCodec>| {
             response.result(request.payload)
         }))?;

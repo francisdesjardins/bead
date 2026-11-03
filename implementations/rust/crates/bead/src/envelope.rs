@@ -179,7 +179,7 @@ pub struct CancelHeader {
 /// An envelope's header, by its kind.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
-pub enum Header {
+pub enum EnvelopeHeader {
     /// A request's.
     Request(RequestHeader),
     /// A result's.
@@ -196,7 +196,7 @@ pub enum Header {
     Cancel(CancelHeader),
 }
 
-impl Header {
+impl EnvelopeHeader {
     /// Its kind.
     #[must_use]
     pub fn kind(&self) -> EnvelopeKind {
@@ -291,7 +291,7 @@ pub struct Prefix {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ReadHeader {
     /// The header.
-    pub header: Header,
+    pub header: EnvelopeHeader,
     /// Its length, where the payload starts.
     pub header_bytes: usize,
 }
@@ -364,15 +364,15 @@ pub enum Envelope {
 impl Envelope {
     /// Its header.
     #[must_use]
-    pub fn header(&self) -> Header {
+    pub fn header(&self) -> EnvelopeHeader {
         match self {
-            Self::Request { header, .. } => Header::Request(header.clone()),
-            Self::Result { header, .. } => Header::Result(header.clone()),
-            Self::Failure { header, .. } => Header::Failure(header.clone()),
-            Self::Notification { header, .. } => Header::Notification(header.clone()),
-            Self::Chunk { header, .. } => Header::Chunk(header.clone()),
-            Self::Credit { header } => Header::Credit(header.clone()),
-            Self::Cancel { header } => Header::Cancel(header.clone()),
+            Self::Request { header, .. } => EnvelopeHeader::Request(header.clone()),
+            Self::Result { header, .. } => EnvelopeHeader::Result(header.clone()),
+            Self::Failure { header, .. } => EnvelopeHeader::Failure(header.clone()),
+            Self::Notification { header, .. } => EnvelopeHeader::Notification(header.clone()),
+            Self::Chunk { header, .. } => EnvelopeHeader::Chunk(header.clone()),
+            Self::Credit { header } => EnvelopeHeader::Credit(header.clone()),
+            Self::Cancel { header } => EnvelopeHeader::Cancel(header.clone()),
         }
     }
 
@@ -594,7 +594,7 @@ fn check_prefix(bytes: &[u8], side: RouterSide) -> Result<Option<(EnvelopeKind, 
         ));
     }
 
-    let Some(kind) = EnvelopeKind::of(prefix.kind) else {
+    let Ok(kind) = EnvelopeKind::try_from(prefix.kind) else {
         return Err(
             Failure::protocol(ProtocolCode::KIND_UNSUPPORTED, side).saying(format!(
                 "{} is not a kind this peer takes",
@@ -796,7 +796,7 @@ fn read_blocks(
 fn header_of(
     bytes: &[u8],
     ((kind, call_id, flags), (blocks, side)): ((EnvelopeKind, u32, u8), (Blocks, RouterSide)),
-) -> Result<Header, Failure> {
+) -> Result<EnvelopeHeader, Failure> {
     Ok(match kind {
         EnvelopeKind::Request => {
             let service_id = read_u16(bytes, PREFIX_BYTES).unwrap_or(0);
@@ -816,7 +816,7 @@ fn header_of(
                 ));
             }
 
-            Header::Request(RequestHeader {
+            EnvelopeHeader::Request(RequestHeader {
                 call_id,
                 service_id,
                 procedure_id,
@@ -827,22 +827,22 @@ fn header_of(
                 credential: blocks.credential,
             })
         }
-        EnvelopeKind::Result => Header::Result(ResultHeader {
+        EnvelopeKind::Result => EnvelopeHeader::Result(ResultHeader {
             call_id,
             total: blocks.total,
             credential: blocks.credential,
         }),
-        EnvelopeKind::Failure => Header::Failure(FailureHeader {
+        EnvelopeKind::Failure => EnvelopeHeader::Failure(FailureHeader {
             call_id,
             credential: blocks.credential,
         }),
-        EnvelopeKind::Notification => Header::Notification(NotificationHeader { call_id }),
+        EnvelopeKind::Notification => EnvelopeHeader::Notification(NotificationHeader { call_id }),
         EnvelopeKind::Chunk => {
             let Some(offset) = read_u53(bytes, PREFIX_BYTES) else {
                 return Err(malformed(side, "a chunk's offset is below 2⁵³".to_owned()));
             };
 
-            Header::Chunk(ChunkHeader {
+            EnvelopeHeader::Chunk(ChunkHeader {
                 call_id,
                 offset,
                 is_last: flags & EnvelopeFlag::MORE.bits() == 0,
@@ -853,13 +853,13 @@ fn header_of(
                 return Err(malformed(side, "a credit's end is below 2⁵³".to_owned()));
             };
 
-            Header::Credit(CreditHeader {
+            EnvelopeHeader::Credit(CreditHeader {
                 call_id,
                 credit_end,
                 paced: flags & EnvelopeFlag::PACED.bits() != 0,
             })
         }
-        EnvelopeKind::Cancel => Header::Cancel(CancelHeader { call_id }),
+        EnvelopeKind::Cancel => EnvelopeHeader::Cancel(CancelHeader { call_id }),
     })
 }
 
@@ -931,8 +931,9 @@ fn cut_of(payload: &[u8], end: usize) -> usize {
 
 /// A failure's record, from a failure envelope's payload.
 ///
-/// Its code, its relays as they came, its scope, and its detail — cut to `maximum_detail_bytes`, back to the start of the character the
-/// cut fell in, bytes that are not UTF-8 read as U+FFFD, a leading U+FEFF kept.
+/// Its code, its relays as they came, its scope, and its detail — cut to the options'
+/// `maximum_detail_bytes`, [`MAXIMUM_DETAIL_BYTES`] when none, back to the start of the character
+/// the cut fell in, bytes that are not UTF-8 read as U+FFFD, a leading U+FEFF kept.
 ///
 /// # Errors
 ///
@@ -940,8 +941,10 @@ fn cut_of(payload: &[u8], end: usize) -> usize {
 /// application's.
 pub fn read_failure(
     payload: &[u8],
-    (side, maximum_detail_bytes): (RouterSide, usize),
+    side: RouterSide,
+    options: &ReadEnvelopeOptions,
 ) -> Result<FailureRecord, Failure> {
+    let maximum_detail_bytes = options.maximum_detail_bytes.unwrap_or(MAXIMUM_DETAIL_BYTES);
     let (Some(code), Some(&relays), Some(&flags)) =
         (read_u16(payload, 0), payload.get(2), payload.get(3))
     else {
@@ -1043,29 +1046,23 @@ pub fn read_envelope(
     };
 
     Ok(Some(match header {
-        Header::Failure(header) => Envelope::Failure {
+        EnvelopeHeader::Failure(header) => Envelope::Failure {
             header,
-            failure: read_failure(
-                &body,
-                (
-                    side,
-                    options.maximum_detail_bytes.unwrap_or(MAXIMUM_DETAIL_BYTES),
-                ),
-            )?,
+            failure: read_failure(&body, side, options)?,
         },
-        Header::Notification(header) => Envelope::Notification {
+        EnvelopeHeader::Notification(header) => Envelope::Notification {
             header,
             payload: body,
         },
-        Header::Request(header) => Envelope::Request {
+        EnvelopeHeader::Request(header) => Envelope::Request {
             header,
             payload: body,
         },
-        Header::Result(header) => Envelope::Result {
+        EnvelopeHeader::Result(header) => Envelope::Result {
             header,
             payload: body,
         },
-        Header::Chunk(header) => {
+        EnvelopeHeader::Chunk(header) => {
             // a chunk carries the next bytes of its payload: without any, it moves nothing on
             if body.is_empty() {
                 return Err(malformed(
@@ -1079,12 +1076,12 @@ pub fn read_envelope(
                 payload: body,
             }
         }
-        Header::Credit(header) => {
+        EnvelopeHeader::Credit(header) => {
             nothing_after("credit")?;
 
             Envelope::Credit { header }
         }
-        Header::Cancel(header) => {
+        EnvelopeHeader::Cancel(header) => {
             nothing_after("cancel")?;
 
             Envelope::Cancel { header }
@@ -1142,9 +1139,9 @@ fn credential_bytes_of(
 
 // the flags `header` writes: the blocks it carries, whether it opens a subscription, whether it is
 // paced, and, for a chunk, whether more follow it
-fn flags_of(header: &Header) -> u8 {
+fn flags_of(header: &EnvelopeHeader) -> u8 {
     match header {
-        Header::Request(header) => {
+        EnvelopeHeader::Request(header) => {
             let mut flags = 0;
 
             if header.destination_id.is_some() {
@@ -1169,7 +1166,7 @@ fn flags_of(header: &Header) -> u8 {
 
             flags
         }
-        Header::Result(header) => {
+        EnvelopeHeader::Result(header) => {
             let mut flags = 0;
 
             if header.total.is_some() {
@@ -1182,28 +1179,28 @@ fn flags_of(header: &Header) -> u8 {
 
             flags
         }
-        Header::Failure(header) => {
+        EnvelopeHeader::Failure(header) => {
             if header.credential.is_some() {
                 EnvelopeFlag::CREDENTIAL.bits()
             } else {
                 0
             }
         }
-        Header::Chunk(header) => {
+        EnvelopeHeader::Chunk(header) => {
             if header.is_last {
                 0
             } else {
                 EnvelopeFlag::MORE.bits()
             }
         }
-        Header::Credit(header) => {
+        EnvelopeHeader::Credit(header) => {
             if header.paced {
                 EnvelopeFlag::PACED.bits()
             } else {
                 0
             }
         }
-        Header::Notification(_) | Header::Cancel(_) => 0,
+        EnvelopeHeader::Notification(_) | EnvelopeHeader::Cancel(_) => 0,
     }
 }
 
@@ -1212,10 +1209,12 @@ fn flags_of(header: &Header) -> u8 {
 // a credential as a header writes it: its scheme and its bytes
 type Written = (CredentialScheme, Bytes);
 
-fn unbounded_layout_of(header: &Header) -> Result<(u8, Option<Written>, usize), ProgrammerError> {
+fn unbounded_layout_of(
+    header: &EnvelopeHeader,
+) -> Result<(u8, Option<Written>, usize), ProgrammerError> {
     let flags = flags_of(header);
 
-    if let Header::Request(request) = header
+    if let EnvelopeHeader::Request(request) = header
         && request.paced
         && !request.opens_subscription
     {
@@ -1245,7 +1244,7 @@ fn unbounded_layout_of(header: &Header) -> Result<(u8, Option<Written>, usize), 
 /// # Errors
 ///
 /// As [`write_header`] refuses, but for its bound.
-pub(crate) fn unbounded_header_bytes_of(header: &Header) -> Result<usize, ProgrammerError> {
+pub(crate) fn unbounded_header_bytes_of(header: &EnvelopeHeader) -> Result<usize, ProgrammerError> {
     unbounded_layout_of(header).map(|(_, _, header_bytes)| header_bytes)
 }
 
@@ -1254,7 +1253,7 @@ pub(crate) fn unbounded_header_bytes_of(header: &Header) -> Result<usize, Progra
 /// # Errors
 ///
 /// As [`write_header`] refuses.
-pub fn header_bytes_of(header: &Header) -> Result<usize, ProgrammerError> {
+pub fn header_bytes_of(header: &EnvelopeHeader) -> Result<usize, ProgrammerError> {
     let header_bytes = unbounded_header_bytes_of(header)?;
 
     if header_bytes > MAXIMUM_HEADER_BYTES {
@@ -1294,7 +1293,10 @@ fn assert_u53(field: &str, value: u64) -> Result<(), ProgrammerError> {
 /// maximum — from 0 to 2⁵³ − 1 for an offset, an end or a total — a credential of a scheme its kind
 /// does not take or that its scheme does not hold, a request paced that opens no subscription, or a
 /// header past 1,020 bytes.
-pub fn write_header(header: &Header, bytes: &mut Vec<u8>) -> Result<usize, ProgrammerError> {
+pub fn write_header(
+    header: &EnvelopeHeader,
+    bytes: &mut Vec<u8>,
+) -> Result<usize, ProgrammerError> {
     let (flags, credential, header_bytes) = unbounded_layout_of(header)?;
 
     if header_bytes > MAXIMUM_HEADER_BYTES {
@@ -1310,7 +1312,7 @@ pub fn write_header(header: &Header, bytes: &mut Vec<u8>) -> Result<usize, Progr
     let mut total = None;
 
     match header {
-        Header::Request(request) => {
+        EnvelopeHeader::Request(request) => {
             assert_field("serviceId", (u64::from(request.service_id), 0xffff))?;
             assert_field("procedureId", (u64::from(request.procedure_id), 0xffff))?;
             part.extend(request.service_id.to_be_bytes());
@@ -1318,16 +1320,18 @@ pub fn write_header(header: &Header, bytes: &mut Vec<u8>) -> Result<usize, Progr
             destination_id = request.destination_id;
             total = request.total;
         }
-        Header::Result(result) => total = result.total,
-        Header::Chunk(chunk) => {
+        EnvelopeHeader::Result(result) => total = result.total,
+        EnvelopeHeader::Chunk(chunk) => {
             assert_u53("offset", chunk.offset)?;
             part.extend(chunk.offset.to_be_bytes());
         }
-        Header::Credit(credit) => {
+        EnvelopeHeader::Credit(credit) => {
             assert_u53("creditEnd", credit.credit_end)?;
             part.extend(credit.credit_end.to_be_bytes());
         }
-        Header::Failure(_) | Header::Notification(_) | Header::Cancel(_) => {}
+        EnvelopeHeader::Failure(_)
+        | EnvelopeHeader::Notification(_)
+        | EnvelopeHeader::Cancel(_) => {}
     }
 
     if let Some(destination_id) = destination_id {

@@ -9,7 +9,7 @@ use super::{Fixture, Recording, header, locked, props};
 use crate::constants::{ProtocolCode, RouterSide};
 use crate::envelope::{Envelope, FailureRecord};
 use crate::failure::Failure;
-use crate::managers::service::ResolverDependencies;
+use crate::managers::service::RequestResolverDependencies;
 use crate::payloads::{JsonCodec, TextCodec};
 use crate::router::admissions::BeforeRequest;
 use crate::router::core::Handler;
@@ -63,7 +63,7 @@ async fn a_request_before_request_refuses_is_answered_with_an_access_denied_seen
     let fixture = Fixture::new();
     let handed = Arc::new(std::sync::Mutex::new(Vec::new()));
     let reading = Arc::clone(&handed);
-    let mut dependencies = ResolverDependencies::of(TextCodec, TextCodec);
+    let mut dependencies = RequestResolverDependencies::new(TextCodec, TextCodec);
     dependencies.before_request = Some(BeforeRequest::new(
         move |request| {
             locked(&reading).push((
@@ -113,7 +113,7 @@ async fn a_request_before_request_refuses_is_answered_with_an_access_denied_seen
 async fn refuses_with_an_access_denied_what_is_not_admitted_with_true() {
     for admits in [false, true] {
         let fixture = Fixture::new();
-        let mut dependencies = ResolverDependencies::of(TextCodec, TextCodec);
+        let mut dependencies = RequestResolverDependencies::new(TextCodec, TextCodec);
         dependencies.before_request = Some(BeforeRequest::new(move |_| admits, None));
         fixture
             .manager
@@ -152,7 +152,7 @@ async fn refuses_with_an_access_denied_what_is_not_admitted_with_true() {
 async fn refuses_with_the_refusal_a_before_request_carries_and_never_reaches_the_callback() {
     for carries_refusal in [true, false] {
         let fixture = Fixture::new();
-        let mut dependencies = ResolverDependencies::of(TextCodec, TextCodec);
+        let mut dependencies = RequestResolverDependencies::new(TextCodec, TextCodec);
         dependencies.before_request = Some(BeforeRequest::new(
             |_| false,
             carries_refusal
@@ -185,7 +185,7 @@ async fn is_asked_before_the_payload_is_read_a_request_refused_is_refused_undeco
  {
     let fixture = Fixture::new();
     let heard = fixture.heard();
-    let mut dependencies = ResolverDependencies::of(JsonCodec, JsonCodec);
+    let mut dependencies = RequestResolverDependencies::new(JsonCodec, JsonCodec);
     dependencies.before_request = Some(BeforeRequest::new(|_| false, None));
     fixture
         .manager
@@ -209,7 +209,7 @@ async fn is_not_asked_again_of_a_request_its_router_admitted() {
     let fixture = Fixture::new();
     let admits = Arc::new(AtomicUsize::new(0));
     let called = Arc::clone(&admits);
-    let mut dependencies = ResolverDependencies::of(TextCodec, TextCodec);
+    let mut dependencies = RequestResolverDependencies::new(TextCodec, TextCodec);
     dependencies.before_request = Some(BeforeRequest::new(
         move |_| {
             called.fetch_add(1, Ordering::SeqCst);
@@ -269,11 +269,17 @@ async fn is_the_resolvers_to_answer_for_its_router_nothing_admits_a_failure_refu
         ),
         (5, Some(BeforeRequest::new(|_| panic!("thrown"), None))),
     ] {
-        let mut dependencies = ResolverDependencies::of(TextCodec, TextCodec);
+        let mut dependencies = RequestResolverDependencies::new(TextCodec, TextCodec);
         dependencies.before_request = before;
         fixture
             .manager
-            .get_request_resolver(&crate::identity::Procedure { id, ..echo() }, dependencies)
+            .get_request_resolver(
+                &crate::identity::Procedure {
+                    procedure_id: id,
+                    ..echo()
+                },
+                dependencies,
+            )
             .expect("defined")
             .on(Arc::new(|_, _| Box::pin(async { Ok(()) })))
             .expect("registered");
@@ -315,7 +321,7 @@ async fn a_self_admitting_resolver_refuses_before_decoding_and_tells_no_trace_on
     for panics in [false, true] {
         let fixture = Fixture::new();
         let heard = fixture.heard();
-        let mut dependencies = ResolverDependencies::of(JsonCodec, JsonCodec);
+        let mut dependencies = RequestResolverDependencies::new(JsonCodec, JsonCodec);
         dependencies.before_request = Some(BeforeRequest::new(
             move |_| {
                 assert!(!panics, "the admission fails");
@@ -335,7 +341,7 @@ async fn a_self_admitting_resolver_refuses_before_decoding_and_tells_no_trace_on
             }))
             .expect("registered");
         let recording = Arc::new(Recording::default());
-        let request = crate::router::core::ResolverProps {
+        let request = crate::router::core::RequestResolverProps {
             is_admitted: false,
             ..props(&recording, b"{not json")
         };

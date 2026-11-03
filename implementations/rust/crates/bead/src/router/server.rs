@@ -24,7 +24,7 @@ use crate::credentials::{
 use crate::debug::{DebugDirection, TracedEnvelope};
 use crate::duration::{LONGEST_TIMER, hold};
 use crate::envelope::{
-    Credential, CreditHeader, Envelope, FailureHeader, FailureRecord, Header, RequestHeader,
+    Credential, CreditHeader, Envelope, EnvelopeHeader, FailureHeader, FailureRecord, RequestHeader,
 };
 use crate::errors::{CallError, ProgrammerError};
 use crate::failure::{Failure, ProcedureAddress};
@@ -44,9 +44,9 @@ use crate::router::intake::Intake;
 use crate::router::requester::CoreRequest;
 use crate::router::types::{
     AccessRefusal, BoxFuture, CallAddress, CallSession, ConnectionHandle, Gauges,
-    IntakeLimitsOptions, RequestCredential, ResolvedRequestOptions, RouterActivity, RouterAnswer,
-    RouterError, RouterLimits, RouterLimitsOptions, RouterResult, SessionIdentifier, Signal,
-    TransportMessage, intake_limits_of, limits_of, session_key_of,
+    IntakeLimitsOptions, NotifyRequest, RequestCredential, RouterActivity, RouterAnswer,
+    RouterError, RouterLimits, RouterLimitsOptions, RouterRequest, RouterResult, SessionIdentifier,
+    Signal, TransportMessage, intake_limits_of, limits_of, session_key_of,
 };
 use crate::session_token::SessionToken;
 use crate::transport::{
@@ -80,10 +80,19 @@ pub type SessionTokenProvider =
 /// Resolves a connection's session for NONE or OPAQUE in the request's turn, before admission.
 /// The header and signal belong to the call; no transport credential is handed to it.
 pub type SessionProvider = Arc<
-    dyn Fn((&ConnectionHandle, &RequestHeader), &Signal) -> Result<Option<CallSession>, RouterError>
+    dyn Fn(&SessionProviderRequest<'_>, &Signal) -> Result<Option<CallSession>, RouterError>
         + Send
         + Sync,
 >;
+
+/// A connection's request as its session provider reads it, without a transport credential.
+#[derive(Debug)]
+pub struct SessionProviderRequest<'a> {
+    /// The connection the request comes from.
+    pub connection_handle: &'a ConnectionHandle,
+    /// Its request header, before its credential is resolved.
+    pub header: &'a RequestHeader,
+}
 
 /// How a server's router is built, beyond its transport.
 #[derive(Clone, Default)]
@@ -363,10 +372,10 @@ impl Side for ServerState {
     fn trace(
         &mut self,
         direction: DebugDirection,
-        (connection_handle, header): (&ConnectionHandle, &Header),
+        (connection_handle, header): (&ConnectionHandle, &EnvelopeHeader),
     ) {
         let listeners = Arc::clone(&self.listeners);
-        let traced = TracedEnvelope::of(connection_handle, header);
+        let traced = TracedEnvelope::new(connection_handle, header);
 
         listeners.guarded(
             (&listeners.debug, |listener: &EnvelopeListener| {
@@ -447,8 +456,16 @@ impl Side for ServerState {
         }
 
         let session = if let Some(provider) = &self.session_of {
-            match caught(("a session provider", || provider((handle, header), signal)))
-                .unwrap_or_else(|panicked| Err(panicked.into()))
+            match caught(("a session provider", || {
+                provider(
+                    &SessionProviderRequest {
+                        connection_handle: handle,
+                        header,
+                    },
+                    signal,
+                )
+            }))
+            .unwrap_or_else(|panicked| Err(panicked.into()))
             {
                 Ok(session) => session,
                 Err(error) => return Resolution::Now(Err(Unresolved::Other(Arc::new(error)))),
@@ -1242,7 +1259,7 @@ fn end_subscription(
     (call, series, failure): (CallAddress, Option<NotificationSeries>, Failure),
 ) {
     if let Some(series) = &series {
-        series.dropped(Some((failure.code(), failure.scope())));
+        series.dropped(Some(&failure));
     }
 
     let handle = Arc::clone(&call.connection_handle);
@@ -1677,37 +1694,6 @@ impl Future for Call {
     }
 }
 
-/// A call of the server's own, to a connection its options name.
-#[derive(Debug, Clone)]
-pub struct ServerRequest {
-    /// The procedure it calls.
-    pub procedure: ProcedureAddress,
-    /// The bytes a payload of it holds at most.
-    pub maximum_payload_bytes: Option<u64>,
-    /// Its options, resolved: the connection it goes to among them.
-    pub options: ResolvedRequestOptions,
-    /// The series it counts into: its requester's.
-    pub series: Option<ProcedureSeries>,
-    /// What refuses it once it started, as its requester judged it.
-    pub refusal: Option<CallError>,
-}
-
-/// What hears a call's id, and its hand-off to its transport.
-#[derive(Default)]
-#[non_exhaustive]
-pub struct CallHooks {
-    /// Hears the call's id once its router drew it.
-    pub on_call_id: Option<Box<dyn FnOnce(u32) + Send>>,
-    /// Hears whether its transport took it.
-    pub on_sent: Option<Box<dyn FnMut(bool) + Send>>,
-}
-
-impl fmt::Debug for CallHooks {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter.debug_struct("CallHooks").finish_non_exhaustive()
-    }
-}
-
 struct Shared {
     #[cfg(test)]
     requester_probe: Mutex<Option<crate::testing::scripted::RequesterProbe>>,
@@ -1753,6 +1739,10 @@ impl RouterServer {
         Self::build(transport, (options, None))
     }
 
+    #[expect(
+        clippy::too_many_lines,
+        reason = "the server binds its transport, clock, session providers and owner in one construction"
+    )]
     pub(crate) fn build(
         transport: Arc<dyn ServerTransport>,
         (options, facade): (&RouterServerOptions, Option<crate::server::Facade>),
@@ -1762,10 +1752,12 @@ impl RouterServer {
             |last| crate::router::parts::PendingCalls::bounded(RouterSide::Server, last),
         )?;
         let runtime = crate::platform::runtime_of(options.runtime.as_ref(), "a router")?;
-        let clock = crate::clock::clock_of(
-            (transport.clock().as_ref(), options.clock.as_ref()),
-            ("a server's router", "its transport"),
-        )?
+        let clock = crate::clock::clock_of(&crate::clock::LayeredClocks {
+            beneath: transport.clock().as_ref(),
+            given: options.clock.as_ref(),
+            layer: "a server's router",
+            below: "its transport",
+        })?
         .unwrap_or_else(|| {
             let platform: SharedClock = Arc::new(crate::clock::SystemClock::on(runtime.clone()));
 
@@ -2019,11 +2011,7 @@ impl RouterServer {
     ///
     /// A [`ProgrammerError`] for options that name no connection, or a timeout spec 1.4 does not
     /// hold.
-    pub fn request(
-        &self,
-        payload: Bytes,
-        (request, hooks): (ServerRequest, CallHooks),
-    ) -> Result<Call, ProgrammerError> {
+    pub fn request(&self, payload: Bytes, request: RouterRequest) -> Result<Call, ProgrammerError> {
         #[cfg(test)]
         if let Some(probe) = self.requester_probe() {
             (probe.called)(request.series.as_ref());
@@ -2032,14 +2020,14 @@ impl RouterServer {
         // made after its router's dispose fails unsent, whatever thread or turn it is made on; one
         // made before goes (spec 9.1)
         if self.shared.disposal.is_set() {
-            named_of(&request.options)?;
+            named_of(&request)?;
 
             return Ok(Call::refused(CallError::Disconnected(
                 crate::router::core::DISPOSED.to_owned(),
             )));
         }
 
-        request_on(&self.shared.owner.downgrade(), (payload, request, hooks))
+        request_on(&self.shared.owner.downgrade(), (payload, request))
     }
 
     /// Sends a notification's payload to each subscription its procedure holds that `filter`
@@ -2052,12 +2040,14 @@ impl RouterServer {
     pub fn notify(
         &self,
         payload: Result<Bytes, RouterError>,
-        (procedure, filter, key): (
-            ProcedureAddress,
-            Option<NotifyFilter>,
-            Option<NotificationKey>,
-        ),
+        request: NotifyRequest,
     ) -> BoxFuture<Result<(), RouterError>> {
+        let NotifyRequest {
+            procedure,
+            filter,
+            key,
+        } = request;
+
         // ! once its handle is disposed, a notification made after it goes to nobody
         if self.shared.disposal.is_set() {
             return Box::pin(async { Ok(()) });
@@ -2117,7 +2107,8 @@ impl RouterServer {
     /// Ends the subscriptions of a connection's session, with `failure`.
     pub fn drop_subscriptions(
         &self,
-        (connection_handle, failure): (ConnectionHandle, Failure),
+        connection_handle: ConnectionHandle,
+        failure: Failure,
     ) -> BoxFuture<()> {
         // ! once its handle is disposed, the dispose's job lets every subscription go, sending
         // nothing
@@ -2272,8 +2263,17 @@ pub(crate) fn gauges(state: &ServerState) -> Result<Gauges, ProgrammerError> {
     ])
 }
 
-// the connection a server's call names, once its options hold: a programmer's error otherwise
-fn named_of(options: &ResolvedRequestOptions) -> Result<ConnectionHandle, ProgrammerError> {
+// the connection a server's call names, once it asks nothing no server does and its options hold:
+// a programmer's error otherwise
+fn named_of(request: &RouterRequest) -> Result<ConnectionHandle, ProgrammerError> {
+    let options = &request.options;
+
+    if request.subscribes.is_some() {
+        return Err(ProgrammerError::new(
+            "a server does not subscribe to notifications; it sends them",
+        ));
+    }
+
     let Some(named) = options.connection_handle.clone() else {
         return Err(ProgrammerError::new(
             "a server request names the connection it goes to",
@@ -2296,16 +2296,20 @@ fn named_of(options: &ResolvedRequestOptions) -> Result<ConnectionHandle, Progra
 /// Makes a call of the server's own on the owner `owner`, sent as it is made.
 pub(crate) fn request_on(
     owner: &WeakOwner<ServerState>,
-    (payload, request, hooks): (Bytes, ServerRequest, CallHooks),
+    (payload, request): (Bytes, RouterRequest),
 ) -> Result<Call, ProgrammerError> {
-    let ServerRequest {
+    let named = named_of(&request)?;
+    let RouterRequest {
         procedure,
-        maximum_payload_bytes,
         options,
         series,
         refusal,
+        on_call_id,
+        on_sent,
+        ..
     } = request;
-    let named = named_of(&options)?;
+    let maximum_payload_bytes = procedure.maximum_payload_bytes;
+    let procedure = procedure.address();
     let (reply, answer) = oneshot::channel();
     let posted = owner.post(Box::new(move |state: &mut ServerState| {
         let is_open = state.connections.contains_key(&named);
@@ -2368,8 +2372,8 @@ pub(crate) fn request_on(
                     connection_handle: named,
                     credential,
                     on_drawn: None,
-                    on_call_id: hooks.on_call_id,
-                    on_sent: hooks.on_sent,
+                    on_call_id,
+                    on_sent,
                     opens_subscription: false,
                     paced: false,
                     options,

@@ -94,7 +94,7 @@ pub struct BrokerPublication {
 impl BrokerPublication {
     /// A publication of `payload` to `topic`, living as long as its broker keeps it.
     #[must_use]
-    pub fn of<T: Into<String>, I: IntoIterator<Item = T>>(topic: I, payload: Bytes) -> Self {
+    pub fn new<T: Into<String>, I: IntoIterator<Item = T>>(topic: I, payload: Bytes) -> Self {
         Self {
             topic: topic.into_iter().map(Into::into).collect(),
             payload,
@@ -137,7 +137,7 @@ pub struct BrokerDown {
 impl BrokerDown {
     /// A link lost, or taken over when `is_taken_over`.
     #[must_use]
-    pub const fn of(is_taken_over: bool) -> Self {
+    pub const fn new(is_taken_over: bool) -> Self {
         Self { is_taken_over }
     }
 }

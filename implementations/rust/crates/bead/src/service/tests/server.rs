@@ -1,5 +1,6 @@
 //! The greeter's service server: admission, offering, registration and notifications.
 
+use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 
 use super::locked;
@@ -7,8 +8,8 @@ use crate::constants::{FailureScope, ProcedureKind, ProtocolCode, RouterSide};
 use crate::errors::{CallError, ResolverError};
 use crate::failure::FailureOrigin;
 use crate::managers::service::{
-    NotificationDependencies, NotifyOptions, RequestDependencies, RequestOptions, ResolverCallback,
-    ResolverDependencies, Validate,
+    NotificationDependencies, NotifyOptions, RequestDependencies, RequestOptions,
+    RequestResolverDependencies, ResolverCallback, Validate,
 };
 use crate::payloads::TextCodec;
 use crate::service::{
@@ -26,10 +27,10 @@ fn init((id, name): (u16, &str), admission: AdmissionRule) -> DescriptorInit<Tex
     DescriptorInit {
         procedure: crate::identity::Procedure {
             service_id: 7,
-            id,
+            procedure_id: id,
             service_revision: 1,
-            name: name.to_owned(),
-            kind: None,
+            procedure_name: name.to_owned(),
+            procedure_kind: None,
             ..echo()
         },
         admission,
@@ -70,13 +71,13 @@ impl Greeter {
 
     fn procedures(&self) -> Vec<ServiceProcedure> {
         vec![
-            ServiceProcedure::of(&self.clock),
-            ServiceProcedure::of(&self.guarded),
-            ServiceProcedure::of(&self.login),
-            ServiceProcedure::of_notifying(&self.news),
-            ServiceProcedure::of(&self.hello),
-            ServiceProcedure::of(&self.shout),
-            ServiceProcedure::of(&self.whoami),
+            ServiceProcedure::from(&self.clock),
+            ServiceProcedure::from(&self.guarded),
+            ServiceProcedure::from(&self.login),
+            ServiceProcedure::from(&self.news),
+            ServiceProcedure::from(&self.hello),
+            ServiceProcedure::from(&self.shout),
+            ServiceProcedure::from(&self.whoami),
         ]
     }
 
@@ -84,7 +85,7 @@ impl Greeter {
         ServiceServer::new(
             self.procedures(),
             &ServiceServerOptions {
-                admissions: Some(vec![("loud", hook)]),
+                admissions: Some(BTreeMap::from([("loud", hook)])),
                 ..ServiceServerOptions::default()
             },
         )
@@ -217,7 +218,7 @@ async fn makes_each_command_s_requester_once_as_it_is_offered_and_refuses_one_ca
         .observe_requester(crate::testing::scripted::RequesterProbe {
             declared: Arc::new(move |procedure, series| {
                 locked(&declaring).push(procedure.clone());
-                if procedure.name == "clock" {
+                if procedure.procedure_name == "clock" {
                     *locked(&declaring_series) = Some(series.expect("clock's series").clone());
                 }
             }),
@@ -234,7 +235,7 @@ async fn makes_each_command_s_requester_once_as_it_is_offered_and_refuses_one_ca
         .services()
         .get_request_resolver(
             greeter.clock.procedure(),
-            ResolverDependencies::of(TextCodec, TextCodec),
+            RequestResolverDependencies::new(TextCodec, TextCodec),
         )
         .expect("clock resolver")
         .register(
@@ -297,7 +298,7 @@ async fn call(
         .services()
         .get_request(
             descriptor.procedure(),
-            RequestDependencies::of(TextCodec, TextCodec),
+            RequestDependencies::new(TextCodec, TextCodec),
         )
         .expect("a requester")
         .call(payload.to_owned(), &RequestOptions::default())
@@ -429,7 +430,7 @@ fn refuses_a_hook_the_options_lack_one_no_procedure_names_and_one_that_is_no_hoo
         ServiceServer::new(
             greeter.procedures(),
             &ServiceServerOptions {
-                admissions: Some(vec![("loud", loud()), ("quiet", loud())]),
+                admissions: Some(BTreeMap::from([("loud", loud()), ("quiet", loud())])),
                 ..ServiceServerOptions::default()
             }
         )
@@ -438,8 +439,8 @@ fn refuses_a_hook_the_options_lack_one_no_procedure_names_and_one_that_is_no_hoo
         "the hook quiet is given, and no procedure names it"
     );
     let consumer = Consumer::new();
-    consumer.accepts("pub fn check(mut options: bead::ServiceServerOptions, hook: bead::AdmissionHook) { options.admissions = Some(vec![(\"loud\", hook)]); }");
-    consumer.refuses("pub fn check(mut options: bead::ServiceServerOptions) { options.admissions = Some(vec![(\"loud\", None)]); }", ("E0308", "mismatched types"));
+    consumer.accepts("pub fn check(mut options: bead::ServiceServerOptions, hook: bead::AdmissionHook) { options.admissions = Some(std::collections::BTreeMap::from([(\"loud\", hook)])); }");
+    consumer.refuses("pub fn check(mut options: bead::ServiceServerOptions) { options.admissions = Some(std::collections::BTreeMap::from([(\"loud\", None)])); }", ("E0308", "mismatched types"));
     consumer.refuses(
         "pub fn check() { let _ = bead::AdmissionHook { admits: None, detail: None }; }",
         ("E0308", "mismatched types"),
@@ -452,7 +453,7 @@ fn refuses_a_hook_the_options_lack_one_no_procedure_names_and_one_that_is_no_hoo
 fn refuses_options_without_admissions_where_a_procedure_names_a_hook() {
     let greeter = Greeter::new();
     let none_listed = ServiceServerOptions {
-        admissions: Some(Vec::new()),
+        admissions: Some(BTreeMap::new()),
         ..ServiceServerOptions::default()
     };
     let failing_fast = ServiceServerOptions {
@@ -553,7 +554,8 @@ async fn notifies_nothing_before_it_is_offered_and_resolves() {
     service
         .notify(
             &greeter.news,
-            ("before".to_owned(), &NotifyOptions::default()),
+            "before".to_owned(),
+            &NotifyOptions::default(),
         )
         .await;
     service
@@ -577,27 +579,25 @@ async fn notifies_nothing_before_it_is_offered_and_resolves() {
         .services()
         .get_notification(
             greeter.news.descriptor().procedure(),
-            NotificationDependencies::of((TextCodec, TextCodec, TextCodec)),
+            NotificationDependencies::new(
+                RequestDependencies::new(TextCodec, TextCodec),
+                TextCodec,
+            ),
         )
         .expect("a notification");
     let registration = notification
-        .on(
-            (
-                "subscribe".to_owned(),
-                Arc::new(move |value| {
-                    locked(&hearing).push(value);
-                    Box::pin(async { Ok(()) })
-                }),
-            ),
+        .register(
+            "subscribe".to_owned(),
+            Arc::new(move |value| {
+                locked(&hearing).push(value);
+                Box::pin(async { Ok(()) })
+            }),
             &RequestOptions::default(),
         )
         .await
         .expect("subscribed");
     service
-        .notify(
-            &greeter.news,
-            ("after".to_owned(), &NotifyOptions::default()),
-        )
+        .notify(&greeter.news, "after".to_owned(), &NotifyOptions::default())
         .await;
     pair.settle().await;
     assert_eq!(*locked(&heard), ["after"]);
@@ -620,7 +620,7 @@ async fn lists_the_procedures_without_a_resolver_which_the_router_answers_proced
         service
             .procedures_without_resolver()
             .iter()
-            .map(|procedure| procedure.name.clone())
+            .map(|procedure| procedure.procedure_name.clone())
             .collect::<Vec<_>>(),
         ["login", "news", "shout", "whoami"]
     );
@@ -630,7 +630,10 @@ async fn lists_the_procedures_without_a_resolver_which_the_router_answers_proced
     assert!(
         matches!(failure, CallError::Failure(failure) if failure.protocol_code() == Some(ProtocolCode::PROCEDURE_UNKNOWN))
     );
-    assert_eq!(greeter.clock.procedure().kind, Some(ProcedureKind::Command));
+    assert_eq!(
+        greeter.clock.procedure().procedure_kind,
+        Some(ProcedureKind::Command)
+    );
 }
 
 const NOT_EMPTY_DETAIL: &str = "{\"bounds\":{\"min_len\":\"1\"},\"message\":\"must be at least 1 characters\",\"ruleId\":\"string.min_len\"}\n{\"more\":0}";
@@ -680,7 +683,7 @@ async fn answers_payload_invalid_with_its_violations_to_a_request_its_rules_refu
     let pair = pair().await;
     let descriptor = checked(not_empty(), false);
     let service = ServiceServer::new(
-        vec![ServiceProcedure::of(&descriptor)],
+        vec![ServiceProcedure::from(&descriptor)],
         &ServiceServerOptions::default(),
     )
     .expect("a checked service");
@@ -708,7 +711,7 @@ async fn answers_payload_invalid_with_its_violations_to_a_request_its_rules_refu
     assert_eq!(failure.origin(), FailureOrigin::Peer);
     assert_eq!(failure.detail(), NOT_EMPTY_DETAIL);
     assert_eq!(
-        violations_of((failure.code(), failure.scope()), failure.detail()),
+        violations_of(&failure),
         ReadViolations {
             violations: vec![Violation {
                 bounds: Some(
@@ -742,7 +745,7 @@ async fn answers_procedure_failed_to_a_validate_that_throws_and_reports_it() {
         false,
     );
     let service = ServiceServer::new(
-        vec![ServiceProcedure::of(&descriptor)],
+        vec![ServiceProcedure::from(&descriptor)],
         &ServiceServerOptions::default(),
     )
     .expect("a checked service");
@@ -791,7 +794,7 @@ async fn validates_a_command_before_it_goes_when_its_options_say_so() {
     let pair = pair().await;
     let descriptor = checked(not_empty(), true);
     let service = ServiceServer::new(
-        vec![ServiceProcedure::of(&descriptor)],
+        vec![ServiceProcedure::from(&descriptor)],
         &ServiceServerOptions {
             validates: Some(true),
             ..ServiceServerOptions::default()
@@ -804,7 +807,7 @@ async fn validates_a_command_before_it_goes_when_its_options_say_so() {
         .services()
         .get_request_resolver(
             descriptor.procedure(),
-            ResolverDependencies::of(TextCodec, TextCodec),
+            RequestResolverDependencies::new(TextCodec, TextCodec),
         )
         .expect("a command resolver")
         .register(

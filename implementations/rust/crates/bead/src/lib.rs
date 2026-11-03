@@ -1,4 +1,4 @@
-//! Bead, a binary wire protocol, on the Rust side: its core — the envelope's codec, the routers
+//! Bead, a binary wire protocol, on the Rust side: its core â€” the envelope's codec, the routers
 //! and their service layer, sessions and credentials, the clock and the durations, debugging and
 //! metrics, the in-memory transport, the broker's core over an in-memory broker, and the joined
 //! transport (decision 0044).
@@ -42,19 +42,20 @@ pub use broker::adapter::{
     BrokerSubscription, Settle,
 };
 pub use broker::client::{
-    BrokerClient, BrokerClientOptions, BrokerConnectOptions, MAXIMUM_UNSENT_BYTES,
+    BrokerTransportClient, BrokerTransportClientConnectOptions, BrokerTransportClientOptions,
+    MAXIMUM_UNSENT_BYTES,
 };
 pub use broker::memory::{
     MemoryBroker, MemoryBrokerAdapter, MemoryBrokerAdapterOptions, MemoryBrokerFault,
     MemoryBrokerFaultOptions, MemoryBrokerOptions, TRANSPORT_BROKER,
 };
 pub use broker::participant::{
-    BODY_GRACE_PERIOD, BrokerParticipant, BrokerParticipantOptions, BrokerRefusedError, HEARTBEAT,
-    HELD_BYTES_BUDGET, MAXIMUM_ENVELOPE_PARTS_BYTES, MINIMUM_BODY_BYTES_PER_SECOND,
-    ParticipantErrorListener, ROOT,
+    BODY_GRACE_PERIOD, BrokerParticipant, BrokerParticipantOptions, BrokerRefusal,
+    BrokerRefusedError, HEARTBEAT, HELD_BYTES_BUDGET, MAXIMUM_ENVELOPE_PARTS_BYTES,
+    MINIMUM_BODY_BYTES_PER_SECOND, ParticipantErrorListener, ROOT,
 };
 pub use broker::server::{
-    ACCEPT_TIMEOUT, BrokerServer, BrokerServerOptions, MAXIMUM_CONNECTIONS,
+    ACCEPT_TIMEOUT, BrokerTransportServer, BrokerTransportServerOptions, MAXIMUM_CONNECTIONS,
     MAXIMUM_CONNECTIONS_PER_ADDRESS,
 };
 pub use client::{Client, ClientOptions};
@@ -77,8 +78,8 @@ pub use debug::{
 };
 pub use duration::{DurationRefusal, LONGEST_TIMER, NEVER};
 pub use envelope::{
-    CancelHeader, ChunkHeader, Credential, CreditHeader, FailureHeader, FailureRecord, Header,
-    NotificationHeader, RequestHeader, ResultHeader,
+    CancelHeader, ChunkHeader, Credential, CreditHeader, EnvelopeHeader, FailureHeader,
+    FailureRecord, NotificationHeader, RequestHeader, ResultHeader,
 };
 pub use errors::{
     CallError, CapacityError, ConnectError, Disposed, ProgrammerError, ReadyStateError,
@@ -96,16 +97,17 @@ pub use managers::notification::{
 pub use managers::service::{
     CloseConnection, DEFAULT_TIMEOUT, DebugEvent, DebugListener, DeprecatedListener,
     DroppedListener, Notification, NotificationCallback, NotificationDependencies,
-    NotificationRegistration, NotificationResolverOf, Notifier, NotifyOptions, Request,
-    RequestDefaults, RequestDependencies, RequestOptions, RequestProps, ResolverCallback,
-    ResolverDependencies, ResolverOf, Response, ServiceCall, ServiceManager, ServiceManagerOptions,
-    ServiceRouter, Subscriber, SubscriberFilter, Traced, TracedError, TracedValue, Unsubscribe,
-    Validate, ValidateOptions,
+    NotificationRegistration, NotificationResolverDependencies, NotificationResolverOf, Notifier,
+    NotifyOptions, Request, RequestDefaults, RequestDependencies, RequestOptions, RequestProps,
+    RequestResolverDependencies, ResolverCallback, ResolverOf, Response, ServiceCall,
+    ServiceManager, ServiceManagerOptions, ServiceRouter, Subscriber, SubscriberFilter, Traced,
+    TracedError, TracedValue, Unsubscribe, Validate, ValidateOptions,
 };
 pub use managers::sessions::{Session, SessionEvent, SessionManagerOptions};
 pub use memory::{
-    MEMORY_ADDRESS, MemoryClient, MemoryClientOptions, MemoryConnectOptions, MemoryServer,
-    MemoryServerOptions, TRANSPORT_MEMORY,
+    MEMORY_ADDRESS, MemoryTransportClient, MemoryTransportClientConnectOptions,
+    MemoryTransportClientOptions, MemoryTransportServer, MemoryTransportServerOptions,
+    TRANSPORT_MEMORY,
 };
 pub use metrics::{
     CallEnding, MAXIMUM_PROCEDURES, METRICS_CONTENT_TYPE, MetricsExposition, MetricsRegistry,
@@ -116,28 +118,31 @@ pub use router::admissions::{
     BeforeRequest, require_credential, require_session, share_leg_b_session,
 };
 pub use router::client::{
-    ClientActivityListener, ClientEnvelopeListener, ClientErrorListener, ClientRequest,
-    NotificationLike, RouterClient, RouterClientOptions, Settled, WithdrawnListener,
+    ClientActivityListener, ClientEnvelopeListener, ClientErrorListener, NotificationLike,
+    RouterClient, RouterClientOptions, Settled, UnregisterNotificationOptions, WithdrawnListener,
 };
-pub use router::core::{AdmissionRefusal, AdmissionRequest, AdmitFn, Answerer, ResolverProps};
+pub use router::core::{
+    AdmissionRefusal, AdmissionRequest, AdmitFn, Answerer, RequestResolverProps,
+};
 pub use router::relay::{
     Destination, DestinationOptions, DestinationRegistration, RelayLeg, RelayOptions, RelayRouter,
     RelayTarget,
 };
 pub use router::server::{
-    ActivityListener, Call, CallHooks, EnvelopeListener, ErrorListener, NotifyFilter,
-    RefusalListener, RouterServer, RouterServerOptions, ServerRequest, SessionProvider,
+    ActivityListener, Call, EnvelopeListener, ErrorListener, NotifyFilter, RefusalListener,
+    RouterServer, RouterServerOptions, SessionProvider, SessionProviderRequest,
     SessionTokenProvider,
 };
 pub use router::types::{
     AccessRefusal, AccessRefusalStage, BoxFuture, CallAddress, CallSession, ConnectionHandle,
-    Gauges, INTAKE_DEFAULTS, IntakeLimits, IntakeLimitsOptions, LIMIT_DEFAULTS, RequestCredential,
-    ResolvedRequestOptions, RouterActivity, RouterAnswer, RouterError, RouterLimits,
-    RouterLimitsOptions, RouterResult, SessionIdentifier, Signal, SignalReason, TransportMessage,
+    Gauges, INTAKE_DEFAULTS, IntakeLimits, IntakeLimitsOptions, LIMIT_DEFAULTS, NotifyRequest,
+    RequestCredential, ResolvedRequestOptions, RouterActivity, RouterAnswer, RouterError,
+    RouterLimits, RouterLimitsOptions, RouterRequest, RouterResult, SessionIdentifier, Signal,
+    SignalReason, TransportMessage,
 };
 pub use server::{
     Health, HealthCheck, HealthStatus, LayerGauges, Server, ServerGauges, ServerOptions,
-    SessionListener, Sessions, WARNING_RATIO,
+    SessionListener, SessionManager, WARNING_RATIO,
 };
 pub use service::{
     AdmissionHook, AdmissionRule, Descriptor, DescriptorInit, FailureCatalogue, ListedFailure,
@@ -146,17 +151,19 @@ pub use service::{
 };
 pub use session_token::SessionToken;
 pub use transport::{
-    CONNECT_TIMEOUT, ClientListener, ClientTransport, Connect, DisconnectOptions, ListenerId,
-    RECONNECT_ATTEMPTS, RECONNECT_DELAY, ReadyState, ReconnectDelay, ReconnectOptions, Sent,
-    ServerListener, ServerTransport, TransportServerRefusal, is_field_value,
+    CONNECT_TIMEOUT, ClientListener, Connect, ListenerId, RECONNECT_ATTEMPTS, RECONNECT_DELAY,
+    ReadyState, RouterClientTransport, Sent, ServerListener, ServerTransport,
+    TransportClientDisconnectOptions, TransportClientReconnectDelay,
+    TransportClientReconnectDelayResolver, TransportClientReconnectOptions, TransportServerClient,
+    TransportServerRefusal, is_field_value,
 };
 pub use violations::{
     CLOSING_BYTES, Judged, ReadViolations, Violation, ViolationHolder, detail_bound_of,
     violations_detail_of, violations_of, words_of,
 };
 
-/// What the workspace's own members — the interop service, the bench, the conformance players and
-/// the fuzz targets — reach that the API does not offer: outside SemVer, and no road for another
+/// What the workspace's own members â€” the interop service, the bench, the conformance players and
+/// the fuzz targets â€” reach that the API does not offer: outside SemVer, and no road for another
 /// crate. The envelope's codec is here, internal on every side as a router's core is (decision
 /// 0004), as the C# side's members reach theirs by `InternalsVisibleTo`.
 #[doc(hidden)]
@@ -167,7 +174,7 @@ pub mod internal {
         read_envelope, read_failure, read_header, read_prefix, write_envelope, write_header,
     };
     pub use crate::identity::{are_one_name, is_procedure_name};
-    pub use crate::jwt_verifier::{read_jwt, verify_jwt};
+    pub use crate::jwt_verifier::{ReadJwt, read_jwt, verify_jwt};
     pub use crate::router::types::{limits_of, session_key_of};
 }
 

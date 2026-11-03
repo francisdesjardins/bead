@@ -20,7 +20,7 @@ use crate::clock::SharedClock;
 use crate::constants::{ProtocolCode, RouterSide, SERVER_CONNECTION_HANDLE};
 use crate::debug::{DebugDirection, DebugType};
 use crate::duration::hold;
-use crate::envelope::{FailureHeader, FailureRecord, Header, RequestHeader};
+use crate::envelope::{EnvelopeHeader, FailureHeader, FailureRecord, RequestHeader};
 use crate::errors::{CallError, ProgrammerError, ResolverError};
 use crate::failure::Failure;
 use crate::identity::{Procedure, check_declaration};
@@ -28,12 +28,13 @@ use crate::managers::notification::NotificationKey;
 use crate::metrics::ProcedureSeries;
 use crate::payloads::{PayloadCodec, decoded, encoded, refusal_saying};
 use crate::router::admissions::BeforeRequest;
-use crate::router::client::{ClientRequest, NotificationLike, RouterClient};
-use crate::router::core::{AdmissionRequest, AdmitFn, Answerer, Handler, ResolverProps};
-use crate::router::server::{CallHooks, NotifyFilter, RouterServer, ServerRequest};
+use crate::router::client::{NotificationLike, RouterClient};
+use crate::router::core::{AdmissionRequest, AdmitFn, Answerer, Handler, RequestResolverProps};
+use crate::router::server::{NotifyFilter, RouterServer};
 use crate::router::types::{
-    BoxFuture, CallSession, ConnectionHandle, RequestCredential, ResolvedRequestOptions,
-    RouterAnswer, RouterError, RouterLimits, SessionIdentifier, Signal,
+    BoxFuture, CallSession, ConnectionHandle, NotifyRequest, RequestCredential,
+    ResolvedRequestOptions, RouterAnswer, RouterError, RouterLimits, RouterRequest,
+    SessionIdentifier, Signal,
 };
 use crate::transport::{Listened, ListenerId};
 use crate::violations::{Judged, detail_bound_of, is_refused, violations_detail_of};
@@ -122,16 +123,6 @@ pub enum ServiceRouter {
     Client(RouterClient),
 }
 
-/// A call the manager asks of its router.
-pub(crate) struct RouterCall {
-    pub(crate) procedure: Procedure,
-    pub(crate) options: ResolvedRequestOptions,
-    pub(crate) series: Option<ProcedureSeries>,
-    pub(crate) refusal: Option<CallError>,
-    pub(crate) on_call_id: Option<Box<dyn FnOnce(u32) + Send>>,
-    pub(crate) subscribes: Option<Arc<dyn NotificationLike>>,
-}
-
 impl ServiceRouter {
     fn side(&self) -> RouterSide {
         match self {
@@ -184,41 +175,11 @@ impl ServiceRouter {
     fn request(
         &self,
         payload: Bytes,
-        call: RouterCall,
+        request: RouterRequest,
     ) -> Result<crate::router::server::Call, ProgrammerError> {
         match self {
-            Self::Server(router) => router.request(
-                payload,
-                (
-                    ServerRequest {
-                        procedure: call.procedure.address(),
-                        maximum_payload_bytes: call.procedure.maximum_payload_bytes,
-                        options: call.options,
-                        series: call.series,
-                        refusal: call.refusal,
-                    },
-                    CallHooks {
-                        on_call_id: call.on_call_id,
-                        on_sent: None,
-                    },
-                ),
-            ),
-            Self::Client(router) => router.request(
-                payload,
-                (
-                    ClientRequest {
-                        procedure: call.procedure,
-                        options: call.options,
-                        series: call.series,
-                        refusal: call.refusal,
-                        subscribes: call.subscribes,
-                    },
-                    CallHooks {
-                        on_call_id: call.on_call_id,
-                        on_sent: None,
-                    },
-                ),
-            ),
+            Self::Server(router) => router.request(payload, request),
+            Self::Client(router) => router.request(payload, request),
         }
     }
 
@@ -323,7 +284,7 @@ impl<Req: PayloadCodec, Res: PayloadCodec> fmt::Debug for RequestDependencies<Re
 impl<Req: PayloadCodec, Res: PayloadCodec> RequestDependencies<Req, Res> {
     /// A requester's codecs, judged by no rule.
     #[must_use]
-    pub fn of(request: Req, result: Res) -> Self {
+    pub fn new(request: Req, result: Res) -> Self {
         Self {
             request,
             result,
@@ -453,8 +414,8 @@ impl Inner {
             direction: step.direction,
             duration,
             options,
-            procedure_id: procedure.id,
-            procedure_name: procedure.name.clone(),
+            procedure_id: procedure.procedure_id,
+            procedure_name: procedure.procedure_name.clone(),
             rx: step.rx,
             service_id: procedure.service_id,
             service_revision: procedure.service_revision,
@@ -519,10 +480,12 @@ impl ServiceManager {
         options: &ServiceManagerOptions,
     ) -> Result<Self, ProgrammerError> {
         let below = router.clock();
-        let clock = crate::clock::clock_of(
-            (Some(&below), options.clock.as_ref()),
-            ("a service manager", "its router"),
-        )?
+        let clock = crate::clock::clock_of(&crate::clock::LayeredClocks {
+            beneath: Some(&below),
+            given: options.clock.as_ref(),
+            layer: "a service manager",
+            below: "its router",
+        })?
         .unwrap_or(below);
         let defaults = options.defaults.clone().unwrap_or_default();
         // held as the manager is built, rather than refused at each call it would time
@@ -686,7 +649,7 @@ impl ServiceManager {
         {
             return Err(ProgrammerError::new(format!(
                 "{} refuses with a failure that is not an admission's of the {}'s table",
-                procedure.name,
+                procedure.procedure_name,
                 side.as_str()
             )));
         }
@@ -703,7 +666,7 @@ impl ServiceManager {
     pub fn get_request_resolver<Req, Res>(
         &self,
         procedure: &Procedure,
-        dependencies: ResolverDependencies<Req, Res>,
+        dependencies: RequestResolverDependencies<Req, Res>,
     ) -> Result<ResolverOf<Req, Res>, ProgrammerError>
     where
         Req: PayloadCodec,
@@ -728,7 +691,7 @@ impl ServiceManager {
     pub fn get_command_resolver<Req, Res>(
         &self,
         procedure: &Procedure,
-        dependencies: ResolverDependencies<Req, Res>,
+        dependencies: RequestResolverDependencies<Req, Res>,
     ) -> Result<ResolverOf<Req, Res>, ProgrammerError>
     where
         Req: PayloadCodec,
@@ -753,13 +716,29 @@ impl ServiceManager {
     pub fn get_notification_resolver<Req, Res, Not>(
         &self,
         procedure: &Procedure,
-        (dependencies, notification): (ResolverDependencies<Req, Res>, Not),
+        dependencies: NotificationResolverDependencies<Req, Res, Not>,
     ) -> Result<NotificationResolverOf<Req, Res, Not>, ProgrammerError>
     where
         Req: PayloadCodec,
         Res: PayloadCodec,
         Not: PayloadCodec,
     {
+        let NotificationResolverDependencies {
+            request,
+            result,
+            notification,
+            before_request,
+            validate,
+            fail_fast,
+        } = dependencies;
+        let dependencies = RequestResolverDependencies {
+            request,
+            result,
+            before_request,
+            validate,
+            fail_fast,
+        };
+
         self.assert_refusal((procedure, dependencies.before_request.as_ref()))?;
 
         Ok(NotificationResolverOf {
@@ -895,7 +874,7 @@ where
         let shared = &self.shared;
         let manager = &shared.manager;
         let procedure = &shared.procedure;
-        let mut resolved = ResolvedRequestOptions::of(hold(
+        let mut resolved = ResolvedRequestOptions::new(hold(
             "a call's timeout",
             options.timeout.unwrap_or(manager.timeout),
         )?);
@@ -942,19 +921,17 @@ where
         let (on_call_id, call_id) = oneshot::channel::<u32>();
         let close_on_timeout = resolved.close_on_timeout.unwrap_or(false);
         let destination_id = resolved.destination_id;
-        let requested = manager.router.request(
-            encoded,
-            RouterCall {
-                procedure: procedure.clone(),
-                options: resolved,
-                series: shared.series.clone(),
-                refusal,
-                on_call_id: Some(Box::new(move |call_id: u32| {
-                    on_call_id.send(call_id).ok();
-                })),
-                subscribes,
-            },
-        )?;
+        let requested = manager.router.request(encoded, {
+            let mut request = RouterRequest::new(procedure.clone(), &resolved);
+
+            request.series.clone_from(&shared.series);
+            request.refusal = refusal;
+            request.on_call_id = Some(Box::new(move |call_id: u32| {
+                on_call_id.send(call_id).ok();
+            }));
+            request.subscribes = subscribes;
+            request
+        })?;
         let (reply, outcome) = oneshot::channel();
         let shared = Arc::clone(&self.shared);
         let connection_handle = options.connection_handle.clone();
@@ -1023,7 +1000,7 @@ where
                             // ! a detail of the side's own words: its codec's reason, in spec 17.2's
                             // words; the rest in its cause
                             .saying(refused.reason().to_owned())
-                            .about(&Header::Result(result.header.clone()))
+                            .about(&EnvelopeHeader::Result(result.header.clone()))
                             .of_call(Some(procedure.address()), destination_id)
                             .caused_by(Arc::new(refused));
                             let reason = CallError::Failure(failure);
@@ -1101,7 +1078,7 @@ fn refusal_of<Req: PayloadCodec, Res: PayloadCodec>(
 // ── Resolvers ────────────────────────────────────────────────────────────────────────────────
 
 /// What a resolver reads and writes by, admits by, and judges a request by.
-pub struct ResolverDependencies<Req: PayloadCodec, Res: PayloadCodec> {
+pub struct RequestResolverDependencies<Req: PayloadCodec, Res: PayloadCodec> {
     /// The request's codec.
     pub request: Req,
     /// The result's codec.
@@ -1114,26 +1091,82 @@ pub struct ResolverDependencies<Req: PayloadCodec, Res: PayloadCodec> {
     pub fail_fast: bool,
 }
 
-impl<Req: PayloadCodec, Res: PayloadCodec> fmt::Debug for ResolverDependencies<Req, Res> {
+impl<Req: PayloadCodec, Res: PayloadCodec> fmt::Debug for RequestResolverDependencies<Req, Res> {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter
-            .debug_struct("ResolverDependencies")
+            .debug_struct("RequestResolverDependencies")
             .field("request", &self.request)
             .field("result", &self.result)
             .finish_non_exhaustive()
     }
 }
 
-impl<Req: PayloadCodec, Res: PayloadCodec> ResolverDependencies<Req, Res> {
+impl<Req: PayloadCodec, Res: PayloadCodec> RequestResolverDependencies<Req, Res> {
     /// A resolver's codecs, admitting every request, judged by no rule.
     #[must_use]
-    pub fn of(request: Req, result: Res) -> Self {
+    pub fn new(request: Req, result: Res) -> Self {
         Self {
             request,
             result,
             before_request: None,
             validate: None,
             fail_fast: false,
+        }
+    }
+}
+
+/// What a resolver that notifies reads and writes by, admits by, and judges a request by: a
+/// request resolver's dependencies, and its notification's codec.
+pub struct NotificationResolverDependencies<Req: PayloadCodec, Res: PayloadCodec, Not: PayloadCodec>
+{
+    /// The request's codec.
+    pub request: Req,
+    /// The result's codec.
+    pub result: Res,
+    /// The notification's codec.
+    pub notification: Not,
+    /// Whether a request may reach the callback, on its header and its call's session.
+    pub before_request: Option<BeforeRequest>,
+    /// The rules a request is judged by before the callback.
+    pub validate: Option<Validate<Req::Value>>,
+    /// Whether its rules stop at the first violation.
+    pub fail_fast: bool,
+}
+
+impl<Req: PayloadCodec, Res: PayloadCodec, Not: PayloadCodec> fmt::Debug
+    for NotificationResolverDependencies<Req, Res, Not>
+{
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("NotificationResolverDependencies")
+            .field("request", &self.request)
+            .field("result", &self.result)
+            .field("notification", &self.notification)
+            .finish_non_exhaustive()
+    }
+}
+
+impl<Req: PayloadCodec, Res: PayloadCodec, Not: PayloadCodec>
+    NotificationResolverDependencies<Req, Res, Not>
+{
+    /// A resolver's `dependencies`, and the codec of the notification it sends.
+    #[must_use]
+    pub fn new(dependencies: RequestResolverDependencies<Req, Res>, notification: Not) -> Self {
+        let RequestResolverDependencies {
+            request,
+            result,
+            before_request,
+            validate,
+            fail_fast,
+        } = dependencies;
+
+        Self {
+            request,
+            result,
+            notification,
+            before_request,
+            validate,
+            fail_fast,
         }
     }
 }
@@ -1238,7 +1271,7 @@ where
             shared.manager.router.report(
                 &RouterError::Other(Arc::new(ProgrammerError::new(format!(
                     "{} answers failure {}, which it does not list",
-                    shared.procedure.name,
+                    shared.procedure.procedure_name,
                     failure.code()
                 )))),
                 Some(&shared.connection_handle),
@@ -1264,7 +1297,7 @@ where
             if shared.is_answered.load(Ordering::Acquire) {
                 return Err(ResolverError::other(ProgrammerError::new(format!(
                     "{} has answered this request already",
-                    shared.procedure.name
+                    shared.procedure.procedure_name
                 ))));
             }
 
@@ -1290,7 +1323,7 @@ where
                         |record| Step {
                             error: Some(Arc::new(CallError::Failure(
                                 Failure::answered(record, shared.manager.router.side()).about(
-                                    &Header::Failure(FailureHeader {
+                                    &EnvelopeHeader::Failure(FailureHeader {
                                         call_id: shared.call_id,
                                         credential: None,
                                     }),
@@ -1339,7 +1372,7 @@ where
         if self.shared.is_answered.load(Ordering::Acquire) {
             let error = ProgrammerError::new(format!(
                 "{} subscribes before it answers",
-                self.shared.procedure.name
+                self.shared.procedure.procedure_name
             ));
 
             return Box::pin(async move { Err(CallError::Refused(error)) });
@@ -1363,7 +1396,7 @@ pub type ResolverCallback<Req, Res> = Arc<
 pub struct ResolverOf<Req: PayloadCodec, Res: PayloadCodec> {
     manager: ServiceManager,
     procedure: Procedure,
-    dependencies: ResolverDependencies<Req, Res>,
+    dependencies: RequestResolverDependencies<Req, Res>,
     call_type: DebugType,
 }
 
@@ -1421,7 +1454,7 @@ where
             listed,
         });
         let handler = Handler {
-            resolve: Arc::new(move |props: ResolverProps| {
+            resolve: Arc::new(move |props: RequestResolverProps| {
                 let resolving = Arc::clone(&resolving);
 
                 Box::pin(async move { resolving.resolve(props).await })
@@ -1467,7 +1500,7 @@ where
         clippy::too_many_lines,
         reason = "a request decoded, judged, handed and answered, its steps told in their order"
     )]
-    async fn resolve(&self, props: ResolverProps) -> Result<(), ResolverError> {
+    async fn resolve(&self, props: RequestResolverProps) -> Result<(), ResolverError> {
         let manager = &self.manager;
         // * the one check a request makes while nobody listens; traced, the call starts as it
         // arrives, its admission and its decoding counting in its duration
@@ -1505,7 +1538,7 @@ where
             }
         }
 
-        let ResolverProps {
+        let RequestResolverProps {
             connection_handle,
             header,
             payload,
@@ -1880,14 +1913,13 @@ where
             .map_err(|refused| RouterError::Other(Arc::new(refused)));
         let failure = payload.as_ref().err().cloned();
         let notified = match &manager.router {
-            ServiceRouter::Server(router) => router.notify(
-                payload,
-                (
-                    shared.procedure.address(),
-                    filter_of(options),
-                    options.key.clone(),
-                ),
-            ),
+            ServiceRouter::Server(router) => router.notify(payload, {
+                let mut request = NotifyRequest::new(shared.procedure.address());
+
+                request.filter = filter_of(options);
+                request.key.clone_from(&options.key);
+                request
+            }),
             // * only a server notifies; a client asks with a request
             ServiceRouter::Client(_) => Box::pin(async { Ok(()) }),
         };

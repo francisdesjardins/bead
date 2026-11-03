@@ -6,11 +6,11 @@ use core::fmt;
 use core::time::Duration;
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
+use std::time::SystemTime;
 
-use serde_json::Value;
 use tokio::runtime::Handle;
 
-use crate::clock::{SharedClock, SystemClock, Timer, clock_of};
+use crate::clock::{LayeredClocks, SharedClock, SystemClock, Timer, clock_of};
 use crate::constants::ProtocolCode;
 use crate::credentials::Credentials;
 use crate::duration::{NEVER, hold};
@@ -20,7 +20,7 @@ use crate::managers::service::{
     RequestDefaults, ServiceManager, ServiceManagerOptions, ServiceRouter,
 };
 use crate::managers::sessions::{
-    Arming, Inactivity, Session, SessionEvent, SessionManager, SessionManagerOptions,
+    Arming, Inactivity, Session, SessionEvent, SessionManagerOptions, SessionState,
 };
 use crate::metrics::MetricsRegistry;
 use crate::ordered::Ordered;
@@ -84,7 +84,7 @@ impl fmt::Debug for ServerOptions {
 
 /// What a server keeps beside its router, in its router's owner.
 pub(crate) struct Facade {
-    pub(crate) sessions: SessionManager,
+    pub(crate) sessions: SessionState,
     // the connections the transport holds: only these keep a session
     connections: Ordered<ConnectionHandle, ()>,
     // the connections being closed, so each is asked to close once
@@ -141,17 +141,8 @@ fn arming_of(state: &ServerState) -> SessionArming {
     }
 }
 
-fn wall_of(state: &ServerState) -> i64 {
-    wall_milliseconds(sessions_clock_of(state))
-}
-
-fn wall_milliseconds(clock: &SharedClock) -> i64 {
-    clock
-        .wall()
-        .duration_since(std::time::SystemTime::UNIX_EPOCH)
-        .map_or(0, |since| {
-            i64::try_from(since.as_millis()).unwrap_or(i64::MAX)
-        })
+fn wall_of(state: &ServerState) -> SystemTime {
+    crate::managers::sessions::wall_of(sessions_clock_of(state))
 }
 
 // what happened to the sessions, told: the server's own reaction first, which may tell more, then
@@ -242,10 +233,10 @@ fn react(state: &mut ServerState, event: &SessionEvent) {
 
             told(state, events);
         }
-        SessionEvent::DataChanged(..)
-        | SessionEvent::LastActivityChanged(..)
-        | SessionEvent::ConnectionInactivityTimeoutChanged(..)
-        | SessionEvent::SessionInactivityTimeoutChanged(..) => {}
+        SessionEvent::DataChanged { .. }
+        | SessionEvent::LastActivityChanged { .. }
+        | SessionEvent::ConnectionInactivityTimeoutChanged { .. }
+        | SessionEvent::SessionInactivityTimeoutChanged { .. } => {}
     }
 }
 
@@ -696,14 +687,16 @@ pub(crate) fn health_of(gauges: &ServerGauges) -> Health {
 
 /// A server's sessions: a handle to its router's owner, which holds them.
 #[derive(Clone)]
-pub struct Sessions {
+pub struct SessionManager {
     router: RouterServer,
     listeners: Arc<Listened<SessionListener>>,
 }
 
-impl fmt::Debug for Sessions {
+impl fmt::Debug for SessionManager {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter.debug_struct("Sessions").finish_non_exhaustive()
+        formatter
+            .debug_struct("SessionManager")
+            .finish_non_exhaustive()
     }
 }
 
@@ -716,16 +709,19 @@ fn on_owner<T: Send + 'static, J: FnOnce(&mut ServerState) -> T + Send + 'static
     Box::pin(async move { pending.await.unwrap_or(otherwise) })
 }
 
-impl Sessions {
+impl SessionManager {
     /// A session of `connection_handle`, not stored: holding nothing, never timed out, its
     /// activity now.
     #[must_use]
     pub fn create(&self, connection_handle: ConnectionHandle) -> Session {
-        Session::new(connection_handle, wall_milliseconds(&self.router.clock()))
+        Session::new(
+            connection_handle,
+            crate::managers::sessions::wall_of(&self.router.clock()),
+        )
     }
 
     /// Hears what happens to its sessions from now on; the id given takes it off again, with
-    /// [`Sessions::off`].
+    /// [`SessionManager::off`].
     pub fn on(&self, listener: SessionListener) -> ListenerId {
         self.listeners.add(listener)
     }
@@ -944,11 +940,14 @@ impl Sessions {
         )
     }
 
-    /// Stores `data` in the session of `connection_handle`.
-    pub fn update_data(
-        &self,
-        (connection_handle, data): (ConnectionHandle, Option<Value>),
-    ) -> BoxFuture<Option<Session>> {
+    /// Stores the data `session` holds in the session of its connection.
+    pub fn update_data(&self, session: Session) -> BoxFuture<Option<Session>> {
+        let Session {
+            connection_handle,
+            data,
+            ..
+        } = session;
+
         on_owner(
             &self.router,
             (
@@ -969,16 +968,22 @@ impl Sessions {
         )
     }
 
-    /// Sets the connection's timeout of `connection_handle`'s session, its manager's default when
-    /// none.
+    /// Sets the connection's timeout `session` holds on the session of its connection, its
+    /// manager's default when none.
     ///
     /// # Errors
     ///
     /// A [`ProgrammerError`] for a timeout spec 1.4 does not hold.
     pub fn update_connection_inactivity_timeout(
         &self,
-        (connection_handle, timeout): (ConnectionHandle, Option<Duration>),
+        session: Session,
     ) -> Result<BoxFuture<Option<Session>>, ProgrammerError> {
+        let Session {
+            connection_handle,
+            connection_inactivity_timeout: timeout,
+            ..
+        } = session;
+
         if let Some(timeout) = timeout {
             hold("an inactivity timeout", timeout)?;
         }
@@ -1009,16 +1014,22 @@ impl Sessions {
         ))
     }
 
-    /// Sets the session's own timeout of `connection_handle`'s session, its manager's default when
-    /// none.
+    /// Sets the session's own timeout `session` holds on the session of its connection, its
+    /// manager's default when none.
     ///
     /// # Errors
     ///
     /// A [`ProgrammerError`] for a timeout spec 1.4 does not hold.
     pub fn update_session_inactivity_timeout(
         &self,
-        (connection_handle, timeout): (ConnectionHandle, Option<Duration>),
+        session: Session,
     ) -> Result<BoxFuture<Option<Session>>, ProgrammerError> {
+        let Session {
+            connection_handle,
+            session_inactivity_timeout: timeout,
+            ..
+        } = session;
+
         if let Some(timeout) = timeout {
             hold("an inactivity timeout", timeout)?;
         }
@@ -1056,7 +1067,8 @@ impl Sessions {
     /// A [`ProgrammerError`] for a timeout spec 1.4 does not hold.
     pub fn reset_connection_inactivity_timeout(
         &self,
-        (connection_handle, timeout): (ConnectionHandle, Duration),
+        connection_handle: ConnectionHandle,
+        timeout: Duration,
     ) -> Result<BoxFuture<()>, ProgrammerError> {
         let timeout = hold("a connection inactivity timeout", timeout)?;
 
@@ -1087,7 +1099,8 @@ impl Sessions {
     /// A [`ProgrammerError`] for a timeout spec 1.4 does not hold.
     pub fn reset_session_inactivity_timeout(
         &self,
-        (connection_handle, timeout): (ConnectionHandle, Duration),
+        connection_handle: ConnectionHandle,
+        timeout: Duration,
     ) -> Result<BoxFuture<()>, ProgrammerError> {
         let timeout = hold("a session inactivity timeout", timeout)?;
 
@@ -1137,7 +1150,7 @@ impl Sessions {
 struct Shared {
     router: RouterServer,
     services: ServiceManager,
-    sessions: Sessions,
+    sessions: SessionManager,
     transport: Arc<dyn ServerTransport>,
 }
 
@@ -1170,21 +1183,25 @@ impl Server {
         // * one clock for every layer: the transport's, or the one given, which the sessions and
         // the router are both handed
         let runtime = crate::platform::runtime_of(options.runtime.as_ref(), "a router")?;
-        let clock = clock_of(
-            (transport.clock().as_ref(), options.clock.as_ref()),
-            ("a server's router", "its transport"),
-        )?
+        let clock = clock_of(&LayeredClocks {
+            beneath: transport.clock().as_ref(),
+            given: options.clock.as_ref(),
+            layer: "a server's router",
+            below: "its transport",
+        })?
         .unwrap_or_else(|| {
             let platform: SharedClock = Arc::new(SystemClock::on(runtime.clone()));
 
             platform
         });
         let sessions_options = options.sessions.clone().unwrap_or_default();
-        let sessions = SessionManager::new(&SessionManagerOptions {
-            clock: clock_of(
-                (Some(&clock), sessions_options.clock.as_ref()),
-                ("a server's sessions", "its server"),
-            )?,
+        let sessions = SessionState::new(&SessionManagerOptions {
+            clock: clock_of(&LayeredClocks {
+                beneath: Some(&clock),
+                given: sessions_options.clock.as_ref(),
+                layer: "a server's sessions",
+                below: "its server",
+            })?,
             ..sessions_options
         })?;
         let listeners: Arc<Listened<SessionListener>> = Arc::default();
@@ -1246,7 +1263,7 @@ impl Server {
 
         Ok(Self {
             shared: Arc::new(Shared {
-                sessions: Sessions {
+                sessions: SessionManager {
                     router: router.clone(),
                     listeners,
                 },
@@ -1271,7 +1288,7 @@ impl Server {
 
     /// Its sessions.
     #[must_use]
-    pub fn sessions(&self) -> &Sessions {
+    pub fn sessions(&self) -> &SessionManager {
         &self.shared.sessions
     }
 
@@ -1366,6 +1383,6 @@ impl Server {
     }
 }
 
-pub(crate) fn sessions_of(state: &ServerState) -> Option<&SessionManager> {
+pub(crate) fn sessions_of(state: &ServerState) -> Option<&SessionState> {
     state.facade.as_ref().map(|facade| &facade.sessions)
 }

@@ -224,7 +224,7 @@ public sealed partial class DurationsTests
 
         await using (client)
         {
-            var connecting = client.Connect(new HttpConnectOptions { Host = Host, Port = 8_080 }, Cancelled);
+            var connecting = client.Connect(new HttpTransportClientConnectOptions { Host = Host, Port = 8_080 }, Cancelled);
             var drawn = new HttpResponseMessage(HttpStatusCode.Created);
 
             drawn.Headers.TryAddWithoutValidation(HttpTransport.ConnectionTokenHeader, Token);
@@ -234,7 +234,7 @@ public sealed partial class DurationsTests
 
             var observed = await drive(new ClientDrive(fetch, clock));
 
-            await client.CloseConnection(new TransportDisconnectOptions { IsQuick = true }).WaitAsync(Patience, Cancelled);
+            await client.CloseConnection(new TransportClientDisconnectOptions { IsQuick = true }).WaitAsync(Patience, Cancelled);
 
             return observed;
         }
@@ -418,7 +418,7 @@ public sealed partial class DurationsTests
         {
             Connect = (token) =>
             {
-                return client.Connect(new HttpConnectOptions { Host = Host, Port = 80, Timeout = Assert.NotNull(given) }, token);
+                return client.Connect(new HttpTransportClientConnectOptions { Host = Host, Port = 80, Timeout = Assert.NotNull(given) }, token);
             },
             StateOf = () =>
             {
@@ -454,7 +454,7 @@ public sealed partial class DurationsTests
             {
                 Connect = (token) =>
                 {
-                    return client.Connect(new WebSocketConnectOptions { Host = Host, Port = listener.Port, Timeout = Assert.NotNull(given) }, token);
+                    return client.Connect(new WebSocketTransportClientConnectOptions { Host = Host, Port = listener.Port, Timeout = Assert.NotNull(given) }, token);
                 },
                 StateOf = () =>
                 {
@@ -504,7 +504,7 @@ public sealed partial class DurationsTests
         {
             Connect = (token) =>
             {
-                return client.Connect(new MemoryConnectOptions { Server = server, Timeout = Assert.NotNull(given) }, token);
+                return client.Connect(new MemoryTransportClientConnectOptions { Server = server, Timeout = Assert.NotNull(given) }, token);
             },
             StateOf = () =>
             {
@@ -588,7 +588,7 @@ public sealed partial class DurationsTests
     {
         return ReconnectionDelayBy(given, (delay) =>
         {
-            return TransportReconnectDelayOrResolver.Of((_, _) =>
+            return new TransportClientReconnectDelay((_, _) =>
             {
                 return delay;
             });
@@ -598,21 +598,24 @@ public sealed partial class DurationsTests
     // a number: the wait itself
     private static Task<Observed> ReconnectionDelayByNumber(TimeSpan? given)
     {
-        return ReconnectionDelayBy(given, TransportReconnectDelayOrResolver.Of);
+        return ReconnectionDelayBy(given, (delay) =>
+        {
+            return new TransportClientReconnectDelay(delay);
+        });
     }
 
     // the delay in the form given, on a WebSocket client whose connect was refused, after a first
     // attempt refused again: the delay its tap hears and the due of its wait, the attempt at it and
     // not before; at once, no wait and the attempt at once; refused, before its tap hears it, no
     // attempt more, and the client closed
-    private static async Task<Observed> ReconnectionDelayBy(TimeSpan? given, Func<TimeSpan, TransportReconnectDelayOrResolver> delayOf)
+    private static async Task<Observed> ReconnectionDelayBy(TimeSpan? given, Func<TimeSpan, TransportClientReconnectDelay> delayOf)
     {
         var delay = Assert.NotNull(given);
         var clock = new SteppingClock(Epoch);
         using var listener = new Listener();
         await using var client = new WebSocketTransportClient(new WebSocketTransportClientOptions { Clock = clock });
         var taps = Channel.CreateUnbounded<TimeSpan>();
-        var connecting = client.Connect(new WebSocketConnectOptions { Host = Host, Port = listener.Port }, Cancelled);
+        var connecting = client.Connect(new WebSocketTransportClientConnectOptions { Host = Host, Port = listener.Port }, Cancelled);
 
         await Listener.Refuse((await Reached(listener, connecting)).Peer);
         await Assert.ThrowsAsync<WebSocketException>(() =>
@@ -620,7 +623,7 @@ public sealed partial class DurationsTests
             return connecting.WaitAsync(Patience, Cancelled);
         });
 
-        var reconnecting = client.Reconnect(new TransportReconnectOptions
+        var reconnecting = client.Reconnect(new TransportClientReconnectOptions
         {
             Delay = delayOf(delay),
             Tap = (heard, _) =>

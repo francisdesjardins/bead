@@ -6,11 +6,12 @@ use bytes::Bytes;
 
 use super::server::{Served, first, second};
 use super::{answered, options_of};
+use crate::RouterRequest;
 use crate::constants::ProtocolCode;
 use crate::envelope::{Credential, Envelope};
 use crate::errors::{CallError, ProgrammerError};
 use crate::failure::FailureOrigin;
-use crate::router::server::{Call, CallHooks, RouterServerOptions, ServerRequest};
+use crate::router::server::{Call, RouterServerOptions};
 use crate::router::types::{ConnectionHandle, RequestCredential};
 use crate::testing::pair::echo;
 use crate::testing::scripted::handle_of;
@@ -26,16 +27,15 @@ fn command(
     options.credential = Some(credential);
     served.router.request(
         Bytes::new(),
-        (
-            ServerRequest {
-                procedure: echo().address(),
-                maximum_payload_bytes: None,
-                options,
-                series: None,
-                refusal: None,
-            },
-            CallHooks::default(),
-        ),
+        RouterRequest {
+            procedure: echo(),
+            options,
+            series: None,
+            refusal: None,
+            subscribes: None,
+            on_call_id: None,
+            on_sent: None,
+        },
     )
 }
 

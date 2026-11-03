@@ -9,6 +9,7 @@ use core::fmt;
 use core::time::Duration;
 use std::collections::VecDeque;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError, Weak};
+use std::time::SystemTime;
 
 use bytes::Bytes;
 use tokio::runtime::Handle;
@@ -23,9 +24,9 @@ use crate::owner::{Owner, WeakOwner};
 use crate::platform::runtime_of;
 use crate::router::types::{BoxFuture, ConnectionHandle, Gauges, RouterError, TransportMessage};
 use crate::transport::{
-    CONNECT_TIMEOUT, ClientListener, ClientTransport, Connect, DisconnectOptions, Listeners,
-    RECONNECTION_CANCELLED, ReadyState, ReconnectOptions, Sent, ServerListener, ServerTransport,
-    attempting, first_of, is_field_value,
+    CONNECT_TIMEOUT, ClientListener, Connect, Listeners, RECONNECTION_CANCELLED, ReadyState,
+    RouterClientTransport, Sent, ServerListener, ServerTransport, TransportClientDisconnectOptions,
+    TransportClientReconnectOptions, TransportServerClient, attempting, first_of, is_field_value,
 };
 
 #[cfg(test)]
@@ -57,21 +58,12 @@ fn locked<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
     mutex.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
-fn wall_of(clock: &SharedClock) -> i64 {
-    clock
-        .wall()
-        .duration_since(std::time::SystemTime::UNIX_EPOCH)
-        .map_or(0, |since| {
-            i64::try_from(since.as_millis()).unwrap_or(i64::MAX)
-        })
-}
-
 // ── The server ───────────────────────────────────────────────────────────────────────────────
 
 /// How an in-memory transport server is built.
 #[derive(Debug, Clone, Default)]
 #[non_exhaustive]
-pub struct MemoryServerOptions {
+pub struct MemoryTransportServerOptions {
     /// The clock it runs on, which the layers above it run on too.
     pub clock: Option<SharedClock>,
     /// The runtime its later turns run on: the current one when none.
@@ -85,7 +77,7 @@ struct Connection {
     address: String,
     port: Option<u16>,
     peer: Arc<ClientPeer>,
-    last_activity: Option<i64>,
+    last_activity: Option<SystemTime>,
     is_paused: bool,
     held: VecDeque<TransportMessage>,
 }
@@ -107,14 +99,14 @@ struct ServerInner {
 
 /// An in-memory transport server: what its clients connect to, in the same process.
 #[derive(Clone)]
-pub struct MemoryServer {
+pub struct MemoryTransportServer {
     inner: Arc<ServerInner>,
 }
 
-impl fmt::Debug for MemoryServer {
+impl fmt::Debug for MemoryTransportServer {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter
-            .debug_struct("MemoryServer")
+            .debug_struct("MemoryTransportServer")
             .finish_non_exhaustive()
     }
 }
@@ -287,13 +279,13 @@ impl ServerInner {
     }
 }
 
-impl MemoryServer {
+impl MemoryTransportServer {
     /// An in-memory transport server, not started.
     ///
     /// # Errors
     ///
     /// A [`ProgrammerError`] outside a tokio runtime, given none, or on one without its time driver.
-    pub fn new(options: &MemoryServerOptions) -> Result<Self, ProgrammerError> {
+    pub fn new(options: &MemoryTransportServerOptions) -> Result<Self, ProgrammerError> {
         let runtime = runtime_of(options.runtime.as_ref(), "an in-memory transport")?;
         let clock: SharedClock = match &options.clock {
             Some(clock) => Arc::clone(clock),
@@ -335,23 +327,22 @@ impl MemoryServer {
     /// The connections it holds, and the address and port each client gave, with its last
     /// activity.
     #[must_use]
-    pub fn clients(&self) -> Vec<(ConnectionHandle, String, Option<u16>, Option<i64>)> {
+    pub fn clients(&self) -> Vec<TransportServerClient> {
         locked(&self.inner.state)
             .connections
             .iter()
-            .map(|(handle, connection)| {
-                (
-                    Arc::clone(handle),
-                    connection.address.clone(),
-                    connection.port,
-                    connection.last_activity,
-                )
+            .map(|(handle, connection)| TransportServerClient {
+                connection_handle: Arc::clone(handle),
+                address: connection.address.clone(),
+                port: connection.port,
+                last_activity: connection.last_activity,
+                transport_type: TRANSPORT_MEMORY,
             })
             .collect()
     }
 }
 
-impl ServerTransport for MemoryServer {
+impl ServerTransport for MemoryTransportServer {
     // a credential given here is not carried: the router fails a command that presents one its
     // transport cannot carry before it goes (decision 0010)
     fn send(
@@ -566,7 +557,7 @@ impl ServerEnd {
         let Some(server) = self.server.upgrade() else {
             return;
         };
-        let now = wall_of(&server.clock);
+        let now = server.clock.wall();
         let told = {
             let mut state = locked(&server.state);
 
@@ -620,7 +611,7 @@ impl ServerEnd {
 /// How an in-memory transport client is built.
 #[derive(Debug, Clone, Default)]
 #[non_exhaustive]
-pub struct MemoryClientOptions {
+pub struct MemoryTransportClientOptions {
     /// The clock it runs on: its connect's timeout and its reconnection's delays.
     pub clock: Option<SharedClock>,
 }
@@ -628,9 +619,9 @@ pub struct MemoryClientOptions {
 /// How an in-memory client connects: to its server, which a reconnection connects to again.
 #[derive(Debug, Clone)]
 #[non_exhaustive]
-pub struct MemoryConnectOptions {
+pub struct MemoryTransportClientConnectOptions {
     /// The server it connects to.
-    pub server: MemoryServer,
+    pub server: MemoryTransportServer,
     /// The address it gives its server: [`MEMORY_ADDRESS`] when none.
     pub address: Option<String>,
     /// The port it gives its server.
@@ -641,10 +632,10 @@ pub struct MemoryConnectOptions {
     pub timeout: Option<Duration>,
 }
 
-impl MemoryConnectOptions {
+impl MemoryTransportClientConnectOptions {
     /// A connect to `server`, every other option its default.
     #[must_use]
-    pub const fn of(server: MemoryServer) -> Self {
+    pub const fn new(server: MemoryTransportServer) -> Self {
         Self {
             server,
             address: None,
@@ -677,7 +668,7 @@ struct AttemptState {
 struct ClientState {
     ready: ReadyState,
     current: Option<(ServerEnd, u64)>,
-    last_connect: Option<MemoryConnectOptions>,
+    last_connect: Option<MemoryTransportClientConnectOptions>,
     is_attempting: bool,
     attempt: Option<Arc<Attempt>>,
     serial: u64,
@@ -954,14 +945,14 @@ impl ClientInner {
 
 /// An in-memory transport client: one connection at a time to its server.
 #[derive(Clone)]
-pub struct MemoryClient {
+pub struct MemoryTransportClient {
     inner: Arc<ClientInner>,
 }
 
-impl fmt::Debug for MemoryClient {
+impl fmt::Debug for MemoryTransportClient {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter
-            .debug_struct("MemoryClient")
+            .debug_struct("MemoryTransportClient")
             .finish_non_exhaustive()
     }
 }
@@ -974,13 +965,13 @@ fn is_address(address: &str) -> bool {
             .all(|byte| (b'!'..=b'~').contains(&byte) && byte != b';')
 }
 
-impl MemoryClient {
+impl MemoryTransportClient {
     /// A client, not connected: its connect names its server.
     ///
     /// # Errors
     ///
     /// A [`ProgrammerError`] outside a tokio runtime, or on one without its time driver.
-    pub fn new(options: &MemoryClientOptions) -> Result<Self, ProgrammerError> {
+    pub fn new(options: &MemoryTransportClientOptions) -> Result<Self, ProgrammerError> {
         let runtime = runtime_of(None, "an in-memory transport")?;
         let clock: SharedClock = match &options.clock {
             Some(clock) => Arc::clone(clock),
@@ -1008,7 +999,7 @@ impl MemoryClient {
     }
 
     /// Connects to its server, started as it is called: open once its server drew the connection.
-    pub fn connect(&self, options: &MemoryConnectOptions) -> Connect {
+    pub fn connect(&self, options: &MemoryTransportClientConnectOptions) -> Connect {
         match self.start_connect(options) {
             Ok(outcome) => Connect::of(outcome),
             Err(error) => Connect::refused(error),
@@ -1021,7 +1012,7 @@ impl MemoryClient {
     )]
     fn start_connect(
         &self,
-        options: &MemoryConnectOptions,
+        options: &MemoryTransportClientConnectOptions,
     ) -> Result<oneshot::Receiver<Result<(), TransportError>>, TransportError> {
         let inner = &self.inner;
         // held here, before anything moves or is kept for a reconnection
@@ -1053,7 +1044,7 @@ impl MemoryClient {
             }
 
             // without its signal: a reconnection brings its own
-            state.last_connect = Some(MemoryConnectOptions {
+            state.last_connect = Some(MemoryTransportClientConnectOptions {
                 signal: None,
                 ..options.clone()
             });
@@ -1186,7 +1177,10 @@ impl MemoryClient {
     /// # Errors
     ///
     /// A [`TransportError`] when it is not open.
-    pub fn disconnect(&self, options: &DisconnectOptions) -> Result<(), TransportError> {
+    pub fn disconnect(
+        &self,
+        options: &TransportClientDisconnectOptions,
+    ) -> Result<(), TransportError> {
         let inner = &self.inner;
         let is_clean = options.is_clean.unwrap_or(true);
         let is_quick = options.is_quick.unwrap_or(false);
@@ -1244,7 +1238,7 @@ impl MemoryClient {
     /// Closes its connection cleanly when it is open, then lets go of everything.
     pub fn close(&self) {
         if self.ready_state() == ReadyState::Open {
-            drop(self.disconnect(&DisconnectOptions::default()));
+            drop(self.disconnect(&TransportClientDisconnectOptions::default()));
         }
 
         self.dispose();
@@ -1258,7 +1252,7 @@ impl MemoryClient {
     /// or closing, or a signal cancelled already.
     pub fn reconnect(
         &self,
-        options: &ReconnectOptions,
+        options: &TransportClientReconnectOptions,
     ) -> Result<BoxFuture<Result<(), TransportError>>, TransportError> {
         let inner = &self.inner;
         let target = {
@@ -1329,14 +1323,17 @@ impl MemoryClient {
 
     async fn reconnecting(
         &self,
-        (target, options): (MemoryConnectOptions, ReconnectOptions),
+        (target, options): (
+            MemoryTransportClientConnectOptions,
+            TransportClientReconnectOptions,
+        ),
     ) -> Result<(), TransportError> {
         let inner = &self.inner;
 
         attempting((&inner.clock, &options), |signal| {
             locked(&inner.state).is_attempting = true;
 
-            let connecting = self.connect(&MemoryConnectOptions {
+            let connecting = self.connect(&MemoryTransportClientConnectOptions {
                 signal,
                 ..target.clone()
             });
@@ -1352,7 +1349,7 @@ impl MemoryClient {
             .as_ref()
             .is_some_and(CancellationToken::is_cancelled)
         {
-            drop(self.disconnect(&DisconnectOptions::default()));
+            drop(self.disconnect(&TransportClientDisconnectOptions::default()));
 
             return Err(TransportError::Cancelled(RECONNECTION_CANCELLED.to_owned()));
         }
@@ -1361,7 +1358,7 @@ impl MemoryClient {
     }
 }
 
-impl ClientTransport for MemoryClient {
+impl RouterClientTransport for MemoryTransportClient {
     // ! the bytes held now, so a sender that reuses its buffer changes nothing on its way
     fn send(&self, message: TransportMessage) -> Result<Sent, RouterError> {
         let end = {

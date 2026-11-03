@@ -120,7 +120,7 @@ titles that hold one write it `’`, and the citation does the same.
 - at most two parameters to a function, then at most one options record, always last (`TOptions?
   options = null` when every member is optional, a `required` member — a setting, at most two —
   making it a required parameter, a `CancellationToken` inside it); a third essential thing is a
-  design to revisit, never a third parameter;
+  design to revisit, never a third parameter; no tuple on the public surface;
 - `TreatWarningsAsErrors`, the analyzers at `latest-recommended`, the code style enforced in the
   build, a doc comment on every public member;
 - `_camelCase` private fields; PascalCase constants and static readonly fields;
@@ -133,7 +133,7 @@ titles that hold one write it `’`, and the citation does the same.
 - the author's style: section comments, `I`-prefixed interfaces, block-bodied arrow functions, at
   most two parameters then at most one options object, always last, optional unless a member of it
   is required (no `?`, at most two, never the operand), a conditional type where that depends on a
-  type parameter, frozen objects over `enum`;
+  type parameter, no tuple on the public surface, frozen objects over `enum`;
 - one test file per module, named after it, in a `__tests__/` folder beside it
   (`src/transport/shared/create-promise.ts` →
   `src/transport/shared/__tests__/create-promise.test.ts`).
@@ -148,9 +148,11 @@ titles that hold one write it `’`, and the citation does the same.
   `RUSTFLAGS`; the toolchain `rust-toolchain.toml` pins, edition 2024;
 - beside the receiver, at most two parameters, then at most one options struct, always last: named
   `…Options`, `#[non_exhaustive]`, never `Copy`, its fields public, each an `Option` but a required
-  setting, at most two, which its constructor of the required members sets, the struct then
+  setting, at most two, which its constructor of the required members, `new`, sets, the struct then
   without `Default`, and with `Default` otherwise; set by assignment over what that gives, and
   taken by `&`; a third essential thing is a design to revisit, never a third parameter;
+- no tuple taken or given on a `pub` item, nor a variant of two unnamed fields; a third essential
+  thing is a record of the call;
 - traits and composition, no `I` prefix; a `Result` for every refusal, never a panic in the
   library;
 - one owner per router, its state one task's, a turn awaiting nothing; an operation takes effect as

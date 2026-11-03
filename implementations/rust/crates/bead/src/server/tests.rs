@@ -169,7 +169,7 @@ async fn update_data_emits_nothing_for_equal_data() {
     let hearing = Arc::clone(&changed);
 
     sessions.on(Arc::new(move |event: &SessionEvent| {
-        if matches!(event, SessionEvent::DataChanged(..)) {
+        if matches!(event, SessionEvent::DataChanged { .. }) {
             *hearing.lock().unwrap_or_else(PoisonError::into_inner) += 1;
         }
     }));
@@ -182,16 +182,20 @@ async fn update_data_emits_nothing_for_equal_data() {
     // the TypeScript side compares data deep, the C# side by its equality; this side by a JSON
     // value's, which compares an object's members by name, whatever their order
     sessions
-        .update_data((
-            Arc::clone(&pair.connection_handle),
-            Some(json!({ "name": "guest", "tags": ["a", "b"] })),
-        ))
+        .update_data({
+            let mut session = sessions.create(Arc::clone(&pair.connection_handle));
+
+            session.data = Some(json!({ "name": "guest", "tags": ["a", "b"] }));
+            session
+        })
         .await;
     sessions
-        .update_data((
-            Arc::clone(&pair.connection_handle),
-            Some(json!({ "tags": ["a", "b"], "name": "guest" })),
-        ))
+        .update_data({
+            let mut session = sessions.create(Arc::clone(&pair.connection_handle));
+
+            session.data = Some(json!({ "tags": ["a", "b"], "name": "guest" }));
+            session
+        })
         .await;
     pair.settle().await;
 
@@ -214,7 +218,7 @@ async fn off_takes_off_the_listener_its_id_names_and_no_other() {
         let hearing = Arc::clone(&heard);
 
         Arc::new(move |event: &SessionEvent| {
-            if matches!(event, SessionEvent::DataChanged(..)) {
+            if matches!(event, SessionEvent::DataChanged { .. }) {
                 hearing
                     .lock()
                     .unwrap_or_else(PoisonError::into_inner)
@@ -231,7 +235,12 @@ async fn off_takes_off_the_listener_its_id_names_and_no_other() {
         .await
         .expect("stored");
     sessions
-        .update_data((Arc::clone(&handle), Some(json!({ "step": 1 }))))
+        .update_data({
+            let mut session = sessions.create(Arc::clone(&handle));
+
+            session.data = Some(json!({ "step": 1 }));
+            session
+        })
         .await;
     pair.settle().await;
 
@@ -244,7 +253,12 @@ async fn off_takes_off_the_listener_its_id_names_and_no_other() {
     sessions.off(taken);
     sessions.off(taken);
     sessions
-        .update_data((Arc::clone(&handle), Some(json!({ "step": 2 }))))
+        .update_data({
+            let mut session = sessions.create(Arc::clone(&handle));
+
+            session.data = Some(json!({ "step": 2 }));
+            session
+        })
         .await;
     pair.settle().await;
 

@@ -136,14 +136,14 @@ export interface IBrokerParticipantOptions {
   minimumBodyBytesPerSecond?: number | undefined;
   /**
    * How its link connects again once lost, each time as a new incarnation: `delay` milliseconds
-   * between attempts, 1,000 by default, `maxAttempts` attempts, without end by default, `signal`
-   * aborted ending them; `false` for none, which leaves it closed once its link is lost.
+   * between attempts, 1,000 by default, `maximumAttempts` attempts, without end by default,
+   * `signal` aborted ending them; `false` for none, which leaves it closed once its link is lost.
    */
   reconnect?:
     | false
     | {
         delay?: number | undefined;
-        maxAttempts?: number | undefined;
+        maximumAttempts?: number | undefined;
         signal?: AbortSignal | undefined;
       }
     | undefined;
@@ -435,7 +435,7 @@ export const createBrokerParticipant = (options: IBrokerParticipantOptions): IBr
       ? undefined
       : {
           delay: assertHeldDelay('a delay', reconnect.delay ?? 1_000),
-          maxAttempts: reconnect.maxAttempts ?? Infinity,
+          maximumAttempts: reconnect.maximumAttempts ?? Infinity,
           signal: reconnect.signal,
         };
 
@@ -1501,7 +1501,7 @@ export const createBrokerParticipant = (options: IBrokerParticipantOptions): IBr
   const relink = async (
     former: { acceptor: Uint8Array; opener: Uint8Array; peer: string }[]
   ): Promise<void> => {
-    const { delay, maxAttempts, signal } = reconnection ?? { delay: 0, maxAttempts: 0 };
+    const { delay, maximumAttempts, signal } = reconnection ?? { delay: 0, maximumAttempts: 0 };
     // ! the same words as the C# side's: a stop or a cancel ends the reconnection, told so
     const ended = (reason: string): GenericError => {
       return new GenericError(`the link of ${id} went down, and its reconnection ended: ${reason}`);
@@ -1528,7 +1528,7 @@ export const createBrokerParticipant = (options: IBrokerParticipantOptions): IBr
           );
         }
 
-        if (attempt >= maxAttempts) {
+        if (attempt >= maximumAttempts) {
           throw new GenericError(
             `the link of ${id} went down, and ${String(attempt)} attempts did not bring it back`,
             { cause: reason }

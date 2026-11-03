@@ -4,6 +4,7 @@ use std::sync::Arc;
 
 use super::client::Notified;
 use super::{Scripted, TIMEOUT, answered, failure_of, notification_of, result_of};
+use crate::UnregisterNotificationOptions;
 use crate::constants::ProtocolCode;
 use crate::envelope::Envelope;
 use crate::testing::scripted::Sending;
@@ -61,7 +62,10 @@ async fn credits_nothing_for_a_subscription_let_go_of_while_its_callbacks_ran() 
     scripted.settle().await;
     scripted
         .router
-        .unregister_notification((&notification.like(), true))
+        .unregister_notification(
+            &notification.like(),
+            &UnregisterNotificationOptions::default(),
+        )
         .await;
     scripted.done((&notification, 0)).await;
     assert_eq!(scripted.transport.credits(), Vec::<u64>::new());

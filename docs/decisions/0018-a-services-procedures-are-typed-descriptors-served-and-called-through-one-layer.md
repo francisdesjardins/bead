@@ -1044,8 +1044,8 @@ public interface IClient : IAsyncDisposable
 {
     RouterClient Router { get; }
     ServiceManager Services { get; }
-    Task Disconnect(TransportDisconnectOptions? options = null);
-    Task Reconnect(TransportReconnectOptions? options = null);
+    Task Disconnect(TransportClientDisconnectOptions? options = null);
+    Task Reconnect(TransportClientReconnectOptions? options = null);
 }
 ```
 

@@ -20,7 +20,7 @@ use crate::errors::{CallError, ProgrammerError};
 use crate::failure::Failure;
 use crate::identity::{Procedure, check_declaration};
 use crate::payloads::PayloadCodec;
-use crate::router::client::{NotificationLike, RouterClient};
+use crate::router::client::{NotificationLike, RouterClient, UnregisterNotificationOptions};
 use crate::router::types::{BoxFuture, RouterError};
 
 fn locked<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -67,15 +67,23 @@ impl<Req: PayloadCodec, Res: PayloadCodec, Not: PayloadCodec> fmt::Debug
 impl<Req: PayloadCodec, Res: PayloadCodec, Not: PayloadCodec>
     NotificationDependencies<Req, Res, Not>
 {
-    /// A notification's codecs, unpaced, judged by no rule, its subscription cancelled as it is left.
+    /// A requester's `dependencies`, and the codec of the notification it hears: unpaced, its
+    /// subscription cancelled as it is left.
     #[must_use]
-    pub fn of((request, result, notification): (Req, Res, Not)) -> Self {
+    pub fn new(dependencies: RequestDependencies<Req, Res>, notification: Not) -> Self {
+        let RequestDependencies {
+            request,
+            result,
+            validate,
+            fail_fast,
+        } = dependencies;
+
         Self {
             request,
             result,
             notification,
-            validate: None,
-            fail_fast: false,
+            validate,
+            fail_fast,
             unsubscribe: None,
             window: None,
         }
@@ -199,7 +207,9 @@ where
 
         // a router may hold it when what follows fails, as a subscription can
         if registered.is_err() && self.router.has_notification(&liked) {
-            self.router.unregister_notification((&liked, true)).await;
+            self.router
+                .unregister_notification(&liked, &UnregisterNotificationOptions::default())
+                .await;
         }
 
         registered
@@ -221,9 +231,11 @@ where
         }
 
         if let Some(liked) = self.liked() {
-            self.router
-                .unregister_notification((&liked, !is_acknowledged))
-                .await;
+            let options = UnregisterNotificationOptions {
+                cancel: Some(!is_acknowledged),
+            };
+
+            self.router.unregister_notification(&liked, &options).await;
         }
 
         outcome
@@ -309,7 +321,7 @@ where
         {
             return Err(RouterError::Other(Arc::new(ProgrammerError::new(format!(
                 "{} should not have been triggered",
-                self.procedure.name
+                self.procedure.procedure_name
             )))));
         }
 
@@ -498,9 +510,10 @@ where
 
     /// Registers `callback`, listening first: its subscribing call goes with `payload` when no
     /// subscription is held, and the registration waits for it.
-    pub fn on(
+    pub fn register(
         &self,
-        (payload, callback): (Req::Value, NotificationCallback<Not::Value>),
+        payload: Req::Value,
+        callback: NotificationCallback<Not::Value>,
         options: &RequestOptions,
     ) -> BoxFuture<Result<NotificationRegistration, CallError>> {
         let shared = Arc::clone(&self.shared);
@@ -569,7 +582,7 @@ where
                 } else {
                     Err(CallError::Disconnected(format!(
                         "{} was dropped with its connection",
-                        shared.procedure.name
+                        shared.procedure.procedure_name
                     )))
                 }
             });
@@ -602,8 +615,11 @@ pub(super) struct Known {
 
 // what tells two declarations of one procedure apart
 fn difference_of(known: &Procedure, asked: &Procedure) -> Option<String> {
-    if known.kind != asked.kind {
-        return Some(format!("kind {:?}, not {:?}", known.kind, asked.kind));
+    if known.procedure_kind != asked.procedure_kind {
+        return Some(format!(
+            "kind {:?}, not {:?}",
+            known.procedure_kind, asked.procedure_kind
+        ));
     }
 
     if known.maximum_payload_bytes != asked.maximum_payload_bytes {
@@ -613,8 +629,11 @@ fn difference_of(known: &Procedure, asked: &Procedure) -> Option<String> {
         ));
     }
 
-    if known.name != asked.name {
-        return Some(format!("procedureName {}, not {}", known.name, asked.name));
+    if known.procedure_name != asked.procedure_name {
+        return Some(format!(
+            "procedureName {}, not {}",
+            known.procedure_name, asked.procedure_name
+        ));
     }
 
     if known.service_revision != asked.service_revision {
@@ -650,7 +669,7 @@ where
     // * the router's check before the manager's own reason, so spec 16.10's order holds here too
     check_declaration(procedure)?;
 
-    let key = (procedure.service_id, procedure.id);
+    let key = (procedure.service_id, procedure.procedure_id);
     let known = locked(&manager.inner.notifications).get(&key).map(|known| {
         (
             known.procedure.clone(),
@@ -673,7 +692,7 @@ where
         if let Some(difference) = difference {
             return Err(ProgrammerError::new(format!(
                 "{}/{} is already a notification with {difference}",
-                procedure.service_id, procedure.id
+                procedure.service_id, procedure.procedure_id
             )));
         }
 
@@ -683,7 +702,7 @@ where
             .ok_or_else(|| {
                 ProgrammerError::new(format!(
                     "{}/{} is already a notification of other payloads",
-                    procedure.service_id, procedure.id
+                    procedure.service_id, procedure.procedure_id
                 ))
             });
     }

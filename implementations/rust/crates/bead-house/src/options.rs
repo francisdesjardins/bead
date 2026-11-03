@@ -1,9 +1,10 @@
 //! The options struct's shape (decision 0044, the rule 0004 states for every side): each public
 //! struct named `…Options` is `#[non_exhaustive]`, never `Copy`, its fields public, each an
 //! `Option` but a setting it cannot be built without, at most two of them, which its constructor
-//! of the required members sets: an associated function of its own `impl` that takes those fields,
-//! by their names, and nothing else, and gives `Self`. Such a struct has no `Default`; one with
-//! none required derives it. The constructor is judged by its shape, never by its word.
+//! of the required members sets: an associated function of its own `impl`, `new` (C-CTOR), that
+//! takes those fields, by their names, and nothing else, and gives `Self`, as C-BUILDER's
+//! `Command::new(program)` takes its program. Such a struct has no `Default`; one with none
+//! required derives it.
 
 use std::collections::BTreeMap;
 
@@ -22,6 +23,7 @@ const MORE_THAN_TWO: &str = "an options struct requires two members at most";
 const DEFAULT_WITH_REQUIRED: &str =
     "an options struct with a required member has no `Default`: its constructor builds it";
 const NO_DEFAULT: &str = "an options struct with no required member derives `Default`";
+const NOT_NEW: &str = "an options struct's constructor of its required members is `new` (C-CTOR)";
 
 // what the attributes of an item derive, by each trait's last name
 fn derived_of(attributes: &[Attribute]) -> Vec<String> {
@@ -77,13 +79,20 @@ fn name_of(written: &Type) -> Option<String> {
         .map(|segment| segment.ident.to_string())
 }
 
+// an associated function that gives `Self`
+struct Constructor {
+    word: String,
+    line: usize,
+    parameters: Vec<String>,
+}
+
 // what one file's `impl`s say of each type, by its name
 #[derive(Default)]
 struct Implemented {
     // the traits implemented, by their last name
     traits: Vec<String>,
-    // each associated function that gives `Self`, by its parameters' names
-    constructors: Vec<Vec<String>>,
+    // each associated function that gives `Self`: its word, its line, and its parameters' names
+    constructors: Vec<Constructor>,
 }
 
 fn implemented_of(items: &[Item], found: &mut BTreeMap<String, Implemented>) {
@@ -130,7 +139,11 @@ fn implemented_of(items: &[Item], found: &mut BTreeMap<String, Implemented>) {
                         .collect();
 
                     if gives_self && let Some(parameters) = parameters {
-                        entry.constructors.push(parameters);
+                        entry.constructors.push(Constructor {
+                            word: signature.ident.to_string(),
+                            line: signature.ident.span().start().line,
+                            parameters,
+                        });
                     }
                 }
             }
@@ -255,15 +268,33 @@ fn judge(declared: &ItemStruct, implemented: Option<&Implemented>) -> Vec<Findin
     names.sort_unstable();
 
     // a constructor of the required members: their names, and nothing else
-    let is_constructed = !plain.is_empty()
-        && implemented.is_some_and(|implemented| {
-            implemented.constructors.iter().any(|parameters| {
-                let mut taken: Vec<&str> = parameters.iter().map(String::as_str).collect();
+    let constructors: Vec<&Constructor> = implemented
+        .filter(|_| !plain.is_empty())
+        .map(|implemented| {
+            implemented
+                .constructors
+                .iter()
+                .filter(|constructor| {
+                    let mut taken: Vec<&str> =
+                        constructor.parameters.iter().map(String::as_str).collect();
 
-                taken.sort_unstable();
-                taken == names
-            })
+                    taken.sort_unstable();
+                    taken == names
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    let is_constructed = !constructors.is_empty();
+
+    for constructor in constructors
+        .iter()
+        .filter(|constructor| constructor.word != "new")
+    {
+        findings.push(Finding {
+            line: constructor.line,
+            reason: NOT_NEW,
         });
+    }
 
     if !is_constructed {
         for (_, field_line) in &plain {

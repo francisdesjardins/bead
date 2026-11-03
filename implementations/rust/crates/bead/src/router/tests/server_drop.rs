@@ -7,12 +7,13 @@ use tokio_util::sync::CancellationToken;
 
 use super::server::{Served, first, header_of, news, second, subscribing_of};
 use super::{locked, token};
+use crate::NotificationResolverDependencies;
 use crate::constants::{ProtocolCode, RouterSide};
 use crate::envelope::{Credential, Envelope, FailureHeader, RequestHeader};
 use crate::errors::ResolverError;
 use crate::failure::Failure;
 use crate::identity::Procedure;
-use crate::managers::service::{ResolverDependencies, Response};
+use crate::managers::service::{RequestResolverDependencies, Response};
 use crate::payloads::TextCodec;
 use crate::router::server::RouterServerOptions;
 use crate::router::types::{ConnectionHandle, RouterError};
@@ -21,14 +22,17 @@ use crate::testing::scripted::Sending;
 
 fn resolve(served: &Served, (procedure, release): (&Procedure, Option<CancellationToken>)) {
     let procedure = Procedure {
-        kind: Some(crate::constants::ProcedureKind::Notifies),
+        procedure_kind: Some(crate::constants::ProcedureKind::Notifies),
         ..procedure.clone()
     };
     served
         .services
         .get_notification_resolver(
             &procedure,
-            (ResolverDependencies::of(TextCodec, TextCodec), TextCodec),
+            NotificationResolverDependencies::new(
+                RequestResolverDependencies::new(TextCodec, TextCodec),
+                TextCodec,
+            ),
         )
         .expect("the notification resolved")
         .on(Arc::new(move |_, response: Response<TextCodec>| {
@@ -86,8 +90,8 @@ async fn drop_subscriptions_ends_each_established_subscription_with_a_failure_th
         ..RouterServerOptions::default()
     });
     let other = Procedure {
-        id: 7,
-        name: "other".to_owned(),
+        procedure_id: 7,
+        procedure_name: "other".to_owned(),
         ..news()
     };
     let release = CancellationToken::new();
@@ -131,10 +135,10 @@ async fn drop_subscriptions_ends_each_established_subscription_with_a_failure_th
     *locked(&current) = None;
     served
         .router
-        .drop_subscriptions((
+        .drop_subscriptions(
             first(),
             Failure::protocol(ProtocolCode::SESSION_REQUIRED, RouterSide::Server),
-        ))
+        )
         .await;
     served.settle().await;
     let sent = served.transport.take();
@@ -172,10 +176,10 @@ async fn drop_subscriptions_ends_each_established_subscription_with_a_failure_th
     ));
     served
         .router
-        .drop_subscriptions((
+        .drop_subscriptions(
             second(),
             Failure::protocol(ProtocolCode::SESSION_REQUIRED, RouterSide::Server),
-        ))
+        )
         .await;
     served.settle().await;
     assert_eq!(served.reported(), ["gone second"]);

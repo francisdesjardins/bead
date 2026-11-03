@@ -69,7 +69,7 @@ public sealed record BrokerTransportClientOptions
 }
 
 /// <summary>Where a broker's client connects — a server's name — and how long it waits.</summary>
-public sealed record BrokerConnectOptions
+public sealed record BrokerTransportClientConnectOptions
 {
     /// <summary>The server's name its OPEN goes to, a token (spec 15.16).</summary>
     public required string Server { get; init; }
@@ -104,7 +104,7 @@ public sealed class BrokerTransportClient : IRouterClientTransport, IAsyncDispos
     private readonly Lock _gate = new();
     private volatile ReadyState _readyState = ReadyState.Uninitialized;
     // the options of the last connect its guard let through, which a reconnection connects with
-    private BrokerConnectOptions? _lastConnectOptions;
+    private BrokerTransportClientConnectOptions? _lastConnectOptions;
     // what a dispose cancels the connect under way by
     private CancellationTokenSource? _connecting;
     // the open connection; one this side let go of is none, and its end tells nothing
@@ -232,7 +232,7 @@ public sealed class BrokerTransportClient : IRouterClientTransport, IAsyncDispos
     /// <summary>
     /// Connects through a server's name; settles once the first ACCEPT naming its half came, its
     /// third leg sent. Refused with an <see cref="ArgumentOutOfRangeException"/> for a timeout
-    /// <see cref="BrokerConnectOptions.Timeout"/> does not take, and an <see cref="ArgumentException"/>
+    /// <see cref="BrokerTransportClientConnectOptions.Timeout"/> does not take, and an <see cref="ArgumentException"/>
     /// for a name that is no token, each leaving its state as it was; with an
     /// <see cref="InvalidOperationException"/> unless Uninitialized or Closed; with an
     /// <see cref="OperationCanceledException"/>, nothing changed, when its token is cancelled
@@ -241,7 +241,7 @@ public sealed class BrokerTransportClient : IRouterClientTransport, IAsyncDispos
     /// or a dispose that gave up on it; a <see cref="TimeoutException"/> past its timeout; an
     /// <see cref="OperationCanceledException"/> once its token is cancelled; each ending Closed.
     /// </summary>
-    public Task Connect(BrokerConnectOptions options, CancellationToken cancellationToken = default)
+    public Task Connect(BrokerTransportClientConnectOptions options, CancellationToken cancellationToken = default)
     {
         return Connecting(options, (cancellationToken, false));
     }
@@ -333,10 +333,10 @@ public sealed class BrokerTransportClient : IRouterClientTransport, IAsyncDispos
 
     /// <summary>
     /// Closes the connection with a CLOSE of 1000, or by a RESET, at once, where
-    /// <see cref="TransportDisconnectOptions.IsClean"/> says it is not clean, and raises its close
+    /// <see cref="TransportClientDisconnectOptions.IsClean"/> says it is not clean, and raises its close
     /// as its options say. Refused with a <see cref="DisconnectException"/> unless Open. It ends Closed.
     /// </summary>
-    public Task CloseConnection(TransportDisconnectOptions? options = null)
+    public Task CloseConnection(TransportClientDisconnectOptions? options = null)
     {
         var isClean = options?.IsClean ?? true;
         var isQuick = options?.IsQuick ?? false;
@@ -374,16 +374,16 @@ public sealed class BrokerTransportClient : IRouterClientTransport, IAsyncDispos
     /// Connects again through the name of the last connect its guard let through, a pair drawn
     /// anew, replacing an open connection without a close, and raises
     /// <see cref="IRouterClientTransport.Reconnect"/> as it starts. The first attempt goes at once,
-    /// each next one after its <see cref="TransportReconnectOptions.Delay"/>. Attempts that run out
+    /// each next one after its <see cref="TransportClientReconnectOptions.Delay"/>. Attempts that run out
     /// end Closed with a <see cref="ReconnectException"/>; a cancel stops them with an
     /// <see cref="OperationCanceledException"/>. A reconnection under way, never connected, or
     /// connecting is an <see cref="InvalidOperationException"/>.
     /// </summary>
-    public async Task Reconnect(TransportReconnectOptions? options = null)
+    public async Task Reconnect(TransportClientReconnectOptions? options = null)
     {
-        var reconnect = options ?? new TransportReconnectOptions();
+        var reconnect = options ?? new TransportClientReconnectOptions();
         var token = reconnect.CancellationToken;
-        BrokerConnectOptions target;
+        BrokerTransportClientConnectOptions target;
         BrokerConnection? replaced;
         Action? starting;
 
@@ -578,7 +578,7 @@ public sealed class BrokerTransportClient : IRouterClientTransport, IAsyncDispos
     }
 
     // a connect, or a reconnection's attempt, which its guard alone tells apart
-    private async Task Connecting(BrokerConnectOptions given, (CancellationToken Token, bool IsAttempt) call)
+    private async Task Connecting(BrokerTransportClientConnectOptions given, (CancellationToken Token, bool IsAttempt) call)
     {
         ArgumentNullException.ThrowIfNull(given);
 
@@ -589,7 +589,7 @@ public sealed class BrokerTransportClient : IRouterClientTransport, IAsyncDispos
 
         var options = given with
         {
-            Timeout = Clocks.AssertHeld(("a connect's timeout", nameof(BrokerConnectOptions.Timeout)), given.Timeout),
+            Timeout = Clocks.AssertHeld(("a connect's timeout", nameof(BrokerTransportClientConnectOptions.Timeout)), given.Timeout),
         };
         var (token, isAttempt) = call;
         var connecting = new CancellationTokenSource();
@@ -719,7 +719,7 @@ public sealed class BrokerTransportClient : IRouterClientTransport, IAsyncDispos
     // its OPEN, once its link is up, to the server's name, living in its broker the connect's time
     // left, none when it is without end (spec 15.18); its connection once the first ACCEPT naming its
     // half came, failed as its link goes down before its answer
-    private async Task<BrokerConnection> Opening((BrokerConnectOptions Options, long Started) connect, CancellationToken cancellationToken)
+    private async Task<BrokerConnection> Opening((BrokerTransportClientConnectOptions Options, long Started) connect, CancellationToken cancellationToken)
     {
         var (options, started) = connect;
 

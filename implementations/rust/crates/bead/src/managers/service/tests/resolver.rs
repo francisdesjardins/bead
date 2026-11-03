@@ -11,7 +11,7 @@ use crate::debug::{DebugDirection, DebugType};
 use crate::envelope::{Envelope, FailureRecord};
 use crate::errors::{CallError, ResolverError};
 use crate::failure::Failure;
-use crate::managers::service::{ResolverCallback, ResolverDependencies, Resolving};
+use crate::managers::service::{RequestResolverDependencies, ResolverCallback, Resolving};
 use crate::payloads::{CodecRefusal, JsonCodec, PayloadCodec, TextCodec};
 use crate::router::types::{RouterAnswer, SignalReason};
 use crate::testing::pair::echo;
@@ -51,10 +51,13 @@ async fn makes_and_registers_the_resolver_only_once_it_is_given_its_callback() {
     let fixture = Fixture::new();
     let define = fixture
         .manager
-        .get_request_resolver(&echo(), ResolverDependencies::of(TextCodec, TextCodec))
+        .get_request_resolver(
+            &echo(),
+            RequestResolverDependencies::new(TextCodec, TextCodec),
+        )
         .expect("a definition");
-    assert_eq!(define.procedure.name, "echo");
-    assert_eq!(define.procedure.id, 1);
+    assert_eq!(define.procedure.procedure_name, "echo");
+    assert_eq!(define.procedure.procedure_id, 1);
     fixture.transport.open(&handle_of(1), true);
     fixture.transport.deliver(
         &Envelope::Request {

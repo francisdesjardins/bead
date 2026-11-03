@@ -614,7 +614,7 @@ test.describe('createMemoryTransportClient', () => {
       }
 
       const pending = isReconnect
-        ? client.reconnect({ maxAttempts: 1 })
+        ? client.reconnect({ maximumAttempts: 1 })
         : client.connect({ server: accepting });
 
       try {
@@ -715,7 +715,7 @@ test.describe('createMemoryTransportClient', () => {
     await turn();
     expect(closedAtClient).toEqual(['false false']);
 
-    const gaveUp = await client.reconnect({ maxAttempts: 1 }).then(
+    const gaveUp = await client.reconnect({ maximumAttempts: 1 }).then(
       () => {
         throw new Error('the reconnection was taken');
       },
@@ -753,7 +753,7 @@ test.describe('createMemoryTransportClient', () => {
     });
 
     const cancelled: unknown = await client
-      .reconnect({ maxAttempts: 1, signal: cancelling.signal })
+      .reconnect({ maximumAttempts: 1, signal: cancelling.signal })
       .catch((error: unknown) => {
         return error;
       });
@@ -817,7 +817,7 @@ test.describe('createMemoryTransportClient', () => {
         cancelling.abort();
       });
       const cancelled: unknown = await client
-        .reconnect({ signal: cancelling.signal, maxAttempts: 1 })
+        .reconnect({ signal: cancelling.signal, maximumAttempts: 1 })
         .catch((reason: unknown) => {
           return reason;
         });

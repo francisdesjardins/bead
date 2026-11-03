@@ -189,7 +189,7 @@ transport states what it pauses, and one to come cannot skip the bound in silenc
 
 | Side       | A server's transport                                                                   | A client's transport                                        |
 | ---------- | -------------------------------------------------------------------------------------- | ----------------------------------------------------------- |
-| Rust       | `pause(&self, connection_handle: &ConnectionHandle)`, `resume(…)` on `ServerTransport` | `pause(&self)`, `resume(&self)` on `ClientTransport`        |
+| Rust       | `pause(&self, connection_handle: &ConnectionHandle)`, `resume(…)` on `ServerTransport` | `pause(&self)`, `resume(&self)` on `RouterClientTransport`  |
 | C#         | `void Pause(string connectionHandle)`, `void Resume(…)` on `IRouterServerTransport`    | `void Pause()`, `void Resume()` on `IRouterClientTransport` |
 | TypeScript | `pause(connectionHandle)`, `resume(connectionHandle)` on `IRouterServerTransportLike`  | `pause()`, `resume()` on the client's                       |
 

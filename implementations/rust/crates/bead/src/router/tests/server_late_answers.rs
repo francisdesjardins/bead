@@ -7,9 +7,10 @@ use tokio_util::sync::CancellationToken;
 
 use super::server::{Served, first, header_of, news, request_of, second};
 use super::token;
+use crate::NotificationResolverDependencies;
 use crate::envelope::{Credential, Envelope, RequestHeader};
 use crate::errors::ResolverError;
-use crate::managers::service::{ResolverDependencies, Response};
+use crate::managers::service::{RequestResolverDependencies, Response};
 use crate::payloads::TextCodec;
 use crate::router::server::RouterServerOptions;
 use crate::testing::pair::echo;
@@ -26,7 +27,10 @@ async fn requests_answered_after_their_connection_closed_send_nothing_so_the_han
     let waiting = released.clone();
     served
         .services
-        .get_request_resolver(&echo(), ResolverDependencies::of(TextCodec, TextCodec))
+        .get_request_resolver(
+            &echo(),
+            RequestResolverDependencies::new(TextCodec, TextCodec),
+        )
         .expect("echo resolved")
         .on(Arc::new(move |request, response: Response<TextCodec>| {
             let waiting = waiting.clone();
@@ -88,7 +92,10 @@ async fn what_an_answer_subscribed_goes_with_it_when_it_is_a_failure_or_does_not
         .services
         .get_notification_resolver(
             &news(),
-            (ResolverDependencies::of(TextCodec, TextCodec), TextCodec),
+            NotificationResolverDependencies::new(
+                RequestResolverDependencies::new(TextCodec, TextCodec),
+                TextCodec,
+            ),
         )
         .expect("news resolved")
         .on(Arc::new(|request, response: Response<TextCodec>| {

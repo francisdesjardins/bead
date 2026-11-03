@@ -371,7 +371,7 @@ async fn reserved_of(scripted: &Scripted, call_ids: [u32; 2]) -> [bool; 2] {
 async fn reserved(scripted: &Scripted, (call_id, timeout): (u32, Option<Duration>)) {
     scripted
         .router
-        .reserve((call_id, timeout))
+        .reserve(call_id, timeout)
         .expect("a reservation held")
         .await;
 }
@@ -420,7 +420,7 @@ async fn refuses_a_reservation_longer_than_a_timer_holds_or_under_a_millisecond_
         Duration::from_micros(500),
     ] {
         assert!(
-            scripted.router.reserve((1, Some(timeout))).is_err(),
+            scripted.router.reserve(1, Some(timeout)).is_err(),
             "{timeout:?} refused"
         );
     }

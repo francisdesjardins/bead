@@ -55,6 +55,7 @@ export type {
   Arose,
   Encoding,
   ICallFailure,
+  IOwnProblemOptions,
   IProblem,
   IProblemOptions,
   IProblemRoute,
@@ -67,7 +68,7 @@ export {
   eventOf,
   HEARTBEAT_COMMENT,
 } from './events';
-export type { IEventSink, IEventStream, IEventStreamOptions } from './events';
+export type { IEventSink, IEventStream, IEventStreamOptions, IServerSentEvent } from './events';
 export { createHTTPCaller, httpRequesterOf, httpSubscriberOf } from './http-caller';
 export type {
   HTTPEvent,

@@ -10,7 +10,7 @@ use bytes::Bytes;
 
 use crate::constants::{ProtocolCode, RouterSide};
 use crate::envelope::{
-    ChunkHeader, Credential, CreditHeader, Envelope, Header, RequestHeader, ResultHeader,
+    ChunkHeader, Credential, CreditHeader, Envelope, EnvelopeHeader, RequestHeader, ResultHeader,
     header_bytes_of, write_envelope,
 };
 use crate::router::parts::{Placed, Placement};
@@ -59,7 +59,7 @@ fn lays_the_spec_s_20_mib_out_byte_by_byte_its_opening_a_credit_a_chunk_with_mor
     let Ok(Placed::Transfer(mut outgoing)) = placement.transfer_of(
         &payload,
         (
-            &Header::Request(request.clone()),
+            &EnvelopeHeader::Request(request.clone()),
             limits.maximum_payload_bytes * 2,
         ),
     ) else {
@@ -234,7 +234,7 @@ fn incoming(opening: &Bytes, (total, per_chunk, window): (u64, u64, u64)) -> Inc
 
 #[test]
 fn sizes_a_chunk_as_what_an_envelope_of_the_chunk_size_holds_past_its_header_an_envelope_at_most() {
-    let chunk = Header::Chunk(ChunkHeader {
+    let chunk = EnvelopeHeader::Chunk(ChunkHeader {
         call_id: 1,
         offset: 0,
         is_last: true,
@@ -244,16 +244,16 @@ fn sizes_a_chunk_as_what_an_envelope_of_the_chunk_size_holds_past_its_header_an_
     assert_eq!(placement.payload_bytes_per_chunk, 1_048_560);
     let payload = pattern_of(2_097_152);
     let openings = [
-        Header::Request(RequestHeader {
+        EnvelopeHeader::Request(RequestHeader {
             total: Some(0),
             ..super::request_header_of(1)
         }),
-        Header::Request(RequestHeader {
+        EnvelopeHeader::Request(RequestHeader {
             destination_id: Some(1),
             total: Some(0),
             ..super::request_header_of(1)
         }),
-        Header::Result(ResultHeader {
+        EnvelopeHeader::Result(ResultHeader {
             call_id: 2,
             credential: Some(Credential::Opaque(super::token())),
             total: Some(0),
@@ -271,16 +271,16 @@ fn sizes_a_chunk_as_what_an_envelope_of_the_chunk_size_holds_past_its_header_an_
         .iter()
         .map(|header| {
             let bare = match header {
-                Header::Result(result) => Header::Result(ResultHeader {
+                EnvelopeHeader::Result(result) => EnvelopeHeader::Result(ResultHeader {
                     credential: None,
                     ..result.clone()
                 }),
-                Header::Request(_)
-                | Header::Failure(_)
-                | Header::Notification(_)
-                | Header::Chunk(_)
-                | Header::Credit(_)
-                | Header::Cancel(_) => header.clone(),
+                EnvelopeHeader::Request(_)
+                | EnvelopeHeader::Failure(_)
+                | EnvelopeHeader::Notification(_)
+                | EnvelopeHeader::Chunk(_)
+                | EnvelopeHeader::Credit(_)
+                | EnvelopeHeader::Cancel(_) => header.clone(),
             };
             let Placed::Transfer(outgoing) = placement
                 .transfer_of(&payload, (&bare, u64::MAX))
