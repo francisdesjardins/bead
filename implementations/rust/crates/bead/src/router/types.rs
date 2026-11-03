@@ -620,18 +620,25 @@ impl Gauges {
     }
 
     /// The gauges of several parts as one.
-    #[must_use]
-    pub fn merged(parts: Vec<Self>) -> Self {
+    ///
+    /// # Errors
+    ///
+    /// A [`ProgrammerError`] when two parts name the same count.
+    pub fn merged(parts: Vec<Self>) -> Result<Self, ProgrammerError> {
         let mut merged = Self::default();
 
         for part in parts {
-            merged.counts.extend(part.counts);
+            for (name, count) in part.counts {
+                if merged.counts.insert(name, count).is_some() {
+                    return Err(ProgrammerError::new(format!("two parts count {name}")));
+                }
+            }
             merged.ceilings.extend(part.ceilings);
             merged.connection_handles.extend(part.connection_handles);
             merged.anomalies.extend(part.anomalies);
         }
 
-        merged
+        Ok(merged)
     }
 }
 

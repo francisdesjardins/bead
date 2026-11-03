@@ -417,14 +417,26 @@ async fn ignores_listens_outside_a_connection_and_unmatched_endings_without_chan
     fixture.listen(true).await;
     fixture.listen(false).await;
     fixture.advance(100).await;
-    let counts = fixture.server.gauges().await.server.counts;
+    let counts = fixture
+        .server
+        .gauges()
+        .await
+        .expect("distinct counts")
+        .server
+        .counts;
     assert_eq!((counts["connections"], counts["listening"]), (0, 0));
     assert_eq!(fixture.transport.closed().len(), 0);
     assert_eq!(fixture.clock.dues().len(), 0);
     fixture.open().await;
     fixture.advance(40).await;
     fixture.listen(false).await;
-    let counts = fixture.server.gauges().await.server.counts;
+    let counts = fixture
+        .server
+        .gauges()
+        .await
+        .expect("distinct counts")
+        .server
+        .counts;
     assert_eq!(
         (counts["connections"], counts["idle"], counts["listening"]),
         (1, 1, 0)
@@ -436,7 +448,13 @@ async fn ignores_listens_outside_a_connection_and_unmatched_endings_without_chan
     fixture.transport.close_connection(&fixture.first);
     fixture.listen(true).await;
     fixture.listen(false).await;
-    let counts = fixture.server.gauges().await.server.counts;
+    let counts = fixture
+        .server
+        .gauges()
+        .await
+        .expect("distinct counts")
+        .server
+        .counts;
     assert_eq!((counts["connections"], counts["listening"]), (0, 0));
     assert_eq!(fixture.clock.dues().len(), 0);
     let second = handle_of(2);
@@ -444,7 +462,13 @@ async fn ignores_listens_outside_a_connection_and_unmatched_endings_without_chan
     fixture.transport.hold_listen(true, &second);
     fixture.advance(1_000).await;
     assert_eq!(fixture.transport.closed(), [Arc::clone(&fixture.first)]);
-    let counts = fixture.server.gauges().await.server.counts;
+    let counts = fixture
+        .server
+        .gauges()
+        .await
+        .expect("distinct counts")
+        .server
+        .counts;
     assert_eq!((counts["connections"], counts["listening"]), (1, 1));
     fixture.transport.hold_listen(false, &second);
     fixture.advance(59).await;
@@ -454,7 +478,16 @@ async fn ignores_listens_outside_a_connection_and_unmatched_endings_without_chan
         fixture.transport.closed(),
         [Arc::clone(&fixture.first), second]
     );
-    assert_eq!(fixture.server.gauges().await.server.counts["listening"], 0);
+    assert_eq!(
+        fixture
+            .server
+            .gauges()
+            .await
+            .expect("distinct counts")
+            .server
+            .counts["listening"],
+        0
+    );
     fixture.server.dispose().await.expect("disposed");
 }
 
@@ -473,14 +506,32 @@ async fn a_listen_held_is_no_silence_a_connection_with_no_session_is_not_closed_
     fixture.advance(1_000).await;
     assert_eq!(fixture.transport.closed().len(), 0);
     assert_eq!(fixture.clock.dues().len(), 0);
-    assert_eq!(fixture.server.gauges().await.server.counts["listening"], 1);
+    assert_eq!(
+        fixture
+            .server
+            .gauges()
+            .await
+            .expect("distinct counts")
+            .server
+            .counts["listening"],
+        1
+    );
     fixture.listen(false).await;
     assert_eq!(fixture.clock.dues(), [Duration::from_millis(60)]);
     fixture.advance(59).await;
     assert_eq!(fixture.transport.closed().len(), 0);
     fixture.advance(1).await;
     assert_eq!(fixture.transport.closed(), [Arc::clone(&fixture.first)]);
-    assert_eq!(fixture.server.gauges().await.server.counts["listening"], 0);
+    assert_eq!(
+        fixture
+            .server
+            .gauges()
+            .await
+            .expect("distinct counts")
+            .server
+            .counts["listening"],
+        0
+    );
     fixture.server.dispose().await.expect("disposed");
 }
 
@@ -685,13 +736,23 @@ async fn counts_no_close_under_way_once_disposed() {
     fixture.open().await;
     fixture.advance(20).await;
     assert_eq!(fixture.transport.closed(), [Arc::clone(&fixture.first)]);
-    assert_eq!(fixture.server.gauges().await.server.counts["closing"], 1);
+    assert_eq!(
+        fixture
+            .server
+            .gauges()
+            .await
+            .expect("distinct counts")
+            .server
+            .counts["closing"],
+        1
+    );
     fixture.server.dispose().await.expect("disposed");
     assert_eq!(
         fixture
             .server
             .gauges()
             .await
+            .expect("distinct counts")
             .server
             .counts
             .get("closing")
@@ -740,7 +801,13 @@ async fn count_each_layer_set_against_the_connections_it_holds_when_its_transpor
     fixture.sessions((None, None));
     fixture.open().await;
     assert_eq!(
-        fixture.server.gauges().await.server.counts,
+        fixture
+            .server
+            .gauges()
+            .await
+            .expect("distinct counts")
+            .server
+            .counts,
         [
             ("closing", 0),
             ("connections", 1),
@@ -750,7 +817,7 @@ async fn count_each_layer_set_against_the_connections_it_holds_when_its_transpor
         .into()
     );
     fixture.ask(1, (1, None)).await;
-    let gauges = fixture.server.gauges().await;
+    let gauges = fixture.server.gauges().await.expect("distinct counts");
     assert_eq!(
         gauges.server.counts,
         [
@@ -773,10 +840,18 @@ async fn count_each_layer_set_against_the_connections_it_holds_when_its_transpor
     assert_eq!(gauges.transport.counts.len(), 0);
     assert_eq!(gauges.router.counts["connections"], 1);
     assert_eq!(gauges.router.counts["pendingCalls"], 0);
-    assert_eq!(fixture.server.health().await.status, HealthStatus::Pass);
+    assert_eq!(
+        fixture
+            .server
+            .health()
+            .await
+            .expect("distinct counts")
+            .status,
+        HealthStatus::Pass
+    );
     fixture.transport.close_connection(&fixture.first);
     fixture.clock.settle().await;
-    let gauges = fixture.server.gauges().await;
+    let gauges = fixture.server.gauges().await.expect("distinct counts");
     assert_eq!(
         gauges.server.counts,
         [
@@ -791,7 +866,15 @@ async fn count_each_layer_set_against_the_connections_it_holds_when_its_transpor
         gauges.sessions.counts,
         [("sessions", 0), ("timedConnections", 0)].into()
     );
-    assert_eq!(fixture.server.health().await.status, HealthStatus::Pass);
+    assert_eq!(
+        fixture
+            .server
+            .health()
+            .await
+            .expect("distinct counts")
+            .status,
+        HealthStatus::Pass
+    );
     fixture.server.dispose().await.expect("disposed");
 }
 
@@ -1058,7 +1141,7 @@ async fn fail_what_a_layer_keeps_for_a_connection_the_transport_does_not_hold_an
             ..crate::router::types::Gauges::default()
         }));
     fixture.open().await;
-    let health = fixture.server.health().await;
+    let health = fixture.server.health().await.expect("distinct counts");
     assert_eq!(health.status, HealthStatus::Fail);
     for layer in ["server", "router"] {
         let checks = &health.checks[&format!("{layer}:orphans")];
@@ -1071,7 +1154,13 @@ async fn fail_what_a_layer_keeps_for_a_connection_the_transport_does_not_hold_an
         );
     }
     assert_eq!(
-        fixture.server.gauges().await.transport.counts,
+        fixture
+            .server
+            .gauges()
+            .await
+            .expect("distinct counts")
+            .transport
+            .counts,
         [("connections", 0)].into()
     );
     fixture
@@ -1081,7 +1170,15 @@ async fn fail_what_a_layer_keeps_for_a_connection_the_transport_does_not_hold_an
             connection_handles: [Arc::clone(&fixture.first)].into(),
             ..crate::router::types::Gauges::default()
         }));
-    assert_eq!(fixture.server.health().await.status, HealthStatus::Pass);
+    assert_eq!(
+        fixture
+            .server
+            .health()
+            .await
+            .expect("distinct counts")
+            .status,
+        HealthStatus::Pass
+    );
     fixture.server.dispose().await.expect("disposed");
 }
 
@@ -1292,7 +1389,16 @@ async fn a_connection_that_closes_takes_its_session_and_a_close_that_fails_is_re
                 Some(Arc::clone(&fixture.first))
             )]
         );
-        assert_eq!(fixture.server.gauges().await.server.counts["closing"], 0);
+        assert_eq!(
+            fixture
+                .server
+                .gauges()
+                .await
+                .expect("distinct counts")
+                .server
+                .counts["closing"],
+            0
+        );
         fixture.server.dispose().await.expect("disposed");
     }
 }

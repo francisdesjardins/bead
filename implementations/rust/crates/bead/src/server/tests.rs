@@ -78,11 +78,11 @@ async fn keeps_a_session_per_connection_its_token_drawn_as_it_is_first_stored() 
 #[tokio::test]
 async fn gauges_each_layer_and_passes_a_server_that_keeps_nothing_it_should_not() {
     let pair = pair().await;
-    let gauges = pair.server.gauges().await;
+    let gauges = pair.server.gauges().await.expect("distinct counts");
 
     assert_eq!(gauges.router.orphans, 0, "the router keeps no orphan");
     assert_eq!(
-        pair.server.health().await.status,
+        pair.server.health().await.expect("distinct counts").status,
         HealthStatus::Pass,
         "it passes"
     );
@@ -272,7 +272,7 @@ async fn count_the_sessions_and_the_connections_timed() {
         .await
         .expect("stored");
 
-    let gauges = sessions.gauges().await;
+    let gauges = sessions.gauges().await.expect("distinct counts");
 
     assert!(gauges.anomalies.is_empty(), "no anomaly");
     assert!(gauges.ceilings.is_empty(), "no ceiling");
@@ -284,7 +284,7 @@ async fn count_the_sessions_and_the_connections_timed() {
     assert_eq!(counts_of(&gauges), (Some(1), Some(1)), "one, timed");
     assert!(sessions.delete(Arc::clone(&handle)).await, "deleted");
 
-    let gauges = sessions.gauges().await;
+    let gauges = sessions.gauges().await.expect("distinct counts");
 
     assert!(gauges.connection_handles.is_empty(), "no connection kept");
     assert_eq!(counts_of(&gauges), (Some(0), Some(0)), "none");
@@ -303,7 +303,7 @@ async fn count_the_sessions_and_the_connections_timed() {
         .expect("stored");
 
     assert_eq!(
-        counts_of(&sessions.gauges().await),
+        counts_of(&sessions.gauges().await.expect("distinct counts")),
         (Some(1), Some(1)),
         "one, timed"
     );

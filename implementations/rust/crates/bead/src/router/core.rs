@@ -563,13 +563,13 @@ impl<S: Side> Core<S> {
     pub(crate) fn now(&self) -> Duration {
         #[cfg(test)]
         if let Some(reads) = &self.observed_reads {
-            locked(reads).push(self.gauges());
+            locked(reads).push(self.gauges().expect("each core part names its own counts"));
         }
         self.clock.monotonic()
     }
 
     /// Gauges of every part.
-    pub(crate) fn gauges(&self) -> Gauges {
+    pub(crate) fn gauges(&self) -> Result<Gauges, ProgrammerError> {
         Gauges::merged(vec![
             self.pending.gauges(),
             self.answering.gauges(),

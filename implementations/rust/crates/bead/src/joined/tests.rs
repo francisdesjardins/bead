@@ -950,9 +950,13 @@ async fn serves_one_service_offered_once_to_a_client_of_each_transport() {
         Arc::ptr_eq(&server.transport(), &joined),
         "the join its transport"
     );
-    assert_eq!(server.health().await.status, HealthStatus::Pass, "healthy");
+    assert_eq!(
+        server.health().await.expect("distinct counts").status,
+        HealthStatus::Pass,
+        "healthy"
+    );
 
-    let gauges = server.gauges().await;
+    let gauges = server.gauges().await.expect("distinct counts");
 
     // both transports' connections counted as one transport's, and none of the router's left out
     assert_eq!(

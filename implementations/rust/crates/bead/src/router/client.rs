@@ -1325,7 +1325,11 @@ impl RouterClient {
     }
 
     /// What it holds right now, for diagnosis.
-    pub fn gauges(&self) -> BoxFuture<Gauges> {
+    ///
+    /// # Errors
+    ///
+    /// A [`ProgrammerError`] when two parts name the same count.
+    pub fn gauges(&self) -> BoxFuture<Result<Gauges, ProgrammerError>> {
         let gauged = self.shared.owner.run(|state: &mut ClientState| {
             let mut own = Gauges::default();
 
@@ -1334,10 +1338,10 @@ impl RouterClient {
                 u64::try_from(state.subscriptions.len()).unwrap_or(u64::MAX),
             );
 
-            Gauges::merged(vec![own, state.core.gauges()])
+            Gauges::merged(vec![own, state.core.gauges()?])
         });
 
-        Box::pin(async move { gauged.await.unwrap_or_default() })
+        Box::pin(async move { gauged.await.unwrap_or_else(|_| Ok(Gauges::default())) })
     }
 
     /// Disposes of it: every call ends, and nothing more goes out. Disposed at once, a call made

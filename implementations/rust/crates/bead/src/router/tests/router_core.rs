@@ -295,7 +295,7 @@ async fn answers_envelope_too_large_a_request_that_came_whole_past_chunk_bytes_a
     );
     assert_eq!(call_ids_of(&handed), [5], "the one of chunkBytes taken");
 
-    let gauges = served.router.gauges().await;
+    let gauges = served.router.gauges().await.expect("distinct counts");
 
     assert_eq!(
         (

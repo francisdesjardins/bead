@@ -448,6 +448,7 @@ async fn answering_of(served: &server::Served) -> Option<u64> {
         .router
         .gauges()
         .await
+        .expect("distinct counts")
         .counts
         .get("answeringCalls")
         .copied()

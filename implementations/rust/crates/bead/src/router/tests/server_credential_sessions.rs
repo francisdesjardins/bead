@@ -68,7 +68,7 @@ fn register(
     .expect("a subscription");
 }
 fn counts(state: &ServerState) -> (u64, u64) {
-    let gauged = gauges(state);
+    let gauged = gauges(state).expect("distinct counts");
     (
         gauged.counts["credentialSessions"],
         gauged.counts["timedCredentialSessions"],

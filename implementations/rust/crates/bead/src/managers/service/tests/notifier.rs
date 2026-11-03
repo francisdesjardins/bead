@@ -287,7 +287,12 @@ async fn tells_the_router_what_a_notification_is_about_for_a_paced_subscription_
         matches!(&first[0].1, Envelope::Notification { payload, .. } if payload.as_ref() == b"first")
     );
     assert_eq!(
-        fixture.router.gauges().await.counts["queuedNotifications"],
+        fixture
+            .router
+            .gauges()
+            .await
+            .expect("distinct counts")
+            .counts["queuedNotifications"],
         2
     );
     fixture.transport.deliver(

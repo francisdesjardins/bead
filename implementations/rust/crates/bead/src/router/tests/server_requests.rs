@@ -115,7 +115,15 @@ async fn a_session_provider_s_error_or_panic_is_reported_and_refuses_only_its_ca
                     .contains("the session provider failed")
             );
         }
-        assert_eq!(served.router.gauges().await.counts["answeringCalls"], 0);
+        assert_eq!(
+            served
+                .router
+                .gauges()
+                .await
+                .expect("distinct counts")
+                .counts["answeringCalls"],
+            0
+        );
     }
 }
 
@@ -228,7 +236,12 @@ async fn takes_this_packages_transport_server() {
         .await
         .expect("the router starts without a subscription");
     assert_eq!(
-        served.router.gauges().await.counts["notifiedSubscriptions"],
+        served
+            .router
+            .gauges()
+            .await
+            .expect("distinct counts")
+            .counts["notifiedSubscriptions"],
         0
     );
 }

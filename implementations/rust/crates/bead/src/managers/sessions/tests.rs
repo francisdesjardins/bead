@@ -909,7 +909,13 @@ fn a_reset_for_a_connection_with_no_session_arms_nothing() {
 
     assert!(sessions.arming.dues().is_empty(), "nothing armed");
     assert_eq!(
-        sessions.manager.gauges().counts.get("sessions").copied(),
+        sessions
+            .manager
+            .gauges()
+            .expect("distinct session counts")
+            .counts
+            .get("sessions")
+            .copied(),
         Some(0),
         "no session"
     );
@@ -979,6 +985,7 @@ fn delete_emits_deleted_and_stops_the_timers_an_unknown_connection_is_false() {
         sessions
             .manager
             .gauges()
+            .expect("distinct session counts")
             .counts
             .get("timedConnections")
             .copied(),

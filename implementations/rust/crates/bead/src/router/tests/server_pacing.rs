@@ -82,7 +82,13 @@ impl Paced {
     }
 
     async fn queued(&self) -> (u64, u64) {
-        let counts = self.served.router.gauges().await.counts;
+        let counts = self
+            .served
+            .router
+            .gauges()
+            .await
+            .expect("distinct counts")
+            .counts;
         (counts["pausedSubscriptions"], counts["queuedNotifications"])
     }
 

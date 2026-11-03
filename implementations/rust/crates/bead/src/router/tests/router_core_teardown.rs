@@ -135,7 +135,8 @@ async fn close_awaiting((forward, incoming): (bool, u32)) {
         .owner
         .run(|state| state.core.gauges())
         .await
-        .expect("gauges");
+        .expect("the owner replies")
+        .expect("distinct counts");
     for name in ["answeringCalls", "pendingCalls", "sendingTransfers"] {
         assert_eq!(
             before.counts.get(name),
@@ -152,7 +153,7 @@ async fn close_awaiting((forward, incoming): (bool, u32)) {
             state.core.observed_reads = Some(observing);
             router_core::reject_pending(state, ("the connection closed", Some(&Arc::from("a"))));
             state.core.observed_reads = None;
-            detached(&state.core.gauges());
+            detached(&state.core.gauges().expect("distinct counts"));
             let heard = locked(&at_return);
             assert_eq!(
                 heard.replies,

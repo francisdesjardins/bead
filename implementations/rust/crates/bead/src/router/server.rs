@@ -2156,13 +2156,17 @@ impl RouterServer {
     }
 
     /// What it holds right now, for diagnosis.
-    pub fn gauges(&self) -> BoxFuture<Gauges> {
+    ///
+    /// # Errors
+    ///
+    /// A [`ProgrammerError`] when two parts name the same count.
+    pub fn gauges(&self) -> BoxFuture<Result<Gauges, ProgrammerError>> {
         let gauged = self
             .shared
             .owner
             .run(|state: &mut ServerState| gauges(state));
 
-        Box::pin(async move { gauged.await.unwrap_or_default() })
+        Box::pin(async move { gauged.await.unwrap_or_else(|_| Ok(Gauges::default())) })
     }
 
     /// Disposes of it: every call ends, and nothing more goes out. Disposed at once, a call made
@@ -2227,7 +2231,7 @@ fn clear_places(state: &mut ServerState, handle: Option<&ConnectionHandle>) {
 }
 
 /// What a server's router holds, merged.
-pub(crate) fn gauges(state: &ServerState) -> Gauges {
+pub(crate) fn gauges(state: &ServerState) -> Result<Gauges, ProgrammerError> {
     let mut own = Gauges::default();
 
     own.counts.insert(
@@ -2262,7 +2266,7 @@ pub(crate) fn gauges(state: &ServerState) -> Gauges {
 
     Gauges::merged(vec![
         own,
-        state.core.gauges(),
+        state.core.gauges()?,
         places,
         state.notifications.gauges(),
         sessions,

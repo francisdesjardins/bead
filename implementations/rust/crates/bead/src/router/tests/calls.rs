@@ -860,7 +860,12 @@ async fn detaches_calls_before_settling_an_incoming_resolver_awaiting_an_outgoin
 
     pair.settle().await;
 
-    let before = pair.server.router().gauges().await;
+    let before = pair
+        .server
+        .router()
+        .gauges()
+        .await
+        .expect("distinct counts");
 
     assert_eq!(
         (
@@ -886,7 +891,12 @@ async fn detaches_calls_before_settling_an_incoming_resolver_awaiting_an_outgoin
         "its call rejected as its connection went, its signal aborted by then"
     );
 
-    let after = pair.server.router().gauges().await;
+    let after = pair
+        .server
+        .router()
+        .gauges()
+        .await
+        .expect("distinct counts");
 
     assert_eq!(
         (
