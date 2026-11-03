@@ -1694,6 +1694,9 @@ export const readDraft = (
  */
 export const readMessage = (
   schema: DescMessage,
+  // TODO: `node`, the operand, is carried as a required member of the options: the C# side's form,
+  // an object holding the registry and calls of two parameters (`JsonForm`), is the one to revisit
+  // toward (decision 0004)
   options: IJsonFormOptions & { node: JsonNode }
 ): Message => {
   const message = readDraft(schema, options);
@@ -1706,6 +1709,9 @@ export const readMessage = (
 /** A `proto` request's body read by Bead's mapping, its text then its message (transcoding 5.2). */
 export const readProtoJson = (
   schema: DescMessage,
+  // TODO: `bytes`, the operand, is carried as a required member of the options: the C# side's form,
+  // an object holding the registry and calls of two parameters (`JsonForm`), is the one to revisit
+  // toward (decision 0004)
   { bytes, registry }: IJsonFormOptions & { bytes: Uint8Array }
 ): Message => {
   return readMessage(schema, { node: readJsonText(bytes), registry });
@@ -2153,6 +2159,9 @@ const messageJsonOf = (schema: DescMessage, message: Message, writing: IWritingO
  */
 export const writeProtoJson = (
   schema: DescMessage,
+  // TODO: `message`, the operand, is carried as a required member of the options: the C# side's
+  // form, an object holding the registry and calls of two parameters (`JsonForm`), is the one to
+  // revisit toward (decision 0004)
   { message, registry }: IJsonFormOptions & { message: Message }
 ): string => {
   return messageJsonOf(schema, message, { depth: 0, registry });
@@ -2166,6 +2175,9 @@ export const writeProtoJson = (
  */
 export const writeFieldJson = (
   schema: DescMessage,
+  // TODO: three required members, `message` the operand among them, where the rule takes two at
+  // most, waived by `tools/check-surface.mjs` until then: the C# side's form, an object holding the
+  // registry and calls of two parameters (`JsonForm`), is the one to revisit toward (decision 0004)
   { message, name, registry }: IJsonFormOptions & { message: Message; name: string }
 ): string => {
   const field = schema.fields.find((each) => {

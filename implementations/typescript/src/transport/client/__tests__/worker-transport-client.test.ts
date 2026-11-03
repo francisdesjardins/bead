@@ -198,6 +198,18 @@ test.describe('createWorkerTransportClient', () => {
       ]);
   });
 
+  // decision 0004: options of which every member is optional are optional
+  test('connects with no options', async () => {
+    await using started = await startWorker();
+    const client = createWorkerTransportClient({ worker: started.worker });
+
+    await client.connect();
+
+    expect([client.isOpen(), started.server.clients.length]).toEqual([true, 1]);
+
+    await client.disconnect();
+  });
+
   test('says it carries no credential beside an envelope, and is secure, never leaving the machine, before any connect', async () => {
     await using started = await startWorker();
     const client = createWorkerTransportClient({ worker: started.worker });

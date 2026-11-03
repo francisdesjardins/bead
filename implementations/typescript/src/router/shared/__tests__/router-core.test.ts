@@ -2118,14 +2118,28 @@ test.describe('createRouterCore', () => {
       expect(sent).toEqual([]);
     });
 
-    // spec 13.1: the TypeScript side's surface, by its entry points and its types, which the C#
-    // side's twin holds by reflection
-    test('keeps the router core and the transport’s credential out of the public surface', () => {
-      // no entry point is the core, nor exports it
-      expect(Object.values(PACKAGE.exports)).not.toContain('./src/router/shared/router-core.ts');
+    // spec 13.1 and decision 0004: the TypeScript side's surface, by its entry points and its
+    // types, which the C# side's twin holds by reflection: the envelope's codec is internal on
+    // every side
+    test('keeps the router core, the envelope codec and the transport’s credential out of the public surface', () => {
+      // no entry point is the core or the codec, nor exports either
+      for (const internal of ['router-core', 'envelope', 'header']) {
+        expect(Object.values(PACKAGE.exports)).not.toContain(`./src/router/shared/${internal}.ts`);
+      }
 
       for (const entry of [routerClient, routerServer, serviceManager]) {
-        expect(Object.keys(entry)).not.toContain('createRouterCore');
+        for (const name of [
+          'createRouterCore',
+          'readEnvelope',
+          'writeEnvelope',
+          'readHeader',
+          'writeHeader',
+          'readPrefix',
+          'readFailure',
+          'writeFailure',
+        ]) {
+          expect(Object.keys(entry)).not.toContain(name);
+        }
       }
 
       // ! none of the public types carries a bearer credential, nor a resolver the flag that would

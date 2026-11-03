@@ -1223,16 +1223,17 @@ no counterpart to mirror.
 
 `memory-transport-client` and `memory-transport-server` join a client's router and a server's
 router of one process (spec 15.13): a gateway that calls its application's own server, a core
-before it has a socket, a test. `createMemoryTransportClient({ server })` connects to a
-`createMemoryTransportServer()` with the address and port its caller gives, `local` and none by
-default; the server draws the connection `type=MEMORY;ip=<address>;ordinal=n` and hands that
-address and port with each envelope, so a refusal told names them. Each envelope crosses as a copy,
-whole, once and in order, in a later turn than its send, never within it, so no router is entered
-from its own call. A request's credential crosses beside it, any field value, as `POST /bead`
-carries one; none goes toward a client, so a command presenting `ELSEWHERE` fails before it goes.
-It never leaves the process, so it is secure and a bearer credential crosses it; it carries
-transfers under its routers' limits and holds no bound or heartbeat of its own. Either end closes a
-connection, the other told in a later turn; a server that stops closes each and takes no connect.
+before it has a socket, a test. `createMemoryTransportClient()` connects, at `connect({ server })`,
+to a `createMemoryTransportServer()` with the address and port its caller gives, `local` and none by
+default, and a reconnection connects to that server again; the server draws the connection
+`type=MEMORY;ip=<address>;ordinal=n` and hands that address and port with each envelope, so a
+refusal told names them. Each envelope crosses as a copy, whole, once and in order, in a later
+turn than its send, never within it, so no router is entered from its own call. A request's
+credential crosses beside it, any field value, as `POST /bead` carries one; none goes toward a
+client, so a command presenting `ELSEWHERE` fails before it goes. It never leaves the process, so
+it is secure and a bearer credential crosses it; it carries transfers under its routers' limits and
+holds no bound or heartbeat of its own. Either end closes a connection, the other told in a later
+turn; a server that stops closes each and takes no connect.
 
 `joinTransports([memory, webSocket])`, of `joined-transport-server`, is one server transport over
 several (spec 15.14), so one server — one router, one admission, one session manager, each service

@@ -55,7 +55,7 @@
     "playground:build:file": "node demo/playground.ts",
     "docs:examples": "node tools/check-examples.mjs",
     "docs:examples:fix": "node tools/check-examples.mjs --fix",
-    "check": "yarn type-check && yarn lint --deny-warnings && yarn lint:cases && yarn format:check && yarn comment-budget && yarn docs:examples && yarn protobuf:check",
+    "check": "yarn type-check && yarn lint --deny-warnings && yarn lint:cases && yarn format:check && yarn comment-budget && yarn docs:examples && yarn protobuf:check && yarn surface:check",
     "format": "oxfmt .",
     "format:check": "oxfmt --check .",
     "lint": "oxlint --type-aware",
@@ -73,6 +73,8 @@
     "verify:all": "yarn check && yarn test",
     "protobuf:check": "node tools/check-protobuf.mjs",
     "protobuf:generate": "node tools/check-protobuf.mjs --write",
+    "surface:check": "node tools/check-surface.mjs && node tools/check-surface.mjs --cases",
+    "surface:write": "node tools/check-surface.mjs --write",
     "validations:check": "node ../../tools/check-validations.mjs typescript",
     "validations:generate": "node ../../tools/check-validations.mjs typescript --write"
   },

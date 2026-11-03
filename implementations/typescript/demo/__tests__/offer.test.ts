@@ -46,7 +46,7 @@ const BROKEN_VIOLATIONS = Object.freeze([
 const connected = async () => {
   const transport = createMemoryTransportServer();
   const server = createServer({ transport });
-  const client = createClient({ transport: createMemoryTransportClient({ server: transport }) });
+  const client = createClient({ transport: createMemoryTransportClient() });
   const heard: unknown[] = [];
 
   offer(server, createMetricsRegistry());
@@ -54,7 +54,7 @@ const connected = async () => {
     heard.push(message);
   });
   await transport.start();
-  await client.connect({});
+  await client.connect({ server: transport });
 
   return {
     heard,

@@ -56,6 +56,11 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - The TypeScript side hands a request to its resolver in a later turn, as the C# side does, so the
   order of answers never turns on whether a resolver answers at once: a later request's refusal
   goes before it (spec 9.2, 15.1).
+- On the TypeScript side a transport client's `connect` takes its options as optional where every
+  member is: the worker transport's and the worker client's.
+- The in-memory transport client takes its server at each connect, on every side, as every other
+  transport takes where it connects: on the TypeScript side `server` moves from
+  `createMemoryTransportClient`'s options to `connect`'s, and a reconnection replays it.
 
 ### Fixed
 

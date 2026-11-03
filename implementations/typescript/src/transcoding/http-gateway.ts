@@ -1311,7 +1311,7 @@ export const createHTTPGateway = (given: IHTTPGatewayOptions): IHTTPGateway => {
     // * one Bead connection for this exchange, closed as its response ends (2.1); its client
     // declares no resolver: a command its server sends is answered SERVICE_UNKNOWN (2.6)
     const client = createClient(
-      { transport: createMemoryTransportClient({ clock, server: transport }) },
+      { transport: createMemoryTransportClient({ clock }) },
       { devtools: false, limits }
     );
     const abort = new AbortController();
@@ -1334,6 +1334,7 @@ export const createHTTPGateway = (given: IHTTPGatewayOptions): IHTTPGateway => {
       await client.connect({
         address: exchange.address,
         ...(exchange.port === undefined ? {} : { port: exchange.port }),
+        server: transport,
       });
     } catch (error) {
       if (abort.signal.aborted) {

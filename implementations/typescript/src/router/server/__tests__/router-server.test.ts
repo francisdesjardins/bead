@@ -2371,8 +2371,8 @@ test.describe('createRouterServer', () => {
     test('an envelope of one connection waits behind no more than the bound of another that floods', async () => {
       const memory = createMemoryTransportServer();
       using router = createRouterServer(memory, { intake: { maximumUntakenEnvelopes: 4 } });
-      await using flooding = createMemoryTransportClient({ server: memory });
-      await using other = createMemoryTransportClient({ server: memory });
+      await using flooding = createMemoryTransportClient();
+      await using other = createMemoryTransportClient();
       const taken: string[] = [];
 
       router.on('debug', ({ connectionHandle, direction, header }) => {
@@ -2383,8 +2383,8 @@ test.describe('createRouterServer', () => {
         }
       });
       await memory.start();
-      await flooding.connect({ address: 'flooding' });
-      await other.connect({ address: 'other' });
+      await flooding.connect({ address: 'flooding', server: memory });
+      await other.connect({ address: 'other', server: memory });
 
       // * 40 of one connection, then one of the other, sent before any is taken
       for (let callId = 1; callId <= 79; callId += 2) {

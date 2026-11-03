@@ -1,0 +1,10 @@
+{
+  // The package's compiler options, for `surface.cases.ts` alone: `check-surface.mjs --cases` reads
+  // the cases through it, and the package's own `tsconfig.json` leaves them out.
+  "extends": "../tsconfig.base.json",
+  "compilerOptions": {
+    "lib": ["ES2024"],
+    "types": []
+  },
+  "files": ["surface.cases.ts"]
+}

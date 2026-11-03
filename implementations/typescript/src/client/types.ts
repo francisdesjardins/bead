@@ -27,7 +27,8 @@ export interface IClient<Transport extends IClientTransportLike = IClientTranspo
   readonly services: IServiceManager<RouterClientConnectionHandle>;
   readonly transport: Transport;
 
-  connect(options: Parameters<Transport['connect']>[0]): Promise<void>;
+  /** Connects the transport, with its options, optional where every member of them is. */
+  connect(...[options]: Parameters<Transport['connect']>): Promise<void>;
   disconnect(options?: Parameters<Transport['disconnect']>[0]): Promise<void>;
   /** Reconnects the transport; a dispose aborts it, along with the signal given. */
   reconnect(options?: Parameters<Transport['reconnect']>[0]): Promise<void>;
@@ -98,7 +99,7 @@ export interface IClientOptions {
  * package's. The options are the transport's own: {@link IClient} reads them back from it.
  */
 export interface IClientTransportLike extends IRouterClientTransportLike {
-  connect(options: unknown): Promise<void>;
+  connect(options?: unknown): Promise<void>;
   disconnect(options?: unknown): Promise<void>;
   reconnect(options?: { signal?: AbortSignal | undefined }): Promise<void>;
   [Symbol.asyncDispose](): Promise<void>;
