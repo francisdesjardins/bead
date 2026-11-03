@@ -326,10 +326,11 @@ leaves out. The first and the last are the platform rows; any other parting fail
 **The matrix holds no open row for a stock library reading past protobuf's rules**, every side
 playing those entries. Its "Leveled down" holds "A known proto field at a wire type its type does
 not take, a map's entry's included", "A proto map's entry with a field other than its key and its
-value" and "A singular closed enum's undeclared number, written back"; two platform rows, "A proto
-message's unknown fields, written back" and "A proto map's entry, its key at its default, written
-back", say what each library writes; "A string's leading U+FEFF in a proto payload" is open, as it
-says why, and "A proto string no string holds, given to a writer" is a platform row
+value" and "A singular closed enum's undeclared number, written back"; three platform rows, "A
+proto message's unknown fields, written back", "A proto map's entry, its key or its value at its
+default, written back" and "A proto map's entries, written back", say what each library writes;
+"A string's leading U+FEFF in a proto payload" is open, as it says why, and "A proto string no
+string holds, given to a writer" is a platform row
 ([0031](0031-a-proto-payload-is-protobufs-format-and-bead-states-only-its-own.md)).
 
 **Code that names contract 2, 3 or 4 is regenerated**, on the TypeScript and C# sides, before it
