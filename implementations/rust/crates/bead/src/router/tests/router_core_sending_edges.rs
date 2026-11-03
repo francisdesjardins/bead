@@ -96,6 +96,10 @@ pub(super) fn payload(envelopes: &[Envelope]) -> Bytes {
 }
 
 #[tokio::test]
+#[expect(
+    clippy::disallowed_methods,
+    reason = "the test slices its own fixed payload at offsets within its length"
+)]
 async fn send_a_result_as_a_transfer_its_call_held_open_until_its_last_chunk_is_handed_off() {
     for dotnet in [false, true] {
         for total in [100, 150] {
@@ -186,6 +190,10 @@ async fn send_a_result_as_a_transfer_its_call_held_open_until_its_last_chunk_is_
 }
 
 #[tokio::test]
+#[expect(
+    clippy::disallowed_methods,
+    reason = "the test slices its own fixed payload at offsets within its length"
+)]
 async fn stop_a_result_the_peer_cancels_and_send_nothing_more_of_it_whatever_credit_comes() {
     for (total, initial) in [(100, None), (150, Some(80))] {
         let (peer, handed) = serving(false, &limits()).await;
@@ -309,6 +317,10 @@ async fn end_a_result_whose_chunk_cannot_go_out_forgetting_its_call() {
 }
 
 #[tokio::test]
+#[expect(
+    clippy::disallowed_methods,
+    reason = "the test slices its own fixed payload at offsets within its length"
+)]
 async fn end_a_result_whose_opening_cannot_go_out_forgetting_its_call() {
     for (later, dotnet) in [(false, false), (true, true)] {
         let (peer, handed) = serving(false, &limits()).await;

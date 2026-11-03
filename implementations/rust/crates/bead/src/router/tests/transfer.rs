@@ -18,6 +18,17 @@ use crate::router::transfer::{ChunkOutcome, IncomingBounds, IncomingTransfer, Ou
 use crate::router::types::LIMIT_DEFAULTS;
 use crate::testing::hexadecimal;
 
+#[test]
+fn clamps_an_outgoing_opening_to_its_payload_and_sends_no_chunk_past_its_end() {
+    for opening in [3, 4, u64::MAX] {
+        let mut outgoing = OutgoingTransfer::new(Bytes::from_static(b"abc"), (opening, 8));
+        assert_eq!(outgoing.opening(), Bytes::from_static(b"abc"));
+        assert_eq!(outgoing.credit_end(), 3);
+        outgoing.grant(u64::MAX);
+        assert_eq!(outgoing.next_chunk(), None);
+    }
+}
+
 // bytes that differ from one to the next, so a byte out of place shows
 fn pattern_of(length: usize) -> Bytes {
     Bytes::from(
@@ -306,6 +317,10 @@ fn sizes_a_chunk_as_what_an_envelope_of_the_chunk_size_holds_past_its_header_an_
 }
 
 #[test]
+#[expect(
+    clippy::disallowed_methods,
+    reason = "the test slices its own fixed payload at offsets within its length"
+)]
 fn sends_no_small_chunk_a_full_one_or_the_last_and_waits_for_the_credit_either_needs() {
     let whole = pattern_of(25);
     let mut outgoing = OutgoingTransfer::new(whole.clone(), (4, 6));
@@ -414,6 +429,10 @@ fn checks_a_chunk_in_order_its_bounds_its_bytes_its_last_then_its_credit_then_wh
 }
 
 #[test]
+#[expect(
+    clippy::disallowed_methods,
+    reason = "the test slices its own fixed payload at offsets within its length"
+)]
 fn joins_the_whole_out_of_order_once_and_gives_the_same_whole_when_asked_again() {
     let whole = pattern_of(28);
     let mut incoming = incoming(&whole.slice(..4), (28, 5, 60));
@@ -450,6 +469,10 @@ fn joins_the_whole_out_of_order_once_and_gives_the_same_whole_when_asked_again()
 }
 
 #[test]
+#[expect(
+    clippy::disallowed_methods,
+    reason = "the test slices its own fixed payload at offsets within its length"
+)]
 fn refuses_a_chunk_before_the_last_that_is_not_full_and_one_over_bytes_received_in_part() {
     let whole = pattern_of(19);
     let mut incoming = incoming(&whole.slice(..4), (19, 4, 40));
@@ -494,6 +517,10 @@ fn refuses_a_chunk_before_the_last_that_is_not_full_and_one_over_bytes_received_
 }
 
 #[test]
+#[expect(
+    clippy::disallowed_methods,
+    reason = "the test slices its own fixed payload at offsets within its length"
+)]
 fn refuses_a_chunk_past_full_before_the_last_or_the_last_chunk_invalid_and_places_a_full_one_and_a_last_one_full_at_most()
  {
     let whole = pattern_of(16);

@@ -174,6 +174,10 @@ fn refuses_bytes_of_another_length() {
 }
 
 #[test]
+#[expect(
+    clippy::disallowed_methods,
+    reason = "the test repeats its own string a bounded number of times"
+)]
 fn refuses_16_zero_bytes_which_are_no_token() {
     assert!(SessionToken::new([0; 16]).is_err(), "16 zero bytes refused");
     assert!(!is_session_token(&"A".repeat(22)), "nor spelled");

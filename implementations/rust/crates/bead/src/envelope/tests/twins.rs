@@ -274,6 +274,10 @@ fn take_an_envelope_of_the_largest_size_and_refuse_one_byte_more() {
 }
 
 #[test]
+#[expect(
+    clippy::disallowed_methods,
+    reason = "the test repeats its own string a bounded number of times"
+)]
 fn cuts_a_long_detail_at_the_default_limit_back_to_the_start_of_the_character_cut() {
     for (detail, expected) in [
         ("a".repeat(1_025), "a".repeat(1_024)),

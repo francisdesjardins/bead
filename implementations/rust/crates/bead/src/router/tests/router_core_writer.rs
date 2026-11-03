@@ -290,6 +290,10 @@ async fn refuse_a_payload_past_its_own_limit_and_an_envelope_past_its_own() {
 
 // spec 9.2, 12.2
 #[tokio::test]
+#[expect(
+    clippy::disallowed_methods,
+    reason = "the test repeats its own string a bounded number of times"
+)]
 async fn cut_a_failures_detail_to_its_envelopes_room_and_to_its_own_limit_both_ways() {
     let record = FailureRecord {
         code: NonZeroU16::new(7).expect("an application code"),

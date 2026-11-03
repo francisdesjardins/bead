@@ -244,6 +244,10 @@ async fn a_callback_that_subscribes_before_it_answers_gets_its_requests_call_id_
 
 // spec 11.2, 12.3
 #[tokio::test]
+#[expect(
+    clippy::disallowed_methods,
+    reason = "the test repeats its own string a bounded number of times"
+)]
 async fn a_subscriptions_result_too_large_for_one_envelope_is_refused_answered_as_failed_and_subscribes_nothing()
  {
     let served = served();

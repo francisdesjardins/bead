@@ -77,6 +77,10 @@ fn refusal_of(outcome: &Result<(), TransportError>) -> Option<BrokerRefusedError
 }
 
 #[tokio::test]
+#[expect(
+    clippy::disallowed_methods,
+    reason = "the test repeats its own string a bounded number of times"
+)]
 async fn fails_a_connect_refused_or_past_its_time_or_cancelled_and_refuses_what_it_cannot_take() {
     let clock = SteppingClock::new(SystemTime::UNIX_EPOCH);
     let shared: SharedClock = Arc::<SteppingClock>::clone(&clock);

@@ -1221,6 +1221,10 @@ mod intake {
     // spec 15.12.17, 15.12.18: the twin of "takes the envelope that reaches a bound": by its count,
     // and by its bytes, an envelope past the byte bound taken whole, never held for good
     #[tokio::test]
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "the test repeats its own string a bounded number of times"
+    )]
     async fn takes_the_envelope_that_reaches_a_bound() {
         let served = server::Served::new(&intake_of((2, 1_048_576)));
         let taken = taking(&served);

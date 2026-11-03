@@ -152,6 +152,10 @@ async fn refuse_an_opening_before_any_credit_goes_each_by_its_own_failure_and_ke
 }
 
 #[tokio::test]
+#[expect(
+    clippy::disallowed_methods,
+    reason = "the test slices its own fixed payload at offsets within its length"
+)]
 async fn find_a_transfer_that_a_chunk_comes_for_at_once_as_its_first_credit_goes_out() {
     for dotnet in [false, true] {
         let (peer, handed) = serving(false, &limits()).await;
@@ -213,6 +217,10 @@ async fn find_a_transfer_that_a_chunk_comes_for_at_once_as_its_first_credit_goes
 #[expect(
     clippy::too_many_lines,
     reason = "the twin keeps the broken, abandoned and reused call in one scenario"
+)]
+#[expect(
+    clippy::disallowed_methods,
+    reason = "the test slices its own fixed payload at offsets within its length"
 )]
 async fn end_a_requests_transfer_with_the_failure_a_chunk_breaks_and_drop_what_its_credit_let_come_after()
  {

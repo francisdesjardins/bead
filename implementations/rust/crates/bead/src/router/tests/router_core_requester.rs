@@ -483,6 +483,10 @@ async fn send_no_cancel_for_a_request_whose_send_failed_whole_or_its_transfers_o
 
 // spec 12
 #[tokio::test]
+#[expect(
+    clippy::disallowed_methods,
+    reason = "the test slices its own fixed payload at offsets within its length"
+)]
 async fn receive_a_result_in_a_transfer_credited_as_it_comes_and_settle_its_call_once_whole() {
     for (side, call_id) in [(RouterSide::Server, 2), (RouterSide::Client, 1)] {
         let peer = Peer::new(side, &limits());
@@ -704,6 +708,10 @@ async fn end_a_results_transfer_the_peer_fails_giving_the_budget_back_and_drop_w
 
 // spec 9.2, 12
 #[tokio::test]
+#[expect(
+    clippy::disallowed_methods,
+    reason = "the test slices its own fixed payload at offsets within its length"
+)]
 async fn report_a_second_result_on_a_call_whose_result_comes_in_a_transfer_and_go_on_receiving_it()
 {
     for (side, call_id) in [(RouterSide::Server, 2), (RouterSide::Client, 1)] {

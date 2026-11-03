@@ -390,6 +390,10 @@ async fn rejects_when_the_transport_cannot_send_and_when_the_payload_is_too_larg
 }
 
 #[tokio::test]
+#[expect(
+    clippy::disallowed_methods,
+    reason = "the test repeats its own string a bounded number of times"
+)]
 async fn refuses_a_payload_that_would_go_as_a_transfer_where_it_sends_none_before_anything_goes_out()
  {
     let scripted = Scripted::with(&RouterClientOptions {

@@ -499,6 +499,10 @@ async fn reports_a_resolver_that_throws_or_rejects_with_its_connection() {
 // type refuses here
 // spec 16.2
 #[tokio::test]
+#[expect(
+    clippy::disallowed_methods,
+    reason = "the test repeats its own string a bounded number of times"
+)]
 async fn refuses_a_second_resolver_for_one_procedure_and_an_address_a_revision_or_a_name_outside_section_16()
  {
     let served = Served::new(&RouterServerOptions::default());

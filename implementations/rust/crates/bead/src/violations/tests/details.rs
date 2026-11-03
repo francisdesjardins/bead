@@ -55,6 +55,10 @@ fn detail(violations: Vec<Violation>, more: u64) -> String {
 }
 
 #[test]
+#[expect(
+    clippy::disallowed_methods,
+    reason = "the test repeats its own string a bounded number of times"
+)]
 fn keeps_a_full_violation_detail_closed_to_smaller_violations_after_the_first_refusal() {
     let small = Violation {
         bounds: Some(serde_json::Map::new()),

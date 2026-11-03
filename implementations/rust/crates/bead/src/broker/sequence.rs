@@ -214,10 +214,13 @@ pub(crate) fn cut(envelope: &Bytes, (limit, credential_bytes): (u64, Option<usiz
         let room = if at == 0 { first } else { next };
         let end = at.saturating_add(room).min(envelope.len());
 
-        parts.push((
-            envelope.slice(at..end),
-            at == 0 && credential_bytes.is_some(),
-        ));
+        #[expect(
+            clippy::disallowed_methods,
+            reason = "at starts at zero and advances to an end clamped to the envelope's length"
+        )]
+        let part = envelope.slice(at..end);
+
+        parts.push((part, at == 0 && credential_bytes.is_some()));
         at = end;
     }
 

@@ -46,6 +46,8 @@ impl OutgoingTransfer {
         payload: Bytes,
         (opening_bytes, payload_bytes_per_chunk): (u64, u64),
     ) -> Self {
+        let opening_bytes = opening_bytes.min(length_of(&payload));
+
         Self {
             payload,
             opening_bytes,
@@ -66,6 +68,10 @@ impl OutgoingTransfer {
     }
 
     /// The bytes the opening carries.
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "the constructor clamps the opening to the payload's length"
+    )]
     pub(crate) fn opening(&self) -> Bytes {
         self.payload
             .slice(..index_of(self.opening_bytes).min(self.payload.len()))
@@ -77,6 +83,10 @@ impl OutgoingTransfer {
     }
 
     /// The next chunk the credit lets go out: a full one, or the last; none when neither fits.
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "sent starts within the payload and advances to an end clamped to its length"
+    )]
     pub(crate) fn next_chunk(&mut self) -> Option<Chunk> {
         let total = self.total();
         let end = self
