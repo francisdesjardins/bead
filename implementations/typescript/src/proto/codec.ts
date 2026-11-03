@@ -16,7 +16,7 @@ import {
 } from '@bufbuild/protobuf';
 import { type IPayloadCodec, payloadCodecOf } from '../router/shared/payloads';
 import { assertProtoDepth } from './depth';
-import { checkProtoRecords, PROTO_REASONS } from './records';
+import { checkProtoRecords, filtered, PROTO_REASONS } from './records';
 import { type RequiredPath, unsetNameOf, unsetPathOf } from './required';
 
 // constants
@@ -48,9 +48,10 @@ const readBack = (bytes: Uint8Array, schema: DescMessage): Uint8Array => {
 };
 
 /**
- * `bytes` read as `schema` as spec 17.9 reads a payload but for its item 7: the records checked,
- * then protobuf-es's reader within `recursionLimit`, which keeps a closed enum's undeclared number
- * among the unknown fields (17.9.8). An `Any`'s bytes are read so, which 17.9.7 does not look into.
+ * `bytes` read as `schema` as spec 17.9 reads a payload but for its item 7: the records checked, a
+ * singular closed enum's undeclared number dropped before protobuf-es reads, as every side drops it
+ * (17.9.8), then protobuf-es's reader within `recursionLimit`. An `Any`'s bytes are read so, which
+ * 17.9.7 does not look into.
  * What does not read throws a `SyntaxError`, the refusal of every codec's reader, of its reason,
  * `nested past 100` or `not its message`, protobuf-es's own error or the record refused its
  * `cause`.
@@ -59,12 +60,12 @@ export const readProtoBytes = <Desc extends DescMessage>(
   schema: Desc,
   { bytes, recursionLimit }: { bytes: Uint8Array; recursionLimit: number }
 ): MessageShape<Desc> => {
-  checkProtoRecords(bytes, schema);
+  const read = filtered(bytes, schema);
 
   // ! protobuf-es throws a TypeError on a string that is not UTF-8, and a plain Error elsewhere:
   // what the stock reader throws as it reads is spec 17.9's refusal, never the side's own error
   try {
-    return fromBinary(schema, bytes, { recursionLimit });
+    return fromBinary(schema, read, { recursionLimit });
   } catch (reason) {
     throw new SyntaxError(PROTO_REASONS.notItsMessage, { cause: reason });
   }
@@ -74,15 +75,15 @@ export const readProtoBytes = <Desc extends DescMessage>(
 
 /**
  * The codec of a `proto` payload of `schema`, as generated code holds one: its reader checks the
- * records against the schema (`checkProtoRecords`), reads them with protobuf-es within spec
- * 17.9.3's bound, then refuses a message that leaves a field of `LEGACY_REQUIRED` presence unset
- * (17.9.7), each refusal a `SyntaxError`. Its writer refuses, with a `TypeError`, a value whose
- * known fields nest past the bound before anything is built of it, then builds the message of what
- * it is given and refuses one that leaves such a field unset, writes it, and checks the bytes as
- * its reader does, so it writes nothing its reader refuses (17.2). A refusal's message is its
- * reason in 17.2's words, `not its message`, `nested past 100` or `a required field unset`, the
- * field's name or the record refused in its `cause`. The walk looks into every message the payload
- * holds but an extension's and an `Any`'s.
+ * records against the schema (`checkProtoRecords`), drops a singular closed enum's undeclared
+ * number (17.9.8), reads them with protobuf-es within spec 17.9.3's bound, then refuses a message
+ * that leaves a field of `LEGACY_REQUIRED` presence unset (17.9.7), each refusal a `SyntaxError`.
+ * Its writer refuses, with a `TypeError`, a value whose known fields nest past the bound before
+ * anything is built of it, then builds the message of what it is given and refuses one that leaves
+ * such a field unset, writes it, and checks the bytes as its reader does, so it writes nothing its
+ * reader refuses (17.2). A refusal's message is its reason in 17.2's words, `not its message`,
+ * `nested past 100` or `a required field unset`, the field's name or the record refused in its
+ * `cause`. The walk looks into every message the payload holds but an extension's and an `Any`'s.
  *
  * @example
  * import { protoCodecOf } from '@francisdesjardins/bead/proto';

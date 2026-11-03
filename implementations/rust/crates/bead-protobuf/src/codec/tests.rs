@@ -482,22 +482,31 @@ fn reads_a_closed_enum_s_undeclared_number_as_setting_nothing_its_last_declared_
         "a oneof's word kept"
     );
 
-    // ! a matrix row: kept among the unknown fields, which Buffa writes back
+    // ! a matrix row of "Leveled down": dropped before Buffa reads, as every side drops it, where
+    // protobuf keeps it among the unknown fields
     assert_eq!(
         hex_of(&probe.encode(&kept).expect("written")),
-        "70 01 70 05",
-        "written back whole"
+        "70 01",
+        "written back without 5"
     );
 
     // * the leveled row: a repeated field's item and a map's value of 5 kept as the item and the
-    // value they are, since the generator opens such a field; a singular one set aside
+    // value they are, since the generator opens such a field; a singular one dropped
     let leveled = ProtoCodec::<Leveled>::new();
 
-    for (hex, expected) in [
-        ("08 05", "tones [Unknown(5)]"),
-        ("12 02 01 05", "packed [TONE_HIGH, Unknown(5)]"),
-        ("1A 05 0A 01 61 10 05", "by_name {\"a\": Unknown(5)}"),
-        ("20 05", "one None"),
+    for (hex, expected, written) in [
+        ("08 05", "tones [Unknown(5)]", "08 05"),
+        (
+            "12 02 01 05",
+            "packed [TONE_HIGH, Unknown(5)]",
+            "12 02 01 05",
+        ),
+        (
+            "1A 05 0A 01 61 10 05",
+            "by_name {\"a\": Unknown(5)}",
+            "1A 05 0A 01 61 10 05",
+        ),
+        ("20 05", "one None", ""),
     ] {
         let read = leveled.decode(&bytes_of(hex)).expect("read");
         let said = match hex {
@@ -510,7 +519,7 @@ fn reads_a_closed_enum_s_undeclared_number_as_setting_nothing_its_last_declared_
         assert_eq!(said, expected, "{hex} read");
         assert_eq!(
             hex_of(&leveled.encode(&read).expect("written")),
-            hex,
+            written,
             "{hex} written back"
         );
     }
@@ -530,20 +539,59 @@ fn reads_a_closed_enum_s_undeclared_number_as_setting_nothing_its_last_declared_
 }
 
 #[test]
-fn echoes_a_closed_enum_s_undeclared_number_beside_another_unknown_field_and_a_wide_one_as_its_library_keeps_them()
+fn drops_a_closed_enum_s_undeclared_number_before_its_library_reads_beside_another_unknown_field_wide_or_overlong()
  {
     let probe = ProtoCodec::<Probe>::new();
+    let dynamic = dynamic_codec_of::<Probe>();
+    // a text of 128 bytes, so its child's length takes two
+    let text = ["61"; 128].join(" ");
+    let long = format!("1A 85 01 0A 80 01 {text} 70 05");
+    let long_written = format!("1A 83 01 0A 80 01 {text}");
 
-    // ! a matrix row: Buffa sets the record aside among the unknown fields, its bytes as they came,
-    // beside another unknown field and past 31 bits alike
-    for hex in ["70 05 20 01", "70 FF FF FF FF 0F"] {
+    // ! a matrix row of "Leveled down": dropped before Buffa reads, at the top, in a child given
+    // twice or past 127 bytes, in a group's Needs and in needs, beside another unknown field of any
+    // wire type, past 31 or 32 bits and overlong alike, each enclosing length written again; the
+    // other unknown fields kept
+    for (hex, written, shade) in [
+        ("70 05", "", None),
+        ("70 05 70 01", "70 01", Some(Shade::SHADE_LIGHT)),
+        ("70 01 70 05", "70 01", Some(Shade::SHADE_LIGHT)),
+        ("70 05 20 01", "20 01", None),
+        ("70 05 20 01 70 06", "20 01", None),
+        ("1A 02 20 01 1A 04 70 05 28 01", "1A 04 20 01 28 01", None),
+        ("1A 02 20 01 1A 02 70 05", "1A 02 20 01", None),
+        (
+            "6B 3A 08 08 07 10 01 10 05 20 01 6C",
+            "6B 3A 06 08 07 10 01 20 01 6C",
+            None,
+        ),
+        ("3A 06 08 07 10 01 10 05", "3A 04 08 07 10 01", None),
+        ("70 FF FF FF FF 0F", "", None),
+        ("70 85 80 80 80 10", "", None),
+        ("70 85 00", "", None),
+        (
+            "70 05 25 01 02 03 04 29 01 02 03 04 05 06 07 08",
+            "25 01 02 03 04 29 01 02 03 04 05 06 07 08",
+            None,
+        ),
+        ("70 05 2B 08 01 2C", "2B 08 01 2C", None),
+        (long.as_str(), long_written.as_str(), None),
+    ] {
         let read = probe.decode(&bytes_of(hex)).expect("read");
 
-        assert_eq!(read.shade, None, "{hex} sets nothing");
+        assert_eq!(read.shade, shade, "{hex} read");
         assert_eq!(
             hex_of(&probe.encode(&read).expect("written")),
-            hex,
-            "{hex} written back whole"
+            written,
+            "{hex} written back"
+        );
+
+        let read = dynamic.decode(&bytes_of(hex)).expect("read");
+
+        assert_eq!(
+            hex_of(&dynamic.encode(&read).expect("written")),
+            written,
+            "{hex} written back by the dynamic codec"
         );
     }
 }

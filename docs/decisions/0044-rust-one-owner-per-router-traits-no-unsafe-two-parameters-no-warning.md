@@ -577,10 +577,11 @@ is added to fit a library.**
   unknown fields and of element memory lifted, as neither other side's library holds one: the
   procedure's payload limit bounds a payload. `to_owned_message()` then gives the application its
   value.
-- **A singular closed enum's undeclared number** Buffa sets aside among the unknown fields itself,
-  the last declared number kept (17.9.8), so no filter of Bead's runs before it, where the C# side
-  drops such a record; the walk checks that a required closed enum's number is declared, since the
-  dynamic message takes any.
+- **A singular closed enum's undeclared number** is dropped before Buffa reads, as on every side
+  (17.9.8,
+  [0028](0028-a-proto-payloads-records-are-read-against-its-message-before-its-library-reads-them.md#on-the-corpus-that-writes-every-field-of-probe)),
+  the last declared number kept; the walk checks that a required closed enum's number is declared,
+  since the dynamic message takes any.
 - **The generator** opens each repeated and map field of a closed enum by Buffa's `open_enums_in`,
   the fields read from the descriptors, so such an item or value is kept as the leveled row has it;
   views and vtable reflection are on, and `allow_message_set(true)` takes the suite's messages. The

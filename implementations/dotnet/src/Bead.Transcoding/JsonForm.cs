@@ -1552,7 +1552,7 @@ public sealed partial class JsonForm
         IMessage inner;
 
         // * read as spec 17.9 reads a payload, its records checked, a closed enum's undeclared number
-        // set aside, within the depth left below it, but for 17.9.7, which looks into no Any
+        // dropped, within the depth left below it, but for 17.9.7, which looks into no Any
         try
         {
             inner = ProtoCodecs.Unjudged(held, (any.Value.Memory, Depth + 1 - depth));

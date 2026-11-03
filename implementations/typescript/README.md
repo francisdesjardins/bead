@@ -632,10 +632,10 @@ a map's entry with a field other than its key and its value
 It then reads with protobuf-es's `fromBinary(schema, bytes, { recursionLimit: 101 })` — 101, since
 protobuf-es counts the top message, and section 17.9 bounds a message 100 deep below it
 ([0031](../../docs/decisions/0031-a-proto-payload-is-protobufs-format-and-bead-states-only-its-own.md)),
-a closed enum's undeclared number setting nothing (17.9.8). Last, it walks the message for a field of
-`LEGACY_REQUIRED` presence left unset, proto2's `required`, at any depth but in an extension or an
-`Any`, and throws a `SyntaxError`; its writer walks the message it builds before `toBinary` and
-throws a `TypeError` of the same reason
+a singular closed enum's undeclared number dropped before it reads, so it sets nothing (17.9.8).
+Last, it walks the message for a field of `LEGACY_REQUIRED` presence left unset, proto2's
+`required`, at any depth but in an extension or an `Any`, and throws a `SyntaxError`; its writer
+walks the message it builds before `toBinary` and throws a `TypeError` of the same reason
 ([0042](../../docs/decisions/0042-a-proto-message-that-leaves-a-required-field-unset-neither-reads-nor-writes-and-a-gateway-refuses-it-where-its-server-would.md)).
 The writer writes nothing its reader refuses (17.2): a value whose own fields nest a message past
 the bound is refused before protobuf-es builds any of it, a `Struct` held as a JSON object counted

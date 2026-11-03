@@ -368,26 +368,47 @@ public sealed partial class ProtoCodecsTests
         Assert.Equal(Shade.Light, kept.Shade);
         Assert.Equal((Toned.PickOneofCase.Word, "a"), (toned.PickCase, toned.Word));
 
-        // ! a matrix row: dropped before Google.Protobuf reads, which keeps a known field's record in
-        // no unknown set a caller fills, where protobuf-es writes it back among the unknown fields
-        // where the message holds no other
+        // ! a row of the matrix's Leveled down: dropped before its library reads, on every side, where
+        // protobuf keeps it among the unknown fields
         Assert.Equal("70 01", HexOf(probe.Encode(kept)));
     }
 
     [Fact]
-    public void Echoes_a_closed_enum_s_undeclared_number_beside_another_unknown_field_and_a_wide_one_as_its_library_keeps_them()
+    public void Drops_a_closed_enum_s_undeclared_number_before_its_library_reads_beside_another_unknown_field_wide_or_overlong()
     {
         var probe = ProtoCodecs.Of<Probe>();
-        var beside = probe.Decode(BytesOf("70 05 20 01"));
-        var wide = probe.Decode(BytesOf("70 FF FF FF FF 0F"));
+        // a text of 128 bytes, so its child's length takes two
+        var text = string.Join(" ", Enumerable.Repeat("61", 128));
+        var cases = new (string Given, string Written, Shade? Shade)[]
+        {
+            ("70 05", "", null),
+            ("70 05 70 01", "70 01", Shade.Light),
+            ("70 01 70 05", "70 01", Shade.Light),
+            ("70 05 20 01", "20 01", null),
+            ("70 05 20 01 70 06", "20 01", null),
+            ("1A 02 20 01 1A 04 70 05 28 01", "1A 04 20 01 28 01", null),
+            ("1A 02 20 01 1A 02 70 05", "1A 02 20 01", null),
+            ("6B 3A 08 08 07 10 01 10 05 20 01 6C", "6B 3A 06 08 07 10 01 20 01 6C", null),
+            ("3A 06 08 07 10 01 10 05", "3A 04 08 07 10 01", null),
+            ("70 FF FF FF FF 0F", "", null),
+            ("70 85 80 80 80 10", "", null),
+            ("70 85 00", "", null),
+            ("70 05 25 01 02 03 04 29 01 02 03 04 05 06 07 08", "25 01 02 03 04 29 01 02 03 04 05 06 07 08", null),
+            ("70 05 2B 08 01 2C", "2B 08 01 2C", null),
+            ($"1A 85 01 0A 80 01 {text} 70 05", $"1A 83 01 0A 80 01 {text}", null),
+        };
 
-        Assert.False(beside.HasShade);
-        Assert.False(wide.HasShade);
+        // ! a row of the matrix's Leveled down: dropped before its library reads, on every side, alone,
+        // beside a declared number or another unknown field of any wire type, through a child given
+        // twice or past 127 bytes, a group and a Needs, wide or overlong, where protobuf keeps it among
+        // the unknown fields; the other unknown fields kept
+        foreach (var (given, written, shade) in cases)
+        {
+            var read = probe.Decode(BytesOf(given));
 
-        // ! a matrix row: dropped before Google.Protobuf reads, beside another unknown field and past
-        // 31 bits alike, the other unknown field kept
-        Assert.Equal("20 01", HexOf(probe.Encode(beside)));
-        Assert.Equal("", HexOf(probe.Encode(wide)));
+            Assert.Equal((given, shade), (given, read.HasShade ? read.Shade : (Shade?)null));
+            Assert.Equal((given, written), (given, HexOf(probe.Encode(read))));
+        }
     }
 
     [Fact]

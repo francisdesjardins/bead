@@ -445,8 +445,23 @@ test.describe('the codecs', () => {
     expect(hexOf(PROBE_CODEC.encode({ text: LONE_SURROGATE }))).toBe('0A 05 61 EF BF BD 62');
   });
 
-  test("a proto map's entry, its key at its default, as protobuf-es writes it", () => {
-    // * the empty key written, where Google.Protobuf leaves it out as any field at its default
+  test('a proto map’s entry, its key or its value at its default, as protobuf-es writes it', () => {
+    // * the empty key and the value 0 written, where Google.Protobuf leaves each out as any field
+    // at its default
     expect(hexOf(PROBE_CODEC.encode({ children: { '': {} } }))).toBe('62 04 0A 00 12 00');
+    expect(hexOf(PROBE_CODEC.encode({ tallies: { a: 0 } }))).toBe('82 01 05 0A 01 61 10 00');
+  });
+
+  test('a proto map’s entries, in the order its library writes them', () => {
+    // * tallies keyed b, 1, a, 0, in that order, each entry of 8 bytes
+    const b = '82 01 05 0A 01 62 10 01';
+    const one = '82 01 05 0A 01 31 10 02';
+    const a = '82 01 05 0A 01 61 10 03';
+    const zero = '82 01 05 0A 01 30 10 04';
+
+    // a JavaScript object's own order: integer keys first and ascending, then the others as read
+    expect(hexOf(PROBE_CODEC.encode(PROBE_CODEC.decode(bytesOf(`${b} ${one} ${a} ${zero}`))))).toBe(
+      `${zero} ${one} ${b} ${a}`
+    );
   });
 });

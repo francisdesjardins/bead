@@ -2525,9 +2525,12 @@ generator writes for the message. What is Bead's:
    its key was given. A closed enum's field is unset where item 8 leaves it so.
 
 8. A singular field of a closed enum — proto2's, an edition's `features.enum_type = CLOSED` —
-   takes no record whose number its enum declares no value of. Such a record sets nothing, as
-   protobuf keeps it among the unknown fields
-   ([Enum Behavior](https://protobuf.dev/programming-guides/enum/)). The field holds the last
+   takes no record whose number its enum declares no value of. Such a record sets nothing
+   ([Enum Behavior](https://protobuf.dev/programming-guides/enum/)), and a reader drops it before
+   its library reads, so a message read and written again holds none of it, where protobuf keeps
+   it among the message's unknown fields and writes it again (Enum Behavior;
+   [Language Guide](https://protobuf.dev/programming-guides/proto3/), "Unknown Fields"): a
+   leveling the support matrix keeps. The field holds the last
    declared number its records give, or none, and a `oneof` it is a member of holds what its
    other records give it. A repeated field's items and a map's values keep such a number on every
    side, where protobuf's Enum Behavior sets it among the unknown fields: a leveling the support

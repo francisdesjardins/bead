@@ -6,14 +6,12 @@
 // declare, is read: a refusal, a `SyntaxError`, passes. A message that reads is wrapped `count`
 // times on its path, then written: its writer refuses it, a `TypeError` of `nested past 100`, or
 // its reader takes what it wrote (17.2), which equals the message as protobuf-es compares messages
-// and writes again to the same bytes, but where a reading kept a singular closed enum's undeclared
-// number among its unknown fields, which protobuf-es writes back otherwise, as the support matrix's
-// row of it says. The C# side's `ProtoCodecsTarget` and the Rust side's `proto-codecs` are its twins.
+// and writes again to the same bytes. The C# side's `ProtoCodecsTarget` and the Rust side's
+// `proto-codecs` are its twins.
 
 // dependencies
 
 import { create, equals } from '@bufbuild/protobuf';
-import { type ReflectMessage, reflect } from '@bufbuild/protobuf/reflect';
 import { protoCodecOf } from '../../src/proto/codec';
 import { type Probe, ProbeSchema } from '../../src/router/shared/__tests__/codecs_pb';
 import { hexadecimalOf, isRefused } from './refusal';
@@ -38,44 +36,6 @@ const wrapped = (inner: Probe, path: number): Probe => {
     default:
       return create(ProbeSchema, { delimited: inner });
   }
-};
-
-/**
- * Whether `message`, or a message it holds, keeps a singular closed enum's undeclared number among
- * its unknown fields: protobuf-es's reader sets one there, and replaces it with the message's other
- * unknown fields where it holds any, so what it writes reads back and is written otherwise.
- */
-const keepsAnUndeclaredNumber = (message: ReflectMessage): boolean => {
-  const kept = new Set(
-    (message.getUnknown() ?? []).map(({ no }) => {
-      return no;
-    })
-  );
-
-  return message.fields.some((field) => {
-    switch (field.fieldKind) {
-      case 'enum':
-        return kept.has(field.number);
-      case 'message':
-        return message.isSet(field) && keepsAnUndeclaredNumber(message.get(field));
-      case 'list':
-        return (
-          field.listKind === 'message' &&
-          [...message.get(field)].some((item) => {
-            return keepsAnUndeclaredNumber(item as ReflectMessage);
-          })
-        );
-      case 'map':
-        return (
-          field.mapKind === 'message' &&
-          [...message.get(field)].some(([, value]) => {
-            return keepsAnUndeclaredNumber(value as ReflectMessage);
-          })
-        );
-      case 'scalar':
-        return false;
-    }
-  });
 };
 
 const isSame = (one: Uint8Array, other: Uint8Array): boolean => {
@@ -133,11 +93,7 @@ export const fuzz = (data: Uint8Array): void => {
     throw new Error(`a proto message reads back otherwise: ${hexadecimalOf(data)}`);
   }
 
-  // * protobuf-es's echo of a closed enum's undeclared number, the matrix's row, is no finding
-  if (
-    !isSame(PROBE.encode(read), written) &&
-    !keepsAnUndeclaredNumber(reflect(ProbeSchema, message))
-  ) {
+  if (!isSame(PROBE.encode(read), written)) {
     throw new Error(`a proto message is written again otherwise: ${hexadecimalOf(data)}`);
   }
 };
