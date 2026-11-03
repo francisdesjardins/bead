@@ -676,7 +676,7 @@ pub fn offer_interop(server: &Server) -> Result<ServiceServer, ProgrammerError> 
     // the name its call's session holds, whatever its connection's holds meanwhile
     interop.on(
         &procedures_of.whoami,
-        callback_of(|request, response| response.result(name_of(request.session.as_ref()))),
+        callback_of(|request, response| response.result(name_of(request.session.as_deref()))),
     )?;
 
     // the server asks its client back, by a command, before it answers

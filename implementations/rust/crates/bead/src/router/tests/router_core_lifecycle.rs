@@ -274,7 +274,8 @@ async fn draws_no_call_id_reserved_and_none_at_all_when_every_one_is() {
         let peer = Peer::new(RouterSide::Server, &RouterLimitsOptions::default());
         peer.owner
             .run(move |state| {
-                state.core.pending = PendingCalls::new(RouterSide::Server, Some(last));
+                state.core.pending =
+                    PendingCalls::bounded(RouterSide::Server, last).expect("a bound of its side");
             })
             .await
             .expect("the call id range set");
@@ -760,7 +761,8 @@ async fn reserves_the_call_id_of_a_result_it_received_in_part_as_long_as_the_pee
     client
         .owner
         .run(|state| {
-            state.core.pending = PendingCalls::new(RouterSide::Client, Some(3));
+            state.core.pending =
+                PendingCalls::bounded(RouterSide::Client, 3).expect("a bound of its side");
         })
         .await
         .expect("two call ids");

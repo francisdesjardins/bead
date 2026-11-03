@@ -711,19 +711,40 @@ pub struct Gauges {
 }
 
 impl Gauges {
-    /// The gauges of several parts as one.
+    /// A part's counts and the connections it keeps, each connection held once. Ceilings and
+    /// anomalies are empty; a reader borrows the snapshot to inspect it.
     #[must_use]
-    pub fn merged(parts: Vec<Self>) -> Self {
+    pub fn new<Handles: IntoIterator<Item = ConnectionHandle>>(
+        counts: BTreeMap<&'static str, u64>,
+        connection_handles: Handles,
+    ) -> Self {
+        Self {
+            counts,
+            connection_handles: connection_handles.into_iter().collect(),
+            ..Self::default()
+        }
+    }
+
+    /// The gauges of several parts as one.
+    ///
+    /// # Errors
+    ///
+    /// A [`ProgrammerError`] when two parts name the same count.
+    pub fn merged(parts: Vec<Self>) -> Result<Self, ProgrammerError> {
         let mut merged = Self::default();
 
         for part in parts {
-            merged.counts.extend(part.counts);
+            for (name, count) in part.counts {
+                if merged.counts.insert(name, count).is_some() {
+                    return Err(ProgrammerError::new(format!("two parts count {name}")));
+                }
+            }
             merged.ceilings.extend(part.ceilings);
             merged.connection_handles.extend(part.connection_handles);
             merged.anomalies.extend(part.anomalies);
         }
 
-        merged
+        Ok(merged)
     }
 }
 

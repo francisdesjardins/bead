@@ -71,6 +71,11 @@ pub enum Credential {
         /// Its bytes.
         bytes: Bytes,
     },
+    /// A credential kept by its scheme alone, without a token; never a wire credential.
+    Redacted {
+        /// The credential's scheme.
+        scheme: CredentialScheme,
+    },
 }
 
 impl Credential {
@@ -82,7 +87,7 @@ impl Credential {
             Self::Opaque(_) => CredentialScheme::OPAQUE,
             Self::Jwt(_) => CredentialScheme::JWT,
             Self::Elsewhere => CredentialScheme::ELSEWHERE,
-            Self::ToCome { scheme, .. } => *scheme,
+            Self::ToCome { scheme, .. } | Self::Redacted { scheme } => *scheme,
         }
     }
 }
@@ -231,18 +236,21 @@ impl EnvelopeHeader {
         }
     }
 
-    /// A copy fit to be traced or kept: a bearer credential, a `JWT`'s or one to come, kept by its
-    /// scheme alone, its bytes dropped.
+    /// A copy fit to be traced or kept: a bearer credential, including an `OPAQUE` token, kept by
+    /// its scheme alone, its bytes dropped.
     #[must_use]
     pub fn redacted(&self) -> Self {
         let redact = |credential: &Option<Credential>| -> Option<Credential> {
             credential.as_ref().map(|credential| match credential {
+                Credential::Opaque(_) => Credential::Redacted {
+                    scheme: CredentialScheme::OPAQUE,
+                },
                 Credential::Jwt(_) => Credential::Jwt(Bytes::new()),
                 Credential::ToCome { scheme, .. } => Credential::ToCome {
                     scheme: *scheme,
                     bytes: Bytes::new(),
                 },
-                Credential::None | Credential::Opaque(_) | Credential::Elsewhere => {
+                Credential::None | Credential::Elsewhere | Credential::Redacted { .. } => {
                     credential.clone()
                 }
             })
@@ -1123,6 +1131,9 @@ fn credential_bytes_of(
 
             Ok((scheme, bytes.clone()))
         }
+        Credential::Redacted { .. } => Err(ProgrammerError::new(
+            "a redacted credential has no token to write",
+        )),
     }
 }
 

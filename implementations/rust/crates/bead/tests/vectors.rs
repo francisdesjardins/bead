@@ -557,7 +557,7 @@ async fn refused_credential(vector: &CredentialRefusalVector) -> Result<(), Fail
         let settled = (situation == "end-come").then(|| ElsewhereSession {
             id: "ada".to_owned(),
             data: Some(Value::String("ada".to_owned())),
-            end: Some(ended_at),
+            end: Value::from(ended_at).as_f64(),
         });
 
         credentials.verify = Some(Arc::new(

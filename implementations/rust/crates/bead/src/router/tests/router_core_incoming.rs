@@ -14,6 +14,87 @@ use crate::router::core::RequestResolverProps;
 use crate::router::types::{CallAddress, RouterAnswer, SignalReason};
 use crate::testing::pair::echo;
 
+// spec 9.0
+#[tokio::test]
+async fn answers_a_request_its_codec_throws_on_other_than_a_refusal_envelope_malformed_with_no_detail_and_reports_the_error_with_its_connection()
+ {
+    use crate::constants::{FailureScope, ProtocolCode, RouterSide};
+    use crate::envelope::{Credential, ReadEnvelopeOptions};
+    use crate::router::types::RouterError;
+    use crate::testing::core_port::{Peer, scripted_header};
+    use std::error::Error;
+
+    let peer = Peer::new(
+        RouterSide::Server,
+        &crate::router::types::RouterLimitsOptions::default(),
+    );
+    peer.owner
+        .run(|state| {
+            state.reader = Some(Box::new(|bytes| {
+                let envelope = crate::envelope::read_envelope(
+                    bytes,
+                    RouterSide::Server,
+                    &ReadEnvelopeOptions::default(),
+                )
+                .expect("the actual request reads")
+                .expect("a request");
+                let Envelope::Request { header, .. } = envelope else {
+                    panic!("a request")
+                };
+                assert_eq!(header.call_id, 1);
+                assert_eq!(
+                    header.credential,
+                    Some(Credential::Jwt(Bytes::from_static(b"a.b.c")))
+                );
+                panic!("internal: 10.0.0.5:8443");
+            }));
+        })
+        .await
+        .expect("the reader scripted");
+    peer.receive((
+        Envelope::Request {
+            header: crate::envelope::RequestHeader {
+                credential: Some(Credential::Jwt(Bytes::from_static(b"a.b.c"))),
+                ..scripted_header(1)
+            },
+            payload: Bytes::new(),
+        },
+        Arc::from("a"),
+    ));
+    peer.settle().await;
+    peer.owner
+        .run(|state| {
+            assert_eq!(state.sent.len(), 1);
+            let (handle, Envelope::Failure { header, failure }) = &state.sent[0] else {
+                panic!("a failure answered")
+            };
+            assert_eq!(handle.as_ref(), "a");
+            assert_eq!(header.call_id, 1);
+            assert_eq!(failure.code, ProtocolCode::ENVELOPE_MALFORMED.get());
+            assert_eq!(failure.scope, FailureScope::Protocol);
+            assert_eq!(failure.detail, "");
+            assert_eq!(state.reports.len(), 1);
+            let (handle, RouterError::Failure(failure)) = &state.reports[0] else {
+                panic!("a malformed envelope reported")
+            };
+            assert_eq!(handle.as_ref(), "a");
+            assert_eq!(
+                failure.protocol_code(),
+                Some(ProtocolCode::ENVELOPE_MALFORMED)
+            );
+            assert_eq!(failure.detail(), "internal: 10.0.0.5:8443");
+            let source = failure.source().expect("the codec's panic retained");
+            assert!(source.is::<crate::transport::Panicked>());
+            assert_eq!(
+                source.to_string(),
+                "an envelope codec panicked: internal: 10.0.0.5:8443"
+            );
+            assert!(!state.core.is_disposed());
+        })
+        .await
+        .expect("the router stays live");
+}
+
 // spec 9.1
 #[tokio::test]
 async fn reports_a_request_of_its_own_parity_or_on_a_call_open_and_answers_the_open_one_once() {

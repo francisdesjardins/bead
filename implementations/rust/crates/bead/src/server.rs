@@ -1125,7 +1125,11 @@ impl SessionManager {
     }
 
     /// Its sessions and its timers, counted.
-    pub fn gauges(&self) -> BoxFuture<Gauges> {
+    ///
+    /// # Errors
+    ///
+    /// A [`ProgrammerError`] when two parts name the same count.
+    pub fn gauges(&self) -> BoxFuture<Result<Gauges, ProgrammerError>> {
         on_owner(
             &self.router,
             (
@@ -1133,10 +1137,9 @@ impl SessionManager {
                     state
                         .facade
                         .as_ref()
-                        .map(|facade| facade.sessions.gauges())
-                        .unwrap_or_default()
+                        .map_or_else(|| Ok(Gauges::default()), |facade| facade.sessions.gauges())
                 },
-                Gauges::default(),
+                Ok(Gauges::default()),
             ),
         )
     }
@@ -1223,6 +1226,8 @@ impl Server {
             Arc::clone(&transport),
             (
                 &RouterServerOptions {
+                    last_call_id: None,
+                    session_of: None,
                     clock: Some(clock),
                     runtime: Some(runtime),
                     limits: options.limits.clone(),
@@ -1294,18 +1299,22 @@ impl Server {
     }
 
     /// Each layer's gauges, set against the connections the transport holds.
-    pub fn gauges(&self) -> BoxFuture<ServerGauges> {
+    ///
+    /// # Errors
+    ///
+    /// A [`ProgrammerError`] when two parts name the same count.
+    pub fn gauges(&self) -> BoxFuture<Result<ServerGauges, ProgrammerError>> {
         let transport = Arc::clone(&self.shared.transport);
         let gauged = self
             .shared
             .router
             .owner()
             .run(move |state: &mut ServerState| {
-                let router = crate::router::server::gauges(state);
-                let (own, sessions) = state.facade.as_ref().map_or_else(
-                    || (Gauges::default(), Gauges::default()),
-                    |facade| (facade_gauges(facade), facade.sessions.gauges()),
-                );
+                let router = crate::router::server::gauges(state)?;
+                let (own, sessions) = match state.facade.as_ref() {
+                    Some(facade) => (facade_gauges(facade), facade.sessions.gauges()?),
+                    None => (Gauges::default(), Gauges::default()),
+                };
                 let held = transport.gauges().unwrap_or_else(|| {
                     let mut held = Gauges::default();
 
@@ -1318,22 +1327,26 @@ impl Server {
                 });
                 let handles = held.connection_handles.clone();
 
-                ServerGauges {
+                Ok(ServerGauges {
                     router: layer_gauges_of(router, &handles),
                     server: layer_gauges_of(own, &handles),
                     sessions: layer_gauges_of(sessions, &handles),
                     transport: layer_gauges_of(held, &handles),
-                }
+                })
             });
 
-        Box::pin(async move { gauged.await.unwrap_or_default() })
+        Box::pin(async move { gauged.await.unwrap_or_else(|_| Ok(ServerGauges::default())) })
     }
 
     /// Its health, from its gauges.
-    pub fn health(&self) -> BoxFuture<Health> {
+    ///
+    /// # Errors
+    ///
+    /// A [`ProgrammerError`] when two parts name the same count.
+    pub fn health(&self) -> BoxFuture<Result<Health, ProgrammerError>> {
         let gauges = self.gauges();
 
-        Box::pin(async move { health_of(&gauges.await) })
+        Box::pin(async move { Ok(health_of(&gauges.await?)) })
     }
 
     /// Disposes of it: its router, its sessions, then its transport, stopped. Its router disposed

@@ -288,6 +288,7 @@ async fn a_payload_whose_codec_throws_other_than_its_refusal_is_answered_procedu
     let recording = Arc::new(Recording::default());
     let resolver = crate::managers::service::Resolving {
         manager: Arc::clone(&fixture.manager.inner),
+        admit: None,
         procedure: echo(),
         request: Broken,
         result: Arc::new(TextCodec),

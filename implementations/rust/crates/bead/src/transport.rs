@@ -507,6 +507,12 @@ pub(crate) struct Panicked {
     message: String,
 }
 
+impl Panicked {
+    pub(crate) fn message(&self) -> &str {
+        &self.message
+    }
+}
+
 impl fmt::Display for Panicked {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(formatter, "{} panicked: {}", self.what, self.message)

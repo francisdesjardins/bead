@@ -41,7 +41,7 @@ fn failure(envelope: Envelope) -> FailureRecord {
     failure
 }
 
-async fn handler(fixture: &Fixture, procedure_id: u16) -> Arc<Handler> {
+pub(super) async fn handler(fixture: &Fixture, procedure_id: u16) -> Arc<Handler> {
     fixture
         .router
         .owner()
@@ -313,4 +313,58 @@ async fn is_the_resolvers_to_answer_for_its_router_nothing_admits_a_failure_refu
         }
     }
     fixture.router.dispose().await;
+}
+
+#[tokio::test]
+async fn a_self_admitting_resolver_refuses_before_decoding_and_tells_no_trace_on_a_failed_admission()
+ {
+    for panics in [false, true] {
+        let fixture = Fixture::new();
+        let heard = fixture.heard();
+        let mut dependencies = RequestResolverDependencies::new(JsonCodec, JsonCodec);
+        dependencies.before_request = Some(BeforeRequest::new(
+            move |_| {
+                assert!(!panics, "the admission fails");
+                false
+            },
+            Some(Failure::protocol(
+                ProtocolCode::SESSION_REQUIRED,
+                RouterSide::Server,
+            )),
+        ));
+        fixture
+            .manager
+            .get_request_resolver(&echo(), dependencies)
+            .expect("defined")
+            .on(Arc::new(|_, _| {
+                panic!("a refusal never reaches the callback")
+            }))
+            .expect("registered");
+        let recording = Arc::new(Recording::default());
+        let request = crate::router::core::RequestResolverProps {
+            is_admitted: false,
+            ..props(&recording, b"{not json")
+        };
+        let result = (handler(&fixture, 1).await.resolve)(request).await;
+        let code = if panics {
+            assert!(
+                result
+                    .expect_err("the admission error reaches its caller")
+                    .to_string()
+                    .contains("the admission fails")
+            );
+            ProtocolCode::PROCEDURE_FAILED
+        } else {
+            result.expect("the resolver answers the refusal");
+            ProtocolCode::SESSION_REQUIRED
+        };
+        assert_eq!(
+            recording.answers(),
+            [RouterAnswer::Failure(
+                Failure::protocol(code, RouterSide::Server).record()
+            )]
+        );
+        assert!(locked(&heard).is_empty());
+        fixture.router.dispose().await;
+    }
 }

@@ -90,8 +90,8 @@ pub struct AdmissionRequest {
     pub connection_handle: ConnectionHandle,
     /// Its header, a `JWT`'s token left out.
     pub header: RequestHeader,
-    /// The call's session; none when the call runs in none.
-    pub session: Option<CallSession>,
+    /// The call's shared session; admission and the callback receive the same allocation.
+    pub session: Option<Arc<CallSession>>,
     pub(crate) carried: Option<Carried>,
 }
 
@@ -137,6 +137,41 @@ pub(crate) struct Handler {
     pub(crate) notifies: bool,
 }
 
+impl Handler {
+    /// Asks its admission when a caller hands it a request the router has not admitted.
+    pub(crate) fn self_admitting(mut self) -> Self {
+        if let Some(admit) = self.admit.clone() {
+            let resolve = self.resolve;
+            self.resolve = Arc::new(move |props| {
+                let admit = Arc::clone(&admit);
+                let resolve = Arc::clone(&resolve);
+
+                Box::pin(async move {
+                    if !props.is_admitted {
+                        let request = AdmissionRequest {
+                            connection_handle: Arc::clone(&props.connection_handle),
+                            header: props.header.clone(),
+                            session: props.session.clone(),
+                            carried: props.carried.clone(),
+                        };
+                        if let Some(refused) = admit(&request)? {
+                            return props
+                                .answerer
+                                .respond(RouterAnswer::Failure(refused.failure.record()))
+                                .await
+                                .map_err(ResolverError::other);
+                        }
+                    }
+
+                    resolve(props).await
+                })
+            });
+        }
+
+        self
+    }
+}
+
 impl fmt::Debug for Handler {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter
@@ -156,7 +191,7 @@ pub(crate) struct Dispatch {
     /// Its header as a procedure is handed it: a `JWT`'s scheme alone.
     pub(crate) header: RequestHeader,
     pub(crate) handler: Mutex<Option<Arc<Handler>>>,
-    pub(crate) session: Mutex<Option<CallSession>>,
+    pub(crate) session: Mutex<Option<Arc<CallSession>>>,
     pub(crate) answered: Mutex<Option<FailureRecord>>,
     pub(crate) origin: (Option<String>, Option<u16>),
 }
@@ -185,14 +220,16 @@ pub trait Answerer: Send + Sync {
     reason = "what its transport carried, a bearer's secret, stays the router's"
 )]
 pub struct RequestResolverProps {
+    /// Whether its router has admitted it; otherwise its handler asks its own admission.
+    pub is_admitted: bool,
     /// The connection it came from.
     pub connection_handle: ConnectionHandle,
     /// Its header, a `JWT`'s token left out (spec 13.1).
     pub header: RequestHeader,
     /// Its payload, whole, still encoded.
     pub payload: Bytes,
-    /// The call's session; none when the call runs in none.
-    pub session: Option<CallSession>,
+    /// The call's shared session; admission and the callback receive the same allocation.
+    pub session: Option<Arc<CallSession>>,
     /// Aborted when the call ends before its answer.
     pub signal: Signal,
     /// What answers the call.
@@ -245,7 +282,7 @@ pub(crate) struct BeforeAnswer {
     pub(crate) header: RequestHeader,
     pub(crate) is_failure: bool,
     pub(crate) handler: Option<Arc<Handler>>,
-    pub(crate) session: Option<CallSession>,
+    pub(crate) session: Option<Arc<CallSession>>,
 }
 
 /// What undoes what a side did before an answer that did not go out.
@@ -253,6 +290,15 @@ pub(crate) type Undo<S> = Box<dyn FnOnce(&mut S) + Send>;
 
 /// What sets one side of a router apart, for its core: its port.
 pub(crate) trait Side: Sized + Send + 'static {
+    /// Reads an envelope with this side's codec, past its prefix.
+    fn read_envelope(
+        &mut self,
+        data: &Bytes,
+        options: &ReadEnvelopeOptions,
+    ) -> Result<Option<Envelope>, Failure> {
+        read_envelope(data, self.core().side, options)
+    }
+
     /// Its core.
     fn core(&mut self) -> &mut Core<Self>;
 
@@ -500,7 +546,7 @@ impl<S: Side> Core<S> {
                 most: limits.maximum_answering_calls,
                 ..AnsweringCalls::default()
             },
-            pending: PendingCalls::new(side, None),
+            pending: PendingCalls::new(side),
             announcements: Announcements::default(),
             resolvers: Resolvers::default(),
             disposal: Disposal::default(),
@@ -559,13 +605,13 @@ impl<S: Side> Core<S> {
     pub(crate) fn now(&self) -> Duration {
         #[cfg(test)]
         if let Some(reads) = &self.observed_reads {
-            locked(reads).push(self.gauges());
+            locked(reads).push(self.gauges().expect("each core part names its own counts"));
         }
         self.clock.monotonic()
     }
 
     /// Gauges of every part.
-    pub(crate) fn gauges(&self) -> Gauges {
+    pub(crate) fn gauges(&self) -> Result<Gauges, ProgrammerError> {
         Gauges::merged(vec![
             self.pending.gauges(),
             self.answering.gauges(),
@@ -883,11 +929,25 @@ pub(crate) fn receive<S: Side>(
         maximum_envelope_bytes: usize::try_from(limits.maximum_envelope_bytes).ok(),
     };
 
-    let envelope = match read_envelope(&data, side, &options) {
-        Ok(Some(envelope)) => envelope,
+    let envelope = match caught(("an envelope codec", || state.read_envelope(&data, &options))) {
+        Ok(Ok(Some(envelope))) => envelope,
         // an advisory kind is skipped
-        Ok(None) => return,
-        Err(failure) => return gate(state, ((failure, handle, prefix), false)),
+        Ok(Ok(None)) => return,
+        Ok(Err(failure)) => return gate(state, ((failure, handle, prefix), false)),
+        Err(panicked) => {
+            let failure = state.core().failure(ProtocolCode::ENVELOPE_MALFORMED);
+            state.report(
+                reported(
+                    failure
+                        .clone()
+                        // ! a detail of the side's own words: the report alone takes the panic; the peer gets the failure cloned before it
+                        .saying(panicked.message())
+                        .caused_by(Arc::new(panicked)),
+                ),
+                handle,
+            );
+            return gate(state, ((failure, handle, prefix), true));
+        }
     };
 
     if state.is_tracing() {
@@ -1701,6 +1761,7 @@ fn dispatch_to<S: Side>(
     let owner = core.owner.clone();
     let session = locked(&dispatch.session).clone();
     let props = RequestResolverProps {
+        is_admitted: true,
         connection_handle: Arc::clone(&dispatch.connection_handle),
         header: dispatch.header.clone(),
         payload,
@@ -2019,7 +2080,7 @@ fn resolve_session<S: Side>(
                     Resolved::Session(session) => {
                         let handle = Arc::clone(&dispatch.connection_handle);
 
-                        (Some(state.resolved(session, &handle)), None)
+                        (Some(Arc::new(state.resolved(session, &handle))), None)
                     }
                     Resolved::Refused(reason) => (None, Some(reason)),
                     Resolved::None => (None, None),

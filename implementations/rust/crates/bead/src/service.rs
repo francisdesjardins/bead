@@ -392,6 +392,7 @@ type Binder = Arc<dyn Fn(&Server, &Bound) -> Result<Option<Made>, ProgrammerErro
 #[derive(Clone)]
 pub struct ServiceProcedure {
     procedure: Procedure,
+    descriptor: Made,
     admission: AdmissionRule,
     command: Option<CommandMaker>,
 }
@@ -447,6 +448,7 @@ where
 
         Self {
             procedure: descriptor.procedure().clone(),
+            descriptor: Arc::<DescriptorInit<Req, Res>>::clone(&descriptor.init),
             admission: descriptor.admission(),
             command,
         }
@@ -460,6 +462,7 @@ impl<Req: PayloadCodec, Res: PayloadCodec, Not: PayloadCodec>
     fn from(descriptor: &NotifyingDescriptor<Req, Res, Not>) -> Self {
         Self {
             procedure: descriptor.descriptor.procedure().clone(),
+            descriptor: Arc::<DescriptorInit<Req, Res>>::clone(&descriptor.descriptor.init),
             admission: descriptor.descriptor.admission(),
             command: None,
         }
@@ -601,13 +604,13 @@ impl ServiceServer {
     // a resolver of `procedure`, registered now on the server offered, or once it is
     fn add(
         &self,
-        (procedure, kind): (&Procedure, ProcedureKind),
+        (procedure, kind, descriptor): (&Procedure, ProcedureKind, &Made),
         binder: &Binder,
     ) -> Result<(), ProgrammerError> {
         let (offered, bound) = {
             let mut inner = locked(&self.inner);
             let is_answered = inner.procedures.iter().any(|known| {
-                known.procedure.address() == procedure.address()
+                Arc::ptr_eq(&known.descriptor, descriptor)
                     && known.procedure.procedure_kind == Some(kind)
             });
 
@@ -666,6 +669,7 @@ impl ServiceServer {
         Res::Value: Clone + fmt::Debug + Sync,
     {
         let procedure = descriptor.procedure().clone();
+        let identity: Made = Arc::<DescriptorInit<Req, Res>>::clone(&descriptor.init);
         let descriptor = descriptor.clone();
         let binder: Binder = Arc::new(move |server: &Server, bound: &Bound| {
             let (dependencies, listed) = dependencies_of(&descriptor, bound);
@@ -678,7 +682,7 @@ impl ServiceServer {
             Ok(None)
         });
 
-        self.add((&procedure, ProcedureKind::Request), &binder)
+        self.add((&procedure, ProcedureKind::Request, &identity), &binder)
     }
 
     /// Registers `callback` as the resolver of `descriptor`'s procedure that notifies.
@@ -701,6 +705,7 @@ impl ServiceServer {
         Not::Value: Clone + fmt::Debug + Sync,
     {
         let procedure = descriptor.descriptor.procedure().clone();
+        let identity: Made = Arc::<DescriptorInit<Req, Res>>::clone(&descriptor.descriptor.init);
         let descriptor = descriptor.clone();
         let binder: Binder = Arc::new(move |server: &Server, bound: &Bound| {
             let (dependencies, listed) = dependencies_of(&descriptor.descriptor, bound);
@@ -720,7 +725,7 @@ impl ServiceServer {
             Ok(Some(made))
         });
 
-        self.add((&procedure, ProcedureKind::Notifies), &binder)
+        self.add((&procedure, ProcedureKind::Notifies, &identity), &binder)
     }
 
     /// Offers the service on `server`: its commands made, its resolvers registered.

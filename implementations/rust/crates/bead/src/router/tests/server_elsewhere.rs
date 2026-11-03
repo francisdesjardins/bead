@@ -95,7 +95,7 @@ async fn moves_the_end_of_a_session_kept_by_a_call_whose_credential_renews_it_an
             .send(Ok(Some(ElsewhereSession {
                 id: "ada".to_owned(),
                 data: Some(serde_json::json!("ada")),
-                end: Some(1_767_225_600_000 + after),
+                end: serde_json::Value::from(1_767_225_600_000 + after).as_f64(),
             })))
             .expect("the resolving call waits on its verdict");
     };

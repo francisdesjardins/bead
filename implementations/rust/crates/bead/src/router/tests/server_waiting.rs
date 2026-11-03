@@ -111,7 +111,12 @@ impl Holding {
         assert_eq!(held(&served).await, [(first(), 1, 5)]);
         assert_eq!(served.sent_since(), ["first result 3 ok"]);
         assert_eq!(
-            served.router.gauges().await.counts["subscriptionsWaiting"],
+            served
+                .router
+                .gauges()
+                .await
+                .expect("distinct counts")
+                .counts["subscriptionsWaiting"],
             1
         );
         Self {
@@ -201,7 +206,13 @@ async fn stays_out_once_that_call_is_answered_and_does_not_take_a_place_it_leave
     holding.served.settle().await;
     assert_eq!(held(&holding.served).await, []);
     assert_eq!(
-        holding.served.router.gauges().await.counts["subscriptionsWaiting"],
+        holding
+            .served
+            .router
+            .gauges()
+            .await
+            .expect("distinct counts")
+            .counts["subscriptionsWaiting"],
         0
     );
 }
@@ -312,7 +323,12 @@ async fn a_subscription_answered_once_another_holds_its_place_answered_already_w
     served.settle().await;
     assert_eq!(held(&served).await, []);
     assert_eq!(
-        served.router.gauges().await.counts["subscriptionsWaiting"],
+        served
+            .router
+            .gauges()
+            .await
+            .expect("distinct counts")
+            .counts["subscriptionsWaiting"],
         0
     );
 }
@@ -348,7 +364,13 @@ async fn drop_subscriptions_ends_the_established_and_the_waiting_never_one_in_fl
     assert_eq!(holding.served.sent_since(), ["first result 1 held"]);
     assert_eq!(held(&holding.served).await, [(first(), 1, 5)]);
     assert_eq!(
-        holding.served.router.gauges().await.counts["subscriptionsWaiting"],
+        holding
+            .served
+            .router
+            .gauges()
+            .await
+            .expect("distinct counts")
+            .counts["subscriptionsWaiting"],
         0
     );
 }
@@ -397,7 +419,13 @@ async fn takes_no_place_on_a_connection_that_closed_as_the_answer_of_that_call_f
     assert_eq!(holding.served.reported(), ["gone first"]);
     assert_eq!(held(&holding.served).await, []);
     assert_eq!(
-        holding.served.router.gauges().await.counts["subscriptionsWaiting"],
+        holding
+            .served
+            .router
+            .gauges()
+            .await
+            .expect("distinct counts")
+            .counts["subscriptionsWaiting"],
         0
     );
 }

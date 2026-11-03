@@ -1,4 +1,4 @@
-# alone: typescript 348, csharp 73, rust 87
+# alone: typescript 347, csharp 73, rust 87
 # concept	typescript	csharp	rust	class
 ACCEPT_TIMEOUT	ACCEPT_TIMEOUT [constant]	-	ACCEPT_TIMEOUT [constant]	same
 AccessRefusal	IAccessRefusal [record]	AccessRefusal [record]	AccessRefusal [record]	same
@@ -257,7 +257,7 @@ SessionIdentifier	SessionIdentifier [choice]	SessionIdentifier [record]	SessionI
 SessionListener	-	-	SessionListener [function type]	own: a listener the Rust side registers for an event the other sides emit (0044)
 SessionManager	ISessionManager [record], createSessionManager [function]	SessionManager [record]	SessionManager [record]	same
 SessionManagerOptions	ISessionManagerOptions [record]	SessionManagerOptions [record]	SessionManagerOptions [record]	same
-SessionRequest	ISessionRequest [record]	SessionRequest [record]	-	same
+SessionRequest	ISessionRequest [record]	SessionRequest [record]	SessionRequest [record]	same
 SessionToken	SessionToken [record]	SessionToken [record]	SessionToken [record]	same
 SharedClock	-	-	SharedClock [record]	own: the platform's clock and its timers, which the other sides take from their platform (0044, 0011)
 shareLegBSession	shareLegBSession [function]	-	share_leg_b_session [function]	same
@@ -693,7 +693,7 @@ SessionManagerEventMap	SessionManagerEventMap [record]	-	-	alone
 SessionManagerOnInactivityTimeoutCallback	SessionManagerOnInactivityTimeoutCallback [record]	-	-	alone
 SessionManagerOnSessionCallback	SessionManagerOnSessionCallback [record]	-	-	alone
 SessionManagerTimers	ISessionManagerTimers [record]	-	-	alone
-SessionOf	SessionOf [function type]	-	-	alone
+SessionOf	SessionOf [function type]	-	SessionOf [function type]	same
 SessionTimeoutIds	ISessionTimeoutIds [record]	-	-	alone
 SessionTokenProvider	-	-	SessionTokenProvider [function type]	alone
 setReadyStateClosed	setReadyStateClosed [function]	-	-	alone

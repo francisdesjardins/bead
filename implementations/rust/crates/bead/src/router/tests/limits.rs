@@ -14,6 +14,103 @@ fn refusal_of(limits: &RouterLimitsOptions) -> String {
     limits_of(limits).map_or_else(|error| error.to_string(), |_| String::new())
 }
 
+// spec 12.2
+#[tokio::test]
+async fn take_the_defaults_where_they_say_nothing_and_let_the_transfers_and_the_detail_be_none() {
+    let limits = RouterLimitsOptions {
+        maximum_detail_bytes: Some(0),
+        maximum_transfers: Some(0),
+        ..RouterLimitsOptions::default()
+    };
+    let held = limits_of(&limits).expect("zero transfers and detail bytes hold");
+    assert_eq!(held.chunk_bytes, LIMIT_DEFAULTS.chunk_bytes);
+    assert_eq!(held.maximum_detail_bytes, 0);
+    assert_eq!(held.maximum_transfers, 0);
+    let peer = crate::testing::core_port::Peer::new(crate::constants::RouterSide::Server, &limits);
+    peer.owner
+        .run(|state| {
+            assert_eq!(state.core.limits.chunk_bytes, LIMIT_DEFAULTS.chunk_bytes);
+            assert_eq!(state.core.limits.maximum_transfers, 0);
+            assert_eq!(state.core.limits.maximum_detail_bytes, 0);
+            crate::router::core::dispose(state);
+        })
+        .await
+        .expect("the router constructs and disposes");
+}
+
+// spec 12.2
+#[test]
+fn takes_the_edges_of_each_rule_and_0_where_0_means_none() {
+    let edges = RouterLimitsOptions {
+        buffered_bytes_budget: Some(LIMIT_DEFAULTS.maximum_payload_bytes),
+        chunk_bytes: Some(64),
+        maximum_detail_bytes: Some(0),
+        maximum_envelope_bytes: Some(64),
+        maximum_transfers: Some(0),
+        transfer_inactivity_timeout: Some(Duration::from_millis(2_147_483_647)),
+        window_bytes: Some(128),
+        ..RouterLimitsOptions::default()
+    };
+    let held = limits_of(&edges).expect("the edges hold together");
+    assert_eq!(
+        held.buffered_bytes_budget,
+        LIMIT_DEFAULTS.maximum_payload_bytes
+    );
+    assert_eq!(held.chunk_bytes, 64);
+    assert_eq!(held.maximum_detail_bytes, 0);
+    assert_eq!(held.maximum_envelope_bytes, 64);
+    assert_eq!(held.maximum_transfers, 0);
+    assert_eq!(
+        held.transfer_inactivity_timeout,
+        Duration::from_millis(2_147_483_647)
+    );
+    assert_eq!(held.window_bytes, 128);
+    let shortest = limits_of(&RouterLimitsOptions {
+        transfer_inactivity_timeout: Some(Duration::from_millis(1)),
+        ..RouterLimitsOptions::default()
+    })
+    .expect("the shortest inactivity holds");
+    assert_eq!(
+        shortest.transfer_inactivity_timeout,
+        Duration::from_millis(1)
+    );
+}
+
+// spec 15.1
+#[tokio::test]
+async fn gives_limits_a_router_holds_together_and_refuses_a_transfer_asked_for() {
+    use crate::router::server::{RouterServer, RouterServerOptions};
+    use crate::testing::scripted::ScriptedServer;
+    use std::sync::Arc;
+
+    let limits = whole_envelope_limits_of(&RouterLimitsOptions {
+        maximum_envelope_bytes: Some(4_096),
+        ..RouterLimitsOptions::default()
+    })
+    .expect("whole envelope limits");
+    let clock = crate::testing::SteppingClock::new(crate::testing::instants::new_year());
+    let transport = ScriptedServer::new(clock);
+    let router = RouterServer::new(
+        Arc::<ScriptedServer>::clone(&transport),
+        &RouterServerOptions {
+            limits: Some(limits),
+            ..RouterServerOptions::default()
+        },
+    )
+    .expect("the router holds these limits");
+    router.dispose().await;
+    assert_eq!(transport.listener_count(), 0);
+    assert_eq!(
+        whole_envelope_limits_of(&RouterLimitsOptions {
+            maximum_transfers: Some(4),
+            ..RouterLimitsOptions::default()
+        })
+        .expect_err("whole envelopes refuse transfers")
+        .to_string(),
+        "a transport of whole envelopes carries no transfer: maximumTransfers is 0, not 4"
+    );
+}
+
 // a u64 holds no negative: a count of transfers or of a detail's bytes below 0, refused by the
 // other sides by its words, is refused here by its type
 // spec 12.2

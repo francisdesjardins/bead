@@ -92,14 +92,15 @@ impl fmt::Debug for JwtKeySet {
 }
 
 /// What an `ELSEWHERE`'s verifier settles with for a credential that holds (spec 13.11).
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct ElsewhereSession {
     /// Its id, which names its session with the scheme.
     pub id: String,
     /// Its data, which the call carries.
     pub data: Option<Value>,
-    /// Its end, in milliseconds since the epoch; none for a session without one.
-    pub end: Option<i64>,
+    /// Its end, in milliseconds since the epoch, rounded up as the verifier settles; none for a
+    /// session without one. A non-finite value or one beyond ±(2⁵³ − 1) fails its resolution.
+    pub end: Option<f64>,
 }
 
 /// What an `ELSEWHERE`'s verifier settles with: a session, none for a credential that does not
@@ -422,6 +423,11 @@ impl CredentialResolver {
             Credential::None | Credential::Opaque(_) | Credential::ToCome { .. } => {
                 Box::pin(async { Ok(Resolved::None) })
             }
+            Credential::Redacted { .. } => Box::pin(async {
+                Err(Unresolved::Other(Arc::new(ProgrammerError::new(
+                    "a redacted credential has no token to resolve",
+                ))))
+            }),
         }
     }
 }
@@ -895,17 +901,14 @@ async fn resolve_elsewhere(
         return Ok(Resolved::Refused("verifier".to_owned()));
     };
 
-    if session
+    let end = session
         .end
-        .is_some_and(|end| !(-9_007_199_254_740_991..=9_007_199_254_740_991).contains(&end))
-    {
-        return Err(Unresolved::Other(Arc::new(ProgrammerError::new(
-            "an ELSEWHERE's verifier settles with a session whose end is a number of milliseconds within ±9007199254740991",
-        ))));
-    }
+        .map(rounded_end_of)
+        .transpose()
+        .map_err(|error| Unresolved::Other(Arc::new(error)))?;
 
     // the wall clock read as the verifier settles: a session whose end it reached does not hold
-    if let Some(end) = session.end
+    if let Some(end) = end
         && milliseconds_since_epoch(wall_now(inner)) >= end
     {
         return Ok(Resolved::Refused("end".to_owned()));
@@ -913,7 +916,15 @@ async fn resolve_elsewhere(
 
     Ok(Resolved::Session(CallSession {
         data: session.data,
-        end: session.end,
+        end,
         identifier: Some(SessionIdentifier::Elsewhere { id: session.id }),
     }))
+}
+
+fn rounded_end_of(end: f64) -> Result<i64, ProgrammerError> {
+    crate::json::integer_of(end.ceil())
+        .filter(|_| end.abs() <= 9_007_199_254_740_991.0)
+        .ok_or_else(|| ProgrammerError::new(
+            "an ELSEWHERE's verifier settles with a session whose end is a number of milliseconds within ±9007199254740991",
+        ))
 }

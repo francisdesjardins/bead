@@ -68,14 +68,14 @@ fn register(
     .expect("a subscription");
 }
 fn counts(state: &ServerState) -> (u64, u64) {
-    let gauged = gauges(state);
+    let gauged = gauges(state).expect("distinct counts");
     (
         gauged.counts["credentialSessions"],
         gauged.counts["timedCredentialSessions"],
     )
 }
 
-struct Sessions {
+struct SessionManager {
     router: RouterServer,
     clock: Arc<SteppingClock>,
     transport: Arc<ScriptedServer>,
@@ -86,7 +86,7 @@ async fn times_an_end_past_a_timers_ceiling_in_steps_the_wall_clock_read_again_a
  {
     use crate::duration::LONGEST_TIMER;
 
-    let kept = Sessions::new().await;
+    let kept = SessionManager::new().await;
     let span = Duration::from_mins(30 * 24 * 60 + 1);
     let end = NOW + i64::try_from(span.as_millis()).expect("thirty days fit");
     kept.router
@@ -165,7 +165,7 @@ async fn times_an_end_past_a_timers_ceiling_in_steps_the_wall_clock_read_again_a
     assert_eq!(kept.clock.dues(), Vec::<Duration>::new());
     kept.router.dispose().await;
 }
-impl Sessions {
+impl SessionManager {
     async fn new() -> Self {
         let clock = SteppingClock::new(instants::new_year());
         let transport = ScriptedServer::new(Arc::<SteppingClock>::clone(&clock));
@@ -201,7 +201,7 @@ impl Sessions {
 #[tokio::test]
 async fn keeps_the_latest_credential_end_across_subscriptions_and_clears_its_timers_when_the_connection_closes()
  {
-    let kept = Sessions::new().await;
+    let kept = SessionManager::new().await;
     kept.router
         .owner()
         .run(|state| {
@@ -268,7 +268,7 @@ async fn keeps_the_latest_credential_end_across_subscriptions_and_clears_its_tim
 #[tokio::test]
 async fn keeps_a_credentials_session_from_its_first_subscription_on_a_connection_to_its_last_timing_its_end_meanwhile_its_connections_session_it_never_keeps()
  {
-    let kept = Sessions::new().await;
+    let kept = SessionManager::new().await;
     kept.router
         .owner()
         .run(|state| {
@@ -308,7 +308,7 @@ async fn keeps_a_credentials_session_from_its_first_subscription_on_a_connection
 #[tokio::test]
 async fn ends_nothing_in_the_turn_after_its_end_was_reached_for_a_session_forgotten_or_renewed_meanwhile()
  {
-    let kept = Sessions::new().await;
+    let kept = SessionManager::new().await;
     kept.router
         .owner()
         .run(|state| {
@@ -339,7 +339,7 @@ async fn ends_nothing_in_the_turn_after_its_end_was_reached_for_a_session_forgot
 #[tokio::test]
 async fn moves_a_kept_sessions_end_to_the_later_of_the_two_in_whatever_order_calls_resolve_its_timer_armed_anew_a_call_runs_with_the_end_kept()
  {
-    let kept = Sessions::new().await;
+    let kept = SessionManager::new().await;
     kept.router
         .owner()
         .run(|state| {
@@ -373,7 +373,7 @@ async fn moves_a_kept_sessions_end_to_the_later_of_the_two_in_whatever_order_cal
 #[tokio::test]
 async fn ends_a_session_by_its_identifier_on_every_connection_that_keeps_it_and_forgets_those_of_a_connection_that_closes()
  {
-    let kept = Sessions::new().await;
+    let kept = SessionManager::new().await;
     kept.router
         .owner()
         .run(|state| {

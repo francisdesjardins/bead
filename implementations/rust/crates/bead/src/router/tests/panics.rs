@@ -322,7 +322,7 @@ async fn a_turn_that_panics_ends_its_router_failing_each_call_it_waits_on_with_t
         "a call made after refused at once"
     );
     assert_eq!(
-        router.gauges().await,
+        router.gauges().await.expect("distinct counts"),
         crate::router::types::Gauges::default(),
         "its owner gone"
     );

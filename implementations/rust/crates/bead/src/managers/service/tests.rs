@@ -24,6 +24,7 @@ mod notifier;
 mod requester;
 mod resolver;
 mod resolver_edges;
+mod sessions;
 mod validation;
 
 type Heard = Arc<Mutex<Vec<(Option<String>, DebugEvent)>>>;
@@ -140,6 +141,7 @@ fn header() -> RequestHeader {
 
 fn props(recording: &Arc<Recording>, payload: &[u8]) -> RequestResolverProps {
     RequestResolverProps {
+        is_admitted: true,
         connection_handle: handle_of(1),
         header: header(),
         payload: Bytes::copy_from_slice(payload),

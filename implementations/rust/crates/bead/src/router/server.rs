@@ -38,7 +38,8 @@ use crate::ordered::Ordered;
 use crate::owner::{Owner, WeakOwner};
 use crate::router::core::{
     BeforeAnswer, Core, Dispatch, Disposal, Handler, Resolution, Resolved, Resolvers, Responded,
-    SessionRequest, Side, Undo, Unresolved, is_answering, reported, reported_call, respond,
+    SessionRequest as CoreSessionRequest, Side, Undo, Unresolved, is_answering, reported,
+    reported_call, respond,
 };
 use crate::router::intake::Intake;
 use crate::router::requester::CoreRequest;
@@ -77,6 +78,21 @@ pub type ActivityListener = Arc<dyn Fn(RouterActivity, &ConnectionHandle) + Send
 pub type SessionTokenProvider =
     Arc<dyn Fn(&ConnectionHandle) -> Result<Option<SessionToken>, RouterError> + Send + Sync>;
 
+/// Resolves a connection's session for NONE or OPAQUE in the request's turn, before admission.
+/// The header and signal belong to the call; no transport credential is handed to it.
+pub type SessionOf = Arc<
+    dyn Fn(&SessionRequest<'_>, &Signal) -> Result<Option<CallSession>, RouterError> + Send + Sync,
+>;
+
+/// A connection's request as its session provider reads it, without a transport credential.
+#[derive(Debug)]
+pub struct SessionRequest<'a> {
+    /// The connection the request comes from.
+    pub connection_handle: &'a ConnectionHandle,
+    /// Its request header, before its credential is resolved.
+    pub header: &'a RequestHeader,
+}
+
 /// How a server's router is built, beyond its transport.
 #[derive(Clone, Default)]
 #[non_exhaustive]
@@ -87,6 +103,8 @@ pub struct RouterServerOptions {
     pub runtime: Option<Handle>,
     /// How much it reads, writes and holds.
     pub limits: Option<RouterLimitsOptions>,
+    /// The last call id it draws, of its own parity: its whole range when none.
+    pub last_call_id: Option<u32>,
     /// What it counts its calls into.
     pub metrics_registry: Option<MetricsRegistry>,
     /// What a paced subscription queues at most.
@@ -96,6 +114,8 @@ pub struct RouterServerOptions {
     pub intake: Option<IntakeLimitsOptions>,
     /// What resolves a `JWT` and an `ELSEWHERE`.
     pub credentials: Option<Credentials>,
+    /// Resolves NONE and OPAQUE synchronously; the server's session manager supplies it when none.
+    pub session_of: Option<SessionOf>,
     /// The connection's token: the server's session manager supplies it when none is given.
     pub session_token_of: Option<SessionTokenProvider>,
     /// Its relay's options.
@@ -138,6 +158,8 @@ pub(crate) struct Waiting {
 /// What a server's router holds, in its owner.
 pub(crate) struct ServerState {
     pub(crate) core: Core<Self>,
+    #[cfg(test)]
+    pub(crate) transmit_probe: Option<crate::testing::scripted::ServerTransmitProbe>,
     // ! its transport and its bridge held weakly: the transport holds the bridge, which holds the
     // owner, so a strong edge back would keep the owner of its own (decision 0044); the handle holds
     // the transport strongly, so it goes only once nothing holds the router
@@ -162,6 +184,7 @@ pub(crate) struct ServerState {
     pub(crate) relay: crate::router::relay::Relay,
     pub(crate) listeners: Arc<ServerListeners>,
     pub(crate) facade: Option<crate::server::Facade>,
+    session_of: Option<SessionOf>,
     session_token_of: Option<SessionTokenProvider>,
 }
 
@@ -261,7 +284,7 @@ impl Side for ServerState {
             handler,
             session,
         } = answer;
-        let (end, identifier) = subscribing_of(session.as_ref());
+        let (end, identifier) = subscribing_of(session.as_deref());
         let call_id = header.call_id;
 
         // a call in flight whose credential's session ended meanwhile keeps it anew as its answer
@@ -376,6 +399,11 @@ impl Side for ServerState {
             .transport()
             .ok_or_else(crate::router::core::transport_gone)?;
 
+        #[cfg(test)]
+        if let Some(probe) = &self.transmit_probe {
+            probe(self, connection_handle);
+        }
+
         caught(("a transport", || transport.send(message, connection_handle)))
             .unwrap_or_else(|panicked| Err(panicked.into()))
     }
@@ -404,7 +432,7 @@ impl Side for ServerState {
         );
     }
 
-    fn session_of(&mut self, request: &SessionRequest, signal: &Signal) -> Resolution {
+    fn session_of(&mut self, request: &CoreSessionRequest, signal: &Signal) -> Resolution {
         let handle = &request.connection_handle;
         let header = &request.carried.header;
         let credential = header.credential.clone();
@@ -426,12 +454,29 @@ impl Side for ServerState {
             )));
         }
 
-        let session = crate::server::sessions_of(self).and_then(|sessions| {
-            connection_session_of(
-                credential.as_ref(),
-                (sessions.token_of(handle).as_ref(), sessions.data_of(handle)),
-            )
-        });
+        let session = if let Some(provider) = &self.session_of {
+            match caught(("a session provider", || {
+                provider(
+                    &SessionRequest {
+                        connection_handle: handle,
+                        header,
+                    },
+                    signal,
+                )
+            }))
+            .unwrap_or_else(|panicked| Err(panicked.into()))
+            {
+                Ok(session) => session,
+                Err(error) => return Resolution::Now(Err(Unresolved::Other(Arc::new(error)))),
+            }
+        } else {
+            crate::server::sessions_of(self).and_then(|sessions| {
+                connection_session_of(
+                    credential.as_ref(),
+                    (sessions.token_of(handle).as_ref(), sessions.data_of(handle)),
+                )
+            })
+        };
 
         // an OPAQUE no session holds on its connection is refused for its session
         Resolution::Now(Ok(match session {
@@ -1159,7 +1204,7 @@ fn subscribe(state: &mut ServerState, dispatch: &Arc<Dispatch>) -> Result<u32, C
         .lock()
         .unwrap_or_else(PoisonError::into_inner)
         .clone();
-    let (end, identifier) = subscribing_of(session.as_ref());
+    let (end, identifier) = subscribing_of(session.as_deref());
     let call = SubscribingCall {
         call_id: header.call_id,
         connection_handle: Arc::clone(handle),
@@ -1649,6 +1694,8 @@ impl Future for Call {
 }
 
 struct Shared {
+    #[cfg(test)]
+    requester_probe: Mutex<Option<crate::testing::scripted::RequesterProbe>>,
     owner: Owner<ServerState>,
     disposal: Disposal,
     clock: SharedClock,
@@ -1691,10 +1738,18 @@ impl RouterServer {
         Self::build(transport, (options, None))
     }
 
+    #[expect(
+        clippy::too_many_lines,
+        reason = "the server binds its transport, clock, session providers and owner in one construction"
+    )]
     pub(crate) fn build(
         transport: Arc<dyn ServerTransport>,
         (options, facade): (&RouterServerOptions, Option<crate::server::Facade>),
     ) -> Result<Self, ProgrammerError> {
+        let pending = options.last_call_id.map_or_else(
+            || Ok(crate::router::parts::PendingCalls::new(RouterSide::Server)),
+            |last| crate::router::parts::PendingCalls::bounded(RouterSide::Server, last),
+        )?;
         let runtime = crate::platform::runtime_of(options.runtime.as_ref(), "a router")?;
         let clock = crate::clock::clock_of(&crate::clock::LayeredClocks {
             beneath: transport.clock().as_ref(),
@@ -1736,7 +1791,10 @@ impl RouterServer {
         let disposal = Disposal::default();
         let owner = Owner::spawn((&runtime, &clock), |weak: WeakOwner<ServerState>| {
             ServerState {
+                #[cfg(test)]
+                transmit_probe: None,
                 core: Core {
+                    pending,
                     resolvers: Arc::clone(&resolvers),
                     disposal: disposal.clone(),
                     ..Core::new(
@@ -1763,6 +1821,7 @@ impl RouterServer {
                 relay: relay.clone(),
                 listeners: Arc::clone(&listeners),
                 facade,
+                session_of: options.session_of.clone(),
                 session_token_of: options.session_token_of.clone(),
             }
         });
@@ -1783,6 +1842,8 @@ impl RouterServer {
 
         Ok(Self {
             shared: Arc::new(Shared {
+                #[cfg(test)]
+                requester_probe: Mutex::new(None),
                 owner,
                 disposal,
                 clock,
@@ -1799,6 +1860,24 @@ impl RouterServer {
 
     pub(crate) fn owner(&self) -> &Owner<ServerState> {
         &self.shared.owner
+    }
+
+    #[cfg(test)]
+    pub(crate) fn observe_requester(&self, probe: crate::testing::scripted::RequesterProbe) {
+        *self
+            .shared
+            .requester_probe
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner) = Some(probe);
+    }
+
+    #[cfg(test)]
+    fn requester_probe(&self) -> Option<crate::testing::scripted::RequesterProbe> {
+        self.shared
+            .requester_probe
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone()
     }
 
     // marks it disposed at once, before what it holds is let go in a later turn (spec 9.0)
@@ -1876,11 +1955,17 @@ impl RouterServer {
         check_declaration(procedure)?;
         check_procedure_kind(procedure, DeclarationWay::ServerRequester)?;
 
-        self.shared
+        let series = self
+            .shared
             .metrics
             .as_ref()
             .map(|metrics| metrics.declare_requester(procedure))
-            .transpose()
+            .transpose()?;
+        #[cfg(test)]
+        if let Some(probe) = self.requester_probe() {
+            (probe.declared)(procedure, series.as_ref());
+        }
+        Ok(series)
     }
 
     /// Registers a resolver of `procedure`.
@@ -1926,6 +2011,10 @@ impl RouterServer {
     /// A [`ProgrammerError`] for options that name no connection, or a timeout spec 1.4 does not
     /// hold.
     pub fn request(&self, payload: Bytes, request: RouterRequest) -> Result<Call, ProgrammerError> {
+        #[cfg(test)]
+        if let Some(probe) = self.requester_probe() {
+            (probe.called)(request.series.as_ref());
+        }
         // ! its handle's mark, read once, as its job is posted, a programmer's error first: one
         // made after its router's dispose fails unsent, whatever thread or turn it is made on; one
         // made before goes (spec 9.1)
@@ -2055,13 +2144,17 @@ impl RouterServer {
     }
 
     /// What it holds right now, for diagnosis.
-    pub fn gauges(&self) -> BoxFuture<Gauges> {
+    ///
+    /// # Errors
+    ///
+    /// A [`ProgrammerError`] when two parts name the same count.
+    pub fn gauges(&self) -> BoxFuture<Result<Gauges, ProgrammerError>> {
         let gauged = self
             .shared
             .owner
             .run(|state: &mut ServerState| gauges(state));
 
-        Box::pin(async move { gauged.await.unwrap_or_default() })
+        Box::pin(async move { gauged.await.unwrap_or_else(|_| Ok(Gauges::default())) })
     }
 
     /// Disposes of it: every call ends, and nothing more goes out. Disposed at once, a call made
@@ -2126,7 +2219,7 @@ fn clear_places(state: &mut ServerState, handle: Option<&ConnectionHandle>) {
 }
 
 /// What a server's router holds, merged.
-pub(crate) fn gauges(state: &ServerState) -> Gauges {
+pub(crate) fn gauges(state: &ServerState) -> Result<Gauges, ProgrammerError> {
     let mut own = Gauges::default();
 
     own.counts.insert(
@@ -2161,7 +2254,7 @@ pub(crate) fn gauges(state: &ServerState) -> Gauges {
 
     Gauges::merged(vec![
         own,
-        state.core.gauges(),
+        state.core.gauges()?,
         places,
         state.notifications.gauges(),
         sessions,

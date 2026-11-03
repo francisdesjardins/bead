@@ -104,6 +104,38 @@ async fn pair() -> Pair {
         .expect("a pair connected")
 }
 
+#[tokio::test]
+async fn raises_deprecated_before_the_call_s_tx_step() {
+    let pair = pair().await;
+    serve_echo(&pair, None);
+    let manager = pair.client.services();
+    let heard = Arc::new(Mutex::new(Vec::new()));
+    let deprecations = Arc::clone(&heard);
+    manager.on_deprecated(Arc::new(move |_| locked(&deprecations).push("deprecated")));
+    let steps = Arc::clone(&heard);
+    manager.on_debug(Arc::new(move |_, event| {
+        locked(&steps).push(match event.direction {
+            DebugDirection::Tx => "tx",
+            DebugDirection::Rx => "rx",
+        });
+    }));
+    let procedure = Procedure {
+        deprecation: Some(crate::identity::Deprecation {
+            message: Some("use echo2".to_owned()),
+        }),
+        ..echo()
+    };
+    let request = manager
+        .get_request(&procedure, RequestDependencies::new(JsonCodec, JsonCodec))
+        .expect("echo requested");
+    let call = request
+        .call(json!({ "text": "a" }), &RequestOptions::default())
+        .expect("a call");
+    pair.settle().await;
+    assert_eq!(call.await.expect("an answer"), json!({ "text": "a" }));
+    assert_eq!(*locked(&heard), ["deprecated", "tx", "rx"]);
+}
+
 fn asking(manager: &ServiceManager) -> crate::managers::service::Request<JsonCodec, JsonCodec> {
     manager
         .get_request(&echo(), RequestDependencies::new(JsonCodec, JsonCodec))

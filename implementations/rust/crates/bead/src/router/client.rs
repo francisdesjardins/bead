@@ -99,6 +99,8 @@ pub struct RouterClientOptions {
     pub credentials: Option<Credentials>,
     /// How much it reads, writes and holds.
     pub limits: Option<RouterLimitsOptions>,
+    /// The last call id it draws, of its own parity: its whole range when none.
+    pub last_call_id: Option<u32>,
     /// What it counts its calls into.
     pub metrics_registry: Option<MetricsRegistry>,
     /// What it holds untaken of what its server sent, past which it pauses its transport (spec
@@ -509,6 +511,7 @@ impl Side for ClientState {
                 Credential::None
                 | Credential::Jwt(_)
                 | Credential::Elsewhere
+                | Credential::Redacted { .. }
                 | Credential::ToCome { .. } => None,
             };
         }
@@ -771,6 +774,10 @@ impl RouterClient {
         transport: Arc<dyn RouterClientTransport>,
         options: &RouterClientOptions,
     ) -> Result<Self, ProgrammerError> {
+        let pending = options.last_call_id.map_or_else(
+            || Ok(crate::router::parts::PendingCalls::new(RouterSide::Client)),
+            |last| crate::router::parts::PendingCalls::bounded(RouterSide::Client, last),
+        )?;
         let runtime = crate::platform::runtime_of(options.runtime.as_ref(), "a router")?;
         let clock = crate::clock::clock_of(&crate::clock::LayeredClocks {
             beneath: transport.clock().as_ref(),
@@ -811,6 +818,7 @@ impl RouterClient {
         let owner = Owner::spawn((&runtime, &clock), |weak: WeakOwner<ClientState>| {
             ClientState {
                 core: Core {
+                    pending,
                     resolvers: Arc::clone(&resolvers),
                     disposal: disposal.clone(),
                     ..Core::new(
@@ -1294,7 +1302,11 @@ impl RouterClient {
     }
 
     /// What it holds right now, for diagnosis.
-    pub fn gauges(&self) -> BoxFuture<Gauges> {
+    ///
+    /// # Errors
+    ///
+    /// A [`ProgrammerError`] when two parts name the same count.
+    pub fn gauges(&self) -> BoxFuture<Result<Gauges, ProgrammerError>> {
         let gauged = self.shared.owner.run(|state: &mut ClientState| {
             let mut own = Gauges::default();
 
@@ -1303,10 +1315,10 @@ impl RouterClient {
                 u64::try_from(state.subscriptions.len()).unwrap_or(u64::MAX),
             );
 
-            Gauges::merged(vec![own, state.core.gauges()])
+            Gauges::merged(vec![own, state.core.gauges()?])
         });
 
-        Box::pin(async move { gauged.await.unwrap_or_default() })
+        Box::pin(async move { gauged.await.unwrap_or_else(|_| Ok(Gauges::default())) })
     }
 
     /// Disposes of it: every call ends, and nothing more goes out. Disposed at once, a call made

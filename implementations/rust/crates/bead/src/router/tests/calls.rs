@@ -659,7 +659,8 @@ async fn counts_a_call_made_refused_before_it_goes_no_call_id_free_or_payload_to
         .router
         .owner()
         .run(|state| {
-            state.core().pending = PendingCalls::new(RouterSide::Client, Some(3));
+            state.core().pending =
+                PendingCalls::bounded(RouterSide::Client, 3).expect("a bound of its side");
         })
         .await
         .expect("its call ids bounded");
@@ -856,7 +857,12 @@ async fn detaches_calls_before_settling_an_incoming_resolver_awaiting_an_outgoin
 
     pair.settle().await;
 
-    let before = pair.server.router().gauges().await;
+    let before = pair
+        .server
+        .router()
+        .gauges()
+        .await
+        .expect("distinct counts");
 
     assert_eq!(
         (
@@ -882,7 +888,12 @@ async fn detaches_calls_before_settling_an_incoming_resolver_awaiting_an_outgoin
         "its call rejected as its connection went, its signal aborted by then"
     );
 
-    let after = pair.server.router().gauges().await;
+    let after = pair
+        .server
+        .router()
+        .gauges()
+        .await
+        .expect("distinct counts");
 
     assert_eq!(
         (

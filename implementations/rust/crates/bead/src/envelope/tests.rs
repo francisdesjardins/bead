@@ -12,6 +12,7 @@ use crate::router::types::LIMIT_DEFAULTS;
 use crate::testing::hexadecimal;
 
 mod fuzz;
+mod redaction;
 mod twins;
 
 const TWO_TO_53: u64 = 1 << 53;

@@ -13,14 +13,16 @@ use crate::constants::{CredentialScheme, RouterSide};
 use crate::debug::{DebugDirection, TracedEnvelope};
 use crate::envelope::{
     CreditHeader, Envelope, EnvelopeHeader, FailureHeader, FailureRecord, NotificationHeader,
+    ReadEnvelopeOptions,
 };
-use crate::errors::CallError;
+use crate::errors::{CallError, ProgrammerError};
+use crate::failure::Failure;
 use crate::owner::Owner;
 use crate::router::core::{
     self as router_core, BeforeAnswer, Core, Dispatch, Handler, Resolution, Resolved,
     SessionRequest, Side, Undo,
 };
-use crate::router::parts::Answering;
+use crate::router::parts::{Answering, PendingCalls};
 use crate::router::requester::{self, CoreRequest};
 use crate::router::types::{
     ConnectionHandle, RouterAnswer, RouterError, RouterLimitsOptions, RouterResult, Signal,
@@ -35,6 +37,7 @@ pub(crate) type TransmitHook = Box<dyn FnMut(&mut State, &Envelope) + Send>;
 pub(crate) type TokenHook =
     Box<dyn FnMut(&ConnectionHandle) -> Result<Option<SessionToken>, RouterError> + Send>;
 pub(crate) type SessionHook = Box<dyn FnMut(&SessionRequest, &Signal) -> Resolution + Send>;
+pub(crate) type ReadHook = Box<dyn FnOnce(&Bytes) -> Result<Option<Envelope>, Failure> + Send>;
 
 #[expect(
     clippy::struct_excessive_bools,
@@ -47,6 +50,7 @@ pub(crate) struct State {
     pub(crate) sending: VecDeque<Result<Sent, RouterError>>,
     pub(crate) on_transmit: Option<TransmitHook>,
     pub(crate) session: Option<SessionHook>,
+    pub(crate) reader: Option<ReadHook>,
     pub(crate) schemes: Vec<CredentialScheme>,
     pub(crate) destination: Option<Arc<Handler>>,
     pub(crate) held: Vec<u32>,
@@ -78,6 +82,17 @@ impl core::fmt::Debug for State {
 }
 
 impl Side for State {
+    fn read_envelope(
+        &mut self,
+        data: &Bytes,
+        options: &ReadEnvelopeOptions,
+    ) -> Result<Option<Envelope>, Failure> {
+        self.reader.take().map_or_else(
+            || crate::envelope::read_envelope(data, self.core.side, options),
+            |read| read(data),
+        )
+    }
+
     fn core(&mut self) -> &mut Core<Self> {
         &mut self.core
     }
@@ -234,8 +249,34 @@ impl Clock for RecordedClock {
     }
 }
 
+/// Construction controls shared by a scripted core and its bounded-range twins.
+#[derive(Debug, Default)]
+#[non_exhaustive]
+pub(crate) struct PeerOptions {
+    pub(crate) limits: Option<RouterLimitsOptions>,
+    pub(crate) last_call_id: Option<u32>,
+}
+
 impl Peer {
     pub(crate) fn new(side: RouterSide, limits: &RouterLimitsOptions) -> Self {
+        Self::with_options(
+            side,
+            &PeerOptions {
+                limits: Some(limits.clone()),
+                ..PeerOptions::default()
+            },
+        )
+        .expect("a core on valid limits")
+    }
+
+    pub(crate) fn with_options(
+        side: RouterSide,
+        options: &PeerOptions,
+    ) -> Result<Self, ProgrammerError> {
+        let pending = options.last_call_id.map_or_else(
+            || Ok(PendingCalls::new(side)),
+            |last| PendingCalls::bounded(side, last),
+        )?;
         let clock = SteppingClock::new(instants::new_year());
         let armed = Arc::default();
         let shared: SharedClock = Arc::new(RecordedClock {
@@ -243,14 +284,18 @@ impl Peer {
             armed: Arc::clone(&armed),
         });
         let runtime = crate::platform::runtime_of(None, "a test's core").expect("a runtime");
-        let limits = limits_of(limits).expect("limits that hold");
+        let limits = limits_of(&options.limits.clone().unwrap_or_default())?;
         let owner = Owner::spawn((&runtime, &shared), |owner| State {
-            core: Core::new(owner, (side, limits, Arc::clone(&shared), None)),
+            core: Core {
+                pending,
+                ..Core::new(owner, (side, limits, Arc::clone(&shared), None))
+            },
             tokens: BTreeMap::new(),
             token: None,
             sending: VecDeque::new(),
             on_transmit: None,
             session: None,
+            reader: None,
             schemes: Vec::new(),
             destination: None,
             held: Vec::new(),
@@ -271,11 +316,11 @@ impl Peer {
             one_way: Vec::new(),
             two_way_asked: Mutex::new(Vec::new()),
         });
-        Self {
+        Ok(Self {
             clock,
             owner,
             armed,
-        }
+        })
     }
 
     pub(crate) fn armed(&self) -> Vec<Duration> {

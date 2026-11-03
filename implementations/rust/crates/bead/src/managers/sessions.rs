@@ -693,7 +693,7 @@ impl SessionState {
     }
 
     /// Its sessions and its timers, counted.
-    pub(crate) fn gauges(&self) -> Gauges {
+    pub(crate) fn gauges(&self) -> Result<Gauges, ProgrammerError> {
         let untied = self
             .timers
             .keys()

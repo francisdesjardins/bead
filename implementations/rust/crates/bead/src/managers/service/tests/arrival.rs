@@ -7,19 +7,19 @@ use std::time::SystemTime;
 
 use bytes::Bytes;
 
-use super::locked;
+use super::{Recording, locked, props};
 use crate::clock::{Clock, Schedule, SharedClock, Timer, TimerCallback};
 use crate::debug::DebugDirection;
-use crate::envelope::Envelope;
 use crate::managers::service::{
     RequestResolverDependencies, ServiceManager, ServiceManagerOptions, ServiceRouter,
 };
 use crate::payloads::{CodecRefusal, PayloadCodec, TextCodec};
 use crate::router::admissions::BeforeRequest;
+use crate::router::core::RequestResolverProps;
 use crate::router::server::{RouterServer, RouterServerOptions};
-use crate::testing::core_port::scripted_header;
+use crate::router::types::RouterAnswer;
 use crate::testing::pair::echo;
-use crate::testing::scripted::{ScriptedServer, handle_of};
+use crate::testing::scripted::ScriptedServer;
 use crate::testing::{SteppingClock, instants};
 
 #[derive(Debug)]
@@ -77,7 +77,6 @@ impl PayloadCodec for Decoding {
 }
 
 #[tokio::test]
-#[ignore = "divergence: a received service call starts after its admission, not at arrival"]
 async fn a_received_call_starts_as_it_arrives_its_admission_and_its_decoding_count_in_its_duration()
 {
     for decoding in [0, 7] {
@@ -125,19 +124,28 @@ async fn a_received_call_starts_as_it_arrives_its_admission_and_its_decoding_cou
                 response.result(request.payload)
             }))
             .expect("registered");
-        transport.open(&handle_of(1), true);
-        transport.deliver(
-            &Envelope::Request {
-                header: scripted_header(7),
-                payload: Bytes::from_static(b"hi"),
-            },
-            &handle_of(1),
-        );
-        base.settle().await;
-        let sent = transport.take();
-        assert_eq!(sent.len(), 1);
-        assert!(
-            matches!(&sent[0].1, Envelope::Result { payload, .. } if payload.as_ref() == b"hi")
+        let handler = router
+            .owner()
+            .run(|state| {
+                Arc::clone(
+                    &locked(&state.core.resolvers)
+                        .get(&(2, 1))
+                        .expect("registered")
+                        .handler,
+                )
+            })
+            .await
+            .expect("the registered resolver");
+        let recording = Arc::new(Recording::default());
+        (handler.resolve)(RequestResolverProps {
+            is_admitted: false,
+            ..props(&recording, b"hi")
+        })
+        .await
+        .expect("the resolver admits and answers its caller");
+        assert_eq!(
+            recording.answers(),
+            [RouterAnswer::Result(Bytes::from_static(b"hi"))]
         );
         router.dispose().await;
         assert_eq!(

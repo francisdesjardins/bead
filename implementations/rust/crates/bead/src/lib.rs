@@ -1,4 +1,4 @@
-//! Bead, a binary wire protocol, on the Rust side: its core — the envelope's codec, the routers
+//! Bead, a binary wire protocol, on the Rust side: its core â€” the envelope's codec, the routers
 //! and their service layer, sessions and credentials, the clock and the durations, debugging and
 //! metrics, the in-memory transport, the broker's core over an in-memory broker, and the joined
 //! transport (decision 0044).
@@ -130,7 +130,7 @@ pub use router::relay::{
 };
 pub use router::server::{
     ActivityListener, Call, EnvelopeListener, ErrorListener, NotifyFilter, RefusalListener,
-    RouterServer, RouterServerOptions, SessionTokenProvider,
+    RouterServer, RouterServerOptions, SessionOf, SessionRequest, SessionTokenProvider,
 };
 pub use router::types::{
     AccessRefusal, AccessRefusalStage, BoxFuture, CallAddress, CallSession, ConnectionHandle,
@@ -161,8 +161,8 @@ pub use violations::{
     violations_detail_of, violations_of, words_of,
 };
 
-/// What the workspace's own members — the interop service, the bench, the conformance players and
-/// the fuzz targets — reach that the API does not offer: outside SemVer, and no road for another
+/// What the workspace's own members â€” the interop service, the bench, the conformance players and
+/// the fuzz targets â€” reach that the API does not offer: outside SemVer, and no road for another
 /// crate. The envelope's codec is here, internal on every side as a router's core is (decision
 /// 0004), as the C# side's members reach theirs by `InternalsVisibleTo`.
 #[doc(hidden)]

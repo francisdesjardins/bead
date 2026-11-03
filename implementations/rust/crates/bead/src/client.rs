@@ -70,6 +70,7 @@ impl Client {
     ) -> Result<Self, ProgrammerError> {
         let clock: Option<SharedClock> = transport.clock();
         let router_options = RouterClientOptions {
+            last_call_id: None,
             clock,
             runtime: options.runtime.clone(),
             credential: options.credential.clone(),

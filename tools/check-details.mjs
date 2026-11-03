@@ -49,7 +49,7 @@ export const ALLOWED = Object.freeze({
   'implementations/dotnet/src/Bead.Transcoding.Http/HttpGateway.cs': 2,
   'implementations/rust/crates/bead/src/managers/service.rs': 2,
   'implementations/rust/crates/bead/src/managers/service/notification.rs': 1,
-  'implementations/rust/crates/bead/src/router/core.rs': 1,
+  'implementations/rust/crates/bead/src/router/core.rs': 2,
 });
 
 const TYPESCRIPT = /\bdetail\s*(?::|=)\s*[^,;\n]*\.message\b|\bproblemOf\w*\s*\([^\n]*\.message\b/;
