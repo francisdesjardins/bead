@@ -4,6 +4,41 @@
 use super::{INTAKE_DEFAULTS, IntakeLimits, IntakeLimitsOptions, intake_limits_of};
 
 #[test]
+fn gives_several_parts_as_one_and_refuses_a_count_two_of_them_name() {
+    use super::Gauges;
+    use std::collections::{BTreeMap, BTreeSet};
+    use std::sync::Arc;
+
+    let merged = Gauges::merged(vec![
+        Gauges {
+            ceilings: BTreeMap::from([("bytes", 8)]),
+            ..Gauges::new(BTreeMap::from([("bytes", 1)]), [Arc::from("a")])
+        },
+        Gauges {
+            anomalies: vec!["odd".to_owned()],
+            ..Gauges::new(BTreeMap::from([("calls", 2)]), ["a", "b"].map(Arc::from))
+        },
+    ])
+    .expect("each part names its own counts");
+
+    assert_eq!(merged.counts, BTreeMap::from([("bytes", 1), ("calls", 2)]));
+    assert_eq!(merged.ceilings, BTreeMap::from([("bytes", 8)]));
+    assert_eq!(
+        merged.connection_handles,
+        BTreeSet::from(["a", "b"].map(Arc::from))
+    );
+    assert_eq!(merged.anomalies, ["odd"]);
+    assert_eq!(Gauges::merged(vec![]).expect("no parts"), Gauges::default());
+
+    let refused = Gauges::merged(vec![
+        Gauges::new(BTreeMap::from([("calls", 1)]), []),
+        Gauges::new(BTreeMap::from([("calls", 2)]), []),
+    ])
+    .expect_err("two parts name calls");
+    assert_eq!(refused.message(), "two parts count calls");
+}
+
+#[test]
 fn gives_a_parts_gauges_frozen_what_it_does_not_give_being_none() {
     use super::Gauges;
     use std::collections::{BTreeMap, BTreeSet};
