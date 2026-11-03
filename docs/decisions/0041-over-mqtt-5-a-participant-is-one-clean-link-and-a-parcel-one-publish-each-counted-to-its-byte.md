@@ -91,14 +91,17 @@ by one participant alone. Its handles' type is `MQTT`.
 
 **A link is one network connection that keeps no session** (spec 15.26): Clean Start 1, Session
 Expiry 0, the participant's id its Client Identifier, authenticated by a User Name and a Password,
-asked anew at each link where it expires, or by a TLS client certificate its broker ties to the
-id; Receive Maximum 65,535; Topic Alias Maximum 0; Maximum Packet Size its `maximumPacketSize`,
-16,777,216 by default and never without end (0033); Keep Alive its `keepAlive`, 30 s by default and
-never 0, so its will comes at 45 s, inside the 60 s a connection's heartbeat takes. A Server Keep
-Alive replaces it: MQTT.js applies it, and the C# adapter sends a PINGREQ once nothing went for a
-shorter one. A start waits `connectTimeout`, 30 s by default, for its CONNACK, which fails it on a
-reason but 0x00 and on a Maximum QoS of 0. The will is the participant's GONE, QoS 1, RETAIN 0,
-Delay 0; a stop is a DISCONNECT of 0x00, so no will goes.
+given or asked of its provider anew at each link's start
+([0040](0040-a-brokers-adapter-offers-bytes-at-topics-and-bead-keeps-its-own-credit-credential-and-heartbeat.md)),
+or by a TLS client certificate its broker ties to the id, never both, a User Name alone where it is
+given neither; Receive Maximum 65,535; Topic Alias Maximum 0; Maximum Packet Size its
+`maximumPacketSize`, 16,777,216 by default and never without end (0033); Keep Alive its
+`keepAlive`, 30 s by default and never 0, so its will comes at 45 s, inside the 60 s a connection's
+heartbeat takes. A Server Keep Alive replaces it: MQTT.js applies it, and the C# adapter sends a
+PINGREQ once nothing went for a shorter one. A start waits `connectTimeout`, 30 s by default, for
+its password, where it asks its provider, and its CONNACK, which fails it on a reason but 0x00 and
+on a Maximum QoS of 0. The will is the participant's GONE, QoS 1, RETAIN 0, Delay 0; a stop is a
+DISCONNECT of 0x00, so no will goes.
 
 **A link taken over is fenced** (spec 15.21): a DISCONNECT of 0x8E from its broker is its link
 taken over by another of its id. The adapter tells its `down` so, `isTakenOver` / `IsTakenOver`,

@@ -60,12 +60,26 @@ const FIXTURE_USER = 'fixture';
 
 // helpers
 
-/** An adapter of `ID` to `script`, its password `PASSWORD` unless told. */
+/** An adapter of `ID` to `script`, its password `PASSWORD` unless a provider or a certificate is told. */
 const adapterOf = (
   script: IAmqpScript,
   options?: Partial<IAmqpBrokerAdapterOptions>
 ): IAmqpBrokerAdapter => {
-  return createAmqpBrokerAdapter({ id: ID, password: PASSWORD, url: script.url, ...options });
+  const password =
+    options?.passwordProvider === undefined && options?.tls === undefined ? PASSWORD : undefined;
+
+  return createAmqpBrokerAdapter({ id: ID, password, url: script.url, ...options });
+};
+
+/** What `build` throws, or nothing. */
+const refusalOf = (build: () => unknown): unknown => {
+  try {
+    build();
+  } catch (error) {
+    return error;
+  }
+
+  return undefined;
 };
 
 /** `adapter` started, its link the script's next. */
@@ -257,7 +271,7 @@ test.describe('createAmqpBrokerAdapter', () => {
     let asked = 0;
     const adapter = adapterOf(script, {
       idleTimeout: 1_500,
-      password: () => {
+      passwordProvider: () => {
         asked += 1;
 
         return `${PASSWORD}-${String(asked)}`;
@@ -2025,7 +2039,7 @@ test.describe('createAmqpBrokerAdapter', () => {
     // a stop as it asks its password ends that start
     const asking = Promise.withResolvers<string>();
     const asked = adapterOf(script, {
-      password: () => {
+      passwordProvider: () => {
         return asking.promise;
       },
     });
@@ -2129,6 +2143,251 @@ test.describe('createAmqpBrokerAdapter', () => {
     expect([downs, adapter.isLinked]).toEqual([[], false]);
   });
 
+  test('fails its start once its password provider outlives its connect timeout, and takes no late answer', async () => {
+    const late = Promise.withResolvers<string>();
+    const adapter = adapterOf(script, {
+      connectTimeout: 200,
+      passwordProvider: () => {
+        return late.promise;
+      },
+    });
+    const { downs } = heardOf(adapter);
+    const error = await settledOf(adapter.start());
+
+    expect(error).toBeInstanceOf(GenericError);
+    expect((error as Error).message).toBe(
+      'the link of ada had no password within 200 ms, its connectTimeout'
+    );
+
+    // * its answer, come too late, opens no connection
+    late.resolve(PASSWORD);
+    await expect(script.link({ within: 300 })).rejects.toThrow('no link came');
+    expect([adapter.isLinked, downs]).toEqual([false, []]);
+
+    // * one connectTimeout from its start's call: its OPEN and sessions wait what its ask left of it
+    script.policy.attach = ({ address }) => {
+      return address === undefined ? 'hold' : 'take';
+    };
+
+    const slow = adapterOf(script, {
+      connectTimeout: 600,
+      passwordProvider: async () => {
+        await sleep(450);
+
+        return PASSWORD;
+      },
+    });
+    const began = performance.now();
+    const waiting = settledOf(slow.start());
+    const held = await script.link();
+
+    expect(String(await waiting)).toContain(
+      'the link of ada had no OPEN and no sessions within 600 ms, its connectTimeout'
+    );
+    expect(performance.now() - began).toBeLessThan(900);
+    await held.closed;
+  });
+
+  test('ends its start once stopped as its password is asked, and links at the next start, asked anew', async () => {
+    let asked = 0;
+    const adapter = adapterOf(script, {
+      passwordProvider: () => {
+        asked += 1;
+
+        // * the first ask never answers, nor hears its signal
+        return asked === 1
+          ? new Promise<string>(() => {
+              // it never settles
+            })
+          : `${PASSWORD}-${String(asked)}`;
+      },
+    });
+    const starting = settledOf(adapter.start());
+
+    await until(() => {
+      return asked === 1;
+    });
+    await adapter.stop();
+
+    const error = await starting;
+
+    expect(error).toBeInstanceOf(GenericError);
+    expect((error as Error).message).toBe('the link of ada stopped as it started');
+    await expect(script.link({ within: 200 })).rejects.toThrow('no link came');
+
+    const link = await linkUp({ adapter, script });
+
+    expect(link.plain).toEqual({ password: `${PASSWORD}-2`, username: ID });
+    expect(asked).toBe(2);
+    await adapter.stop();
+  });
+
+  test('ends its start at its own cancellation as its password is asked', async () => {
+    const signals: AbortSignal[] = [];
+    const adapter = adapterOf(script, {
+      passwordProvider: ({ signal }) => {
+        signals.push(signal);
+
+        return new Promise<string>(() => {
+          // it never settles
+        });
+      },
+    });
+    const given = new AbortController();
+    const starting = settledOf(adapter.start({ signal: given.signal }));
+
+    await until(() => {
+      return signals.length === 1;
+    });
+    expect(signals[0]?.aborted).toBe(false);
+    given.abort();
+    expect(await starting).toBeInstanceOf(CancelError);
+    // * its provider's signal aborted with it
+    expect(signals[0]?.aborted).toBe(true);
+    await expect(script.link({ within: 200 })).rejects.toThrow('no link came');
+
+    // and a signal aborted already asks nothing
+    expect(await settledOf(adapter.start({ signal: AbortSignal.abort() }))).toBeInstanceOf(
+      CancelError
+    );
+    expect(signals).toHaveLength(1);
+  });
+
+  test('fails its start when its password provider throws, its throw the cause', async () => {
+    const thrown = new Error('the vault is down');
+
+    // * as it is called, or as it answers
+    for (const passwordProvider of [
+      (): string => {
+        throw thrown;
+      },
+      (): Promise<string> => {
+        return Promise.reject(thrown);
+      },
+    ]) {
+      const adapter = adapterOf(script, { passwordProvider });
+      const error = await settledOf(adapter.start());
+
+      expect(error).toBeInstanceOf(GenericError);
+      expect(error).toMatchObject({ cause: thrown, message: 'the password provider failed' });
+      expect(adapter.isLinked).toBe(false);
+    }
+
+    await expect(script.link({ within: 200 })).rejects.toThrow('no link came');
+  });
+
+  test('refuses a password that is empty or holds a NUL, as built or as answered', async () => {
+    const refusal = 'a password is a non-empty string holding no NUL';
+
+    for (const password of ['', `${PASSWORD}\0`]) {
+      const built = refusalOf(() => {
+        return createAmqpBrokerAdapter({ id: ID, password, url: script.url });
+      });
+
+      expect(built).toBeInstanceOf(ProgrammerError);
+      expect((built as Error).message).toBe(refusal);
+
+      const answered = await settledOf(
+        adapterOf(script, {
+          passwordProvider: () => {
+            return password;
+          },
+        }).start()
+      );
+
+      expect(answered).toBeInstanceOf(ProgrammerError);
+      expect((answered as Error).message).toBe(refusal);
+    }
+
+    // * and an answer that is no string: none is never taken for no password, so never ANONYMOUS
+    const unanswered = await settledOf(
+      adapterOf(script, {
+        passwordProvider: () => {
+          return undefined as unknown as string;
+        },
+      }).start()
+    );
+
+    expect(unanswered).toBeInstanceOf(ProgrammerError);
+    expect((unanswered as Error).message).toBe(refusal);
+    await expect(script.link({ within: 200 })).rejects.toThrow('no link came');
+  });
+
+  test('aborts its password provider’s signal once its start ends, linked or not', async () => {
+    const signals: AbortSignal[] = [];
+    // whether its signal was live as it answered
+    const live: boolean[] = [];
+    const adapter = adapterOf(script, {
+      connectTimeout: 1_000,
+      passwordProvider: async ({ signal }) => {
+        signals.push(signal);
+        await sleep(20);
+        live.push(!signal.aborted);
+
+        return PASSWORD;
+      },
+    });
+
+    await linkUp({ adapter, script });
+    await until(() => {
+      return signals[0]?.aborted === true;
+    });
+    expect([signals[0]?.aborted, live]).toEqual([true, [true]]);
+    await adapter.stop();
+
+    // and a start that fails, its senders' ATTACHes held past its connectTimeout
+    script.policy.attach = ({ address }) => {
+      return address === undefined ? 'hold' : 'take';
+    };
+
+    const failing = settledOf(adapter.start());
+    const held = await script.link();
+
+    expect(String(await failing)).toContain('had no OPEN and no sessions within 1000 ms');
+    await until(() => {
+      return signals[1]?.aborted === true;
+    });
+    expect(
+      signals.map(({ aborted }) => {
+        return aborted;
+      })
+    ).toEqual([true, true]);
+    expect(live).toEqual([true, true]);
+    await held.closed;
+  });
+
+  test('refuses a password beside a client certificate, both a password and its provider, and neither', () => {
+    const secured = 'amqps://127.0.0.1:5671';
+    const provider = (): string => {
+      return PASSWORD;
+    };
+    const refusals = [
+      { password: PASSWORD, tls: TLS_FIXTURE },
+      { passwordProvider: provider, tls: TLS_FIXTURE },
+      { password: PASSWORD, passwordProvider: provider },
+      // * both, and a certificate: the first refusal, in one order on every side
+      { password: PASSWORD, passwordProvider: provider, tls: TLS_FIXTURE },
+      // * neither: PLAIN's password is one octet at least, and its link never ANONYMOUS
+      {},
+    ].map((given) => {
+      const refusal = refusalOf(() => {
+        return createAmqpBrokerAdapter({ id: ID, url: secured, ...given });
+      });
+
+      expect(refusal).toBeInstanceOf(ProgrammerError);
+
+      return (refusal as Error).message;
+    });
+
+    expect(refusals).toEqual([
+      'a link authenticates by its client certificate or by a password, not both',
+      'a link authenticates by its client certificate or by a password, not both',
+      'a link takes a password or a password provider, not both',
+      'a link takes a password or a password provider, not both',
+      'an AMQP link authenticates by a password or by its client certificate',
+    ]);
+  });
+
   test('refuses a departure, offering no will (spec 15.32)', async () => {
     const adapter = adapterOf(script);
 
@@ -2150,7 +2409,7 @@ test.describe('createAmqpBrokerAdapter', () => {
 
   test('is secure over amqps, and over amqp to the loopback alone', () => {
     const secureOf = (url: string): boolean => {
-      return createAmqpBrokerAdapter({ id: ID, url }).isSecure;
+      return createAmqpBrokerAdapter({ id: ID, password: PASSWORD, url }).isSecure;
     };
 
     expect(
@@ -2165,9 +2424,9 @@ test.describe('createAmqpBrokerAdapter', () => {
 
     // what is none of its two is refused as it is built, and so is an id that is none
     for (const refused of [
-      { id: ID, url: 'mqtt://broker.example' },
-      { id: ID, url: 'no url' },
-      { id: '', url: 'amqp://127.0.0.1' },
+      { id: ID, password: PASSWORD, url: 'mqtt://broker.example' },
+      { id: ID, password: PASSWORD, url: 'no url' },
+      { id: '', password: PASSWORD, url: 'amqp://127.0.0.1' },
     ]) {
       expect(() => {
         return createAmqpBrokerAdapter(refused);

@@ -3727,7 +3727,8 @@ src/transport/shared/amqp-broker-adapter.ts IAmqpBrokerAdapterOptions
     idleTimeout?: number | undefined
     linkCredit?: number | undefined
     maximumMessageSize?: number | undefined
-    password?: string | (() => Promise<string> | string) | undefined
+    password?: string | undefined
+    passwordProvider?: ((options: {signal: AbortSignal}) => string | Promise<string>) | undefined
     tls?: | {ca?: string | Uint8Array | undefined; cert: string | Uint8Array; key: string | Uint8Array} | undefined
     url: string
     virtualHost?: string | undefined
@@ -4014,7 +4015,8 @@ src/transport/shared/mqtt-broker-adapter.ts IMqttBrokerAdapterOptions
     id: string
     keepAlive?: number | undefined
     maximumPacketSize?: number | undefined
-    password?: string | (() => Promise<string> | string) | undefined
+    password?: string | undefined
+    passwordProvider?: ((options: {signal: AbortSignal}) => string | Promise<string>) | undefined
     tls?: | {ca?: string | Uint8Array | undefined; cert: string | Uint8Array; key: string | Uint8Array} | undefined
     url: string
 src/transport/shared/mqtt-broker-adapter.ts KEEP_ALIVE

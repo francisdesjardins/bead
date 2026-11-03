@@ -175,7 +175,7 @@ public sealed class MqttBrokerAdapterTests : IAsyncLifetime
                 Password = null,
                 PasswordProvider = (_) =>
                 {
-                    return Task.FromResult($"{Password}-{Interlocked.Increment(ref asked)}");
+                    return ValueTask.FromResult($"{Password}-{Interlocked.Increment(ref asked)}");
                 },
             };
         });
@@ -1008,7 +1008,7 @@ public sealed class MqttBrokerAdapterTests : IAsyncLifetime
                 Password = null,
                 PasswordProvider = (_) =>
                 {
-                    return asking.Task;
+                    return new ValueTask<string>(asking.Task);
                 },
             };
         });
@@ -1092,6 +1092,369 @@ public sealed class MqttBrokerAdapterTests : IAsyncLifetime
         Assert.Equal([new BrokerDown(), new BrokerDown()], downs);
         await again.Closed.WaitAsync(Patience, Cancelled);
         await adapter.Stop();
+    }
+
+    [Fact]
+    public async Task Fails_its_start_once_its_password_provider_outlives_its_connect_timeout_and_takes_no_late_answer()
+    {
+        var late = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
+        await using var adapter = AdapterOf((options) =>
+        {
+            return options with
+            {
+                ConnectTimeout = TimeSpan.FromMilliseconds(200),
+                Password = null,
+                PasswordProvider = (_) =>
+                {
+                    return new ValueTask<string>(late.Task);
+                },
+            };
+        });
+        var (_, downs) = HeardOf(adapter);
+
+        Assert.Equal("the link of ada had no password within 200 ms, its connectTimeout", Assert.IsType<TimeoutException>(await FailureOf(() =>
+        {
+            return adapter.Start();
+        })).Message);
+
+        // * its answer, come too late, opens no network connection
+        late.SetResult(Password);
+        await Assert.ThrowsAsync<TimeoutException>(() =>
+        {
+            return _script.Link(TimeSpan.FromMilliseconds(300));
+        });
+        Assert.Equal((false, 0), (adapter.IsLinked, downs.Count));
+
+        // * one connectTimeout from its start's call: its CONNACK waits what its ask left of it
+        await using var slow = AdapterOf((options) =>
+        {
+            return options with
+            {
+                ConnectTimeout = TimeSpan.FromMilliseconds(600),
+                Password = null,
+                PasswordProvider = async (token) =>
+                {
+                    await Task.Delay(450, token);
+
+                    return Password;
+                },
+            };
+        });
+        var began = Stopwatch.StartNew();
+        var waiting = FailureOf(() =>
+        {
+            return slow.Start();
+        });
+
+        await _script.Link();
+        Assert.Equal("the link of ada had no CONNACK within 600 ms, its connectTimeout", Assert.IsType<TimeoutException>(await waiting).Message);
+        Assert.True(began.Elapsed < TimeSpan.FromMilliseconds(900));
+    }
+
+    [Fact]
+    public async Task Ends_its_start_once_stopped_as_its_password_is_asked_and_links_at_the_next_start_asked_anew()
+    {
+        var asked = 0;
+        await using var adapter = AdapterOf((options) =>
+        {
+            return options with
+            {
+                Password = null,
+                PasswordProvider = (_) =>
+                {
+                    var count = Interlocked.Increment(ref asked);
+
+                    // * the first ask never answers, nor hears its token
+                    return count == 1 ? new ValueTask<string>(new TaskCompletionSource<string>().Task) : ValueTask.FromResult($"{Password}-{count}");
+                },
+            };
+        });
+        var starting = adapter.Start();
+
+        await Until(() =>
+        {
+            return Volatile.Read(ref asked) == 1;
+        });
+        await adapter.Stop();
+        Assert.Equal("the link of ada stopped as it started", Assert.IsType<IOException>(await FailureOf(() =>
+        {
+            return starting;
+        })).Message);
+        await Assert.ThrowsAsync<TimeoutException>(() =>
+        {
+            return _script.Link(TimeSpan.FromMilliseconds(200));
+        });
+
+        var connect = (await LinkUp((adapter, _script))).Connect;
+
+        Assert.Equal($"{Password}-2", Encoding.UTF8.GetString(connect.Password));
+        Assert.Equal((2, true), (Volatile.Read(ref asked), adapter.IsLinked));
+        await adapter.Stop();
+    }
+
+    [Fact]
+    public async Task Ends_its_start_at_its_own_cancellation_as_its_password_is_asked()
+    {
+        var tokens = new ConcurrentQueue<CancellationToken>();
+        await using var adapter = AdapterOf((options) =>
+        {
+            return options with
+            {
+                Password = null,
+                PasswordProvider = (token) =>
+                {
+                    tokens.Enqueue(token);
+
+                    // it never settles
+                    return new ValueTask<string>(new TaskCompletionSource<string>().Task);
+                },
+            };
+        });
+        using var given = new CancellationTokenSource();
+        var starting = adapter.Start(new BrokerStart { CancellationToken = given.Token });
+
+        await Until(() =>
+        {
+            return tokens.Count == 1;
+        });
+
+        var asked = Assert.Single(tokens);
+
+        Assert.False(asked.IsCancellationRequested);
+        await given.CancelAsync();
+        Assert.IsAssignableFrom<OperationCanceledException>(await FailureOf(() =>
+        {
+            return starting;
+        }));
+
+        // * its provider's token cancelled with it
+        Assert.True(asked.IsCancellationRequested);
+        await Assert.ThrowsAsync<TimeoutException>(() =>
+        {
+            return _script.Link(TimeSpan.FromMilliseconds(200));
+        });
+
+        // and a token cancelled already asks nothing
+        Assert.IsAssignableFrom<OperationCanceledException>(await FailureOf(() =>
+        {
+            return adapter.Start(new BrokerStart { CancellationToken = new CancellationToken(true) });
+        }));
+        Assert.Single(tokens);
+    }
+
+    [Fact]
+    public async Task Fails_its_start_when_its_password_provider_throws_its_throw_the_cause()
+    {
+        var thrown = new InvalidOperationException("the vault is down");
+
+        // * as it is called, or as it answers
+        Func<CancellationToken, ValueTask<string>>[] providers =
+        [
+            (_) =>
+            {
+                throw thrown;
+            },
+            (_) =>
+            {
+                return ValueTask.FromException<string>(thrown);
+            },
+        ];
+
+        foreach (var provider in providers)
+        {
+            await using var adapter = AdapterOf((options) =>
+            {
+                return options with { Password = null, PasswordProvider = provider };
+            });
+            var error = Assert.IsType<IOException>(await FailureOf(() =>
+            {
+                return adapter.Start();
+            }));
+
+            Assert.Equal(("the password provider failed", (Exception)thrown), (error.Message, error.InnerException));
+            Assert.False(adapter.IsLinked);
+        }
+
+        await Assert.ThrowsAsync<TimeoutException>(() =>
+        {
+            return _script.Link(TimeSpan.FromMilliseconds(200));
+        });
+    }
+
+    [Fact]
+    public async Task Refuses_a_password_that_is_empty_or_holds_a_NUL_as_built_or_as_answered()
+    {
+        const string Refusal = "a password is a non-empty string holding no NUL";
+
+        foreach (var password in new[] { "", $"{Password}\0" })
+        {
+            var built = Assert.Throws<ArgumentException>(() =>
+            {
+                return new MqttBrokerAdapter(new MqttBrokerAdapterOptions { Id = Id, Password = password, Uri = _script.Uri });
+            });
+
+            Assert.Equal((Refusal, "options"), (built.Message.Split(" (Parameter", 2)[0], built.ParamName));
+
+            await using var answering = AdapterOf((options) =>
+            {
+                return options with
+                {
+                    Password = null,
+                    PasswordProvider = (_) =>
+                    {
+                        return ValueTask.FromResult(password);
+                    },
+                };
+            });
+            var answered = Assert.IsType<ArgumentException>(await FailureOf(() =>
+            {
+                return answering.Start();
+            }));
+
+            // ! no word names the secret it refuses
+            Assert.StartsWith(Refusal, answered.Message, StringComparison.Ordinal);
+            Assert.DoesNotContain(Password, answered.Message, StringComparison.Ordinal);
+        }
+
+        // * and an answer that is none: none is never taken for no password
+        await using var unanswered = AdapterOf((options) =>
+        {
+            return options with
+            {
+                Password = null,
+                PasswordProvider = (_) =>
+                {
+                    return ValueTask.FromResult<string>(null!);
+                },
+            };
+        });
+
+        Assert.StartsWith(Refusal, Assert.IsType<ArgumentException>(await FailureOf(() =>
+        {
+            return unanswered.Start();
+        })).Message, StringComparison.Ordinal);
+        await Assert.ThrowsAsync<TimeoutException>(() =>
+        {
+            return _script.Link(TimeSpan.FromMilliseconds(200));
+        });
+    }
+
+    [Fact]
+    public async Task Aborts_its_password_provider_s_signal_once_its_start_ends_linked_or_not()
+    {
+        var tokens = new ConcurrentQueue<CancellationToken>();
+        await using var adapter = AdapterOf((options) =>
+        {
+            return options with
+            {
+                Password = null,
+                PasswordProvider = (token) =>
+                {
+                    tokens.Enqueue(token);
+
+                    return ValueTask.FromResult(Password);
+                },
+            };
+        });
+        var starting = adapter.Start();
+        var link = await _script.Link();
+
+        // * live while its start is under way
+        Assert.False(Assert.Single(tokens).IsCancellationRequested);
+        await link.Send(ScriptedLink.ConnAck());
+        await starting.WaitAsync(Patience, Cancelled);
+        await Until(() =>
+        {
+            return tokens.Single().IsCancellationRequested;
+        });
+        Assert.Equal((true, true), (tokens.Single().IsCancellationRequested, adapter.IsLinked));
+        await adapter.Stop();
+
+        // and a start its CONNACK refuses
+        var refusing = adapter.Start();
+        var refused = await _script.Link();
+
+        await refused.Send(new MqttConnAckPacket { ReasonCode = MqttConnectReasonCode.BadUserNameOrPassword, MaximumQoS = MqttQualityOfServiceLevel.ExactlyOnce, RetainAvailable = true, SharedSubscriptionAvailable = true });
+        Assert.Contains("0x86", (await FailureOf(() =>
+        {
+            return refusing;
+        })).Message, StringComparison.Ordinal);
+        await Until(() =>
+        {
+            return tokens.Count == 2 && tokens.All((token) =>
+            {
+                return token.IsCancellationRequested;
+            });
+        });
+        Assert.Equal([true, true], tokens.Select((token) =>
+        {
+            return token.IsCancellationRequested;
+        }));
+    }
+
+    [Fact]
+    public async Task Refuses_a_password_beside_a_client_certificate_and_both_a_password_and_its_provider()
+    {
+        var secured = new Uri("mqtts://127.0.0.1:8883");
+        var certificate = new MqttBrokerTlsOptions { ClientCertificates = [Certificate.Value] };
+        Func<CancellationToken, ValueTask<string>> provider = (_) =>
+        {
+            return ValueTask.FromResult(Password);
+        };
+        MqttBrokerAdapterOptions[] refused =
+        [
+            new MqttBrokerAdapterOptions { Id = Id, Password = Password, Tls = certificate, Uri = secured },
+            new MqttBrokerAdapterOptions { Id = Id, PasswordProvider = provider, Tls = certificate, Uri = secured },
+            new MqttBrokerAdapterOptions { Id = Id, Password = Password, PasswordProvider = provider, Uri = secured },
+
+            // * both, and a certificate: the first refusal, in one order on every side
+            new MqttBrokerAdapterOptions { Id = Id, Password = Password, PasswordProvider = provider, Tls = certificate, Uri = secured },
+        ];
+
+        Assert.Equal(
+            [
+                "a link authenticates by its client certificate or by a password, not both",
+                "a link authenticates by its client certificate or by a password, not both",
+                "a link takes a password or a password provider, not both",
+                "a link takes a password or a password provider, not both",
+            ],
+            refused.Select((options) =>
+            {
+                var refusal = Assert.Throws<ArgumentException>(() =>
+                {
+                    return new MqttBrokerAdapter(options);
+                });
+
+                Assert.Equal("options", refusal.ParamName);
+
+                return refusal.Message.Split(" (Parameter", 2)[0];
+            }));
+
+        // neither: its User Name, its id, with no Password
+        await using var bare = new MqttBrokerAdapter(new MqttBrokerAdapterOptions { Id = Id, Uri = _script.Uri });
+        var connect = (await LinkUp((bare, _script))).Connect;
+
+        Assert.Equal((Id, (byte[]?)null), (connect.Username, connect.Password));
+        await bare.Stop();
+    }
+
+    [Fact]
+    public void Prints_no_password_nor_its_provider()
+    {
+        var given = new MqttBrokerAdapterOptions { Id = Id, Password = Password, Uri = new Uri("mqtt://127.0.0.1:1883") };
+        var asked = given with
+        {
+            Password = null,
+            PasswordProvider = (_) =>
+            {
+                return ValueTask.FromResult(Password);
+            },
+        };
+
+        Assert.DoesNotContain(Password, given.ToString(), StringComparison.Ordinal);
+        Assert.StartsWith("MqttBrokerAdapterOptions { Uri = mqtt://127.0.0.1:1883/, Id = ada, Password = set, PasswordProvider = none, Tls = , ", given.ToString(), StringComparison.Ordinal);
+        Assert.Contains("Password = none, PasswordProvider = set", asked.ToString(), StringComparison.Ordinal);
+        Assert.EndsWith("Delivery = AtLeastOnce, Groups = True }", asked.ToString(), StringComparison.Ordinal);
     }
 
     [Fact]
