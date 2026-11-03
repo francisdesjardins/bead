@@ -10,6 +10,62 @@ use crate::router::core::{Resolved, Unresolved};
 use crate::testing::surface::Consumer;
 
 #[tokio::test]
+async fn rounds_an_end_up_to_a_millisecond_half_a_millisecond_past_the_wall_clock_holds_and_half_short_does_not()
+ {
+    use std::collections::VecDeque;
+    use std::sync::Mutex;
+
+    let ends = Arc::new(Mutex::new(VecDeque::from([
+        1_767_225_600_000.5,
+        1_767_225_599_999.5,
+        1_767_225_600_000.0,
+        9_007_199_254_740_991.0,
+    ])));
+    let verifying = Arc::clone(&ends);
+    let (clock, resolver) = super::resolver_of(&Credentials {
+        verify: Some(Arc::new(move |_, _| {
+            let end = verifying
+                .lock()
+                .expect("the verifier's ends")
+                .pop_front()
+                .expect("one end per resolution");
+            Box::pin(async move {
+                Ok(Some(ElsewhereSession {
+                    id: "ada".to_owned(),
+                    data: None,
+                    end: Some(end),
+                }))
+            })
+        })),
+        ..Credentials::default()
+    });
+    assert_eq!(
+        crate::clock::Clock::wall(&*clock),
+        crate::testing::instants::new_year()
+    );
+    for expected in [
+        Some(1_767_225_600_001),
+        None,
+        None,
+        Some(9_007_199_254_740_991),
+    ] {
+        let outcome = resolver
+            .resolve((
+                super::elsewhere_of("Interop sub=ada"),
+                CancellationToken::new(),
+            ))
+            .await
+            .expect("the verifier settles");
+        match (expected, outcome) {
+            (Some(end), Resolved::Session(session)) => assert_eq!(session.end, Some(end)),
+            (None, Resolved::Refused(reason)) => assert_eq!(reason, "end"),
+            (expected, actual) => panic!("expected {expected:?}, got {actual:?}"),
+        }
+    }
+    assert!(ends.lock().expect("the verifier's ends").is_empty());
+}
+
+#[tokio::test]
 async fn fails_a_session_whose_end_is_not_a_number_within_2_53_and_one_whose_id_is_no_string() {
     for (end, whole) in [
         (9_007_199_254_740_992.0, None),
