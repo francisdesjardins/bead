@@ -113,7 +113,7 @@ export const DISCONNECT_TIMEOUT = 5_000;
 
 /**
  * How long a client sends again an envelope that is no request, refused `busy`, from its first
- * send, by default: 5 minutes, a server's own exchange timeout (spec 15.6, 15.12).
+ * send, by default: 5 minutes, a server's own exchange timeout (spec 15.6, 15.12.8).
  */
 export const EXCHANGE_TIMEOUT = 300_000;
 

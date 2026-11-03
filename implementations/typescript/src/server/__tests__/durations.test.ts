@@ -63,6 +63,7 @@ import {
   createHTTPTransportServer,
   type IHTTPTransportServerOptions,
   LISTEN_HEADER,
+  REFUSAL_HEADER,
   WAIT_HEADER,
 } from '../../transport/server/http-transport-server';
 import type { TransportServerConnectionHandle } from '../../transport/server/types';
@@ -74,6 +75,7 @@ import { createEmitter } from '../../transport/shared/emitter';
 import {
   CancelError,
   ConnectError,
+  GenericError,
   ProgrammerError,
   TimeoutError,
 } from '../../transport/shared/errors';
@@ -186,6 +188,15 @@ const REQUEST = envelopeOf({
   header: { callId: 1, kind: EnvelopeKind.REQUEST, procedureId: 1, serviceId: 2 },
   kind: EnvelopeKind.REQUEST,
   payload: new Uint8Array(0),
+});
+
+/** A cancel's envelope, as an HTTP client reads it: no request, so sent again when refused busy. */
+const CANCEL = Uint8Array.of(0xa1, EnvelopeKind.CANCEL, 0, 0, 0, 0, 0, 1);
+
+/** A refusal busy whose `Retry-After` asks longer than a timer holds, in whole seconds. */
+const BUSY = Object.freeze({
+  headers: { [REFUSAL_HEADER]: 'busy', 'retry-after': String(Math.ceil(LONGEST_TIMER / 1_000)) },
+  status: 429,
 });
 
 // helpers
@@ -843,7 +854,7 @@ const heldByHTTPServer = async (
 };
 
 // an exchange handed on, waiting its answer, its connection's rest without end
-const exchangeOfOptions: Way = (given) => {
+const exchangeOfServer: Way = (given) => {
   return heldByHTTPServer(
     {
       drawn: (fake) => {
@@ -995,6 +1006,85 @@ const inactivityOfClient: Way = async (given) => {
   await client.disconnect({ isQuick: true });
 
   return { held };
+};
+
+/**
+ * An HTTP client's exchange timeout, its listens off so its pause is its one timer: a non-request
+ * refused busy, its `Retry-After` past the ceiling, pauses no longer than what is left of its time;
+ * at that due, a second busy loses its exchange where the timeout is held, and pauses again where
+ * it is never.
+ */
+const exchangeOfClient: Way = async (given) => {
+  const clock = createTestClock();
+  const fake = createFakeFetch();
+  const building = attempt(() => {
+    return createHTTPTransportClient({
+      clock,
+      fetch: fake.fetch,
+      isListening: false,
+      ...optionOf('exchangeTimeout', given),
+    });
+  });
+
+  if ('refusal' in building) {
+    return { moved: movedOf({ 'a fetch': fake.calls.length > 0 }), refusal: building.refusal };
+  }
+
+  const client = building.built;
+  const connecting = client.connect({ host, port: 8_080 });
+
+  fake.calls[0]?.answer({ headers: { [CONNECTION_TOKEN_HEADER]: 'T'.repeat(22) }, status: 201 });
+  await connecting;
+
+  const sending = watched(client.send({ data: CANCEL }));
+
+  await turnsUntil(() => {
+    return fake.calls.length > 1;
+  });
+  fake.calls[1]?.answer(BUSY);
+  await turnsUntil(() => {
+    return delaysOn(clock).length > 0;
+  });
+
+  // ! a pause is armed whatever the timeout: none armed is never read as never here
+  const [due = 0] = delaysOn(clock);
+
+  expect(delaysOn(clock), 'one pause').toHaveLength(1);
+
+  await clock.tickAsync(due - 1);
+  await sleep(0);
+
+  expect(fake.calls, 'sent again before its pause').toHaveLength(2);
+
+  await clock.tickAsync(1);
+  await turnsUntil(() => {
+    return fake.calls.length > 2;
+  });
+  fake.calls[2]?.answer(BUSY);
+  await turnsUntil(() => {
+    return sending.isSettled() || delaysOn(clock).length > 0;
+  });
+
+  // held: refused, its exchange lost and its connection with it, and no pause again
+  if (sending.isSettled()) {
+    await turnsUntil(() => {
+      return !client.isOpen();
+    });
+
+    expect([await sending.settled, delaysOn(clock)]).toEqual([
+      new GenericError('the server refused the exchange: 429 busy'),
+      [],
+    ]);
+
+    return { held: due };
+  }
+
+  // never: each pause as long as a timer holds, and another after it
+  expect([due, delaysOn(clock)], 'paused again').toEqual([LONGEST_TIMER, [LONGEST_TIMER]]);
+
+  await client.disconnect({ isQuick: true });
+
+  return { held: Infinity };
 };
 
 // the wait its listen asks
@@ -1754,10 +1844,6 @@ const PLAYED: Readonly<Record<string, IPlayed>> = Object.freeze({
     phrase: "a connection's inactivity timeout",
     ways: { options: serverOfOptions },
   },
-  'httpTransportServer.exchangeTimeout': {
-    phrase: 'exchangeTimeout',
-    ways: { options: exchangeOfOptions },
-  },
   'httpTransportServer.maximumWait': {
     phrase: 'maximumWait',
     ways: { options: maximumWaitOfOptions },
@@ -1781,6 +1867,10 @@ const PLAYED: Readonly<Record<string, IPlayed>> = Object.freeze({
   'gateway.heartbeat': {
     phrase: 'heartbeat',
     ways: { options: ofGateway('heartbeat') },
+  },
+  'httpTransport.exchangeTimeout': {
+    phrase: 'exchangeTimeout',
+    ways: { client: exchangeOfClient, server: exchangeOfServer },
   },
   'httpTransport.inactivityTimeout': {
     phrase: 'inactivityTimeout',
