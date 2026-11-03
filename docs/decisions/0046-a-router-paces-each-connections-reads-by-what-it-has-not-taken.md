@@ -349,7 +349,9 @@ every side, the Rust side's over HTTP and WebSocket ahead with its transports:
   connection (spec 15.9); over a broker, the receiving participant's `maximumHeldEnvelopeBytes`
   loses it. The TypeScript side, its event loop held by its router, already behaves so.
 - **Over HTTP, the resend**: a non-request refused `busy` is sent again once its `Retry-After`
-  passed, until `exchangeTimeout` from its first send loses the exchange.
+  passed, until `exchangeTimeout` from its first send loses the exchange. That timeout is a place
+  of `spec/durations.json`, `httpTransport.exchangeTimeout`, its client's way beside its server's
+  ([0014](0014-every-place-that-takes-a-duration-is-a-row-of-one-file.md)).
 - **Over HTTP, a paused connection's bodies hold `bodyBytesBudget`** until handed on: twice
   `maximumWaitingExchanges` exchanges of `maximumBodyBytes` pass the budget, and another
   connection's body is then refused 503 `busy`, as a slow body can make it be. The resend covers a
