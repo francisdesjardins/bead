@@ -10,14 +10,19 @@ import {
   readParcel,
   writeParcel,
 } from '../broker-parcel';
-import { BROKER_DELIVERIES, createBrokerParticipant } from '../broker-participant';
-import { ProgrammerError } from '../errors';
+import {
+  BROKER_DELIVERIES,
+  BROKER_PUBLISHED,
+  createBrokerParticipant,
+} from '../broker-participant';
+import { GenericError, ProgrammerError } from '../errors';
 import {
   createMemoryBroker,
   type IMemoryBroker,
   type IMemoryBrokerAdapter,
   MEMORY_BROKER_FAULTS,
 } from '../memory-broker';
+import { noop } from '../noop';
 import type { BrokerTopic, IBrokerAdapter } from '../types';
 import { createTestClock } from './fixtures';
 
@@ -127,6 +132,56 @@ const loggedOf = (adapter: IBrokerAdapter, log: string[]): IBrokerAdapter => {
       return adapter.subscribe(topic, options);
     },
   });
+};
+
+/**
+ * An adapter whose every start, while `holding.isHolding`, waits for the test to release it, its
+ * signal unheard, as a CONNACK that comes after its participant's stop went.
+ */
+const heldOf = (adapter: IBrokerAdapter) => {
+  const releases: (() => void)[] = [];
+  const holding = { isHolding: true };
+  const held = Object.assign(Object.create(adapter) as IBrokerAdapter, {
+    start: (options?: Parameters<IBrokerAdapter['start']>[0]) => {
+      if (!holding.isHolding) {
+        return adapter.start(options);
+      }
+
+      return new Promise<void>((resolve, reject) => {
+        releases.push(() => {
+          adapter.start(options).then(resolve, reject);
+        });
+      });
+    },
+  });
+
+  return { held, holding, releases };
+};
+
+/** What a peer's publication to the inbox of `id` meets over `broker`: a subscriber, or none. */
+const inboxOf = async (broker: IMemoryBroker, id: string) => {
+  const peer = broker.adapter({ id: `${id}-peer` });
+
+  await peer.start();
+
+  const published = await peer.publish({ payload: Uint8Array.of(1), topic: ['bead', 'i', id] });
+
+  await peer.stop();
+
+  return published;
+};
+
+/** The states of the link `participant` tells its trace, in their order. */
+const linkStatesOf = (participant: ReturnType<typeof createBrokerParticipant>): string[] => {
+  const states: string[] = [];
+
+  participant.on('debug', (event) => {
+    if (event.event === 'link') {
+      states.push(String(event.state));
+    }
+  });
+
+  return states;
 };
 
 /** The ACCEPT a peer answers an OPEN with, its own half `acceptor`, its bound 65,536 unless told. */
@@ -1752,6 +1807,148 @@ test.describe('broker participant', () => {
 
     await throwing.stop();
     await tapping.stop();
+  });
+
+  // spec 1.4
+  test('takes a turn of its platform between two attempts at a delay of 0, over an adapter that refuses its start at once', async () => {
+    const broker = createMemoryBroker();
+    const adapter = broker.adapter({ id: 'ada' });
+    let starts = 0;
+    let ranAt: number | undefined;
+    const refusing = Object.assign(Object.create(adapter) as IBrokerAdapter, {
+      start: (options?: Parameters<IBrokerAdapter['start']>[0]) => {
+        starts += 1;
+
+        return starts === 1
+          ? adapter.start(options)
+          : Promise.reject(new GenericError('refused at once'));
+      },
+    });
+    const participant = createBrokerParticipant({
+      adapter: refusing,
+      reconnect: {
+        delay: 0,
+        maximumAttempts: 3,
+        tap: (_delay, attempt) => {
+          // * a task queued as its first wait is told
+          if (attempt === 1) {
+            setImmediate(() => {
+              ranAt = starts;
+            });
+          }
+        },
+      },
+    });
+    const reported = hearing(participant);
+
+    await participant.start();
+    adapter.lose();
+    await until(() => {
+      return reported.length > 0;
+    }, 'its attempts spent');
+
+    expect(ranAt, 'that task runs before its second attempt').toBe(2);
+    expect(wordsOf(reported)).toEqual([
+      'the link of ada went down, and 3 attempts did not bring it back',
+    ]);
+
+    await participant.stop();
+  });
+
+  test('fails a link its stop meets as it connects, at its start or as it links anew, and stops its adapter once that start settles, nothing left subscribed (spec 15.21)', async () => {
+    const broker = createMemoryBroker();
+
+    // at its start: both its stops await the start under way, which then fails
+    const ada = broker.adapter({ id: 'ada' });
+    const atStart = heldOf(ada);
+    const starting = createBrokerParticipant({ adapter: atStart.held });
+    const links = linkStatesOf(starting);
+    const started = starting.start().catch((reason: unknown) => {
+      return reason;
+    });
+
+    await settled();
+
+    const stops = [starting.stop(), starting.stop()];
+    const settledStops: number[] = [];
+
+    for (const [index, stop] of stops.entries()) {
+      void stop.then(() => {
+        settledStops.push(index);
+      });
+    }
+
+    await settled();
+    expect(settledStops, 'neither stop settles while its start is held').toEqual([]);
+    atStart.releases.shift()?.();
+    await Promise.all(stops);
+    expect(settledStops, 'both settle once it is released').toEqual([0, 1]);
+
+    const failed = await started;
+
+    expect(failed, 'its start failed, as a link fails').toBeInstanceOf(GenericError);
+    expect(failed).toMatchObject({ message: 'the participant ada stopped as it started' });
+    expect([starting.isLinked, ada.isLinked, links], 'its adapter stopped, no up told').toEqual([
+      false,
+      false,
+      ['stopped'],
+    ]);
+    expect(await inboxOf(broker, 'ada'), 'its inbox let go').toBe(BROKER_PUBLISHED.NO_SUBSCRIBER);
+
+    // with no turn between them: whatever its start's outcome, nothing of its link is left
+    const cy = broker.adapter({ id: 'cy' });
+    const sudden = createBrokerParticipant({ adapter: cy });
+    const suddenLinks = linkStatesOf(sudden);
+    const suddenStart = sudden.start().catch(noop);
+
+    void sudden.stop();
+    await sudden.stop();
+    await suddenStart;
+    expect([sudden.isLinked, cy.isLinked], 'linked no more').toEqual([false, false]);
+    expect(await inboxOf(broker, 'cy'), 'its inbox let go').toBe(BROKER_PUBLISHED.NO_SUBSCRIBER);
+    expect(suddenLinks.slice(suddenLinks.indexOf('stopped')), 'no up told after its stop').toEqual([
+      'stopped',
+    ]);
+
+    // as it links anew: its reconnection ends at once, no wait told after the stop
+    const bob = broker.adapter({ id: 'bob' });
+    const anew = heldOf(bob);
+    const taps: number[] = [];
+    const linking = createBrokerParticipant({
+      adapter: anew.held,
+      reconnect: {
+        delay: 0,
+        tap: (delay) => {
+          taps.push(delay);
+        },
+      },
+    });
+    const reported = hearing(linking);
+
+    anew.holding.isHolding = false;
+    await linking.start();
+    anew.holding.isHolding = true;
+    bob.lose();
+    await until(() => {
+      return anew.releases.length > 0;
+    }, 'an attempt under way');
+
+    const relinking = linking.stop();
+
+    anew.releases.shift()?.();
+    await relinking;
+    await until(() => {
+      return reported.length > 0;
+    }, 'its reconnection ended');
+    await settled();
+    expect(wordsOf(reported), 'told so, once').toEqual([
+      'the link of bob went down, and its reconnection ended: the participant bob is stopped',
+    ]);
+    expect(
+      [taps, linking.isLinked, bob.isLinked],
+      'no wait after its stop, linked no more'
+    ).toEqual([[], false, false]);
+    expect(await inboxOf(broker, 'bob'), 'its inbox let go').toBe(BROKER_PUBLISHED.NO_SUBSCRIBER);
   });
 
   test('serves its names again once its link connects anew, its former peers reset', async () => {

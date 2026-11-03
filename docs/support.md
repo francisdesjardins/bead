@@ -322,8 +322,10 @@ that a test of each side does:
   taken from its adapter and its halves and incarnation drawn, no life given a publication of an
   adapter that offers none, a participant taken over failing each connect until it is started
   again, and a participant's reconnection: its delay held, its attempts and its signal its
-  application's, every end reported with its cause, a stop among them, and its next start linking it
-  anew, `transport/shared/__tests__/broker-participant.test.ts` and
+  application's, every end reported with its cause, a stop among them, its next start linking it
+  anew, a turn of its platform between two attempts at a delay of 0, and a stop that meets its link
+  as it connects failing that link and stopping its adapter once its start settled, a later stop
+  settling with the first, `transport/shared/__tests__/broker-participant.test.ts` and
   `Bead.Core.Tests/BrokerParticipantTests`
   (`subscribes its inbox before anything goes, takes its id from its adapter, and draws its incarnation and each half from a cryptographic source (spec 15.24)`,
   `closes each connection as its link goes down, and connects anew as another incarnation, resetting its peers`,
@@ -336,6 +338,8 @@ that a test of each side does:
   `ends its reconnection before any attempt once its signal is aborted`,
   `links anew at its next start once its reconnection ended`,
   `reports its reconnection ended when its delay function or its tap throws`,
+  `takes a turn of its platform between two attempts at a delay of 0, over an adapter that refuses its start at once`,
+  `fails a link its stop meets as it connects, at its start or as it links anew, and stops its adapter once that start settles, nothing left subscribed (spec 15.21)`,
   `acknowledges a message once taken or dropped as a copy, never after its router is done with it`,
   `is refused as built when its application requires delivery at least once of an adapter that gives it at most once`);
   a direction's sequence and its parts, `broker-sequence.test.ts` and `BrokerSequenceTests`
@@ -365,6 +369,7 @@ that a test of each side does:
   `fails its start on a CONNACK whose Maximum QoS is 0, naming it (spec 15.26)`,
   `keeps a Server Keep Alive shorter than its own: a PINGREQ once nothing went for that long (spec 15.26)`,
   `leaves a will of its GONE, QoS 1, RETAIN 0 and a Will Delay Interval of 0, and stops with a DISCONNECT of 0x00 (spec 15.26)`,
+  `ends a participant’s link with a DISCONNECT of 0x00 when its stop meets its inbox’s SUBSCRIBE (spec 15.21)`,
   `tells its link taken over on a DISCONNECT of 0x8E, and lost on any other end (spec 15.26)`,
   `tells its link lost once, and nothing of a lost link reaches the next: no message, no acknowledgement, no PUBACK’s reason, no quota (spec 15.26)`,
   `refuses what is asked while its link is down, and leaves no library to reconnect, subscribe again or hold a publication (spec 15.26)`,

@@ -2,6 +2,10 @@
 //! written by hand until beadc's Rust target generates them, and its behaviour
 //! `spec/interop-service.json`, as Bead's Rust side answers it: what a client of any side calls, and
 //! what `spec/conversations.json` plays against.
+#![expect(
+    clippy::disallowed_methods,
+    reason = "the interop's own turn, outside the core"
+)]
 
 mod credentials;
 mod descriptors;

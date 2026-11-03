@@ -57,7 +57,7 @@ pub(super) async fn until<F: Fn() -> bool>(holds: F, what: &str) {
 /// one.
 pub(super) async fn settle() {
     for _ in 0..20 {
-        tokio::task::yield_now().await;
+        crate::testing::yield_now().await;
     }
 
     crate::testing::rest(Duration::from_millis(20)).await;
@@ -173,15 +173,20 @@ pub(super) async fn peer_of(
 /// An adapter around a memory broker's, passing every call on, that writes down each call its
 /// participant makes of it, in order, and the life each publication asked, by what it carries: what
 /// it publishes to a topic bounded by `room` when given, its leg secure as `secure` says when given;
-/// and, when `grants` is, the subscription to its inbox held until a test grants it.
+/// each start after its first `starts` refused as it returns, when given; each start after its
+/// first `holds` held, heeding no signal, until a test releases it, when given; and, when `grants`
+/// is, the subscription to its inbox held until a test grants it.
 #[derive(Debug)]
 pub(super) struct Calling {
     pub(super) inner: MemoryBrokerAdapter,
     pub(super) room: Option<u64>,
     pub(super) secure: Option<bool>,
+    pub(super) starts: Option<usize>,
+    pub(super) holds: Option<usize>,
     pub(super) grants: bool,
     pub(super) calls: Mutex<Vec<String>>,
     pub(super) lives: Mutex<Vec<(&'static str, Option<Duration>)>>,
+    pub(super) held: Mutex<Vec<tokio::sync::oneshot::Sender<()>>>,
     pub(super) inbox: Mutex<Vec<tokio::sync::oneshot::Sender<()>>>,
 }
 
@@ -191,11 +196,30 @@ impl Calling {
             inner,
             room: None,
             secure: None,
+            starts: None,
+            holds: None,
             grants: false,
             calls: Mutex::default(),
             lives: Mutex::default(),
+            held: Mutex::default(),
             inbox: Mutex::default(),
         }
+    }
+
+    /// Releases the start its participant asked first of those it holds.
+    pub(super) fn release(&self) -> bool {
+        let release = {
+            let mut held = locked(&self.held);
+
+            (!held.is_empty()).then(|| held.remove(0))
+        };
+
+        release.is_some_and(|release| release.send(()).is_ok())
+    }
+
+    /// The starts it holds, unreleased.
+    pub(super) fn holding(&self) -> usize {
+        locked(&self.held).len()
     }
 
     pub(super) fn calls(&self) -> Vec<String> {
@@ -260,7 +284,29 @@ impl BrokerAdapter for Calling {
         &self,
         options: super::adapter::BrokerStart,
     ) -> crate::router::types::BoxFuture<Result<(), super::adapter::BrokerError>> {
-        locked(&self.calls).push("start".to_owned());
+        let started = {
+            let mut calls = locked(&self.calls);
+
+            calls.push("start".to_owned());
+            calls.iter().filter(|call| *call == "start").count()
+        };
+
+        if self.starts.is_some_and(|starts| started > starts) {
+            return Box::pin(async { Err(super::adapter::BrokerError::failed("refused at once")) });
+        }
+
+        if self.holds.is_some_and(|holds| started > holds) {
+            let (release, released) = tokio::sync::oneshot::channel();
+            let inner = self.inner.clone();
+
+            locked(&self.held).push(release);
+
+            // * held as it is asked, its signal unheard: it goes on once the test releases it
+            return Box::pin(async move {
+                released.await.ok();
+                inner.start(options).await
+            });
+        }
 
         self.inner.start(options)
     }

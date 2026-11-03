@@ -101,12 +101,12 @@ a resolver a service manager registered holds that manager, and so its router, w
 its dispose. A job that panics past the guards of the sites the spec lets throw ends its router at
 once, each call it waits on failed with that panic for its reason.
 
-The core spawns through one private module, `platform`, and reads time through its clock alone
-(decision 0011): clippy's `disallowed-methods` and `disallowed-types`, in `clippy.toml`, refuse
-tokio's spawns and timers, std's `Instant`, `SystemTime::now` and a thread of Bead's own anywhere
-else. A test takes them from the kit, `bead::testing`'s `spawn`, `rest`, `patience`, `Instant` and
-`wall_now`; a native target, the benches or a player that measures real time, is exempted once, at
-its root, with its reason.
+The core spawns and yields through one private module, `platform`, and reads time through its
+clock alone (decision 0011): clippy's `disallowed-methods` and `disallowed-types`, in `clippy.toml`,
+refuse tokio's spawns, its yield and its timers, std's `Instant`, `SystemTime::now` and a thread of
+Bead's own anywhere else. A test takes them from the kit, `bead::testing`'s `spawn`, `yield_now`,
+`rest`, `patience`, `Instant` and `wall_now`; a native target, the benches, the interop or a player
+that measures real time, is exempted once, at its root, with its reason.
 
 ## Modules
 
@@ -164,13 +164,13 @@ entry's own name, under `libtest-mimic`; the `proto` entries of `spec/codecs.jso
 `bead::testing`, behind the feature `testing`, is the test kit: the stepping clock the players give
 the side, the conformance files' typed readers, the durations' helper, a pair of the in-memory
 transport, the scripted transports the unit tests write bytes on, the seeded mutations the suite's
-readers are fed, and what a test takes from its platform: a task spawned, a rest, a patience, a
-monotonic instant and the wall clock's reading. It is no API: an application never turns the feature
-on. What the conformance players, the fuzz targets, the interop service and the bench reach that the
-API does not offer, the envelope's codec among it, is `bead::internal`, hidden from the docs and
-outside SemVer, as the C# side's members reach theirs by `InternalsVisibleTo`; no feature turns it
-on. `BEAD_HOUSE_WRITE=1 cargo test -p francisdesjardins-bead-house` writes each crate's list of its
-public items anew, its diff the change's to review.
+readers are fed, and what a test takes from its platform: a task spawned, a turn yielded, a rest, a
+patience, a monotonic instant and the wall clock's reading. It is no API: an application never turns
+the feature on. What the conformance players, the fuzz targets, the interop service and the bench
+reach that the API does not offer, the envelope's codec among it, is `bead::internal`, hidden from
+the docs and outside SemVer, as the C# side's members reach theirs by `InternalsVisibleTo`; no
+feature turns it on. `BEAD_HOUSE_WRITE=1 cargo test -p francisdesjardins-bead-house` writes each
+crate's list of its public items anew, its diff the change's to review.
 
 ## Fuzzing and the bench
 

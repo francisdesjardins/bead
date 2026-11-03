@@ -65,7 +65,9 @@ public sealed record TransportClientReconnectOptions
     /// whole one, which its tap hears, and any other — <see cref="Timeout.InfiniteTimeSpan"/> among
     /// them — is an <see cref="ArgumentOutOfRangeException"/>: a fixed one where it is given, as a
     /// transport client's reconnection is called or a broker participant is built, and a resolver's
-    /// answer at its attempt, before its tap hears it, ending the reconnection (spec 1.4).
+    /// answer at its attempt, before its tap hears it, ending the reconnection (spec 1.4). After a wait
+    /// of zero, its next attempt comes in a later turn of the scheduler or context its reconnection
+    /// runs on, never within the one its last attempt failed in.
     /// </summary>
     public TransportClientReconnectDelay? Delay { get; init; }
 

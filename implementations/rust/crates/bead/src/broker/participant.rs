@@ -139,9 +139,10 @@ pub struct BrokerParticipantOptions {
     /// How its link connects again once lost, each time a new incarnation (spec 15.21): a second
     /// between attempts when none; its attempts without end when it names none; its fixed delay
     /// held as it is built, whatever `reconnects`. Its signal is read before each attempt and during
-    /// each wait, an attempt under way not cut short; a stop ends it at its next attempt. Once it
-    /// ends it is reported, what ended it the report's source, and the next start or connect links
-    /// it anew.
+    /// each wait, an attempt under way not cut short; a delay of 0 none, its next attempt in a later
+    /// turn of its tokio runtime; a stop ends it at its next attempt, and at once during one. Once
+    /// it ends it is reported, what ended it the report's source, and the next start or connect
+    /// links it anew.
     pub reconnect: Option<TransportClientReconnectOptions>,
     /// Whether its link connects again once lost, as `reconnect` says: true when none; false leaves
     /// it down, reported, until a start or a connect links it anew.
@@ -427,6 +428,12 @@ pub(crate) struct Config {
     reconnect: TransportClientReconnectOptions,
     reconnects: bool,
     status: Mutex<Status>,
+    // what its stop cancels: its adapter's start under way gives up on it
+    stopping: CancellationToken,
+    // its adapter's starts under way, which its stop waits out
+    under_way: watch::Sender<usize>,
+    // its stop's end, which every later stop shares
+    stopped: watch::Sender<bool>,
     live: watch::Sender<bool>,
     // the connections held, their counts read for its gauges
     counted: Mutex<HashMap<Pair, Arc<Counters>>>,
@@ -641,6 +648,55 @@ impl Config {
             "the link of {} was taken over by another link of its id",
             self.id
         )
+    }
+
+    // a link its stop met as it connected: a failure of that link's, never a misuse, which a call
+    // made once stopped is
+    fn stopped_as_it_started(&self) -> BrokerError {
+        BrokerError::failed(format!("the participant {} stopped as it started", self.id))
+    }
+
+    fn is_stopped(&self) -> bool {
+        locked(&self.status).is_stopped
+    }
+}
+
+// an adapter's start under way, counted from its link's first step to the start's end, whatever
+// ends it; counted under its participant's status lock, where its stop is marked, so that a stop
+// either refuses it or waits it out
+struct UnderWay<'config>(&'config watch::Sender<usize>);
+
+impl<'config> UnderWay<'config> {
+    fn of(config: &'config Config) -> Result<Self, BrokerError> {
+        let status = locked(&config.status);
+
+        if status.is_stopped {
+            return Err(config.stopped_as_it_started());
+        }
+
+        // ! the count under the status lock, the watch's own lock after it and never before it
+        config
+            .under_way
+            .send_modify(|count| *count = count.saturating_add(1));
+        drop(status);
+
+        Ok(Self(&config.under_way))
+    }
+}
+
+impl Drop for UnderWay<'_> {
+    fn drop(&mut self) {
+        self.0.send_modify(|count| *count = count.saturating_sub(1));
+    }
+}
+
+// a stop's end, told to every stop as its task ends, whatever ends it: its turns done, a panic of
+// its adapter's stop, or its runtime gone before it ran
+struct Ended(Arc<Config>);
+
+impl Drop for Ended {
+    fn drop(&mut self) {
+        self.0.stopped.send_replace(true);
     }
 }
 
@@ -1854,16 +1910,26 @@ async fn relinking(
                 )));
             };
 
-            if locked(&inner.config.status).is_stopped {
-                return Err(TransportError::Refused(ProgrammerError::new(format!(
+            let stopped = || {
+                TransportError::Refused(ProgrammerError::new(format!(
                     "the participant {} is stopped",
                     inner.config.id
-                ))));
+                )))
+            };
+
+            if inner.config.is_stopped() {
+                return Err(stopped());
             }
 
-            link(&inner)
-                .await
-                .map_err(|error| TransportError::Connect(ConnectError::new(error.to_string())))
+            link(&inner).await.map_err(|error| {
+                // ! stopped as it linked: a misuse to the loop, so it ends at once, no wait told
+                // after it
+                if inner.config.is_stopped() {
+                    return stopped();
+                }
+
+                TransportError::Connect(ConnectError::new(error.to_string()))
+            })
         }
     })
     .await;
@@ -1919,9 +1985,13 @@ async fn relinking(
 }
 
 // in its turn's stead: its link connected, a new incarnation, its inbox and its names subscribed
-// before anything goes
+// before anything goes; its stop met as it connects fails it, stopped as it started, nothing of it
+// going on
 async fn link(inner: &Arc<ParticipantInner>) -> Result<(), BrokerError> {
     let config = &inner.config;
+    // * checked as it begins, where a turn can pass since its caller's check: a stop either refuses
+    // it here or waits its adapter's start out
+    let under_way = UnderWay::of(config)?;
     let mut bytes = [0_u8; 16];
 
     getrandom::fill(&mut bytes)
@@ -1936,7 +2006,12 @@ async fn link(inner: &Arc<ParticipantInner>) -> Result<(), BrokerError> {
         status.incarnation = incarnation;
     }
 
-    let mut start = BrokerStart::default();
+    // * its stop's signal to its start alone: a SUBSCRIBE given up by a signal retires its link with
+    // no DISCONNECT, so its will would go; its adapter's stop ends that one cleanly
+    let mut start = BrokerStart {
+        signal: Some(config.stopping.child_token()),
+        ..BrokerStart::default()
+    };
 
     if config
         .adapter
@@ -1953,11 +2028,28 @@ async fn link(inner: &Arc<ParticipantInner>) -> Result<(), BrokerError> {
         ));
     }
 
-    config.adapter.start(start).await?;
-    config
+    let started = config.adapter.start(start).await;
+
+    drop(under_way);
+
+    // ! stopped as it started: its inbox never subscribed, and its stop ends what that start
+    // brought up
+    if config.is_stopped() {
+        return Err(config.stopped_as_it_started());
+    }
+
+    started?;
+
+    let subscribed = config
         .adapter
         .subscribe(&config.inbox_of(&config.id), BrokerSubscription::default())
-        .await?;
+        .await;
+
+    if config.is_stopped() {
+        return Err(config.stopped_as_it_started());
+    }
+
+    subscribed?;
 
     for server in config.servers() {
         server.relink().await?;
@@ -1975,11 +2067,19 @@ async fn link(inner: &Arc<ParticipantInner>) -> Result<(), BrokerError> {
     inner
         .owner
         .run(|state| {
-            let is_down = {
+            let (is_stopped, is_down) = {
                 let status = locked(&state.config.status);
 
-                status.is_down_as_it_links || status.is_stopped || status.is_taken_over
+                (
+                    status.is_stopped,
+                    status.is_down_as_it_links || status.is_taken_over,
+                )
             };
+
+            // * never up once its stop is marked: its stop tells none after its stopped
+            if is_stopped {
+                return Err(state.config.stopped_as_it_started());
+            }
 
             if is_down {
                 return Err(BrokerError::failed(format!(
@@ -2176,6 +2276,9 @@ impl BrokerParticipant {
                 starting: None,
                 relinking: None,
             }),
+            stopping: CancellationToken::new(),
+            under_way: watch::Sender::new(0),
+            stopped: watch::Sender::new(false),
             live: watch::Sender::new(false),
             counted: Mutex::new(HashMap::new()),
             departures: AtomicU64::new(0),
@@ -2472,49 +2575,54 @@ impl BrokerParticipant {
         .await
     }
 
-    /// Closes each connection with a CLOSE of 1001, then ends its link cleanly, so its broker
-    /// publishes no will (spec 15.21).
+    /// Gives up its link's start under way and awaits it, closes each connection with a CLOSE of
+    /// 1001, then ends its link cleanly, so its broker publishes no will of a link it held (spec
+    /// 15.21); a later stop settles with the first.
     pub fn stop(&self) -> BoxFuture<()> {
-        {
-            let mut status = locked(&self.inner.config.status);
+        let config = &self.inner.config;
+        let mut ended = config.stopped.subscribe();
+        let is_first = !core::mem::replace(&mut locked(&config.status).is_stopped, true);
 
-            if status.is_stopped {
-                return Box::pin(async {});
-            }
+        if is_first {
+            config.stopping.cancel();
 
-            status.is_stopped = true;
+            // ! read once its stop is marked: a start counted before it is waited out, and none is
+            // counted after it
+            let mut under_way = config.under_way.subscribe();
+            let closing = self.inner.owner.run(|state| {
+                let ended = state.ordinals();
+
+                state.stopping();
+                ended
+            });
+            let adapter = Arc::clone(&config.adapter);
+            let inner = Arc::clone(&self.inner);
+            let ending = Ended(Arc::clone(config));
+
+            self.inner.owner.cover(async move {
+                let ended = closing.await.ok().flatten();
+
+                // * its adapter's start under way, given up, settles before its stop: the two never
+                // overlap, and what that start brought up after the stop ends with it
+                under_way.wait_for(|count| *count == 0).await.ok();
+                adapter.stop().await;
+                inner
+                    .owner
+                    .run(move |state| {
+                        locked(&state.config.held_names).clear();
+
+                        if !locked(&state.config.status).is_taken_over {
+                            state.config.transition("stopped", ended);
+                        }
+                    })
+                    .await
+                    .ok();
+                drop(ending);
+            });
         }
 
-        let closing = self.inner.owner.run(|state| {
-            let ended = state.ordinals();
-
-            state.stopping();
-            ended
-        });
-        let adapter = Arc::clone(&self.inner.config.adapter);
-        let inner = Arc::clone(&self.inner);
-        let (reply, stopped) = oneshot::channel::<()>();
-
-        self.inner.owner.cover(async move {
-            let ended = closing.await.ok().flatten();
-
-            adapter.stop().await;
-            inner
-                .owner
-                .run(move |state| {
-                    locked(&state.config.held_names).clear();
-
-                    if !locked(&state.config.status).is_taken_over {
-                        state.config.transition("stopped", ended);
-                    }
-                })
-                .await
-                .ok();
-            reply.send(()).ok();
-        });
-
         Box::pin(async move {
-            stopped.await.ok();
+            ended.wait_for(|is_ended| *is_ended).await.ok();
         })
     }
 

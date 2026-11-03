@@ -151,8 +151,10 @@ export interface IBrokerParticipantOptions {
    * transport client's `reconnect` takes it: `delay` 1,000 milliseconds between attempts by
    * default, a fixed one held as it is built whatever `reconnects`; `maximumAttempts` without end by
    * default; `signal` read before each attempt and during each wait, an attempt under way not cut
-   * short; `tap` told each wait. A stop ends it at its next attempt. Once it ends it is reported on
-   * `error`, what ended it the `cause`, and the next start or connect links it anew.
+   * short; `tap` told each wait. A delay of 0 waits a later task of the platform, which fake timers
+   * on the globals hold, as they hold its timers. A stop ends it at its next attempt, and at once
+   * during one. Once it ends it is reported on `error`, what ended it the `cause`, and the next start
+   * or connect links it anew.
    */
   reconnect?: ITransportClientReconnectOptions | undefined;
   /**
@@ -203,7 +205,11 @@ export interface IBrokerParticipant {
   on(event: 'debug', listener: (event: IParticipantDebugEvent) => void): this;
   /** Starts its link, once: its incarnation drawn, its inbox subscribed. */
   start(options?: { signal?: AbortSignal | undefined }): Promise<void>;
-  /** Closes each of its connections with 1001, then ends its link cleanly, so no will goes. */
+  /**
+   * Gives up its link's start under way and awaits it, closes each of its connections with 1001,
+   * then ends its link cleanly, so its broker publishes no will of a link it held; a later stop
+   * settles with the first.
+   */
   stop(): Promise<void>;
   /** A client's transport over it, one connection at a time through a server's name. */
   transportClient(options?: IBrokerTransportClientOptions): BrokerTransportClient;
@@ -512,6 +518,12 @@ export const createBrokerParticipant = (options: IBrokerParticipantOptions): IBr
   let downsAsItLinks = 0;
   // each link and each down its own, so that what a former link asked does nothing on the next
   let epoch = 0;
+  // * what its stop aborts: its adapter's start under way gives up on it
+  const stopping = new AbortController();
+  // its adapter's start under way, which its stop awaits before it stops its adapter
+  let starting: Promise<void> | undefined;
+  // its stop's end, which every later stop shares
+  let stopped: Promise<void> | undefined;
 
   const isDebugging = (): boolean => {
     return emitter.listenerCount('debug') > 0;
@@ -1419,6 +1431,18 @@ export const createBrokerParticipant = (options: IBrokerParticipantOptions): IBr
 
   // ── the link ──
 
+  // a link its stop overtook as it connected, what its adapter failed with as its cause
+  const stoppedAsItStarted = (cause?: unknown): GenericError => {
+    return new GenericError(
+      `the participant ${id} stopped as it started`,
+      cause === undefined ? undefined : { cause }
+    );
+  };
+  // read afresh at each call: its stop may come at any await of a link
+  const hasStopped = (): boolean => {
+    return isStopped;
+  };
+
   // starts a link, a new incarnation, its inbox and its names subscribed before anything goes
   const link = async (signal?: AbortSignal): Promise<void> => {
     const drawnIncarnation = drawn(INCARNATION_BYTES);
@@ -1442,10 +1466,27 @@ export const createBrokerParticipant = (options: IBrokerParticipantOptions): IBr
     isLinking = true;
 
     try {
-      await adapter.start({ signal, will });
-      await adapter.subscribe(inbox, { signal });
+      // * its stop's signal to its start alone: a SUBSCRIBE given up by a signal retires its link
+      // with no DISCONNECT, so its will would go; its adapter's stop ends that one cleanly
+      starting = adapter.start({
+        signal: signal === undefined ? stopping.signal : AbortSignal.any([signal, stopping.signal]),
+        will,
+      });
+      await starting;
+
+      if (!hasStopped()) {
+        await adapter.subscribe(inbox, { signal });
+      }
+    } catch (reason) {
+      throw hasStopped() ? stoppedAsItStarted(reason) : reason;
     } finally {
       isLinking = false;
+    }
+
+    // ! stopped as it started: nothing of this link goes on, and its stop ends it once its start
+    // settled
+    if (hasStopped()) {
+      throw stoppedAsItStarted();
     }
 
     // ! a link that went down as it connected is none: this attempt fails, and the next links
@@ -1469,6 +1510,9 @@ export const createBrokerParticipant = (options: IBrokerParticipantOptions): IBr
         }
       })
     );
+    if (hasStopped()) {
+      throw stoppedAsItStarted();
+    }
     if (epoch === linkedEpoch) {
       transition('up');
     }
@@ -1530,6 +1574,11 @@ export const createBrokerParticipant = (options: IBrokerParticipantOptions): IBr
 
           // * every failure of a link another attempt may mend, an adapter's misuse among them
           await link().catch((reason: unknown) => {
+            // ! stopped as it linked: a misuse to the loop, so it ends at once, no wait told after it
+            if (isStopped) {
+              throw new ProgrammerError(`the participant ${id} is stopped`, { cause: reason });
+            }
+
             throw wrapReason(ConnectError, reason);
           });
         },
@@ -1825,33 +1874,37 @@ export const createBrokerParticipant = (options: IBrokerParticipantOptions): IBr
     start: async (startOptions) => {
       await linked({ isStart: true, signal: startOptions?.signal });
     },
-    stop: async () => {
-      if (isStopped) {
-        return;
-      }
+    stop: () => {
+      stopped ??= (async () => {
+        const ended = isDebugging()
+          ? [...connections.values()].map((record) => {
+              return record.ordinal;
+            })
+          : undefined;
+        for (const record of connections.values()) {
+          record.connection.close(CloseCode.GOING_AWAY);
+        }
 
-      const ended = isDebugging()
-        ? [...connections.values()].map((record) => {
-            return record.ordinal;
-          })
-        : undefined;
-      for (const record of connections.values()) {
-        record.connection.close(CloseCode.GOING_AWAY);
-      }
+        failAwaiting(`the participant ${id} stopped as it connected`);
+        isStopped = true;
+        epoch += 1;
+        isLinked = false;
+        // * its adapter's start under way, given up, settles before its stop: the two never overlap,
+        // and what that start brought up after the stop ends with it
+        stopping.abort(stoppedAsItStarted());
+        await starting?.catch(noop);
+        await adapter.stop();
+        for (const entry of names.values()) {
+          entry.isHeld = false;
+        }
+        departures.clear();
+        if (!isTakenOver) {
+          transition('stopped', ended);
+        }
+        withdraw();
+      })();
 
-      failAwaiting(`the participant ${id} stopped as it connected`);
-      isStopped = true;
-      epoch += 1;
-      isLinked = false;
-      await adapter.stop();
-      for (const entry of names.values()) {
-        entry.isHeld = false;
-      }
-      departures.clear();
-      if (!isTakenOver) {
-        transition('stopped', ended);
-      }
-      withdraw();
+      return stopped;
     },
     transportClient: (clientOptions) => {
       return createBrokerTransportClient(participant, clientOptions);

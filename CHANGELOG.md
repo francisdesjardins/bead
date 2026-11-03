@@ -152,6 +152,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   password provider failed`, its throw the cause, `the link of {id} had no CONNACK within {N} ms,
   its connectTimeout` and `the link of {id} had no OPEN and no sessions within {N} ms, its
   connectTimeout`.
+- A reconnection of a delay of 0 waits a later task of the platform between two attempts, on the
+  TypeScript side `setImmediate`'s, which fake timers installed on the globals hold, as they hold
+  its timers: a test that installs them moves its clock to let the next attempt go.
 
 ### Removed
 
@@ -200,6 +203,17 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `HttpPolicy.Of` does, where it kept each as given.
 - On the TypeScript side, `createEventStream` holds its `heartbeat` as spec 1.4 states, refusing 0,
   a negative value and NaN, where it armed a timer at every turn.
+- A reconnection of a delay of 0, a transport client's or a broker participant's, takes a turn of
+  its platform between two attempts on every side (spec 1.4). Over an adapter that refused its start
+  at once, the TypeScript side's ran on microtasks alone, starving every timer and every I/O, the C#
+  side's ran within one turn of its participant's scheduler, and the Rust side's back to back.
+- A broker participant's stop ends a link under way, its start's or an attempt of its
+  reconnection's: it gives up its adapter's start, awaits it, then ends the link, so that the two
+  never overlap and nothing that start linked or subscribed outlives the stop. The start fails, "the
+  participant … stopped as it started", its inbox never subscribed, and its reconnection ends with
+  no wait told after it; a stop called again settles with the first. On the TypeScript side such a
+  start succeeded and the participant called itself linked after its stop; on every side its
+  adapter stayed linked and its inbox subscribed (spec 15.21; debugging 13.5).
 
 ### Security
 
