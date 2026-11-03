@@ -7,7 +7,8 @@
  * platform has it, Node's, after the I/O of its poll; by a `MessageChannel`'s message in a page.
  * Never a microtask, which runs before the loop turns, and never a timer, which Node holds to 1 ms
  * at least: what one task handed is released no sooner than the side could take another
- * connection's (spec 15.12, decision 0046). Returns what cancels it, which does nothing once it ran.
+ * connection's (spec 15.12, decision 0046), and a reconnection's attempts at a delay of 0 go a
+ * task apart (decision 0038). Returns what cancels it, which does nothing once it ran.
  *
  * @example
  * const cancel = laterTask(() => {

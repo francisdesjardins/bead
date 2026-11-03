@@ -370,7 +370,8 @@ pub const RECONNECT_ATTEMPTS: u32 = 5;
 #[non_exhaustive]
 pub struct TransportClientReconnectOptions {
     /// The delay between two attempts: [`RECONNECT_DELAY`] when none. A fixed one out of bounds is
-    /// refused where it is given (spec 1.4); a resolver's answer is held at each attempt.
+    /// refused where it is given (spec 1.4); a resolver's answer is held at each attempt. One of 0
+    /// arms no timer, its next attempt in a later turn of its tokio runtime.
     pub delay: Option<TransportClientReconnectDelay>,
     /// The attempts it makes at most: its owner's default when none, [`RECONNECT_ATTEMPTS`] for a
     /// transport client's reconnection, without end for a broker participant's.
@@ -685,7 +686,8 @@ pub(crate) async fn first_of<A: Future, B: Future>((first, second): (A, B)) -> b
 }
 
 /// A reconnection's attempts, on `clock`, as `options` says: the first at once, each next one after
-/// its delay, each made by `attempt`, given the reconnection's signal, which is read before each. It
+/// its delay, at a delay of 0 in a later turn of its runtime, never within the one its last failed
+/// in, each made by `attempt`, given the reconnection's signal, which is read before each. It
 /// ends once one opened; with a [`TransportError::Reconnect`] once its attempts ran out; at once for
 /// a misuse an attempt met, which the next would meet again, or a delay or a tap that panicked; and
 /// cancelled once its signal is.
@@ -749,38 +751,31 @@ where
                 )?
             }
         };
-        // held before tap hears it: 0 waits none, and never would wait for ever
+        // held before tap hears it: 0 arms none, and never would wait for ever
         let next = hold_delay("a delay", next)?;
         // armed before tap is told, so whoever moves the clock once told moves it past the wait;
-        // none armed for at once
-        let (woken, wait) = oneshot::channel::<()>();
-        let mut woken = Some(woken);
-        let timer = if next.is_zero() {
-            if let Some(woken) = woken.take() {
-                woken.send(()).ok();
-            }
-
-            None
-        } else {
-            Some(clock.arm(
+        // none at 0, which takes a turn of its runtime once told instead
+        let armed = (!next.is_zero()).then(|| {
+            let (woken, wait) = oneshot::channel::<()>();
+            let mut woken = Some(woken);
+            let timer = clock.arm(
                 Schedule::Once(next),
                 Box::new(move || {
                     if let Some(woken) = woken.take() {
                         woken.send(()).ok();
                     }
                 }),
-            ))
-        };
-        let cancel_timer = || {
-            if let Some(timer) = &timer {
-                timer.cancel();
-            }
-        };
+            );
+
+            (timer, wait)
+        });
 
         if let Some(tap) = &options.tap
             && let Err(panicked) = caught(("a reconnection's tap", || tap(next, number)))
         {
-            cancel_timer();
+            if let Some((timer, _wait)) = &armed {
+                timer.cancel();
+            }
 
             return Err(TransportError::Refused(ProgrammerError::new(
                 panicked.message(),
@@ -789,13 +784,20 @@ where
 
         previous = Some(next);
 
+        // * at 0, a turn of its runtime between two attempts, never none: an attempt refused at once
+        // would otherwise run the reconnection within one poll, broken by tokio's budget alone
+        let Some((timer, wait)) = armed else {
+            crate::platform::yield_now().await;
+
+            continue;
+        };
         let is_woken = match &signal {
             Some(signal) => !first_of((signal.cancelled(), wait)).await,
             None => wait.await.is_ok(),
         };
 
         if !is_woken {
-            cancel_timer();
+            timer.cancel();
 
             return Err(TransportError::Cancelled(RECONNECTION_CANCELLED.to_owned()));
         }

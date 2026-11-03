@@ -49,8 +49,9 @@ public sealed record BrokerParticipantOptions
     /// transport client's reconnection takes it: a second between attempts unless told, a fixed
     /// delay held as it is built whatever <see cref="Reconnects"/>; its attempts without end unless
     /// <see cref="TransportClientReconnectOptions.MaximumAttempts"/> bounds them; its token read
-    /// before each attempt and during each wait, an attempt under way not cut short; its tap told
-    /// each wait. A stop ends it at its next attempt. Once it ends it is reported through
+    /// before each attempt and during each wait, an attempt under way not cut short; a wait of zero
+    /// none, its next attempt in a later turn of its scheduler; its tap told each wait. A stop ends
+    /// it at its next attempt. Once it ends it is reported through
     /// <see cref="BrokerParticipant.Error"/>, what ended it the inner exception, and the next start or
     /// connect links it anew.
     /// </summary>

@@ -1793,6 +1793,59 @@ async fn reports_its_reconnection_ended_when_its_delay_function_or_its_tap_throw
     tapping.stop().await;
 }
 
+// spec 1.4
+#[tokio::test]
+async fn takes_a_turn_of_its_platform_between_two_attempts_at_a_delay_of_0_over_an_adapter_that_refuses_its_start_at_once()
+ {
+    let broker = broker();
+    let inner = adapter_of(&broker, "ada");
+    let refusing = Arc::new(Calling {
+        starts: Some(1),
+        ..Calling::of(inner.clone())
+    });
+    let adapter: Arc<dyn BrokerAdapter> = Arc::<Calling>::clone(&refusing);
+    // the starts asked of its broker as a task queued at its first wait ran
+    let ran_at: Arc<Mutex<Option<usize>>> = Arc::default();
+    let queuing = (Arc::clone(&refusing), Arc::clone(&ran_at));
+    let participant = BrokerParticipant::new(
+        adapter,
+        &BrokerParticipantOptions {
+            reconnect: Some(TransportClientReconnectOptions {
+                maximum_attempts: Some(3),
+                tap: Some(Arc::new(move |_delay, attempt| {
+                    // * a task queued on its runtime as its first wait is told
+                    if attempt == 1 {
+                        let (refusing, ran_at) = (Arc::clone(&queuing.0), Arc::clone(&queuing.1));
+
+                        drop(crate::testing::spawn(async move {
+                            *locked(&ran_at) = Some(starts_of(&refusing));
+                        }));
+                    }
+                })),
+                ..immediately()
+            }),
+            ..BrokerParticipantOptions::default()
+        },
+    )
+    .expect("a participant");
+    let reported = reporting(&participant);
+
+    participant.start().await.expect("started");
+    inner.lose();
+    until(|| !locked(&reported).is_empty(), "its attempts spent").await;
+    assert_eq!(
+        *locked(&ran_at),
+        Some(2),
+        "that task runs before its second attempt"
+    );
+    assert_eq!(
+        *locked(&reported),
+        ["the link of ada went down, and 3 attempts did not bring it back"],
+        "reported"
+    );
+    participant.stop().await;
+}
+
 #[tokio::test]
 async fn serves_its_names_again_once_its_link_connects_anew_its_former_peers_reset() {
     let pair = BrokerPair::of(&BrokerPairOptions::default()).await;

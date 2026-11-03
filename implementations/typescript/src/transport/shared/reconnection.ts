@@ -5,6 +5,7 @@
 import { assertHeldDelay, type IClock } from './clock';
 import { createPromise } from './create-promise';
 import { CancelError, ProgrammerError, ReconnectError, wrapReason } from './errors';
+import { nextTask } from './later-task';
 import { noop } from './noop';
 import type {
   TransportClientReconnectDelay,
@@ -58,12 +59,13 @@ export const assertHeldReconnection = (options: {
 /**
  * A reconnection's attempts, each made by `attempt`, given its signal: the first at once, each next
  * one after its delay on its clock, armed before `tap` hears it, so whoever moves the clock once
- * told moves it past the wait. Its signal is read before each attempt, the first included, and
- * during each wait; an attempt under way is cut short only where `attempt` reads it. It resolves
- * once one opens, and rejects with a {@link CancelError} once its signal is aborted; with a
- * {@link ReconnectError} once its attempts ran out, the last one's error its `cause`; with a
- * {@link ProgrammerError} that an attempt met, which the next would meet again, or that its delay's
- * function threw or answered out of bounds; and with what `tap` throws, as it is.
+ * told moves it past the wait; at a delay of 0, in a later task of the event loop, never a
+ * microtask. Its signal is read before each attempt, the first included, and during each wait; an
+ * attempt under way is cut short only where `attempt` reads it. It resolves once one opens, and
+ * rejects with a {@link CancelError} once its signal is aborted; with a {@link ReconnectError} once
+ * its attempts ran out, the last one's error its `cause`; with a {@link ProgrammerError} that an
+ * attempt met, which the next would meet again, or that its delay's function threw or answered out
+ * of bounds; and with what `tap` throws, as it is.
  *
  * @example
  * await attemptReconnection(
@@ -116,27 +118,32 @@ export const attemptReconnection = async (
       throw wrapReason(ProgrammerError, reason);
     }
 
-    // held before "tap" hears it: 0 waits none, and never would wait for ever
+    // held before "tap" hears it: 0 arms none, and never would wait for ever
     nextDelay = assertHeldDelay('a delay', nextDelay);
 
-    // armed before "tap" is told, so whoever moves the clock once told moves it past the wait
+    // armed before "tap" is told, so whoever moves the clock once told moves it past the wait; none
+    // at 0, which waits a later task of the event loop once told instead
     const pausing = new AbortController();
-    const waiting = createPromise(
-      (resolve) => {
-        resolve();
-      },
-      {
-        clock,
-        delay: nextDelay,
-        signal: signal === undefined ? pausing.signal : AbortSignal.any([signal, pausing.signal]),
-      }
-    );
+    const waiting =
+      nextDelay === 0
+        ? undefined
+        : createPromise(
+            (resolve) => {
+              resolve();
+            },
+            {
+              clock,
+              delay: nextDelay,
+              signal:
+                signal === undefined ? pausing.signal : AbortSignal.any([signal, pausing.signal]),
+            }
+          );
 
     try {
       tap?.(nextDelay, number);
     } catch (reason) {
       pausing.abort();
-      await waiting.catch(noop);
+      await waiting?.catch(noop);
 
       throw reason;
     }
@@ -144,7 +151,9 @@ export const attemptReconnection = async (
     previousDelay = nextDelay;
 
     try {
-      await waiting;
+      // * at 0, a task of the event loop, never a microtask: an attempt refused at once would
+      // otherwise run on microtasks alone, which no timer and no I/O ever pass
+      await (waiting ?? nextTask());
     } catch (reason) {
       throw signal !== undefined && isAborted() ? reconnectionCancelOf(signal) : reason;
     }

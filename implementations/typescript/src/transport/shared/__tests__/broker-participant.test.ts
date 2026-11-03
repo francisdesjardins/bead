@@ -11,7 +11,7 @@ import {
   writeParcel,
 } from '../broker-parcel';
 import { BROKER_DELIVERIES, createBrokerParticipant } from '../broker-participant';
-import { ProgrammerError } from '../errors';
+import { GenericError, ProgrammerError } from '../errors';
 import {
   createMemoryBroker,
   type IMemoryBroker,
@@ -1752,6 +1752,52 @@ test.describe('broker participant', () => {
 
     await throwing.stop();
     await tapping.stop();
+  });
+
+  // spec 1.4
+  test('takes a turn of its platform between two attempts at a delay of 0, over an adapter that refuses its start at once', async () => {
+    const broker = createMemoryBroker();
+    const adapter = broker.adapter({ id: 'ada' });
+    let starts = 0;
+    let ranAt: number | undefined;
+    const refusing = Object.assign(Object.create(adapter) as IBrokerAdapter, {
+      start: (options?: Parameters<IBrokerAdapter['start']>[0]) => {
+        starts += 1;
+
+        return starts === 1
+          ? adapter.start(options)
+          : Promise.reject(new GenericError('refused at once'));
+      },
+    });
+    const participant = createBrokerParticipant({
+      adapter: refusing,
+      reconnect: {
+        delay: 0,
+        maximumAttempts: 3,
+        tap: (_delay, attempt) => {
+          // * a task queued as its first wait is told
+          if (attempt === 1) {
+            setImmediate(() => {
+              ranAt = starts;
+            });
+          }
+        },
+      },
+    });
+    const reported = hearing(participant);
+
+    await participant.start();
+    adapter.lose();
+    await until(() => {
+      return reported.length > 0;
+    }, 'its attempts spent');
+
+    expect(ranAt, 'that task runs before its second attempt').toBe(2);
+    expect(wordsOf(reported)).toEqual([
+      'the link of ada went down, and 3 attempts did not bring it back',
+    ]);
+
+    await participant.stop();
   });
 
   test('serves its names again once its link connects anew, its former peers reset', async () => {

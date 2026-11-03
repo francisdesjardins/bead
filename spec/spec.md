@@ -127,7 +127,8 @@ aside, and a value that is no number: NaN, or a string or a boolean, as a limit 
 be. A timeout or a bound is never 0, and may be without end but where its place says it is never
 without end; one not given is its default. A delay — a wait before an act: a pause, a reconnection's
 wait, the `wait` a client's listens ask (section 15.10) — is never without end, and takes 0 as at
-once.
+once, arming no timer; a reconnection whose wait is 0 makes its next attempt in a later turn of its
+platform than the one its last attempt failed in.
 
 ## 2. The prefix
 

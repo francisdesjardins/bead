@@ -1,12 +1,12 @@
-//! What the core spawns on: the application's tokio runtime, given or current, its time driver
-//! checked (decision 0044).
+//! What the core spawns and yields on: the application's tokio runtime, given or current, its time
+//! driver checked (decision 0044).
 //!
-//! The core spawns nowhere else, and reads time through its clock alone (decision 0011), as
-//! clippy's `disallowed-methods` and `disallowed-types` hold it: what tokio's calls name is named
-//! here, once, so that the core keeps compiling for a browser's WebAssembly as natively.
+//! The core spawns and yields nowhere else, and reads time through its clock alone (decision
+//! 0011), as clippy's `disallowed-methods` and `disallowed-types` hold it: what tokio's calls name
+//! is named here, once, so that the core keeps compiling for a browser's WebAssembly as natively.
 #![expect(
     clippy::disallowed_methods,
-    reason = "the one place the core spawns, finds its runtime and checks its time driver"
+    reason = "the one place the core spawns, yields, finds its runtime and checks its time driver"
 )]
 
 use core::future::Future;
@@ -57,4 +57,10 @@ where
     F::Output: Send + 'static,
 {
     runtime.spawn(future)
+}
+
+/// Hands its task's turn back to its tokio runtime: the task is polled again once the runtime ran
+/// what was ready before it, its timers and I/O among it.
+pub(crate) async fn yield_now() {
+    tokio::task::yield_now().await;
 }
