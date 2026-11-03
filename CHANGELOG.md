@@ -195,6 +195,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - On the TypeScript side, `httpPolicyOf` holds `bodyGracePeriod`, `headersTimeout` and
   `sendGracePeriod` rounded to the nearest whole millisecond, as spec 1.4 states and the C# side's
   `HttpPolicy.Of` does, where it kept each as given.
+- On the TypeScript side, `createEventStream` holds its `heartbeat` as spec 1.4 states, refusing 0,
+  a negative value and NaN, where it armed a timer at every turn.
 
 ### Security
 
