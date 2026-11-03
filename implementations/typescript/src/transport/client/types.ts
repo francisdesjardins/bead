@@ -56,19 +56,30 @@ export interface ITransportClientOptions {
   clock?: IClock | undefined;
 }
 
+/**
+ * How a transport client's `reconnect` connects again, and a broker participant's link once lost
+ * (spec 15.21).
+ */
 export interface ITransportClientReconnectOptions {
   /**
    * Milliseconds to wait after a failed attempt before the next one, or a function of the previous
-   * wait and the number of the attempt that failed. The first attempt goes at once; one of 0 waits
-   * none, one from 1 to 2³¹ − 1 is rounded to the nearest whole one, which `tap` hears, and any
-   * other — `Infinity` among them — rejects with a {@link ProgrammerError}, before `tap` hears it.
+   * wait and the number of the attempt that failed; 1,000 by default. The first attempt goes at
+   * once; one of 0 waits none, one from 1 to 2³¹ − 1 is rounded to the nearest whole one, which
+   * `tap` hears, and any other — `Infinity` among them — is a {@link ProgrammerError}: a number's
+   * where it is given (spec 1.4), a function's answer at the attempt it follows, before `tap`
+   * hears it.
    */
   delay?: TransportClientReconnectDelay | undefined;
-  /** Attempts before giving up with a {@link ReconnectError}; there is always at least one. */
+  /**
+   * Attempts before giving up with a {@link ReconnectError}; there is always at least one. Its
+   * owner's default when left out: 5 for a transport client's `reconnect`, without end for a broker
+   * participant's link.
+   */
   maximumAttempts?: number | undefined;
   /**
-   * Aborting it stops the attempts, the one connecting included, or disconnects a success, with a
-   * {@link CancelError}.
+   * Aborting it stops the attempts with a {@link CancelError}: it is read before each attempt and
+   * during each wait. A transport client's attempt under way is handed it, and a success it comes
+   * after is disconnected; a broker participant's attempt under way is not cut short.
    */
   signal?: AbortSignal | undefined;
   /** Told the wait and the number of the attempt that failed, before waiting. */
@@ -147,11 +158,11 @@ export interface ITransportClient<
   /**
    * Connects again with the options of the last accepted `connect`, replacing an open socket without
    * a `close`. Attempts that run out end CLOSED without a `close`; a cancel after a successful
-   * attempt disconnects, which emits one; a misuse or an already aborted signal leaves the state as it
-   * was. Rejects with a {@link ProgrammerError}, a {@link ReconnectError} or a {@link CancelError},
-   * `the reconnection was cancelled`, its signal's reason its `cause`; an error thrown by `tap`
-   * passes through, and so does a {@link ProgrammerError} an attempt rejects with, which the next
-   * would meet again.
+   * attempt disconnects, which emits one; a misuse, a fixed `delay` out of bounds among them, or an
+   * already aborted signal leaves the state as it was, no `reconnect` emitted. Rejects with a
+   * {@link ProgrammerError}, a {@link ReconnectError} or a {@link CancelError}, `the reconnection
+   * was cancelled`, its signal's reason its `cause`; an error thrown by `tap` passes through, and so
+   * does a {@link ProgrammerError} an attempt rejects with, which the next would meet again.
    */
   reconnect(options?: ITransportClientReconnectOptions): Promise<void>;
   removeAllListeners(event?: TRANSPORT_CLIENT_EVENTS): this;

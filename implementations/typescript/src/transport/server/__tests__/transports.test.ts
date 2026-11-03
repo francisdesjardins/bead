@@ -1464,7 +1464,7 @@ const playBrokerCase = async (
       heldBytesBudget: options.heldBytesBudget,
       maximumEnvelopePartsBytes: options.maximumEnvelopePartsBytes ?? limits?.maximumEnvelopeBytes,
       minimumBodyBytesPerSecond: options.minimumBodyBytesPerSecond,
-      reconnect: isClient ? false : {},
+      reconnects: !isClient,
     });
 
     if (isClient) {

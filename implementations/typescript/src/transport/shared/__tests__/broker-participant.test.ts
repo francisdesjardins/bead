@@ -44,6 +44,42 @@ const settled = (): Promise<void> => {
   return new Promise(setImmediate);
 };
 
+/** Waits, a millisecond at a time, until `condition` holds; past two seconds, fails naming `what`. */
+const until = async (condition: () => boolean, what: string): Promise<void> => {
+  for (let count = 0; count < 2_000 && !condition(); count += 1) {
+    await new Promise((resolve) => {
+      setTimeout(resolve, 1);
+    });
+  }
+
+  expect(condition(), what).toBe(true);
+};
+
+/** The starts of its link `log` holds, its first among them. */
+const startsIn = (log: string[]): number => {
+  return log.filter((entry) => {
+    return entry.startsWith('start');
+  }).length;
+};
+
+/** What `participant` reports, each kept whole, its `cause` among it. */
+const hearing = (participant: ReturnType<typeof createBrokerParticipant>): Error[] => {
+  const reported: Error[] = [];
+
+  participant.on('error', (error) => {
+    reported.push(error);
+  });
+
+  return reported;
+};
+
+/** The words of each of `reported`. */
+const wordsOf = (reported: Error[]): string[] => {
+  return reported.map(({ message }) => {
+    return message;
+  });
+};
+
 /** A peer over `broker`, its inbox subscribed, and the name too when `isServing`. */
 const peerOf = async (
   broker: IMemoryBroker,
@@ -357,7 +393,7 @@ test.describe('broker participant', () => {
 
     // without a reconnection, a link lost stays down, and says so
     const lone = broker.adapter({ id: 'bob' });
-    const alone = createBrokerParticipant({ adapter: lone, reconnect: false });
+    const alone = createBrokerParticipant({ adapter: lone, reconnects: false });
     const reported: string[] = [];
 
     alone.on('error', ({ message }) => {
@@ -1472,6 +1508,250 @@ test.describe('broker participant', () => {
     expect(participant.isLinked).toBe(false);
 
     await participant.stop();
+  });
+
+  // spec 1.4, 15.21
+  test('refuses a fixed reconnection delay out of bounds as it is built, and ends its reconnection, reported, on a function’s answer out of bounds', async () => {
+    const broker = createMemoryBroker();
+    const adapter = broker.adapter({ id: 'ada' });
+
+    // * a fixed delay held as it is built, whether or not it reconnects
+    for (const [delay, reconnects, written] of [
+      [0.4, undefined, '0.4'],
+      [2 ** 31, true, '2147483648'],
+      [Infinity, false, 'Infinity'],
+    ] as const) {
+      expect(() => {
+        return createBrokerParticipant({ adapter, reconnect: { delay }, reconnects });
+      }, `${written} refused as it is built`).toThrow(
+        new ProgrammerError(
+          `a delay is 0 for at once, or a number of milliseconds from 1 to 2147483647, not ${written}`
+        )
+      );
+    }
+
+    expect(adapter.isLinked, 'nothing started').toBe(false);
+
+    // a function's answer held at each attempt: out of bounds, its reconnection ends, reported,
+    // its refusal the report's cause
+    const participant = createBrokerParticipant({
+      adapter,
+      reconnect: {
+        delay: () => {
+          return Infinity;
+        },
+      },
+    });
+    const reported = hearing(participant);
+
+    await participant.start();
+    adapter.lose();
+    await adapter.start();
+    await until(() => {
+      return reported.length > 0;
+    }, 'its reconnection ended');
+    await settled();
+
+    expect(wordsOf(reported), 'reported once').toEqual([
+      'the link of ada went down, and its reconnection ended: a delay is 0 for at once, or a number of milliseconds from 1 to 2147483647, not Infinity',
+    ]);
+    expect(reported[0]?.cause, "its refusal the report's cause").toBeInstanceOf(ProgrammerError);
+    expect(participant.isLinked, 'down').toBe(false);
+
+    await participant.stop();
+  });
+
+  // spec 15.21
+  test('reconnects without end when given a delay alone', async () => {
+    const broker = createMemoryBroker();
+    const adapter = broker.adapter({ id: 'ada' });
+    const log: string[] = [];
+    const participant = createBrokerParticipant({
+      adapter: loggedOf(adapter, log),
+      reconnect: { delay: 1 },
+    });
+    const reported = hearing(participant);
+
+    await participant.start();
+    adapter.lose();
+    await adapter.start();
+
+    // * past the 5 attempts a transport client's reconnection makes when it names none
+    await until(() => {
+      return startsIn(log) > 8;
+    }, 'its attempts past five');
+    expect([wordsOf(reported), participant.isLinked], 'nothing reported, down').toEqual([
+      [],
+      false,
+    ]);
+
+    // its broker lets it through: linked again, by its own reconnection
+    await adapter.stop();
+    await until(() => {
+      return participant.isLinked;
+    }, 'linked again');
+    expect(wordsOf(reported), 'nothing reported').toEqual([]);
+
+    await participant.stop();
+  });
+
+  // spec 15.21
+  test('ends its reconnection once it is stopped, told so, and links no more', async () => {
+    const broker = createMemoryBroker();
+    const adapter = broker.adapter({ id: 'ada' });
+    const log: string[] = [];
+    const participant = createBrokerParticipant({
+      adapter: loggedOf(adapter, log),
+      reconnect: { delay: 10 },
+    });
+    const reported = hearing(participant);
+
+    await participant.start();
+    adapter.lose();
+    await adapter.start();
+    await until(() => {
+      return startsIn(log) > 2;
+    }, 'its attempts refused');
+
+    // * its stop ends its link, the test's own among it: its broker would let it through now
+    await participant.stop();
+
+    const stopped = startsIn(log);
+
+    await until(() => {
+      return reported.length > 0;
+    }, 'its reconnection ended');
+    await new Promise((resolve) => {
+      setTimeout(resolve, 50);
+    });
+
+    expect(wordsOf(reported), 'told so, once').toEqual([
+      'the link of ada went down, and its reconnection ended: the participant ada is stopped',
+    ]);
+    expect(startsIn(log), 'no attempt after its stop').toBe(stopped);
+    expect([participant.isLinked, adapter.isLinked], 'linked no more').toEqual([false, false]);
+  });
+
+  // spec 15.21
+  test('ends its reconnection before any attempt once its signal is aborted', async () => {
+    const broker = createMemoryBroker();
+    const adapter = broker.adapter({ id: 'ada' });
+    const log: string[] = [];
+    const cancelling = new AbortController();
+    const participant = createBrokerParticipant({
+      adapter: loggedOf(adapter, log),
+      reconnect: { delay: 0, signal: cancelling.signal },
+    });
+    const reported = hearing(participant);
+
+    await participant.start();
+
+    // * aborted before its link goes down, its broker letting it through
+    cancelling.abort();
+    adapter.lose();
+    await until(() => {
+      return reported.length > 0;
+    }, 'its reconnection ended');
+    await settled();
+
+    expect(wordsOf(reported), 'reported once').toEqual([
+      'the link of ada went down, and its reconnection ended: the reconnection was cancelled',
+    ]);
+    expect(startsIn(log), 'no attempt, its start alone').toBe(1);
+    expect(participant.isLinked, 'down').toBe(false);
+
+    await participant.stop();
+  });
+
+  // spec 15.21
+  test('links anew at its next start once its reconnection ended', async () => {
+    const broker = createMemoryBroker();
+    const adapter = broker.adapter({ id: 'ada' });
+    const participant = createBrokerParticipant({
+      adapter,
+      reconnect: { delay: 0, maximumAttempts: 2 },
+    });
+    const reported = hearing(participant);
+
+    await participant.start();
+
+    const former = participant.incarnation;
+
+    adapter.lose();
+    await adapter.start();
+    await until(() => {
+      return reported.length > 0;
+    }, 'given up on');
+    expect(wordsOf(reported), 'reported').toEqual([
+      'the link of ada went down, and 2 attempts did not bring it back',
+    ]);
+
+    // its broker lets it through: it stays down until it is started
+    await adapter.stop();
+    await settled();
+    expect(participant.isLinked, 'down').toBe(false);
+
+    // * its next start links it anew, another incarnation, not the first start's outcome
+    await participant.start();
+    expect([participant.isLinked, adapter.isLinked], 'linked anew').toEqual([true, true]);
+    expect(participant.incarnation, 'another incarnation').not.toEqual(former);
+
+    await participant.stop();
+  });
+
+  // spec 15.21
+  test('reports its reconnection ended when its delay function or its tap throws', async () => {
+    const broker = createMemoryBroker();
+    const ada = broker.adapter({ id: 'ada' });
+    const bob = broker.adapter({ id: 'bob' });
+    const delayBroke = new Error('its delay broke');
+    const tapBroke = new Error('its tap broke');
+    const throwing = createBrokerParticipant({
+      adapter: ada,
+      reconnect: {
+        delay: () => {
+          throw delayBroke;
+        },
+      },
+    });
+    const tapping = createBrokerParticipant({
+      adapter: bob,
+      reconnect: {
+        delay: 0,
+        tap: () => {
+          throw tapBroke;
+        },
+      },
+    });
+    const reported = [hearing(throwing), hearing(tapping)];
+
+    await throwing.start();
+    await tapping.start();
+    ada.lose();
+    await ada.start();
+    bob.lose();
+    await bob.start();
+    await until(() => {
+      return reported.every((each) => {
+        return each.length > 0;
+      });
+    }, 'each reconnection ended');
+    await settled();
+
+    // * each told once, what it threw its cause
+    expect(reported.map(wordsOf), 'each reported once').toEqual([
+      ['the link of ada went down, and its reconnection ended: its delay broke'],
+      ['the link of bob went down, and its reconnection ended: its tap broke'],
+    ]);
+    expect(reported[0]?.[0]?.cause, "its delay's throw, a misuse").toMatchObject({
+      cause: delayBroke,
+      name: 'ProgrammerError',
+    });
+    expect(reported[1]?.[0]?.cause, "its tap's throw, as it is").toBe(tapBroke);
+    expect([throwing.isLinked, tapping.isLinked], 'each down').toEqual([false, false]);
+
+    await throwing.stop();
+    await tapping.stop();
   });
 
   test('serves its names again once its link connects anew, its former peers reset', async () => {

@@ -33,11 +33,18 @@ import {
   partsOf,
   SEQUENCE_VERDICTS,
 } from './broker-sequence';
-import { assertHeldDelay, assertHeldFinite, type IClock, PLATFORM_CLOCK } from './clock';
+import { assertHeldFinite, type IClock, PLATFORM_CLOCK } from './clock';
 import { BROKER_DELIVERIES, BROKER_PUBLISHED } from './constants';
-import { createPromise } from './create-promise';
 import { createEmitter } from './emitter';
-import { ConnectError, GenericError, notServedOf, ProgrammerError, toError } from './errors';
+import {
+  ConnectError,
+  GenericError,
+  notServedOf,
+  ProgrammerError,
+  ReconnectError,
+  toError,
+  wrapReason,
+} from './errors';
 import { gaugesOf } from './gauges';
 import {
   assertHeartbeat,
@@ -47,6 +54,7 @@ import {
 } from './heartbeat';
 import { noop } from './noop';
 import { announceParticipantToDevtools } from './participant-devtools';
+import { assertHeldReconnection, attemptReconnection } from './reconnection';
 import {
   type IParticipantDebugEvent,
   type ParcelVerdict,
@@ -66,7 +74,11 @@ import type {
   IGauges,
 } from './types';
 import { createBrokerTransportClient } from '../client/broker-transport-client';
-import type { BrokerTransportClient, IBrokerTransportClientOptions } from '../client/types';
+import type {
+  BrokerTransportClient,
+  IBrokerTransportClientOptions,
+  ITransportClientReconnectOptions,
+} from '../client/types';
 import { createBrokerTransportServer } from '../server/broker-transport-server';
 import { assertCount } from '../server/server-bounds';
 import type { BrokerTransportServer, IBrokerTransportServerOptions } from '../server/types';
@@ -135,18 +147,19 @@ export interface IBrokerParticipantOptions {
    */
   minimumBodyBytesPerSecond?: number | undefined;
   /**
-   * How its link connects again once lost, each time as a new incarnation: `delay` milliseconds
-   * between attempts, 1,000 by default, `maximumAttempts` attempts, without end by default,
-   * `signal` aborted ending them; `false` for none, which leaves it closed once its link is lost.
+   * How its link connects again once lost, each time as a new incarnation (spec 15.21), as a
+   * transport client's `reconnect` takes it: `delay` 1,000 milliseconds between attempts by
+   * default, a fixed one held as it is built whatever `reconnects`; `maximumAttempts` without end by
+   * default; `signal` read before each attempt and during each wait, an attempt under way not cut
+   * short; `tap` told each wait. A stop ends it at its next attempt. Once it ends it is reported on
+   * `error`, what ended it the `cause`, and the next start or connect links it anew.
    */
-  reconnect?:
-    | false
-    | {
-        delay?: number | undefined;
-        maximumAttempts?: number | undefined;
-        signal?: AbortSignal | undefined;
-      }
-    | undefined;
+  reconnect?: ITransportClientReconnectOptions | undefined;
+  /**
+   * Whether its link connects again once lost, as `reconnect` says: true by default; `false` leaves
+   * it down, reported, until a start or a connect links it anew.
+   */
+  reconnects?: boolean | undefined;
   /**
    * The delivery its application requires: one at least once of an adapter that gives at most once
    * is a {@link ProgrammerError} as it is built (spec 15.19).
@@ -399,6 +412,7 @@ export const createBrokerParticipant = (options: IBrokerParticipantOptions): IBr
     maximumHeldEnvelopeBytes,
     minimumBodyBytesPerSecond = MINIMUM_BODY_BYTES_PER_SECOND,
     reconnect = {},
+    reconnects = true,
     requireDelivery,
     root = ROOT,
   } = options;
@@ -430,14 +444,9 @@ export const createBrokerParticipant = (options: IBrokerParticipantOptions): IBr
     'bodyGracePeriod',
     options.bodyGracePeriod ?? BODY_GRACE_PERIOD
   );
-  const reconnection =
-    reconnect === false
-      ? undefined
-      : {
-          delay: assertHeldDelay('a delay', reconnect.delay ?? 1_000),
-          maximumAttempts: reconnect.maximumAttempts ?? Infinity,
-          signal: reconnect.signal,
-        };
+
+  // * a fixed delay held as it is given, whether or not it reconnects (spec 1.4)
+  assertHeldReconnection(reconnect);
 
   assertCount('heldBytesBudget', { value: heldBytesBudget });
 
@@ -492,6 +501,8 @@ export const createBrokerParticipant = (options: IBrokerParticipantOptions): IBr
   let ordinal = 0;
   let incarnation: Uint8Array | undefined;
   let linking: Promise<void> | undefined;
+  // its reconnection under way, which its fence gives up
+  let relinking: AbortController | undefined;
   let isLinked = false;
   let isStopped = false;
   // ! taken over by another link of its id: it connects no more until its application starts it
@@ -1497,55 +1508,48 @@ export const createBrokerParticipant = (options: IBrokerParticipantOptions): IBr
   };
 
   // * its link lost: each connection closed, unclean, unreported; a new incarnation connected by
-  // its own reconnection; then a RESET to each peer it held a connection with
+  // its own reconnection, without end unless its application bounds it; then a RESET to each peer
+  // it held a connection with
   const relink = async (
-    former: { acceptor: Uint8Array; opener: Uint8Array; peer: string }[]
+    former: { acceptor: Uint8Array; opener: Uint8Array; peer: string }[],
+    fenced: AbortSignal
   ): Promise<void> => {
-    const { delay, maximumAttempts, signal } = reconnection ?? { delay: 0, maximumAttempts: 0 };
-    // ! the same words as the C# side's: a stop or a cancel ends the reconnection, told so
-    const ended = (reason: string): GenericError => {
-      return new GenericError(`the link of ${id} went down, and its reconnection ended: ${reason}`);
-    };
+    const { delay = 1_000, maximumAttempts = Infinity, signal, tap } = reconnect;
+    // the attempts made, which its end's words count
+    let attempts = 0;
 
-    for (let attempt = 1; ; attempt += 1) {
-      if (isStopped) {
-        throw ended(`the participant ${id} is stopped`);
-      }
+    try {
+      await attemptReconnection(
+        async () => {
+          attempts += 1;
 
-      if (signal?.aborted === true) {
-        throw ended('the reconnection was cancelled');
-      }
+          // ! a misuse to the loop, so it ends at once, in the other sides' words
+          if (isStopped) {
+            throw new ProgrammerError(`the participant ${id} is stopped`);
+          }
 
-      try {
-        await link();
-        break;
-      } catch (reason) {
-        // * taken over as it linked anew: no attempt follows it
-        if (isTakenOver) {
-          throw new GenericError(
-            `the link of ${id} was taken over by another link of its id, and connects no more until it is started again`,
-            { cause: reason }
-          );
+          // * every failure of a link another attempt may mend, an adapter's misuse among them
+          await link().catch((reason: unknown) => {
+            throw wrapReason(ConnectError, reason);
+          });
+        },
+        {
+          clock,
+          delay,
+          maximumAttempts,
+          signal: signal === undefined ? fenced : AbortSignal.any([signal, fenced]),
+          tap,
         }
+      );
+    } catch (reason) {
+      const cause = toError(reason);
 
-        if (attempt >= maximumAttempts) {
-          throw new GenericError(
-            `the link of ${id} went down, and ${String(attempt)} attempts did not bring it back`,
-            { cause: reason }
-          );
-        }
-      }
-
-      try {
-        await createPromise(
-          (resolve) => {
-            resolve();
-          },
-          { clock, delay, signal }
-        );
-      } catch {
-        throw ended('the reconnection was cancelled');
-      }
+      throw new GenericError(
+        cause instanceof ReconnectError
+          ? `the link of ${id} went down, and ${String(attempts)} attempts did not bring it back`
+          : `the link of ${id} went down, and its reconnection ended: ${cause.message}`,
+        { cause }
+      );
     }
 
     for (const { acceptor, opener, peer } of former) {
@@ -1575,6 +1579,8 @@ export const createBrokerParticipant = (options: IBrokerParticipantOptions): IBr
   const fence = (): void => {
     isTakenOver = true;
     linking = undefined;
+    relinking?.abort();
+    relinking = undefined;
     report(new GenericError(`the link of ${id} was taken over by another link of its id`));
   };
 
@@ -1627,7 +1633,7 @@ export const createBrokerParticipant = (options: IBrokerParticipantOptions): IBr
       return;
     }
 
-    if (reconnection === undefined) {
+    if (!reconnects) {
       linking = undefined;
 
       report(new GenericError(`the link of ${id} went down`));
@@ -1635,8 +1641,15 @@ export const createBrokerParticipant = (options: IBrokerParticipantOptions): IBr
       return;
     }
 
-    linking = relink(former).catch((reason: unknown) => {
-      linking = undefined;
+    const fencing = new AbortController();
+
+    relinking = fencing;
+
+    const relinked = relink(former, fencing.signal).catch((reason: unknown) => {
+      // * ended: it stays down, and the next start or connect links it anew
+      if (linking === relinked) {
+        linking = undefined;
+      }
 
       // * taken over as it linked anew: its fence reported it
       if (!isTakenOver) {
@@ -1645,6 +1658,8 @@ export const createBrokerParticipant = (options: IBrokerParticipantOptions): IBr
 
       throw toError(reason);
     });
+
+    linking = relinked;
     linking.catch(noop);
   };
 

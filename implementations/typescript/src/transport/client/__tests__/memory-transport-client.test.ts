@@ -565,6 +565,49 @@ test.describe('createMemoryTransportClient', () => {
     expect([client.isOpen(), server.clients.length]).toEqual([true, 1]);
   });
 
+  // spec 1.4
+  test('refuses a fixed delay out of bounds as reconnect is called, nothing changed', async () => {
+    await using server = createMemoryTransportServer();
+    await using client = createMemoryTransportClient();
+    const aborted = AbortSignal.abort();
+    const told: string[] = [];
+    const refusalOf = (written: string): ProgrammerError => {
+      return new ProgrammerError(
+        `a delay is 0 for at once, or a number of milliseconds from 1 to 2147483647, not ${written}`
+      );
+    };
+
+    await server.start();
+    await client.connect({ server });
+    client.on('reconnect', () => {
+      told.push('reconnect');
+    });
+    client.on('close', () => {
+      told.push('close');
+    });
+
+    // * refused as it is called: after its state's guards, before its signal
+    for (const [delay, written] of [
+      [0.4, '0.4'],
+      [2 ** 31, '2147483648'],
+      [Infinity, 'Infinity'],
+    ] as const) {
+      await expect(client.reconnect({ delay, signal: aborted }), written).rejects.toThrow(
+        refusalOf(written)
+      );
+    }
+
+    // nothing changed: open, its connection kept, no reconnect told and no close
+    expect([client.isOpen(), server.clients.length, told]).toEqual([true, 1, []]);
+
+    // its state's guards first: a client never connected says so
+    await using never = createMemoryTransportClient();
+
+    await expect(never.reconnect({ delay: Infinity })).rejects.toThrow(
+      new ProgrammerError('the transport client was never connected')
+    );
+  });
+
   test('refuses a second connect or reconnect while one is pending', async () => {
     for (const isReconnect of [false, true]) {
       await using server = createMemoryTransportServer();
