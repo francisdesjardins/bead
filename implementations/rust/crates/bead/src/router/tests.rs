@@ -41,6 +41,7 @@ mod client_subscription_rebinding;
 mod client_subscription_registration;
 mod client_subscriptions;
 mod client_trace;
+mod core_link;
 mod disposal;
 mod limits;
 mod metrics;
