@@ -12,7 +12,7 @@ use crate::envelope::{Envelope, RequestHeader};
 use crate::errors::ResolverError;
 use crate::failure::Failure;
 use crate::identity::Procedure;
-use crate::managers::service::ResolverDependencies;
+use crate::managers::service::RequestResolverDependencies;
 use crate::payloads::{CodecRefusal, JsonCodec, PayloadCodec, TextCodec};
 use crate::router::admissions::BeforeRequest;
 use crate::router::types::RouterError;
@@ -21,7 +21,7 @@ use crate::testing::scripted::{Sending, handle_of};
 
 fn command() -> Procedure {
     Procedure {
-        kind: Some(ProcedureKind::Command),
+        procedure_kind: Some(ProcedureKind::Command),
         ..echo()
     }
 }
@@ -37,7 +37,10 @@ async fn get_command_resolver_runs_the_servers_request_registered_in_the_router_
     }));
     fixture
         .manager
-        .get_command_resolver(&command(), ResolverDependencies::of(TextCodec, TextCodec))
+        .get_command_resolver(
+            &command(),
+            RequestResolverDependencies::new(TextCodec, TextCodec),
+        )
         .expect("defined")
         .on(Arc::new(|request, response| {
             response.result(format!("{}!", request.payload))
@@ -67,7 +70,7 @@ async fn get_command_resolver_runs_the_servers_request_registered_in_the_router_
 #[tokio::test]
 async fn on_a_clients_router_a_refusal_is_the_clients() {
     let fixture = ClientFixture::new();
-    let mut dependencies = ResolverDependencies::of(JsonCodec, JsonCodec);
+    let mut dependencies = RequestResolverDependencies::new(JsonCodec, JsonCodec);
     dependencies.before_request = Some(BeforeRequest::new(|_| false, None));
     fixture
         .manager
@@ -149,7 +152,7 @@ async fn a_refusal_that_cannot_go_out_is_not_answered_again() {
     fixture.router.on_error(Arc::new(move |error, _| {
         locked(&hearing).push(error.clone());
     }));
-    let mut dependencies = ResolverDependencies::of(TextCodec, TextCodec);
+    let mut dependencies = RequestResolverDependencies::new(TextCodec, TextCodec);
     dependencies.before_request = Some(BeforeRequest::new(|_| false, None));
     fixture
         .manager
@@ -192,26 +195,38 @@ async fn a_callback_that_fails_before_it_answers_is_answered_as_failed_and_its_r
     }));
     fixture
         .manager
-        .get_request_resolver(&echo(), ResolverDependencies::of(TextCodec, TextCodec))
+        .get_request_resolver(
+            &echo(),
+            RequestResolverDependencies::new(TextCodec, TextCodec),
+        )
         .expect("defined")
         .on(Arc::new(|_, _| panic!("thrown")))
         .expect("registered");
     fixture
         .manager
         .get_request_resolver(
-            &Procedure { id: 2, ..echo() },
-            ResolverDependencies::of(TextCodec, TextCodec),
+            &Procedure {
+                procedure_id: 2,
+                ..echo()
+            },
+            RequestResolverDependencies::new(TextCodec, TextCodec),
         )
         .expect("defined")
         .on(Arc::new(|_, _| {
             Box::pin(async { Err(ResolverError::other(std::io::Error::other("rejected"))) })
         }))
         .expect("registered");
-    let mut dependencies = ResolverDependencies::of(TextCodec, TextCodec);
+    let mut dependencies = RequestResolverDependencies::new(TextCodec, TextCodec);
     dependencies.before_request = Some(BeforeRequest::new(|_| panic!("thrown"), None));
     fixture
         .manager
-        .get_request_resolver(&Procedure { id: 3, ..echo() }, dependencies)
+        .get_request_resolver(
+            &Procedure {
+                procedure_id: 3,
+                ..echo()
+            },
+            dependencies,
+        )
         .expect("defined")
         .on(Arc::new(|_, _| {
             panic!("an admission error keeps the callback out")

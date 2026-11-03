@@ -13,7 +13,7 @@ use crate::client::ClientOptions;
 use crate::constants::RouterSide;
 use crate::identity::Procedure;
 use crate::managers::service::{
-    RequestDependencies, RequestOptions, ResolverDependencies, Response,
+    RequestDependencies, RequestOptions, RequestResolverDependencies, Response,
 };
 use crate::payloads::JsonCodec;
 use crate::server::ServerOptions;
@@ -24,15 +24,15 @@ fn echo_of_1() -> Procedure {
     Procedure {
         service_id: 1,
         service_revision: 1,
-        kind: None,
+        procedure_kind: None,
         ..echo()
     }
 }
 
 fn named((id, name): (u16, &str)) -> Procedure {
     Procedure {
-        id,
-        name: name.to_owned(),
+        procedure_id: id,
+        procedure_name: name.to_owned(),
         ..echo_of_1()
     }
 }
@@ -133,8 +133,8 @@ fn writes_each_series_from_one_reading_of_its_counts() {
     let failing = metrics
         .declare_resolver(
             &Procedure {
-                id: 2,
-                name: "fail".to_owned(),
+                procedure_id: 2,
+                procedure_name: "fail".to_owned(),
                 ..echo()
             },
             false,
@@ -494,7 +494,10 @@ async fn counts_exactly_under_calls_made_at_once_from_many_threads() {
 
     pair.server
         .services()
-        .get_request_resolver(&echo(), ResolverDependencies::of(JsonCodec, JsonCodec))
+        .get_request_resolver(
+            &echo(),
+            RequestResolverDependencies::new(JsonCodec, JsonCodec),
+        )
         .expect("echo resolved")
         .on(Arc::new(|request, response: Response<JsonCodec>| {
             response.result(request.payload)
@@ -504,7 +507,7 @@ async fn counts_exactly_under_calls_made_at_once_from_many_threads() {
     let asking = pair
         .client
         .services()
-        .get_request(&echo(), RequestDependencies::of(JsonCodec, JsonCodec))
+        .get_request(&echo(), RequestDependencies::new(JsonCodec, JsonCodec))
         .expect("echo asked");
     let threads: Vec<_> = (0..THREADS)
         .map(|thread| {

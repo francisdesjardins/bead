@@ -8,7 +8,7 @@ use bytes::Bytes;
 use crate::broker::adapter::{BrokerMessage, BrokerMessageOptions, BrokerPublication};
 
 fn publication() -> BrokerPublication {
-    BrokerPublication::of(["bead", "i", "ada"], Bytes::from_static(&[0xB1]))
+    BrokerPublication::new(["bead", "i", "ada"], Bytes::from_static(&[0xB1]))
 }
 
 #[test]

@@ -8,6 +8,7 @@ use bytes::Bytes;
 use tokio::sync::oneshot;
 
 use super::{Scripted, failure_of, locked, notification_of, result_of, token};
+use crate::UnregisterNotificationOptions;
 use crate::constants::{EnvelopeKind, ProtocolCode};
 use crate::envelope::{Credential, Envelope};
 use crate::failure::Failure;
@@ -135,7 +136,10 @@ async fn keeps_the_call_id_of_a_subscription_let_go_of_a_while_silent_on_what_co
     super::answered(subscribing).await.expect("subscribed");
     scripted
         .router
-        .unregister_notification((&notification.like(), true))
+        .unregister_notification(
+            &notification.like(),
+            &UnregisterNotificationOptions::default(),
+        )
         .await;
 
     // on its way when it was let go of: dropped in silence, and so is the failure that ends it,

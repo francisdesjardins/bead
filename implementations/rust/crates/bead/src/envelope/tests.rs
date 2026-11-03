@@ -4,8 +4,8 @@
 use bytes::Bytes;
 
 use super::{
-    ChunkHeader, Credential, CreditHeader, FailureHeader, FailureRecord, Header, RequestHeader,
-    ResultHeader, header_bytes_of, write_failure, write_header,
+    ChunkHeader, Credential, CreditHeader, EnvelopeHeader, FailureHeader, FailureRecord,
+    RequestHeader, ResultHeader, header_bytes_of, write_failure, write_header,
 };
 use crate::constants::{CredentialScheme, FailureScope};
 use crate::router::types::LIMIT_DEFAULTS;
@@ -43,7 +43,7 @@ fn refuses_to_write_a_header_and_writes_nothing() {
     let unwritable = [
         (
             "a call id of 0",
-            Header::Result(ResultHeader {
+            EnvelopeHeader::Result(ResultHeader {
                 call_id: 0,
                 ..result(None)
             }),
@@ -51,7 +51,7 @@ fn refuses_to_write_a_header_and_writes_nothing() {
         ),
         (
             "a service id of 0",
-            Header::Request(RequestHeader {
+            EnvelopeHeader::Request(RequestHeader {
                 service_id: 0,
                 ..request(None)
             }),
@@ -59,7 +59,7 @@ fn refuses_to_write_a_header_and_writes_nothing() {
         ),
         (
             "a procedure id of 0",
-            Header::Request(RequestHeader {
+            EnvelopeHeader::Request(RequestHeader {
                 procedure_id: 0,
                 ..request(None)
             }),
@@ -67,7 +67,7 @@ fn refuses_to_write_a_header_and_writes_nothing() {
         ),
         (
             "a destination id of 0",
-            Header::Request(RequestHeader {
+            EnvelopeHeader::Request(RequestHeader {
                 destination_id: Some(0),
                 ..request(None)
             }),
@@ -75,7 +75,7 @@ fn refuses_to_write_a_header_and_writes_nothing() {
         ),
         (
             "a request paced that opens no subscription",
-            Header::Request(RequestHeader {
+            EnvelopeHeader::Request(RequestHeader {
                 paced: true,
                 ..request(None)
             }),
@@ -83,7 +83,7 @@ fn refuses_to_write_a_header_and_writes_nothing() {
         ),
         (
             "an offset of 2^53",
-            Header::Chunk(ChunkHeader {
+            EnvelopeHeader::Chunk(ChunkHeader {
                 call_id: 7,
                 offset: TWO_TO_53,
                 is_last: true,
@@ -92,7 +92,7 @@ fn refuses_to_write_a_header_and_writes_nothing() {
         ),
         (
             "an end of 2^53",
-            Header::Credit(CreditHeader {
+            EnvelopeHeader::Credit(CreditHeader {
                 call_id: 7,
                 credit_end: TWO_TO_53,
                 paced: false,
@@ -101,7 +101,7 @@ fn refuses_to_write_a_header_and_writes_nothing() {
         ),
         (
             "a total of 2^53",
-            Header::Result(ResultHeader {
+            EnvelopeHeader::Result(ResultHeader {
                 call_id: 3,
                 total: Some(TWO_TO_53),
                 credential: None,
@@ -132,40 +132,40 @@ fn refuses_a_credential_its_kind_does_not_take_or_its_scheme_does_not_hold() {
     let unwritable = [
         (
             "NONE on a request",
-            Header::Request(request(Some(Credential::None))),
+            EnvelopeHeader::Request(request(Some(Credential::None))),
         ),
         (
             "a JWT on a result",
-            Header::Result(result(Some(Credential::Jwt(Bytes::from_static(b"a"))))),
+            EnvelopeHeader::Result(result(Some(Credential::Jwt(Bytes::from_static(b"a"))))),
         ),
         (
             "ELSEWHERE on a failure",
-            Header::Failure(FailureHeader {
+            EnvelopeHeader::Failure(FailureHeader {
                 call_id: 2,
                 credential: Some(Credential::Elsewhere),
             }),
         ),
         (
             "a scheme to come on a result",
-            Header::Result(result(Some(Credential::ToCome {
+            EnvelopeHeader::Result(result(Some(Credential::ToCome {
                 scheme: CredentialScheme::new(4),
                 bytes: Bytes::new(),
             }))),
         ),
         (
             "a JWT of no character",
-            Header::Request(request(Some(Credential::Jwt(Bytes::new())))),
+            EnvelopeHeader::Request(request(Some(Credential::Jwt(Bytes::new())))),
         ),
         (
             "a JWT of 1,005 characters",
-            Header::Request(request(Some(Credential::Jwt(Bytes::from(vec![
+            EnvelopeHeader::Request(request(Some(Credential::Jwt(Bytes::from(vec![
                 b'a';
                 1_005
             ]))))),
         ),
         (
             "a scheme to come numbered as one the protocol names",
-            Header::Request(request(Some(Credential::ToCome {
+            EnvelopeHeader::Request(request(Some(Credential::ToCome {
                 scheme: CredentialScheme::JWT,
                 bytes: Bytes::from_static(b"a"),
             }))),

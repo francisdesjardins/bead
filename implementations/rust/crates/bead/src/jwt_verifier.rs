@@ -491,19 +491,29 @@ fn parts_of(token: &[u8]) -> Option<[&[u8]; 3]> {
         .then_some([header, claims, signature])
 }
 
+/// A token's header and claims set, read and not verified.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct ReadJwt {
+    /// Its header.
+    pub header: Map<String, Value>,
+    /// Its claims set.
+    pub claims: Map<String, Value>,
+}
+
 /// A token's header and claims set as step 1 of section 13.8 reads them, verifying nothing.
 ///
 /// What a relay that does not verify reads its `aud` from, and a key set's ask its `kid` and its
 /// `iss`; none for a token that does not read.
 #[must_use]
-pub fn read_jwt(token: &[u8]) -> Option<(Map<String, Value>, Map<String, Value>)> {
+pub fn read_jwt(token: &[u8]) -> Option<ReadJwt> {
     let [header, claims, signature] = parts_of(token)?;
     let header = object_of(header)?;
     let claims = object_of(claims)?;
 
     base64url::decode(signature)?;
 
-    Some((header, claims))
+    Some(ReadJwt { header, claims })
 }
 
 // milliseconds since the epoch of a wall clock's reading

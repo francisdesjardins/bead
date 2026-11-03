@@ -86,7 +86,7 @@ fn heard_by(adapter: &MemoryBrokerAdapter) -> (Heard, Arc<Mutex<Vec<bool>>>) {
 // a linked adapter of the broker and what reached it, its acknowledgement given as it comes
 async fn linked_of((broker, id): (&MemoryBroker, &str)) -> (MemoryBrokerAdapter, Heard) {
     let adapter = broker
-        .adapter(&MemoryBrokerAdapterOptions::of(id))
+        .adapter(&MemoryBrokerAdapterOptions::new(id))
         .expect("an adapter");
     let (heard, _) = heard_by(&adapter);
 
@@ -99,7 +99,7 @@ async fn linked_of((broker, id): (&MemoryBroker, &str)) -> (MemoryBrokerAdapter,
 }
 
 fn publication_of(payload: u8) -> BrokerPublication {
-    BrokerPublication::of(TOPIC, Bytes::from(vec![payload]))
+    BrokerPublication::new(TOPIC, Bytes::from(vec![payload]))
 }
 
 fn taken(heard: &Heard) -> Vec<String> {
@@ -194,7 +194,7 @@ async fn a_publish_a_listener_makes_within_the_broker_s_turn_comes_behind_one_it
     let (entered, entering) = std::sync::mpsc::channel();
     let (releasing, released) = std::sync::mpsc::channel();
     let publisher = broker
-        .adapter(&MemoryBrokerAdapterOptions::of("ada"))
+        .adapter(&MemoryBrokerAdapterOptions::new("ada"))
         .expect("an adapter");
     let inbox = topic_of(["bead", "i", "ada"]);
 
@@ -221,7 +221,7 @@ async fn a_publish_a_listener_makes_within_the_broker_s_turn_comes_behind_one_it
         .expect("subscribed");
 
     // its "go" reaches the publisher's application within a turn of the broker's
-    drop(other.publish(BrokerPublication::of(inbox, Bytes::from_static(&[0x60]))));
+    drop(other.publish(BrokerPublication::new(inbox, Bytes::from_static(&[0x60]))));
     entering
         .recv_timeout(Duration::from_secs(10))
         .expect("the publisher's application within the broker's turn");
@@ -307,7 +307,7 @@ async fn hands_a_group_message_to_one_member_in_turn_and_again_to_another_when_a
     );
 
     // a group needs its adapter to offer one
-    let mut options = MemoryBrokerAdapterOptions::of("plain");
+    let mut options = MemoryBrokerAdapterOptions::new("plain");
 
     options.capabilities = Some(BrokerCapabilities::NONE);
 
@@ -397,14 +397,14 @@ async fn copies_reorders_and_drops_a_message_as_a_test_asks_drops_past_a_subscri
     let departure = topic_of(["bead", "d", "cid"]);
     let (lost, _) = linked_of((&broker, "cid-link")).await;
     let will = BrokerStart {
-        will: Some(BrokerPublication::of(
+        will: Some(BrokerPublication::new(
             departure.clone(),
             Bytes::from_static(&[0x0A]),
         )),
         ..BrokerStart::default()
     };
     let leaving = broker
-        .adapter(&MemoryBrokerAdapterOptions::of("cid"))
+        .adapter(&MemoryBrokerAdapterOptions::new("cid"))
         .expect("an adapter");
     let (_, downs) = heard_by(&leaving);
 
@@ -436,7 +436,7 @@ async fn takes_a_link_over_as_a_test_asks_as_a_second_link_of_its_id_would_its_s
     let (broker, clock) = broker_on(&MemoryBrokerOptions::default());
     let (ada, heard) = linked_of((&broker, "ada")).await;
     let bob = broker
-        .adapter(&MemoryBrokerAdapterOptions::of("bob"))
+        .adapter(&MemoryBrokerAdapterOptions::new("bob"))
         .expect("an adapter");
     let departure = topic_of(["bead", "d", "bob"]);
     let inbox = topic_of(["bead", "i", "bob"]);
@@ -446,7 +446,7 @@ async fn takes_a_link_over_as_a_test_asks_as_a_second_link_of_its_id_would_its_s
         .await
         .expect("subscribed");
     bob.start(BrokerStart {
-        will: Some(BrokerPublication::of(
+        will: Some(BrokerPublication::new(
             departure.clone(),
             Bytes::from_static(&[0x0A]),
         )),
@@ -466,7 +466,7 @@ async fn takes_a_link_over_as_a_test_asks_as_a_second_link_of_its_id_would_its_s
 
     // * no link of its id holds its inbox now
     assert_eq!(
-        ada.publish(BrokerPublication::of(inbox, Bytes::from_static(&[1])))
+        ada.publish(BrokerPublication::new(inbox, Bytes::from_static(&[1])))
             .await
             .expect("published"),
         BrokerPublished::NoSubscriber,
@@ -484,7 +484,7 @@ async fn takes_a_link_over_as_a_test_asks_as_a_second_link_of_its_id_would_its_s
 #[tokio::test]
 async fn refuses_a_second_adapter_of_one_id_and_a_will_asked_of_an_adapter_that_takes_none() {
     let (broker, _clock) = broker_on(&MemoryBrokerOptions::default());
-    let mut options = MemoryBrokerAdapterOptions::of("ada");
+    let mut options = MemoryBrokerAdapterOptions::new("ada");
 
     options.capabilities = Some(BrokerCapabilities::NONE);
 
@@ -492,7 +492,7 @@ async fn refuses_a_second_adapter_of_one_id_and_a_will_asked_of_an_adapter_that_
 
     assert_eq!(
         broker
-            .adapter(&MemoryBrokerAdapterOptions::of("ada"))
+            .adapter(&MemoryBrokerAdapterOptions::new("ada"))
             .expect_err("refused")
             .message(),
         "an adapter of this broker is ada already",
@@ -502,7 +502,7 @@ async fn refuses_a_second_adapter_of_one_id_and_a_will_asked_of_an_adapter_that_
         matches!(
             plain
                 .start(BrokerStart {
-                    will: Some(BrokerPublication::of(
+                    will: Some(BrokerPublication::new(
                         ["bead", "d", "ada"],
                         Bytes::from_static(b"gone"),
                     )),
@@ -551,7 +551,7 @@ async fn refuses_a_start_of_a_link_up_already_and_a_publication_past_maximum_mes
         ..MemoryBrokerOptions::default()
     });
     let ada = broker
-        .adapter(&MemoryBrokerAdapterOptions::of("ada"))
+        .adapter(&MemoryBrokerAdapterOptions::new("ada"))
         .expect("an adapter");
     let (heard, downs) = heard_by(&ada);
     let inbox = topic_of(["bead", "i", "ada"]);
@@ -577,7 +577,7 @@ async fn refuses_a_start_of_a_link_up_already_and_a_publication_past_maximum_mes
         "up already"
     );
     assert_eq!(
-        bob.publish(BrokerPublication::of(
+        bob.publish(BrokerPublication::new(
             inbox.clone(),
             Bytes::from_static(b"fives")
         ))
@@ -589,7 +589,7 @@ async fn refuses_a_start_of_a_link_up_already_and_a_publication_past_maximum_mes
     );
 
     // * published, then its subscriber's link lost in the same turn: what it held goes with it
-    let published = bob.publish(BrokerPublication::of(
+    let published = bob.publish(BrokerPublication::new(
         inbox.clone(),
         Bytes::from_static(b"lost"),
     ));
@@ -616,7 +616,7 @@ async fn refuses_a_start_of_a_link_up_already_and_a_publication_past_maximum_mes
 
     // an adapter no listener hears: handed a message, then lost, telling no one
     let cid = broker
-        .adapter(&MemoryBrokerAdapterOptions::of("cid"))
+        .adapter(&MemoryBrokerAdapterOptions::new("cid"))
         .expect("an adapter");
     let cid_inbox = topic_of(["bead", "i", "cid"]);
 
@@ -624,7 +624,7 @@ async fn refuses_a_start_of_a_link_up_already_and_a_publication_past_maximum_mes
     cid.subscribe(&cid_inbox, BrokerSubscription::default())
         .await
         .expect("subscribed");
-    bob.publish(BrokerPublication::of(cid_inbox, Bytes::from_static(&[1])))
+    bob.publish(BrokerPublication::new(cid_inbox, Bytes::from_static(&[1])))
         .await
         .expect("published");
     clock.settle().await;

@@ -13,8 +13,8 @@ public interface IClient : IAsyncDisposable
     ServiceManager Services { get; }
 
     /// <summary>Closes its transport's connection.</summary>
-    Task Disconnect(TransportDisconnectOptions? options = null);
+    Task Disconnect(TransportClientDisconnectOptions? options = null);
 
     /// <summary>Reconnects its transport; a dispose cancels it, as the token given does.</summary>
-    Task Reconnect(TransportReconnectOptions? options = null);
+    Task Reconnect(TransportClientReconnectOptions? options = null);
 }

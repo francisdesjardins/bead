@@ -8,13 +8,13 @@ use super::{Scripted, cancel_of, locked, request_header_of};
 use crate::constants::{EnvelopeKind, ProtocolCode};
 use crate::envelope::{Envelope, RequestHeader};
 use crate::errors::ResolverError;
-use crate::router::core::{Handler, ResolveFn, ResolverProps};
+use crate::router::core::{Handler, RequestResolverProps, ResolveFn};
 use crate::router::types::{RouterAnswer, RouterError, RouterLimitsOptions, TransportMessage};
 use crate::testing::scripted::Sending;
 
 fn echo() -> crate::identity::Procedure {
     crate::identity::Procedure {
-        kind: Some(crate::constants::ProcedureKind::Command),
+        procedure_kind: Some(crate::constants::ProcedureKind::Command),
         ..crate::testing::pair::echo()
     }
 }
@@ -96,7 +96,7 @@ async fn answers_capacity_exceeded_a_command_past_the_calls_its_server_has_it_an
         }),
         ..crate::router::client::RouterClientOptions::default()
     });
-    let handed = Arc::new(Mutex::new(Vec::<ResolverProps>::new()));
+    let handed = Arc::new(Mutex::new(Vec::<RequestResolverProps>::new()));
     scripted
         .router
         .register_resolver((&echo(), handler(super::keeping((&handed, None)))))
@@ -132,7 +132,7 @@ async fn for_a_service_a_procedure_or_a_destination_it_does_not_know_are_refused
     command(&scripted, request_header_of(2));
     scripted.settle().await;
     let mut procedure = echo();
-    procedure.id = 9;
+    procedure.procedure_id = 9;
     scripted
         .router
         .register_resolver((
@@ -268,7 +268,7 @@ async fn fails_a_command_to_no_connection_or_to_none_named() {
     let command = pair
         .server
         .services()
-        .get_command(&echo(), RequestDependencies::of(TextCodec, TextCodec))
+        .get_command(&echo(), RequestDependencies::new(TextCodec, TextCodec))
         .expect("command declared");
     let missing = command
         .call(

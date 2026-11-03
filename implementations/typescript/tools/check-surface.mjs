@@ -1,7 +1,7 @@
 #!/usr/bin/env node
-// ── The package's surface, pinned to its list, and its options judged ────────
+// ── The package's surface, pinned to its list, its options and tuples judged ─
 // Reads each entry of `package.json`'s `exports` through TypeScript 7's checker (its
-// `unstable/sync` API, at the version the lockfile pins) and holds two things (decisions 0004 and
+// `unstable/sync` API, at the version the lockfile pins) and holds three things (decisions 0004 and
 // 0006):
 //
 // - the surface: each entry's exports, then each declaration they name, with its members — a
@@ -14,15 +14,21 @@
 //   with two members required at most. A parameter is the options when it comes last and its type,
 //   `undefined` aside, is named `…Options`, or holds one in an intersection; a rest is judged by the
 //   last element of its tuple, a conditional one by each of its arms, never by a tuple's array
-//   members; options typed by a type parameter are judged where an instantiation is exported.
+//   members; options typed by a type parameter are judged where an instantiation is exported;
+// - the tuple rule: no export takes or gives a tuple, at any depth of a parameter's, a return's, a
+//   member's, an alias's or a constant's type, written or inferred, an alias of ours judged by what
+//   it names; nor takes an array apart in a parameter. A parameter list stays: a rest's own tuple,
+//   and at depth one whose every element is labeled, an event map's; a non-rest parameter's or a
+//   return's own type is never one. A conditional type's `[X] extends [Y]` is no value, skipped.
 //
-// What the rule waives is `WAIVED`, each with its reason. `bead/options-last` judges what syntax
-// shows of the rule; this judges what only the checker knows, a named type's members.
+// What the options rule waives is `WAIVED`, and the tuple rule `WAIVED_TUPLES`, each with its
+// reason. `bead/options-last` judges what syntax shows of the options rule; this judges what only
+// the checker knows, a named type's members.
 //
 // Usage, from the package's folder; `yarn check` runs it as `yarn surface:check`:
-//   node tools/check-surface.mjs           the surface against `surface.txt`, and the rule
-//   node tools/check-surface.mjs --write   writes `surface.txt` from the surface, and the rule
-//   node tools/check-surface.mjs --cases   the rule over `tools/surface.cases.ts`, which must be
+//   node tools/check-surface.mjs           the surface against `surface.txt`, and the rules
+//   node tools/check-surface.mjs --write   writes `surface.txt` from the surface, and the rules
+//   node tools/check-surface.mjs --cases   the rules over `tools/surface.cases.ts`, which must be
 //                                          refused on exactly the lines its cases mark
 
 import { readFileSync, writeFileSync } from 'node:fs';
@@ -35,7 +41,7 @@ const SURFACE = 'surface.txt';
 const CASES = 'tools/surface.cases.ts';
 const CASES_PROJECT = 'tools/surface.cases.tsconfig.json';
 // what the cases must mark at least, so a cases file emptied of them cannot pass
-const FLOOR = 10;
+const FLOOR = 20;
 
 const require = createRequire(join(ROOT, 'package.json'));
 const moduleOf = (specifier) => {
@@ -57,6 +63,18 @@ const WAIVED = Object.freeze({
 
 // `typeToString`'s `NoTruncation`: a type printed whole, however long
 const NO_TRUNCATION = 1;
+
+/**
+ * The tuple rule's waivers, by the declaration's file and name, each with its reason: what the
+ * platform types as a tuple, no value of Bead's a caller builds.
+ */
+const WAIVED_TUPLES = Object.freeze({
+  'src/proto/validate.ts entriesByKey': "a map's entries as ECMA-262's Object.entries gives them",
+  'src/transcoding/json-form.ts JsonNode':
+    "an object's members in order, each as ECMA-262's Object.entries gives it",
+  'src/transport/server/http-policy.ts HTTP_POLICY_MEMBERS':
+    'a frozen list of names, which as const types as a tuple',
+});
 
 /** An options type's name, its generic arguments aside. */
 const OPTIONS_NAME = /Options$/u;
@@ -402,6 +420,285 @@ function judgeMethods({ type, where }, scope) {
   }
 }
 
+// ── The tuple rule ───────────────────────────────────────────────────────────
+
+/** Records a tuple taken or given at `node`, once however many exports reach it. */
+function refuseTuple({ node, text }, scope) {
+  const place = placeOf(node);
+  const key = `${place.file}:${String(node.pos)} ${text}`;
+  if (scope.tupled.has(key)) {
+    return;
+  }
+  scope.tupled.add(key);
+  scope.faults.set(`${scope.where}\t${text}`, place);
+}
+
+/** Whether `WAIVED_TUPLES` names a declaration, wherever it is reached from. */
+function isWaivedTuple(node) {
+  return Object.hasOwn(WAIVED_TUPLES, `${placeOf(node).file} ${node.name?.getText() ?? ''}`);
+}
+
+/** Whether a tuple type writes a parameter list: every element labeled. */
+function isParameterList(node) {
+  return node.elements.every((element) => {
+    return is.isNamedTupleMember(element);
+  });
+}
+
+/** A tuple element's own type: what its label, its `...` or its `?` wraps. */
+function elementTypeOf(element) {
+  return is.isNamedTupleMember(element) ||
+    is.isRestTypeNode(element) ||
+    is.isOptionalTypeNode(element)
+    ? element.type
+    : element;
+}
+
+/** Judges a type parameter's constraint and default, each a type at depth. */
+function judgeTypeParameters(node, scope) {
+  for (const parameter of node.typeParameters ?? []) {
+    judgeTypeNode({ node: parameter.constraint, role: 'depth' }, scope);
+    judgeTypeNode({ node: parameter.default, role: 'depth' }, scope);
+  }
+}
+
+/**
+ * Judges a type as written. `role` is what it types: `own`, a parameter's, a return's or a
+ * constant's own type, never a tuple; `rest`, a rest's, whose own tuple is the parameter list
+ * itself; `depth`, any other place, where a tuple every element of which is labeled is a parameter
+ * list — an event map's, `Parameters<…>`'s — and any other is refused.
+ */
+function judgeTypeNode({ node, role }, scope) {
+  if (node === undefined) {
+    return;
+  }
+  if (is.isTupleTypeNode(node)) {
+    if (role === 'own' || (role === 'depth' && !isParameterList(node))) {
+      refuseTuple({ node, text: `a tuple, ${nodeTextOf(node)}` }, scope);
+    }
+    for (const element of node.elements) {
+      judgeTypeNode({ node: elementTypeOf(element), role: 'depth' }, scope);
+    }
+    return;
+  }
+  // * `[X] extends [Y]` is the checker's idiom against distribution, no value: its arms alone
+  if (is.isConditionalTypeNode(node)) {
+    judgeTypeNode({ node: node.trueType, role }, scope);
+    judgeTypeNode({ node: node.falseType, role }, scope);
+    return;
+  }
+  if (is.isParenthesizedTypeNode(node) || is.isTypeOperatorNode(node)) {
+    judgeTypeNode({ node: node.type, role }, scope);
+    return;
+  }
+  if (is.isUnionTypeNode(node)) {
+    for (const part of node.types) {
+      judgeTypeNode({ node: part, role }, scope);
+    }
+    return;
+  }
+  if (is.isTypeReferenceNode(node) || is.isExpressionWithTypeArguments(node)) {
+    followName(
+      { name: is.isTypeReferenceNode(node) ? node.typeName : node.expression, role },
+      scope
+    );
+    for (const argument of node.typeArguments ?? []) {
+      judgeTypeNode({ node: argument, role: 'depth' }, scope);
+    }
+    return;
+  }
+  if (is.isFunctionTypeNode(node) || is.isConstructorTypeNode(node)) {
+    judgeSignatureNode(node, scope);
+    return;
+  }
+  if (is.isTypeLiteralNode(node)) {
+    for (const member of node.members) {
+      judgeMember(member, scope);
+    }
+    return;
+  }
+  // a value's type, or a module's, is judged where it is declared, if ours
+  if (is.isTypeQueryNode(node) || is.isImportTypeNode(node)) {
+    return;
+  }
+  node.forEachChild((child) => {
+    judgeTypeNode({ node: child, role: 'depth' }, scope);
+  });
+}
+
+/**
+ * Judges a type as the checker reads it, where nothing is written: a tuple at any depth of its
+ * type arguments or of a union's or an intersection's parts, and a declaration of ours by its own.
+ */
+function judgeType({ node, seen = new Set(), type }, scope) {
+  if (type === undefined || seen.has(type.id)) {
+    return;
+  }
+  seen.add(type.id);
+  const { checker } = scope;
+  if (checker.isTupleType(type)) {
+    refuseTuple(
+      { node, text: `a tuple, ${textOf(checker.typeToString(type, node, NO_TRUNCATION))}` },
+      scope
+    );
+    return;
+  }
+  if (type.isUnionType() || type.isIntersectionType()) {
+    for (const part of type.getTypes() ?? []) {
+      judgeType({ node, seen, type: part }, scope);
+    }
+    return;
+  }
+  if (type.isTypeReference()) {
+    for (const argument of checker.getTypeArguments(type) ?? []) {
+      judgeType({ node, seen, type: argument }, scope);
+    }
+  }
+  for (const handle of type.getSymbol?.()?.declarations ?? []) {
+    const declaration = handle.resolve();
+    if (declaration === undefined || !isOurs(declaration.getSourceFile().fileName, scope)) {
+      continue;
+    }
+    if (is.isObjectLiteralExpression(declaration)) {
+      for (const property of declaration.properties) {
+        judgeMember(property, scope);
+      }
+    } else {
+      judgeDeclarationOnce(declaration, scope);
+    }
+  }
+}
+
+/**
+ * Judges a function-like declaration: its type parameters, each parameter — none an array taken
+ * apart, none of a tuple type but a rest — and what it returns, as written or as inferred.
+ */
+function judgeSignatureNode(node, scope) {
+  judgeTypeParameters(node, scope);
+  for (const parameter of node.parameters) {
+    const isRest = parameter.dotDotDotToken !== undefined;
+    if (!isRest && is.isArrayBindingPattern(parameter.name)) {
+      refuseTuple(
+        { node: parameter, text: `an array taken apart, ${nodeTextOf(parameter.name)}` },
+        scope
+      );
+    }
+    judgeTypeNode({ node: parameter.type, role: isRest ? 'rest' : 'own' }, scope);
+  }
+  if (node.type !== undefined) {
+    judgeTypeNode({ node: node.type, role: 'own' }, scope);
+    return;
+  }
+  if (
+    node.body === undefined ||
+    is.isConstructorDeclaration(node) ||
+    is.isSetAccessorDeclaration(node)
+  ) {
+    return;
+  }
+  const signature = scope.checker.getSignatureFromDeclaration(node);
+  const returned = signature && scope.checker.getReturnTypeOfSignature(signature);
+  judgeType({ node, type: returned }, scope);
+}
+
+/** Judges a member of an interface, a type literal, a class or an object literal. */
+function judgeMember(member, scope) {
+  const initializer = is.isPropertyAssignment(member) ? member.initializer : undefined;
+  if (
+    initializer !== undefined &&
+    (is.isArrowFunction(initializer) || is.isFunctionExpression(initializer))
+  ) {
+    judgeSignatureNode(initializer, scope);
+    return;
+  }
+  if (member.parameters !== undefined) {
+    judgeSignatureNode(member, scope);
+    return;
+  }
+  if (member.type !== undefined) {
+    judgeTypeNode({ node: member.type, role: 'depth' }, scope);
+    return;
+  }
+  const symbol = member.name && scope.checker.getSymbolAtLocation(member.name);
+  judgeType({ node: member, type: symbol && scope.checker.getTypeOfSymbol(symbol) }, scope);
+}
+
+/** Judges the declarations of ours a type's name stands for: an alias by what it names. */
+function followName({ name, role }, scope) {
+  let symbol = scope.checker.getSymbolAtLocation(name);
+  if (symbol !== undefined && symbol.flags & SymbolFlags.Alias) {
+    symbol = scope.checker.getAliasedSymbol(symbol);
+  }
+  for (const handle of symbol?.declarations ?? []) {
+    const declaration = handle.resolve();
+    if (declaration === undefined || !isOurs(declaration.getSourceFile().fileName, scope)) {
+      continue;
+    }
+    if (isWaivedTuple(declaration)) {
+      continue;
+    }
+    if (is.isTypeAliasDeclaration(declaration)) {
+      const key = `${placeOf(declaration).file}:${String(declaration.pos)} ${role}`;
+      if (!scope.tupled.has(key)) {
+        scope.tupled.add(key);
+        judgeTypeParameters(declaration, scope);
+        judgeTypeNode({ node: declaration.type, role }, scope);
+      }
+    } else if (is.isInterfaceDeclaration(declaration) || is.isClassDeclaration(declaration)) {
+      judgeDeclarationOnce(declaration, scope);
+    }
+  }
+}
+
+/** Judges a declaration of ours once, however many exports name it. */
+function judgeDeclarationOnce(node, scope) {
+  const key = `${placeOf(node).file}:${String(node.pos)} declaration`;
+  if (scope.tupled.has(key) || isWaivedTuple(node)) {
+    return;
+  }
+  scope.tupled.add(key);
+  if (is.isTypeAliasDeclaration(node)) {
+    followName({ name: node.name, role: 'depth' }, scope);
+  } else if (is.isInterfaceDeclaration(node) || is.isClassDeclaration(node)) {
+    judgeTypeParameters(node, scope);
+    for (const clause of node.heritageClauses ?? []) {
+      for (const type of clause.types) {
+        judgeTypeNode({ node: type, role: 'depth' }, scope);
+      }
+    }
+    for (const member of node.members) {
+      if (
+        !is.isClassDeclaration(node) ||
+        is.isConstructorDeclaration(member) ||
+        !isPrivate(member)
+      ) {
+        judgeMember(member, scope);
+      }
+    }
+  } else if (is.isFunctionDeclaration(node)) {
+    judgeSignatureNode(node, scope);
+  } else if (is.isVariableDeclaration(node)) {
+    const { initializer } = node;
+    if (node.type !== undefined) {
+      judgeTypeNode({ node: node.type, role: 'own' }, scope);
+    } else if (
+      initializer !== undefined &&
+      (is.isArrowFunction(initializer) || is.isFunctionExpression(initializer))
+    ) {
+      judgeSignatureNode(initializer, scope);
+    } else {
+      const symbol = scope.checker.getSymbolAtLocation(node.name);
+      judgeType({ node, type: symbol && scope.checker.getTypeOfSymbol(symbol) }, scope);
+    }
+  }
+}
+
+/** Judges an export's declaration of ours, called as `where`. */
+function judgeTuples({ node, where }, scope) {
+  scope.where = where;
+  judgeDeclarationOnce(node, scope);
+}
+
 // ── The walk ─────────────────────────────────────────────────────────────────
 
 /** Every entry of `exports` with its file, the `package.json` entry aside. */
@@ -418,7 +715,7 @@ function entriesOf() {
  */
 function walk(project, { entries, isCases }) {
   const { checker, program } = project;
-  const scope = { checker, faults: new Map(), isCases, judged: new Set() };
+  const scope = { checker, faults: new Map(), isCases, judged: new Set(), tupled: new Set() };
   const failures = [];
   const listed = [];
   const declarations = new Map();
@@ -464,6 +761,7 @@ function walk(project, { entries, isCases }) {
         if (!declarations.has(key)) {
           declarations.set(key, declarationOf({ name: symbol.name, node }, scope));
         }
+        judgeTuples({ node, where: `${entry} ${name}` }, scope);
       }
       if (ours.length === 0) {
         continue;
@@ -583,7 +881,7 @@ try {
         failures.push(`${CASES}:${String(line)} — refused, and not marked: ${fault}`);
       }
     }
-    summary = `the options rule refuses the ${String(marked.size)} lines its cases mark, and no other`;
+    summary = `the options and tuple rules refuse the ${String(marked.size)} lines their cases mark, and no other`;
   } else {
     for (const [fault, place] of walked.faults) {
       failures.push(`${place.file}:${String(place.line)} — ${fault.replace('\t', ': ')}`);
@@ -618,7 +916,7 @@ try {
           })
         );
       }
-      summary = `${String(walked.names)} names over ${String(entries.length)} entries are ${SURFACE}, and their options hold the rule`;
+      summary = `${String(walked.names)} names over ${String(entries.length)} entries are ${SURFACE}, their options hold the rule, and none takes or gives a tuple`;
     }
   }
 } finally {

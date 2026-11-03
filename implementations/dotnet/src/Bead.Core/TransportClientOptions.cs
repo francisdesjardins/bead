@@ -1,7 +1,7 @@
 namespace Bead;
 
 /// <summary>How a transport client closes its connection.</summary>
-public sealed record TransportDisconnectOptions
+public sealed record TransportClientDisconnectOptions
 {
     /// <summary>What its close says of being clean; true unless told.</summary>
     public bool IsClean { get; init; } = true;
@@ -16,39 +16,35 @@ public sealed record TransportDisconnectOptions
 /// </summary>
 /// <param name="previousDelay">The wait before, or none.</param>
 /// <param name="attempt">The number of the attempt that failed, from 1.</param>
-public delegate TimeSpan TransportReconnectDelay(TimeSpan? previousDelay, int attempt);
+public delegate TimeSpan TransportClientReconnectDelayResolver(TimeSpan? previousDelay, int attempt);
 
 /// <summary>
 /// A reconnection's delay, as every side takes one: a wait, the same after each failed attempt, or a
-/// <see cref="TransportReconnectDelay"/> that resolves each, as the TypeScript side's
-/// <c>TransportClientReconnectDelayOrDelayResolver</c> is a number or a function (0004). It holds
-/// one of the two, and judges neither: the reconnection holds the wait it comes to.
+/// <see cref="TransportClientReconnectDelayResolver"/> that resolves each, as the TypeScript side's
+/// <c>TransportClientReconnectDelay</c> is a number or a function (0004). It holds one of the two,
+/// built by the constructor of each, and judges neither: the reconnection holds the wait it comes to.
 /// </summary>
-public sealed record TransportReconnectDelayOrResolver
+public sealed record TransportClientReconnectDelay
 {
-    private TransportReconnectDelayOrResolver()
-    {
-    }
-
-    /// <summary>The wait after each failed attempt; none where a resolver gives it.</summary>
-    public TimeSpan? Fixed { get; private init; }
-
-    /// <summary>What resolves the wait after each failed attempt; none where it is fixed.</summary>
-    public TransportReconnectDelay? Resolver { get; private init; }
-
     /// <summary>The same wait after each failed attempt.</summary>
-    public static TransportReconnectDelayOrResolver Of(TimeSpan delay)
+    public TransportClientReconnectDelay(TimeSpan delay)
     {
-        return new TransportReconnectDelayOrResolver { Fixed = delay };
+        Fixed = delay;
     }
 
     /// <summary>The wait <paramref name="resolver"/> resolves after each failed attempt.</summary>
-    public static TransportReconnectDelayOrResolver Of(TransportReconnectDelay resolver)
+    public TransportClientReconnectDelay(TransportClientReconnectDelayResolver resolver)
     {
         ArgumentNullException.ThrowIfNull(resolver);
 
-        return new TransportReconnectDelayOrResolver { Resolver = resolver };
+        Resolver = resolver;
     }
+
+    /// <summary>The wait after each failed attempt; none where a resolver gives it.</summary>
+    public TimeSpan? Fixed { get; }
+
+    /// <summary>What resolves the wait after each failed attempt; none where it is fixed.</summary>
+    public TransportClientReconnectDelayResolver? Resolver { get; }
 
     /// <summary>The wait after the attempt numbered <paramref name="attempt"/> failed.</summary>
     internal TimeSpan After(TimeSpan? previousDelay, int attempt)
@@ -58,7 +54,7 @@ public sealed record TransportReconnectDelayOrResolver
 }
 
 /// <summary>How a transport client connects again.</summary>
-public sealed record TransportReconnectOptions
+public sealed record TransportClientReconnectOptions
 {
     /// <summary>
     /// The wait after a failed attempt, before the next, or what resolves it from the wait before and
@@ -68,7 +64,7 @@ public sealed record TransportReconnectOptions
     /// them — ends the reconnection with an <see cref="ArgumentOutOfRangeException"/>, before its tap
     /// hears it.
     /// </summary>
-    public TransportReconnectDelayOrResolver? Delay { get; init; }
+    public TransportClientReconnectDelay? Delay { get; init; }
 
     /// <summary>The attempts before it gives up with a <see cref="ReconnectException"/>; there is always one at least.</summary>
     public int MaximumAttempts { get; init; } = 5;

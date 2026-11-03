@@ -270,7 +270,10 @@ and `multiple-versions = "deny"`, each duplicate a listed exception with its rea
 **`bead-house`**, a dev-only crate whose test reads every crate's source with `syn`, holds what no
 lint does, as `tools/oxlint-plugin.mjs` and `tools/check-surface.mjs` hold the TypeScript side's:
 the parameter rule below, each options parameter taken by `&` and each public `…Options` struct's
-shape, its cases listed as `oxlint-plugin.cases.ts` lists its own; each library crate's public
+shape, its cases listed as `oxlint-plugin.cases.ts` lists its own; no tuple taken or given by a
+`pub` item, at any depth of its type, the crate's aliases of every visibility expanded, nor a
+variant or a `pub` tuple struct of two unnamed fields or more, a one-field newtype aside
+([0004](0004-one-behaviour-in-every-language.md)), its cases in `cases/tuples.rs`; each library crate's public
 items, every `pub` one with its declaration, its fields, its variants, its inherent methods and the
 traits it derives or implements, its bodies not, pinned to its list in
 `crates/bead-house/surfaces/`, `internal` a section of its own and the test kit left out by name, so
@@ -299,7 +302,7 @@ sides start as it is called — `request`, `notify`, `subscribe`, `command`, `co
 job to the owner, which draws the call id and sends in the order calls are made, and returns a named
 `#[must_use]` future of the outcome (`Call<T>`, `Connect`, …), as a promise or a `Task` is returned
 already running. What it refuses as it is made is its `Err` at once, as the other sides throw it
-synchronously: `fn request(&self, payload: P, request: Request) -> Result<Call<R>,
+synchronously: `fn request(&self, payload: P, request: RouterRequest) -> Result<Call<R>,
 ProgrammerError>`, read `router.request(payload, request)?.await`. **Dropping a call's future
 cancels nothing**: the call went when it was made, and goes on to its answer or its timeout; a
 cancel is its options' `CancellationToken`. A call made before its router's dispose goes, and one
@@ -308,7 +311,7 @@ made after fails unsent, `Disconnected`, "the router was disposed", in its futur
 call's, the state's, as on every side
 ([0045](0045-a-router-takes-what-its-application-makes-in-one-queue-behind-the-turn-that-tells-it.md)).
 What only the owner's state can tell is refused within the future, never as the operation is made:
-a session token another connection holds, given to `Sessions::set`, is its future's
+a session token another connection holds, given to `SessionManager::set`, is its future's
 `CallError::Refused`, where a timeout spec 1.4 does not hold is its `Err` at once, the matrix's row
 `A session token another connection holds, given to set`.
 
@@ -414,8 +417,8 @@ ms. A refusal is an `Err` whose reason is a code, `DurationRefusal::{UnderTheFlo
 ZeroRefused, NeverRefused, NotANumber}`, which the harness checks against the file's derived
 reason; the words stay Rust's. A `Duration` holds no value under zero, no NaN and nothing that is
 no number: those inputs are played at no place, each by its row. A reconnection's delay is a
-`ReconnectDelay`, `Fixed(Duration)` or `Computed`, a function of the previous delay and the attempt,
-as every side takes a number or a function ([0004](0004-one-behaviour-in-every-language.md)).
+`TransportClientReconnectDelay`, `Fixed(Duration)` or `Resolver`, a function of the previous delay
+and the attempt, as every side takes a number or a function ([0004](0004-one-behaviour-in-every-language.md)).
 
 ### Failures and errors
 
@@ -471,8 +474,8 @@ to revisit. The options struct is named `…Options`, **`#[non_exhaustive]` from
 its fields public, `Debug + Clone` and **never `Copy`**, **taken by `&`**. **Every field is an
 `Option`, with the default its doc states, but a setting the rule marks required
 ([0004](0004-one-behaviour-in-every-language.md)): such a field is plain, at most two of them, and
-the struct's constructor of its required members — an associated function that takes them and
-nothing else — sets them; the struct then has no `Default`. With none required it derives
+the struct's constructor of its required members, `new`, which takes them and nothing else, as
+C-BUILDER's `Command::new(program)` takes its program, sets them; the struct then has no `Default`. With none required it derives
 `Default`.** It is set as C#'s object initializer sets one, by assignment over what `default()` or
 that constructor gives:
 
@@ -495,15 +498,24 @@ and otherwise takes it as an `Option` refused where the object is used, a row of
 callback Bead declares takes its options as `&…Options` too. Clippy's `too_many_arguments` at 4,
 since it counts the receiver, and `bead-house`'s tests hold it: the parameters, each public
 `…Options` struct's shape, and each options parameter by `&`, as `max-params`, `bead/options-last`
-and `tools/check-surface.mjs` hold the TypeScript side's. The constructor's word is for the round on
-names, C-CTOR's `new` the default to beat; the code writes `of`.
+and `tools/check-surface.mjs` hold the TypeScript side's. The count binds every function. Inside the
+crate a tuple counts as one parameter. On the surface no item takes or gives one
+([0004](0004-one-behaviour-in-every-language.md)), which `bead-house`'s `tuples.rs` holds: two
+things are two parameters, a third essential thing a record of the call, `RouterRequest` or
+`NotifyRequest`, and several values given back a `#[non_exhaustive]` struct.
 
 ### Names, side by side
 
 C-CASE gives Rust its cases, and the words are the other sides': `RouterClient::new`,
 `MemoryTransportClient::new`, `ServiceManager`, `Clock` for `IClock`, a trait carrying no `I`, an
 acronym a word, `Jwt`, `Http`, an overload a second name, `notify` and `notify_unwritten`. A name
-that drifts from the other sides' exports is a parity defect, renamed on every side.
+that drifts from the other sides' exports is a parity defect, renamed on every side. A constructor
+is `new` (C-CTOR), and a conversion is `From` or `TryFrom` (C-CONV-TRAITS), never a static `of`. A
+function that derives a value from what it is given is `…_of`, the other sides' `…Of`. A method
+keeps the TypeScript side's word, as `ListedFailure::of` keeps `catalogue.of`. An event the other
+sides emit is a `…Listener` or an `on_…` the Rust side registers. A TypeScript `type` member is
+`…_type` here, since `type` is Rust's keyword. The Rust names are the other sides', each held by
+`tools/names.tsv` ([0004](0004-one-behaviour-in-every-language.md)).
 
 ### Payloads, a `JWT`, randomness
 

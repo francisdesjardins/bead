@@ -63,9 +63,9 @@ export interface ITransportClientReconnectOptions {
    * none, one from 1 to 2³¹ − 1 is rounded to the nearest whole one, which `tap` hears, and any
    * other — `Infinity` among them — rejects with a {@link ProgrammerError}, before `tap` hears it.
    */
-  delay?: TransportClientReconnectDelayOrDelayResolver | undefined;
+  delay?: TransportClientReconnectDelay | undefined;
   /** Attempts before giving up with a {@link ReconnectError}; there is always at least one. */
-  maxAttempts?: number | undefined;
+  maximumAttempts?: number | undefined;
   /**
    * Aborting it stops the attempts, the one connecting included, or disconnects a success, with a
    * {@link CancelError}.
@@ -289,14 +289,12 @@ export type TransportClientOnMessageCallback = EmitterListener<
   TransportClientEventMap[MESSAGE_EVENT]
 >;
 
-export type TransportClientReconnectDelay = number;
+/** A reconnection's wait, in milliseconds, or a function of the previous one and the attempt. */
+export type TransportClientReconnectDelay = number | TransportClientReconnectDelayResolver;
 export type TransportClientReconnectDelayResolver = (
   previousDelay: number | undefined,
   attempt: number
-) => TransportClientReconnectDelay;
-export type TransportClientReconnectDelayOrDelayResolver =
-  | TransportClientReconnectDelay
-  | TransportClientReconnectDelayResolver;
+) => number;
 export type TransportClientReconnectTapCallback = (nextDelay: number, attempt: number) => void;
 
 // ── WebSocket ─────────────────────────────────────────────────────────────────
@@ -562,6 +560,16 @@ export type HTTPTransportClient = ITransportClient<
 // ── Broker ────────────────────────────────────────────────────────────────────
 
 // interfaces
+
+/** What a {@link BrokerRefusedError} holds of a connect refused (spec 15.18, 15.6). */
+export interface IBrokerRefusal {
+  /** The layouts a 426 names. */
+  layouts?: readonly number[] | undefined;
+  /** `malformed`, `layout-refused`, `busy`, or `no-subscriber`. */
+  reason: string;
+  /** The REFUSE's status; none for `no-subscriber`. */
+  status?: number | undefined;
+}
 
 /** What a broker connect takes besides: the server it opens a connection to, by its name. */
 export interface IBrokerTransportClientConnectOptions extends ITransportClientConnectOptions {

@@ -33,8 +33,8 @@ pub fn options_first(options: &GoodOptions, a: u32) {}
 // refused: a fourth, the options not last
 pub fn fourth(a: u32, b: u32, options: GoodOptions, d: u32) {}
 
-// a tuple taken whole is one parameter
-pub fn tupled((a, b, c): (u32, u32, u32), (d, e): (u32, u32)) {}
+// a tuple taken whole is one parameter inside a crate; the surface takes none (tuples.rs)
+fn tupled((a, b, c): (u32, u32, u32), (d, e): (u32, u32)) {}
 
 // ── Beside a receiver ────────────────────────────────────────────────────────
 
@@ -74,7 +74,7 @@ pub fn in_option(a: u32, options: Option<&GoodOptions>) {}
 pub fn twice_borrowed(options: &&GoodOptions) {}
 
 // a tuple taken whole is judged by no form of its own
-pub fn tupled_options((a, options): (u32, GoodOptions)) {}
+fn tupled_options((a, options): (u32, GoodOptions)) {}
 
 // ── A callback a type alias declares ─────────────────────────────────────────
 

@@ -5,7 +5,6 @@ use super::{Scripted, TIMEOUT, answered, notification_of, result_of};
 use crate::constants::EnvelopeKind;
 use crate::constants::ProtocolCode;
 use crate::errors::CallError;
-use crate::router::server::CallHooks;
 use bytes::Bytes;
 
 #[tokio::test]
@@ -66,10 +65,7 @@ async fn keeps_the_subscription_when_its_replacement_is_refused_before_drawing_a
         .router
         .request(
             Bytes::from(vec![0; 0x100_0001]),
-            (
-                super::request_of((Some(notification.like()), TIMEOUT)),
-                CallHooks::default(),
-            ),
+            super::request_of((Some(notification.like()), TIMEOUT)),
         )
         .expect("a request future");
     assert!(

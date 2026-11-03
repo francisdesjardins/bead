@@ -8,8 +8,8 @@ use serde_json::{Value, json};
 use sha2::Sha256;
 
 use super::{
-    JwtAgainst, JwtAlgorithm, JwtKey, JwtRefusal, JwtVerdict, assert_jwt_key, audiences_of,
-    read_jwt, verify_jwt,
+    JwtAgainst, JwtAlgorithm, JwtKey, JwtRefusal, JwtVerdict, ReadJwt, assert_jwt_key,
+    audiences_of, read_jwt, verify_jwt,
 };
 use crate::base64url;
 
@@ -72,7 +72,7 @@ fn reads_a_token_s_header_and_claims_verifying_nothing_and_none_of_what_is_no_to
         part_of(&json!({ "iss": "https://issuer.example", "aud": ["a", "b"] })),
         base64url::encode(b"signature")
     );
-    let (header, claims) = read_jwt(token.as_bytes()).expect("a token read");
+    let ReadJwt { header, claims } = read_jwt(token.as_bytes()).expect("a token read");
 
     assert_eq!(header.get("kid"), Some(&Value::from("k1")), "its header");
     assert_eq!(audiences_of(claims.get("aud")), ["a", "b"], "its audiences");
@@ -234,8 +234,10 @@ fn reads_unverified_jwts_only_when_all_three_parts_decode() {
     }
 
     // * a one-byte signature is readable here: only the verifier judges its signature
-    let (read_header, read_claims) =
-        read_jwt(format!("{header}.{claims}.AA").as_bytes()).expect("read");
+    let ReadJwt {
+        header: read_header,
+        claims: read_claims,
+    } = read_jwt(format!("{header}.{claims}.AA").as_bytes()).expect("read");
     let object = |part: &str| {
         serde_json::from_slice::<Value>(&base64url::decode(part.as_bytes()).expect("a part"))
             .expect("JSON")
@@ -287,7 +289,7 @@ fn reads_a_token_s_parts_as_section_17_5_bounds_a_payload_no_number_past_the_lar
         r#""exp":{}"#,
         read_jwt(token.as_bytes())
             .expect("read")
-            .1
+            .claims
             .get("exp")
             .expect("its exp")
     );
@@ -351,7 +353,7 @@ fn reads_a_token_s_parts_as_section_17_5_bounds_a_payload_no_number_past_the_lar
 fn reads_the_wall_clock_once_the_signature_verifies_so_a_verification_that_waits_past_a_token_s_end_refuses_it_at_exp()
  {
     let (token, keys, audiences, _) = holding();
-    let claims = read_jwt(token.as_bytes()).expect("read").1;
+    let claims = read_jwt(token.as_bytes()).expect("read").claims;
     let exp = claims.get("exp").and_then(Value::as_u64).expect("its exp");
     let reads = core::sync::atomic::AtomicUsize::new(0);
     // the reading taken as the signature verified stands for a wall clock that went past the

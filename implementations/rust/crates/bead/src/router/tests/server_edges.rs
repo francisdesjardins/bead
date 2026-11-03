@@ -11,12 +11,13 @@ use super::{answered, locked, options_of, token};
 use crate::constants::EnvelopeKind;
 use crate::envelope::{Envelope, NotificationHeader};
 use crate::errors::{CallError, ResolverError};
-use crate::managers::service::{NotifyOptions, ResolverDependencies, Response};
+use crate::managers::service::{NotifyOptions, RequestResolverDependencies, Response};
 use crate::payloads::TextCodec;
-use crate::router::server::{CallHooks, RouterServer, RouterServerOptions, ServerRequest};
+use crate::router::server::{RouterServer, RouterServerOptions};
 use crate::router::types::RouterLimitsOptions;
 use crate::session_token::SessionToken;
 use crate::testing::pair::echo;
+use crate::{NotificationResolverDependencies, NotifyRequest, RouterRequest};
 
 fn opened(options: &RouterServerOptions) -> Served {
     let served = Served::new(options);
@@ -90,7 +91,7 @@ async fn notify_refuses_a_payload_too_large_for_each_connection_and_reports_it_w
         .router
         .notify(
             Ok(Bytes::from(vec![0; 0x100_0001])),
-            (news().address(), None, None),
+            NotifyRequest::new(news().address()),
         )
         .await
         .expect("targets selected");
@@ -118,7 +119,7 @@ async fn notify_sends_a_notification_in_one_envelope_of_the_routers_limits_or_re
             .router
             .notify(
                 Ok(Bytes::from(vec![0; count])),
-                (news().address(), None, None),
+                NotifyRequest::new(news().address()),
             )
             .await
             .expect("targets selected");
@@ -160,24 +161,22 @@ async fn notify_sends_a_notification_in_one_envelope_of_the_routers_limits_or_re
     options.connection_handle = Some(first());
     let asking = served
         .router
-        .request(
-            Bytes::from_static(&[1]),
-            (
-                ServerRequest {
-                    procedure: news().address(),
-                    maximum_payload_bytes: None,
-                    options,
-                    series: None,
-                    refusal: None,
-                },
-                CallHooks {
-                    on_sent: Some(Box::new(move |handed| {
-                        locked(&hearing).push(handed);
-                    })),
-                    ..CallHooks::default()
-                },
-            ),
-        )
+        .request(Bytes::from_static(&[1]), {
+            let mut request = RouterRequest {
+                procedure: news(),
+                options,
+                series: None,
+                refusal: None,
+                subscribes: None,
+                on_call_id: None,
+                on_sent: None,
+            };
+
+            request.on_sent = Some(Box::new(move |handed| {
+                locked(&hearing).push(handed);
+            }));
+            request
+        })
         .expect("a command");
     served.settle().await;
     assert_eq!(*locked(&heard), [true]);
@@ -197,16 +196,15 @@ async fn a_command_that_times_out_is_cancelled_on_its_even_call_id() {
         .router
         .request(
             Bytes::from_static(b"ping"),
-            (
-                ServerRequest {
-                    procedure: echo().address(),
-                    maximum_payload_bytes: None,
-                    options,
-                    series: None,
-                    refusal: None,
-                },
-                CallHooks::default(),
-            ),
+            RouterRequest {
+                procedure: echo(),
+                options,
+                series: None,
+                refusal: None,
+                subscribes: None,
+                on_call_id: None,
+                on_sent: None,
+            },
         )
         .expect("a command");
     served.clock.advance(Duration::from_millis(20)).await;
@@ -232,7 +230,10 @@ async fn a_callback_that_subscribes_as_the_router_is_disposed_hears_a_disconnect
         .services
         .get_notification_resolver(
             &news(),
-            (ResolverDependencies::of(TextCodec, TextCodec), TextCodec),
+            NotificationResolverDependencies::new(
+                RequestResolverDependencies::new(TextCodec, TextCodec),
+                TextCodec,
+            ),
         )
         .expect("news resolved")
         .on(Arc::new(move |request, response: Response<TextCodec>| {

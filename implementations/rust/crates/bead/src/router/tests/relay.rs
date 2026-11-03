@@ -2,7 +2,7 @@
 
 async fn through_own(
     served: &Served,
-    (resolver, props): (Arc<Handler>, ResolverProps),
+    (resolver, props): (Arc<Handler>, RequestResolverProps),
 ) -> crate::router::types::TransportMessage {
     let mut handled = (resolver.resolve)(props);
     core::future::poll_fn(|context| {
@@ -215,7 +215,7 @@ use crate::envelope::{Credential, Envelope, FailureRecord, RequestHeader, Result
 use crate::errors::{CallError, ProgrammerError};
 use crate::failure::Failure;
 use crate::router::admissions::BeforeRequest;
-use crate::router::core::{AdmissionRequest, Answerer, Handler, ResolverProps};
+use crate::router::core::{AdmissionRequest, Answerer, Handler, RequestResolverProps};
 use crate::router::relay::{
     self, Destination, DestinationOptions, DestinationRegistration, Relay, RelayLeg, RelayOptions,
     RelayRouter, RelayTarget,
@@ -322,8 +322,8 @@ fn header(call_id: u32, destination_id: u32) -> RequestHeader {
     }
 }
 
-fn props(answers: &Arc<Answers>, header: RequestHeader) -> ResolverProps {
-    ResolverProps {
+fn props(answers: &Arc<Answers>, header: RequestHeader) -> RequestResolverProps {
+    RequestResolverProps {
         connection_handle: first(),
         header,
         payload: Bytes::from_static(&[4, 5]),
@@ -600,13 +600,13 @@ async fn asks_leg_b_the_same_service_and_procedure_with_the_payloads_bytes_leg_a
         assert_eq!(
             (
                 leg.procedure.service_id,
-                leg.procedure.id,
+                leg.procedure.procedure_id,
                 leg.procedure.service_revision,
                 leg.procedure.maximum_payload_bytes
             ),
             (2, 1, 0, Some(1_000))
         );
-        assert_eq!(leg.procedure.name, "2/1 to 7");
+        assert_eq!(leg.procedure.procedure_name, "2/1 to 7");
         assert_eq!(
             (
                 leg.options.destination_id,
@@ -1279,7 +1279,7 @@ async fn keeps_the_first_response_error_when_its_detail_free_fallback_succeeds_o
             outcome: Mutex::new(Some(outcome)),
             ..Fallback::default()
         });
-        let request = ResolverProps {
+        let request = RequestResolverProps {
             answerer: Arc::<Fallback>::clone(&answerer),
             ..props(&Arc::new(Answers::default()), header(1, 7))
         };

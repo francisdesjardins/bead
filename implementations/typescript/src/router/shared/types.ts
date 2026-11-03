@@ -952,19 +952,7 @@ export interface IRouterLike<Handle extends string = ConnectionHandle> {
    * given why its value does not write (spec 17.2, item 6), sends it to none, counts it failed for
    * each of them, and reports why once.
    */
-  notify(
-    payload: Uint8Array | Error,
-    notification: {
-      /**
-       * Whether a subscription gets it, by its subscriber: its connection and the session that
-       * holds it; each does when not given.
-       */
-      filter?: ((subscriber: ISubscriber<Handle>) => boolean) | undefined;
-      /** What it replaces, queued for a paced subscription: the one of the same key. */
-      key?: NotificationKey | undefined;
-      procedure: IProcedureAddress;
-    }
-  ): Promise<unknown>;
+  notify(payload: Uint8Array | Error, notification: INotifyRequest<Handle>): Promise<unknown>;
   /**
    * Registers a notification; a procedure off spec section 16, refused first, rejects with a
    * {@link ProgrammerError}, as one already registered does.
@@ -983,27 +971,7 @@ export interface IRouterLike<Handle extends string = ConnectionHandle> {
    * by a throw: the manager tells the call's `tx` step once it returns, so a router that throws
    * loses that step.
    */
-  request(
-    payload: Uint8Array,
-    request: {
-      /**
-       * Hears the call's id once the router drew it, before the request goes; a call refused before
-       * it draws one is never heard. A router that never calls it leaves each step of its calls
-       * naming no call, as a call refused before its id does.
-       */
-      onCallId?: ((callId: CallId) => void) | undefined;
-      options: IResolvedRequestOptions;
-      procedure: IProcedure;
-      /**
-       * What refuses the call once it started, before it goes, as its requester judged it: a value
-       * its rules refuse (spec 18.2). It draws no call id, and its payload goes nowhere.
-       */
-      refusal?: Error | undefined;
-      /** The series its requester's declaration gave; a call that carries none counts as `_OTHER`. */
-      series?: IProcedureSeries | undefined;
-      subscribes?: INotificationLike | undefined;
-    }
-  ): Promise<IRouterResult>;
+  request(payload: Uint8Array, request: IRouterRequest): Promise<IRouterResult>;
   respond(
     response: RouterAnswer,
     request: Pick<IRequestResolverProps<Handle>, 'connectionHandle' | 'header'>
@@ -1027,8 +995,55 @@ export interface IRouterLike<Handle extends string = ConnectionHandle> {
    */
   unregisterNotification(
     notification: INotificationLike,
-    options?: { cancel?: boolean | undefined }
+    options?: IUnregisterNotificationOptions
   ): Promise<unknown>;
+}
+
+/** What a router's `notify` sends a notification's payload with: its procedure, and to whom. */
+export interface INotifyRequest<Handle extends string = ConnectionHandle> {
+  /**
+   * Whether a subscription gets it, by its subscriber: its connection and the session that holds
+   * it; each does when not given.
+   */
+  filter?: ((subscriber: ISubscriber<Handle>) => boolean) | undefined;
+  /** What it replaces, queued for a paced subscription: the one of the same key. */
+  key?: NotificationKey | undefined;
+  procedure: IProcedureAddress;
+}
+
+/** What a router's `request` sends a payload with: its procedure, its options, and its hooks. */
+export interface IRouterRequest {
+  /**
+   * Hears the call's id once the router drew it, before the request goes; a call refused before it
+   * draws one is never heard. A router that never calls it leaves each step of its calls naming no
+   * call, as a call refused before its id does.
+   */
+  onCallId?: ((callId: CallId) => void) | undefined;
+  /**
+   * Hears `true` as the request is handed to the transport, and `false` should the transport refuse
+   * it: before `true`, or after `false`, nothing of it was tried.
+   */
+  onSent?: ((isHanded: boolean) => void) | undefined;
+  options: IResolvedRequestOptions;
+  procedure: IProcedure;
+  /**
+   * What refuses the call once it started, before it goes, as its requester judged it: a value its
+   * rules refuse (spec 18.2). It draws no call id, and its payload goes nowhere.
+   */
+  refusal?: Error | undefined;
+  /**
+   * The series its requester's declaration gave, which a counted call counts into; `_OTHER`'s when
+   * none is given, as a relay's leg B.
+   */
+  series?: IProcedureSeries | undefined;
+  /** The notification the router holds for the procedure, which the call subscribes. */
+  subscribes?: INotificationLike | undefined;
+}
+
+/** How a router unregisters a notification. */
+export interface IUnregisterNotificationOptions {
+  /** Whether its peer is sent a cancel; `true` when not given. */
+  cancel?: boolean | undefined;
 }
 
 /** Where a call is: the connection it is on, and its call id there. */

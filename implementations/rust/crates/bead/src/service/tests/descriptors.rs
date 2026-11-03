@@ -9,7 +9,7 @@ use crate::testing::surface::Consumer;
 fn init() -> DescriptorInit<TextCodec, TextCodec> {
     DescriptorInit {
         procedure: crate::identity::Procedure {
-            kind: None,
+            procedure_kind: None,
             ..echo()
         },
         admission: AdmissionRule::None,
@@ -25,7 +25,7 @@ fn sets_a_requests_kind_a_notifying_requests_and_a_commands() {
     for (service_id, name) in [(7, "sayHello"), (8, "echo")] {
         let mut given = init().procedure;
         given.service_id = service_id;
-        given.name = name.to_owned();
+        given.procedure_name = name.to_owned();
         let request = request_of(DescriptorInit {
             procedure: given.clone(),
             ..init()
@@ -46,9 +46,9 @@ fn sets_a_requests_kind_a_notifying_requests_and_a_commands() {
         .expect("a command");
         assert_eq!(
             [
-                request.procedure().kind,
-                notifying.descriptor().procedure().kind,
-                command.procedure().kind
+                request.procedure().procedure_kind,
+                notifying.descriptor().procedure().procedure_kind,
+                command.procedure().procedure_kind
             ],
             [
                 Some(ProcedureKind::Request),
@@ -56,9 +56,9 @@ fn sets_a_requests_kind_a_notifying_requests_and_a_commands() {
                 Some(ProcedureKind::Command)
             ]
         );
-        assert_eq!(given.kind, None);
+        assert_eq!(given.procedure_kind, None);
         let stated = crate::identity::Procedure {
-            kind: Some(ProcedureKind::Command),
+            procedure_kind: Some(ProcedureKind::Command),
             ..given
         };
         let command = command_of(DescriptorInit {
@@ -69,14 +69,14 @@ fn sets_a_requests_kind_a_notifying_requests_and_a_commands() {
         assert_eq!(*command.procedure(), stated);
     }
     let consumer = Consumer::new();
-    consumer.accepts("pub fn check(d: &bead::Descriptor<bead::TextCodec, bead::TextCodec>) { let _ = d.procedure().id; }");
-    consumer.refuses("pub fn check(d: &bead::Descriptor<bead::TextCodec, bead::TextCodec>) { d.procedure().id = 9; }", ("E0594", "cannot assign"));
+    consumer.accepts("pub fn check(d: &bead::Descriptor<bead::TextCodec, bead::TextCodec>) { let _ = d.procedure().procedure_id; }");
+    consumer.refuses("pub fn check(d: &bead::Descriptor<bead::TextCodec, bead::TextCodec>) { d.procedure().procedure_id = 9; }", ("E0594", "cannot assign"));
 }
 
 #[test]
 fn refuses_a_procedure_that_states_another_kind() {
     let mut request = init();
-    request.procedure.kind = Some(ProcedureKind::Command);
+    request.procedure.procedure_kind = Some(ProcedureKind::Command);
     assert_eq!(
         request_of(request)
             .expect_err("a request cannot state command")
@@ -84,10 +84,10 @@ fn refuses_a_procedure_that_states_another_kind() {
         "echo is of kind command, not request"
     );
     let mut notifying = init();
-    notifying.procedure.kind = Some(ProcedureKind::Request);
+    notifying.procedure.procedure_kind = Some(ProcedureKind::Request);
     notifying_of(notifying, TextCodec).expect_err("a notifying request cannot state request");
     let mut command = init();
-    command.procedure.kind = Some(ProcedureKind::Notifies);
+    command.procedure.procedure_kind = Some(ProcedureKind::Notifies);
     command_of(command).expect_err("a command cannot state notifies");
 }
 

@@ -47,9 +47,9 @@ public sealed class MemoryTransportServerTests
         Assert.Equal(TransportTypes.Memory, server.Type);
         Assert.Equal(new TransportServerAddress("local", 0), await server.Start());
 
-        await first.Connect(new MemoryConnectOptions { Server = server, Address = "127.0.0.1", Port = 50_001 }, Cancelled);
-        await second.Connect(new MemoryConnectOptions { Server = server }, Cancelled);
-        await third.Connect(new MemoryConnectOptions { Server = server, Address = "::1" }, Cancelled);
+        await first.Connect(new MemoryTransportClientConnectOptions { Server = server, Address = "127.0.0.1", Port = 50_001 }, Cancelled);
+        await second.Connect(new MemoryTransportClientConnectOptions { Server = server }, Cancelled);
+        await third.Connect(new MemoryTransportClientConnectOptions { Server = server, Address = "::1" }, Cancelled);
 
         Assert.Equal(
             [
@@ -63,12 +63,12 @@ public sealed class MemoryTransportServerTests
         // stop and a start, which reset no rank
         await first.CloseConnection();
         await scheduler.WhenIdle().WaitAsync(Patience, Cancelled);
-        await first.Connect(new MemoryConnectOptions { Server = server, Address = "127.0.0.1", Port = 50_001 }, Cancelled);
-        await second.Reconnect(new TransportReconnectOptions { CancellationToken = Cancelled });
+        await first.Connect(new MemoryTransportClientConnectOptions { Server = server, Address = "127.0.0.1", Port = 50_001 }, Cancelled);
+        await second.Reconnect(new TransportClientReconnectOptions { CancellationToken = Cancelled });
         await server.Stop();
         await scheduler.WhenIdle().WaitAsync(Patience, Cancelled);
         await server.Start();
-        await third.Connect(new MemoryConnectOptions { Server = server }, Cancelled);
+        await third.Connect(new MemoryTransportClientConnectOptions { Server = server }, Cancelled);
 
         Assert.Equal(
             [
@@ -90,7 +90,7 @@ public sealed class MemoryTransportServerTests
         {
             var refused = await Assert.ThrowsAsync<ArgumentException>(() =>
             {
-                return named.Connect(new MemoryConnectOptions { Server = server, Address = address }, Cancelled);
+                return named.Connect(new MemoryTransportClientConnectOptions { Server = server, Address = address }, Cancelled);
             });
 
             Assert.StartsWith("an in-memory connect's address", refused.Message, StringComparison.Ordinal);
@@ -100,7 +100,7 @@ public sealed class MemoryTransportServerTests
         {
             await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() =>
             {
-                return named.Connect(new MemoryConnectOptions { Server = server, Port = port }, Cancelled);
+                return named.Connect(new MemoryTransportClientConnectOptions { Server = server, Port = port }, Cancelled);
             });
         }
 
@@ -124,8 +124,8 @@ public sealed class MemoryTransportServerTests
             heard.Add((message.Address, message.Port, connectionHandle));
         };
         Assert.Equal(new TransportServerAddress("local", 0), await server.Start());
-        await given.Connect(new MemoryConnectOptions { Server = server, Address = "203.0.113.7", Port = 50_123 }, Cancelled);
-        await none.Connect(new MemoryConnectOptions { Server = server }, Cancelled);
+        await given.Connect(new MemoryTransportClientConnectOptions { Server = server, Address = "203.0.113.7", Port = 50_123 }, Cancelled);
+        await none.Connect(new MemoryTransportClientConnectOptions { Server = server }, Cancelled);
         await given.Send(new TransportMessage(new byte[] { 1 }, false));
         await none.Send(new TransportMessage(new byte[] { 2 }, false));
         await scheduler.WhenIdle().WaitAsync(Patience, Cancelled);
@@ -154,7 +154,7 @@ public sealed class MemoryTransportServerTests
             refused.TrySetResult(refusal);
         };
         await transport.Start();
-        await caller.Connect(new MemoryConnectOptions { Server = transport, Address = "198.51.100.4", Port = 61_000 }, Cancelled);
+        await caller.Connect(new MemoryTransportClientConnectOptions { Server = transport, Address = "198.51.100.4", Port = 61_000 }, Cancelled);
 
         var failed = await Assert.ThrowsAsync<FailureException>(() =>
         {
@@ -180,7 +180,7 @@ public sealed class MemoryTransportServerTests
         // a connect before its start fails before anything goes
         var early = await Assert.ThrowsAsync<ConnectException>(() =>
         {
-            return first.Connect(new MemoryConnectOptions { Server = server }, Cancelled);
+            return first.Connect(new MemoryTransportClientConnectOptions { Server = server }, Cancelled);
         });
 
         Assert.Equal("the in-memory transport server is uninitialized, not open", early.Message);
@@ -199,8 +199,8 @@ public sealed class MemoryTransportServerTests
             told.Add($"second {isClean} {isQuick}");
         };
         await server.Start();
-        await first.Connect(new MemoryConnectOptions { Server = server }, Cancelled);
-        await second.Connect(new MemoryConnectOptions { Server = server }, Cancelled);
+        await first.Connect(new MemoryTransportClientConnectOptions { Server = server }, Cancelled);
+        await second.Connect(new MemoryTransportClientConnectOptions { Server = server }, Cancelled);
 
         await server.Stop();
         await scheduler.WhenIdle().WaitAsync(Patience, Cancelled);
@@ -214,7 +214,7 @@ public sealed class MemoryTransportServerTests
 
         var late = await Assert.ThrowsAsync<ConnectException>(() =>
         {
-            return first.Connect(new MemoryConnectOptions { Server = server }, Cancelled);
+            return first.Connect(new MemoryTransportClientConnectOptions { Server = server }, Cancelled);
         });
 
         Assert.Equal("the in-memory transport server is closed, not open", late.Message);
@@ -234,7 +234,7 @@ public sealed class MemoryTransportServerTests
                 gate.Wait(Patience);
             });
 
-            var queued = first.Connect(new MemoryConnectOptions { Server = server }, Cancelled);
+            var queued = first.Connect(new MemoryTransportClientConnectOptions { Server = server }, Cancelled);
             var stopping = server.Stop();
 
             gate.Set();
@@ -268,7 +268,7 @@ public sealed class MemoryTransportServerTests
         held.Connection += drawn.Add;
         await held.Start();
 
-        var connecting = second.Connect(new MemoryConnectOptions { Server = held }, Cancelled);
+        var connecting = second.Connect(new MemoryTransportClientConnectOptions { Server = held }, Cancelled);
 
         await reached.Task.WaitAsync(Patience, Cancelled);
         await held.Stop();
@@ -325,14 +325,14 @@ public sealed class MemoryTransportServerTests
         isCancelling = true;
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
         {
-            return client.Connect(new MemoryConnectOptions { Server = server }, cancelling.Token);
+            return client.Connect(new MemoryTransportClientConnectOptions { Server = server }, cancelling.Token);
         });
         Assert.Empty(server.ConnectionHandles);
         Assert.Empty(drawn);
         isCancelling = false;
 
         // a listener's throw reported with its connection, the transport going on
-        await client.Connect(new MemoryConnectOptions { Server = server }, Cancelled);
+        await client.Connect(new MemoryTransportClientConnectOptions { Server = server }, Cancelled);
 
         var handle = Assert.Single(server.ConnectionHandles);
 
@@ -368,7 +368,7 @@ public sealed class MemoryTransportServerTests
             closedAtClient.Add($"{isClean} {isQuick}");
         };
         await server.Start();
-        await client.Connect(new MemoryConnectOptions { Server = server }, Cancelled);
+        await client.Connect(new MemoryTransportClientConnectOptions { Server = server }, Cancelled);
 
         var handle = Assert.Single(server.ConnectionHandles);
 
@@ -428,7 +428,7 @@ public sealed class MemoryTransportServerTests
             }
         };
         await transport.Start();
-        await caller.Connect(new MemoryConnectOptions { Server = transport }, Cancelled);
+        await caller.Connect(new MemoryTransportClientConnectOptions { Server = transport }, Cancelled);
 
         var payload = new string('x', 20 * 1_024);
         var echoed = await new InteropClient(linked).Echo(JsonOf(payload))().WaitAsync(Patience, Cancelled);
@@ -489,7 +489,7 @@ public sealed class MemoryTransportServerTests
             atClient.AddRange(message.Bytes.ToArray());
         };
         await server.Start();
-        await client.Connect(new MemoryConnectOptions { Server = server }, Cancelled);
+        await client.Connect(new MemoryTransportClientConnectOptions { Server = server }, Cancelled);
 
         // the server's end, paused, then paused again as it hands what it held
         server.Pause(ConnectionHandle);

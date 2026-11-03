@@ -71,7 +71,7 @@ fn reads_or_refuses_with_a_failure_every_mutation_of_a_vector(seed: u32) -> Resu
 
         for side in [RouterSide::Server, RouterSide::Client] {
             defects.extend(defect_of(|| read_envelope(&bytes, side, &options), &input));
-            defects.extend(defect_of(|| read_failure(&input, (side, 1_024)), &input));
+            defects.extend(defect_of(|| read_failure(&input, side, &options), &input));
         }
     }
 

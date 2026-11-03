@@ -76,11 +76,17 @@ impl EnvelopeKind {
             Self::Cancel => 0x16,
         }
     }
+}
 
-    /// The kind `byte` is, or none for a byte this layout reads as no kind of its own.
-    #[must_use]
-    pub fn of(byte: u8) -> Option<Self> {
-        Self::ALL.into_iter().find(|kind| kind.byte() == byte)
+/// The kind a byte is, or the byte itself, refused, for one this layout reads as no kind of its own.
+impl TryFrom<u8> for EnvelopeKind {
+    type Error = u8;
+
+    fn try_from(byte: u8) -> Result<Self, Self::Error> {
+        Self::ALL
+            .into_iter()
+            .find(|kind| kind.byte() == byte)
+            .ok_or(byte)
     }
 }
 
@@ -401,8 +407,7 @@ impl RouterSide {
 
     /// The first and the last call id this side draws, two apart, as HTTP/2 numbers its streams:
     /// odd from a client, even from a server, so the two never draw the same one.
-    #[must_use]
-    pub fn call_ids(self) -> (u32, u32) {
+    pub(crate) const fn call_ids(self) -> (u32, u32) {
         match self {
             Self::Client => (1, 0xffff_ffff),
             Self::Server => (2, 0xffff_fffe),

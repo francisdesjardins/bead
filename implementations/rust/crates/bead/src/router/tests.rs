@@ -10,6 +10,7 @@ use std::time::SystemTime;
 
 use bytes::Bytes;
 
+use crate::RouterRequest;
 use crate::clock::SharedClock;
 use crate::constants::{FailureScope, ProcedureKind, ProtocolCode};
 use crate::envelope::{
@@ -18,8 +19,8 @@ use crate::envelope::{
 };
 use crate::errors::CallError;
 use crate::identity::Procedure;
-use crate::router::client::{ClientRequest, NotificationLike, RouterClient, RouterClientOptions};
-use crate::router::server::{Call, CallHooks};
+use crate::router::client::{NotificationLike, RouterClient, RouterClientOptions};
+use crate::router::server::Call;
 use crate::router::types::{ResolvedRequestOptions, RouterError, RouterResult};
 use crate::session_token::SessionToken;
 use crate::testing::SteppingClock;
@@ -180,7 +181,7 @@ async fn answered(call: Call) -> Result<RouterResult, CallError> {
 }
 
 fn options_of(timeout: Duration) -> ResolvedRequestOptions {
-    let mut options = ResolvedRequestOptions::of(timeout);
+    let mut options = ResolvedRequestOptions::new(timeout);
 
     options.close_on_timeout = Some(false);
     options
@@ -189,7 +190,7 @@ fn options_of(timeout: Duration) -> ResolvedRequestOptions {
 // echo, as a procedure that notifies
 fn notifying() -> Procedure {
     Procedure {
-        kind: Some(ProcedureKind::Notifies),
+        procedure_kind: Some(ProcedureKind::Notifies),
         ..echo()
     }
 }
@@ -197,8 +198,8 @@ fn notifying() -> Procedure {
 // a call to echo, or to the procedure `subscribes` subscribes when given
 fn request_of(
     (subscribes, timeout): (Option<Arc<dyn NotificationLike>>, Duration),
-) -> ClientRequest {
-    ClientRequest {
+) -> RouterRequest {
+    RouterRequest {
         procedure: subscribes
             .as_ref()
             .map_or_else(echo, |notification| notification.procedure().clone()),
@@ -206,6 +207,8 @@ fn request_of(
         series: None,
         refusal: None,
         subscribes,
+        on_call_id: None,
+        on_sent: None,
     }
 }
 
@@ -226,7 +229,7 @@ impl Scripted {
         let clock = SteppingClock::new(january_first());
         let shared: SharedClock = Arc::<SteppingClock>::clone(&clock);
         let transport = ScriptedClient::new(shared);
-        let carried: Arc<dyn crate::transport::ClientTransport> =
+        let carried: Arc<dyn crate::transport::RouterClientTransport> =
             Arc::<ScriptedClient>::clone(&transport);
         let router = RouterClient::new(carried, options).expect("a router built");
         let errors: Arc<Mutex<Vec<RouterError>>> = Arc::default();
@@ -268,10 +271,7 @@ impl Scripted {
             .router
             .request(
                 Bytes::new(),
-                (
-                    request_of((Some(Arc::clone(notification)), timeout)),
-                    CallHooks::default(),
-                ),
+                request_of((Some(Arc::clone(notification)), timeout)),
             )
             .expect("subscribing");
 
@@ -336,21 +336,23 @@ fn failures_of(served: &server::Served) -> Vec<(u16, String)> {
 #[tokio::test]
 async fn answers_a_resolver_s_own_failure_as_it_is_and_any_other_error_procedure_failed_with_no_detail_and_reported()
  {
-    let served = resolving(Arc::new(|props: crate::router::core::ResolverProps| {
-        Box::pin(async move {
-            if props.payload.as_ref() == b"own" {
-                let code = core::num::NonZeroU16::new(21).expect("21 is no zero");
+    let served = resolving(Arc::new(
+        |props: crate::router::core::RequestResolverProps| {
+            Box::pin(async move {
+                if props.payload.as_ref() == b"own" {
+                    let code = core::num::NonZeroU16::new(21).expect("21 is no zero");
 
-                return Err(crate::errors::ResolverError::Failure(
-                    crate::failure::Failure::application(code, "nothing to echo"),
-                ));
-            }
+                    return Err(crate::errors::ResolverError::Failure(
+                        crate::failure::Failure::application(code, "nothing to echo"),
+                    ));
+                }
 
-            Err(crate::errors::ResolverError::other(std::io::Error::other(
-                "internal: 10.0.0.5:8443",
-            )))
-        })
-    }));
+                Err(crate::errors::ResolverError::other(std::io::Error::other(
+                    "internal: 10.0.0.5:8443",
+                )))
+            })
+        },
+    ));
 
     served
         .transport
@@ -377,11 +379,13 @@ async fn answers_a_resolver_s_own_failure_as_it_is_and_any_other_error_procedure
 
 #[tokio::test]
 async fn answers_a_resolver_that_panics_procedure_failed_with_no_detail_and_reported() {
-    let served = resolving(Arc::new(|_props: crate::router::core::ResolverProps| {
-        Box::pin(async move {
-            panic!("this resolver breaks, on purpose");
-        })
-    }));
+    let served = resolving(Arc::new(
+        |_props: crate::router::core::RequestResolverProps| {
+            Box::pin(async move {
+                panic!("this resolver breaks, on purpose");
+            })
+        },
+    ));
 
     served
         .transport
@@ -403,14 +407,14 @@ async fn answers_a_resolver_that_panics_procedure_failed_with_no_detail_and_repo
 }
 
 // what a resolver was handed, each request in turn
-type Handed = Arc<Mutex<Vec<crate::router::core::ResolverProps>>>;
+type Handed = Arc<Mutex<Vec<crate::router::core::RequestResolverProps>>>;
 
 // a resolver that keeps what it is handed and answers nothing itself, failing the first request
 // with `failure` when given one
 fn keeping((handed, failure): (&Handed, Option<&'static str>)) -> crate::router::core::ResolveFn {
     let handed = Arc::clone(handed);
 
-    Arc::new(move |props: crate::router::core::ResolverProps| {
+    Arc::new(move |props: crate::router::core::RequestResolverProps| {
         let handed = Arc::clone(&handed);
 
         Box::pin(async move {
@@ -689,16 +693,15 @@ fn asking(
     router
         .request(
             Bytes::from_static(payload.as_bytes()),
-            (
-                crate::router::server::ServerRequest {
-                    procedure: echo().address(),
-                    maximum_payload_bytes: None,
-                    options,
-                    series: None,
-                    refusal: None,
-                },
-                CallHooks::default(),
-            ),
+            RouterRequest {
+                procedure: echo(),
+                options,
+                series: None,
+                refusal: None,
+                subscribes: None,
+                on_call_id: None,
+                on_sent: None,
+            },
         )
         .expect("a call")
 }
@@ -757,9 +760,9 @@ async fn a_call_a_listener_makes_goes_among_what_its_turn_defers_in_the_order_de
         ..RouterClientOptions::default()
     });
     let clock = Procedure {
-        id: 9,
-        name: "clock".to_owned(),
-        kind: Some(ProcedureKind::Command),
+        procedure_id: 9,
+        procedure_name: "clock".to_owned(),
+        procedure_kind: Some(ProcedureKind::Command),
         ..echo()
     };
 
@@ -768,7 +771,7 @@ async fn a_call_a_listener_makes_goes_among_what_its_turn_defers_in_the_order_de
         .register_resolver((
             &clock,
             crate::router::core::Handler {
-                resolve: Arc::new(|_props: crate::router::core::ResolverProps| {
+                resolve: Arc::new(|_props: crate::router::core::RequestResolverProps| {
                     Box::pin(async { Ok(()) })
                 }),
                 admit: None,
@@ -793,10 +796,7 @@ async fn a_call_a_listener_makes_goes_among_what_its_turn_defers_in_the_order_de
 
             // within the turn that reads its server's command, before the refusal it defers
             let call = within
-                .request(
-                    Bytes::from_static(b"made"),
-                    (request_of((None, TIMEOUT)), CallHooks::default()),
-                )
+                .request(Bytes::from_static(b"made"), request_of((None, TIMEOUT)))
                 .expect("a call");
 
             locked(&making).push(call);
@@ -807,7 +807,7 @@ async fn a_call_a_listener_makes_goes_among_what_its_turn_defers_in_the_order_de
     scripted.transport.deliver(&Envelope::Request {
         header: RequestHeader {
             service_id: clock.service_id,
-            procedure_id: clock.id,
+            procedure_id: clock.procedure_id,
             credential: Some(Credential::Elsewhere),
             ..request_header_of(2)
         },
@@ -981,7 +981,7 @@ async fn a_listener_s_panic_is_reported_and_the_transport_goes_on() {
         .services()
         .get_request_resolver(
             &echo(),
-            crate::managers::service::ResolverDependencies::of(
+            crate::managers::service::RequestResolverDependencies::new(
                 crate::payloads::TextCodec,
                 crate::payloads::TextCodec,
             ),
@@ -1006,7 +1006,7 @@ async fn a_listener_s_panic_is_reported_and_the_transport_goes_on() {
         .services()
         .get_request(
             &echo(),
-            crate::managers::service::RequestDependencies::of(
+            crate::managers::service::RequestDependencies::new(
                 crate::payloads::TextCodec,
                 crate::payloads::TextCodec,
             ),
@@ -1067,20 +1067,23 @@ mod intake {
     use crate::debug::{DebugDirection, TracedEnvelope};
     use crate::errors::CallError;
     use crate::managers::service::{
-        RequestDependencies, RequestOptions, ResolverDependencies, Response,
+        RequestDependencies, RequestOptions, RequestResolverDependencies, Response,
     };
     use crate::memory::{
-        MemoryClient, MemoryClientOptions, MemoryConnectOptions, MemoryServer, MemoryServerOptions,
+        MemoryTransportClient, MemoryTransportClientConnectOptions, MemoryTransportClientOptions,
+        MemoryTransportServer, MemoryTransportServerOptions,
     };
     use crate::payloads::RawCodec;
     use crate::router::client::RouterClientOptions;
-    use crate::router::server::{CallHooks, RouterServer, RouterServerOptions, ServerRequest};
-    use crate::router::types::{IntakeLimitsOptions, RouterLimitsOptions, TransportMessage};
+    use crate::router::server::{RouterServer, RouterServerOptions};
+    use crate::router::types::{
+        IntakeLimitsOptions, RouterLimitsOptions, RouterRequest, TransportMessage,
+    };
     use crate::server::ServerOptions;
     use crate::testing::SteppingClock;
     use crate::testing::pair::{Pair, PairOptions, echo};
     use crate::testing::scripted::bytes_of;
-    use crate::transport::{ClientTransport, ServerTransport};
+    use crate::transport::{RouterClientTransport, ServerTransport};
 
     // a server's router options of the intake bounds given, its envelopes then its bytes
     fn intake_of((envelopes, bytes): (u64, u64)) -> RouterServerOptions {
@@ -1258,17 +1261,17 @@ mod intake {
 
     // a client of `memory` connected from `address`, on `clock`
     async fn connected_from(
-        (memory, clock): (&MemoryServer, &Arc<SteppingClock>),
+        (memory, clock): (&MemoryTransportServer, &Arc<SteppingClock>),
         address: &str,
-    ) -> MemoryClient {
+    ) -> MemoryTransportClient {
         let shared: SharedClock = Arc::<SteppingClock>::clone(clock);
-        let client = MemoryClient::new(&MemoryClientOptions {
+        let client = MemoryTransportClient::new(&MemoryTransportClientOptions {
             clock: Some(shared),
         })
         .expect("a client");
-        let connecting = client.connect(&MemoryConnectOptions {
+        let connecting = client.connect(&MemoryTransportClientConnectOptions {
             address: Some(address.to_owned()),
-            ..MemoryConnectOptions::of(memory.clone())
+            ..MemoryTransportClientConnectOptions::new(memory.clone())
         });
 
         clock.settle().await;
@@ -1284,7 +1287,7 @@ mod intake {
      {
         let clock = SteppingClock::new(january_first());
         let shared: SharedClock = Arc::<SteppingClock>::clone(&clock);
-        let memory = MemoryServer::new(&MemoryServerOptions {
+        let memory = MemoryTransportServer::new(&MemoryTransportServerOptions {
             clock: Some(shared),
             runtime: None,
         })
@@ -1362,7 +1365,10 @@ mod intake {
         // a resolution: echo resolved off the owner, its outcome posted back
         served
             .services
-            .get_request_resolver(&echo(), ResolverDependencies::of(RawCodec, RawCodec))
+            .get_request_resolver(
+                &echo(),
+                RequestResolverDependencies::new(RawCodec, RawCodec),
+            )
             .expect("echo resolved")
             .on(Arc::new(|request, response: Response<RawCodec>| {
                 response.result(request.payload)
@@ -1383,16 +1389,15 @@ mod intake {
                         deferring
                             .request(
                                 Bytes::new(),
-                                (
-                                    ServerRequest {
-                                        procedure: echo().address(),
-                                        maximum_payload_bytes: None,
-                                        options,
-                                        series: None,
-                                        refusal: None,
-                                    },
-                                    CallHooks::default(),
-                                ),
+                                RouterRequest {
+                                    procedure: echo(),
+                                    options,
+                                    series: None,
+                                    refusal: None,
+                                    subscribes: None,
+                                    on_call_id: None,
+                                    on_sent: None,
+                                },
                             )
                             .expect("a call made"),
                     );
@@ -1715,7 +1720,10 @@ mod intake {
 
         pair.server
             .services()
-            .get_request_resolver(&echo(), ResolverDependencies::of(RawCodec, RawCodec))
+            .get_request_resolver(
+                &echo(),
+                RequestResolverDependencies::new(RawCodec, RawCodec),
+            )
             .expect("echo resolved")
             .on(Arc::new(|request, response: Response<RawCodec>| {
                 response.result(request.payload)
@@ -1737,7 +1745,7 @@ mod intake {
         let call = pair
             .client
             .services()
-            .get_request(&echo(), RequestDependencies::of(RawCodec, RawCodec))
+            .get_request(&echo(), RequestDependencies::new(RawCodec, RawCodec))
             .expect("echo asked")
             .call(payload.clone(), &RequestOptions::default())
             .expect("echo called");

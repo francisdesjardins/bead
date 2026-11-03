@@ -4,7 +4,6 @@ use bytes::Bytes;
 
 use super::client::Notified;
 use super::{Scripted, TIMEOUT, request_of};
-use crate::router::server::CallHooks;
 
 #[tokio::test]
 async fn binds_no_notification_the_router_does_not_hold_for_the_procedure() {
@@ -12,13 +11,7 @@ async fn binds_no_notification_the_router_does_not_hold_for_the_procedure() {
     let held = Notified::new(None);
     scripted
         .router
-        .request(
-            Bytes::new(),
-            (
-                request_of((Some(held.like()), TIMEOUT)),
-                CallHooks::default(),
-            ),
-        )
+        .request(Bytes::new(), request_of((Some(held.like()), TIMEOUT)))
         .expect_err("the notification is not held");
     scripted
         .router
@@ -28,17 +21,14 @@ async fn binds_no_notification_the_router_does_not_hold_for_the_procedure() {
         .router
         .request(
             Bytes::new(),
-            (
-                request_of((Some(Notified::new(None).like()), TIMEOUT)),
-                CallHooks::default(),
-            ),
+            request_of((Some(Notified::new(None).like()), TIMEOUT)),
         )
         .expect_err("another notification of the procedure is not held");
     let mut mismatch = request_of((Some(held.like()), TIMEOUT));
-    mismatch.procedure.id = 9;
+    mismatch.procedure.procedure_id = 9;
     scripted
         .router
-        .request(Bytes::new(), (mismatch, CallHooks::default()))
+        .request(Bytes::new(), mismatch)
         .expect_err("the notification belongs to another procedure");
     scripted.settle().await;
     assert_eq!(scripted.transport.sent().len(), 0);

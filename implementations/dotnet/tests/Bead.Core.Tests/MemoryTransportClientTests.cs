@@ -56,7 +56,7 @@ public sealed class MemoryTransportClientTests
 
         server.Connection += connections.Add;
         await server.Start();
-        await client.Connect(new MemoryConnectOptions { Server = server }, Cancelled);
+        await client.Connect(new MemoryTransportClientConnectOptions { Server = server }, Cancelled);
 
         return (server, client, Assert.Single(connections));
     }
@@ -194,7 +194,7 @@ public sealed class MemoryTransportClientTests
 
         InteropHandlers.Offer(built);
         await transport.Start();
-        await caller.Connect(new MemoryConnectOptions { Server = transport }, Cancelled);
+        await caller.Connect(new MemoryTransportClientConnectOptions { Server = transport }, Cancelled);
 
         var whoami = await new InteropClient(linked).Whoami(JsonSerializer.SerializeToElement<object?>(null))().WaitAsync(Patience, Cancelled);
 
@@ -299,7 +299,7 @@ public sealed class MemoryTransportClientTests
                 atUnclean.Add($"closed {isClean} {isQuick}");
             };
 
-            await unclean.CloseConnection(new TransportDisconnectOptions { IsClean = false });
+            await unclean.CloseConnection(new TransportClientDisconnectOptions { IsClean = false });
             Assert.Equal(["closed False False"], atUnclean);
             await third.WhenIdle().WaitAsync(Patience, Cancelled);
             atTold.Writer.TryWrite("settled");
@@ -332,7 +332,7 @@ public sealed class MemoryTransportClientTests
             heard.Add(Convert.ToHexString(message.Bytes.Span));
         };
         await server.Start();
-        await client.Connect(new MemoryConnectOptions { Server = server }, Cancelled);
+        await client.Connect(new MemoryTransportClientConnectOptions { Server = server }, Cancelled);
 
         Assert.StartsWith("an in-memory connection carries envelopes, as bytes", (await Assert.ThrowsAsync<ArgumentException>(() =>
         {
@@ -362,25 +362,25 @@ public sealed class MemoryTransportClientTests
         await cancelled.CancelAsync();
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
         {
-            return client.Connect(new MemoryConnectOptions { Server = server }, cancelled.Token);
+            return client.Connect(new MemoryTransportClientConnectOptions { Server = server }, cancelled.Token);
         });
         Assert.Equal(ReadyState.Uninitialized, client.ReadyState);
         Assert.Equal("the in-memory transport server is uninitialized, not open", (await Assert.ThrowsAsync<ConnectException>(() =>
         {
-            return client.Connect(new MemoryConnectOptions { Server = server }, Cancelled);
+            return client.Connect(new MemoryTransportClientConnectOptions { Server = server }, Cancelled);
         })).Message);
         Assert.Equal(ReadyState.Closed, client.ReadyState);
 
         // open: a second connect refused, and a reconnection whose token is cancelled already leaves it open
         await server.Start();
-        await client.Connect(new MemoryConnectOptions { Server = server }, Cancelled);
+        await client.Connect(new MemoryTransportClientConnectOptions { Server = server }, Cancelled);
         Assert.Equal("the transport client is already open", (await Assert.ThrowsAsync<InvalidOperationException>(() =>
         {
-            return client.Connect(new MemoryConnectOptions { Server = server }, Cancelled);
+            return client.Connect(new MemoryTransportClientConnectOptions { Server = server }, Cancelled);
         })).Message);
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
         {
-            return client.Reconnect(new TransportReconnectOptions { CancellationToken = cancelled.Token });
+            return client.Reconnect(new TransportClientReconnectOptions { CancellationToken = cancelled.Token });
         });
         Assert.Equal(ReadyState.Open, client.ReadyState);
         Assert.Single(server.ConnectionHandles);
@@ -436,13 +436,13 @@ public sealed class MemoryTransportClientTests
 
         if (isReconnect)
         {
-            await client.Connect(new MemoryConnectOptions { Server = server }, Cancelled);
+            await client.Connect(new MemoryTransportClientConnectOptions { Server = server }, Cancelled);
             isHolding = true;
         }
 
         var pending = isReconnect
-            ? client.Reconnect(new TransportReconnectOptions { MaximumAttempts = 1, CancellationToken = Cancelled })
-            : client.Connect(new MemoryConnectOptions { Server = server }, Cancelled);
+            ? client.Reconnect(new TransportClientReconnectOptions { MaximumAttempts = 1, CancellationToken = Cancelled })
+            : client.Connect(new MemoryTransportClientConnectOptions { Server = server }, Cancelled);
 
         try
         {
@@ -453,7 +453,7 @@ public sealed class MemoryTransportClientTests
 
             Assert.Equal($"the transport client is already {state}", (await Assert.ThrowsAsync<InvalidOperationException>(() =>
             {
-                return client.Connect(new MemoryConnectOptions { Server = server }, Cancelled);
+                return client.Connect(new MemoryTransportClientConnectOptions { Server = server }, Cancelled);
             })).Message);
             Assert.Equal(isReconnect ? "the transport client is already reconnecting" : "the transport client cannot reconnect while connecting", (await Assert.ThrowsAsync<InvalidOperationException>(() =>
             {
@@ -525,8 +525,8 @@ public sealed class MemoryTransportClientTests
         };
 
         await server.Start();
-        await client.Connect(new MemoryConnectOptions { Server = server, Address = "10.0.0.1", Port = 4_000 }, Cancelled);
-        await client.Reconnect(new TransportReconnectOptions { CancellationToken = Cancelled });
+        await client.Connect(new MemoryTransportClientConnectOptions { Server = server, Address = "10.0.0.1", Port = 4_000 }, Cancelled);
+        await client.Reconnect(new TransportClientReconnectOptions { CancellationToken = Cancelled });
         await scheduler.WhenIdle().WaitAsync(Patience, Cancelled);
 
         Assert.Equal(ReadyState.Open, client.ReadyState);
@@ -543,7 +543,7 @@ public sealed class MemoryTransportClientTests
 
         var gaveUp = await Assert.ThrowsAsync<ReconnectException>(() =>
         {
-            return client.Reconnect(new TransportReconnectOptions { MaximumAttempts = 1, CancellationToken = Cancelled });
+            return client.Reconnect(new TransportClientReconnectOptions { MaximumAttempts = 1, CancellationToken = Cancelled });
         });
 
         Assert.IsType<ConnectException>(gaveUp.InnerException);
@@ -586,7 +586,7 @@ public sealed class MemoryTransportClientTests
 
         var cancelled = await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
         {
-            return client.Reconnect(new TransportReconnectOptions { MaximumAttempts = 1, CancellationToken = cancelling.Token });
+            return client.Reconnect(new TransportClientReconnectOptions { MaximumAttempts = 1, CancellationToken = cancelling.Token });
         });
 
         await scheduler.WhenIdle().WaitAsync(Patience, Cancelled);
@@ -612,7 +612,7 @@ public sealed class MemoryTransportClientTests
         var closedAtServer = new List<bool>();
 
         await server.Start();
-        await client.Connect(new MemoryConnectOptions { Server = server }, Cancelled);
+        await client.Connect(new MemoryTransportClientConnectOptions { Server = server }, Cancelled);
         client.Close += (isClean, isQuick) =>
         {
             closedAtClient.Add($"{isClean} {isQuick}");
@@ -632,7 +632,7 @@ public sealed class MemoryTransportClientTests
 
         var cancelled = await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
         {
-            return client.Reconnect(new TransportReconnectOptions { CancellationToken = cancelling.Token });
+            return client.Reconnect(new TransportClientReconnectOptions { CancellationToken = cancelling.Token });
         });
 
         await scheduler.WhenIdle().WaitAsync(Patience, Cancelled);
@@ -660,7 +660,7 @@ public sealed class MemoryTransportClientTests
             var opened = 0;
 
             await server.Start();
-            await client.Connect(new MemoryConnectOptions { Server = server }, Cancelled);
+            await client.Connect(new MemoryTransportClientConnectOptions { Server = server }, Cancelled);
             client.Close += (isClean, isQuick) =>
             {
                 closedAtClient.Add((isClean, isQuick));
@@ -690,7 +690,7 @@ public sealed class MemoryTransportClientTests
             };
             var cancelled = await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
             {
-                return client.Reconnect(new TransportReconnectOptions { CancellationToken = cancelling.Token, MaximumAttempts = 1 });
+                return client.Reconnect(new TransportClientReconnectOptions { CancellationToken = cancelling.Token, MaximumAttempts = 1 });
             });
             await scheduler.WhenIdle().WaitAsync(Patience, Cancelled);
 
@@ -752,7 +752,7 @@ public sealed class MemoryTransportClientTests
 
         // its clock past its timeout
         await using var timed = new MemoryTransportClient(new MemoryTransportClientOptions { Clock = clock });
-        var timing = timed.Connect(new MemoryConnectOptions { Server = server, Timeout = TimeSpan.FromSeconds(1) }, Cancelled);
+        var timing = timed.Connect(new MemoryTransportClientConnectOptions { Server = server, Timeout = TimeSpan.FromSeconds(1) }, Cancelled);
 
         await Holding(
             () =>
@@ -771,7 +771,7 @@ public sealed class MemoryTransportClientTests
         // its token cancelled
         await using var asked = new MemoryTransportClient();
         using var cancelling = CancellationTokenSource.CreateLinkedTokenSource(Cancelled);
-        var asking = asked.Connect(new MemoryConnectOptions { Server = server }, cancelling.Token);
+        var asking = asked.Connect(new MemoryTransportClientConnectOptions { Server = server }, cancelling.Token);
 
         await Holding(
             () =>
@@ -787,7 +787,7 @@ public sealed class MemoryTransportClientTests
 
         // its dispose
         var disposed = new MemoryTransportClient();
-        var disposing = disposed.Connect(new MemoryConnectOptions { Server = server }, Cancelled);
+        var disposing = disposed.Connect(new MemoryTransportClientConnectOptions { Server = server }, Cancelled);
 
         await Holding(
             () =>
@@ -829,7 +829,7 @@ public sealed class MemoryTransportClientTests
         };
 
         await server.Start();
-        await client.Connect(new MemoryConnectOptions { Server = server }, Cancelled);
+        await client.Connect(new MemoryTransportClientConnectOptions { Server = server }, Cancelled);
         await scheduler.WhenIdle().WaitAsync(Patience, Cancelled);
 
         Assert.Equal(["heard 1", "heard 2"], heard);
@@ -866,7 +866,7 @@ public sealed class MemoryTransportClientTests
 
         Assert.Equal("the in-memory transport server closed the connection as it opened", (await Assert.ThrowsAsync<ConnectException>(() =>
         {
-            return client.Connect(new MemoryConnectOptions { Server = server }, Cancelled);
+            return client.Connect(new MemoryTransportClientConnectOptions { Server = server }, Cancelled);
         })).Message);
         await scheduler.WhenIdle().WaitAsync(Patience, Cancelled);
 
@@ -904,7 +904,7 @@ public sealed class MemoryTransportClientTests
 
         Assert.Equal("the transport client was disposed as it connected", (await Assert.ThrowsAsync<ConnectException>(() =>
         {
-            return client.Connect(new MemoryConnectOptions { Server = server }, Cancelled);
+            return client.Connect(new MemoryTransportClientConnectOptions { Server = server }, Cancelled);
         })).Message);
         await scheduler.WhenIdle().WaitAsync(Patience, Cancelled);
 

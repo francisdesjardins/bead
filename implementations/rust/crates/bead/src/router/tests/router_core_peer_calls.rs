@@ -31,8 +31,8 @@ async fn refuses_a_request_that_opens_a_subscription_on_a_connection_that_carrie
         .run(move |state| {
             state.one_way.push(Arc::from("a"));
             let mut procedure = echo();
-            procedure.id = 2;
-            procedure.name = "guarded".to_owned();
+            procedure.procedure_id = 2;
+            procedure.procedure_name = "guarded".to_owned();
             router_core::register_resolver(&state.core.resolvers, (&procedure, guarded, None))
                 .expect("guarded registered");
             for (call_id, procedure_id, opens_subscription, handle, total) in [

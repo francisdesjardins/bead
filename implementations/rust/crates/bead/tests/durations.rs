@@ -19,19 +19,21 @@ use bead::testing::SteppingClock;
 use bead::testing::durations::{DurationInput, DurationPlace, Durations, PlaceOutcome};
 use bead::testing::parcels::{self, ParcelFields, ParcelReading};
 use bead::{
-    BeforeRequest, BoxFuture, BrokerAdapter, BrokerClientOptions, BrokerConnectOptions,
-    BrokerListener, BrokerMessage, BrokerParticipant, BrokerParticipantOptions, BrokerPublication,
-    BrokerServer, BrokerServerOptions, BrokerStart, BrokerSubscription, Call, CallError, CallHooks,
-    ClientListener, ClientRequest, ClientTransport, ConnectionHandle, DebugEvent,
+    BeforeRequest, BoxFuture, BrokerAdapter, BrokerListener, BrokerMessage, BrokerParticipant,
+    BrokerParticipantOptions, BrokerPublication, BrokerStart, BrokerSubscription,
+    BrokerTransportClientConnectOptions, BrokerTransportClientOptions, BrokerTransportServer,
+    BrokerTransportServerOptions, Call, CallError, ClientListener, ConnectionHandle, DebugEvent,
     DestinationOptions, DurationRefusal, LIMIT_DEFAULTS, MemoryBroker, MemoryBrokerAdapter,
-    MemoryBrokerAdapterOptions, MemoryBrokerOptions, MemoryClient, MemoryClientOptions,
-    MemoryConnectOptions, MemoryServer, MemoryServerOptions, NEVER, Procedure, ProgrammerError,
-    RawCodec, ReadyState, ReconnectDelay, ReconnectOptions, Refusal, RelayLeg, RelayOptions,
-    RelayRouter, RelayTarget, RequestDefaults, RequestDependencies, RequestHeader, RequestOptions,
-    ResolvedRequestOptions, RouterClient, RouterClientOptions, RouterError, RouterLimits,
-    RouterLimitsOptions, RouterServer, RouterServerOptions, Sent, Server, ServerListener,
-    ServerOptions, ServerTransport, ServiceManager, ServiceManagerOptions, ServiceRouter,
-    SessionManagerOptions, SharedClock, TransportError, TransportMessage,
+    MemoryBrokerAdapterOptions, MemoryBrokerOptions, MemoryTransportClient,
+    MemoryTransportClientConnectOptions, MemoryTransportClientOptions, MemoryTransportServer,
+    MemoryTransportServerOptions, NEVER, Procedure, ProgrammerError, RawCodec, ReadyState, Refusal,
+    RelayLeg, RelayOptions, RelayRouter, RelayTarget, RequestDefaults, RequestDependencies,
+    RequestHeader, RequestOptions, ResolvedRequestOptions, RouterClient, RouterClientOptions,
+    RouterClientTransport, RouterError, RouterLimits, RouterLimitsOptions, RouterRequest,
+    RouterServer, RouterServerOptions, Sent, Server, ServerListener, ServerOptions,
+    ServerTransport, ServiceManager, ServiceManagerOptions, ServiceRouter, SessionManagerOptions,
+    SharedClock, TransportClientReconnectDelay, TransportClientReconnectOptions, TransportError,
+    TransportMessage,
 };
 use bytes::Bytes;
 use libtest_mimic::{Arguments, Failed, Trial};
@@ -146,7 +148,7 @@ struct Recording {
     sent: Mutex<Vec<Bytes>>,
 }
 
-impl ClientTransport for Recording {
+impl RouterClientTransport for Recording {
     fn send(&self, message: TransportMessage) -> Result<Sent, RouterError> {
         locked(&self.sent).push(message.data);
 
@@ -256,10 +258,10 @@ impl ServerTransport for Pipe {
 fn echo() -> Procedure {
     Procedure {
         service_id: 2,
-        id: 1,
+        procedure_id: 1,
         service_revision: 3,
-        name: "echo".to_owned(),
-        kind: None,
+        procedure_name: "echo".to_owned(),
+        procedure_kind: None,
         maximum_payload_bytes: None,
         deprecation: None,
     }
@@ -304,7 +306,7 @@ async fn traced_call(
     }));
 
     let request = manager
-        .get_request(&echo(), RequestDependencies::of(RawCodec, RawCodec))
+        .get_request(&echo(), RequestDependencies::new(RawCodec, RawCodec))
         .map_err(|error| error.to_string())?;
     let mut options = RequestOptions::default();
 
@@ -367,7 +369,7 @@ async fn default_timeout_by_options(given: Option<Duration>) -> Played {
 }
 
 fn resolved(timeout: Duration) -> ResolvedRequestOptions {
-    ResolvedRequestOptions::of(timeout)
+    ResolvedRequestOptions::new(timeout)
 }
 
 // the options its router's request is given: no answer a millisecond short of what it holds, and
@@ -379,10 +381,7 @@ async fn call_by_router(given: Option<Duration>) -> Played {
         .router
         .request(
             Bytes::from_static(&[1]),
-            (
-                ClientRequest::of(echo(), &resolved(given)),
-                CallHooks::default(),
-            ),
+            RouterRequest::new(echo(), &resolved(given)),
         )
         .map_err(|error| error.to_string())?;
     let waiting = tokio::spawn(call);
@@ -454,7 +453,7 @@ async fn reserved_for(calling: &Calling, call_id: u32) -> Played {
 async fn reservation_by_reserve(given: Option<Duration>) -> Played {
     let calling = calling()?;
 
-    match calling.router.reserve((1, given)) {
+    match calling.router.reserve(1, given) {
         Err(refused) => {
             calling.clock.settle().await;
             hold(!calling.router.is_reserved(1).await, || {
@@ -474,7 +473,7 @@ async fn reservation_by_reserve(given: Option<Duration>) -> Played {
 async fn reservation_by_cancel(given: Option<Duration>) -> Played {
     let calling = calling()?;
 
-    match calling.router.cancel((3, given)) {
+    match calling.router.cancel(3, given) {
         Err(refused) => {
             calling.clock.settle().await;
             hold(
@@ -799,7 +798,12 @@ async fn session_timeout_of((way, given): (SessionWay, Option<Duration>)) -> Pla
             )
         }
         SessionWay::UpdateConnection => (
-            match sessions.update_connection_inactivity_timeout((Arc::from(HANDLE), given)) {
+            match sessions.update_connection_inactivity_timeout({
+                let mut session = sessions.create(Arc::from(HANDLE));
+
+                session.connection_inactivity_timeout = given;
+                session
+            }) {
                 Ok(updating) => Ok(updating
                     .await
                     .and_then(|updated| updated.connection_inactivity_timeout)),
@@ -808,7 +812,12 @@ async fn session_timeout_of((way, given): (SessionWay, Option<Duration>)) -> Pla
             Some(OTHER_TIMEOUT),
         ),
         SessionWay::UpdateSession => (
-            match sessions.update_session_inactivity_timeout((Arc::from(HANDLE), given)) {
+            match sessions.update_session_inactivity_timeout({
+                let mut session = sessions.create(Arc::from(HANDLE));
+
+                session.session_inactivity_timeout = given;
+                session
+            }) {
                 Ok(updating) => Ok(updating
                     .await
                     .and_then(|updated| updated.session_inactivity_timeout)),
@@ -901,9 +910,9 @@ async fn reset_of((is_connection, given): (bool, Option<Duration>)) -> Played {
     })?;
 
     let reset = if is_connection {
-        sessions.reset_connection_inactivity_timeout((Arc::from(HANDLE), given))
+        sessions.reset_connection_inactivity_timeout(Arc::from(HANDLE), given)
     } else {
-        sessions.reset_session_inactivity_timeout((Arc::from(HANDLE), given))
+        sessions.reset_session_inactivity_timeout(Arc::from(HANDLE), given)
     };
 
     match reset {
@@ -983,17 +992,19 @@ async fn server_inactivity_by_options(given: Option<Duration>) -> Played {
 
 // ── transportClient.connectTimeout and transportClient.reconnectionDelay ─────────────────────
 
-fn memory_of(clock: &Arc<SteppingClock>) -> Result<(MemoryServer, MemoryClient), String> {
-    let mut server_options = MemoryServerOptions::default();
+fn memory_of(
+    clock: &Arc<SteppingClock>,
+) -> Result<(MemoryTransportServer, MemoryTransportClient), String> {
+    let mut server_options = MemoryTransportServerOptions::default();
 
     server_options.clock = Some(shared_of(clock));
 
-    let server = MemoryServer::new(&server_options).map_err(|error| error.to_string())?;
-    let mut options = MemoryClientOptions::default();
+    let server = MemoryTransportServer::new(&server_options).map_err(|error| error.to_string())?;
+    let mut options = MemoryTransportClientOptions::default();
 
     options.clock = Some(shared_of(clock));
 
-    let client = MemoryClient::new(&options).map_err(|error| error.to_string())?;
+    let client = MemoryTransportClient::new(&options).map_err(|error| error.to_string())?;
 
     Ok((server, client))
 }
@@ -1014,7 +1025,7 @@ fn refused_of(error: TransportError) -> Result<ProgrammerError, String> {
 async fn connect_timeout_by_memory(given: Option<Duration>) -> Played {
     let clock = SteppingClock::new(epoch());
     let (server, client) = memory_of(&clock)?;
-    let mut options = MemoryConnectOptions::of(server);
+    let mut options = MemoryTransportClientConnectOptions::new(server);
 
     options.timeout = given;
 
@@ -1036,16 +1047,20 @@ async fn connect_timeout_by_memory(given: Option<Duration>) -> Played {
 
 // a reconnection whose first attempt fails: the delay its tap hears; refused, its reconnection
 // refused with it
-async fn reconnection_delay_of(delay: ReconnectDelay) -> Played {
+async fn reconnection_delay_of(delay: TransportClientReconnectDelay) -> Played {
     let clock = SteppingClock::new(epoch());
     let (server, client) = memory_of(&clock)?;
     let tapped: Arc<Mutex<Vec<Duration>>> = Arc::default();
     let tapping = Arc::clone(&tapped);
 
     // its server never started: the connect fails, and is kept for the reconnection
-    drop(client.connect(&MemoryConnectOptions::of(server)).await);
+    drop(
+        client
+            .connect(&MemoryTransportClientConnectOptions::new(server))
+            .await,
+    );
 
-    let mut options = ReconnectOptions::default();
+    let mut options = TransportClientReconnectOptions::default();
 
     options.delay = Some(delay);
     options.maximum_attempts = Some(2);
@@ -1081,7 +1096,7 @@ async fn reconnection_delay_of(delay: ReconnectDelay) -> Played {
 async fn reconnection_delay_by_function(given: Option<Duration>) -> Played {
     let given = given.ok_or("a delay's function gives one")?;
 
-    reconnection_delay_of(ReconnectDelay::Computed(Arc::new(
+    reconnection_delay_of(TransportClientReconnectDelay::Resolver(Arc::new(
         move |_previous, _attempt| given,
     )))
     .await
@@ -1090,7 +1105,7 @@ async fn reconnection_delay_by_function(given: Option<Duration>) -> Played {
 async fn reconnection_delay_by_number(given: Option<Duration>) -> Played {
     let given = given.ok_or("a delay's number is given")?;
 
-    reconnection_delay_of(ReconnectDelay::Fixed(given)).await
+    reconnection_delay_of(TransportClientReconnectDelay::Fixed(given)).await
 }
 
 // ── The broker's places ──────────────────────────────────────────────────────────────────────
@@ -1135,7 +1150,7 @@ async fn peer_of(
     (id, topic): (&str, [&str; 3]),
 ) -> Result<(MemoryBrokerAdapter, Arc<Mutex<Vec<Bytes>>>), String> {
     let peer = broker
-        .adapter(&MemoryBrokerAdapterOptions::of(id))
+        .adapter(&MemoryBrokerAdapterOptions::new(id))
         .map_err(|error| error.to_string())?;
     let heard: Arc<Mutex<Vec<Bytes>>> = Arc::default();
 
@@ -1167,7 +1182,7 @@ fn participant_on(
 ) -> Result<Result<BrokerParticipant, ProgrammerError>, String> {
     let adapter: Arc<dyn BrokerAdapter> = Arc::new(
         broker
-            .adapter(&MemoryBrokerAdapterOptions::of(id))
+            .adapter(&MemoryBrokerAdapterOptions::new(id))
             .map_err(|error| error.to_string())?,
     );
 
@@ -1179,14 +1194,14 @@ fn participant_on(
 struct BrokerDrive {
     clock: Arc<SteppingClock>,
     participant: BrokerParticipant,
-    server: BrokerServer,
+    server: BrokerTransportServer,
     peer: MemoryBrokerAdapter,
     heard: Arc<Mutex<Vec<Bytes>>>,
 }
 
 impl BrokerDrive {
     async fn of(
-        (participant, server): (BrokerParticipantOptions, BrokerServerOptions),
+        (participant, server): (BrokerParticipantOptions, BrokerTransportServerOptions),
     ) -> Result<Result<Self, ProgrammerError>, String> {
         let clock = SteppingClock::new(epoch());
         let broker = broker_on(&clock)?;
@@ -1220,7 +1235,7 @@ impl BrokerDrive {
         let payload = parcels::write(fields)?;
 
         self.peer
-            .publish(BrokerPublication::of(topic, Bytes::from(payload)))
+            .publish(BrokerPublication::new(topic, Bytes::from(payload)))
             .await
             .map(drop)
             .map_err(|error| error.to_string())?;
@@ -1278,7 +1293,7 @@ async fn broker_heartbeat_by_options(given: Option<Duration>) -> Played {
 // the transport server's options, as it is built: the due of the timer an ACCEPT arms for its third
 // leg; refused, no server built
 async fn accept_timeout_by_options(given: Option<Duration>) -> Played {
-    let mut server = BrokerServerOptions::of(["interop"]);
+    let mut server = BrokerTransportServerOptions::new(["interop"]);
 
     server.accept_timeout = given;
 
@@ -1303,7 +1318,9 @@ async fn broker_body_grace_period_by_options(given: Option<Duration>) -> Played 
 
     participant.body_grace_period = given;
 
-    let drive = match BrokerDrive::of((participant, BrokerServerOptions::of(["interop"]))).await? {
+    let drive = match BrokerDrive::of((participant, BrokerTransportServerOptions::new(["interop"])))
+        .await?
+    {
         Ok(drive) => drive,
         Err(refused) => return Ok(Observed::Refused(refused)),
     };
@@ -1356,9 +1373,9 @@ async fn connect_timeout_by_broker(given: Option<Duration>) -> Played {
         .map_err(|error| error.to_string())?;
 
     let client = participant
-        .client(&BrokerClientOptions::default())
+        .client(&BrokerTransportClientOptions::default())
         .map_err(|error| error.to_string())?;
-    let mut connect = BrokerConnectOptions::of("interop");
+    let mut connect = BrokerTransportClientConnectOptions::new("interop");
 
     connect.timeout = given;
 

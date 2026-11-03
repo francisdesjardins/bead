@@ -98,7 +98,7 @@ public sealed class ViolationsTests
     }
 
     // what a reader read, whole, as one line of text: its violations, its count and whether it stopped
-    private static string Shown(ViolationsRead read)
+    private static string Shown(ReadViolations read)
     {
         var count = read.More?.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? "-";
 
@@ -114,7 +114,7 @@ public sealed class ViolationsTests
     // what a reader read, as Shown writes it, of the violations and the count given
     private static string ReadShown(Violation[] violations, long? more = null)
     {
-        return Shown(new ViolationsRead { More = more, Violations = violations });
+        return Shown(new ReadViolations { More = more, Violations = violations });
     }
 
     // definition

@@ -10,7 +10,7 @@ use super::{Handed, answer, cancel_of, failures_of, keeping, locked};
 use crate::constants::{FailureScope, ProtocolCode};
 use crate::envelope::{Credential, Envelope, FailureRecord, RequestHeader};
 use crate::identity::Procedure;
-use crate::router::core::{Handler, ResolveFn, ResolverProps};
+use crate::router::core::{Handler, RequestResolverProps, ResolveFn};
 use crate::router::server::RouterServerOptions;
 use crate::router::types::{ConnectionHandle, RouterLimitsOptions, TransportMessage};
 use crate::testing::pair::echo;
@@ -82,7 +82,10 @@ fn call_ids_of(handed: &Handed) -> Vec<u32> {
 #[tokio::test]
 async fn refuses_a_request_for_a_destination_a_service_or_a_procedure_it_does_not_know_on_its_call_id_alone()
  {
-    let nine = Procedure { id: 9, ..echo() };
+    let nine = Procedure {
+        procedure_id: 9,
+        ..echo()
+    };
     let (served, _handed) = served_keeping((&RouterServerOptions::default(), &nine));
     let eight = Procedure {
         service_id: 8,
@@ -441,7 +444,7 @@ async fn answers_an_envelope_larger_than_it_reads_on_its_call_id() {
 // a resolver that fails at once, as the TypeScript side's throws, or once it has waited, as its
 // rejects
 fn failing(waits: bool) -> ResolveFn {
-    Arc::new(move |_props: ResolverProps| {
+    Arc::new(move |_props: RequestResolverProps| {
         Box::pin(async move {
             if waits {
                 tokio::task::yield_now().await;
@@ -462,7 +465,10 @@ fn failing(waits: bool) -> ResolveFn {
 #[tokio::test]
 async fn reports_a_resolver_that_throws_or_rejects_with_its_connection() {
     let served = Served::new(&RouterServerOptions::default());
-    let two = Procedure { id: 2, ..echo() };
+    let two = Procedure {
+        procedure_id: 2,
+        ..echo()
+    };
 
     served.transport.open(&first(), true);
     served.transport.open(&second(), true);
@@ -506,7 +512,7 @@ async fn refuses_a_second_resolver_for_one_procedure_and_an_address_a_revision_o
 
     assert!(
         register(&Procedure {
-            name: "again".to_owned(),
+            procedure_name: "again".to_owned(),
             ..echo()
         })
         .is_err(),
@@ -514,7 +520,10 @@ async fn refuses_a_second_resolver_for_one_procedure_and_an_address_a_revision_o
     );
 
     for procedure in [
-        Procedure { id: 0, ..echo() },
+        Procedure {
+            procedure_id: 0,
+            ..echo()
+        },
         Procedure {
             service_id: 0,
             ..echo()
@@ -529,7 +538,7 @@ async fn refuses_a_second_resolver_for_one_procedure_and_an_address_a_revision_o
         },
     ] {
         let refusal = register(&Procedure {
-            id: if procedure.id == 0 { 0 } else { 2 },
+            procedure_id: if procedure.procedure_id == 0 { 0 } else { 2 },
             ..procedure
         })
         .map_or_else(|error| error.to_string(), |()| String::new());
@@ -542,8 +551,8 @@ async fn refuses_a_second_resolver_for_one_procedure_and_an_address_a_revision_o
 
     for name in ["Echo", "_OTHER", "echo\n", "get_thing", &"a".repeat(64)] {
         let refusal = register(&Procedure {
-            id: 2,
-            name: name.to_owned(),
+            procedure_id: 2,
+            procedure_name: name.to_owned(),
             ..echo()
         })
         .map_or_else(|error| error.to_string(), |()| String::new());
@@ -566,7 +575,11 @@ async fn refuses_a_second_resolver_for_one_procedure_and_an_address_a_revision_o
     };
 
     assert!(
-        limited(Procedure { id: 9, ..echo() }).is_err(),
+        limited(Procedure {
+            procedure_id: 9,
+            ..echo()
+        })
+        .is_err(),
         "a limit of 0"
     );
     assert!(
@@ -580,7 +593,7 @@ async fn refuses_a_second_resolver_for_one_procedure_and_an_address_a_revision_o
     );
 
     register(&Procedure {
-        id: 0xffff,
+        procedure_id: 0xffff,
         service_id: 0xffff,
         service_revision: (1 << 31) - 1,
         ..echo()

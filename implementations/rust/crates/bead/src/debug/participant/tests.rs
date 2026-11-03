@@ -9,7 +9,9 @@ use super::{ParcelVerdict, ParticipantDebugEvent, ParticipantDebugListener};
 use crate::broker::adapter::{
     BrokerAdapter, BrokerDown, BrokerListener, BrokerMessage, BrokerPublication, BrokerSubscription,
 };
-use crate::broker::client::{BrokerClient, BrokerClientOptions, BrokerConnectOptions};
+use crate::broker::client::{
+    BrokerTransportClient, BrokerTransportClientConnectOptions, BrokerTransportClientOptions,
+};
 use crate::broker::memory::{
     MemoryBroker, MemoryBrokerAdapter, MemoryBrokerAdapterOptions, MemoryBrokerOptions,
 };
@@ -17,13 +19,16 @@ use crate::broker::parcel::{
     Parcel, ParcelRead, encode_parcel, flags, kinds, read_parcel, write_parcel,
 };
 use crate::broker::participant::{BrokerParticipant, BrokerParticipantOptions};
-use crate::broker::server::{BrokerServer, BrokerServerOptions};
+use crate::broker::server::{BrokerTransportServer, BrokerTransportServerOptions};
 use crate::clock::SharedClock;
 use crate::debug::DebugDirection;
 use crate::duration::NEVER;
 use crate::router::types::TransportMessage;
 use crate::testing::SteppingClock;
-use crate::transport::{ClientTransport, ReconnectDelay, ReconnectOptions, ServerTransport};
+use crate::transport::{
+    RouterClientTransport, ServerTransport, TransportClientReconnectDelay,
+    TransportClientReconnectOptions,
+};
 
 type Events = Arc<Mutex<Vec<ParticipantDebugEvent>>>;
 
@@ -58,8 +63,8 @@ struct TracePair {
     server_adapter: MemoryBrokerAdapter,
     client_participant: BrokerParticipant,
     server_participant: BrokerParticipant,
-    client: BrokerClient,
-    server: BrokerServer,
+    client: BrokerTransportClient,
+    server: BrokerTransportServer,
     events: Events,
     server_events: Events,
     listener: ParticipantDebugListener,
@@ -78,19 +83,19 @@ impl TracePair {
         })
         .expect("a broker");
         let client_adapter = broker
-            .adapter(&MemoryBrokerAdapterOptions::of("client"))
+            .adapter(&MemoryBrokerAdapterOptions::new("client"))
             .expect("an adapter");
         let server_adapter = broker
-            .adapter(&MemoryBrokerAdapterOptions::of("server"))
+            .adapter(&MemoryBrokerAdapterOptions::new("server"))
             .expect("an adapter");
         let client_participant = BrokerParticipant::new(
             Arc::new(client_adapter.clone()),
             &BrokerParticipantOptions {
                 clock: Some(Arc::clone(&shared)),
                 heartbeat: Some(NEVER),
-                reconnect: Some(ReconnectOptions {
-                    delay: Some(ReconnectDelay::Fixed(Duration::ZERO)),
-                    ..ReconnectOptions::default()
+                reconnect: Some(TransportClientReconnectOptions {
+                    delay: Some(TransportClientReconnectDelay::Fixed(Duration::ZERO)),
+                    ..TransportClientReconnectOptions::default()
                 }),
                 ..BrokerParticipantOptions::default()
             },
@@ -118,15 +123,15 @@ impl TracePair {
         server_participant.on_debug(hear(&server_events));
 
         let server = server_participant
-            .server(&BrokerServerOptions::of(["interop"]))
+            .server(&BrokerTransportServerOptions::new(["interop"]))
             .expect("a server");
         let client = client_participant
-            .client(&BrokerClientOptions::default())
+            .client(&BrokerTransportClientOptions::default())
             .expect("a client");
 
         server.start().await.expect("started");
         client
-            .connect(&BrokerConnectOptions::of("interop"))
+            .connect(&BrokerTransportClientConnectOptions::new("interop"))
             .await
             .expect("connected");
         settle(&clock, &server_clock).await;
@@ -155,7 +160,7 @@ impl TracePair {
 
     async fn send(&self, payload: Bytes) {
         self.server_adapter
-            .publish(BrokerPublication::of(["bead", "i", "client"], payload))
+            .publish(BrokerPublication::new(["bead", "i", "client"], payload))
             .await
             .expect("published");
         settle(&self.clock, &self.server_clock).await;
@@ -163,7 +168,7 @@ impl TracePair {
 
     async fn publish(&self, payload: Bytes, place: &str) {
         self.client_adapter
-            .publish(BrokerPublication::of(
+            .publish(BrokerPublication::new(
                 [
                     "bead",
                     place,
@@ -311,7 +316,7 @@ async fn traces_each_incoming_verdict_once_after_judgment_and_names_a_loss_by_it
     }))
     .await;
     pair.server_adapter
-        .publish_retained(BrokerPublication::of(
+        .publish_retained(BrokerPublication::new(
             ["bead", "i", "client"],
             written(&parcel),
         ))
@@ -325,7 +330,7 @@ async fn traces_each_incoming_verdict_once_after_judgment_and_names_a_loss_by_it
         .await
         .expect("subscribed");
     pair.server_adapter
-        .publish(BrokerPublication::of(
+        .publish(BrokerPublication::new(
             ["other", "i", "client"],
             written(&parcel),
         ))
@@ -363,6 +368,10 @@ async fn traces_each_incoming_verdict_once_after_judgment_and_names_a_loss_by_it
     pair.stop().await;
 }
 
+#[expect(
+    clippy::too_many_lines,
+    reason = "the twin plays every leg's trace in one connection's history"
+)]
 // debugging 13.3, 13.7
 #[tokio::test]
 async fn traces_parcel_attempts_and_third_leg_handles_without_carried_bytes_credentials_or_an_acceptor_s_half()
@@ -391,7 +400,14 @@ async fn traces_parcel_attempts_and_third_leg_handles_without_carried_bytes_cred
             event.direction == Some(DebugDirection::Rx) && event.kind.as_deref() == Some("DATA")
         })
         .expect("a DATA taken");
-    let handle = Arc::clone(&pair.server.clients().first().expect("a client").0);
+    let handle = Arc::clone(
+        &pair
+            .server
+            .clients()
+            .first()
+            .expect("a client")
+            .connection_handle,
+    );
 
     assert_eq!(
         (
@@ -529,7 +545,7 @@ async fn tells_completed_link_transitions_and_held_names_by_push_and_keeps_level
         "levels by pull"
     );
     pair.client
-        .connect(&BrokerConnectOptions::of("interop"))
+        .connect(&BrokerTransportClientConnectOptions::new("interop"))
         .await
         .expect("connected");
     settle(&pair.clock, &pair.server_clock).await;
@@ -611,7 +627,7 @@ async fn reports_a_debug_listener_s_throw_and_calls_later_listeners_while_the_pa
  {
     let broker = MemoryBroker::new(&MemoryBrokerOptions::default()).expect("a broker");
     let adapter = broker
-        .adapter(&MemoryBrokerAdapterOptions::of("client"))
+        .adapter(&MemoryBrokerAdapterOptions::new("client"))
         .expect("an adapter");
     let participant =
         BrokerParticipant::new(Arc::new(adapter), &BrokerParticipantOptions::default())

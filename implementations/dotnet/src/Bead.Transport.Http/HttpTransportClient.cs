@@ -65,7 +65,7 @@ public sealed record HttpTransportClientOptions
 }
 
 /// <summary>Where a client connects — <c>http://host:port/pathname</c>, or <c>https://</c> when secured — and how long it waits.</summary>
-public sealed record HttpConnectOptions
+public sealed record HttpTransportClientConnectOptions
 {
     /// <summary>The server's host.</summary>
     public required string Host { get; init; }
@@ -148,7 +148,7 @@ public sealed class HttpTransportClient : IRouterClientTransport, IAsyncDisposab
     private HttpClient? _http;
 
     // the options of the last connect its guard let through, which a reconnection connects with
-    private HttpConnectOptions? _lastConnectOptions;
+    private HttpTransportClientConnectOptions? _lastConnectOptions;
 
     // what aborts a connect under way: a dispose does
     private CancellationTokenSource? _connecting;
@@ -275,7 +275,7 @@ public sealed class HttpTransportClient : IRouterClientTransport, IAsyncDisposab
     /// <summary>
     /// Connects: the server draws a connection, and its token is kept here, never shown. Refused with
     /// an <see cref="ArgumentOutOfRangeException"/> for a timeout
-    /// <see cref="HttpConnectOptions.Timeout"/> does not take, zero among them, which leaves the state, and the target a
+    /// <see cref="HttpTransportClientConnectOptions.Timeout"/> does not take, zero among them, which leaves the state, and the target a
     /// reconnection replays, as they were; with an <see cref="InvalidOperationException"/> unless
     /// Uninitialized or Closed; and with an <see cref="OperationCanceledException"/>, nothing
     /// changed, when its token is cancelled already.
@@ -283,7 +283,7 @@ public sealed class HttpTransportClient : IRouterClientTransport, IAsyncDisposab
     /// <see cref="OperationCanceledException"/> once its token is cancelled, and an
     /// <see cref="HttpRequestException"/> when the server draws none, ending Closed.
     /// </summary>
-    public Task Connect(HttpConnectOptions options, CancellationToken cancellationToken = default)
+    public Task Connect(HttpTransportClientConnectOptions options, CancellationToken cancellationToken = default)
     {
         return Connecting(options, (cancellationToken, false));
     }
@@ -379,10 +379,10 @@ public sealed class HttpTransportClient : IRouterClientTransport, IAsyncDisposab
     /// <summary>
     /// Deletes the connection — the server ends it first, so what waits there learns it, then what
     /// waits here goes — and raises its close, which says it was clean as
-    /// <see cref="TransportDisconnectOptions.IsClean"/> does; quick, it lets the connection go at once,
+    /// <see cref="TransportClientDisconnectOptions.IsClean"/> does; quick, it lets the connection go at once,
     /// the server told unwaited. Refused with a <see cref="DisconnectException"/> unless Open.
     /// </summary>
-    public async Task CloseConnection(TransportDisconnectOptions? options = null)
+    public async Task CloseConnection(TransportClientDisconnectOptions? options = null)
     {
         var isClean = options?.IsClean ?? true;
         var isQuick = options?.IsQuick ?? false;
@@ -441,11 +441,11 @@ public sealed class HttpTransportClient : IRouterClientTransport, IAsyncDisposab
     /// connection without a close, and raises <see cref="IRouterClientTransport.Reconnect"/> as it
     /// starts — as the WebSocket transport client does, attempt for attempt.
     /// </summary>
-    public async Task Reconnect(TransportReconnectOptions? options = null)
+    public async Task Reconnect(TransportClientReconnectOptions? options = null)
     {
-        var reconnect = options ?? new TransportReconnectOptions();
+        var reconnect = options ?? new TransportClientReconnectOptions();
         var token = reconnect.CancellationToken;
-        HttpConnectOptions target;
+        HttpTransportClientConnectOptions target;
         Drawn? replaced;
         Action? starting;
 
@@ -604,7 +604,7 @@ public sealed class HttpTransportClient : IRouterClientTransport, IAsyncDisposab
 
     // http://host:port/pathname, or https://; an IPv6 literal bracketed, or its colons would read as
     // the port's
-    private static Uri UriOf(HttpConnectOptions options)
+    private static Uri UriOf(HttpTransportClientConnectOptions options)
     {
         var host = options.Host.Contains(':') && !options.Host.StartsWith('[') ? $"[{options.Host}]" : options.Host;
         var path = options.Pathname.StartsWith('/') ? options.Pathname : $"/{options.Pathname}";
@@ -793,14 +793,14 @@ public sealed class HttpTransportClient : IRouterClientTransport, IAsyncDisposab
 
     // a connect, or a reconnection's attempt, which its guard alone tells apart: an attempt passes
     // only while the client reconnects, and leaves the state to its reconnection when it fails
-    private async Task Connecting(HttpConnectOptions given, (CancellationToken Token, bool IsAttempt) call)
+    private async Task Connecting(HttpTransportClientConnectOptions given, (CancellationToken Token, bool IsAttempt) call)
     {
         ArgumentNullException.ThrowIfNull(given);
 
         // held before anything moves or is kept, so a reconnection connects again with it held
         var options = given with
         {
-            Timeout = Clocks.AssertHeld(("a connect's timeout", nameof(HttpConnectOptions.Timeout)), given.Timeout),
+            Timeout = Clocks.AssertHeld(("a connect's timeout", nameof(HttpTransportClientConnectOptions.Timeout)), given.Timeout),
         };
         var (token, isAttempt) = call;
         var uri = UriOf(options);

@@ -13,9 +13,11 @@ namespace Bead.Transport.Http.Tests;
 /// The options rule over this side's public surface, by reflection over the eight assemblies an
 /// application calls (decisions 0004 and 0007): an options record is a sealed record of
 /// <c>init</c> properties, at most two of them <c>required</c>, a setting it cannot be built
-/// without; and a parameter that takes one is required exactly when one of its members is. What the
-/// rule reads the compiler writes into the assembly: <c>RequiredMemberAttribute</c>, the
-/// <c>IsExternalInit</c> modifier and a parameter's default. The TypeScript side's twin is
+/// without; and a parameter that takes one is required exactly when one of its members is. No
+/// public member takes or gives a tuple, at any depth of its type: what a caller passes or reads is
+/// named. What the rules read the compiler writes into the assembly: <c>RequiredMemberAttribute</c>,
+/// the <c>IsExternalInit</c> modifier, a parameter's default and a tuple's own type. The TypeScript
+/// side's twin is
 /// <c>tools/check-surface.mjs</c>; the members each side exposes are pinned apart, the C# side's in
 /// each project's <c>PublicAPI.Shipped.txt</c> and <c>PublicAPI.Unshipped.txt</c>.
 /// </summary>
@@ -156,7 +158,85 @@ public sealed class SurfaceTests
         return $"{name}: required though every member is optional";
     }
 
+    // whether a type holds a tuple at any depth: itself, what it is an array, a pointer or a
+    // reference of, or one of a generic's arguments, so Task<(…)> and IReadOnlyList<(…)> hold one;
+    // a KeyValuePair<,> is a map's entry, no tuple
+    private static bool HoldsTuple(Type type)
+    {
+        if (type.HasElementType)
+        {
+            return HoldsTuple(type.GetElementType()!);
+        }
+
+        if (!type.IsGenericType)
+        {
+            return false;
+        }
+
+        var definition = type.GetGenericTypeDefinition().FullName ?? "";
+
+        // * every arity of both, their eighth element's rest among them
+        if (definition.StartsWith("System.ValueTuple`", StringComparison.Ordinal) || definition.StartsWith("System.Tuple`", StringComparison.Ordinal))
+        {
+            return true;
+        }
+
+        return type.GetGenericArguments().Any(HoldsTuple);
+    }
+
+    // what of one public member takes or gives a tuple: a method's, a constructor's or a delegate's
+    // Invoke's parameters and return, a property's, a field's, a constant's or an event's type
+    private static IEnumerable<string> TuplesOf(MemberInfo member)
+    {
+        var name = $"{member.DeclaringType!.FullName}.{member.Name}";
+
+        switch (member)
+        {
+            case MethodBase method when IsCalled(method):
+                foreach (var parameter in method.GetParameters().Where((parameter) =>
+                {
+                    return HoldsTuple(parameter.ParameterType);
+                }))
+                {
+                    yield return $"{name}({parameter.Name})";
+                }
+
+                if (method is MethodInfo { ReturnType: var returned } && HoldsTuple(returned))
+                {
+                    yield return $"{name}: its return";
+                }
+
+                break;
+            case PropertyInfo property when HoldsTuple(property.PropertyType):
+                yield return name;
+                break;
+            case FieldInfo field when HoldsTuple(field.FieldType):
+                yield return name;
+                break;
+            case EventInfo handled when HoldsTuple(handled.EventHandlerType!):
+                yield return name;
+                break;
+            default:
+                break;
+        }
+    }
+
     // tests
+
+    [Fact]
+    public void Takes_and_gives_no_tuple_on_the_public_surface()
+    {
+        var members = PublicTypes()
+            .SelectMany((type) =>
+            {
+                return type.GetMembers(Declared);
+            })
+            .ToList();
+        var off = members.SelectMany(TuplesOf);
+
+        Assert.NotEmpty(members);
+        Assert.Empty(off);
+    }
 
     [Fact]
     public void Every_public_options_record_is_a_sealed_record_of_init_properties()

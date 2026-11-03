@@ -7,6 +7,7 @@ use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use bytes::Bytes;
 use serde_json::Value;
 
+use crate::NotificationResolverDependencies;
 use crate::constants::{FailureScope, ProcedureKind, ProtocolCode, RouterSide};
 use crate::debug::{DebugDirection, DebugType};
 use crate::errors::CallError;
@@ -14,7 +15,7 @@ use crate::failure::FailureOrigin;
 use crate::identity::{Deprecation, Procedure};
 use crate::managers::service::{
     DebugEvent, NotificationDependencies, NotifyOptions, RequestDependencies, RequestOptions,
-    ResolverDependencies, Response, ServiceManager, TracedError,
+    RequestResolverDependencies, Response, ServiceManager, TracedError,
 };
 use crate::payloads::{CodecRefusal, JsonCodec, PayloadCodec, RawCodec};
 use crate::router::types::{ConnectionHandle, RouterError};
@@ -46,7 +47,7 @@ fn scripted() -> (
     let clock = crate::testing::SteppingClock::new(crate::testing::instants::new_year());
     let shared: crate::clock::SharedClock = Arc::<crate::testing::SteppingClock>::clone(&clock);
     let transport = crate::testing::scripted::ScriptedClient::new(shared);
-    let carried: Arc<dyn crate::transport::ClientTransport> =
+    let carried: Arc<dyn crate::transport::RouterClientTransport> =
         Arc::<crate::testing::scripted::ScriptedClient>::clone(&transport);
     let client = crate::client::Client::new(carried, &crate::client::ClientOptions::default())
         .expect("a client built");
@@ -69,9 +70,9 @@ fn recorded(manager: &ServiceManager) -> Heard {
 
 fn ticks() -> Procedure {
     Procedure {
-        id: 2,
-        name: "ticks".to_owned(),
-        kind: Some(ProcedureKind::Notifies),
+        procedure_id: 2,
+        procedure_name: "ticks".to_owned(),
+        procedure_kind: Some(ProcedureKind::Notifies),
         ..echo()
     }
 }
@@ -107,7 +108,7 @@ async fn an_answer_that_does_not_decode_fails_the_call_here_with_its_header_and_
         ..RequestOptions::default()
     };
     let call = manager
-        .get_request(&echo(), RequestDependencies::of(JsonCodec, JsonCodec))
+        .get_request(&echo(), RequestDependencies::new(JsonCodec, JsonCodec))
         .expect("echo asked")
         .call(Value::from("x"), &options)
         .expect("echo called");
@@ -145,7 +146,7 @@ async fn an_answer_that_does_not_decode_fails_the_call_here_with_its_header_and_
     assert_eq!(failure.procedure(), Some(echo().address()), "its call");
     assert_eq!(failure.destination_id(), Some(4), "its call's destination");
     assert!(
-        matches!(failure.header(), Some(crate::envelope::Header::Result(header)) if *header == answer),
+        matches!(failure.header(), Some(crate::envelope::EnvelopeHeader::Result(header)) if *header == answer),
         "its answer's header"
     );
     assert!(
@@ -175,7 +176,10 @@ async fn a_notification_that_does_not_decode_fails_here_for_the_router_to_report
         .services()
         .get_notification_resolver(
             &ticks(),
-            (ResolverDependencies::of(JsonCodec, JsonCodec), RawCodec),
+            NotificationResolverDependencies::new(
+                RequestResolverDependencies::new(JsonCodec, JsonCodec),
+                RawCodec,
+            ),
         )
         .expect("ticks resolved")
         .on(Arc::new(|_request, response: Response<JsonCodec>| {
@@ -188,18 +192,19 @@ async fn a_notification_that_does_not_decode_fails_here_for_the_router_to_report
     let notification = manager
         .get_notification(
             &ticks(),
-            NotificationDependencies::of((JsonCodec, JsonCodec, JsonCodec)),
+            NotificationDependencies::new(
+                RequestDependencies::new(JsonCodec, JsonCodec),
+                JsonCodec,
+            ),
         )
         .expect("ticks heard");
-    let registering = notification.on(
-        (
-            Value::Null,
-            Arc::new(move |value: Value| {
-                locked(&hearing).push(value);
+    let registering = notification.register(
+        Value::Null,
+        Arc::new(move |value: Value| {
+            locked(&hearing).push(value);
 
-                Box::pin(async { Ok(()) })
-            }),
-        ),
+            Box::pin(async { Ok(()) })
+        }),
         &RequestOptions::default(),
     );
 
@@ -260,7 +265,10 @@ async fn a_call_whose_value_does_not_write_fails_before_anything_goes_nothing_re
 
     pair.server
         .services()
-        .get_request_resolver(&echo(), ResolverDependencies::of(JsonCodec, JsonCodec))
+        .get_request_resolver(
+            &echo(),
+            RequestResolverDependencies::new(JsonCodec, JsonCodec),
+        )
         .expect("echo resolved")
         .on(Arc::new(move |request, response: Response<JsonCodec>| {
             *locked(&counting) += 1;
@@ -278,7 +286,7 @@ async fn a_call_whose_value_does_not_write_fails_before_anything_goes_nothing_re
                 deprecation: Some(Deprecation::default()),
                 ..echo()
             },
-            RequestDependencies::of(Unwritable, JsonCodec),
+            RequestDependencies::new(Unwritable, JsonCodec),
         )
         .expect("echo asked");
 
@@ -311,7 +319,10 @@ async fn a_notification_whose_value_does_not_write_goes_to_its_router_in_its_pay
         .services()
         .get_notification_resolver(
             &ticks(),
-            (ResolverDependencies::of(JsonCodec, JsonCodec), Unwritable),
+            NotificationResolverDependencies::new(
+                RequestResolverDependencies::new(JsonCodec, JsonCodec),
+                Unwritable,
+            ),
         )
         .expect("ticks resolved")
         .on(Arc::new(|_request, response: Response<JsonCodec>| {
@@ -323,14 +334,15 @@ async fn a_notification_whose_value_does_not_write_goes_to_its_router_in_its_pay
         .services()
         .get_notification(
             &ticks(),
-            NotificationDependencies::of((JsonCodec, JsonCodec, JsonCodec)),
+            NotificationDependencies::new(
+                RequestDependencies::new(JsonCodec, JsonCodec),
+                JsonCodec,
+            ),
         )
         .expect("ticks heard");
-    let registering = notification.on(
-        (
-            Value::Null,
-            Arc::new(|_value: Value| Box::pin(async { Ok(()) })),
-        ),
+    let registering = notification.register(
+        Value::Null,
+        Arc::new(|_value: Value| Box::pin(async { Ok(()) })),
         &RequestOptions::default(),
     );
 
@@ -423,7 +435,7 @@ async fn a_request_whose_codec_panics_as_it_reads_is_answered_procedure_failed_w
         .services()
         .get_request_resolver(
             &echo(),
-            ResolverDependencies::of(
+            RequestResolverDependencies::new(
                 Breaking {
                     reads: true,
                     writes: false,
@@ -442,7 +454,7 @@ async fn a_request_whose_codec_panics_as_it_reads_is_answered_procedure_failed_w
     let call = pair
         .client
         .services()
-        .get_request(&echo(), RequestDependencies::of(JsonCodec, JsonCodec))
+        .get_request(&echo(), RequestDependencies::new(JsonCodec, JsonCodec))
         .expect("echo asked")
         .call(Value::from("x"), &RequestOptions::default())
         .expect("echo called");
@@ -488,7 +500,10 @@ async fn an_answer_whose_codec_panics_as_it_reads_fails_the_call_here_undecodabl
 
     pair.server
         .services()
-        .get_request_resolver(&echo(), ResolverDependencies::of(JsonCodec, JsonCodec))
+        .get_request_resolver(
+            &echo(),
+            RequestResolverDependencies::new(JsonCodec, JsonCodec),
+        )
         .expect("echo resolved")
         .on(Arc::new(|request, response: Response<JsonCodec>| {
             response.result(request.payload)
@@ -499,7 +514,7 @@ async fn an_answer_whose_codec_panics_as_it_reads_fails_the_call_here_undecodabl
     let call = manager
         .get_request(
             &echo(),
-            RequestDependencies::of(
+            RequestDependencies::new(
                 JsonCodec,
                 Breaking {
                     reads: true,
@@ -533,7 +548,7 @@ async fn an_answer_whose_codec_panics_as_it_reads_fails_the_call_here_undecodabl
     );
 
     let next = manager
-        .get_request(&echo(), RequestDependencies::of(JsonCodec, JsonCodec))
+        .get_request(&echo(), RequestDependencies::new(JsonCodec, JsonCodec))
         .expect("echo asked")
         .call(Value::from("y"), &RequestOptions::default())
         .expect("echo called");
@@ -560,7 +575,7 @@ async fn a_call_whose_codec_panics_as_it_writes_fails_with_its_throw_and_nothing
     let call = manager
         .get_request(
             &echo(),
-            RequestDependencies::of(
+            RequestDependencies::new(
                 Breaking {
                     reads: false,
                     writes: true,

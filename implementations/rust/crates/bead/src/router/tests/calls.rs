@@ -16,19 +16,20 @@ use tokio_util::sync::CancellationToken;
 
 use super::server::{Served, counted_options, first, registry, request_of, second};
 use super::{Scripted, answered, locked, options_of, request_of as client_request_of, result_of};
+use crate::RouterRequest;
 use crate::constants::{EnvelopeKind, ProcedureKind, ProtocolCode, RouterSide};
 use crate::debug::{DebugDirection, TracedEnvelope};
 use crate::envelope::{CreditHeader, Envelope, RequestHeader, ResultHeader};
 use crate::errors::CallError;
 use crate::identity::Procedure;
-use crate::managers::service::{ResolverDependencies, Response};
+use crate::managers::service::{RequestResolverDependencies, Response};
 use crate::metrics::MetricsRegistry;
 use crate::payloads::RawCodec;
 use crate::router::admissions::BeforeRequest;
-use crate::router::client::{ClientRequest, RouterClientOptions};
-use crate::router::core::{Handler, ResolverProps, Side};
+use crate::router::client::RouterClientOptions;
+use crate::router::core::{Handler, RequestResolverProps, Side};
 use crate::router::parts::PendingCalls;
-use crate::router::server::{CallHooks, RouterServerOptions, ServerRequest};
+use crate::router::server::RouterServerOptions;
 use crate::router::types::{
     CallAddress, ConnectionHandle, RouterAnswer, RouterLimitsOptions, TransportMessage,
 };
@@ -38,7 +39,7 @@ use crate::testing::scripted::Sending;
 // echo as a command, which a server's router makes
 fn command(maximum_payload_bytes: Option<u64>) -> Procedure {
     Procedure {
-        kind: Some(ProcedureKind::Command),
+        procedure_kind: Some(ProcedureKind::Command),
         maximum_payload_bytes,
         ..echo()
     }
@@ -57,16 +58,15 @@ fn command_of(
         .router
         .request(
             payload,
-            (
-                ServerRequest {
-                    procedure: procedure.address(),
-                    maximum_payload_bytes: procedure.maximum_payload_bytes,
-                    options,
-                    series: None,
-                    refusal: None,
-                },
-                CallHooks::default(),
-            ),
+            RouterRequest {
+                procedure: procedure.clone(),
+                options,
+                series: None,
+                refusal: None,
+                subscribes: None,
+                on_call_id: None,
+                on_sent: None,
+            },
         )
         .expect("a command")
 }
@@ -102,7 +102,10 @@ fn answering(served: &Served, procedure: &Procedure) -> Arc<Mutex<Vec<RequestHea
 
     served
         .services
-        .get_request_resolver(procedure, ResolverDependencies::of(RawCodec, RawCodec))
+        .get_request_resolver(
+            procedure,
+            RequestResolverDependencies::new(RawCodec, RawCodec),
+        )
         .expect("echo resolved")
         .on(Arc::new(move |request, response: Response<RawCodec>| {
             locked(&keeping).push(request.header.clone());
@@ -193,8 +196,8 @@ async fn holds_a_procedure_s_payloads_to_its_own_limit_within_the_router_s_both_
         ..echo()
     };
     let refusing = Procedure {
-        id: 7,
-        name: "refusing".to_owned(),
+        procedure_id: 7,
+        procedure_name: "refusing".to_owned(),
         ..small.clone()
     };
     let handed: Arc<Mutex<Vec<RequestHeader>>> = Arc::default();
@@ -211,7 +214,7 @@ async fn holds_a_procedure_s_payloads_to_its_own_limit_within_the_router_s_both_
         .register_resolver((
             &small,
             Handler {
-                resolve: Arc::new(move |props: ResolverProps| {
+                resolve: Arc::new(move |props: RequestResolverProps| {
                     let (keeping, telling) = (Arc::clone(&keeping), Arc::clone(&telling));
 
                     Box::pin(async move {
@@ -239,7 +242,7 @@ async fn holds_a_procedure_s_payloads_to_its_own_limit_within_the_router_s_both_
         .register_resolver((
             &refusing,
             Handler {
-                resolve: Arc::new(|_props: ResolverProps| Box::pin(async { Ok(()) })),
+                resolve: Arc::new(|_props: RequestResolverProps| Box::pin(async { Ok(()) })),
                 admit: Some(
                     BeforeRequest::new(|_request| false, None).admission(RouterSide::Server),
                 ),
@@ -252,7 +255,7 @@ async fn holds_a_procedure_s_payloads_to_its_own_limit_within_the_router_s_both_
 
     // sent: past the procedure's limit, nothing goes
     let small_command = Procedure {
-        kind: Some(ProcedureKind::Command),
+        procedure_kind: Some(ProcedureKind::Command),
         ..small.clone()
     };
     let refused = answered(command_of(
@@ -396,10 +399,7 @@ async fn ends_the_transfers_it_sends_on_a_connection_that_goes_and_on_a_router_d
             .router
             .request(
                 Bytes::from(vec![7; 300]),
-                (
-                    client_request_of((None, Duration::from_secs(5))),
-                    CallHooks::default(),
-                ),
+                client_request_of((None, Duration::from_secs(5))),
             )
             .expect("a call");
 
@@ -568,13 +568,10 @@ async fn readings_of(given: Option<&MetricsRegistry>) -> [(usize, usize); 2] {
         .router
         .request(
             Bytes::from_static(&[1]),
-            (
-                ClientRequest {
-                    series,
-                    ..client_request_of((None, crate::duration::NEVER))
-                },
-                CallHooks::default(),
-            ),
+            RouterRequest {
+                series,
+                ..client_request_of((None, crate::duration::NEVER))
+            },
         )
         .expect("a call");
 
@@ -648,14 +645,11 @@ async fn counts_a_call_made_refused_before_it_goes_no_call_id_free_or_payload_to
             .router
             .request(
                 Bytes::from(vec![0; payload]),
-                (
-                    ClientRequest {
-                        procedure,
-                        series: series.clone(),
-                        ..client_request_of((None, crate::duration::NEVER))
-                    },
-                    CallHooks::default(),
-                ),
+                RouterRequest {
+                    procedure,
+                    series: series.clone(),
+                    ..client_request_of((None, crate::duration::NEVER))
+                },
             )
             .expect("a call")
     };
@@ -732,10 +726,7 @@ async fn counts_a_call_made_refused_before_it_goes_no_call_id_free_or_payload_to
     jwt.options.credential = Some(crate::router::types::RequestCredential::Jwt(String::new()));
 
     assert!(
-        scripted
-            .router
-            .request(Bytes::new(), (jwt, CallHooks::default()))
-            .is_err(),
+        scripted.router.request(Bytes::new(), jwt).is_err(),
         "a JWT of no token refused"
     );
 
@@ -746,7 +737,7 @@ async fn counts_a_call_made_refused_before_it_goes_no_call_id_free_or_payload_to
 
     let cancelled = scripted
         .router
-        .request(Bytes::new(), (cancelled, CallHooks::default()))
+        .request(Bytes::new(), cancelled)
         .expect("a call aborted already");
 
     assert!(
@@ -773,7 +764,7 @@ async fn detaches_calls_before_settling_an_incoming_resolver_awaiting_an_outgoin
     use crate::payloads::JsonCodec;
     use crate::server::ServerOptions;
     use crate::testing::pair::{Pair, PairOptions};
-    use crate::transport::DisconnectOptions;
+    use crate::transport::TransportClientDisconnectOptions;
 
     let registry = MetricsRegistry::new(&MetricsRegistryOptions::default()).expect("a registry");
     let options = PairOptions {
@@ -787,16 +778,19 @@ async fn detaches_calls_before_settling_an_incoming_resolver_awaiting_an_outgoin
         .await
         .expect("a pair connected");
     let hold = Procedure {
-        id: 2,
-        name: "hold".to_owned(),
-        kind: Some(ProcedureKind::Command),
+        procedure_id: 2,
+        procedure_name: "hold".to_owned(),
+        procedure_kind: Some(ProcedureKind::Command),
         ..echo()
     };
 
     // the client takes the command and never answers it
     pair.client
         .services()
-        .get_request_resolver(&hold, ResolverDependencies::of(JsonCodec, JsonCodec))
+        .get_request_resolver(
+            &hold,
+            RequestResolverDependencies::new(JsonCodec, JsonCodec),
+        )
         .expect("hold resolved")
         .on(Arc::new(|_request, _response: Response<JsonCodec>| {
             Box::pin(core::future::pending())
@@ -806,7 +800,7 @@ async fn detaches_calls_before_settling_an_incoming_resolver_awaiting_an_outgoin
     let holding = pair
         .server
         .services()
-        .get_request(&hold, RequestDependencies::of(JsonCodec, JsonCodec))
+        .get_request(&hold, RequestDependencies::new(JsonCodec, JsonCodec))
         .expect("hold asked");
     let heard: Arc<Mutex<Vec<String>>> = Arc::default();
     let hearing = Arc::clone(&heard);
@@ -814,7 +808,10 @@ async fn detaches_calls_before_settling_an_incoming_resolver_awaiting_an_outgoin
 
     pair.server
         .services()
-        .get_request_resolver(&echo(), ResolverDependencies::of(JsonCodec, JsonCodec))
+        .get_request_resolver(
+            &echo(),
+            RequestResolverDependencies::new(JsonCodec, JsonCodec),
+        )
         .expect("echo resolved")
         .on(Arc::new(move |request, response: Response<JsonCodec>| {
             let holding = holding.clone();
@@ -852,7 +849,7 @@ async fn detaches_calls_before_settling_an_incoming_resolver_awaiting_an_outgoin
     let calling = pair
         .client
         .services()
-        .get_request(&echo(), RequestDependencies::of(JsonCodec, JsonCodec))
+        .get_request(&echo(), RequestDependencies::new(JsonCodec, JsonCodec))
         .expect("echo asked")
         .call(serde_json::json!("hello"), &RequestOptions::default())
         .expect("echo called");
@@ -871,7 +868,7 @@ async fn detaches_calls_before_settling_an_incoming_resolver_awaiting_an_outgoin
     );
 
     pair.transport
-        .disconnect(&DisconnectOptions::default())
+        .disconnect(&TransportClientDisconnectOptions::default())
         .expect("disconnected");
     pair.settle().await;
 

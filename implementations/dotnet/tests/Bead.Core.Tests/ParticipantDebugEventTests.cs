@@ -75,7 +75,7 @@ public sealed class ParticipantDebugEventTests
         Assert.Equal([1L], links[1].Ended);
         Assert.NotEqual(before, pair.ClientParticipant.Incarnation);
         Assert.Equal(0, pair.ClientParticipant.Gauges().Counts["connections"]);
-        await pair.Client.Connect(new BrokerConnectOptions { Server = "interop" }, TestContext.Current.CancellationToken);
+        await pair.Client.Connect(new BrokerTransportClientConnectOptions { Server = "interop" }, TestContext.Current.CancellationToken);
         await pair.Scheduler.WhenIdle();
         Assert.Equal(2L, pair.Events.Last((item) => { return item.Kind == "PING" && item.Direction == "tx"; }).Connection);
         await pair.ClientParticipant.Stop();
@@ -342,7 +342,7 @@ public sealed class ParticipantDebugEventTests
                 Scheduler = Scheduler,
                 Clock = Clock,
                 Heartbeat = Timeout.InfiniteTimeSpan,
-                Reconnect = new TransportReconnectOptions { Delay = TransportReconnectDelayOrResolver.Of(TimeSpan.Zero) },
+                Reconnect = new TransportClientReconnectOptions { Delay = new TransportClientReconnectDelay(TimeSpan.Zero) },
             });
             ServerParticipant = new BrokerParticipant(ServerAdapter, new BrokerParticipantOptions { Scheduler = Scheduler, Heartbeat = Timeout.InfiniteTimeSpan });
             ClientParticipant.Debug += Events.Enqueue;
@@ -377,7 +377,7 @@ public sealed class ParticipantDebugEventTests
         {
             var pair = new TracePair();
             await pair.Server.Start();
-            await pair.Client.Connect(new BrokerConnectOptions { Server = "interop" }, TestContext.Current.CancellationToken);
+            await pair.Client.Connect(new BrokerTransportClientConnectOptions { Server = "interop" }, TestContext.Current.CancellationToken);
             await pair.Scheduler.WhenIdle();
             Assert.NotNull(pair.Accept);
             Assert.NotEmpty(pair.Handle);

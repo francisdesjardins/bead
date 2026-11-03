@@ -84,7 +84,7 @@ pub struct ConnectOptions {
 }
 
 impl ConnectOptions {
-    pub fn of(server: String) -> Self {
+    pub fn new(server: String) -> Self {
         Self {
             server,
             timeout: None,
@@ -119,7 +119,7 @@ pub struct DefaultedOptions {
 }
 
 impl DefaultedOptions {
-    pub fn of(id: String) -> Self {
+    pub fn new(id: String) -> Self {
         Self { id }
     }
 }
@@ -141,7 +141,7 @@ pub struct PartlyBuiltOptions {
 }
 
 impl PartlyBuiltOptions {
-    pub fn of(id: String) -> Self {
+    pub fn new(id: String) -> Self {
         Self {
             id,
             server: String::new(),
@@ -157,7 +157,7 @@ pub struct OverTakenOptions {
 }
 
 impl OverTakenOptions {
-    pub fn of(id: String, timeout: u64) -> Self {
+    pub fn new(id: String, timeout: u64) -> Self {
         Self { id }
     }
 }
@@ -172,8 +172,26 @@ pub struct ThreeOptions {
 }
 
 impl ThreeOptions {
-    pub fn of(host: String, port: u16, id: String) -> Self {
+    pub fn new(host: String, port: u16, id: String) -> Self {
         Self { host, port, id }
+    }
+}
+
+/// Its constructor of the required members, under another word.
+#[derive(Debug, Clone)]
+#[non_exhaustive]
+pub struct WordedOptions {
+    pub server: String,
+    pub timeout: Option<u64>,
+}
+
+impl WordedOptions {
+    // refused: the constructor's word is `new`
+    pub fn of(server: String) -> Self {
+        Self {
+            server,
+            timeout: None,
+        }
     }
 }
 

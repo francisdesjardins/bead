@@ -10,13 +10,14 @@ use serde_json::{Value, json};
 use tokio::sync::oneshot;
 
 use super::{CallAsked, DebugDirection, DebugFilterSource, DebugType, FilterKeeper, GivenFilter};
+use crate::NotificationResolverDependencies;
 use crate::clock::{Clock, Schedule};
 use crate::constants::{ProcedureKind, SERVER_CONNECTION_HANDLE};
 use crate::errors::{CallError, ResolverError};
 use crate::identity::Procedure;
 use crate::managers::service::{
     DebugEvent, NotificationDependencies, NotifyOptions, RequestDependencies, RequestOptions,
-    ResolverDependencies, Response, ServiceManager, Traced, TracedError,
+    RequestResolverDependencies, Response, ServiceManager, Traced, TracedError,
 };
 use crate::payloads::{CodecRefusal, JsonCodec, PayloadCodec};
 use crate::router::types::RequestCredential;
@@ -67,7 +68,10 @@ fn serve_echo(pair: &Pair, delay: Option<Duration>) {
 
     pair.server
         .services()
-        .get_request_resolver(&echo(), ResolverDependencies::of(JsonCodec, JsonCodec))
+        .get_request_resolver(
+            &echo(),
+            RequestResolverDependencies::new(JsonCodec, JsonCodec),
+        )
         .expect("echo resolved")
         .on(Arc::new(move |request, response: Response<JsonCodec>| {
             let clock = Arc::clone(&clock);
@@ -102,7 +106,7 @@ async fn pair() -> Pair {
 
 fn asking(manager: &ServiceManager) -> crate::managers::service::Request<JsonCodec, JsonCodec> {
     manager
-        .get_request(&echo(), RequestDependencies::of(JsonCodec, JsonCodec))
+        .get_request(&echo(), RequestDependencies::new(JsonCodec, JsonCodec))
         .expect("echo asked")
 }
 
@@ -254,7 +258,7 @@ async fn tells_each_step_of_a_request_and_once_answered_its_duration() {
 async fn tells_a_call_made_and_its_answer_with_the_call_id_its_router_drew_and_their_connection() {
     let pair = pair().await;
     let either = Procedure {
-        kind: None,
+        procedure_kind: None,
         ..echo()
     };
     let seen = recorded(pair.client.services());
@@ -263,7 +267,10 @@ async fn tells_a_call_made_and_its_answer_with_the_call_id_its_router_drew_and_t
     serve_echo(&pair, None);
     pair.client
         .services()
-        .get_command_resolver(&either, ResolverDependencies::of(JsonCodec, JsonCodec))
+        .get_command_resolver(
+            &either,
+            RequestResolverDependencies::new(JsonCodec, JsonCodec),
+        )
         .expect("a command resolved")
         .on(Arc::new(|request, response: Response<JsonCodec>| {
             response.result(request.payload)
@@ -280,7 +287,7 @@ async fn tells_a_call_made_and_its_answer_with_the_call_id_its_router_drew_and_t
     let command = pair
         .server
         .services()
-        .get_command(&either, RequestDependencies::of(JsonCodec, JsonCodec))
+        .get_command(&either, RequestDependencies::new(JsonCodec, JsonCodec))
         .expect("a command");
     let commanding = command
         .call(
@@ -422,7 +429,10 @@ async fn tells_a_duration_in_whole_milliseconds_its_fraction_dropped() {
 
     pair.server
         .services()
-        .get_request_resolver(&echo(), ResolverDependencies::of(JsonCodec, JsonCodec))
+        .get_request_resolver(
+            &echo(),
+            RequestResolverDependencies::new(JsonCodec, JsonCodec),
+        )
         .expect("echo resolved")
         .on(Arc::new(move |request, response: Response<JsonCodec>| {
             let released = locked(&released).take();
@@ -487,10 +497,10 @@ impl PayloadCodec for Unwritable {
 fn ticks() -> Procedure {
     Procedure {
         service_id: 2,
-        id: 2,
+        procedure_id: 2,
         service_revision: 3,
-        name: "ticks".to_owned(),
-        kind: Some(ProcedureKind::Notifies),
+        procedure_name: "ticks".to_owned(),
+        procedure_kind: Some(ProcedureKind::Notifies),
         maximum_payload_bytes: None,
         deprecation: None,
     }
@@ -507,7 +517,10 @@ async fn a_notification_starts_as_it_is_heard_or_sent_and_a_failed_notify_tells_
     let notifier = notifying
         .get_notification_resolver(
             &ticks(),
-            (ResolverDependencies::of(JsonCodec, JsonCodec), JsonCodec),
+            NotificationResolverDependencies::new(
+                RequestResolverDependencies::new(JsonCodec, JsonCodec),
+                JsonCodec,
+            ),
         )
         .expect("ticks resolved")
         .on(Arc::new(|_request, response: Response<JsonCodec>| {
@@ -517,11 +530,14 @@ async fn a_notification_starts_as_it_is_heard_or_sent_and_a_failed_notify_tells_
     let failing = notifying
         .get_notification_resolver(
             &Procedure {
-                id: 3,
-                name: "late".to_owned(),
+                procedure_id: 3,
+                procedure_name: "late".to_owned(),
                 ..ticks()
             },
-            (ResolverDependencies::of(JsonCodec, JsonCodec), Unwritable),
+            NotificationResolverDependencies::new(
+                RequestResolverDependencies::new(JsonCodec, JsonCodec),
+                Unwritable,
+            ),
         )
         .expect("late resolved")
         .on(Arc::new(|_request, response: Response<JsonCodec>| {
@@ -531,11 +547,15 @@ async fn a_notification_starts_as_it_is_heard_or_sent_and_a_failed_notify_tells_
     let notification = hearing
         .get_notification(
             &ticks(),
-            NotificationDependencies::of((JsonCodec, JsonCodec, JsonCodec)),
+            NotificationDependencies::new(
+                RequestDependencies::new(JsonCodec, JsonCodec),
+                JsonCodec,
+            ),
         )
         .expect("ticks heard");
-    let registering = notification.on(
-        (Value::Null, Arc::new(|_value| Box::pin(async { Ok(()) }))),
+    let registering = notification.register(
+        Value::Null,
+        Arc::new(|_value| Box::pin(async { Ok(()) })),
         &RequestOptions::default(),
     );
 
@@ -641,7 +661,10 @@ async fn reads_no_clock_for_a_call_made_a_request_answered_a_notification_sent_a
         .services()
         .get_notification_resolver(
             &ticks(),
-            (ResolverDependencies::of(JsonCodec, JsonCodec), JsonCodec),
+            NotificationResolverDependencies::new(
+                RequestResolverDependencies::new(JsonCodec, JsonCodec),
+                JsonCodec,
+            ),
         )
         .expect("ticks resolved")
         .on(Arc::new(|_request, response: Response<JsonCodec>| {
@@ -653,11 +676,15 @@ async fn reads_no_clock_for_a_call_made_a_request_answered_a_notification_sent_a
         .services()
         .get_notification(
             &ticks(),
-            NotificationDependencies::of((JsonCodec, JsonCodec, JsonCodec)),
+            NotificationDependencies::new(
+                RequestDependencies::new(JsonCodec, JsonCodec),
+                JsonCodec,
+            ),
         )
         .expect("ticks heard");
-    let registering = notification.on(
-        (Value::Null, Arc::new(|_value| Box::pin(async { Ok(()) }))),
+    let registering = notification.register(
+        Value::Null,
+        Arc::new(|_value| Box::pin(async { Ok(()) })),
         &RequestOptions::default(),
     );
 
@@ -875,7 +902,10 @@ async fn tells_a_notification_sent_or_heard_with_no_call_id() {
         .services()
         .get_notification_resolver(
             &ticks(),
-            (ResolverDependencies::of(JsonCodec, JsonCodec), JsonCodec),
+            NotificationResolverDependencies::new(
+                RequestResolverDependencies::new(JsonCodec, JsonCodec),
+                JsonCodec,
+            ),
         )
         .expect("ticks resolved")
         .on(Arc::new(|_request, response: Response<JsonCodec>| {
@@ -887,11 +917,15 @@ async fn tells_a_notification_sent_or_heard_with_no_call_id() {
         .services()
         .get_notification(
             &ticks(),
-            NotificationDependencies::of((JsonCodec, JsonCodec, JsonCodec)),
+            NotificationDependencies::new(
+                RequestDependencies::new(JsonCodec, JsonCodec),
+                JsonCodec,
+            ),
         )
         .expect("ticks heard");
-    let registering = notification.on(
-        (Value::Null, Arc::new(|_value| Box::pin(async { Ok(()) }))),
+    let registering = notification.register(
+        Value::Null,
+        Arc::new(|_value| Box::pin(async { Ok(()) })),
         &RequestOptions::default(),
     );
 
@@ -975,7 +1009,10 @@ async fn tells_a_callback_that_fails_before_it_answers_as_an_answer_that_did_not
 
     pair.server
         .services()
-        .get_request_resolver(&echo(), ResolverDependencies::of(JsonCodec, JsonCodec))
+        .get_request_resolver(
+            &echo(),
+            RequestResolverDependencies::new(JsonCodec, JsonCodec),
+        )
         .expect("echo resolved")
         .on(Arc::new(|request, response: Response<JsonCodec>| {
             Box::pin(async move {

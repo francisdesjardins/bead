@@ -89,10 +89,10 @@ public delegate Judged RequestValidator<in TRequest>(TRequest request, ValidateO
 /// violations, the count its closing line gives, none where it has none, and whether its side
 /// stopped.
 /// </summary>
-public sealed record ViolationsRead
+public sealed record ReadViolations
 {
     /// <summary>A detail that gives nothing.</summary>
-    public static ViolationsRead None { get; } = new() { Violations = [] };
+    public static ReadViolations None { get; } = new() { Violations = [] };
 
     /// <summary>Its violations, in their order.</summary>
     public required IReadOnlyList<Violation> Violations { get; init; }
@@ -625,13 +625,13 @@ public static class Violations
     /// The violations <paramref name="failure"/> carries: its detail read (spec 18.7) when it is a
     /// <see cref="ProtocolCode.PayloadInvalid"/>, none otherwise.
     /// </summary>
-    public static ViolationsRead Of(Failure failure)
+    public static ReadViolations Of(Failure failure)
     {
         ArgumentNullException.ThrowIfNull(failure);
 
         return failure.Scope == FailureScope.Protocol && failure.Code == (ushort)ProtocolCode.PayloadInvalid
             ? Read(failure.Detail)
-            : ViolationsRead.None;
+            : ReadViolations.None;
     }
 
     /// <summary>
@@ -641,7 +641,7 @@ public static class Violations
     /// and one with no closing line counts nothing; a violation without its words takes those its
     /// rule and bounds give, where they give them.
     /// </summary>
-    public static ViolationsRead Read(string detail)
+    public static ReadViolations Read(string detail)
     {
         ArgumentNullException.ThrowIfNull(detail);
 
@@ -662,7 +662,7 @@ public static class Violations
 
             if (ClosingOf(line) is (true, var more, var stopped))
             {
-                return new ViolationsRead { More = more, Stopped = stopped, Violations = violations };
+                return new ReadViolations { More = more, Stopped = stopped, Violations = violations };
             }
 
             if (ViolationOf(line) is not { } violation)
@@ -673,7 +673,7 @@ public static class Violations
             violations.Add(violation);
         }
 
-        return violations.Count == 0 ? ViolationsRead.None : new ViolationsRead { Violations = violations };
+        return violations.Count == 0 ? ReadViolations.None : new ReadViolations { Violations = violations };
     }
 
     /// <summary>

@@ -247,7 +247,7 @@ its connection's loss, matching no answer of an ended pair to a later request.
 so after its own connection went silent, the id's next link is refused until its broker reaps the
 dead connection, three of its `heartbeat` and its close, 210 s by default and 40 s at a `heartbeat`
 of 10. The participant's reconnection, an attempt a second without end by default, links once it is
-reaped; a `maxAttempts` an application sets outlasts that, or the reconnection ends first. A
+reaped; a `maximumAttempts` an application sets outlasts that, or the reconnection ends first. A
 deployment that wants a short lockout lowers its broker's `heartbeat`, at the cost of an empty frame
 from every client each half of it. During it, the dead inbox still takes parcels: Bead's heartbeat
 (15.21) is the only word on a peer gone silent, as for every binding without a will. A row of

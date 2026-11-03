@@ -11,7 +11,7 @@ use crate::constants::{ProtocolCode, RouterSide};
 use crate::envelope::{Credential, Envelope};
 use crate::errors::CallError;
 use crate::failure::FailureOrigin;
-use crate::router::server::{Call, CallHooks};
+use crate::router::server::Call;
 use crate::router::types::{RequestCredential, RouterAnswer, TransportMessage};
 use crate::session_token::SessionToken;
 
@@ -20,7 +20,7 @@ fn ask(scripted: &Scripted, credential: Option<RequestCredential>) -> Call {
     request.options.credential = credential;
     scripted
         .router
-        .request(Bytes::new(), (request, CallHooks::default()))
+        .request(Bytes::new(), request)
         .expect("a request")
 }
 
@@ -113,7 +113,7 @@ async fn dispose_lets_go_of_the_transport_rejects_what_still_waits_and_sends_not
         .router
         .register_resolver((
             &crate::identity::Procedure {
-                kind: Some(crate::constants::ProcedureKind::Command),
+                procedure_kind: Some(crate::constants::ProcedureKind::Command),
                 ..crate::testing::pair::echo()
             },
             crate::router::core::Handler {

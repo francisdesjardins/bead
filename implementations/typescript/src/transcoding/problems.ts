@@ -65,6 +65,12 @@ export interface IProblemOptions {
   readonly route?: IProblemRoute | undefined;
 }
 
+/** What a problem of the gateway's own is written with besides its failure and its detail. */
+export interface IOwnProblemOptions {
+  /** The gateway's challenge, which an auth-scheme but `Bearer` answers; `Bearer` by default. */
+  readonly challenge?: string | undefined;
+}
+
 /** A problem as a gateway answers it: its status, the fields beside it, and its body's text. */
 export interface IProblem {
   readonly body: string;
@@ -418,7 +424,8 @@ export const problemOfFailure = (
  */
 export const problemOfOwn = (
   own: OwnFailure,
-  { challenge = DEFAULT_CHALLENGE, detail }: { challenge?: string | undefined; detail: string }
+  detail: string,
+  { challenge = DEFAULT_CHALLENGE }: IOwnProblemOptions = {}
 ): IProblem => {
   const status = OWN_STATUSES[own];
 

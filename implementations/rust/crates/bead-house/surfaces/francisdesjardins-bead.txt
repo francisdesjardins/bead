@@ -13,9 +13,9 @@ crate
   use broker::adapter::BrokerStart
   use broker::adapter::BrokerSubscription
   use broker::adapter::Settle
-  use broker::client::BrokerClient
-  use broker::client::BrokerClientOptions
-  use broker::client::BrokerConnectOptions
+  use broker::client::BrokerTransportClient
+  use broker::client::BrokerTransportClientConnectOptions
+  use broker::client::BrokerTransportClientOptions
   use broker::client::MAXIMUM_UNSENT_BYTES
   use broker::memory::MemoryBroker
   use broker::memory::MemoryBrokerAdapter
@@ -27,6 +27,7 @@ crate
   use broker::participant::BODY_GRACE_PERIOD
   use broker::participant::BrokerParticipant
   use broker::participant::BrokerParticipantOptions
+  use broker::participant::BrokerRefusal
   use broker::participant::BrokerRefusedError
   use broker::participant::HEARTBEAT
   use broker::participant::HELD_BYTES_BUDGET
@@ -35,8 +36,8 @@ crate
   use broker::participant::ParticipantErrorListener
   use broker::participant::ROOT
   use broker::server::ACCEPT_TIMEOUT
-  use broker::server::BrokerServer
-  use broker::server::BrokerServerOptions
+  use broker::server::BrokerTransportServer
+  use broker::server::BrokerTransportServerOptions
   use broker::server::MAXIMUM_CONNECTIONS
   use broker::server::MAXIMUM_CONNECTIONS_PER_ADDRESS
   use client::Client
@@ -91,9 +92,9 @@ crate
   use envelope::ChunkHeader
   use envelope::Credential
   use envelope::CreditHeader
+  use envelope::EnvelopeHeader
   use envelope::FailureHeader
   use envelope::FailureRecord
-  use envelope::Header
   use envelope::NotificationHeader
   use envelope::RequestHeader
   use envelope::ResultHeader
@@ -136,6 +137,7 @@ crate
   use managers::service::NotificationCallback
   use managers::service::NotificationDependencies
   use managers::service::NotificationRegistration
+  use managers::service::NotificationResolverDependencies
   use managers::service::NotificationResolverOf
   use managers::service::Notifier
   use managers::service::NotifyOptions
@@ -144,8 +146,8 @@ crate
   use managers::service::RequestDependencies
   use managers::service::RequestOptions
   use managers::service::RequestProps
+  use managers::service::RequestResolverDependencies
   use managers::service::ResolverCallback
-  use managers::service::ResolverDependencies
   use managers::service::ResolverOf
   use managers::service::Response
   use managers::service::ServiceCall
@@ -164,11 +166,11 @@ crate
   use managers::sessions::SessionEvent
   use managers::sessions::SessionManagerOptions
   use memory::MEMORY_ADDRESS
-  use memory::MemoryClient
-  use memory::MemoryClientOptions
-  use memory::MemoryConnectOptions
-  use memory::MemoryServer
-  use memory::MemoryServerOptions
+  use memory::MemoryTransportClient
+  use memory::MemoryTransportClientConnectOptions
+  use memory::MemoryTransportClientOptions
+  use memory::MemoryTransportServer
+  use memory::MemoryTransportServerOptions
   use memory::TRANSPORT_MEMORY
   use metrics::CallEnding
   use metrics::MAXIMUM_PROCEDURES
@@ -193,17 +195,17 @@ crate
   use router::client::ClientActivityListener
   use router::client::ClientEnvelopeListener
   use router::client::ClientErrorListener
-  use router::client::ClientRequest
   use router::client::NotificationLike
   use router::client::RouterClient
   use router::client::RouterClientOptions
   use router::client::Settled
+  use router::client::UnregisterNotificationOptions
   use router::client::WithdrawnListener
   use router::core::AdmissionRefusal
   use router::core::AdmissionRequest
   use router::core::AdmitFn
   use router::core::Answerer
-  use router::core::ResolverProps
+  use router::core::RequestResolverProps
   use router::relay::Destination
   use router::relay::DestinationOptions
   use router::relay::DestinationRegistration
@@ -213,14 +215,12 @@ crate
   use router::relay::RelayTarget
   use router::server::ActivityListener
   use router::server::Call
-  use router::server::CallHooks
   use router::server::EnvelopeListener
   use router::server::ErrorListener
   use router::server::NotifyFilter
   use router::server::RefusalListener
   use router::server::RouterServer
   use router::server::RouterServerOptions
-  use router::server::ServerRequest
   use router::server::SessionTokenProvider
   use router::types::AccessRefusal
   use router::types::AccessRefusalStage
@@ -233,6 +233,7 @@ crate
   use router::types::IntakeLimits
   use router::types::IntakeLimitsOptions
   use router::types::LIMIT_DEFAULTS
+  use router::types::NotifyRequest
   use router::types::RequestCredential
   use router::types::ResolvedRequestOptions
   use router::types::RouterActivity
@@ -240,6 +241,7 @@ crate
   use router::types::RouterError
   use router::types::RouterLimits
   use router::types::RouterLimitsOptions
+  use router::types::RouterRequest
   use router::types::RouterResult
   use router::types::SessionIdentifier
   use router::types::Signal
@@ -253,7 +255,7 @@ crate
   use server::ServerGauges
   use server::ServerOptions
   use server::SessionListener
-  use server::Sessions
+  use server::SessionManager
   use server::WARNING_RATIO
   use service::AdmissionHook
   use service::AdmissionRule
@@ -272,18 +274,20 @@ crate
   use session_token::SessionToken
   use transport::CONNECT_TIMEOUT
   use transport::ClientListener
-  use transport::ClientTransport
   use transport::Connect
-  use transport::DisconnectOptions
   use transport::ListenerId
   use transport::RECONNECT_ATTEMPTS
   use transport::RECONNECT_DELAY
   use transport::ReadyState
-  use transport::ReconnectDelay
-  use transport::ReconnectOptions
+  use transport::RouterClientTransport
   use transport::Sent
   use transport::ServerListener
   use transport::ServerTransport
+  use transport::TransportClientDisconnectOptions
+  use transport::TransportClientReconnectDelay
+  use transport::TransportClientReconnectDelayResolver
+  use transport::TransportClientReconnectOptions
+  use transport::TransportServerClient
   use transport::TransportServerRefusal
   use transport::is_field_value
   use violations::CLOSING_BYTES
@@ -320,7 +324,7 @@ crate::broker::adapter
     pub payload: Bytes
     pub expires_after: Option<Duration>
     pub signal: Option<CancellationToken>
-    fn of<T: Into<String>, I: IntoIterator<Item = T>>(topic: I, payload: Bytes) -> Self
+    fn new<T: Into<String>, I: IntoIterator<Item = T>>(topic: I, payload: Bytes) -> Self
     derives Clone, Debug
   struct BrokerStart #[non_exhaustive]
     pub will: Option<BrokerPublication>
@@ -332,7 +336,7 @@ crate::broker::adapter
     derives Clone, Debug, Default
   struct BrokerDown #[non_exhaustive]
     pub is_taken_over: bool
-    const fn of(is_taken_over: bool) -> Self
+    const fn new(is_taken_over: bool) -> Self
     derives Clone, Copy, Debug, Default, Eq, PartialEq
   type Settle = Arc<dyn Fn() + Send + Sync>
   struct BrokerMessageOptions #[non_exhaustive]
@@ -374,23 +378,23 @@ crate::broker::adapter
     fn stop(&self) -> BoxFuture<()>
 crate::broker::client
   const MAXIMUM_UNSENT_BYTES: u64
-  struct BrokerClientOptions #[non_exhaustive]
+  struct BrokerTransportClientOptions #[non_exhaustive]
     pub maximum_unsent_bytes: Option<u64>
     derives Clone, Debug, Default
-  struct BrokerConnectOptions #[non_exhaustive]
+  struct BrokerTransportClientConnectOptions #[non_exhaustive]
     pub server: String
     pub signal: Option<CancellationToken>
     pub timeout: Option<Duration>
-    fn of<S: Into<String>>(server: S) -> Self
+    fn new<S: Into<String>>(server: S) -> Self
     derives Clone, Debug
-  struct BrokerClient
-    fn new(participant: &BrokerParticipant, options: &BrokerClientOptions) -> Result<Self, ProgrammerError>
-    fn connect(&self, options: &BrokerConnectOptions) -> Connect
-    fn disconnect(&self, options: &DisconnectOptions) -> Result<(), TransportError>
+  struct BrokerTransportClient
+    fn new(participant: &BrokerParticipant, options: &BrokerTransportClientOptions) -> Result<Self, ProgrammerError>
+    fn connect(&self, options: &BrokerTransportClientConnectOptions) -> Connect
+    fn disconnect(&self, options: &TransportClientDisconnectOptions) -> Result<(), TransportError>
     fn dispose(&self)
     fn close(&self)
-    fn reconnect(&self, options: &ReconnectOptions) -> Result<BoxFuture<Result<(), TransportError>>, TransportError>
-    implements ClientTransport, Debug
+    fn reconnect(&self, options: &TransportClientReconnectOptions) -> Result<BoxFuture<Result<(), TransportError>>, TransportError>
+    implements Debug, RouterClientTransport
     derives Clone
 crate::broker::memory
   const TRANSPORT_BROKER: &str
@@ -405,7 +409,7 @@ crate::broker::memory
     pub id: String
     pub capabilities: Option<BrokerCapabilities>
     pub delivery: Option<BrokerDelivery>
-    fn of<I: Into<String>>(id: I) -> Self
+    fn new<I: Into<String>>(id: I) -> Self
     derives Clone, Debug
   enum MemoryBrokerFault #[non_exhaustive]
     Copy
@@ -448,13 +452,19 @@ crate::broker::participant
     pub minimum_body_bytes_per_second: Option<u64>
     pub body_grace_period: Option<Duration>
     pub require_delivery: Option<BrokerDelivery>
-    pub reconnect: Option<ReconnectOptions>
+    pub reconnect: Option<TransportClientReconnectOptions>
     pub is_reconnecting: Option<bool>
     pub maximum_held_envelope_bytes: Option<u64>
     derives Clone, Debug, Default
+  struct BrokerRefusal #[non_exhaustive]
+    pub reason: String
+    pub status: Option<u16>
+    pub layouts: Option<Vec<u8>>
+    fn new<R: Into<String>>(reason: R) -> Self
+    derives Clone, Debug, Eq, PartialEq
   struct BrokerRefusedError
     const NO_SUBSCRIBER: &str
-    fn new<R: Into<String>>(reason: R, (status, layouts): (Option<u16>, Option<Vec<u8>>)) -> Self
+    fn new(refusal: BrokerRefusal) -> Self
     fn reason(&self) -> &str
     const fn status(&self) -> Option<u16>
     fn layouts(&self) -> Option<&[u8]>
@@ -474,8 +484,8 @@ crate::broker::participant
     fn on_error(&self, listener: ParticipantErrorListener) -> ListenerId
     fn off(&self, listener: ListenerId)
     fn gauges(&self) -> Gauges
-    fn server(&self, options: &BrokerServerOptions) -> Result<BrokerServer, ProgrammerError>
-    fn client(&self, options: &BrokerClientOptions) -> Result<BrokerClient, ProgrammerError>
+    fn server(&self, options: &BrokerTransportServerOptions) -> Result<BrokerTransportServer, ProgrammerError>
+    fn client(&self, options: &BrokerTransportClientOptions) -> Result<BrokerTransportClient, ProgrammerError>
     fn start(&self) -> BoxFuture<Result<(), BrokerError>>
     fn stop(&self) -> BoxFuture<()>
     fn incarnation(&self) -> u128
@@ -485,7 +495,7 @@ crate::broker::server
   const MAXIMUM_CONNECTIONS: u64
   const MAXIMUM_CONNECTIONS_PER_ADDRESS: u64
   const ACCEPT_TIMEOUT: Duration
-  struct BrokerServerOptions #[non_exhaustive]
+  struct BrokerTransportServerOptions #[non_exhaustive]
     pub names: Vec<String>
     pub is_in_group: Option<bool>
     pub maximum_connections: Option<u64>
@@ -493,13 +503,13 @@ crate::broker::server
     pub maximum_unsent_bytes: Option<u64>
     pub accept_timeout: Option<Duration>
     pub secure: Option<bool>
-    fn of<N: Into<String>, I: IntoIterator<Item = N>>(names: I) -> Self
+    fn new<N: Into<String>, I: IntoIterator<Item = N>>(names: I) -> Self
     derives Clone, Debug
-  struct BrokerServer
-    fn new(participant: &BrokerParticipant, options: &BrokerServerOptions) -> Result<Self, ProgrammerError>
+  struct BrokerTransportServer
+    fn new(participant: &BrokerParticipant, options: &BrokerTransportServerOptions) -> Result<Self, ProgrammerError>
     fn names(&self) -> &[String]
     fn ready_state(&self) -> ReadyState
-    fn clients(&self) -> Vec<(ConnectionHandle, String, Option<u16>, Option<i64>)>
+    fn clients(&self) -> Vec<TransportServerClient>
     implements Debug, ServerTransport
     derives Clone
 crate::client
@@ -513,10 +523,10 @@ crate::client
     implements Debug
     derives Clone, Default
   struct Client
-    fn new(transport: Arc<dyn ClientTransport>, options: &ClientOptions) -> Result<Self, ProgrammerError>
+    fn new(transport: Arc<dyn RouterClientTransport>, options: &ClientOptions) -> Result<Self, ProgrammerError>
     const fn router(&self) -> &RouterClient
     const fn services(&self) -> &ServiceManager
-    fn transport(&self) -> Arc<dyn ClientTransport>
+    fn transport(&self) -> Arc<dyn RouterClientTransport>
     fn dispose(&self) -> BoxFuture<()>
     implements Debug
     derives Clone
@@ -560,7 +570,7 @@ crate::constants
     Cancel
     const ALL: [Self; 7]
     fn byte(self) -> u8
-    fn of(byte: u8) -> Option<Self>
+    implements TryFrom
     derives Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd
   struct EnvelopeFlag(u8);
     const DESTINATION: Self
@@ -628,7 +638,6 @@ crate::constants
     Server
     fn peer(self) -> Self
     fn as_str(self) -> &'static str
-    fn call_ids(self) -> (u32, u32)
     fn of_call_id(call_id: u32) -> Option<Self>
     implements Display
     derives Clone, Copy, Debug, Eq, Hash, PartialEq
@@ -673,9 +682,9 @@ crate::debug
     derives Clone, Copy, Debug, Eq, Hash, PartialEq
   struct TracedEnvelope #[non_exhaustive]
     pub connection_handle: ConnectionHandle
-    pub header: Header
+    pub header: EnvelopeHeader
     pub credential_scheme: Option<CredentialScheme>
-    fn of(connection_handle: &ConnectionHandle, header: &Header) -> Self
+    fn new(connection_handle: &ConnectionHandle, header: &EnvelopeHeader) -> Self
     derives Clone, Debug, Eq, PartialEq
   enum DebugType #[non_exhaustive]
     Request
@@ -829,7 +838,7 @@ crate::envelope
   struct CancelHeader
     pub call_id: u32
     derives Clone, Debug, Eq, PartialEq
-  enum Header #[non_exhaustive]
+  enum EnvelopeHeader #[non_exhaustive]
     Request(RequestHeader)
     Result(ResultHeader)
     Failure(FailureHeader)
@@ -848,7 +857,7 @@ crate::envelope
     pub call_id: u32
     derives Clone, Copy, Debug, Eq, PartialEq
   struct ReadHeader
-    pub header: Header
+    pub header: EnvelopeHeader
     pub header_bytes: usize
     derives Clone, Debug, Eq, PartialEq
   struct FailureRecord
@@ -865,7 +874,7 @@ crate::envelope
     Chunk { header: ChunkHeader, payload: Bytes }
     Credit { header: CreditHeader }
     Cancel { header: CancelHeader }
-    fn header(&self) -> Header
+    fn header(&self) -> EnvelopeHeader
     fn kind(&self) -> EnvelopeKind
     fn call_id(&self) -> u32
     derives Clone, Debug, Eq, PartialEq
@@ -876,10 +885,10 @@ crate::envelope
     derives Clone, Debug, Default
   fn read_prefix(bytes: &[u8], side: RouterSide) -> Result<Prefix, Failure>
   fn read_header(bytes: &[u8], side: RouterSide) -> Result<Option<ReadHeader>, Failure>
-  fn read_failure(payload: &[u8], (side, maximum_detail_bytes): (RouterSide, usize)) -> Result<FailureRecord, Failure>
+  fn read_failure(payload: &[u8], side: RouterSide, options: &ReadEnvelopeOptions) -> Result<FailureRecord, Failure>
   fn read_envelope(bytes: &Bytes, side: RouterSide, options: &ReadEnvelopeOptions) -> Result<Option<Envelope>, Failure>
-  fn header_bytes_of(header: &Header) -> Result<usize, ProgrammerError>
-  fn write_header(header: &Header, bytes: &mut Vec<u8>) -> Result<usize, ProgrammerError>
+  fn header_bytes_of(header: &EnvelopeHeader) -> Result<usize, ProgrammerError>
+  fn write_header(header: &EnvelopeHeader, bytes: &mut Vec<u8>) -> Result<usize, ProgrammerError>
   fn write_envelope(envelope: &Envelope, maximum_detail_bytes: usize) -> Result<Bytes, ProgrammerError>
 crate::errors
   enum Refusal #[non_exhaustive]
@@ -956,7 +965,7 @@ crate::failure
     fn application(code: NonZeroU16, detail: &str) -> Self
     fn received(record: &FailureRecord, side: RouterSide) -> Self
     fn saying<D: Into<String>>(mut self, detail: D) -> Self
-    fn about(mut self, header: &Header) -> Self
+    fn about(mut self, header: &EnvelopeHeader) -> Self
     fn of_call(mut self, procedure: Option<ProcedureAddress>, destination_id: Option<u32>) -> Self
     fn overtaking(mut self, may_overtake: bool) -> Self
     fn caused_by(mut self, source: Arc<dyn Error + Send + Sync>) -> Self
@@ -969,7 +978,7 @@ crate::failure
     fn procedure(&self) -> Option<ProcedureAddress>
     fn destination_id(&self) -> Option<u32>
     fn may_overtake(&self) -> bool
-    fn header(&self) -> Option<&Header>
+    fn header(&self) -> Option<&EnvelopeHeader>
     fn is_protocol(&self) -> bool
     fn is_protocol_code(&self, codes: &[ProtocolCode]) -> bool
     fn is_protocol_code_from(&self, codes: &[ProtocolCode], side: RouterSide) -> bool
@@ -997,10 +1006,10 @@ crate::identity
     derives Clone, Copy, Debug, Eq, Hash, PartialEq
   struct Procedure
     pub service_id: u16
-    pub id: u16
+    pub procedure_id: u16
     pub service_revision: u32
-    pub name: String
-    pub kind: Option<ProcedureKind>
+    pub procedure_name: String
+    pub procedure_kind: Option<ProcedureKind>
     pub maximum_payload_bytes: Option<u64>
     pub deprecation: Option<Deprecation>
     fn address(&self) -> ProcedureAddress
@@ -1091,7 +1100,11 @@ crate::jwt_verifier
     pub keys: &'keys [JwtKey]
     pub now: &'keys(dyn Fn() -> SystemTime + Send + Sync)
     implements Debug
-  fn read_jwt(token: &[u8]) -> Option<(Map<String, Value>, Map<String, Value>)>
+  struct ReadJwt #[non_exhaustive]
+    pub header: Map<String, Value>
+    pub claims: Map<String, Value>
+    derives Clone, Debug, Eq, PartialEq
+  fn read_jwt(token: &[u8]) -> Option<ReadJwt>
   fn verify_jwt(token: &[u8], against: &JwtAgainst<'_>) -> Result<JwtVerdict, ProgrammerError>
 crate::managers::notification
   struct PacingLimits
@@ -1167,7 +1180,7 @@ crate::managers::service
     pub result: Res
     pub validate: Option<Validate<Req::Value>>
     pub fail_fast: bool
-    fn of(request: Req, result: Res) -> Self
+    fn new(request: Req, result: Res) -> Self
     implements Debug
   type DroppedListener = Arc<dyn Fn(&Procedure, Option<&Failure>) + Send + Sync>
   struct ServiceManager
@@ -1181,9 +1194,9 @@ crate::managers::service
     fn router(&self) -> &ServiceRouter
     fn get_request<Req, Res>(&self, procedure: &Procedure, dependencies: RequestDependencies<Req, Res>) -> Result<Request<Req, Res>, ProgrammerError> where Req: PayloadCodec, Res: PayloadCodec, Req::Value: Clone + fmt::Debug + Sync, Res::Value: Clone + fmt::Debug + Sync,
     fn get_command<Req, Res>(&self, procedure: &Procedure, dependencies: RequestDependencies<Req, Res>) -> Result<Request<Req, Res>, ProgrammerError> where Req: PayloadCodec, Res: PayloadCodec, Req::Value: Clone + fmt::Debug + Sync, Res::Value: Clone + fmt::Debug + Sync,
-    fn get_request_resolver<Req, Res>(&self, procedure: &Procedure, dependencies: ResolverDependencies<Req, Res>) -> Result<ResolverOf<Req, Res>, ProgrammerError> where Req: PayloadCodec, Res: PayloadCodec,
-    fn get_command_resolver<Req, Res>(&self, procedure: &Procedure, dependencies: ResolverDependencies<Req, Res>) -> Result<ResolverOf<Req, Res>, ProgrammerError> where Req: PayloadCodec, Res: PayloadCodec,
-    fn get_notification_resolver<Req, Res, Not>(&self, procedure: &Procedure, (dependencies, notification): (ResolverDependencies<Req, Res>, Not)) -> Result<NotificationResolverOf<Req, Res, Not>, ProgrammerError> where Req: PayloadCodec, Res: PayloadCodec, Not: PayloadCodec,
+    fn get_request_resolver<Req, Res>(&self, procedure: &Procedure, dependencies: RequestResolverDependencies<Req, Res>) -> Result<ResolverOf<Req, Res>, ProgrammerError> where Req: PayloadCodec, Res: PayloadCodec,
+    fn get_command_resolver<Req, Res>(&self, procedure: &Procedure, dependencies: RequestResolverDependencies<Req, Res>) -> Result<ResolverOf<Req, Res>, ProgrammerError> where Req: PayloadCodec, Res: PayloadCodec,
+    fn get_notification_resolver<Req, Res, Not>(&self, procedure: &Procedure, dependencies: NotificationResolverDependencies<Req, Res, Not>) -> Result<NotificationResolverOf<Req, Res, Not>, ProgrammerError> where Req: PayloadCodec, Res: PayloadCodec, Not: PayloadCodec,
     implements Debug
     derives Clone
   type CloseConnection = Arc<dyn Fn(&ConnectionHandle) + Send + Sync>
@@ -1193,13 +1206,22 @@ crate::managers::service
     implements Clone, Debug
   struct ServiceCall<T>
     implements Debug, Future
-  struct ResolverDependencies<Req: PayloadCodec, Res: PayloadCodec>
+  struct RequestResolverDependencies<Req: PayloadCodec, Res: PayloadCodec>
     pub request: Req
     pub result: Res
     pub before_request: Option<BeforeRequest>
     pub validate: Option<Validate<Req::Value>>
     pub fail_fast: bool
-    fn of(request: Req, result: Res) -> Self
+    fn new(request: Req, result: Res) -> Self
+    implements Debug
+  struct NotificationResolverDependencies<Req: PayloadCodec, Res: PayloadCodec, Not: PayloadCodec>
+    pub request: Req
+    pub result: Res
+    pub notification: Not
+    pub before_request: Option<BeforeRequest>
+    pub validate: Option<Validate<Req::Value>>
+    pub fail_fast: bool
+    fn new(dependencies: RequestResolverDependencies<Req, Res>, notification: Not) -> Self
     implements Debug
   struct RequestProps<T> #[non_exhaustive]
     pub connection_handle: ConnectionHandle
@@ -1245,7 +1267,7 @@ crate::managers::service::notification
     pub fail_fast: bool
     pub unsubscribe: Option<Unsubscribe<Res::Value>>
     pub window: Option<u64>
-    fn of((request, result, notification): (Req, Res, Not)) -> Self
+    fn new(dependencies: RequestDependencies<Req, Res>, notification: Not) -> Self
     implements Debug
   struct NotificationRegistration
     fn unregister(&self) -> BoxFuture<Result<(), CallError>>
@@ -1253,27 +1275,27 @@ crate::managers::service::notification
   struct Notification<Req: PayloadCodec, Res: PayloadCodec, Not: PayloadCodec>
     fn procedure(&self) -> &Procedure
     fn as_like(&self) -> Arc<dyn NotificationLike>
-    fn on(&self, (payload, callback): (Req::Value, NotificationCallback<Not::Value>), options: &RequestOptions) -> BoxFuture<Result<NotificationRegistration, CallError>>
+    fn register(&self, payload: Req::Value, callback: NotificationCallback<Not::Value>, options: &RequestOptions) -> BoxFuture<Result<NotificationRegistration, CallError>>
     implements Clone, Debug
 crate::managers::sessions
   struct Session #[non_exhaustive]
     pub connection_handle: ConnectionHandle
     pub connection_inactivity_timeout: Option<Duration>
     pub data: Option<Value>
-    pub last_activity: i64
+    pub last_activity: SystemTime
     pub session_inactivity_timeout: Option<Duration>
     pub session_token: Option<SessionToken>
-    fn new(connection_handle: ConnectionHandle, now: i64) -> Self
+    fn new(connection_handle: ConnectionHandle, now: SystemTime) -> Self
     implements Debug
     derives Clone, Eq, PartialEq
   enum SessionEvent #[non_exhaustive]
     Created(Session)
     Updated(Session)
     Deleted(Session)
-    DataChanged(Session, Option<Value>, Option<Value>)
-    LastActivityChanged(Session, i64, i64)
-    ConnectionInactivityTimeoutChanged(Session, Duration, Duration)
-    SessionInactivityTimeoutChanged(Session, Duration, Duration)
+    DataChanged { session: Session, new_value: Option<Value>, old_value: Option<Value> }
+    LastActivityChanged { session: Session, new_value: SystemTime, old_value: SystemTime }
+    ConnectionInactivityTimeoutChanged { session: Session, new_value: Duration, old_value: Duration }
+    SessionInactivityTimeoutChanged { session: Session, new_value: Duration, old_value: Duration }
     ConnectionInactivityTimeoutReached(Session)
     SessionInactivityTimeoutReached(Session)
     derives Clone, Debug, Eq, PartialEq
@@ -1285,35 +1307,35 @@ crate::managers::sessions
 crate::memory
   const TRANSPORT_MEMORY: &str
   const MEMORY_ADDRESS: &str
-  struct MemoryServerOptions #[non_exhaustive]
+  struct MemoryTransportServerOptions #[non_exhaustive]
     pub clock: Option<SharedClock>
     pub runtime: Option<Handle>
     derives Clone, Debug, Default
-  struct MemoryServer
-    fn new(options: &MemoryServerOptions) -> Result<Self, ProgrammerError>
+  struct MemoryTransportServer
+    fn new(options: &MemoryTransportServerOptions) -> Result<Self, ProgrammerError>
     fn ready_state(&self) -> ReadyState
-    fn clients(&self) -> Vec<(ConnectionHandle, String, Option<u16>, Option<i64>)>
+    fn clients(&self) -> Vec<TransportServerClient>
     implements Debug, ServerTransport
     derives Clone
-  struct MemoryClientOptions #[non_exhaustive]
+  struct MemoryTransportClientOptions #[non_exhaustive]
     pub clock: Option<SharedClock>
     derives Clone, Debug, Default
-  struct MemoryConnectOptions #[non_exhaustive]
-    pub server: MemoryServer
+  struct MemoryTransportClientConnectOptions #[non_exhaustive]
+    pub server: MemoryTransportServer
     pub address: Option<String>
     pub port: Option<u16>
     pub signal: Option<CancellationToken>
     pub timeout: Option<Duration>
-    const fn of(server: MemoryServer) -> Self
+    const fn new(server: MemoryTransportServer) -> Self
     derives Clone, Debug
-  struct MemoryClient
-    fn new(options: &MemoryClientOptions) -> Result<Self, ProgrammerError>
-    fn connect(&self, options: &MemoryConnectOptions) -> Connect
-    fn disconnect(&self, options: &DisconnectOptions) -> Result<(), TransportError>
+  struct MemoryTransportClient
+    fn new(options: &MemoryTransportClientOptions) -> Result<Self, ProgrammerError>
+    fn connect(&self, options: &MemoryTransportClientConnectOptions) -> Connect
+    fn disconnect(&self, options: &TransportClientDisconnectOptions) -> Result<(), TransportError>
     fn dispose(&self)
     fn close(&self)
-    fn reconnect(&self, options: &ReconnectOptions) -> Result<BoxFuture<Result<(), TransportError>>, TransportError>
-    implements ClientTransport, Debug
+    fn reconnect(&self, options: &TransportClientReconnectOptions) -> Result<BoxFuture<Result<(), TransportError>>, TransportError>
+    implements Debug, RouterClientTransport
     derives Clone
 crate::metrics
   const METRICS_CONTENT_TYPE: &str
@@ -1348,7 +1370,7 @@ crate::metrics
     implements Debug
     derives Clone
   struct NotificationSeries
-    fn dropped(&self, failure: Option<(NonZeroU16, FailureScope)>)
+    fn dropped(&self, failure: Option<&Failure>)
     fn sent(&self)
     fn failed(&self)
     fn heard(&self)
@@ -1419,21 +1441,15 @@ crate::router::client
     pub intake: Option<IntakeLimitsOptions>
     implements Debug
     derives Clone, Default
-  struct ClientRequest #[non_exhaustive]
-    pub procedure: Procedure
-    pub options: ResolvedRequestOptions
-    pub series: Option<ProcedureSeries>
-    pub refusal: Option<CallError>
-    pub subscribes: Option<Arc<dyn NotificationLike>>
-    fn of(procedure: Procedure, options: &ResolvedRequestOptions) -> Self
-    implements Debug
-    derives Clone
+  struct UnregisterNotificationOptions #[non_exhaustive]
+    pub cancel: Option<bool>
+    derives Clone, Debug, Default, Eq, PartialEq
   struct RouterClient
-    fn new(transport: Arc<dyn ClientTransport>, options: &RouterClientOptions) -> Result<Self, ProgrammerError>
+    fn new(transport: Arc<dyn RouterClientTransport>, options: &RouterClientOptions) -> Result<Self, ProgrammerError>
     fn as_relay_target(&self) -> crate::router::relay::RelayTarget
     fn clock(&self) -> SharedClock
     fn limits(&self) -> RouterLimits
-    fn transport(&self) -> Arc<dyn ClientTransport>
+    fn transport(&self) -> Arc<dyn RouterClientTransport>
     fn credential(&self) -> Option<RequestCredential>
     fn set_credential(&self, credential: Option<RequestCredential>) -> Result<(), ProgrammerError>
     fn is_credential_withdrawn(&self) -> bool
@@ -1447,12 +1463,12 @@ crate::router::client
     fn declare_requester(&self, procedure: &Procedure) -> Result<Option<ProcedureSeries>, ProgrammerError>
     fn has_notification(&self, notification: &Arc<dyn NotificationLike>) -> bool
     fn register_notification(&self, notification: Arc<dyn NotificationLike>) -> Result<(), ProgrammerError>
-    fn unregister_notification(&self, (notification, cancel): (&Arc<dyn NotificationLike>, bool)) -> BoxFuture<()>
-    fn request(&self, payload: Bytes, (request, hooks): (ClientRequest, CallHooks)) -> Result<Call, ProgrammerError>
+    fn unregister_notification(&self, notification: &Arc<dyn NotificationLike>, options: &UnregisterNotificationOptions) -> BoxFuture<()>
+    fn request(&self, payload: Bytes, request: RouterRequest) -> Result<Call, ProgrammerError>
     fn gauges(&self) -> BoxFuture<Gauges>
     fn dispose(&self) -> BoxFuture<()>
-    fn reserve(&self, (call_id, timeout): (u32, Option<Duration>)) -> Result<BoxFuture<()>, ProgrammerError>
-    fn cancel(&self, (call_id, timeout): (u32, Option<Duration>)) -> Result<BoxFuture<()>, ProgrammerError>
+    fn reserve(&self, call_id: u32, timeout: Option<Duration>) -> Result<BoxFuture<()>, ProgrammerError>
+    fn cancel(&self, call_id: u32, timeout: Option<Duration>) -> Result<BoxFuture<()>, ProgrammerError>
     fn is_reserved(&self, call_id: u32) -> BoxFuture<bool>
     async fn settle(&self)
     implements Debug
@@ -1473,7 +1489,7 @@ crate::router::core
     fn respond(&self, answer: RouterAnswer) -> BoxFuture<Result<(), CallError>>
     fn answered(&self) -> BoxFuture<Option<FailureRecord>>
     fn subscribe(&self) -> BoxFuture<Result<u32, CallError>>
-  struct ResolverProps
+  struct RequestResolverProps
     pub connection_handle: ConnectionHandle
     pub header: RequestHeader
     pub payload: Bytes
@@ -1544,18 +1560,6 @@ crate::router::server
     fn refused(error: CallError) -> Self
     implements Future
     derives Debug
-  struct ServerRequest
-    pub procedure: ProcedureAddress
-    pub maximum_payload_bytes: Option<u64>
-    pub options: ResolvedRequestOptions
-    pub series: Option<ProcedureSeries>
-    pub refusal: Option<CallError>
-    derives Clone, Debug
-  struct CallHooks #[non_exhaustive]
-    pub on_call_id: Option<Box<dyn FnOnce(u32) + Send>>
-    pub on_sent: Option<Box<dyn FnMut(bool) + Send>>
-    implements Debug
-    derives Default
   struct RouterServer
     fn new(transport: Arc<dyn ServerTransport>, options: &RouterServerOptions) -> Result<Self, ProgrammerError>
     fn clock(&self) -> SharedClock
@@ -1568,12 +1572,12 @@ crate::router::server
     fn off(&self, listener: ListenerId)
     fn report(&self, error: &RouterError, connection_handle: Option<&ConnectionHandle>)
     fn declare_requester(&self, procedure: &Procedure) -> Result<Option<ProcedureSeries>, ProgrammerError>
-    fn request(&self, payload: Bytes, (request, hooks): (ServerRequest, CallHooks)) -> Result<Call, ProgrammerError>
-    fn notify(&self, payload: Result<Bytes, RouterError>, (procedure, filter, key): (ProcedureAddress, Option<NotifyFilter>, Option<NotificationKey>)) -> BoxFuture<Result<(), RouterError>>
+    fn request(&self, payload: Bytes, request: RouterRequest) -> Result<Call, ProgrammerError>
+    fn notify(&self, payload: Result<Bytes, RouterError>, request: NotifyRequest) -> BoxFuture<Result<(), RouterError>>
     fn end_session(&self, identifier: SessionIdentifier) -> BoxFuture<()>
     fn end_sessions_of(&self, issuer: String) -> BoxFuture<()>
     fn unsubscribe(&self, call: CallAddress) -> BoxFuture<bool>
-    fn drop_subscriptions(&self, (connection_handle, failure): (ConnectionHandle, Failure)) -> BoxFuture<()>
+    fn drop_subscriptions(&self, connection_handle: ConnectionHandle, failure: Failure) -> BoxFuture<()>
     fn register_destination(&self, target: crate::router::relay::RelayTarget, options: &crate::router::relay::DestinationOptions) -> Result<crate::router::relay::DestinationRegistration, ProgrammerError>
     fn destinations(&self) -> Vec<crate::router::relay::Destination>
     fn gauges(&self) -> BoxFuture<Gauges>
@@ -1660,8 +1664,24 @@ crate::router::types
     pub credential: Option<RequestCredential>
     pub signal: Option<CancellationToken>
     pub close_on_timeout: Option<bool>
-    const fn of(timeout: Duration) -> Self
+    const fn new(timeout: Duration) -> Self
     derives Clone, Debug
+  struct RouterRequest #[non_exhaustive]
+    pub procedure: Procedure
+    pub options: ResolvedRequestOptions
+    pub series: Option<ProcedureSeries>
+    pub refusal: Option<CallError>
+    pub subscribes: Option<Arc<dyn NotificationLike>>
+    pub on_call_id: Option<Box<dyn FnOnce(u32) + Send>>
+    pub on_sent: Option<Box<dyn FnMut(bool) + Send>>
+    fn new(procedure: Procedure, options: &ResolvedRequestOptions) -> Self
+    implements Debug
+  struct NotifyRequest #[non_exhaustive]
+    pub procedure: ProcedureAddress
+    pub filter: Option<NotifyFilter>
+    pub key: Option<NotificationKey>
+    const fn new(procedure: ProcedureAddress) -> Self
+    implements Debug
   struct RouterResult
     pub header: ResultHeader
     pub payload: Bytes
@@ -1755,7 +1775,7 @@ crate::server
     pub checks: BTreeMap<String, Vec<HealthCheck>>
     pub status: HealthStatus
     derives Clone, Debug, Eq, PartialEq
-  struct Sessions
+  struct SessionManager
     fn create(&self, connection_handle: ConnectionHandle) -> Session
     fn on(&self, listener: SessionListener) -> ListenerId
     fn off(&self, listener: ListenerId)
@@ -1768,11 +1788,11 @@ crate::server
     fn get_or_else_set(&self, connection_handle: ConnectionHandle) -> BoxFuture<Result<Session, CallError>>
     fn delete(&self, connection_handle: ConnectionHandle) -> BoxFuture<bool>
     fn touch(&self, connection_handle: ConnectionHandle) -> BoxFuture<Option<Session>>
-    fn update_data(&self, (connection_handle, data): (ConnectionHandle, Option<Value>)) -> BoxFuture<Option<Session>>
-    fn update_connection_inactivity_timeout(&self, (connection_handle, timeout): (ConnectionHandle, Option<Duration>)) -> Result<BoxFuture<Option<Session>>, ProgrammerError>
-    fn update_session_inactivity_timeout(&self, (connection_handle, timeout): (ConnectionHandle, Option<Duration>)) -> Result<BoxFuture<Option<Session>>, ProgrammerError>
-    fn reset_connection_inactivity_timeout(&self, (connection_handle, timeout): (ConnectionHandle, Duration)) -> Result<BoxFuture<()>, ProgrammerError>
-    fn reset_session_inactivity_timeout(&self, (connection_handle, timeout): (ConnectionHandle, Duration)) -> Result<BoxFuture<()>, ProgrammerError>
+    fn update_data(&self, session: Session) -> BoxFuture<Option<Session>>
+    fn update_connection_inactivity_timeout(&self, session: Session) -> Result<BoxFuture<Option<Session>>, ProgrammerError>
+    fn update_session_inactivity_timeout(&self, session: Session) -> Result<BoxFuture<Option<Session>>, ProgrammerError>
+    fn reset_connection_inactivity_timeout(&self, connection_handle: ConnectionHandle, timeout: Duration) -> Result<BoxFuture<()>, ProgrammerError>
+    fn reset_session_inactivity_timeout(&self, connection_handle: ConnectionHandle, timeout: Duration) -> Result<BoxFuture<()>, ProgrammerError>
     fn gauges(&self) -> BoxFuture<Gauges>
     implements Debug
     derives Clone
@@ -1780,7 +1800,7 @@ crate::server
     fn new(transport: Arc<dyn ServerTransport>, options: &ServerOptions) -> Result<Self, ProgrammerError>
     fn router(&self) -> &RouterServer
     fn services(&self) -> &ServiceManager
-    fn sessions(&self) -> &Sessions
+    fn sessions(&self) -> &SessionManager
     fn transport(&self) -> Arc<dyn ServerTransport>
     fn gauges(&self) -> BoxFuture<ServerGauges>
     fn health(&self) -> BoxFuture<Health>
@@ -1835,15 +1855,13 @@ crate::service
     implements Debug
     derives Clone
   struct ServiceServerOptions #[non_exhaustive]
-    pub admissions: Option<Vec<(&'static str, AdmissionHook)>>
+    pub admissions: Option<BTreeMap<&'static str, AdmissionHook>>
     pub fail_fast: Option<bool>
     pub validates: Option<bool>
     derives Clone, Debug, Default
   struct ServiceProcedure
-    fn of<Req, Res>(descriptor: &Descriptor<Req, Res>) -> Self where Req: PayloadCodec + Clone, Res: PayloadCodec + Clone, Req::Value: Clone + fmt::Debug + Sync, Res::Value: Clone + fmt::Debug + Sync,
-    fn of_notifying<Req: PayloadCodec, Res: PayloadCodec, Not: PayloadCodec>(descriptor: &NotifyingDescriptor<Req, Res, Not>) -> Self
     const fn procedure(&self) -> &Procedure
-    implements Debug
+    implements Debug, From
     derives Clone
   struct ServiceServer
     fn new(procedures: Vec<ServiceProcedure>, options: &ServiceServerOptions) -> Result<Self, ProgrammerError>
@@ -1851,7 +1869,7 @@ crate::service
     fn on_notifying<Req, Res, Not>(&self, descriptor: &NotifyingDescriptor<Req, Res, Not>, callback: ResolverCallback<Req, Res>) -> Result<(), ProgrammerError> where Req: PayloadCodec + Clone, Res: PayloadCodec + Clone, Not: PayloadCodec + Clone, Req::Value: Clone + fmt::Debug + Sync, Res::Value: Clone + fmt::Debug + Sync, Not::Value: Clone + fmt::Debug + Sync,
     fn offer(&self, server: &Server) -> Result<(), ProgrammerError>
     fn command<Req, Res>(&self, descriptor: &Descriptor<Req, Res>) -> Result<Request<Req, Res>, ProgrammerError> where Req: PayloadCodec, Res: PayloadCodec,
-    fn notify<Req, Res, Not>(&self, descriptor: &NotifyingDescriptor<Req, Res, Not>, (notification, options): (Not::Value, &NotifyOptions)) -> BoxFuture<()> where Req: PayloadCodec, Res: PayloadCodec, Not: PayloadCodec, Not::Value: Clone + fmt::Debug + Sync,
+    fn notify<Req, Res, Not>(&self, descriptor: &NotifyingDescriptor<Req, Res, Not>, notification: Not::Value, options: &NotifyOptions) -> BoxFuture<()> where Req: PayloadCodec, Res: PayloadCodec, Not: PayloadCodec, Not::Value: Clone + fmt::Debug + Sync,
     fn procedures_without_resolver(&self) -> Vec<Procedure>
     implements Debug
     derives Clone
@@ -1886,7 +1904,14 @@ crate::transport
     pub port: Option<u16>
     pub reason: String
     pub status: u16
-    fn of<R: Into<String>>((status, reason): (u16, R), address: Option<String>) -> Self
+    fn new<R: Into<String>>(status: u16, reason: R) -> Self
+    derives Clone, Debug, Eq, PartialEq
+  struct TransportServerClient #[non_exhaustive]
+    pub connection_handle: ConnectionHandle
+    pub address: String
+    pub port: Option<u16>
+    pub last_activity: Option<SystemTime>
+    pub transport_type: &'static str
     derives Clone, Debug, Eq, PartialEq
   trait ServerListener: Send + Sync
     fn on_connection(&self, _connection_handle: &ConnectionHandle)
@@ -1915,7 +1940,7 @@ crate::transport
     fn on_close(&self, _was_clean: bool, _is_quick: bool)
     fn on_reconnect(&self)
     fn on_error(&self, _error: &RouterError)
-  trait ClientTransport: Send + Sync + fmt::Debug
+  trait RouterClientTransport: Send + Sync + fmt::Debug
     fn send(&self, message: TransportMessage) -> Result<Sent, RouterError>
     fn listen(&self, listener: Arc<dyn ClientListener>)
     fn unlisten(&self, listener: &Arc<dyn ClientListener>)
@@ -1926,20 +1951,21 @@ crate::transport
     fn carries(&self, _credential: &str) -> bool
     fn is_open(&self) -> bool
     fn ready_state(&self) -> ReadyState
-  struct DisconnectOptions #[non_exhaustive]
+  struct TransportClientDisconnectOptions #[non_exhaustive]
     pub is_clean: Option<bool>
     pub is_quick: Option<bool>
     derives Clone, Debug, Default, Eq, PartialEq
-  enum ReconnectDelay #[non_exhaustive]
+  type TransportClientReconnectDelayResolver = Arc<dyn Fn(Option<Duration>, u32) -> Duration + Send + Sync>
+  enum TransportClientReconnectDelay #[non_exhaustive]
     Fixed(Duration)
-    Computed(Arc<dyn Fn(Option<Duration>, u32) -> Duration + Send + Sync>)
+    Resolver(TransportClientReconnectDelayResolver)
     implements Debug
     derives Clone
   const CONNECT_TIMEOUT: Duration
   const RECONNECT_DELAY: Duration
   const RECONNECT_ATTEMPTS: u32
-  struct ReconnectOptions #[non_exhaustive]
-    pub delay: Option<ReconnectDelay>
+  struct TransportClientReconnectOptions #[non_exhaustive]
+    pub delay: Option<TransportClientReconnectDelay>
     pub maximum_attempts: Option<u32>
     pub signal: Option<CancellationToken>
     pub tap: Option<Arc<dyn Fn(Duration, u32) + Send + Sync>>
@@ -1979,7 +2005,7 @@ crate::violations
     derives Clone, Debug
   fn violations_detail_of(judged: &Judged, maximum_bytes: usize) -> String
   fn words_of(violation: &Violation) -> Option<String>
-  fn violations_of((code, scope): (NonZeroU16, FailureScope), detail: &str) -> ReadViolations
+  fn violations_of(failure: &Failure) -> ReadViolations
 crate::internal
   use crate::duration::hold
   use crate::duration::hold_finite
@@ -1997,6 +2023,7 @@ crate::internal
   use crate::envelope::write_header
   use crate::identity::are_one_name
   use crate::identity::is_procedure_name
+  use crate::jwt_verifier::ReadJwt
   use crate::jwt_verifier::read_jwt
   use crate::jwt_verifier::verify_jwt
   use crate::router::types::limits_of

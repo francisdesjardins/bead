@@ -44,13 +44,15 @@ analyzer that refuses a name ending in `Flags` (CA1711).
 ## Consequences
 
 The rename is the cheap half. The expensive half is noticing: a word that means two things is found
-by reading the surface aloud, not by a tool, and no gate finds the next one
-([0006](0006-a-rule-has-its-gate.md)). What holds it is review, and, for every renaming, the Tenth
-Man ([0009](0009-conventional-commits-git-flow-and-the-tenth-man.md)).
+by reading the surface aloud; within a side no gate finds the next one
+([0006](0006-a-rule-has-its-gate.md)), and across the sides `tools/check-names.mjs` refuses one
+spelling for two kinds and a name one side drifts from
+([0004](0004-one-behaviour-in-every-language.md)). What holds it is review, and, for every renaming,
+the Tenth Man ([0009](0009-conventional-commits-git-flow-and-the-tenth-man.md)).
 
 **A better word is applied on every side where it applies, with its call sites, in one commit**
 ([0004](0004-one-behaviour-in-every-language.md)); until it is, the two words are an open row of the
-support matrix. Anything else leaves two vocabularies in the tree, and a reader who has to know
+support matrix and a `differs` row of `tools/names.tsv` that names it. Anything else leaves two vocabularies in the tree, and a reader who has to know
 which file speaks which.
 
 **A word on the wire costs more than a word in the code.** A flag's or a code's name is in the spec,

@@ -7,7 +7,7 @@ use bytes::Bytes;
 use super::{request, result};
 use crate::constants::{FailureScope, ProtocolCode, RouterSide};
 use crate::envelope::{
-    CancelHeader, Credential, CreditHeader, Envelope, FailureHeader, FailureRecord, Header,
+    CancelHeader, Credential, CreditHeader, Envelope, EnvelopeHeader, FailureHeader, FailureRecord,
     NotificationHeader, ReadEnvelopeOptions, RequestHeader, ResultHeader, header_bytes_of,
     read_envelope, read_failure, read_header, write_envelope, write_header,
 };
@@ -15,7 +15,7 @@ use crate::failure::FailureOrigin;
 use crate::session_token::SessionToken;
 use crate::testing::{hexadecimal, vectors};
 
-fn written(header: &Header) -> Vec<u8> {
+fn written(header: &EnvelopeHeader) -> Vec<u8> {
     let mut bytes = Vec::new();
     assert_eq!(
         write_header(header, &mut bytes).expect("a header written"),
@@ -24,7 +24,7 @@ fn written(header: &Header) -> Vec<u8> {
     bytes
 }
 
-fn sizes(headers: &[Header]) -> Vec<usize> {
+fn sizes(headers: &[EnvelopeHeader]) -> Vec<usize> {
     headers
         .iter()
         .map(|header| header_bytes_of(header).expect("a header's size"))
@@ -64,21 +64,21 @@ fn size_each_header_by_its_kind_and_its_blocks() {
     };
     assert_eq!(
         sizes(&[
-            Header::Request(plain.clone()),
-            Header::Request(RequestHeader {
+            EnvelopeHeader::Request(plain.clone()),
+            EnvelopeHeader::Request(RequestHeader {
                 destination_id: Some(1),
                 ..plain.clone()
             }),
-            Header::Request(opaque.clone()),
-            Header::Request(RequestHeader {
+            EnvelopeHeader::Request(opaque.clone()),
+            EnvelopeHeader::Request(RequestHeader {
                 destination_id: Some(1),
                 ..opaque
             }),
-            Header::Request(RequestHeader {
+            EnvelopeHeader::Request(RequestHeader {
                 credential: Some(Credential::Jwt(Bytes::from_static(b"a.b.c"))),
                 ..plain.clone()
             }),
-            Header::Request(RequestHeader {
+            EnvelopeHeader::Request(RequestHeader {
                 credential: Some(Credential::Elsewhere),
                 ..plain
             }),
@@ -87,13 +87,13 @@ fn size_each_header_by_its_kind_and_its_blocks() {
     );
     assert_eq!(
         sizes(&[
-            Header::Result(result(None)),
-            Header::Result(result(Some(Credential::Opaque(token)))),
-            Header::Result(ResultHeader {
+            EnvelopeHeader::Result(result(None)),
+            EnvelopeHeader::Result(result(Some(Credential::Opaque(token)))),
+            EnvelopeHeader::Result(ResultHeader {
                 total: Some(4_096),
                 ..result(None)
             }),
-            Header::Result(ResultHeader {
+            EnvelopeHeader::Result(ResultHeader {
                 total: Some(4_096),
                 ..result(Some(Credential::None))
             }),
@@ -101,11 +101,14 @@ fn size_each_header_by_its_kind_and_its_blocks() {
         [8, 28, 16, 20]
     );
     assert_eq!(
-        header_bytes_of(&Header::Notification(NotificationHeader { call_id: 1 })).expect("sized"),
+        header_bytes_of(&EnvelopeHeader::Notification(NotificationHeader {
+            call_id: 1
+        }))
+        .expect("sized"),
         8
     );
     assert_eq!(
-        header_bytes_of(&Header::Cancel(CancelHeader { call_id: 1 })).expect("sized"),
+        header_bytes_of(&EnvelopeHeader::Cancel(CancelHeader { call_id: 1 })).expect("sized"),
         8
     );
 }
@@ -113,14 +116,14 @@ fn size_each_header_by_its_kind_and_its_blocks() {
 #[test]
 fn write_big_endian_and_read_every_call_id_unsigned() {
     assert_eq!(
-        written(&Header::Result(ResultHeader {
+        written(&EnvelopeHeader::Result(ResultHeader {
             call_id: 0x0102_0304,
             ..result(None)
         })),
         hexadecimal::bytes_of("A1 11 00 02 01 02 03 04").expect("hexadecimal")
     );
     for call_id in [1 << 31, u32::MAX, (1 << 31) + 1] {
-        let header = Header::Result(ResultHeader {
+        let header = EnvelopeHeader::Result(ResultHeader {
             call_id,
             ..result(None)
         });
@@ -140,7 +143,8 @@ fn reads_a_jwt_byte_0xe9_as_u_00e9_and_writes_it_back_as_the_same_byte() {
     let expected =
         hexadecimal::bytes_of("A1 10 08 05 00 00 00 03 00 02 00 01 00 02 00 01 E9 00 00 00")
             .expect("hexadecimal");
-    let header = Header::Request(request(Some(Credential::Jwt(Bytes::from_static(&[0xe9])))));
+    let header =
+        EnvelopeHeader::Request(request(Some(Credential::Jwt(Bytes::from_static(&[0xe9])))));
     let read = read_header(&expected, RouterSide::Server)
         .expect("read")
         .expect("known kind");
@@ -151,7 +155,7 @@ fn reads_a_jwt_byte_0xe9_as_u_00e9_and_writes_it_back_as_the_same_byte() {
 
 #[test]
 fn writes_the_padding_over_whatever_the_bytes_held() {
-    let header = Header::Request(request(Some(Credential::Jwt(Bytes::from_static(b"a")))));
+    let header = EnvelopeHeader::Request(request(Some(Credential::Jwt(Bytes::from_static(b"a")))));
     let mut bytes = vec![0xff; 20];
     bytes.clear();
     assert_eq!(
@@ -175,7 +179,7 @@ fn carries_a_64_bit_field_whole_its_high_word_first_from_0_to_2_53_1() {
         (1 << 32) + 1,
         (1 << 53) - 1,
     ] {
-        let header = Header::Credit(CreditHeader {
+        let header = EnvelopeHeader::Credit(CreditHeader {
             call_id: 1,
             credit_end,
             paced: false,
@@ -188,7 +192,7 @@ fn carries_a_64_bit_field_whole_its_high_word_first_from_0_to_2_53_1() {
             header
         );
     }
-    let bytes = written(&Header::Credit(CreditHeader {
+    let bytes = written(&EnvelopeHeader::Credit(CreditHeader {
         call_id: 1,
         credit_end: (1 << 32) + 5,
         paced: false,
@@ -249,7 +253,7 @@ fn take_an_envelope_of_the_largest_size_and_refuse_one_byte_more() {
         maximum_envelope_bytes: Some(64),
         ..ReadEnvelopeOptions::default()
     };
-    let mut exact = written(&Header::Result(ResultHeader {
+    let mut exact = written(&EnvelopeHeader::Result(ResultHeader {
         call_id: 3,
         ..result(None)
     }));
@@ -282,12 +286,9 @@ fn cuts_a_long_detail_at_the_default_limit_back_to_the_start_of_the_character_cu
         let mut record = vec![0, 19, 0, 0];
         record.extend_from_slice(detail.as_bytes());
         assert_eq!(
-            read_failure(
-                &record,
-                (RouterSide::Server, crate::envelope::MAXIMUM_DETAIL_BYTES)
-            )
-            .expect("read under the default bound")
-            .detail,
+            read_failure(&record, RouterSide::Server, &ReadEnvelopeOptions::default())
+                .expect("read under the default bound")
+                .detail,
             expected
         );
     }

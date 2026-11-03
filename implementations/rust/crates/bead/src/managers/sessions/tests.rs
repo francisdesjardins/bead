@@ -6,10 +6,11 @@ use core::sync::atomic::{AtomicBool, Ordering};
 use core::time::Duration;
 use std::collections::BTreeSet;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
+use std::time::SystemTime;
 
 use serde_json::{Value, json};
 
-use super::{Arming, Inactivity, Session, SessionEvent, SessionManager, SessionManagerOptions};
+use super::{Arming, Inactivity, Session, SessionEvent, SessionManagerOptions, SessionState};
 use crate::clock::{SharedClock, Timer};
 use crate::duration::{LONGEST_TIMER, NEVER};
 use crate::errors::CallError;
@@ -22,8 +23,17 @@ const FIRST: &str = "type=WS;ip=127.0.0.1;port=50001;ordinal=1";
 const SECOND: &str = "type=WS;ip=127.0.0.1;port=50002;ordinal=1";
 const UNKNOWN: &str = "type=WS;ip=127.0.0.1;port=1;ordinal=1";
 
-// 2026-01-01T00:00:00Z, in milliseconds since the epoch
-const NEW_YEAR: i64 = 1_767_225_600_000;
+// 2026-01-01T00:00:00Z, moved by `milliseconds`, back when negative
+fn at(milliseconds: i64) -> SystemTime {
+    let new_year = crate::testing::instants::new_year();
+    let moved = Duration::from_millis(milliseconds.unsigned_abs());
+
+    if milliseconds < 0 {
+        new_year.checked_sub(moved).expect("an instant")
+    } else {
+        new_year.checked_add(moved).expect("an instant")
+    }
+}
 
 fn locked<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
     mutex.lock().unwrap_or_else(PoisonError::into_inner)
@@ -110,7 +120,7 @@ impl Recorder {
 
 // a manager, what it arms, and what it tells
 struct Sessions {
-    manager: SessionManager,
+    manager: SessionState,
     arming: Recorder,
     told: Vec<SessionEvent>,
 }
@@ -125,7 +135,7 @@ impl Sessions {
         let clock = options.clock.clone().unwrap_or_else(stepping);
 
         Self {
-            manager: SessionManager::new(&SessionManagerOptions {
+            manager: SessionState::new(&SessionManagerOptions {
                 clock: Some(clock),
                 ..options.clone()
             })
@@ -136,7 +146,7 @@ impl Sessions {
     }
 
     fn create(connection: &str) -> Session {
-        Session::new(handle(connection), NEW_YEAR)
+        Session::new(handle(connection), at(0))
     }
 
     fn set(&mut self, session: Session) -> Result<Session, CallError> {
@@ -174,7 +184,7 @@ impl Sessions {
             .expect("a session")
     }
 
-    fn touch(&mut self, (connection, now): (&str, i64)) -> Option<Session> {
+    fn touch(&mut self, (connection, now): (&str, SystemTime)) -> Option<Session> {
         self.manager
             .touch((&handle(connection), now), (&self.arming, &mut self.told))
     }
@@ -202,7 +212,7 @@ fn create_makes_a_session_without_storing_it_no_token_no_timeout_no_data() {
             connection_handle: handle(FIRST),
             connection_inactivity_timeout: Some(NEVER),
             data: None,
-            last_activity: NEW_YEAR,
+            last_activity: at(0),
             session_inactivity_timeout: Some(NEVER),
             session_token: None,
         },
@@ -383,7 +393,7 @@ fn keeps_each_connection_to_its_token_through_every_change_and_no_update_changes
     );
     sessions.connection_timeout((FIRST, Some(milliseconds(5_000))));
     sessions.session_timeout((FIRST, Some(milliseconds(5_000))));
-    sessions.touch((FIRST, NEW_YEAR + 5));
+    sessions.touch((FIRST, at(5)));
 
     assert_eq!(
         sessions.tokens_of_both(),
@@ -497,7 +507,7 @@ fn every_update_of_a_connection_with_no_session_is_null() {
         None,
         "its data"
     );
-    assert_eq!(sessions.touch((FIRST, NEW_YEAR)), None, "its activity");
+    assert_eq!(sessions.touch((FIRST, at(0))), None, "its activity");
     assert_eq!(
         sessions.manager.update_session_inactivity_timeout(
             (&first, Some(milliseconds(1))),
@@ -551,12 +561,12 @@ fn says_nothing_of_a_session_timeout_given_the_one_it_has() {
 #[tokio::test]
 async fn runs_on_the_clock_its_options_give_the_system_s_when_none() {
     let clock = stepping();
-    let given = SessionManager::new(&SessionManagerOptions {
+    let given = SessionState::new(&SessionManagerOptions {
         clock: Some(Arc::clone(&clock)),
         ..SessionManagerOptions::default()
     })
     .expect("a manager on the clock given");
-    let none = SessionManager::new(&SessionManagerOptions::default()).expect("a manager");
+    let none = SessionState::new(&SessionManagerOptions::default()).expect("a manager");
     let system = crate::testing::wall_now();
     let read = none.clock().wall();
     let apart = read
@@ -571,7 +581,7 @@ async fn runs_on_the_clock_its_options_give_the_system_s_when_none() {
     );
     assert_eq!(
         given.create(handle(FIRST)).last_activity,
-        NEW_YEAR,
+        at(0),
         "its activity read on the clock given"
     );
 }
@@ -706,8 +716,8 @@ fn activity_within_the_same_millisecond_restarts_both_timers_and_emits_nothing()
     sessions.taken();
 
     // the clock held on one millisecond
-    sessions.touch((FIRST, NEW_YEAR + 1));
-    sessions.touch((FIRST, NEW_YEAR + 1));
+    sessions.touch((FIRST, at(1)));
+    sessions.touch((FIRST, at(1)));
 
     // each touch stopped the timer before it and set another going
     assert_eq!(
@@ -727,7 +737,7 @@ fn activity_within_the_same_millisecond_restarts_both_timers_and_emits_nothing()
         sessions
             .taken()
             .into_iter()
-            .filter(|event| matches!(event, SessionEvent::LastActivityChanged(..)))
+            .filter(|event| matches!(event, SessionEvent::LastActivityChanged { .. }))
             .count(),
         1,
         "told once"
@@ -745,12 +755,17 @@ async fn the_activity_it_reports_reads_the_wall_clock_which_a_clock_set_by_hand_
     .await
     .expect("a pair connected");
     let sessions = pair.server.sessions();
-    let told: Arc<Mutex<Vec<(i64, i64)>>> = Arc::default();
+    let told: Arc<Mutex<Vec<(SystemTime, SystemTime)>>> = Arc::default();
     let hearing = Arc::clone(&told);
 
     sessions.on(Arc::new(move |event: &SessionEvent| {
-        if let SessionEvent::LastActivityChanged(_, new, old) = event {
-            locked(&hearing).push((*new, *old));
+        if let SessionEvent::LastActivityChanged {
+            new_value,
+            old_value,
+            ..
+        } = event
+        {
+            locked(&hearing).push((*new_value, *old_value));
         }
     }));
 
@@ -770,7 +785,7 @@ async fn the_activity_it_reports_reads_the_wall_clock_which_a_clock_set_by_hand_
 
     assert_eq!(
         *locked(&told),
-        [(NEW_YEAR - DAY, NEW_YEAR)],
+        [(at(-DAY), at(0))],
         "the wall clock's reading"
     );
     assert!(
@@ -1035,11 +1050,11 @@ fn update_connection_inactivity_timeout_stores_the_timeout_emits_its_change_and_
 
     assert_eq!(
         sessions.taken(),
-        [SessionEvent::ConnectionInactivityTimeoutChanged(
-            stored.clone(),
-            milliseconds(30),
-            NEVER
-        )],
+        [SessionEvent::ConnectionInactivityTimeoutChanged {
+            session: stored.clone(),
+            new_value: milliseconds(30),
+            old_value: NEVER,
+        }],
         "its change told once"
     );
     assert_eq!(
@@ -1073,11 +1088,11 @@ fn update_session_inactivity_timeout_stores_the_timeout_emits_its_change_and_arm
 
     assert_eq!(
         sessions.taken(),
-        [SessionEvent::SessionInactivityTimeoutChanged(
-            stored.clone(),
-            milliseconds(30),
-            NEVER
-        )],
+        [SessionEvent::SessionInactivityTimeoutChanged {
+            session: stored.clone(),
+            new_value: milliseconds(30),
+            old_value: NEVER,
+        }],
         "its change told"
     );
     assert_eq!(
@@ -1170,7 +1185,7 @@ fn a_timeout_past_the_longest_a_timer_waits_is_refused_by_a_reset_a_store_an_upd
             ..SessionManagerOptions::default()
         },
     ] {
-        assert!(SessionManager::new(&options).is_err(), "a default");
+        assert!(SessionState::new(&options).is_err(), "a default");
     }
 
     // the timer running is left as it was, and nothing was stored
@@ -1213,20 +1228,21 @@ fn activity_restarts_both_timers_on_its_clock_and_emits_last_activity_changed() 
     sessions.taken();
 
     // a later millisecond, so the activity is a change
-    let stored = sessions.touch((FIRST, NEW_YEAR + 5)).expect("a session");
+    let stored = sessions.touch((FIRST, at(5))).expect("a session");
 
     assert_eq!(
         sessions.taken(),
-        [SessionEvent::LastActivityChanged(
-            stored.clone(),
-            NEW_YEAR + 5,
-            NEW_YEAR
-        )],
+        [SessionEvent::LastActivityChanged {
+            session: stored.clone(),
+            new_value: at(5),
+            old_value: at(0),
+        }],
         "its change told"
     );
-    assert_eq!(stored.last_activity, NEW_YEAR + 5, "stamped");
+    assert_eq!(stored.last_activity, at(5), "stamped");
     assert_eq!(
-        session.last_activity, NEW_YEAR,
+        session.last_activity,
+        at(0),
         "the one handed before left alone"
     );
 

@@ -162,7 +162,7 @@ public sealed class WebSocketServerTests
 
     private static Task Connect(WebSocketClient client, int port)
     {
-        return client.Connect(new WebSocketConnectOptions { Host = Host, Port = port }, Cancelled);
+        return client.Connect(new WebSocketTransportClientConnectOptions { Host = Host, Port = port }, Cancelled);
     }
 
     // reads what comes until the server's close, answers it, and gives its status
@@ -1270,9 +1270,9 @@ public sealed class WebSocketServerTests
                 return response.Answer(request.Payload.ToUpperInvariant());
             });
 
-            await alice.Connect(new WebSocketConnectOptions { Host = "127.0.0.1", Port = port }, Cancelled);
+            await alice.Connect(new WebSocketTransportClientConnectOptions { Host = "127.0.0.1", Port = port }, Cancelled);
             await alice.Services.GetRequest(OpenSession, TextAsked)("alice")().WaitAsync(Patience, Cancelled);
-            await other.Connect(new WebSocketConnectOptions { Host = "127.0.0.2", Port = port }, Cancelled);
+            await other.Connect(new WebSocketTransportClientConnectOptions { Host = "127.0.0.2", Port = port }, Cancelled);
 
             // ! the client's connect settles on the 101, which the server writes before it keeps the
             // connection: wait for it to hold both

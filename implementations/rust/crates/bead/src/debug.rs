@@ -5,7 +5,7 @@ use core::fmt;
 use std::sync::{Arc, Mutex, PoisonError};
 
 use crate::constants::{CredentialScheme, EnvelopeKind};
-use crate::envelope::{Credential, FailureHeader, Header, RequestHeader, ResultHeader};
+use crate::envelope::{Credential, EnvelopeHeader, FailureHeader, RequestHeader, ResultHeader};
 use crate::errors::{ProgrammerError, Refusal};
 use crate::router::types::ConnectionHandle;
 
@@ -53,7 +53,7 @@ pub struct TracedEnvelope {
     /// The connection it went or came on: the server's, on a client's router.
     pub connection_handle: ConnectionHandle,
     /// Its header, its credential taken out.
-    pub header: Header,
+    pub header: EnvelopeHeader,
     /// Its credential's scheme, in place of its credential.
     pub credential_scheme: Option<CredentialScheme>,
 }
@@ -62,24 +62,25 @@ impl TracedEnvelope {
     /// The trace of `header`, on `connection_handle`: a session's token, a `JWT` and a scheme to
     /// come's bytes never in it.
     #[must_use]
-    pub fn of(connection_handle: &ConnectionHandle, header: &Header) -> Self {
+    pub fn new(connection_handle: &ConnectionHandle, header: &EnvelopeHeader) -> Self {
         let credential_scheme = header.credential().map(Credential::scheme);
         let header = match header {
-            Header::Request(request) => Header::Request(RequestHeader {
+            EnvelopeHeader::Request(request) => EnvelopeHeader::Request(RequestHeader {
                 credential: None,
                 ..request.clone()
             }),
-            Header::Result(result) => Header::Result(ResultHeader {
+            EnvelopeHeader::Result(result) => EnvelopeHeader::Result(ResultHeader {
                 credential: None,
                 ..result.clone()
             }),
-            Header::Failure(failure) => Header::Failure(FailureHeader {
+            EnvelopeHeader::Failure(failure) => EnvelopeHeader::Failure(FailureHeader {
                 credential: None,
                 ..failure.clone()
             }),
-            Header::Notification(_) | Header::Chunk(_) | Header::Credit(_) | Header::Cancel(_) => {
-                header.clone()
-            }
+            EnvelopeHeader::Notification(_)
+            | EnvelopeHeader::Chunk(_)
+            | EnvelopeHeader::Credit(_)
+            | EnvelopeHeader::Cancel(_) => header.clone(),
         };
 
         Self {

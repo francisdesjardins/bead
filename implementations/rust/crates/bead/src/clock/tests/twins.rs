@@ -5,7 +5,7 @@ use core::task::Poll;
 use core::time::Duration;
 use std::sync::{Arc, Mutex};
 
-use crate::clock::{Clock, Schedule, SharedClock, SystemClock, clock_of};
+use crate::clock::{Clock, LayeredClocks, Schedule, SharedClock, SystemClock, clock_of};
 use crate::duration::LONGEST_TIMER;
 use crate::testing::{SteppingClock, instants};
 use crate::transport::{caught, caught_future};
@@ -89,27 +89,34 @@ async fn a_layer_runs_on_the_clock_of_the_one_beneath_it_unless_given_one_and_re
     let beneath: SharedClock = SteppingClock::new(instants::new_year());
     let given: SharedClock = SteppingClock::new(instants::new_year());
     let platform: SharedClock = Arc::new(SystemClock::current().expect("a platform clock"));
-    let names = ("a server", "its transport");
+    let layered = |(beneath, given): (Option<&SharedClock>, Option<&SharedClock>)| {
+        clock_of(&LayeredClocks {
+            beneath,
+            given,
+            layer: "a server",
+            below: "its transport",
+        })
+    };
     for (below, own, expected) in [
         (Some(&beneath), None, &beneath),
         (Some(&beneath), Some(&beneath), &beneath),
         (None, Some(&given), &given),
     ] {
         assert!(Arc::ptr_eq(
-            &clock_of((below, own), names)
+            &layered((below, own))
                 .expect("one clock")
                 .expect("a clock selected"),
             expected
         ));
     }
     assert!(
-        clock_of((None, None), names)
+        layered((None, None))
             .expect("the builder supplies its platform clock")
             .is_none()
     );
     for (given, description) in [(&given, "one of its own"), (&platform, "the platform's")] {
         assert_eq!(
-            clock_of((Some(&beneath), Some(given)), names)
+            layered((Some(&beneath), Some(given)))
                 .expect_err("two clocks")
                 .message(),
             format!(

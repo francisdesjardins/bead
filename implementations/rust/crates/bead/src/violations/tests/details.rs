@@ -29,10 +29,10 @@ fn name() -> Violation {
 }
 
 fn read(detail: &str) -> ReadViolations {
-    violations_of(
+    violations_of(&super::failure_of(
         (ProtocolCode::PAYLOAD_INVALID.get(), FailureScope::Protocol),
         detail,
-    )
+    ))
 }
 
 fn shown(violations: Vec<Violation>, more: Option<u64>) -> ReadViolations {
@@ -159,7 +159,7 @@ fn reads_no_violations_from_a_detail_empty_cut_or_of_another_form() {
         (ProtocolCode::PAYLOAD_INVALID, FailureScope::Application),
     ] {
         assert_eq!(
-            violations_of((code.get(), scope), valid),
+            violations_of(&super::failure_of((code.get(), scope), valid)),
             ReadViolations::default()
         );
     }

@@ -7,13 +7,14 @@ use bytes::Bytes;
 
 use super::server::{Served, first, request_of, second};
 use super::{answered, locked, options_of, result_of, token};
+use crate::RouterRequest;
 use crate::constants::{ProtocolCode, RouterSide};
 use crate::envelope::{Credential, Envelope, RequestHeader, ResultHeader};
 use crate::errors::CallError;
 use crate::failure::FailureOrigin;
-use crate::managers::service::{ResolverDependencies, Response};
+use crate::managers::service::{RequestResolverDependencies, Response};
 use crate::payloads::TextCodec;
-use crate::router::server::{CallHooks, RouterServerOptions, ServerRequest};
+use crate::router::server::RouterServerOptions;
 use crate::router::types::{RequestCredential, RouterError};
 use crate::testing::core_port::error_of;
 use crate::testing::pair::echo;
@@ -21,7 +22,10 @@ use crate::testing::pair::echo;
 fn resolve(served: &Served) {
     served
         .services
-        .get_request_resolver(&echo(), ResolverDependencies::of(TextCodec, TextCodec))
+        .get_request_resolver(
+            &echo(),
+            RequestResolverDependencies::new(TextCodec, TextCodec),
+        )
         .expect("echo resolved")
         .on(Arc::new(|request, response: Response<TextCodec>| {
             response.result(format!("{}!", request.payload))
@@ -135,16 +139,15 @@ async fn its_own_requests_present_opaque_when_they_ask_their_connections_session
             .router
             .request(
                 Bytes::new(),
-                (
-                    ServerRequest {
-                        procedure: echo().address(),
-                        maximum_payload_bytes: None,
-                        options,
-                        series: None,
-                        refusal: None,
-                    },
-                    CallHooks::default(),
-                ),
+                RouterRequest {
+                    procedure: echo(),
+                    options,
+                    series: None,
+                    refusal: None,
+                    subscribes: None,
+                    on_call_id: None,
+                    on_sent: None,
+                },
             )
             .expect("an OPAQUE command")
     };

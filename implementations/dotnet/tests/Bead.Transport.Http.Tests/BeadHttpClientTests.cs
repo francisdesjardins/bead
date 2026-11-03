@@ -88,7 +88,7 @@ public sealed class BeadHttpClientTests
     // connected: its connect, which waits for its answer, drawn
     private static async Task Connect(BeadHttpClient client, Fetch fetch)
     {
-        var connecting = client.Connect(new HttpConnectOptions { Host = "localhost", Port = 8_080 }, Cancelled);
+        var connecting = client.Connect(new HttpTransportClientConnectOptions { Host = "localhost", Port = 8_080 }, Cancelled);
 
         (await fetch.Next()).SetResult(Drawn());
         await connecting.WaitAsync(Patience, Cancelled);
@@ -175,7 +175,7 @@ public sealed class BeadHttpClientTests
             Transport = new HttpTransportClientOptions { Handler = fetch, IsListening = false },
         });
 
-        await client.Connect(new HttpConnectOptions { Host = "localhost", Port = 8_080 }, Cancelled);
+        await client.Connect(new HttpTransportClientConnectOptions { Host = "localhost", Port = 8_080 }, Cancelled);
 
         Assert.Equal("HI", await client.Services.GetRequest(Echo, Text)("hi")().WaitAsync(Patience, Cancelled));
 
@@ -243,7 +243,7 @@ public sealed class BeadHttpClientTests
             Limits = RouterLimits.Default with { MaximumEnvelopeBytes = 1_024 },
             Transport = new HttpTransportClientOptions { Handler = fetch, IsListening = false },
         });
-        var connecting = client.Connect(new HttpConnectOptions { Host = "localhost", Port = 8_080 }, Cancelled);
+        var connecting = client.Connect(new HttpTransportClientConnectOptions { Host = "localhost", Port = 8_080 }, Cancelled);
 
         (await fetch.Next()).SetResult(Drawn());
         await connecting.WaitAsync(Patience, Cancelled);
@@ -281,8 +281,8 @@ public sealed class BeadHttpClientTests
         {
             closes.Writer.TryWrite((wasClean, wasQuick));
         };
-        await client.Connect(new HttpConnectOptions { Host = "localhost", Port = 8_080 }, Cancelled);
-        await client.Disconnect(new TransportDisconnectOptions { IsClean = false }).WaitAsync(Patience, Cancelled);
+        await client.Connect(new HttpTransportClientConnectOptions { Host = "localhost", Port = 8_080 }, Cancelled);
+        await client.Disconnect(new TransportClientDisconnectOptions { IsClean = false }).WaitAsync(Patience, Cancelled);
 
         Assert.Equal((false, false), await closes.Reader.ReadAsync(Cancelled).AsTask().WaitAsync(Patience, Cancelled));
         Assert.Equal(ReadyState.Closed, client.Transport.ReadyState);
@@ -291,7 +291,7 @@ public sealed class BeadHttpClientTests
         await cancelled.CancelAsync();
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
         {
-            return client.Reconnect(new TransportReconnectOptions { CancellationToken = cancelled.Token });
+            return client.Reconnect(new TransportClientReconnectOptions { CancellationToken = cancelled.Token });
         });
         Assert.Equal(ReadyState.Closed, client.Transport.ReadyState);
 
@@ -300,15 +300,15 @@ public sealed class BeadHttpClientTests
 
         Assert.Equal("attempt 2 reached", (await Assert.ThrowsAsync<ReconnectException>(() =>
         {
-            return client.Reconnect(new TransportReconnectOptions
+            return client.Reconnect(new TransportClientReconnectOptions
             {
-                Delay = TransportReconnectDelayOrResolver.Of(TimeSpan.Zero),
+                Delay = new TransportClientReconnectDelay(TimeSpan.Zero),
                 MaximumAttempts = 2,
             }).WaitAsync(Patience, Cancelled);
         })).Message);
 
         isDrawing = true;
-        await client.Reconnect(new TransportReconnectOptions { MaximumAttempts = 1 }).WaitAsync(Patience, Cancelled);
+        await client.Reconnect(new TransportClientReconnectOptions { MaximumAttempts = 1 }).WaitAsync(Patience, Cancelled);
 
         Assert.Equal(ReadyState.Open, client.Transport.ReadyState);
         Assert.Same(client.Transport, client.Router.Transport);
@@ -327,7 +327,7 @@ public sealed class BeadHttpClientTests
         await Connect(other, fetch);
 
         var byDispose = client.Reconnect();
-        var byToken = other.Reconnect(new TransportReconnectOptions { CancellationToken = source.Token });
+        var byToken = other.Reconnect(new TransportClientReconnectOptions { CancellationToken = source.Token });
 
         // each attempt under way, which the server never answers
         await fetch.Next();

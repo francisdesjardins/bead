@@ -17,7 +17,7 @@ use crate::testing::scripted::bytes_of;
 
 fn echo() -> crate::identity::Procedure {
     crate::identity::Procedure {
-        kind: Some(ProcedureKind::Command),
+        procedure_kind: Some(ProcedureKind::Command),
         ..crate::testing::pair::echo()
     }
 }

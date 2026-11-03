@@ -8,7 +8,7 @@ use super::token;
 use crate::constants::{CredentialScheme, EnvelopeKind, ProtocolCode, RouterSide};
 use crate::debug::DebugDirection;
 use crate::envelope::{
-    Credential, CreditHeader, Envelope, Header, NotificationHeader, ResultHeader,
+    Credential, CreditHeader, Envelope, EnvelopeHeader, NotificationHeader, ResultHeader,
 };
 use crate::router::core::{self as router_core, Handler};
 use crate::router::types::{RouterAnswer, RouterError, RouterLimitsOptions};
@@ -172,12 +172,12 @@ async fn trace_what_goes_out_and_what_comes_in_without_its_credential_its_scheme
             expected.push((DebugDirection::Tx, "a", EnvelopeKind::Failure, call_id, if answer_first { None } else { Some(CredentialScheme::OPAQUE) }));
             assert_eq!(state.traces.iter().map(|(direction, traced)| (*direction, traced.connection_handle.as_ref(), traced.header.kind(), traced.header.call_id(), traced.credential_scheme)).collect::<Vec<_>>(), expected);
             let request = &state.traces[usize::from(answer_first)].1.header;
-            assert_eq!(request, &Header::Request(scripted_header(call_id)));
+            assert_eq!(request, &EnvelopeHeader::Request(scripted_header(call_id)));
             assert!(state.traces.iter().all(|(_, traced)| traced.header.credential().is_none()), "a trace carries the credential's scheme alone, with no token");
             assert!(!format!("{:?}", state.traces).contains("a.b.c"));
             assert!(!format!("{:?}", state.traces).contains(&token().to_string()));
             assert_eq!(state.sent[0].1.kind(), if answer_first { EnvelopeKind::Result } else { EnvelopeKind::Failure });
-            assert!(matches!(state.sent[0].1.header(), Header::Result(ResultHeader { credential: Some(Credential::Opaque(announced)), .. }) | Header::Failure(crate::envelope::FailureHeader { credential: Some(Credential::Opaque(announced)), .. }) if announced == token()));
+            assert!(matches!(state.sent[0].1.header(), EnvelopeHeader::Result(ResultHeader { credential: Some(Credential::Opaque(announced)), .. }) | EnvelopeHeader::Failure(crate::envelope::FailureHeader { credential: Some(Credential::Opaque(announced)), .. }) if announced == token()));
         }).await.expect("the traces checked");
     }
 }

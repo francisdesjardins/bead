@@ -9,29 +9,34 @@ use bytes::Bytes;
 
 use super::server::{Served, first, header_of, second};
 use super::{Scripted, answered, locked, options_of, request_of as client_request_of, result_of};
+use crate::RouterRequest;
 use crate::constants::ProcedureKind;
 use crate::envelope::{Envelope, RequestHeader};
 use crate::identity::Procedure;
-use crate::router::server::{CallHooks, RouterServerOptions, ServerRequest};
+use crate::router::server::RouterServerOptions;
 use crate::router::types::{ConnectionHandle, RouterResult};
 use crate::testing::pair::echo;
 
 // echo as a command, which a server's router makes
 fn command() -> Procedure {
     Procedure {
-        kind: Some(ProcedureKind::Command),
+        procedure_kind: Some(ProcedureKind::Command),
         ..echo()
     }
 }
 
-// a command to `connection_handle` of `payload`, to `destination_id` when given, `hooks` told
+// what hears a call's id
+type OnCallId = Option<Box<dyn FnOnce(u32) + Send>>;
+
+// a command to `connection_handle` of `payload`, to `destination_id` when given, `on_call_id` told
+// its call id
 fn command_of(
     served: &Served,
-    (connection_handle, payload, destination_id, hooks): (
+    (connection_handle, payload, destination_id, on_call_id): (
         &ConnectionHandle,
         Bytes,
         Option<u32>,
-        CallHooks,
+        OnCallId,
     ),
 ) -> crate::router::server::Call {
     let mut options = options_of(Duration::from_secs(1));
@@ -43,16 +48,15 @@ fn command_of(
         .router
         .request(
             payload,
-            (
-                ServerRequest {
-                    procedure: command().address(),
-                    maximum_payload_bytes: None,
-                    options,
-                    series: None,
-                    refusal: None,
-                },
-                hooks,
-            ),
+            RouterRequest {
+                procedure: command(),
+                options,
+                series: None,
+                refusal: None,
+                subscribes: None,
+                on_call_id,
+                on_sent: None,
+            },
         )
         .expect("a command")
 }
@@ -97,12 +101,9 @@ async fn sends_its_requests_on_a_call_id_of_its_side_naming_their_procedure_and_
             &first(),
             Bytes::from_static(&[1, 2, 3]),
             None,
-            CallHooks {
-                on_call_id: Some(Box::new(move |call_id| {
-                    locked(&telling).push((call_id, transport.envelopes(&first()).len()));
-                })),
-                on_sent: None,
-            },
+            Some(Box::new(move |call_id| {
+                locked(&telling).push((call_id, transport.envelopes(&first()).len()));
+            })),
         ),
     );
 
@@ -146,18 +147,14 @@ async fn sends_its_requests_on_a_call_id_of_its_side_naming_their_procedure_and_
     let (hearing, carried) = (Arc::clone(&heard), Arc::clone(&scripted.transport));
     let call = scripted
         .router
-        .request(
-            Bytes::from_static(&[1]),
-            (
-                client_request_of((None, Duration::from_secs(5))),
-                CallHooks {
-                    on_call_id: Some(Box::new(move |call_id| {
-                        locked(&hearing).push((call_id, carried.envelopes().len()));
-                    })),
-                    on_sent: None,
-                },
-            ),
-        )
+        .request(Bytes::from_static(&[1]), {
+            let mut request = client_request_of((None, Duration::from_secs(5)));
+
+            request.on_call_id = Some(Box::new(move |call_id| {
+                locked(&hearing).push((call_id, carried.envelopes().len()));
+            }));
+            request
+        })
         .expect("a request");
 
     scripted.settle().await;
@@ -184,14 +181,8 @@ async fn writes_the_destination_a_request_names_and_none_left_out() {
     served.transport.open(&first(), true);
 
     let calls = [
-        command_of(
-            &served,
-            (&first(), Bytes::new(), Some(7), CallHooks::default()),
-        ),
-        command_of(
-            &served,
-            (&first(), Bytes::new(), None, CallHooks::default()),
-        ),
+        command_of(&served, (&first(), Bytes::new(), Some(7), None)),
+        command_of(&served, (&first(), Bytes::new(), None, None)),
     ];
 
     served.settle().await;
@@ -231,10 +222,7 @@ async fn pairs_its_requests_by_call_id_alone_on_their_own_connection_once() {
     served.transport.open(&first(), true);
     served.transport.open(&second(), true);
 
-    let asked = command_of(
-        &served,
-        (&first(), Bytes::new(), Some(3), CallHooks::default()),
-    );
+    let asked = command_of(&served, (&first(), Bytes::new(), Some(3), None));
 
     served.settle().await;
     served.transport.deliver(&result(&[]), &second());
@@ -273,7 +261,7 @@ async fn keeps_the_later_end_of_a_call_id_reserved_twice_clearing_the_timer_it_r
     for (call_id, timeout) in [(1, 20), (1, 200), (3, 200), (3, 20)] {
         scripted
             .router
-            .reserve((call_id, Some(milliseconds(timeout))))
+            .reserve(call_id, Some(milliseconds(timeout)))
             .expect("held")
             .await;
     }

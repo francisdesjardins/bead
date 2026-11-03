@@ -21,26 +21,23 @@ use crate::managers::service::{
 use crate::payloads::TextCodec;
 use crate::router::client::{RouterClient, RouterClientOptions};
 use crate::router::core::Side;
-use crate::router::server::{Call, CallHooks};
+use crate::router::server::Call;
 use crate::router::types::{LIMIT_DEFAULTS, RouterActivity, RouterError, RouterLimitsOptions};
 use crate::testing::pair::echo;
 use crate::testing::scripted::Sending;
-use crate::transport::ClientTransport;
+use crate::transport::RouterClientTransport;
 
 fn request(scripted: &Scripted, payload: &'static [u8]) -> Call {
     scripted
         .router
-        .request(
-            Bytes::from_static(payload),
-            (request_of((None, TIMEOUT)), CallHooks::default()),
-        )
+        .request(Bytes::from_static(payload), request_of((None, TIMEOUT)))
         .expect("a request")
 }
 
 #[tokio::test]
 async fn takes_any_transport_of_this_package() {
     let scripted = Scripted::new();
-    let transport: Arc<dyn ClientTransport> =
+    let transport: Arc<dyn RouterClientTransport> =
         Arc::<crate::testing::scripted::ScriptedClient>::clone(&scripted.transport);
     assert!(Arc::ptr_eq(&scripted.router.transport(), &transport));
     assert_eq!(scripted.router.session_token(), None);
@@ -219,10 +216,7 @@ async fn times_out_and_cancels_its_call_a_result_too_late_says_nothing_while_its
     let timeout = Duration::from_millis(10);
     let asking = scripted
         .router
-        .request(
-            Bytes::new(),
-            (request_of((None, timeout)), CallHooks::default()),
-        )
+        .request(Bytes::new(), request_of((None, timeout)))
         .expect("a request");
     scripted.settle().await;
     assert_eq!(scripted.clock.dues(), [timeout]);
@@ -293,7 +287,7 @@ async fn writes_the_destination_a_request_names_refuses_a_destination_of_0_and_w
         calls.push(
             scripted
                 .router
-                .request(Bytes::new(), (request, CallHooks::default()))
+                .request(Bytes::new(), request)
                 .expect("a destination"),
         );
     }
@@ -301,7 +295,7 @@ async fn writes_the_destination_a_request_names_refuses_a_destination_of_0_and_w
     zero.options.destination_id = Some(0);
     let refused = scripted
         .router
-        .request(Bytes::new(), (zero, CallHooks::default()))
+        .request(Bytes::new(), zero)
         .expect("a request future");
     assert!(
         matches!(answered(refused).await, Err(CallError::Refused(_))),
@@ -377,7 +371,7 @@ async fn rejects_when_the_transport_cannot_send_and_when_the_payload_is_too_larg
         .router
         .request(
             Bytes::from(vec![0; 0x100_0001]),
-            (request_of((None, TIMEOUT)), CallHooks::default()),
+            request_of((None, TIMEOUT)),
         )
         .expect("a request");
     let CallError::Failure(failure) = answered(asking).await.expect_err("a payload too large")
@@ -411,7 +405,7 @@ async fn refuses_a_payload_that_would_go_as_a_transfer_where_it_sends_none_befor
     )
     .expect("a service manager");
     let requester = services
-        .get_request(&echo(), RequestDependencies::of(TextCodec, TextCodec))
+        .get_request(&echo(), RequestDependencies::new(TextCodec, TextCodec))
         .expect("echo's requester");
     let asking = requester
         .call("x".repeat(2 * 1_048_576), &RequestOptions::default())
@@ -459,18 +453,14 @@ async fn requests_are_held_to_the_limits_the_router_is_built_with_which_must_hol
         calls.push(
             scripted
                 .router
-                .request(
-                    Bytes::from(vec![0; length]),
-                    (
-                        request_of((None, TIMEOUT)),
-                        CallHooks {
-                            on_call_id: None,
-                            on_sent: Some(Box::new(move |handed| {
-                                locked(&hearing).push((length, handed));
-                            })),
-                        },
-                    ),
-                )
+                .request(Bytes::from(vec![0; length]), {
+                    let mut request = request_of((None, TIMEOUT));
+
+                    request.on_sent = Some(Box::new(move |handed| {
+                        locked(&hearing).push((length, handed));
+                    }));
+                    request
+                })
                 .expect("a request"),
         );
         if length == 9 {

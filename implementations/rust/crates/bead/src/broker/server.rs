@@ -14,11 +14,13 @@ use core::sync::atomic::{AtomicBool, Ordering};
 use core::time::Duration;
 use std::collections::{BTreeSet, HashMap};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError, Weak};
+use std::time::SystemTime;
 
 use tokio::sync::watch;
 
 use crate::broker::adapter::{BrokerCapabilities, BrokerError, BrokerSubscription};
 use crate::broker::client::MAXIMUM_UNSENT_BYTES;
+use crate::broker::memory::TRANSPORT_BROKER;
 use crate::broker::parcel::{
     LAYOUT, LEAST_BOUND, Parcel, ParcelRead, is_token, kinds, refuse_reason_of,
 };
@@ -31,7 +33,8 @@ use crate::duration::hold_finite;
 use crate::errors::ProgrammerError;
 use crate::router::types::{BoxFuture, ConnectionHandle, Gauges, RouterError, TransportMessage};
 use crate::transport::{
-    Listeners, ReadyState, Sent, ServerListener, ServerTransport, TransportServerRefusal,
+    Listeners, ReadyState, Sent, ServerListener, ServerTransport, TransportServerClient,
+    TransportServerRefusal,
 };
 
 /// The connections a server's transport holds at once by default, half-open ones among them
@@ -51,7 +54,7 @@ fn locked<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
 /// How a broker's server transport is built (spec 15.12, 15.18, 15.23).
 #[derive(Debug, Clone)]
 #[non_exhaustive]
-pub struct BrokerServerOptions {
+pub struct BrokerTransportServerOptions {
     /// The names it serves, each a token, a server's as a host name is (spec 15.16): its clients'
     /// OPENs go to them; one at least.
     pub names: Vec<String>,
@@ -77,10 +80,10 @@ pub struct BrokerServerOptions {
     pub secure: Option<bool>,
 }
 
-impl BrokerServerOptions {
+impl BrokerTransportServerOptions {
     /// A server transport serving `names`.
     #[must_use]
-    pub fn of<N: Into<String>, I: IntoIterator<Item = N>>(names: I) -> Self {
+    pub fn new<N: Into<String>, I: IntoIterator<Item = N>>(names: I) -> Self {
         Self {
             names: names.into_iter().map(Into::into).collect(),
             is_in_group: None,
@@ -103,7 +106,7 @@ struct HeldConnection {
     handle: Option<ConnectionHandle>,
     accepting: Option<Arc<dyn Timer>>,
     arrival: u64,
-    last_activity: Option<i64>,
+    last_activity: Option<SystemTime>,
     paused: Arc<AtomicBool>,
 }
 
@@ -138,14 +141,14 @@ pub(crate) struct ServerInner {
 
 /// A server's transport over a broker's participant, serving the names it is given.
 #[derive(Clone)]
-pub struct BrokerServer {
+pub struct BrokerTransportServer {
     inner: Arc<ServerInner>,
 }
 
-impl fmt::Debug for BrokerServer {
+impl fmt::Debug for BrokerTransportServer {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter
-            .debug_struct("BrokerServer")
+            .debug_struct("BrokerTransportServer")
             .field("names", &self.inner.names)
             .finish_non_exhaustive()
     }
@@ -169,15 +172,6 @@ pub(crate) fn refuse_open(state: &ParticipantState, (open, status): (&Parcel, u1
     refuse.status = Some(status);
     refuse.layouts = (status == 426).then(|| vec![LAYOUT]);
     state.quietly((state.config.inbox_of(id), &refuse));
-}
-
-fn wall_of(clock: &SharedClock) -> i64 {
-    clock
-        .wall()
-        .duration_since(std::time::SystemTime::UNIX_EPOCH)
-        .map_or(0, |since| {
-            i64::try_from(since.as_millis()).unwrap_or(i64::MAX)
-        })
 }
 
 impl ServerInner {
@@ -307,10 +301,10 @@ impl ServerInner {
 
         refuse_open(state, (open, status));
 
-        let refusal = TransportServerRefusal::of(
-            (status, refuse_reason_of(status).unwrap_or("busy")),
-            Some(id),
-        );
+        let mut refusal =
+            TransportServerRefusal::new(status, refuse_reason_of(status).unwrap_or("busy"));
+
+        refusal.address = Some(id);
 
         self.tell((
             |listener: &dyn ServerListener| listener.on_refusal(&refusal),
@@ -651,7 +645,7 @@ impl ConnectionOwner for ServerInner {
     }
 
     fn delivered(&self, pair: Pair, message: TransportMessage) {
-        let now = wall_of(&self.participant.clock());
+        let now = self.participant.clock().wall();
         let handle = {
             let mut state = locked(&self.state);
             let Some(held) = state.held.get_mut(&pair) else {
@@ -715,7 +709,7 @@ impl ConnectionOwner for ServerInner {
 }
 
 // what it holds of a connection told, its pair and what the gauges count
-impl BrokerServer {
+impl BrokerTransportServer {
     /// A server transport over `participant`, serving its options' names.
     ///
     /// # Errors
@@ -725,7 +719,7 @@ impl BrokerServer {
     /// timeout spec 1.4 does not hold.
     pub fn new(
         participant: &BrokerParticipant,
-        options: &BrokerServerOptions,
+        options: &BrokerTransportServerOptions,
     ) -> Result<Self, ProgrammerError> {
         if options.names.is_empty() || options.names.iter().any(|name| !is_token(name)) {
             return Err(ProgrammerError::new(
@@ -815,31 +809,31 @@ impl BrokerServer {
     /// The connections its router was told of, in the order they came: each its handle, its peer
     /// participant's id as its address, no port, and when it last delivered an envelope.
     #[must_use]
-    pub fn clients(&self) -> Vec<(ConnectionHandle, String, Option<u16>, Option<i64>)> {
+    pub fn clients(&self) -> Vec<TransportServerClient> {
         let mut told: Vec<_> = locked(&self.inner.state)
             .held
             .values()
             .filter_map(|held| {
                 held.handle.as_ref().map(|handle| {
-                    (
-                        held.arrival,
-                        Arc::clone(handle),
-                        held.peer_id.clone(),
-                        None,
-                        held.last_activity,
-                    )
+                    let client = TransportServerClient {
+                        connection_handle: Arc::clone(handle),
+                        address: held.peer_id.clone(),
+                        port: None,
+                        last_activity: held.last_activity,
+                        transport_type: TRANSPORT_BROKER,
+                    };
+
+                    (held.arrival, client)
                 })
             })
             .collect();
 
-        told.sort_by_key(|(arrival, ..)| *arrival);
-        told.into_iter()
-            .map(|(_, handle, address, port, last_activity)| (handle, address, port, last_activity))
-            .collect()
+        told.sort_by_key(|(arrival, _)| *arrival);
+        told.into_iter().map(|(_, client)| client).collect()
     }
 }
 
-impl ServerTransport for BrokerServer {
+impl ServerTransport for BrokerTransportServer {
     // a credential given here is not carried: the router fails a command that presents one its
     // transport cannot carry before it goes (spec 15.22)
     fn send(

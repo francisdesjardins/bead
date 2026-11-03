@@ -211,7 +211,7 @@ fn builds_validate_options_from_another_crate() {
         "pub fn check() -> bead::ValidateOptions { let mut o = bead::ValidateOptions::default(); o.fail_fast = Some(true); o.maximum_bytes = Some(512); o }",
     );
     consumer.refuses(
-        "pub fn check() { let _ = bead::BrokerConnectOptions::default(); }",
+        "pub fn check() { let _ = bead::BrokerTransportClientConnectOptions::default(); }",
         ("E0599", "default"),
     );
 }

@@ -26,7 +26,7 @@ public sealed class BrokerParticipantTests
         await using var participant = new BrokerParticipant(recording, new BrokerParticipantOptions());
         await using var client = participant.Client();
 
-        await client.Connect(new BrokerConnectOptions { Server = "interop" }, Cancelled);
+        await client.Connect(new BrokerTransportClientConnectOptions { Server = "interop" }, Cancelled);
 
         // * its link started, its inbox subscribed, before its first publication
         Assert.Equal(["start", "subscribe bead/i/ada", "publish bead/s/interop"], recording.Calls.Take(3));
@@ -86,7 +86,7 @@ public sealed class BrokerParticipantTests
         await silent.Start();
         await silent.Subscribe(["bead", "s", "quiet"]);
 
-        var pending = pair.ClientParticipant.Client().Connect(new BrokerConnectOptions { Server = "quiet" }, Cancelled);
+        var pending = pair.ClientParticipant.Client().Connect(new BrokerTransportClientConnectOptions { Server = "quiet" }, Cancelled);
 
         await BrokerPair.Until(
             () =>
@@ -240,7 +240,7 @@ public sealed class BrokerParticipantTests
 
         server.Connection += handles.Enqueue;
         await server.Start();
-        await client.Connect(new BrokerConnectOptions { Server = "interop" }, Cancelled);
+        await client.Connect(new BrokerTransportClientConnectOptions { Server = "interop" }, Cancelled);
         await BrokerPair.Until(
             () =>
             {
@@ -308,7 +308,7 @@ public sealed class BrokerParticipantTests
         await using var third = bob.Client();
         var publisher = pair.Broker.Adapter(new MemoryBrokerAdapterOptions { Id = "will" });
 
-        await third.Connect(new BrokerConnectOptions { Server = "interop" }, Cancelled);
+        await third.Connect(new BrokerTransportClientConnectOptions { Server = "interop" }, Cancelled);
         await publisher.Start();
         await BrokerPair.Until(
             () =>
@@ -425,7 +425,7 @@ public sealed class BrokerParticipantTests
 
             server.Connection += handles.Enqueue;
             await server.Start();
-            await client.Connect(new BrokerConnectOptions { Server = "interop" }, Cancelled);
+            await client.Connect(new BrokerTransportClientConnectOptions { Server = "interop" }, Cancelled);
             await BrokerPair.Until(
                 () =>
                 {
@@ -571,7 +571,7 @@ public sealed class BrokerParticipantTests
         participant.Error += Listener;
 
         // a connect whose OPEN reached a name nobody answers
-        var pending = participant.Client().Connect(new BrokerConnectOptions { Server = "interop" }, Cancelled);
+        var pending = participant.Client().Connect(new BrokerTransportClientConnectOptions { Server = "interop" }, Cancelled);
 
         await BrokerPair.Until(
             () =>
@@ -602,7 +602,7 @@ public sealed class BrokerParticipantTests
         })).Message);
         Assert.Equal("the participant ada is stopped", (await Assert.ThrowsAsync<InvalidOperationException>(() =>
         {
-            return participant.Client().Connect(new BrokerConnectOptions { Server = "interop" }, Cancelled);
+            return participant.Client().Connect(new BrokerTransportClientConnectOptions { Server = "interop" }, Cancelled);
         })).Message);
         await participant.DisposeAsync();
         Assert.False(participant.IsLinked);
@@ -787,7 +787,7 @@ public sealed class BrokerParticipantTests
         var adapter = broker.Adapter(new MemoryBrokerAdapterOptions { Id = "ada" });
         await using var participant = new BrokerParticipant(adapter, new BrokerParticipantOptions
         {
-            Reconnect = new TransportReconnectOptions { Delay = Immediately, MaximumAttempts = 2 },
+            Reconnect = new TransportClientReconnectOptions { Delay = Immediately, MaximumAttempts = 2 },
         });
         var reported = new TaskCompletionSource<Exception>(TaskCreationOptions.RunContinuationsAsynchronously);
 
@@ -812,9 +812,9 @@ public sealed class BrokerParticipantTests
         using var cancelling = new CancellationTokenSource();
         await using var participant = new BrokerParticipant(adapter, new BrokerParticipantOptions
         {
-            Reconnect = new TransportReconnectOptions
+            Reconnect = new TransportClientReconnectOptions
             {
-                Delay = TransportReconnectDelayOrResolver.Of(TimeSpan.FromMinutes(1)),
+                Delay = new TransportClientReconnectDelay(TimeSpan.FromMinutes(1)),
                 CancellationToken = cancelling.Token,
             },
         });
@@ -1138,7 +1138,7 @@ public sealed class BrokerParticipantTests
         await peer.DisposeAsync();
     }
 
-    private static readonly TransportReconnectDelayOrResolver Immediately = TransportReconnectDelayOrResolver.Of(TimeSpan.Zero);
+    private static readonly TransportClientReconnectDelay Immediately = new TransportClientReconnectDelay(TimeSpan.Zero);
 
     // the acceptor's half, a test's own peer's
     private const ulong AcceptorHalf = 0xA1_00_00_00_00_00_00_01;
@@ -1163,7 +1163,7 @@ public sealed class BrokerParticipantTests
         await acceptor.Subscribe(["bead", "i", "acceptor"]);
         await acceptor.Subscribe(["bead", "s", "interop"]);
 
-        var connecting = connect.Client.Connect(new BrokerConnectOptions { Server = "interop" }, Cancelled);
+        var connecting = connect.Client.Connect(new BrokerTransportClientConnectOptions { Server = "interop" }, Cancelled);
 
         await BrokerPair.Until(
             () =>
@@ -1238,7 +1238,7 @@ public sealed class BrokerParticipantTests
 
             peer.Heard.Clear();
 
-            var connecting = client.Connect(new BrokerConnectOptions { Server = "interop" }, Cancelled);
+            var connecting = client.Connect(new BrokerTransportClientConnectOptions { Server = "interop" }, Cancelled);
 
             await BrokerPair.Until(
                 () =>
@@ -1387,7 +1387,7 @@ public sealed class BrokerParticipantTests
 
         await using var client = participant.Client();
 
-        await client.Connect(new BrokerConnectOptions { Server = "interop" }, Cancelled);
+        await client.Connect(new BrokerTransportClientConnectOptions { Server = "interop" }, Cancelled);
         await client.Send(new TransportMessage((byte[])[0xA1, 0x10, 0x00, 0x03, 0x00, 0x00, 0x00, 0x01, 0x00, 0x01, 0x00, 0x01, 0x22, 0x78, 0x22], false) { Credential = "Interop sub=ada" });
         await heard.Task.WaitAsync(BrokerPair.Patience, Cancelled);
 
@@ -1432,7 +1432,7 @@ public sealed class BrokerParticipantTests
         await silent.Subscribe(["bead", "s", "silent"]);
 
         await using var waiting = pair.ClientParticipant.Client();
-        var pending = waiting.Connect(new BrokerConnectOptions { Server = "silent" }, Cancelled);
+        var pending = waiting.Connect(new BrokerTransportClientConnectOptions { Server = "silent" }, Cancelled);
 
         await pair.Scheduler.WhenIdle();
         pair.ClientAdapter.TakeOver();
@@ -1460,7 +1460,7 @@ public sealed class BrokerParticipantTests
         await using var refused = pair.ClientParticipant.Client();
         var failure = await Assert.ThrowsAsync<ConnectException>(() =>
         {
-            return refused.Connect(new BrokerConnectOptions { Server = "interop" }, Cancelled);
+            return refused.Connect(new BrokerTransportClientConnectOptions { Server = "interop" }, Cancelled);
         });
 
         Assert.Equal("the link of client was taken over by another link of its id, and connects no more until it is started again", failure.Message);
@@ -1485,7 +1485,7 @@ public sealed class BrokerParticipantTests
         var granting = new GrantingAdapter(inner);
         await using var participant = new BrokerParticipant(granting, new BrokerParticipantOptions
         {
-            Reconnect = new TransportReconnectOptions { Delay = Immediately, MaximumAttempts = 5 },
+            Reconnect = new TransportClientReconnectOptions { Delay = Immediately, MaximumAttempts = 5 },
         });
         var reported = new ConcurrentQueue<string>();
         var lost = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -1565,7 +1565,7 @@ public sealed class BrokerParticipantTests
 
         Assert.Equal("the link of ada was taken over by another link of its id, and connects no more until it is started again", (await Assert.ThrowsAsync<ConnectException>(() =>
         {
-            return refused.Connect(new BrokerConnectOptions { Server = "interop" }, Cancelled);
+            return refused.Connect(new BrokerTransportClientConnectOptions { Server = "interop" }, Cancelled);
         })).Message);
     }
 
