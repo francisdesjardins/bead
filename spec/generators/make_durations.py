@@ -183,6 +183,9 @@ def default(clause, *, milliseconds=None, ways, state=None):
 # a gateway's options, which take the bounds of 15.12 by their names (transcoding 10.2)
 GATEWAY = way('gateway', "a gateway's options, as it is built")
 
+# an HTTP policy's members, which an HTTP server or a gateway takes (spec 15.12, decision 0037)
+POLICY = way('policy', "an HTTP policy's members, as it is made")
+
 places = [
     {
         'id': 'call.timeout',
@@ -330,7 +333,7 @@ places = [
         'kind': 'timeout',
         'never': 'refused',
         'neverClause': '15.12',
-        'ways': [way('options', "the transport server's options, as it is built"), GATEWAY],
+        'ways': [way('options', "the transport server's options, as it is built"), GATEWAY, POLICY],
         'observed': 'refusal',
     },
     {
@@ -339,7 +342,7 @@ places = [
         'kind': 'timeout',
         'never': 'refused',
         'neverClause': '15.12',
-        'ways': [way('options', "the transport server's options, as it is built"), GATEWAY],
+        'ways': [way('options', "the transport server's options, as it is built"), GATEWAY, POLICY],
         'observed': 'refusal',
     },
     {
@@ -348,7 +351,7 @@ places = [
         'kind': 'timeout',
         'never': 'refused',
         'neverClause': '15.12',
-        'ways': [way('options', "the transport server's options, as it is built"), GATEWAY],
+        'ways': [way('options', "the transport server's options, as it is built"), GATEWAY, POLICY],
         'default': default('15.12.16', milliseconds=DEFAULTS['bodyGracePeriod'], ways=['options', 'gateway']),
         'observed': 'held',
     },

@@ -125,8 +125,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `httpTransport.exchangeTimeout`, by two ways, `client` and `server`, where
   `httpTransportServer.exchangeTimeout` was the server's place alone, as 15.12 names that timeout
   for both ends, and a broker participant's reconnection delay as a place of its own,
-  `brokerParticipant.reconnectionDelay`, by `function` and `number` (decision 0014). The file holds
-  35 places, by 54 ways.
+  `brokerParticipant.reconnectionDelay`, by `function` and `number`, and an HTTP policy's three
+  durations by a way of their own, `policy` (decision 0014). The file holds 35 places, by 57 ways.
 - A broker adapter takes its password as a string, or from a provider asked at each link's start,
   two members of one name on every side, as a WebSocket client's credential and its provider are
   (decisions 0032, 0040). On the TypeScript side `password` is a string alone and
@@ -192,6 +192,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - On the TypeScript side an AMQP 1.0 adapter falls to SASL ANONYMOUS no more: given neither a
   password nor a client certificate it is refused as it is built, and a provider's empty answer
   fails its start.
+- On the TypeScript side, `httpPolicyOf` holds `bodyGracePeriod`, `headersTimeout` and
+  `sendGracePeriod` rounded to the nearest whole millisecond, as spec 1.4 states and the C# side's
+  `HttpPolicy.Of` does, where it kept each as given.
 
 ### Security
 

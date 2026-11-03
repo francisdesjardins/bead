@@ -13,15 +13,16 @@ less than a millisecond nor past 2³¹ − 1, and none for a fraction
 ([0011](0011-every-side-takes-its-time-from-a-clock-it-is-given.md)). The values users write do not
 reach a timer alike: 0.41 s is 410 ms in JavaScript and 409.9999 ms in .NET.
 
-Thirty-five places take such a duration, by 54 ways, from a call's timeout to a gateway's heartbeat
+Thirty-five places take such a duration, by 57 ways, from a call's timeout to a gateway's heartbeat
 and a broker's: its participant's heartbeat, `bodyGracePeriod` and reconnection delay, its server
 transport's `acceptTimeout`, and its MQTT 5 and AMQP 1.0 adapters' keep-alive, idle-time-out and
 connect timeout. Some are reached more than one way: a reserve and a cancel, a relay's own timeout
 and a destination's, every transport's connect, the in-memory client's and the broker client's
 among them, a client and its server over HTTP and over WebSocket, a reconnection's delay as a
-number and as a function, and an HTTP server and a gateway at three of 15.12's places. Few inputs
-tell two readings of 1.4 apart — a half up from a half to the even, a value as given from as
-rounded at the ceiling, −1 ms, NaN — and a table of inputs that misses them proves neither reading.
+number and as a function, and an HTTP server, a gateway and an HTTP policy at three of 15.12's
+places. Few inputs tell two readings of 1.4 apart — a half up from a half to the even, a value as
+given from as rounded at the ceiling, −1 ms, NaN — and a table of inputs that misses them proves
+neither reading.
 
 A file must not pin what the spec leaves to each side. A refusal's words are each side's: the C#
 side's message carries .NET's ` (Parameter '…')`, which its tests skip; each side names an option in
@@ -89,7 +90,7 @@ and the key stays. A place carries besides:
   loses its exchange, and never where it pauses again, not where none is armed;
   `refusal`, whether it refuses alone, at those on the real clock (0011), whose timers no test clock
   reaches: a WebSocket's heartbeat and its close timeout, its client's and its server's, and each
-  server's `sendGracePeriod` and `headersTimeout`, a gateway's among them
+  server's `sendGracePeriod` and `headersTimeout`, a gateway's and an HTTP policy's among them
   ([0033](0033-a-side-bounds-what-a-peer-holds-of-it.md)); at a gateway's heartbeat; and over a
   broker, at its participant's heartbeat and at each adapter's keep-alive or idle-time-out and
   connect timeout. A place observed by its refusal has no default in the file, since nothing would

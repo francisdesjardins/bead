@@ -1848,6 +1848,10 @@
         {
           "id": "gateway",
           "name": "a gateway's options, as it is built"
+        },
+        {
+          "id": "policy",
+          "name": "an HTTP policy's members, as it is made"
         }
       ],
       "observed": "refusal",
@@ -1978,6 +1982,10 @@
         {
           "id": "gateway",
           "name": "a gateway's options, as it is built"
+        },
+        {
+          "id": "policy",
+          "name": "an HTTP policy's members, as it is made"
         }
       ],
       "observed": "refusal",
@@ -2109,6 +2117,10 @@
         {
           "id": "gateway",
           "name": "a gateway's options, as it is built"
+        },
+        {
+          "id": "policy",
+          "name": "an HTTP policy's members, as it is made"
         }
       ],
       "default": {

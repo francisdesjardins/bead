@@ -81,8 +81,9 @@ const DURATIONS = Object.freeze(['bodyGracePeriod', 'headersTimeout', 'sendGrace
 /**
  * A policy of `init`'s members, checked once as each listener would check it — its hosts and
  * origins by their forms, its proxies by theirs, each count, rate and duration by its bound — and
- * frozen, its lists copied: what does not hold is a {@link ProgrammerError}. Given as `policy` to
- * the HTTP transport's options and to a gateway's, each takes its members from it.
+ * frozen, its lists copied, each duration held as a whole number of milliseconds: what does not
+ * hold is a {@link ProgrammerError}. Given as `policy` to the HTTP transport's options and to a
+ * gateway's, each takes its members from it.
  *
  * @example
  * import { httpPolicyOf } from '@francisdesjardins/bead/http-transport-server';
@@ -111,12 +112,6 @@ export const httpPolicyOf = (init: IHTTPPolicyInit = {}): IHTTPPolicy => {
     }
   }
 
-  for (const name of DURATIONS) {
-    if (init[name] !== undefined) {
-      assertHeldFinite(name, init[name]);
-    }
-  }
-
   const members: Record<string, unknown> = {};
 
   for (const name of HTTP_POLICY_MEMBERS) {
@@ -124,6 +119,14 @@ export const httpPolicyOf = (init: IHTTPPolicyInit = {}): IHTTPPolicy => {
 
     if (value !== undefined) {
       members[name] = Array.isArray(value) ? Object.freeze([...(value as unknown[])]) : value;
+    }
+  }
+
+  // each duration kept as it is held, a whole number of milliseconds (spec 1.4), as a listener
+  // built on the policy holds it
+  for (const name of DURATIONS) {
+    if (init[name] !== undefined) {
+      members[name] = assertHeldFinite(name, init[name]);
     }
   }
 

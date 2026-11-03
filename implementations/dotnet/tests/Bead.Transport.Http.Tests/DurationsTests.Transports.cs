@@ -423,27 +423,87 @@ public sealed partial class DurationsTests
     {
         var options = new HttpTransportServerOptions { InactivityTimeout = Never };
 
-        return HttpServerOf(given is { } grace ? options with { BodyGracePeriod = grace } : options, async (drive) =>
+        return HttpServerOf(given is { } grace ? options with { BodyGracePeriod = grace } : options, BodyGraceDues);
+    }
+
+    // the dues a server arms once a body declares its bytes and brings none, on a connection that
+    // arms no other: the body's grace, the first timer armed
+    private static async Task<IReadOnlyList<TimeSpan>> BodyGraceDues(ServerDrive drive)
+    {
+        var connectionToken = await drive.Connect(false);
+        using var socket = new TcpClient();
+
+        await socket.ConnectAsync(IPAddress.Loopback, drive.Url.Port, Cancelled);
+        await socket.GetStream().WriteAsync(
+            Encoding.ASCII.GetBytes($"POST {HttpTransport.Pathname} HTTP/1.1\r\nHost: {Host}\r\nContent-Type: {HttpTransport.MediaType}\r\n{HttpTransport.ConnectionTokenHeader}: {connectionToken}\r\nContent-Length: 100\r\n\r\n"),
+            Cancelled);
+
+        var watch = System.Diagnostics.Stopwatch.StartNew();
+        var dues = drive.Clock.Dues();
+
+        while (dues.Count == 0 && watch.Elapsed < Patience)
         {
-            var connectionToken = await drive.Connect(false);
-            using var socket = new TcpClient();
+            await Task.Delay(5, Cancelled);
+            dues = drive.Clock.Dues();
+        }
 
-            await socket.ConnectAsync(IPAddress.Loopback, drive.Url.Port, Cancelled);
-            await socket.GetStream().WriteAsync(
-                Encoding.ASCII.GetBytes($"POST {HttpTransport.Pathname} HTTP/1.1\r\nHost: {Host}\r\nContent-Type: {HttpTransport.MediaType}\r\n{HttpTransport.ConnectionTokenHeader}: {connectionToken}\r\nContent-Length: 100\r\n\r\n"),
-                Cancelled);
+        return dues;
+    }
 
-            var watch = System.Diagnostics.Stopwatch.StartNew();
-            var dues = drive.Clock.Dues();
+    // httpTransportServer.sendGracePeriod, httpTransportServer.headersTimeout, a policy's
 
-            while (dues.Count == 0 && watch.Elapsed < Patience)
-            {
-                await Task.Delay(5, Cancelled);
-                dues = drive.Clock.Dues();
-            }
+    // an HTTP policy's members, as it is made: taken by a transport server built on it, or refused,
+    // on the real clock
+    private static Task<Observed> SendGracePeriodByPolicy(TimeSpan? given)
+    {
+        return HttpServerOnPolicy(new HttpPolicyOptions { SendGracePeriod = Assert.NotNull(given) });
+    }
 
-            return dues;
-        });
+    private static Task<Observed> HeadersTimeoutByPolicy(TimeSpan? given)
+    {
+        return HttpServerOnPolicy(new HttpPolicyOptions { HeadersTimeout = Assert.NotNull(given) });
+    }
+
+    // a policy made of what is given, and an HTTP transport server built on it, taken or refused
+    private static Task<Observed> HttpServerOnPolicy(HttpPolicyOptions given)
+    {
+        HttpPolicy policy;
+
+        try
+        {
+            policy = HttpPolicy.Of(given);
+        }
+        catch (ArgumentOutOfRangeException refused)
+        {
+            return Task.FromResult(Refused(refused));
+        }
+
+        return HttpServerBuilt(new HttpTransportServerOptions { Policy = policy });
+    }
+
+    // httpTransportServer.bodyGracePeriod, a policy's
+
+    // an HTTP policy's members, as it is made: what the policy holds, read back, and the due of the
+    // timer a transport server built on it arms for a body that declares its bytes and brings none,
+    // the same; refused, no policy made
+    private static async Task<Observed> BodyGracePeriodByPolicy(TimeSpan? given)
+    {
+        HttpPolicy policy;
+
+        try
+        {
+            policy = HttpPolicy.Of(new HttpPolicyOptions { BodyGracePeriod = Assert.NotNull(given) });
+        }
+        catch (ArgumentOutOfRangeException refused)
+        {
+            return Refused(refused);
+        }
+
+        var observed = await HttpServerOf(new HttpTransportServerOptions { InactivityTimeout = Never, Policy = policy }, BodyGraceDues);
+
+        Assert.Equal(policy.BodyGracePeriod, observed.Held);
+
+        return observed;
     }
 
     // webSocketTransportServer.sendGracePeriod, webSocketTransportServer.headersTimeout
