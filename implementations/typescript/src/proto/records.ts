@@ -63,7 +63,7 @@ interface IReader {
   isUndeclared: boolean;
 }
 
-/** Where a rewrite writes: its bytes, the payload's size, and how many it holds. */
+/** Where a rewrite writes: its bytes, sized to the payload, and how many it holds. */
 interface IOutput {
   at: number;
   readonly bytes: Uint8Array;
