@@ -118,6 +118,7 @@ async fn keeps_a_notification_refused_by_its_registry_unregistered_and_accepts_t
         scripted.transport.deliver(&super::notification_of(1, 5));
         scripted.settle().await;
         assert_eq!(accepted.triggered(), [5]);
+        assert_eq!(accepted.payloads(), [Bytes::from_static(&[5])]);
         assert!(super::metrics::counts_of(&registry).contains(
             &"bead_notifications_heard_total{service=\"2\",procedure=\"echo\"} 1".to_owned()
         ));

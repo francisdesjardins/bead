@@ -19,15 +19,16 @@ use crate::testing::pair::echo;
 #[tokio::test]
 async fn rejects_every_request_still_waiting_when_the_connection_closes() {
     let scripted = Scripted::new();
+    let announced = crate::session_token::SessionToken::new([1; 16]).expect("the TypeScript token");
     scripted
         .transport
-        .deliver(&result_of(9, Some(Credential::Opaque(token()))));
+        .deliver(&result_of(9, Some(Credential::Opaque(announced))));
     let waiting = scripted
         .router
         .request(Bytes::new(), request_of((None, TIMEOUT)))
         .expect("waiting");
     scripted.settle().await;
-    assert_eq!(scripted.router.session_token(), Some(token()));
+    assert_eq!(scripted.router.session_token(), Some(announced));
     assert_eq!(
         scripted.transport.envelopes(),
         [Envelope::Request {
