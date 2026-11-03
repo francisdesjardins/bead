@@ -936,17 +936,20 @@ pub(crate) fn handler_of(state: &ServerState, destination_id: u32) -> Option<Arc
             })))
         });
 
-        return Some(Arc::new(Handler {
-            resolve: Arc::new(
-                |_props: ResolverProps| -> BoxFuture<Result<(), ResolverError>> {
-                    Box::pin(async { Ok(()) })
-                },
-            ),
-            admit: Some(admit),
-            maximum_payload_bytes: None,
-            forwards_credentials: !relay.verifies,
-            notifies: false,
-        }));
+        return Some(Arc::new(
+            Handler {
+                resolve: Arc::new(
+                    |_props: ResolverProps| -> BoxFuture<Result<(), ResolverError>> {
+                        Box::pin(async { Ok(()) })
+                    },
+                ),
+                admit: Some(admit),
+                maximum_payload_bytes: None,
+                forwards_credentials: !relay.verifies,
+                notifies: false,
+            }
+            .self_admitting(),
+        ));
     };
     let carriage = carriage_of(state, &registration.target);
     let route = Arc::new(Route {
@@ -970,22 +973,25 @@ pub(crate) fn handler_of(state: &ServerState, destination_id: u32) -> Option<Arc
     };
     let maximum_payload_bytes = route.payload_limit_of(None);
 
-    Some(Arc::new(Handler {
-        resolve: Arc::new(
-            move |props: ResolverProps| -> BoxFuture<Result<(), ResolverError>> {
-                let route = Route {
-                    relay: route.relay.clone(),
-                    owner: route.owner.clone(),
-                    registration: route.registration.clone(),
-                    carriage: route.carriage.clone(),
-                };
+    Some(Arc::new(
+        Handler {
+            resolve: Arc::new(
+                move |props: ResolverProps| -> BoxFuture<Result<(), ResolverError>> {
+                    let route = Route {
+                        relay: route.relay.clone(),
+                        owner: route.owner.clone(),
+                        registration: route.registration.clone(),
+                        carriage: route.carriage.clone(),
+                    };
 
-                Box::pin(forward(route, props))
-            },
-        ),
-        admit: Some(admit),
-        maximum_payload_bytes: Some(maximum_payload_bytes),
-        forwards_credentials: !relay.verifies,
-        notifies: false,
-    }))
+                    Box::pin(forward(route, props))
+                },
+            ),
+            admit: Some(admit),
+            maximum_payload_bytes: Some(maximum_payload_bytes),
+            forwards_credentials: !relay.verifies,
+            notifies: false,
+        }
+        .self_admitting(),
+    ))
 }

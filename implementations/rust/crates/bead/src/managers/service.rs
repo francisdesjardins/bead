@@ -1430,7 +1430,8 @@ where
             maximum_payload_bytes: procedure.maximum_payload_bytes,
             forwards_credentials: false,
             notifies,
-        };
+        }
+        .self_admitting();
 
         manager
             .inner

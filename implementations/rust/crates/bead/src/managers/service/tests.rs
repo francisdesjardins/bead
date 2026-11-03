@@ -140,6 +140,7 @@ fn header() -> RequestHeader {
 
 fn props(recording: &Arc<Recording>, payload: &[u8]) -> ResolverProps {
     ResolverProps {
+        is_admitted: true,
         connection_handle: handle_of(1),
         header: header(),
         payload: Bytes::copy_from_slice(payload),

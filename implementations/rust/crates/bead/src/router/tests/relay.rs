@@ -346,6 +346,7 @@ fn header(call_id: u32, destination_id: u32) -> RequestHeader {
 
 fn props(answers: &Arc<Answers>, header: RequestHeader) -> ResolverProps {
     ResolverProps {
+        is_admitted: true,
         connection_handle: first(),
         header,
         payload: Bytes::from_static(&[4, 5]),

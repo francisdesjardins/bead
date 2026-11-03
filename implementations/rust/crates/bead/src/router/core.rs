@@ -137,6 +137,41 @@ pub(crate) struct Handler {
     pub(crate) notifies: bool,
 }
 
+impl Handler {
+    /// Asks its admission when a caller hands it a request the router has not admitted.
+    pub(crate) fn self_admitting(mut self) -> Self {
+        if let Some(admit) = self.admit.clone() {
+            let resolve = self.resolve;
+            self.resolve = Arc::new(move |props| {
+                let admit = Arc::clone(&admit);
+                let resolve = Arc::clone(&resolve);
+
+                Box::pin(async move {
+                    if !props.is_admitted {
+                        let request = AdmissionRequest {
+                            connection_handle: Arc::clone(&props.connection_handle),
+                            header: props.header.clone(),
+                            session: props.session.clone(),
+                            carried: props.carried.clone(),
+                        };
+                        if let Some(refused) = admit(&request)? {
+                            return props
+                                .answerer
+                                .respond(RouterAnswer::Failure(refused.failure.record()))
+                                .await
+                                .map_err(ResolverError::other);
+                        }
+                    }
+
+                    resolve(props).await
+                })
+            });
+        }
+
+        self
+    }
+}
+
 impl fmt::Debug for Handler {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter
@@ -185,6 +220,8 @@ pub trait Answerer: Send + Sync {
     reason = "what its transport carried, a bearer's secret, stays the router's"
 )]
 pub struct ResolverProps {
+    /// Whether its router has admitted it; otherwise its handler asks its own admission.
+    pub is_admitted: bool,
     /// The connection it came from.
     pub connection_handle: ConnectionHandle,
     /// Its header, a `JWT`'s token left out (spec 13.1).
@@ -1715,6 +1752,7 @@ fn dispatch_to<S: Side>(
     let owner = core.owner.clone();
     let session = locked(&dispatch.session).clone();
     let props = ResolverProps {
+        is_admitted: true,
         connection_handle: Arc::clone(&dispatch.connection_handle),
         header: dispatch.header.clone(),
         payload,
