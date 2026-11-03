@@ -25,7 +25,6 @@ fn keeps_the_router_core_the_envelope_codec_and_the_transports_credential_out_of
         "Dispatch",
         "CoreRequest",
         "BeforeAnswer",
-        "SessionRequest",
         "Envelope",
         "Prefix",
         "ReadEnvelopeOptions",
@@ -37,6 +36,11 @@ fn keeps_the_router_core_the_envelope_codec_and_the_transports_credential_out_of
             ("E0432", "unresolved import"),
         );
     }
+    // * the session provider's request is public, as the other sides' is, and holds no credential
+    consumer.refuses(
+        "pub fn check(request: &bead::SessionRequest<'_>) { let _secret = &request.carried; }",
+        ("E0609", "no field `carried`"),
+    );
     for item in ["RequestResolverProps", "AdmissionRequest"] {
         consumer.refuses(
             &format!("pub fn check(props: &bead::{item}) {{ let _secret = &props.carried; }}"),
