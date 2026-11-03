@@ -82,7 +82,6 @@ fn carries_no_header_when_none_is_supplied_explicitly() {
 }
 
 #[test]
-#[ignore = "divergence: Failure::about keeps the OPAQUE token in its header; TypeScript and C# keep its scheme alone"]
 fn carries_the_failure_and_where_it_belongs_and_keeps_a_redacted_copy_of_the_header() {
     let token = crate::session_token::SessionToken::new([7; 16]).expect("a token");
     let mut header = Header::Failure(FailureHeader {
@@ -205,7 +204,6 @@ fn is_the_peer_s_of_the_other_side_through_no_relay_when_received() {
 }
 
 #[test]
-#[ignore = "divergence: Header::redacted keeps an OPAQUE token; TypeScript and C# keep its scheme alone"]
 fn leaves_the_credential_out_and_says_its_scheme_alone_when_there_was_one() {
     use crate::constants::CredentialScheme;
     use crate::envelope::{NotificationHeader, RequestHeader, ResultHeader};
