@@ -342,7 +342,7 @@ public sealed class ParticipantDebugEventTests
                 Scheduler = Scheduler,
                 Clock = Clock,
                 Heartbeat = Timeout.InfiniteTimeSpan,
-                Reconnect = new TransportReconnectOptions { Delay = (_, _) => { return TimeSpan.Zero; } },
+                Reconnect = new TransportReconnectOptions { Delay = TransportReconnectDelayOrResolver.Of(TimeSpan.Zero) },
             });
             ServerParticipant = new BrokerParticipant(ServerAdapter, new BrokerParticipantOptions { Scheduler = Scheduler, Heartbeat = Timeout.InfiniteTimeSpan });
             ClientParticipant.Debug += Events.Enqueue;

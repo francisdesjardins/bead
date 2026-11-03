@@ -7,7 +7,7 @@ namespace Bead;
 /// An envelope's bytes, read and written: its prefix, its header, its failure's record, and the
 /// envelope whole. <c>spec/spec.md</c> states what it reads and refuses, in which order.
 /// </summary>
-public static partial class EnvelopeCodec
+internal static partial class EnvelopeCodec
 {
     // constants
 

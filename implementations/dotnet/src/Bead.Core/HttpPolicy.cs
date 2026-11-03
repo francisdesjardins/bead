@@ -55,14 +55,14 @@ public sealed record HttpPolicy
     public int? MaximumConnectionsPerAddress { get; private init; }
 
     /// <summary>
-    /// A policy of <paramref name="given"/>'s members, checked once as a listener checks its own: an
-    /// entry of its hosts, its origins or its proxies none takes is an
+    /// A policy of <paramref name="given"/>'s members, of none when none is given, checked once as a
+    /// listener checks its own: an entry of its hosts, its origins or its proxies none takes is an
     /// <see cref="ArgumentException"/> naming it; a count not above 0, a rate under 0, or a duration
     /// off its range, finite, an <see cref="ArgumentOutOfRangeException"/>.
     /// </summary>
-    public static HttpPolicy Of(HttpPolicyOptions given)
+    public static HttpPolicy Of(HttpPolicyOptions? given = null)
     {
-        ArgumentNullException.ThrowIfNull(given);
+        given ??= new HttpPolicyOptions();
 
         HostsAndOrigins.AssertHosts(given.Hosts, nameof(HttpPolicyOptions.Hosts));
         HostsAndOrigins.AssertOrigins(given.Origins, nameof(HttpPolicyOptions.Origins));

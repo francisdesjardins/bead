@@ -95,6 +95,11 @@ dotnet_diagnostic.VSTHRD003.severity = none
 dotnet_diagnostic.VSTHRD110.severity = none
 dotnet_diagnostic.VSTHRD200.severity = none
 
+# each src project's public surface is its PublicAPI.Shipped.txt and PublicAPI.Unshipped.txt (0006):
+# RS0016 and RS0017 hold it; RS0026 reads 0007's own form as a fault, a union an overload for each
+# arm with the options optional and last, and is off
+dotnet_diagnostic.RS0026.severity = none
+
 # tests name what they show, in words: xUnit's test methods are the one place underscores read best
 [tests/**.cs]
 dotnet_diagnostic.CA1707.severity = none

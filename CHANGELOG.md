@@ -61,6 +61,21 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - The in-memory transport client takes its server at each connect, on every side, as every other
   transport takes where it connects: on the TypeScript side `server` moves from
   `createMemoryTransportClient`'s options to `connect`'s, and a reconnection replays it.
+- On the C# side `ServiceServerOptions.Admissions` is no longer `required`: none where no procedure
+  names a hook, and its absence where one does is refused as the service is built.
+- A reconnection's delay is a number or a function on every side. On the C# side
+  `TransportReconnectOptions.Delay` is a `TransportReconnectDelayOrResolver`, built by `Of` from a
+  `TimeSpan` or from a `TransportReconnectDelay`, which keeps its name; a lambda assigned to `Delay`
+  is now written `TransportReconnectDelayOrResolver.Of((previousDelay, attempt) => …)` (spec 1.4,
+  `spec/durations.json`).
+- The C# side's `HttpPolicy.Of` takes its options as optional, as every member of them is.
+
+### Removed
+
+- The envelope's codec is internal on every side, as the TypeScript side keeps it: on the C# side
+  `EnvelopeCodec`, `Envelope`, `EnvelopePrefix` and `EnvelopeReadOptions` leave the public surface.
+  An envelope's headers stay public where an event, a hook or a result carries them. With the codec,
+  `Health.Of`, `LayerGauges.Of` and `RouterLimits.WholeEnvelopeOf` leave the C# side's surface.
 
 ### Fixed
 

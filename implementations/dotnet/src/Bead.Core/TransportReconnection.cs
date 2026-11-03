@@ -59,7 +59,7 @@ internal static class TransportReconnection
 
             try
             {
-                nextDelay = reconnect.Delay is { } delay ? delay(previousDelay, number) : Delay;
+                nextDelay = reconnect.Delay is { } delay ? delay.After(previousDelay, number) : Delay;
             }
             catch (Exception reason)
             {

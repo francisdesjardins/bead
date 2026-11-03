@@ -1,0 +1,64 @@
+#nullable enable
+Bead.Transport.Amqp.AmqpBrokerAdapter
+Bead.Transport.Amqp.AmqpBrokerAdapter.AmqpBrokerAdapter(Bead.Transport.Amqp.AmqpBrokerAdapterOptions! options) -> void
+Bead.Transport.Amqp.AmqpBrokerAdapter.Capabilities.get -> Bead.BrokerCapabilities
+Bead.Transport.Amqp.AmqpBrokerAdapter.Delivery.get -> Bead.BrokerDelivery
+Bead.Transport.Amqp.AmqpBrokerAdapter.DisposeAsync() -> System.Threading.Tasks.ValueTask
+Bead.Transport.Amqp.AmqpBrokerAdapter.Down -> System.Action<Bead.BrokerDown!>?
+Bead.Transport.Amqp.AmqpBrokerAdapter.Id.get -> string!
+Bead.Transport.Amqp.AmqpBrokerAdapter.IsLinked.get -> bool
+Bead.Transport.Amqp.AmqpBrokerAdapter.IsSecure.get -> bool
+Bead.Transport.Amqp.AmqpBrokerAdapter.MaximumPayloadBytes(System.Collections.Generic.IReadOnlyList<string!>! topic) -> long
+Bead.Transport.Amqp.AmqpBrokerAdapter.Message -> System.Action<Bead.BrokerMessage!>?
+Bead.Transport.Amqp.AmqpBrokerAdapter.Publish(Bead.BrokerPublication! publication) -> System.Threading.Tasks.Task<Bead.BrokerPublished>!
+Bead.Transport.Amqp.AmqpBrokerAdapter.ReceiveBound(System.Collections.Generic.IReadOnlyList<string!>! topic) -> long
+Bead.Transport.Amqp.AmqpBrokerAdapter.Start(Bead.BrokerStart? start = null) -> System.Threading.Tasks.Task!
+Bead.Transport.Amqp.AmqpBrokerAdapter.Stop() -> System.Threading.Tasks.Task!
+Bead.Transport.Amqp.AmqpBrokerAdapter.Subscribe(System.Collections.Generic.IReadOnlyList<string!>! topic, Bead.BrokerSubscription? subscription = null) -> System.Threading.Tasks.Task!
+Bead.Transport.Amqp.AmqpBrokerAdapter.Type.get -> string!
+Bead.Transport.Amqp.AmqpBrokerAdapter.Unsettled.get -> int
+Bead.Transport.Amqp.AmqpBrokerAdapter.Unsubscribe(System.Collections.Generic.IReadOnlyList<string!>! topic) -> System.Threading.Tasks.Task!
+Bead.Transport.Amqp.AmqpBrokerAdapterOptions
+Bead.Transport.Amqp.AmqpBrokerAdapterOptions.<Clone>$() -> Bead.Transport.Amqp.AmqpBrokerAdapterOptions!
+Bead.Transport.Amqp.AmqpBrokerAdapterOptions.AmqpBrokerAdapterOptions() -> void
+Bead.Transport.Amqp.AmqpBrokerAdapterOptions.ConnectTimeout.get -> System.TimeSpan
+Bead.Transport.Amqp.AmqpBrokerAdapterOptions.ConnectTimeout.init -> void
+Bead.Transport.Amqp.AmqpBrokerAdapterOptions.Delivery.get -> Bead.BrokerDelivery
+Bead.Transport.Amqp.AmqpBrokerAdapterOptions.Delivery.init -> void
+Bead.Transport.Amqp.AmqpBrokerAdapterOptions.Equals(Bead.Transport.Amqp.AmqpBrokerAdapterOptions? other) -> bool
+Bead.Transport.Amqp.AmqpBrokerAdapterOptions.Id.get -> string!
+Bead.Transport.Amqp.AmqpBrokerAdapterOptions.Id.init -> void
+Bead.Transport.Amqp.AmqpBrokerAdapterOptions.IdleTimeout.get -> System.TimeSpan
+Bead.Transport.Amqp.AmqpBrokerAdapterOptions.IdleTimeout.init -> void
+Bead.Transport.Amqp.AmqpBrokerAdapterOptions.LinkCredit.get -> int
+Bead.Transport.Amqp.AmqpBrokerAdapterOptions.LinkCredit.init -> void
+Bead.Transport.Amqp.AmqpBrokerAdapterOptions.MaximumMessageSize.get -> long
+Bead.Transport.Amqp.AmqpBrokerAdapterOptions.MaximumMessageSize.init -> void
+Bead.Transport.Amqp.AmqpBrokerAdapterOptions.Password.get -> string?
+Bead.Transport.Amqp.AmqpBrokerAdapterOptions.Password.init -> void
+Bead.Transport.Amqp.AmqpBrokerAdapterOptions.PasswordProvider.get -> System.Func<System.Threading.CancellationToken, System.Threading.Tasks.Task<string!>!>?
+Bead.Transport.Amqp.AmqpBrokerAdapterOptions.PasswordProvider.init -> void
+Bead.Transport.Amqp.AmqpBrokerAdapterOptions.Tls.get -> Bead.Transport.Amqp.AmqpBrokerTlsOptions?
+Bead.Transport.Amqp.AmqpBrokerAdapterOptions.Tls.init -> void
+Bead.Transport.Amqp.AmqpBrokerAdapterOptions.Uri.get -> System.Uri!
+Bead.Transport.Amqp.AmqpBrokerAdapterOptions.Uri.init -> void
+Bead.Transport.Amqp.AmqpBrokerAdapterOptions.VirtualHost.get -> string?
+Bead.Transport.Amqp.AmqpBrokerAdapterOptions.VirtualHost.init -> void
+Bead.Transport.Amqp.AmqpBrokerTlsOptions
+Bead.Transport.Amqp.AmqpBrokerTlsOptions.<Clone>$() -> Bead.Transport.Amqp.AmqpBrokerTlsOptions!
+Bead.Transport.Amqp.AmqpBrokerTlsOptions.AmqpBrokerTlsOptions() -> void
+Bead.Transport.Amqp.AmqpBrokerTlsOptions.ClientCertificates.get -> System.Security.Cryptography.X509Certificates.X509Certificate2Collection?
+Bead.Transport.Amqp.AmqpBrokerTlsOptions.ClientCertificates.init -> void
+Bead.Transport.Amqp.AmqpBrokerTlsOptions.Equals(Bead.Transport.Amqp.AmqpBrokerTlsOptions? other) -> bool
+Bead.Transport.Amqp.AmqpBrokerTlsOptions.TrustChain.get -> System.Security.Cryptography.X509Certificates.X509Certificate2Collection?
+Bead.Transport.Amqp.AmqpBrokerTlsOptions.TrustChain.init -> void
+override Bead.Transport.Amqp.AmqpBrokerAdapterOptions.Equals(object? obj) -> bool
+override Bead.Transport.Amqp.AmqpBrokerAdapterOptions.GetHashCode() -> int
+override Bead.Transport.Amqp.AmqpBrokerAdapterOptions.ToString() -> string!
+override Bead.Transport.Amqp.AmqpBrokerTlsOptions.Equals(object? obj) -> bool
+override Bead.Transport.Amqp.AmqpBrokerTlsOptions.GetHashCode() -> int
+override Bead.Transport.Amqp.AmqpBrokerTlsOptions.ToString() -> string!
+static Bead.Transport.Amqp.AmqpBrokerAdapterOptions.operator !=(Bead.Transport.Amqp.AmqpBrokerAdapterOptions? left, Bead.Transport.Amqp.AmqpBrokerAdapterOptions? right) -> bool
+static Bead.Transport.Amqp.AmqpBrokerAdapterOptions.operator ==(Bead.Transport.Amqp.AmqpBrokerAdapterOptions? left, Bead.Transport.Amqp.AmqpBrokerAdapterOptions? right) -> bool
+static Bead.Transport.Amqp.AmqpBrokerTlsOptions.operator !=(Bead.Transport.Amqp.AmqpBrokerTlsOptions? left, Bead.Transport.Amqp.AmqpBrokerTlsOptions? right) -> bool
+static Bead.Transport.Amqp.AmqpBrokerTlsOptions.operator ==(Bead.Transport.Amqp.AmqpBrokerTlsOptions? left, Bead.Transport.Amqp.AmqpBrokerTlsOptions? right) -> bool

@@ -285,10 +285,7 @@ public sealed class WebSocketClientTests : IAsyncLifetime
         using var source = new CancellationTokenSource();
         var reconnecting = new TransportReconnectOptions
         {
-            Delay = (_, _) =>
-            {
-                return TimeSpan.FromMinutes(1);
-            },
+            Delay = TransportReconnectDelayOrResolver.Of(TimeSpan.FromMinutes(1)),
         };
 
         await other.Connect(new WebSocketConnectOptions { Host = "127.0.0.1", Port = _port }, Cancelled);

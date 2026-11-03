@@ -1,0 +1,312 @@
+#nullable enable
+Bead.Transcoding.BindingOptions
+Bead.Transcoding.BindingOptions.<Clone>$() -> Bead.Transcoding.BindingOptions!
+Bead.Transcoding.BindingOptions.BindingOptions() -> void
+Bead.Transcoding.BindingOptions.Body.get -> System.ReadOnlyMemory<byte>?
+Bead.Transcoding.BindingOptions.Body.init -> void
+Bead.Transcoding.BindingOptions.Equals(Bead.Transcoding.BindingOptions? other) -> bool
+Bead.Transcoding.BindingOptions.IsPatch.get -> bool
+Bead.Transcoding.BindingOptions.IsPatch.init -> void
+Bead.Transcoding.BindingOptions.Query.get -> string?
+Bead.Transcoding.BindingOptions.Query.init -> void
+Bead.Transcoding.BindingOptions.RouteBody.get -> string?
+Bead.Transcoding.BindingOptions.RouteBody.init -> void
+Bead.Transcoding.BindingOptions.Variables.get -> System.Collections.Generic.IReadOnlyDictionary<string!, string!>!
+Bead.Transcoding.BindingOptions.Variables.init -> void
+Bead.Transcoding.FailureArising
+Bead.Transcoding.FailureArising.Answer = 2 -> Bead.Transcoding.FailureArising
+Bead.Transcoding.FailureArising.Client = 1 -> Bead.Transcoding.FailureArising
+Bead.Transcoding.FailureArising.Gateway = 3 -> Bead.Transcoding.FailureArising
+Bead.Transcoding.FailureArising.Server = 0 -> Bead.Transcoding.FailureArising
+Bead.Transcoding.HttpBinding
+Bead.Transcoding.HttpBinding.Bind(Google.Protobuf.Reflection.MessageDescriptor! request, Bead.Transcoding.BindingOptions! options) -> Google.Protobuf.IMessage!
+Bead.Transcoding.HttpBinding.HttpBinding(Bead.Transcoding.JsonForm! form) -> void
+Bead.Transcoding.HttpCallOptions
+Bead.Transcoding.HttpCallOptions.<Clone>$() -> Bead.Transcoding.HttpCallOptions!
+Bead.Transcoding.HttpCallOptions.Authorization.get -> string?
+Bead.Transcoding.HttpCallOptions.Authorization.init -> void
+Bead.Transcoding.HttpCallOptions.CancellationToken.get -> System.Threading.CancellationToken
+Bead.Transcoding.HttpCallOptions.CancellationToken.init -> void
+Bead.Transcoding.HttpCallOptions.Equals(Bead.Transcoding.HttpCallOptions? other) -> bool
+Bead.Transcoding.HttpCallOptions.HttpCallOptions() -> void
+Bead.Transcoding.HttpCallOptions.WithoutAuthorization.get -> bool
+Bead.Transcoding.HttpCallOptions.WithoutAuthorization.init -> void
+Bead.Transcoding.HttpCaller
+Bead.Transcoding.HttpCaller.Call<TResult>(Bead.Transcoding.HttpRoute! route, object? value, Bead.Transcoding.HttpCallOptions? options = null) -> System.Threading.Tasks.Task<TResult>!
+Bead.Transcoding.HttpCaller.Dispose() -> void
+Bead.Transcoding.HttpCaller.HttpCaller(System.Collections.Generic.IReadOnlyList<Bead.Transcoding.HttpRoute!>! routes, System.Uri! url, Bead.Transcoding.HttpCallerOptions? options = null) -> void
+Bead.Transcoding.HttpCaller.Subscribe<TResult, TNotification>(Bead.Transcoding.HttpRoute! route, object? value, Bead.Transcoding.HttpCallOptions? options = null) -> System.Collections.Generic.IAsyncEnumerable<Bead.Transcoding.HttpEvent<TResult, TNotification>!>!
+Bead.Transcoding.HttpCallerOptions
+Bead.Transcoding.HttpCallerOptions.<Clone>$() -> Bead.Transcoding.HttpCallerOptions!
+Bead.Transcoding.HttpCallerOptions.Authorization.get -> string?
+Bead.Transcoding.HttpCallerOptions.Authorization.init -> void
+Bead.Transcoding.HttpCallerOptions.Equals(Bead.Transcoding.HttpCallerOptions? other) -> bool
+Bead.Transcoding.HttpCallerOptions.Handler.get -> System.Net.Http.HttpMessageHandler?
+Bead.Transcoding.HttpCallerOptions.Handler.init -> void
+Bead.Transcoding.HttpCallerOptions.HttpCallerOptions() -> void
+Bead.Transcoding.HttpCallerOptions.MaximumBodyBytes.get -> int
+Bead.Transcoding.HttpCallerOptions.MaximumBodyBytes.init -> void
+Bead.Transcoding.HttpEncoding
+Bead.Transcoding.HttpEncoding.Json = 1 -> Bead.Transcoding.HttpEncoding
+Bead.Transcoding.HttpEncoding.Proto = 0 -> Bead.Transcoding.HttpEncoding
+Bead.Transcoding.HttpEncoding.Raw = 3 -> Bead.Transcoding.HttpEncoding
+Bead.Transcoding.HttpEncoding.Text = 2 -> Bead.Transcoding.HttpEncoding
+Bead.Transcoding.HttpEvent<TResult, TNotification>
+Bead.Transcoding.HttpEvent<TResult, TNotification>.<Clone>$() -> Bead.Transcoding.HttpEvent<TResult, TNotification>!
+Bead.Transcoding.HttpEvent<TResult, TNotification>.Equals(Bead.Transcoding.HttpEvent<TResult, TNotification>? other) -> bool
+Bead.Transcoding.HttpEvent<TResult, TNotification>.HttpEvent() -> void
+Bead.Transcoding.HttpEvent<TResult, TNotification>.IsResult.get -> bool
+Bead.Transcoding.HttpEvent<TResult, TNotification>.IsResult.init -> void
+Bead.Transcoding.HttpEvent<TResult, TNotification>.Notification.get -> TNotification?
+Bead.Transcoding.HttpEvent<TResult, TNotification>.Notification.init -> void
+Bead.Transcoding.HttpEvent<TResult, TNotification>.Result.get -> TResult?
+Bead.Transcoding.HttpEvent<TResult, TNotification>.Result.init -> void
+Bead.Transcoding.HttpEvents
+Bead.Transcoding.HttpEvents.Failure(System.ReadOnlyMemory<byte> problem, out System.Threading.Tasks.Task! written) -> bool
+Bead.Transcoding.HttpEvents.Heartbeat() -> System.Threading.Tasks.Task!
+Bead.Transcoding.HttpEvents.HttpEvents(System.Func<System.ReadOnlyMemory<byte>, System.Threading.Tasks.Task!>! write) -> void
+Bead.Transcoding.HttpEvents.IsAnswered.get -> bool
+Bead.Transcoding.HttpEvents.IsEnded.get -> bool
+Bead.Transcoding.HttpEvents.Notification(System.ReadOnlyMemory<byte> data) -> System.Threading.Tasks.Task!
+Bead.Transcoding.HttpEvents.Result(System.ReadOnlyMemory<byte> data) -> System.Threading.Tasks.Task!
+Bead.Transcoding.HttpPath
+Bead.Transcoding.HttpPath.<Clone>$() -> Bead.Transcoding.HttpPath!
+Bead.Transcoding.HttpPath.Equals(Bead.Transcoding.HttpPath? other) -> bool
+Bead.Transcoding.HttpPath.HttpPath() -> void
+Bead.Transcoding.HttpPath.Segments.get -> System.Collections.Generic.IReadOnlyList<string!>!
+Bead.Transcoding.HttpPath.Segments.init -> void
+Bead.Transcoding.HttpPath.Verb.get -> string?
+Bead.Transcoding.HttpPath.Verb.init -> void
+Bead.Transcoding.HttpPayload
+Bead.Transcoding.HttpPayload.Descriptor.get -> Google.Protobuf.Reflection.MessageDescriptor?
+Bead.Transcoding.HttpPayload.Encoding.get -> Bead.Transcoding.HttpEncoding
+Bead.Transcoding.HttpProblem
+Bead.Transcoding.HttpProblem.<Clone>$() -> Bead.Transcoding.HttpProblem!
+Bead.Transcoding.HttpProblem.Body.get -> System.ReadOnlyMemory<byte>
+Bead.Transcoding.HttpProblem.Body.init -> void
+Bead.Transcoding.HttpProblem.Equals(Bead.Transcoding.HttpProblem? other) -> bool
+Bead.Transcoding.HttpProblem.Fields.get -> System.Collections.Generic.IReadOnlyDictionary<string!, string!>!
+Bead.Transcoding.HttpProblem.Fields.init -> void
+Bead.Transcoding.HttpProblem.HttpProblem() -> void
+Bead.Transcoding.HttpProblem.Status.get -> int
+Bead.Transcoding.HttpProblem.Status.init -> void
+Bead.Transcoding.HttpProblems
+Bead.Transcoding.HttpRoute
+Bead.Transcoding.HttpRoute.<Clone>$() -> Bead.Transcoding.HttpRoute!
+Bead.Transcoding.HttpRoute.Equals(Bead.Transcoding.HttpRoute? other) -> bool
+Bead.Transcoding.HttpRoute.Failures.get -> System.Collections.Generic.IReadOnlyDictionary<string!, int>!
+Bead.Transcoding.HttpRoute.Failures.init -> void
+Bead.Transcoding.HttpRoute.HttpRoute() -> void
+Bead.Transcoding.HttpRoute.NoSideEffects.get -> bool
+Bead.Transcoding.HttpRoute.NoSideEffects.init -> void
+Bead.Transcoding.HttpRoute.Notification.get -> Bead.Transcoding.HttpPayload?
+Bead.Transcoding.HttpRoute.Notification.init -> void
+Bead.Transcoding.HttpRoute.Procedure.get -> Bead.Procedure!
+Bead.Transcoding.HttpRoute.Procedure.init -> void
+Bead.Transcoding.HttpRoute.Request.get -> Bead.Transcoding.HttpPayload!
+Bead.Transcoding.HttpRoute.Request.init -> void
+Bead.Transcoding.HttpRoute.Result.get -> Bead.Transcoding.HttpPayload!
+Bead.Transcoding.HttpRoute.Result.init -> void
+Bead.Transcoding.HttpRoute.Routes.get -> System.Collections.Generic.IReadOnlyList<Bead.Transcoding.HttpRouteTemplate!>!
+Bead.Transcoding.HttpRoute.Routes.init -> void
+Bead.Transcoding.HttpRouteTemplate
+Bead.Transcoding.HttpRouteTemplate.<Clone>$() -> Bead.Transcoding.HttpRouteTemplate!
+Bead.Transcoding.HttpRouteTemplate.Body.get -> string?
+Bead.Transcoding.HttpRouteTemplate.Body.init -> void
+Bead.Transcoding.HttpRouteTemplate.Equals(Bead.Transcoding.HttpRouteTemplate? other) -> bool
+Bead.Transcoding.HttpRouteTemplate.HttpRouteTemplate() -> void
+Bead.Transcoding.HttpRouteTemplate.Method.get -> string!
+Bead.Transcoding.HttpRouteTemplate.Method.init -> void
+Bead.Transcoding.HttpRouteTemplate.ResponseBody.get -> string?
+Bead.Transcoding.HttpRouteTemplate.ResponseBody.init -> void
+Bead.Transcoding.HttpRouteTemplate.Template.get -> string!
+Bead.Transcoding.HttpRouteTemplate.Template.init -> void
+Bead.Transcoding.HttpSegment
+Bead.Transcoding.HttpSegment.Deconstruct(out Bead.Transcoding.HttpSegmentKind Kind, out string? Text) -> void
+Bead.Transcoding.HttpSegment.Equals(Bead.Transcoding.HttpSegment other) -> bool
+Bead.Transcoding.HttpSegment.HttpSegment() -> void
+Bead.Transcoding.HttpSegment.HttpSegment(Bead.Transcoding.HttpSegmentKind Kind, string? Text) -> void
+Bead.Transcoding.HttpSegment.Kind.get -> Bead.Transcoding.HttpSegmentKind
+Bead.Transcoding.HttpSegment.Kind.init -> void
+Bead.Transcoding.HttpSegment.Text.get -> string?
+Bead.Transcoding.HttpSegment.Text.init -> void
+Bead.Transcoding.HttpSegmentKind
+Bead.Transcoding.HttpSegmentKind.Literal = 0 -> Bead.Transcoding.HttpSegmentKind
+Bead.Transcoding.HttpSegmentKind.Star = 1 -> Bead.Transcoding.HttpSegmentKind
+Bead.Transcoding.HttpSegmentKind.Stars = 2 -> Bead.Transcoding.HttpSegmentKind
+Bead.Transcoding.HttpTemplate
+Bead.Transcoding.HttpTemplate.Matches(Bead.Transcoding.HttpPath! path) -> bool
+Bead.Transcoding.HttpTemplate.Segments.get -> System.Collections.Generic.IReadOnlyList<Bead.Transcoding.HttpSegment>!
+Bead.Transcoding.HttpTemplate.Text.get -> string!
+Bead.Transcoding.HttpTemplate.Ties(Bead.Transcoding.HttpTemplate! other) -> bool
+Bead.Transcoding.HttpTemplate.ValuesOf(Bead.Transcoding.HttpPath! path) -> System.Collections.Generic.IReadOnlyDictionary<string!, string!>!
+Bead.Transcoding.HttpTemplate.Variables.get -> System.Collections.Generic.IReadOnlyList<Bead.Transcoding.HttpVariable!>!
+Bead.Transcoding.HttpTemplate.Verb.get -> string?
+Bead.Transcoding.HttpVariable
+Bead.Transcoding.HttpVariable.<Clone>$() -> Bead.Transcoding.HttpVariable!
+Bead.Transcoding.HttpVariable.Deconstruct(out string! FieldPath, out int Start, out int End) -> void
+Bead.Transcoding.HttpVariable.End.get -> int
+Bead.Transcoding.HttpVariable.End.init -> void
+Bead.Transcoding.HttpVariable.Equals(Bead.Transcoding.HttpVariable? other) -> bool
+Bead.Transcoding.HttpVariable.FieldPath.get -> string!
+Bead.Transcoding.HttpVariable.FieldPath.init -> void
+Bead.Transcoding.HttpVariable.HttpVariable(string! FieldPath, int Start, int End) -> void
+Bead.Transcoding.HttpVariable.Start.get -> int
+Bead.Transcoding.HttpVariable.Start.init -> void
+Bead.Transcoding.JsonForm
+Bead.Transcoding.JsonForm.JsonForm(System.Collections.Generic.IEnumerable<Google.Protobuf.Reflection.MessageDescriptor!>! messages) -> void
+Bead.Transcoding.JsonForm.Read(Google.Protobuf.Reflection.MessageDescriptor! descriptor, System.ReadOnlySpan<byte> body) -> Google.Protobuf.IMessage!
+Bead.Transcoding.JsonForm.Write(Google.Protobuf.IMessage! message) -> byte[]!
+Bead.Transcoding.JsonForm.WriteField(Google.Protobuf.IMessage! message, string! fieldName) -> byte[]!
+Bead.Transcoding.JsonFormException
+Bead.Transcoding.JsonFormException.At.get -> System.Collections.Generic.IReadOnlyList<Bead.Transcoding.JsonToken!>?
+Bead.Transcoding.JsonFormException.IsUnset.get -> bool
+Bead.Transcoding.JsonFormException.JsonFormException(string! message) -> void
+Bead.Transcoding.JsonFormException.JsonFormException(string! message, Bead.Transcoding.JsonFormExceptionOptions! options) -> void
+Bead.Transcoding.JsonFormException.JsonFormException(string! message, System.Exception! innerException) -> void
+Bead.Transcoding.JsonFormException.Place.get -> Bead.Transcoding.RequestPlace?
+Bead.Transcoding.JsonFormException.Pointer.get -> string?
+Bead.Transcoding.JsonFormExceptionOptions
+Bead.Transcoding.JsonFormExceptionOptions.<Clone>$() -> Bead.Transcoding.JsonFormExceptionOptions!
+Bead.Transcoding.JsonFormExceptionOptions.At.get -> System.Collections.Generic.IReadOnlyList<Bead.Transcoding.JsonToken!>?
+Bead.Transcoding.JsonFormExceptionOptions.At.init -> void
+Bead.Transcoding.JsonFormExceptionOptions.Equals(Bead.Transcoding.JsonFormExceptionOptions? other) -> bool
+Bead.Transcoding.JsonFormExceptionOptions.InnerException.get -> System.Exception?
+Bead.Transcoding.JsonFormExceptionOptions.InnerException.init -> void
+Bead.Transcoding.JsonFormExceptionOptions.IsUnset.get -> bool
+Bead.Transcoding.JsonFormExceptionOptions.IsUnset.init -> void
+Bead.Transcoding.JsonFormExceptionOptions.JsonFormExceptionOptions() -> void
+Bead.Transcoding.JsonFormExceptionOptions.Place.get -> Bead.Transcoding.RequestPlace?
+Bead.Transcoding.JsonFormExceptionOptions.Place.init -> void
+Bead.Transcoding.JsonToken
+Bead.Transcoding.JsonToken.<Clone>$() -> Bead.Transcoding.JsonToken!
+Bead.Transcoding.JsonToken.Deconstruct(out string! Text, out bool IsGiven) -> void
+Bead.Transcoding.JsonToken.Equals(Bead.Transcoding.JsonToken? other) -> bool
+Bead.Transcoding.JsonToken.IsGiven.get -> bool
+Bead.Transcoding.JsonToken.IsGiven.init -> void
+Bead.Transcoding.JsonToken.JsonToken(string! Text, bool IsGiven) -> void
+Bead.Transcoding.JsonToken.Text.get -> string!
+Bead.Transcoding.JsonToken.Text.init -> void
+Bead.Transcoding.OwnFailure
+Bead.Transcoding.OwnFailure.Closed = 1 -> Bead.Transcoding.OwnFailure
+Bead.Transcoding.OwnFailure.Failed = 5 -> Bead.Transcoding.OwnFailure
+Bead.Transcoding.OwnFailure.Jwt = 3 -> Bead.Transcoding.OwnFailure
+Bead.Transcoding.OwnFailure.Scheme = 4 -> Bead.Transcoding.OwnFailure
+Bead.Transcoding.OwnFailure.Timeout = 0 -> Bead.Transcoding.OwnFailure
+Bead.Transcoding.OwnFailure.Unwritable = 2 -> Bead.Transcoding.OwnFailure
+Bead.Transcoding.ProblemContext
+Bead.Transcoding.ProblemContext.<Clone>$() -> Bead.Transcoding.ProblemContext!
+Bead.Transcoding.ProblemContext.Arose.get -> Bead.Transcoding.FailureArising
+Bead.Transcoding.ProblemContext.Arose.init -> void
+Bead.Transcoding.ProblemContext.Challenge.get -> string!
+Bead.Transcoding.ProblemContext.Challenge.init -> void
+Bead.Transcoding.ProblemContext.Credential.get -> bool
+Bead.Transcoding.ProblemContext.Credential.init -> void
+Bead.Transcoding.ProblemContext.Encoding.get -> Bead.Transcoding.HttpEncoding
+Bead.Transcoding.ProblemContext.Encoding.init -> void
+Bead.Transcoding.ProblemContext.Equals(Bead.Transcoding.ProblemContext? other) -> bool
+Bead.Transcoding.ProblemContext.Failures.get -> System.Collections.Generic.IReadOnlyDictionary<string!, int>?
+Bead.Transcoding.ProblemContext.Failures.init -> void
+Bead.Transcoding.ProblemContext.Place.get -> Bead.Transcoding.RequestPlace?
+Bead.Transcoding.ProblemContext.Place.init -> void
+Bead.Transcoding.ProblemContext.ProblemContext() -> void
+Bead.Transcoding.ProblemContext.ProblemTypes.get -> string?
+Bead.Transcoding.ProblemContext.ProblemTypes.init -> void
+Bead.Transcoding.ProblemContext.Request.get -> Google.Protobuf.Reflection.MessageDescriptor?
+Bead.Transcoding.ProblemContext.Request.init -> void
+Bead.Transcoding.ProblemContext.Rule.get -> Bead.Transcoding.HttpRouteTemplate?
+Bead.Transcoding.ProblemContext.Rule.init -> void
+Bead.Transcoding.RequestPlace
+Bead.Transcoding.RequestPlace.<Clone>$() -> Bead.Transcoding.RequestPlace!
+Bead.Transcoding.RequestPlace.Equals(Bead.Transcoding.RequestPlace? other) -> bool
+Bead.Transcoding.RequestPlace.Parameter.get -> string?
+Bead.Transcoding.RequestPlace.Parameter.init -> void
+Bead.Transcoding.RequestPlace.Pointer.get -> string?
+Bead.Transcoding.RequestPlace.Pointer.init -> void
+Bead.Transcoding.RequestPlace.RequestPlace() -> void
+const Bead.Transcoding.HttpProblems.MediaType = "application/problem+json" -> string!
+const Bead.Transcoding.HttpProblems.Tag = "tag:francisdesjardins.ca,2026:bead/" -> string!
+override Bead.Transcoding.BindingOptions.Equals(object? obj) -> bool
+override Bead.Transcoding.BindingOptions.GetHashCode() -> int
+override Bead.Transcoding.BindingOptions.ToString() -> string!
+override Bead.Transcoding.HttpCallOptions.Equals(object? obj) -> bool
+override Bead.Transcoding.HttpCallOptions.GetHashCode() -> int
+override Bead.Transcoding.HttpCallOptions.ToString() -> string!
+override Bead.Transcoding.HttpCallerOptions.Equals(object? obj) -> bool
+override Bead.Transcoding.HttpCallerOptions.GetHashCode() -> int
+override Bead.Transcoding.HttpCallerOptions.ToString() -> string!
+override Bead.Transcoding.HttpEvent<TResult, TNotification>.Equals(object? obj) -> bool
+override Bead.Transcoding.HttpEvent<TResult, TNotification>.GetHashCode() -> int
+override Bead.Transcoding.HttpEvent<TResult, TNotification>.ToString() -> string!
+override Bead.Transcoding.HttpPath.Equals(object? obj) -> bool
+override Bead.Transcoding.HttpPath.GetHashCode() -> int
+override Bead.Transcoding.HttpPath.ToString() -> string!
+override Bead.Transcoding.HttpProblem.Equals(object? obj) -> bool
+override Bead.Transcoding.HttpProblem.GetHashCode() -> int
+override Bead.Transcoding.HttpProblem.ToString() -> string!
+override Bead.Transcoding.HttpRoute.Equals(object? obj) -> bool
+override Bead.Transcoding.HttpRoute.GetHashCode() -> int
+override Bead.Transcoding.HttpRoute.ToString() -> string!
+override Bead.Transcoding.HttpRouteTemplate.Equals(object? obj) -> bool
+override Bead.Transcoding.HttpRouteTemplate.GetHashCode() -> int
+override Bead.Transcoding.HttpRouteTemplate.ToString() -> string!
+override Bead.Transcoding.HttpSegment.GetHashCode() -> int
+override Bead.Transcoding.HttpVariable.Equals(object? obj) -> bool
+override Bead.Transcoding.HttpVariable.GetHashCode() -> int
+override Bead.Transcoding.HttpVariable.ToString() -> string!
+override Bead.Transcoding.JsonFormExceptionOptions.Equals(object? obj) -> bool
+override Bead.Transcoding.JsonFormExceptionOptions.GetHashCode() -> int
+override Bead.Transcoding.JsonFormExceptionOptions.ToString() -> string!
+override Bead.Transcoding.JsonToken.Equals(object? obj) -> bool
+override Bead.Transcoding.JsonToken.GetHashCode() -> int
+override Bead.Transcoding.JsonToken.ToString() -> string!
+override Bead.Transcoding.ProblemContext.Equals(object? obj) -> bool
+override Bead.Transcoding.ProblemContext.GetHashCode() -> int
+override Bead.Transcoding.ProblemContext.ToString() -> string!
+override Bead.Transcoding.RequestPlace.Equals(object? obj) -> bool
+override Bead.Transcoding.RequestPlace.GetHashCode() -> int
+override Bead.Transcoding.RequestPlace.ToString() -> string!
+static Bead.Transcoding.BindingOptions.operator !=(Bead.Transcoding.BindingOptions? left, Bead.Transcoding.BindingOptions? right) -> bool
+static Bead.Transcoding.BindingOptions.operator ==(Bead.Transcoding.BindingOptions? left, Bead.Transcoding.BindingOptions? right) -> bool
+static Bead.Transcoding.HttpCallOptions.operator !=(Bead.Transcoding.HttpCallOptions? left, Bead.Transcoding.HttpCallOptions? right) -> bool
+static Bead.Transcoding.HttpCallOptions.operator ==(Bead.Transcoding.HttpCallOptions? left, Bead.Transcoding.HttpCallOptions? right) -> bool
+static Bead.Transcoding.HttpCallerOptions.operator !=(Bead.Transcoding.HttpCallerOptions? left, Bead.Transcoding.HttpCallerOptions? right) -> bool
+static Bead.Transcoding.HttpCallerOptions.operator ==(Bead.Transcoding.HttpCallerOptions? left, Bead.Transcoding.HttpCallerOptions? right) -> bool
+static Bead.Transcoding.HttpEvent<TResult, TNotification>.operator !=(Bead.Transcoding.HttpEvent<TResult, TNotification>? left, Bead.Transcoding.HttpEvent<TResult, TNotification>? right) -> bool
+static Bead.Transcoding.HttpEvent<TResult, TNotification>.operator ==(Bead.Transcoding.HttpEvent<TResult, TNotification>? left, Bead.Transcoding.HttpEvent<TResult, TNotification>? right) -> bool
+static Bead.Transcoding.HttpEvents.DataOf(Bead.Transcoding.HttpPayload! payload, (System.ReadOnlyMemory<byte> Bytes, Bead.Transcoding.JsonForm! Form) of) -> System.ReadOnlyMemory<byte>
+static Bead.Transcoding.HttpEvents.EventOf(string? name, (long Id, System.ReadOnlyMemory<byte> Data) at) -> byte[]!
+static Bead.Transcoding.HttpPath.Of(string! path) -> Bead.Transcoding.HttpPath?
+static Bead.Transcoding.HttpPath.operator !=(Bead.Transcoding.HttpPath? left, Bead.Transcoding.HttpPath? right) -> bool
+static Bead.Transcoding.HttpPath.operator ==(Bead.Transcoding.HttpPath? left, Bead.Transcoding.HttpPath? right) -> bool
+static Bead.Transcoding.HttpPayload.Json.get -> Bead.Transcoding.HttpPayload!
+static Bead.Transcoding.HttpPayload.Of(Google.Protobuf.Reflection.MessageDescriptor! descriptor) -> Bead.Transcoding.HttpPayload!
+static Bead.Transcoding.HttpPayload.Raw.get -> Bead.Transcoding.HttpPayload!
+static Bead.Transcoding.HttpPayload.Text.get -> Bead.Transcoding.HttpPayload!
+static Bead.Transcoding.HttpProblem.operator !=(Bead.Transcoding.HttpProblem? left, Bead.Transcoding.HttpProblem? right) -> bool
+static Bead.Transcoding.HttpProblem.operator ==(Bead.Transcoding.HttpProblem? left, Bead.Transcoding.HttpProblem? right) -> bool
+static Bead.Transcoding.HttpProblems.Of(Bead.Failure! failure, Bead.Transcoding.ProblemContext! context) -> Bead.Transcoding.HttpProblem!
+static Bead.Transcoding.HttpProblems.Own(Bead.Transcoding.OwnFailure failure, (string! Detail, string! Challenge) told) -> Bead.Transcoding.HttpProblem!
+static Bead.Transcoding.HttpProblems.PhraseOf(int status) -> string!
+static Bead.Transcoding.HttpProblems.Refusal(int status, string! detail) -> System.ReadOnlyMemory<byte>
+static Bead.Transcoding.HttpProblems.StatusOf(ushort code, Bead.Transcoding.ProblemContext! context) -> int
+static Bead.Transcoding.HttpRoute.operator !=(Bead.Transcoding.HttpRoute? left, Bead.Transcoding.HttpRoute? right) -> bool
+static Bead.Transcoding.HttpRoute.operator ==(Bead.Transcoding.HttpRoute? left, Bead.Transcoding.HttpRoute? right) -> bool
+static Bead.Transcoding.HttpRouteTemplate.operator !=(Bead.Transcoding.HttpRouteTemplate? left, Bead.Transcoding.HttpRouteTemplate? right) -> bool
+static Bead.Transcoding.HttpRouteTemplate.operator ==(Bead.Transcoding.HttpRouteTemplate? left, Bead.Transcoding.HttpRouteTemplate? right) -> bool
+static Bead.Transcoding.HttpSegment.operator !=(Bead.Transcoding.HttpSegment left, Bead.Transcoding.HttpSegment right) -> bool
+static Bead.Transcoding.HttpSegment.operator ==(Bead.Transcoding.HttpSegment left, Bead.Transcoding.HttpSegment right) -> bool
+static Bead.Transcoding.HttpTemplate.Answering(System.Collections.Generic.IReadOnlyList<Bead.Transcoding.HttpTemplate!>! templates, Bead.Transcoding.HttpPath! path) -> int?
+static Bead.Transcoding.HttpTemplate.Parse(string! text) -> Bead.Transcoding.HttpTemplate!
+static Bead.Transcoding.HttpVariable.operator !=(Bead.Transcoding.HttpVariable? left, Bead.Transcoding.HttpVariable? right) -> bool
+static Bead.Transcoding.HttpVariable.operator ==(Bead.Transcoding.HttpVariable? left, Bead.Transcoding.HttpVariable? right) -> bool
+static Bead.Transcoding.JsonFormExceptionOptions.operator !=(Bead.Transcoding.JsonFormExceptionOptions? left, Bead.Transcoding.JsonFormExceptionOptions? right) -> bool
+static Bead.Transcoding.JsonFormExceptionOptions.operator ==(Bead.Transcoding.JsonFormExceptionOptions? left, Bead.Transcoding.JsonFormExceptionOptions? right) -> bool
+static Bead.Transcoding.JsonToken.operator !=(Bead.Transcoding.JsonToken? left, Bead.Transcoding.JsonToken? right) -> bool
+static Bead.Transcoding.JsonToken.operator ==(Bead.Transcoding.JsonToken? left, Bead.Transcoding.JsonToken? right) -> bool
+static Bead.Transcoding.ProblemContext.operator !=(Bead.Transcoding.ProblemContext? left, Bead.Transcoding.ProblemContext? right) -> bool
+static Bead.Transcoding.ProblemContext.operator ==(Bead.Transcoding.ProblemContext? left, Bead.Transcoding.ProblemContext? right) -> bool
+static Bead.Transcoding.RequestPlace.operator !=(Bead.Transcoding.RequestPlace? left, Bead.Transcoding.RequestPlace? right) -> bool
+static Bead.Transcoding.RequestPlace.operator ==(Bead.Transcoding.RequestPlace? left, Bead.Transcoding.RequestPlace? right) -> bool
+~override Bead.Transcoding.HttpSegment.Equals(object obj) -> bool
+~override Bead.Transcoding.HttpSegment.ToString() -> string
