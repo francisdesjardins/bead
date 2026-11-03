@@ -4,6 +4,7 @@
 //! sentences.
 
 use core::time::Duration;
+use std::error::Error;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 use bytes::Bytes;
@@ -18,6 +19,7 @@ use super::memory::{
 use super::parcel::{Parcel, ParcelRead, read_parcel};
 use super::participant::{BrokerParticipant, BrokerParticipantOptions};
 use super::server::{BrokerTransportServer, BrokerTransportServerOptions};
+use crate::errors::ProgrammerError;
 use crate::router::types::{ConnectionHandle, RouterError, TransportMessage};
 use crate::testing::Instant;
 use crate::transport::{
@@ -61,6 +63,21 @@ pub(super) async fn settle() {
     }
 
     crate::testing::rest(Duration::from_millis(20)).await;
+}
+
+/// The misuse `error` is, or the first its sources carry.
+pub(super) fn misuse_in(error: &(dyn Error + 'static)) -> Option<ProgrammerError> {
+    let mut source = Some(error);
+
+    while let Some(cause) = source {
+        if let Some(misuse) = cause.downcast_ref::<ProgrammerError>() {
+            return Some(misuse.clone());
+        }
+
+        source = cause.source();
+    }
+
+    None
 }
 
 /// A broker of the test's own, on the platform's clock.
@@ -183,6 +200,10 @@ pub(super) struct Calling {
     pub(super) secure: Option<bool>,
     pub(super) starts: Option<usize>,
     pub(super) holds: Option<usize>,
+    // its first starts refused as a misuse, as an adapter whose link is up already refuses one
+    pub(super) refuses: Option<usize>,
+    // its start awaits its signal, then fails: a start its stop overtakes
+    pub(super) gives_up: bool,
     pub(super) grants: bool,
     pub(super) calls: Mutex<Vec<String>>,
     pub(super) lives: Mutex<Vec<(&'static str, Option<Duration>)>>,
@@ -198,6 +219,8 @@ impl Calling {
             secure: None,
             starts: None,
             holds: None,
+            refuses: None,
+            gives_up: false,
             grants: false,
             calls: Mutex::default(),
             lives: Mutex::default(),
@@ -293,6 +316,25 @@ impl BrokerAdapter for Calling {
 
         if self.starts.is_some_and(|starts| started > starts) {
             return Box::pin(async { Err(super::adapter::BrokerError::failed("refused at once")) });
+        }
+
+        if self.refuses.is_some_and(|refuses| started <= refuses) {
+            let refused = ProgrammerError::new(format!("the link of {} is up already", self.id()));
+
+            return Box::pin(async move { Err(super::adapter::BrokerError::from(refused)) });
+        }
+
+        if self.gives_up {
+            let signal = options.signal.unwrap_or_default();
+
+            // * it waits for its stop's signal, then fails, saying so
+            return Box::pin(async move {
+                signal.cancelled().await;
+
+                Err(super::adapter::BrokerError::failed(
+                    "the adapter gave up its start",
+                ))
+            });
         }
 
         if self.holds.is_some_and(|holds| started > holds) {

@@ -500,6 +500,26 @@ public sealed class BrokerTransportServerTests
         Assert.Equal(0, server.Gauges().Counts["names"]);
     }
 
+    // spec 15.21
+    [Fact]
+    public async Task Refuses_its_start_once_its_participant_stopped_its_state_kept()
+    {
+        var broker = new MemoryBroker();
+        var calling = new CallingAdapter(broker.Adapter(new MemoryBrokerAdapterOptions { Id = "ada" }));
+        await using var participant = new BrokerParticipant(calling);
+        await using var server = participant.Server(new BrokerTransportServerOptions { Names = ["interop"] });
+
+        await participant.Stop();
+
+        // * its application's misuse, refused before anything moves
+        Assert.Equal("the participant ada is stopped", (await Assert.ThrowsAsync<ObjectDisposedException>(() =>
+        {
+            return server.Start();
+        })).Message);
+        Assert.Equal(ReadyState.Uninitialized, server.ReadyState);
+        Assert.Equal(["stop"], calling.Calls);
+    }
+
     // an adapter that holds each subscription and unsubscription of a server's name until the test
     // settles it, and passes every other call on
     private sealed class HoldingAdapter(MemoryBrokerAdapter inner) : IBrokerAdapter

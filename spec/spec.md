@@ -1957,13 +1957,22 @@ to its peer's. A participant whose link goes down closes each of its connections
 connects anew as another incarnation, its inbox and its names subscribed again before anything
 goes, then sends a RESET to each peer it held a connection with. Its reconnection is its
 application's to bound, by its attempts, by a signal, or not at all, and ends when the participant
-stops; once it ends, the participant reports it, and its next start or connect links it anew. A
-participant that stops as its link connects, at its start or at an attempt of its reconnection,
-fails that link, stopped as it started, and ends its reconnection with no wait after it: it gives
-up its adapter's start under way and ends its link once that start settled, never while it runs,
-so that nothing that start linked or subscribed outlives the stop, nor meets its id's next link; a
-stop called again settles with the first. A participant whose link its broker ends for another
-link of its id, a takeover, closes each of its
+stops; once it ends, the participant reports it, and, unless it stopped, its next start or connect
+links it anew. A participant that stops as its link connects, at its start or at an attempt of its
+reconnection, fails that link, stopped as it started, and ends its reconnection with no wait after
+it: it gives up its adapter's start under way and ends its link once that start settled, never
+while it runs, so that nothing that start linked or subscribed outlives the stop, nor meets its
+id's next link; a stop called again settles with the first. A participant stopped links no more:
+its stop ends what it holds once, its link, its incarnation and its signal to its adapter's start,
+and a start after it would meet that stop under way. Its start, and a client's connect or
+reconnection or a server's start over it, made after its stop, is its application's misuse,
+refused before anything of the participant, the client or the server moves. A client's connect
+made before the stop that meets it fails, stopped as it connected; a client's reconnection under
+way ends as its own signal ends it (section 15.15), at once, in a wait or once its attempt under
+way failed, no wait told after it. A failure an adapter's start or subscription meets as a client's
+connect links its participant, its adapter's misuse among them, fails that connect, which another
+attempt may mend. A participant whose link its broker ends for another link of its id, a takeover,
+closes each of its
 connections, unclean, reports it, and connects no more until its application starts it again: its
 server's transports take no OPEN and its clients' connects fail, naming it, so that two holders of
 one id never take each other over without end; the later link keeps the id. A participant whose

@@ -21,7 +21,7 @@ use crate::broker::adapter::BrokerPublished;
 use crate::broker::parcel::{Parcel, flags, is_token, kinds, write_parcel};
 use crate::broker::participant::{
     BrokerParticipant, BrokerRefusal, BrokerRefusedError, ConnectionOwner, End, Pair,
-    ParticipantState, Peer, PendingConnect, Setup,
+    ParticipantState, Peer, PendingConnect, Setup, connect_error_of,
 };
 use crate::broker::sequence::fits;
 use crate::clock::{Schedule, SharedClock, Timer};
@@ -418,9 +418,7 @@ async fn opening(
         Err(error) => {
             return client.settle((
                 &attempt,
-                Err(TransportError::Connect(ConnectError::new(
-                    error.to_string(),
-                ))),
+                Err(TransportError::Connect(connect_error_of(error))),
             ));
         }
         Ok(_) => {}
@@ -521,7 +519,9 @@ impl BrokerTransportClient {
     /// Connects through a server's name, started as it is called: open once the first ACCEPT naming
     /// its half came, its third leg sent. It fails naming the REFUSE it read, or `no-subscriber`
     /// when its broker says nothing serves the name, or a dispose that gave up on it; past its
-    /// timeout; once its signal is cancelled; each ending closed.
+    /// timeout; once its signal is cancelled; each ending closed. Its participant stopped, it is
+    /// refused, a [`TransportError::Refused`], after its options' own checks and before anything
+    /// moves, its state and its target kept: a stopped participant links no more (spec 15.21).
     pub fn connect(&self, options: &BrokerTransportClientConnectOptions) -> Connect {
         match self.start_connect(options) {
             Ok(outcome) => Connect::of(outcome),
@@ -547,6 +547,15 @@ impl BrokerTransportClient {
             "a connect's timeout",
             options.timeout.unwrap_or(CONNECT_TIMEOUT),
         )?;
+
+        // * its participant outranks it: a connect once it stopped is a misuse, refused before its
+        // state is read, nothing kept
+        if inner.participant.is_stopped() {
+            return Err(TransportError::Refused(
+                inner.participant.config().stopped(),
+            ));
+        }
+
         let (attempt, reply) = {
             let mut state = locked(&inner.state);
             let is_refused = if state.is_attempting {
@@ -729,8 +738,9 @@ impl BrokerTransportClient {
     /// # Errors
     ///
     /// A [`TransportError`] for a reconnection under way, a client never connected, one connecting
-    /// or closing, a fixed delay out of bounds (spec 1.4), or a signal cancelled already: each
-    /// refused before anything moves, in that order.
+    /// or closing, its participant stopped (spec 15.21), a fixed delay out of bounds (spec 1.4), or
+    /// a signal cancelled already: each refused before anything moves, in that order. A
+    /// reconnection under way ends, cancelled, as its participant stops.
     pub fn reconnect(
         &self,
         options: &TransportClientReconnectOptions,
@@ -756,6 +766,13 @@ impl BrokerTransportClient {
                     "the transport client cannot reconnect while {}",
                     state.ready.said()
                 ))));
+            }
+
+            // * its participant stopped: a misuse, no reconnect told, nothing moved
+            if inner.participant.is_stopped() {
+                return Err(TransportError::Refused(
+                    inner.participant.config().stopped(),
+                ));
             }
 
             // * a fixed delay out of bounds refused as it is given, before anything moves
@@ -815,8 +832,28 @@ impl BrokerTransportClient {
     ) -> Result<(), TransportError> {
         let inner = &self.inner;
         let clock = inner.participant.clock();
+        // * its own signal joined with its participant's stop, as a dispose ends one: the stop ends
+        // it at once in a wait, or once its attempt under way failed, no wait told after it
+        let joined = inner.participant.config().stopping();
+        // ! cancelled as it returns, which ends the watcher of its application's signal
+        let _ended = joined.clone().drop_guard();
 
-        attempting((&clock, &options), |signal| {
+        if let Some(signal) = options.signal.clone() {
+            let joining = joined.clone();
+
+            inner.participant.cover(async move {
+                if first_of((signal.cancelled(), joining.cancelled())).await {
+                    joining.cancel();
+                }
+            });
+        }
+
+        let joined_options = TransportClientReconnectOptions {
+            signal: Some(joined.clone()),
+            ..options
+        };
+
+        attempting((&clock, &joined_options), |signal| {
             locked(&inner.state).is_attempting = true;
 
             let connecting = self.connect(&BrokerTransportClientConnectOptions {
@@ -826,15 +863,24 @@ impl BrokerTransportClient {
 
             locked(&inner.state).is_attempting = false;
 
-            connecting
+            let participant = inner.participant.clone();
+            let ending = joined.clone();
+
+            async move {
+                let connected = connecting.await;
+
+                // ! its stop is marked before its signal is cancelled: an attempt that failed
+                // with its participant stopped cancels it itself, so no wait is told after it
+                if connected.is_err() && participant.is_stopped() {
+                    ending.cancel();
+                }
+
+                connected
+            }
         })
         .await?;
 
-        if options
-            .signal
-            .as_ref()
-            .is_some_and(CancellationToken::is_cancelled)
-        {
+        if joined.is_cancelled() {
             drop(self.disconnect(&TransportClientDisconnectOptions::default()));
 
             return Err(TransportError::Cancelled(RECONNECTION_CANCELLED.to_owned()));

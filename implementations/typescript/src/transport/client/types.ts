@@ -224,6 +224,8 @@ export interface ITransportClientImplementation<
   readonly clock?: IClock | undefined;
   /** Whether it is secure, as its last connect was given; not, without it. */
   readonly isSecure?: boolean | undefined;
+  /** A signal of its owner's end: a reconnection under way ends as it aborts, cancelled. */
+  readonly lifetime?: AbortSignal | undefined;
   connect(options: ConnectOptions): Promise<void>;
   disconnect(options?: ITransportClientDisconnectOptions): Promise<void>;
   /**

@@ -141,8 +141,8 @@ pub struct BrokerParticipantOptions {
     /// held as it is built, whatever `reconnects`. Its signal is read before each attempt and during
     /// each wait, an attempt under way not cut short; a delay of 0 none, its next attempt in a later
     /// turn of its tokio runtime; a stop ends it at its next attempt, and at once during one. Once
-    /// it ends it is reported, what ended it the report's source, and the next start or connect
-    /// links it anew.
+    /// it ends it is reported, what ended it the report's source, and, unless it stopped, the next
+    /// start or connect links it anew.
     pub reconnect: Option<TransportClientReconnectOptions>,
     /// Whether its link connects again once lost, as `reconnect` says: true when none; false leaves
     /// it down, reported, until a start or a connect links it anew.
@@ -651,13 +651,37 @@ impl Config {
     }
 
     // a link its stop met as it connected: a failure of that link's, never a misuse, which a call
-    // made once stopped is
-    fn stopped_as_it_started(&self) -> BrokerError {
-        BrokerError::failed(format!("the participant {} stopped as it started", self.id))
+    // made once stopped is; what its adapter failed with as it stopped, its source
+    fn stopped_as_it_started(&self, source: Option<BrokerError>) -> BrokerError {
+        let message = format!("the participant {} stopped as it started", self.id);
+
+        match source {
+            Some(source) => BrokerError::caused(message, Arc::new(source)),
+            None => BrokerError::failed(message),
+        }
     }
 
-    fn is_stopped(&self) -> bool {
+    /// A connect its stop met before it reached its link: a failure of that connect's, never the
+    /// misuse a call made once stopped is.
+    pub(crate) fn stopped_as_it_connected(&self) -> String {
+        format!("the participant {} stopped as it connected", self.id)
+    }
+
+    /// A call made once it stopped: its application's misuse, refused before anything moves (spec
+    /// 15.21).
+    pub(crate) fn stopped(&self) -> ProgrammerError {
+        ProgrammerError::new(format!("the participant {} is stopped", self.id))
+    }
+
+    /// Whether its stop is marked.
+    pub(crate) fn is_stopped(&self) -> bool {
         locked(&self.status).is_stopped
+    }
+
+    /// A signal its stop cancels, a child of its own: what ends a client's reconnection under way
+    /// as it stops.
+    pub(crate) fn stopping(&self) -> CancellationToken {
+        self.stopping.child_token()
     }
 }
 
@@ -671,7 +695,7 @@ impl<'config> UnderWay<'config> {
         let status = locked(&config.status);
 
         if status.is_stopped {
-            return Err(config.stopped_as_it_started());
+            return Err(config.stopped_as_it_started(None));
         }
 
         // ! the count under the status lock, the watch's own lock after it and never before it
@@ -1880,6 +1904,22 @@ impl ParticipantState {
     }
 }
 
+/// What a link's failure fails a connect with, hoisted, never nested: a failure's message and its
+/// source, or a misuse's words and the misuse its source, so that its kind is found.
+pub(crate) fn connect_error_of(error: BrokerError) -> ConnectError {
+    match error {
+        BrokerError::Refused(misuse) => ConnectError::caused(misuse.to_string(), Arc::new(misuse)),
+        BrokerError::Failed {
+            message,
+            source: Some(source),
+        } => ConnectError::caused(message, source),
+        BrokerError::Failed {
+            message,
+            source: None,
+        } => ConnectError::new(message),
+    }
+}
+
 // its link connected again as another incarnation, by its own reconnection; then a RESET to each
 // peer it held a connection with
 async fn relinking(
@@ -1910,12 +1950,7 @@ async fn relinking(
                 )));
             };
 
-            let stopped = || {
-                TransportError::Refused(ProgrammerError::new(format!(
-                    "the participant {} is stopped",
-                    inner.config.id
-                )))
-            };
+            let stopped = || TransportError::Refused(inner.config.stopped());
 
             if inner.config.is_stopped() {
                 return Err(stopped());
@@ -1928,7 +1963,7 @@ async fn relinking(
                     return stopped();
                 }
 
-                TransportError::Connect(ConnectError::new(error.to_string()))
+                TransportError::Connect(connect_error_of(error))
             })
         }
     })
@@ -1944,7 +1979,8 @@ async fn relinking(
             return;
         }
 
-        // * ended: it stays down, and the next start or connect links it anew
+        // * ended: it stays down, and, its participant not stopped, the next start or connect links
+        // it anew
         if relinked.is_err() {
             status.starting = None;
         }
@@ -2033,9 +2069,9 @@ async fn link(inner: &Arc<ParticipantInner>) -> Result<(), BrokerError> {
     drop(under_way);
 
     // ! stopped as it started: its inbox never subscribed, and its stop ends what that start
-    // brought up
+    // brought up; what its start failed with, its source
     if config.is_stopped() {
-        return Err(config.stopped_as_it_started());
+        return Err(config.stopped_as_it_started(started.err()));
     }
 
     started?;
@@ -2046,7 +2082,7 @@ async fn link(inner: &Arc<ParticipantInner>) -> Result<(), BrokerError> {
         .await;
 
     if config.is_stopped() {
-        return Err(config.stopped_as_it_started());
+        return Err(config.stopped_as_it_started(subscribed.err()));
     }
 
     subscribed?;
@@ -2078,7 +2114,7 @@ async fn link(inner: &Arc<ParticipantInner>) -> Result<(), BrokerError> {
 
             // * never up once its stop is marked: its stop tells none after its stopped
             if is_stopped {
-                return Err(state.config.stopped_as_it_started());
+                return Err(state.config.stopped_as_it_started(None));
             }
 
             if is_down {
@@ -2486,14 +2522,19 @@ impl BrokerParticipant {
     /// one, its inbox subscribed and the names of its server transports that serve; settles once
     /// all of it is held. A second start shares the first, or starts anew once the first failed, or
     /// once its link was taken over: its application's start lifts the fence a takeover set.
+    ///
+    /// # Errors
+    ///
+    /// A [`BrokerError::Refused`] once stopped, refused before anything moves: a stopped
+    /// participant links no more (spec 15.21). A [`BrokerError::Failed`] for a link that failed,
+    /// what failed it its source where it knows, its stop met as it started among them.
     pub fn start(&self) -> BoxFuture<Result<(), BrokerError>> {
         let starting = {
             let config = &self.inner.config;
             let mut status = locked(&config.status);
 
             if status.is_stopped {
-                let stopped =
-                    BrokerError::failed(format!("the participant {} is stopped", config.id));
+                let stopped = BrokerError::from(config.stopped());
 
                 return Box::pin(async move { Err(stopped) });
             }
@@ -2525,28 +2566,60 @@ impl BrokerParticipant {
         starting.wait()
     }
 
-    /// Settles once its link is up, started or connected again; its signal ends the wait. Its link
-    /// taken over, it fails at once naming it: a connect never lifts the fence, which its
-    /// application's start alone does.
+    /// Settles once its link is up, started or connected again; its signal ends the wait. Stopped
+    /// since its connect was called, it fails, stopped as it connected, before its takeover is
+    /// read; its link taken over, it fails at once naming it: a connect never lifts the fence,
+    /// which its application's start alone does. A failure its link meets, its adapter's misuse
+    /// among them, fails the connect, which another attempt may mend.
     pub(crate) async fn linked(
         &self,
         signal: Option<CancellationToken>,
     ) -> Result<(), TransportError> {
         let config = &self.inner.config;
 
-        if locked(&config.status).is_taken_over {
-            return Err(TransportError::Connect(ConnectError::new(format!(
-                "{}, and connects no more until it is started again",
-                config.taken_over()
-            ))));
+        // * the stop first: a connect it overtook before its link fails, never the misuse a call
+        // made once stopped is, nor the takeover's words
+        {
+            let status = locked(&config.status);
+
+            if status.is_stopped {
+                return Err(TransportError::Connect(ConnectError::new(
+                    config.stopped_as_it_connected(),
+                )));
+            }
+
+            if status.is_taken_over {
+                return Err(TransportError::Connect(ConnectError::new(format!(
+                    "{}, and connects no more until it is started again",
+                    config.taken_over()
+                ))));
+            }
         }
 
         let started = self.start();
+        let stopped = Arc::clone(config);
         let mut live = config.live.subscribe();
         let waiting = async move {
-            started
-                .await
-                .map_err(|error| TransportError::Connect(ConnectError::new(error.to_string())))?;
+            started.await.map_err(|error| {
+                // ! its stop met as it linked, the stop's own refusal racing this check among it:
+                // stopped as it connected, hoisted, what its adapter failed with its source, and
+                // the stop's misuse never carried as a link's failure
+                if stopped.is_stopped() {
+                    let message = stopped.stopped_as_it_connected();
+
+                    return TransportError::Connect(match error {
+                        BrokerError::Failed {
+                            source: Some(source),
+                            ..
+                        } => ConnectError::caused(message, source),
+                        BrokerError::Failed { .. } | BrokerError::Refused(_) => {
+                            ConnectError::new(message)
+                        }
+                    });
+                }
+
+                TransportError::Connect(connect_error_of(error))
+            })?;
             live.wait_for(|is_live| *is_live)
                 .await
                 .map(|_live| ())
@@ -2630,6 +2703,11 @@ impl BrokerParticipant {
     #[must_use]
     pub fn incarnation(&self) -> u128 {
         self.inner.config.incarnation()
+    }
+
+    /// Whether its stop is marked: a call made since is its application's misuse.
+    pub(crate) fn is_stopped(&self) -> bool {
+        self.inner.config.is_stopped()
     }
 
     /// A half drawn in its turn, as a connect draws one.

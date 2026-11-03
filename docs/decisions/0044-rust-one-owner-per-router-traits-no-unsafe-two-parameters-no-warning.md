@@ -427,8 +427,12 @@ Display + Error + Send + Sync + 'static`: `Failure`, its code a `NonZeroU16`, an
 and the protocol's alike; `CallError`, a `Failure`, a cancel or a disconnection, `#[non_exhaustive]`;
 `ConnectError`, `ReconnectError`, `CapacityError`, `ReadyStateError`, `BrokerRefusedError`;
 `ProgrammerError`, with a reason code where a file derives one. An operation returns the error it
-can return, never a crate-wide `Error`. **No panic in the library**: a builder that refuses its
-options returns `Result<Self, ProgrammerError>`.
+can return, never a crate-wide `Error`. An error that wraps another keeps it as its `source`, std's
+word, as the other sides keep a `cause` and an `InnerException`: an `Arc<dyn Error + Send + Sync>`
+where the error is `Clone`, as `ConnectError`, `ReconnectError` and a failed `BrokerError` are; a
+wrapper that only changes the kind takes its source's words and source, never says them twice.
+**No panic in the library**: a builder that refuses its options returns
+`Result<Self, ProgrammerError>`.
 
 **What the spec lets a side throw has a Rust form at every site.** A resolver returns `Result<T,
 ResolverError>`: `ResolverError::Failure` is its procedure's own failure, answered as it is;

@@ -35,8 +35,17 @@ const drop = (client: ITransportClient<object, never>): void => {
   (client as ITransportClientInternal<object, never>)[dispose]();
 };
 
-/** A transport with no socket: it records its calls, fails `failures` times, and opens otherwise. */
-const createStubClient = (options?: { clock?: TestClock; failures?: number; hang?: boolean }) => {
+/**
+ * A transport with no socket: it records its calls, fails `failures` times, and opens otherwise;
+ * `assertConnect` and `lifetime`, when given, are its own.
+ */
+const createStubClient = (options?: {
+  assertConnect?: (options: ITransportClientAddressOptions) => void;
+  clock?: TestClock;
+  failures?: number;
+  hang?: boolean;
+  lifetime?: AbortSignal;
+}) => {
   const calls: string[] = [];
   let failuresLeft = options?.failures ?? 0;
   let failureCount = 0;
@@ -46,6 +55,8 @@ const createStubClient = (options?: { clock?: TestClock; failures?: number; hang
     defineOptions = given;
     return {
       clock: options?.clock,
+      ...(options?.assertConnect === undefined ? {} : { assertConnect: options.assertConnect }),
+      ...(options?.lifetime === undefined ? {} : { lifetime: options.lifetime }),
 
       connect: (connectOptions) => {
         calls.push(`connect:${String(connectOptions.port)}`);
@@ -678,5 +689,54 @@ test.describe('createTransportClient #reconnect', () => {
 
     expect(calls).toEqual(['connect:1', 'dispose', 'connect:1', 'disconnect']);
     expect(client.isClosed()).toBe(true);
+  });
+
+  test('ends a reconnection as its implementation’s lifetime is aborted, and holds its target by assertConnect as reconnect is called', async () => {
+    const lifetime = new AbortController();
+    const asserted: number[] = [];
+    let isRefusing = false;
+    let reconnects = 0;
+    const { calls, client } = createStubClient({
+      assertConnect: ({ port }) => {
+        asserted.push(port);
+
+        if (isRefusing) {
+          throw new ProgrammerError('its owner forbids it');
+        }
+      },
+      failures: 2,
+      lifetime: lifetime.signal,
+    });
+
+    await expect(client.connect(target)).rejects.toBeInstanceOf(ConnectError);
+
+    // * its lifetime aborted mid-wait: ended at once, cancelled, its reason the cause
+    const reconnecting = client.reconnect({
+      delay: 60_000,
+      tap: () => {
+        queueMicrotask(() => {
+          lifetime.abort('ended');
+        });
+      },
+    });
+
+    await expect(reconnecting).rejects.toMatchObject(RECONNECTION_CANCELLED);
+    await expect(reconnecting).rejects.toHaveProperty('cause', 'ended');
+    expect([calls, client.isClosed()]).toEqual([['connect:1', 'connect:1'], true]);
+
+    // * its target held again as it is called, before its lifetime: a misuse, nothing moved
+    client.on('reconnect', () => {
+      reconnects += 1;
+    });
+    isRefusing = true;
+    await expect(client.reconnect({ delay: 0 })).rejects.toThrow(
+      new ProgrammerError('its owner forbids it')
+    );
+
+    // its lifetime over, its target taken: cancelled before any attempt, nothing moved
+    isRefusing = false;
+    await expect(client.reconnect({ delay: 0 })).rejects.toMatchObject(RECONNECTION_CANCELLED);
+    expect([calls, reconnects, client.isClosed()]).toEqual([['connect:1', 'connect:1'], 0, true]);
+    expect(asserted, 'its connect, then each reconnect and its attempt').toEqual([1, 1, 1, 1, 1]);
   });
 });

@@ -237,15 +237,33 @@ impl BrokerMessage {
 pub enum BrokerError {
     /// A misuse, refused as it was made.
     Refused(ProgrammerError),
-    /// What its broker or its link failed with, saying why.
-    Failed(String),
+    /// What its broker or its link failed with, saying why, and what caused it where it knows.
+    #[non_exhaustive]
+    Failed {
+        /// What it says.
+        message: String,
+        /// What caused it.
+        source: Option<Arc<dyn Error + Send + Sync>>,
+    },
 }
 
 impl BrokerError {
     /// A failure, saying `message`.
     #[must_use]
     pub fn failed<M: Into<String>>(message: M) -> Self {
-        Self::Failed(message.into())
+        Self::Failed {
+            message: message.into(),
+            source: None,
+        }
+    }
+
+    /// A failure, saying `message`, caused by `source`.
+    #[must_use]
+    pub fn caused<M: Into<String>>(message: M, source: Arc<dyn Error + Send + Sync>) -> Self {
+        Self::Failed {
+            message: message.into(),
+            source: Some(source),
+        }
     }
 }
 
@@ -259,7 +277,7 @@ impl fmt::Display for BrokerError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Refused(error) => write!(formatter, "{error}"),
-            Self::Failed(message) => formatter.write_str(message),
+            Self::Failed { message, .. } => formatter.write_str(message),
         }
     }
 }
@@ -268,7 +286,9 @@ impl Error for BrokerError {
     fn source(&self) -> Option<&(dyn Error + 'static)> {
         match self {
             Self::Refused(error) => Some(error),
-            Self::Failed(_) => None,
+            Self::Failed { source, .. } => source
+                .as_ref()
+                .map(|source| -> &(dyn Error + 'static) { source.as_ref() }),
         }
     }
 }

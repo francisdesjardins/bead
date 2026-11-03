@@ -124,7 +124,9 @@ const refusedOf = (refusal: BrokerRefusedError): ConnectError => {
  * secure while its participant's leg and its server's are; a reconnection opens a new connection
  * through the same name, possibly to another participant. Paused by its router, whole, a pause that
  * outlasts its connection, its participant holds what comes on it, in order, to
- * `maximumHeldEnvelopeBytes`, and never pauses its link (spec 15.12, 15.23).
+ * `maximumHeldEnvelopeBytes`, and never pauses its link (spec 15.12, 15.23). Once its participant
+ * stopped, a connect or a reconnect is a {@link ProgrammerError}, its state and its target kept, and
+ * a reconnection under way ends as it stops, cancelled (spec 15.21).
  *
  * @example
  * const client = participant.transportClient();
@@ -228,14 +230,22 @@ export const createBrokerTransportClient = (
           return port.isSecure && isPeerSecure;
         },
 
+        // ! its participant outranks it: once stopped, a connect or a reconnect over it is a misuse,
+        // refused before its state moves or its target is kept (spec 15.21)
         assertConnect: ({ server }) => {
           if (typeof server !== 'string' || !isToken(server)) {
             throw new ProgrammerError(
               `a server's name is a token of base64url's alphabet, 1 to 64 characters, not ${JSON.stringify(server)}`
             );
           }
+
+          if (port.isStopped) {
+            throw new ProgrammerError(`the participant ${port.id} is stopped`);
+          }
         },
         carries: isFieldValue,
+        // a reconnection under way ends as its participant stops, cancelled
+        lifetime: port.stopped,
 
         connect: async ({ server, signal, timeout = CONNECT_DEFAULTS.timeout }) => {
           const attempt: IAttempt = {

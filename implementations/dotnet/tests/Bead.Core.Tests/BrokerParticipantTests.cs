@@ -591,22 +591,70 @@ public sealed class BrokerParticipantTests
 
         await participant.Stop();
 
-        // * the connect fails as its participant stops; a start since is refused, a second stop does nothing
+        // * the connect fails as its participant stops; a start since is a misuse, refused, a second
+        // stop does nothing
         Assert.Equal("the participant ada stopped as it connected", (await Assert.ThrowsAsync<ConnectException>(() =>
         {
             return pending.WaitAsync(BrokerPair.Patience, Cancelled);
         })).Message);
-        Assert.Equal("the participant ada is stopped", (await Assert.ThrowsAsync<InvalidOperationException>(() =>
+        Assert.Equal("the participant ada is stopped", (await Assert.ThrowsAsync<ObjectDisposedException>(() =>
         {
             return participant.Start();
         })).Message);
-        Assert.Equal("the participant ada is stopped", (await Assert.ThrowsAsync<InvalidOperationException>(() =>
+        Assert.Equal("the participant ada is stopped", (await Assert.ThrowsAsync<ObjectDisposedException>(() =>
         {
             return participant.Client().Connect(new BrokerTransportClientConnectOptions { Server = "interop" }, Cancelled);
         })).Message);
         await participant.DisposeAsync();
         Assert.False(participant.IsLinked);
         Assert.Equal(["a message to the inbox of ada is no parcel: 1 bytes, under a parcel's 28"], reported);
+
+        // * taken over, then stopped: a connect is the stop's misuse, never the takeover's words
+        var cat = broker.Adapter(new MemoryBrokerAdapterOptions { Id = "cat" });
+        var fenced = new BrokerParticipant(cat, new BrokerParticipantOptions { Scheduler = scheduler, Reconnects = false });
+        var fencing = Hearing(fenced);
+
+        await fenced.Start();
+        cat.TakeOver();
+        await BrokerPair.Until(
+            () =>
+            {
+                return !fencing.IsEmpty;
+            },
+            "its takeover reported");
+        await fenced.Stop();
+        Assert.Equal("the participant cat is stopped", (await Assert.ThrowsAsync<ObjectDisposedException>(() =>
+        {
+            return fenced.Client().Connect(new BrokerTransportClientConnectOptions { Server = "interop" }, Cancelled);
+        })).Message);
+    }
+
+    // spec 15.21
+    [Fact]
+    public async Task Fails_a_start_its_stop_overtakes_what_its_adapter_s_start_failed_with_as_its_cause()
+    {
+        var broker = new MemoryBroker();
+        var giving = new CallingAdapter(broker.Adapter(new MemoryBrokerAdapterOptions { Id = "ada" })) { GivesUp = true };
+        var participant = new BrokerParticipant(giving);
+        var starting = participant.Start();
+
+        await BrokerPair.Until(
+            () =>
+            {
+                return giving.Calls.SequenceEqual(["start"]);
+            },
+            "its start asked");
+        await participant.Stop().WaitAsync(BrokerPair.Patience, Cancelled);
+
+        // * its start fails as a link fails, its adapter's failure its cause, by its words
+        var failed = await Assert.ThrowsAsync<IOException>(() =>
+        {
+            return starting.WaitAsync(BrokerPair.Patience, Cancelled);
+        });
+
+        Assert.Equal("the participant ada stopped as it started", failed.Message);
+        Assert.Equal("the adapter gave up its start", failed.InnerException?.Message);
+        Assert.Equal(["start", "stop"], giving.Calls);
     }
 
     [Fact]
@@ -2152,172 +2200,6 @@ public sealed class BrokerParticipantTests
 
         public Task Stop()
         {
-            return inner.Stop();
-        }
-    }
-
-    // an adapter that writes down each call its participant makes of it, in order, and passes it on,
-    // what it publishes to a topic bounded by Room when given, its leg secure as Secure says when given,
-    // each start after its first Starts refused as it returns when given, and each start after its
-    // first HoldsStart held, heeding no token, until the test releases it, when given
-    private sealed class CallingAdapter(MemoryBrokerAdapter inner) : IBrokerAdapter
-    {
-        // the starts it holds, unreleased, the first asked first
-        private readonly ConcurrentQueue<TaskCompletionSource> _held = new();
-
-        public long? Room { get; init; }
-
-        public bool? Secure { get; init; }
-
-        public int? Starts { get; init; }
-
-        public int? HoldsStart { get; init; }
-
-        // the starts it holds, unreleased
-        public int Holding
-        {
-            get
-            {
-                return _held.Count;
-            }
-        }
-
-        public event Action<BrokerMessage>? Message
-        {
-            add
-            {
-                inner.Message += value;
-            }
-
-            remove
-            {
-                inner.Message -= value;
-            }
-        }
-
-        public event Action<BrokerDown>? Down
-        {
-            add
-            {
-                inner.Down += value;
-            }
-
-            remove
-            {
-                inner.Down -= value;
-            }
-        }
-
-        public ConcurrentQueue<string> Calls { get; } = new();
-
-        public string Type
-        {
-            get
-            {
-                return inner.Type;
-            }
-        }
-
-        public string Id
-        {
-            get
-            {
-                return inner.Id;
-            }
-        }
-
-        public BrokerCapabilities Capabilities
-        {
-            get
-            {
-                return inner.Capabilities;
-            }
-        }
-
-        public BrokerDelivery Delivery
-        {
-            get
-            {
-                return inner.Delivery;
-            }
-        }
-
-        public bool IsSecure
-        {
-            get
-            {
-                return Secure ?? inner.IsSecure;
-            }
-        }
-
-        public long ReceiveBound(IReadOnlyList<string> topic)
-        {
-            return inner.ReceiveBound(topic);
-        }
-
-        public Task Start(BrokerStart? start = null)
-        {
-            Calls.Enqueue("start");
-
-            if (Starts is { } starts && StartsIn(this) > starts)
-            {
-                return Task.FromException(new IOException("refused at once"));
-            }
-
-            if (HoldsStart is { } holds && StartsIn(this) > holds)
-            {
-                return Held(start);
-            }
-
-            return inner.Start(start);
-        }
-
-        // releases the start its participant asked first of those it holds
-        public bool Release()
-        {
-            return _held.TryDequeue(out var release) && release.TrySetResult();
-        }
-
-        // * held as it is asked, its token unheard: it goes on once the test releases it
-        private async Task Held(BrokerStart? start)
-        {
-            var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-
-            _held.Enqueue(release);
-            await release.Task;
-            await inner.Start(start);
-        }
-
-        public Task Subscribe(IReadOnlyList<string> topic, BrokerSubscription? subscription = null)
-        {
-            Calls.Enqueue($"subscribe {string.Join('/', topic)}");
-
-            return inner.Subscribe(topic, subscription);
-        }
-
-        public Task Unsubscribe(IReadOnlyList<string> topic)
-        {
-            Calls.Enqueue($"unsubscribe {string.Join('/', topic)}");
-
-            return inner.Unsubscribe(topic);
-        }
-
-        public Task<BrokerPublished> Publish(BrokerPublication publication)
-        {
-            Calls.Enqueue($"publish {string.Join('/', publication.Topic)}");
-
-            return inner.Publish(publication);
-        }
-
-        public long MaximumPayloadBytes(IReadOnlyList<string> topic)
-        {
-            return Room ?? inner.MaximumPayloadBytes(topic);
-        }
-
-        public Task Stop()
-        {
-            Calls.Enqueue("stop");
-
             return inner.Stop();
         }
     }

@@ -258,10 +258,18 @@ public sealed class BrokerTransportServer : IServerTransport, IAsyncDisposable, 
     /// Starts its participant where it was not, or links it anew where its link was taken over, and
     /// serves its names, each subscribed, in its group where it serves in one; settles once its
     /// broker holds each, giving its participant's id and port 0, and fails on a name its broker
-    /// refused. Refused with an <see cref="InvalidOperationException"/> unless Uninitialized or Closed.
+    /// refused. Refused with an <see cref="ObjectDisposedException"/> once its participant stopped, its
+    /// state kept, before anything else (spec 15.21); then with an
+    /// <see cref="InvalidOperationException"/> unless Uninitialized or Closed.
     /// </summary>
     public Task<TransportServerAddress> Start()
     {
+        // ! its participant stopped: its application's misuse, its state kept (spec 15.21)
+        if (_participant.IsStopped)
+        {
+            return Task.FromException<TransportServerAddress>(_participant.StoppedRefusal());
+        }
+
         return _life.Start(async () =>
         {
             await _participant.Start();

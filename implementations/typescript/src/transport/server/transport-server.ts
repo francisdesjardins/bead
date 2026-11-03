@@ -353,6 +353,9 @@ export const createTransportServer = <Socket extends object, Request>(
       }
     },
     start: async (options) => {
+      // * what its transport's owner forbids first, as a connect's options are held first
+      implementation.assertStart?.();
+
       if (!server.isUninitialized() && !server.isClosed()) {
         throw new ProgrammerError(`the transport server is already ${getReadyStateName(server)}`);
       }
