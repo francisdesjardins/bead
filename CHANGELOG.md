@@ -24,6 +24,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Each side's suite reads seeded mutations of the parcels, as it reads the envelope's, the Rust
   side's the envelope's too, the same inputs on every side; the `proto` differential takes
   `spec/codecs.json`'s payloads among its seeds.
+- Each side's public surface is pinned, members included, to a list its gate holds: the TypeScript
+  package's exports by `tools/check-surface.mjs`, the C# side's by PublicApiAnalyzers'
+  `PublicAPI.Shipped.txt` and `PublicAPI.Unshipped.txt`, which `tools/release.mjs prepare` brings up
+  to date, and the Rust crates' by `bead-house`.
 
 ### Changed
 

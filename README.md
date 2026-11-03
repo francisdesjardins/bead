@@ -265,19 +265,26 @@ In `implementations/typescript`. Node 24.9 or later. Yarn 4 is vendored under `.
 ```sh
 cd implementations/typescript
 yarn install --immutable
-yarn check        # types, lint and its plugin's cases, format, comment budget, the doc examples, the generated Probe
+yarn check        # types, lint and its plugin's cases, format, comment budget, the doc examples, the generated Probe, the public surface
 yarn test         # the unit tests, and the interop against the C# server
 ```
 
-The package is `@francisdesjardins/bead`, private; its `exports` point at the sources. Its
+The package is `@francisdesjardins/bead`, private; its `exports` point at the sources. What they
+export, each declaration with its members, is pinned to `surface.txt`, and an options parameter is
+required exactly when a member of its options is: `yarn check` holds both, through TypeScript 7's
+checker, and `yarn surface:write` writes the list anew, its diff the change's to review. Its
 [README](implementations/typescript/README.md) describes each layer.
 
 ## C#
 
 In `implementations/dotnet`. The .NET 10 SDK, as `global.json` pins it; tests run on
 Microsoft.Testing.Platform. Every warning is an error, the recommended analyzers are on, and every
-public member has its doc comment. Its [README](implementations/dotnet/README.md) describes its
-layout and its modules.
+public member has its doc comment. Each `src` project's public surface, its members included, is
+pinned to its `PublicAPI.Shipped.txt`, what the last release shipped, and its
+`PublicAPI.Unshipped.txt`, what changed since: the build refuses a public symbol neither lists and
+one listed that is gone, by PublicApiAnalyzers, and `tools/release.mjs prepare` moves the second
+into the first. Its [README](implementations/dotnet/README.md) describes its layout and its
+modules.
 
 ```sh
 cd implementations/dotnet
@@ -299,7 +306,10 @@ Clippy's `pedantic`, `nursery` and `cargo` groups and chosen restriction lints a
 `unsafe_code` forbidden, and every warning of rustc, clippy and rustdoc an error by its
 `.cargo/config.toml`
 ([0044](docs/decisions/0044-rust-one-owner-per-router-traits-no-unsafe-two-parameters-no-warning.md)).
-Its [README](implementations/rust/README.md) describes its crates and its modules.
+`bead-house`'s tests, among `cargo test`'s, hold what no lint holds: the parameter rule, each
+options struct's shape, and each library crate's public items, their members included, to its list
+under `crates/bead-house/surfaces/`, which `BEAD_HOUSE_WRITE=1` writes anew. Its
+[README](implementations/rust/README.md) describes its crates and its modules.
 
 ```sh
 cd implementations/rust
@@ -596,16 +606,17 @@ value fails the run. Both counters include client and server in `local`, and onl
 process in `interop`. Neither counts the remote server or native allocations; V8 also excludes
 external buffers such as `ArrayBuffer` backing stores. The reports state each counter and scope.
 
-The Rust side's bench, `bead-bench`, in `implementations/rust/benches/`, measures the interop
-service's echo of a JSON string over its in-memory transport, locally alone: calls, `call.p50`,
-`call.p95`, `call.p99` and `call.throughput`, on one connection kept, and exchanges, `exchange.p50`
-to `exchange.throughput`, each a client and its connection drawn, called once and closed, at 0 B,
-1 KiB and 64 KiB, each measure after 500 calls of warm-up, its throughput in batches of 32. It
-measures no memory, since an allocator that counts takes unsafe code, which the side forbids, and no
-codec, notification, large echo, interop or transcoding. `node tools/bench-release.mjs rust` builds
-it once in release and runs it in fresh processes as it runs the others; its report names `rust` for
-its side and `rustc` for its runtime, and `tools/bench-compare.mjs` compares two of them. A release
-keeps its report, as it keeps the others' (below). Alone, from `implementations/rust`:
+The Rust side's bench, `bead-bench`, in `implementations/rust/benches/`, measures the envelope's
+codec, `codec.roundTrip`, as the other sides' do, and the interop service's echo of a JSON string
+over its in-memory transport, locally alone: calls, `call.p50`, `call.p95`, `call.p99` and
+`call.throughput`, on one connection kept, and exchanges, `exchange.p50` to `exchange.throughput`,
+each a client and its connection drawn, called once and closed, at 0 B, 1 KiB and 64 KiB, each
+measure after 500 calls of warm-up, its throughput in batches of 32. It measures no memory, since an
+allocator that counts takes unsafe code, which the side forbids, and no notification, large echo,
+interop or transcoding. `node tools/bench-release.mjs rust` builds it once in release and runs it in
+fresh processes as it runs the others; its report names `rust` for its side and `rustc` for its
+runtime, and `tools/bench-compare.mjs` compares two of them. A release keeps its report, as it keeps
+the others' (below). Alone, from `implementations/rust`:
 
 ```sh
 cargo run --release --locked --manifest-path benches/Cargo.toml -- --runs 3 --seconds 3 --json
@@ -870,8 +881,10 @@ product's version in the TypeScript side's and the builder's `package.json`, in
 workspace's `Cargo.toml` and its members in the workspace's lock and in the two locks outside it,
 the fuzz targets' and protobuf's conformance testee's, in the header of the code beadc generates and
 in the image an example's wrappers name, and each changed document's a step past its last release,
-the spec's in that header too and in the `specVersion` of a blueprint an example generated; it runs
-the generators, dates the CHANGELOG's version and links it, then runs the gate as a release,
+the spec's in that header too and in the `specVersion` of a blueprint an example generated; it moves
+each C# project's `PublicAPI.Unshipped.txt` into its `PublicAPI.Shipped.txt`, a `*REMOVED*` line
+taking its symbol out, so the next change is read against what the release ships; it runs the
+generators, dates the CHANGELOG's version and links it, then runs the gate as a release,
 `spec/check.py` and the root's format check, naming any whose tool is absent with the CI job that
 holds it.
 `tools/release.mjs tag`, after the finish, tags each document whose version no tag names yet at the
@@ -928,25 +941,27 @@ runner images, `ubuntu-26.04`, and `windows-2025` and `ubuntu-26.04-arm` for the
 (regenerate, then diff, then `spec/check.py`); `playwright` (the exact version of
 `@playwright/test` the TypeScript side pins, which names Microsoft's image of it, the one the
 `typescript` and `dotnet` jobs run in, its Chromium already there); `typescript` on Node 26 and on
-the floor, 24.9 (install, check, test, under coverage on Node 26, held to the side's floor, the
-demo's static build, the DevTools extension built and, on Node 26, tested in Chromium, the demo's
-tests on Node 26, and the root's files under the same formatter); `dotnet` (every C# package
-audited by NuGetAudit as it restores, format, build, the builder's C# goldens among its projects,
-the C# bench built in Release, test under coverage, held to the side's floor, the interop both ways
-with `BEAD_INTEROP_REQUIRED=1`, each side's generated HTTP client against the other's gateway among
-it, and a page of another origin in Chromium against both HTTP servers); `mqtt` (on the runner's
-host, a Mosquitto 2.1.2 by its digest and a password drawn for the run, with `BEAD_MQTT_REQUIRED=1`
-and `BEAD_INTEROP_REQUIRED=1`: the cases over MQTT 5 on the TypeScript and C# sides, each adapter
-against it over TCP and WebSocket, the interop over MQTT 5 both ways, the demo's server and its
-page's client over it, a page's client in Chromium, and the DevTools extension following the demo's
-client over it); `amqp` (on the runner's host, a RabbitMQ 4.4.0 by its digest, its heartbeat
-lowered, and a password drawn for the run, with `BEAD_AMQP_REQUIRED=1` and
+the floor, 24.9 (install, check, the public surface held to its list among it, test, under coverage
+on Node 26, held to the side's floor, the demo's static build, the DevTools extension built and, on
+Node 26, tested in Chromium, the demo's tests on Node 26, and the root's files under the same
+formatter); `dotnet` (every C# package audited by NuGetAudit as it restores, format, build, the
+builder's C# goldens among its projects and each `src` project's public surface held to its
+`PublicAPI` lists, the C# bench built in Release, test under coverage, held to the side's floor, the
+interop both ways with `BEAD_INTEROP_REQUIRED=1`, each side's generated HTTP client against the
+other's gateway among it, and a page of another origin in Chromium against both HTTP servers);
+`mqtt` (on the runner's host, a Mosquitto 2.1.2 by its digest and a password drawn for the run, with
+`BEAD_MQTT_REQUIRED=1` and `BEAD_INTEROP_REQUIRED=1`: the cases over MQTT 5 on the TypeScript and C#
+sides, each adapter against it over TCP and WebSocket, the interop over MQTT 5 both ways, the demo's
+server and its page's client over it, a page's client in Chromium, and the DevTools extension
+following the demo's client over it); `amqp` (on the runner's host, a RabbitMQ 4.4.0 by its digest,
+its heartbeat lowered, and a password drawn for the run, with `BEAD_AMQP_REQUIRED=1` and
 `BEAD_INTEROP_REQUIRED=1`: the cases over AMQP 1.0 on the TypeScript and C# sides, each adapter
 against it, and the interop over AMQP 1.0 both ways, with no page leg, since no page reaches an AMQP
 1.0 broker); `rust` on Linux and Windows (on Linux, the toolchain its file pins, format, clippy, the
 core's clippy for the browser's target, the documentation, a build on the default features alone,
 cargo-deny, the tests' descriptor set held to what protoc writes at its pin, the tests under
-coverage, lines and regions held to the side's floor, and the fuzz targets built on the nightly
+coverage, `bead-house`'s holding each library crate's public surface to its list among them, lines
+and regions held to the side's floor, and the fuzz targets built on the nightly
 pinned by its date; on Windows, the tests); `builder` (install, protoc by its pin's sha256, test
 with `BEADC_PROTOC_REQUIRED=1` and `BEADC_WRAPPERS_REQUIRED=1`, the wrappers held to one contract
 against a stand-in engine, then beadc over the interop's
