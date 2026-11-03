@@ -814,6 +814,14 @@ against each server.
 - `node tools/check-details.mjs`: no exception's message goes into a failure's detail but at the few
   sites that report alone (spec 9.0), on every side, each marked where it stands by
   `// ! a detail of the side's own words: <why>`. Given files, those alone.
+- `node tools/check-names.mjs`: each side's public names, read from its surface list — the
+  TypeScript side's `surface.txt`, each C# project's `PublicAPI.Shipped.txt` with its Unshipped
+  applied, the Rust side's `surfaces/` — are one on every side, or a row of `tools/names.tsv` says
+  how one renders, why it is one side's own, or which row of the support matrix's Differences holds
+  it; a row gives each name its kind, and a row whose kinds do not render each other fails, as one
+  word for a number, a delegate and an enum would. The names no reading has
+  placed, `alone`, are counted against the pin on the file's first line, which only falls.
+  `--seed` writes the file anew from the lists.
 - `node tools/check-versions.mjs`: on every ref, each version agrees with itself — the TypeScript
   package's and the builder's, the C# side's and the project ranges of the C# lock files, an
   example's among them, the Rust workspace's and its lock's members, and each conformance file's

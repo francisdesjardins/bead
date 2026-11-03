@@ -28,6 +28,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   package's exports by `tools/check-surface.mjs`, the C# side's by PublicApiAnalyzers'
   `PublicAPI.Shipped.txt` and `PublicAPI.Unshipped.txt`, which `tools/release.mjs prepare` brings up
   to date, and the Rust crates' by `bead-house`.
+- Each side's public names are mapped term for term in `tools/names.tsv`, one row a concept, each
+  name with its kind. A row gives the same name in each language's case, a rendering a record
+  names, one side's own with its reason, or a difference the support matrix holds.
+  `tools/check-names.mjs` holds the three sides' surface lists to it.
 - The TypeScript side exports the types of the objects its calls take: `INotifyRequest`,
   `IRouterRequest`, `IUnregisterNotificationOptions`, `IBrokerRefusal`, `IServerSentEvent` and
   `IOwnProblemOptions`.
