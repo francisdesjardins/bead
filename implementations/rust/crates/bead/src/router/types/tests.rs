@@ -9,20 +9,19 @@ fn gives_a_parts_gauges_frozen_what_it_does_not_give_being_none() {
     use std::collections::{BTreeMap, BTreeSet};
     use std::sync::Arc;
 
-    let gauges = Gauges {
-        counts: BTreeMap::from([("calls", 2)]),
-        ..Gauges::default()
-    };
+    let gauges = Gauges::new(BTreeMap::from([("calls", 2)]), []);
     assert_eq!(gauges.counts, BTreeMap::from([("calls", 2)]));
     assert_eq!(gauges.anomalies, Vec::<String>::new());
     assert!(gauges.ceilings.is_empty());
     assert!(gauges.connection_handles.is_empty());
 
     let populated = Gauges {
-        counts: BTreeMap::from([("calls", 3)]),
         ceilings: BTreeMap::from([("calls", 4)]),
-        connection_handles: ["a", "a", "b"].into_iter().map(Arc::from).collect(),
         anomalies: vec!["odd".to_owned()],
+        ..Gauges::new(
+            BTreeMap::from([("calls", 3)]),
+            ["a", "a", "b"].map(Arc::from),
+        )
     };
     assert_eq!(populated.counts, BTreeMap::from([("calls", 3)]));
     assert_eq!(populated.ceilings, BTreeMap::from([("calls", 4)]));
@@ -32,14 +31,10 @@ fn gives_a_parts_gauges_frozen_what_it_does_not_give_being_none() {
     );
     assert_eq!(populated.anomalies, ["odd"]);
     assert_eq!(
-        Gauges {
-            connection_handles: ["a", "a", "b"].into_iter().map(Arc::from).collect(),
-            ..Gauges::default()
-        }
-        .connection_handles,
+        Gauges::new(BTreeMap::new(), ["a", "a", "b"].map(Arc::from)).connection_handles,
         populated.connection_handles
     );
-    assert!(Gauges::default().counts.is_empty());
+    assert!(Gauges::new(BTreeMap::new(), []).counts.is_empty());
 
     // A reader borrows its snapshot; no part can be changed through that borrow.
     let consumer = crate::testing::surface::Consumer::new();
