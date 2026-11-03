@@ -26,6 +26,7 @@ use crate::testing::SteppingClock;
 use crate::testing::pair::echo;
 use crate::testing::scripted::ScriptedClient;
 
+mod announcements;
 mod calls;
 mod client;
 mod client_command_credentials;
