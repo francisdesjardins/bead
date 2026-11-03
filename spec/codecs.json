@@ -1592,6 +1592,28 @@
       }
     },
     {
+      "name": "a required closed enum given a number past 32 bits, whose low 32 bits it declares",
+      "encoding": "proto",
+      "clauses": [
+        "17.9.7"
+      ],
+      "bytes": "3A 08 08 00 10 81 80 80 80 10",
+      "read": {
+        "text": "",
+        "number": 0,
+        "nested": 0
+      }
+    },
+    {
+      "name": "a required closed enum given a number past 32 bits, whose low 32 bits it does not declare",
+      "encoding": "proto",
+      "clauses": [
+        "17.9.7"
+      ],
+      "bytes": "3A 08 08 00 10 85 80 80 80 10",
+      "refused": "a required field unset"
+    },
+    {
       "name": "a closed enum's number its enum does not declare, which sets nothing",
       "encoding": "proto",
       "clauses": [
@@ -1616,6 +1638,33 @@
         "number": 0,
         "nested": 0,
         "shade": 1
+      }
+    },
+    {
+      "name": "a closed enum's number past 32 bits, whose low 32 bits it declares",
+      "encoding": "proto",
+      "clauses": [
+        "17.9.8"
+      ],
+      "bytes": "70 81 80 80 80 10",
+      "read": {
+        "text": "",
+        "number": 0,
+        "nested": 0,
+        "shade": 1
+      }
+    },
+    {
+      "name": "a closed enum's number past 32 bits, whose low 32 bits it does not declare",
+      "encoding": "proto",
+      "clauses": [
+        "17.9.8"
+      ],
+      "bytes": "70 85 80 80 80 10",
+      "read": {
+        "text": "",
+        "number": 0,
+        "nested": 0
       }
     }
   ],

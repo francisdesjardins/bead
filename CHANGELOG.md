@@ -40,6 +40,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - The TypeScript side exports the types of the objects its calls take: `INotifyRequest`,
   `IRouterRequest`, `IUnregisterNotificationOptions`, `IBrokerRefusal`, `IServerSentEvent` and
   `IOwnProblemOptions`.
+- Four rows of `spec/codecs.json` read a closed enum's number past 32 bits by its low 32 bits,
+  singular and required (spec 17.9.7, 17.9.8).
 
 ### Changed
 

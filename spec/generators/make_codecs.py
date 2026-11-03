@@ -1082,9 +1082,19 @@ PAYLOADS = [
      bytes.fromhex('3A 04 08 00 10 05')),
     ('a required closed enum given a declared number, then one it does not declare', 'proto', ['17.9.7'],
      bytes.fromhex('3A 06 08 00 10 01 10 05')),
+    # * an enum's number is its varint's low 32 bits, as protobuf reads an int32: past 32 bits, a
+    # number may be one its enum declares
+    ('a required closed enum given a number past 32 bits, whose low 32 bits it declares', 'proto', ['17.9.7'],
+     bytes.fromhex('3A 08 08 00 10 81 80 80 80 10')),
+    ('a required closed enum given a number past 32 bits, whose low 32 bits it does not declare', 'proto',
+     ['17.9.7'], bytes.fromhex('3A 08 08 00 10 85 80 80 80 10')),
     # a closed enum's undeclared number sets nothing on a singular field (17.9.8)
     ("a closed enum's number its enum does not declare, which sets nothing", 'proto', ['17.9.8'], bytes.fromhex('70 05')),
     ("a closed enum's declared number, then one it does not declare", 'proto', ['17.9.8'], bytes.fromhex('70 01 70 05')),
+    ("a closed enum's number past 32 bits, whose low 32 bits it declares", 'proto', ['17.9.8'],
+     bytes.fromhex('70 81 80 80 80 10')),
+    ("a closed enum's number past 32 bits, whose low 32 bits it does not declare", 'proto', ['17.9.8'],
+     bytes.fromhex('70 85 80 80 80 10')),
 ]
 
 # the payloads a stock library reads otherwise than 17.9 says, each by the rows it crosses and the
@@ -1334,7 +1344,7 @@ assert declared_values('Shade') == (SHADES, True), declared_values('Shade')
 payloads = [payload_entry(*entry) for entry in PAYLOADS]
 values = [value_entry(*entry) for entry in VALUES]
 
-assert len(payloads) == 155 and len(values) == 54
+assert len(payloads) == 159 and len(values) == 54
 
 
 
@@ -1404,8 +1414,12 @@ PROTO_RECORD = {
     'a group that leaves a required field unset': REQUIRED_UNSET, 'a child that leaves a required field unset': REQUIRED_UNSET,
     "a required closed enum's number its enum does not declare": REQUIRED_UNSET,
     'a required closed enum given a declared number, then one it does not declare': ('', 0, 0),
+    'a required closed enum given a number past 32 bits, whose low 32 bits it declares': ('', 0, 0),
+    'a required closed enum given a number past 32 bits, whose low 32 bits it does not declare': REQUIRED_UNSET,
     "a closed enum's number its enum does not declare, which sets nothing": ('', 0, 0),
     "a closed enum's declared number, then one it does not declare": taken('', 0, 0, shade=1),
+    "a closed enum's number past 32 bits, whose low 32 bits it declares": taken('', 0, 0, shade=1),
+    "a closed enum's number past 32 bits, whose low 32 bits it does not declare": ('', 0, 0),
 }
 PROTO_RECORD = {name: taken(*outcome) if isinstance(outcome, tuple) else outcome for name, outcome in PROTO_RECORD.items()}
 outcomes = {entry['name']: entry.get('refused') or entry['read'] for entry in payloads if entry['encoding'] == 'proto'}
