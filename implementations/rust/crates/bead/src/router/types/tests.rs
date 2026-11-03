@@ -3,6 +3,59 @@
 
 use super::{INTAKE_DEFAULTS, IntakeLimits, IntakeLimitsOptions, intake_limits_of};
 
+#[test]
+fn gives_a_parts_gauges_frozen_what_it_does_not_give_being_none() {
+    use super::Gauges;
+    use std::collections::{BTreeMap, BTreeSet};
+    use std::sync::Arc;
+
+    let gauges = Gauges {
+        counts: BTreeMap::from([("calls", 2)]),
+        ..Gauges::default()
+    };
+    assert_eq!(gauges.counts, BTreeMap::from([("calls", 2)]));
+    assert_eq!(gauges.anomalies, Vec::<String>::new());
+    assert!(gauges.ceilings.is_empty());
+    assert!(gauges.connection_handles.is_empty());
+
+    let populated = Gauges {
+        counts: BTreeMap::from([("calls", 3)]),
+        ceilings: BTreeMap::from([("calls", 4)]),
+        connection_handles: ["a", "a", "b"].into_iter().map(Arc::from).collect(),
+        anomalies: vec!["odd".to_owned()],
+    };
+    assert_eq!(populated.counts, BTreeMap::from([("calls", 3)]));
+    assert_eq!(populated.ceilings, BTreeMap::from([("calls", 4)]));
+    assert_eq!(
+        populated.connection_handles,
+        BTreeSet::from([Arc::from("a"), Arc::from("b")])
+    );
+    assert_eq!(populated.anomalies, ["odd"]);
+    assert_eq!(
+        Gauges {
+            connection_handles: ["a", "a", "b"].into_iter().map(Arc::from).collect(),
+            ..Gauges::default()
+        }
+        .connection_handles,
+        populated.connection_handles
+    );
+    assert!(Gauges::default().counts.is_empty());
+
+    // A reader borrows its snapshot; no part can be changed through that borrow.
+    let consumer = crate::testing::surface::Consumer::new();
+    for mutation in [
+        "gauges.counts.insert(\"calls\", 9);",
+        "gauges.ceilings.insert(\"calls\", 9);",
+        "gauges.anomalies.push(String::new());",
+        "gauges.connection_handles.clear();",
+    ] {
+        consumer.refuses(
+            &format!("pub fn check(gauges: &bead::Gauges) {{ {mutation} }}"),
+            ("E0596", "cannot borrow"),
+        );
+    }
+}
+
 // spec 15.12.17, 15.12.18: the twin of "the intake limits refuse a bound below 1, and default to 64
 // and 1 MiB"
 #[test]
