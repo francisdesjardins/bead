@@ -41,118 +41,136 @@ fn counts(registry: &MetricsRegistry) -> Vec<String> {
 
 #[tokio::test]
 async fn count_what_its_pieces_hold_together_and_nothing_once_its_connections_went() {
-    let (peer, _) = serving(false, &RouterLimitsOptions::default()).await;
-    let waiting = peer.request((Bytes::new(), request_of("a")));
-    peer.owner
-        .run(|state| {
-            receive(state, (request(3, None), "b", None));
-            let gauges = state.core.gauges().expect("the combined gauges");
-            assert_eq!(gauges.anomalies, Vec::<String>::new());
-            assert_eq!(
-                gauges.ceilings,
-                BTreeMap::from([
-                    (
-                        "bufferedBytes",
-                        crate::router::types::LIMIT_DEFAULTS.buffered_bytes_budget
-                    ),
-                    ("largestAnsweringCalls", 64),
-                ])
-            );
-            assert_eq!(
-                gauges.connection_handles,
-                BTreeSet::from([Arc::from("a"), Arc::from("b")])
-            );
-            assert_eq!(
-                gauges.counts,
-                BTreeMap::from([
-                    ("abandonedCalls", 0),
-                    ("announced", 0),
-                    ("answeringCalls", 1),
-                    ("bufferedBytes", 0),
-                    ("largestAnsweringCalls", 1),
-                    ("pendingCalls", 1),
-                    ("receivingTransfers", 0),
-                    ("reservedCallIds", 0),
-                    ("sendingTransfers", 0),
-                ])
-            );
-            router_core::reject_pending(state, ("all gone", None));
-        })
-        .await
-        .expect("both connections counted, then closed");
-    assert!(matches!(
-        completed(waiting).await,
-        Err(CallError::Disconnected(_))
-    ));
-    peer.owner
-        .run(|state| {
-            assert_eq!(
-                state
-                    .core
-                    .gauges()
-                    .expect("the closed core's gauges")
-                    .connection_handles,
-                BTreeSet::new()
-            );
-        })
-        .await
-        .expect("the core keeps no connection");
+    for dotnet in [false, true] {
+        let (peer, _) = serving(false, &RouterLimitsOptions::default()).await;
+        let mut options = request_of("a");
+        options.options.timeout = core::time::Duration::from_secs(if dotnet { 5 } else { 1 });
+        let waiting = peer.request((Bytes::new(), options));
+        peer.owner
+            .run(|state| {
+                receive(state, (request(3, None), "b", None));
+                let gauges = state.core.gauges().expect("the combined gauges");
+                assert_eq!(gauges.anomalies, Vec::<String>::new());
+                assert_eq!(
+                    gauges.ceilings,
+                    BTreeMap::from([
+                        (
+                            "bufferedBytes",
+                            crate::router::types::LIMIT_DEFAULTS.buffered_bytes_budget
+                        ),
+                        ("largestAnsweringCalls", 64),
+                    ])
+                );
+                assert_eq!(
+                    gauges.connection_handles,
+                    BTreeSet::from([Arc::from("a"), Arc::from("b")])
+                );
+                assert_eq!(
+                    gauges.counts,
+                    BTreeMap::from([
+                        ("abandonedCalls", 0),
+                        ("announced", 0),
+                        ("answeringCalls", 1),
+                        ("bufferedBytes", 0),
+                        ("largestAnsweringCalls", 1),
+                        ("pendingCalls", 1),
+                        ("receivingTransfers", 0),
+                        ("reservedCallIds", 0),
+                        ("sendingTransfers", 0),
+                    ])
+                );
+                router_core::reject_pending(state, ("all gone", None));
+            })
+            .await
+            .expect("both connections counted, then closed");
+        assert!(matches!(
+            completed(waiting).await,
+            Err(CallError::Disconnected(_))
+        ));
+        peer.owner
+            .run(|state| {
+                assert_eq!(
+                    state
+                        .core
+                        .gauges()
+                        .expect("the closed core's gauges")
+                        .connection_handles,
+                    BTreeSet::new()
+                );
+            })
+            .await
+            .expect("the core keeps no connection");
+    }
 }
 
 #[tokio::test]
 async fn count_a_call_that_carries_no_series_under_other_and_a_router_given_no_registry_counts_nothing()
  {
-    let registry = registry();
-    let metrics = registry.attach(RouterSide::Server);
-    let declared = metrics.declare_requester(&echo()).expect("a named series");
-    let counted = Peer::new(RouterSide::Server, &RouterLimitsOptions::default());
-    let uncounted = Peer::new(RouterSide::Server, &RouterLimitsOptions::default());
-    counted
-        .owner
-        .run(move |state| {
-            state.core.metrics = Some(metrics);
-        })
-        .await
-        .expect("the registry attached");
-    uncounted
-        .owner
-        .run(|state| {
-            assert!(
-                router_core::register_resolver(
-                    &state.core.resolvers,
-                    (
-                        &echo(),
-                        handler((&Arc::default(), &Arc::default())),
-                        state.core.metrics.as_ref()
-                    )
-                )
-                .expect("the resolver registered")
-                .is_none()
-            );
-        })
-        .await
-        .expect("an uncounted registration declares no series");
-    let asking = counted.request((Bytes::new(), request_of("a")));
-    let mut options = request_of("a");
-    options.series = Some(declared);
-    let uncounted_asking = uncounted.request((Bytes::new(), options));
-    counted.settle().await;
-    uncounted.settle().await;
-    assert_eq!(
-        counts(&registry),
-        [
-            "bead_client_call_started_total{service=\"_OTHER\",procedure=\"_OTHER\",type=\"command\"} 1"
-        ]
-    );
-    for (peer, waiting) in [(&counted, asking), (&uncounted, uncounted_asking)] {
-        peer.owner
-            .run(router_core::dispose)
+    for dotnet in [false, true] {
+        let registry = registry();
+        let metrics = registry.attach(RouterSide::Server);
+        let declared = metrics.declare_requester(&echo()).expect("a named series");
+        let counted = Peer::new(RouterSide::Server, &RouterLimitsOptions::default());
+        let uncounted = Peer::new(RouterSide::Server, &RouterLimitsOptions::default());
+        counted
+            .owner
+            .run(move |state| {
+                state.core.metrics = Some(metrics);
+            })
             .await
-            .expect("the waiting core disposed");
-        assert!(matches!(
-            completed(waiting).await,
-            Err(CallError::Disconnected(_))
-        ));
+            .expect("the registry attached");
+        uncounted
+            .owner
+            .run(|state| {
+                assert!(
+                    router_core::register_resolver(
+                        &state.core.resolvers,
+                        (
+                            &echo(),
+                            handler((&Arc::default(), &Arc::default())),
+                            state.core.metrics.as_ref()
+                        )
+                    )
+                    .expect("the resolver registered")
+                    .is_none()
+                );
+            })
+            .await
+            .expect("an uncounted registration declares no series");
+        let payload = if dotnet {
+            Bytes::from_static(&[0])
+        } else {
+            Bytes::new()
+        };
+        let mut counted_options = request_of("a");
+        if dotnet {
+            counted_options.options.timeout = crate::duration::NEVER;
+        }
+        let asking = counted.request((payload.clone(), counted_options));
+        let mut options = request_of("a");
+        options.series = Some(declared);
+        if dotnet {
+            options.options.timeout = crate::duration::NEVER;
+        }
+        let uncounted_asking = uncounted.request((payload, options));
+        counted.settle().await;
+        uncounted.settle().await;
+        assert_eq!(
+            counts(&registry),
+            [
+                "bead_client_call_started_total{service=\"_OTHER\",procedure=\"_OTHER\",type=\"command\"} 1"
+            ]
+        );
+        for (peer, waiting) in [(&counted, asking), (&uncounted, uncounted_asking)] {
+            peer.owner
+                .run(router_core::dispose)
+                .await
+                .expect("the waiting core disposed");
+            assert!(matches!(
+                completed(waiting).await,
+                Err(CallError::Disconnected(_))
+            ));
+        }
     }
 }
 
@@ -238,6 +256,8 @@ async fn counts_an_unreadable_request_once_when_its_refusal_transport_throws_or_
             panic!("a failure");
         };
         assert_eq!(header.call_id, 1);
+        assert_eq!(header.credential, None);
+        assert_eq!(failure.relays, 0);
         assert_eq!(failure.code, ProtocolCode::ENVELOPE_MALFORMED.get());
         assert_eq!(failure.scope, FailureScope::Protocol);
         assert_eq!(
