@@ -129,11 +129,11 @@ impl fmt::Display for CallError {
 impl Error for CallError {
     fn source(&self) -> Option<&(dyn Error + 'static)> {
         match self {
-            Self::Failure(failure) => Some(failure),
-            Self::Refused(error) => Some(error),
+            Self::Failure(failure) => failure.source(),
+            Self::Refused(error) => error.source(),
             Self::Other(error) => {
                 let source: &(dyn Error + 'static) = error.as_ref();
-                Some(source)
+                source.source()
             }
             Self::Cancelled(_) | Self::Disconnected(_) | Self::TimedOut(_) => None,
         }
@@ -324,10 +324,10 @@ impl fmt::Display for ResolverError {
 impl Error for ResolverError {
     fn source(&self) -> Option<&(dyn Error + 'static)> {
         match self {
-            Self::Failure(failure) => Some(failure),
+            Self::Failure(failure) => failure.source(),
             Self::Other(error) => {
                 let source: &(dyn Error + 'static) = error.as_ref();
-                Some(source)
+                source.source()
             }
         }
     }
@@ -399,10 +399,10 @@ impl fmt::Display for TransportError {
 impl Error for TransportError {
     fn source(&self) -> Option<&(dyn Error + 'static)> {
         match self {
-            Self::Refused(error) => Some(error),
-            Self::Connect(error) => Some(error),
-            Self::ReadyState(error) => Some(error),
-            Self::Reconnect(error) => Some(error),
+            Self::Refused(error) => error.source(),
+            Self::Connect(error) => error.source(),
+            Self::ReadyState(error) => error.source(),
+            Self::Reconnect(error) => error.source(),
             Self::Cancelled(_) | Self::TimedOut(_) => None,
         }
     }

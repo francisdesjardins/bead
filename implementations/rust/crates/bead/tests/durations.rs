@@ -1456,6 +1456,9 @@ fn misuse_in(error: &RouterError) -> Option<ProgrammerError> {
         if let Some(misuse) = cause.downcast_ref::<ProgrammerError>() {
             return Some(misuse.clone());
         }
+        if let Some(TransportError::Refused(misuse)) = cause.downcast_ref::<TransportError>() {
+            return Some(misuse.clone());
+        }
 
         source = cause.source();
     }
