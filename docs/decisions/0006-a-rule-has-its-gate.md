@@ -102,8 +102,7 @@ mutations of the readers no differential holds, the envelope's and the parcel's,
 every side, each side ordering its seeds by their SHA-1 and asserting their count and digests; the
 `proto` codecs' mutations are the differential's, which takes `spec/codecs.json`'s `proto` payloads
 among its seeds. A target passes what a row of the support matrix states of its side, and nothing
-more: the TypeScript side's `proto-codecs` takes a message that kept a singular closed enum's
-undeclared number among its unknown fields as written again otherwise, which protobuf-es does.
+more.
 
 **A gate guards itself against finding nothing.** A floor says what it must have found: the comment
 budget fails under 40 blocks in 10 files; Microsoft.Testing.Platform fails a run where no test ran,

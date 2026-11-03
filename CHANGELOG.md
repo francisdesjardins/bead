@@ -51,8 +51,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   the matrix excuses it from.
 - `bead::testing::Difference`, with `is_excused` and `LANGUAGE` beside it, in place of
   `bead::testing::durations::Difference`.
-- The support matrix's "A singular closed enum's undeclared number, echoed" says what protobuf-es
-  writes beside another unknown field and for a wide number, and what Buffa writes.
+- Every side drops a singular closed enum's undeclared number before its library reads, as the C#
+  side did. A message the TypeScript or Rust side reads and writes again no longer carries it (spec
+  17.9.8; a row of the support matrix's "Leveled down").
 - A `JWT` whose header or claims set holds a number past the largest finite double, or nests deeper
   than 64, is refused at `token` on every side, before its signature is reached, and a relay that
   does not verify reads no `aud` from it (spec 13.8, 17.5; RFC 7493 §2.2).

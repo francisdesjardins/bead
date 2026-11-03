@@ -1,6 +1,7 @@
 //! The runtime codecs of a `proto` message (spec 17.9, decision 0042), which hold 17.9 once: its
-//! records checked against its schema before Buffa reads them (decision 0028), the bound of 17.9.3
-//! set in the call, then the message refused where it leaves a required field unset (17.9.7).
+//! records checked against its schema before Buffa reads them (decision 0028), a singular closed
+//! enum's undeclared number dropped before Buffa reads (17.9.8), the bound of 17.9.3 set in the
+//! call, then the message refused where it leaves a required field unset (17.9.7).
 //! A value is written as its reader would read it (17.2, decision 0031): refused before Buffa
 //! writes any of it where its known fields nest past the bound, or the same walk finds a required
 //! field unset; then its bytes checked as a reader checks them, which refuses what a reading kept
@@ -18,7 +19,7 @@ use buffa_descriptor::reflect::{DynamicMessage, ReflectMessage};
 use buffa_descriptor::{DescriptorPool, MessageIndex};
 use bytes::Bytes;
 
-use crate::records::{DEPTH, ProtoSchema, check_records};
+use crate::records::{DEPTH, ProtoSchema, check_records, filtered};
 use crate::refusal::{NOT_ITS_MESSAGE, found, refusal};
 use crate::required::{Presence, bounded, checked};
 
@@ -61,13 +62,14 @@ fn read_back(bytes: Vec<u8>, schema: &ProtoSchema) -> Result<Bytes, CodecRefusal
 
 /// The codec of `M`, a message Buffa generated as `bead_protobuf_build` sets its generator.
 ///
-/// Its reading checks a payload's records, decodes `M`'s view within the bound, walks the view's
-/// required fields, then gives the owned message; its writing bounds its depth, walks its required
-/// fields, writes it, then checks its bytes as its reading does. An owned message holds a required
-/// scalar or enum bare and a closed enum as its Rust enum, so no value of `M` leaves such a field
-/// unset or holds a number its enum does not declare: the type makes the fault impossible rather
-/// than hiding it. A required message it holds as a field set or not, which the walk refuses unset
-/// before anything is written. [`DynamicCodec`] writes the forms `M` cannot hold.
+/// Its reading checks a payload's records, drops a singular closed enum's undeclared number,
+/// decodes `M`'s view within the bound, walks the view's required fields, then gives the owned
+/// message; its writing bounds its depth, walks its required fields, writes it, then checks its
+/// bytes as its reading does. An owned message holds a required scalar or enum bare and a closed
+/// enum as its Rust enum, so no value of `M` leaves such a field unset or holds a number its enum
+/// does not declare: the type makes the fault impossible rather than hiding it. A required message
+/// it holds as a field set or not, which the walk refuses unset before anything is written.
+/// [`DynamicCodec`] writes the forms `M` cannot hold.
 pub struct ProtoCodec<M> {
     schema: ProtoSchema,
     of: PhantomData<fn() -> M>,
@@ -124,10 +126,10 @@ where
     type Value = M;
 
     fn decode(&self, bytes: &Bytes) -> Result<M, CodecRefusal> {
-        // ! the check first: it refuses what protobuf refuses where Buffa reads on (decision 0028)
-        check_records(bytes, &self.schema)?;
-
-        let view: M::View<'_> = decode_options().decode_view(bytes).map_err(refused)?;
+        // ! the check first: it refuses what protobuf refuses where Buffa reads on (decision 0028),
+        // and drops what Buffa would set aside among the unknown fields (17.9.8)
+        let bytes = filtered(bytes, &self.schema)?;
+        let view: M::View<'_> = decode_options().decode_view(&bytes).map_err(refused)?;
 
         // ! the view's presence is the wire's, merged as protobuf merges a message given twice
         checked(&view, (&self.schema, Presence::Read))?;
@@ -152,12 +154,13 @@ where
 
 /// The codec of a message by its descriptor alone, its value Buffa's [`DynamicMessage`].
 ///
-/// Its reading checks a payload's records, decodes the dynamic message within the bound and walks
-/// its required fields; its writing bounds its depth, walks them, writes it, then checks its bytes
-/// as its reading does. A dynamic message holds a field set or not, a required one among them, and
-/// any number of a closed enum, so its writer refuses what a typed message cannot hold. The pool is
-/// the one the message's generated code embeds, where it has some: it carries the generator's
-/// opening of a closed enum's repeated and map fields.
+/// Its reading checks a payload's records, drops a singular closed enum's undeclared number,
+/// decodes the dynamic message within the bound and walks its required fields; its writing bounds
+/// its depth, walks them, writes it, then checks its bytes as its reading does. A dynamic message
+/// holds a field set or not, a required one among them, and any number of a closed enum, so its
+/// writer refuses what a typed message cannot hold. The pool is the one the message's generated
+/// code embeds, where it has some: it carries the generator's opening of a closed enum's repeated
+/// and map fields.
 #[derive(Debug, Clone)]
 pub struct DynamicCodec {
     schema: ProtoSchema,
@@ -183,12 +186,11 @@ impl PayloadCodec for DynamicCodec {
     type Value = DynamicMessage;
 
     fn decode(&self, bytes: &Bytes) -> Result<DynamicMessage, CodecRefusal> {
-        check_records(bytes, &self.schema)?;
-
+        let bytes = filtered(bytes, &self.schema)?;
         let message = DynamicMessage::decode_with_options(
             Arc::clone(self.schema.pool()),
             self.schema.message(),
-            bytes,
+            &bytes,
             &decode_options(),
         )
         .map_err(refused)?;

@@ -14,7 +14,7 @@ namespace Bead.Tests;
 /// raw text those very bytes, so that the value handed on is the canonical form's; a <c>proto</c>
 /// payload read as <c>Probe</c>, of <c>spec/codecs.proto</c>, through the runtime codec generated
 /// code names, <see cref="ProtoCodecs"/>: its records checked first (decision 0028), a closed enum's
-/// undeclared number set aside (17.9.8), its required fields judged once it is read (17.9.7,
+/// undeclared number dropped (17.9.8), its required fields judged once it is read (17.9.7,
 /// decision 0042), then refused, or its fields those read; each value built from its form and
 /// written, to its bytes or refused, a chain of probes among them, built from the deepest up. An
 /// entry a row of the support matrix excuses this side from, a value no <see cref="JsonElement"/>

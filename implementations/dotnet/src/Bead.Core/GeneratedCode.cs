@@ -22,7 +22,7 @@ public static class GeneratedCode
     /// options typed by the service, a client side's Bead client apart from them; the runtime codec
     /// of a <c>proto</c> message, <c>Bead.Protobuf</c>'s <c>ProtoCodecs</c>, which a generated
     /// binding names and which holds spec 17.9 whole: its records checked, <c>ProtoRecords</c>
-    /// (decision 0028), its bound, a closed enum's undeclared number set aside (17.9.8), and a
+    /// (decision 0028), its bound, a closed enum's undeclared number dropped (17.9.8), and a
     /// message that leaves a required field unset refused both ways, <c>ProtoRequired</c> (17.9.7,
     /// decision 0042); and the payload rules a generated file's validators judge a request by
     /// (decision 0035): a descriptor's <c>Validate</c> a <see cref="RequestValidator{TRequest}"/>,

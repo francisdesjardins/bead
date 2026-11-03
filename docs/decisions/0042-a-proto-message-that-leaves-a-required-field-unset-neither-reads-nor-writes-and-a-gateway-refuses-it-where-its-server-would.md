@@ -6,15 +6,15 @@
   and its step 4, 5.6's sentence of an `Any`'s message, 7.4's place of a field left unset and its
   pointer, and the `required` of 11.4, 11.5 and 11.7; each side's runtime codec of a schema,
   `protoCodecOf` of `./proto`, `ProtoCodecs` of `Bead.Protobuf` and `ProtoCodec` and `DynamicCodec`
-  of `bead-protobuf`, its required walk, and on the C# side its filter of a closed enum's record and
+  of `bead-protobuf`, its required walk and its filter of a closed enum's record, and on the C# side
   `ProtoRequired.Check`; generated code's contract 6; `spec/codecs.proto`'s `Needs`, `Shade` and
   fields 7, 8 and 14, `spec/codecs.json`'s rows of 17.9.7 and 17.9.8 and the reason
   `a required field unset`; `spec/transcoding-required.proto`, `Requiring` and the procedures
   `require`, `getNeeds` and `updateNeeds` of `spec/transcoding.proto`, and their entries in
   `spec/transcoding.json`; the blueprint's `legacyRequired` under the feature `legacy-required`,
   beadc's document, and its rules `HTTP_REQUIRED_UNBOUND` and `HTTP_PATCH_REQUIRED`; the support
-  matrix's rows of an extension's required field given to a writer, a closed enum's echo, and a
-  repeated closed enum's leveling.
+  matrix's rows of an extension's required field given to a writer, and of a singular and a
+  repeated closed enum's levelings.
   What 17.9 restates of protobuf, and its items 1 to 4, are
   [0031](0031-a-proto-payload-is-protobufs-format-and-bead-states-only-its-own.md)'s; the check of a
   payload's records, 17.9.5 and 17.9.6,
@@ -99,20 +99,18 @@ parse, so a message given twice sets its required fields in either record, and i
 17.9.7's, by field number and depth first, a map's entries by 18.5's order of their keys.
 
 **A closed enum's undeclared number sets nothing on a singular field** (spec 17.9.8), as Enum
-Behavior has it: the field holds the last declared number its records give, or none. protobuf-es
-reads so already, and Buffa sets such a record aside itself; the C# side's runtime reader drops such
-a record before Google.Protobuf reads, which narrows what reads and never reads in the library's
-place
-([0028](0028-a-proto-payloads-records-are-read-against-its-message-before-its-library-reads-them.md)).
+Behavior has it: the field holds the last declared number its records give, or none. Every side's
+runtime reader drops such a record before its library reads, which narrows what reads and never
+reads in the library's place, where protobuf keeps it among the unknown fields: a row of "Leveled
+down" ([0028](0028-a-proto-payloads-records-are-read-against-its-message-before-its-library-reads-them.md#on-the-corpus-that-writes-every-field-of-probe)).
 A repeated field's items and a map's values keep the number on every side, the Rust side's generator
-opening each such field of a closed enum: a row of "Leveled down". What each writes back of a
-singular field's number is a platform row.
+opening each such field of a closed enum: a row of "Leveled down".
 
 **One runtime codec of a schema on each side holds 17.9 once**: `protoCodecOf(schema)` of
 `@francisdesjardins/bead/proto` and `ProtoCodecs.Of<T>()` with `ProtoCodecs.Read(descriptor, bytes)`
 of `Bead.Protobuf`, and `ProtoCodec` and `DynamicCodec` of `bead-protobuf`
 ([0044](0044-rust-one-owner-per-router-traits-no-unsafe-two-parameters-no-warning.md)). Its read
-runs the records check, then, on the C# side, 17.9.8's filter, then the parse at 17.9.3's bound,
+runs the records check, then 17.9.8's filter, then the parse at 17.9.3's bound,
 then the walk; its write runs 17.9.3's depth pass, then the walk, within 101 levels, then the stock
 writer, then the records check over what it wrote
 ([0031](0031-a-proto-payload-is-protobufs-format-and-bead-states-only-its-own.md)). On the Rust side
@@ -128,11 +126,11 @@ side's `ProtoRequired.Check` and the Rust side's `check_required`, refuse past 1
 the same refusal. The walk is Bead's own on every side, its facts in the one shape per descriptor
 `ProtoRecords` holds, weakly held as long as its descriptor is, the Rust side's in its
 `ProtoSchema`, read once from its pool: each message's required fields, the message fields that
-reach one, and on the C# side its singular closed enums. Reachability is one search over the
-descriptor's closure, cycles included, with no flag cached mid-search. Generated code, the gateway's
-result reader, `JsonForm.EventDataOf`, an `Any`'s bytes on writing, both HTTP callers and every test
-codec read and write through it; an `Any`'s bytes are read with the records check, the bound and the
-filter, and no walk.
+reach one, and its singular closed enums, each with the numbers its enum declares. Reachability is
+one search over the descriptor's closure, cycles included, with no flag cached mid-search.
+Generated code, the gateway's result reader, `JsonForm.EventDataOf`, an `Any`'s bytes on writing,
+both HTTP callers and every test codec read and write through it; an `Any`'s bytes are read with the
+records check, the bound and the filter, and no walk.
 
 **Generated code's contract moves to 6.** A service's generated file calls the runtime codec, which
 a runtime without it lacks, so it names `GENERATED_CODE_SUPPORTS_VERSION_6` and
@@ -191,17 +189,17 @@ sides and every gateway must change to conform.
 derived: a caller that would keep it unchanged sends its own `update_mask`, which beadc's
 `HTTP_PATCH_REQUIRED` tells a `.proto`'s author.
 
-**Two platform rows and a leveling.** An extension's message that leaves a required field unset,
+**A platform row and two levelings.** An extension's message that leaves a required field unset,
 given to a writer: refused on the TypeScript side, as protobuf-es's `toBinary` checks it, written on
 the C# side, since Google.Protobuf lists no extension a message holds, and on the Rust side, since
 Buffa's generated codec, given no registry, writes it back among the unknown fields; reading is at
-parity. A singular closed enum's undeclared number, echoed: protobuf-es and Buffa write it back
-among the unknown fields, the C# side has dropped it before its library read; what each reads is at
-parity. A repeated closed enum's item, or a map's value, of an undeclared number: kept on every
-side, the Rust side's generator opening such a field, where Enum Behavior moves it among the unknown
-fields, a row of "Leveled down" that lifts when the TypeScript side can move it to `$unknown`, the
-C# side can drop it in its filter and the Rust side's generator can leave such a field closed,
-together.
+parity. A singular closed enum's undeclared number, written back: dropped on every side before its
+library reads, where Enum Behavior keeps it, a row of "Leveled down" that lifts when Google.Protobuf
+keeps it among a message's unknown fields and protobuf-es keeps it wherever it reads it. A repeated
+closed enum's item, or a map's value, of an undeclared number: kept on every side, the Rust side's
+generator opening such a field, where Enum Behavior moves it among the unknown fields, a row of
+"Leveled down" that lifts when the TypeScript side can move it to `$unknown`, the C# side can drop
+it in its filter and the Rust side's generator can leave such a field closed, together.
 
 **The cost is the walk**, linear in the messages a payload holds that reach a required field, and
 one lookup for a message that reaches none; the floor of protobuf's conformance suite, 5,601 tests

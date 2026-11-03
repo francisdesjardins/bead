@@ -1,8 +1,9 @@
 // ── Proto records ─────────────────────────────────────────────────────────────
 
 // A `proto` payload's records, read against its message before protobuf-es reads them (decision
-// 0028): what protobuf refuses where the library reads on, and what spec 17.9.5 and 17.9.6 level.
-// Its shape comes from the descriptor the library holds, by type alone: no protobuf code loads here.
+// 0028): what protobuf refuses where the library reads on, what spec 17.9.5 and 17.9.6 level, and
+// a singular closed enum's undeclared number, dropped (17.9.8). Its shape is the descriptor's,
+// by type alone: no protobuf code loads here.
 
 // dependencies
 
@@ -13,6 +14,11 @@ import type { FeatureSet_FieldPresence } from '@bufbuild/protobuf/wkt';
 
 /** What one field's records take: its wire types, what a packed record of it holds, its message's shape. */
 interface IFieldShape {
+  /**
+   * The numbers its enum declares, where it is a singular field of a closed enum, whose record of
+   * any other sets nothing (spec 17.9.8); none otherwise, a list's and a map's value among them.
+   */
+  readonly declared: ReadonlySet<number> | undefined;
   /** The message a record of it holds, a map's entry's or a group's among them; none for a scalar. */
   readonly holds: IMessageShape | undefined;
   /** What a length-delimited record of it holds when packed: its values' fixed width, or varints. */
@@ -53,6 +59,14 @@ interface IReader {
   end: number;
   /** The number of the group being read, whose end group closes it; 0 in a length-delimited message. */
   group: number;
+  /** Whether it met a singular closed enum's record of a number its enum does not declare. */
+  isUndeclared: boolean;
+}
+
+/** Where a rewrite writes: its bytes, the payload's size, and how many it holds. */
+interface IOutput {
+  at: number;
+  readonly bytes: Uint8Array;
 }
 
 // constants
@@ -129,6 +143,9 @@ export const PROTO_REASONS = Object.freeze({
 // an unknown group's shape: any field, each skipped
 const ANY_FIELD: IMessageShape = Object.freeze({ fields: new Map(), isClosed: false });
 
+// the bytes of a varint that hold an int32's 32 bits, the last of them holding its top 4
+const INT32_PLACES = 5;
+
 // each message's shape, built once, at first use
 const SHAPES = new WeakMap<DescMessage, IMessageShape>();
 
@@ -151,10 +168,11 @@ const refuse = (found: string): never => {
 const scalarShape = (wire: number, isRepeated: boolean): IFieldShape => {
   // * a repeated scalar of a numeric type takes its own wire type and a packed record, packed or not
   if (!isRepeated || wire === LEN) {
-    return { holds: undefined, packs: NOT_PACKED, takes: 1 << wire };
+    return { declared: undefined, holds: undefined, packs: NOT_PACKED, takes: 1 << wire };
   }
 
   return {
+    declared: undefined,
     holds: undefined,
     packs: wire === VARINT ? VARINTS : wire === I32 ? 4 : 8,
     takes: (1 << wire) | (1 << LEN),
@@ -163,7 +181,12 @@ const scalarShape = (wire: number, isRepeated: boolean): IFieldShape => {
 
 /** What a field of a message type's records take: a group's, or a length-delimited record. */
 const messageShape = (message: DescMessage, isDelimited: boolean): IFieldShape => {
-  return { holds: shapeOf(message), packs: NOT_PACKED, takes: 1 << (isDelimited ? SGROUP : LEN) };
+  return {
+    declared: undefined,
+    holds: shapeOf(message),
+    packs: NOT_PACKED,
+    takes: 1 << (isDelimited ? SGROUP : LEN),
+  };
 };
 
 /** A map's entry, as it is on the wire: a message of its key at 1 and its value at 2 (Encoding, "Maps"). */
@@ -197,11 +220,21 @@ const fieldShape = (field: DescField): IFieldShape => {
     case 'scalar':
       return scalarShape(WIRE_OF_SCALAR[field.scalar], false);
     case 'enum':
-      return scalarShape(VARINT, false);
+      // * spec 17.9.8: a singular field of a closed enum, as protobuf-es reads the field
+      return field.enum.open
+        ? scalarShape(VARINT, false)
+        : {
+            ...scalarShape(VARINT, false),
+            declared: new Set(
+              field.enum.values.map((value) => {
+                return value.number;
+              })
+            ),
+          };
     case 'message':
       return messageShape(field.message, field.delimitedEncoding);
     case 'map':
-      return { holds: entryShape(field), packs: NOT_PACKED, takes: 1 << LEN };
+      return { declared: undefined, holds: entryShape(field), packs: NOT_PACKED, takes: 1 << LEN };
     case 'list':
       switch (field.listKind) {
         case 'message':
@@ -435,6 +468,27 @@ const readVarint = (reader: IReader): number => {
   return refuse('holds a varint of more than 10 bytes');
 };
 
+/**
+ * The varint at `at` of `bytes`, which the walk took, as protobuf reads an int32: its low 32 bits
+ * (Language Guide, "Updating A Message Type"), exact where the varint passes 2^53.
+ */
+const int32At = (bytes: Uint8Array, at: number): number => {
+  let value = 0;
+
+  for (let place = 0; place < INT32_PLACES; place += 1) {
+    const byte = bytes[at + place] ?? 0;
+
+    // ! a shift is an int32's: the 5th byte's bits past the 32nd fall away
+    value |= (byte & 0x7f) << (7 * place);
+
+    if (byte < 0x80) {
+      break;
+    }
+  }
+
+  return value;
+};
+
 /** The tag at the reader: a uint32 varint, five bytes at most (Encoding, its reference card). */
 const readTag = (reader: IReader): number => {
   const start = reader.at;
@@ -560,9 +614,17 @@ const walkRecords = (reader: IReader, shape: IMessageShape): void => {
     }
 
     switch (wire) {
-      case VARINT:
+      case VARINT: {
+        const start = reader.at;
+
         readVarint(reader);
+
+        // * spec 17.9.8: a record that sets nothing, which `filtered` drops
+        if (field?.declared !== undefined && !field.declared.has(int32At(reader.bytes, start))) {
+          reader.isUndeclared = true;
+        }
         break;
+      }
       case I64:
         skipFixed(reader, 8);
         break;
@@ -611,6 +673,117 @@ const walkRecords = (reader: IReader, shape: IMessageShape): void => {
   }
 };
 
+/** Writes `value` as a varint's shortest form at `at` of `bytes` (Encoding, "Base 128 Varints"). */
+const writeVarint = (bytes: Uint8Array, { at, value }: { at: number; value: number }): void => {
+  let rest = value;
+  let place = at;
+
+  while (rest >= 0x80) {
+    bytes[place] = (rest & 0x7f) | 0x80;
+    rest >>>= 7;
+    place += 1;
+  }
+
+  bytes[place] = rest;
+};
+
+/** How many bytes a length takes as a varint's shortest form. */
+const lengthSizeOf = (length: number): number => {
+  let size = 1;
+
+  for (let rest = length; rest >= 0x80; rest >>>= 7) {
+    size += 1;
+  }
+
+  return size;
+};
+
+/**
+ * Writes the records at the reader, which the walk took, to `output`, as `shape` reads them, but
+ * each singular closed enum's record of a number its enum does not declare, the length of each
+ * message that held one written again (spec 17.9.8): to the end of their message, or for a group
+ * through its own end group. What it writes is never longer than what it read, so it writes in
+ * place of what it read, in one array of the payload's size.
+ */
+const rewriteRecords = (
+  reader: IReader,
+  { output, shape }: { output: IOutput; shape: IMessageShape }
+): void => {
+  const { bytes } = reader;
+
+  while (reader.at < reader.end) {
+    const start = reader.at;
+    const tag = readTag(reader);
+    const field = shape.fields.get(tag >>> 3);
+
+    switch (tag & 7) {
+      case EGROUP:
+        output.bytes.set(bytes.subarray(start, reader.at), output.at);
+        output.at += reader.at - start;
+        return;
+      case VARINT: {
+        const value = reader.at;
+
+        readVarint(reader);
+
+        if (field?.declared !== undefined && !field.declared.has(int32At(bytes, value))) {
+          continue;
+        }
+        break;
+      }
+      case I64:
+        reader.at += 8;
+        break;
+      case I32:
+        reader.at += 4;
+        break;
+      case LEN: {
+        const tagEnd = reader.at;
+        const length = readLength(reader);
+
+        if (field?.holds === undefined) {
+          reader.at += length;
+          break;
+        }
+
+        // * the message's records written after room for its length as it came, then its new
+        // length, never longer, written in its place and the records moved up to it
+        const { end } = reader;
+        const lengthAt = output.at + tagEnd - start;
+        const room = reader.at - tagEnd;
+
+        output.bytes.set(bytes.subarray(start, tagEnd), output.at);
+        output.at = lengthAt + room;
+        reader.end = reader.at + length;
+        rewriteRecords(reader, { output, shape: field.holds });
+        reader.end = end;
+
+        const written = output.at - lengthAt - room;
+        const size = lengthSizeOf(written);
+
+        output.bytes.copyWithin(lengthAt + size, lengthAt + room, output.at);
+        writeVarint(output.bytes, { at: lengthAt, value: written });
+        output.at = lengthAt + size + written;
+        continue;
+      }
+      default:
+        // * a group: its tag, then its records through its end group
+        output.bytes.set(bytes.subarray(start, reader.at), output.at);
+        output.at += reader.at - start;
+        rewriteRecords(reader, { output, shape: field?.holds ?? ANY_FIELD });
+        continue;
+    }
+
+    output.bytes.set(bytes.subarray(start, reader.at), output.at);
+    output.at += reader.at - start;
+  }
+};
+
+/** A walk of `bytes` from their start, as `checkProtoRecords` begins one. */
+const readerOf = (bytes: Uint8Array): IReader => {
+  return { at: 0, bytes, depth: 0, end: bytes.length, group: NO_GROUP, isUndeclared: false };
+};
+
 // definition
 
 /**
@@ -626,7 +799,8 @@ const walkRecords = (reader: IReader, shape: IMessageShape): void => {
  * Its message is spec 17.2's reason, `nested past 100` for the depth and `not its message` for any
  * other, the record refused in its `cause`. It reads nothing of the message and allocates nothing
  * per record; each message's shape is built once, from its descriptor. `protoCodecOf` runs it
- * first, as generated code reads a payload, and again over what its writer wrote.
+ * first, through `filtered`, as generated code reads a payload, and again over what its writer
+ * wrote.
  *
  * @example
  * import { fromBinary } from '@bufbuild/protobuf';
@@ -637,7 +811,30 @@ const walkRecords = (reader: IReader, shape: IMessageShape): void => {
  * const request = fromBinary(SayHelloRequestSchema, bytes, { recursionLimit: 101 });
  */
 export const checkProtoRecords = (bytes: Uint8Array, message: DescMessage): void => {
-  walkRecords({ at: 0, bytes, depth: 0, end: bytes.length, group: NO_GROUP }, shapeOf(message));
+  walkRecords(readerOf(bytes), shapeOf(message));
+};
+
+/**
+ * `bytes`, checked as `checkProtoRecords` checks them, without each singular closed enum's record
+ * of a number its enum declares no value of, the length of each message that held one written
+ * again (spec 17.9.8): what protobuf keeps among the unknown fields, protobuf-es then never reads,
+ * as every side drops it; the field holds the last declared number its records give, or none.
+ * `bytes` themselves where they hold none, which costs nothing past the check.
+ */
+export const filtered = (bytes: Uint8Array, message: DescMessage): Uint8Array => {
+  const walked = readerOf(bytes);
+
+  walkRecords(walked, shapeOf(message));
+
+  if (!walked.isUndeclared) {
+    return bytes;
+  }
+
+  const output: IOutput = { at: 0, bytes: new Uint8Array(bytes.length) };
+
+  rewriteRecords(readerOf(bytes), { output, shape: shapeOf(message) });
+
+  return output.bytes.subarray(0, output.at);
 };
 
 /**

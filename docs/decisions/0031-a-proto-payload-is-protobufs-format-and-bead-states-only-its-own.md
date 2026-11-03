@@ -182,7 +182,7 @@ global::Bead.Protobuf.ProtoCodecs.Of<global::Hello.V1.SayHelloRequest>()
 ```
 
 What the codec runs, laid out here over lines, its depth pass, its required walk, its check of what
-it wrote and the C# side's filter of a closed enum's record aside, which the paragraphs below and
+it wrote and its filter of a closed enum's record aside, which the paragraphs below and
 [0042](0042-a-proto-message-that-leaves-a-required-field-unset-neither-reads-nor-writes-and-a-gateway-refuses-it-where-its-server-would.md)
 state:
 

@@ -12,15 +12,15 @@ namespace Bead.Protobuf;
 /// refuses where a stock library reads on, and reads nothing in the library's place but one thing:
 /// a singular closed enum's record of a number its enum declares no value of, which protobuf keeps
 /// among the unknown fields and Google.Protobuf would read as the field's (17.9.8), is dropped
-/// before the library reads, through <see cref="ProtoCodecs"/>. It walks the payload once, by the
-/// message's own descriptor, and allocates nothing per record. Each message's shape holds what
-/// <see cref="ProtoRequired"/> walks too (17.9.7): its fields protobuf requires, and those that
-/// hold a message reaching one; and how deep its known fields can nest, which a writer's depth pass
-/// takes (<see cref="ProtoDepth"/>, 17.9.3). A refusal is a <see cref="FormatException"/> of spec
-/// 17.2's reason, <c>nested past 100</c> for the depth and <c>not its message</c> for any other,
-/// the record refused in its inner exception; <see cref="ProtoCodecs"/> runs it again over what its
-/// writer wrote. The TypeScript side's twin is <c>checkProtoRecords</c>, of
-/// <c>@francisdesjardins/bead/proto</c>.
+/// before the library reads, as every side drops it, through <see cref="ProtoCodecs"/>. It walks
+/// the payload once, by the message's own descriptor, and allocates nothing per record. Each
+/// message's shape holds what <see cref="ProtoRequired"/> walks too (17.9.7): its fields protobuf
+/// requires, and those that hold a message reaching one; and how deep its known fields can nest,
+/// which a writer's depth pass takes (<see cref="ProtoDepth"/>, 17.9.3). A refusal is a
+/// <see cref="FormatException"/> of spec 17.2's reason, <c>nested past 100</c> for the depth and
+/// <c>not its message</c> for any other, the record refused in its inner exception;
+/// <see cref="ProtoCodecs"/> runs it again over what its writer wrote. The TypeScript side's twin
+/// is <c>checkProtoRecords</c>, of <c>@francisdesjardins/bead/proto</c>.
 /// </summary>
 public static class ProtoRecords
 {
@@ -103,8 +103,9 @@ public static class ProtoRecords
     /// <summary>
     /// <paramref name="bytes"/>, which <see cref="Checked"/> took, without each singular closed
     /// enum's record of a number its enum declares no value of, the length of each record that held
-    /// one written again (17.9.8): what protobuf keeps among the unknown fields, Google.Protobuf then
-    /// never reads as the field's, which holds the last declared number its records give, or none.
+    /// one written again (17.9.8): what protobuf keeps among the unknown fields, Google.Protobuf
+    /// then never reads as the field's, as every side drops it, the field holding the last declared
+    /// number its records give, or none.
     /// </summary>
     internal static byte[] Filtered(ReadOnlySpan<byte> bytes, MessageDescriptor message)
     {
