@@ -123,7 +123,7 @@ internal sealed class BrokerCasePlayer : IAsyncDisposable
             Heartbeat = OptionOf((entry, "heartbeat")) is { } heartbeat ? TimeOf(heartbeat) : TimeSpan.FromSeconds(30),
 
             // * a client alone connects no more once its link is lost; a server's participant links anew
-            IsReconnecting = !_isClient,
+            Reconnects = !_isClient,
 
             // * the router's envelope by default, as its server sizes it (spec 15.20)
             MaximumEnvelopePartsBytes = OptionOf((entry, "maximumEnvelopePartsBytes"))?.GetInt64() ?? limits.MaximumEnvelopeBytes,

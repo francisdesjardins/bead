@@ -107,10 +107,26 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   - `TransportClientReconnectDelayOrDelayResolver` is gone;
   - `maxAttempts` becomes `maximumAttempts`.
 - On the C# side, `ViolationsRead` becomes `ReadViolations`, as on the other sides.
+- A broker participant takes its link's reconnection as a transport client's `reconnect` takes it,
+  through the one reconnection loop its side's clients run: on the TypeScript side
+  `ITransportClientReconnectOptions`, its `delay` a number or a
+  `TransportClientReconnectDelayResolver` and its `tap` told each wait. "No reconnection" is a
+  boolean beside it on every side, true by default: `reconnect: false` becomes `reconnects: false`
+  on the TypeScript side, and `IsReconnecting` becomes `Reconnects` on the C# side. A participant's
+  `maximumAttempts` left out is without end, a transport client's `reconnect`'s 5: on the C# side
+  `TransportClientReconnectOptions.MaximumAttempts` is an `int?`, where a participant given a
+  `Reconnect` without it gave up after five attempts (spec 15.21; decision 0038).
+- A fixed reconnection delay that is not 0 and not from 1 to 2³¹ − 1 ms is refused where it is
+  given, on every side: a participant's as it is built, whatever its `reconnects`, and a transport
+  client's as `reconnect` is called, after its state guards and before its signal, nothing moved,
+  no `reconnect` told and its connection kept. A function's answer is held at each attempt (spec
+  1.4).
 - `spec/durations.json` holds an HTTP exchange's timeout as one place,
   `httpTransport.exchangeTimeout`, by two ways, `client` and `server`, where
   `httpTransportServer.exchangeTimeout` was the server's place alone, as 15.12 names that timeout
-  for both ends (decision 0014). The file holds 34 places, by 52 ways.
+  for both ends, and a broker participant's reconnection delay as a place of its own,
+  `brokerParticipant.reconnectionDelay`, by `function` and `number` (decision 0014). The file holds
+  35 places, by 54 ways.
 
 ### Removed
 
@@ -136,6 +152,13 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   refused before its library writes any of it, so the codec's write no longer overflows the stack;
   one deep through what a reading kept is refused once written. C#'s `ProtoRequired.Check` and
   Rust's `check_required` are bounded alike.
+- A broker participant's reconnection ends with a report whatever ends it, its cause carried, in the
+  same words on every side, counting the attempts made: on the C# side a delay refused, or a tap
+  that throws, ended it unreported, and on the TypeScript side the report carried no cause. On the
+  C# side a stop ends it, where it went on and linked again, and its token is read before every
+  attempt, the first included (spec 15.21).
+- Once a broker participant's reconnection ended, its next start or connect links it anew, where the
+  C# side kept it down (spec 15.21).
 
 ## [0.9.0] - 2026-10-30
 

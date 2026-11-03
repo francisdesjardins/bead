@@ -7,10 +7,14 @@
 *REMOVED*Bead.BrokerConnectOptions.Server.init -> void
 *REMOVED*Bead.BrokerConnectOptions.Timeout.get -> System.TimeSpan
 *REMOVED*Bead.BrokerConnectOptions.Timeout.init -> void
+*REMOVED*Bead.BrokerParticipantOptions.IsReconnecting.get -> bool
+*REMOVED*Bead.BrokerParticipantOptions.IsReconnecting.init -> void
 Bead.BrokerParticipantOptions.MaximumHeldEnvelopeBytes.get -> long?
 Bead.BrokerParticipantOptions.MaximumHeldEnvelopeBytes.init -> void
 Bead.BrokerParticipantOptions.Reconnect.get -> Bead.TransportClientReconnectOptions?
 *REMOVED*Bead.BrokerParticipantOptions.Reconnect.get -> Bead.TransportReconnectOptions?
+Bead.BrokerParticipantOptions.Reconnects.get -> bool
+Bead.BrokerParticipantOptions.Reconnects.init -> void
 Bead.BrokerTransportClient.CloseConnection(Bead.TransportClientDisconnectOptions? options = null) -> System.Threading.Tasks.Task!
 *REMOVED*Bead.BrokerTransportClient.CloseConnection(Bead.TransportDisconnectOptions? options = null) -> System.Threading.Tasks.Task!
 *REMOVED*Bead.BrokerTransportClient.Connect(Bead.BrokerConnectOptions! options, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task!
@@ -162,7 +166,7 @@ Bead.TransportClientReconnectOptions.CancellationToken.init -> void
 Bead.TransportClientReconnectOptions.Delay.get -> Bead.TransportClientReconnectDelay?
 Bead.TransportClientReconnectOptions.Delay.init -> void
 Bead.TransportClientReconnectOptions.Equals(Bead.TransportClientReconnectOptions? other) -> bool
-Bead.TransportClientReconnectOptions.MaximumAttempts.get -> int
+Bead.TransportClientReconnectOptions.MaximumAttempts.get -> int?
 Bead.TransportClientReconnectOptions.MaximumAttempts.init -> void
 Bead.TransportClientReconnectOptions.Tap.get -> System.Action<System.TimeSpan, int>?
 Bead.TransportClientReconnectOptions.Tap.init -> void

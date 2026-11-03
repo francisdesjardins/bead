@@ -432,9 +432,9 @@ places = [
         'observed': 'held',
     },
     # a broker's (spec 15.21, 15.23): its heartbeat on the platform's timer, as a WebSocket's, observed
-    # by its refusal alone; a half-open connection's wait and the grace of an envelope's parts on the
-    # clock given (decision 0011). A participant's link reconnects as a transport client does, its delay
-    # transportClient.reconnectionDelay's
+    # by its refusal alone; a half-open connection's wait, the grace of an envelope's parts and its
+    # participant's reconnection delay on the clock given (decision 0011), that delay a place of its
+    # own, since no clause names one option for it and a transport client's
     {
         'id': 'brokerParticipant.heartbeat',
         'name': "a broker participant's heartbeat on a silent connection",
@@ -462,6 +462,17 @@ places = [
         'neverClause': '15.12',
         'ways': [way('options', "the participant's options, as it is built")],
         'default': default('15.12.16', milliseconds=DEFAULTS['bodyGracePeriod'], ways=['options']),
+        'observed': 'held',
+    },
+    {
+        'id': 'brokerParticipant.reconnectionDelay',
+        'name': "a broker participant's reconnection delay, once its link went down",
+        'kind': 'delay',
+        'never': 'refused',
+        'ways': [
+            way('function', 'a function of the previous delay and the attempt, its answer'),
+            way('number', 'a number'),
+        ],
         'observed': 'held',
     },
     # MQTT 5's adapter (spec 15.26, 15.30): its Keep Alive and the wait for its CONNACK, each on its

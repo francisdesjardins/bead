@@ -14,7 +14,8 @@ use super::{
 };
 use crate::client::ClientOptions;
 use crate::clock::SharedClock;
-use crate::errors::TransportError;
+use crate::duration::{DurationRefusal, NEVER};
+use crate::errors::{Refusal, TransportError};
 use crate::managers::service::{
     RequestDependencies, RequestOptions, RequestResolverDependencies, Response,
 };
@@ -1283,6 +1284,59 @@ async fn refuses_a_reconnect_never_connected_and_a_connect_unless_closed_nothing
     );
     assert_eq!(client.ready_state(), ReadyState::Open, "still open");
     assert_eq!(ends.server.clients().len(), 1, "one connection held");
+}
+
+// spec 1.4
+#[tokio::test]
+async fn refuses_a_fixed_delay_out_of_bounds_as_reconnect_is_called_nothing_changed() {
+    let ends = Ends::started().await;
+    let (client, told) = ends.connected((None, None)).await;
+    let cancelled = CancellationToken::new();
+    let fixed = |delay: Duration| TransportClientReconnectOptions {
+        delay: Some(TransportClientReconnectDelay::Fixed(delay)),
+        signal: Some(cancelled.clone()),
+        ..TransportClientReconnectOptions::default()
+    };
+
+    cancelled.cancel();
+    ends.server_told();
+    taken(&told);
+
+    // * refused as it is called, by its reason's code: after its state's guards, before its signal
+    for (delay, reason) in [
+        (Duration::from_micros(500), DurationRefusal::UnderTheFloor),
+        (
+            Duration::from_millis(2_147_483_648),
+            DurationRefusal::PastTheCeiling,
+        ),
+        (NEVER, DurationRefusal::NeverRefused),
+    ] {
+        let refused = client.reconnect(&fixed(delay)).err();
+
+        assert!(
+            matches!(
+                &refused,
+                Some(TransportError::Refused(misuse))
+                    if misuse.reason() == Some(Refusal::Duration(reason))
+            ),
+            "{delay:?} refused: {refused:?}"
+        );
+    }
+
+    // nothing changed: open, its connection kept, no reconnect told and no close
+    assert_eq!(client.ready_state(), ReadyState::Open, "still open");
+    assert_eq!(ends.server.clients().len(), 1, "its connection kept");
+    assert!(taken(&told).is_empty(), "nothing told");
+    assert!(ends.server_told().is_empty(), "nothing told its server");
+
+    // its state's guards first: a client never connected says so
+    let (never, _) = ends.client();
+
+    assert_eq!(
+        refusal_of(never.reconnect(&fixed(NEVER))).as_deref(),
+        Some("the transport client was never connected"),
+        "its state first"
+    );
 }
 
 // pending from its call to a later turn: what the other sides hold behind an accept, this side

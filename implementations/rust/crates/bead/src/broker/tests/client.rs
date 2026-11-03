@@ -18,7 +18,8 @@ use crate::broker::memory::{MemoryBroker, MemoryBrokerOptions};
 use crate::broker::parcel::{Parcel, flags, kinds, write_parcel};
 use crate::broker::participant::{BrokerParticipantOptions, BrokerRefusedError};
 use crate::clock::SharedClock;
-use crate::errors::TransportError;
+use crate::duration::{DurationRefusal, NEVER};
+use crate::errors::{Refusal, TransportError};
 use crate::router::types::TransportMessage;
 use crate::testing::SteppingClock;
 use crate::transport::{
@@ -699,6 +700,80 @@ async fn refuses_a_connect_while_one_is_under_way_or_one_given_up_already() {
         "the first fails once disposed"
     );
     ada.stop().await;
+}
+
+// spec 1.4
+#[tokio::test]
+async fn refuses_a_fixed_delay_out_of_bounds_as_reconnect_is_called_nothing_changed() {
+    let pair = BrokerPair::of(&BrokerPairOptions::default()).await;
+    let client = pair.connect().await;
+    let told = Arc::new(ClientTold::default());
+    let before = client.pair().expect("a pair");
+    let cancelled = CancellationToken::new();
+    let fixed = |delay: Duration| TransportClientReconnectOptions {
+        delay: Some(TransportClientReconnectDelay::Fixed(delay)),
+        signal: Some(cancelled.clone()),
+        ..TransportClientReconnectOptions::default()
+    };
+
+    cancelled.cancel();
+    client.listen(Arc::new(AtClient(Arc::clone(&told))));
+
+    // * refused as it is called, by its reason's code: after its state's guards, before its signal
+    for (delay, reason) in [
+        (Duration::from_micros(500), DurationRefusal::UnderTheFloor),
+        (
+            Duration::from_millis(2_147_483_648),
+            DurationRefusal::PastTheCeiling,
+        ),
+        (NEVER, DurationRefusal::NeverRefused),
+    ] {
+        let refused = client.reconnect(&fixed(delay)).err();
+
+        assert!(
+            matches!(
+                &refused,
+                Some(TransportError::Refused(misuse))
+                    if misuse.reason() == Some(Refusal::Duration(reason))
+            ),
+            "{delay:?} refused: {refused:?}"
+        );
+    }
+
+    settle().await;
+
+    // nothing changed: open, its connection kept, no reconnect told and no close
+    assert_eq!(
+        (
+            client.ready_state(),
+            client.pair(),
+            *locked(&told.reconnects)
+        ),
+        (ReadyState::Open, Some(before), 0),
+        "still open on its pair, no reconnect told"
+    );
+    assert!(locked(&told.closes).is_empty(), "no close told");
+    assert!(
+        locked(&pair.told.closed).is_empty(),
+        "no close at its server"
+    );
+
+    // its state's guards first: a client never connected says so
+    let never = pair
+        .client_participant
+        .client(&BrokerTransportClientOptions::default())
+        .expect("a client");
+
+    assert_eq!(
+        never
+            .reconnect(&fixed(NEVER))
+            .map(drop)
+            .expect_err("refused")
+            .to_string(),
+        "the transport client was never connected",
+        "its state first"
+    );
+    pair.stop().await;
 }
 
 #[tokio::test]

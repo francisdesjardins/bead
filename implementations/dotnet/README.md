@@ -162,7 +162,11 @@ that keeps no broker session, its connections lost with it and its peers reset o
 A link another of its id takes over (the adapter's `Down` telling `BrokerDown.IsTakenOver`) closes
 each connection alike, is reported, and connects no more until the application starts its
 participant again, or a server's transport over it: two holders of one id never take each other
-over without end. An OPEN lives in its broker its connect's time left, and a DATA that carries a
+over without end. Any other link lost connects anew as its `Reconnect` says, a transport client's
+`TransportClientReconnectOptions`, its attempts without end unless it bounds them, or stays down
+where `Reconnects` is false; a fixed delay out of bounds is refused as it is built. Its
+reconnection ends by its attempts, its token or its stop, reported through `Error`, what ended it
+the inner exception, and its next start or connect links it anew. An OPEN lives in its broker its connect's time left, and a DATA that carries a
 credential twice the heartbeat, where the adapter offers a message's life. A server's transport
 starts once its broker holds each name it serves and stops once it let each go, its gauge `names`
 its broker's word. `MemoryBroker` offers every capability an adapter may, and copies, holds, drops
@@ -422,7 +426,8 @@ the listens, the outboxes and the server's life, under one lock on the C# side.
   off the machine, HTTPS.
 - **The transports** hold the same ready states on the TypeScript and C# sides, and the client
   reconnects alike, its delay, attempts, token and tap, its router rejecting what waited on the
-  connection replaced.
+  connection replaced; a fixed delay out of bounds is refused as `Reconnect` is called, nothing
+  changed.
   Neither client reads a `Retry-After`: a reconnection waits its own schedule, whatever a refusal's
   `Retry-After` asks (spec 15.7). A server listens on `localhost` unless `Start` is given an
   `Address`: both loopbacks, `127.0.0.1` and `::1`, on one port, so no other process can answer a

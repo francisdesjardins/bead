@@ -425,6 +425,56 @@ public sealed class BrokerTransportClientTests
         });
     }
 
+    // spec 1.4
+    [Fact]
+    public async Task Refuses_a_fixed_delay_out_of_bounds_as_reconnect_is_called_nothing_changed()
+    {
+        await using var pair = await BrokerPair.Of();
+        await using var client = await pair.Connect();
+        var before = client.Pair;
+        var told = new ConcurrentQueue<string>();
+
+        ((IRouterClientTransport)client).Reconnect += () =>
+        {
+            told.Enqueue("reconnect");
+        };
+        client.Close += (_, _) =>
+        {
+            told.Enqueue("close");
+        };
+
+        // * refused as it is called: after its state's guards, before its token
+        foreach (var (delay, written) in new[]
+        {
+            (TimeSpan.FromTicks(4_000), "0.4"),
+            (TimeSpan.FromMilliseconds(2_147_483_648), "2147483648"),
+            (Timeout.InfiniteTimeSpan, "infinite"),
+        })
+        {
+            var refused = await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() =>
+            {
+                return client.Reconnect(new TransportClientReconnectOptions { Delay = new TransportClientReconnectDelay(delay), CancellationToken = new CancellationToken(true) });
+            });
+
+            Assert.Equal($"a delay is 0 for at once, or a number of milliseconds from 1 to 2147483647, not {written} (Parameter 'Delay')", refused.Message);
+        }
+
+        await pair.Scheduler.WhenIdle();
+
+        // nothing changed: open on its pair, no reconnect told and no close, at either end
+        Assert.Equal((ReadyState.Open, before), (client.ReadyState, client.Pair));
+        Assert.Empty(told);
+        Assert.Empty(pair.Closed);
+
+        // its state's guards first: a client never connected says so
+        await using var never = pair.ClientParticipant.Client();
+
+        Assert.Equal("the transport client was never connected", (await Assert.ThrowsAsync<InvalidOperationException>(() =>
+        {
+            return never.Reconnect(new TransportClientReconnectOptions { Delay = new TransportClientReconnectDelay(Timeout.InfiniteTimeSpan) });
+        })).Message);
+    }
+
     [Fact]
     public async Task Refuses_a_reconnection_never_connected_under_way_while_it_connects_or_given_up_already_and_ends_closed_once_its_attempts_run_out()
     {

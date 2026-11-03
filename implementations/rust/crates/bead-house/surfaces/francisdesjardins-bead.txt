@@ -455,7 +455,7 @@ crate::broker::participant
     pub body_grace_period: Option<Duration>
     pub require_delivery: Option<BrokerDelivery>
     pub reconnect: Option<TransportClientReconnectOptions>
-    pub is_reconnecting: Option<bool>
+    pub reconnects: Option<bool>
     pub maximum_held_envelope_bytes: Option<u64>
     derives Clone, Debug, Default
   struct BrokerRefusal #[non_exhaustive]

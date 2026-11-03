@@ -50,7 +50,7 @@ use crate::duration::{NEVER, hold, hold_finite};
 use crate::errors::{ConnectError, ProgrammerError, TransportError};
 use crate::owner::{Owner, WeakOwner};
 use crate::router::types::{BoxFuture, ConnectionHandle, Gauges, RouterError, TransportMessage};
-use crate::transport::{ListenerId, Listeners, TransportClientReconnectOptions, attempting};
+use crate::transport::{ListenerId, Listeners, TransportClientReconnectOptions, attempting, held};
 
 /// How long a connection is silent before it is pinged, and a ping unanswered before it is closed,
 /// by default (spec 15.23): 30 seconds.
@@ -86,6 +86,26 @@ pub(crate) fn reported(message: String) -> RouterError {
     RouterError::Other(Arc::new(std::io::Error::other(message)))
 }
 
+// its reconnection's end, reported in the other sides' words, what ended it its source: a
+// duration's refusal among it, by its code
+#[derive(Debug)]
+struct ReconnectionEnded {
+    message: String,
+    cause: TransportError,
+}
+
+impl fmt::Display for ReconnectionEnded {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(&self.message)
+    }
+}
+
+impl std::error::Error for ReconnectionEnded {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        Some(&self.cause)
+    }
+}
+
 /// How a broker's participant is built (spec 15.21, 15.23).
 #[derive(Debug, Clone, Default)]
 #[non_exhaustive]
@@ -115,11 +135,15 @@ pub struct BrokerParticipantOptions {
     /// built (spec 15.19); none when none.
     pub require_delivery: Option<BrokerDelivery>,
     /// How its link connects again once lost, each time a new incarnation (spec 15.21): a second
-    /// between attempts, without end, when none.
+    /// between attempts when none; its attempts without end when it names none; its fixed delay
+    /// held as it is built, whatever `reconnects`. Its signal is read before each attempt and during
+    /// each wait, an attempt under way not cut short; a stop ends it at its next attempt. Once it
+    /// ends it is reported, what ended it the report's source, and the next start or connect links
+    /// it anew.
     pub reconnect: Option<TransportClientReconnectOptions>,
     /// Whether its link connects again once lost, as `reconnect` says: true when none; false leaves
     /// it down, reported, until a start or a connect links it anew.
-    pub is_reconnecting: Option<bool>,
+    pub reconnects: Option<bool>,
     /// What it holds of the envelopes of one connection its router paused, past which it loses that
     /// connection, a CLOSE of 4000 (spec 15.23); none bounds each by that connection's
     /// `maximumUnsentBytes`, its transport's. Charged to no budget of its parts.
@@ -348,7 +372,8 @@ impl fmt::Display for BrokerRefusedError {
 
 impl std::error::Error for BrokerRefusedError {}
 
-// a link's start, shared by every start until one fails
+// a link's start, shared by every start until one fails, or its link went down and stays down: no
+// reconnection, or one that ended
 struct Starting {
     outcome: watch::Sender<Option<Result<(), BrokerError>>>,
 }
@@ -398,7 +423,7 @@ pub(crate) struct Config {
     // what it holds of one connection paused, past which it loses it; none, its maximumUnsentBytes
     maximum_held_envelope_bytes: Option<u64>,
     reconnect: TransportClientReconnectOptions,
-    is_reconnecting: bool,
+    reconnects: bool,
     status: Mutex<Status>,
     live: watch::Sender<bool>,
     // the connections held, their counts read for its gauges
@@ -1732,7 +1757,7 @@ impl ParticipantState {
         config.transition("down", ended);
 
         // * no reconnection: it stays down, said so, and the next start or connect links it anew
-        if !config.is_reconnecting {
+        if !config.reconnects {
             locked(&config.status).starting = None;
             config.report(&reported(format!("the link of {} went down", config.id)));
 
@@ -1809,12 +1834,16 @@ async fn relinking(
     let config = Arc::clone(&inner.config);
     let mut options = config.reconnect.clone();
 
+    // * without end unless its application bounds it
     options.maximum_attempts = Some(options.maximum_attempts.unwrap_or(u32::MAX));
     options.signal = Some(fenced);
 
-    let attempts = options.maximum_attempts.unwrap_or(u32::MAX);
+    // the attempts made, which its end's words count
+    let mut attempts = 0_u32;
     let relinked = attempting((&config.clock, &options), |_signal| {
         let linking = participant.upgrade();
+
+        attempts = attempts.saturating_add(1);
 
         async move {
             let Some(inner) = linking else {
@@ -1846,9 +1875,14 @@ async fn relinking(
         if status.is_taken_over {
             return;
         }
+
+        // * ended: it stays down, and the next start or connect links it anew
+        if relinked.is_err() {
+            status.starting = None;
+        }
     }
 
-    let ended = match relinked {
+    let cause = match relinked {
         Ok(()) => {
             inner
                 .owner
@@ -1860,20 +1894,25 @@ async fn relinking(
 
             return;
         }
-        Err(TransportError::Reconnect(_)) => format!(
+        Err(cause) => cause,
+    };
+    let message = if matches!(cause, TransportError::Reconnect(_)) {
+        format!(
             "the link of {} went down, and {attempts} attempts did not bring it back",
             config.id
-        ),
-        Err(error) => format!(
-            "the link of {} went down, and its reconnection ended: {error}",
+        )
+    } else {
+        format!(
+            "the link of {} went down, and its reconnection ended: {cause}",
             config.id
-        ),
+        )
     };
+    let ended = RouterError::Other(Arc::new(ReconnectionEnded { message, cause }));
 
     inner
         .owner
         .offer(Box::new(move |state: &mut ParticipantState| {
-            state.config.report(&reported(ended));
+            state.config.report(&ended);
         }));
 }
 
@@ -2086,6 +2125,11 @@ impl BrokerParticipant {
             "bodyGracePeriod",
             options.body_grace_period.unwrap_or(BODY_GRACE_PERIOD),
         )?;
+        let reconnect = options.reconnect.clone().unwrap_or_default();
+
+        // * a fixed delay held as it is given, whether or not it reconnects (spec 1.4)
+        held(&reconnect)?;
+
         let inbox = vec![root.clone(), "i".to_owned(), id.clone()];
         // * asked by its inbox's topic, which a broker that counts a packet's every byte needs
         let receive_bound = adapter.receive_bound(&inbox).min(LARGEST_BOUND);
@@ -2120,8 +2164,8 @@ impl BrokerParticipant {
             heartbeat,
             receive_bound,
             maximum_held_envelope_bytes: options.maximum_held_envelope_bytes,
-            reconnect: options.reconnect.clone().unwrap_or_default(),
-            is_reconnecting: options.is_reconnecting.unwrap_or(true),
+            reconnect,
+            reconnects: options.reconnects.unwrap_or(true),
             status: Mutex::new(Status {
                 incarnation: 0,
                 is_stopped: false,

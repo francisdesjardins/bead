@@ -2,18 +2,10 @@
 
 // dependencies
 
-import { assertHeld, assertHeldDelay, type IClock, PLATFORM_CLOCK } from '../shared/clock';
+import { assertHeld, PLATFORM_CLOCK } from '../shared/clock';
 import { ERROR_EVENT, RECONNECT_EVENT } from '../shared/constants';
-import { createPromise } from '../shared/create-promise';
 import { createEmitter } from '../shared/emitter';
-import {
-  CancelError,
-  ProgrammerError,
-  ReconnectError,
-  toCancelError,
-  toError,
-  wrapReason,
-} from '../shared/errors';
+import { ProgrammerError, toCancelError, toError } from '../shared/errors';
 import { createEventMethods, createReadyStateMethods } from '../shared/lifecycle';
 import { noop } from '../shared/noop';
 import {
@@ -21,6 +13,11 @@ import {
   setReadyStateClosed,
   setReadyStateReconnecting,
 } from '../shared/ready-state';
+import {
+  assertHeldReconnection,
+  attemptReconnection,
+  reconnectionCancelOf,
+} from '../shared/reconnection';
 import { dispose } from './symbols';
 import type {
   ITransportClient,
@@ -113,9 +110,6 @@ export const RECONNECT_DEFAULTS = Object.freeze({
   maximumAttempts: 5,
 } satisfies ITransportClientReconnectOptions);
 
-/** What a reconnection its signal ended rejects with, as the C# side words it. */
-const RECONNECTION_CANCELLED = 'the reconnection was cancelled';
-
 // a field's value, and so a credential an `Authorization` carries (RFC 9110 §5.5): visible ASCII,
 // spaces and tabs alone, none first or last, which a field cannot keep
 const FIELD_VALUE = /^(?:[!-~](?:[\t -~]*[!-~])?)?$/u;
@@ -129,23 +123,6 @@ const FIELD_VALUE = /^(?:[!-~](?:[\t -~]*[!-~])?)?$/u;
  */
 export const isFieldValue = (value: string): boolean => {
   return FIELD_VALUE.test(value);
-};
-
-/** The {@link CancelError} a reconnection its `signal` ended rejects with, its reason the `cause`. */
-const reconnectionCancelOf = (signal: AbortSignal): CancelError => {
-  return new CancelError(RECONNECTION_CANCELLED, { cause: signal.reason });
-};
-
-const sleep = (
-  delay: number,
-  { clock, signal }: { clock: IClock; signal: AbortSignal | undefined }
-) => {
-  return createPromise(
-    (resolve) => {
-      resolve();
-    },
-    { clock, delay, signal }
-  );
 };
 
 // definition
@@ -326,9 +303,8 @@ export const createTransportClient = <
         );
       }
 
-      if (Number.isNaN(maximumAttempts)) {
-        throw new ProgrammerError('maximumAttempts is not a number');
-      }
+      // * held as it is called, before anything moves: a fixed delay out of bounds among it
+      assertHeldReconnection({ delay, maximumAttempts });
 
       // before the dispose below, so an already aborted signal leaves an open connection alone
       if (signal?.aborted) {
@@ -346,79 +322,19 @@ export const createTransportClient = <
 
       setReadyStateReconnecting(client);
 
-      const attemptConnect = (): Promise<void> => {
-        isAttempting = true;
-
-        try {
-          return client.connect({ ...target, signal });
-        } finally {
-          isAttempting = false;
-        }
-      };
-
-      let previousDelay: number | undefined;
-
       try {
-        // an abort between attempts needs no check here: `connect` is handed the signal and rejects
-        // at once when it is aborted, which the catch below reports as the CancelError
-        for (let attempt = 1; ; attempt += 1) {
-          try {
-            await attemptConnect();
+        await attemptReconnection(
+          (attempting) => {
+            isAttempting = true;
 
-            break;
-          } catch (reason) {
-            if (signal?.aborted) {
-              throw reconnectionCancelOf(signal);
+            try {
+              return client.connect({ ...target, signal: attempting });
+            } finally {
+              isAttempting = false;
             }
-
-            // a misuse an attempt met, the next would meet again
-            if (reason instanceof ProgrammerError) {
-              throw reason;
-            }
-
-            if (attempt >= maximumAttempts) {
-              throw new ReconnectError(`attempt ${String(maximumAttempts)} reached`, {
-                cause: reason,
-              });
-            }
-          }
-
-          let nextDelay: number;
-
-          try {
-            nextDelay = typeof delay === 'function' ? delay(previousDelay, attempt) : delay;
-          } catch (reason) {
-            throw wrapReason(ProgrammerError, reason);
-          }
-
-          // held before "tap" hears it: 0 waits none, and never would wait for ever
-          nextDelay = assertHeldDelay('a delay', nextDelay);
-
-          // armed before "tap" is told, so whoever moves the clock once told moves it past the wait
-          const pausing = new AbortController();
-          const waiting = sleep(nextDelay, {
-            clock: client.clock,
-            signal:
-              signal === undefined ? pausing.signal : AbortSignal.any([signal, pausing.signal]),
-          });
-
-          try {
-            tap?.(nextDelay, attempt);
-          } catch (reason) {
-            pausing.abort();
-            await waiting.catch(noop);
-
-            throw reason;
-          }
-
-          previousDelay = nextDelay;
-
-          try {
-            await waiting;
-          } catch (reason) {
-            throw signal?.aborted === true ? reconnectionCancelOf(signal) : reason;
-          }
-        }
+          },
+          { clock: client.clock, delay, maximumAttempts, signal, tap }
+        );
 
         if (signal?.aborted) {
           await client.disconnect().catch(noop);

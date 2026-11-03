@@ -3076,12 +3076,6 @@ src/transport/client/types.ts IMessageEventLike
     data: unknown
 src/transport/client/types.ts ITransportClient
   interface ITransportClient<Socket extends object = object, ConnectOptions extends ITransportClientConnectOptions = ITransportClientAddressOptions> extends IReadyStateMethods
-    isClosed(): boolean
-    isClosing(): boolean
-    isConnecting(): boolean
-    isOpen(): boolean
-    isReconnecting(): boolean
-    isUninitialized(): boolean
     readonly clock: IClock
     readonly isSecure: boolean
     socket: Socket | null
@@ -3099,6 +3093,12 @@ src/transport/client/types.ts ITransportClient
     resume(): void
     send(message: ITransportMessage): Promise<void>
     [Symbol.asyncDispose](): Promise<void>
+    isClosed(): boolean
+    isClosing(): boolean
+    isConnecting(): boolean
+    isOpen(): boolean
+    isReconnecting(): boolean
+    isUninitialized(): boolean
 src/transport/client/types.ts ITransportClientAddressOptions
   interface ITransportClientAddressOptions extends ITransportClientConnectOptions
     host: string
@@ -3800,7 +3800,8 @@ src/transport/shared/broker-participant.ts IBrokerParticipantOptions
     maximumHeldEnvelopeBytes?: number | undefined
     maximumEnvelopePartsBytes?: number | undefined
     minimumBodyBytesPerSecond?: number | undefined
-    reconnect?: | false | {delay?: number | undefined; maximumAttempts?: number | undefined; signal?: AbortSignal | undefined} | undefined
+    reconnect?: ITransportClientReconnectOptions | undefined
+    reconnects?: boolean | undefined
     requireDelivery?: BrokerDelivery | undefined
     root?: string | undefined
 src/transport/shared/broker-participant.ts IBrokerParticipantPort

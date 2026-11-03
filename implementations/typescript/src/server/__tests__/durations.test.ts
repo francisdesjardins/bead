@@ -35,6 +35,7 @@ import {
 import {
   createTransportClient,
   dispose,
+  getReadyState,
   setReadyStateClosed,
   setReadyStateOpen,
   type ITransportClientAddressOptions,
@@ -1571,16 +1572,22 @@ const createFailingClient = (clock: TestClock) => {
   return { client, connects };
 };
 
-// a reconnection's delay, a function's answer or a number: its tap hears it, its wait is due at it,
-// and the attempt comes then, not before; refused, nothing heard, no attempt more, and closed
+// a reconnection's delay: its tap hears it, its wait due at it, the attempt then; refused, a number
+// as reconnect is called, nothing moved, and a function's answer at its attempt, then closed
 const reconnectionOf = (as: 'function' | 'number'): Way => {
   return async (given) => {
     const clock = createTestClock();
     const { client, connects } = createFailingClient(clock);
     const taps: number[] = [];
     const duration = durationOf(given);
+    let told = 0;
 
     await expect(client.connect({ host, port: 1 })).rejects.toBeInstanceOf(ConnectError);
+    client.on('reconnect', () => {
+      told += 1;
+    });
+
+    const before = getReadyState(client);
 
     const reconnecting = watched(
       client.reconnect({
@@ -1602,10 +1609,19 @@ const reconnectionOf = (as: 'function' | 'number'): Way => {
 
     if (taps.length === 0) {
       return {
-        moved: movedOf({
-          'an attempt more': connects.length > 2,
-          'the client open': !client.isClosed(),
-        }),
+        moved: movedOf(
+          as === 'number'
+            ? {
+                'an attempt': connects.length > 1,
+                'a reconnect told': told > 0,
+                'the client moved': getReadyState(client) !== before,
+              }
+            : {
+                'an attempt more': connects.length > 2,
+                'a reconnect told but once': told !== 1,
+                'the client open': !client.isClosed(),
+              }
+        ),
         refusal: await reconnecting.settled,
       };
     }
@@ -1627,6 +1643,79 @@ const reconnectionOf = (as: 'function' | 'number'): Way => {
     expect([connects.length, taps]).toEqual([3, [held]]);
 
     return { held };
+  };
+};
+
+// a participant whose link went down, its first attempt refused: the delay its tap hears, armed at
+// its due; refused, a number as it is built, and a function's answer as the report's cause
+const reconnectionOfParticipant = (as: 'function' | 'number'): Way => {
+  return async (given) => {
+    const clock = createTestClock();
+    const adapter = createMemoryBroker({ clock }).adapter({ id: 'ada' });
+    const duration = durationOf(given);
+    const taps: number[] = [];
+    const reported: Error[] = [];
+    const building = attempt(() => {
+      return createBrokerParticipant({
+        adapter,
+        clock,
+        heartbeat: Infinity,
+        reconnect: {
+          delay:
+            as === 'number'
+              ? duration
+              : () => {
+                  return duration;
+                },
+          // ! bounded: at once, it would attempt without end
+          maximumAttempts: 2,
+          tap: (nextDelay) => {
+            taps.push(nextDelay);
+          },
+        },
+      });
+    });
+
+    if ('refusal' in building) {
+      return {
+        moved: movedOf({ 'its link started': adapter.isLinked }),
+        refusal: building.refusal,
+      };
+    }
+
+    const participant = building.built;
+
+    participant.on('error', (error) => {
+      reported.push(error);
+    });
+    await participant.start();
+    adapter.lose();
+    // its broker holds its id's link of another start already: its first attempt is refused
+    await adapter.start();
+    await turnsUntil(() => {
+      return taps.length > 0 || reported.length > 0;
+    });
+
+    const delays = delaysOn(clock);
+
+    await participant.stop();
+
+    if (taps.length > 0) {
+      const [held = 0] = taps;
+
+      // * on the clock it is given: a timer armed at the due its tap heard, none for at once
+      expect(delays, 'armed at its due').toEqual(held === 0 ? [] : [held]);
+
+      return { held };
+    }
+
+    expect(as, 'a number refused past its build').toBe('function');
+    expect(reported, 'reported once').toHaveLength(1);
+
+    return {
+      moved: movedOf({ 'its link up': participant.isLinked }),
+      refusal: reported[0]?.cause,
+    };
   };
 };
 
@@ -1925,6 +2014,13 @@ const PLAYED: Readonly<Record<string, IPlayed>> = Object.freeze({
   'brokerParticipant.bodyGracePeriod': {
     phrase: 'bodyGracePeriod',
     ways: { options: bodyGracePeriodOfParticipant },
+  },
+  'brokerParticipant.reconnectionDelay': {
+    phrase: 'a delay',
+    ways: {
+      function: reconnectionOfParticipant('function'),
+      number: reconnectionOfParticipant('number'),
+    },
   },
   // ! a Keep Alive is a Two Byte Integer of seconds: its ceiling 65,535 of them
   'mqttBrokerAdapter.keepAlive': {

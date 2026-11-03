@@ -541,6 +541,57 @@ test.describe('createBrokerTransportClient', () => {
     await ada.stop();
   });
 
+  // spec 1.4
+  test('refuses a fixed delay out of bounds as reconnect is called, nothing changed', async () => {
+    const broker = createMemoryBroker();
+    const participant = createBrokerParticipant({ adapter: broker.adapter({ id: 'server' }) });
+    const server = participant.transportServer({ names: ['interop'] });
+    const ada = createBrokerParticipant({ adapter: broker.adapter({ id: 'ada' }) });
+    const client = ada.transportClient();
+    const aborted = AbortSignal.abort();
+    const told: string[] = [];
+    const closed: string[] = [];
+
+    await server.start();
+    server.on('close', (_wasClean, connectionHandle) => {
+      closed.push(connectionHandle);
+    });
+    await client.connect({ server: 'interop' });
+    client.on('reconnect', () => {
+      told.push('reconnect');
+    });
+    client.on('close', () => {
+      told.push('close');
+    });
+
+    const before = client.socket;
+
+    // * refused as it is called: after its state's guards, before its signal
+    for (const [delay, written] of [
+      [0.4, '0.4'],
+      [2 ** 31, '2147483648'],
+      [Infinity, 'Infinity'],
+    ] as const) {
+      await expect(client.reconnect({ delay, signal: aborted }), written).rejects.toThrow(
+        new ProgrammerError(
+          `a delay is 0 for at once, or a number of milliseconds from 1 to 2147483647, not ${written}`
+        )
+      );
+    }
+
+    await turn();
+
+    // nothing changed: open on its pair, no reconnect told and no close, at either end
+    expect([client.isOpen(), client.socket === before, told, closed]).toEqual([true, true, [], []]);
+
+    // its state's guards first: a client never connected says so
+    await expect(ada.transportClient().reconnect({ delay: Infinity })).rejects.toThrow(
+      new ProgrammerError('the transport client was never connected')
+    );
+
+    await Promise.all([participant.stop(), ada.stop()]);
+  });
+
   test('refuses a reconnection never connected, under way, while it connects, or given up already, and ends closed once its attempts run out', async () => {
     const broker = createMemoryBroker();
     const participant = createBrokerParticipant({ adapter: broker.adapter({ id: 'server' }) });

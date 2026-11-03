@@ -29,7 +29,7 @@ internal sealed class BrokerPair : IAsyncDisposable
         ClientParticipant = new BrokerParticipant(ClientAdapter, new BrokerParticipantOptions
         {
             Heartbeat = options.Heartbeat,
-            Reconnect = new TransportClientReconnectOptions { Delay = Immediately, MaximumAttempts = int.MaxValue },
+            Reconnect = new TransportClientReconnectOptions { Delay = Immediately },
             Scheduler = Scheduler,
         });
         Server = ServerParticipant.Server(new BrokerTransportServerOptions { Names = ["interop"] });

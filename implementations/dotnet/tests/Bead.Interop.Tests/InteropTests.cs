@@ -1205,11 +1205,7 @@ public sealed class InteropTests(InteropTests.TypeScriptServer server, InteropTe
                     var adapter = new CopyingAdapter(linking.AdapterOf(("cs-client", relay.Uri)));
                     var participant = new BrokerParticipant(adapter, new BrokerParticipantOptions
                     {
-                        Reconnect = new TransportClientReconnectOptions
-                        {
-                            Delay = new TransportClientReconnectDelay(TimeSpan.FromMilliseconds(100)),
-                            MaximumAttempts = int.MaxValue,
-                        },
+                        Reconnect = new TransportClientReconnectOptions { Delay = new TransportClientReconnectDelay(TimeSpan.FromMilliseconds(100)) },
                     });
 
                     await participant.Start();
