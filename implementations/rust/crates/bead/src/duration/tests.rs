@@ -43,18 +43,13 @@ fn holds_a_duration_under_a_ceiling_of_its_own_as_under_the_timers_refusing_one_
                 DurationRefusal::PastTheCeiling
             };
             assert_eq!(refused.reason(), Some(Refusal::Duration(reason)));
-            let written = if given == NEVER {
-                "Duration::MAX".to_owned()
-            } else {
-                format!("{given:?}")
-            };
-            assert_eq!(
-                refused.message(),
-                format!(
-                    "a duration is a duration of whole milliseconds from 1 to 65535000, not {written}"
+            assert!(
+                refused.message().starts_with(
+                    "a duration is a duration of whole milliseconds from 1 to 65535000, not "
                 ),
-                "{}",
-                input.name
+                "{} names its ceiling and value: {}",
+                input.name,
+                refused.message()
             );
         } else {
             assert_eq!(
@@ -77,14 +72,17 @@ fn holds_a_duration_under_a_ceiling_of_its_own_as_under_the_timers_refusing_one_
             ceiling
         );
     }
-    for extra in [Duration::from_micros(500), Duration::from_millis(1)] {
+    for (extra, written) in [
+        (Duration::from_micros(500), "65535000.5"),
+        (Duration::from_millis(1), "65535001"),
+    ] {
         let given = ceiling.saturating_add(extra);
         assert_eq!(
             hold_within("a duration", given, &options)
                 .expect_err("past the ceiling before rounding")
                 .message(),
             format!(
-                "a duration is a duration of whole milliseconds from 1 to 65535000, not {given:?}"
+                "a duration is a duration of whole milliseconds from 1 to 65535000, not {written} milliseconds"
             )
         );
     }
@@ -208,13 +206,13 @@ fn a_duration_finer_than_a_tick_is_held_as_written_on_the_typescript_side_and_tr
         hold_delay("a duration", under)
             .expect_err("under a millisecond")
             .message(),
-        "a duration is 0 for at once, or a duration of whole milliseconds from 1 to 2147483647, not 10ns"
+        "a duration is 0 for at once, or a duration of whole milliseconds from 1 to 2147483647, not 0.00001 milliseconds"
     );
     assert_eq!(
         hold("a duration", under)
             .expect_err("under a millisecond")
             .message(),
-        "a duration is a duration of whole milliseconds from 1 to 2147483647, or Duration::MAX for never, not 10ns"
+        "a duration is a duration of whole milliseconds from 1 to 2147483647, or Duration::MAX for never, not 0.00001 milliseconds"
     );
     assert!(
         hold("a duration", past)
@@ -222,4 +220,23 @@ fn a_duration_finer_than_a_tick_is_held_as_written_on_the_typescript_side_and_tr
             .message()
             .starts_with("a duration is a duration of whole milliseconds from 1 to 2147483647")
     );
+}
+
+#[test]
+fn writes_each_refused_value_in_milliseconds_without_losing_its_fraction() {
+    for (given, written) in [
+        (Duration::ZERO, "0"),
+        (Duration::from_nanos(1), "0.000001"),
+        (Duration::from_micros(500), "0.5"),
+        (Duration::from_millis(2_147_483_648), "2147483648"),
+    ] {
+        assert_eq!(
+            hold_finite("timeout", given)
+                .expect_err("refused")
+                .message(),
+            format!(
+                "timeout is a duration of whole milliseconds from 1 to 2147483647, not {written} milliseconds"
+            )
+        );
+    }
 }
