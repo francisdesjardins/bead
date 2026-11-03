@@ -242,3 +242,64 @@ async fn sends_a_payload_in_one_envelope_to_its_limit_and_one_byte_more_as_a_tra
         Err(CallError::Disconnected(_))
     ));
 }
+
+#[test]
+fn places_a_payload_whole_up_to_its_envelope_as_a_transfer_past_it_and_refuses_one_past_its_limit_a_procedures_held_within_the_routers()
+ {
+    use crate::envelope::{EnvelopeHeader, header_bytes_of};
+    use crate::router::parts::{Placed, Placement};
+    use crate::router::types::limits_of;
+
+    let options = RouterLimitsOptions {
+        buffered_bytes_budget: Some(1_024),
+        maximum_payload_bytes: Some(1_024),
+        ..limits()
+    };
+    let placement = Placement::new(RouterSide::Server, limits_of(&options).expect("the limits"));
+    let header = EnvelopeHeader::Request(scripted_header(1));
+    let whole = usize::try_from(placement.whole_bytes)
+        .expect("a small envelope")
+        .saturating_sub(header_bytes_of(&header).expect("the header fits"));
+    assert_eq!(placement.whole_bytes, 64);
+    assert!(matches!(
+        placement.transfer_of(&Bytes::from(vec![0; whole]), (&header, 1_024)),
+        Ok(Placed::Whole)
+    ));
+    let Ok(Placed::Transfer(transfer)) = placement.transfer_of(
+        &Bytes::from(vec![0; whole.saturating_add(1)]),
+        (&header, 1_024),
+    ) else {
+        panic!("one more byte goes as a transfer")
+    };
+    assert_eq!(
+        transfer.total(),
+        u64::try_from(whole)
+            .expect("a small payload")
+            .saturating_add(1)
+    );
+    let failure = placement
+        .transfer_of(&Bytes::from(vec![0; 9]), (&header, 8))
+        .expect_err("the payload exceeds its limit");
+    assert_eq!(failure.code(), ProtocolCode::PAYLOAD_TOO_LARGE.get());
+    assert_eq!(failure.side(), Some(RouterSide::Server));
+    assert_eq!(failure.scope(), crate::constants::FailureScope::Protocol);
+    assert_eq!(failure.detail(), "a payload is 8 bytes at most, not 9");
+    assert_eq!(
+        [Some(8), Some(4_096), None].map(|bound| placement.payload_limit_of(bound)),
+        [8, 1_024, 1_024]
+    );
+    for bound in [None, Some(1), Some(8)] {
+        limits_of(&RouterLimitsOptions {
+            maximum_payload_bytes: bound,
+            ..RouterLimitsOptions::default()
+        })
+        .expect("a valid payload limit");
+    }
+    limits_of(&RouterLimitsOptions {
+        maximum_payload_bytes: Some(0),
+        ..RouterLimitsOptions::default()
+    })
+    .expect_err("zero is not a payload limit");
+    // Option<u64> admits none, a positive integer or zero; negatives, fractions, strings and
+    // null are not values of this API. Its runtime guard refuses the remaining invalid value.
+}
