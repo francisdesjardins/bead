@@ -27,7 +27,7 @@ type Sessions = Arc<Mutex<Vec<(u32, Option<CallSession>)>>>;
 fn answering(sessions: &Sessions) -> ResolveFn {
     let sessions = Arc::clone(sessions);
     Arc::new(move |props| {
-        locked(&sessions).push((props.header.call_id, props.session));
+        locked(&sessions).push((props.header.call_id, props.session.as_deref().cloned()));
         Box::pin(async move {
             props
                 .answerer

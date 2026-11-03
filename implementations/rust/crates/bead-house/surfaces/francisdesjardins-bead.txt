@@ -1206,7 +1206,7 @@ crate::managers::service
     pub connection_handle: ConnectionHandle
     pub header: RequestHeader
     pub payload: T
-    pub session: Option<CallSession>
+    pub session: Option<Arc<CallSession>>
     pub signal: Signal
     derives Clone, Debug
   struct Response<Res: PayloadCodec>
@@ -1463,7 +1463,7 @@ crate::router::core
   struct AdmissionRequest
     pub connection_handle: ConnectionHandle
     pub header: RequestHeader
-    pub session: Option<CallSession>
+    pub session: Option<Arc<CallSession>>
     implements Debug
     derives Clone
   struct AdmissionRefusal
@@ -1480,7 +1480,7 @@ crate::router::core
     pub connection_handle: ConnectionHandle
     pub header: RequestHeader
     pub payload: Bytes
-    pub session: Option<CallSession>
+    pub session: Option<Arc<CallSession>>
     pub signal: Signal
     pub answerer: Arc<dyn Answerer>
     implements Debug

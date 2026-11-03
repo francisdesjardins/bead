@@ -276,7 +276,7 @@ impl Side for ServerState {
             handler,
             session,
         } = answer;
-        let (end, identifier) = subscribing_of(session.as_ref());
+        let (end, identifier) = subscribing_of(session.as_deref());
         let call_id = header.call_id;
 
         // a call in flight whose credential's session ended meanwhile keeps it anew as its answer
@@ -1188,7 +1188,7 @@ fn subscribe(state: &mut ServerState, dispatch: &Arc<Dispatch>) -> Result<u32, C
         .lock()
         .unwrap_or_else(PoisonError::into_inner)
         .clone();
-    let (end, identifier) = subscribing_of(session.as_ref());
+    let (end, identifier) = subscribing_of(session.as_deref());
     let call = SubscribingCall {
         call_id: header.call_id,
         connection_handle: Arc::clone(handle),

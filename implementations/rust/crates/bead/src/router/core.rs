@@ -90,8 +90,8 @@ pub struct AdmissionRequest {
     pub connection_handle: ConnectionHandle,
     /// Its header, a `JWT`'s token left out.
     pub header: RequestHeader,
-    /// The call's session; none when the call runs in none.
-    pub session: Option<CallSession>,
+    /// The call's shared session; admission and the callback receive the same allocation.
+    pub session: Option<Arc<CallSession>>,
     pub(crate) carried: Option<Carried>,
 }
 
@@ -191,7 +191,7 @@ pub(crate) struct Dispatch {
     /// Its header as a procedure is handed it: a `JWT`'s scheme alone.
     pub(crate) header: RequestHeader,
     pub(crate) handler: Mutex<Option<Arc<Handler>>>,
-    pub(crate) session: Mutex<Option<CallSession>>,
+    pub(crate) session: Mutex<Option<Arc<CallSession>>>,
     pub(crate) answered: Mutex<Option<FailureRecord>>,
     pub(crate) origin: (Option<String>, Option<u16>),
 }
@@ -228,8 +228,8 @@ pub struct ResolverProps {
     pub header: RequestHeader,
     /// Its payload, whole, still encoded.
     pub payload: Bytes,
-    /// The call's session; none when the call runs in none.
-    pub session: Option<CallSession>,
+    /// The call's shared session; admission and the callback receive the same allocation.
+    pub session: Option<Arc<CallSession>>,
     /// Aborted when the call ends before its answer.
     pub signal: Signal,
     /// What answers the call.
@@ -282,7 +282,7 @@ pub(crate) struct BeforeAnswer {
     pub(crate) header: RequestHeader,
     pub(crate) is_failure: bool,
     pub(crate) handler: Option<Arc<Handler>>,
-    pub(crate) session: Option<CallSession>,
+    pub(crate) session: Option<Arc<CallSession>>,
 }
 
 /// What undoes what a side did before an answer that did not go out.
@@ -2071,7 +2071,7 @@ fn resolve_session<S: Side>(
                     Resolved::Session(session) => {
                         let handle = Arc::clone(&dispatch.connection_handle);
 
-                        (Some(state.resolved(session, &handle)), None)
+                        (Some(Arc::new(state.resolved(session, &handle))), None)
                     }
                     Resolved::Refused(reason) => (None, Some(reason)),
                     Resolved::None => (None, None),

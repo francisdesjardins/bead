@@ -149,7 +149,10 @@ async fn hands_a_destinations_handler_the_bearer_credentials_its_call_came_with_
         )
     {
         assert_eq!(header.credential, credential(header.call_id));
-        assert_eq!(*session, Some(super::router_core_sessions::session()));
+        assert_eq!(
+            session.as_deref(),
+            Some(&super::router_core_sessions::session())
+        );
         assert!(carried.is_none(), "a procedure receives no bearer secret");
     }
     assert_eq!(locked(&handed).len(), 3);

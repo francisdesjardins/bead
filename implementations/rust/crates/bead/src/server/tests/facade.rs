@@ -351,7 +351,7 @@ async fn require_session_refuses_a_call_in_none_with_session_required_testing_th
         admission.refusal().expect("its refusal").protocol_code(),
         Some(ProtocolCode::SESSION_REQUIRED)
     );
-    request.session = Some(CallSession::default());
+    request.session = Some(Arc::new(CallSession::default()));
     assert!(
         admission.admission(RouterSide::Server)(&request)
             .expect("judged")
@@ -948,7 +948,7 @@ async fn a_request_runs_in_its_connection_s_session_presenting_none_or_its_token
                             .result(
                                 request
                                     .session
-                                    .and_then(|session| session.data)
+                                    .and_then(|session| session.data.clone())
                                     .map_or_else(|| "none".to_owned(), |data| data.to_string()),
                             )
                             .await
@@ -1012,7 +1012,10 @@ async fn a_request_runs_in_its_connection_s_session_presenting_none_or_its_token
         })
     };
     assert_eq!(
-        *locked(&held),
+        locked(&held)
+            .iter()
+            .map(|session| session.as_deref().cloned())
+            .collect::<Vec<_>>(),
         [None, data_of("ada"), data_of("ada"), data_of("bob")]
     );
     let sent = fixture.transport.envelopes(&fixture.first);

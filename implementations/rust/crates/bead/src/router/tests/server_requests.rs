@@ -156,7 +156,7 @@ async fn are_each_asked_their_session_of_its_session_of_once_their_call_id_held_
         move |request| {
             locked(&admitting).push(SessionStep::Admit(
                 request.header.call_id,
-                request.session.clone(),
+                request.session.as_deref().cloned(),
             ));
             true
         },
@@ -170,7 +170,7 @@ async fn are_each_asked_their_session_of_its_session_of_once_their_call_id_held_
         .on(Arc::new(move |request, response| {
             locked(&callbacks).push(SessionStep::Callback(
                 request.header.call_id,
-                request.session,
+                request.session.as_deref().cloned(),
             ));
             response.result("ok".to_owned())
         }))

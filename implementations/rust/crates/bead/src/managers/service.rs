@@ -1148,8 +1148,8 @@ pub struct RequestProps<T> {
     pub header: RequestHeader,
     /// Its payload, decoded.
     pub payload: T,
-    /// Its call's session.
-    pub session: Option<CallSession>,
+    /// Its call's shared session, the same allocation its admission receives.
+    pub session: Option<Arc<CallSession>>,
     /// What tells its call ended before its answer.
     pub signal: Signal,
 }

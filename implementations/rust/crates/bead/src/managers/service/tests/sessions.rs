@@ -74,14 +74,14 @@ async fn a_routers_own_handle_type_reaches_the_callback_for_the_session_manager_
 #[tokio::test]
 async fn self_admission_and_callbacks_keep_the_session_values_the_caller_hands_them() {
     let fixture = Fixture::new();
-    let ada = CallSession {
+    let ada = Arc::new(CallSession {
         data: Some(json!("ada")),
         ..CallSession::default()
-    };
-    let bob = CallSession {
+    });
+    let bob = Arc::new(CallSession {
         data: Some(json!("bob")),
         ..CallSession::default()
-    };
+    });
     let read = Arc::new(Mutex::new(Vec::new()));
     let reading = Arc::clone(&read);
     let mut dependencies = ResolverDependencies::of(JsonCodec, JsonCodec);
@@ -107,7 +107,7 @@ async fn self_admission_and_callbacks_keep_the_session_values_the_caller_hands_t
         resolver.admit.as_ref().expect("admission")(&AdmissionRequest {
             connection_handle: handle_of(1),
             header: header(),
-            session: Some(ada.clone()),
+            session: Some(Arc::clone(&ada)),
             carried: None,
         })
         .expect("admitted")
@@ -115,8 +115,8 @@ async fn self_admission_and_callbacks_keep_the_session_values_the_caller_hands_t
     );
     let recording = Arc::new(Recording::default());
     for (is_admitted, session) in [
-        (true, Some(ada.clone())),
-        (false, Some(ada.clone())),
+        (true, Some(Arc::clone(&ada))),
+        (false, Some(Arc::clone(&ada))),
         (false, None),
     ] {
         (resolver.resolve)(ResolverProps {
@@ -130,10 +130,10 @@ async fn self_admission_and_callbacks_keep_the_session_values_the_caller_hands_t
     assert_eq!(
         *locked(&read),
         [
-            ("admission", Some(ada.clone())),
-            ("callback", Some(ada.clone())),
-            ("admission", Some(ada.clone())),
-            ("callback", Some(ada.clone())),
+            ("admission", Some(Arc::clone(&ada))),
+            ("callback", Some(Arc::clone(&ada))),
+            ("admission", Some(Arc::clone(&ada))),
+            ("callback", Some(Arc::clone(&ada))),
             ("admission", None),
         ]
     );
@@ -152,7 +152,7 @@ async fn self_admission_and_callbacks_keep_the_session_values_the_caller_hands_t
     fixture.router.dispose().await;
 }
 
-async fn permissive_sessions(fixture: &Fixture, (ada, bob): (CallSession, CallSession)) {
+async fn permissive_sessions(fixture: &Fixture, (ada, bob): (Arc<CallSession>, Arc<CallSession>)) {
     let recording = Arc::new(Recording::default());
     let admitted = Arc::new(Mutex::new(Vec::new()));
     let received = Arc::new(Mutex::new(Vec::new()));
@@ -184,9 +184,9 @@ async fn permissive_sessions(fixture: &Fixture, (ada, bob): (CallSession, CallSe
         .expect("permissive registered");
     let resolver = handler(fixture, 2).await;
     for (is_admitted, session) in [
-        (false, Some(ada.clone())),
+        (false, Some(Arc::clone(&ada))),
         (false, None),
-        (true, Some(bob.clone())),
+        (true, Some(Arc::clone(&bob))),
     ] {
         (resolver.resolve)(ResolverProps {
             is_admitted,
@@ -200,6 +200,6 @@ async fn permissive_sessions(fixture: &Fixture, (ada, bob): (CallSession, CallSe
         .await
         .expect("permissive answered");
     }
-    assert_eq!(*locked(&admitted), [Some(ada.clone()), None]);
+    assert_eq!(*locked(&admitted), [Some(Arc::clone(&ada)), None]);
     assert_eq!(*locked(&received), [Some(ada), None, Some(bob)]);
 }
