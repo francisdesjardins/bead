@@ -267,6 +267,14 @@ impl SendingTransfers {
         }
     }
 
+    /// What the transfer on `call` is for, while it is held.
+    pub(crate) fn purpose_of(&self, call: &CallAddress) -> Option<SendingFor> {
+        self.sent
+            .get(&call.connection_handle)
+            .and_then(|calls| calls.get(&call.call_id))
+            .map(|sending| sending.purpose)
+    }
+
     /// Whether the transfer on `call` is still the one for `purpose`.
     pub(crate) fn is_open(&self, call: &CallAddress, purpose: SendingFor) -> bool {
         self.sent

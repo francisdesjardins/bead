@@ -15,7 +15,7 @@ use bytes::Bytes;
 use core::time::Duration;
 use std::sync::Arc;
 
-fn pattern((length, dotnet): (usize, bool)) -> Bytes {
+pub(super) fn pattern((length, dotnet): (usize, bool)) -> Bytes {
     (0..length)
         .map(|index| {
             let value = if dotnet {
@@ -28,7 +28,7 @@ fn pattern((length, dotnet): (usize, bool)) -> Bytes {
         .collect()
 }
 
-async fn asked(peer: &Peer, (handed, payload): (&Handed, Bytes)) -> Arc<dyn Answerer> {
+pub(super) async fn asked(peer: &Peer, (handed, payload): (&Handed, Bytes)) -> Arc<dyn Answerer> {
     peer.receive((
         Envelope::Request {
             header: crate::testing::core_port::scripted_header(1),
@@ -42,7 +42,7 @@ async fn asked(peer: &Peer, (handed, payload): (&Handed, Bytes)) -> Arc<dyn Answ
     Arc::clone(&seen[0].answerer)
 }
 
-async fn sent(peer: &Peer) -> Vec<Envelope> {
+pub(super) async fn sent(peer: &Peer) -> Vec<Envelope> {
     peer.sent()
         .await
         .into_iter()
@@ -53,7 +53,7 @@ async fn sent(peer: &Peer) -> Vec<Envelope> {
         .collect()
 }
 
-fn pieces(envelopes: &[Envelope]) -> Vec<(u64, bool, usize)> {
+pub(super) fn pieces(envelopes: &[Envelope]) -> Vec<(u64, bool, usize)> {
     envelopes
         .iter()
         .map(|envelope| match envelope {
@@ -79,7 +79,7 @@ fn pieces(envelopes: &[Envelope]) -> Vec<(u64, bool, usize)> {
         .collect()
 }
 
-fn payload(envelopes: &[Envelope]) -> Bytes {
+pub(super) fn payload(envelopes: &[Envelope]) -> Bytes {
     envelopes
         .iter()
         .flat_map(|envelope| match envelope {
@@ -186,7 +186,6 @@ async fn send_a_result_as_a_transfer_its_call_held_open_until_its_last_chunk_is_
 }
 
 #[tokio::test]
-#[ignore = "divergence: a credit queued after CANCEL can finish a result before its signal observer stops it"]
 async fn stop_a_result_the_peer_cancels_and_send_nothing_more_of_it_whatever_credit_comes() {
     for (total, initial) in [(100, None), (150, Some(80))] {
         let (peer, handed) = serving(false, &limits()).await;
