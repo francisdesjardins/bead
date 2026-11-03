@@ -7,15 +7,15 @@
 //   node tools/check-details.mjs             every implementation's sources
 //   node tools/check-details.mjs <file…>     those files alone
 //
-// The TypeScript side builds a detail by `detail: <error>.message`; the C# side hands
-// `<error>.Message` to a failure's constructor, or to one of a gateway's `HttpProblems`; the Rust
-// side hands an error's `Display`, a refusal's `reason()` or an error's `message()` to
-// `Failure::saying`, `Failure::application`, a `detail` field or binding, or a helper of its file
-// that hands its parameter on to one. Each site allowed carries its marker, `// ! a detail of the
-// side's own words: <why>`, on its line or among the comment lines right above it, and its file
-// counts its marked sites in `ALLOWED`: a site unmarked fails, with its file and line, and a new
-// site is marked and counted here by decision, with the test that shows what its detail says. A
-// site moved, its marker with it, still holds.
+// The TypeScript side builds a detail by `detail: <error>.message`, or hands `<error>.message` to
+// one of a gateway's `problemOf…`; the C# side hands `<error>.Message` to a failure's constructor,
+// or to one of a gateway's `HttpProblems`; the Rust side hands an error's `Display`, a refusal's
+// `reason()` or an error's `message()` to `Failure::saying`, `Failure::application`, a `detail`
+// field or binding, or a helper of its file that hands its parameter on to one. Each site allowed
+// carries its marker, `// ! a detail of the side's own words: <why>`, on its line or among the
+// comment lines right above it, and its file counts its marked sites in `ALLOWED`: a site unmarked
+// fails, with its file and line, and a new site is marked and counted here by decision, with the
+// test that shows what its detail says. A site moved, its marker with it, still holds.
 //
 // A Rust detail spans the lines rustfmt breaks it into, so the scan reads each sink's argument
 // whole, by its brackets, and reports the sink's own line. Both of its lists come from the file, as
@@ -52,7 +52,7 @@ export const ALLOWED = Object.freeze({
   'implementations/rust/crates/bead/src/router/core.rs': 1,
 });
 
-const TYPESCRIPT = /\bdetail\s*(?::|=)\s*[^,;\n]*\.message\b/;
+const TYPESCRIPT = /\bdetail\s*(?::|=)\s*[^,;\n]*\.message\b|\bproblemOf\w*\s*\([^\n]*\.message\b/;
 const CSHARP =
   /\b(?:Failure|ProtocolFailureOf|OfProtocol|FailureException|HttpProblems\.\w+)\w*\s*\([^\n]*\.Message\b/;
 // ! the marker's words are the same on every side, one space after `//`, and its why is never
