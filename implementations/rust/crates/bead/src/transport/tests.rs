@@ -3,6 +3,8 @@
 
 use super::{RECONNECT_ATTEMPTS, RECONNECT_DELAY, ReadyState, is_field_value};
 
+mod reconnection;
+
 #[test]
 fn takes_a_field_s_value_as_a_credential_visible_ascii_spaces_and_tabs_alone_none_first_or_last() {
     for value in [
