@@ -641,7 +641,8 @@ fn a_command_options_carry_every_option_of_a_request() {
 }
 
 // spec 16.11: a client's router makes requests and hears notifications, a server's makes commands;
-// the other maker is refused as it is made, after spec 16.10's reasons, and declares nothing
+// the other maker is refused as it is made, by the side before spec 16.10's reasons, and declares
+// nothing
 #[tokio::test]
 #[expect(
     clippy::too_many_lines,
@@ -668,6 +669,12 @@ async fn makes_requests_and_notifications_on_a_client_router_alone_and_commands_
     };
     let notifying =
         || NotificationDependencies::new(RequestDependencies::new(TextCodec, TextCodec), TextCodec);
+    let kinds = [
+        None,
+        Some(ProcedureKind::Request),
+        Some(ProcedureKind::Notifies),
+        Some(ProcedureKind::Command),
+    ];
 
     // on a server's router
     let registry = MetricsRegistry::new(&MetricsRegistryOptions::default()).expect("a registry");
@@ -691,43 +698,44 @@ async fn makes_requests_and_notifications_on_a_client_router_alone_and_commands_
             .map(drop)
             .map_err(told)
     };
-    for kind in [None, Some(ProcedureKind::Command)] {
-        assert_eq!(request(&of_kind(kind)), Err(by_side(COMMANDS)), "{kind:?}");
-        assert_eq!(
-            notification(&of_kind(kind)),
-            Err(by_side(NOTIFIES)),
-            "{kind:?}"
-        );
-    }
-    assert!(against(
-        &request(&of_kind(Some(ProcedureKind::Request))).expect_err("a request")
-    ));
-    for kind in [ProcedureKind::Request, ProcedureKind::Notifies] {
-        assert!(
-            against(&notification(&of_kind(Some(kind))).expect_err("refused")),
-            "{kind:?}"
-        );
-    }
-    // * out of its range before the side, as before its kind
+    let command = |procedure: &Procedure| {
+        fixture
+            .manager
+            .get_command(procedure, RequestDependencies::new(TextCodec, TextCodec))
+            .map(drop)
+            .map_err(told)
+    };
+    // * the side first, whatever the procedure: of every kind, and out of its range
     let unranged = Procedure {
         service_id: 0,
         procedure_kind: None,
         ..echo()
     };
-    for refused in [request(&unranged), notification(&unranged)] {
+    for procedure in kinds
+        .iter()
+        .map(|&kind| of_kind(kind))
+        .chain([unranged.clone()])
+    {
+        assert_eq!(request(&procedure), Err(by_side(COMMANDS)), "{procedure:?}");
         assert_eq!(
-            refused.expect_err("out of its range").0,
-            Some(Refusal::Identity(IdentityRefusal::OutOfItsRange))
+            notification(&procedure),
+            Err(by_side(NOTIFIES)),
+            "{procedure:?}"
         );
     }
+    // then spec 16.10's reasons, for the way of the maker of its side
+    for kind in [ProcedureKind::Request, ProcedureKind::Notifies] {
+        assert!(
+            against(&command(&of_kind(Some(kind))).expect_err("refused")),
+            "{kind:?}"
+        );
+    }
+    assert_eq!(
+        command(&unranged).expect_err("out of its range").0,
+        Some(Refusal::Identity(IdentityRefusal::OutOfItsRange))
+    );
     assert_eq!(registry.exposition().text, declared, "nothing declared");
-    fixture
-        .manager
-        .get_command(
-            &of_kind(None),
-            RequestDependencies::new(TextCodec, TextCodec),
-        )
-        .expect("a command, on a server's router");
+    command(&of_kind(None)).expect("a command, on a server's router");
     assert_ne!(registry.exposition().text, declared, "the command declared");
     fixture.router.dispose().await;
 
@@ -745,16 +753,39 @@ async fn makes_requests_and_notifications_on_a_client_router_alone_and_commands_
             .map(drop)
             .map_err(told)
     };
-    for kind in [
-        None,
-        Some(ProcedureKind::Request),
-        Some(ProcedureKind::Notifies),
-    ] {
-        assert_eq!(command(&of_kind(kind)), Err(by_side(REQUESTS)), "{kind:?}");
+    let request = |procedure: &Procedure| {
+        fixture
+            .manager
+            .get_request(procedure, RequestDependencies::new(TextCodec, TextCodec))
+            .map(drop)
+            .map_err(told)
+    };
+    let notification = |procedure: &Procedure| {
+        fixture
+            .manager
+            .get_notification(procedure, notifying())
+            .map(drop)
+            .map_err(told)
+    };
+    for procedure in kinds
+        .iter()
+        .map(|&kind| of_kind(kind))
+        .chain([unranged.clone()])
+    {
+        assert_eq!(command(&procedure), Err(by_side(REQUESTS)), "{procedure:?}");
     }
-    assert!(against(
-        &command(&of_kind(Some(ProcedureKind::Command))).expect_err("a command")
-    ));
+    for refused in [
+        request(&of_kind(Some(ProcedureKind::Command))),
+        notification(&of_kind(Some(ProcedureKind::Command))),
+    ] {
+        assert!(against(&refused.expect_err("a command")));
+    }
+    for refused in [request(&unranged), notification(&unranged)] {
+        assert_eq!(
+            refused.expect_err("out of its range").0,
+            Some(Refusal::Identity(IdentityRefusal::OutOfItsRange))
+        );
+    }
     assert_eq!(registry.exposition().text, declared, "nothing declared");
     fixture
         .manager

@@ -83,11 +83,11 @@ test.describe('createServiceManager', () => {
         } satisfies Required<IProcedure>;
       };
       const asked = stating(71, 'request');
-      const answered = stating(72, 'request');
+      const answered = stating(72, 'command');
       const notifying = stating(73, 'notifies');
       const request = manager.getRequest(asked, { serializer });
 
-      manager.getRequestResolver(answered, { serializer: serverSerializer })(() => {
+      manager.getCommandResolver(answered, { serializer: serverSerializer })(() => {
         return Promise.resolve();
       });
 

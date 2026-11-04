@@ -145,7 +145,7 @@ async fn counts_a_call_its_rules_refuse_before_it_goes_as_payload_invalid_starte
         .get_request(
             &echo(),
             RequestDependencies {
-                validate: Some(Arc::new(judge)),
+                validate: Some(Arc::new(|value, options| Ok(judge(value, options)))),
                 ..RequestDependencies::new(JsonCodec, JsonCodec)
             },
         )

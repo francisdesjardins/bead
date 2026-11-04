@@ -79,7 +79,7 @@ public sealed partial class ServiceManagerTests
         var asked = new Text("hello");
         var answer = new Text("hi!");
         Text? received = null;
-        var resolver = manager.GetRequestResolver(Echo, Answered())((request, response) =>
+        var resolver = manager.GetCommandResolver(Echo, Answered())((request, response) =>
         {
             received = request.Payload;
 

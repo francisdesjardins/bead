@@ -401,7 +401,7 @@ test.describe('an HTTP server and client', () => {
       .toEqual(['first', 'second']);
 
     // the server asks, and the client answers
-    client.services.getRequestResolver(ping, { serializer: text })((request, response) => {
+    client.services.getCommandResolver(ping, { serializer: text })((request, response) => {
       return response(`${request.payload} pong`);
     });
 
@@ -415,7 +415,7 @@ test.describe('an HTTP server and client', () => {
     // a call another client makes, relayed to this one
     const requester = createHTTPClient();
 
-    client.services.getRequestResolver(echo, { serializer: text })((request, response) => {
+    client.services.getCommandResolver(echo, { serializer: text })((request, response) => {
       return response(request.payload.toUpperCase());
     });
     server.router.registerDestination({ connectionHandle }, { destinationId: 5 });

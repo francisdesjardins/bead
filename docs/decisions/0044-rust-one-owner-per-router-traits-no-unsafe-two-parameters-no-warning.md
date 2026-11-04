@@ -439,18 +439,21 @@ wrapper that only changes the kind takes its source's words and source, never sa
 ResolverError>`: `ResolverError::Failure` is its procedure's own failure, answered as it is;
 `ResolverError::Other`, a boxed error, anything else, answered `PROCEDURE_FAILED` with no detail and
 reported (spec 9.0). Every other callback the spec lets throw — an admission, a verifier, a key
-set's ask, an application's codec — takes the same shape, or a boxed error where the other sides
-answer every throw alike. **A panic is its site's throw**: a resolver's seen on its `JoinHandle`,
-the others' within `catch_unwind`, a future's as it is polled, answered and reported as the throw
-it stands for, the transport going on
+set's ask, an application's codec, a rule — takes the same shape, or a boxed error where the other
+sides answer every throw alike: a rule's judgment is `Result<Judged, Box<dyn Error + Send + Sync>>`,
+its error answered `PROCEDURE_FAILED` and reported in its own words (spec 18.2). **A panic is its
+site's throw**: a resolver's seen on its `JoinHandle`, the others' within `catch_unwind`, a future's
+as it is polled, answered and reported as the throw it stands for, the transport going on
 ([0023](0023-a-transport-goes-on-through-its-listeners-throw-and-takes-nothing-new-as-it-stops.md)).
 The sites are every place the router calls the application's code: an admission, a verifier and
-its future, a key set's ask and its future, a codec as it reads and as it writes, a listener, a
-call's hooks, and a transport's `send` and what the router asks of its transport. A codec's panic
-as it reads a request is its throw other than a refusal: answered `PROCEDURE_FAILED` with no
-detail and reported, as every side answers a codec that throws other than its refusal (spec 9.0,
-17.2). Its panic as it reads a result fails the call here, undecodable; as it writes, the call
-fails with its throw and nothing goes. A hook's panic fails its own call; a `send`'s is the
+its future, a key set's ask and its future, a codec as it reads and as it writes, a rule, at a
+resolver and at a requester, a listener, a call's hooks, and a transport's `send` and what the
+router asks of its transport. A codec's panic as it reads a request is its throw other than a
+refusal: answered `PROCEDURE_FAILED` with no detail and reported, as every side answers a codec that
+throws other than its refusal (spec 9.0, 17.2). Its panic as it reads a result fails the call here,
+undecodable; as it writes, the call fails with its throw and nothing goes. A rule's panic is its
+error: at a resolver, answered `PROCEDURE_FAILED` and reported `a rule panicked: …`; at a requester,
+its call failed before anything goes. A hook's panic fails its own call; a `send`'s is the
 transport's error, the send undone and reported, as the other sides' writers take a `send` that
 throws. **A panic past those sites**, within a turn — a custom clock's, say — leaves the owner's
 state half changed with nothing to undo it: the owner ends at once, each call it waits on failed

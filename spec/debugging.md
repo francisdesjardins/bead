@@ -104,7 +104,7 @@ side, each in its platform's case:
 | Field                          | What it holds                                                                                                                   |
 | ------------------------------ | ------------------------------------------------------------------------------------------------------------------------------- |
 | `direction`                    | `tx` for a step out, `rx` for a step in                                                                                         |
-| `type`                         | `request`, `command` or `notification`                                                                                          |
+| `type`                         | `request` or `command` for a call, by its router's side (8.2); `notification` for a notification sent or heard                  |
 | `procedureId`, `procedureName` | its procedure                                                                                                                   |
 | `serviceId`, `serviceRevision` | its procedure's service                                                                                                         |
 | `startedAt`                    | the call's start, on the wall clock; a notification's, as it is sent or heard                                                   |

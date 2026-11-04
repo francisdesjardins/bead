@@ -161,6 +161,7 @@ public sealed class IdentityTests
     public void A_manager_refuses_a_resolver_off_section_16_as_it_is_asked_for_before_its_callback_is_given()
     {
         using var server = ServerOf();
+        using var client = new RouterClient(new UnconnectedClient());
 
         var services = new ServiceManager(server);
         var request = new RequestResolverDependencies<string, string> { Serializer = new ServerTexts() };
@@ -174,7 +175,7 @@ public sealed class IdentityTests
         }).Message, StringComparison.Ordinal);
         Assert.Contains("is off its form", Assert.Throws<ArgumentException>(() =>
         {
-            services.GetCommandResolver(named, request);
+            new ServiceManager(client).GetCommandResolver(named, request);
         }).Message, StringComparison.Ordinal);
         Assert.Contains("is out of its range", Assert.Throws<ArgumentException>(() =>
         {

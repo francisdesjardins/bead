@@ -181,48 +181,65 @@ public sealed partial class ServiceManagerTests
             return Assert.IsAssignableFrom<Exception>(Record.Exception(made));
         }
 
-        // * the side's refusal, as it is made, after spec 16.10's reasons
-        Assert.Contains("GetCommand", Assert.IsType<InvalidOperationException>(RefusalOf(() =>
+        ProcedureKind?[] kinds = [null, ProcedureKind.Request, ProcedureKind.Notifies, ProcedureKind.Command];
+        Procedure[] every = [.. kinds.Select((kind) =>
         {
-            onServer.GetRequest(Echo, Asked);
-        })).Message, StringComparison.Ordinal);
-        Assert.Contains("GetRequest", Assert.IsType<InvalidOperationException>(RefusalOf(() =>
-        {
-            onClient.GetCommand(Echo, Asked);
-        })).Message, StringComparison.Ordinal);
+            return Echo with { ProcedureKind = kind };
+        }), Echo with { ServiceId = 0 }];
 
-        // a notification on a server's router, by its kind: none and a command's refused by the side, a
-        // request's and one that notifies against its kind, as a requester a server's router makes
-        foreach (var kind in new ProcedureKind?[] { null, ProcedureKind.Command })
+        // * the side first, whatever the procedure: of every kind, and out of its range
+        foreach (var procedure in every)
         {
-            Assert.IsType<InvalidOperationException>(RefusalOf(() =>
+            Assert.Equal("a server's router makes commands: GetCommand", Assert.IsType<InvalidOperationException>(RefusalOf(() =>
             {
-                onServer.GetNotification(Echo with { ProcedureKind = kind }, Notified());
-            }));
+                onServer.GetRequest(procedure, Asked);
+            })).Message);
+            Assert.Equal("only a client hears notifications; a server notifies them", Assert.IsType<InvalidOperationException>(RefusalOf(() =>
+            {
+                onServer.GetNotification(procedure, Notified());
+            })).Message);
+            Assert.Equal("a client's router makes requests: GetRequest", Assert.IsType<InvalidOperationException>(RefusalOf(() =>
+            {
+                onClient.GetCommand(procedure, Asked);
+            })).Message);
         }
 
+        // then spec 16.10's reasons, for the way of the maker of its side
         foreach (var kind in new[] { ProcedureKind.Request, ProcedureKind.Notifies })
         {
             Assert.Contains("is against its kind", Assert.IsType<ArgumentException>(RefusalOf(() =>
             {
-                onServer.GetNotification(Echo with { ProcedureKind = kind }, Notified());
+                onServer.GetCommand(Echo with { ProcedureKind = kind }, Asked);
             })).Message, StringComparison.Ordinal);
         }
 
         Assert.Contains("is against its kind", Assert.IsType<ArgumentException>(RefusalOf(() =>
         {
-            onServer.GetRequest(Echo with { ProcedureKind = ProcedureKind.Request }, Asked);
+            onClient.GetRequest(Echo with { ProcedureKind = ProcedureKind.Command }, Asked);
         })).Message, StringComparison.Ordinal);
         Assert.Contains("is against its kind", Assert.IsType<ArgumentException>(RefusalOf(() =>
         {
-            onClient.GetCommand(Echo with { ProcedureKind = ProcedureKind.Command }, Asked);
+            onClient.GetNotification(Echo with { ProcedureKind = ProcedureKind.Command }, Notified());
         })).Message, StringComparison.Ordinal);
 
-        // out of its range first, whatever the side
-        Assert.Contains("is out of its range", Assert.IsType<ArgumentException>(RefusalOf(() =>
+        foreach (var made in new Action[]
         {
-            onServer.GetRequest(Echo with { ServiceId = 0 }, Asked);
-        })).Message, StringComparison.Ordinal);
+            () =>
+            {
+                onServer.GetCommand(Echo with { ServiceId = 0 }, Asked);
+            },
+            () =>
+            {
+                onClient.GetRequest(Echo with { ServiceId = 0 }, Asked);
+            },
+            () =>
+            {
+                onClient.GetNotification(Echo with { ServiceId = 0 }, Notified());
+            },
+        })
+        {
+            Assert.Contains("is out of its range", Assert.IsType<ArgumentException>(RefusalOf(made)).Message, StringComparison.Ordinal);
+        }
 
         // a maker refused declares nothing
         Assert.Empty(server.Declared);

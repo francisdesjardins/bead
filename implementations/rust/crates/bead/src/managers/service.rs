@@ -36,7 +36,7 @@ use crate::router::types::{
     ResolvedRequestOptions, RouterAnswer, RouterError, RouterLimits, RouterRequest,
     SessionIdentifier, Signal,
 };
-use crate::transport::{Listened, ListenerId};
+use crate::transport::{Listened, ListenerId, caught};
 use crate::violations::{Judged, detail_bound_of, is_refused, violations_detail_of};
 
 mod notification;
@@ -149,14 +149,6 @@ impl ServiceRouter {
         match self {
             Self::Server(router) => router.report(error, connection_handle),
             Self::Client(router) => router.report(error),
-        }
-    }
-
-    // how its requesters are declared (spec 16.11)
-    const fn requester_way(&self) -> DeclarationWay {
-        match self {
-            Self::Server(_) => DeclarationWay::ServerRequester,
-            Self::Client(_) => DeclarationWay::ClientRequester,
         }
     }
 
@@ -306,8 +298,10 @@ pub struct ValidateOptions {
     pub maximum_bytes: Option<usize>,
 }
 
-/// The rules a value is judged by.
-pub type Validate<T> = Arc<dyn Fn(&T, &ValidateOptions) -> Judged + Send + Sync>;
+/// The rules a value is judged by: its judgment, or the error of a rule that fails to judge,
+/// answered `PROCEDURE_FAILED` and reported in its own words (spec 18.2).
+pub type Validate<T> =
+    Arc<dyn Fn(&T, &ValidateOptions) -> Result<Judged, Box<dyn Error + Send + Sync>> + Send + Sync>;
 
 /// What a requester reads and writes by, and judges its request by.
 pub struct RequestDependencies<Req: PayloadCodec, Res: PayloadCodec> {
@@ -593,10 +587,9 @@ impl ServiceManager {
     ///
     /// # Errors
     ///
-    /// A [`ProgrammerError`] for a procedure off spec section 16, or against its kind for a
-    /// requester of its router (spec 16.11), then for a manager over a server's router, which
-    /// hears no notification, then for one known with another declaration or window, or a window
-    /// of 0.
+    /// A [`ProgrammerError`] for a manager over a server's router, which notifies; then for a
+    /// procedure off spec section 16, or against its kind (spec 16.11); then for one known with
+    /// another declaration or window, or a window of 0.
     pub fn get_notification<Req, Res, Not>(
         &self,
         procedure: &Procedure,
@@ -630,9 +623,9 @@ impl ServiceManager {
     ///
     /// # Errors
     ///
-    /// A [`ProgrammerError`] for a procedure off spec section 16, or against its kind for a
-    /// requester of its router (spec 16.11), then for a manager over a server's router, which
-    /// makes commands, or a procedure its router refuses to declare.
+    /// A [`ProgrammerError`] for a manager over a server's router, which makes commands; then for
+    /// a procedure off spec section 16, or against its kind (spec 16.11); then for a procedure its
+    /// router refuses to declare.
     pub fn get_request<Req, Res>(
         &self,
         procedure: &Procedure,
@@ -644,7 +637,7 @@ impl ServiceManager {
         Req::Value: Clone + fmt::Debug + Sync,
         Res::Value: Clone + fmt::Debug + Sync,
     {
-        self.check_maker((procedure, RouterSide::Client))?;
+        self.client_router((procedure, Maker::Request))?;
 
         Ok(Request {
             shared: self.requester_of(procedure, (dependencies, DebugType::Request))?,
@@ -656,9 +649,9 @@ impl ServiceManager {
     ///
     /// # Errors
     ///
-    /// A [`ProgrammerError`] for a procedure off spec section 16, or against its kind for a
-    /// requester of its router (spec 16.11), then for a manager over a client's router, which
-    /// makes requests, or a procedure its router refuses to declare.
+    /// A [`ProgrammerError`] for a manager over a client's router, which makes requests; then for
+    /// a procedure off spec section 16, or against its kind (spec 16.11); then for a procedure its
+    /// router refuses to declare.
     pub fn get_command<Req, Res>(
         &self,
         procedure: &Procedure,
@@ -670,31 +663,43 @@ impl ServiceManager {
         Req::Value: Clone + fmt::Debug + Sync,
         Res::Value: Clone + fmt::Debug + Sync,
     {
-        self.check_maker((procedure, RouterSide::Server))?;
+        self.server_router((procedure, Maker::Command))?;
 
         Ok(Command {
             shared: self.requester_of(procedure, (dependencies, DebugType::Command))?,
         })
     }
 
-    // * spec 16.10's reasons first, the kind for the way its router's requester declares, then the
-    // side a maker belongs to: a maker refused declares nothing
-    fn check_maker(
+    // * the side first: a maker that is not its router's way declares nothing (spec 16.11); then
+    // spec 16.10's three reasons for its way, its router's once the side holds; then, by its
+    // maker, the maker's own. A maker refused declares nothing
+    fn server_router(
         &self,
-        (procedure, side): (&Procedure, RouterSide),
-    ) -> Result<(), ProgrammerError> {
-        check_declaration(procedure)?;
-        check_procedure_kind(procedure, self.inner.router.requester_way())?;
+        (procedure, maker): (&Procedure, Maker),
+    ) -> Result<&RouterServer, ProgrammerError> {
+        let ServiceRouter::Server(router) = &self.inner.router else {
+            return Err(ProgrammerError::new(maker.refusal()));
+        };
 
-        match (side, self.inner.router.side()) {
-            (RouterSide::Client, RouterSide::Server) => Err(ProgrammerError::new(
-                "a server's router makes commands: get_command",
-            )),
-            (RouterSide::Server, RouterSide::Client) => Err(ProgrammerError::new(
-                "a client's router makes requests: get_request",
-            )),
-            _ => Ok(()),
-        }
+        check_declaration(procedure)?;
+        check_procedure_kind(procedure, maker.way())?;
+
+        Ok(router)
+    }
+
+    // as `server_router`, for a maker of a client's router
+    fn client_router(
+        &self,
+        (procedure, maker): (&Procedure, Maker),
+    ) -> Result<&RouterClient, ProgrammerError> {
+        let ServiceRouter::Client(router) = &self.inner.router else {
+            return Err(ProgrammerError::new(maker.refusal()));
+        };
+
+        check_declaration(procedure)?;
+        check_procedure_kind(procedure, maker.way())?;
+
+        Ok(router)
     }
 
     // the requester's shared state, declared to its router; its maker checked its side
@@ -718,13 +723,12 @@ impl ServiceManager {
         }))
     }
 
-    // a refusal is checked once, as the resolver is asked for, after the procedure's identity
+    // a refusal is checked once, as the resolver is asked for, after its maker's side and the
+    // procedure's identity
     fn assert_refusal(
         &self,
         (procedure, before_request): (&Procedure, Option<&BeforeRequest>),
     ) -> Result<(), ProgrammerError> {
-        check_declaration(procedure)?;
-
         let side = self.inner.router.side();
 
         if let Some(refusal) = before_request.and_then(BeforeRequest::refusal)
@@ -742,12 +746,14 @@ impl ServiceManager {
         Ok(())
     }
 
-    /// A resolver of `procedure`, to register with its callback.
+    /// A resolver of the request `procedure`, a server's router's alone, to register with its
+    /// callback.
     ///
     /// # Errors
     ///
-    /// A [`ProgrammerError`] for a procedure off spec section 16, or a refusal that is not an
-    /// admission's.
+    /// A [`ProgrammerError`] for a manager over a client's router, which answers commands; then for
+    /// a procedure off spec section 16, or against its kind (spec 16.11); then for a refusal that
+    /// is not an admission's.
     pub fn get_request_resolver<Req, Res>(
         &self,
         procedure: &Procedure,
@@ -757,6 +763,7 @@ impl ServiceManager {
         Req: PayloadCodec,
         Res: PayloadCodec,
     {
+        self.server_router((procedure, Maker::RequestResolver))?;
         self.assert_refusal((procedure, dependencies.before_request.as_ref()))?;
 
         Ok(ResolverOf {
@@ -767,12 +774,14 @@ impl ServiceManager {
         })
     }
 
-    /// A resolver of the command `procedure`, on a client, to register with its callback.
+    /// A resolver of the command `procedure`, a client's router's alone, to register with its
+    /// callback.
     ///
     /// # Errors
     ///
-    /// A [`ProgrammerError`] for a procedure off spec section 16, or a refusal that is not an
-    /// admission's.
+    /// A [`ProgrammerError`] for a manager over a server's router, which answers requests; then
+    /// for a procedure off spec section 16, or against its kind (spec 16.11); then for a refusal
+    /// that is not an admission's.
     pub fn get_command_resolver<Req, Res>(
         &self,
         procedure: &Procedure,
@@ -782,6 +791,7 @@ impl ServiceManager {
         Req: PayloadCodec,
         Res: PayloadCodec,
     {
+        self.client_router((procedure, Maker::CommandResolver))?;
         self.assert_refusal((procedure, dependencies.before_request.as_ref()))?;
 
         Ok(ResolverOf {
@@ -792,12 +802,14 @@ impl ServiceManager {
         })
     }
 
-    /// A resolver of `procedure` that notifies, to register with its callback.
+    /// A resolver of `procedure` that notifies, a server's router's alone, to register with its
+    /// callback: its registration gives the notifier.
     ///
     /// # Errors
     ///
-    /// A [`ProgrammerError`] for a procedure off spec section 16, or a refusal that is not an
-    /// admission's.
+    /// A [`ProgrammerError`] for a manager over a client's router, which hears notifications; then
+    /// for a procedure off spec section 16, or against its kind (spec 16.11); then for a refusal
+    /// that is not an admission's.
     pub fn get_notification_resolver<Req, Res, Not>(
         &self,
         procedure: &Procedure,
@@ -808,6 +820,9 @@ impl ServiceManager {
         Res: PayloadCodec,
         Not: PayloadCodec,
     {
+        let router = self
+            .server_router((procedure, Maker::NotificationResolver))?
+            .clone();
         let NotificationResolverDependencies {
             request,
             result,
@@ -833,8 +848,46 @@ impl ServiceManager {
                 dependencies,
                 call_type: DebugType::Request,
             },
+            router,
             notification,
         })
+    }
+}
+
+// each of a manager's six makers, its router's side's alone (spec 16.11)
+#[derive(Debug, Clone, Copy)]
+enum Maker {
+    Request,
+    Notification,
+    Command,
+    RequestResolver,
+    CommandResolver,
+    NotificationResolver,
+}
+
+impl Maker {
+    // the way it declares in, its router's once the side holds (spec 16.11)
+    const fn way(self) -> DeclarationWay {
+        match self {
+            Self::Request | Self::Notification => DeclarationWay::ClientRequester,
+            Self::Command => DeclarationWay::ServerRequester,
+            Self::RequestResolver => DeclarationWay::ServerResolver,
+            Self::CommandResolver => DeclarationWay::ClientResolver,
+            Self::NotificationResolver => DeclarationWay::ServerNotificationResolver,
+        }
+    }
+
+    // ! the words every side refuses it with on the other side's router, its maker named in this
+    // side's case
+    const fn refusal(self) -> &'static str {
+        match self {
+            Self::Request => "a server's router makes commands: get_command",
+            Self::Notification => "only a client hears notifications; a server notifies them",
+            Self::Command => "a client's router makes requests: get_request",
+            Self::RequestResolver => "a client's router answers commands: get_command_resolver",
+            Self::CommandResolver => "a server's router answers requests: get_request_resolver",
+            Self::NotificationResolver => "only a server notifies; a client hears notifications",
+        }
     }
 }
 
@@ -1060,8 +1113,13 @@ where
         let manager = &shared.manager;
         let procedure = &shared.procedure;
 
-        // * judged before it is written: PAYLOAD_INVALID, its detail under this side's bound
-        let refusal = refusal_of(shared, (&payload, resolved.destination_id));
+        // * judged before it is written: PAYLOAD_INVALID, its detail under this side's bound; a rule
+        // that fails to judge, or panics, fails the call before anything goes, as a value that
+        // does not write
+        let refusal = match refusal_of(shared, (&payload, resolved.destination_id)) {
+            Ok(refusal) => refusal,
+            Err(failed) => return Ok(ServiceCall::failed(CallError::Other(failed))),
+        };
         let encoded = match &refusal {
             Some(_) => Bytes::new(),
             None => match encoded(&shared.dependencies.request, &payload) {
@@ -1219,31 +1277,44 @@ where
     }
 }
 
+// the refusal its rules judge `payload` with, if any; or, apart, the error of a rule that fails to
+// judge, or its panic, named as a rule's
 fn refusal_of<Req: PayloadCodec, Res: PayloadCodec>(
     shared: &RequestShared<Req, Res>,
     (payload, destination_id): (&Req::Value, Option<u32>),
-) -> Option<CallError> {
-    let validate = shared.dependencies.validate.as_ref()?;
+) -> Result<Option<CallError>, TracedError> {
+    let Some(validate) = shared.dependencies.validate.as_ref() else {
+        return Ok(None);
+    };
     let limits = shared.manager.router.limits();
     let maximum_bytes = detail_bound_of(
         usize::try_from(limits.maximum_detail_bytes).unwrap_or(usize::MAX),
         usize::try_from(limits.maximum_envelope_bytes).unwrap_or(usize::MAX),
     );
-    let judged = validate(
-        payload,
-        &ValidateOptions {
-            fail_fast: Some(shared.dependencies.fail_fast),
-            maximum_bytes: Some(maximum_bytes),
-        },
-    );
+    let options = ValidateOptions {
+        fail_fast: Some(shared.dependencies.fail_fast),
+        maximum_bytes: Some(maximum_bytes),
+    };
+    let judged = judged_by(validate, (payload, &options))?;
 
-    is_refused(&judged).then(|| {
+    Ok(is_refused(&judged).then(|| {
         CallError::Failure(
             Failure::protocol(ProtocolCode::PAYLOAD_INVALID, shared.manager.router.side())
                 .saying(violations_detail_of(&judged, maximum_bytes))
                 .of_call(Some(shared.procedure.address()), destination_id),
         )
-    })
+    }))
+}
+
+// what `validate` judges `value` with, within a guard: or the error of a rule that fails to judge,
+// in its own words, or its panic, its throw named as a rule's (spec 18.2, decision 0044)
+fn judged_by<T>(
+    validate: &Validate<T>,
+    (value, options): (&T, &ValidateOptions),
+) -> Result<Judged, TracedError> {
+    caught(("a rule", || validate(value, options)))
+        .map_err(|panicked| -> TracedError { Arc::new(panicked) })
+        .and_then(|judging| judging.map_err(TracedError::from))
 }
 
 // ── Resolvers ────────────────────────────────────────────────────────────────────────────────
@@ -1791,15 +1862,10 @@ where
                 fail_fast: Some(self.fail_fast),
                 maximum_bytes: Some(maximum_bytes),
             };
-            let judging = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                validate(&value, &options)
-            }));
-            let judged = match judging {
+            let judged = match judged_by(validate, (&value, &options)) {
                 Ok(judged) => judged,
                 // a rule that fails to judge is its side's own error, answered as a resolver's
-                Err(panicked) => {
-                    let error = crate::transport::panic_error(&*panicked);
-
+                Err(error) => {
                     if let Some(step) = &step
                         && !signal.is_aborted()
                     {
@@ -1807,7 +1873,7 @@ where
                             &self.procedure,
                             Step {
                                 direction: DebugDirection::Tx,
-                                error: Some(Arc::new(error.clone())),
+                                error: Some(Arc::clone(&error)),
                                 is_answered: true,
                                 ..step.clone()
                             },
@@ -1981,6 +2047,7 @@ fn filter_of(options: &NotifyOptions) -> Option<NotifyFilter> {
 /// A resolver that notifies, its callback to come.
 pub struct NotificationResolverOf<Req: PayloadCodec, Res: PayloadCodec, Not: PayloadCodec> {
     resolver: ResolverOf<Req, Res>,
+    router: RouterServer,
     notification: Not,
 }
 
@@ -2028,6 +2095,7 @@ where
         Ok(Notifier {
             shared: Arc::new(NotifierShared {
                 manager,
+                router: self.router,
                 procedure,
                 codec: self.notification,
             }),
@@ -2037,6 +2105,8 @@ where
 
 struct NotifierShared<Not: PayloadCodec> {
     manager: Arc<Inner>,
+    // the server's router its resolver was made on: only a server notifies
+    router: RouterServer,
     procedure: Procedure,
     codec: Not,
 }
@@ -2095,20 +2165,13 @@ where
         let payload = encoded(&shared.codec, &notification)
             .map_err(|refused| RouterError::Other(Arc::new(refused)));
         let failure = payload.as_ref().err().cloned();
-        let notified = match &manager.router {
-            ServiceRouter::Server(router) => router.notify(payload, {
-                let mut request = NotifyRequest::new(shared.procedure.address());
+        let notified = shared.router.notify(payload, {
+            let mut request = NotifyRequest::new(shared.procedure.address());
 
-                request.filter = filter_of(options);
-                request.key.clone_from(&options.key);
-                request
-            }),
-            ServiceRouter::Client(_) => Box::pin(async {
-                Err(RouterError::Other(Arc::new(ProgrammerError::new(
-                    "only a server notifies; a client asks with a request",
-                ))))
-            }),
-        };
+            request.filter = filter_of(options);
+            request.key.clone_from(&options.key);
+            request
+        });
         let shared = Arc::clone(&self.shared);
 
         Box::pin(async move {

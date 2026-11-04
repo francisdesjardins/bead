@@ -34,8 +34,9 @@ descriptor. That layer needs eight things of each runtime, the same on every sid
   refuse neither a command's requester made for a request nor a subscription asked of a procedure
   that never notifies. Bead says what a call is by the router's side: "a client's router makes
   requests and answers commands, a server's the reverse" (`spec/debugging.md` 8.2), as the metrics
-  registry types it; the service manager's accessor names only pick the trace's type, and both
-  routers declare a requester alike.
+  registry types it; each of the service manager's makers belongs to one side, refused on the other
+  as it is made, so the type it gives the trace is its router's side's, and both routers declare a
+  requester alike.
 - **The codecs of section 17, public.** Generated code binds each payload to a codec by name, and
   makes a protobuf message's of its stock library's functions;
   [0016](0016-a-json-payload-has-one-form-whichever-side-writes-it.md) puts the codecs in the
@@ -97,14 +98,23 @@ Where it is checked:
 - **The service manager, by the accessor's name**: `getRequest` on a server's manager, for a
   procedure of kind `request`, passes, yet its call goes to a client, and the registry counts it a
   command. The accessor does not say the side; the router does.
-- **Each router, at its declaration, by the way it is declared. Chosen.** A router knows its side,
-  and whether a resolver notifies before it registers it: `typeof resolver.notify === 'function'`,
-  `resolver is INotificationResolver`. A notification is registered on a client's router alone. The
-  ways are `spec/identities.json`'s own, six of them: `client-resolver`, `server-resolver`,
-  `server-notification-resolver`, `client-requester`, `server-requester`, `client-notification`. A
-  resolver that notifies is a way of its own, since a server's router takes another kind of it than
-  of a plain one. The manager adds no reason of its own, and 0017's paragraph "The service manager
-  checks first where it refuses first" stands as it is: it checks the procedure's identity, once.
+- **Each router, at its declaration, and the manager, as it makes. Chosen.** A router knows its
+  side, and whether a resolver notifies before it registers it:
+  `typeof resolver.notify === 'function'`, `resolver is INotificationResolver`. A notification is
+  registered on a client's router alone. The ways are `spec/identities.json`'s own, six of them:
+  `client-resolver`, `server-resolver`, `server-notification-resolver`, `client-requester`,
+  `server-requester`, `client-notification`. A resolver that notifies is a way of its own, since a
+  server's router takes another kind of it than of a plain one. The router checks by the way it is
+  declared, for a router called directly. The manager checks its maker's side first, since the
+  router alone cannot refuse a request resolver on a client's router, which is a `client-resolver`
+  the router takes; it then checks the same way's three reasons, as 0017's paragraph "The service
+  manager checks first where it refuses first" orders them.
+
+**Ahead:** a manager typed by its side, on every side, each type carrying its side's three makers, as
+[0004](0004-one-behaviour-in-every-language.md)'s rule for a requirement that depends on an
+instantiation asks of the C# and Rust sides where their types name the case: `IClient.Services` and
+`IBeadServer.Services`, `Client::services()` and `Server::services()`. The refusal as made stays for
+a manager built over an untyped router.
 
 What each way takes, the procedure's `procedureKind` given:
 
@@ -1167,7 +1177,7 @@ Its other objections, each with its answer:
 
 | Objection                                                                                                                                                                                                                                           | Answer                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
 | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| The service manager checks the type by the accessor's name, yet Bead types a call by the router's side, so `getRequest` on a server passes; the check belongs where 0017 put identity, at the router; "no peer sees it" is no reason against a file | Accepted: verified in `spec/debugging.md` 8.2, the metrics registry and both routers' `declareRequester`. Each router checks the procedure's kind at its declaration, by the ways of `spec/identities.json`, before registering anything; the manager adds no reason, and 0017's paragraph stands. The reason joins 16.10 and the file, the user's choice                                                                                                                                                                                                           |
+| The service manager checks the type by the accessor's name, yet Bead types a call by the router's side, so `getRequest` on a server passes; the check belongs where 0017 put identity, at the router; "no peer sees it" is no reason against a file | Accepted: verified in `spec/debugging.md` 8.2, the metrics registry and both routers' `declareRequester`. Each router checks the procedure's kind at its declaration, by the ways of `spec/identities.json`, before registering anything; the manager adds the side, before them, as 0017's paragraph orders it. The reason joins 16.10 and the file, the user's choice                                                                                                                                                                                             |
 | "The procedure's type is the trace's type" is false: the trace's `type` takes `notification` and types a step; two optional members bring back a state the builder's `oneof` made impossible, then refuse it at run time                            | Accepted: verified in `spec/debugging.md` 4.1, `DebugType` on both sides, the service manager's trace of a notification, and `IDebugEvent` laid out flat. One optional member, `procedureKind`, `request`, `notifies` or `command`: the `oneof`'s two members and the plain request it means unset, since an absent member on a hand-written procedure checks nothing. No state is refused. The blueprint follows                                                                                                                                                   |
 | `createAPIServer`, `ApiServer<TApi, TData>` and their peers bring an abbreviation into Bead's names, for a layer that serves one service, and take the word the builder leaves to a per-package aggregate                                           | Accepted: verified, no name under `implementations/*/src` holds _API_, and 0003 lists the words it owns. The layer is named after a service — `createServiceServer`, `ServiceServer<TService, TData>`, `IServiceProcedure<TService>`, `./service` — the user's choice against _API_ with 0003 amended                                                                                                                                                                                                                                                               |
 | The C# `Subscriber`, a positional record struct, breaks every filter that deconstructs it, matches it by position or constructs it the day a member joins, which is item 7's only reason; and `SubscriptionPlace` stays beside it                   | Accepted: the probe gives CS8129, CS8130 and CS7036; a `readonly record struct` of `init` properties builds clean under the repository's gates with a third member against the same filters. `Subscriber` replaces the internal `SubscriptionPlace`                                                                                                                                                                                                                                                                                                                 |
