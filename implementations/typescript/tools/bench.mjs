@@ -62,7 +62,7 @@ const entry = `
   export { InteropClient } from './interop/generated/interop_bead.ts';
   export { offerInterop } from './interop/handlers.ts';
   export { fromBinary, fromJsonString, toBinary, toJsonString } from '@bufbuild/protobuf';
-  export { readProtoJson, typeRegistryOf, writeProtoJson } from './src/transcoding/json-form.ts';
+  export { createJsonForm } from './src/transcoding/json-form.ts';
   export { EverythingSchema } from './src/transcoding/__tests__/generated/transcoding_pb.ts';
 `;
 
@@ -154,19 +154,17 @@ const transcoding = (reader) => {
     return Number.parseInt(pair, 16);
   });
   const schema = reader.EverythingSchema;
-  const registry = reader.typeRegistryOf([schema]);
+  const form = reader.createJsonForm([schema]);
   const encoder = new TextEncoder();
   const decoder = new TextDecoder();
-  const body = encoder.encode(
-    reader.writeProtoJson(schema, { message: reader.fromBinary(schema, payload), registry })
-  );
+  const body = encoder.encode(form.write(schema, reader.fromBinary(schema, payload)));
   const row = { sizeBytes: body.length, unit: 'ns' };
 
   if (selected('transcoding.read.bead', row)) {
     record(
       'transcoding.read.bead',
       codec(() => {
-        return reader.toBinary(schema, reader.readProtoJson(schema, { bytes: body, registry }));
+        return reader.toBinary(schema, form.read(schema, body));
       }, 100),
       row
     );
@@ -184,9 +182,7 @@ const transcoding = (reader) => {
     record(
       'transcoding.write.bead',
       codec(() => {
-        return encoder.encode(
-          reader.writeProtoJson(schema, { message: reader.fromBinary(schema, payload), registry })
-        );
+        return encoder.encode(form.write(schema, reader.fromBinary(schema, payload)));
       }, 100),
       row
     );

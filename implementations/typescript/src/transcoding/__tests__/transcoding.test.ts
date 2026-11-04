@@ -19,11 +19,11 @@ import { createTestClock } from '../../transport/shared/__tests__/fixtures';
 import { HEARTBEAT } from '../events';
 import {
   type Arose,
-  bindRequest,
   createEventStream,
+  createHTTPBinding,
+  createJsonForm,
   type Encoding,
   EVENT_STREAM_MEDIA_TYPE,
-  eventDataOf,
   isTie,
   JsonFormError,
   type OwnFailure,
@@ -31,13 +31,10 @@ import {
   problemOfFailure,
   problemOfOwn,
   rawPathOf,
-  readProtoJson,
   type RequestPlace,
   routeIndexOf,
   templateOf,
-  typeRegistryOf,
   variablesOf,
-  writeProtoJson,
 } from '../transcoding';
 import { HTTP_ROUTES, OPENAPI_DOCUMENT } from './generated/bead_http';
 import { EdgesSchema, EverythingSchema, RequiringSchema } from './generated/transcoding_pb';
@@ -178,14 +175,16 @@ const MESSAGES: Readonly<Record<string, DescMessage>> = Object.freeze({
   [RequiringSchema.typeName]: RequiringSchema,
 });
 
-const REGISTRY = typeRegistryOf([
+const SCHEMAS = [
   ...Object.values(MESSAGES),
   ...HTTP_ROUTES.flatMap((route) => {
     return [route.request, route.result].filter((payload) => {
       return typeof payload === 'object';
     });
   }),
-]);
+];
+
+const FORM = createJsonForm(SCHEMAS);
 
 const ENCODER = new TextEncoder();
 
@@ -288,8 +287,8 @@ const dataOf = (data: EventData): string => {
   }
 
   return 'text' in data
-    ? eventDataOf({ encoding: 'text', text: data.text })
-    : eventDataOf({ bytes: fromHexadecimal(data.raw), encoding: 'raw' });
+    ? FORM.eventDataOf('text', ENCODER.encode(data.text))
+    : FORM.eventDataOf('raw', fromHexadecimal(data.raw));
 };
 
 const messageOf = (name: string): DescMessage => {
@@ -650,8 +649,8 @@ test.describe('plays transcoding.json', () => {
         entry.bodyBytes === undefined
           ? ENCODER.encode(entry.body ?? '')
           : fromHexadecimal(entry.bodyBytes);
-      const read = (): ReturnType<typeof readProtoJson> => {
-        return readProtoJson(schema, { bytes, registry: REGISTRY });
+      const read = (): Message => {
+        return FORM.read(schema, bytes);
       };
 
       if (entry.payload === undefined) {
@@ -689,11 +688,10 @@ test.describe('plays transcoding.json', () => {
           throw new JsonFormError(decoded.reason, { place: { parameter: decoded.fieldPath } });
         }
 
-        return bindRequest(schema, {
+        return createHTTPBinding(SCHEMAS).bind(schema, {
           ...(entry.body === undefined ? {} : { body: ENCODER.encode(entry.body) }),
           isPatch: entry.route.method === 'PATCH',
           ...(queries.length === 0 ? {} : { query: queries.join('?') }),
-          registry: REGISTRY,
           routeBody: entry.route.body,
           variables: decoded.variables,
         });
@@ -886,7 +884,7 @@ test.describe('plays transcoding.json', () => {
       // * read through the runtime's reader, as the gateway reads a result
       const message = protoCodecOf(schema).decode(fromHexadecimal(entry.payload));
       const write = (): string => {
-        return writeProtoJson(schema, { message, registry: REGISTRY });
+        return FORM.write(schema, message);
       };
 
       if (entry.body === undefined) {

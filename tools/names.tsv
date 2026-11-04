@@ -1,4 +1,4 @@
-# alone: typescript 346, csharp 73, rust 87
+# alone: typescript 335, csharp 71, rust 87
 # concept	typescript	csharp	rust	class
 ACCEPT_TIMEOUT	ACCEPT_TIMEOUT [constant]	-	ACCEPT_TIMEOUT [constant]	same
 AccessRefusal	IAccessRefusal [record]	AccessRefusal [record]	AccessRefusal [record]	same
@@ -101,6 +101,7 @@ Health	IHealth [record]	Health [record]	Health [record]	same
 HealthCheck	IHealthCheck [record]	HealthCheck [record]	HealthCheck [record]	same
 HealthStatus	HealthStatus [choice]	HealthStatus [choice]	HealthStatus [choice]	same
 HEARTBEAT	HEARTBEAT [constant]	-	HEARTBEAT [constant]	same
+HTTPBinding	IHTTPBinding [record], createHTTPBinding [function]	HttpBinding [record]	-	same
 HTTPCaller	IHTTPCaller [record], createHTTPCaller [function]	HttpCaller [record]	-	same
 HTTPCallerOptions	IHTTPCallerOptions [record]	HttpCallerOptions [record]	-	same
 HTTPCallOptions	IHTTPCallOptions [record]	HttpCallOptions [record]	-	same
@@ -125,6 +126,7 @@ IntakeLimitsOptions	IntakeLimitsOptions [record]	-	IntakeLimitsOptions [record]	
 isFieldValue	isFieldValue [function]	-	is_field_value [function]	same
 isUnique	isUnique [function]	Validators.IsUnique [function]	-	rendered: of (0007, 0044)
 JoinedServerTransport	-	JoinedServerTransport [record]	JoinedServerTransport [record]	same
+JsonForm	IJsonForm [record], createJsonForm [function]	JsonForm [record]	-	same
 JsonFormError	JsonFormError [record]	JsonFormException [record]	-	rendered: error (0007, 0044)
 JsonToken	IJsonToken [record]	JsonToken [record]	-	same
 Judged	IJudged [record]	Judged [record]	Judged [record]	same
@@ -318,7 +320,6 @@ BEAD_MEDIA_TYPE	BEAD_MEDIA_TYPE [constant]	-	-	alone
 BeadHttpClient	-	BeadHttpClient [record]	-	alone
 BeadHttpClientOptions	-	BeadHttpClientOptions [record]	-	alone
 BeadServer	-	IBeadServer [record]	-	alone
-bindRequest	bindRequest [function]	-	-	alone
 BODY_BYTES_BUDGET	BODY_BYTES_BUDGET [constant]	-	-	alone
 BROKER_DELIVERIES	BROKER_DELIVERIES [constant]	-	-	alone
 BROKER_PUBLISHED	BROKER_PUBLISHED [constant]	-	-	alone
@@ -418,7 +419,6 @@ ENVELOPE_PREFIX	ENVELOPE_PREFIX [constant]	-	-	alone
 EnvelopeAsked	-	-	EnvelopeAsked [record]	alone
 ERROR_EVENT	ERROR_EVENT [constant]	-	-	alone
 EVENT_STREAM_MEDIA_TYPE	EVENT_STREAM_MEDIA_TYPE [constant]	-	-	alone
-eventDataOf	eventDataOf [function]	-	-	alone
 EventIteratorOptions	IEventIteratorOptions [record]	-	-	alone
 eventOf	eventOf [function]	-	-	alone
 EventSink	IEventSink [record]	-	-	alone
@@ -452,7 +452,6 @@ HELD_BYTES_BUDGET	-	-	HELD_BYTES_BUDGET [constant]	alone
 HookName	HookName [record]	-	-	alone
 HOST_REFUSAL	HOST_REFUSAL [constant]	-	-	alone
 HTTP_POLICY_MEMBERS	HTTP_POLICY_MEMBERS [constant]	-	-	alone
-HttpBinding	-	HttpBinding [record]	-	alone
 HTTPClient	HTTPClient [record]	-	-	alone
 HTTPClientConnection	IHTTPClientConnection [record]	-	-	alone
 HTTPClientOptions	IHTTPClientOptions [record]	-	-	alone
@@ -515,10 +514,7 @@ json::to_bytes	-	-	json::to_bytes [function]	alone
 json::to_value	-	-	json::to_value [function]	alone
 json::write	-	-	json::write [function]	alone
 JsonCodec	-	-	JsonCodec [record]	alone
-JsonForm	-	JsonForm [record]	-	alone
 JsonFormExceptionOptions	-	JsonFormExceptionOptions [record]	-	alone
-JsonFormOptions	IJsonFormOptions [record]	-	-	alone
-JsonNode	JsonNode [choice]	-	-	alone
 JsonOf	-	-	JsonOf [record]	alone
 JsonPlace	IJsonPlace [record]	-	-	alone
 JsonValue	JsonValue [choice]	-	-	alone
@@ -621,9 +617,6 @@ ProtoSchema	-	-	ProtoSchema [record]	alone
 RawCodec	-	-	RawCodec [record]	alone
 RawPath	IRawPath [record]	-	-	alone
 rawPathOf	rawPathOf [function]	-	-	alone
-readJsonText	readJsonText [function]	-	-	alone
-readMessage	readMessage [function]	-	-	alone
-readProtoJson	readProtoJson [function]	-	-	alone
 READY_STATE_NAMES	READY_STATE_NAMES [constant]	-	-	alone
 ReceivedFailure	IReceivedFailure [record]	-	-	alone
 RECONNECT_ATTEMPTS	-	-	RECONNECT_ATTEMPTS [constant]	alone
@@ -766,8 +759,6 @@ TransportServerResolvedStartOptions	TransportServerResolvedStartOptions [record]
 TransportServerStartOptions	ITransportServerStartOptions [record]	-	-	alone
 TransportServerToldEvent	TransportServerToldEvent [record]	-	-	alone
 TransportTypes	-	TransportTypes [constant]	-	alone
-TypeRegistry	ITypeRegistry [record]	-	-	alone
-typeRegistryOf	typeRegistryOf [function]	-	-	alone
 Unsubscribe	-	-	Unsubscribe [function type]	alone
 UPDATED_EVENT	UPDATED_EVENT [constant]	-	-	alone
 UpgradeResponseLike	IUpgradeResponseLike [record]	-	-	alone
@@ -809,5 +800,3 @@ WorkerTransportClient	WorkerTransportClient [record]	-	-	alone
 WorkerTransportClientOptions	IWorkerTransportClientOptions [record]	-	-	alone
 WorkerTransportServer	WorkerTransportServer [record]	-	-	alone
 WorkerTransportServerOptions	IWorkerTransportServerOptions [record]	-	-	alone
-writeFieldJson	writeFieldJson [function]	-	-	alone
-writeProtoJson	writeProtoJson [function]	-	-	alone
