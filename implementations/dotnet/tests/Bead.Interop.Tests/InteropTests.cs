@@ -846,7 +846,7 @@ public sealed class InteropTests(InteropTests.TypeScriptServer server, InteropTe
     {
         private InteropClient? _interop;
 
-        public ServiceManager Services
+        public IServiceManagerClient Services
         {
             get
             {
@@ -912,7 +912,7 @@ public sealed class InteropTests(InteropTests.TypeScriptServer server, InteropTe
 
         public RouterClient Router { get; }
 
-        public ServiceManager Services { get; }
+        public IServiceManagerClient Services { get; }
 
         public Task Disconnect(TransportClientDisconnectOptions? options = null)
         {

@@ -215,6 +215,16 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   answered requests, traced `command`. A call's step is now typed by its router's side, as its
   metrics are (`spec/debugging.md` 4.1, 8.2). A client router's refusal of a notify says "only a
   server notifies; a client hears notifications".
+- **Breaking:** a client's and a server's services are typed by their side, each with its side's
+  makers alone, so the other side's maker does not compile, and a server's emit no `dropped`, which
+  no server could hear. `IServiceManagerClient` and `IServiceManagerServer` on the TypeScript and C#
+  sides, which the one manager implements, and `ServiceManagerClient` and `ServiceManagerServer` on
+  the Rust side. `IClient.services` (`IClient.Services`, `Client::services()`) gives a client's;
+  `IServer.services` (`IBeadServer<TData>.Services`, `Server<TData>.Services`, the C# transports'
+  servers, `Server::services()`) gives a server's, and the C# transports' clients a client's. A
+  manager over a router whose side its type does not name (`createServiceManager`,
+  `new ServiceManager(IRouterLike)`, `ServiceManager::new(ServiceRouter)`) keeps all six makers, and
+  refuses the other side's as it is made.
 - **Breaking:** on the Rust side a rule (`Validate<T>`) returns `Result<Judged, Box<dyn Error +
   Send + Sync>>`. A rule that fails to judge returns its error, answered `PROCEDURE_FAILED` and
   reported in its own words, as the other sides report its throw. Its panic is reported `a rule

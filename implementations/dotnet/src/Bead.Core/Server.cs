@@ -326,7 +326,7 @@ public sealed class Server<TData> : IBeadServer<TData>
     public RouterServer Router { get; }
 
     /// <summary>Its services.</summary>
-    public ServiceManager Services { get; }
+    public IServiceManagerServer Services { get; }
 
     /// <summary>Its sessions.</summary>
     public SessionManager<TData> Sessions { get; }

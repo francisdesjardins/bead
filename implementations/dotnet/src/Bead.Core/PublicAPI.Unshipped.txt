@@ -348,3 +348,24 @@ virtual Bead.TransportClientReconnectDelayResolver.Invoke(System.TimeSpan? previ
 *REMOVED*virtual Bead.TransportReconnectDelay.Invoke(System.TimeSpan? previousDelay, int attempt) -> System.TimeSpan
 *REMOVED*~override Bead.EnvelopePrefix.Equals(object obj) -> bool
 *REMOVED*~override Bead.EnvelopePrefix.ToString() -> string
+*REMOVED*Bead.IBeadServer<TData>.Services.get -> Bead.ServiceManager!
+*REMOVED*Bead.IClient.Services.get -> Bead.ServiceManager!
+*REMOVED*Bead.Server<TData>.Services.get -> Bead.ServiceManager!
+Bead.IBeadServer<TData>.Services.get -> Bead.IServiceManagerServer!
+Bead.IClient.Services.get -> Bead.IServiceManagerClient!
+Bead.IServiceManagerClient
+Bead.IServiceManagerClient.Debug -> System.Action<System.Exception?, Bead.DebugEvent!>?
+Bead.IServiceManagerClient.Deprecated -> System.Action<Bead.Procedure!>?
+Bead.IServiceManagerClient.Dropped -> System.Action<Bead.Procedure!, Bead.Failure?>?
+Bead.IServiceManagerClient.GetCommandResolver<TRequest, TResponse>(Bead.Procedure! procedure, Bead.RequestResolverDependencies<TRequest, TResponse>! dependencies) -> System.Func<Bead.RequestResolverCallback<TRequest, TResponse>!, Bead.IRequestResolver!>!
+Bead.IServiceManagerClient.GetNotification<TRequest, TResponse, TNotification>(Bead.Procedure! procedure, Bead.NotificationDependencies<TRequest, TResponse, TNotification>! dependencies) -> Bead.INotification<TRequest, TNotification>!
+Bead.IServiceManagerClient.GetRequest<TRequest, TResponse>(Bead.Procedure! procedure, Bead.RequestDependencies<TRequest, TResponse>! dependencies) -> System.Func<TRequest, Bead.BoundCall<TResponse>!>!
+Bead.IServiceManagerClient.IsDebugging.get -> bool
+Bead.IServiceManagerServer
+Bead.IServiceManagerServer.Debug -> System.Action<System.Exception?, Bead.DebugEvent!>?
+Bead.IServiceManagerServer.Deprecated -> System.Action<Bead.Procedure!>?
+Bead.IServiceManagerServer.GetCommand<TRequest, TResponse>(Bead.Procedure! procedure, Bead.RequestDependencies<TRequest, TResponse>! dependencies) -> System.Func<TRequest, Bead.BoundCommand<TResponse>!>!
+Bead.IServiceManagerServer.GetNotificationResolver<TRequest, TResponse, TNotification>(Bead.Procedure! procedure, Bead.NotificationResolverDependencies<TRequest, TResponse, TNotification>! dependencies) -> System.Func<Bead.NotificationResolverCallback<TRequest, TResponse>!, Bead.INotificationResolver<TNotification>!>!
+Bead.IServiceManagerServer.GetRequestResolver<TRequest, TResponse>(Bead.Procedure! procedure, Bead.RequestResolverDependencies<TRequest, TResponse>! dependencies) -> System.Func<Bead.RequestResolverCallback<TRequest, TResponse>!, Bead.IRequestResolver!>!
+Bead.IServiceManagerServer.IsDebugging.get -> bool
+Bead.Server<TData>.Services.get -> Bead.IServiceManagerServer!

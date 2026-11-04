@@ -101,6 +101,8 @@ export const RUNTIME_TYPES: ReadonlySet<string> = new Set([
   'ServiceClient',
   'ServiceClientOptions',
   'ServiceManager',
+  'IServiceManagerClient',
+  'IServiceManagerServer',
   'ServiceServer',
   'ServiceServerOptions',
   'IServiceAdmissions',

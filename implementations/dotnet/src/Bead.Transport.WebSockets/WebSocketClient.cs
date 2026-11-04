@@ -80,7 +80,7 @@ public sealed class WebSocketClient : IClient
     public RouterClient Router { get; }
 
     /// <summary>Its services.</summary>
-    public ServiceManager Services { get; }
+    public IServiceManagerClient Services { get; }
 
     /// <summary>Connects its transport, as <see cref="WebSocketTransportClient.Connect"/> does.</summary>
     public Task Connect(WebSocketTransportClientConnectOptions options, CancellationToken cancellationToken = default)

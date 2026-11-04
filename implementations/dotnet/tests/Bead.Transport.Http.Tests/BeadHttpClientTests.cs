@@ -223,6 +223,7 @@ public sealed class BeadHttpClientTests
 
         Assert.Same(client.Router, beadClient.Router);
         Assert.Same(client.Services, beadClient.Services);
+        Assert.Equal(typeof(IServiceManagerClient), typeof(BeadHttpClient).GetProperty(nameof(BeadHttpClient.Services))!.PropertyType);
     }
 
     [Fact]

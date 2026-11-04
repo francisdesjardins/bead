@@ -319,7 +319,7 @@ internal static class Program
 
         public RouterClient Router { get; }
 
-        public ServiceManager Services { get; }
+        public IServiceManagerClient Services { get; }
 
         public Task Connect(MemoryTransportServer server)
         {

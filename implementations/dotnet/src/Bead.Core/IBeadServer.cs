@@ -15,7 +15,7 @@ public interface IBeadServer<TData> : IAsyncDisposable
     RouterServer Router { get; }
 
     /// <summary>Its services.</summary>
-    ServiceManager Services { get; }
+    IServiceManagerServer Services { get; }
 
     /// <summary>Its sessions.</summary>
     SessionManager<TData> Sessions { get; }

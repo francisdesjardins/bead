@@ -81,7 +81,7 @@ public sealed class BeadHttpClient : IClient
     public RouterClient Router { get; }
 
     /// <summary>Its services.</summary>
-    public ServiceManager Services { get; }
+    public IServiceManagerClient Services { get; }
 
     /// <summary>Connects its transport, as <see cref="HttpTransportClient.Connect"/> does.</summary>
     public Task Connect(HttpTransportClientConnectOptions options, CancellationToken cancellationToken = default)

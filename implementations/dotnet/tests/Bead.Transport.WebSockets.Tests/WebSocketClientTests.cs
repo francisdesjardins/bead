@@ -95,6 +95,7 @@ public sealed class WebSocketClientTests : IAsyncLifetime
 
         Assert.Same(client.Router, beadClient.Router);
         Assert.Same(client.Services, beadClient.Services);
+        Assert.Equal(typeof(IServiceManagerClient), typeof(WebSocketClient).GetProperty(nameof(WebSocketClient.Services))!.PropertyType);
     }
 
     [Fact]

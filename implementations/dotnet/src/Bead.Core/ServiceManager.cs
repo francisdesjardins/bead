@@ -528,12 +528,14 @@ public sealed record ServiceManagerOptions
 
 /// <summary>
 /// The requesters and resolvers of the services on one router: what a requester calls, and what
-/// answers it on the other side. Both sides of a router use the same manager: a request or a
+/// answers it on the other side. The untyped manager serves either side's router: a request or a
 /// notification made on a client's router, a command on a server's; a command answered on a
 /// client's, a request or a notification on a server's; each refused on the other's as it is made,
-/// its side first, then spec 16.10's reasons.
+/// its side first, then spec 16.10's reasons. A client and a server give it by the interface of
+/// their side, <see cref="IServiceManagerClient"/> and <see cref="IServiceManagerServer"/>, without
+/// the other side's makers.
 /// </summary>
-public sealed partial class ServiceManager
+public sealed partial class ServiceManager : IServiceManagerClient, IServiceManagerServer
 {
     // how long a request waits for its answer when its options and the manager's say nothing
     private static readonly TimeSpan TimeoutDefault = TimeSpan.FromSeconds(5);
@@ -634,6 +636,22 @@ public sealed partial class ServiceManager
         get
         {
             return _router.Side;
+        }
+    }
+
+    ServiceManager IServiceManagerClient.Manager
+    {
+        get
+        {
+            return this;
+        }
+    }
+
+    ServiceManager IServiceManagerServer.Manager
+    {
+        get
+        {
+            return this;
         }
     }
 

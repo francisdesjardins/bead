@@ -67,3 +67,7 @@ override Bead.Transport.WebSockets.WebSocketTransportClientConnectOptions.ToStri
 *REMOVED*static Bead.Transport.WebSockets.WebSocketConnectOptions.operator ==(Bead.Transport.WebSockets.WebSocketConnectOptions? left, Bead.Transport.WebSockets.WebSocketConnectOptions? right) -> bool
 static Bead.Transport.WebSockets.WebSocketTransportClientConnectOptions.operator !=(Bead.Transport.WebSockets.WebSocketTransportClientConnectOptions? left, Bead.Transport.WebSockets.WebSocketTransportClientConnectOptions? right) -> bool
 static Bead.Transport.WebSockets.WebSocketTransportClientConnectOptions.operator ==(Bead.Transport.WebSockets.WebSocketTransportClientConnectOptions? left, Bead.Transport.WebSockets.WebSocketTransportClientConnectOptions? right) -> bool
+*REMOVED*Bead.Transport.WebSockets.WebSocketClient.Services.get -> Bead.ServiceManager!
+*REMOVED*Bead.Transport.WebSockets.WebSocketServer<TData>.Services.get -> Bead.ServiceManager!
+Bead.Transport.WebSockets.WebSocketClient.Services.get -> Bead.IServiceManagerClient!
+Bead.Transport.WebSockets.WebSocketServer<TData>.Services.get -> Bead.IServiceManagerServer!
