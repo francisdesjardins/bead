@@ -76,8 +76,8 @@ access token of RFC 9068 in JWS Compact Serialization (RFC 7515), on a request a
 `ELSEWHERE`, 3, empty, the credential its transport carried with it, on a request alone. A scheme
 from 4 to 65,535 is read whole, then refused at admission, `CREDENTIAL_UNSUPPORTED`.
 
-**A header carries it as `credential`, `Credential`**, on a request, a result and a failure alike,
-one field of one type on both sides: `{ scheme, … }`, its credential scheme and its bytes.
+**A header carries it as `credential`**, on a request, a result and a failure alike, one field of
+one type on every side: `{ scheme, … }`, its credential scheme and its bytes.
 
 **The header holds 1,020 bytes**, the 255 words byte 3 counts, and a credential has what the rest
 leaves: 992 bytes on a request that names a destination and opens a transfer (28 bytes of prefix,
@@ -137,12 +137,12 @@ Within step 6 of section 9.2, in this order:
    withdraw a credential that holds;
 3. **its admission**, `beforeRequest`, synchronous, decides on the call's session.
 
-`requireSession`, `RequireSession`, tests the call's session, never the connection's: a call that
-presented a `JWT` is not in its connection's session, whatever that session holds. It refuses a call
-in none that presented no credential with `SESSION_REQUIRED`, and one that presented a credential it
-does not run in — a relay forwarding it without verifying — with `ACCESS_DENIED`: an admission never
-answers `SESSION_REQUIRED` to a call that presented a credential, which would have its client
-withdraw one that may hold.
+`requireSession` tests the call's session, never the connection's: a call that presented a `JWT` is
+not in its connection's session, whatever that session holds. It refuses a call in none that
+presented no credential with `SESSION_REQUIRED`, and one that presented a credential it does not run
+in — a relay forwarding it without verifying — with `ACCESS_DENIED`: an admission never answers
+`SESSION_REQUIRED` to a call that presented a credential, which would have its client withdraw one
+that may hold.
 
 **Resolution may wait.** A `JWT` verified by Web Crypto, a key set asked for a `kid` not yet seen, a
 session service asked whether a token holds: a verifier settles later, a `PromiseLike` on the
@@ -349,79 +349,76 @@ every side alike: `127.0.0.1.` is on it, and a host the parser fails on is not.
 | `ELSEWHERE`    | forwards it to a destination registered with an audience, over a leg B that carries one                     | `ELSEWHERE`, its credential moved to leg B's transport |
 
 A destination is registered with the audience it verifies, as a resource is named for a token (RFC
-8707). A server's relay admits by default only a credential it forwards, `requireCredential`,
-`RequireCredential`: a call whose header presents a `JWT`, or an `ELSEWHERE` its transport carried,
-read from the header's scheme; one that presents none or `OPAQUE`, in leg A's connection's session
-or in none, is refused `ACCESS_DENIED`, its detail `a relay admits by default only a credential it
-forwards`, since leg A's session opens nothing at the destination, and a relay that ran it in leg
-B's session would lend its own authority to whoever holds a session at the relay, the confused
-deputy (Hardy, 1988; CWE-441), as impersonation is a grant and never a default (RFC 8693 §1.1). A
-relay whose requesters log in at it writes a `beforeRoute` that checks the destination against the
-requester's session; `shareLegBSession`, `ShareLegBSession`, second, lends leg B's session to every
-session of leg A's, at every destination, reading none, and refuses a call in none that presented
-none `SESSION_REQUIRED`. A `beforeRoute` given as `requireSession` refuses every credential the
-relay forwards without verifying, `ACCESS_DENIED`.
-With `verifies`, the relay verifies what it forwards besides, with its side's `credentials`, at step
-1 of section 14.3, before `beforeRoute`: a `JWT` against the set of audiences its registrations
-hold. A credential that does not hold, or a `JWT` that names none of those audiences, is refused
-`SESSION_REQUIRED` there, and `beforeRoute` reads the credential's session. At step 1, a scheme the
-relay neither resolves nor forwards is refused `CREDENTIAL_UNSUPPORTED`, and an `ELSEWHERE` that
-carried nothing `SESSION_REQUIRED`. A call the relay cannot forward — to a destination of another
-audience or of none, over a leg B that cannot carry it, or in the clear off the machine — is
-refused `DESTINATION_UNREACHABLE`, at a step of its own, section 14.3's fifth, before the limits'
-step, the sixth: its credential may hold, and its route does not; with `verifies`, that step holds a
-verified `aud` to its destination's own audience. A call that presents a credential never runs in
-leg B's session in place of its own. Leg B's header counts its credential, call by call, against the
-smaller of the two legs' limits (section 14.3, step 6).
+8707). A server's relay admits by default only a credential it forwards, `requireCredential`: a call
+whose header presents a `JWT`, or an `ELSEWHERE` its transport carried, read from the header's
+scheme; one that presents none or `OPAQUE`, in leg A's connection's session or in none, is refused
+`ACCESS_DENIED`, its detail `a relay admits by default only a credential it forwards`, since leg A's
+session opens nothing at the destination, and a relay that ran it in leg B's session would lend its
+own authority to whoever holds a session at the relay, the confused deputy (Hardy, 1988; CWE-441),
+as impersonation is a grant and never a default (RFC 8693 §1.1). A relay whose requesters log in at
+it writes a `beforeRoute` that checks the destination against the requester's session;
+`shareLegBSession`, second, lends leg B's session to every session of leg A's, at every destination,
+reading none, and refuses a call in none that presented none `SESSION_REQUIRED`. A `beforeRoute`
+given as `requireSession` refuses every credential the relay forwards without verifying,
+`ACCESS_DENIED`. With `verifies`, the relay verifies what it forwards besides, with its side's
+`credentials`, at step 1 of section 14.3, before `beforeRoute`: a `JWT` against the set of audiences
+its registrations hold. A credential that does not hold, or a `JWT` that names none of those
+audiences, is refused `SESSION_REQUIRED` there, and `beforeRoute` reads the credential's session. At
+step 1, a scheme the relay neither resolves nor forwards is refused `CREDENTIAL_UNSUPPORTED`, and an
+`ELSEWHERE` that carried nothing `SESSION_REQUIRED`. A call the relay cannot forward — to a
+destination of another audience or of none, over a leg B that cannot carry it, or in the clear off
+the machine — is refused `DESTINATION_UNREACHABLE`, at a step of its own, section 14.3's fifth,
+before the limits' step, the sixth: its credential may hold, and its route does not; with
+`verifies`, that step holds a verified `aud` to its destination's own audience. A call that presents
+a credential never runs in leg B's session in place of its own. Leg B's header counts its
+credential, call by call, against the smaller of the two legs' limits (section 14.3, step 6).
 
 ### What a side reports, and the names
 
 **A credential stays out of everything a side reports**: no detail, event, trace or log carries its
-bytes, nor the transport's field; only its scheme, `credentialScheme`, `CredentialScheme`.
+bytes, nor the transport's field; only its scheme, `credentialScheme`.
 
-**The surface is named alike on both sides**, the TypeScript side's name before the C# side's:
+**The surface is named alike on every side**, each name in its side's case:
 
-- `credentials`, `Credentials`, among a server's options, and a client's for the commands it
-  receives: a `JWT`'s keys, each with its issuer and its algorithm, and its audience; the key set,
-  `keySet`, `KeySet`, given with the issuers it answers for, which the runtime asks for a `kid` no
-  key of the token's issuer names, with a signal its deadline aborts, which may wait, and whose
-  answer it holds ten minutes, and the calls that may wait for an issuer's deadline at once,
-  `maximumWaitingCalls`, `MaximumWaitingCalls`; and an `ELSEWHERE`'s verifier, `verify`, `Verify`,
-  given what the transport carried and its call's signal, which settles with a credential's session
-  — its identifier, its data, and its end, none for a session without one — or with none, when the
-  credential does not hold. The side builds its `JWT` verifier from them, as data, on the clock its
-  stack runs on, so no verifier brings a clock of its own;
-- the call's session, `session`, `Session`, on the request admission reads and on the request a
-  resolver receives, never a bearer credential its call came with, which reaches the verifier and a
-  relay alone: none when the call runs in none; its data; and, for a credential's session, its
+- `credentials`, among a server's options, and a client's for the commands it receives: a `JWT`'s
+  keys, each with its issuer and its algorithm, and its audience; the key set, `keySet`, given with
+  the issuers it answers for, which the runtime asks for a `kid` no key of the token's issuer names,
+  with a signal its deadline aborts, which may wait, and whose answer it holds ten minutes, and the
+  calls that may wait for an issuer's deadline at once, `maximumWaitingCalls`; and an `ELSEWHERE`'s
+  verifier, `verify`, given what the transport carried and its call's signal, which settles with a
+  credential's session — its identifier, its data, and its end, none for a session without one — or
+  with none, when the credential does not hold. The side builds its `JWT` verifier from them, as
+  data, on the clock its stack runs on, so no verifier brings a clock of its own;
+- the call's session, `session`, on the request admission reads and on the request a resolver
+  receives, never a bearer credential its call came with, which reaches the verifier and a relay
+  alone: none when the call runs in none; its data; and, for a credential's session, its
   identifier, the record above, and its end;
-- the header a procedure and its admission are handed: on the TypeScript side an
-  `IHandedRequestHeader`, its credential a `HandedCredential`, which says of a `JWT` its scheme
-  alone; on the C# side the `RequestHeader`, whose `Credential` carries no `Token` for a `JWT`;
-- `sessionOf`, `SessionOf`, the router's hook asked once per request, with its call's signal,
-  between holding its call id and the synchronous `beforeRequest`: it may wait, never for a request
-  that presents none or `OPAQUE`. `sessionTokenOf`, `SessionTokenOf`, stays beside it, asked per
-  answer and never waiting, for the announcement of section 13.3;
-- `requireSession`, `RequireSession`, tests the call's session;
-- `requireCredential`, `RequireCredential`, a server's relay's default admission: a call presenting
-  a credential the relay may forward, and no other, `ACCESS_DENIED` with its detail;
-- `shareLegBSession`, `ShareLegBSession`, an admission a relay is given, named for what it lends:
-  a call in any session of leg A's connection's, at every destination, runs in leg B's session, as
-  does one presenting a credential the relay may forward;
-- `endSession(id)`, `EndSession(id)`, ends a credential's session by its identifier, that record,
-  and the subscriptions it bounds; `endSessionsOf(issuer)`, `EndSessionsOf(issuer)`, every
-  credential's session of an issuer, on every connection that keeps one;
-- `verifies`, `Verifies`, among a relay's options, has it verify what it forwards besides, at step 1
-  of section 14.3;
-- `credential`, `Credential`, among a client's options for its default, and among a request's
-  options for that call alone: a call may present none whatever the default, and `OPAQUE` stands for
-  the session the client learned;
-- `credentialWithdrawn`, `CredentialWithdrawn`, the client's event that tells its application a
-  default credential was withdrawn; `isCredentialWithdrawn`, `IsCredentialWithdrawn`, whether it
-  stands withdrawn, the calls that would present it failing before they go;
-- the credential a transport carries travels with its envelope, as one argument: on the TypeScript
-  side, the message event's first argument and `send`'s are `{ data, credential }`; on the C# side,
-  `TransportMessage` has its `Credential`; each keeps its other parameter.
+- the header a procedure and its admission are handed, whose credential says of a `JWT` its scheme
+  alone, never its token;
+- `sessionOf`, the router's hook asked once per request, with its call's signal, between holding
+  its call id and the synchronous `beforeRequest`: it may wait, never for a request that presents
+  none or `OPAQUE`. `sessionTokenOf` stays beside it, asked per answer and never waiting, for the
+  announcement of section 13.3;
+- `requireSession` tests the call's session;
+- `requireCredential`, a server's relay's default admission: a call presenting a credential the
+  relay may forward, and no other, `ACCESS_DENIED` with its detail;
+- `shareLegBSession`, an admission a relay is given, named for what it lends: a call in any session
+  of leg A's connection's, at every destination, runs in leg B's session, as does one presenting a
+  credential the relay may forward;
+- `endSession(id)` ends a credential's session by its identifier, that record, and the
+  subscriptions it bounds; `endSessionsOf(issuer)`, every credential's session of an issuer, on
+  every connection that keeps one;
+- `verifies`, among a relay's options, has it verify what it forwards besides, at step 1 of section
+  14.3;
+- `credential`, among a client's options for its default, and among a request's options for that
+  call alone: a call may present none whatever the default, and `OPAQUE` stands for the session the
+  client learned;
+- `credentialWithdrawn`, the client's event that tells its application a default credential was
+  withdrawn; `isCredentialWithdrawn`, whether it stands withdrawn, the calls that would present it
+  failing before they go;
+- the credential a transport carries travels with its envelope, as one argument: what a transport
+  hands its router and what it sends hold the envelope's bytes and its `credential`; each keeps its
+  other parameter.
 
 **The builder binds to the call's session once resolved.** Its admission vocabulary maps to no
 `beforeRequest`, to `requireSession` over `session`, or to a named `beforeRequest`, synchronous,
@@ -514,7 +511,7 @@ credential resolves, a transfer's opening gets no credit, and its requester coun
 inactivity meanwhile (section 12.8): a verifier slower than 30 s, by default, ends the call at its
 requester.
 
-**Resolution waits on both sides**, a `JWT`'s and an `ELSEWHERE`'s in a later turn even when its
+**Resolution waits on every side**, a `JWT`'s and an `ELSEWHERE`'s in a later turn even when its
 verifier does not: a call presenting none, sent after one presenting a `JWT`, may be answered first,
 on every side alike, and a conversation awaits a `JWT` call's answer before it sends anything that
 could overtake it. The order of section 9.2, a cancel during resolution and a transfer's first
@@ -768,7 +765,7 @@ Its objections, each with the answer that holds:
 | 11.4 is a platform's rule, not a language's, and the Rust side already holds its twin; the matrix's cell is stale (O6)                                                                                                                                                                              | Accepted: 11.4 names a browser, not a language, and the matrix's Rust cell cites both its tests, the page ahead with its core                                                                                                                                                                                                                                                                                                                                                |
 | 11.1's Rust form, if forms stay, as its test names it (O7)                                                                                                                                                                                                                                          | Moot: the forms leave by O5                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
 | 12.5's and 13.9's Rust forms, if forms stay; 13.9's error event lacks the Rust name (O8)                                                                                                                                                                                                            | Moot: the forms leave by O5, and 13.9 says the participant's own turn, as an envelope is told in its router's                                                                                                                                                                                                                                                                                                                                                                |
-| `spec/transcoding.md`'s two-side passages name what the Rust side has ahead (O9)                                                                                                                                                                                                                    | Accepted: the document does not move                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| `spec/transcoding.md`'s two-side passages name what the Rust side has ahead (O9)                                                                                                                                                                                                                    | Accepted: the document does not move; revised by [0044](0044-rust-one-owner-per-router-traits-no-unsafe-two-parameters-no-warning.md#on-the-rust-sides-form-in-the-spec-its-companions-and-the-records)'s round on the Rust side's form in the spec, which states its rules once for every side                                                                                                                                                                              |
 | Decision 0010 is touched at one line of four that name two sides (O10)                                                                                                                                                                                                                              | Accepted in part: the line O1 changes moves; the others go to the sweep of the records, a pass of its own                                                                                                                                                                                                                                                                                                                                                                    |
 | The units and the versions: which units move, and which version moves (O11)                                                                                                                                                                                                                         | Accepted: each unit whose text moves is acknowledged; the versions move at the release, a minor of the spec since two sides' verdicts change, a patch of the companion                                                                                                                                                                                                                                                                                                       |
 

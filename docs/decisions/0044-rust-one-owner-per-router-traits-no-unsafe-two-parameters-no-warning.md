@@ -520,8 +520,13 @@ is `new` (C-CTOR), and a conversion is `From` or `TryFrom` (C-CONV-TRAITS), neve
 function that derives a value from what it is given is `…_of`, the other sides' `…Of`. A method
 keeps the TypeScript side's word, as `ListedFailure::of` keeps `catalogue.of`. An event the other
 sides emit is a `…Listener` or an `on_…` the Rust side registers. A TypeScript `type` member is
-`…_type` here, since `type` is Rust's keyword. The Rust names are the other sides', each held by
-`tools/names.tsv` ([0004](0004-one-behaviour-in-every-language.md)).
+`…_type` here, since `type` is Rust's keyword. A variant of an error enum names the end the
+operation met, as std's `io::ErrorKind::TimedOut` does, where the TypeScript side names the error
+after the event, and the C# side so where it has a type of its own: `CallError::Disconnected` is
+`DisconnectError` and `DisconnectException`, `CallError::Cancelled` is `CancelError`,
+`CallError::TimedOut` is `TimeoutError`, which `tools/names.tsv` renders, `rendered: error`. The
+Rust names are the other sides', each held by `tools/names.tsv`
+([0004](0004-one-behaviour-in-every-language.md)).
 
 ### Payloads, a `JWT`, randomness
 

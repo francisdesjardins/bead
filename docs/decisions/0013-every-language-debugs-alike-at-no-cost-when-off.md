@@ -160,14 +160,13 @@ listener, a record and an object, a `TimeSpan` and milliseconds.
 | A requester's series   | `router.declareRequester(procedure)`, `IProcedureSeries`; the router's request's `series`    | `router.DeclareRequester(procedure)`, `ProcedureSeries`; `RouterRequest.Series`                    | `router.declare_requester(&procedure)`, `ProcedureSeries`; the router's request's `series` |
 | A step's call          | `IDebugEvent`'s `callId` and `connectionHandle`; the router's request's `onCallId`           | `DebugEvent.CallId`, `DebugEvent.ConnectionHandle`; `RouterRequest.OnCallId`                       | `DebugEvent`'s `call_id` and `connection_handle`; `RouterRequest`'s `on_call_id`           |
 
-`metricsRegistry`, `MetricsRegistry` and `metrics_registry` are a router's option, which the servers
-and clients that build a router pass on. The registry is not `Metrics`: `prometheus-net`'s static
-class of that name would make a bare one ambiguous (CS0104) in an application that uses both, which
+`metricsRegistry` is a router's option, which the servers and clients that build a router pass on.
+The registry is not `Metrics`: `prometheus-net`'s static class of that name would make a bare one
+ambiguous (CS0104) in an application that uses both, which
 [0008](0008-three-version-axes-and-names-qualified-by-their-owner.md) avoids. A requester's series
 is the handle its declaration gives back, which the manager hands to its router's `request` with
-each call: `declareRequester`, `DeclareRequester` and `declare_requester` give it,
-`IProcedureSeries` and `ProcedureSeries`, and the router's request carries it as `series` and
-`Series`.
+each call: `declareRequester` gives it, a `ProcedureSeries`, and the router's request carries it as
+`series`.
 
 **The trace of calls and the trace of envelopes tell each step**, at the service manager and at the
 router, with the same fields on every side, as debugging 4 and 5 state. A call's options are traced
@@ -177,22 +176,21 @@ A client's trace of envelopes names its connection, `server`, as a server's name
 call's `startedAt` is on the wall clock and its `duration` whole milliseconds on the monotonic
 reading ([0011](0011-every-side-takes-its-time-from-a-clock-it-is-given.md)). Each step of a call
 names it as its envelopes do, `callId` and `connectionHandle`, `server` on a client: a call made
-once its router drew its id, which the router's `request` hands its manager through `onCallId`,
-`OnCallId`; a request received by its header's. The manager tells a call's `tx` step from its own
-flow once it holds the id, never from its router's turn. A call refused before its id is drawn names
-none, and neither does a notification, sent or heard (debugging 4.1, 4.2, 4.4). An error on a `tx`
-step says its `tx` did not go out, and why, for an answer as for a notification: an answer its
-router could not send is told again at its start with its error; an answer to a request its router
-already answered in its resolver's place, its subscription's queue past its bounds (spec 11.10), is
-told once, as its resolver answers, with the failure its router answered, which the router holds for
-its manager from the moment it answers in the resolver's place, `answeredOf`, `AnsweredOf`; and a
-resolver that failed before it answered tells a step of no answer with what it failed with. On the
-C# side, an answer that goes to its router as that router answers in the resolver's place, on its
-own thread, is told again at its start with the router's failure, as one its router could not send
-is. What goes in their place, `PROCEDURE_FAILED` or the router's own failure, is the envelopes' to
-tell. So a span a bridge makes of the step takes its status from what the call returned, as
-OpenTelemetry's RPC conventions set it. A call answered nothing tells no failure (debugging 4.2,
-4.3).
+once its router drew its id, which the router's `request` hands its manager through `onCallId`; a
+request received by its header's. The manager tells a call's `tx` step from its own flow once it
+holds the id, never from its router's turn. A call refused before its id is drawn names none, and
+neither does a notification, sent or heard (debugging 4.1, 4.2, 4.4). An error on a `tx` step says
+its `tx` did not go out, and why, for an answer as for a notification: an answer its router could
+not send is told again at its start with its error; an answer to a request its router already
+answered in its resolver's place, its subscription's queue past its bounds (spec 11.10), is told
+once, as its resolver answers, with the failure its router answered, which the router holds for its
+manager from the moment it answers in the resolver's place, `answeredOf`; and a resolver that failed
+before it answered tells a step of no answer with what it failed with. On the C# side, an answer
+that goes to its router as that router answers in the resolver's place, on its own thread, is told
+again at its start with the router's failure, as one its router could not send is. What goes in
+their place, `PROCEDURE_FAILED` or the router's own failure, is the envelopes' to tell. So a span a
+bridge makes of the step takes its status from what the call returned, as OpenTelemetry's RPC
+conventions set it. A call answered nothing tells no failure (debugging 4.2, 4.3).
 
 **A listener's error never changes a call** (debugging 2.2 and 2.3). It is reported, as spec 9.0
 reports an error, through the router's `error` event, `Error`; the call goes on as if nobody
