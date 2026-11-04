@@ -26,6 +26,7 @@ use crate::transport::RouterClientTransport;
 
 mod elsewhere_bound;
 mod key_sets;
+mod values;
 
 #[tokio::test]
 async fn a_redacted_credential_has_no_token_to_resolve() {
