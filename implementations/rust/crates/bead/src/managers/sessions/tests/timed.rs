@@ -92,6 +92,79 @@ impl Timed {
 }
 
 #[tokio::test]
+async fn a_timeout_longer_than_a_timer_holds_is_refused_and_nothing_is_stored_the_longest_one_fires_at_its_due()
+ {
+    use crate::duration::{LONGEST_TIMER, NEVER};
+
+    let fixture = Timed::new();
+    let first = handle(FIRST);
+    let second = handle(SECOND);
+    let session = fixture
+        .set(Session {
+            session_inactivity_timeout: Some(milliseconds(1_000)),
+            ..Session::new(Arc::clone(&first), at(0))
+        })
+        .expect("stored");
+    let longer = LONGEST_TIMER + milliseconds(1);
+
+    assert!(matches!(
+        fixture.set(Session {
+            connection_inactivity_timeout: Some(longer),
+            ..Session::new(Arc::clone(&second), at(0))
+        }),
+        Err(CallError::Refused(_))
+    ));
+    {
+        let mut state = locked(&fixture.state);
+        let mut told = locked(&fixture.arming.told);
+        state
+            .update_connection_inactivity_timeout(
+                (&first, Some(longer)),
+                (&fixture.arming, &mut told),
+            )
+            .expect_err("the connection timeout is past the longest timer");
+        state
+            .update_session_inactivity_timeout((&first, Some(longer)), (&fixture.arming, &mut told))
+            .expect_err("the session timeout is past the longest timer");
+        state
+            .reset_connection_inactivity_timeout((&first, longer), &fixture.arming)
+            .expect_err("the connection timer is past its longest due");
+        assert_eq!(
+            state
+                .reset_session_inactivity_timeout((&first, longer), &fixture.arming)
+                .expect_err("the session timer is past its longest due")
+                .message(),
+            "a session inactivity timeout is a duration of whole milliseconds from 1 to 2147483647, or Duration::MAX for never, not 2147483648 milliseconds"
+        );
+        assert!(!state.has(&second));
+        assert_eq!(state.get(&first), Some(session));
+    }
+    assert_eq!(fixture.arming.clock.dues(), [milliseconds(1_000)]);
+    {
+        let mut state = locked(&fixture.state);
+        state
+            .reset_connection_inactivity_timeout((&first, LONGEST_TIMER), &fixture.arming)
+            .expect("the longest connection timer holds");
+        state
+            .reset_session_inactivity_timeout((&first, NEVER), &fixture.arming)
+            .expect("the session timer ends");
+    }
+    assert_eq!(fixture.arming.clock.dues(), [LONGEST_TIMER]);
+    fixture
+        .arming
+        .clock
+        .advance(
+            LONGEST_TIMER
+                .checked_sub(milliseconds(1))
+                .expect("a positive due"),
+        )
+        .await;
+    assert_eq!(fixture.reached(), Vec::<&str>::new());
+    fixture.arming.clock.advance(milliseconds(1)).await;
+    assert_eq!(fixture.reached(), ["connection"]);
+}
+
+#[tokio::test]
 async fn reaches_its_timeouts_unless_its_connection_speaks_which_starts_both_anew() {
     let fixture = Timed::new();
     fixture
