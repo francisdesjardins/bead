@@ -371,24 +371,19 @@ impl Peer {
                 answered: Mutex::new(None),
                 origin: (None, None),
             });
-            state
-                .core
-                .answering
-                .answering
-                .entry(call.connection_handle)
-                .or_default()
-                .insert(
-                    call.call_id,
-                    Answering {
-                        dispatched: id,
-                        signal: Signal::new(),
-                        is_answered: false,
-                        is_ended: false,
-                        receiving: None,
-                        series: None,
-                        started_at: Duration::ZERO,
-                    },
-                );
+            // * opened as a request dispatched opens it: a call abandoned on its call id forgotten
+            state.core.answering.open(
+                &call,
+                Answering {
+                    dispatched: id,
+                    signal: Signal::new(),
+                    is_answered: false,
+                    is_ended: false,
+                    receiving: None,
+                    series: None,
+                    started_at: Duration::ZERO,
+                },
+            );
             router_core::respond(
                 state,
                 (

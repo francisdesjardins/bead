@@ -1,14 +1,17 @@
-//! The calls a core keeps abandoned: the oldest of a connection yields, and their timers end.
+//! The calls a core answers: whether the call of a request is open still, and those it keeps
+//! abandoned, the oldest of a connection yielding, and their timers ending.
 
 use core::time::Duration;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use bytes::Bytes;
 
+use super::router_core_transfer_edges::serving;
+use super::{Handed, locked};
 use crate::constants::RouterSide;
 use crate::envelope::{CancelHeader, Envelope, RequestHeader};
-use crate::router::core::{self as router_core, Handler};
-use crate::router::types::{CallAddress, RouterLimitsOptions};
+use crate::router::core::{self as router_core, Dispatch, Handler};
+use crate::router::types::{CallAddress, ConnectionHandle, RouterAnswer, RouterLimitsOptions};
 use crate::testing::core_port::{Peer, scripted_header};
 
 async fn peer() -> Peer {
@@ -199,4 +202,132 @@ async fn forgets_a_call_abandoned_once_its_transfers_inactivity_is_over() {
     assert_eq!(ends(&peer, ("a", vec![1])).await, [Some(10)]);
     peer.clock.advance(Duration::from_millis(1)).await;
     assert_eq!(ends(&peer, ("a", vec![1, 3])).await, [None, None]);
+}
+
+// the dispatch each request `handed` came with, as its router drew it: its id, its header handed
+async fn dispatches_of(peer: &Peer, handed: &Handed) -> Vec<Arc<Dispatch>> {
+    let requests: Vec<(ConnectionHandle, RequestHeader)> = locked(handed)
+        .iter()
+        .map(|props| (Arc::clone(&props.connection_handle), props.header.clone()))
+        .collect();
+
+    peer.owner
+        .run(move |state| {
+            requests
+                .into_iter()
+                .map(|(connection_handle, header)| {
+                    let call = CallAddress {
+                        connection_handle: Arc::clone(&connection_handle),
+                        call_id: header.call_id,
+                    };
+
+                    Arc::new(Dispatch {
+                        id: state
+                            .core
+                            .answering
+                            .get(&call)
+                            .expect("an open call")
+                            .dispatched,
+                        ..dispatch_of((connection_handle, header))
+                    })
+                })
+                .collect()
+        })
+        .await
+        .expect("the dispatches read")
+}
+
+// a dispatch of `header` on `connection_handle`, its id one its router never drew
+fn dispatch_of((connection_handle, header): (ConnectionHandle, RequestHeader)) -> Dispatch {
+    Dispatch {
+        id: u64::MAX,
+        connection_handle,
+        header,
+        handler: Mutex::new(None),
+        session: Mutex::new(None),
+        answered: Mutex::new(None),
+        origin: (None, None),
+    }
+}
+
+// whether the call each of `dispatches` opened is open still, as its router asks
+async fn open_still(peer: &Peer, dispatches: Vec<Arc<Dispatch>>) -> Vec<bool> {
+    peer.owner
+        .run(move |state| {
+            dispatches
+                .iter()
+                .map(|dispatch| router_core::is_answering(state, dispatch))
+                .collect()
+        })
+        .await
+        .expect("the calls read")
+}
+
+// ! a request is known by the id its dispatch drew, as the other sides know it by the very header
+// dispatched: a request never dispatched is open to none, on every side
+// spec 9.3, 9.4
+#[tokio::test]
+async fn say_whether_the_call_of_a_request_is_open_still() {
+    let (peer, handed) = serving(true, &RouterLimitsOptions::default()).await;
+
+    peer.receive((
+        Envelope::Request {
+            header: scripted_header(5),
+            payload: Bytes::new(),
+        },
+        Arc::from("a"),
+    ));
+    peer.receive((
+        Envelope::Request {
+            header: scripted_header(7),
+            payload: Bytes::new(),
+        },
+        Arc::from("a"),
+    ));
+    peer.settle().await;
+
+    let dispatches = dispatches_of(&peer, &handed).await;
+
+    assert_eq!(
+        dispatches
+            .iter()
+            .map(|dispatch| dispatch.header.call_id)
+            .collect::<Vec<_>>(),
+        [5, 7],
+        "both requests reach the resolver"
+    );
+    assert_eq!(
+        open_still(&peer, dispatches.clone()).await,
+        [true, true],
+        "both open"
+    );
+
+    peer.receive((
+        Envelope::Cancel {
+            header: CancelHeader { call_id: 5 },
+        },
+        Arc::from("a"),
+    ));
+
+    let answerer = Arc::clone(&locked(&handed)[1].answerer);
+    let answering = answerer.respond(RouterAnswer::Result(Bytes::new()));
+
+    peer.settle().await;
+    answering.await.expect("answered");
+
+    assert_eq!(
+        open_still(&peer, dispatches).await,
+        [false, false],
+        "cancelled, then answered"
+    );
+    // a request never dispatched says nothing for it
+    assert_eq!(
+        open_still(
+            &peer,
+            vec![Arc::new(dispatch_of((Arc::from("a"), scripted_header(9))))]
+        )
+        .await,
+        [false],
+        "never dispatched"
+    );
 }

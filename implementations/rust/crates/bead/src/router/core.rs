@@ -1177,10 +1177,7 @@ fn gate_chunk<S: Side>(
     let invalid = core
         .failure(ProtocolCode::CHUNK_INVALID)
         .saying(failure.detail().to_owned());
-    let receiving = core
-        .answering
-        .get(&call)
-        .and_then(|answering| answering.receiving.clone());
+    let receiving = core.answering.receiving_of(&call).cloned();
 
     if let Some(RequestReceiving { transfer }) = receiving {
         let is_whole = core
@@ -1302,39 +1299,16 @@ pub(crate) fn pump<S: Side>(state: &mut S, (call, purpose): (&CallAddress, Sendi
 
 // ── Answering ────────────────────────────────────────────────────────────────────────────────
 
-// counts a call ended, once, timed to now
-fn ended<S: Side>(state: &mut S, (call, ending): (&CallAddress, CallEnding)) {
-    let core = state.core();
-
-    if let Some(answering) = core.answering.get_mut(call)
-        && !answering.is_ended
-        && let Some(series) = answering.series.clone()
-    {
-        // * read only for a call counted (spec/debugging.md 3.1)
-        let now = core.clock.monotonic();
-
-        answering.is_ended = true;
-        series.end(
-            ending,
-            microseconds_of(now.saturating_sub(answering.started_at)),
-        );
-    }
-}
-
 // counts the call of a request ended, as `ending` says, while it is the one `dispatch` opened
 fn end_answering<S: Side>(state: &mut S, (dispatch, ending): (&Dispatch, CallEnding)) {
     let call = CallAddress {
         connection_handle: Arc::clone(&dispatch.connection_handle),
         call_id: dispatch.header.call_id,
     };
-    let is_its = state
-        .core()
-        .answering
-        .get(&call)
-        .is_some_and(|answering| answering.dispatched == dispatch.id);
+    let core = state.core();
 
-    if is_its {
-        ended(state, (&call, ending));
+    if let Some(answering) = core.answering.answering_of_mut((&call, dispatch.id)) {
+        answering.end(ending, || core.clock.monotonic());
     }
 }
 
@@ -1450,8 +1424,12 @@ pub(crate) fn send_credits<S: Side>(state: &mut S, credits: Vec<(CallAddress, u6
 
 // takes a call out, cancelled, counted so
 fn take_answering<S: Side>(state: &mut S, call: &CallAddress) -> Option<Answering> {
-    ended(state, (call, CallEnding::Cancelled));
-    forget_answering(state, (call, None))
+    let mut answering = forget_answering(state, (call, None))?;
+    let core = state.core();
+
+    answering.end(CallEnding::Cancelled, || core.clock.monotonic());
+
+    Some(answering)
 }
 
 // closes the call `dispatch` opened, none that took its call id since: unanswered, counted an error
@@ -1460,15 +1438,11 @@ pub(crate) fn close_answering<S: Side>(state: &mut S, dispatch: &Dispatch) {
         connection_handle: Arc::clone(&dispatch.connection_handle),
         call_id: dispatch.header.call_id,
     };
-    let is_its = state
-        .core()
-        .answering
-        .get(&call)
-        .is_some_and(|answering| answering.dispatched == dispatch.id);
 
-    if is_its {
-        ended(state, (&call, CallEnding::Error));
-        forget_answering(state, (&call, Some(dispatch.id)));
+    if let Some(mut answering) = forget_answering(state, (&call, Some(dispatch.id))) {
+        let core = state.core();
+
+        answering.end(CallEnding::Error, || core.clock.monotonic());
     }
 }
 
@@ -1479,11 +1453,7 @@ pub(crate) fn is_answering<S: Side>(state: &mut S, dispatch: &Dispatch) -> bool 
         call_id: dispatch.header.call_id,
     };
 
-    state
-        .core()
-        .answering
-        .get(&call)
-        .is_some_and(|answering| answering.dispatched == dispatch.id && !answering.is_answered)
+    state.core().answering.is_answering((&call, dispatch.id))
 }
 
 /// The signal of the call `dispatch` opened, while it is open.
@@ -1493,12 +1463,7 @@ pub(crate) fn signal_of<S: Side>(state: &mut S, dispatch: &Dispatch) -> Option<S
         call_id: dispatch.header.call_id,
     };
 
-    state
-        .core()
-        .answering
-        .get(&call)
-        .filter(|answering| answering.dispatched == dispatch.id)
-        .map(|answering| answering.signal.clone())
+    state.core().answering.signal_of((&call, dispatch.id))
 }
 
 /// What settles once an answer went, or could not.
@@ -1588,16 +1553,8 @@ pub(crate) fn respond<S: Side>(
         connection_handle: Arc::clone(&handle),
         call_id,
     };
-    let is_its = state
-        .core()
-        .answering
-        .get(&call)
-        .is_some_and(|answering| answering.dispatched == dispatch.id);
-
     // its answer going out: a second goes nowhere, and this one closes the call once done
-    if is_its && let Some(answering) = state.core().answering.get_mut(&call) {
-        answering.is_answered = true;
-    }
+    let is_its = state.core().answering.answer((&call, dispatch.id));
 
     if let RouterAnswer::Failure(failure) = &answer
         && is_its
@@ -1993,9 +1950,7 @@ fn admit_routed<S: Side>(
         .insert(transfer, (Arc::clone(&dispatch), Arc::clone(&handler)));
 
     // kept before its first credit goes, so a chunk that credit brings at once finds it
-    if let Some(answering) = core.answering.get_mut(&call) {
-        answering.receiving = Some(RequestReceiving { transfer });
-    }
+    core.answering.attach(&call, RequestReceiving { transfer });
 
     touch_request_transfer(state, (transfer, timeout));
 
@@ -2335,23 +2290,18 @@ fn receive_request<S: Side>(
         Duration::ZERO
     };
 
-    core.answering.forget_abandoned(&call, None);
-    core.answering
-        .answering
-        .entry(Arc::clone(handle))
-        .or_default()
-        .insert(
-            call_id,
-            Answering {
-                dispatched: id,
-                signal: Signal::new(),
-                is_answered: false,
-                is_ended: false,
-                receiving: None,
-                series,
-                started_at,
-            },
-        );
+    core.answering.open(
+        &call,
+        Answering {
+            dispatched: id,
+            signal: Signal::new(),
+            is_answered: false,
+            is_ended: false,
+            receiving: None,
+            series,
+            started_at,
+        },
+    );
 
     // ! what its transport carried stands for ELSEWHERE alone (spec 13.1, 15.1)
     let carried = Carried {
@@ -2528,10 +2478,7 @@ fn receive_request_chunk<S: Side>(
 ) {
     let core = state.core();
     let handle = Arc::clone(&call.connection_handle);
-    let receiving = core
-        .answering
-        .get(&call)
-        .and_then(|answering| answering.receiving.clone());
+    let receiving = core.answering.receiving_of(&call).cloned();
     let length = u64::try_from(chunk.bytes.len()).unwrap_or(u64::MAX);
     let Some(RequestReceiving { transfer }) = receiving else {
         let credit_end = core.answering.abandoned_end_of(&call);
@@ -2651,26 +2598,13 @@ pub(crate) fn reject_pending<S: Side>(
     // ! the calls it answers taken last, each counted closed once all are out
     let mut taken = core.answering.take_all(handle);
 
-    // * read only when a call it takes is counted (spec/debugging.md 3.1)
-    let now = if taken
-        .iter()
-        .any(|(_, answering)| !answering.is_ended && answering.series.is_some())
-    {
-        core.now()
-    } else {
-        Duration::ZERO
-    };
+    // * read once, and only when a call it takes is counted (spec/debugging.md 3.1)
+    let mut now = None;
 
     for (_, answering) in &mut taken {
-        if !answering.is_ended
-            && let Some(series) = &answering.series
-        {
-            answering.is_ended = true;
-            series.end(
-                CallEnding::Closed,
-                microseconds_of(now.saturating_sub(answering.started_at)),
-            );
-        }
+        answering.end(CallEnding::Closed, || {
+            *now.get_or_insert_with(|| core.now())
+        });
     }
 
     // then each call waiting settled, and each signal aborted, application code last

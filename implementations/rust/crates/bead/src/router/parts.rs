@@ -2,6 +2,7 @@
 //! the call ids it reserved, the calls it answers and those abandoned, the transfers it sends and
 //! receives, and what its answers announced.
 
+use core::time::Duration;
 use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 
@@ -15,7 +16,8 @@ use crate::envelope::{
 };
 use crate::errors::ProgrammerError;
 use crate::failure::{Failure, ProcedureAddress};
-use crate::metrics::ProcedureSeries;
+use crate::metrics::{CallEnding, ProcedureSeries};
+use crate::router::core::microseconds_of;
 use crate::router::transfer::{
     Chunk, ChunkOutcome, IncomingBounds, IncomingTransfer, OutgoingTransfer,
 };
@@ -627,7 +629,7 @@ pub(crate) struct PendingRequest {
     pub(crate) receiving: Option<ResultReceiving>,
     pub(crate) reply: Option<CallReply>,
     pub(crate) sending: bool,
-    pub(crate) timeout: Option<core::time::Duration>,
+    pub(crate) timeout: Option<Duration>,
     pub(crate) timer: HeldTimer,
 }
 
@@ -644,7 +646,7 @@ impl core::fmt::Debug for PendingRequest {
 /// A call id reserved: when it is free again, on the monotonic reading, its id, and its timer.
 #[derive(Debug)]
 pub(crate) struct Reservation {
-    pub(crate) ends: core::time::Duration,
+    pub(crate) ends: Duration,
     pub(crate) id: u64,
     pub(crate) timer: HeldTimer,
 }
@@ -870,7 +872,23 @@ pub(crate) struct Answering {
     pub(crate) is_ended: bool,
     pub(crate) receiving: Option<RequestReceiving>,
     pub(crate) series: Option<ProcedureSeries>,
-    pub(crate) started_at: core::time::Duration,
+    pub(crate) started_at: Duration,
+}
+
+impl Answering {
+    /// Counts the call ended, once, as `ending` says: `clock` read only for a call counted
+    /// (spec/debugging.md 3.1), its time from its start to that reading.
+    pub(crate) fn end(&mut self, ending: CallEnding, clock: impl FnOnce() -> Duration) {
+        if !self.is_ended
+            && let Some(series) = &self.series
+        {
+            // * read only for a call counted (spec/debugging.md 3.1)
+            let now = clock();
+
+            self.is_ended = true;
+            series.end(ending, microseconds_of(now.saturating_sub(self.started_at)));
+        }
+    }
 }
 
 /// A call whose transfer ended: the end its credit reached, and what forgets it.
@@ -897,7 +915,7 @@ impl AnsweringCalls {
             .and_then(|calls| calls.get(&call.call_id))
     }
 
-    pub(crate) fn get_mut(&mut self, call: &CallAddress) -> Option<&mut Answering> {
+    fn get_mut(&mut self, call: &CallAddress) -> Option<&mut Answering> {
         self.answering
             .get_mut(&call.connection_handle)
             .and_then(|calls| calls.get_mut(&call.call_id))
@@ -911,6 +929,77 @@ impl AnsweringCalls {
         self.answering
             .get(handle)
             .map_or(0, |calls| count_of(calls.len()))
+    }
+
+    // ! a request is known by the id its dispatch drew, as the other sides know it by the very
+    // header dispatched: an id no dispatch of the call drew finds nothing, and answers nothing
+
+    /// Opens a call as its request is dispatched, `answering` holding the id its dispatch drew; a
+    /// call abandoned on its call id is forgotten.
+    pub(crate) fn open(&mut self, call: &CallAddress, answering: Answering) {
+        self.forget_abandoned(call, None);
+        self.answering
+            .entry(Arc::clone(&call.connection_handle))
+            .or_default()
+            .insert(call.call_id, answering);
+    }
+
+    /// The call the dispatch `dispatched` opened, while it is open: none once another request
+    /// opened its call id, and none for an id no dispatch of this call drew.
+    pub(crate) fn answering_of(
+        &self,
+        (call, dispatched): (&CallAddress, u64),
+    ) -> Option<&Answering> {
+        self.get(call)
+            .filter(|answering| answering.dispatched == dispatched)
+    }
+
+    /// The call the dispatch `dispatched` opened, while it is open, to change.
+    pub(crate) fn answering_of_mut(
+        &mut self,
+        (call, dispatched): (&CallAddress, u64),
+    ) -> Option<&mut Answering> {
+        self.get_mut(call)
+            .filter(|answering| answering.dispatched == dispatched)
+    }
+
+    /// The signal of the call `opened` names by its dispatch, while it is open.
+    pub(crate) fn signal_of(&self, opened: (&CallAddress, u64)) -> Option<Signal> {
+        self.answering_of(opened)
+            .map(|answering| answering.signal.clone())
+    }
+
+    /// Whether the call `opened` names by its dispatch is still to be answered: once its answer
+    /// goes out, or it is closed, taken, or its call id opened again, it is not.
+    pub(crate) fn is_answering(&self, opened: (&CallAddress, u64)) -> bool {
+        self.answering_of(opened)
+            .is_some_and(|answering| !answering.is_answered)
+    }
+
+    /// Marks the call `opened` names by its dispatch answered as its answer goes out: a second
+    /// goes nowhere, and the call stays until that answer closes it. Whether it was its.
+    pub(crate) fn answer(&mut self, opened: (&CallAddress, u64)) -> bool {
+        let Some(answering) = self.answering_of_mut(opened) else {
+            return false;
+        };
+
+        answering.is_answered = true;
+
+        true
+    }
+
+    /// Gives a call what it receives of its payload, until the call leaves; a call not open
+    /// receives nothing.
+    pub(crate) fn attach(&mut self, call: &CallAddress, receiving: RequestReceiving) {
+        if let Some(answering) = self.get_mut(call) {
+            answering.receiving = Some(receiving);
+        }
+    }
+
+    /// What a call receives of its payload; none for a call that receives none.
+    pub(crate) fn receiving_of(&self, call: &CallAddress) -> Option<&RequestReceiving> {
+        self.get(call)
+            .and_then(|answering| answering.receiving.as_ref())
     }
 
     pub(crate) fn abandoned_end_of(&self, call: &CallAddress) -> Option<u64> {
