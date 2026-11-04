@@ -34,6 +34,7 @@ mod client_clocks;
 mod client_command_credentials;
 mod client_commands;
 mod client_connection_end;
+mod client_conversations;
 mod client_credentials;
 mod client_drops;
 mod client_pacing;
