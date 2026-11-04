@@ -32,6 +32,60 @@ fn sizes(headers: &[EnvelopeHeader]) -> Vec<usize> {
 }
 
 #[test]
+fn writes_a_session_announced_as_the_token_it_was_given() {
+    let token = SessionToken::new([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15])
+        .expect("a session token");
+    assert_eq!(
+        written(&EnvelopeHeader::Failure(FailureHeader {
+            call_id: 3,
+            credential: Some(Credential::Opaque(token)),
+        })),
+        hexadecimal::bytes_of(
+            "A1 12 08 07 00 00 00 03 00 01 00 10 00 01 02 03 04 05 06 07 08 09 0A 0B 0C 0D 0E 0F"
+        )
+        .expect("hexadecimal")
+    );
+}
+
+#[test]
+fn writes_the_relays_and_the_scope_of_an_application_failure() {
+    use crate::envelope::write_failure;
+
+    let record = FailureRecord {
+        code: NonZeroU16::new(21).expect("a failure code"),
+        detail: String::new(),
+        relays: 2,
+        scope: FailureScope::Application,
+    };
+    assert_eq!(write_failure(&record, 1_024), [0x00, 0x15, 0x02, 0x01]);
+    for relays in [0, 1, 255] {
+        let crossed = write_failure(
+            &FailureRecord {
+                code: NonZeroU16::new(19).expect("a failure code"),
+                relays,
+                scope: FailureScope::Protocol,
+                ..record.clone()
+            },
+            1_024,
+        );
+        assert_eq!(crossed[2], relays);
+        assert_eq!(
+            read_failure(
+                &crossed,
+                RouterSide::Server,
+                &ReadEnvelopeOptions::default()
+            )
+            .expect("a failure reads")
+            .relays,
+            relays
+        );
+    }
+    let plain =
+        crate::failure::Failure::protocol(ProtocolCode::PROCEDURE_UNKNOWN, RouterSide::Server);
+    assert_eq!(write_failure(&plain.record(), 1_024)[2], 0);
+}
+
+#[test]
 fn reads_name_and_writes_it_back() {
     let entries: Vec<vectors::HeaderVector> = vectors::of("headers").expect("header vectors");
     assert_ne!(entries.len(), 0);
