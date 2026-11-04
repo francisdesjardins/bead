@@ -712,11 +712,10 @@ which judges the decoded request before the resolver: a server's resolvers, and 
 resolvers. A request its rules refuse is answered `PAYLOAD_INVALID`, its violations in its detail,
 and its resolver never called; a validator that throws is answered `PROCEDURE_FAILED` and reported
 (spec 9.5, 18.2). The side that requests judges its value before the encode when its options say so,
-`validates` and `Validates`: a client's requests and subscribing requests, and a server's commands,
-whose server takes the option too. A refusal fails the call before anything goes with
-`PAYLOAD_INVALID` and the same detail, counted as a call refused before it goes. `failFast`,
-`FailFast` and `fail_fast`, in the options of the side that answers and of the side that requests,
-stops a judging at its first violation.
+`validates`: a client's requests and subscribing requests, and a server's commands, whose server
+takes the option too. A refusal fails the call before anything goes with `PAYLOAD_INVALID` and the
+same detail, counted as a call refused before it goes. `failFast`, in the options of the side that
+answers and of the side that requests, stops a judging at its first violation.
 
 **One layer serves and calls a service, in each runtime.**
 

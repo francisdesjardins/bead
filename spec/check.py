@@ -40,7 +40,9 @@ none and what it notifies where it notifies, and each code it names a failure of
 catalogue that its procedure lists; a conversation's listener calls a command of that blueprint's;
 and every count the tables of files of docs/support.md and the
 README state is what the files it counts hold, protobuf's conformance suite's tests the floor of its
-runner, and no other number stands in a row of either, a unit cited and a code span aside.
+runner, and no other number stands in a row of either, a unit cited and a code span aside; and the spec
+and its companions name no language, no member in two sides' forms side by side, one name under
+tools/check-names.mjs's case rules spelled apart, and no side's own type of tools/names.tsv.
 Exit 1 on any of them.
 
   python spec/check.py --write-units [unit…]
@@ -1418,6 +1420,114 @@ for entry in named['exits']:
     for number, step in enumerate(entry['steps'], 1):
         for line in step.get('counted', ()):
             sample_of(line, f'exits: {entry["name"]!r}, step {number}')
+
+# ── The spec and its companions name no language ────────────────────────────────────────────────
+
+# a normative text states the rule, not each implementation's form (RFC 2119 §6, WHATWG Infra §2,
+# 0004): the spec and its companions name a member once, in its platform's form or case, and no
+# language, each side's own type left to docs/support.md
+SIDE_NAME = re.compile(r'(?<![\w#])(?:TypeScript|C#|Rust)(?![\w#])')
+
+# two backticked names side by side, `a`, `A`, `a` or `A`, `a` and `A`, a call's arguments aside
+NAME = r'`([A-Za-z_][A-Za-z0-9_:<>]*)(?:\([^`]*\))?`'
+PAIR = re.compile(rf'{NAME}(?:,|,? or|,? and) (?={NAME})')
+
+# a cell of tools/names.tsv, read as tools/check-names.mjs reads it: names split at ', ', each
+# `name [kind]`
+NAMES_CELL = re.compile(r'^(\S+) \[([a-z ]+)\]$')
+
+
+def name_key(name):
+    """A name's key under tools/check-names.mjs's case rules: a Rust path by its last segment, a C#
+    arity and an interface's I dropped, its underscores and its case, and a trailing Error,
+    Exception or Async, one member's three forms keying alike."""
+    name = re.sub(r'<,*>$', '', name.split('::')[-1])
+    name = re.sub(r'^I(?=[A-Z])', '', name).replace('_', '').lower()
+    return re.sub(r'(?<=.)(?:error|exception|async)$', '', name)
+
+
+def side_types():
+    """Each name tools/names.tsv holds in a side's cell of a row whose names are not one under the
+    case rules, its concept and its class beside it: a side's own form, or one rendered from
+    another's."""
+    types = {}
+
+    with open(os.path.join(ROOT, 'tools', 'names.tsv'), encoding='utf-8') as file:
+        for row in file.read().splitlines():
+            if row.startswith('#') or not row.strip():
+                continue
+
+            concept, *cells, row_class = row.split('\t')
+
+            if row_class == 'same':
+                continue
+
+            for cell in cells:
+                for part in cell.split(', ') if cell != '-' else ():
+                    found = NAMES_CELL.match(part)
+                    types[found.group(1) if found else part] = f'{concept}, {row_class.split(" (")[0]}'
+
+    return types
+
+
+def languages_named(text, types):
+    """Where a document names a language: each paragraph read with its white space folded, so a name
+    across a line break is read whole, and each finding at the line its name starts on: a side's
+    name, a member in two sides' forms side by side, or a side's type of tools/names.tsv."""
+    findings = []
+    lines = text.splitlines()
+    index = 0
+
+    while index < len(lines):
+        if not lines[index].strip():
+            index += 1
+            continue
+
+        starts, words = [], []
+
+        while index < len(lines) and lines[index].strip():
+            starts.append((sum(len(word) + 1 for word in words), index + 1))
+            words.append(' '.join(lines[index].split()))
+            index += 1
+
+        folded = ' '.join(words)
+
+        def line_at(offset):
+            return max(line for start, line in starts if start <= offset)
+
+        for found in SIDE_NAME.finditer(folded):
+            findings.append((line_at(found.start()), f'names {found.group(0)}, a language'))
+
+        for found in PAIR.finditer(folded):
+            first, second = found.group(1), found.group(2)
+
+            # a side's form moves the first letter's case, an underscore, an interface's I or an
+            # error's suffix: two names apart only in a later letter's case, `getHTTPStatus` and
+            # `getHttpStatus`, are one form, as spec.md section 16.6 sets them side by side
+            inner = first[0] == second[0] and first.lower() == second.lower()
+
+            if not inner and name_key(first) == name_key(second):
+                findings.append((line_at(found.start()), f'names `{first}` and `{second}`, one member in two '
+                                 'sides\' forms'))
+
+        for found in re.finditer(r'`([^`]+)`', folded):
+            name = re.sub(r'\(.*\)$', '', found.group(1))
+
+            if name in types:
+                findings.append((line_at(found.start()), f'names `{name}`, a side\'s own form in tools/names.tsv '
+                                 f'({types[name]})'))
+
+    return sorted(set(findings))
+
+
+named_types = side_types()
+
+for _, document, _ in LEDGERS.values():
+    with open(os.path.join(ROOT, document), encoding='utf-8') as file:
+        for line, finding in languages_named(file.read(), named_types):
+            problems.append(f'{document}:{line}: {finding}: the spec and its companions state a rule once, a '
+                            'member in its platform\'s form or case, and name no language; each side\'s type is '
+                            'docs/support.md\'s (0004)')
 
 # ── The published test keys stay in spec/ and the tests ─────────────────────────────────────────
 

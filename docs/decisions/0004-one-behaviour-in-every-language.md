@@ -312,9 +312,11 @@ and the metrics' [0013](0013-every-language-debugs-alike-at-no-cost-when-off.md)
 case, and any language that can carry the protocol whole mirrors the surface almost name for name;
 each language's own mapping of terms is its implementation's record, as
 [0007](0007-csharp-interfaces-blocks-two-parameters-no-warning.md) is the C# side's, and
-`tools/names.tsv` holds the mapping of the public names, one row a concept, each name with its
-kind, which `tools/check-names.mjs` checks against each side's list; a name only one side holds and
-no row explains is counted, and the count only falls.
+`tools/names.tsv` holds the mapping of the public names, one row a concept, each name with its kind,
+which `tools/check-names.mjs` checks against each side's list; a name only one side holds and no row
+explains is counted, and the count only falls. The spec and its companions state each rule once, a
+member in its platform's form or case, and name no language; `spec/check.py` holds it
+([0044](0044-rust-one-owner-per-router-traits-no-unsafe-two-parameters-no-warning.md#on-the-rust-sides-form-in-the-spec-its-companions-and-the-records)).
 
 **Every side takes two parameters, then one options object, and marks a required member in its own
 form.** A function takes at most two parameters, then at most one options object, always last,

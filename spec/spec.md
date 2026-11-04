@@ -2503,7 +2503,8 @@ and a payload read and written again is its canonical form: an echo answers
 one the procedure's definition names. What that format takes, refuses and writes is protobuf's, as
 its [Encoding](https://protobuf.dev/programming-guides/encoding/) guide and its
 [Language Guide](https://protobuf.dev/programming-guides/proto3/) state it; this section restates
-none of it, and a side reads and writes through its stock protobuf library and the code its
+none of it, and a side reads and writes through its stock protobuf library, the one it takes as
+published, in whose place nothing of Bead's reads or writes the binary format, and the code its
 generator writes for the message. What is Bead's:
 
 1. Bytes that are no encoding of the message do not read (section 17.2).

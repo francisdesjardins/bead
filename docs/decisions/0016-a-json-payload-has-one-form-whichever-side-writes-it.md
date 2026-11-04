@@ -334,7 +334,8 @@ another connection held.
 **Each runtime holds the codecs**, public under the names
 [0018](0018-a-services-procedures-are-typed-descriptors-served-and-called-through-one-layer.md)
 gives them: the TypeScript side's in `src/router/shared/payloads.ts`, the C# side's in
-`Bead.Core/Payloads.cs`. The interop's serializers delegate to them.
+`Bead.Core/Payloads.cs`, the Rust side's in `bead/src/payloads.rs`. The interop's serializers
+delegate to them.
 
 **The rule has its gate** ([0006](0006-a-rule-has-its-gate.md)): `spec/check.py` holds the file in
 the frame of every file of entries ([0004](0004-one-behaviour-in-every-language.md)), as its header says.

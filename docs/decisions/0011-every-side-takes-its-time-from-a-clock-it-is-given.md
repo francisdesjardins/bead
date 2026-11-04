@@ -80,18 +80,18 @@ TypeScript side it is the part of the globals Bead calls — `setTimeout`, `clea
 so its timers keep the platform's handle, `unref` included where it has one. The pair is a row of
 each side's list of terms ([0007](0007-csharp-interfaces-blocks-two-parameters-no-warning.md)). The
 word is _clock_ ([0003](0003-one-word-one-meaning.md)): `clock`, `Clock`, `IClock`; a _timestamp_ is
-the monotonic reading alone, and the instants a side reports are `lastActivity`, `LastActivity`, and
-a trace's `startedAt`, `StartedAt`, beside its `duration`, `Duration` — the shape of an
-OpenTelemetry span: a start on the wall clock, a duration on the monotonic one.
+the monotonic reading alone, and the instants a side reports are `lastActivity`, and a trace's
+`startedAt`, beside its `duration` — the shape of an OpenTelemetry span: a start on the wall clock,
+a duration on the monotonic one.
 
-**One ceiling, JavaScript's: 2³¹ − 1 milliseconds**, which the C# side keeps for parity, though its
-timers reach twice as far. Every option and method that takes a timeout refuses a longer one — a
-session manager's reset and a server's connection timeout among them — and _never_ is `Infinity`,
-`Timeout.InfiniteTimeSpan` and `Duration::MAX`, which arm nothing. One constant a side, beside its
-clock. **And one floor: a millisecond, counted whole.** Bead arms no timer for less on the clock it
-is given, where Node waits a millisecond at least and .NET fires at once, nor for a fraction, which
-both drop. How a side holds a duration an application gives it, between that floor and that
-ceiling, is [0014](0014-every-place-that-takes-a-duration-is-a-row-of-one-file.md)'s.
+**One ceiling, JavaScript's: 2³¹ − 1 milliseconds**, which the C# and Rust sides keep for parity,
+though their timers reach further. Every option and method that takes a timeout refuses a longer one
+— a session manager's reset and a server's connection timeout among them — and _never_ is
+`Infinity`, `Timeout.InfiniteTimeSpan` and `Duration::MAX`, which arm nothing. One constant a side,
+beside its clock. **And one floor: a millisecond, counted whole.** Bead arms no timer for less on
+the clock it is given, where Node waits a millisecond at least and .NET fires at once, nor for a
+fraction, which both drop. How a side holds a duration an application gives it, between that floor
+and that ceiling, is [0014](0014-every-place-that-takes-a-duration-is-a-row-of-one-file.md)'s.
 
 **`advance` steps.** It settles the side; takes the earliest timer due by now plus its milliseconds;
 sets both readings to that due; fires it; settles; and so on, then sets the readings to now plus its

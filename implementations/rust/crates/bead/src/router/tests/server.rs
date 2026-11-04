@@ -507,6 +507,143 @@ async fn counts_a_call_whose_admission_fails_procedure_failed_and_one_whose_subs
     );
 }
 
+// a codec of text that panics as it reads, as an application's might: its throw other than its
+// refusal, the one a CodecRefusal leaves it
+#[derive(Debug)]
+struct Unreadable;
+
+impl PayloadCodec for Unreadable {
+    type Value = String;
+
+    fn decode(&self, _bytes: &Bytes) -> Result<String, CodecRefusal> {
+        panic!("this codec breaks as it reads, on purpose")
+    }
+
+    fn encode(&self, value: &String) -> Result<Bytes, CodecRefusal> {
+        TextCodec.encode(value)
+    }
+
+    fn encoding(&self) -> &'static str {
+        "text"
+    }
+}
+
+// echo served on the first connection through `dependencies`, a request delivered to it: what it
+// sent, what it reported and what the registry counted of it
+async fn counted_through<Req: PayloadCodec<Value = String>>(
+    dependencies: RequestResolverDependencies<Req, TextCodec>,
+) -> (Vec<String>, Vec<String>, Vec<String>) {
+    let registry = registry();
+    let served = Served::new(&counted_options(&registry));
+    let reached = Arc::new(Mutex::new(Vec::new()));
+    let reaching = Arc::clone(&reached);
+
+    served.transport.open(&first(), true);
+    served
+        .services
+        .get_request_resolver(&echo(), dependencies)
+        .expect("echo resolved")
+        .on(Arc::new(move |request, response: Response<TextCodec>| {
+            locked(&reaching).push(request.payload.clone());
+
+            response.result(request.payload)
+        }))
+        .expect("echo registered");
+    served
+        .transport
+        .deliver(&request_of((1, &echo(), "x")), &first());
+    served.settle().await;
+
+    assert!(locked(&reached).is_empty(), "never reaching the callback");
+
+    (
+        served.sent_since(),
+        served.reported(),
+        counted_of((&registry, "echo")),
+    )
+}
+
+// a request's call counted once, a failure under PROCEDURE_FAILED, never as its codec's refusal
+// nor as an error
+fn assert_counted_procedure_failed(counted: &[String]) {
+    assert!(
+        counted.contains(&"bead_server_call_started_total{type=\"request\"} 1".to_owned()),
+        "started once: {counted:?}"
+    );
+    assert!(
+        counted.contains(
+            &"bead_server_call_handled_total{type=\"request\",outcome=\"failure\",code=\"PROCEDURE_FAILED\"} 1"
+                .to_owned()
+        ),
+        "handled a failure, PROCEDURE_FAILED: {counted:?}"
+    );
+    assert_eq!(
+        counted
+            .iter()
+            .filter(|line| line.starts_with("bead_server_call_handled_total"))
+            .count(),
+        1,
+        "handled once: {counted:?}"
+    );
+    assert!(
+        !counted
+            .iter()
+            .any(|line| line.contains("PAYLOAD_UNDECODABLE")),
+        "never as its codec's refusal: {counted:?}"
+    );
+    assert!(
+        !counted
+            .iter()
+            .any(|line| line.contains("outcome=\"error\"")),
+        "never as an error: {counted:?}"
+    );
+}
+
+// debugging 9.4.14, spec 9.0, 17.2: the twin of "counts a request whose codec throws other than
+// its refusal as failure PROCEDURE_FAILED", a codec's panic its throw
+#[tokio::test]
+async fn counts_a_request_whose_codec_panics_as_it_reads_as_failure_procedure_failed() {
+    let (sent, reported, counted) =
+        counted_through(RequestResolverDependencies::new(Unreadable, TextCodec)).await;
+
+    assert_eq!(
+        sent,
+        ["first failure 1 PROCEDURE_FAILED"],
+        "answered PROCEDURE_FAILED"
+    );
+    assert_eq!(
+        reported,
+        ["a codec panicked: this codec breaks as it reads, on purpose first"],
+        "its panic reported once, with its connection"
+    );
+    assert_counted_procedure_failed(&counted);
+}
+
+// debugging 9.4.14, spec 18.2
+#[tokio::test]
+async fn counts_a_request_whose_rule_fails_to_judge_as_failure_procedure_failed() {
+    let (sent, reported, counted) = counted_through(RequestResolverDependencies {
+        validate: Some(Arc::new(|_value: &String, _options| {
+            panic!("this rule fails to judge, on purpose")
+        })),
+        ..RequestResolverDependencies::new(TextCodec, TextCodec)
+    })
+    .await;
+
+    assert_eq!(
+        sent,
+        ["first failure 1 PROCEDURE_FAILED"],
+        "answered PROCEDURE_FAILED"
+    );
+    assert_eq!(reported.len(), 1, "its failure reported once: {reported:?}");
+    assert!(
+        reported[0].contains("this rule fails to judge, on purpose")
+            && reported[0].ends_with(" first"),
+        "its failure reported, with its connection: {reported:?}"
+    );
+    assert_counted_procedure_failed(&counted);
+}
+
 // debugging 9.7
 #[tokio::test]
 async fn counts_a_command_to_a_connection_not_open_as_started_and_closed_in_the_turn_it_started() {

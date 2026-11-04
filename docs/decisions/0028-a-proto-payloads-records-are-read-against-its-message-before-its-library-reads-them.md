@@ -114,13 +114,15 @@ its place: a difference in what a library writes, the order of unknown fields, t
 entries and an entry's key or value at its default among them, is a platform row.
 
 **The check reads the message's own descriptor**, the one its library and the generated code already
-hold: protobuf-es's `DescMessage`, the `…Schema` a generated file imports, and Google.Protobuf's
-`MessageDescriptor`, `Foo.Descriptor`. Under `messages: external` it is the descriptor of the code
-the project's own build compiles, so it cannot go stale, and the library that reads resolves
-editions' features and map entries, so the check sees what it reads. Each message's shape is built
-once, at first use, and cached by its descriptor, in a `WeakMap` and a `ConditionalWeakTable`: each
-field number to what its records take, and the shapes of the messages it holds, so a message holds
-itself.
+hold: protobuf-es's `DescMessage`, the `…Schema` a generated file imports, Google.Protobuf's
+`MessageDescriptor`, `Foo.Descriptor`, and Buffa's, a `buffa_descriptor::DescriptorPool` and the
+message's `MessageIndex`, held as a `ProtoSchema`. Under `messages: external` it is the descriptor
+of the code the project's own build compiles, so it cannot go stale, and the library that reads
+resolves editions' features and map entries, so the check sees what it reads. Each message's
+shape is built once, at first use, and cached by its descriptor, in a `WeakMap` and a
+`ConditionalWeakTable`, and on the Rust side read once into the `ProtoSchema` its codec holds,
+shared by every clone: each field number to what its records take, and the shapes of the messages
+it holds, so a message holds itself.
 
 - **TypeScript**: the subpath `@francisdesjardins/bead/proto`, `src/proto/proto.ts`, and its
   `checkProtoRecords(bytes, schema)`, in `src/proto/records.ts`, which throws a `SyntaxError`, as
@@ -136,11 +138,17 @@ itself.
   `FormatException`, as `Payloads` does; its tests in `tests/Bead.Protobuf.Tests/`. `Bead.Core`
   references no Google.Protobuf: a project that binds `proto` references `Bead.Protobuf`, which
   carries the library its generated messages need.
+- **Rust**: the crate `bead-protobuf`, beside the core, which depends on no protobuf library,
+  `check_records(bytes: &[u8], schema: &ProtoSchema)`, which returns a `CodecRefusal`, as every
+  codec of `bead` does; its tests in `src/records/tests.rs`.
 
-The two map name for name, `./proto` and `checkProtoRecords`, `Bead.Protobuf` and
-`ProtoRecords.Check`; the router answers a throw from either `PAYLOAD_UNDECODABLE`, as it answers
-any decoder's. The target still writes data and types, the call and the descriptor its library
-gives, and the check is the runtime's behaviour
+The three map name for name, `./proto` and `checkProtoRecords`, `Bead.Protobuf` and
+`ProtoRecords.Check`, `bead-protobuf` and `check_records`. A request whose check refuses it is
+answered `PAYLOAD_UNDECODABLE`, as any codec's refusal is; a request's decoder that throws, or
+panics, other than by its refusal is its side's own error, answered `PROCEDURE_FAILED` with no
+detail and reported; a result's or a notification's fails as a refusal does (spec 9.0, 17.2). The
+target still writes data and types, the call and the descriptor its library gives, and the check
+is the runtime's behaviour
 ([0022](0022-a-proto-becomes-one-checked-blueprint-and-each-language-is-generated-from-it.md)).
 
 **What the check refuses**, in one walk of the payload that allocates nothing per record:
@@ -161,8 +169,8 @@ gives, and the check is the runtime's behaviour
 - a group not closed by an end group of its own number, an unknown group walked as an unknown
   message; the wire types 6 and 7, and an end group that closes no group;
 - a message nested more than 100 deep below the top one, a group and a map's entry each counting as
-  a message (17.9.3): Google.Protobuf counts them so, and the check refuses first where protobuf-es,
-  which does not count an entry, would read on;
+  a message (17.9.3): Google.Protobuf counts them so, and the check refuses first where protobuf-es
+  and Buffa, which count no entry, would read on;
 - a field the message declares, at a wire type its type does not take, in a map's entry too, a
   repeated scalar of a numeric type taking its own and the length-delimited (17.9.5);
 - a field a map's entry does not declare (17.9.6).
@@ -182,15 +190,17 @@ as Google.Protobuf counts them.
 
 **The runtime codec calls the check, for generated code.** A generated codec is the runtime's
 codec of its message's schema, `protoCodecOf(FooSchema)` of `@francisdesjardins/bead/proto` and
-`global::Bead.Protobuf.ProtoCodecs.Of<global::Foo>()`, whose read checks the records before the
-library reads them, then reads at 17.9.3's bound and judges the message's required fields
+`global::Bead.Protobuf.ProtoCodecs.Of<global::Foo>()`, and on the Rust side
+`bead_protobuf::ProtoCodec::<Foo>::new()`, whose read checks the records before the library reads
+them, then reads at 17.9.3's bound and judges the message's required fields
 ([0042](0042-a-proto-message-that-leaves-a-required-field-unset-neither-reads-nor-writes-and-a-gateway-refuses-it-where-its-server-would.md)). 3 is the contract whose code first called the check, since generated code that
 calls it needs an export a runtime without it lacks, which is what moves the counter. **The runtimes
 hold 5 and 6**, on the TypeScript and C# sides, 5 for a route table ([0037](0037-a-procedure-is-also-an-http-route-which-a-gateway-answers-as-one-more-client-of-its-server.md)) and 6 since a service's
 generated file calls the runtime codec ([0042](0042-a-proto-message-that-leaves-a-required-field-unset-neither-reads-nor-writes-and-a-gateway-refuses-it-where-its-server-would.md)), and none older: they hold no
 `GENERATED_CODE_SUPPORTS_VERSION_2`, `_3` or `_4` and no `GeneratedCode.SupportsVersion2`,
 `SupportsVersion3` or `SupportsVersion4`, so code that names 2, 3 or 4, an earlier beadc's, fails its
-type-check and its build until it is regenerated.
+type-check and its build until it is regenerated. On the Rust side, whose beadc target is ahead,
+an application makes the runtime codec itself.
 A runtime keeps a constant while it still serves the code that names it, and one that would run
 version-2 code unchecked no longer serves it as Bead conforms: before 1.0.0, an older constant goes
 once the code that names it no longer conforms through the runtime; from 1.0.0, it stays for the
@@ -229,7 +239,7 @@ which a row's `read` gives as a depth. protoc 36.2, protoc-gen-es 2.16.0 under b
 than 5 bytes or past 32 bits, a length past 32 bits, an unknown varint of more than 10 bytes, a
 varint past 64 bits, a record past the end of its message — are played by every side, none excused.
 Each part has its entries, each citing its unit, none excused, every reading confirmed on
-protobuf-es and Google.Protobuf, the check in front:
+protobuf-es, Google.Protobuf and Buffa, the check in front:
 
 - read: `counts packed`, `counts unpacked and packed, in one message`, `stamps unpacked`,
   `stamps packed`, `a map's entry, its value before its key`, `a group closed by its own end group`
@@ -238,7 +248,7 @@ protobuf-es and Google.Protobuf, the check in front:
   `a packed uint32 whose last varint runs past its record, a field after`,
   `a group closed by another number's end group`, `a group never closed` (17.9.1);
 - refused, nested past 100: `51 maps deep, 102 messages below the top, each entry counted`, which
-  protobuf-es alone reads (17.9.3);
+  protobuf-es and Buffa read (17.9.3);
 - refused under 17.9.5: `a string at the varint wire type`,
   `a uint32 at the length-delimited wire type`, `a uint32 at the fixed32 wire type`,
   `a message at the varint wire type, a string after`, `stamps at the varint wire type`,
@@ -360,8 +370,9 @@ messages, where TypeScript's ratio ran from 47% to 84% across runs, and close to
 A packed record's walk counts its varints' bytes without decoding a value, which keeps it under the
 library's decoding of each. The bound the TypeScript and C# runtimes hold: on each row, the check
 costs no more than its library's read, the packed walk included, and allocates nothing per record;
-the C# side's allocates no byte over 1,000 checks of each payload. A `proto` writer runs the same
-check over the bytes it wrote, its refusal the writer's
+the C# side's allocates no byte over 1,000 checks of each payload. The Rust side's bench, which a
+release keeps, measures no `proto` payload, so no bound is stated of its check. A `proto` writer
+runs the same check over the bytes it wrote, its refusal the writer's
 ([0031](0031-a-proto-payload-is-protobufs-format-and-bead-states-only-its-own.md)), so a write costs
 that walk too.
 
