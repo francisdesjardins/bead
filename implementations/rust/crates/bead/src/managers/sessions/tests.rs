@@ -19,6 +19,8 @@ use crate::session_token::SessionToken;
 use crate::testing::SteppingClock;
 use crate::testing::pair::{Pair, PairOptions};
 
+mod copies;
+
 const FIRST: &str = "type=WS;ip=127.0.0.1;port=50001;ordinal=1";
 const SECOND: &str = "type=WS;ip=127.0.0.1;port=50002;ordinal=1";
 const UNKNOWN: &str = "type=WS;ip=127.0.0.1;port=1;ordinal=1";
