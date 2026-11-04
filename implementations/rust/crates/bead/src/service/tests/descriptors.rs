@@ -159,3 +159,32 @@ fn refuses_a_codec_missing() {
         ("E0061", "1 argument"),
     );
 }
+
+// a rule is a value of three: anybody, a session, or a hook by its name; a hook of no name is
+// refused as its descriptor is made, where C# refuses it as the rule is made
+#[test]
+fn makes_a_rule_of_every_call_a_session_or_a_hook_by_its_name() {
+    let hook_of = |rule: AdmissionRule| match rule {
+        AdmissionRule::Hook(name) => Some(name),
+        AdmissionRule::None | AdmissionRule::Session => None,
+    };
+    assert_eq!(
+        [
+            hook_of(AdmissionRule::None),
+            hook_of(AdmissionRule::Session),
+            hook_of(AdmissionRule::Hook("loud"))
+        ],
+        [None, None, Some("loud")]
+    );
+    assert_eq!(AdmissionRule::Hook("loud"), AdmissionRule::Hook("loud"));
+    assert_ne!(AdmissionRule::None, AdmissionRule::Session);
+    assert_eq!(
+        request_of(DescriptorInit {
+            admission: AdmissionRule::Hook(""),
+            ..init()
+        })
+        .expect_err("a hook of no name")
+        .message(),
+        "echo's admission is none, session or a hook by name"
+    );
+}
