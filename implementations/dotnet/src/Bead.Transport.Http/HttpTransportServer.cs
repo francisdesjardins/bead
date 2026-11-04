@@ -464,6 +464,9 @@ public sealed record HttpTransportStartOptions
 
     /// <summary>Whether it takes any free port instead.</summary>
     public bool FindOpenPort { get; init; }
+
+    /// <summary>What gives up on the start.</summary>
+    public CancellationToken CancellationToken { get; init; }
 }
 
 /// <summary>
@@ -767,7 +770,7 @@ public sealed partial class HttpTransportServer : IServerTransport, IAsyncDispos
                     return connection.Ordinal;
                 }).Select((connection) =>
                 {
-                    return new TransportServerClient(connection.Address, connection.ConnectionHandle, connection.LastActivity, connection.Port, TransportTypes.Http);
+                    return new TransportServerClient { Address = connection.Address, ConnectionHandle = connection.ConnectionHandle, LastActivity = connection.LastActivity, Port = connection.Port, Type = TransportTypes.Http };
                 })];
             }
         }
@@ -836,13 +839,13 @@ public sealed partial class HttpTransportServer : IServerTransport, IAsyncDispos
     /// its state kept; then with an <see cref="InvalidOperationException"/> unless Uninitialized or
     /// Closed; one that fails ends Closed, ready to start again.
     /// </summary>
-    public Task<TransportServerAddress> Start(HttpTransportStartOptions? options = null, CancellationToken cancellationToken = default)
+    public Task<TransportServerAddress> Start(HttpTransportStartOptions? options = null)
     {
         var start = options ?? new HttpTransportStartOptions();
 
         return _life.Start(() =>
         {
-            return Starting((start, cancellationToken));
+            return Starting((start, start.CancellationToken));
         });
     }
 
@@ -1115,13 +1118,15 @@ public sealed partial class HttpTransportServer : IServerTransport, IAsyncDispos
         // * built only when a listener listens
         if (end.Reason is { } reason && Refusal is { } listeners)
         {
-            var refusal = new TransportServerRefusal(
-                AddressOf(context),
-                HttpServerFields.AuthorityOf(context),
-                HostsAndOrigins.OriginOf(context.Request.Headers.Origin),
-                context.Connection.RemotePort,
-                reason,
-                end.Status);
+            var refusal = new TransportServerRefusal
+            {
+                Address = AddressOf(context),
+                Authority = HttpServerFields.AuthorityOf(context),
+                Origin = HostsAndOrigins.OriginOf(context.Request.Headers.Origin),
+                Port = context.Connection.RemotePort,
+                Reason = reason,
+                Status = end.Status,
+            };
 
             _listeners.Tell(listeners, refusal);
         }

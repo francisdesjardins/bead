@@ -124,7 +124,7 @@ public sealed class GreeterCommands
 public sealed class GreeterNotifiers
 {
     /// <summary>Notifies the subscribers of <c>watch</c>.</summary>
-    public required global::System.Func<global::Google.Protobuf.WellKnownTypes.Timestamp, global::Bead.NotifyOptions?, global::System.Threading.Tasks.Task> Watch { [global::System.Obsolete("Use sayHello.", DiagnosticId = "BEAD0001")] get; init; }
+    public required global::Bead.Notifier<global::Google.Protobuf.WellKnownTypes.Timestamp> Watch { [global::System.Obsolete("Use sayHello.", DiagnosticId = "BEAD0001")] get; init; }
 }
 
 /// <summary>The window each procedure of <c>bead.messages.v1.GreeterService</c> that notifies is asked for; none, unpaced.</summary>

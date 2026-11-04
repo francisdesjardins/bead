@@ -187,7 +187,7 @@ public sealed class InteropTests(InteropTests.TypeScriptServer server, InteropTe
             var link = await LinkedOver(transport);
             var broker = new BrokerClient(link.Participant.Client());
 
-            await broker.Transport.Connect(new BrokerTransportClientConnectOptions { Server = "interop-ts" }, Cancelled);
+            await broker.Transport.Connect(new BrokerTransportClientConnectOptions { Server = "interop-ts", CancellationToken = Cancelled });
 
             return new Connected(broker, broker.DisposeAsync);
         }
@@ -196,7 +196,7 @@ public sealed class InteropTests(InteropTests.TypeScriptServer server, InteropTe
         {
             var client = new WebSocketClient();
 
-            await client.Connect(new WebSocketTransportClientConnectOptions { Host = Host, Port = port, Credential = credential }, Cancelled);
+            await client.Connect(new WebSocketTransportClientConnectOptions { Host = Host, Port = port, Credential = credential, CancellationToken = Cancelled });
 
             return new Connected(client, client.DisposeAsync);
         }
@@ -204,7 +204,7 @@ public sealed class InteropTests(InteropTests.TypeScriptServer server, InteropTe
         var inOrder = new InOrder();
         var httpClient = new BeadHttpClient(new BeadHttpClientOptions { Transport = new HttpTransportClientOptions { Handler = inOrder } });
 
-        await httpClient.Connect(new HttpTransportClientConnectOptions { Host = Host, Port = httpPort }, Cancelled);
+        await httpClient.Connect(new HttpTransportClientConnectOptions { Host = Host, Port = httpPort, CancellationToken = Cancelled });
 
         return new Connected(httpClient, async () =>
         {
@@ -684,7 +684,7 @@ public sealed class InteropTests(InteropTests.TypeScriptServer server, InteropTe
             await using var each = new BrokerClient(link.Participant.Client());
             var payload = $"{{\"index\":{index}}}";
 
-            await each.Transport.Connect(new BrokerTransportClientConnectOptions { Server = "interop-both" }, Cancelled);
+            await each.Transport.Connect(new BrokerTransportClientConnectOptions { Server = "interop-both", CancellationToken = Cancelled });
             Assert.Equal(payload, (await new InteropClient(each).Echo(JsonOf(payload))().WaitAsync(Patience, Cancelled)).GetRawText());
         }
 
@@ -739,7 +739,7 @@ public sealed class InteropTests(InteropTests.TypeScriptServer server, InteropTe
         {
             closes.Enqueue(isClean);
         };
-        await client.Transport.Connect(new BrokerTransportClientConnectOptions { Server = "interop-ts" }, Cancelled);
+        await client.Transport.Connect(new BrokerTransportClientConnectOptions { Server = "interop-ts", CancellationToken = Cancelled });
         Assert.Equal("\"before\"", (await new InteropClient(client).Echo(JsonOf("\"before\""))().WaitAsync(Patience, Cancelled)).GetRawText());
         link.Relay.Cut();
         await Until(() =>
@@ -775,7 +775,7 @@ public sealed class InteropTests(InteropTests.TypeScriptServer server, InteropTe
 
         await using var next = new BrokerClient(link.Participant.Client());
 
-        await next.Transport.Connect(new BrokerTransportClientConnectOptions { Server = "interop-ts" }, Cancelled);
+        await next.Transport.Connect(new BrokerTransportClientConnectOptions { Server = "interop-ts", CancellationToken = Cancelled });
         Assert.Equal("\"after\"", (await new InteropClient(next).Echo(JsonOf("\"after\""))().WaitAsync(Patience, Cancelled)).GetRawText());
     }
 

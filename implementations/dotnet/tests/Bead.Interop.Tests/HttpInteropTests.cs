@@ -135,7 +135,7 @@ public sealed class HttpInteropTests(InteropTests.TypeScriptServer server)
     {
         await using var memory = new MemoryTransportServer();
         await using var local = new HttpGateway(new HttpGatewayOptions { Transport = memory, Routes = HttpRoutes.All, Document = HttpRoutes.OpenApiDocument.ToArray() });
-        var own = await local.Start(new HttpGatewayStartOptions { Address = "127.0.0.1", FindOpenPort = true }, Cancelled);
+        var own = await local.Start(new HttpGatewayStartOptions { Address = "127.0.0.1", FindOpenPort = true, CancellationToken = Cancelled });
         using var http = new HttpClient();
         using var remote = await http.GetAsync(new Uri(await Gateway(), "/openapi.json"), Cancelled);
         using var served = await http.GetAsync(new Uri($"http://127.0.0.1:{own.Port}/openapi.json"), Cancelled);

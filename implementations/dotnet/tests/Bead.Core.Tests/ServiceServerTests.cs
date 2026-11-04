@@ -385,7 +385,7 @@ public sealed class ServiceServerTests
         var first = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var news = greeter.NotifierOf(GreeterProcedures.News);
 
-        await news("before", null).WaitAsync(Patience, Cancelled);
+        await news("before").WaitAsync(Patience, Cancelled);
 
         greeter.On(GreeterProcedures.News, async (_, response) =>
         {
@@ -406,7 +406,7 @@ public sealed class ServiceServerTests
             return Task.CompletedTask;
         })().WaitAsync(Patience, Cancelled);
 
-        await news("after", null).WaitAsync(Patience, Cancelled);
+        await news("after").WaitAsync(Patience, Cancelled);
         await first.Task.WaitAsync(Patience, Cancelled);
 
         // * every notification heard, collected: the one after its offer, once, none before
@@ -414,6 +414,34 @@ public sealed class ServiceServerTests
         {
             Assert.Equal(["after"], heard);
         }
+    }
+
+    [Fact]
+    public async Task Gives_one_notifier_for_each_procedure_that_notifies_and_refuses_a_procedure_its_service_lacks()
+    {
+        await using var link = await ServiceLink.Open();
+        var greeter = GreeterOf();
+        var other = new RequestProcedure<GreeterProcedures, string, string, string, NoFailure>(
+            GreeterProcedures.News.Procedure,
+            GreeterProcedures.News.Bindings);
+
+        // * one for news, the one procedure that notifies, given before the offer as after it; a
+        // procedure that does not notify has no notifier, which does not compile
+        Notifier<string> news = greeter.NotifierOf(GreeterProcedures.News);
+
+        Assert.NotNull(news);
+        Assert.Throws<ArgumentException>(() =>
+        {
+            return greeter.NotifierOf(other);
+        });
+
+        greeter.Offer(link.Server);
+
+        Assert.NotNull(greeter.NotifierOf(GreeterProcedures.News));
+        Assert.Throws<ArgumentException>(() =>
+        {
+            return greeter.NotifierOf(other);
+        });
     }
 
     [Fact]

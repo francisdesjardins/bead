@@ -34,7 +34,7 @@ internal sealed class TranscodingService : IAsyncDisposable
     /// <summary>Notifies each subscriber of watch with <paramref name="remaining"/>, as the server's service does.</summary>
     public Task Watched(int remaining)
     {
-        return _transcoding!.Notify.Watch(new Tick { Remaining = remaining }, null);
+        return _transcoding!.Notify.Watch(new Tick { Remaining = remaining });
     }
 
     /// <summary>The calls of hang its resolver took.</summary>

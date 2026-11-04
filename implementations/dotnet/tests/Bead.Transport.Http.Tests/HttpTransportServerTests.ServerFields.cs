@@ -49,7 +49,7 @@ public sealed partial class HttpTransportServerTests
                 return next(context);
             });
         };
-        var bound = await transport.Start(Loopback, Cancelled);
+        var bound = await transport.Start(Loopback with { CancellationToken = Cancelled });
         var url = new Uri($"http://{Host}:{bound.Port}/bead");
 
         foreach (var (name, value, status, reason) in cases)
@@ -620,7 +620,7 @@ public sealed partial class HttpTransportServerTests
             {
                 return refusal.Origin;
             }));
-            Assert.Equal([new TransportServerRefusal(Host, own, "http://a.example\tb", peerPort, HttpRefusals.Origin, 403)], _refusals);
+            Assert.Equal([new TransportServerRefusal { Address = Host, Authority = own, Origin = "http://a.example\tb", Port = peerPort, Reason = HttpRefusals.Origin, Status = 403 }], _refusals);
         }
     }
 }

@@ -356,10 +356,10 @@ public sealed class TranscodingCommands
 public sealed class TranscodingNotifiers
 {
     /// <summary>Notifies the subscribers of <c>ticks</c>.</summary>
-    public required global::System.Func<global::Bead.Transcoding.V1.Tick, global::Bead.NotifyOptions?, global::System.Threading.Tasks.Task> Ticks { get; init; }
+    public required global::Bead.Notifier<global::Bead.Transcoding.V1.Tick> Ticks { get; init; }
 
     /// <summary>Notifies the subscribers of <c>watch</c>.</summary>
-    public required global::System.Func<global::Bead.Transcoding.V1.Tick, global::Bead.NotifyOptions?, global::System.Threading.Tasks.Task> Watch { get; init; }
+    public required global::Bead.Notifier<global::Bead.Transcoding.V1.Tick> Watch { get; init; }
 }
 
 /// <summary>The window each procedure of <c>bead.transcoding.v1.TranscodingService</c> that notifies is asked for; none, unpaced.</summary>

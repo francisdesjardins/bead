@@ -338,7 +338,7 @@ public sealed class InteropCommands
 public sealed class InteropNotifiers
 {
     /// <summary>Notifies the subscribers of <c>ticks</c>.</summary>
-    public required global::System.Func<global::System.Text.Json.JsonElement, global::Bead.NotifyOptions?, global::System.Threading.Tasks.Task> Ticks { get; init; }
+    public required global::Bead.Notifier<global::System.Text.Json.JsonElement> Ticks { get; init; }
 }
 
 /// <summary>The window each procedure of <c>Interop</c> that notifies is asked for; none, unpaced.</summary>

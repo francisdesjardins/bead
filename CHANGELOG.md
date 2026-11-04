@@ -51,6 +51,11 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `notify` members.
 - On the Rust side `REQUEST_DEFAULTS`, `RECONNECT_DEFAULTS` and `METRICS_REGISTRY_DEFAULTS`, the
   defaults Bead declares, as on the TypeScript side; each a `const` of its options struct.
+- Gates of the parameter rule: `SurfaceTests` holds each public C# method, constructor and delegate
+  to two parameters, then one options record, last, and each public event to two values;
+  `tools/check-surface.mjs` refuses an exported TypeScript function's parameter typed as an inline
+  object that is not its options; and a ratchet holds, on the C# and Rust sides, the count of the
+  tuples of three elements or more a function takes, which may only fall.
 
 ### Changed
 
@@ -246,6 +251,20 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - **Breaking:** on the TypeScript side a router server's `dropSubscriptions(connectionHandle,
   failure)` takes two parameters, as on the other sides, where it took `{ connectionHandle, failure
   }`, and refuses a handle that is no string.
+- **Breaking:** on the C# side a public record of more than two members is a record of `init`
+  properties, built by name: `TransportServerRefusal`, its `Reason` and `Status` required,
+  `TransportServerClient`, `LayerGauges`, `ServerGauges` and `HealthCheck`; their positional
+  constructors and `Deconstruct` are gone. `new TransportServerRefusal(address, authority, origin,
+  port, reason, status)` is now written `new TransportServerRefusal { Reason = reason, Status =
+  status, Address = address, … }`. A transport's `Connect` and `Start` and the HTTP gateway's
+  `Start` take their `CancellationToken` in their options, as a request's options do, where it
+  followed them.
+- **Breaking:** a session manager's event of a change carries one value on the TypeScript and C#
+  sides, the change: `ISessionChange` and `SessionChange<TData, TValue>`, its session, its new
+  value and its old, as the Rust side's `SessionEvent` variants carry them. `on('dataChanged',
+  (session, newValue, oldValue) => …)` is now written `on('dataChanged', ({ session, newValue,
+  oldValue }) => …)`, and `DataChanged += (session, newValue, oldValue) => …` is now written
+  `DataChanged += (change) => …`.
 - **Breaking:** on the TypeScript side a transport server's `connection` event carries two values,
   what its platform opened the connection with, then its handle:
   `[connection: ITransportServerConnection<Socket, Request>, connectionHandle]`, the socket and the
@@ -256,6 +275,13 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `TRANSPORT_WEBSOCKET` and `WEBSOCKET_REFUSALS`, from `./websocket-client`, `./websocket-server`,
   `./websocket-transport-client` and `./websocket-transport-server`. The transport's type is still
   `'WS'`. A file that imports Bead's `WebSocketServer` type beside `ws`'s class aliases one.
+- **Breaking:** a service server gives one handle per procedure on every side, before it is offered:
+  on the C# side `NotifierOf` gives a `Notifier<TNotification>`, its options optional, where it gave
+  a `Func` that took them, and C# generated code types its notifiers by it, under contract 7: code an
+  earlier beadc generated with a notifying procedure is generated again. On the Rust side
+  `notifier_of(&descriptor)` and `command_of(&descriptor)` give them, where `notify(&descriptor,
+  …)` sent and `command(&descriptor)` refused before the offer; each refuses a descriptor its
+  service does not hold, and a command's call before the offer is refused, as on the other sides.
 
 ### Removed
 
@@ -264,6 +290,13 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   public surface. An envelope's headers stay public where an event, a hook or a result carries them.
   With the codec, `Health.Of`, `LayerGauges.Of` and `RouterLimits.WholeEnvelopeOf` leave the C#
   side's surface.
+- **Breaking:** on the C# side `CallIds`, `Gauges.Of`, `Gauges.Merge` and
+  `FailureException.OfProtocol` leave the public surface, as the TypeScript side keeps them its own;
+  a part's gauges are built by their initializer, `new Gauges { Counts = …, ConnectionHandles = …
+  }`. On the Rust side `RouterSide::of_call_id`, `RouterSide::peer` and `Gauges::merged` leave the
+  crate's surface, and `HELD_BYTES_BUDGET`, `JWT_LEEWAY`, `JWT_LIMIT_BYTES` and `RESERVATION` with
+  them; `DEFAULT_TIMEOUT`, `RECONNECT_ATTEMPTS`, `RECONNECT_DELAY` and `MAXIMUM_PROCEDURES` are
+  members of `REQUEST_DEFAULTS`, `RECONNECT_DEFAULTS` and `METRICS_REGISTRY_DEFAULTS`.
 
 ### Fixed
 

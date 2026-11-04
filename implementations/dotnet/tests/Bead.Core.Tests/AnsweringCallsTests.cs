@@ -249,13 +249,13 @@ public sealed class AnsweringCallsTests
     public void Gauges_largestAnsweringCalls_under_its_ceiling_maximumAnsweringCalls_which_health_warns_at()
     {
         var calls = CallsOf(OptionsOf(new FakeTimeProvider()) with { Limits = RouterLimits.Default with { MaximumAnsweringCalls = 5 } });
-        var none = new LayerGauges([], new Dictionary<string, long>(), new Dictionary<string, long>(), 0);
+        var none = new LayerGauges { Anomalies = [], Ceilings = new Dictionary<string, long>(), Counts = new Dictionary<string, long>(), Orphans = 0 };
 
         HealthCheck CheckOf()
         {
             var router = LayerGauges.Of(calls.Gauges(), new HashSet<string> { "a", "b" });
 
-            return Assert.Single(Health.Of(new ServerGauges(router, none, none, none)).Checks["router:largestAnsweringCalls"]);
+            return Assert.Single(Health.Of(new ServerGauges { Router = router, Server = none, Sessions = none, Transport = none }).Checks["router:largestAnsweringCalls"]);
         }
 
         foreach (var callId in new uint[] { 1, 3, 5 })
@@ -269,9 +269,9 @@ public sealed class AnsweringCallsTests
         Assert.Equal(5, calls.Gauges().Ceilings["largestAnsweringCalls"]);
         Assert.Equal((4L, 3L), (calls.Gauges().Counts["answeringCalls"], calls.Gauges().Counts["largestAnsweringCalls"]));
         Assert.Equal(3, calls.CountOn("a"));
-        Assert.Equal(new HealthCheck(3, HealthStatus.Pass, "3 of 5"), CheckOf());
+        Assert.Equal(new HealthCheck { ObservedValue = 3, Status = HealthStatus.Pass, Output = "3 of 5" }, CheckOf());
         calls.Open(new AnswerTarget("a", HeaderOf(7)));
-        Assert.Equal(new HealthCheck(4, HealthStatus.Warn, "4 of 5"), CheckOf());
+        Assert.Equal(new HealthCheck { ObservedValue = 4, Status = HealthStatus.Warn, Output = "4 of 5" }, CheckOf());
         calls.TakeAll("a");
         Assert.Equal(1, calls.Gauges().Counts["largestAnsweringCalls"]);
     }

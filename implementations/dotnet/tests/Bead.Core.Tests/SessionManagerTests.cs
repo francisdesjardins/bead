@@ -73,9 +73,9 @@ public sealed class SessionManagerTests
         {
             told.Add($"updated {session.Data}");
         };
-        sessions.DataChanged += (_, data, old) =>
+        sessions.DataChanged += (change) =>
         {
-            told.Add($"data {old} to {data}");
+            told.Add($"data {change.OldValue} to {change.NewValue}");
         };
         sessions.Deleted += (session) =>
         {
@@ -141,13 +141,13 @@ public sealed class SessionManagerTests
         var changed = new List<(string Timer, Session<string> Session, TimeSpan Timeout, TimeSpan Old)>();
         var reached = new List<string>();
 
-        sessions.ConnectionInactivityTimeoutChanged += (session, timeout, old) =>
+        sessions.ConnectionInactivityTimeoutChanged += (change) =>
         {
-            changed.Add(("connection", session, timeout, old));
+            changed.Add(("connection", change.Session, change.NewValue, change.OldValue));
         };
-        sessions.SessionInactivityTimeoutChanged += (session, timeout, old) =>
+        sessions.SessionInactivityTimeoutChanged += (change) =>
         {
-            changed.Add(("session", session, timeout, old));
+            changed.Add(("session", change.Session, change.NewValue, change.OldValue));
         };
         sessions.ConnectionInactivityTimeoutReached += (_) =>
         {
@@ -190,9 +190,9 @@ public sealed class SessionManagerTests
 
         var changed = new List<(Session<string> Session, DateTimeOffset LastActivity, DateTimeOffset Old)>();
 
-        sessions.LastActivityChanged += (session, lastActivity, old) =>
+        sessions.LastActivityChanged += (change) =>
         {
-            changed.Add((session, lastActivity, old));
+            changed.Add((change.Session, change.NewValue, change.OldValue));
         };
 
         var session = sessions.Set(sessions.Create(Handle));
@@ -221,6 +221,153 @@ public sealed class SessionManagerTests
     }
 
     [Fact]
+    public void UpdateData_stores_a_copy_and_emits_dataChanged_with_the_new_and_old_values()
+    {
+        using var sessions = new SessionManager<string>();
+
+        var changed = new List<SessionChange<string, string?>>();
+
+        sessions.DataChanged += (change) =>
+        {
+            changed.Add(change);
+        };
+
+        var session = sessions.GetOrElseSet(Handle);
+        var given = session with { Data = "guest" };
+        var stored = sessions.UpdateData(given);
+
+        // * a record of its own, its data the one given, as the TypeScript side stores a clone
+        Assert.NotSame(given, stored);
+        Assert.Equal("guest", sessions.Get(Handle)!.Data);
+        Assert.Equal("guest", stored!.Data);
+        Assert.Equal([new SessionChange<string, string?> { Session = stored, NewValue = "guest", OldValue = null }], changed);
+    }
+
+    [Fact]
+    public void UpdateConnectionInactivityTimeout_stores_the_timeout_emits_its_change_and_arms_the_timer()
+    {
+        var time = new FakeTimeProvider();
+
+        using var sessions = new SessionManager<string>(new SessionManagerOptions { Clock = time });
+
+        var changed = new List<SessionChange<string, TimeSpan>>();
+        var reached = new List<Session<string>>();
+
+        sessions.ConnectionInactivityTimeoutChanged += (change) =>
+        {
+            changed.Add(change);
+        };
+
+        var session = sessions.GetOrElseSet(Handle);
+        var stored = sessions.UpdateConnectionInactivityTimeout(session with { ConnectionInactivityTimeout = TimeSpan.FromMilliseconds(30) });
+
+        sessions.UpdateConnectionInactivityTimeout(session with { ConnectionInactivityTimeout = TimeSpan.FromMilliseconds(30) });
+
+        Assert.Equal(
+            [new SessionChange<string, TimeSpan> { Session = stored!, NewValue = TimeSpan.FromMilliseconds(30), OldValue = Timeout.InfiniteTimeSpan }],
+            changed);
+        Assert.Equal(Timeout.InfiniteTimeSpan, stored!.SessionInactivityTimeout);
+
+        sessions.ConnectionInactivityTimeoutReached += (reaching) =>
+        {
+            reached.Add(reaching);
+        };
+        time.Advance(TimeSpan.FromMilliseconds(29));
+        Assert.Empty(reached);
+        time.Advance(TimeSpan.FromMilliseconds(1));
+        Assert.Equal([session.SessionToken], reached.Select((reaching) =>
+        {
+            return reaching.SessionToken;
+        }));
+    }
+
+    [Fact]
+    public void UpdateSessionInactivityTimeout_stores_the_timeout_emits_its_change_and_arms_the_timer()
+    {
+        var time = new FakeTimeProvider();
+
+        using var sessions = new SessionManager<string>(new SessionManagerOptions { Clock = time });
+
+        var changed = new List<SessionChange<string, TimeSpan>>();
+        var reached = new List<Session<string>>();
+
+        sessions.SessionInactivityTimeoutChanged += (change) =>
+        {
+            changed.Add(change);
+        };
+
+        var session = sessions.GetOrElseSet(Handle);
+        var stored = sessions.UpdateSessionInactivityTimeout(session with { SessionInactivityTimeout = TimeSpan.FromMilliseconds(30) });
+
+        Assert.Equal(
+            [new SessionChange<string, TimeSpan> { Session = stored!, NewValue = TimeSpan.FromMilliseconds(30), OldValue = Timeout.InfiniteTimeSpan }],
+            changed);
+        Assert.Equal(Timeout.InfiniteTimeSpan, stored!.ConnectionInactivityTimeout);
+
+        sessions.SessionInactivityTimeoutReached += (reaching) =>
+        {
+            reached.Add(reaching);
+        };
+        time.Advance(TimeSpan.FromMilliseconds(29));
+        Assert.Empty(reached);
+        time.Advance(TimeSpan.FromMilliseconds(1));
+        Assert.Equal([session.SessionToken], reached.Select((reaching) =>
+        {
+            return reaching.SessionToken;
+        }));
+    }
+
+    [Fact]
+    public void Activity_restarts_both_timers_on_its_clock_and_emits_lastActivityChanged()
+    {
+        var start = new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero);
+        var time = new FakeTimeProvider(start);
+        var clock = new RecordingClock(time);
+
+        using var sessions = new SessionManager<string>(new SessionManagerOptions { Clock = clock });
+
+        var changed = new List<SessionChange<string, DateTimeOffset>>();
+        var connectionReached = 0;
+        var sessionReached = 0;
+
+        sessions.LastActivityChanged += (change) =>
+        {
+            changed.Add(change);
+        };
+        sessions.ConnectionInactivityTimeoutReached += (_) =>
+        {
+            connectionReached += 1;
+        };
+        sessions.SessionInactivityTimeoutReached += (_) =>
+        {
+            sessionReached += 1;
+        };
+
+        var session = sessions.GetOrElseSet(Handle);
+        var delay = TimeSpan.FromMilliseconds(200);
+
+        sessions.UpdateConnectionInactivityTimeout(session with { ConnectionInactivityTimeout = delay });
+        sessions.UpdateSessionInactivityTimeout(session with { SessionInactivityTimeout = delay });
+
+        // a later millisecond, so the activity is a change
+        time.Advance(TimeSpan.FromMilliseconds(5));
+
+        var stored = sessions.UpdateLastActivity(session);
+
+        Assert.Equal(
+            [new SessionChange<string, DateTimeOffset> { Session = stored!, NewValue = start + TimeSpan.FromMilliseconds(5), OldValue = start }],
+            changed);
+        Assert.Equal(start + TimeSpan.FromMilliseconds(5), stored!.LastActivity);
+
+        // the first two armed by the timeouts, two more of the same delay by the activity
+        Assert.Equal(Enumerable.Repeat(delay, 4), clock.Armed);
+        time.Advance(TimeSpan.FromMilliseconds(199));
+        Assert.Equal((0, 0), (connectionReached, sessionReached));
+        time.Advance(TimeSpan.FromMilliseconds(1));
+        Assert.Equal((1, 1), (connectionReached, sessionReached));
+    }
+
+    [Fact]
     public void Activity_within_the_same_millisecond_restarts_both_timers_and_emits_nothing()
     {
         var time = new FakeTimeProvider(new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero));
@@ -230,7 +377,7 @@ public sealed class SessionManagerTests
         var connectionReached = 0;
         var sessionReached = 0;
 
-        sessions.LastActivityChanged += (_, _, _) =>
+        sessions.LastActivityChanged += (_) =>
         {
             changed += 1;
         };
@@ -273,7 +420,7 @@ public sealed class SessionManagerTests
         {
             told.Add("updated");
         };
-        sessions.DataChanged += (_, _, _) =>
+        sessions.DataChanged += (_) =>
         {
             told.Add("data");
         };
@@ -297,7 +444,7 @@ public sealed class SessionManagerTests
 
         var changed = 0;
 
-        sessions.SessionInactivityTimeoutChanged += (_, _, _) =>
+        sessions.SessionInactivityTimeoutChanged += (_) =>
         {
             changed += 1;
         };
@@ -554,7 +701,7 @@ public sealed class SessionManagerTests
 
         var changed = 0;
 
-        sessions.DataChanged += (_, _, _) =>
+        sessions.DataChanged += (_) =>
         {
             changed += 1;
         };
@@ -821,9 +968,9 @@ public sealed class SessionManagerTests
 
         var changed = new List<(DateTimeOffset LastActivity, DateTimeOffset Old)>();
 
-        sessions.LastActivityChanged += (_, lastActivity, old) =>
+        sessions.LastActivityChanged += (change) =>
         {
-            changed.Add((lastActivity, old));
+            changed.Add((change.NewValue, change.OldValue));
         };
         sessions.Set(sessions.Create(Handle) with { SessionInactivityTimeout = TimeSpan.FromMilliseconds(200) });
         time.Wall(TimeSpan.FromDays(-1));

@@ -350,11 +350,13 @@ public sealed class Server<TData> : IBeadServer<TData>
             held = Transport.Gauges() ?? Bead.Gauges.Of(new Dictionary<string, long>(), _connections);
         }
 
-        return new ServerGauges(
-            LayerGauges.Of(router, held.ConnectionHandles),
-            LayerGauges.Of(own, held.ConnectionHandles),
-            LayerGauges.Of(Sessions.Gauges(), held.ConnectionHandles),
-            LayerGauges.Of(held, held.ConnectionHandles));
+        return new ServerGauges
+        {
+            Router = LayerGauges.Of(router, held.ConnectionHandles),
+            Server = LayerGauges.Of(own, held.ConnectionHandles),
+            Sessions = LayerGauges.Of(Sessions.Gauges(), held.ConnectionHandles),
+            Transport = LayerGauges.Of(held, held.ConnectionHandles),
+        };
     }
 
     /// <summary>

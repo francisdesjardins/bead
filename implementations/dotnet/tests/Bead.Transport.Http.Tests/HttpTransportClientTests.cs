@@ -235,7 +235,7 @@ public sealed class HttpTransportClientTests
     {
         var fetch = given ?? new Fetch();
         var faked = new Faked(new HttpTransportClient(options with { Handler = fetch }), fetch);
-        var connecting = faked.Client.Connect(new HttpTransportClientConnectOptions { Host = Host, Port = 8_080 }, Cancelled);
+        var connecting = faked.Client.Connect(new HttpTransportClientConnectOptions { Host = Host, Port = 8_080, CancellationToken = Cancelled });
 
         if (!fetch.IsResponding)
         {
@@ -253,7 +253,7 @@ public sealed class HttpTransportClientTests
     {
         var fetch = new Fetch();
         var faked = new Faked(new HttpTransportClient(options with { Handler = fetch }), fetch);
-        var connecting = faked.Client.Connect(new HttpTransportClientConnectOptions { Host = Host, Port = 8_080 }, Cancelled);
+        var connecting = faked.Client.Connect(new HttpTransportClientConnectOptions { Host = Host, Port = 8_080, CancellationToken = Cancelled });
 
         (await fetch.CallOf(0)).Answer(new Answer { Status = 503 });
         await Assert.ThrowsAsync<HttpRequestException>(() =>
@@ -889,7 +889,7 @@ public sealed class HttpTransportClientTests
         {
             var started = new Started();
 
-            started.Port = (await started.Server.Start(new HttpTransportStartOptions { Address = Host, FindOpenPort = true }, Cancelled)).Port;
+            started.Port = (await started.Server.Start(new HttpTransportStartOptions { Address = Host, FindOpenPort = true, CancellationToken = Cancelled })).Port;
 
             return started;
         }
@@ -1322,7 +1322,7 @@ public sealed class HttpTransportClientTests
             using var fetch = new Fetch { IsDeaf = true };
             using var cancelling = new CancellationTokenSource();
             await using var client = new HttpTransportClient(new HttpTransportClientOptions { Handler = fetch, Clock = time, IsListening = false });
-            var connecting = client.Connect(new HttpTransportClientConnectOptions { Host = Host, Port = 8080, Timeout = TimeSpan.FromMilliseconds(100) }, cancelling.Token);
+            var connecting = client.Connect(new HttpTransportClientConnectOptions { Host = Host, Port = 8080, Timeout = TimeSpan.FromMilliseconds(100), CancellationToken = cancelling.Token });
             var outcome = Record.ExceptionAsync(() => { return connecting; });
             var call = await fetch.CallOf(0);
             if (ending == "cancel") { await cancelling.CancelAsync(); }
@@ -1357,7 +1357,7 @@ public sealed class HttpTransportClientTests
         // judged from what it connects with, before its first connect from nothing
         Assert.Equal((true, false), (faked.Client.Carries(Bearer), faked.Client.IsSecure));
 
-        var connecting = faked.Client.Connect(new HttpTransportClientConnectOptions { Host = host, Port = 8_080, Secured = isTls }, Cancelled);
+        var connecting = faked.Client.Connect(new HttpTransportClientConnectOptions { Host = host, Port = 8_080, Secured = isTls, CancellationToken = Cancelled });
 
         (await fetch.CallOf(0)).Answer(DrawnOf(false));
         await connecting.WaitAsync(Patience, Cancelled);
@@ -1376,7 +1376,7 @@ public sealed class HttpTransportClientTests
         {
             heard.Writer.TryWrite(message.Bytes.ToArray());
         };
-        await client.Connect(started.Target(), Cancelled);
+        await client.Connect(started.Target() with { CancellationToken = Cancelled });
 
         var connectionHandle = await Next(started.Connections);
 
@@ -1404,7 +1404,7 @@ public sealed class HttpTransportClientTests
         await using var started = await Started.Start();
         await using var client = new HttpTransportClient(NotListening);
 
-        await client.Connect(started.Target(), Cancelled);
+        await client.Connect(started.Target() with { CancellationToken = Cancelled });
 
         // a request on the server's own parity
         Assert.Equal("the server refused the exchange: 400 malformed", (await Assert.ThrowsAsync<IOException>(() =>
@@ -1423,7 +1423,7 @@ public sealed class HttpTransportClientTests
         await using var tap = new Tap(started.Port);
         await using var client = new HttpTransportClient();
 
-        await client.Connect(new HttpTransportClientConnectOptions { Host = Host, Port = tap.Port }, Cancelled);
+        await client.Connect(new HttpTransportClientConnectOptions { Host = Host, Port = tap.Port, CancellationToken = Cancelled });
         await client.Send(new TransportMessage(EnvelopeOf(EnvelopeKind.Request, (1, 0)), false)).WaitAsync(Patience, Cancelled);
 
         // the listen it holds, once the connect said it listens
@@ -1474,7 +1474,7 @@ public sealed class HttpTransportClientTests
         {
             heard.Writer.TryWrite(message);
         };
-        await client.Connect(started.Target(), Cancelled);
+        await client.Connect(started.Target() with { CancellationToken = Cancelled });
         await client.Send(new TransportMessage(EnvelopeOf(EnvelopeKind.Request, (1, 0)), false) { Credential = Bearer }).WaitAsync(Patience, Cancelled);
 
         Assert.Equal((Bearer, (string?)null), (await Next(taken), (await Next(heard)).Credential));
@@ -1538,7 +1538,7 @@ public sealed class HttpTransportClientTests
         await using var client = new HttpTransportClient(NotListening);
         var closes = ClosesOf(client);
 
-        await client.Connect(started.Target(), Cancelled);
+        await client.Connect(started.Target() with { CancellationToken = Cancelled });
 
         var connectionHandle = await Next(started.Connections);
 
@@ -1834,7 +1834,7 @@ public sealed class HttpTransportClientTests
         // drawn, then dropped before the connect heard it: its answer comes back all the same
         using var drawn = new Fetch { IsDeaf = true };
         await using var client = new HttpTransportClient(NotListening with { Handler = drawn });
-        var connecting = client.Connect(new HttpTransportClientConnectOptions { Host = Host, Port = 80 }, Cancelled);
+        var connecting = client.Connect(new HttpTransportClientConnectOptions { Host = Host, Port = 80, CancellationToken = Cancelled });
         var connect = await drawn.CallOf(0);
 
         await client.DisposeAsync();
@@ -1933,11 +1933,11 @@ public sealed class HttpTransportClientTests
         foreach (var address in Addresses.ReachedByLocalhost())
         {
             await using var server = new HttpTransportServer();
-            var port = (await server.Start(new HttpTransportStartOptions { Address = address, FindOpenPort = true }, Cancelled)).Port;
+            var port = (await server.Start(new HttpTransportStartOptions { Address = address, FindOpenPort = true, CancellationToken = Cancelled })).Port;
             await using var client = new HttpTransportClient(NotListening);
             var started = TimeProvider.System.GetTimestamp();
 
-            await client.Connect(new HttpTransportClientConnectOptions { Host = "localhost", Port = port }, Cancelled).WaitAsync(Patience, Cancelled);
+            await client.Connect(new HttpTransportClientConnectOptions { Host = "localhost", Port = port, CancellationToken = Cancelled }).WaitAsync(Patience, Cancelled);
             connects.Add((address, TimeProvider.System.GetElapsedTime(started)));
             Assert.Equal((address, ReadyState.Open), (address, client.ReadyState));
         }
@@ -1957,7 +1957,7 @@ public sealed class HttpTransportClientTests
         await using var client = new HttpTransportClient(NotListening with { Handler = fetch });
         var told = EndOf(client);
         var target = new HttpTransportClientConnectOptions { Host = Host, Port = 8_080 };
-        var connecting = client.Connect(target, Cancelled);
+        var connecting = client.Connect(target with { CancellationToken = Cancelled });
         Task? disposing = null;
         var completions = 0;
 
@@ -1982,7 +1982,7 @@ public sealed class HttpTransportClientTests
         Assert.Empty(told);
         Assert.Equal((HttpMethod.Delete, Token), ((await fetch.CallOf(1)).Method, fetch.Calls[1].ConnectionToken));
 
-        var again = client.Connect(target, Cancelled);
+        var again = client.Connect(target with { CancellationToken = Cancelled });
 
         (await fetch.CallOf(2)).Answer(DrawnOf(false));
         await again.WaitAsync(Patience, Cancelled);
@@ -1999,7 +1999,7 @@ public sealed class HttpTransportClientTests
     {
         using var refused = new Fetch();
         await using var client = new HttpTransportClient(NotListening with { Handler = refused });
-        var connecting = client.Connect(new HttpTransportClientConnectOptions { Host = "::1", Pathname = "api", Port = 8_080, Secured = true }, Cancelled);
+        var connecting = client.Connect(new HttpTransportClientConnectOptions { Host = "::1", Pathname = "api", Port = 8_080, Secured = true, CancellationToken = Cancelled });
 
         // a gateway's unmarked refusal is named by its status alone
         (await refused.CallOf(0)).Answer(new Answer { Status = 503 });
@@ -2018,7 +2018,7 @@ public sealed class HttpTransportClientTests
         {
             using var named = new Fetch();
             await using var naming = new HttpTransportClient(NotListening with { Handler = named });
-            var connectingNamed = naming.Connect(new HttpTransportClientConnectOptions { Host = Host, Port = 80 }, Cancelled);
+            var connectingNamed = naming.Connect(new HttpTransportClientConnectOptions { Host = Host, Port = 80, CancellationToken = Cancelled });
 
             (await named.CallOf(0)).Answer(answer);
 
@@ -2037,7 +2037,7 @@ public sealed class HttpTransportClientTests
         {
             using var odd = new Fetch();
             await using var oddly = new HttpTransportClient(NotListening with { Handler = odd });
-            var connectingOddly = oddly.Connect(new HttpTransportClientConnectOptions { Host = Host, Port = 80 }, Cancelled);
+            var connectingOddly = oddly.Connect(new HttpTransportClientConnectOptions { Host = Host, Port = 80, CancellationToken = Cancelled });
 
             (await odd.CallOf(0)).Answer(answer);
 
@@ -2052,7 +2052,7 @@ public sealed class HttpTransportClientTests
 
         using var unreachable = new Fetch();
         await using var failed = new HttpTransportClient(NotListening with { Handler = unreachable });
-        var failing = failed.Connect(new HttpTransportClientConnectOptions { Host = Host, Port = 1 }, Cancelled);
+        var failing = failed.Connect(new HttpTransportClientConnectOptions { Host = Host, Port = 1, CancellationToken = Cancelled });
 
         (await unreachable.CallOf(0)).Fail(new HttpRequestException("connect ECONNREFUSED"));
 
@@ -2065,7 +2065,7 @@ public sealed class HttpTransportClientTests
         var time = new FakeTimeProvider();
         using var slow = new Fetch();
         await using var late = new HttpTransportClient(NotListening with { Handler = slow, Clock = time });
-        var lateConnecting = late.Connect(new HttpTransportClientConnectOptions { Host = Host, Port = 80, Timeout = TimeSpan.FromMilliseconds(20) }, Cancelled);
+        var lateConnecting = late.Connect(new HttpTransportClientConnectOptions { Host = Host, Port = 80, Timeout = TimeSpan.FromMilliseconds(20), CancellationToken = Cancelled });
         var slowly = await slow.CallOf(0);
 
         time.Advance(TimeSpan.FromMilliseconds(20));
@@ -2096,7 +2096,7 @@ public sealed class HttpTransportClientTests
 
         using var connecting = new Fetch();
         await using var disposed = new HttpTransportClient(NotListening with { Handler = connecting });
-        var attempt = disposed.Connect(new HttpTransportClientConnectOptions { Host = Host, Port = 80 }, Cancelled);
+        var attempt = disposed.Connect(new HttpTransportClientConnectOptions { Host = Host, Port = 80, CancellationToken = Cancelled });
 
         await connecting.CallOf(0);
         await disposed.DisposeAsync();
@@ -2130,7 +2130,7 @@ public sealed class HttpTransportClientTests
         await using var client = new HttpTransportClient(NotListening);
         var closes = ClosesOf(client);
 
-        await client.Connect(started.Target(), Cancelled);
+        await client.Connect(started.Target() with { CancellationToken = Cancelled });
 
         var first = await Next(started.Connections);
 
@@ -2177,7 +2177,7 @@ public sealed class HttpTransportClientTests
 
             var thrown = await Assert.ThrowsAsync<HttpRequestException>(() =>
             {
-                return client.Connect(new HttpTransportClientConnectOptions { Host = Host, Port = origin.Port }, Cancelled).WaitAsync(Patience, Cancelled);
+                return client.Connect(new HttpTransportClientConnectOptions { Host = Host, Port = origin.Port, CancellationToken = Cancelled }).WaitAsync(Patience, Cancelled);
             });
 
             failures.Add((thrown.Message, client.ReadyState));
@@ -2213,7 +2213,7 @@ public sealed class HttpTransportClientTests
             {
                 var closes = ClosesOf(client);
 
-                await client.Connect(new HttpTransportClientConnectOptions { Host = Host, Port = origin.Port }, Cancelled);
+                await client.Connect(new HttpTransportClientConnectOptions { Host = Host, Port = origin.Port, CancellationToken = Cancelled });
 
                 var connectionHandle = await Next(started.Connections);
 
@@ -2268,7 +2268,7 @@ public sealed class HttpTransportClientTests
 
         await using (client)
         {
-            await client.Connect(new HttpTransportClientConnectOptions { Host = Host, Port = origin.Port }, Cancelled);
+            await client.Connect(new HttpTransportClientConnectOptions { Host = Host, Port = origin.Port, CancellationToken = Cancelled });
 
             var connectionHandle = await Next(started.Connections);
             var sending = started.Server.Send(new TransportMessage(envelope, false), connectionHandle);
@@ -2304,7 +2304,7 @@ public sealed class HttpTransportClientTests
             await using var sender = new HttpTransportClient(NotListening);
             var closes = ClosesOf(sender);
 
-            await sender.Connect(new HttpTransportClientConnectOptions { Host = Host, Port = origin.Port }, Cancelled);
+            await sender.Connect(new HttpTransportClientConnectOptions { Host = Host, Port = origin.Port, CancellationToken = Cancelled });
 
             var connectionHandle = await Next(started.Connections);
 
@@ -2330,7 +2330,7 @@ public sealed class HttpTransportClientTests
 
             await using (listener)
             {
-                await listener.Connect(new HttpTransportClientConnectOptions { Host = Host, Port = origin.Port }, Cancelled);
+                await listener.Connect(new HttpTransportClientConnectOptions { Host = Host, Port = origin.Port, CancellationToken = Cancelled });
 
                 var connectionHandle = await Next(started.Connections);
                 var sending = started.Server.Send(new TransportMessage(envelope, false), connectionHandle);
@@ -2366,7 +2366,7 @@ public sealed class HttpTransportClientTests
 
                 Assert.Equal("the server drew no connection: a redirect followed", (await Assert.ThrowsAsync<HttpRequestException>(() =>
                 {
-                    return connecting.Connect(new HttpTransportClientConnectOptions { Host = Host, Port = origin.Port }, Cancelled).WaitAsync(Patience, Cancelled);
+                    return connecting.Connect(new HttpTransportClientConnectOptions { Host = Host, Port = origin.Port, CancellationToken = Cancelled }).WaitAsync(Patience, Cancelled);
                 })).Message);
                 Assert.Equal(ReadyState.Closed, connecting.ReadyState);
                 Assert.Equal([status == 302 ? "GET" : "POST"], target.Asked.Select((asked) =>
@@ -2396,7 +2396,7 @@ public sealed class HttpTransportClientTests
                 {
                     var closes = ClosesOf(client);
 
-                    await client.Connect(new HttpTransportClientConnectOptions { Host = Host, Port = origin.Port }, Cancelled);
+                    await client.Connect(new HttpTransportClientConnectOptions { Host = Host, Port = origin.Port, CancellationToken = Cancelled });
 
                     var connectionHandle = await Next(started.Connections);
 
@@ -2709,7 +2709,7 @@ public sealed class HttpTransportClientTests
     {
         var fetch = new Fetch();
         await using var faked = new Faked(new HttpTransportClient(ListeningOn(new FakeTimeProvider()) with { Handler = fetch, Wait = TimeSpan.Zero }), fetch);
-        var connecting = faked.Client.Connect(new HttpTransportClientConnectOptions { Host = Host, Port = 8_080, Pathname = "/api/bead" }, Cancelled);
+        var connecting = faked.Client.Connect(new HttpTransportClientConnectOptions { Host = Host, Port = 8_080, Pathname = "/api/bead", CancellationToken = Cancelled });
         var envelope = EnvelopeOf(EnvelopeKind.Notification, (1, 0));
 
         (await fetch.CallOf(0)).Answer(new Answer
@@ -2743,7 +2743,7 @@ public sealed class HttpTransportClientTests
     {
         var fetch = new Fetch();
         await using var faked = new Faked(new HttpTransportClient(ListeningOn(new FakeTimeProvider()) with { Handler = fetch }), fetch);
-        var connecting = faked.Client.Connect(new HttpTransportClientConnectOptions { Host = Host, Port = 8_080 }, Cancelled);
+        var connecting = faked.Client.Connect(new HttpTransportClientConnectOptions { Host = Host, Port = 8_080, CancellationToken = Cancelled });
         var envelope = EnvelopeOf(EnvelopeKind.Notification, (1, 0));
 
         (await fetch.CallOf(0)).Answer(new Answer
@@ -2891,7 +2891,7 @@ public sealed class HttpTransportClientTests
         await using var client = new HttpTransportClient(new HttpTransportClientOptions { Handler = fetch, InactivityTimeout = TimeSpan.FromMilliseconds(40), Clock = time });
         var closes = ClosesOf(client);
 
-        await client.Connect(new HttpTransportClientConnectOptions { Host = Host, Port = 80 }, Cancelled);
+        await client.Connect(new HttpTransportClientConnectOptions { Host = Host, Port = 80, CancellationToken = Cancelled });
 
         // its last wait ends at its timeout, never after it
         time.Advance(TimeSpan.FromMilliseconds(39));
@@ -2921,7 +2921,7 @@ public sealed class HttpTransportClientTests
             await using var drawn = new HttpTransportClient(new HttpTransportClientOptions { Handler = fetch, InactivityTimeout = TimeSpan.FromMilliseconds(700), Clock = drawing });
             var closesDrawn = ClosesOf(drawn);
 
-            await drawn.Connect(new HttpTransportClientConnectOptions { Host = Host, Port = 80 }, Cancelled);
+            await drawn.Connect(new HttpTransportClientConnectOptions { Host = Host, Port = 80, CancellationToken = Cancelled });
             drawing.Advance(TimeSpan.FromMilliseconds(699));
 
             Assert.Equal(ReadyState.Open, drawn.ReadyState);
@@ -2947,7 +2947,7 @@ public sealed class HttpTransportClientTests
         });
         var closesOnLeaps = ClosesOf(onLeaps);
 
-        await onLeaps.Connect(new HttpTransportClientConnectOptions { Host = Host, Port = 80 }, Cancelled);
+        await onLeaps.Connect(new HttpTransportClientConnectOptions { Host = Host, Port = 80, CancellationToken = Cancelled });
         time.Advance(TimeSpan.FromMilliseconds(39));
 
         Assert.Equal((ReadyState.Open, 2), (onLeaps.ReadyState, ListensOf(leaping)));
@@ -2969,7 +2969,7 @@ public sealed class HttpTransportClientTests
         });
         var closesOnStill = ClosesOf(onStill);
 
-        await onStill.Connect(new HttpTransportClientConnectOptions { Host = Host, Port = 80 }, Cancelled);
+        await onStill.Connect(new HttpTransportClientConnectOptions { Host = Host, Port = 80, CancellationToken = Cancelled });
         stillTime.Advance(TimeSpan.FromMilliseconds(699));
 
         Assert.Equal(ReadyState.Open, onStill.ReadyState);
@@ -3010,7 +3010,7 @@ public sealed class HttpTransportClientTests
         });
         var closes = ClosesOf(client);
 
-        await client.Connect(new HttpTransportClientConnectOptions { Host = Host, Port = 80 }, Cancelled);
+        await client.Connect(new HttpTransportClientConnectOptions { Host = Host, Port = 80, CancellationToken = Cancelled });
         time.Advance(TimeSpan.FromMilliseconds(38));
 
         Assert.Equal((ReadyState.Open, 2), (client.ReadyState, Volatile.Read(ref gets)));
@@ -3372,7 +3372,7 @@ public sealed class HttpTransportClientTests
     {
         using var fetch = new Fetch();
         await using var client = new HttpTransportClient(ListeningOn(new FakeTimeProvider()) with { Handler = fetch });
-        var connecting = client.Connect(new HttpTransportClientConnectOptions { Host = Host, Port = 80 }, Cancelled);
+        var connecting = client.Connect(new HttpTransportClientConnectOptions { Host = Host, Port = 80, CancellationToken = Cancelled });
 
         (await fetch.CallOf(0)).Answer(DrawnOf(false));
         await connecting.WaitAsync(Patience, Cancelled);
@@ -3387,7 +3387,7 @@ public sealed class HttpTransportClientTests
     {
         using var fetch = new Fetch();
         await using var client = new HttpTransportClient(NotListening with { Handler = fetch, Clock = new FakeTimeProvider() });
-        var connecting = client.Connect(new HttpTransportClientConnectOptions { Host = Host, Port = 80 }, Cancelled);
+        var connecting = client.Connect(new HttpTransportClientConnectOptions { Host = Host, Port = 80, CancellationToken = Cancelled });
 
         // a server that says a listen back all the same takes none from a client that asked for none
         (await fetch.CallOf(0)).Answer(DrawnOf(true));
@@ -3407,12 +3407,12 @@ public sealed class HttpTransportClientTests
         await using var started = await Started.Start();
         await using var client = new HttpTransportClient(NotListening);
 
-        await client.Connect(started.Target(), Cancelled);
+        await client.Connect(started.Target() with { CancellationToken = Cancelled });
         await Next(started.Connections);
 
         var refused = await Assert.ThrowsAsync<InvalidOperationException>(() =>
         {
-            return client.Connect(started.Target(), Cancelled).WaitAsync(Patience, Cancelled);
+            return client.Connect(started.Target() with { CancellationToken = Cancelled }).WaitAsync(Patience, Cancelled);
         });
 
         Assert.Equal("the transport client is already open", refused.Message);
@@ -3427,11 +3427,11 @@ public sealed class HttpTransportClientTests
     {
         using var fetch = new Fetch();
         await using var client = new HttpTransportClient(NotListening with { Handler = fetch });
-        var first = client.Connect(new HttpTransportClientConnectOptions { Host = Host, Port = 8_080 }, Cancelled);
+        var first = client.Connect(new HttpTransportClientConnectOptions { Host = Host, Port = 8_080, CancellationToken = Cancelled });
 
         Assert.Equal("the transport client is already connecting", (await Assert.ThrowsAsync<InvalidOperationException>(() =>
         {
-            return client.Connect(new HttpTransportClientConnectOptions { Host = Host, Port = 8_080 }, Cancelled).WaitAsync(Patience, Cancelled);
+            return client.Connect(new HttpTransportClientConnectOptions { Host = Host, Port = 8_080, CancellationToken = Cancelled }).WaitAsync(Patience, Cancelled);
         })).Message);
 
         (await fetch.CallOf(0)).Answer(DrawnOf(false));
@@ -3450,13 +3450,13 @@ public sealed class HttpTransportClientTests
 
         Assert.Equal("the transport client is already closing", (await Assert.ThrowsAsync<InvalidOperationException>(() =>
         {
-            return faked.Client.Connect(new HttpTransportClientConnectOptions { Host = Host, Port = 8_080 }, Cancelled).WaitAsync(Patience, Cancelled);
+            return faked.Client.Connect(new HttpTransportClientConnectOptions { Host = Host, Port = 8_080, CancellationToken = Cancelled }).WaitAsync(Patience, Cancelled);
         })).Message);
 
         (await faked.Fetch.CallOf(1)).Answer(new Answer { Status = 204 });
         await closing.WaitAsync(Patience, Cancelled);
 
-        var connecting = faked.Client.Connect(new HttpTransportClientConnectOptions { Host = Host, Port = 8_080 }, Cancelled);
+        var connecting = faked.Client.Connect(new HttpTransportClientConnectOptions { Host = Host, Port = 8_080, CancellationToken = Cancelled });
 
         (await faked.Fetch.CallOf(2)).Answer(DrawnOf(false));
         await connecting.WaitAsync(Patience, Cancelled);
@@ -3471,7 +3471,7 @@ public sealed class HttpTransportClientTests
         await using var started = await Started.Start();
         await using var client = new HttpTransportClient(NotListening);
 
-        await client.Connect(started.Target(), Cancelled);
+        await client.Connect(started.Target() with { CancellationToken = Cancelled });
         await client.CloseConnection().WaitAsync(Patience, Cancelled);
         await client.Reconnect(new TransportClientReconnectOptions { Delay = DelayOf(TimeSpan.FromMilliseconds(10)), MaximumAttempts = 1 }).WaitAsync(Patience, Cancelled);
 
@@ -3484,13 +3484,13 @@ public sealed class HttpTransportClientTests
         await using var started = await Started.Start();
         await using var client = new HttpTransportClient(NotListening);
 
-        await client.Connect(started.Target(), Cancelled);
+        await client.Connect(started.Target() with { CancellationToken = Cancelled });
         await Next(started.Connections);
 
         // a target where the server draws no connection: a reconnection that took it would fail
         await Assert.ThrowsAsync<InvalidOperationException>(() =>
         {
-            return client.Connect(started.Target() with { Pathname = "/elsewhere" }, Cancelled).WaitAsync(Patience, Cancelled);
+            return client.Connect(started.Target() with { Pathname = "/elsewhere", CancellationToken = Cancelled }).WaitAsync(Patience, Cancelled);
         });
         await client.Reconnect(new TransportClientReconnectOptions { Delay = DelayOf(TimeSpan.Zero) }).WaitAsync(Patience, Cancelled);
         await Next(started.Connections);
@@ -3505,7 +3505,7 @@ public sealed class HttpTransportClientTests
         await using var client = new HttpTransportClient(NotListening);
         using var source = CancellationTokenSource.CreateLinkedTokenSource(Cancelled);
 
-        await client.Connect(started.Target(), source.Token);
+        await client.Connect(started.Target() with { CancellationToken = source.Token });
         await source.CancelAsync();
         await client.Reconnect(new TransportClientReconnectOptions { Delay = DelayOf(TimeSpan.Zero) }).WaitAsync(Patience, Cancelled);
 
@@ -3547,7 +3547,7 @@ public sealed class HttpTransportClientTests
         await using var client = new HttpTransportClient(NotListening with { Handler = fetch });
 
         // under way as long as its POST is held, whatever the machine's pace
-        var connecting = client.Connect(new HttpTransportClientConnectOptions { Host = Host, Port = 8_080 }, Cancelled);
+        var connecting = client.Connect(new HttpTransportClientConnectOptions { Host = Host, Port = 8_080, CancellationToken = Cancelled });
         var held = await fetch.CallOf(0);
 
         Assert.Equal("the transport client cannot reconnect while connecting", (await Assert.ThrowsAsync<InvalidOperationException>(() =>
@@ -3615,7 +3615,7 @@ public sealed class HttpTransportClientTests
 
         Assert.Equal("the transport client is already reconnecting", (await Assert.ThrowsAsync<InvalidOperationException>(() =>
         {
-            return faked.Client.Connect(new HttpTransportClientConnectOptions { Host = Host, Port = 8_080 }, Cancelled).WaitAsync(Patience, Cancelled);
+            return faked.Client.Connect(new HttpTransportClientConnectOptions { Host = Host, Port = 8_080, CancellationToken = Cancelled }).WaitAsync(Patience, Cancelled);
         })).Message);
 
         await source.CancelAsync();
@@ -3646,7 +3646,7 @@ public sealed class HttpTransportClientTests
         });
         Assert.Equal(0, reconnects);
 
-        await client.Connect(started.Target(), Cancelled);
+        await client.Connect(started.Target() with { CancellationToken = Cancelled });
         await client.Reconnect().WaitAsync(Patience, Cancelled);
         await client.CloseConnection().WaitAsync(Patience, Cancelled);
         await client.Reconnect().WaitAsync(Patience, Cancelled);
@@ -3679,7 +3679,7 @@ public sealed class HttpTransportClientTests
             }
         };
 
-        await client.Connect(started.Target(), Cancelled);
+        await client.Connect(started.Target() with { CancellationToken = Cancelled });
         var first = await Next(started.Connections);
 
         await client.Reconnect().WaitAsync(Patience, Cancelled);
@@ -3905,7 +3905,7 @@ public sealed class HttpTransportClientTests
 
         faked.Client.Close += (_, _) =>
         {
-            replacement = faked.Client.Connect(new HttpTransportClientConnectOptions { Host = Host, Port = 8_080 }, Cancelled);
+            replacement = faked.Client.Connect(new HttpTransportClientConnectOptions { Host = Host, Port = 8_080, CancellationToken = Cancelled });
         };
 
         await faked.Client.DisposeAsync().AsTask().WaitAsync(Patience, Cancelled);
@@ -4060,7 +4060,7 @@ public sealed class HttpTransportClientTests
         {
             reconnecting.TrySetResult(client.Reconnect(new TransportClientReconnectOptions { MaximumAttempts = 1 }));
         };
-        await client.Connect(started.Target(), Cancelled);
+        await client.Connect(started.Target() with { CancellationToken = Cancelled });
         await Eventually(() =>
         {
             return started.Server.Gauges().Counts["listens"] == 1;

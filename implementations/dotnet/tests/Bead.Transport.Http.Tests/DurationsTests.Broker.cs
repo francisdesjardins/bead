@@ -298,7 +298,7 @@ public sealed partial class DurationsTests
         {
             Connect = (token) =>
             {
-                return client.Connect(new BrokerTransportClientConnectOptions { Server = "interop", Timeout = Assert.NotNull(given) }, token);
+                return client.Connect(new BrokerTransportClientConnectOptions { Server = "interop", Timeout = Assert.NotNull(given), CancellationToken = token });
             },
             StateOf = () =>
             {

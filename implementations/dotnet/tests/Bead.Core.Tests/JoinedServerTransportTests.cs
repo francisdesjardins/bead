@@ -45,7 +45,7 @@ public sealed class JoinedServerTransportTests
         await using var joined = new JoinedServerTransport([memory, paired]);
         await using var client = new MemoryTransportClient(new MemoryTransportClientOptions { Scheduler = scheduler });
         var told = new List<string>();
-        var refusal = new TransportServerRefusal("203.0.113.7", "example.com", null, 50_002, "host-refused", 403);
+        var refusal = new TransportServerRefusal { Address = "203.0.113.7", Authority = "example.com", Port = 50_002, Reason = "host-refused", Status = 403 };
 
         joined.Connection += (connectionHandle) =>
         {
@@ -101,7 +101,7 @@ public sealed class JoinedServerTransportTests
         };
 
         await memory.Start();
-        await client.Connect(new MemoryTransportClientConnectOptions { Server = memory }, Cancelled);
+        await client.Connect(new MemoryTransportClientConnectOptions { Server = memory, CancellationToken = Cancelled });
 
         var drawn = Assert.Single(memory.ConnectionHandles);
 
@@ -154,7 +154,7 @@ public sealed class JoinedServerTransportTests
             heard.Add(Convert.ToHexString(message.Bytes.Span));
         };
         await memory.Start();
-        await client.Connect(new MemoryTransportClientConnectOptions { Server = memory }, Cancelled);
+        await client.Connect(new MemoryTransportClientConnectOptions { Server = memory, CancellationToken = Cancelled });
         paired.Open();
 
         var drawn = Assert.Single(memory.ConnectionHandles);
@@ -211,7 +211,7 @@ public sealed class JoinedServerTransportTests
             heard.AddRange(message.Bytes.ToArray());
         };
         await memory.Start();
-        await client.Connect(new MemoryTransportClientConnectOptions { Server = memory }, Cancelled);
+        await client.Connect(new MemoryTransportClientConnectOptions { Server = memory, CancellationToken = Cancelled });
 
         var toMemory = Assert.Single(memory.ConnectionHandles);
 
@@ -299,8 +299,8 @@ public sealed class JoinedServerTransportTests
         await using var second = new MemoryTransportClient(new MemoryTransportClientOptions { Scheduler = scheduler });
 
         await memory.Start();
-        await first.Connect(new MemoryTransportClientConnectOptions { Server = memory }, Cancelled);
-        await second.Connect(new MemoryTransportClientConnectOptions { Server = memory }, Cancelled);
+        await first.Connect(new MemoryTransportClientConnectOptions { Server = memory, CancellationToken = Cancelled });
+        await second.Connect(new MemoryTransportClientConnectOptions { Server = memory, CancellationToken = Cancelled });
         uncounted.Open();
 
         var gauges = joined.Gauges();
@@ -391,7 +391,7 @@ public sealed class JoinedServerTransportTests
             }
         };
         await memory.Start();
-        await inMemory.Connect(new MemoryTransportClientConnectOptions { Server = memory }, Cancelled);
+        await inMemory.Connect(new MemoryTransportClientConnectOptions { Server = memory, CancellationToken = Cancelled });
         paired.Open();
 
         var echoed = await Task.WhenAll(

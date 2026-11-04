@@ -1,6 +1,6 @@
 #nullable enable
 *REMOVED*Bead.Transport.WebSockets.WebSocketClient.Connect(Bead.Transport.WebSockets.WebSocketConnectOptions! options, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task!
-Bead.Transport.WebSockets.WebSocketClient.Connect(Bead.Transport.WebSockets.WebSocketTransportClientConnectOptions! options, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task!
+Bead.Transport.WebSockets.WebSocketClient.Connect(Bead.Transport.WebSockets.WebSocketTransportClientConnectOptions! options) -> System.Threading.Tasks.Task!
 Bead.Transport.WebSockets.WebSocketClient.Disconnect(Bead.TransportClientDisconnectOptions? options = null) -> System.Threading.Tasks.Task!
 *REMOVED*Bead.Transport.WebSockets.WebSocketClient.Disconnect(Bead.TransportDisconnectOptions? options = null) -> System.Threading.Tasks.Task!
 Bead.Transport.WebSockets.WebSocketClient.Reconnect(Bead.TransportClientReconnectOptions? options = null) -> System.Threading.Tasks.Task!
@@ -30,13 +30,15 @@ Bead.Transport.WebSockets.WebSocketClientOptions.Intake.init -> void
 Bead.Transport.WebSockets.WebSocketTransportClient.CloseConnection(Bead.TransportClientDisconnectOptions? options = null) -> System.Threading.Tasks.Task!
 *REMOVED*Bead.Transport.WebSockets.WebSocketTransportClient.CloseConnection(Bead.TransportDisconnectOptions? options = null) -> System.Threading.Tasks.Task!
 *REMOVED*Bead.Transport.WebSockets.WebSocketTransportClient.Connect(Bead.Transport.WebSockets.WebSocketConnectOptions! options, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task!
-Bead.Transport.WebSockets.WebSocketTransportClient.Connect(Bead.Transport.WebSockets.WebSocketTransportClientConnectOptions! options, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task!
+Bead.Transport.WebSockets.WebSocketTransportClient.Connect(Bead.Transport.WebSockets.WebSocketTransportClientConnectOptions! options) -> System.Threading.Tasks.Task!
 Bead.Transport.WebSockets.WebSocketTransportClient.Pause() -> void
 Bead.Transport.WebSockets.WebSocketTransportClient.Reconnect(Bead.TransportClientReconnectOptions? options = null) -> System.Threading.Tasks.Task!
 *REMOVED*Bead.Transport.WebSockets.WebSocketTransportClient.Reconnect(Bead.TransportReconnectOptions? options = null) -> System.Threading.Tasks.Task!
 Bead.Transport.WebSockets.WebSocketTransportClient.Resume() -> void
 Bead.Transport.WebSockets.WebSocketTransportClientConnectOptions
 Bead.Transport.WebSockets.WebSocketTransportClientConnectOptions.<Clone>$() -> Bead.Transport.WebSockets.WebSocketTransportClientConnectOptions!
+Bead.Transport.WebSockets.WebSocketTransportClientConnectOptions.CancellationToken.get -> System.Threading.CancellationToken
+Bead.Transport.WebSockets.WebSocketTransportClientConnectOptions.CancellationToken.init -> void
 Bead.Transport.WebSockets.WebSocketTransportClientConnectOptions.Credential.get -> string?
 Bead.Transport.WebSockets.WebSocketTransportClientConnectOptions.Credential.init -> void
 Bead.Transport.WebSockets.WebSocketTransportClientConnectOptions.CredentialProvider.get -> System.Func<System.Threading.CancellationToken, System.Threading.Tasks.ValueTask<string!>>?
@@ -57,6 +59,10 @@ Bead.Transport.WebSockets.WebSocketTransportClientConnectOptions.Timeout.init ->
 Bead.Transport.WebSockets.WebSocketTransportClientConnectOptions.WebSocketTransportClientConnectOptions() -> void
 Bead.Transport.WebSockets.WebSocketTransportServer.Pause(string! connectionHandle) -> void
 Bead.Transport.WebSockets.WebSocketTransportServer.Resume(string! connectionHandle) -> void
+Bead.Transport.WebSockets.WebSocketTransportServer.Start(Bead.Transport.WebSockets.WebSocketTransportStartOptions? options = null) -> System.Threading.Tasks.Task<Bead.TransportServerAddress>!
+*REMOVED*Bead.Transport.WebSockets.WebSocketTransportServer.Start(Bead.Transport.WebSockets.WebSocketTransportStartOptions? options = null, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<Bead.TransportServerAddress>!
+Bead.Transport.WebSockets.WebSocketTransportStartOptions.CancellationToken.get -> System.Threading.CancellationToken
+Bead.Transport.WebSockets.WebSocketTransportStartOptions.CancellationToken.init -> void
 *REMOVED*override Bead.Transport.WebSockets.WebSocketConnectOptions.Equals(object? obj) -> bool
 *REMOVED*override Bead.Transport.WebSockets.WebSocketConnectOptions.GetHashCode() -> int
 *REMOVED*override Bead.Transport.WebSockets.WebSocketConnectOptions.ToString() -> string!

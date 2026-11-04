@@ -157,12 +157,12 @@ public sealed class WebSocketServerTests
 
     private static async Task<int> PortOf(WebSocketServer<string> server)
     {
-        return (await server.Transport.Start(Loopback, Cancelled)).Port;
+        return (await server.Transport.Start(Loopback with { CancellationToken = Cancelled })).Port;
     }
 
     private static Task Connect(WebSocketClient client, int port)
     {
-        return client.Connect(new WebSocketTransportClientConnectOptions { Host = Host, Port = port }, Cancelled);
+        return client.Connect(new WebSocketTransportClientConnectOptions { Host = Host, Port = port, CancellationToken = Cancelled });
     }
 
     // reads what comes until the server's close, answers it, and gives its status
@@ -1242,7 +1242,7 @@ public sealed class WebSocketServerTests
     {
         // a server on every address, each socket bound to one address and port of the loopback
         var server = new WebSocketServer<string>();
-        var port = (await server.Transport.Start(new WebSocketTransportStartOptions { Address = "0.0.0.0", FindOpenPort = true }, Cancelled)).Port;
+        var port = (await server.Transport.Start(new WebSocketTransportStartOptions { Address = "0.0.0.0", FindOpenPort = true, CancellationToken = Cancelled })).Port;
         var localPort = new StrongBox<int>(0);
         using var aliceHandshakes = new SamePort(localPort);
         using var otherHandshakes = new SamePort(localPort);
@@ -1271,9 +1271,9 @@ public sealed class WebSocketServerTests
                 return response.Answer(request.Payload.ToUpperInvariant());
             });
 
-            await alice.Connect(new WebSocketTransportClientConnectOptions { Host = "127.0.0.1", Port = port }, Cancelled);
+            await alice.Connect(new WebSocketTransportClientConnectOptions { Host = "127.0.0.1", Port = port, CancellationToken = Cancelled });
             await alice.Services.GetRequest(OpenSession, TextAsked)("alice")().WaitAsync(Patience, Cancelled);
-            await other.Connect(new WebSocketTransportClientConnectOptions { Host = "127.0.0.2", Port = port }, Cancelled);
+            await other.Connect(new WebSocketTransportClientConnectOptions { Host = "127.0.0.2", Port = port, CancellationToken = Cancelled });
 
             // ! the client's connect settles on the 101, which the server writes before it keeps the
             // connection: wait for it to hold both

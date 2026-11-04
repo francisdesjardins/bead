@@ -84,7 +84,7 @@ public sealed partial class DurationsTests
                 asked.TrySetResult();
             };
 
-            var port = (await gateway.Start(new HttpGatewayStartOptions { Address = Host, FindOpenPort = true }, Cancelled)).Port;
+            var port = (await gateway.Start(new HttpGatewayStartOptions { Address = Host, FindOpenPort = true, CancellationToken = Cancelled })).Port;
             using var socket = new TcpClient();
 
             await socket.ConnectAsync(IPAddress.Loopback, port, Cancelled);
@@ -165,7 +165,7 @@ public sealed partial class DurationsTests
 
         await using (gateway)
         {
-            var port = (await gateway.Start(new HttpGatewayStartOptions { Address = Host, FindOpenPort = true }, Cancelled)).Port;
+            var port = (await gateway.Start(new HttpGatewayStartOptions { Address = Host, FindOpenPort = true, CancellationToken = Cancelled })).Port;
             using var socket = new TcpClient();
 
             await socket.ConnectAsync(IPAddress.Loopback, port, Cancelled);

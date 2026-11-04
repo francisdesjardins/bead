@@ -44,6 +44,13 @@ public delegate Task ServiceNotificationResolverCallback<TRequest, TResult, TFai
     where TFailure : IApplicationFailure;
 
 /// <summary>
+/// What notifies the subscribers of one procedure that notifies, as its options, when any, filter
+/// them: a server side's handle of that procedure, given before its service is offered.
+/// </summary>
+/// <typeparam name="TNotification">What a notification carries.</typeparam>
+public delegate Task Notifier<TNotification>(TNotification notification, NotifyOptions? options = null);
+
+/// <summary>
 /// The hooks a server side of <typeparamref name="TService"/> is given, as the service layer reads
 /// them: each by the name its procedures give it. A service's record of hooks, which beadc generates
 /// with a required member a hook, implements it.
@@ -300,7 +307,7 @@ public sealed class ServiceServer<TService, TData>
     /// the service is offered, or before its resolver is registered, it sends nothing and resolves. A
     /// procedure the service lacks is an <see cref="ArgumentException"/>.
     /// </summary>
-    public Func<TNotification, NotifyOptions?, Task> NotifierOf<TRequest, TResult, TNotification, TFailure>(
+    public Notifier<TNotification> NotifierOf<TRequest, TResult, TNotification, TFailure>(
         RequestProcedure<TService, TRequest, TResult, TNotification, TFailure> procedure)
         where TFailure : IApplicationFailure
     {

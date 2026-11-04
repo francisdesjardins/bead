@@ -50,7 +50,7 @@ public sealed class WebSocketTransportClientTests : IAsyncLifetime
         using var invoker = new HttpMessageInvoker(handler);
         using var cancelling = new CancellationTokenSource();
         await using var client = new WebSocketTransportClient(new WebSocketTransportClientOptions { Clock = time, Invoker = invoker });
-        var connecting = client.Connect(Target with { Timeout = TimeSpan.FromMilliseconds(100) }, cancelling.Token);
+        var connecting = client.Connect(Target with { Timeout = TimeSpan.FromMilliseconds(100), CancellationToken = cancelling.Token });
         var outcome = Record.ExceptionAsync(() => { return connecting; });
         await handler.Entered.Task.WaitAsync(Patience, Cancelled);
         if (ending == "cancel") { await cancelling.CancelAsync(); }
@@ -229,7 +229,7 @@ public sealed class WebSocketTransportClientTests : IAsyncLifetime
     // a connect the listener refuses: it fails, and its target is the one a reconnection takes
     private static async Task ConnectRefused(WebSocketTransportClient client, Listener listener)
     {
-        var connecting = client.Connect(new WebSocketTransportClientConnectOptions { Host = Host, Port = listener.Port }, Cancelled);
+        var connecting = client.Connect(new WebSocketTransportClientConnectOptions { Host = Host, Port = listener.Port, CancellationToken = Cancelled });
         var (peer, _) = await listener.Next();
 
         await Listener.Refuse(peer, 503);
@@ -396,7 +396,7 @@ public sealed class WebSocketTransportClientTests : IAsyncLifetime
         {
             _connections.Writer.TryWrite(connectionHandle);
         };
-        _port = (await _server.Start(new WebSocketTransportStartOptions { Address = Host, FindOpenPort = true }, Cancelled)).Port;
+        _port = (await _server.Start(new WebSocketTransportStartOptions { Address = Host, FindOpenPort = true, CancellationToken = Cancelled })).Port;
     }
 
     public async ValueTask DisposeAsync()
@@ -433,7 +433,7 @@ public sealed class WebSocketTransportClientTests : IAsyncLifetime
 
         Assert.Equal(ReadyState.Uninitialized, _client.ReadyState);
 
-        var connecting = _client.Connect(new WebSocketTransportClientConnectOptions { Host = Host, Port = listener.Port }, Cancelled);
+        var connecting = _client.Connect(new WebSocketTransportClientConnectOptions { Host = Host, Port = listener.Port, CancellationToken = Cancelled });
         var (peer, head) = await listener.Next();
 
         // the listener holds the handshake, so nothing on another thread moves the state meanwhile
@@ -468,7 +468,7 @@ public sealed class WebSocketTransportClientTests : IAsyncLifetime
 
         // judged from what it connects with, before its first connect from nothing
         Assert.Equal((false, false), (_client.Carries(Bearer), _client.IsSecure));
-        await _client.Connect(Target, Cancelled);
+        await _client.Connect(Target with { CancellationToken = Cancelled });
         Assert.Equal((false, true), (_client.Carries(Bearer), _client.IsSecure));
 
         var observed = new ObservedRequests(true);
@@ -489,7 +489,7 @@ public sealed class WebSocketTransportClientTests : IAsyncLifetime
 
             await Assert.ThrowsAsync<WebSocketException>(() =>
             {
-                return judged.Connect(new WebSocketTransportClientConnectOptions { Host = host, Port = 8_080, Secured = tls }, Cancelled);
+                return judged.Connect(new WebSocketTransportClientConnectOptions { Host = host, Port = 8_080, Secured = tls, CancellationToken = Cancelled });
             });
             Assert.Equal((false, expected), (judged.Carries(Bearer), judged.IsSecure));
         }
@@ -497,11 +497,11 @@ public sealed class WebSocketTransportClientTests : IAsyncLifetime
         // off the machine, in the clear or under TLS, whether its connect went through or not
         await Assert.ThrowsAnyAsync<Exception>(() =>
         {
-            return faraway.Connect(new WebSocketTransportClientConnectOptions { Host = "192.0.2.1", Port = 80, Timeout = instant }, Cancelled);
+            return faraway.Connect(new WebSocketTransportClientConnectOptions { Host = "192.0.2.1", Port = 80, Timeout = instant, CancellationToken = Cancelled });
         });
         await Assert.ThrowsAnyAsync<Exception>(() =>
         {
-            return secured.Connect(new WebSocketTransportClientConnectOptions { Host = "192.0.2.1", Port = 443, Secured = true, Timeout = instant }, Cancelled);
+            return secured.Connect(new WebSocketTransportClientConnectOptions { Host = "192.0.2.1", Port = 443, Secured = true, Timeout = instant, CancellationToken = Cancelled });
         });
         Assert.Equal((false, true), (faraway.IsSecure, secured.IsSecure));
     }
@@ -511,11 +511,11 @@ public sealed class WebSocketTransportClientTests : IAsyncLifetime
     {
         await Assert.ThrowsAsync<WebSocketException>(() =>
         {
-            return _client.Connect(new WebSocketTransportClientConnectOptions { Host = Host, Port = ClosedPort() }, Cancelled);
+            return _client.Connect(new WebSocketTransportClientConnectOptions { Host = Host, Port = ClosedPort(), CancellationToken = Cancelled });
         });
         Assert.Equal(ReadyState.Closed, _client.ReadyState);
 
-        await _client.Connect(Target, Cancelled);
+        await _client.Connect(Target with { CancellationToken = Cancelled });
 
         Assert.Equal(ReadyState.Open, _client.ReadyState);
     }
@@ -525,7 +525,7 @@ public sealed class WebSocketTransportClientTests : IAsyncLifetime
     {
         await Assert.ThrowsAsync<UriFormatException>(() =>
         {
-            return _client.Connect(new WebSocketTransportClientConnectOptions { Host = Host, Port = 100_000 }, Cancelled);
+            return _client.Connect(new WebSocketTransportClientConnectOptions { Host = Host, Port = 100_000, CancellationToken = Cancelled });
         });
         Assert.Equal(ReadyState.Closed, _client.ReadyState);
     }
@@ -533,12 +533,12 @@ public sealed class WebSocketTransportClientTests : IAsyncLifetime
     [Fact]
     public async Task Refuses_a_connect_while_open_reaching_no_server()
     {
-        await _client.Connect(Target, Cancelled);
+        await _client.Connect(Target with { CancellationToken = Cancelled });
         await Next(_connections);
 
         var refused = await Assert.ThrowsAsync<InvalidOperationException>(() =>
         {
-            return _client.Connect(Target, Cancelled);
+            return _client.Connect(Target with { CancellationToken = Cancelled });
         });
 
         Assert.Equal("the transport client is already open", refused.Message);
@@ -550,11 +550,11 @@ public sealed class WebSocketTransportClientTests : IAsyncLifetime
     [Fact]
     public async Task Refuses_a_second_connect_while_the_first_is_connecting_opening_one_socket_only()
     {
-        var first = _client.Connect(Target, Cancelled);
+        var first = _client.Connect(Target with { CancellationToken = Cancelled });
 
         await Assert.ThrowsAsync<InvalidOperationException>(() =>
         {
-            return _client.Connect(Target, Cancelled);
+            return _client.Connect(Target with { CancellationToken = Cancelled });
         });
         await first.WaitAsync(Patience, Cancelled);
         await Next(_connections);
@@ -568,7 +568,7 @@ public sealed class WebSocketTransportClientTests : IAsyncLifetime
     public async Task Writes_no_Origin_on_its_upgrade()
     {
         using var listener = new Listener(IPAddress.Loopback);
-        var connecting = _client.Connect(new WebSocketTransportClientConnectOptions { Host = Host, Port = listener.Port }, Cancelled);
+        var connecting = _client.Connect(new WebSocketTransportClientConnectOptions { Host = Host, Port = listener.Port, CancellationToken = Cancelled });
         var (peer, head) = await listener.Next();
 
         using (peer)
@@ -591,7 +591,7 @@ public sealed class WebSocketTransportClientTests : IAsyncLifetime
     public async Task Refuses_a_connect_while_its_close_is_under_way_and_connects_again_once_closed()
     {
         using var listener = new Listener(IPAddress.Loopback);
-        var connecting = _client.Connect(new WebSocketTransportClientConnectOptions { Host = Host, Port = listener.Port }, Cancelled);
+        var connecting = _client.Connect(new WebSocketTransportClientConnectOptions { Host = Host, Port = listener.Port, CancellationToken = Cancelled });
         var (peer, head) = await listener.Next();
 
         using (peer)
@@ -604,14 +604,14 @@ public sealed class WebSocketTransportClientTests : IAsyncLifetime
 
             Assert.Equal("the transport client is already closing", (await Assert.ThrowsAsync<InvalidOperationException>(() =>
             {
-                return _client.Connect(Target, Cancelled);
+                return _client.Connect(Target with { CancellationToken = Cancelled });
             })).Message);
             Assert.Equal(WebSocketMessageType.Close, (await server.ReceiveAsync(new byte[16], Cancelled).WaitAsync(Patience, Cancelled)).MessageType);
             await server.CloseOutputAsync(WebSocketCloseStatus.NormalClosure, null, Cancelled);
             await closing.WaitAsync(Patience, Cancelled);
         }
 
-        await _client.Connect(Target, Cancelled);
+        await _client.Connect(Target with { CancellationToken = Cancelled });
 
         Assert.Equal(ReadyState.Open, _client.ReadyState);
     }
@@ -625,13 +625,13 @@ public sealed class WebSocketTransportClientTests : IAsyncLifetime
         await before.CancelAsync();
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
         {
-            return _client.Connect(Target, before.Token);
+            return _client.Connect(Target with { CancellationToken = before.Token });
         });
         Assert.Equal(ReadyState.Uninitialized, _client.ReadyState);
 
         using var listener = new Listener(IPAddress.Loopback);
         using var during = new CancellationTokenSource();
-        var connecting = _client.Connect(new WebSocketTransportClientConnectOptions { Host = Host, Port = listener.Port }, during.Token);
+        var connecting = _client.Connect(new WebSocketTransportClientConnectOptions { Host = Host, Port = listener.Port, CancellationToken = during.Token });
         var (peer, _) = await listener.Next();
 
         using (peer)
@@ -646,7 +646,7 @@ public sealed class WebSocketTransportClientTests : IAsyncLifetime
             Assert.True(await IsClosed(peer));
         }
 
-        await _client.Connect(Target, Cancelled);
+        await _client.Connect(Target with { CancellationToken = Cancelled });
 
         Assert.Equal(ReadyState.Open, _client.ReadyState);
     }
@@ -658,7 +658,7 @@ public sealed class WebSocketTransportClientTests : IAsyncLifetime
         var time = new FakeTimeProvider();
         using var listener = new Listener(IPAddress.Loopback);
         await using var client = new WebSocketTransportClient(new WebSocketTransportClientOptions { Clock = time });
-        var connecting = client.Connect(new WebSocketTransportClientConnectOptions { Host = Host, Port = listener.Port, Timeout = TimeSpan.FromMilliseconds(100) }, Cancelled);
+        var connecting = client.Connect(new WebSocketTransportClientConnectOptions { Host = Host, Port = listener.Port, Timeout = TimeSpan.FromMilliseconds(100), CancellationToken = Cancelled });
         var (peer, _) = await listener.Next();
 
         using (peer)
@@ -681,7 +681,7 @@ public sealed class WebSocketTransportClientTests : IAsyncLifetime
         using var listener = new Listener(IPAddress.Loopback);
         using var source = CancellationTokenSource.CreateLinkedTokenSource(Cancelled);
         await using var client = new WebSocketTransportClient(new WebSocketTransportClientOptions { Clock = time });
-        var connecting = client.Connect(new WebSocketTransportClientConnectOptions { Host = Host, Port = listener.Port, Timeout = Timeout.InfiniteTimeSpan }, source.Token);
+        var connecting = client.Connect(new WebSocketTransportClientConnectOptions { Host = Host, Port = listener.Port, Timeout = Timeout.InfiniteTimeSpan, CancellationToken = source.Token });
         var (peer, _) = await listener.Next();
 
         using (peer)
@@ -719,8 +719,9 @@ public sealed class WebSocketTransportClientTests : IAsyncLifetime
             {
                 token.Register(() => { callback.TrySetResult(); throw reason; });
                 return ValueTask.FromResult(Bearer);
-            }
-        }, Cancelled).WaitAsync(Patience, Cancelled);
+            },
+            CancellationToken = Cancelled,
+        }).WaitAsync(Patience, Cancelled);
         await callback.Task.WaitAsync(Patience, Cancelled);
         Assert.Equal(ReadyState.Open, client.ReadyState);
         Assert.Empty(errors);
@@ -745,7 +746,8 @@ public sealed class WebSocketTransportClientTests : IAsyncLifetime
                     await client.DisposeAsync();
                     return Bearer;
                 },
-            }, Cancelled).WaitAsync(Patience, Cancelled);
+                CancellationToken = Cancelled,
+            }).WaitAsync(Patience, Cancelled);
         });
         Assert.Equal("the transport client was disposed as it connected", failure.Message);
         Assert.Equal(ReadyState.Closed, client.ReadyState);
@@ -768,7 +770,7 @@ public sealed class WebSocketTransportClientTests : IAsyncLifetime
             using var handler = new PendingUpgrade();
             using var invoker = new HttpMessageInvoker(handler);
             await using var client = new WebSocketTransportClient(new WebSocketTransportClientOptions { Clock = time, Invoker = invoker });
-            var connecting = client.Connect(Target with { Timeout = TimeSpan.FromMilliseconds(100), CredentialProvider = (_) => { entered.TrySetResult(); return new ValueTask<string>(answer.Task); } }, cancelling.Token);
+            var connecting = client.Connect(Target with { Timeout = TimeSpan.FromMilliseconds(100), CredentialProvider = (_) => { entered.TrySetResult(); return new ValueTask<string>(answer.Task); }, CancellationToken = cancelling.Token });
             var outcome = Record.ExceptionAsync(() => { return connecting; });
             await entered.Task.WaitAsync(Patience, Cancelled);
             if (ending == "cancel") { await cancelling.CancelAsync(); }
@@ -799,7 +801,7 @@ public sealed class WebSocketTransportClientTests : IAsyncLifetime
                 var answer = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
                 using var cancelling = new CancellationTokenSource();
                 await using var client = new WebSocketTransportClient(new WebSocketTransportClientOptions { Clock = time });
-                var connecting = client.Connect(Target with { Timeout = TimeSpan.FromMilliseconds(100), CredentialProvider = (token) => { entered.TrySetResult(token); return new ValueTask<string>(answer.Task); } }, cancelling.Token);
+                var connecting = client.Connect(Target with { Timeout = TimeSpan.FromMilliseconds(100), CredentialProvider = (token) => { entered.TrySetResult(token); return new ValueTask<string>(answer.Task); }, CancellationToken = cancelling.Token });
                 var outcome = Record.ExceptionAsync(() => { return connecting; });
                 var providerToken = await entered.Task.WaitAsync(Patience, Cancelled);
                 if (ending == "cancel") { await cancelling.CancelAsync(); }
@@ -816,7 +818,7 @@ public sealed class WebSocketTransportClientTests : IAsyncLifetime
                 else { answer.TrySetException(new InvalidOperationException("late provider failure")); }
                 // a round trip through the server lets a late continuation reach it before the count
                 await using var probe = new WebSocketTransportClient();
-                await probe.Connect(Target, Cancelled).WaitAsync(Patience, Cancelled);
+                await probe.Connect(Target with { CancellationToken = Cancelled }).WaitAsync(Patience, Cancelled);
                 var probeHandle = await Next(_connections);
                 Assert.Single(_server.ConnectionHandles);
                 await probe.CloseConnection(new TransportClientDisconnectOptions { IsQuick = true });
@@ -848,18 +850,18 @@ public sealed class WebSocketTransportClientTests : IAsyncLifetime
             };
             try
             {
-                var first = client.Connect(Target with { CredentialProvider = provider }, cancelling.Token);
+                var first = client.Connect(Target with { CredentialProvider = provider, CancellationToken = cancelling.Token });
                 var failed = Record.ExceptionAsync(() => { return first; });
                 await entered.Task.WaitAsync(Patience, Cancelled);
                 await cancelling.CancelAsync();
                 Assert.IsAssignableFrom<OperationCanceledException>(await failed.AsTask().WaitAsync(Patience, Cancelled));
-                await client.Connect(Target with { CredentialProvider = (_) => { otherCalls++; return ValueTask.FromResult(Bearer); } }, Cancelled).WaitAsync(Patience, Cancelled);
+                await client.Connect(Target with { CredentialProvider = (_) => { otherCalls++; return ValueTask.FromResult(Bearer); }, CancellationToken = Cancelled }).WaitAsync(Patience, Cancelled);
                 Assert.Equal(1, otherCalls);
                 Assert.Equal(1, calls);
                 Assert.Equal(ReadyState.Open, client.ReadyState);
                 Assert.True(client.Carries(Bearer));
                 await client.CloseConnection(new TransportClientDisconnectOptions { IsQuick = true });
-                var held = client.Connect(Target with { CredentialProvider = provider, Timeout = TimeSpan.FromMilliseconds(100) }, Cancelled);
+                var held = client.Connect(Target with { CredentialProvider = provider, Timeout = TimeSpan.FromMilliseconds(100), CancellationToken = Cancelled });
                 var refused = Record.ExceptionAsync(() => { return held; });
                 time.Advance(TimeSpan.FromMilliseconds(100));
                 Assert.IsType<TimeoutException>(await refused.AsTask().WaitAsync(Patience, Cancelled));
@@ -867,7 +869,7 @@ public sealed class WebSocketTransportClientTests : IAsyncLifetime
                 Assert.Equal(1, calls);
                 if (late == "failure") { answer.TrySetException(new InvalidOperationException("abandoned provider failure")); }
                 else { answer.TrySetResult("Bearer abandoned"); }
-                await client.Connect(Target with { CredentialProvider = provider }, Cancelled).WaitAsync(Patience, Cancelled);
+                await client.Connect(Target with { CredentialProvider = provider, CancellationToken = Cancelled }).WaitAsync(Patience, Cancelled);
                 Assert.Equal(2, calls);
                 Assert.Equal(1, otherCalls);
                 Assert.Equal(ReadyState.Open, client.ReadyState);
@@ -922,13 +924,13 @@ public sealed class WebSocketTransportClientTests : IAsyncLifetime
                 };
                 try
                 {
-                    var first = client.Connect(options, cancelling.Token);
+                    var first = client.Connect(options with { CancellationToken = cancelling.Token });
                     var failed = Record.ExceptionAsync(() => { return first; });
                     var firstToken = await entered.Task.WaitAsync(Patience, Cancelled);
                     await cancelling.CancelAsync();
                     Assert.IsAssignableFrom<OperationCanceledException>(await failed.AsTask().WaitAsync(Patience, Cancelled));
                     Assert.True(firstToken.IsCancellationRequested);
-                    var second = client.Connect(options, Cancelled);
+                    var second = client.Connect(options with { CancellationToken = Cancelled });
                     var outcome = Record.ExceptionAsync(() => { return second; });
                     Assert.Equal(1, calls);
                     Assert.False(settled);
@@ -996,12 +998,12 @@ public sealed class WebSocketTransportClientTests : IAsyncLifetime
                 };
                 try
                 {
-                    var first = client.Connect(options, cancelling.Token);
+                    var first = client.Connect(options with { CancellationToken = cancelling.Token });
                     var failed = Record.ExceptionAsync(() => { return first; });
                     await entered.Task.WaitAsync(Patience, Cancelled);
                     await cancelling.CancelAsync();
                     Assert.IsAssignableFrom<OperationCanceledException>(await failed.AsTask().WaitAsync(Patience, Cancelled));
-                    var second = client.Connect(options with { Timeout = TimeSpan.FromMilliseconds(100) }, waiting.Token);
+                    var second = client.Connect(options with { Timeout = TimeSpan.FromMilliseconds(100), CancellationToken = waiting.Token });
                     var outcome = Record.ExceptionAsync(() => { return second; });
                     Assert.Equal(ReadyState.Connecting, client.ReadyState);
                     Assert.Equal(1, calls);
@@ -1015,7 +1017,7 @@ public sealed class WebSocketTransportClientTests : IAsyncLifetime
                     Assert.Equal(ReadyState.Closed, client.ReadyState);
                     if (late == "failure") { answer.TrySetException(new InvalidOperationException("abandoned provider failure")); }
                     else { answer.TrySetResult(Bearer); }
-                    await client.Connect(Target, Cancelled).WaitAsync(Patience, Cancelled);
+                    await client.Connect(Target with { CancellationToken = Cancelled }).WaitAsync(Patience, Cancelled);
                     Assert.Equal(ReadyState.Open, client.ReadyState);
                     Assert.False(client.Carries(Bearer));
                     Assert.Equal(1, calls);
@@ -1031,7 +1033,7 @@ public sealed class WebSocketTransportClientTests : IAsyncLifetime
     {
         var reason = new OperationCanceledException("provider cancelled");
         await using var client = new WebSocketTransportClient();
-        var refused = await Assert.ThrowsAsync<WebSocketException>(() => { return client.Connect(Target with { CredentialProvider = (_) => { throw reason; } }, Cancelled); });
+        var refused = await Assert.ThrowsAsync<WebSocketException>(() => { return client.Connect(Target with { CredentialProvider = (_) => { throw reason; }, CancellationToken = Cancelled }); });
         Assert.Equal("the credential provider failed", refused.Message);
         Assert.Same(reason, refused.InnerException);
         Assert.Equal(ReadyState.Closed, client.ReadyState);
@@ -1053,8 +1055,9 @@ public sealed class WebSocketTransportClientTests : IAsyncLifetime
             {
                 token.Register(() => { callback.TrySetResult(); throw reason; });
                 entered.TrySetResult(); return new ValueTask<string>(answer.Task);
-            }
-        }, Cancelled);
+            },
+            CancellationToken = Cancelled,
+        });
         var outcome = Record.ExceptionAsync(() => { return connecting; });
         await entered.Task.WaitAsync(Patience, Cancelled);
         time.Advance(TimeSpan.FromMilliseconds(100));
@@ -1081,7 +1084,8 @@ public sealed class WebSocketTransportClientTests : IAsyncLifetime
                     release.Wait(Cancelled);
                     return ValueTask.FromResult(Bearer);
                 },
-            }, Cancelled);
+                CancellationToken = Cancelled,
+            });
         }, Cancelled);
         try
         {
@@ -1112,8 +1116,9 @@ public sealed class WebSocketTransportClientTests : IAsyncLifetime
                 {
                     token.Register(() => { entered.TrySetResult(); release.Wait(Cancelled); left.TrySetResult(); });
                     return ValueTask.FromResult(Bearer);
-                }
-            }, Cancelled);
+                },
+                CancellationToken = Cancelled,
+            });
             await entered.Task.WaitAsync(Patience, Cancelled);
             await connecting.WaitAsync(Patience, Cancelled);
             Assert.Equal(ReadyState.Open, client.ReadyState);
@@ -1127,7 +1132,7 @@ public sealed class WebSocketTransportClientTests : IAsyncLifetime
     public async Task DisposeAsync_while_connecting_fails_the_connect_ending_closed_and_closes_its_socket()
     {
         using var listener = new Listener(IPAddress.Loopback);
-        var connecting = _client.Connect(new WebSocketTransportClientConnectOptions { Host = Host, Port = listener.Port }, Cancelled);
+        var connecting = _client.Connect(new WebSocketTransportClientConnectOptions { Host = Host, Port = listener.Port, CancellationToken = Cancelled });
         // the handshake under way, which the listener never answers
         var (peer, _) = await listener.Next();
 
@@ -1149,7 +1154,7 @@ public sealed class WebSocketTransportClientTests : IAsyncLifetime
     {
         using var listener = new Listener(IPAddress.Loopback);
         using var source = CancellationTokenSource.CreateLinkedTokenSource(Cancelled);
-        var connecting = _client.Connect(new WebSocketTransportClientConnectOptions { Host = Host, Port = listener.Port, Protocols = ["echo"] }, source.Token);
+        var connecting = _client.Connect(new WebSocketTransportClientConnectOptions { Host = Host, Port = listener.Port, Protocols = ["echo"], CancellationToken = source.Token });
         var (peer, head) = await listener.Next();
 
         using (peer)
@@ -1173,8 +1178,8 @@ public sealed class WebSocketTransportClientTests : IAsyncLifetime
     {
         using var listener = new Listener(IPAddress.Loopback);
         using var source = CancellationTokenSource.CreateLinkedTokenSource(Cancelled);
-        var target = new WebSocketTransportClientConnectOptions { Host = Host, Port = listener.Port };
-        var connecting = _client.Connect(pathname is null ? target : target with { Pathname = pathname }, source.Token);
+        var target = new WebSocketTransportClientConnectOptions { Host = Host, Port = listener.Port, CancellationToken = source.Token };
+        var connecting = _client.Connect(pathname is null ? target : target with { Pathname = pathname });
         var (peer, head) = await listener.Next();
 
         using (peer)
@@ -1194,7 +1199,7 @@ public sealed class WebSocketTransportClientTests : IAsyncLifetime
     public async Task Offers_no_extension_in_its_upgrade_permessage_deflate_among_them()
     {
         using var listener = new Listener(IPAddress.Loopback);
-        var connecting = _client.Connect(new WebSocketTransportClientConnectOptions { Host = Host, Port = listener.Port }, Cancelled);
+        var connecting = _client.Connect(new WebSocketTransportClientConnectOptions { Host = Host, Port = listener.Port, CancellationToken = Cancelled });
         var (peer, head) = await listener.Next();
 
         Assert.DoesNotContain("\r\nSec-WebSocket-Extensions:", Encoding.ASCII.GetString(head), StringComparison.OrdinalIgnoreCase);
@@ -1211,12 +1216,12 @@ public sealed class WebSocketTransportClientTests : IAsyncLifetime
     {
         await Assert.ThrowsAsync<WebSocketException>(() =>
         {
-            return _client.Connect(new WebSocketTransportClientConnectOptions { Host = Host, Port = ClosedPort(), Secured = true }, Cancelled);
+            return _client.Connect(new WebSocketTransportClientConnectOptions { Host = Host, Port = ClosedPort(), Secured = true, CancellationToken = Cancelled });
         });
 
         using var listener = new Listener(IPAddress.Loopback);
         using var source = CancellationTokenSource.CreateLinkedTokenSource(Cancelled);
-        var connecting = _client.Connect(new WebSocketTransportClientConnectOptions { Host = Host, Port = listener.Port, Secured = true }, source.Token);
+        var connecting = _client.Connect(new WebSocketTransportClientConnectOptions { Host = Host, Port = listener.Port, Secured = true, CancellationToken = source.Token });
         var (peer, head) = await listener.Next();
 
         using (peer)
@@ -1244,7 +1249,7 @@ public sealed class WebSocketTransportClientTests : IAsyncLifetime
 
             await Assert.ThrowsAsync<WebSocketException>(() =>
             {
-                return client.Connect(new WebSocketTransportClientConnectOptions { Host = host, Port = 8_080 }, Cancelled);
+                return client.Connect(new WebSocketTransportClientConnectOptions { Host = host, Port = 8_080, CancellationToken = Cancelled });
             });
         }
 
@@ -1261,7 +1266,7 @@ public sealed class WebSocketTransportClientTests : IAsyncLifetime
         {
             await using var client = new WebSocketTransportClient();
 
-            await client.Connect(new WebSocketTransportClientConnectOptions { Host = host, Port = _port }, Cancelled);
+            await client.Connect(new WebSocketTransportClientConnectOptions { Host = host, Port = _port, CancellationToken = Cancelled });
             Assert.Equal(ReadyState.Open, client.ReadyState);
         }
 
@@ -1271,13 +1276,13 @@ public sealed class WebSocketTransportClientTests : IAsyncLifetime
         }
 
         await using var server = new WebSocketTransportServer();
-        var port = (await server.Start(new WebSocketTransportStartOptions { Address = "::1", FindOpenPort = true }, Cancelled)).Port;
+        var port = (await server.Start(new WebSocketTransportStartOptions { Address = "::1", FindOpenPort = true, CancellationToken = Cancelled })).Port;
 
         foreach (var host in new[] { "::1", "[::1]" })
         {
             await using var client = new WebSocketTransportClient();
 
-            await client.Connect(new WebSocketTransportClientConnectOptions { Host = host, Port = port }, Cancelled);
+            await client.Connect(new WebSocketTransportClientConnectOptions { Host = host, Port = port, CancellationToken = Cancelled });
 
             Assert.Equal(ReadyState.Open, client.ReadyState);
         }
@@ -1308,7 +1313,7 @@ public sealed class WebSocketTransportClientTests : IAsyncLifetime
         {
             var closes = ClosesOf(client);
 
-            await client.Connect(Target, Cancelled);
+            await client.Connect(Target with { CancellationToken = Cancelled });
 
             var connectionHandle = await Next(_connections);
 
@@ -1325,7 +1330,7 @@ public sealed class WebSocketTransportClientTests : IAsyncLifetime
     {
         var closes = ClosesOf(_client);
 
-        await _client.Connect(Target, Cancelled);
+        await _client.Connect(Target with { CancellationToken = Cancelled });
 
         var connectionHandle = await Next(_connections);
 
@@ -1347,7 +1352,7 @@ public sealed class WebSocketTransportClientTests : IAsyncLifetime
             return _client.CloseConnection();
         });
 
-        await _client.Connect(Target, Cancelled);
+        await _client.Connect(Target with { CancellationToken = Cancelled });
         await _client.CloseConnection().WaitAsync(Patience, Cancelled);
 
         Assert.Equal("the transport client is closed, not open", (await Assert.ThrowsAsync<DisconnectException>(() =>
@@ -1361,7 +1366,7 @@ public sealed class WebSocketTransportClientTests : IAsyncLifetime
     {
         using var listener = new Listener(IPAddress.Loopback);
         var closes = ClosesOf(_client);
-        var connecting = _client.Connect(new WebSocketTransportClientConnectOptions { Host = Host, Port = listener.Port }, Cancelled);
+        var connecting = _client.Connect(new WebSocketTransportClientConnectOptions { Host = Host, Port = listener.Port, CancellationToken = Cancelled });
         var (peer, head) = await listener.Next();
 
         using (peer)
@@ -1389,7 +1394,7 @@ public sealed class WebSocketTransportClientTests : IAsyncLifetime
     {
         using var listener = new Listener(IPAddress.Loopback);
         var closes = ClosesOf(_client);
-        var connecting = _client.Connect(new WebSocketTransportClientConnectOptions { Host = Host, Port = listener.Port }, Cancelled);
+        var connecting = _client.Connect(new WebSocketTransportClientConnectOptions { Host = Host, Port = listener.Port, CancellationToken = Cancelled });
         var (peer, head) = await listener.Next();
 
         using (peer)
@@ -1414,7 +1419,7 @@ public sealed class WebSocketTransportClientTests : IAsyncLifetime
             Assert.True(closes.Reader.Count == 0);
         }
 
-        await _client.Connect(Target, Cancelled);
+        await _client.Connect(Target with { CancellationToken = Cancelled });
 
         Assert.Equal(ReadyState.Open, _client.ReadyState);
     }
@@ -1429,10 +1434,10 @@ public sealed class WebSocketTransportClientTests : IAsyncLifetime
         _client.Close += (clean, quick) =>
         {
             closes.Add((clean, quick));
-            replacement = Record.ExceptionAsync(() => { return _client.Connect(Target, Cancelled); }).AsTask();
+            replacement = Record.ExceptionAsync(() => { return _client.Connect(Target with { CancellationToken = Cancelled }); }).AsTask();
         };
         _client.Error += errors.Add;
-        await _client.Connect(Target, Cancelled);
+        await _client.Connect(Target with { CancellationToken = Cancelled });
         await _client.DisposeAsync().AsTask().WaitAsync(Patience, Cancelled);
 
         Assert.Equal(ReadyState.Closed, _client.ReadyState);
@@ -1456,7 +1461,7 @@ public sealed class WebSocketTransportClientTests : IAsyncLifetime
     [Fact]
     public async Task A_dispose_on_an_open_client_leaves_it_closed_refusing_a_send_and_ready_to_connect_again()
     {
-        await _client.Connect(Target, Cancelled);
+        await _client.Connect(Target with { CancellationToken = Cancelled });
         await _client.DisposeAsync();
 
         Assert.Equal(ReadyState.Closed, _client.ReadyState);
@@ -1465,7 +1470,7 @@ public sealed class WebSocketTransportClientTests : IAsyncLifetime
             return _client.Send(new TransportMessage(new byte[] { 1 }, false));
         })).Message);
 
-        await _client.Connect(Target, Cancelled);
+        await _client.Connect(Target with { CancellationToken = Cancelled });
 
         Assert.Equal(ReadyState.Open, _client.ReadyState);
     }
@@ -1476,7 +1481,7 @@ public sealed class WebSocketTransportClientTests : IAsyncLifetime
         using var listener = new Listener(IPAddress.Loopback);
         Assert.False(_client.Carries(Bearer));
         var upgrades = new List<string[]>();
-        var connecting = _client.Connect(new WebSocketTransportClientConnectOptions { Host = Host, Port = listener.Port, Credential = Bearer }, Cancelled);
+        var connecting = _client.Connect(new WebSocketTransportClientConnectOptions { Host = Host, Port = listener.Port, Credential = Bearer, CancellationToken = Cancelled });
         var (peer, head) = await listener.Next();
         upgrades.Add([.. AuthorizationsOf(head)]);
 
@@ -1509,7 +1514,7 @@ public sealed class WebSocketTransportClientTests : IAsyncLifetime
         // none once its connection is gone, and none on an upgrade given none, an empty one among them
         Assert.False(_client.Carries(Bearer));
 
-        var reconnecting = _client.Connect(new WebSocketTransportClientConnectOptions { Host = Host, Port = listener.Port }, Cancelled);
+        var reconnecting = _client.Connect(new WebSocketTransportClientConnectOptions { Host = Host, Port = listener.Port, CancellationToken = Cancelled });
         var (reopened, reopenedHead) = await listener.Next();
         using (reopened)
         using (await Listener.Answer(reopened, reopenedHead))
@@ -1525,7 +1530,7 @@ public sealed class WebSocketTransportClientTests : IAsyncLifetime
         foreach (var given in new[] { null, "" })
         {
             await using var client = new WebSocketTransportClient();
-            var bare = client.Connect(new WebSocketTransportClientConnectOptions { Host = Host, Port = listener.Port, Credential = given }, Cancelled);
+            var bare = client.Connect(new WebSocketTransportClientConnectOptions { Host = Host, Port = listener.Port, Credential = given, CancellationToken = Cancelled });
             var (other, otherHead) = await listener.Next();
             upgrades.Add([.. AuthorizationsOf(otherHead)]);
 
@@ -1562,7 +1567,7 @@ public sealed class WebSocketTransportClientTests : IAsyncLifetime
                 return handed == 2 ? throw new InvalidOperationException("the token store is away") : ValueTask.FromResult($"Bearer token-{handed}");
             },
         };
-        var connecting = client.Connect(target, Cancelled);
+        var connecting = client.Connect(target with { CancellationToken = Cancelled });
         var (peer, head) = await listener.Next();
 
         using (peer)
@@ -1605,8 +1610,8 @@ public sealed class WebSocketTransportClientTests : IAsyncLifetime
                     {
                         throw away;
                     },
-                },
-                Cancelled);
+                    CancellationToken = Cancelled,
+                });
         });
 
         Assert.Equal(("the credential provider failed", away, ReadyState.Closed), (thrown.Message, thrown.InnerException, failing.ReadyState));
@@ -1625,7 +1630,7 @@ public sealed class WebSocketTransportClientTests : IAsyncLifetime
                 "a credential holds visible ASCII, spaces and tabs alone, none first or last (Parameter 'credential')",
                 (await Assert.ThrowsAsync<ArgumentException>(() =>
                 {
-                    return _client.Connect(target with { Credential = credential }, Cancelled);
+                    return _client.Connect(target with { Credential = credential, CancellationToken = Cancelled });
                 })).Message);
         }
 
@@ -1645,7 +1650,7 @@ public sealed class WebSocketTransportClientTests : IAsyncLifetime
                 "a credential never crosses off the machine in the clear: connect over wss, or to a host on the loopback (Parameter 'options')",
                 (await Assert.ThrowsAsync<ArgumentException>(() =>
                 {
-                    return _client.Connect(faraway, Cancelled);
+                    return _client.Connect(faraway with { CancellationToken = Cancelled });
                 })).Message);
         }
 
@@ -1671,8 +1676,8 @@ public sealed class WebSocketTransportClientTests : IAsyncLifetime
 
                     return ValueTask.FromResult(handed);
                 },
-            },
-            Cancelled);
+                CancellationToken = Cancelled,
+            });
         var (peer, head) = await listener.Next();
 
         using (peer)
@@ -1718,7 +1723,8 @@ public sealed class WebSocketTransportClientTests : IAsyncLifetime
 
                 return new ValueTask<string>(answer.Task);
             },
-        }, cancelling.Token);
+            CancellationToken = cancelling.Token,
+        });
         var providerToken = await entered.Task.WaitAsync(Patience, Cancelled);
 
         try
@@ -1756,7 +1762,7 @@ public sealed class WebSocketTransportClientTests : IAsyncLifetime
             "a connect takes a credential or a credential provider, not both (Parameter 'options')",
             (await Assert.ThrowsAsync<ArgumentException>(() =>
             {
-                return _client.Connect(both, Cancelled);
+                return _client.Connect(both with { CancellationToken = Cancelled });
             })).Message);
         Assert.Equal(ReadyState.Uninitialized, _client.ReadyState);
     }
@@ -1773,7 +1779,7 @@ public sealed class WebSocketTransportClientTests : IAsyncLifetime
             messages.Writer.TryWrite(message);
         };
 
-        var connecting = _client.Connect(new WebSocketTransportClientConnectOptions { Host = Host, Port = listener.Port }, Cancelled);
+        var connecting = _client.Connect(new WebSocketTransportClientConnectOptions { Host = Host, Port = listener.Port, CancellationToken = Cancelled });
         var (peer, head) = await listener.Next();
 
         using (peer)
@@ -1810,7 +1816,7 @@ public sealed class WebSocketTransportClientTests : IAsyncLifetime
         {
             await using var client = new WebSocketTransportClient();
             var (told, closed) = EndOf(client);
-            var connecting = client.Connect(new WebSocketTransportClientConnectOptions { Host = Host, Port = listener.Port }, Cancelled);
+            var connecting = client.Connect(new WebSocketTransportClientConnectOptions { Host = Host, Port = listener.Port, CancellationToken = Cancelled });
             var (peer, head) = await listener.Next();
 
             using (peer)
@@ -1841,7 +1847,7 @@ public sealed class WebSocketTransportClientTests : IAsyncLifetime
     {
         using var listener = new Listener(IPAddress.Loopback);
         var (told, closed) = EndOf(_client);
-        var connecting = _client.Connect(new WebSocketTransportClientConnectOptions { Host = Host, Port = listener.Port }, Cancelled);
+        var connecting = _client.Connect(new WebSocketTransportClientConnectOptions { Host = Host, Port = listener.Port, CancellationToken = Cancelled });
         var (peer, head) = await listener.Next();
 
         using (peer)
@@ -1872,7 +1878,7 @@ public sealed class WebSocketTransportClientTests : IAsyncLifetime
         using var listener = new Listener(IPAddress.Loopback);
         await using var client = new WebSocketTransportClient(new WebSocketTransportClientOptions { MaximumMessageBytes = 1024 });
         var (told, closed) = EndOf(client);
-        var connecting = client.Connect(new WebSocketTransportClientConnectOptions { Host = Host, Port = listener.Port }, Cancelled);
+        var connecting = client.Connect(new WebSocketTransportClientConnectOptions { Host = Host, Port = listener.Port, CancellationToken = Cancelled });
         var (peer, head) = await listener.Next();
 
         using (peer)
@@ -1900,7 +1906,7 @@ public sealed class WebSocketTransportClientTests : IAsyncLifetime
         using var listener = new Listener(IPAddress.Loopback);
         await using var client = new WebSocketTransportClient(new WebSocketTransportClientOptions { MaximumMessageBytes = 1024, CloseTimeout = TimeSpan.FromMilliseconds(200) });
         var (told, closed) = EndOf(client);
-        var connecting = client.Connect(new WebSocketTransportClientConnectOptions { Host = Host, Port = listener.Port }, Cancelled);
+        var connecting = client.Connect(new WebSocketTransportClientConnectOptions { Host = Host, Port = listener.Port, CancellationToken = Cancelled });
         var (peer, head) = await listener.Next();
 
         using (peer)
@@ -1934,7 +1940,7 @@ public sealed class WebSocketTransportClientTests : IAsyncLifetime
             throw new InvalidOperationException("an error listener that throws");
         };
 
-        var connecting = _client.Connect(new WebSocketTransportClientConnectOptions { Host = Host, Port = listener.Port }, Cancelled);
+        var connecting = _client.Connect(new WebSocketTransportClientConnectOptions { Host = Host, Port = listener.Port, CancellationToken = Cancelled });
         var (peer, head) = await listener.Next();
 
         using (peer)
@@ -1961,7 +1967,7 @@ public sealed class WebSocketTransportClientTests : IAsyncLifetime
             messages.Writer.TryWrite(message);
         };
 
-        var connecting = _client.Connect(new WebSocketTransportClientConnectOptions { Host = Host, Port = listener.Port }, Cancelled);
+        var connecting = _client.Connect(new WebSocketTransportClientConnectOptions { Host = Host, Port = listener.Port, CancellationToken = Cancelled });
         var (peer, head) = await listener.Next();
 
         using (peer)
@@ -2000,7 +2006,7 @@ public sealed class WebSocketTransportClientTests : IAsyncLifetime
             messages.Writer.TryWrite(message);
         };
 
-        var connecting = _client.Connect(new WebSocketTransportClientConnectOptions { Host = Host, Port = listener.Port }, Cancelled);
+        var connecting = _client.Connect(new WebSocketTransportClientConnectOptions { Host = Host, Port = listener.Port, CancellationToken = Cancelled });
         var (peer, head) = await listener.Next();
 
         using (peer)
@@ -2029,7 +2035,7 @@ public sealed class WebSocketTransportClientTests : IAsyncLifetime
         }
 
         // * its pause outlasts the connection: one connected after holds until resumed
-        connecting = _client.Connect(new WebSocketTransportClientConnectOptions { Host = Host, Port = listener.Port }, Cancelled);
+        connecting = _client.Connect(new WebSocketTransportClientConnectOptions { Host = Host, Port = listener.Port, CancellationToken = Cancelled });
         (peer, head) = await listener.Next();
 
         using (peer)
@@ -2072,7 +2078,7 @@ public sealed class WebSocketTransportClientTests : IAsyncLifetime
             errors.Writer.TryWrite(reason);
         };
 
-        var connecting = _client.Connect(new WebSocketTransportClientConnectOptions { Host = Host, Port = listener.Port }, Cancelled);
+        var connecting = _client.Connect(new WebSocketTransportClientConnectOptions { Host = Host, Port = listener.Port, CancellationToken = Cancelled });
         var (peer, head) = await listener.Next();
 
         using (peer)
@@ -2106,7 +2112,7 @@ public sealed class WebSocketTransportClientTests : IAsyncLifetime
         using var listener = new Listener(IPAddress.Loopback);
         await using var client = new WebSocketTransportClient(new WebSocketTransportClientOptions { Heartbeat = TimeSpan.FromMilliseconds(500) });
         var (told, closed) = EndOf(client);
-        var connecting = client.Connect(new WebSocketTransportClientConnectOptions { Host = Host, Port = listener.Port }, Cancelled);
+        var connecting = client.Connect(new WebSocketTransportClientConnectOptions { Host = Host, Port = listener.Port, CancellationToken = Cancelled });
         var (peer, head) = await listener.Next();
 
         using (peer)
@@ -2131,7 +2137,7 @@ public sealed class WebSocketTransportClientTests : IAsyncLifetime
         foreach (var (heartbeat, isPinging) in new[] { (TimeSpan.FromMilliseconds(200), true), (Timeout.InfiniteTimeSpan, false) })
         {
             await using var client = new WebSocketTransportClient(new WebSocketTransportClientOptions { Heartbeat = heartbeat });
-            var connecting = client.Connect(new WebSocketTransportClientConnectOptions { Host = Host, Port = listener.Port }, Cancelled);
+            var connecting = client.Connect(new WebSocketTransportClientConnectOptions { Host = Host, Port = listener.Port, CancellationToken = Cancelled });
             var (peer, head) = await listener.Next();
 
             using (peer)
@@ -2208,7 +2214,7 @@ public sealed class WebSocketTransportClientTests : IAsyncLifetime
         using var listener = new Listener(IPAddress.Loopback);
         await using var client = new WebSocketTransportClient(new WebSocketTransportClientOptions { CloseTimeout = TimeSpan.FromMilliseconds(200) });
         var (told, _) = EndOf(client);
-        var connecting = client.Connect(new WebSocketTransportClientConnectOptions { Host = Host, Port = listener.Port }, Cancelled);
+        var connecting = client.Connect(new WebSocketTransportClientConnectOptions { Host = Host, Port = listener.Port, CancellationToken = Cancelled });
         var (peer, head) = await listener.Next();
 
         using (peer)
@@ -2240,7 +2246,7 @@ public sealed class WebSocketTransportClientTests : IAsyncLifetime
         using var listener = new Listener(IPAddress.Loopback);
         await using var client = new WebSocketTransportClient(new WebSocketTransportClientOptions { CloseTimeout = Timeout.InfiniteTimeSpan });
         var (told, _) = EndOf(client);
-        var connecting = client.Connect(new WebSocketTransportClientConnectOptions { Host = Host, Port = listener.Port }, Cancelled);
+        var connecting = client.Connect(new WebSocketTransportClientConnectOptions { Host = Host, Port = listener.Port, CancellationToken = Cancelled });
         var (peer, head) = await listener.Next();
 
         using (peer)
@@ -2270,7 +2276,7 @@ public sealed class WebSocketTransportClientTests : IAsyncLifetime
     [Fact]
     public async Task Reconnects_after_a_close()
     {
-        await _client.Connect(Target, Cancelled);
+        await _client.Connect(Target with { CancellationToken = Cancelled });
         await _client.CloseConnection();
         await _client.Reconnect(new TransportClientReconnectOptions { Delay = DelayOf(TimeSpan.FromMilliseconds(10)), MaximumAttempts = 1 }).WaitAsync(Patience, Cancelled);
 
@@ -2282,7 +2288,7 @@ public sealed class WebSocketTransportClientTests : IAsyncLifetime
     {
         var closes = ClosesOf(_client);
 
-        await _client.Connect(Target, Cancelled);
+        await _client.Connect(Target with { CancellationToken = Cancelled });
 
         var replaced = await Next(_connections);
 
@@ -2300,11 +2306,11 @@ public sealed class WebSocketTransportClientTests : IAsyncLifetime
     [Fact]
     public async Task Reconnects_to_the_target_of_the_last_accepted_connect()
     {
-        await _client.Connect(Target, Cancelled);
+        await _client.Connect(Target with { CancellationToken = Cancelled });
         await Next(_connections);
         await Assert.ThrowsAsync<InvalidOperationException>(() =>
         {
-            return _client.Connect(Target with { Port = ClosedPort() }, Cancelled);
+            return _client.Connect(Target with { Port = ClosedPort(), CancellationToken = Cancelled });
         });
         await _client.Reconnect(new TransportClientReconnectOptions { Delay = DelayOf(TimeSpan.Zero) }).WaitAsync(Patience, Cancelled);
         await Next(_connections);
@@ -2315,13 +2321,13 @@ public sealed class WebSocketTransportClientTests : IAsyncLifetime
     [Fact]
     public async Task A_connect_refused_after_a_close_keeps_the_target_before_it_which_a_reconnection_replays()
     {
-        await _client.Connect(Target, Cancelled);
+        await _client.Connect(Target with { CancellationToken = Cancelled });
         await Next(_connections);
         await _client.CloseConnection().WaitAsync(Patience, Cancelled);
 
         var refused = await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() =>
         {
-            return _client.Connect(Target with { Port = ClosedPort(), Timeout = TimeSpan.FromMilliseconds(0.5) }, Cancelled);
+            return _client.Connect(Target with { Port = ClosedPort(), Timeout = TimeSpan.FromMilliseconds(0.5), CancellationToken = Cancelled });
         });
 
         Assert.StartsWith("a connect's timeout is a number of milliseconds from 1 to 2147483647, or infinite for never, not 0.5", refused.Message, StringComparison.Ordinal);
@@ -2337,7 +2343,7 @@ public sealed class WebSocketTransportClientTests : IAsyncLifetime
     {
         using var source = CancellationTokenSource.CreateLinkedTokenSource(Cancelled);
 
-        await _client.Connect(Target, source.Token);
+        await _client.Connect(Target with { CancellationToken = source.Token });
         await source.CancelAsync();
         await _client.Reconnect(new TransportClientReconnectOptions { Delay = DelayOf(TimeSpan.Zero) }).WaitAsync(Patience, Cancelled);
 
@@ -2358,7 +2364,7 @@ public sealed class WebSocketTransportClientTests : IAsyncLifetime
     public async Task Refuses_to_reconnect_while_a_close_is_under_way()
     {
         using var listener = new Listener(IPAddress.Loopback);
-        var connecting = _client.Connect(new WebSocketTransportClientConnectOptions { Host = Host, Port = listener.Port }, Cancelled);
+        var connecting = _client.Connect(new WebSocketTransportClientConnectOptions { Host = Host, Port = listener.Port, CancellationToken = Cancelled });
         var (peer, head) = await listener.Next();
 
         using (peer)
@@ -2385,7 +2391,7 @@ public sealed class WebSocketTransportClientTests : IAsyncLifetime
         await using var client = new WebSocketTransportClient(new WebSocketTransportClientOptions { CloseTimeout = TimeSpan.FromMilliseconds(100) });
 
         // under way as long as its handshake is held, whatever the machine's pace
-        var connecting = client.Connect(new WebSocketTransportClientConnectOptions { Host = "127.0.0.1", Port = listener.Port }, Cancelled);
+        var connecting = client.Connect(new WebSocketTransportClientConnectOptions { Host = "127.0.0.1", Port = listener.Port, CancellationToken = Cancelled });
         var (peer, head) = await listener.Next();
 
         using var held = peer;
@@ -2469,7 +2475,7 @@ public sealed class WebSocketTransportClientTests : IAsyncLifetime
 
         Assert.Equal("the transport client is already reconnecting", (await Assert.ThrowsAsync<InvalidOperationException>(() =>
         {
-            return client.Connect(new WebSocketTransportClientConnectOptions { Host = Host, Port = listener.Port }, Cancelled);
+            return client.Connect(new WebSocketTransportClientConnectOptions { Host = Host, Port = listener.Port, CancellationToken = Cancelled });
         })).Message);
 
         await source.CancelAsync();
@@ -2557,7 +2563,7 @@ public sealed class WebSocketTransportClientTests : IAsyncLifetime
         });
         Assert.Equal(0, reconnects);
 
-        await _client.Connect(Target, Cancelled);
+        await _client.Connect(Target with { CancellationToken = Cancelled });
         await _client.Reconnect().WaitAsync(Patience, Cancelled);
         await _client.CloseConnection();
         await _client.Reconnect().WaitAsync(Patience, Cancelled);
@@ -2588,7 +2594,7 @@ public sealed class WebSocketTransportClientTests : IAsyncLifetime
             }
         };
 
-        await _client.Connect(Target, Cancelled);
+        await _client.Connect(Target with { CancellationToken = Cancelled });
         await _client.Reconnect().WaitAsync(Patience, Cancelled);
 
         // the reconnection went on to its attempt, which opened
@@ -2606,7 +2612,7 @@ public sealed class WebSocketTransportClientTests : IAsyncLifetime
         // a clock that never moves: a first attempt that waited would wait for ever
         await using var client = new WebSocketTransportClient(new WebSocketTransportClientOptions { Clock = new FakeTimeProvider() });
 
-        await client.Connect(Target, Cancelled);
+        await client.Connect(Target with { CancellationToken = Cancelled });
         await client.Reconnect(new TransportClientReconnectOptions { Delay = DelayOf(TimeSpan.FromMinutes(1)) }).WaitAsync(Patience, Cancelled);
 
         Assert.Equal(ReadyState.Open, client.ReadyState);
@@ -2702,7 +2708,7 @@ public sealed class WebSocketTransportClientTests : IAsyncLifetime
             taps.Enqueue((delay, attempt));
         };
 
-        await _client.Connect(Target, Cancelled);
+        await _client.Connect(Target with { CancellationToken = Cancelled });
         await _client.Reconnect(new TransportClientReconnectOptions { Delay = DelayOf(TimeSpan.FromMilliseconds(10)), Tap = tap }).WaitAsync(Patience, Cancelled);
 
         Assert.Empty(taps);
@@ -2774,7 +2780,7 @@ public sealed class WebSocketTransportClientTests : IAsyncLifetime
         foreach (var refusal in new (int, string?)[] { (403, "host-refused"), (502, null) })
         {
             await using var client = new WebSocketTransportClient();
-            var connecting = client.Connect(new WebSocketTransportClientConnectOptions { Host = Host, Port = listener.Port }, Cancelled);
+            var connecting = client.Connect(new WebSocketTransportClientConnectOptions { Host = Host, Port = listener.Port, CancellationToken = Cancelled });
             var (peer, _) = await listener.Next();
 
             await Listener.Refuse(peer, refusal);
@@ -2801,7 +2807,7 @@ public sealed class WebSocketTransportClientTests : IAsyncLifetime
     public async Task Fails_its_connect_on_a_redirect_answered_to_its_upgrade_naming_its_status()
     {
         using var listener = new Listener(IPAddress.Loopback);
-        var connecting = _client.Connect(new WebSocketTransportClientConnectOptions { Host = Host, Port = listener.Port, Credential = Bearer }, Cancelled);
+        var connecting = _client.Connect(new WebSocketTransportClientConnectOptions { Host = Host, Port = listener.Port, Credential = Bearer, CancellationToken = Cancelled });
         var (peer, _) = await listener.Next();
 
         // to a server that would take the upgrade: followed, the connect would open there
@@ -2833,11 +2839,11 @@ public sealed class WebSocketTransportClientTests : IAsyncLifetime
         foreach (var address in Addresses.ReachedByLocalhost())
         {
             await using var server = new WebSocketTransportServer();
-            var port = (await server.Start(new WebSocketTransportStartOptions { Address = address, FindOpenPort = true }, Cancelled)).Port;
+            var port = (await server.Start(new WebSocketTransportStartOptions { Address = address, FindOpenPort = true, CancellationToken = Cancelled })).Port;
             await using var client = new WebSocketTransportClient();
             var started = TimeProvider.System.GetTimestamp();
 
-            await client.Connect(new WebSocketTransportClientConnectOptions { Host = "localhost", Port = port }, Cancelled).WaitAsync(Patience, Cancelled);
+            await client.Connect(new WebSocketTransportClientConnectOptions { Host = "localhost", Port = port, CancellationToken = Cancelled }).WaitAsync(Patience, Cancelled);
             connects.Add((address, TimeProvider.System.GetElapsedTime(started)));
             Assert.Equal((address, ReadyState.Open), (address, client.ReadyState));
         }
@@ -2984,7 +2990,7 @@ public sealed class WebSocketTransportClientTests : IAsyncLifetime
             Interlocked.Increment(ref reconnects);
         };
         await cancelled.CancelAsync();
-        await _client.Connect(Target, Cancelled);
+        await _client.Connect(Target with { CancellationToken = Cancelled });
         await Next(_connections);
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
         {
@@ -3058,7 +3064,7 @@ public sealed class WebSocketTransportClientTests : IAsyncLifetime
         var errors = new List<Exception>();
 
         _client.Error += errors.Add;
-        await _client.Connect(Target, Cancelled);
+        await _client.Connect(Target with { CancellationToken = Cancelled });
 
         var replaced = await Next(_connections);
         Task? closing = null;
@@ -3101,7 +3107,7 @@ public sealed class WebSocketTransportClientTests : IAsyncLifetime
         using var source = new CancellationTokenSource();
         var closes = ClosesOf(_client);
 
-        await _client.Connect(Target, Cancelled);
+        await _client.Connect(Target with { CancellationToken = Cancelled });
 
         var replaced = await Next(_connections);
 
@@ -3138,7 +3144,7 @@ public sealed class WebSocketTransportClientTests : IAsyncLifetime
         {
             reconnecting.TrySetResult(_client.Reconnect(new TransportClientReconnectOptions { MaximumAttempts = 1 }));
         };
-        await _client.Connect(Target, Cancelled);
+        await _client.Connect(Target with { CancellationToken = Cancelled });
         await Next(_connections);
         await _server.Stop().WaitAsync(Patience, Cancelled);
 

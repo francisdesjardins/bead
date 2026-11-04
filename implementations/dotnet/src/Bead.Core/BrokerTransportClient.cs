@@ -81,6 +81,13 @@ public sealed record BrokerTransportClientConnectOptions
     /// <see cref="System.Threading.Timeout.InfiniteTimeSpan"/>, which never times out; zero is refused.
     /// </summary>
     public TimeSpan Timeout { get; init; } = TimeSpan.FromSeconds(10);
+
+    /// <summary>
+    /// What gives the connect up: one cancelled already refuses it before anything moves, one
+    /// cancelled after ends it Closed, each an <see cref="OperationCanceledException"/>. Its own
+    /// connect's alone: a reconnection replays the rest of these options, never this token.
+    /// </summary>
+    public CancellationToken CancellationToken { get; init; }
 }
 
 /// <summary>
@@ -246,9 +253,10 @@ public sealed class BrokerTransportClient : IRouterClientTransport, IAsyncDispos
     /// <see cref="TimeoutException"/> past its timeout; an <see cref="OperationCanceledException"/>
     /// once its token is cancelled; each ending Closed.
     /// </summary>
-    public Task Connect(BrokerTransportClientConnectOptions options, CancellationToken cancellationToken = default)
+    public Task Connect(BrokerTransportClientConnectOptions options)
     {
-        return Connecting(options, (cancellationToken, null));
+        // none refused where the connect refuses it, in its task
+        return Connecting(options, (options?.CancellationToken ?? CancellationToken.None, null));
     }
 
     /// <summary>
@@ -640,6 +648,10 @@ public sealed class BrokerTransportClient : IRouterClientTransport, IAsyncDispos
         var options = given with
         {
             Timeout = Clocks.AssertHeld(("a connect's timeout", nameof(BrokerTransportClientConnectOptions.Timeout)), given.Timeout),
+
+            // ! its own connect's, which its call carries: a reconnection replays the rest, never
+            // a token a connect gave
+            CancellationToken = CancellationToken.None,
         };
         var (token, reconnection) = call;
         var isAttempt = reconnection is not null;

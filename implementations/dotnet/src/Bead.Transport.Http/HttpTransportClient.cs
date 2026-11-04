@@ -86,6 +86,13 @@ public sealed record HttpTransportClientConnectOptions
     /// zero is refused.
     /// </summary>
     public TimeSpan Timeout { get; init; } = TimeSpan.FromSeconds(30);
+
+    /// <summary>
+    /// What gives the connect up: one cancelled already refuses it before anything moves, one
+    /// cancelled after ends it Closed, each an <see cref="OperationCanceledException"/>. Its own
+    /// connect's alone: a reconnection replays the rest of these options, never this token.
+    /// </summary>
+    public CancellationToken CancellationToken { get; init; }
 }
 
 /// <summary>
@@ -283,9 +290,10 @@ public sealed class HttpTransportClient : IRouterClientTransport, IAsyncDisposab
     /// <see cref="OperationCanceledException"/> once its token is cancelled, and an
     /// <see cref="HttpRequestException"/> when the server draws none, ending Closed.
     /// </summary>
-    public Task Connect(HttpTransportClientConnectOptions options, CancellationToken cancellationToken = default)
+    public Task Connect(HttpTransportClientConnectOptions options)
     {
-        return Connecting(options, (cancellationToken, false));
+        // none refused where the connect refuses it, in its task
+        return Connecting(options, (options?.CancellationToken ?? CancellationToken.None, false));
     }
 
     /// <summary>
@@ -805,6 +813,10 @@ public sealed class HttpTransportClient : IRouterClientTransport, IAsyncDisposab
         var options = given with
         {
             Timeout = Clocks.AssertHeld(("a connect's timeout", nameof(HttpTransportClientConnectOptions.Timeout)), given.Timeout),
+
+            // ! its own connect's, which its call carries: a reconnection replays the rest, never
+            // a token a connect gave
+            CancellationToken = CancellationToken.None,
         };
         var (token, isAttempt) = call;
         var uri = UriOf(options);

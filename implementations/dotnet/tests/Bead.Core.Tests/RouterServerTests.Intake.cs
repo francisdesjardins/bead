@@ -146,8 +146,8 @@ public sealed partial class RouterServerTests
             }
         };
         await memory.Start();
-        await flooding.Connect(new MemoryTransportClientConnectOptions { Server = memory, Address = "flooding" }, Cancelled);
-        await other.Connect(new MemoryTransportClientConnectOptions { Server = memory, Address = "other" }, Cancelled);
+        await flooding.Connect(new MemoryTransportClientConnectOptions { Server = memory, Address = "flooding", CancellationToken = Cancelled });
+        await other.Connect(new MemoryTransportClientConnectOptions { Server = memory, Address = "other", CancellationToken = Cancelled });
         await Settle();
 
         using (var held = HoldRouter())
