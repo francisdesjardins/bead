@@ -1,4 +1,4 @@
-# alone: typescript 327, csharp 67, rust 78
+# alone: typescript 325, csharp 67, rust 78
 # concept	typescript	csharp	rust	class
 ACCEPT_TIMEOUT	ACCEPT_TIMEOUT [constant]	-	ACCEPT_TIMEOUT [constant]	same
 AccessRefusal	IAccessRefusal [record]	AccessRefusal [record]	AccessRefusal [record]	same
@@ -48,6 +48,7 @@ Client	IClient [record], createClient [function]	IClient [record]	Client [record
 ClientActivityListener	-	-	ClientActivityListener [function type]	own: a listener the Rust side registers for an event the other sides emit (0044)
 ClientEnvelopeListener	-	-	ClientEnvelopeListener [function type]	own: a listener the Rust side registers for an event the other sides emit (0044)
 ClientErrorListener	-	-	ClientErrorListener [function type]	own: a listener the Rust side registers for an event the other sides emit (0044)
+ClientLayers	IClientLayers [record]	-	-	differs: A facade's layers built by the application
 ClientListener	-	-	ClientListener [record]	own: a listener the Rust side registers for an event the other sides emit (0044)
 ClientOptions	IClientOptions [record]	-	ClientOptions [record]	same
 Clock	IClock [record]	-	Clock [record]	same
@@ -252,6 +253,7 @@ Schedule	-	-	Schedule [choice]	own: the platform's clock and its timers, which t
 Server	IServer [record], createServer [function]	Server [record]	Server [record]	same
 SERVER_CONNECTION_HANDLE	SERVER_CONNECTION_HANDLE [constant]	RouterClient.ServerConnectionHandle [constant]	SERVER_CONNECTION_HANDLE [constant]	rendered: constant (0007)
 ServerGauges	ServerGauges [record]	ServerGauges [record]	ServerGauges [record]	same
+ServerLayers	IServerLayers [record]	-	-	differs: A facade's layers built by the application
 ServerListener	-	-	ServerListener [record]	own: a listener the Rust side registers for an event the other sides emit (0044)
 ServerOptions	IServerOptions [record]	ServerOptions [record]	ServerOptions [record]	same
 ServerSentEvent	IServerSentEvent [record]	ServerSentEvent [record]	-	same
@@ -359,7 +361,6 @@ check_records	-	-	check_records [function]	alone
 check_required	-	-	check_required [function]	alone
 checkProtoRecords	checkProtoRecords [function]	-	-	alone
 CLIENT_FAILURES	CLIENT_FAILURES [constant]	-	-	alone
-ClientLayers	IClientLayers [record]	-	-	alone
 ClientTransportLike	IClientTransportLike [record]	-	-	alone
 Clocks	-	Clocks [constant]	-	alone
 CLOSE_EVENT	CLOSE_EVENT [constant]	-	-	alone
@@ -657,7 +658,6 @@ Sent	-	-	Sent [choice]	alone
 SEQUENCE_HEADER	SEQUENCE_HEADER [constant]	-	-	alone
 SERVER_FAILURES	SERVER_FAILURES [constant]	-	-	alone
 ServerConnectionHandle	ServerConnectionHandle [scalar]	-	-	alone
-ServerLayers	IServerLayers [record]	-	-	alone
 ServerSocketLike	IServerSocketLike [record]	-	-	alone
 SERVICE_MANAGER_EVENTS	SERVICE_MANAGER_EVENTS [choice]	-	-	alone
 ServiceAdmissions	-	IServiceAdmissions [record]	-	alone
