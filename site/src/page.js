@@ -14,10 +14,6 @@
     return page.getAttribute('data-lang');
   };
 
-  const isAsked = () => {
-    return new URLSearchParams(window.location.search).has('lng');
-  };
-
   // ── Language ────────────────────────────────────────────────────────────────
 
   const headFor = (language) => {
@@ -27,9 +23,15 @@
     document
       .querySelector('meta[name="description"]')
       .setAttribute('content', HEADS[language].description);
-    document
-      .querySelector('link[rel="canonical"]')
-      .setAttribute('href', isAsked() ? `${ADDRESS}?lng=${language}` : ADDRESS);
+    // the canonical is written here alone: the bare address is the English page and `?lng=fr` the
+    // French one, so a static one in the head would contradict the French page's
+    let canonical = document.querySelector('link[rel="canonical"]');
+    if (canonical === null) {
+      canonical = document.createElement('link');
+      canonical.rel = 'canonical';
+      document.head.append(canonical);
+    }
+    canonical.setAttribute('href', language === 'fr' ? `${ADDRESS}?lng=fr` : ADDRESS);
   };
 
   // the page's content and the template's trade places: one language in the document at a time, so
