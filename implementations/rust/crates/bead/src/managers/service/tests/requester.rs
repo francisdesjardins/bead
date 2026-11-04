@@ -60,11 +60,11 @@ async fn declares_its_requester_to_its_router_as_it_is_made_and_hands_each_of_it
                 locked(&declarations_for_probe).push(procedure.procedure_name.clone());
                 *locked(&series_for_probe) = Some(series.expect("a declared series").clone());
             }),
-            called: Arc::new(move |series| {
+            called: Arc::new(move |request| {
                 let same = locked(&declared_series)
                     .as_ref()
                     .expect("declared before the call")
-                    .is_same(series.expect("the handed series"));
+                    .is_same(request.series.as_ref().expect("the handed series"));
                 locked(&calls_for_probe).push(same);
             }),
         });

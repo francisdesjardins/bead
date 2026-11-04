@@ -225,12 +225,12 @@ async fn makes_each_command_s_requester_once_as_it_is_offered_and_refuses_one_ca
                     *locked(&declaring_series) = Some(series.expect("clock's series").clone());
                 }
             }),
-            called: Arc::new(move |series| {
+            called: Arc::new(move |request| {
                 locked(&calling).push(
                     locked(&clock_series)
                         .as_ref()
                         .expect("clock declared before its calls")
-                        .is_same(series.expect("clock's handed series")),
+                        .is_same(request.series.as_ref().expect("clock's handed series")),
                 );
             }),
         });

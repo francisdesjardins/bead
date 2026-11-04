@@ -341,13 +341,17 @@ async fn hands_the_router_a_procedures_payload_limit_with_its_requests_and_its_r
     };
     let declared = Arc::new(Mutex::new(Vec::new()));
     let declaring = Arc::clone(&declared);
+    let called = Arc::new(Mutex::new(Vec::new()));
+    let calling = Arc::clone(&called);
     fixture
         .router
         .observe_requester(crate::testing::scripted::RequesterProbe {
             declared: Arc::new(move |procedure, _| {
                 locked(&declaring).push(procedure.clone());
             }),
-            called: Arc::new(|_| {}),
+            called: Arc::new(move |request| {
+                locked(&calling).push(request.procedure.clone());
+            }),
         });
     fixture
         .manager
@@ -379,7 +383,11 @@ async fn hands_the_router_a_procedures_payload_limit_with_its_requests_and_its_r
         )
         .expect("a request");
     fixture.clock.settle().await;
-    assert_eq!(*locked(&declared), [limited]);
+    assert_eq!(
+        locked(&declared).as_slice(),
+        core::slice::from_ref(&limited)
+    );
+    assert_eq!(*locked(&called), [limited]);
     assert_eq!(
         fixture.transport.take(),
         [(
