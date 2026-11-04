@@ -85,7 +85,22 @@ fn refusal_of(
     let written = if duration == NEVER {
         "Duration::MAX".to_owned()
     } else {
-        format!("{duration:?}")
+        let fraction = duration
+            .subsec_nanos()
+            .checked_rem(1_000_000)
+            .unwrap_or_default();
+
+        if fraction == 0 {
+            format!("{} milliseconds", duration.as_millis())
+        } else {
+            let fraction = format!("{fraction:06}");
+
+            format!(
+                "{}.{} milliseconds",
+                duration.as_millis(),
+                fraction.trim_end_matches('0')
+            )
+        }
     };
 
     ProgrammerError::refused(
@@ -228,3 +243,5 @@ pub(crate) fn hold_delay(name: &str, duration: Duration) -> Result<Duration, Pro
 
     held_of(duration).map_err(|reason| refusal_of(name, (duration, (reason, offered))))
 }
+
+impl std::error::Error for DurationRefusal {}

@@ -3176,6 +3176,13 @@ bead_server_call_started_total{service="1",procedure="echo",type="request"} 9</c
 <span class="tok-comment"># test or a native target takes from its platform goes through the test kit, or is exempted once,</span>
 <span class="tok-comment"># with its reason, at its root</span>
 disallowed-methods = [
+  <span class="tok-comment"># a peer's lengths and offsets use checked forms; a checked zero-copy slice states its invariant</span>
+  { path = <span class="tok-string">"bytes::Bytes::slice"</span>, reason = <span class="tok-string">"check the slice bounds and expect this lint at the invariant"</span> },
+  { path = <span class="tok-string">"bytes::BytesMut::split_to"</span>, reason = <span class="tok-string">"check the split offset and expect this lint at the invariant"</span> },
+  { path = <span class="tok-string">"bytes::BytesMut::split_off"</span>, reason = <span class="tok-string">"check the split offset and expect this lint at the invariant"</span> },
+  { path = <span class="tok-string">"std::time::Duration::from_secs_f64"</span>, reason = <span class="tok-string">"use Duration::try_from_secs_f64"</span> },
+  { path = <span class="tok-string">"std::time::Duration::from_secs_f32"</span>, reason = <span class="tok-string">"use Duration::try_from_secs_f32"</span> },
+  { path = <span class="tok-string">"str::repeat"</span>, reason = <span class="tok-string">"bound and reserve the output fallibly"</span> },
   { path = <span class="tok-string">"tokio::runtime::Handle::spawn"</span>, reason = <span class="tok-string">"spawn through crate::platform"</span> },
 …
   { path = <span class="tok-string">"tokio::task::spawn"</span>, reason = <span class="tok-string">"spawn through crate::platform"</span> },
@@ -5299,6 +5306,13 @@ bead_server_call_started_total{service="1",procedure="echo",type="request"} 9</c
 <span class="tok-comment"># test or a native target takes from its platform goes through the test kit, or is exempted once,</span>
 <span class="tok-comment"># with its reason, at its root</span>
 disallowed-methods = [
+  <span class="tok-comment"># a peer's lengths and offsets use checked forms; a checked zero-copy slice states its invariant</span>
+  { path = <span class="tok-string">"bytes::Bytes::slice"</span>, reason = <span class="tok-string">"check the slice bounds and expect this lint at the invariant"</span> },
+  { path = <span class="tok-string">"bytes::BytesMut::split_to"</span>, reason = <span class="tok-string">"check the split offset and expect this lint at the invariant"</span> },
+  { path = <span class="tok-string">"bytes::BytesMut::split_off"</span>, reason = <span class="tok-string">"check the split offset and expect this lint at the invariant"</span> },
+  { path = <span class="tok-string">"std::time::Duration::from_secs_f64"</span>, reason = <span class="tok-string">"use Duration::try_from_secs_f64"</span> },
+  { path = <span class="tok-string">"std::time::Duration::from_secs_f32"</span>, reason = <span class="tok-string">"use Duration::try_from_secs_f32"</span> },
+  { path = <span class="tok-string">"str::repeat"</span>, reason = <span class="tok-string">"bound and reserve the output fallibly"</span> },
   { path = <span class="tok-string">"tokio::runtime::Handle::spawn"</span>, reason = <span class="tok-string">"spawn through crate::platform"</span> },
 …
   { path = <span class="tok-string">"tokio::task::spawn"</span>, reason = <span class="tok-string">"spawn through crate::platform"</span> },

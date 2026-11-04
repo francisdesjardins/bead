@@ -67,12 +67,12 @@ fn jwk_of(key: &Map<String, Value>) -> Result<Map<String, Value>, ProgrammerErro
 fn after_on<T: Send + 'static>(
     clock: &SharedClock,
     (milliseconds, value): (Option<u64>, T),
-) -> BoxFuture<T> {
+) -> BoxFuture<Result<T, ProgrammerError>> {
     let Some(milliseconds) = milliseconds else {
         return Box::pin(async move {
             tokio::task::yield_now().await;
 
-            value
+            Ok(value)
         });
     };
     let (woken, wait) = oneshot::channel::<()>();
@@ -87,11 +87,11 @@ fn after_on<T: Send + 'static>(
     );
 
     Box::pin(async move {
-        let _armed = timer;
+        let _armed = timer?;
 
         drop(wait.await);
 
-        value
+        Ok(value)
     })
 }
 
@@ -201,7 +201,7 @@ pub fn interop_verifier_of(clock: &SharedClock) -> ElsewhereVerifier {
                     let failed = after_on(&clock, (after, ()));
 
                     Box::pin(async move {
-                        failed.await;
+                        failed.await?;
 
                         Err("this verifier fails, on purpose".into())
                     })
@@ -214,7 +214,7 @@ pub fn interop_verifier_of(clock: &SharedClock) -> ElsewhereVerifier {
                     };
                     let held = after_on(&clock, (after, session));
 
-                    Box::pin(async move { Ok(Some(held.await)) })
+                    Box::pin(async move { Ok(Some(held.await?)) })
                 }
             }
         },
@@ -327,7 +327,7 @@ pub fn interop_credentials_of(
         };
         let answering = after_on(&asking, (Some(KEY_SET_MILLISECONDS), answered));
 
-        Box::pin(async move { Ok(answering.await) })
+        Box::pin(async move { Ok(answering.await?) })
     });
 
     credentials.audience = jwt

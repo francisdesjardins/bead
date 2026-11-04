@@ -351,6 +351,18 @@ impl ServerInner {
             }),
         );
 
+        let accepting = match accepting {
+            Ok(timer) => timer,
+            Err(error) => {
+                state.drop_connection(pair);
+                self.participant
+                    .inner
+                    .config
+                    .report(&RouterError::Other(Arc::new(error)));
+                self.leave();
+                return;
+            }
+        };
         {
             let mut held = locked(&self.state);
 

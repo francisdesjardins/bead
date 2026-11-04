@@ -10,6 +10,10 @@ use crate::router::types::RouterLimitsOptions;
 use crate::testing::SteppingClock;
 use crate::testing::scripted::ScriptedServer;
 
+#[expect(
+    clippy::disallowed_methods,
+    reason = "the test repeats its own string a bounded number of times"
+)]
 fn key(length: usize) -> JwtKey {
     JwtKey {
         algorithm: JwtAlgorithm::Hs256,

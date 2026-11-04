@@ -935,6 +935,10 @@ fn check_verdict_names() {
 }
 
 #[test]
+#[expect(
+    clippy::disallowed_methods,
+    reason = "the test repeats its own string a bounded number of times"
+)]
 fn keeps_only_each_parcel_kind_s_body_fields_and_the_prefix_when_no_body_reads() {
     check_verdict_names();
 

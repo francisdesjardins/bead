@@ -12,6 +12,9 @@ use crate::duration::DurationRefusal;
 use crate::failure::Failure;
 use crate::identity::IdentityRefusal;
 
+#[cfg(test)]
+mod tests;
+
 /// Why a misuse is refused, where a conformance file derives a reason a side checks by its code.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[non_exhaustive]
@@ -79,8 +82,8 @@ pub enum CallError {
     /// A failure answered, or raised here before or as it went.
     Failure(Failure),
     /// Cancelled by its signal: its answer is not waited on, and the peer, once it went, is sent a
-    /// cancel.
-    Cancelled,
+    /// cancel. Its call id is present once drawn; a signal cancelled before it starts draws none.
+    Cancelled(Option<u32>),
     /// Its connection closed before its answer came, or its router was disposed, saying why.
     Disconnected(String),
     /// No answer came within its timeout.
@@ -107,7 +110,8 @@ impl fmt::Display for CallError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Failure(failure) => write!(formatter, "{failure}"),
-            Self::Cancelled => formatter.write_str("the call was cancelled"),
+            Self::Cancelled(Some(call_id)) => write!(formatter, "call {call_id} was cancelled"),
+            Self::Cancelled(None) => formatter.write_str("the call was cancelled"),
             Self::Disconnected(reason) => formatter.write_str(reason),
             Self::TimedOut(timeout) => {
                 write!(
@@ -125,13 +129,13 @@ impl fmt::Display for CallError {
 impl Error for CallError {
     fn source(&self) -> Option<&(dyn Error + 'static)> {
         match self {
-            Self::Failure(failure) => Some(failure),
-            Self::Refused(error) => Some(error),
+            Self::Failure(failure) => failure.source(),
+            Self::Refused(error) => error.source(),
             Self::Other(error) => {
                 let source: &(dyn Error + 'static) = error.as_ref();
-                Some(source)
+                source.source()
             }
-            Self::Cancelled | Self::Disconnected(_) | Self::TimedOut(_) => None,
+            Self::Cancelled(_) | Self::Disconnected(_) | Self::TimedOut(_) => None,
         }
     }
 }
@@ -320,10 +324,10 @@ impl fmt::Display for ResolverError {
 impl Error for ResolverError {
     fn source(&self) -> Option<&(dyn Error + 'static)> {
         match self {
-            Self::Failure(failure) => Some(failure),
+            Self::Failure(failure) => failure.source(),
             Self::Other(error) => {
                 let source: &(dyn Error + 'static) = error.as_ref();
-                Some(source)
+                source.source()
             }
         }
     }
@@ -382,11 +386,9 @@ impl fmt::Display for TransportError {
         match self {
             Self::Refused(error) => write!(formatter, "{error}"),
             Self::Cancelled(reason) => formatter.write_str(reason),
-            Self::TimedOut(timeout) => write!(
-                formatter,
-                "the connect did not open in {} milliseconds",
-                timeout.as_millis()
-            ),
+            Self::TimedOut(timeout) => {
+                write!(formatter, "timed out after {}ms", timeout.as_millis())
+            }
             Self::Connect(error) => write!(formatter, "{error}"),
             Self::ReadyState(error) => write!(formatter, "{error}"),
             Self::Reconnect(error) => write!(formatter, "{error}"),
@@ -397,10 +399,10 @@ impl fmt::Display for TransportError {
 impl Error for TransportError {
     fn source(&self) -> Option<&(dyn Error + 'static)> {
         match self {
-            Self::Refused(error) => Some(error),
-            Self::Connect(error) => Some(error),
-            Self::ReadyState(error) => Some(error),
-            Self::Reconnect(error) => Some(error),
+            Self::Refused(error) => error.source(),
+            Self::Connect(error) => error.source(),
+            Self::ReadyState(error) => error.source(),
+            Self::Reconnect(error) => error.source(),
             Self::Cancelled(_) | Self::TimedOut(_) => None,
         }
     }

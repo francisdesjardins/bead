@@ -155,7 +155,7 @@ async fn cancels_a_call_waiting_once_throwing_and_reserving_its_call_id_on_its_c
     served.settle().await;
 
     assert!(
-        matches!(answered(asked).await, Err(CallError::Cancelled)),
+        matches!(answered(asked).await, Err(CallError::Cancelled(_))),
         "cancelled"
     );
     assert_eq!(
@@ -742,7 +742,7 @@ async fn counts_a_call_made_refused_before_it_goes_no_call_id_free_or_payload_to
         .expect("a call aborted already");
 
     assert!(
-        matches!(answered(cancelled).await, Err(CallError::Cancelled)),
+        matches!(answered(cancelled).await, Err(CallError::Cancelled(_))),
         "cancelled"
     );
     scripted.settle().await;

@@ -19,6 +19,10 @@ use std::sync::{Arc, Mutex};
 type Answers = Arc<Mutex<Vec<BoxFuture<Result<(), CallError>>>>>;
 
 #[tokio::test]
+#[expect(
+    clippy::disallowed_methods,
+    reason = "the test slices its own fixed payload at offsets within its length"
+)]
 async fn keep_a_result_going_that_its_resolver_failed_behind_a_second_answer_going_nowhere_until_the_peer_cancels_it()
  {
     for dotnet in [false, true] {
@@ -64,7 +68,10 @@ async fn keep_a_result_going_that_its_resolver_failed_behind_a_second_answer_goi
         for (index, response) in pending.into_iter().enumerate() {
             let outcome = response.await;
             if index == 0 {
-                assert!(matches!(outcome, Err(CallError::Cancelled)), "{outcome:?}");
+                assert!(
+                    matches!(outcome, Err(CallError::Cancelled(_))),
+                    "{outcome:?}"
+                );
             } else {
                 outcome.expect("the second answer settles without sending");
             }

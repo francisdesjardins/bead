@@ -560,6 +560,7 @@ fn ask_now(
     });
     entry.deadline = Some(now.saturating_add(KEY_SET_INTERVAL));
     arm(inner, entry);
+    entry.asking.as_ref()?;
 
     let weak = Arc::downgrade(inner);
     let issuer = issuer.to_owned();
@@ -670,7 +671,7 @@ fn arm(inner: &Arc<Inner>, entry: &mut IssuerKeys) {
     let weak = Arc::downgrade(inner);
     let issuer = entry.issuer.clone();
 
-    entry.timer = Some(inner.clock.arm(
+    let timer = inner.clock.arm(
         Schedule::Once(delay),
         Box::new(move || {
             let Some(inner) = weak.upgrade() else {
@@ -696,7 +697,21 @@ fn arm(inner: &Arc<Inner>, entry: &mut IssuerKeys) {
 
             drop(state);
         }),
-    ));
+    );
+    match timer {
+        Ok(timer) => entry.timer = Some(timer),
+        Err(error) => {
+            let failure = ask_failed(&entry.issuer, Arc::new(error));
+            let signal = entry.asking.as_ref().map(|ask| ask.signal.clone());
+            settle(inner, (entry, AskOutcome::Failure(failure.clone())));
+            for mut waiter in core::mem::take(&mut entry.next) {
+                waiter.release(Err(failure.clone()));
+            }
+            if let Some(signal) = signal {
+                signal.cancel();
+            }
+        }
+    }
 }
 
 // a call that leaves its wait by its own signal reaches nothing: it frees its place

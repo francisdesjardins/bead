@@ -1117,7 +1117,8 @@ impl RouterClient {
         })
     }
 
-    /// Makes a call, sent as it is made.
+    /// Makes a call, sent as it is made. Dropping its future cancels nothing: its signal or
+    /// an explicit cancel ends the call.
     ///
     /// # Errors
     ///

@@ -46,7 +46,11 @@ impl Clock for ReadingClock {
             .checked_add(Duration::from_millis(self.elapsed.load(Ordering::SeqCst)))
             .expect("a test instant within its range")
     }
-    fn arm(&self, schedule: Schedule, callback: TimerCallback) -> Arc<dyn Timer> {
+    fn arm(
+        &self,
+        schedule: Schedule,
+        callback: TimerCallback,
+    ) -> Result<Arc<dyn Timer>, crate::errors::ProgrammerError> {
         self.base.arm(schedule, callback)
     }
     fn activity(&self) -> Option<Arc<crate::testing::Activity>> {

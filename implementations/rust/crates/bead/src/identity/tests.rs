@@ -55,6 +55,10 @@ fn refuses_an_id_or_a_revision_out_of_its_range_service_0_and_revision_0_among_t
 }
 
 #[test]
+#[expect(
+    clippy::disallowed_methods,
+    reason = "the test repeats its own string a bounded number of times"
+)]
 fn refuses_a_name_off_its_form_and_refuses_out_of_its_range_first() {
     for name in ["", "Echo", "_OTHER", &"a".repeat(64), "get_thing"] {
         assert_eq!(
@@ -306,6 +310,10 @@ async fn checks_a_declaration_before_the_router_s_reasons_and_its_registry_s() {
 }
 
 #[test]
+#[expect(
+    clippy::disallowed_methods,
+    reason = "the test repeats its own string a bounded number of times"
+)]
 fn names_a_procedure_by_a_lower_case_letter_then_letters_and_digits_63_at_most() {
     let longest = "a".repeat(63);
     let past = "a".repeat(64);

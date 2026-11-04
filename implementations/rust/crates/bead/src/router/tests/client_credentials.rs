@@ -90,6 +90,10 @@ async fn succeed(scripted: &Scripted, (call_id, call): (u32, Call)) {
     answered(call).await.expect("the result");
 }
 
+#[expect(
+    clippy::disallowed_methods,
+    reason = "the test repeats its own string a bounded number of times"
+)]
 fn key() -> JwtKey {
     JwtKey {
         algorithm: JwtAlgorithm::Hs256,

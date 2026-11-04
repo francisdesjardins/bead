@@ -144,6 +144,10 @@ async fn end_a_transfer_it_sends_that_no_credit_comes_for_a_request_with_a_timeo
     clippy::too_many_lines,
     reason = "the twin keeps the combined, progressed and unbounded receiving scenarios together"
 )]
+#[expect(
+    clippy::disallowed_methods,
+    reason = "the test slices its own fixed payload at offsets within its length"
+)]
 async fn end_a_transfer_nothing_comes_for_a_requests_with_a_failure_a_results_with_a_timeout() {
     use super::router_core_requester::opening as result_opening;
     use super::router_core_transfer_edges::{chunk, opening};

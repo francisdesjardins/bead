@@ -1246,15 +1246,15 @@ async fn play_steps(case: &mut Case, steps: &[Value]) -> Result<(), String> {
                 .and_then(hexadecimal::bytes_of)
                 .ok_or("a send's envelope")?;
 
+            let mut message = TransportMessage::default();
+
+            message.data = Bytes::from(envelope);
+            message.credential = send
+                .get("credential")
+                .and_then(Value::as_str)
+                .map(str::to_owned);
             client
-                .send(TransportMessage {
-                    data: Bytes::from(envelope),
-                    credential: send
-                        .get("credential")
-                        .and_then(Value::as_str)
-                        .map(str::to_owned),
-                    ..TransportMessage::default()
-                })
+                .send(message)
                 .map_err(|error| format!("{at}: {error}"))?;
         }
 

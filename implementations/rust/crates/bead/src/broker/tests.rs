@@ -19,7 +19,7 @@ use super::memory::{
 use super::parcel::{Parcel, ParcelRead, read_parcel};
 use super::participant::{BrokerParticipant, BrokerParticipantOptions};
 use super::server::{BrokerTransportServer, BrokerTransportServerOptions};
-use crate::errors::ProgrammerError;
+use crate::errors::{ProgrammerError, TransportError};
 use crate::router::types::{ConnectionHandle, RouterError, TransportMessage};
 use crate::testing::Instant;
 use crate::transport::{
@@ -71,6 +71,9 @@ pub(super) fn misuse_in(error: &(dyn Error + 'static)) -> Option<ProgrammerError
 
     while let Some(cause) = source {
         if let Some(misuse) = cause.downcast_ref::<ProgrammerError>() {
+            return Some(misuse.clone());
+        }
+        if let Some(TransportError::Refused(misuse)) = cause.downcast_ref::<TransportError>() {
             return Some(misuse.clone());
         }
 

@@ -25,6 +25,7 @@ mod requester;
 mod resolver;
 mod resolver_edges;
 mod sessions;
+pub(crate) mod trace_clocks;
 mod validation;
 
 type Heard = Arc<Mutex<Vec<(Option<String>, DebugEvent)>>>;
@@ -90,6 +91,8 @@ impl Recording {
         locked(&self.answers).clone()
     }
 }
+
+impl crate::router::core::sealed::Answerer for Recording {}
 
 impl Answerer for Recording {
     fn respond(&self, answer: RouterAnswer) -> BoxFuture<Result<(), CallError>> {

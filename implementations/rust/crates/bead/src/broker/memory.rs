@@ -633,6 +633,10 @@ impl MemoryBrokerAdapter {
 
     /// As [`BrokerAdapter::publish`], handed on marked retained, as a broker hands a message it
     /// kept, as a test asks.
+    ///
+    /// # Errors
+    ///
+    /// A [`BrokerError`] for a refused topic or publication, or an adapter without a live link.
     pub fn publish_retained(
         &self,
         publication: BrokerPublication,

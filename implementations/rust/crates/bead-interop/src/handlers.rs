@@ -123,11 +123,12 @@ pub fn judge_checked(request: &Value, options: &ValidateOptions) -> Judged {
     };
     let stopped = judge_names(request, &mut sink) && fail_fast;
 
-    Judged {
-        violations: sink.violations,
-        more: sink.more,
-        stopped,
-    }
+    let mut judged = Judged::default();
+
+    judged.violations = sink.violations;
+    judged.more = sink.more;
+    judged.stopped = stopped;
+    judged
 }
 
 fn judge_names(request: &Value, sink: &mut Sink) -> bool {
@@ -232,7 +233,27 @@ fn duration_of(name: &str, given: Option<&Value>) -> Result<Option<Duration>, Pr
             ProgrammerError::new(format!("{name} is a number of milliseconds, not {given}"))
         })?;
 
-    hold_finite(name, Duration::from_secs_f64(milliseconds / 1_000.0)).map(Some)
+    let duration = Duration::try_from_secs_f64(milliseconds / 1_000.0).map_err(|_range| {
+        ProgrammerError::new(format!(
+            "{name} is a representable duration in milliseconds, not {given}"
+        ))
+    })?;
+
+    hold_finite(name, duration).map(Some)
+}
+
+// the C# handler reads an Int32; reserve the accepted bytes fallibly before filling them
+fn bytes_of(length: u64) -> Result<String, ResolverError> {
+    let length = i32::try_from(length).map_err(ResolverError::other)?;
+    let length = usize::try_from(length).map_err(ResolverError::other)?;
+    let mut value = String::new();
+
+    value
+        .try_reserve_exact(length)
+        .map_err(ResolverError::other)?;
+    value.extend(std::iter::repeat_n('x', length));
+
+    Ok(value)
 }
 
 fn name_of(session: Option<&CallSession>) -> Value {
@@ -408,6 +429,7 @@ pub fn offer_interop(server: &Server) -> Result<ServiceServer, ProgrammerError> 
                 );
 
                 Box::pin(async move {
+                    let timer = timer.map_err(ResolverError::other)?;
                     let signal = request.signal.token().clone();
                     let mut wait = core::pin::pin!(wait);
                     let mut cancelled = core::pin::pin!(signal.cancelled());
@@ -477,10 +499,12 @@ pub fn offer_interop(server: &Server) -> Result<ServiceServer, ProgrammerError> 
                 .payload
                 .get("length")
                 .and_then(Value::as_u64)
-                .and_then(|length| usize::try_from(length).ok())
                 .unwrap_or(0);
 
-            response.result(Value::String("x".repeat(length)))
+            match bytes_of(length) {
+                Ok(value) => response.result(Value::String(value)),
+                Err(refused) => Box::pin(async move { Err(refused) }),
+            }
         }),
     )?;
 

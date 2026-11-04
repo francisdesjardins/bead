@@ -241,7 +241,11 @@ impl Clock for Breaking {
         self.clock.wall()
     }
 
-    fn arm(&self, schedule: Schedule, callback: TimerCallback) -> Arc<dyn Timer> {
+    fn arm(
+        &self,
+        schedule: Schedule,
+        callback: TimerCallback,
+    ) -> Result<Arc<dyn Timer>, crate::errors::ProgrammerError> {
         // * once: the panic of one turn, what follows it arming its timers as ever
         assert!(
             !self.breaks.swap(false, Ordering::SeqCst),

@@ -41,7 +41,7 @@ use crate::violations::{Judged, detail_bound_of, is_refused, violations_detail_o
 
 mod notification;
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;
 
 pub use notification::{
     Notification, NotificationCallback, NotificationDependencies, NotificationRegistration,
@@ -460,7 +460,7 @@ pub type CloseConnection = Arc<dyn Fn(&ConnectionHandle) + Send + Sync>;
 fn traced_failure_of(error: &CallError) -> Option<Traced> {
     match error {
         CallError::Failure(failure) => Some(Arc::new(failure.record())),
-        CallError::Cancelled
+        CallError::Cancelled(_)
         | CallError::Disconnected(_)
         | CallError::TimedOut(_)
         | CallError::Refused(_)
@@ -1250,6 +1250,10 @@ where
     Res::Value: Clone + fmt::Debug + Sync,
 {
     /// Answers its request with `value`.
+    ///
+    /// # Errors
+    ///
+    /// A [`ResolverError`] when its codec refuses the value or the answer cannot go out.
     pub fn result(&self, value: Res::Value) -> BoxFuture<Result<(), ResolverError>> {
         let told = traced(value.clone());
         let encoded = encoded(&*self.shared.codec, &value)
@@ -1260,6 +1264,10 @@ where
     }
 
     /// Answers its request with `failure`: one of its own, or a refusal of admission.
+    ///
+    /// # Errors
+    ///
+    /// A [`ResolverError`] for a protocol failure outside admission, or an answer that cannot go out.
     pub fn failure(&self, failure: &Failure) -> BoxFuture<Result<(), ResolverError>> {
         let shared = &self.shared;
 
@@ -1368,6 +1376,10 @@ where
     }
 
     /// Subscribes its requester to its procedure, before it answers.
+    ///
+    /// # Errors
+    ///
+    /// A [`CallError`] when it answers first, its call opens no subscription, or the call or connection ends.
     pub fn register_notification(&self) -> BoxFuture<Result<u32, CallError>> {
         if self.shared.is_answered.load(Ordering::Acquire) {
             let error = ProgrammerError::new(format!(
@@ -1920,8 +1932,11 @@ where
                 request.key.clone_from(&options.key);
                 request
             }),
-            // * only a server notifies; a client asks with a request
-            ServiceRouter::Client(_) => Box::pin(async { Ok(()) }),
+            ServiceRouter::Client(_) => Box::pin(async {
+                Err(RouterError::Other(Arc::new(ProgrammerError::new(
+                    "only a server notifies; a client asks with a request",
+                ))))
+            }),
         };
         let shared = Arc::clone(&self.shared);
 

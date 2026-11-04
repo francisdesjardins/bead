@@ -43,6 +43,10 @@ fn ask(
     clippy::too_many_lines,
     reason = "the shared credential presentations and both header boundaries"
 )]
+#[expect(
+    clippy::disallowed_methods,
+    reason = "the test repeats its own string a bounded number of times"
+)]
 async fn the_credential_this_side_presents_is_the_one_its_side_resolved_and_one_that_leaves_a_transfers_opening_no_byte_fails_it_before_it_goes_payload_too_large()
  {
     let peer = Peer::new(RouterSide::Server, &limits());

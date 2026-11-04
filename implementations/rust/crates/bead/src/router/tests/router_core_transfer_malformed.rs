@@ -77,6 +77,10 @@ async fn end_the_transfer_a_chunk_that_does_not_read_was_for_but_where_it_is_lat
     whole_and_abandoned().await;
 }
 
+#[expect(
+    clippy::disallowed_methods,
+    reason = "the test slices its own fixed payload at offsets within its length"
+)]
 async fn simultaneous() {
     let (peer, handed) = serving(false, &limits()).await;
     let asking = peer.request((Bytes::new(), request_of("a")));
@@ -155,6 +159,10 @@ async fn simultaneous() {
     );
 }
 
+#[expect(
+    clippy::disallowed_methods,
+    reason = "the test slices its own fixed payload at offsets within its length"
+)]
 async fn unreadable_result() {
     let peer = Peer::new(RouterSide::Client, &limits());
     let mut options = request_of("a");
@@ -198,6 +206,10 @@ async fn unreadable_result() {
     );
 }
 
+#[expect(
+    clippy::disallowed_methods,
+    reason = "the test slices its own fixed payload at offsets within its length"
+)]
 async fn whole_and_abandoned() {
     let (peer, handed) = serving(false, &limits()).await;
     peer.owner

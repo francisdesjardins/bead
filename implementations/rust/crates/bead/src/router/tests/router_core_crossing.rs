@@ -76,7 +76,10 @@ async fn arms_no_timer_for_a_call_its_own_send_ended_by_a_failure_or_a_cancel_ha
     assert!(
         matches!(completed(request).await, Err(CallError::Failure(failure)) if failure.code().get() == 21)
     );
-    assert!(matches!(completed(answer).await, Err(CallError::Cancelled)));
+    assert!(matches!(
+        completed(answer).await,
+        Err(CallError::Cancelled(_))
+    ));
     peer.settle().await;
     assert_eq!(peer.clock.dues(), Vec::<Duration>::new());
     assert_eq!(

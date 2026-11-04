@@ -339,9 +339,17 @@ pub trait BrokerAdapter: Send + Sync + fmt::Debug {
 
     /// Connects a link that keeps no broker session, its will set where it offers one; settles once
     /// its broker took it.
+    ///
+    /// # Errors
+    ///
+    /// A [`BrokerError`] when the options are refused or the broker cannot open the link.
     fn start(&self, options: BrokerStart) -> BoxFuture<Result<(), BrokerError>>;
 
     /// Holds a subscription to `topic`, alone or in a group; settles once its broker holds it.
+    ///
+    /// # Errors
+    ///
+    /// A [`BrokerError`] for a refused subscription, an acknowledgement failure, or a lost link.
     fn subscribe(
         &self,
         topic: &[String],
@@ -349,11 +357,19 @@ pub trait BrokerAdapter: Send + Sync + fmt::Debug {
     ) -> BoxFuture<Result<(), BrokerError>>;
 
     /// Lets the subscription to `topic` go.
+    ///
+    /// # Errors
+    ///
+    /// A [`BrokerError`] when the broker refuses the unsubscribe or the link is lost.
     fn unsubscribe(&self, topic: &[String]) -> BoxFuture<Result<(), BrokerError>>;
 
     /// Publishes a payload; settles once its broker took it, at least once, or as it goes, at most
     /// once, [`BrokerPublished::Taken`]; or [`BrokerPublished::NoSubscriber`] when no subscriber
     /// takes it, where its broker says so.
+    ///
+    /// # Errors
+    ///
+    /// A [`BrokerError`] for a refused publication, a failed acknowledgement, or a lost link.
     fn publish(
         &self,
         publication: BrokerPublication,

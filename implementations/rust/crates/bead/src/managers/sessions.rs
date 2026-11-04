@@ -172,7 +172,11 @@ pub(crate) enum Inactivity {
 
 /// What arms a session's timer, whose end its manager is told on its owner.
 pub(crate) trait Arming {
-    fn arm(&self, due: Duration, timer: (Inactivity, ConnectionHandle)) -> Arc<dyn Timer>;
+    fn arm(
+        &self,
+        due: Duration,
+        timer: (Inactivity, ConnectionHandle),
+    ) -> Result<Arc<dyn Timer>, ProgrammerError>;
 }
 
 #[derive(Default)]
@@ -198,6 +202,32 @@ fn cancel(timer: &mut Option<Arc<dyn Timer>>) {
 }
 
 impl Timers {
+    fn arm(
+        arming: &dyn Arming,
+        (handle, (connection, session)): (&ConnectionHandle, (Option<Duration>, Option<Duration>)),
+    ) -> Result<Self, ProgrammerError> {
+        let mut timers = Self::default();
+        for (inactivity, due) in [
+            (Inactivity::Connection, connection),
+            (Inactivity::Session, session),
+        ] {
+            if let Some(due) = due.filter(|&due| due != NEVER) {
+                let timer = match arming.arm(due, (inactivity, Arc::clone(handle))) {
+                    Ok(timer) => timer,
+                    Err(error) => {
+                        timers.clear();
+                        return Err(error);
+                    }
+                };
+                match inactivity {
+                    Inactivity::Connection => timers.connection = Some(timer),
+                    Inactivity::Session => timers.session = Some(timer),
+                }
+            }
+        }
+        Ok(timers)
+    }
+
     fn clear(&mut self) {
         cancel(&mut self.connection);
         cancel(&mut self.session);
@@ -360,24 +390,25 @@ impl SessionState {
         &mut self,
         (inactivity, connection_handle, timeout): (Inactivity, &ConnectionHandle, Duration),
         arming: &dyn Arming,
-    ) {
+    ) -> Result<(), ProgrammerError> {
         let is_held = self.tokens.contains_key(connection_handle);
         let Some(timers) = self
             .timers
             .entry_or_insert_with(Arc::clone(connection_handle), Timers::default)
         else {
-            return;
+            return Ok(());
         };
         let timer = match inactivity {
             Inactivity::Connection => &mut timers.connection,
             Inactivity::Session => &mut timers.session,
         };
 
+        let armed = (is_held && timeout != NEVER)
+            .then(|| arming.arm(timeout, (inactivity, Arc::clone(connection_handle))))
+            .transpose()?;
         cancel(timer);
-
-        if is_held && timeout != NEVER {
-            *timer = Some(arming.arm(timeout, (inactivity, Arc::clone(connection_handle))));
-        }
+        *timer = armed;
+        Ok(())
     }
 
     /// Restarts the connection's timer of `connection_handle`'s session at `timeout`.
@@ -392,7 +423,7 @@ impl SessionState {
     ) -> Result<(), ProgrammerError> {
         let timeout = hold("a connection inactivity timeout", timeout)?;
 
-        self.reset((Inactivity::Connection, connection_handle, timeout), arming);
+        self.reset((Inactivity::Connection, connection_handle, timeout), arming)?;
 
         Ok(())
     }
@@ -409,7 +440,7 @@ impl SessionState {
     ) -> Result<(), ProgrammerError> {
         let timeout = hold("a session inactivity timeout", timeout)?;
 
-        self.reset((Inactivity::Session, connection_handle, timeout), arming);
+        self.reset((Inactivity::Session, connection_handle, timeout), arming)?;
 
         Ok(())
     }
@@ -432,8 +463,10 @@ impl SessionState {
         &mut self,
         (connection_handle, now): (&ConnectionHandle, SystemTime),
         (arming, told): (&dyn Arming, &mut Vec<SessionEvent>),
-    ) -> Option<Session> {
-        let stored = self.stored_of_mut(connection_handle)?;
+    ) -> Result<Option<Session>, ProgrammerError> {
+        let Some(stored) = self.stored_of_mut(connection_handle) else {
+            return Ok(None);
+        };
         let old = stored.session.last_activity;
 
         stored.session.last_activity = now;
@@ -448,8 +481,8 @@ impl SessionState {
         self.reset(
             (Inactivity::Connection, connection_handle, connection),
             arming,
-        );
-        self.reset((Inactivity::Session, connection_handle, session), arming);
+        )?;
+        self.reset((Inactivity::Session, connection_handle, session), arming)?;
 
         if now != old {
             told.push(SessionEvent::LastActivityChanged {
@@ -459,7 +492,7 @@ impl SessionState {
             });
         }
 
-        Some(copy)
+        Ok(Some(copy))
     }
 
     /// The session of `connection_handle`, stored first, its activity now, when it has none.
@@ -536,6 +569,24 @@ impl SessionState {
             session_inactivity_timeout,
         };
         let is_similar = previous.as_ref().is_some_and(|previous| *previous == next);
+        let reset_connection = is_new
+            || previous.as_ref().is_none_or(|previous| {
+                previous.connection_inactivity_timeout != connection_inactivity_timeout
+            });
+        let reset_session = is_new
+            || previous.as_ref().is_none_or(|previous| {
+                previous.session_inactivity_timeout != session_inactivity_timeout
+            });
+        let mut prepared = Timers::arm(
+            arming,
+            (
+                &connection_handle,
+                (
+                    reset_connection.then_some(connection_inactivity_timeout),
+                    reset_session.then_some(session_inactivity_timeout),
+                ),
+            ),
+        )?;
 
         if let Some(previous_token) = previous
             .as_ref()
@@ -558,35 +609,20 @@ impl SessionState {
                 .insert(Arc::clone(&connection_handle), Timers::default());
         }
 
-        if is_new
-            || previous.as_ref().is_none_or(|previous| {
-                previous.connection_inactivity_timeout != connection_inactivity_timeout
-            })
+        if let Some(timers) = self
+            .timers
+            .entry_or_insert_with(Arc::clone(&connection_handle), Timers::default)
         {
-            self.reset(
-                (
-                    Inactivity::Connection,
-                    &connection_handle,
-                    connection_inactivity_timeout,
-                ),
-                arming,
-            );
+            if reset_connection {
+                cancel(&mut timers.connection);
+                timers.connection = prepared.connection.take();
+            }
+            if reset_session {
+                cancel(&mut timers.session);
+                timers.session = prepared.session.take();
+            }
         }
-
-        if is_new
-            || previous.as_ref().is_none_or(|previous| {
-                previous.session_inactivity_timeout != session_inactivity_timeout
-            })
-        {
-            self.reset(
-                (
-                    Inactivity::Session,
-                    &connection_handle,
-                    session_inactivity_timeout,
-                ),
-                arming,
-            );
-        }
+        prepared.clear();
 
         let copy = next.copy();
 
@@ -636,18 +672,24 @@ impl SessionState {
     ) -> Result<Option<Session>, ProgrammerError> {
         let fallback = self.default_connection_inactivity_timeout;
         let new = held_or(timeout, fallback)?;
+        let Some(old) = self
+            .stored_of(connection_handle)
+            .map(|stored| stored.connection_inactivity_timeout)
+        else {
+            return Ok(None);
+        };
+        if new != old {
+            self.reset((Inactivity::Connection, connection_handle, new), arming)?;
+        }
         let Some(stored) = self.stored_of_mut(connection_handle) else {
             return Ok(None);
         };
-        let old = stored.connection_inactivity_timeout;
-
         stored.connection_inactivity_timeout = new;
         stored.session.connection_inactivity_timeout = Some(new);
 
         let copy = stored.copy();
 
         if new != old {
-            self.reset((Inactivity::Connection, connection_handle, new), arming);
             told.push(SessionEvent::ConnectionInactivityTimeoutChanged {
                 session: copy.clone(),
                 new_value: new,
@@ -670,18 +712,24 @@ impl SessionState {
     ) -> Result<Option<Session>, ProgrammerError> {
         let fallback = self.default_session_inactivity_timeout;
         let new = held_or(timeout, fallback)?;
+        let Some(old) = self
+            .stored_of(connection_handle)
+            .map(|stored| stored.session_inactivity_timeout)
+        else {
+            return Ok(None);
+        };
+        if new != old {
+            self.reset((Inactivity::Session, connection_handle, new), arming)?;
+        }
         let Some(stored) = self.stored_of_mut(connection_handle) else {
             return Ok(None);
         };
-        let old = stored.session_inactivity_timeout;
-
         stored.session_inactivity_timeout = new;
         stored.session.session_inactivity_timeout = Some(new);
 
         let copy = stored.copy();
 
         if new != old {
-            self.reset((Inactivity::Session, connection_handle, new), arming);
             told.push(SessionEvent::SessionInactivityTimeoutChanged {
                 session: copy.clone(),
                 new_value: new,

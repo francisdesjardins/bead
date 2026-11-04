@@ -26,6 +26,7 @@ use crate::metrics::MetricsRegistry;
 use crate::ordered::Ordered;
 use crate::owner::WeakOwner;
 use crate::router::admissions::require_credential;
+use crate::router::core::{self as router_core, Side};
 use crate::router::relay::RelayOptions;
 use crate::router::server::{RouterServer, RouterServerOptions, ServerState, end_session};
 use crate::router::types::{
@@ -117,7 +118,7 @@ impl Arming for SessionArming {
         &self,
         due: Duration,
         (inactivity, connection_handle): (Inactivity, ConnectionHandle),
-    ) -> Arc<dyn Timer> {
+    ) -> Result<Arc<dyn Timer>, ProgrammerError> {
         // * cancelled once it fired, as a touch restarts it, its job does nothing
         self.owner
             .after((&self.clock, due), move |state: &mut ServerState| {
@@ -340,6 +341,17 @@ fn wait(state: &mut ServerState, handle: &ConnectionHandle) {
         })
     });
 
+    let timer = match timer.transpose() {
+        Ok(timer) => timer,
+        Err(error) => {
+            state.report(
+                router_core::reported_call(CallError::Refused(error)),
+                handle,
+            );
+            close(state, handle);
+            return;
+        }
+    };
     if let Some(facade) = state.facade.as_mut() {
         facade.idle.insert(Arc::clone(handle), timer);
     }
@@ -384,11 +396,20 @@ pub(crate) fn on_message(state: &mut ServerState, handle: &ConnectionHandle) {
 
     facade.connections.insert(Arc::clone(handle), ());
 
-    let touched = facade
-        .sessions
-        .touch((handle, now), (&arming, &mut events))
-        .is_some();
+    let touched = facade.sessions.touch((handle, now), (&arming, &mut events));
     let is_listening = facade.listens.contains_key(handle);
+    let touched = match touched {
+        Ok(session) => session.is_some(),
+        Err(error) => {
+            state.report(
+                router_core::reported_call(CallError::Refused(error)),
+                handle,
+            );
+            close(state, handle);
+            told(state, events);
+            return;
+        }
+    };
 
     if !touched {
         wait(state, handle);
@@ -867,6 +888,10 @@ impl SessionManager {
     }
 
     /// The session of `connection_handle`, stored first, its activity now, when it has none.
+    ///
+    /// # Errors
+    ///
+    /// A [`CallError`] when the connection or the sessions are gone, or its token cannot be drawn.
     pub fn get_or_else_set(
         &self,
         connection_handle: ConnectionHandle,
@@ -925,11 +950,26 @@ impl SessionManager {
                 move |state: &mut ServerState| {
                     let (now, arming) = (wall_of(state), arming_of(state));
                     let mut events = Vec::new();
-                    let touched = state.facade.as_mut().and_then(|facade| {
-                        facade
-                            .sessions
-                            .touch((&connection_handle, now), (&arming, &mut events))
-                    });
+                    let touched = state
+                        .facade
+                        .as_mut()
+                        .map(|facade| {
+                            facade
+                                .sessions
+                                .touch((&connection_handle, now), (&arming, &mut events))
+                        })
+                        .transpose();
+                    let touched = match touched {
+                        Ok(session) => session.flatten(),
+                        Err(error) => {
+                            state.report(
+                                router_core::reported_call(CallError::Refused(error)),
+                                &connection_handle,
+                            );
+                            close(state, &connection_handle);
+                            None
+                        }
+                    };
 
                     told(state, events);
 

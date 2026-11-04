@@ -207,13 +207,10 @@ impl Pipe {
         let listeners = locked(&self.listeners).clone();
 
         for listener in listeners {
-            listener.on_message(
-                TransportMessage {
-                    data: data.clone(),
-                    ..TransportMessage::default()
-                },
-                &handle,
-            );
+            let mut message = TransportMessage::default();
+
+            message.data = data.clone();
+            listener.on_message(message, &handle);
         }
     }
 }
@@ -529,7 +526,7 @@ impl RelayRouter for Target {
     fn request(&self, _payload: Bytes, leg: RelayLeg) -> Result<Call, ProgrammerError> {
         locked(&self.asked).push(leg.options.timeout);
 
-        Ok(Call::refused(CallError::Cancelled))
+        Ok(Call::refused(CallError::Cancelled(None)))
     }
 }
 
@@ -1454,6 +1451,9 @@ fn misuse_in(error: &RouterError) -> Option<ProgrammerError> {
 
     while let Some(cause) = source {
         if let Some(misuse) = cause.downcast_ref::<ProgrammerError>() {
+            return Some(misuse.clone());
+        }
+        if let Some(TransportError::Refused(misuse)) = cause.downcast_ref::<TransportError>() {
             return Some(misuse.clone());
         }
 

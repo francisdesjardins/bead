@@ -4,7 +4,7 @@ use std::sync::{Arc, Mutex};
 
 use bytes::Bytes;
 
-use super::{Fixture, Recording, header, locked, props};
+use super::{ClientFixture, Fixture, Recording, header, locked, props};
 use crate::NotificationResolverDependencies;
 use crate::clock::SharedClock;
 use crate::debug::{DebugDirection, DebugType};
@@ -45,6 +45,49 @@ fn notifier(fixture: &Fixture) -> Notifier<TextCodec> {
             response.result(request.payload)
         }))
         .expect("registered")
+}
+
+#[tokio::test]
+async fn traces_a_clients_notification_refused_with_its_reason() {
+    let fixture = ClientFixture::new();
+    let heard: super::Heard = Arc::default();
+    let hearing = Arc::clone(&heard);
+
+    fixture.manager.on_debug(Arc::new(move |error, event| {
+        locked(&hearing).push((error.map(ToString::to_string), event.clone()));
+    }));
+    // A client cannot register a notifying resolver; this guard also holds for an internal misuse.
+    let notifying = Notifier {
+        shared: Arc::new(crate::managers::service::NotifierShared {
+            manager: Arc::clone(&fixture.manager.inner),
+            procedure: news(),
+            codec: TextCodec,
+        }),
+    };
+
+    notifying
+        .notify("news".to_owned(), &NotifyOptions::default())
+        .await;
+    fixture.clock.settle().await;
+
+    let heard = locked(&heard).clone();
+    assert_eq!(heard.len(), 2, "the attempt and its refusal");
+    assert_eq!(heard[0].0, None, "the attempt");
+    assert_eq!(
+        heard[1].0.as_deref(),
+        Some("only a server notifies; a client asks with a request"),
+        "the refusal"
+    );
+    assert_eq!(heard[0].1.started_at, heard[1].1.started_at, "one attempt");
+    assert!(
+        heard
+            .iter()
+            .all(|(_, event)| event.direction == DebugDirection::Tx
+                && event.call_type == DebugType::Notification),
+        "the notification sent"
+    );
+    assert!(fixture.transport.sent().is_empty(), "no notification sent");
+    fixture.router.dispose().await;
 }
 
 async fn subscribe(fixture: &Fixture, paced: bool) {

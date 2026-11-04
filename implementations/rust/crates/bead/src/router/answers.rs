@@ -62,7 +62,7 @@ pub(crate) fn cancel<S: Side>(state: &mut S, call: &CallAddress) {
     if let Some(sending) = stop(state, id)
         && let Some(done) = sending.done
     {
-        done(state, Err(CallError::Cancelled));
+        done(state, Err(CallError::Cancelled(Some(call.call_id))));
     }
 }
 
@@ -131,6 +131,13 @@ pub(crate) fn progress<S: Side>(state: &mut S, (_call, id): (&CallAddress, u64))
         );
     });
 
+    let timer = match timer {
+        Ok(timer) => timer,
+        Err(error) => {
+            fail(state, (id, CallError::Refused(error)));
+            return;
+        }
+    };
     if let Some(sending) = state.core().results.get_mut(&id) {
         cancel_timer(&mut sending.timer);
         sending.timer = Some(timer);
@@ -234,6 +241,7 @@ pub(crate) fn send_result<S: Side>(
     // the call's signal ends it: a cancel, the connection gone
     if let Some(signal) = signal {
         let owner = core.owner.clone();
+        let call_id = call.call_id;
 
         core.owner.cover(async move {
             let token = signal.token().clone();
@@ -248,7 +256,7 @@ pub(crate) fn send_result<S: Side>(
             }
 
             let reason = match signal.reason() {
-                Some(SignalReason::Cancelled) | None => CallError::Cancelled,
+                Some(SignalReason::Cancelled) | None => CallError::Cancelled(Some(call_id)),
                 Some(SignalReason::Disconnected(reason)) => CallError::Disconnected(reason),
             };
             owner.offer(Box::new(move |state: &mut S| {

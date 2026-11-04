@@ -114,6 +114,10 @@ pub(super) fn narrow() -> RouterLimitsOptions {
 }
 
 #[tokio::test]
+#[expect(
+    clippy::disallowed_methods,
+    reason = "the test slices its own fixed payload at offsets within its length"
+)]
 async fn assemble_a_requests_payload_from_full_chunks_in_any_order_credited_half_a_window_at_least_at_a_time_then_dispatch_it()
  {
     let (peer, handed) = serving(false, &limits()).await;
@@ -207,6 +211,10 @@ async fn assemble_a_requests_payload_from_full_chunks_in_any_order_credited_half
 #[expect(
     clippy::too_many_lines,
     reason = "the twin plays both opening sizes and the refusal before, and acceptance after, the call ends"
+)]
+#[expect(
+    clippy::disallowed_methods,
+    reason = "the test slices its own fixed payload at offsets within its length"
 )]
 async fn hold_a_connections_place_for_a_transfer_until_its_call_ends_not_once_its_payload_is_whole()
 {
@@ -331,6 +339,10 @@ async fn hold_a_connections_place_for_a_transfer_until_its_call_ends_not_once_it
 #[expect(
     clippy::too_many_lines,
     reason = "the twin plays both connections sharing a budget and the same connection's incremental grants"
+)]
+#[expect(
+    clippy::disallowed_methods,
+    reason = "the test slices its own fixed payload at offsets within its length"
 )]
 async fn give_the_budget_back_once_a_payload_is_whole_and_grant_the_transfer_it_starved() {
     let (peer, handed) = serving(false, &narrow()).await;
@@ -511,6 +523,10 @@ async fn end_a_requests_transfer_its_requester_cancels_giving_the_budget_back() 
 }
 
 #[tokio::test]
+#[expect(
+    clippy::disallowed_methods,
+    reason = "the test slices its own fixed payload at offsets within its length"
+)]
 async fn stall_no_request_whose_payload_came_whole_however_long_its_resolver_takes() {
     let (peer, handed) = serving(
         true,

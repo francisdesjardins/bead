@@ -17,6 +17,13 @@ avoid-breaking-exported-api = false
 # test or a native target takes from its platform goes through the test kit, or is exempted once,
 # with its reason, at its root
 disallowed-methods = [
+  # a peer's lengths and offsets use checked forms; a checked zero-copy slice states its invariant
+  { path = "bytes::Bytes::slice", reason = "check the slice bounds and expect this lint at the invariant" },
+  { path = "bytes::BytesMut::split_to", reason = "check the split offset and expect this lint at the invariant" },
+  { path = "bytes::BytesMut::split_off", reason = "check the split offset and expect this lint at the invariant" },
+  { path = "std::time::Duration::from_secs_f64", reason = "use Duration::try_from_secs_f64" },
+  { path = "std::time::Duration::from_secs_f32", reason = "use Duration::try_from_secs_f32" },
+  { path = "str::repeat", reason = "bound and reserve the output fallibly" },
   { path = "tokio::runtime::Handle::spawn", reason = "spawn through crate::platform" },
   { path = "tokio::runtime::Handle::spawn_blocking", reason = "spawn through crate::platform" },
   { path = "tokio::runtime::Handle::try_current", reason = "the runtime through crate::platform" },

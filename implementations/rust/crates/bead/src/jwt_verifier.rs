@@ -592,3 +592,5 @@ pub fn verify_jwt(token: &[u8], against: &JwtAgainst<'_>) -> Result<JwtVerdict, 
 
     Ok(verdict_of(claims, (against.audiences, key, now)))
 }
+
+impl std::error::Error for JwtRefusal {}

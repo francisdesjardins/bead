@@ -3,6 +3,7 @@
 
 use core::fmt;
 use core::str::FromStr;
+use std::error::Error;
 
 use crate::base64url;
 use crate::constants::SESSION_TOKEN_BYTES;
@@ -10,6 +11,25 @@ use crate::errors::ProgrammerError;
 
 #[cfg(test)]
 mod tests;
+
+/// The system's random source could not draw a session token.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct SessionTokenDrawError {
+    cause: getrandom::Error,
+}
+
+impl fmt::Display for SessionTokenDrawError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str("the system could not draw a session token")
+    }
+}
+
+impl Error for SessionTokenDrawError {
+    fn source(&self) -> Option<&(dyn Error + 'static)> {
+        Some(&self.cause)
+    }
+}
 
 /// A session's token: 16 bytes, not all zero, written in unpadded base64url.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -52,12 +72,12 @@ impl SessionToken {
     ///
     /// # Errors
     ///
-    /// When the system's source gives nothing.
-    pub fn draw<F: Fn(&Self) -> bool>(is_in_use: F) -> Result<Self, getrandom::Error> {
+    /// A [`SessionTokenDrawError`] when the system's source gives nothing, retaining its cause.
+    pub fn draw<F: Fn(&Self) -> bool>(is_in_use: F) -> Result<Self, SessionTokenDrawError> {
         loop {
             let mut bytes = [0_u8; SESSION_TOKEN_BYTES];
 
-            getrandom::fill(&mut bytes)?;
+            getrandom::fill(&mut bytes).map_err(|cause| SessionTokenDrawError { cause })?;
 
             if let Ok(token) = Self::new(bytes)
                 && !is_in_use(&token)

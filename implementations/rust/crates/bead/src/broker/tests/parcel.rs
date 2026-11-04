@@ -258,6 +258,10 @@ fn writes_no_parcel_a_side_refuses_nor_one_of_a_kind_no_writer_writes() {
 }
 
 #[test]
+#[expect(
+    clippy::disallowed_methods,
+    reason = "the test repeats its own string a bounded number of times"
+)]
 fn takes_a_token_of_1_to_64_characters_of_base64url_s_alphabet_and_nothing_else() {
     let longest = "x".repeat(64);
     let past = "x".repeat(65);

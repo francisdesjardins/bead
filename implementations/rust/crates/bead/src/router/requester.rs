@@ -70,7 +70,7 @@ pub(crate) fn made_ending_of(outcome: &Result<RouterResult, CallError>) -> CallE
         Ok(_) => CallEnding::Result,
         Err(CallError::Failure(failure)) => CallEnding::of_failure(failure.code(), failure.scope()),
         Err(CallError::TimedOut(_)) => CallEnding::Timeout,
-        Err(CallError::Cancelled) => CallEnding::Cancelled,
+        Err(CallError::Cancelled(_)) => CallEnding::Cancelled,
         Err(CallError::Disconnected(_)) => CallEnding::Closed,
         Err(_) => CallEnding::Error,
     }
@@ -148,7 +148,12 @@ pub(crate) fn reserve<S: Side>(state: &mut S, (call, timeout): (&CallAddress, Op
         state.core().pending.forget_reservation(&forgotten, id);
     });
 
-    core.pending
+    let Some(timer) = super::core::timer_of(state, (timer, &call.connection_handle)) else {
+        return;
+    };
+    state
+        .core()
+        .pending
         .reservations
         .entry(Arc::clone(&call.connection_handle))
         .or_default()
@@ -256,6 +261,13 @@ fn wait<S: Side>(state: &mut S, (delay, call, id): (Option<Duration>, &CallAddre
             })
         });
 
+    let timer = match timer.transpose() {
+        Ok(timer) => timer,
+        Err(error) => {
+            end_pending(state, (CallError::Refused(error), call, id));
+            return;
+        }
+    };
     if let Some(request) = state.core().pending.get_mut(call) {
         cancel_timer(&mut request.timer);
         request.timer = timer;
@@ -402,7 +414,7 @@ pub(crate) fn request<S: Side>(
         .as_ref()
         .is_some_and(CancellationToken::is_cancelled)
     {
-        return reply(Err(CallError::Cancelled));
+        return reply(Err(CallError::Cancelled(None)));
     }
 
     // the series it counts into, a requester's or _OTHER's; none while the router counts nothing
@@ -511,7 +523,7 @@ pub(crate) fn request<S: Side>(
                 // in that turn takes the pending call out, but cannot change that settlement
                 reply(
                     if signal.as_ref().is_some_and(CancellationToken::is_cancelled) {
-                        Err(CallError::Cancelled)
+                        Err(CallError::Cancelled(Some(call_id)))
                     } else {
                         outcome
                     },
@@ -648,7 +660,7 @@ fn cancelled<S: Side>(state: &mut S, (call, id): (&CallAddress, u64)) {
         send_cancel(state, (call, reserved_for(&request, inactivity)));
     }
 
-    settle(&mut request, Err(CallError::Cancelled));
+    settle(&mut request, Err(CallError::Cancelled(Some(call.call_id))));
 }
 
 // a request as a transfer: its opening, then each chunk credited; the call waits on the transfer's
@@ -726,7 +738,7 @@ pub(crate) fn cancel<S: Side>(state: &mut S, (call, timeout): (&CallAddress, Opt
             }
 
             // heard after the cancel went out, so a call made again in its place goes out behind it
-            settle(&mut request, Err(CallError::Cancelled));
+            settle(&mut request, Err(CallError::Cancelled(Some(call.call_id))));
         }
     }
 }

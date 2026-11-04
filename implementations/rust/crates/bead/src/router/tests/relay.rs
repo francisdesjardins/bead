@@ -373,6 +373,8 @@ impl RelayRouter for Target {
 #[derive(Debug, Default)]
 struct Answers(Mutex<Vec<RouterAnswer>>);
 
+impl crate::router::core::sealed::Answerer for Answers {}
+
 impl Answerer for Answers {
     fn respond(&self, answer: RouterAnswer) -> BoxFuture<Result<(), CallError>> {
         locked(&self.0).push(answer);
@@ -1050,7 +1052,7 @@ async fn answers_nothing_once_leg_a_ended_leg_b_cancelled_by_the_same_signal_rej
     let answers = Arc::new(Answers::default());
     let props = props(&answers, header(1, 7));
     *locked(&target.abort) = Some(props.signal.clone());
-    *locked(&target.outcome) = Some(CallError::Cancelled);
+    *locked(&target.outcome) = Some(CallError::Cancelled(Some(1)));
     (handler(&served, 7).await.resolve)(props)
         .await
         .expect("cancelled in silence");
@@ -1312,6 +1314,8 @@ struct Fallback {
     attempts: Mutex<Vec<RouterAnswer>>,
     outcome: Mutex<Option<oneshot::Receiver<Result<(), CallError>>>>,
 }
+
+impl crate::router::core::sealed::Answerer for Fallback {}
 
 impl Answerer for Fallback {
     fn respond(&self, answer: RouterAnswer) -> BoxFuture<Result<(), CallError>> {

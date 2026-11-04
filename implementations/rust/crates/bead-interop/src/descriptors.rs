@@ -19,10 +19,16 @@ pub const SERVICE_NAME: &str = "Interop";
 pub const SERVICE_REVISION: u32 = 2;
 
 /// This procedure fails, on purpose.
-pub const ON_PURPOSE: ListedFailure = ListedFailure::new("ON_PURPOSE", 7);
+pub const ON_PURPOSE: ListedFailure = ListedFailure::new(
+    "ON_PURPOSE",
+    core::num::NonZeroU16::new(7).expect("a nonzero code"),
+);
 
 /// That destination is registered already.
-pub const REGISTERED_ALREADY: ListedFailure = ListedFailure::new("REGISTERED_ALREADY", 8);
+pub const REGISTERED_ALREADY: ListedFailure = ListedFailure::new(
+    "REGISTERED_ALREADY",
+    core::num::NonZeroU16::new(8).expect("a nonzero code"),
+);
 
 /// A procedure of the interop service, every payload JSON.
 pub type InteropDescriptor = Descriptor<JsonCodec, JsonCodec>;

@@ -7,6 +7,10 @@ use crate::jwt_verifier::{JwtAgainst, JwtAlgorithm, JwtKey, JwtRefusal, JwtVerdi
 use crate::testing::surface::Consumer;
 
 #[test]
+#[expect(
+    clippy::disallowed_methods,
+    reason = "the test repeats its own string a bounded number of times"
+)]
 fn throws_for_a_key_not_shaped_for_its_algorithm_whatever_the_token_name() {
     let (_, keys, audiences, now) = holding();
     let bytes_32 = "A".repeat(43);

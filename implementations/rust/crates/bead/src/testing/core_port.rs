@@ -60,6 +60,7 @@ pub(crate) struct State {
     pub(crate) before_sent: Vec<usize>,
     pub(crate) undone: Vec<u32>,
     pub(crate) notifications: Vec<(ConnectionHandle, NotificationHeader, Bytes)>,
+    pub(crate) cancels: Vec<(u32, ConnectionHandle)>,
     pub(crate) credits: Vec<(ConnectionHandle, CreditHeader)>,
     pub(crate) unpaired: Vec<(ConnectionHandle, FailureHeader, FailureRecord)>,
     pub(crate) traces: Vec<(DebugDirection, TracedEnvelope)>,
@@ -164,6 +165,10 @@ impl Side for State {
         self.takes_unpaired
     }
 
+    fn on_cancel(&mut self, call_id: u32, handle: &ConnectionHandle) {
+        self.cancels.push((call_id, Arc::clone(handle)));
+    }
+
     fn is_tracing(&self) -> bool {
         true
     }
@@ -238,7 +243,11 @@ impl Clock for RecordedClock {
         self.clock.wall()
     }
 
-    fn arm(&self, schedule: Schedule, callback: TimerCallback) -> Arc<dyn Timer> {
+    fn arm(
+        &self,
+        schedule: Schedule,
+        callback: TimerCallback,
+    ) -> Result<Arc<dyn Timer>, ProgrammerError> {
         let (Schedule::Once(delay) | Schedule::Every(delay)) = schedule;
         self.armed.lock().expect("timer history").push(delay);
         self.clock.arm(schedule, callback)
@@ -306,6 +315,7 @@ impl Peer {
             undone: Vec::new(),
             notifications: Vec::new(),
             credits: Vec::new(),
+            cancels: Vec::new(),
             unpaired: Vec::new(),
             traces: Vec::new(),
             activity: Vec::new(),

@@ -621,6 +621,13 @@ impl BrokerTransportClient {
                 }),
             );
 
+            let timer = match timer {
+                Ok(timer) => timer,
+                Err(error) => {
+                    inner.settle((&attempt, Err(TransportError::Refused(error.clone()))));
+                    return Err(error.into());
+                }
+            };
             *locked(&attempt.timer) = Some(timer);
         }
 

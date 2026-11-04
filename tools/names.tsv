@@ -259,6 +259,7 @@ SessionManager	ISessionManager [record], createSessionManager [function]	Session
 SessionManagerOptions	ISessionManagerOptions [record]	SessionManagerOptions [record]	SessionManagerOptions [record]	same
 SessionRequest	ISessionRequest [record]	SessionRequest [record]	SessionRequest [record]	same
 SessionToken	SessionToken [record]	SessionToken [record]	SessionToken [record]	same
+SessionTokenDrawError	-	-	SessionTokenDrawError [record]	own: a Result's error, where the other sides throw (0044)
 SharedClock	-	-	SharedClock [record]	own: the platform's clock and its timers, which the other sides take from their platform (0044, 0011)
 shareLegBSession	shareLegBSession [function]	-	share_leg_b_session [function]	same
 Subscriber	ISubscriber [record]	Subscriber [record]	Subscriber [record]	same

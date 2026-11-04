@@ -10,7 +10,11 @@ use crate::router::types::ConnectionHandle;
 pub(crate) struct NeverArming;
 
 impl Arming for NeverArming {
-    fn arm(&self, _due: Duration, _timer: (Inactivity, ConnectionHandle)) -> Arc<dyn Timer> {
+    fn arm(
+        &self,
+        _due: Duration,
+        _timer: (Inactivity, ConnectionHandle),
+    ) -> Result<Arc<dyn Timer>, crate::errors::ProgrammerError> {
         panic!("sessions with NEVER timeouts arm no timer")
     }
 }

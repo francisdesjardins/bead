@@ -315,6 +315,10 @@ async fn a_connection_that_closes_is_no_longer_notified_and_one_that_cannot_take
 
 // debugging 9.2
 #[tokio::test]
+#[expect(
+    clippy::disallowed_methods,
+    reason = "the test repeats its own string a bounded number of times"
+)]
 async fn counts_a_notification_it_cannot_hand_to_its_transport_as_failed_and_one_its_transport_refuses_once_it_has_it_as_sent()
  {
     let registry = registry();
@@ -716,6 +720,10 @@ async fn hands_leg_a_s_transport_the_relayed_result_once_answers_nothing_after_i
 
 // spec 14.5
 #[tokio::test]
+#[expect(
+    clippy::disallowed_methods,
+    reason = "the test repeats its own string a bounded number of times"
+)]
 async fn answers_a_relayed_result_past_leg_a_s_limit_procedure_failed_with_no_detail_and_reports_payload_too_large_with_leg_a_s_connection()
  {
     // 8 bytes of prefix, 20 of an announcement and 36 of payload fill leg A's chunk of 64; one more

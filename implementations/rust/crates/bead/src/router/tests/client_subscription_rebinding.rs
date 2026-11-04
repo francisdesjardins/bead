@@ -37,7 +37,10 @@ async fn keeps_the_replacement_bound_when_its_predecessor_is_cancelled_before_it
     let notification = Notified::new(None);
     let first = scripted.subscribe((&notification.like(), TIMEOUT)).await;
     let second = scripted.subscribe((&notification.like(), TIMEOUT)).await;
-    assert!(matches!(answered(first).await, Err(CallError::Cancelled)));
+    assert!(matches!(
+        answered(first).await,
+        Err(CallError::Cancelled(_))
+    ));
     scripted.transport.deliver(&result_of(3, None));
     answered(second).await.expect("the replacement's result");
     scripted.transport.deliver(&notification_of(3, 7));

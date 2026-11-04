@@ -71,11 +71,11 @@ fn violation_of(written: &Written) -> Violation {
 
 fn play(entry: &Detail) -> Result<(), Failed> {
     if let Some(write) = &entry.write {
-        let judged = Judged {
-            violations: write.violations.iter().map(violation_of).collect(),
-            more: write.more.unwrap_or(0),
-            stopped: write.stopped.unwrap_or(false),
-        };
+        let mut judged = Judged::default();
+
+        judged.violations = write.violations.iter().map(violation_of).collect();
+        judged.more = write.more.unwrap_or(0);
+        judged.stopped = write.stopped.unwrap_or(false);
         let detail = violations_detail_of(&judged, write.maximum_bytes);
 
         if detail != entry.detail {

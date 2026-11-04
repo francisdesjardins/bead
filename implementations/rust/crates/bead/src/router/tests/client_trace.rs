@@ -38,6 +38,10 @@ fn result(call_id: u32, text: &str) -> Envelope {
 }
 
 #[tokio::test]
+#[expect(
+    clippy::disallowed_methods,
+    reason = "the test repeats its own string a bounded number of times"
+)]
 async fn tells_a_calls_steps_with_the_call_id_its_request_carries() {
     let scripted = Scripted::with(&RouterClientOptions {
         limits: Some(RouterLimitsOptions {

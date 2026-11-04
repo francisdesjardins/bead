@@ -11,6 +11,10 @@ use std::sync::Arc;
 
 #[tokio::test]
 #[ignore = "divergence: closing one connection drops the credits its returned budget grants another; the fix needs the frozen detail-gate fixture updated"]
+#[expect(
+    clippy::disallowed_methods,
+    reason = "the test slices its own fixed payload at offsets within its length"
+)]
 async fn end_the_transfers_of_a_connection_that_goes_before_their_budget_grants_any_credit_and_send_nothing_once_disposed()
  {
     let (peer, handed) = serving(false, &narrow()).await;

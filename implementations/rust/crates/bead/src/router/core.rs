@@ -85,6 +85,7 @@ pub(crate) struct Carried {
     clippy::partial_pub_fields,
     reason = "what its transport carried, a bearer's secret, stays the router's"
 )]
+#[non_exhaustive]
 pub struct AdmissionRequest {
     /// The connection it came from.
     pub connection_handle: ConnectionHandle,
@@ -111,11 +112,20 @@ impl fmt::Debug for AdmissionRequest {
 /// An admission's refusal: its failure, and the name of the admission Bead gives that refused it,
 /// which an access refused tells (spec 13.12); none for an application's own.
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub struct AdmissionRefusal {
     /// The failure answered.
     pub failure: Failure,
     /// The admission of Bead's that refused it.
     pub by: Option<String>,
+}
+
+impl AdmissionRefusal {
+    /// Refuses admission with `failure`, without naming an admission of Bead's.
+    #[must_use]
+    pub fn new(failure: Failure) -> Self {
+        Self { failure, by: None }
+    }
 }
 
 /// An admission: none admits; a refusal refuses; an error refuses as failed, reported.
@@ -200,9 +210,24 @@ fn locked<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
     mutex.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
+pub(crate) mod sealed {
+    /// The answerer's seal: only this crate supplies one.
+    #[expect(
+        unnameable_types,
+        reason = "a sealed trait is public only as an unnameable supertrait"
+    )]
+    pub trait Answerer {}
+}
+
 /// What a request's handler answers its call by, from off the router's owner.
-pub trait Answerer: Send + Sync {
+///
+/// Implemented by Bead alone: an answer always goes through its owning router.
+pub trait Answerer: sealed::Answerer + Send + Sync {
     /// Answers the call; settles once the answer went, or as it could not.
+    ///
+    /// # Errors
+    ///
+    /// A [`CallError`] when its answer is refused, its call is cancelled, its connection ends, or its transport fails.
     fn respond(&self, answer: RouterAnswer) -> BoxFuture<Result<(), CallError>>;
 
     /// The failure the router answered the call with in its handler's place, read as it answers.
@@ -210,6 +235,10 @@ pub trait Answerer: Send + Sync {
 
     /// Subscribes the call's connection to its procedure, on a server's router: the subscription's
     /// call id.
+    ///
+    /// # Errors
+    ///
+    /// A [`CallError`] when its request opens no subscription, or its call or connection ends.
     fn subscribe(&self) -> BoxFuture<Result<u32, CallError>>;
 }
 
@@ -219,6 +248,7 @@ pub trait Answerer: Send + Sync {
     clippy::partial_pub_fields,
     reason = "what its transport carried, a bearer's secret, stays the router's"
 )]
+#[non_exhaustive]
 pub struct RequestResolverProps {
     /// Whether its router has admitted it; otherwise its handler asks its own admission.
     pub is_admitted: bool,
@@ -591,7 +621,7 @@ impl<S: Side> Core<S> {
         &self,
         due: Duration,
         job: J,
-    ) -> Arc<dyn Timer> {
+    ) -> Result<Arc<dyn Timer>, ProgrammerError> {
         self.owner.after((&self.clock, due), job)
     }
 
@@ -651,7 +681,7 @@ pub(crate) fn reported_call(error: CallError) -> RouterError {
     match error {
         CallError::Failure(failure) => RouterError::Failure(failure),
         CallError::Other(error) => RouterError::Other(error),
-        other @ (CallError::Cancelled
+        other @ (CallError::Cancelled(_)
         | CallError::Disconnected(_)
         | CallError::TimedOut(_)
         | CallError::Refused(_)) => RouterError::Other(Arc::new(other)),
@@ -1351,7 +1381,12 @@ fn abandon<S: Side>(state: &mut S, (call, credit_end): (&CallAddress, u64)) {
             .forget_abandoned(&forgotten, Some(id));
     });
 
-    core.answering
+    let Some(timer) = timer_of(state, (timer, &call.connection_handle)) else {
+        return;
+    };
+    state
+        .core()
+        .answering
         .abandoned
         .entry(Arc::clone(&call.connection_handle))
         .or_default()
@@ -1697,6 +1732,8 @@ struct CallAnswerer<S> {
     dispatch: Arc<Dispatch>,
 }
 
+impl<S: Side> sealed::Answerer for CallAnswerer<S> {}
+
 impl<S: Side> Answerer for CallAnswerer<S> {
     fn respond(&self, answer: RouterAnswer) -> BoxFuture<Result<(), CallError>> {
         let (reply, answered) = ::tokio::sync::oneshot::channel();
@@ -1988,6 +2025,15 @@ fn touch_request_transfer<S: Side>(state: &mut S, (transfer, timeout): (u64, Dur
         refuse(state, (failure, &dispatch));
     });
 
+    let Some((dispatch, _)) = state.core().receiving_requests.get(&transfer).cloned() else {
+        if let Ok(timer) = timer {
+            timer.cancel();
+        }
+        return;
+    };
+    let Some(timer) = timer_of(state, (timer, &dispatch.connection_handle)) else {
+        return;
+    };
     if let Some(receiving) = state.core().receivings.get_mut(transfer) {
         cancel_timer(&mut receiving.timer);
         receiving.timer = Some(timer);
@@ -2142,13 +2188,22 @@ fn resolve_session<S: Side>(
         }),
         Resolution::Later(resolving) => {
             let owner = state.core().owner.clone();
+            let token = signal.token().clone();
 
             state.core().owner.cover(async move {
                 // ! what a resolution panics is its throw, as a resolver's is: the call answered
                 // PROCEDURE_FAILED and the panic reported (decision 0044)
-                let resolved = caught_future(("a credential's resolution", resolving))
-                    .await
-                    .unwrap_or_else(|panicked| Err(Unresolved::Other(Arc::new(panicked))));
+                let mut resolving =
+                    Box::pin(caught_future(("a credential's resolution", resolving)));
+                let Some(resolved) = token.run_until_cancelled(resolving.as_mut()).await else {
+                    // ! the verifier may ignore its signal: its task keeps no cancelled call's
+                    // payload, which belongs to the settlement alone
+                    drop(settle);
+                    drop(resolving.await);
+                    return;
+                };
+                let resolved =
+                    resolved.unwrap_or_else(|panicked| Err(Unresolved::Other(Arc::new(panicked))));
                 owner.offer(Box::new(move |state: &mut S| {
                     if !signal.is_aborted() {
                         settle(state, resolved);
@@ -2658,6 +2713,21 @@ impl<S: Side> Owned for S {
 pub(crate) fn dispose<S: Side>(state: &mut S) {
     state.core().mark_disposed();
     reject_pending(state, (&format!("{DISPOSED} before the answer"), None));
+}
+
+// a clock that refuses a deadline cannot keep this router's calls bounded
+pub(crate) fn timer_of<S: Side>(
+    state: &mut S,
+    (armed, connection): (Result<Arc<dyn Timer>, ProgrammerError>, &ConnectionHandle),
+) -> Option<Arc<dyn Timer>> {
+    match armed {
+        Ok(timer) => Some(timer),
+        Err(error) => {
+            state.report(reported_call(CallError::Refused(error)), connection);
+            dispose(state);
+            None
+        }
+    }
 }
 
 /// Sends a notification to one subscription, counted: sent once its transport has it, whatever the

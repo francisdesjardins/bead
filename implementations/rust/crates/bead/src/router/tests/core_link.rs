@@ -250,7 +250,11 @@ async fn cancels_its_call_once_its_token_is_cancelled_after_it_went_out() {
         .expect("a slow call");
     link.clock.settle().await;
     token.cancel();
-    assert!(matches!(answered(slow).await, Err(CallError::Cancelled)));
+    let refused = answered(slow)
+        .await
+        .expect_err("the token cancels its call");
+    assert!(matches!(refused, CallError::Cancelled(Some(1))));
+    assert_eq!(refused.to_string(), "call 1 was cancelled");
     link.clock.settle().await;
     assert_eq!(link.ask("cancellations").await.payload, "1");
     link.dispose().await;
@@ -267,7 +271,10 @@ async fn draws_nothing_for_a_token_cancelled_already() {
         .client
         .request(Bytes::from_static(b"null"), request)
         .expect("a call");
-    assert!(matches!(answered(call).await, Err(CallError::Cancelled)));
+    assert!(matches!(
+        answered(call).await,
+        Err(CallError::Cancelled(None))
+    ));
     assert!(locked(&link.drawn).is_empty());
     assert!(locked(&link.received).is_empty());
     link.dispose().await;

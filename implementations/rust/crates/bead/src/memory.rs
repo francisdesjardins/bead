@@ -1103,8 +1103,12 @@ impl MemoryTransportClient {
             )
         });
 
-        if let Some(timer) = timer {
-            locked(&attempt.state).timer = Some(timer);
+        match timer.transpose() {
+            Ok(timer) => locked(&attempt.state).timer = timer,
+            Err(error) => {
+                inner.settle((&attempt, Err(TransportError::Refused(error.clone()))));
+                return Err(error.into());
+            }
         }
 
         // its signal: cancelled, the connect gives up

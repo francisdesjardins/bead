@@ -1,5 +1,7 @@
 crate
   mod json
+  use tokio::runtime::Handle
+  use tokio_util::sync::CancellationToken
   use broker::adapter::BrokerAdapter
   use broker::adapter::BrokerCapabilities
   use broker::adapter::BrokerDelivery
@@ -274,6 +276,7 @@ crate
   use service::notifying_of
   use service::request_of
   use session_token::SessionToken
+  use session_token::SessionTokenDrawError
   use transport::CONNECT_TIMEOUT
   use transport::ClientListener
   use transport::Connect
@@ -549,7 +552,7 @@ crate::clock
     fn description(&self) -> &'static str
     fn monotonic(&self) -> Duration
     fn wall(&self) -> SystemTime
-    fn arm(&self, schedule: Schedule, callback: TimerCallback) -> Arc<dyn Timer>
+    fn arm(&self, schedule: Schedule, callback: TimerCallback) -> Result<Arc<dyn Timer>, ProgrammerError>
     fn activity(&self) -> Option<Arc<crate::testing::Activity>>
   type SharedClock = Arc<dyn Clock>
 crate::clock::native
@@ -695,7 +698,7 @@ crate::debug
     Notification
     fn as_str(self) -> &'static str
     derives Clone, Copy, Debug, Eq, Hash, PartialEq
-  struct DebugFilter
+  struct DebugFilter #[non_exhaustive]
     pub directions: Vec<DebugDirection>
     pub types: Vec<DebugType>
     pub kinds: Vec<EnvelopeKind>
@@ -708,7 +711,7 @@ crate::debug
     NamesNothing
     HoldsAParenthesis
     fn as_str(self) -> &'static str
-    implements Display
+    implements Display, Error
     derives Clone, Copy, Debug, Eq, Hash, PartialEq
   fn parse_debug_filter(spec: &str) -> Result<DebugFilter, ProgrammerError>
   struct CallAsked<'name>
@@ -791,7 +794,7 @@ crate::duration
     NeverRefused
     NotANumber
     fn as_str(self) -> &'static str
-    implements Display
+    implements Display, Error
     derives Clone, Copy, Debug, Eq, Hash, PartialEq
   fn hold(name: &str, duration: Duration) -> Result<Duration, ProgrammerError>
   fn hold_finite(name: &str, duration: Duration) -> Result<Duration, ProgrammerError>
@@ -909,7 +912,7 @@ crate::errors
     derives Clone, Debug, Eq, PartialEq
   enum CallError #[non_exhaustive]
     Failure(Failure)
-    Cancelled
+    Cancelled(Option<u32>)
     Disconnected(String)
     TimedOut(Duration)
     Refused(ProgrammerError)
@@ -998,7 +1001,7 @@ crate::identity
     OffItsForm
     AgainstItsKind
     fn as_str(self) -> &'static str
-    implements Display
+    implements Display, Error
     derives Clone, Copy, Debug, Eq, Hash, PartialEq
   enum DeclarationWay #[non_exhaustive]
     ClientResolver
@@ -1088,7 +1091,7 @@ crate::jwt_verifier
     Sid
     Sub
     fn as_str(self) -> &'static str
-    implements Display
+    implements Display, Error
     derives Clone, Copy, Debug, Eq, Hash, PartialEq
   enum JwtSessionIdentifier #[non_exhaustive]
     Sid { issuer: String, sid: String }
@@ -1111,7 +1114,7 @@ crate::jwt_verifier
   fn read_jwt(token: &[u8]) -> Option<ReadJwt>
   fn verify_jwt(token: &[u8], against: &JwtAgainst<'_>) -> Result<JwtVerdict, ProgrammerError>
 crate::managers::notification
-  struct PacingLimits
+  struct PacingLimits #[non_exhaustive]
     pub maximum_queued_notification_bytes: u64
     pub maximum_queued_notifications: u64
     derives Clone, Copy, Debug, Eq, PartialEq
@@ -1358,7 +1361,7 @@ crate::metrics
   struct MetricsRegistryOptions #[non_exhaustive]
     pub maximum_procedures: Option<usize>
     derives Clone, Debug, Default
-  struct MetricsExposition
+  struct MetricsExposition #[non_exhaustive]
     pub content_type: &'static str
     pub text: String
     derives Clone, Debug, Eq, PartialEq
@@ -1380,7 +1383,7 @@ crate::metrics
     fn heard(&self)
     implements Debug
     derives Clone
-  struct ResolverSeries
+  struct ResolverSeries #[non_exhaustive]
     pub calls: ProcedureSeries
     pub notifying: Option<NotificationSeries>
     derives Clone, Debug
@@ -1479,22 +1482,23 @@ crate::router::client
     implements Debug
     derives Clone
 crate::router::core
-  struct AdmissionRequest
+  struct AdmissionRequest #[non_exhaustive]
     pub connection_handle: ConnectionHandle
     pub header: RequestHeader
     pub session: Option<Arc<CallSession>>
     implements Debug
     derives Clone
-  struct AdmissionRefusal
+  struct AdmissionRefusal #[non_exhaustive]
     pub failure: Failure
     pub by: Option<String>
+    fn new(failure: Failure) -> Self
     derives Clone, Debug
   type AdmitFn = Arc<dyn Fn(&AdmissionRequest) -> Result<Option<AdmissionRefusal>, ResolverError> + Send + Sync>
-  trait Answerer: Send + Sync
+  trait Answerer: sealed::Answerer + Send + Sync
     fn respond(&self, answer: RouterAnswer) -> BoxFuture<Result<(), CallError>>
     fn answered(&self) -> BoxFuture<Option<FailureRecord>>
     fn subscribe(&self) -> BoxFuture<Result<u32, CallError>>
-  struct RequestResolverProps
+  struct RequestResolverProps #[non_exhaustive]
     pub is_admitted: bool
     pub connection_handle: ConnectionHandle
     pub header: RequestHeader
@@ -1504,6 +1508,8 @@ crate::router::core
     pub answerer: Arc<dyn Answerer>
     implements Debug
     derives Clone
+crate::router::core::sealed
+  trait Answerer
 crate::router::relay
   struct RelayOptions #[non_exhaustive]
     pub before_route: Option<BeforeRequest>
@@ -1531,7 +1537,7 @@ crate::router::relay
     Connection(ConnectionHandle)
     Router(Arc<dyn RelayRouter>)
     derives Clone, Debug
-  struct Destination
+  struct Destination #[non_exhaustive]
     pub destination_id: u32
     pub is_closed: bool
     pub label: Option<String>
@@ -1550,7 +1556,7 @@ crate::router::server
   type ActivityListener = Arc<dyn Fn(RouterActivity, &ConnectionHandle) + Send + Sync>
   type SessionTokenProvider = Arc<dyn Fn(&ConnectionHandle) -> Result<Option<SessionToken>, RouterError> + Send + Sync>
   type SessionOf = Arc<dyn Fn(&SessionRequest<'_>, &Signal) -> Result<Option<CallSession>, RouterError> + Send + Sync,>
-  struct SessionRequest<'a>
+  struct SessionRequest<'a> #[non_exhaustive]
     pub connection_handle: &'a ConnectionHandle
     pub header: &'a RequestHeader
     derives Debug
@@ -1605,7 +1611,7 @@ crate::router::types
     pub connection_handle: ConnectionHandle
     pub call_id: u32
     derives Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd
-  struct RouterLimits
+  struct RouterLimits #[non_exhaustive]
     pub buffered_bytes_budget: u64
     pub chunk_bytes: u64
     pub maximum_answering_calls: u64
@@ -1631,7 +1637,7 @@ crate::router::types
     derives Clone, Debug, Default, Eq, PartialEq
   const LIMIT_DEFAULTS: RouterLimits
   fn limits_of(given: &RouterLimitsOptions) -> Result<RouterLimits, ProgrammerError>
-  struct IntakeLimits
+  struct IntakeLimits #[non_exhaustive]
     pub maximum_untaken_envelopes: u64
     pub maximum_untaken_bytes: u64
     derives Clone, Copy, Debug, Eq, PartialEq
@@ -1647,7 +1653,7 @@ crate::router::types
     fn key(&self) -> String
     derives Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd
   fn session_key_of(identifier: Option<&SessionIdentifier>) -> String
-  struct CallSession
+  struct CallSession #[non_exhaustive]
     pub data: Option<Value>
     pub end: Option<i64>
     pub identifier: Option<SessionIdentifier>
@@ -1695,7 +1701,7 @@ crate::router::types
     pub key: Option<NotificationKey>
     const fn new(procedure: ProcedureAddress) -> Self
     implements Debug
-  struct RouterResult
+  struct RouterResult #[non_exhaustive]
     pub header: ResultHeader
     pub payload: Bytes
     derives Clone, Debug, Eq, PartialEq
@@ -1703,7 +1709,7 @@ crate::router::types
     Result(Bytes)
     Failure(FailureRecord)
     derives Clone, Debug, Eq, PartialEq
-  struct TransportMessage
+  struct TransportMessage #[non_exhaustive]
     pub data: Bytes
     pub credential: Option<String>
     pub address: Option<String>
@@ -1720,7 +1726,7 @@ crate::router::types
     Admission
     Credential
     derives Clone, Copy, Debug, Eq, PartialEq
-  struct AccessRefusal
+  struct AccessRefusal #[non_exhaustive]
     pub stage: AccessRefusalStage
     pub code: u16
     pub reason: Option<String>
@@ -1737,7 +1743,7 @@ crate::router::types
     Other(Arc<dyn Error + Send + Sync>)
     implements Display, Error, From
     derives Clone, Debug
-  struct Gauges
+  struct Gauges #[non_exhaustive]
     pub counts: BTreeMap<&'static str, u64>
     pub ceilings: BTreeMap<&'static str, u64>
     pub connection_handles: BTreeSet<ConnectionHandle>
@@ -1824,7 +1830,7 @@ crate::server
     derives Clone
 crate::service
   struct ListedFailure
-    const fn new(name: &'static str, code: u16) -> Self
+    const fn new(name: &'static str, code: NonZeroU16) -> Self
     const fn name(&self) -> &'static str
     const fn code(&self) -> u16
     fn of(&self, detail: &str) -> Failure
@@ -1888,10 +1894,13 @@ crate::service
     implements Debug
     derives Clone
 crate::session_token
+  struct SessionTokenDrawError #[non_exhaustive]
+    implements Display, Error
+    derives Clone, Copy, Debug, Eq, PartialEq
   struct SessionToken([u8; SESSION_TOKEN_BYTES]);
     fn new(bytes: [u8; SESSION_TOKEN_BYTES]) -> Result<Self, ProgrammerError>
     fn from_slice(bytes: &[u8]) -> Result<Self, ProgrammerError>
-    fn draw<F: Fn(&Self) -> bool>(is_in_use: F) -> Result<Self, getrandom::Error>
+    fn draw<F: Fn(&Self) -> bool>(is_in_use: F) -> Result<Self, SessionTokenDrawError>
     fn bytes(&self) -> &[u8; SESSION_TOKEN_BYTES]
     fn is(&self, presented: &Self) -> bool
     implements Debug, Display, FromStr
@@ -2000,12 +2009,12 @@ crate::violations
     pub rule_id: String
     pub value: Option<Value>
     derives Clone, Debug, Default, Eq, PartialEq
-  struct Judged
+  struct Judged #[non_exhaustive]
     pub violations: Vec<Violation>
     pub more: u64
     pub stopped: bool
     derives Clone, Debug, Default, Eq, PartialEq
-  struct ReadViolations
+  struct ReadViolations #[non_exhaustive]
     pub violations: Vec<Violation>
     pub more: Option<u64>
     pub stopped: bool

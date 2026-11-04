@@ -179,16 +179,15 @@ async fn round((layer, connections): (Layer, usize)) -> Result<Round, String> {
         }
     };
     let handles: Vec<ConnectionHandle> = (0..connections).map(handle_of).collect();
-    let message = TransportMessage {
-        data: write_envelope(
-            &Envelope::Cancel {
-                header: CancelHeader { call_id: 1 },
-            },
-            1_024,
-        )
-        .map_err(|error| error.to_string())?,
-        ..TransportMessage::default()
-    };
+    let mut message = TransportMessage::default();
+
+    message.data = write_envelope(
+        &Envelope::Cancel {
+            header: CancelHeader { call_id: 1 },
+        },
+        1_024,
+    )
+    .map_err(|error| error.to_string())?;
     let opening = Instant::now();
 
     for handle in &handles {

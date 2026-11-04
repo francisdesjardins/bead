@@ -217,6 +217,10 @@ const FIRST: &str = "type=MEMORY;ip=local;ordinal=1";
 // once sent with no copy to show it
 // spec 15.13, 15.15
 #[tokio::test]
+#[expect(
+    clippy::disallowed_methods,
+    reason = "the test slices its own fixed payload at offsets within its length"
+)]
 async fn hands_each_envelope_on_whole_once_and_in_order_in_a_later_turn_than_its_send() {
     let ends = Ends::started().await;
     let (client, at_client) = ends.connected((None, None)).await;

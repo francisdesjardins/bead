@@ -495,7 +495,11 @@ impl Clock for SteppingClock {
         }
     }
 
-    fn arm(&self, schedule: Schedule, callback: TimerCallback) -> Arc<dyn Timer> {
+    fn arm(
+        &self,
+        schedule: Schedule,
+        callback: TimerCallback,
+    ) -> Result<Arc<dyn Timer>, crate::errors::ProgrammerError> {
         let (due, period) = match schedule {
             Schedule::Once(due) => (due, None),
             Schedule::Every(period) => (period, Some(period)),
@@ -522,10 +526,10 @@ impl Clock for SteppingClock {
         });
         drop(readings);
 
-        Arc::new(SteppedTimer {
+        Ok(Arc::new(SteppedTimer {
             number,
             readings: Arc::downgrade(&self.readings),
-        })
+        }))
     }
 
     fn activity(&self) -> Option<Arc<Activity>> {

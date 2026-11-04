@@ -57,7 +57,15 @@ pub trait Clock: Send + Sync + fmt::Debug {
     fn wall(&self) -> SystemTime;
 
     /// Arms a timer that calls `callback` as `schedule` says.
-    fn arm(&self, schedule: Schedule, callback: TimerCallback) -> Arc<dyn Timer>;
+    ///
+    /// # Errors
+    ///
+    /// A [`ProgrammerError`] for a zero period or a deadline outside the platform's range.
+    fn arm(
+        &self,
+        schedule: Schedule,
+        callback: TimerCallback,
+    ) -> Result<Arc<dyn Timer>, ProgrammerError>;
 
     /// What the side does on it, which a test's clock settles on: none for any other.
     #[cfg(any(test, feature = "testing"))]
@@ -157,16 +165,29 @@ mod native {
             SystemTime::now()
         }
 
-        fn arm(&self, schedule: Schedule, mut callback: TimerCallback) -> Arc<dyn Timer> {
+        fn arm(
+            &self,
+            schedule: Schedule,
+            mut callback: TimerCallback,
+        ) -> Result<Arc<dyn Timer>, ProgrammerError> {
+            let due = match schedule {
+                Schedule::Every(period) if period.is_zero() => {
+                    return Err(ProgrammerError::new("a clock's timer period is positive"));
+                }
+                Schedule::Once(due) | Schedule::Every(due) => due,
+            };
+            let _entered = self.handle.enter();
+            let start = tokio::time::Instant::now()
+                .checked_add(due)
+                .ok_or_else(|| {
+                    ProgrammerError::new("a clock's timer deadline fits the platform's range")
+                })?;
             let task = match schedule {
-                Schedule::Once(due) => platform::spawn(&self.handle, async move {
-                    tokio::time::sleep(due).await;
+                Schedule::Once(_) => platform::spawn(&self.handle, async move {
+                    tokio::time::sleep_until(start).await;
                     callback();
                 }),
                 Schedule::Every(period) => platform::spawn(&self.handle, async move {
-                    let start = tokio::time::Instant::now()
-                        .checked_add(period)
-                        .unwrap_or_else(tokio::time::Instant::now);
                     let mut interval = tokio::time::interval_at(start, period);
 
                     interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
@@ -178,9 +199,9 @@ mod native {
                 }),
             };
 
-            Arc::new(SystemTimer {
+            Ok(Arc::new(SystemTimer {
                 task: Mutex::new(Some(task.abort_handle())),
-            })
+            }))
         }
     }
 }

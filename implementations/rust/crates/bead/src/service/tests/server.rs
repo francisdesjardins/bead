@@ -54,7 +54,10 @@ struct Greeter {
 impl Greeter {
     fn new() -> Self {
         let hello = request_of(DescriptorInit {
-            failures: vec![ListedFailure::new("NOBODY_TO_GREET", 1)],
+            failures: vec![ListedFailure::new(
+                "NOBODY_TO_GREET",
+                core::num::NonZeroU16::new(1).expect("a nonzero code"),
+            )],
             ..init((1, "sayHello"), AdmissionRule::None)
         })
         .expect("hello");
@@ -475,9 +478,21 @@ async fn answers_a_failure_its_procedure_lists() {
     let pair = pair().await;
     let greeter = Greeter::new();
     let service = greeter.service(loud());
-    let listed = ListedFailure::new("NOBODY_TO_GREET", 1);
-    let catalogue =
-        failures_of(7, &[listed, ListedFailure::new("TOO_LOUD", 2)]).expect("a catalogue");
+    let listed = ListedFailure::new(
+        "NOBODY_TO_GREET",
+        core::num::NonZeroU16::new(1).expect("a nonzero code"),
+    );
+    let catalogue = failures_of(
+        7,
+        &[
+            listed,
+            ListedFailure::new(
+                "TOO_LOUD",
+                core::num::NonZeroU16::new(2).expect("a nonzero code"),
+            ),
+        ],
+    )
+    .expect("a catalogue");
     service
         .on(
             &greeter.hello,

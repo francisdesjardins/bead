@@ -1257,8 +1257,9 @@ impl ParticipantState {
             let why = connection.parts.late_of();
 
             self.lose(pair, (codes::LOST, why));
-        } else {
-            connection.parts.rearm();
+        } else if let Err(error) = connection.parts.rearm() {
+            self.config.report(&RouterError::Other(Arc::new(error)));
+            self.lose(pair, (codes::LOST, "the clock refused a timer".to_owned()));
         }
     }
 

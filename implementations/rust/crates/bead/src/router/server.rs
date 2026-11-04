@@ -86,6 +86,7 @@ pub type SessionOf = Arc<
 
 /// A connection's request as its session provider reads it, without a transport credential.
 #[derive(Debug)]
+#[non_exhaustive]
 pub struct SessionRequest<'a> {
     /// The connection the request comes from.
     pub connection_handle: &'a ConnectionHandle,
@@ -690,6 +691,9 @@ fn time(state: &mut ServerState, (handle, key): (&ConnectionHandle, &str)) {
         }
     });
 
+    let Some(timer) = super::core::timer_of(state, (timer, &handle)) else {
+        return;
+    };
     match state
         .kept
         .get_mut(&handle)
@@ -1192,7 +1196,7 @@ fn subscribe(state: &mut ServerState, dispatch: &Arc<Dispatch>) -> Result<u32, C
     }
 
     if !is_answering(state, dispatch) {
-        return Err(CallError::Cancelled);
+        return Err(CallError::Cancelled(Some(header.call_id)));
     }
 
     let procedure = ProcedureAddress {

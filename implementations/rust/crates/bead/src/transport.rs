@@ -225,6 +225,10 @@ pub trait ServerTransport: Send + Sync + fmt::Debug {
     }
 
     /// Starts it.
+    ///
+    /// # Errors
+    ///
+    /// A [`RouterError`] when its options or state are refused, or its listener cannot start.
     fn start(&self) -> BoxFuture<Result<(), RouterError>>;
 
     /// Stops it, closing every connection; settles at once when it never started or stopped
@@ -755,20 +759,22 @@ where
         let next = hold_delay("a delay", next)?;
         // armed before tap is told, so whoever moves the clock once told moves it past the wait;
         // none at 0, which takes a turn of its runtime once told instead
-        let armed = (!next.is_zero()).then(|| {
-            let (woken, wait) = oneshot::channel::<()>();
-            let mut woken = Some(woken);
-            let timer = clock.arm(
-                Schedule::Once(next),
-                Box::new(move || {
-                    if let Some(woken) = woken.take() {
-                        woken.send(()).ok();
-                    }
-                }),
-            );
+        let armed = (!next.is_zero())
+            .then(|| {
+                let (woken, wait) = oneshot::channel::<()>();
+                let mut woken = Some(woken);
+                let timer = clock.arm(
+                    Schedule::Once(next),
+                    Box::new(move || {
+                        if let Some(woken) = woken.take() {
+                            woken.send(()).ok();
+                        }
+                    }),
+                );
 
-            (timer, wait)
-        });
+                timer.map(|timer| (timer, wait))
+            })
+            .transpose()?;
 
         if let Some(tap) = &options.tap
             && let Err(panicked) = caught(("a reconnection's tap", || tap(next, number)))

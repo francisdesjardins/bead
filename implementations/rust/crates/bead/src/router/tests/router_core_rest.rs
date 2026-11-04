@@ -292,6 +292,10 @@ async fn settles_a_call_with_an_answer_of_this_layout_that_does_not_read_and_nev
     clippy::too_many_lines,
     reason = "the twin plays whole and transferred requests, admitted and refused, in one scenario"
 )]
+#[expect(
+    clippy::disallowed_methods,
+    reason = "the test slices its own fixed payload at offsets within its length"
+)]
 async fn asks_a_request_s_admission_on_its_header_once_past_its_route_and_before_its_payload_a_refusal_answers_it_before_any_credit()
  {
     let served = Served::new(&RouterServerOptions {

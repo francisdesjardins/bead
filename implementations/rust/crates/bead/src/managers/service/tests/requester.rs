@@ -188,7 +188,7 @@ async fn one_unanswered_in_time_closes_its_connection_as_the_call_or_else_the_ma
                 matches!(outcome, Err(CallError::Failure(failure)) if failure.code() == ProtocolCode::PROCEDURE_FAILED.get())
             ),
             "closed" => assert!(matches!(outcome, Err(CallError::Disconnected(_)))),
-            "cancelled" => assert!(matches!(outcome, Err(CallError::Cancelled))),
+            "cancelled" => assert!(matches!(outcome, Err(CallError::Cancelled(_)))),
             "result" => assert_eq!(outcome.expect("answered"), "run"),
             _ => panic!("a test ending"),
         }
@@ -472,7 +472,7 @@ async fn takes_the_managers_defaults_where_the_call_says_nothing_and_its_signal_
         crate::testing::patience(Duration::from_secs(10), second)
             .await
             .expect("settled"),
-        Err(crate::errors::CallError::Cancelled)
+        Err(crate::errors::CallError::Cancelled(_))
     ));
     for (id, call, payload) in [(1, first, "a"), (5, third, "c")] {
         fixture

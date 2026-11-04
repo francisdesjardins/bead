@@ -401,7 +401,7 @@ async fn report_a_chunk_no_transfer_takes_on_a_call_open_without_one_or_on_none_
         .expect("call cancelled");
 
     assert!(
-        matches!(answered(call).await, Err(CallError::Cancelled)),
+        matches!(answered(call).await, Err(CallError::Cancelled(_))),
         "the pending call stays until cancelled"
     );
 }

@@ -202,6 +202,10 @@ fn detail_of(detail: &str) -> String {
     String::from_utf8(record.get(4..).unwrap_or_default().to_vec()).expect("a detail in UTF-8")
 }
 
+#[expect(
+    clippy::disallowed_methods,
+    reason = "the test repeats its own string a bounded number of times"
+)]
 fn letters(count: usize) -> String {
     "a".repeat(count)
 }

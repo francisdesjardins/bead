@@ -277,6 +277,10 @@ fn signed_text(header: &str, claims: &str) -> String {
 }
 
 #[test]
+#[expect(
+    clippy::disallowed_methods,
+    reason = "the test repeats its own string a bounded number of times"
+)]
 fn reads_a_token_s_parts_as_section_17_5_bounds_a_payload_no_number_past_the_largest_double_nested_64_deep_at_most()
  {
     let (token, keys, audiences, now) = holding();
@@ -350,6 +354,10 @@ fn reads_a_token_s_parts_as_section_17_5_bounds_a_payload_no_number_past_the_lar
 }
 
 #[test]
+#[expect(
+    clippy::disallowed_methods,
+    reason = "the test repeats its own string a bounded number of times"
+)]
 fn reads_the_wall_clock_once_the_signature_verifies_so_a_verification_that_waits_past_a_token_s_end_refuses_it_at_exp()
  {
     let (token, keys, audiences, _) = holding();

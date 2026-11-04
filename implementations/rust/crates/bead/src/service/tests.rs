@@ -38,10 +38,17 @@ fn locked<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
 
 #[test]
 fn keeps_a_catalogue_of_failures_each_of_its_own_code_refusing_one_of_0_or_one_twice() {
-    let on_purpose = ListedFailure::new("ON_PURPOSE", 7);
+    assert_eq!(NonZeroU16::new(0), None, "no code of zero is constructed");
+    let on_purpose = ListedFailure::new("ON_PURPOSE", NonZeroU16::new(7).expect("a nonzero code"));
     let catalogue = failures_of(
         1,
-        &[on_purpose, ListedFailure::new("REGISTERED_ALREADY", 8)],
+        &[
+            on_purpose,
+            ListedFailure::new(
+                "REGISTERED_ALREADY",
+                NonZeroU16::new(8).expect("a nonzero code"),
+            ),
+        ],
     )
     .expect("a catalogue of two codes");
 
@@ -53,21 +60,22 @@ fn keeps_a_catalogue_of_failures_each_of_its_own_code_refusing_one_of_0_or_one_t
             .expect_err("a service of id 0")
             .message()
             .to_owned(),
-        failures_of(1, &[ListedFailure::new("NONE", 0)])
-            .expect_err("a code of 0")
-            .message()
-            .to_owned(),
-        failures_of(1, &[on_purpose, ListedFailure::new("AGAIN", 7)])
-            .expect_err("a code twice")
-            .message()
-            .to_owned(),
+        failures_of(
+            1,
+            &[
+                on_purpose,
+                ListedFailure::new("AGAIN", NonZeroU16::new(7).expect("a nonzero code")),
+            ],
+        )
+        .expect_err("a code twice")
+        .message()
+        .to_owned(),
     ];
 
     assert_eq!(
         refused,
         [
             "a service's id is a whole number from 1 to 65535, not 0",
-            "a failure's code is a whole number from 1 to 65535, not 0 for NONE",
             "AGAIN and ON_PURPOSE are both failure 7",
         ],
         "each refused, saying why"
@@ -201,7 +209,10 @@ async fn sends_an_unlisted_code_as_written_and_reports_it() {
     let descriptor = request_of(DescriptorInit {
         procedure: echo(),
         admission: AdmissionRule::None,
-        failures: vec![ListedFailure::new("ON_PURPOSE", 7)],
+        failures: vec![ListedFailure::new(
+            "ON_PURPOSE",
+            NonZeroU16::new(7).expect("a nonzero code"),
+        )],
         request: JsonCodec,
         result: JsonCodec,
         validate: None,

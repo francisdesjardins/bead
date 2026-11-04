@@ -223,6 +223,7 @@ impl UnsetStep {
 
 /// Where in its field a step takes a message.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub(crate) enum Place {
     /// A singular field's message.
     Field,

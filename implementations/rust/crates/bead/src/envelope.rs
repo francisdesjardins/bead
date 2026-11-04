@@ -1033,6 +1033,10 @@ pub fn read_envelope(
     else {
         return Ok(None);
     };
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "the header's end is clamped to the envelope's length"
+    )]
     let body = bytes.slice(header_bytes.min(bytes.len())..);
     let nothing_after = |what: &str| -> Result<(), Failure> {
         if body.is_empty() {

@@ -36,6 +36,7 @@ pub struct Violation {
 /// What a judging gives: the violations its detail can carry, the count of the rest, and whether
 /// it stopped at its first.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[non_exhaustive]
 pub struct Judged {
     /// The violations, in their order (spec 18.5).
     pub violations: Vec<Violation>,
@@ -50,6 +51,7 @@ pub struct Judged {
 /// Its violations, and its closing line's count, or that its side stopped; neither where the detail
 /// holds no closing line.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[non_exhaustive]
 pub struct ReadViolations {
     /// The violations read, in their order.
     pub violations: Vec<Violation>,
