@@ -8,6 +8,23 @@ use super::{CallError, ConnectError, ProgrammerError, ResolverError, TransportEr
 use crate::router::types::RouterError;
 
 #[test]
+fn keeps_the_original_reason_as_cause() {
+    let reason = Arc::new(std::io::Error::other("root"));
+    let source: Arc<dyn Error + Send + Sync> = Arc::<std::io::Error>::clone(&reason);
+    let error = ConnectError::caused("wrapped", source);
+
+    assert_eq!(error.message(), "wrapped");
+    assert!(core::ptr::eq(
+        error
+            .source()
+            .expect("the original reason")
+            .downcast_ref::<std::io::Error>()
+            .expect("the original error type"),
+        reason.as_ref()
+    ));
+}
+
+#[test]
 fn timeout_error_keeps_the_milliseconds_waited_and_says_them_or_the_words_it_is_given() {
     let timeout = core::time::Duration::from_millis(5_000);
     let connect = TransportError::TimedOut(timeout);
