@@ -129,6 +129,13 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `maximumAttempts` left out is without end, a transport client's `reconnect`'s 5: on the C# side
   `TransportClientReconnectOptions.MaximumAttempts` is an `int?`, where a participant given a
   `Reconnect` without it gave up after five attempts (spec 15.21; decision 0038).
+- **Breaking:** the TypeScript side's mapping of protobuf's JSON is one object made over its
+  messages, as the C# side's `JsonForm` is: `createJsonForm(schemas)` gives `read(schema, body)`,
+  `write(schema, message)`, `writeField(field, message)` and `eventDataOf(payload, bytes)`, and
+  `createHTTPBinding(schemas)` gives `bind(schema, options)`, as the C# side's `HttpBinding`.
+  `readMessage`, `readProtoJson`, `writeProtoJson`, `writeFieldJson`, `typeRegistryOf`,
+  `readJsonText`, `bindRequest` and `eventDataOf` leave `@francisdesjardins/bead/transcoding`, with
+  `IJsonFormOptions`, `ITypeRegistry` and `JsonNode`, and `IBindingOptions` takes no `registry`.
 - A fixed reconnection delay that is not 0 and not from 1 to 2³¹ − 1 ms is refused where it is
   given, on every side: a participant's as it is built, whatever its `reconnects`, and a transport
   client's as `reconnect` is called, after its state guards and before its signal, nothing moved,

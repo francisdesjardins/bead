@@ -21,8 +21,8 @@
 //   and at depth one whose every element is labeled, an event map's; a non-rest parameter's or a
 //   return's own type is never one. A conditional type's `[X] extends [Y]` is no value, skipped.
 //
-// What the options rule waives is `WAIVED`, and the tuple rule `WAIVED_TUPLES`, each with its
-// reason. `bead/options-last` judges what syntax shows of the options rule; this judges what only
+// What the tuple rule waives is `WAIVED_TUPLES`, each with its reason; the options rule waives
+// nothing. `bead/options-last` judges what syntax shows of the options rule; this judges what only
 // the checker knows, a named type's members.
 //
 // Usage, from the package's folder; `yarn check` runs it as `yarn surface:check`:
@@ -52,15 +52,6 @@ const { API, ElementFlags, SignatureKind, SymbolFlags } = await moduleOf(
 );
 const is = await moduleOf('typescript-7/unstable/ast/is');
 
-/**
- * The rule's waivers, by the declaration's file and name, each with its reason: what it waives is
- * a design to revisit, which a `// TODO` beside the declaration names.
- */
-const WAIVED = Object.freeze({
-  'src/transcoding/json-form.ts writeFieldJson':
-    'three members required, its operand among them: toward `JsonForm` on the C# side, as its TODO says',
-});
-
 // `typeToString`'s `NoTruncation`: a type printed whole, however long
 const NO_TRUNCATION = 1;
 
@@ -70,8 +61,6 @@ const NO_TRUNCATION = 1;
  */
 const WAIVED_TUPLES = Object.freeze({
   'src/proto/validate.ts entriesByKey': "a map's entries as ECMA-262's Object.entries gives them",
-  'src/transcoding/json-form.ts JsonNode':
-    "an object's members in order, each as ECMA-262's Object.entries gives it",
   'src/transport/server/http-policy.ts HTTP_POLICY_MEMBERS':
     'a frozen list of names, which as const types as a tuple',
 });
@@ -383,13 +372,7 @@ function judgeCallable({ type, where }, scope) {
       if (fault === undefined) {
         continue;
       }
-      const place = placeOf(options.node);
-      const declaration = signature.declaration?.resolve();
-      const owner = declaration?.parent?.name?.getText() ?? declaration?.name?.getText();
-      if (Object.hasOwn(WAIVED, `${place.file} ${owner ?? ''}`)) {
-        continue;
-      }
-      scope.faults.set(`${where}\t${fault}`, place);
+      scope.faults.set(`${where}\t${fault}`, placeOf(options.node));
     }
   }
 }

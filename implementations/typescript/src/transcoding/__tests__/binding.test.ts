@@ -2,13 +2,11 @@ import { create, fromJsonString } from '@bufbuild/protobuf';
 import { AnySchema, FieldMaskSchema } from '@bufbuild/protobuf/wkt';
 import { expect, test } from '@playwright/test';
 import { ProgrammerError } from '../../transport/shared/errors';
-import { bindRequest, type IBindingOptions } from '../binding';
-import { JsonFormError, typeRegistryOf } from '../json-form';
+import { bindRequest, createHTTPBinding, type IBindingOptions } from '../binding';
+import { JsonFormError } from '../json-form';
 import {
   PatchRequestSchema,
   PatchStructRequestSchema,
-  type PatchRequest,
-  type PatchStructRequest,
 } from './binding-fixtures/generated/patch_binding_pb';
 import {
   EverythingSchema,
@@ -21,29 +19,32 @@ import {
 
 // constants
 
-const REGISTRY = typeRegistryOf([EverythingSchema, GetBookRequestSchema, UpdateBookRequestSchema]);
+const BINDING = createHTTPBinding([
+  EverythingSchema,
+  GetBookRequestSchema,
+  UpdateBookRequestSchema,
+]);
 
 const ENCODER = new TextEncoder();
 
 // helpers
 
-const getBook = (options: Omit<IBindingOptions, 'registry'>): GetBookRequest => {
-  return bindRequest(GetBookRequestSchema, { ...options, registry: REGISTRY }) as GetBookRequest;
+const getBook = (options: IBindingOptions): GetBookRequest => {
+  return BINDING.bind(GetBookRequestSchema, options);
 };
 
 const updateBook = (body: string, query?: string): UpdateBookRequest => {
-  return bindRequest(UpdateBookRequestSchema, {
+  return BINDING.bind(UpdateBookRequestSchema, {
     body: ENCODER.encode(body),
     isPatch: true,
     ...(query === undefined ? {} : { query }),
-    registry: REGISTRY,
     routeBody: 'book',
     variables: { 'book.name': 'shelves/1/books/2' },
-  }) as UpdateBookRequest;
+  });
 };
 
-const everything = (options: Omit<IBindingOptions, 'registry'>): Everything => {
-  return bindRequest(EverythingSchema, { ...options, registry: REGISTRY }) as Everything;
+const everything = (options: IBindingOptions): Everything => {
+  return BINDING.bind(EverythingSchema, options);
 };
 
 /** Why `bind` is refused, in the words of transcoding 4 and 5. */
@@ -90,15 +91,14 @@ test('reads raw Unicode query values and keeps malformed percent escapes literal
 });
 
 test('keeps arbitrary Struct members out of an inferred PATCH mask', () => {
-  const registry = typeRegistryOf([PatchStructRequestSchema]);
+  const binding = createHTTPBinding([PatchStructRequestSchema]);
   for (const body of ['{}', '{"customKey":1}', '{"customKey":1,"other_key":{"nested":false}}']) {
-    const read = bindRequest(PatchStructRequestSchema, {
+    const read = binding.bind(PatchStructRequestSchema, {
       body: ENCODER.encode(body),
       isPatch: true,
-      registry,
       routeBody: 'profile',
       variables: {},
-    }) as PatchStructRequest;
+    });
 
     expect(read.profile).toEqual(
       fromJsonString(PatchStructRequestSchema, `{"profile":${body}}`).profile
@@ -267,13 +267,12 @@ test('refuses a body that is no object as the request whole, or under a field a 
 });
 
 test('fills no update_mask path of a PATCH’s body that is no object, and refuses a member of it that names no field', () => {
-  const read = bindRequest(UpdateBookRequestSchema, {
+  const read = BINDING.bind(UpdateBookRequestSchema, {
     body: ENCODER.encode('null'),
     isPatch: true,
-    registry: REGISTRY,
     routeBody: 'book',
     variables: {},
-  }) as UpdateBookRequest;
+  });
 
   expect(read.book).toBeUndefined();
   expect(read.updateMask?.paths).toEqual([]);
@@ -289,13 +288,12 @@ test('fills a PATCH mask from snake-case fields through nested and empty message
     '{"displayName":"Ada","nestedProfile":{"displayName":"Grace"},"emptyProfile":{}}',
     '{"display_name":"Ada","nested_profile":{"display_name":"Grace"},"empty_profile":{}}',
   ]) {
-    const read = bindRequest(PatchRequestSchema, {
+    const read = createHTTPBinding([PatchRequestSchema]).bind(PatchRequestSchema, {
       body: ENCODER.encode(body),
       isPatch: true,
-      registry: typeRegistryOf([PatchRequestSchema]),
       routeBody: 'profile',
       variables: {},
-    }) as PatchRequest;
+    });
 
     expect(read).toEqual(
       create(PatchRequestSchema, {
@@ -317,6 +315,8 @@ test('throws a programmer’s error for a variable that names no field', () => {
 });
 
 test('propagates a supplied type registry’s error without placing it in the request', () => {
+  // * through the module's own binding, off the entry: a binding made over its schemas holds a
+  // registry of its own, which a caller supplies no other of
   for (const failure of [
     new Error('the type registry failed'),
     new JsonFormError('the registry refuses'),

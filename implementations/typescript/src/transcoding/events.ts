@@ -10,7 +10,6 @@ import { assertHeld, type IClock, type TimeoutId } from '../transport/shared/clo
 import { ProgrammerError } from '../transport/shared/errors';
 
 export { HEARTBEAT } from '../transport/shared/heartbeat';
-import { base64Of } from './json-form';
 import type { IProblem } from './problems';
 
 // interfaces
@@ -80,18 +79,6 @@ export const HEARTBEAT_COMMENT = ':\n';
 /** An event's lines (8.5): its name where it has one, its id, its data, then the empty line. */
 export const eventOf = ({ data, id, name }: IServerSentEvent): string => {
   return `${name === undefined ? '' : `event: ${name}\n`}id: ${String(id)}\ndata: ${data}\n\n`;
-};
-
-/**
- * A `text` or a `raw` payload as an event's data (8.4): its text, or its bytes in standard base64,
- * padded, each a JSON string; a `proto` or a `json` one's is its JSON already.
- */
-export const eventDataOf = (
-  payload: { bytes: Uint8Array; encoding: 'raw' } | { encoding: 'text'; text: string }
-): string => {
-  return payload.encoding === 'text'
-    ? JSON.stringify(payload.text)
-    : `"${base64Of(payload.bytes)}"`;
 };
 
 // definition
