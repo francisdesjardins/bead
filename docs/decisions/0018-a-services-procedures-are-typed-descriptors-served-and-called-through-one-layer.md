@@ -353,15 +353,17 @@ _Conformance:_ none. _Matrix:_ none; `Connect` outside `IClient` is a type's sha
   protocol buffer files to ensure compatibility with the gRPC version used. The latest support
   package version is 9. Older versions are kept for compatibility" (pkg.go.dev,
   `google.golang.org/grpc`). `GENERATED_CODE_SUPPORTS_VERSION_6` on the TypeScript side, and
-  `GeneratedCode.SupportsVersion6` on the C# side, with no underscore, so CA1707 stands; 2 since the
+  `GeneratedCode.SupportsVersion7` on the C# side, with no underscore, so CA1707 stands, each
+  runtime's counter its own, as gRPC-Go's is its package's; 2 since the
   layer's options are typed by the service, which generated code names, 3 since it calls the
   check of a `proto` payload's records
   ([0028](0028-a-proto-payloads-records-are-read-against-its-message-before-its-library-reads-them.md)),
   4 since it generates the validators of a request's rules
   ([0035](0035-a-payload-that-reads-is-held-to-its-messages-rules-before-its-resolver-sees-it.md)),
-  and 6 since its codec is the runtime's codec of a schema, which judges a message's required fields
-  ([0042](0042-a-proto-message-that-leaves-a-required-field-unset-neither-reads-nor-writes-and-a-gateway-refuses-it-where-its-server-would.md));
-  and 5 beside it, `GENERATED_CODE_SUPPORTS_VERSION_5` of `./transcoding` and
+  6 since its codec is the runtime's codec of a schema, which judges a message's required fields
+  ([0042](0042-a-proto-message-that-leaves-a-required-field-unset-neither-reads-nor-writes-and-a-gateway-refuses-it-where-its-server-would.md)),
+  and on the C# side 7 since a server class's commands are typed `BoundCommand` over
+  `CommandOptions`; and 5 beside it, `GENERATED_CODE_SUPPORTS_VERSION_5` of `./transcoding` and
   `GeneratedCode.SupportsVersion5`, for an output that writes a route table, which names the
   transcoding layer's types
   ([0037](0037-a-procedure-is-also-an-http-route-which-a-gateway-answers-as-one-more-client-of-its-server.md)).
@@ -723,7 +725,7 @@ stops a judging at its first violation.
 export interface IServiceServer<S extends ServiceProcedures, Data = unknown> {
   /** A requester of each command, made as the service is offered; one called before is a ProgrammerError. */
   readonly command: {
-    readonly [Name in CommandName<S>]: IRequest<
+    readonly [Name in CommandName<S>]: ICommand<
       GivenOf<S[Name]['request']>,
       ValueOf<S[Name]['result']>,
       TransportServerConnectionHandle
@@ -765,8 +767,7 @@ export interface IServiceClient<S extends ServiceProcedures> {
   readonly request: {
     readonly [Name in AnsweredName<S>]: IRequest<
       GivenOf<S[Name]['request']>,
-      ValueOf<S[Name]['result']>,
-      RouterClientConnectionHandle
+      ValueOf<S[Name]['result']>
     >;
   };
   /** Registers the resolver of a command it answers; twice for one command is a ProgrammerError. */
@@ -814,7 +815,7 @@ public sealed class ServiceServer<TService, TData>
 
     public void Offer(IBeadServer<TData> server);
 
-    public Func<TRequest, BoundCall<TResult>> CommandOf<TRequest, TResult, TFailure>(
+    public Func<TRequest, BoundCommand<TResult>> CommandOf<TRequest, TResult, TFailure>(
         CommandProcedure<TService, TRequest, TResult, TFailure> procedure)
         where TFailure : IApplicationFailure;
 
@@ -937,31 +938,47 @@ TypeScript and C# sides, and the guard sits on it alone:
 
 ```ts
 /** A call bound to its payload: called with its options, it goes. */
-export interface IBoundCall<Result, Options extends unknown[] = RequestOptionsParameters> {
+export interface IBoundCall<Result, Options extends unknown[] = [options?: IRequestOptions]> {
   (...options: Options): Promise<Result>;
   /** Never set: awaiting the bound call, its options' call forgotten, is TS1320. */
   readonly then?: (guard: never) => never;
 }
 
-export interface IRequest<
+/** A command bound to its payload: its options, which name its connection, are required. */
+export type IBoundCommand<Result, Handle extends string = ConnectionHandle> = IBoundCall<
+  Result,
+  [options: ICommandOptions<Handle>]
+>;
+
+/** A subscribing call bound to its payload and its callback: its options name no credential. */
+export type IRegistrar = IBoundCall<INotificationRegistration, [options?: IRegistrationOptions]>;
+
+export interface IRequest<RequestPayload, ResponsePayload> extends IProcedure {
+  (requestPayload: RequestPayload): IBoundCall<ResponsePayload>;
+}
+
+export interface ICommand<
   RequestPayload,
   ResponsePayload,
   Handle extends string = ConnectionHandle,
 > extends IProcedure {
-  (requestPayload: RequestPayload): IBoundCall<ResponsePayload, RequestOptionsParameters<Handle>>;
+  (requestPayload: RequestPayload): IBoundCommand<ResponsePayload, Handle>;
 }
-
-// INotification's call gives IRegistrar: an IBoundCall<INotificationRegistration, [options?: …]>
 ```
 
-On the C# side, the delegate is `BoundCall<TResponse>`, and `Registrar` keeps its name, since it
-names neither a registration nor a request; `IRegistrar` is its TypeScript twin. The spec's
+A request takes `IRequestOptions`; a command, a request a server makes (spec 16.11), takes
+`ICommandOptions`, which extends it with the connection it goes to, required, and its close on
+timeout. On the C# side, the delegates are `BoundCall<TResponse>`, over `RequestOptions?`, and
+`BoundCommand<TResponse>`, over `CommandOptions`, required, whose `ConnectionHandle` is `required`;
+`Registrar` takes `RegistrationOptions?` and keeps its name, since it names neither a registration
+nor a request; `IRegistrar` is its TypeScript twin. The spec's
 _requester_ is the party that makes a request ("as a requester is made, through the router's
 `declareRequester`", `spec/debugging.md`), which a delegate named `Requester<TResponse>` would give
 a second meaning; the bound call is named after the call it makes, the user's choice, though the
 object makes a call rather than being one. The Rust side binds no call: its `Request::call` takes
-the payload and the options at once and sends the call as it is made, its `ServiceCall` only waiting
-for the outcome
+the payload and `&RequestOptions` at once, and `Command::call` the payload and `&CommandOptions`,
+built by `CommandOptions::new(connection_handle)`; each sends the call as it is made, its
+`ServiceCall` only waiting for the outcome
 ([0044](0044-rust-one-owner-per-router-traits-no-unsafe-two-parameters-no-warning.md)).
 
 What the guard catches, under TypeScript 7.0.2: `await procedure(request)` and `await
@@ -1064,15 +1081,17 @@ a route table, `bead_http.ts`, imports `./transcoding`
 ([0037](0037-a-procedure-is-also-an-http-route-which-a-gateway-answers-as-one-more-client-of-its-server.md)).
 
 **Generated code names the contract it needs.** `GENERATED_CODE_SUPPORTS_VERSION_6` in `./service`,
-`true`; `GeneratedCode.SupportsVersion6`, a `const bool` on a static class in `Bead.Core`; and, for
-a route table, `GENERATED_CODE_SUPPORTS_VERSION_5` in `./transcoding` (`src/transcoding/routes.ts`)
-and `GeneratedCode.SupportsVersion5` beside it. A generated file names the highest it needs:
-`void GENERATED_CODE_SUPPORTS_VERSION_6;`, and in C# a private constant of it. The counter moves
-only when generated code needs something the runtime did not have: 2 for the layer's options typed
-by the service, `IServiceClientOptions` and the client side's Bead client apart on the TypeScript
-side, `IServiceAdmissions<TService>`, `IServiceWindows<TService>`, `ServiceServerOptions<TService>`,
-`ServiceClientOptions<TService>` and the client side's three parameters on the C# side; 3 for the
-check of a `proto` payload's records, `checkProtoRecords` and `ProtoRecords.Check`
+`true`; `GeneratedCode.SupportsVersion7`, a `const bool` on a static class in `Bead.Core`, each
+runtime's counter its own, as gRPC-Go's is its package's; and, for a route table,
+`GENERATED_CODE_SUPPORTS_VERSION_5` in `./transcoding` (`src/transcoding/routes.ts`) and
+`GeneratedCode.SupportsVersion5` beside it. A generated file names the highest it needs,
+`void GENERATED_CODE_SUPPORTS_VERSION_6;`, and in C# a private constant of its runtime's. The
+counter moves only when generated code needs something the runtime did not have: 2 for the layer's
+options typed by the service, `IServiceClientOptions` and the client side's Bead client apart on the
+TypeScript side, `IServiceAdmissions<TService>`, `IServiceWindows<TService>`,
+`ServiceServerOptions<TService>`, `ServiceClientOptions<TService>` and the client side's three
+parameters on the C# side; 3 for the check of a `proto` payload's records, `checkProtoRecords` and
+`ProtoRecords.Check`
 ([0028](0028-a-proto-payloads-records-are-read-against-its-message-before-its-library-reads-them.md));
 4 for the validators of a request's rules, `validatorOf` and `Validators.Of`
 ([0035](0035-a-payload-that-reads-is-held-to-its-messages-rules-before-its-resolver-sees-it.md)); 5
@@ -1080,21 +1099,26 @@ for what a route table names, `routeOf` and the transcoding layer that reads it 
 side, `HttpRoute`, `HttpRouteTemplate` and `HttpPayload` on the C# side
 ([0037](0037-a-procedure-is-also-an-http-route-which-a-gateway-answers-as-one-more-client-of-its-server.md));
 6 for the runtime codec of a schema, `protoCodecOf` and `ProtoCodecs.Of`
-([0042](0042-a-proto-message-that-leaves-a-required-field-unset-neither-reads-nor-writes-and-a-gateway-refuses-it-where-its-server-would.md)).
-An older constant stays while the runtime still serves the code that names it: before 1.0.0, it goes
-once the code that names it no longer conforms through the runtime, and from 1.0.0 it stays for the
-whole major. The runtime holds 5 and 6, 5 for a route table, which calls no codec, and none
-older: code that names 4 judges no required field, code that names 3 judges no request by its
-rules, and code that names 2 reads a `proto` payload unchecked, none of which conforms through any
-runtime.
-A file of a later beadc, built against a runtime that lacks its constant, fails on the counter
-(TS2724, CS0117), not on a signature.
+([0042](0042-a-proto-message-that-leaves-a-required-field-unset-neither-reads-nor-writes-and-a-gateway-refuses-it-where-its-server-would.md));
+7 on the C# side for what a server class's commands are typed by, `BoundCommand` and
+`CommandOptions`, where the TypeScript side's generated code names `IServiceServer`'s `command`,
+which needs nothing new, and stays at 6. An older constant stays while the runtime still serves the
+code that names it: before 1.0.0, it goes once the code that names it no longer conforms through the
+runtime, and from 1.0.0 it stays for the whole major. The TypeScript runtime holds 5 and 6, and the
+C# runtime 5, 6 and 7: 5 for a route table, which calls no codec; on the C# side 6 for a file whose
+`…Commands` class holds no command, which still conforms, while one that holds a command fails at
+its type, `BoundCall` against `BoundCommand`; and none older: code that names 4 judges no required
+field, code that names 3 judges no request by its rules, and code that names 2 reads a `proto`
+payload unchecked, none of which conforms through any runtime. A file of a later beadc, built
+against a runtime that lacks its constant, fails on the counter (TS2724, CS0117), not on a
+signature.
 
 **Where it lives.** The TypeScript side: `src/service/` — `service.ts` the entry,
 `service-server.ts`, `service-client.ts`, `descriptors.ts`, `failures.ts`, `generated-code.ts`, a
 test file each in `src/service/__tests__/`; the codecs stay in `router/shared/payloads.ts`, with
 `payloadCodecOf` beside them; `ProcedureKind` in `router/shared/constants.ts`; `ISubscriber`,
-`IBoundCall` and `IRegistrar` in `router/shared/types.ts`; `checkProcedureKind` in
+`IBoundCall`, `IBoundCommand`, `IRegistrar`, `ICommand`, `ICommandOptions` and
+`IRegistrationOptions` in `router/shared/types.ts`; `checkProcedureKind` in
 `router/shared/identity.ts`, run by each router. The C# side, in `Bead.Core`: `ServiceServer.cs`,
 `ServiceClient.cs`, `ServiceProcedures.cs` (the descriptors, `ProcedureBindings`, `AdmissionRule`,
 `AdmissionHook`), `FailureCatalogue.cs` (with `IApplicationFailure`, `NoFailure`,

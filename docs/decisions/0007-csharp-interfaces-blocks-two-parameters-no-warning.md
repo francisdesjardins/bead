@@ -39,12 +39,13 @@ them at most one options record, always last:
 `FindIn(haystack, needle, new FindOptions { FromIndex = 10 })`, as the TypeScript side writes
 `findIn(haystack, needle, { fromIndex: 10 })`, where a required member is one without `?`, its
 options parameter then without `?` or a default, and one required in some instantiations alone a
-conditional parameter type, as `RequestOptionsParameters` is. The count is Deno's, and Bead holds it
+conditional parameter type, as `ConnectParameters` is. The count is Deno's, and Bead holds it
 for every function, not only the public ones; inside a side a tuple counts as one parameter, and on
 the surface none is taken or given ([0004](0004-one-behaviour-in-every-language.md)). The options record is a sealed record of `init`
 properties, its name ending in `Options`; a setting the record cannot be built without is
 `required`, at most two of them and never the call's operand, the record then a required parameter,
-as a connect's `Host` and `Port` make it; with none, the record is optional,
+as a connect's `Host` and `Port` make it, and a command's `ConnectionHandle` makes `CommandOptions`;
+with none, the record is optional,
 `TOptions? options = null`, or an overload without it where a platform rule asks for one (CA1032's
 exception constructors) or where a member is required in some instantiations alone (a service with
 no hook); a callback's options, which Bead hands, are always given

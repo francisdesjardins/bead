@@ -497,13 +497,14 @@ its options, as the other sides' callers keep their object, where C-CALLER-CONTR
 ownership over: a function that keeps a part clones it, a count or a few words. An options struct is
 never `Copy`, since clippy's `trivially_copy_pass_by_ref` refuses `&` of a small `Copy` one and
 `needless_pass_by_value` refuses one taken by value and only read. Where a member is required in
-some instantiations alone, the side states it by a type of its own where the type names the case,
-and otherwise takes it as an `Option` refused where the object is used, a row of the matrix. A
-callback Bead declares takes its options as `&…Options` too. Clippy's `too_many_arguments` at 4,
-since it counts the receiver, and `bead-house`'s tests hold it: the parameters, each public
-`…Options` struct's shape, and each options parameter by `&`, as `max-params`, `bead/options-last`
-and `tools/check-surface.mjs` hold the TypeScript side's. The count binds every function. Inside the
-crate a tuple counts as one parameter. On the surface no item takes or gives one
+some instantiations alone, the side states it by a type of its own where the type names the case, as
+`CommandOptions`, whose `new` takes its connection, and otherwise takes it as an `Option` refused
+where the object is used, a row of the matrix. A callback Bead declares takes its options as
+`&…Options` too. Clippy's `too_many_arguments` at 4, since it counts the receiver, and
+`bead-house`'s tests hold it: the parameters, each public `…Options` struct's shape, and each
+options parameter by `&`, as `max-params`, `bead/options-last` and `tools/check-surface.mjs` hold
+the TypeScript side's. The count binds every function. Inside the crate a tuple counts as one
+parameter. On the surface no item takes or gives one
 ([0004](0004-one-behaviour-in-every-language.md)), which `bead-house`'s `tuples.rs` holds: two
 things are two parameters, a third essential thing a record of the call, `RouterRequest` or
 `NotifyRequest`, and several values given back a `#[non_exhaustive]` struct.
