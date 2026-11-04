@@ -151,19 +151,8 @@ pub(crate) fn end_counted<S: Side>(state: &mut S, (dispatch, ending): (&Dispatch
     let call = call_of(dispatch);
     let core = state.core();
 
-    if let Some(answering) = core.answering.get_mut(&call)
-        && answering.dispatched == dispatch.id
-        && !answering.is_ended
-        && let Some(series) = answering.series.clone()
-    {
-        // * read only for a call counted (spec/debugging.md 3.1)
-        let now = core.clock.monotonic();
-
-        answering.is_ended = true;
-        series.end(
-            ending,
-            crate::router::core::microseconds_of(now.saturating_sub(answering.started_at)),
-        );
+    if let Some(answering) = core.answering.answering_of_mut((&call, dispatch.id)) {
+        answering.end(ending, || core.clock.monotonic());
     }
 }
 

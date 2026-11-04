@@ -275,6 +275,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   participant was stopped, and on the C# side named a start the stop met (spec 15.21).
 - On the C# side, a client's reconnection over a broker participant that stops ends with the stop
   inside its `OperationCanceledException`, where it held the wait's `TaskCanceledException`.
+- An answer, or a subscription, given a request header its router never dispatched is refused —
+  a `ProgrammerError` on the TypeScript side, an `ArgumentException` on the C# side — and nothing
+  goes out. It answered whatever call held that call id: a second answer to an answered call, or one
+  after its requester's cancel (spec 9.3, 9.4). Answer with the header the resolver was handed.
 
 ### Security
 

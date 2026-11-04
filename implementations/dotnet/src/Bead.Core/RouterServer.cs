@@ -525,7 +525,8 @@ public sealed class RouterServer : IRouterLike, IDisposable
     /// Subscribes the connection a request came from to that request's procedure, in the call's
     /// session, which bounds it, and gives the call id of the subscription. A request that opens no subscription is an
     /// <see cref="InvalidOperationException"/>; a connection closed, a
-    /// <see cref="DisconnectException"/>; a call cancelled or answered already, an
+    /// <see cref="DisconnectException"/>; a request this side never dispatched, an
+    /// <see cref="ArgumentException"/>; a call cancelled or answered already, an
     /// <see cref="OperationCanceledException"/>.
     /// </summary>
     public Task<uint> Subscribe(AnswerTarget target)
@@ -546,6 +547,15 @@ public sealed class RouterServer : IRouterLike, IDisposable
             if (!_connections.Contains(connectionHandle))
             {
                 return Task.FromException<uint>(new DisconnectException($"{connectionHandle} is not an open connection"));
+            }
+
+            // ! a subscription goes only to a request this side dispatched, as an answer does: a copy
+            // of its header would subscribe a call nobody opened
+            if (!_core.IsDispatched(header))
+            {
+                return Task.FromException<uint>(new ArgumentException(
+                    $"a subscription goes only to a request this router dispatched, not to call {header.CallId}",
+                    nameof(target)));
             }
 
             if (!_core.IsAnswering(target))

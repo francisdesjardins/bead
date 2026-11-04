@@ -1,3 +1,4 @@
+import { setTimeout as sleep } from 'node:timers/promises';
 import { createTestClock } from '../../../transport/shared/__tests__/fixtures';
 import { CLIENT_FAILURES, CredentialScheme, EnvelopeKind, SERVER_FAILURES } from '../constants';
 import { readEnvelope } from '../envelope';
@@ -318,6 +319,31 @@ export const resolverOf = (procedure: IProcedure, seen: IRequestResolverProps<Ha
 
     return Promise.resolve();
   }, procedure) as IRequestResolver<Handle>;
+};
+
+/**
+ * Registers on `core` a resolver of `echo` that holds each call it is handed, and gives what opens
+ * one: the peer's request on `callId`, from `connectionHandle`, taken and dispatched, then given as
+ * that resolver was handed it. An answer goes only to a request its router dispatched, by that very
+ * header: a test answers what it opened so.
+ */
+export const openerOn = (core: IRouterCore<Handle>) => {
+  const seen: IRequestResolverProps<Handle>[] = [];
+
+  core.registerResolver(resolverOf(echo, seen));
+
+  return async (callId: number, connectionHandle: Handle = 'a') => {
+    core.receive(requestOf(callId), connectionHandle);
+    await sleep(0);
+
+    const handed = seen.at(-1);
+
+    if (handed?.header.callId !== callId || handed.connectionHandle !== connectionHandle) {
+      throw new Error(`the request on call ${String(callId)} was not dispatched`);
+    }
+
+    return handed;
+  };
 };
 
 /** A request header as the core hands one to a resolver. */

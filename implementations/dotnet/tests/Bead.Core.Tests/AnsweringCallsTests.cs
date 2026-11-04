@@ -60,9 +60,9 @@ public sealed class AnsweringCallsTests
         Assert.Same(answering, calls.CallOf(header));
         Assert.True(calls.IsAnswering(new AnswerTarget("a", header)));
 
-        // a copy was never dispatched: it finds no call, and is taken as one to answer
+        // a copy was never dispatched: it finds no call, and is open to none
         Assert.Null(calls.CallOf(header with { }));
-        Assert.True(calls.IsAnswering(new AnswerTarget("a", header with { })));
+        Assert.False(calls.IsAnswering(new AnswerTarget("a", header with { })));
     }
 
     [Fact]

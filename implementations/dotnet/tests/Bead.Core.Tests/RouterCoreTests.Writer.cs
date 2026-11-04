@@ -31,10 +31,12 @@ public sealed partial class RouterCoreTests
         }
     }
 
-    // an answer on a call of echo, to the connection
-    private static Task Answered(Peer server, (uint CallId, RouterAnswer Answer) answered)
+    // an answer on a call of echo the connection's peer opened
+    private static async Task Answered(Peer server, (uint CallId, RouterAnswer Answer) answered)
     {
-        return server.Core.Respond(answered.Answer, new AnswerTarget(Handle, RequestOf(answered.CallId))).WaitAsync(Patience, TestContext.Current.CancellationToken);
+        var target = await server.Open(answered.CallId);
+
+        await server.Core.Respond(answered.Answer, target).WaitAsync(Patience, TestContext.Current.CancellationToken);
     }
 
     [Fact]
@@ -61,7 +63,7 @@ public sealed partial class RouterCoreTests
         }
 
         // another connection, with no session yet, is told nothing
-        await server.Core.Respond(RouterAnswer.OfPayload(ReadOnlyMemory<byte>.Empty), new AnswerTarget("b", RequestOf(1)))
+        await server.Core.Respond(RouterAnswer.OfPayload(ReadOnlyMemory<byte>.Empty), await server.Open(1, "b"))
             .WaitAsync(Patience, TestContext.Current.CancellationToken);
         Assert.Equal(
             new IEnvelopeHeader[]
@@ -128,6 +130,8 @@ public sealed partial class RouterCoreTests
             },
         };
 
+        var calls = new[] { await server.Open(1), await server.Open(3), await server.Open(5) };
+
         server.OnSend = (_) =>
         {
             var send = new TaskCompletionSource();
@@ -137,12 +141,12 @@ public sealed partial class RouterCoreTests
             return send.Task;
         };
 
-        var first = server.Core.Respond(RouterAnswer.OfPayload(ReadOnlyMemory<byte>.Empty), new AnswerTarget(Handle, RequestOf(1)));
+        var first = server.Core.Respond(RouterAnswer.OfPayload(ReadOnlyMemory<byte>.Empty), calls[0]);
 
         await server.Settle();
         current = other;
 
-        var second = server.Core.Respond(RouterAnswer.OfPayload(ReadOnlyMemory<byte>.Empty), new AnswerTarget(Handle, RequestOf(3)));
+        var second = server.Core.Respond(RouterAnswer.OfPayload(ReadOnlyMemory<byte>.Empty), calls[1]);
 
         await server.Settle();
 
@@ -155,7 +159,7 @@ public sealed partial class RouterCoreTests
             return first.WaitAsync(Patience, TestContext.Current.CancellationToken);
         });
         server.OnSend = null;
-        await server.Core.Respond(RouterAnswer.OfPayload(ReadOnlyMemory<byte>.Empty), new AnswerTarget(Handle, RequestOf(5)))
+        await server.Core.Respond(RouterAnswer.OfPayload(ReadOnlyMemory<byte>.Empty), calls[2])
             .WaitAsync(Patience, TestContext.Current.CancellationToken);
         Assert.Equal(
             [
@@ -182,12 +186,14 @@ public sealed partial class RouterCoreTests
             },
         };
 
+        var call = await server.Open(1);
+
         server.OnSend = (_) =>
         {
             return held.Task;
         };
 
-        var inFlight = server.Core.Respond(RouterAnswer.OfPayload(ReadOnlyMemory<byte>.Empty), new AnswerTarget(Handle, RequestOf(1)));
+        var inFlight = server.Core.Respond(RouterAnswer.OfPayload(ReadOnlyMemory<byte>.Empty), call);
 
         await server.Settle();
         server.Core.RejectPending("a closed", Handle);
@@ -215,17 +221,16 @@ public sealed partial class RouterCoreTests
     public async Task Fails_the_answer_whose_session_cannot_be_told_and_announces_nothing_without_a_way_to()
     {
         var unknown = new InvalidOperationException("no session to tell");
-        var server = new Peer(RouterSide.Server)
-        {
-            TokenOf = (_) =>
-            {
-                throw unknown;
-            },
-        };
+        var server = new Peer(RouterSide.Server);
+        var call = await server.Open(1);
 
+        server.TokenOf = (_) =>
+        {
+            throw unknown;
+        };
         Assert.Same(unknown, await Assert.ThrowsAsync<InvalidOperationException>(() =>
         {
-            return server.Core.Respond(RouterAnswer.OfPayload(new byte[] { 1 }), new AnswerTarget(Handle, RequestOf(1)))
+            return server.Core.Respond(RouterAnswer.OfPayload(new byte[] { 1 }), call)
                 .WaitAsync(Patience, TestContext.Current.CancellationToken);
         }));
         Assert.Empty(server.Sent);
@@ -233,8 +238,22 @@ public sealed partial class RouterCoreTests
         // a port that says nothing of its sessions has none to announce
         var bare = new Sessionless();
         using var bareCore = new RouterCore(bare, null);
+        var dispatched = new TaskCompletionSource<RequestResolverProps>(TaskCreationOptions.RunContinuationsAsynchronously);
 
-        await bareCore.Respond(RouterAnswer.OfPayload(ReadOnlyMemory<byte>.Empty), new AnswerTarget(Handle, RequestOf(1)))
+        bareCore.RegisterResolver(new Held(bareCore)
+        {
+            Handling = (props) =>
+            {
+                dispatched.TrySetResult(props);
+
+                return Task.CompletedTask;
+            },
+        });
+        bareCore.Receive(EnvelopeCodec.WriteEnvelope(new Envelope { Header = RequestOf(1) }), Handle);
+
+        var props = await dispatched.Task.WaitAsync(Patience, TestContext.Current.CancellationToken);
+
+        await bareCore.Respond(RouterAnswer.OfPayload(ReadOnlyMemory<byte>.Empty), new AnswerTarget(props.ConnectionHandle, props.Header))
             .WaitAsync(Patience, TestContext.Current.CancellationToken);
         Assert.Equal([new ResultHeader { CallId = 1 }], bare.Sent.Select((envelope) =>
         {

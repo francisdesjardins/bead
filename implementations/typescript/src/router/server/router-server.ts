@@ -870,6 +870,13 @@ export const createRouterServer = <Transport extends IRouterServerTransportLike>
         throw new DisconnectError(`${connectionHandle} is not an open connection`);
       }
 
+      // ! the very header its request was dispatched with: a copy is tied to no call (spec 9.3)
+      if (!core.isDispatched(header)) {
+        throw new ProgrammerError(
+          `a subscription goes only to a request this router dispatched, not to call ${String(callId)}`
+        );
+      }
+
       if (!core.isAnswering({ connectionHandle, header })) {
         throw new CancelError(`call ${String(callId)} was cancelled, or answered already`);
       }
