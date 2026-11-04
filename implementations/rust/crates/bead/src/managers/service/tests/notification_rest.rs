@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use bytes::Bytes;
 
-use super::notifications::{Heard, callback, notification, procedure, subscribed};
+use super::notifications::{Heard, callback, pending, result};
 use super::{ClientFixture, locked};
 use crate::constants::{ProtocolCode, RouterSide};
 use crate::debug::DebugType;
@@ -16,6 +16,31 @@ use crate::managers::service::{
 };
 use crate::payloads::{CodecRefusal, PayloadCodec, TextCodec};
 use crate::router::types::RouterError;
+
+fn procedure() -> crate::Procedure {
+    crate::Procedure {
+        service_id: 2,
+        procedure_id: 5,
+        service_revision: 1,
+        procedure_name: "news".to_owned(),
+        procedure_kind: None,
+        maximum_payload_bytes: None,
+        deprecation: None,
+    }
+}
+
+fn notification(fixture: &ClientFixture) -> crate::Notification<TextCodec, TextCodec, TextCodec> {
+    fixture
+        .manager
+        .get_notification(
+            &procedure(),
+            NotificationDependencies::new(
+                RequestDependencies::new(TextCodec, TextCodec),
+                TextCodec,
+            ),
+        )
+        .expect("news declared")
+}
 
 #[derive(Debug)]
 struct Nonempty;
@@ -43,7 +68,15 @@ impl PayloadCodec for Nonempty {
 async fn without_an_unsubscribe_the_router_is_told_to_cancel() {
     let fixture = ClientFixture::new();
     let notification = notification(&fixture);
-    let registration = subscribed(&fixture, (&notification, callback(&Heard::default(), ""))).await;
+    let mut registering = notification.register(
+        "s".to_owned(),
+        callback(&Heard::default(), ""),
+        &RegistrationOptions::default(),
+    );
+    pending(&mut registering).await;
+    fixture.clock.settle().await;
+    fixture.transport.deliver(&result(1, b"subscribed"));
+    let registration = registering.await.expect("subscribed");
     let requests = fixture.transport.envelopes();
 
     registration
@@ -120,11 +153,9 @@ async fn a_trigger_never_registered_is_a_programmer_error_a_payload_that_does_no
         callback(&heard, ""),
         &RegistrationOptions::default(),
     );
-    super::notifications::pending(&mut registering).await;
+    pending(&mut registering).await;
     fixture.clock.settle().await;
-    fixture
-        .transport
-        .deliver(&super::notifications::result(1, b"subscribed"));
+    fixture.transport.deliver(&result(1, b"subscribed"));
     let registration = registering.await.expect("subscribed");
 
     let triggered = notification.as_like().trigger(Bytes::new());

@@ -4,12 +4,64 @@ use core::time::Duration;
 use std::sync::Arc;
 
 use super::{Credential, Envelope, Fixture, ProtocolCode, ServerOptions, locked};
-use crate::NotifyOptions;
 use crate::envelope::FailureHeader;
 use crate::managers::sessions::SessionEvent;
+use crate::{Clock, NotifyOptions};
 
 fn milliseconds(count: u64) -> Duration {
     Duration::from_millis(count)
+}
+
+#[derive(Debug)]
+struct RecordedClock {
+    clock: Arc<crate::testing::SteppingClock>,
+    arms: std::sync::Mutex<Vec<Duration>>,
+}
+
+impl Clock for RecordedClock {
+    fn monotonic(&self) -> Duration {
+        self.clock.monotonic()
+    }
+
+    fn wall(&self) -> std::time::SystemTime {
+        self.clock.wall()
+    }
+
+    fn arm(
+        &self,
+        schedule: crate::Schedule,
+        callback: crate::clock::TimerCallback,
+    ) -> Result<Arc<dyn crate::Timer>, crate::ProgrammerError> {
+        let (crate::Schedule::Once(due) | crate::Schedule::Every(due)) = schedule;
+        locked(&self.arms).push(due);
+        self.clock.arm(schedule, callback)
+    }
+
+    fn activity(&self) -> Option<Arc<crate::testing::Activity>> {
+        self.clock.activity()
+    }
+}
+
+fn recording(options: &ServerOptions) -> (Fixture, Arc<RecordedClock>) {
+    let clock = crate::testing::SteppingClock::new(crate::testing::instants::new_year());
+    let recorded = Arc::new(RecordedClock {
+        clock: Arc::clone(&clock),
+        arms: std::sync::Mutex::default(),
+    });
+    let shared: crate::SharedClock = Arc::<RecordedClock>::clone(&recorded);
+    let transport = crate::testing::scripted::ScriptedServer::new(shared);
+    let wire: Arc<dyn crate::ServerTransport> =
+        Arc::<crate::testing::scripted::ScriptedServer>::clone(&transport);
+    let server = crate::Server::new(wire, options).expect("a server");
+    (
+        Fixture {
+            clock,
+            transport,
+            server,
+            first: super::handle_of(1),
+        },
+        recorded,
+    )
 }
 
 #[tokio::test]
@@ -136,13 +188,19 @@ async fn a_session_that_ended_takes_its_connections_subscriptions_nothing_more_r
 #[tokio::test]
 async fn a_connection_that_never_opens_a_session_is_closed_once_silent_when_the_server_says_how_long()
  {
-    let told = Fixture::idle(60);
-    let quiet = Fixture::new(&ServerOptions::default());
+    let (told, armed) = recording(&ServerOptions {
+        connection_inactivity_timeout: Some(milliseconds(60)),
+        ..ServerOptions::default()
+    });
+    let (quiet, quiet_armed) = recording(&ServerOptions::default());
     told.open().await;
     quiet.open().await;
     assert_eq!(told.clock.dues(), [milliseconds(60)]);
     assert_eq!(quiet.clock.dues(), []);
+    assert_eq!(*locked(&armed.arms), [milliseconds(60)]);
+    assert_eq!(*locked(&quiet_armed.arms), []);
     told.ask(1, (99, None)).await;
+    assert_eq!(*locked(&armed.arms), [milliseconds(60); 2]);
     assert_eq!(told.clock.dues(), [milliseconds(60)]);
     assert_eq!(told.transport.closed(), []);
     told.advance(60).await;
