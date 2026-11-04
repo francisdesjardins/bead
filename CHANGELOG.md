@@ -13,8 +13,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   French, one document that shows the language the site chooses, in the site's two themes, with its
   diagrams rendered from Mermaid at build time into SVGs that follow both themes. CI's Commits job
   holds the committed page to its build, byte for byte, and each SVG to its source's hash.
-- A router paces each connection's reads by what it has not taken yet, on every side: past
-  `maximumUntakenEnvelopes` envelopes (64) or `maximumUntakenBytes` bytes (1 MiB) of one
+- **Breaking:** a router paces each connection's reads by what it has not taken yet, on every side:
+  past `maximumUntakenEnvelopes` envelopes (64) or `maximumUntakenBytes` bytes (1 MiB) of one
   connection, its transport hands no more of it, holding in order what it received, until its
   router's turns took them down to half. A broker's participant holds a paused connection's
   envelopes to `maximumHeldEnvelopeBytes` and loses that connection past it; an HTTP server's 429
@@ -53,76 +53,76 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   differential reads one corpus through every side's testee, a release keeps each side's bench
   report, the Rust side's included, and the Rust broker trial plays every case but those a row of
   the matrix excuses it from.
-- `bead::testing::Difference`, with `is_excused` and `LANGUAGE` beside it, in place of
+- **Breaking:** `bead::testing::Difference`, with `is_excused` and `LANGUAGE` beside it, in place of
   `bead::testing::durations::Difference`.
-- Every side drops a singular closed enum's undeclared number before its library reads, as the C#
-  side did. A message the TypeScript or Rust side reads and writes again no longer carries it (spec
-  17.9.8; a row of the support matrix's "Leveled down").
+- **Breaking:** every side drops a singular closed enum's undeclared number before its library
+  reads, as the C# side did. A message the TypeScript or Rust side reads and writes again no longer
+  carries it (spec 17.9.8; a row of the support matrix's "Leveled down").
 - The `proto` differential writes every field of `Probe`, `needs`, `needs_items`, `shade` and
   `tallies` among them, takes every `spec/codecs.json` `proto` payload but those a `differs` excuses
   as a seed, and draws 12,500 payloads.
-- A `JWT` whose header or claims set holds a number past the largest finite double, or nests deeper
-  than 64, is refused at `token` on every side, before its signature is reached, and a relay that
-  does not verify reads no `aud` from it (spec 13.8, 17.5; RFC 7493 §2.2).
+- **Breaking:** a `JWT` whose header or claims set holds a number past the largest finite double, or
+  nests deeper than 64, is refused at `token` on every side, before its signature is reached, and a
+  relay that does not verify reads no `aud` from it (spec 13.8, 17.5; RFC 7493 §2.2).
 - The spec and its companion, `spec/debugging.md`, state each rule once for every side, a name in
   its platform's form, and name no language; the support matrix cites the Rust side's tests of a
   duration read in a browser, and says what Buffa does with a field at another wire type.
-- A codec that throws other than its refusal, or panics, as it reads a request is answered
-  `PROCEDURE_FAILED`, with no detail, and reported, on every side; its refusal — a `SyntaxError`, a
-  `FormatException`, a `CodecRefusal` — is still answered `PAYLOAD_UNDECODABLE` (spec 9.0, 17.2).
-  An application's codec refuses with its side's type.
-- What an application does with a router from within a listener — a call, a notification, a
-  cancel, a dispose — goes behind what that turn sends and in the order its turn defers, on every
-  side, where the TypeScript and C# sides ran it at once. A call made before a dispose goes, one
-  made after it fails unsent, and the turn a listener disposes in still sends its answer (spec 9.0,
-  9.1).
+- **Breaking:** a codec that throws other than its refusal, or panics, as it reads a request is
+  answered `PROCEDURE_FAILED`, with no detail, and reported, on every side; its refusal — a
+  `SyntaxError`, a `FormatException`, a `CodecRefusal` — is still answered `PAYLOAD_UNDECODABLE`
+  (spec 9.0, 17.2). An application's codec refuses with its side's type.
+- **Breaking:** what an application does with a router from within a listener — a call, a
+  notification, a cancel, a dispose — goes behind what that turn sends and in the order its turn
+  defers, on every side, where the TypeScript and C# sides ran it at once. A call made before a
+  dispose goes, one made after it fails unsent, and the turn a listener disposes in still sends its
+  answer (spec 9.0, 9.1).
 - A codec's refusal says its reason in spec 17.2's words on every side, its library's own words
   kept in its cause, and a request whose payload does not read is answered `PAYLOAD_UNDECODABLE`
   with that reason as its detail (spec 17.2, `spec/codecs.json`, `spec/conversations.json`).
-- The TypeScript side hands a request to its resolver in a later turn, as the C# side does, so the
-  order of answers never turns on whether a resolver answers at once: a later request's refusal
-  goes before it (spec 9.2, 15.1).
+- **Breaking:** the TypeScript side hands a request to its resolver in a later turn, as the C# side
+  does, so the order of answers never turns on whether a resolver answers at once: a later request's
+  refusal goes before it (spec 9.2, 15.1).
 - An options object marks a setting it cannot be built without as required, at most two and never
   the call's operand, in its language's form on every side — a member without `?`, a `required`
   member, a field its constructor of the required members takes — and is then a required parameter;
   one required in some instantiations alone is a conditional parameter type on the TypeScript side.
 - On the TypeScript side a transport client's `connect` takes its options as optional where every
   member is: the worker transport's and the worker client's.
-- The in-memory transport client takes its server at each connect, on every side, as every other
-  transport takes where it connects: on the TypeScript side `server` moves from
+- **Breaking:** the in-memory transport client takes its server at each connect, on every side, as
+  every other transport takes where it connects: on the TypeScript side `server` moves from
   `createMemoryTransportClient`'s options to `connect`'s, and a reconnection replays it.
 - On the C# side `ServiceServerOptions.Admissions` is no longer `required`: none where no procedure
   names a hook, and its absence where one does is refused as the service is built.
-- A reconnection's delay is a number or a function on every side. On the C# side
+- **Breaking:** a reconnection's delay is a number or a function on every side. On the C# side
   `TransportClientReconnectOptions.Delay` is a `TransportClientReconnectDelay`, built by its
   constructor from a `TimeSpan` or from a `TransportClientReconnectDelayResolver`. A lambda assigned
   to `Delay` is now written `new TransportClientReconnectDelay((previousDelay, attempt) => …)` (spec
   1.4, `spec/durations.json`).
 - The C# side's `HttpPolicy.Of` takes its options as optional, as every member of them is.
-- No public item takes or gives a tuple, on any side: what a caller passes or reads is named
-  (`SurfaceTests`, `tools/check-surface.mjs`, `bead-house`). On the C# side:
+- **Breaking:** no public item takes or gives a tuple, on any side: what a caller passes or reads is
+  named (`SurfaceTests`, `tools/check-surface.mjs`, `bead-house`). On the C# side:
   - `FailureException` takes its cause in `FailureExceptionOptions`;
   - `HttpEvents.EventOf` takes a `ServerSentEvent`;
   - an event's data is `JsonForm.EventDataOf(payload, bytes)` in place of `HttpEvents.DataOf`.
-- A problem of Bead's own takes its detail as a parameter, as a refusal's does:
+- **Breaking:** a problem of Bead's own takes its detail as a parameter, as a refusal's does:
   `HttpProblems.Own(failure, detail, options?)` on the C# side and `problemOfOwn(own, detail,
   options?)` on the TypeScript side, with the challenge in the options.
-- A client transport's options and a reconnection's delay take one family of names on every side,
-  `TransportClient…`. On the C# side:
+- **Breaking:** a client transport's options and a reconnection's delay take one family of names on
+  every side, `TransportClient…`. On the C# side:
   - `BrokerConnectOptions`, `HttpConnectOptions`, `MemoryConnectOptions` and
     `WebSocketConnectOptions` become `…TransportClientConnectOptions`;
   - `TransportDisconnectOptions` and `TransportReconnectOptions` become
     `TransportClientDisconnectOptions` and `TransportClientReconnectOptions`;
   - the delegate `TransportReconnectDelay` becomes `TransportClientReconnectDelayResolver`.
-- On the TypeScript side, with that family of names:
+- **Breaking:** on the TypeScript side, with that family of names:
   - `TransportClientReconnectDelay` is the delay, a number or a
     `TransportClientReconnectDelayResolver`, which now returns a `number`;
   - `TransportClientReconnectDelayOrDelayResolver` is gone;
   - `maxAttempts` becomes `maximumAttempts`.
-- On the C# side, `ViolationsRead` becomes `ReadViolations`, as on the other sides.
-- A broker participant takes its link's reconnection as a transport client's `reconnect` takes it,
-  through the one reconnection loop its side's clients run: on the TypeScript side
-  `ITransportClientReconnectOptions`, its `delay` a number or a
+- **Breaking:** on the C# side, `ViolationsRead` becomes `ReadViolations`, as on the other sides.
+- **Breaking:** a broker participant takes its link's reconnection as a transport client's
+  `reconnect` takes it, through the one reconnection loop its side's clients run: on the TypeScript
+  side `ITransportClientReconnectOptions`, its `delay` a number or a
   `TransportClientReconnectDelayResolver` and its `tap` told each wait. "No reconnection" is a
   boolean beside it on every side, true by default: `reconnect: false` becomes `reconnects: false`
   on the TypeScript side, and `IsReconnecting` becomes `Reconnects` on the C# side. A participant's
@@ -136,82 +136,85 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `readMessage`, `readProtoJson`, `writeProtoJson`, `writeFieldJson`, `typeRegistryOf`,
   `readJsonText`, `bindRequest` and `eventDataOf` leave `@francisdesjardins/bead/transcoding`, with
   `IJsonFormOptions`, `ITypeRegistry` and `JsonNode`, and `IBindingOptions` takes no `registry`.
-- A fixed reconnection delay that is not 0 and not from 1 to 2³¹ − 1 ms is refused where it is
-  given, on every side: a participant's as it is built, whatever its `reconnects`, and a transport
-  client's as `reconnect` is called, after its state guards and before its signal, nothing moved,
-  no `reconnect` told and its connection kept. A function's answer is held at each attempt (spec
-  1.4).
+- **Breaking:** a fixed reconnection delay that is not 0 and not from 1 to 2³¹ − 1 ms is refused
+  where it is given, on every side: a participant's as it is built, whatever its `reconnects`, and a
+  transport client's as `reconnect` is called, after its state guards and before its signal, nothing
+  moved, no `reconnect` told and its connection kept. A function's answer is held at each attempt
+  (spec 1.4).
 - `spec/durations.json` holds an HTTP exchange's timeout as one place,
   `httpTransport.exchangeTimeout`, by two ways, `client` and `server`, where
   `httpTransportServer.exchangeTimeout` was the server's place alone, as 15.12 names that timeout
   for both ends, and a broker participant's reconnection delay as a place of its own,
   `brokerParticipant.reconnectionDelay`, by `function` and `number`, and an HTTP policy's three
   durations by a way of their own, `policy` (decision 0014). The file holds 35 places, by 57 ways.
-- A broker adapter takes its password as a string, or from a provider asked at each link's start,
-  two members of one name on every side, as a WebSocket client's credential and its provider are
-  (decisions 0032, 0040). On the TypeScript side `password` is a string alone and
+- **Breaking:** a broker adapter takes its password as a string, or from a provider asked at each
+  link's start, two members of one name on every side, as a WebSocket client's credential and its
+  provider are (decisions 0032, 0040). On the TypeScript side `password` is a string alone and
   `passwordProvider` takes the function, handed `{ signal }`: `password: () => readPassword()` is
   now written `passwordProvider: () => readPassword()`. On the C# side `PasswordProvider`, shipped
   in 0.8.0, returns a `ValueTask<string>`, as `CredentialProvider` does.
-- A broker adapter is refused as it is built, a programmer's error on every side, after its id, URL
-  and TLS checks and in this order, given a password and a provider both, either beside a TLS client
-  certificate, neither over AMQP 1.0, or a password that is empty or holds a NUL; a provider's
-  answer that is no such password fails its start alike (spec 15.26, 15.33; RFC 4616 §2).
-- An MQTT 5 link given neither a password nor a client certificate carries its id as its User Name,
-  with no Password, on the C# side as on the TypeScript side, where it carried no User Name (spec
-  15.26).
-- A broker adapter's `connectTimeout` bounds its start from its call, the ask of its password
-  included, with the CONNACK, or with the OPEN, the sessions and the inbox, on every side, where the
-  TypeScript side began it after the ask; `spec/durations.json` names
+- **Breaking:** a broker adapter is refused as it is built, a programmer's error on every side,
+  after its id, URL and TLS checks and in this order, given a password and a provider both, either
+  beside a TLS client certificate, neither over AMQP 1.0, or a password that is empty or holds a
+  NUL; a provider's answer that is no such password fails its start alike (spec 15.26, 15.33; RFC
+  4616 §2).
+- **Breaking:** an MQTT 5 link given neither a password nor a client certificate carries its id as
+  its User Name, with no Password, on the C# side as on the TypeScript side, where it carried no
+  User Name (spec 15.26).
+- **Breaking:** a broker adapter's `connectTimeout` bounds its start from its call, the ask of its
+  password included, with the CONNACK, or with the OPEN, the sessions and the inbox, on every side,
+  where the TypeScript side began it after the ask; `spec/durations.json` names
   `mqttBrokerAdapter.connectTimeout` and `amqpBrokerAdapter.connectTimeout` so (spec 15.30, 15.37).
 - A broker adapter's start fails in one set of words on every side: `the link of {id} had no
   password within {N} ms, its connectTimeout`, `the link of {id} stopped as it started`, `the
   password provider failed`, its throw the cause, `the link of {id} had no CONNACK within {N} ms,
   its connectTimeout` and `the link of {id} had no OPEN and no sessions within {N} ms, its
   connectTimeout`.
-- A reconnection of a delay of 0 waits a later task of the platform between two attempts, on the
-  TypeScript side `setImmediate`'s, which fake timers installed on the globals hold, as they hold
-  its timers: a test that installs them moves its clock to let the next attempt go.
-- A broker participant's stop ends its link in place on every side: it closes each connection with
-  1001 and ends its link so that no will goes, what is under way as it is called ending with it,
-  and its next start, a server's start over it, or a client's connect or reconnection over it links
-  it anew as another incarnation, its transports and their routers kept; where it was, its stop was
-  final, and a start after it was refused. Its dispose is final, and a call made after it is its
-  application's misuse, refused before anything moves: its start, a client's connect or reconnect
-  over it, and its server transport's start. On the TypeScript side that misuse is a
-  `ProgrammerError`, where it was a `GenericError`; on the C# side an `ObjectDisposedException`,
-  still an `InvalidOperationException`. A client or a server so refused keeps its state, where it
-  went Closed and kept its target. On the TypeScript side its DevTools announcement is withdrawn as
-  it is disposed, where it was withdrawn as it stopped: a participant no longer in use is disposed
-  (spec 15.21; decisions 0003, 0007, 0015).
-- A server transport's dispose, and on the C# side a broker adapter's, is final: it stops it, and a
-  start after it is its application's misuse, refused, its state kept, where it stopped it and a
-  later start ran it again; on the TypeScript side a `ProgrammerError`, on the C# side an
-  `ObjectDisposedException` (decision 0003).
-- A broker client's connect that its adapter refuses as a misuse fails as a connect, a
+- **Breaking:** a reconnection of a delay of 0 waits a later task of the platform between two
+  attempts, on the TypeScript side `setImmediate`'s, which fake timers installed on the globals
+  hold, as they hold its timers: a test that installs them moves its clock to let the next attempt
+  go.
+- **Breaking:** a broker participant's stop ends its link in place on every side: it closes each
+  connection with 1001 and ends its link so that no will goes, what is under way as it is called
+  ending with it, and its next start, a server's start over it, or a client's connect or
+  reconnection over it links it anew as another incarnation, its transports and their routers kept;
+  where it was, its stop was final, and a start after it was refused. Its dispose is final, and a
+  call made after it is its application's misuse, refused before anything moves: its start, a
+  client's connect or reconnect over it, and its server transport's start. On the TypeScript side
+  that misuse is a `ProgrammerError`, where it was a `GenericError`; on the C# side an
+  `ObjectDisposedException`, still an `InvalidOperationException`. A client or a server so refused
+  keeps its state, where it went Closed and kept its target. On the TypeScript side its DevTools
+  announcement is withdrawn as it is disposed, where it was withdrawn as it stopped: a participant
+  no longer in use is disposed (spec 15.21; decisions 0003, 0007, 0015).
+- **Breaking:** a server transport's dispose, and on the C# side a broker adapter's, is final: it
+  stops it, and a start after it is its application's misuse, refused, its state kept, where it
+  stopped it and a later start ran it again; on the TypeScript side a `ProgrammerError`, on the C#
+  side an `ObjectDisposedException` (decision 0003).
+- **Breaking:** a broker client's connect that its adapter refuses as a misuse fails as a connect, a
   `ConnectError` or a `ConnectException` with the misuse as its cause, and its reconnection tries
   again, as the participant's own does: on the TypeScript side it ended at once, and on the C# side
   the misuse came through as it was (spec 15.21).
-- A command takes its options in a record of its own, its connection required: `CommandOptions`
-  (`ICommandOptions` on the TypeScript side), a request's options with its `connectionHandle` and
-  `closeOnTimeout`, which `RequestOptions` no longer carries; a command's bound call is a
-  `BoundCommand<TResponse>` on the C# side (`IBoundCommand`), which `GetCommand`, `CommandOf` and a
-  server class's `…Commands` give. The TypeScript side's `RequestOptionsParameters` goes and
-  `IRequestOptions` takes no type parameter. C# generated code names the contract 7,
-  `GeneratedCode.SupportsVersion7`, which the runtime holds beside 5 and 6; TypeScript generated
-  code stays at 6.
-- A manager's request and notification makers are a client's router's alone and its command maker a
-  server's alone: the other is refused as it is made, after spec 16.10's reasons, where a
-  notification asked for on a server's router was refused at its first registration.
-- A registration takes `RegistrationOptions` (`IRegistrationOptions`): a timeout, a destination and
-  a cancellation, and no credential, which its subscribing call never presented.
+- **Breaking:** a command takes its options in a record of its own, its connection required:
+  `CommandOptions` (`ICommandOptions` on the TypeScript side), a request's options with its
+  `connectionHandle` and `closeOnTimeout`, which `RequestOptions` no longer carries; a command's
+  bound call is a `BoundCommand<TResponse>` on the C# side (`IBoundCommand`), which `GetCommand`,
+  `CommandOf` and a server class's `…Commands` give. The TypeScript side's
+  `RequestOptionsParameters` goes and `IRequestOptions` takes no type parameter. C# generated code
+  names the contract 7, `GeneratedCode.SupportsVersion7`, which the runtime holds beside 5 and 6;
+  TypeScript generated code stays at 6.
+- **Breaking:** a manager's request and notification makers are a client's router's alone and its
+  command maker a server's alone: the other is refused as it is made, after spec 16.10's reasons,
+  where a notification asked for on a server's router was refused at its first registration.
+- **Breaking:** a registration takes `RegistrationOptions` (`IRegistrationOptions`): a timeout, a
+  destination and a cancellation, and no credential, which its subscribing call never presented.
 
 ### Removed
 
-- The envelope's codec is internal on every side, as the TypeScript side keeps it: on the C# side
-  `EnvelopeCodec`, `Envelope`, `EnvelopePrefix` and `EnvelopeReadOptions` leave the public surface.
-  An envelope's headers stay public where an event, a hook or a result carries them. With the codec,
-  `Health.Of`, `LayerGauges.Of` and `RouterLimits.WholeEnvelopeOf` leave the C# side's surface.
+- **Breaking:** the envelope's codec is internal on every side, as the TypeScript side keeps it: on
+  the C# side `EnvelopeCodec`, `Envelope`, `EnvelopePrefix` and `EnvelopeReadOptions` leave the
+  public surface. An envelope's headers stay public where an event, a hook or a result carries them.
+  With the codec, `Health.Of`, `LayerGauges.Of` and `RouterLimits.WholeEnvelopeOf` leave the C#
+  side's surface.
 
 ### Fixed
 
@@ -245,9 +248,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   provider asked anew, where its next start was refused as up already.
 - On the TypeScript side an MQTT 5 adapter given a password beside a client certificate failed
   every start; it is refused as it is built.
-- On the TypeScript side an AMQP 1.0 adapter falls to SASL ANONYMOUS no more: given neither a
-  password nor a client certificate it is refused as it is built, and a provider's empty answer
-  fails its start.
+- **Breaking:** on the TypeScript side an AMQP 1.0 adapter falls to SASL ANONYMOUS no more: given
+  neither a password nor a client certificate it is refused as it is built, and a provider's empty
+  answer fails its start.
 - On the TypeScript side, `httpPolicyOf` holds `bodyGracePeriod`, `headersTimeout` and
   `sendGracePeriod` rounded to the nearest whole millisecond, as spec 1.4 states and the C# side's
   `HttpPolicy.Of` does, where it kept each as given.
