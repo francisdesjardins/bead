@@ -428,6 +428,31 @@ impl SteppingClock {
         Some(callback)
     }
 
+    // A synchronous callback can move the clock while the side is in its turn: each timer due
+    // fires, without waiting for the turn that called it to settle.
+    #[cfg(test)]
+    pub(crate) fn tick(&self, by: Duration) {
+        let end = {
+            let mut readings = self.readings.lock().unwrap_or_else(PoisonError::into_inner);
+
+            assert!(
+                !readings.is_advancing,
+                "a test clock advances once at a time: an advance within another would move it back"
+            );
+            readings.is_advancing = true;
+            readings.monotonic.saturating_add(by)
+        };
+
+        while let Some(callback) = self.next(end) {
+            (callback.lock().unwrap_or_else(PoisonError::into_inner))();
+        }
+
+        self.readings
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .is_advancing = false;
+    }
+
     /// Steps both readings `by`, from due to due: each timer due within fires at its own, the side
     /// settled before it and after it. One advance at a time.
     ///

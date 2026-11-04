@@ -251,3 +251,64 @@ fn hands_before_request_the_connection_the_header_and_the_calls_session_alone_ne
         ("E0616", "private"),
     );
 }
+
+// no table of failures on this side to ask: a relay's before_route is refused as its router is
+// built unless its refusal is one of the two of its own side, and no value but a failure is given
+#[tokio::test]
+async fn is_one_of_the_two_admission_failures_of_the_tables_own_side_and_nothing_else() {
+    use crate::constants::ProtocolCode;
+    use crate::router::relay::RelayOptions;
+    use crate::router::server::{RouterServer, RouterServerOptions};
+    use crate::testing::SteppingClock;
+    use crate::testing::scripted::ScriptedServer;
+
+    let transport = ScriptedServer::new(SteppingClock::new(super::january_first()));
+    let built = |refusal: Failure| {
+        RouterServer::new(
+            Arc::<ScriptedServer>::clone(&transport),
+            &RouterServerOptions {
+                relay: Some(RelayOptions {
+                    before_route: Some(BeforeRequest::new(|_| false, Some(refusal))),
+                    ..RelayOptions::default()
+                }),
+                ..RouterServerOptions::default()
+            },
+        )
+    };
+
+    for code in [ProtocolCode::ACCESS_DENIED, ProtocolCode::SESSION_REQUIRED] {
+        built(Failure::protocol(code, RouterSide::Server))
+            .expect("an admission failure of its own side")
+            .dispose()
+            .await;
+    }
+
+    // the other side's, another code, or the procedure's own
+    for refusal in [
+        Failure::protocol(ProtocolCode::ACCESS_DENIED, RouterSide::Client),
+        Failure::protocol(ProtocolCode::PAYLOAD_TOO_LARGE, RouterSide::Server),
+        Failure::application(ProtocolCode::ACCESS_DENIED.get(), ""),
+    ] {
+        assert_eq!(
+            built(refusal)
+                .expect_err("no admission failure of its own side")
+                .to_string(),
+            "a relay refuses with a failure that is not an admission's of the server's table"
+        );
+    }
+    assert_eq!(transport.listener_count(), 0);
+}
+
+// what the admission panics with, as this side's admissions say what they throw: an error, which
+// its router answers PROCEDURE_FAILED and reports
+#[test]
+fn throws_what_the_admission_throws() {
+    let throwing = BeforeRequest::new(|_| panic!("no admission today"), None);
+    let thrown = throwing.admission(RouterSide::Server)(&request(None, None))
+        .expect_err("what it panicked with");
+
+    assert!(
+        matches!(&thrown, crate::errors::ResolverError::Other(error) if error.to_string() == "an admission panicked: no admission today"),
+        "{thrown:?}"
+    );
+}

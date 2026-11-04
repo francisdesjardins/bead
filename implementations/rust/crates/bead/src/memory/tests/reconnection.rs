@@ -17,6 +17,208 @@ fn attempts(client: &crate::memory::MemoryTransportClient) -> u64 {
 }
 
 #[tokio::test]
+async fn waits_its_delay_after_each_failed_attempt_on_the_clock_its_transport_runs_on_connecting_once_per_attempt()
+ {
+    let ends = Ends::unstarted();
+    let (client, _) = ends.client();
+    client
+        .connect(&MemoryTransportClientConnectOptions::new(
+            ends.server.clone(),
+        ))
+        .await
+        .expect_err("the initial connect fails");
+    let reconnecting = crate::testing::spawn(
+        client
+            .reconnect(&TransportClientReconnectOptions {
+                delay: Some(TransportClientReconnectDelay::Fixed(Duration::from_millis(
+                    60,
+                ))),
+                ..TransportClientReconnectOptions::default()
+            })
+            .expect("the reconnection starts"),
+    );
+    ends.clock.settle().await;
+    assert_eq!(ends.clock.dues(), [Duration::from_millis(60)]);
+    ends.clock.advance(Duration::from_millis(59)).await;
+    assert_eq!(attempts(&client), 2);
+    assert_eq!(client.ready_state(), ReadyState::Reconnecting);
+    ends.server
+        .start()
+        .await
+        .expect("the next attempt can connect");
+    ends.clock.advance(Duration::from_millis(1)).await;
+    reconnecting.await.expect("settled").expect("connected");
+    assert_eq!(attempts(&client), 3);
+    assert!(Arc::ptr_eq(&client.inner.clock, &ends.shared));
+    assert!(Arc::ptr_eq(
+        &client.clock().expect("the supplied clock"),
+        &ends.shared
+    ));
+    let defaulted =
+        super::MemoryTransportClient::new(&super::MemoryTransportClientOptions::default())
+            .expect("a client on the platform's clock");
+    assert_eq!(defaulted.inner.clock.description(), "the platform's");
+    assert_eq!(client.ready_state(), ReadyState::Open);
+    assert_eq!(ends.clock.dues(), []);
+    defaulted.dispose();
+    client.dispose();
+    ends.server.stop().await.expect("stopped");
+}
+
+#[tokio::test]
+async fn arms_its_wait_before_tap_hears_it_so_a_tap_that_moves_the_clock_by_the_wait_lets_the_next_attempt_follow_with_no_other_move()
+ {
+    let ends = Ends::unstarted();
+    let (client, _) = ends.client();
+    client
+        .connect(&MemoryTransportClientConnectOptions::new(
+            ends.server.clone(),
+        ))
+        .await
+        .expect_err("the initial connect fails");
+    let clock = Arc::clone(&ends.clock);
+    let server = ends.server.clone();
+    let tapped = Arc::new(AtomicUsize::new(0));
+    let heard = Arc::clone(&tapped);
+    client
+        .reconnect(&TransportClientReconnectOptions {
+            delay: Some(TransportClientReconnectDelay::Fixed(Duration::from_millis(
+                60,
+            ))),
+            tap: Some(Arc::new(move |delay, attempt| {
+                assert_eq!((delay, attempt), (Duration::from_millis(60), 1));
+                assert_eq!(clock.dues(), [delay]);
+                heard.fetch_add(1, Ordering::SeqCst);
+                crate::testing::spawn(server.start());
+                clock.tick(delay);
+            })),
+            ..TransportClientReconnectOptions::default()
+        })
+        .expect("the reconnection starts")
+        .await
+        .expect("the tap alone moves past the wait");
+    assert_eq!(tapped.load(Ordering::SeqCst), 1);
+    assert_eq!(attempts(&client), 3);
+    assert_eq!(client.ready_state(), ReadyState::Open);
+    assert_eq!(ends.clock.dues(), []);
+    client.dispose();
+    ends.server.stop().await.expect("stopped");
+}
+
+#[tokio::test]
+async fn the_drop_leaves_an_open_client_closed() {
+    let ends = Ends::started().await;
+    let (client, _) = ends.connected((None, None)).await;
+    assert_eq!(client.ready_state(), ReadyState::Open);
+    assert_eq!(attempts(&client), 1);
+    client.dispose();
+    assert_eq!(client.ready_state(), ReadyState::Closed);
+    ends.clock.settle().await;
+    assert_eq!(
+        ends.server_told(),
+        [
+            format!("connection {}", super::FIRST),
+            format!("closed {} false", super::FIRST)
+        ]
+    );
+    assert_eq!(ends.server.clients(), []);
+    assert_eq!(attempts(&client), 1);
+    ends.server.stop().await.expect("stopped");
+}
+
+#[tokio::test]
+async fn rejects_with_a_programmer_error_when_already_reconnecting_and_leaves_the_first_one_alone()
+{
+    let ends = Ends::unstarted();
+    let (client, _) = ends.client();
+    client
+        .connect(&MemoryTransportClientConnectOptions::new(
+            ends.server.clone(),
+        ))
+        .await
+        .expect_err("the initial attempt fails");
+    let first = crate::testing::spawn(
+        client
+            .reconnect(&TransportClientReconnectOptions {
+                delay: Some(TransportClientReconnectDelay::Fixed(Duration::from_millis(
+                    20,
+                ))),
+                ..TransportClientReconnectOptions::default()
+            })
+            .expect("the first reconnection starts"),
+    );
+    ends.clock.settle().await;
+    let error = client
+        .reconnect(&TransportClientReconnectOptions::default())
+        .err()
+        .expect("already reconnecting");
+    assert!(matches!(&error, TransportError::Refused(_)));
+    assert_eq!(
+        error.to_string(),
+        "the transport client is already reconnecting"
+    );
+    assert_eq!(client.ready_state(), ReadyState::Reconnecting);
+    assert_eq!(attempts(&client), 2);
+    ends.server
+        .start()
+        .await
+        .expect("the next attempt may connect");
+    ends.clock.advance(Duration::from_millis(20)).await;
+    first
+        .await
+        .expect("settled")
+        .expect("the first reconnection succeeds");
+    assert_eq!(client.ready_state(), ReadyState::Open);
+    assert_eq!(attempts(&client), 3);
+    assert_eq!(ends.clock.dues(), []);
+    client.dispose();
+    ends.server.stop().await.expect("stopped");
+}
+
+#[tokio::test]
+async fn never_attempts_with_a_signal_already_aborted_and_stops_at_the_wait_when_tap_aborts() {
+    let ends = Ends::started().await;
+    let (client, _) = ends.connected((None, None)).await;
+    let cancelled = tokio_util::sync::CancellationToken::new();
+    cancelled.cancel();
+    let refused = client
+        .reconnect(&TransportClientReconnectOptions {
+            delay: Some(TransportClientReconnectDelay::Fixed(Duration::ZERO)),
+            signal: Some(cancelled),
+            ..TransportClientReconnectOptions::default()
+        })
+        .err()
+        .expect("cancelled before any attempt");
+    assert!(matches!(&refused, TransportError::Cancelled { .. }));
+    assert_eq!(refused.to_string(), "the reconnection was cancelled");
+    assert_eq!(client.ready_state(), ReadyState::Open);
+    assert_eq!(attempts(&client), 1);
+    assert_eq!(ends.server_told(), [format!("connection {}", super::FIRST)]);
+    client.dispose();
+    ends.server.stop().await.expect("stopped");
+
+    let (clock, failing) = never_started().await;
+    let signal = tokio_util::sync::CancellationToken::new();
+    let aborting = signal.clone();
+    let reconnecting = failing
+        .reconnect(&TransportClientReconnectOptions {
+            delay: Some(TransportClientReconnectDelay::Fixed(Duration::from_secs(
+                60,
+            ))),
+            signal: Some(signal),
+            tap: Some(Arc::new(move |_, _| aborting.cancel())),
+            ..TransportClientReconnectOptions::default()
+        })
+        .expect("starts before the tap aborts it");
+    let refused = reconnecting.await.expect_err("the tap cancels the wait");
+    assert!(matches!(&refused, TransportError::Cancelled { .. }));
+    assert_eq!(refused.to_string(), "the reconnection was cancelled");
+    assert_eq!(attempts(&failing), 2);
+    assert_eq!(failing.ready_state(), ReadyState::Closed);
+    assert_eq!(clock.dues(), []);
+}
+
+#[tokio::test]
 async fn makes_its_first_attempt_at_once() {
     let ends = Ends::started().await;
     let (client, _) = ends.connected((None, None)).await;

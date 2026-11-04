@@ -1224,7 +1224,7 @@ impl Server {
         let clock = clock_of(&LayeredClocks {
             beneath: transport.clock().as_ref(),
             given: options.clock.as_ref(),
-            layer: "a server's router",
+            layer: "a server",
             below: "its transport",
         })?
         .unwrap_or_else(|| {
