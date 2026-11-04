@@ -105,6 +105,7 @@ mod server_filter;
 mod server_jwt_calls;
 mod server_late_answers;
 mod server_lifecycle;
+mod server_metrics_conversations;
 mod server_notifications;
 mod server_pacing;
 mod server_requests;
