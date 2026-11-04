@@ -335,7 +335,7 @@ public static class InteropHandlers
         // the server asks its client back, by a command, before it answers
         interop.On(InteropProcedures.Ask, async (request, response) =>
         {
-            var time = await clock(JsonSerializer.SerializeToElement(Question))(new RequestOptions
+            var time = await clock(JsonSerializer.SerializeToElement(Question))(new CommandOptions
             {
                 ConnectionHandle = request.ConnectionHandle,
                 Timeout = ClockTimeout,

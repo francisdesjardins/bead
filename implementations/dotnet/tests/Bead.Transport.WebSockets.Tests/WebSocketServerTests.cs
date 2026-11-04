@@ -558,7 +558,7 @@ public sealed class WebSocketServerTests
 
         await Assert.ThrowsAsync<TimeoutException>(() =>
         {
-            return ends.Server.Services.GetCommand(Ping, TextAsked)("ping")(new RequestOptions
+            return ends.Server.Services.GetCommand(Ping, TextAsked)("ping")(new CommandOptions
             {
                 ConnectionHandle = connectionHandle,
                 Timeout = TimeSpan.FromMilliseconds(50),
@@ -598,7 +598,7 @@ public sealed class WebSocketServerTests
         // the clock is no part of it: a generous timeout
         var resulted = await ends.Client.Services.GetRequest(Echo, BytesAsked)(request)(new RequestOptions { Timeout = Generous })
             .WaitAsync(Generous, Cancelled);
-        var answered = await ends.Server.Services.GetCommand(Ping, BytesAsked)(command)(new RequestOptions
+        var answered = await ends.Server.Services.GetCommand(Ping, BytesAsked)(command)(new CommandOptions
         {
             ConnectionHandle = await opened.Task.WaitAsync(Patience, Cancelled),
             Timeout = Generous,
@@ -948,7 +948,7 @@ public sealed class WebSocketServerTests
         Assert.Equal("HI", await echoing("hi")().WaitAsync(Patience, Cancelled));
 
         // the server commands the client it names
-        Assert.Equal("pong", await server.Services.GetCommand(Ping, TextAsked)("ping")(new RequestOptions { ConnectionHandle = connectionHandle })
+        Assert.Equal("pong", await server.Services.GetCommand(Ping, TextAsked)("ping")(new CommandOptions { ConnectionHandle = connectionHandle })
             .WaitAsync(Patience, Cancelled));
 
         // silent past its connection timeout, the client is closed, and its session goes with it
@@ -1083,7 +1083,7 @@ public sealed class WebSocketServerTests
 
         await Assert.ThrowsAsync<TimeoutException>(() =>
         {
-            return ends.Server.Services.GetCommand(Ping, TextAsked)("ping")(new RequestOptions
+            return ends.Server.Services.GetCommand(Ping, TextAsked)("ping")(new CommandOptions
             {
                 ConnectionHandle = connectionHandle,
                 Timeout = TimeSpan.FromMilliseconds(50),

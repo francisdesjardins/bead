@@ -127,7 +127,7 @@ public sealed class ServerTests : IAsyncLifetime
 
         return Record.ExceptionAsync(() =>
         {
-            return clock(JsonSerializer.SerializeToElement(0))(new RequestOptions
+            return clock(JsonSerializer.SerializeToElement(0))(new CommandOptions
             {
                 CloseOnTimeout = closeOnTimeout,
                 ConnectionHandle = Handle,
@@ -1240,7 +1240,7 @@ public sealed class ServerTests : IAsyncLifetime
         var clock = Server.Services.GetCommand(
             InteropProcedures.Clock.Procedure,
             new RequestDependencies<JsonElement, JsonElement> { Serializer = new JsonPayloads() });
-        var waiting = clock(JsonSerializer.SerializeToElement("ping"))(new RequestOptions { ConnectionHandle = Handle });
+        var waiting = clock(JsonSerializer.SerializeToElement("ping"))(new CommandOptions { ConnectionHandle = Handle });
 
         await _scheduler.WhenIdle();
 

@@ -1,4 +1,4 @@
-# alone: typescript 347, csharp 73, rust 87
+# alone: typescript 346, csharp 73, rust 87
 # concept	typescript	csharp	rust	class
 ACCEPT_TIMEOUT	ACCEPT_TIMEOUT [constant]	-	ACCEPT_TIMEOUT [constant]	same
 AccessRefusal	IAccessRefusal [record]	AccessRefusal [record]	AccessRefusal [record]	same
@@ -15,6 +15,7 @@ BeforeRequest	IBeforeRequest [record]	BeforeRequest [record]	BeforeRequest [reco
 BindingOptions	IBindingOptions [record]	BindingOptions [record]	-	same
 BODY_GRACE_PERIOD	BODY_GRACE_PERIOD [constant]	-	BODY_GRACE_PERIOD [constant]	same
 BoundCall	IBoundCall [function type]	BoundCall [function type]	-	same
+BoundCommand	IBoundCommand [function type]	BoundCommand [function type]	-	same
 BoxFuture	-	-	BoxFuture [record]	own: the runtime seam, a future boxed (0044)
 BrokerAdapter	IBrokerAdapter [record]	IBrokerAdapter [record]	BrokerAdapter [record]	same
 BrokerCapabilities	IBrokerCapabilities [record]	BrokerCapabilities [choice]	BrokerCapabilities [choice]	differs: A broker's optional capabilities
@@ -52,7 +53,9 @@ Clock	IClock [record]	-	Clock [record]	same
 CLOSING_BYTES	-	Violations.ClosingBytes [constant]	CLOSING_BYTES [constant]	rendered: constant (0007)
 CodecRefusal	-	-	CodecRefusal [record]	own: a Result's error, where the other sides throw (0044)
 codePointLength	codePointLength [function]	Validators.CodePointLength [function]	-	rendered: of (0007, 0044)
+Command	ICommand [record]	-	Command [record]	same
 commandOf	commandOf [function]	-	command_of [function]	same
+CommandOptions	ICommandOptions [record]	CommandOptions [record]	CommandOptions [record]	same
 CONNECT_TIMEOUT	CONNECT_TIMEOUT [constant]	-	CONNECT_TIMEOUT [constant]	same
 ConnectError	ConnectError [record]	ConnectException [record]	ConnectError [record]	rendered: error (0007, 0044)
 ConnectionHandle	ConnectionHandle [scalar]	-	ConnectionHandle [scalar]	same
@@ -195,6 +198,7 @@ ReadyStateError	ReadyStateError [record]	-	ReadyStateError [record]	same
 ReconnectError	ReconnectError [record]	ReconnectException [record]	ReconnectError [record]	rendered: error (0007, 0044)
 RefusalListener	-	-	RefusalListener [function type]	own: a listener the Rust side registers for an event the other sides emit (0044)
 Registrar	IRegistrar [function type]	Registrar [function type]	-	same
+RegistrationOptions	IRegistrationOptions [record]	RegistrationOptions [record]	RegistrationOptions [record]	same
 RelayOptions	IRelayOptions [record]	RelayOptions [record]	RelayOptions [record]	same
 RelayTarget	RelayTarget [choice]	-	RelayTarget [choice]	same
 Request	IRequest [record]	-	Request [record]	same
@@ -636,7 +640,6 @@ REQUEST_DEFAULTS	REQUEST_DEFAULTS [constant]	-	-	alone
 RequestDescriptor	RequestDescriptor [record]	-	-	alone
 RequestHandler	-	IRequestHandler [record]	-	alone
 RequestInit	IRequestInit [record]	-	-	alone
-RequestOptionsParameters	RequestOptionsParameters [record]	-	-	alone
 RequestProcedure<,,,,>	-	RequestProcedure<,,,,> [record]	-	alone
 RequestProcedure<,,,>	-	RequestProcedure<,,,> [record]	-	alone
 RequestValidator	-	RequestValidator [function type]	-	alone

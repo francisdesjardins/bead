@@ -92,7 +92,7 @@ internal static class ConversationPlayer
                 return;
             }
 
-            _ = clock(JsonSerializer.SerializeToElement(InteropHandlers.Question))(new RequestOptions
+            _ = clock(JsonSerializer.SerializeToElement(InteropHandlers.Question))(new CommandOptions
             {
                 ConnectionHandle = connectionHandle,
                 Timeout = Patience,

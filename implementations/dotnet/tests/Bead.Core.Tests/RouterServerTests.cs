@@ -763,7 +763,7 @@ public sealed partial class RouterServerTests : IDisposable
         _transport.Open(First);
         _transport.Open(Second);
 
-        var running = command("run")(new RequestOptions { ConnectionHandle = Second, Timeout = TimeSpan.FromSeconds(1) });
+        var running = command("run")(new CommandOptions { ConnectionHandle = Second, Timeout = TimeSpan.FromSeconds(1) });
 
         Deliver(Second, ResultOf(2, "done"));
 
@@ -2185,8 +2185,8 @@ public sealed partial class RouterServerTests : IDisposable
         // the server asks the client, naming its connection, on an even call id
         Assert.Equal(
             "pong",
-            await Services.GetRequest(ping, new RequestDependencies<string, string> { Serializer = Text })("ping")(
-                new RequestOptions { ConnectionHandle = await asked.Task.WaitAsync(Patience, Cancelled) }).WaitAsync(Patience, Cancelled));
+            await Services.GetCommand(ping, new RequestDependencies<string, string> { Serializer = Text })("ping")(
+                new CommandOptions { ConnectionHandle = await asked.Task.WaitAsync(Patience, Cancelled) }).WaitAsync(Patience, Cancelled));
 
         // unsubscribed at the server, by the call id that subscribed, by the time it is taken away
         await registration.Unregister().WaitAsync(Patience, Cancelled);

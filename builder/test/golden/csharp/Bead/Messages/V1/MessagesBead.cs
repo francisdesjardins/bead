@@ -117,7 +117,7 @@ public sealed class GreeterAdmissions : global::Bead.IServiceAdmissions<GreeterP
 public sealed class GreeterCommands
 {
     /// <summary>Asks the client its name.</summary>
-    public required global::System.Func<string, global::Bead.BoundCall<global::Bead.Messages.V1.Greeting>> Name { [global::System.Obsolete("No replacement is named.", DiagnosticId = "BEAD0001")] get; init; }
+    public required global::System.Func<string, global::Bead.BoundCommand<global::Bead.Messages.V1.Greeting>> Name { [global::System.Obsolete("No replacement is named.", DiagnosticId = "BEAD0001")] get; init; }
 }
 
 /// <summary>What notifies the subscribers of each procedure of <c>bead.messages.v1.GreeterService</c> that notifies.</summary>
@@ -262,5 +262,5 @@ public sealed class GreeterClient
 // the contract with the runtime this file needs: an older runtime lacks the constant, and fails here
 file static class GeneratedCodeContract
 {
-    private const bool Supported = global::Bead.GeneratedCode.SupportsVersion6;
+    private const bool Supported = global::Bead.GeneratedCode.SupportsVersion7;
 }

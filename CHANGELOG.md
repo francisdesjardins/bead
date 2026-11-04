@@ -185,6 +185,19 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `ConnectError` or a `ConnectException` with the misuse as its cause, and its reconnection tries
   again, as the participant's own does: on the TypeScript side it ended at once, and on the C# side
   the misuse came through as it was (spec 15.21).
+- A command takes its options in a record of its own, its connection required: `CommandOptions`
+  (`ICommandOptions` on the TypeScript side), a request's options with its `connectionHandle` and
+  `closeOnTimeout`, which `RequestOptions` no longer carries; a command's bound call is a
+  `BoundCommand<TResponse>` on the C# side (`IBoundCommand`), which `GetCommand`, `CommandOf` and a
+  server class's `…Commands` give. The TypeScript side's `RequestOptionsParameters` goes and
+  `IRequestOptions` takes no type parameter. C# generated code names the contract 7,
+  `GeneratedCode.SupportsVersion7`, which the runtime holds beside 5 and 6; TypeScript generated
+  code stays at 6.
+- A manager's request and notification makers are a client's router's alone and its command maker a
+  server's alone: the other is refused as it is made, after spec 16.10's reasons, where a
+  notification asked for on a server's router was refused at its first registration.
+- A registration takes `RegistrationOptions` (`IRegistrationOptions`): a timeout, a destination and
+  a cancellation, and no credential, which its subscribing call never presented.
 
 ### Removed
 

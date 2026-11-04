@@ -111,7 +111,7 @@ public sealed class HelloAdmissions : global::Bead.IServiceAdmissions<HelloProce
 public sealed class HelloCommands
 {
     /// <summary>Asks the client its name: a command the client answers.</summary>
-    public required global::System.Func<global::Hello.V1.AskNameRequest, global::Bead.BoundCall<global::Hello.V1.AskNameResponse>> AskName { get; init; }
+    public required global::System.Func<global::Hello.V1.AskNameRequest, global::Bead.BoundCommand<global::Hello.V1.AskNameResponse>> AskName { get; init; }
 }
 
 /// <summary>What notifies the subscribers of each procedure of <c>hello.v1.HelloService</c> that notifies.</summary>
@@ -265,5 +265,5 @@ file static class CountDownRequestRules
 // the contract with the runtime this file needs: an older runtime lacks the constant, and fails here
 file static class GeneratedCodeContract
 {
-    private const bool Supported = global::Bead.GeneratedCode.SupportsVersion6;
+    private const bool Supported = global::Bead.GeneratedCode.SupportsVersion7;
 }

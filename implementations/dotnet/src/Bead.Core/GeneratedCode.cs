@@ -30,4 +30,11 @@ public static class GeneratedCode
     /// <c>PatternTable</c> and <c>Pattern</c>.
     /// </summary>
     public const bool SupportsVersion6 = true;
+
+    /// <summary>
+    /// The runtime carries <see cref="BoundCommand{TResponse}"/> and <see cref="CommandOptions"/>,
+    /// which a server class's commands are typed by, beside the contract 6: a command's options a
+    /// record of their own, its connection required.
+    /// </summary>
+    public const bool SupportsVersion7 = true;
 }
