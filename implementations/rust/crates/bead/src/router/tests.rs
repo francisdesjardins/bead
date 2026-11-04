@@ -91,6 +91,7 @@ mod server_admissions;
 mod server_clocks;
 mod server_command_credentials;
 mod server_commands;
+mod server_conversations;
 mod server_credential_notifications;
 mod server_credentials;
 mod server_drop;
