@@ -8,11 +8,11 @@ use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 use bead::internal::{hold_finite, session_key_of};
 use bead::{
-    AdmissionHook, BoxFuture, CallSession, ConnectionHandle, DestinationOptions,
+    AdmissionHook, BoxFuture, CallSession, CommandOptions, ConnectionHandle, DestinationOptions,
     DestinationRegistration, Failure, JsonCodec, Judged, NotifyOptions, ProgrammerError,
-    ProtocolCode, RelayTarget, RequestOptions, RequestProps, ResolverCallback, ResolverError,
-    Response, RouterSide, Schedule, Server, ServiceServer, ServiceServerOptions, SessionIdentifier,
-    Validate, ValidateOptions, Violation, ViolationHolder,
+    ProtocolCode, RelayTarget, RequestProps, ResolverCallback, ResolverError, Response, RouterSide,
+    Schedule, Server, ServiceServer, ServiceServerOptions, SessionIdentifier, Validate,
+    ValidateOptions, Violation, ViolationHolder,
 };
 use serde_json::{Map, Value, json};
 use tokio::sync::oneshot;
@@ -719,9 +719,8 @@ pub fn offer_interop(server: &Server) -> Result<ServiceServer, ProgrammerError> 
                 let clock = clock.clone();
 
                 Box::pin(async move {
-                    let mut options = RequestOptions::default();
+                    let mut options = CommandOptions::new(Arc::clone(&request.connection_handle));
 
-                    options.connection_handle = Some(Arc::clone(&request.connection_handle));
                     options.timeout = Some(Duration::from_millis(CLOCK_MILLISECONDS));
 
                     let time = interop

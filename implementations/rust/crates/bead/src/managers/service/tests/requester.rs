@@ -12,10 +12,11 @@ use crate::debug::{DebugDirection, DebugType};
 use crate::envelope::{Envelope, ResultHeader};
 use crate::identity::{Deprecation, Procedure};
 use crate::managers::service::{
-    RequestDefaults, RequestDependencies, RequestOptions, ServiceManager, ServiceManagerOptions,
-    ServiceRouter,
+    CommandOptions, NotificationDependencies, RequestDefaults, RequestDependencies, RequestOptions,
+    ServiceManager, ServiceManagerOptions, ServiceRouter,
 };
 use crate::payloads::{JsonCodec, TextCodec};
+use crate::router::types::RequestCredential;
 use crate::testing::pair::echo;
 use crate::testing::scripted::handle_of;
 
@@ -78,13 +79,7 @@ async fn declares_its_requester_to_its_router_as_it_is_made_and_hands_each_of_it
     fixture.clock.settle().await;
     for (id, payload) in [(2, "x"), (4, "y")] {
         let answer = request
-            .call(
-                payload.to_owned(),
-                &RequestOptions {
-                    connection_handle: Some(handle_of(1)),
-                    ..RequestOptions::default()
-                },
-            )
+            .call(payload.to_owned(), &CommandOptions::new(handle_of(1)))
             .expect("a command");
         fixture.clock.settle().await;
         fixture.transport.deliver(
@@ -100,10 +95,6 @@ async fn declares_its_requester_to_its_router_as_it_is_made_and_hands_each_of_it
 }
 
 #[tokio::test]
-#[expect(
-    clippy::too_many_lines,
-    reason = "the same timeout matrix and the other endings as both other sides"
-)]
 async fn one_unanswered_in_time_closes_its_connection_as_the_call_or_else_the_manager_says_nothing_else_does()
  {
     use crate::constants::{ProtocolCode, RouterSide};
@@ -146,12 +137,11 @@ async fn one_unanswered_in_time_closes_its_connection_as_the_call_or_else_the_ma
             .expect("declared")
             .call(
                 "run".to_owned(),
-                &RequestOptions {
-                    connection_handle: Some(handle_of(1)),
+                &CommandOptions {
                     timeout: Some(Duration::from_millis(10)),
                     close_on_timeout: own,
                     signal: Some(signal.clone()),
-                    ..RequestOptions::default()
+                    ..CommandOptions::new(handle_of(1))
                 },
             )
             .expect("called");
@@ -200,43 +190,6 @@ async fn one_unanswered_in_time_closes_its_connection_as_the_call_or_else_the_ma
         fixture.router.dispose().await;
     }
     assert_eq!(*locked(&closed), [handle_of(1), handle_of(1)]);
-
-    let fixture = ClientFixture::new();
-    let closing = Arc::clone(&closed);
-    let manager = ServiceManager::new(
-        ServiceRouter::Client(fixture.router.clone()),
-        &ServiceManagerOptions {
-            close_connection: Some(Arc::new(move |handle| {
-                locked(&closing).push(Arc::clone(handle));
-            })),
-            defaults: Some(RequestDefaults {
-                close_on_timeout: Some(true),
-                ..RequestDefaults::default()
-            }),
-            ..ServiceManagerOptions::default()
-        },
-    )
-    .expect("a manager");
-    let call = manager
-        .get_request(&echo(), RequestDependencies::new(TextCodec, TextCodec))
-        .expect("declared")
-        .call(
-            "run".to_owned(),
-            &RequestOptions {
-                timeout: Some(Duration::from_millis(10)),
-                ..RequestOptions::default()
-            },
-        )
-        .expect("called");
-    fixture.clock.advance(Duration::from_millis(10)).await;
-    assert!(matches!(
-        crate::testing::patience(Duration::from_secs(10), call)
-            .await
-            .expect("settled"),
-        Err(CallError::TimedOut(_))
-    ));
-    assert_eq!(*locked(&closed), [handle_of(1), handle_of(1)]);
-    fixture.router.dispose().await;
 }
 
 #[tokio::test]
@@ -269,12 +222,11 @@ async fn fills_what_the_options_leave_out_and_passes_a_destination_as_it_is() {
                 locked(&hearing).push(event.options.clone().expect("options"));
             }
         }));
-        let options = RequestOptions {
-            connection_handle: Some(handle_of(1)),
+        let options = CommandOptions {
             destination_id: destination,
             timeout,
             close_on_timeout: own_close,
-            ..RequestOptions::default()
+            ..CommandOptions::new(handle_of(1))
         };
         let call = manager
             .get_command(&command(), RequestDependencies::new(TextCodec, TextCodec))
@@ -321,26 +273,23 @@ async fn fills_what_the_options_leave_out_and_passes_a_destination_as_it_is() {
                 options.timeout,
                 options.close_on_timeout
             ),
-            (Some(handle_of(1)), destination, timeout, own_close)
+            (handle_of(1), destination, timeout, own_close)
         );
     }
     fixture.router.dispose().await;
 }
 
-// decision 0004: a server's call names its connection, refused at the call without one where the
-// TypeScript side's types refuse it
+// decision 0004: a command's connection is required by its type, `CommandOptions::new`'s; the
+// router refuses one that names none, for whoever calls it directly
 #[tokio::test]
-async fn on_a_server_router_names_the_connection_it_goes_to() {
+async fn a_command_names_the_connection_it_goes_to() {
     let fixture = Fixture::new();
     fixture.transport.open(&handle_of(1), true);
     let requester = fixture
         .manager
         .get_command(&command(), RequestDependencies::new(TextCodec, TextCodec))
         .expect("declared");
-    let options = RequestOptions {
-        connection_handle: Some(handle_of(1)),
-        ..RequestOptions::default()
-    };
+    let options = CommandOptions::new(handle_of(1));
     let call = requester.call("a".to_owned(), &options).expect("called");
     fixture.clock.settle().await;
     let sent = fixture.transport.take();
@@ -360,15 +309,6 @@ async fn on_a_server_router_names_the_connection_it_goes_to() {
             .expect("result"),
         "a"
     );
-    assert_eq!(
-        requester
-            .call("b".to_owned(), &RequestOptions::default())
-            .expect_err("no connection named")
-            .message(),
-        "a server request names the connection it goes to"
-    );
-    fixture.clock.settle().await;
-    assert_eq!(fixture.transport.take().len(), 0);
     fixture.router.dispose().await;
 }
 
@@ -559,13 +499,7 @@ async fn get_command_asks_one_connection_as_a_servers_request_does_and_tells_deb
         .expect("declared");
     assert_eq!(requester.procedure().procedure_name, "echo");
     let call = requester
-        .call(
-            "run".to_owned(),
-            &RequestOptions {
-                connection_handle: Some(handle_of(1)),
-                ..RequestOptions::default()
-            },
-        )
+        .call("run".to_owned(), &CommandOptions::new(handle_of(1)))
         .expect("called");
     fixture.clock.settle().await;
     assert_eq!(fixture.transport.take()[0].0, handle_of(1));
@@ -589,9 +523,6 @@ async fn get_command_asks_one_connection_as_a_servers_request_does_and_tells_deb
             (DebugDirection::Rx, DebugType::Command)
         ]
     );
-    requester
-        .call("run".to_owned(), &RequestOptions::default())
-        .expect_err("a command names a connection");
     fixture.router.dispose().await;
 }
 
@@ -625,10 +556,9 @@ async fn tells_debug_the_close_on_timeout_that_applies_the_calls_or_else_the_man
         let call = requester
             .call(
                 "run".to_owned(),
-                &RequestOptions {
-                    connection_handle: Some(handle_of(1)),
+                &CommandOptions {
                     close_on_timeout: close,
-                    ..RequestOptions::default()
+                    ..CommandOptions::new(handle_of(1))
                 },
             )
             .expect("called");
@@ -642,5 +572,235 @@ async fn tells_debug_the_close_on_timeout_that_applies_the_calls_or_else_the_man
             .expect("result");
     }
     assert_eq!(*locked(&seen), [Some(true), Some(false)]);
+    fixture.router.dispose().await;
+}
+
+// decision 0004: a command's options are a request's and its own, its connection and its close; the
+// four of a request's are written out on both records, so this build is what holds them equal
+#[test]
+fn a_command_options_carry_every_option_of_a_request() {
+    let signal = CancellationToken::new();
+    let request = RequestOptions {
+        timeout: Some(Duration::from_millis(7)),
+        destination_id: Some(4),
+        credential: Some(RequestCredential::Jwt("a.b.c".to_owned())),
+        signal: Some(signal.clone()),
+    };
+    // * destructured without `..`: a field a request's options gain and a command's do not fails
+    // this build
+    let RequestOptions {
+        timeout,
+        destination_id,
+        credential,
+        signal: cancelling,
+    } = request;
+    let command = CommandOptions {
+        timeout,
+        destination_id,
+        credential,
+        signal: cancelling,
+        ..CommandOptions::new(handle_of(1))
+    };
+    assert_eq!(
+        (
+            command.connection_handle,
+            command.close_on_timeout,
+            command.timeout,
+            command.destination_id
+        ),
+        (handle_of(1), None, Some(Duration::from_millis(7)), Some(4))
+    );
+    assert!(matches!(
+        command.credential,
+        Some(RequestCredential::Jwt(token)) if token == "a.b.c"
+    ));
+    signal.cancel();
+    assert!(command.signal.expect("its signal").is_cancelled());
+}
+
+// spec 16.11: a client's router makes requests and hears notifications, a server's makes commands;
+// the other maker is refused as it is made, after spec 16.10's reasons, and declares nothing
+#[tokio::test]
+#[expect(
+    clippy::too_many_lines,
+    reason = "each maker on each router, by kind, as both other sides tell them"
+)]
+async fn makes_requests_and_notifications_on_a_client_router_alone_and_commands_on_a_server_router_alone()
+ {
+    use crate::errors::{ProgrammerError, Refusal};
+    use crate::identity::IdentityRefusal;
+    use crate::metrics::{MetricsRegistry, MetricsRegistryOptions};
+
+    const COMMANDS: &str = "a server's router makes commands: get_command";
+    const REQUESTS: &str = "a client's router makes requests: get_request";
+    const NOTIFIES: &str = "only a client hears notifications; a server notifies them";
+
+    let of_kind = |procedure_kind| Procedure {
+        procedure_kind,
+        ..echo()
+    };
+    let told = |refused: ProgrammerError| (refused.reason(), refused.message().to_owned());
+    let by_side = |message: &str| (None, message.to_owned());
+    let against = |refused: &(Option<Refusal>, String)| {
+        refused.0 == Some(Refusal::Identity(IdentityRefusal::AgainstItsKind))
+    };
+    let notifying =
+        || NotificationDependencies::new(RequestDependencies::new(TextCodec, TextCodec), TextCodec);
+
+    // on a server's router
+    let registry = MetricsRegistry::new(&MetricsRegistryOptions::default()).expect("a registry");
+    let fixture = Fixture::with(&crate::router::server::RouterServerOptions {
+        metrics_registry: Some(registry.clone()),
+        ..crate::router::server::RouterServerOptions::default()
+    });
+    // * what the registry holds before any maker: a declaration adds its procedure's series
+    let declared = registry.exposition().text;
+    let request = |procedure: &Procedure| {
+        fixture
+            .manager
+            .get_request(procedure, RequestDependencies::new(TextCodec, TextCodec))
+            .map(drop)
+            .map_err(told)
+    };
+    let notification = |procedure: &Procedure| {
+        fixture
+            .manager
+            .get_notification(procedure, notifying())
+            .map(drop)
+            .map_err(told)
+    };
+    for kind in [None, Some(ProcedureKind::Command)] {
+        assert_eq!(request(&of_kind(kind)), Err(by_side(COMMANDS)), "{kind:?}");
+        assert_eq!(
+            notification(&of_kind(kind)),
+            Err(by_side(NOTIFIES)),
+            "{kind:?}"
+        );
+    }
+    assert!(against(
+        &request(&of_kind(Some(ProcedureKind::Request))).expect_err("a request")
+    ));
+    for kind in [ProcedureKind::Request, ProcedureKind::Notifies] {
+        assert!(
+            against(&notification(&of_kind(Some(kind))).expect_err("refused")),
+            "{kind:?}"
+        );
+    }
+    // * out of its range before the side, as before its kind
+    let unranged = Procedure {
+        service_id: 0,
+        procedure_kind: None,
+        ..echo()
+    };
+    for refused in [request(&unranged), notification(&unranged)] {
+        assert_eq!(
+            refused.expect_err("out of its range").0,
+            Some(Refusal::Identity(IdentityRefusal::OutOfItsRange))
+        );
+    }
+    assert_eq!(registry.exposition().text, declared, "nothing declared");
+    fixture
+        .manager
+        .get_command(
+            &of_kind(None),
+            RequestDependencies::new(TextCodec, TextCodec),
+        )
+        .expect("a command, on a server's router");
+    assert_ne!(registry.exposition().text, declared, "the command declared");
+    fixture.router.dispose().await;
+
+    // on a client's router
+    let registry = MetricsRegistry::new(&MetricsRegistryOptions::default()).expect("a registry");
+    let fixture = ClientFixture::with(&crate::router::client::RouterClientOptions {
+        metrics_registry: Some(registry.clone()),
+        ..crate::router::client::RouterClientOptions::default()
+    });
+    let declared = registry.exposition().text;
+    let command = |procedure: &Procedure| {
+        fixture
+            .manager
+            .get_command(procedure, RequestDependencies::new(TextCodec, TextCodec))
+            .map(drop)
+            .map_err(told)
+    };
+    for kind in [
+        None,
+        Some(ProcedureKind::Request),
+        Some(ProcedureKind::Notifies),
+    ] {
+        assert_eq!(command(&of_kind(kind)), Err(by_side(REQUESTS)), "{kind:?}");
+    }
+    assert!(against(
+        &command(&of_kind(Some(ProcedureKind::Command))).expect_err("a command")
+    ));
+    assert_eq!(registry.exposition().text, declared, "nothing declared");
+    fixture
+        .manager
+        .get_request(
+            &of_kind(None),
+            RequestDependencies::new(TextCodec, TextCodec),
+        )
+        .expect("a request, on a client's router");
+    fixture
+        .manager
+        .get_notification(
+            &Procedure {
+                procedure_id: 2,
+                procedure_name: "news".to_owned(),
+                procedure_kind: Some(ProcedureKind::Notifies),
+                ..echo()
+            },
+            notifying(),
+        )
+        .expect("a notification, on a client's router");
+    assert_ne!(registry.exposition().text, declared, "the request declared");
+    fixture.router.dispose().await;
+}
+
+// a request names no connection, so it has none to close, whatever its manager's defaults say
+#[tokio::test]
+async fn a_client_request_resolves_no_close_on_timeout() {
+    let fixture = ClientFixture::new();
+    let manager = ServiceManager::new(
+        ServiceRouter::Client(fixture.router.clone()),
+        &ServiceManagerOptions {
+            close_connection: Some(Arc::new(|_| {})),
+            defaults: Some(RequestDefaults {
+                close_on_timeout: Some(true),
+                ..RequestDefaults::default()
+            }),
+            ..ServiceManagerOptions::default()
+        },
+    )
+    .expect("a manager");
+    let seen = Arc::new(Mutex::new(Vec::new()));
+    let hearing = Arc::clone(&seen);
+    manager.on_debug(Arc::new(move |_, event| {
+        if event.direction == DebugDirection::Tx {
+            locked(&hearing).push(event.options.clone().expect("options"));
+        }
+    }));
+    let call = manager
+        .get_request(&echo(), RequestDependencies::new(TextCodec, TextCodec))
+        .expect("declared")
+        .call("run".to_owned(), &RequestOptions::default())
+        .expect("called");
+    fixture.clock.settle().await;
+    fixture
+        .transport
+        .deliver(&result(1, Bytes::from_static(b"run")));
+    assert_eq!(
+        crate::testing::patience(Duration::from_secs(10), call)
+            .await
+            .expect("answered")
+            .expect("result"),
+        "run"
+    );
+    let seen = locked(&seen).clone();
+    assert_eq!(seen.len(), 1);
+    assert_eq!(
+        (seen[0].close_on_timeout, seen[0].connection_handle.clone()),
+        (None, None)
+    );
     fixture.router.dispose().await;
 }

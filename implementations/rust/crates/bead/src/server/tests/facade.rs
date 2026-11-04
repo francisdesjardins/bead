@@ -13,7 +13,7 @@ use crate::envelope::{Credential, Envelope, RequestHeader};
 use crate::errors::{CallError, ResolverError};
 use crate::identity::Procedure;
 use crate::managers::service::{
-    Request, RequestDependencies, RequestOptions, RequestResolverDependencies,
+    Command, CommandOptions, RequestDependencies, RequestResolverDependencies,
 };
 use crate::router::admissions::require_session;
 use crate::router::core::AdmissionRequest;
@@ -165,7 +165,7 @@ impl Fixture {
         self.clock.advance(Duration::from_millis(ms)).await;
     }
 
-    fn command(&self) -> Request<crate::payloads::TextCodec, crate::payloads::TextCodec> {
+    fn command(&self) -> Command<crate::payloads::TextCodec, crate::payloads::TextCodec> {
         self.server
             .services()
             .get_command(
@@ -178,11 +178,10 @@ impl Fixture {
             .expect("a command")
     }
 
-    fn options(&self) -> RequestOptions {
-        RequestOptions {
-            connection_handle: Some(Arc::clone(&self.first)),
+    fn options(&self) -> CommandOptions {
+        CommandOptions {
             timeout: Some(Duration::from_millis(10)),
-            ..RequestOptions::default()
+            ..CommandOptions::new(Arc::clone(&self.first))
         }
     }
     fn news(&self) -> crate::managers::service::Notifier<crate::payloads::TextCodec> {
@@ -681,7 +680,7 @@ async fn a_command_unanswered_in_time_closes_its_connection_as_the_server_s_defa
             .command()
             .call(
                 "ping".to_owned(),
-                &RequestOptions {
+                &CommandOptions {
                     close_on_timeout: override_value,
                     ..fixture.options()
                 },

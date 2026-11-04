@@ -15,7 +15,7 @@ use crate::envelope::{Envelope, RequestHeader, ResultHeader};
 use crate::errors::CallError;
 use crate::failure::FailureOrigin;
 use crate::identity::Procedure;
-use crate::managers::service::{NotificationDependencies, RequestDependencies, RequestOptions};
+use crate::managers::service::{CommandOptions, NotificationDependencies, RequestDependencies};
 use crate::payloads::TextCodec;
 use crate::router::server::{Call, RouterServerOptions};
 use crate::router::types::{ConnectionHandle, TransportMessage};
@@ -72,10 +72,9 @@ async fn tells_a_command_made_with_the_call_id_its_router_drew_on_its_connection
     let running = command
         .call(
             "run".to_owned(),
-            &RequestOptions {
-                connection_handle: Some(second()),
+            &CommandOptions {
                 timeout: Some(Duration::from_secs(1)),
-                ..RequestOptions::default()
+                ..CommandOptions::new(second())
             },
         )
         .expect("the command made");
@@ -205,7 +204,8 @@ async fn commands_name_their_connection_and_it_must_be_open_a_server_holds_no_su
             .message(),
         "a server does not subscribe to notifications; it sends them"
     );
-    // its service layer refuses a subscriber before any call is made
+    // its service layer refuses a subscriber before any call is made: by its kind first (spec
+    // 16.10), a requester on a server's router taking a command alone
     let refused = served
         .services
         .get_notification(
@@ -217,8 +217,10 @@ async fn commands_name_their_connection_and_it_must_be_open_a_server_holds_no_su
         )
         .expect_err("a server cannot subscribe");
     assert_eq!(
-        refused.to_string(),
-        "only a client hears notifications; a server notifies them"
+        refused.reason(),
+        Some(crate::errors::Refusal::Identity(
+            crate::identity::IdentityRefusal::AgainstItsKind
+        ))
     );
     served.transport.close_connection(&first());
     assert!(matches!(

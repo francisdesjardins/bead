@@ -14,7 +14,7 @@ use crate::errors::ResolverError;
 use crate::failure::Failure;
 use crate::identity::Procedure;
 use crate::managers::service::{
-    RequestDependencies, RequestOptions, RequestResolverDependencies, Response,
+    CommandOptions, RequestDependencies, RequestOptions, RequestResolverDependencies, Response,
 };
 use crate::metrics::MetricsRegistry;
 use crate::payloads::TextCodec;
@@ -107,10 +107,9 @@ async fn one_registry_given_to_a_clients_router_and_a_servers_counts_a_call_at_e
                 let noon = command
                     .call(
                         "now".to_owned(),
-                        &RequestOptions {
-                            connection_handle: Some(request.connection_handle),
+                        &CommandOptions {
                             timeout: Some(Duration::from_secs(1)),
-                            ..RequestOptions::default()
+                            ..CommandOptions::new(request.connection_handle)
                         },
                     )
                     .map_err(ResolverError::other)?

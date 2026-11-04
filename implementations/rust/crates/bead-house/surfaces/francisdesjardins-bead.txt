@@ -130,6 +130,8 @@ crate
   use managers::notification::PacingLimits
   use managers::notification::PacingLimitsOptions
   use managers::service::CloseConnection
+  use managers::service::Command
+  use managers::service::CommandOptions
   use managers::service::DEFAULT_TIMEOUT
   use managers::service::DebugEvent
   use managers::service::DebugListener
@@ -143,6 +145,7 @@ crate
   use managers::service::NotificationResolverOf
   use managers::service::Notifier
   use managers::service::NotifyOptions
+  use managers::service::RegistrationOptions
   use managers::service::Request
   use managers::service::RequestDefaults
   use managers::service::RequestDependencies
@@ -1175,10 +1178,22 @@ crate::managers::service
   struct RequestOptions #[non_exhaustive]
     pub timeout: Option<Duration>
     pub destination_id: Option<u32>
-    pub connection_handle: Option<ConnectionHandle>
     pub credential: Option<RequestCredential>
     pub signal: Option<CancellationToken>
+    derives Clone, Debug, Default
+  struct CommandOptions #[non_exhaustive]
+    pub connection_handle: ConnectionHandle
     pub close_on_timeout: Option<bool>
+    pub timeout: Option<Duration>
+    pub destination_id: Option<u32>
+    pub credential: Option<RequestCredential>
+    pub signal: Option<CancellationToken>
+    const fn new(connection_handle: ConnectionHandle) -> Self
+    derives Clone, Debug
+  struct RegistrationOptions #[non_exhaustive]
+    pub timeout: Option<Duration>
+    pub destination_id: Option<u32>
+    pub signal: Option<CancellationToken>
     derives Clone, Debug, Default
   struct ValidateOptions #[non_exhaustive]
     pub fail_fast: Option<bool>
@@ -1203,7 +1218,7 @@ crate::managers::service
     fn is_debugging(&self) -> bool
     fn router(&self) -> &ServiceRouter
     fn get_request<Req, Res>(&self, procedure: &Procedure, dependencies: RequestDependencies<Req, Res>) -> Result<Request<Req, Res>, ProgrammerError> where Req: PayloadCodec, Res: PayloadCodec, Req::Value: Clone + fmt::Debug + Sync, Res::Value: Clone + fmt::Debug + Sync,
-    fn get_command<Req, Res>(&self, procedure: &Procedure, dependencies: RequestDependencies<Req, Res>) -> Result<Request<Req, Res>, ProgrammerError> where Req: PayloadCodec, Res: PayloadCodec, Req::Value: Clone + fmt::Debug + Sync, Res::Value: Clone + fmt::Debug + Sync,
+    fn get_command<Req, Res>(&self, procedure: &Procedure, dependencies: RequestDependencies<Req, Res>) -> Result<Command<Req, Res>, ProgrammerError> where Req: PayloadCodec, Res: PayloadCodec, Req::Value: Clone + fmt::Debug + Sync, Res::Value: Clone + fmt::Debug + Sync,
     fn get_request_resolver<Req, Res>(&self, procedure: &Procedure, dependencies: RequestResolverDependencies<Req, Res>) -> Result<ResolverOf<Req, Res>, ProgrammerError> where Req: PayloadCodec, Res: PayloadCodec,
     fn get_command_resolver<Req, Res>(&self, procedure: &Procedure, dependencies: RequestResolverDependencies<Req, Res>) -> Result<ResolverOf<Req, Res>, ProgrammerError> where Req: PayloadCodec, Res: PayloadCodec,
     fn get_notification_resolver<Req, Res, Not>(&self, procedure: &Procedure, dependencies: NotificationResolverDependencies<Req, Res, Not>) -> Result<NotificationResolverOf<Req, Res, Not>, ProgrammerError> where Req: PayloadCodec, Res: PayloadCodec, Not: PayloadCodec,
@@ -1213,6 +1228,10 @@ crate::managers::service
   struct Request<Req: PayloadCodec, Res: PayloadCodec>
     fn procedure(&self) -> &Procedure
     fn call(&self, payload: Req::Value, options: &RequestOptions) -> Result<ServiceCall<Res::Value>, ProgrammerError>
+    implements Clone, Debug
+  struct Command<Req: PayloadCodec, Res: PayloadCodec>
+    fn procedure(&self) -> &Procedure
+    fn call(&self, payload: Req::Value, options: &CommandOptions) -> Result<ServiceCall<Res::Value>, ProgrammerError>
     implements Clone, Debug
   struct ServiceCall<T>
     implements Debug, Future
@@ -1285,7 +1304,7 @@ crate::managers::service::notification
   struct Notification<Req: PayloadCodec, Res: PayloadCodec, Not: PayloadCodec>
     fn procedure(&self) -> &Procedure
     fn as_like(&self) -> Arc<dyn NotificationLike>
-    fn register(&self, payload: Req::Value, callback: NotificationCallback<Not::Value>, options: &RequestOptions) -> BoxFuture<Result<NotificationRegistration, CallError>>
+    fn register(&self, payload: Req::Value, callback: NotificationCallback<Not::Value>, options: &RegistrationOptions) -> BoxFuture<Result<NotificationRegistration, CallError>>
     implements Clone, Debug
 crate::managers::sessions
   struct Session #[non_exhaustive]
@@ -1891,7 +1910,7 @@ crate::service
     fn on<Req, Res>(&self, descriptor: &Descriptor<Req, Res>, callback: ResolverCallback<Req, Res>) -> Result<(), ProgrammerError> where Req: PayloadCodec + Clone, Res: PayloadCodec + Clone, Req::Value: Clone + fmt::Debug + Sync, Res::Value: Clone + fmt::Debug + Sync,
     fn on_notifying<Req, Res, Not>(&self, descriptor: &NotifyingDescriptor<Req, Res, Not>, callback: ResolverCallback<Req, Res>) -> Result<(), ProgrammerError> where Req: PayloadCodec + Clone, Res: PayloadCodec + Clone, Not: PayloadCodec + Clone, Req::Value: Clone + fmt::Debug + Sync, Res::Value: Clone + fmt::Debug + Sync, Not::Value: Clone + fmt::Debug + Sync,
     fn offer(&self, server: &Server) -> Result<(), ProgrammerError>
-    fn command<Req, Res>(&self, descriptor: &Descriptor<Req, Res>) -> Result<Request<Req, Res>, ProgrammerError> where Req: PayloadCodec, Res: PayloadCodec,
+    fn command<Req, Res>(&self, descriptor: &Descriptor<Req, Res>) -> Result<Command<Req, Res>, ProgrammerError> where Req: PayloadCodec, Res: PayloadCodec,
     fn notify<Req, Res, Not>(&self, descriptor: &NotifyingDescriptor<Req, Res, Not>, notification: Not::Value, options: &NotifyOptions) -> BoxFuture<()> where Req: PayloadCodec, Res: PayloadCodec, Not: PayloadCodec, Not::Value: Clone + fmt::Debug + Sync,
     fn procedures_without_resolver(&self) -> Vec<Procedure>
     implements Debug

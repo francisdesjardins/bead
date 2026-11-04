@@ -100,13 +100,14 @@ pub use managers::notification::{
     NotificationKey, PACING_DEFAULTS, PacingLimits, PacingLimitsOptions,
 };
 pub use managers::service::{
-    CloseConnection, DEFAULT_TIMEOUT, DebugEvent, DebugListener, DeprecatedListener,
-    DroppedListener, Notification, NotificationCallback, NotificationDependencies,
-    NotificationRegistration, NotificationResolverDependencies, NotificationResolverOf, Notifier,
-    NotifyOptions, Request, RequestDefaults, RequestDependencies, RequestOptions, RequestProps,
-    RequestResolverDependencies, ResolverCallback, ResolverOf, Response, ServiceCall,
-    ServiceManager, ServiceManagerOptions, ServiceRouter, Subscriber, SubscriberFilter, Traced,
-    TracedError, TracedValue, Unsubscribe, Validate, ValidateOptions,
+    CloseConnection, Command, CommandOptions, DEFAULT_TIMEOUT, DebugEvent, DebugListener,
+    DeprecatedListener, DroppedListener, Notification, NotificationCallback,
+    NotificationDependencies, NotificationRegistration, NotificationResolverDependencies,
+    NotificationResolverOf, Notifier, NotifyOptions, RegistrationOptions, Request, RequestDefaults,
+    RequestDependencies, RequestOptions, RequestProps, RequestResolverDependencies,
+    ResolverCallback, ResolverOf, Response, ServiceCall, ServiceManager, ServiceManagerOptions,
+    ServiceRouter, Subscriber, SubscriberFilter, Traced, TracedError, TracedValue, Unsubscribe,
+    Validate, ValidateOptions,
 };
 pub use managers::sessions::{Session, SessionEvent, SessionManagerOptions};
 pub use memory::{

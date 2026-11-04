@@ -9,9 +9,9 @@ use crate::debug::DebugDirection;
 use crate::errors::ResolverError;
 use crate::identity::Procedure;
 use crate::managers::service::{
-    NotificationDependencies, NotificationResolverDependencies, Notifier, NotifyOptions,
-    RequestDependencies, RequestOptions, RequestResolverDependencies, Response, ServiceManager,
-    ServiceManagerOptions, ServiceRouter,
+    CommandOptions, NotificationDependencies, NotificationResolverDependencies, Notifier,
+    NotifyOptions, RegistrationOptions, RequestDependencies, RequestOptions,
+    RequestResolverDependencies, Response, ServiceManager, ServiceManagerOptions, ServiceRouter,
 };
 use crate::memory::{
     MemoryTransportClient, MemoryTransportClientConnectOptions, MemoryTransportClientOptions,
@@ -251,7 +251,7 @@ async fn a_client_and_a_server_ask_answer_subscribe_notify_unsubscribe_and_comma
                 locked(&hearing).push(payload);
                 Box::pin(async { Ok(()) })
             }),
-            &RequestOptions::default(),
+            &RegistrationOptions::default(),
         )
         .await
         .expect("subscribed");
@@ -263,22 +263,16 @@ async fn a_client_and_a_server_ask_answer_subscribe_notify_unsubscribe_and_comma
     let handle = locked(&asked).clone().expect("echo names its connection");
     let ping = link
         .answering
-        .get_request(
+        .get_command(
             &procedure(40, "ping"),
             RequestDependencies::new(TextCodec, TextCodec),
         )
         .expect("ping requester");
     assert_eq!(
-        ping.call(
-            "ping".to_owned(),
-            &RequestOptions {
-                connection_handle: Some(Arc::clone(&handle)),
-                ..RequestOptions::default()
-            }
-        )
-        .expect("ping called")
-        .await
-        .expect("ping answered"),
+        ping.call("ping".to_owned(), &CommandOptions::new(Arc::clone(&handle)))
+            .expect("ping called")
+            .await
+            .expect("ping answered"),
         "pong"
     );
     registration
@@ -314,7 +308,7 @@ async fn a_client_and_a_server_ask_answer_subscribe_notify_unsubscribe_and_comma
         .register(
             "subscribe".to_owned(),
             Arc::new(|_| Box::pin(async { Ok(()) })),
-            &RequestOptions::default(),
+            &RegistrationOptions::default(),
         )
         .await
         .expect("subscribed again");

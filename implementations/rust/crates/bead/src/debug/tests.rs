@@ -16,8 +16,9 @@ use crate::constants::{ProcedureKind, SERVER_CONNECTION_HANDLE};
 use crate::errors::{CallError, ResolverError};
 use crate::identity::Procedure;
 use crate::managers::service::{
-    DebugEvent, NotificationDependencies, NotifyOptions, RequestDependencies, RequestOptions,
-    RequestResolverDependencies, Response, ServiceManager, Traced, TracedError,
+    CommandOptions, DebugEvent, NotificationDependencies, NotifyOptions, RegistrationOptions,
+    RequestDependencies, RequestOptions, RequestResolverDependencies, Response, ServiceManager,
+    Traced, TracedError,
 };
 use crate::payloads::{CodecRefusal, JsonCodec, PayloadCodec};
 use crate::router::types::RequestCredential;
@@ -324,10 +325,7 @@ async fn tells_a_call_made_and_its_answer_with_the_call_id_its_router_drew_and_t
     let commanding = command
         .call(
             json!({ "text": "b" }),
-            &RequestOptions {
-                connection_handle: Some(Arc::clone(&pair.connection_handle)),
-                ..RequestOptions::default()
-            },
+            &CommandOptions::new(Arc::clone(&pair.connection_handle)),
         )
         .expect("a command made");
 
@@ -588,7 +586,7 @@ async fn a_notification_starts_as_it_is_heard_or_sent_and_a_failed_notify_tells_
     let registering = notification.register(
         Value::Null,
         Arc::new(|_value| Box::pin(async { Ok(()) })),
-        &RequestOptions::default(),
+        &RegistrationOptions::default(),
     );
 
     pair.settle().await;
@@ -726,7 +724,7 @@ async fn reads_no_clock_for_a_call_made_a_request_answered_a_notification_sent_a
     let registering = notification.register(
         Value::Null,
         Arc::new(|_value| Box::pin(async { Ok(()) })),
-        &RequestOptions::default(),
+        &RegistrationOptions::default(),
     );
 
     pair.settle().await;
@@ -965,7 +963,7 @@ async fn tells_a_notification_sent_or_heard_with_no_call_id() {
     let registering = notification.register(
         Value::Null,
         Arc::new(|_value| Box::pin(async { Ok(()) })),
-        &RequestOptions::default(),
+        &RegistrationOptions::default(),
     );
 
     pair.settle().await;

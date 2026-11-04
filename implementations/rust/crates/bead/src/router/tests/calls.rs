@@ -760,7 +760,7 @@ async fn counts_a_call_made_refused_before_it_goes_no_call_id_free_or_payload_to
 async fn detaches_calls_before_settling_an_incoming_resolver_awaiting_an_outgoing_call_and_counts_its_incoming_close_once()
  {
     use crate::client::ClientOptions;
-    use crate::managers::service::{RequestDependencies, RequestOptions};
+    use crate::managers::service::{CommandOptions, RequestDependencies, RequestOptions};
     use crate::metrics::MetricsRegistryOptions;
     use crate::payloads::JsonCodec;
     use crate::server::ServerOptions;
@@ -801,7 +801,7 @@ async fn detaches_calls_before_settling_an_incoming_resolver_awaiting_an_outgoin
     let holding = pair
         .server
         .services()
-        .get_request(&hold, RequestDependencies::new(JsonCodec, JsonCodec))
+        .get_command(&hold, RequestDependencies::new(JsonCodec, JsonCodec))
         .expect("hold asked");
     let heard: Arc<Mutex<Vec<String>>> = Arc::default();
     let hearing = Arc::clone(&heard);
@@ -822,10 +822,7 @@ async fn detaches_calls_before_settling_an_incoming_resolver_awaiting_an_outgoin
             Box::pin(async move {
                 let called = holding.call(
                     request.payload.clone(),
-                    &RequestOptions {
-                        connection_handle: Some(connection_handle),
-                        ..RequestOptions::default()
-                    },
+                    &CommandOptions::new(connection_handle),
                 );
                 let rejected = match called {
                     Ok(call) => call.await,

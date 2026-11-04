@@ -8,8 +8,8 @@ use crate::constants::{FailureScope, ProcedureKind, ProtocolCode, RouterSide};
 use crate::errors::{CallError, ResolverError};
 use crate::failure::FailureOrigin;
 use crate::managers::service::{
-    NotificationDependencies, NotifyOptions, RequestDependencies, RequestOptions,
-    RequestResolverDependencies, ResolverCallback, Validate,
+    CommandOptions, NotificationDependencies, NotifyOptions, RegistrationOptions,
+    RequestDependencies, RequestOptions, RequestResolverDependencies, ResolverCallback, Validate,
 };
 use crate::payloads::TextCodec;
 use crate::service::{
@@ -269,10 +269,7 @@ async fn makes_each_command_s_requester_once_as_it_is_offered_and_refuses_one_ca
         let call = requester
             .call(
                 asked.to_owned(),
-                &RequestOptions {
-                    connection_handle: Some(Arc::clone(&pair.connection_handle)),
-                    ..RequestOptions::default()
-                },
+                &CommandOptions::new(Arc::clone(&pair.connection_handle)),
             )
             .expect("clock called");
         assert_eq!(
@@ -607,7 +604,7 @@ async fn notifies_nothing_before_it_is_offered_and_resolves() {
                 locked(&hearing).push(value);
                 Box::pin(async { Ok(()) })
             }),
-            &RequestOptions::default(),
+            &RegistrationOptions::default(),
         )
         .await
         .expect("subscribed");
@@ -838,10 +835,7 @@ async fn validates_a_command_before_it_goes_when_its_options_say_so() {
         .expect("registered");
     service.offer(&pair.server).expect("offered");
     let command = service.command(&descriptor).expect("made");
-    let options = || RequestOptions {
-        connection_handle: Some(Arc::clone(&pair.connection_handle)),
-        ..RequestOptions::default()
-    };
+    let options = || CommandOptions::new(Arc::clone(&pair.connection_handle));
     let CallError::Failure(failure) = command
         .call(String::new(), &options())
         .expect("a call")

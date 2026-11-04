@@ -11,14 +11,14 @@ use bytes::Bytes;
 use tokio::sync::Notify;
 
 use super::{
-    Inner, Request, RequestDependencies, RequestOptions, ServiceManager, ServiceRouter, Step,
+    Inner, RegistrationOptions, Request, RequestDependencies, ServiceManager, ServiceRouter, Step,
     Validate, traced,
 };
 use crate::constants::ProtocolCode;
 use crate::debug::{DebugDirection, DebugType};
 use crate::errors::{CallError, ProgrammerError};
 use crate::failure::Failure;
-use crate::identity::{Procedure, check_declaration};
+use crate::identity::{Procedure, check_declaration, check_procedure_kind};
 use crate::payloads::PayloadCodec;
 use crate::router::client::{NotificationLike, RouterClient, UnregisterNotificationOptions};
 use crate::router::types::{BoxFuture, RouterError};
@@ -174,7 +174,7 @@ where
     // anything waiting on the answer runs
     async fn register(
         &self,
-        (payload, options): (Req::Value, RequestOptions),
+        (payload, options): (Req::Value, RegistrationOptions),
     ) -> Result<(), CallError> {
         let liked = self
             .liked()
@@ -184,17 +184,9 @@ where
                 .register_notification(Arc::clone(&liked))
                 .map_err(CallError::Refused)?;
 
-            // a notification's own request names no connection, whichever router it goes through
-            let asked = RequestOptions {
-                destination_id: options.destination_id,
-                signal: options.signal,
-                timeout: options.timeout,
-                ..RequestOptions::default()
-            };
-
             let (call_id, response) = self
                 .requester
-                .call_with(payload, (&asked, Some(Arc::clone(&liked))))
+                .subscribe_with(payload, (&options, Arc::clone(&liked)))
                 .map_err(CallError::Refused)?
                 .with_call_id()
                 .await?;
@@ -522,7 +514,7 @@ where
         &self,
         payload: Req::Value,
         callback: NotificationCallback<Not::Value>,
-        options: &RequestOptions,
+        options: &RegistrationOptions,
     ) -> BoxFuture<Result<NotificationRegistration, CallError>> {
         let shared = Arc::clone(&self.shared);
         let (id, own, unregistering) = {
@@ -674,9 +666,16 @@ where
     Res::Value: Clone + fmt::Debug + Sync,
     Not::Value: Clone + fmt::Debug + Sync,
 {
-    // * the router's check before the manager's own reason, so spec 16.10's order holds here too
+    // * spec 16.10's reasons first, the kind for the way its router's requester declares, then the
+    // side, before the manager's own reasons
     check_declaration(procedure)?;
+    check_procedure_kind(procedure, manager.inner.router.requester_way())?;
 
+    let ServiceRouter::Client(router) = &manager.inner.router else {
+        return Err(ProgrammerError::new(
+            "only a client hears notifications; a server notifies them",
+        ));
+    };
     let key = (procedure.service_id, procedure.procedure_id);
     let known = locked(&manager.inner.notifications).get(&key).map(|known| {
         (
@@ -721,23 +720,20 @@ where
         ));
     }
 
-    let ServiceRouter::Client(router) = &manager.inner.router else {
-        return Err(ProgrammerError::new(
-            "only a client hears notifications; a server notifies them",
-        ));
+    let requester = Request {
+        shared: manager.requester_of(
+            procedure,
+            (
+                RequestDependencies {
+                    request: dependencies.request,
+                    result: dependencies.result,
+                    validate: dependencies.validate,
+                    fail_fast: dependencies.fail_fast,
+                },
+                DebugType::Request,
+            ),
+        )?,
     };
-    let requester = manager.requester_of(
-        procedure,
-        (
-            RequestDependencies {
-                request: dependencies.request,
-                result: dependencies.result,
-                validate: dependencies.validate,
-                fail_fast: dependencies.fail_fast,
-            },
-            DebugType::Request,
-        ),
-    )?;
     let shared = Arc::new(NotificationShared {
         manager: Arc::clone(&manager.inner),
         router: router.clone(),
