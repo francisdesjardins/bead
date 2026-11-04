@@ -79,17 +79,23 @@ struct Relayed {
     sent: Arc<Mutex<Vec<EnvelopeKind>>>,
 }
 
+#[derive(Default)]
+struct RelayedOptions {
+    relay: RelayOptions,
+    device_limits: RouterLimitsOptions,
+}
+
 impl Relayed {
-    async fn new(relay: RelayOptions, device_limits: RouterLimitsOptions) -> Self {
+    async fn new(options: &RelayedOptions) -> Self {
         let device = Pair::connected(
             super::january_first(),
             &PairOptions {
                 server: Some(ServerOptions {
-                    limits: Some(device_limits.clone()),
+                    limits: Some(options.device_limits.clone()),
                     ..ServerOptions::default()
                 }),
                 client: Some(crate::client::ClientOptions {
-                    limits: Some(device_limits),
+                    limits: Some(options.device_limits.clone()),
                     ..crate::client::ClientOptions::default()
                 }),
             },
@@ -151,7 +157,7 @@ impl Relayed {
         let served = Served::on(
             (shared, Arc::clone(&device.clock)),
             &RouterServerOptions {
-                relay: Some(relay),
+                relay: Some(options.relay.clone()),
                 ..RouterServerOptions::default()
             },
         );
@@ -194,8 +200,8 @@ async fn relays_a_request_to_the_destination_it_names_admitted_once_and_brings_t
     for batched in [false, true] {
         let admissions = Arc::new(AtomicUsize::new(0));
         let admitting = Arc::clone(&admissions);
-        let relayed = Relayed::new(
-            RelayOptions {
+        let relayed = Relayed::new(&RelayedOptions {
+            relay: RelayOptions {
                 before_route: Some(BeforeRequest::new(
                     move |_| {
                         admitting.fetch_add(1, Ordering::SeqCst);
@@ -205,8 +211,8 @@ async fn relays_a_request_to_the_destination_it_names_admitted_once_and_brings_t
                 )),
                 ..RelayOptions::default()
             },
-            RouterLimitsOptions::default(),
-        )
+            ..RelayedOptions::default()
+        })
         .await;
         for (id, procedure, payload) in [
             (1, echo(), "hi"),
@@ -273,19 +279,19 @@ async fn relays_a_request_to_the_destination_it_names_admitted_once_and_brings_t
 #[tokio::test]
 async fn refuses_before_leg_b_the_routing_not_admitted_the_destination_unknown_a_subscription_a_payload_past_the_targets_limit_and_sends_the_target_nothing()
  {
-    let relayed = Relayed::new(
-        RelayOptions {
+    let relayed = Relayed::new(&RelayedOptions {
+        relay: RelayOptions {
             before_route: Some(BeforeRequest::new(
                 |request| request.header.call_id != 1,
                 None,
             )),
             ..RelayOptions::default()
         },
-        RouterLimitsOptions {
+        device_limits: RouterLimitsOptions {
             maximum_payload_bytes: Some(4),
             ..RouterLimitsOptions::default()
         },
-    )
+    })
     .await;
     relayed.deliver(&request((1, 7), (&echo(), "")));
     relayed.deliver(&request((3, 8), (&echo(), "")));
@@ -331,7 +337,11 @@ async fn refuses_before_leg_b_the_routing_not_admitted_the_destination_unknown_a
 #[tokio::test]
 async fn cancels_leg_b_when_leg_a_cancels_its_call_when_its_connection_goes_and_when_the_relay_is_disposed_freeing_the_call_id_each_time()
  {
-    let relayed = Relayed::new(admitting(), RouterLimitsOptions::default()).await;
+    let relayed = Relayed::new(&RelayedOptions {
+        relay: admitting(),
+        ..RelayedOptions::default()
+    })
+    .await;
     for ending in 0..3 {
         relayed.deliver(&request((1, 7), (&procedure((3, "held")), "")));
         relayed.served.settle().await;
@@ -369,7 +379,11 @@ async fn cancels_leg_b_when_leg_a_cancels_its_call_when_its_connection_goes_and_
 
 #[tokio::test]
 async fn cancels_leg_b_when_leg_a_cancels_its_call_as_leg_bs_request_is_handed_over() {
-    let relayed = Relayed::new(admitting(), RouterLimitsOptions::default()).await;
+    let relayed = Relayed::new(&RelayedOptions {
+        relay: admitting(),
+        ..RelayedOptions::default()
+    })
+    .await;
     let taken: Arc<Mutex<Vec<EnvelopeKind>>> = Arc::default();
     let taking = Arc::clone(&taken);
     let transport = Arc::clone(&relayed.served.transport);

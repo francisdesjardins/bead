@@ -6,7 +6,7 @@ use std::time::SystemTime;
 
 use super::super::locked;
 use super::super::server::{Served, first};
-use super::{Relayed, admitting, procedure, request};
+use super::{Relayed, RelayedOptions, admitting, procedure, request};
 use crate::clock::{Clock, Schedule, SharedClock, Timer, TimerCallback};
 use crate::constants::ProtocolCode;
 use crate::envelope::Envelope;
@@ -15,7 +15,7 @@ use crate::memory::MemoryTransportClient;
 use crate::router::client::{RouterClient, RouterClientOptions};
 use crate::router::relay::DestinationOptions;
 use crate::router::server::RouterServerOptions;
-use crate::router::types::{RouterError, RouterLimitsOptions, SignalReason, TransportMessage};
+use crate::router::types::{RouterError, SignalReason, TransportMessage};
 use crate::testing::{Activity, SteppingClock};
 use crate::transport::{ClientListener, ReadyState, RouterClientTransport, Sent};
 
@@ -97,7 +97,11 @@ struct Timed {
 
 impl Timed {
     async fn new(timeout: Option<Duration>) -> Self {
-        let device = Relayed::new(admitting(), RouterLimitsOptions::default()).await;
+        let device = Relayed::new(&RelayedOptions {
+            relay: admitting(),
+            ..RelayedOptions::default()
+        })
+        .await;
         // Only the recording router listens to leg B's client transport.
         device.device.client.router().dispose().await;
         device.served.router.dispose().await;

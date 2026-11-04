@@ -7,7 +7,7 @@ use bytes::Bytes;
 
 use super::super::locked;
 use super::super::server::first;
-use super::{Relayed, admitting, cancel, failure, procedure, request};
+use super::{Relayed, RelayedOptions, admitting, cancel, failure, procedure, request};
 use crate::client::ClientOptions;
 use crate::constants::{EnvelopeKind, ProtocolCode};
 use crate::debug::DebugDirection;
@@ -25,7 +25,11 @@ use crate::testing::pair::{Pair, PairOptions, echo};
 #[tokio::test]
 async fn relays_over_a_pipe_that_hands_each_message_a_turn_later_and_cancels_over_it() {
     // The memory pipe hands messages through its owner's queue, in later turns.
-    let relayed = Relayed::new(admitting(), RouterLimitsOptions::default()).await;
+    let relayed = Relayed::new(&RelayedOptions {
+        relay: admitting(),
+        ..RelayedOptions::default()
+    })
+    .await;
     relayed.deliver(&request((1, 7), (&echo(), "hi")));
     relayed.deliver(&request((3, 7), (&procedure((3, "held")), "")));
     assert!(locked(&relayed.sent).is_empty());
@@ -60,7 +64,11 @@ async fn relays_over_a_pipe_that_hands_each_message_a_turn_later_and_cancels_ove
 #[tokio::test]
 async fn answers_unreachable_when_the_target_never_had_the_request_and_lost_when_it_went_after_it_had_it_reporting_why()
  {
-    let relayed = Relayed::new(admitting(), RouterLimitsOptions::default()).await;
+    let relayed = Relayed::new(&RelayedOptions {
+        relay: admitting(),
+        ..RelayedOptions::default()
+    })
+    .await;
     relayed.deliver(&request((1, 7), (&procedure((3, "held")), "")));
     relayed.served.settle().await;
     relayed.device.transport.close();
@@ -116,7 +124,7 @@ impl RelayRouter for RefusingTarget {
     }
 }
 
-async fn receiving_pair(limits: RouterLimitsOptions, admissions: Arc<AtomicUsize>) -> Pair {
+async fn receiving_pair(admissions: Arc<AtomicUsize>, limits: &RouterLimitsOptions) -> Pair {
     Pair::connected(
         super::super::january_first(),
         &PairOptions {
@@ -135,7 +143,7 @@ async fn receiving_pair(limits: RouterLimitsOptions, admissions: Arc<AtomicUsize
                 ..ServerOptions::default()
             }),
             client: Some(ClientOptions {
-                limits: Some(limits),
+                limits: Some(limits.clone()),
                 ..ClientOptions::default()
             }),
         },
@@ -153,16 +161,16 @@ async fn holds_a_transfer_to_the_targets_limit_at_its_opening_and_relays_one_to_
         window_bytes: Some(4_096),
         ..RouterLimitsOptions::default()
     };
-    let behind = Relayed::new(
-        admitting(),
-        RouterLimitsOptions {
+    let behind = Relayed::new(&RelayedOptions {
+        relay: admitting(),
+        device_limits: RouterLimitsOptions {
             maximum_payload_bytes: Some(4_096),
             ..limits.clone()
         },
-    )
+    })
     .await;
     let admissions = Arc::new(AtomicUsize::new(0));
-    let pair = receiving_pair(limits, Arc::clone(&admissions)).await;
+    let pair = receiving_pair(Arc::clone(&admissions), &limits).await;
     let router = pair.server.router();
     let registration = router
         .register_destination(
