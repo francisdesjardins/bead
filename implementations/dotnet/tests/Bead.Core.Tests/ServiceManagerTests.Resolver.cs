@@ -52,11 +52,121 @@ public sealed partial class ServiceManagerTests
         var manager = new ServiceManager(router);
         var limited = Echo with { MaximumPayloadBytes = 64 };
 
-        manager.GetRequestResolver(limited, Answered())(Unanswering);
+        manager.GetCommandResolver(limited, Answered())(Unanswering);
         await manager.GetRequest(limited, Asked)(new Text("hi"))().WaitAsync(Patience, Cancelled);
 
         Assert.Equal(64, Assert.Single(router.RegisteredResolvers).MaximumPayloadBytes);
         Assert.Equal(limited, Assert.Single(router.Requests).Request.Procedure);
+    }
+
+    // spec 16.10, 16.11; debugging 4.1.2
+    [Fact]
+    public void Makes_the_resolvers_of_requests_and_notifications_on_a_server_router_alone_and_of_commands_on_a_client_router_alone()
+    {
+        const string AnswersCommands = "a client's router answers commands: GetCommandResolver";
+        const string AnswersRequests = "a server's router answers requests: GetRequestResolver";
+        const string Notifies = "only a server notifies; a client hears notifications";
+
+        var server = new RecordingRouter();
+        var client = new RecordingRouter(RouterSide.Client);
+        var onServer = new ServiceManager(server);
+        var onClient = new ServiceManager(client);
+        var unranged = Echo with { ServiceId = 0 };
+        ProcedureKind?[] kinds = [null, ProcedureKind.Request, ProcedureKind.Notifies, ProcedureKind.Command];
+        Procedure[] every = [.. kinds.Select((kind) =>
+        {
+            return Echo with { ProcedureKind = kind };
+        }), unranged];
+
+        // what a maker refuses with as it is asked for, before its callback is given
+        static Exception RefusalOf(Action asked)
+        {
+            return Assert.IsAssignableFrom<Exception>(Record.Exception(asked));
+        }
+
+        // the reason of 16.10 a maker refuses with, by its words
+        static void AssertRefused(string reason, Action asked)
+        {
+            Assert.Contains(reason, Assert.IsType<ArgumentException>(RefusalOf(asked)).Message, StringComparison.Ordinal);
+        }
+
+        // * on a client's router, the side first, whatever the procedure: of every kind, and out of
+        // its range
+        foreach (var procedure in every)
+        {
+            Assert.Equal(AnswersCommands, Assert.IsType<InvalidOperationException>(RefusalOf(() =>
+            {
+                onClient.GetRequestResolver(procedure, Answered());
+            })).Message);
+            Assert.Equal(Notifies, Assert.IsType<InvalidOperationException>(RefusalOf(() =>
+            {
+                onClient.GetNotificationResolver(procedure, Notifying);
+            })).Message);
+        }
+
+        // then spec 16.10's reasons, for the way of the maker of its side
+        foreach (var kind in new[] { ProcedureKind.Request, ProcedureKind.Notifies })
+        {
+            AssertRefused("is against its kind", () =>
+            {
+                onClient.GetCommandResolver(Echo with { ProcedureKind = kind }, Answered());
+            });
+        }
+
+        AssertRefused("is out of its range", () =>
+        {
+            onClient.GetCommandResolver(unranged, Answered());
+        });
+
+        // on a server's router, the same
+        foreach (var procedure in every)
+        {
+            Assert.Equal(AnswersRequests, Assert.IsType<InvalidOperationException>(RefusalOf(() =>
+            {
+                onServer.GetCommandResolver(procedure, Answered());
+            })).Message);
+        }
+
+        foreach (var kind in new[] { ProcedureKind.Notifies, ProcedureKind.Command })
+        {
+            AssertRefused("is against its kind", () =>
+            {
+                onServer.GetRequestResolver(Echo with { ProcedureKind = kind }, Answered());
+            });
+        }
+
+        foreach (var kind in new[] { ProcedureKind.Request, ProcedureKind.Command })
+        {
+            AssertRefused("is against its kind", () =>
+            {
+                onServer.GetNotificationResolver(Echo with { ProcedureKind = kind }, Notifying);
+            });
+        }
+
+        AssertRefused("is out of its range", () =>
+        {
+            onServer.GetRequestResolver(unranged, Answered());
+        });
+        AssertRefused("is out of its range", () =>
+        {
+            onServer.GetNotificationResolver(unranged, Notifying);
+        });
+
+        // a maker refused registers nothing; a refusal that is not an admission's is refused here as
+        // its BeforeRequest is built, before any maker (docs/support.md, Differences)
+        Assert.Empty(client.RegisteredResolvers);
+        Assert.Empty(server.RegisteredResolvers);
+
+        // each maker of its side makes, and registers once it is given its callback
+        onClient.GetCommandResolver(Echo with { ProcedureKind = ProcedureKind.Command }, Answered())(Unanswering);
+        onServer.GetRequestResolver(Echo, Answered())(Unanswering);
+        onServer.GetNotificationResolver(Echo with { ProcedureId = 2, ProcedureName = "news", ProcedureKind = ProcedureKind.Notifies }, Notifying)(UnansweringNotified);
+
+        Assert.Equal("echo", Assert.Single(client.RegisteredResolvers).Procedure.ProcedureName);
+        Assert.Equal(["echo", "news"], server.RegisteredResolvers.Select((registered) =>
+        {
+            return registered.Procedure.ProcedureName;
+        }));
     }
 
     [Fact]
@@ -314,7 +424,7 @@ public sealed partial class ServiceManagerTests
     public async Task On_a_client_router_a_refusal_is_the_client_one()
     {
         var router = new RecordingRouter(RouterSide.Client);
-        var resolver = new ServiceManager(router).GetRequestResolver(Echo, Answered(new BeforeRequest((_) =>
+        var resolver = new ServiceManager(router).GetCommandResolver(Echo, Answered(new BeforeRequest((_) =>
         {
             return false;
         })))(Unanswering);

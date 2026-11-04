@@ -2178,7 +2178,7 @@ public sealed partial class RouterServerTests : IDisposable
 
             await response.Answer(isHeld.ToString(CultureInfo.InvariantCulture));
         });
-        clientServices.GetRequestResolver(ping, new RequestResolverDependencies<string, string> { Serializer = Text })((_, response) =>
+        clientServices.GetCommandResolver(ping, new RequestResolverDependencies<string, string> { Serializer = Text })((_, response) =>
         {
             return response.Answer("pong");
         });

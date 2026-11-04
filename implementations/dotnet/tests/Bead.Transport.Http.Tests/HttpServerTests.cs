@@ -473,7 +473,7 @@ public sealed class HttpServerTests
         });
 
         // the server asks, and the client answers
-        client.Services.GetRequestResolver(Ping, new RequestResolverDependencies<string, string> { Serializer = Text })((request, response) =>
+        client.Services.GetCommandResolver(Ping, new RequestResolverDependencies<string, string> { Serializer = Text })((request, response) =>
         {
             return response.Answer($"{request.Payload} pong");
         });
@@ -484,7 +484,7 @@ public sealed class HttpServerTests
         // a call another client makes, relayed to this one
         await using var requester = new BeadHttpClient();
 
-        client.Services.GetRequestResolver(Echo, new RequestResolverDependencies<string, string> { Serializer = Text })((request, response) =>
+        client.Services.GetCommandResolver(Echo, new RequestResolverDependencies<string, string> { Serializer = Text })((request, response) =>
         {
             return response.Answer(request.Payload.ToUpperInvariant());
         });

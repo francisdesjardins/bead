@@ -5,6 +5,19 @@ public sealed partial class ServiceManager
     // the resolvers this manager registers, and the one answer each incoming request may take
     private sealed class ServiceResolver(IRouterLike router, ServiceTrace trace)
     {
+        // a resolver checked as its maker asks for it, before its callback is given: the side the
+        // maker is for first, since a maker that is not its router's way declares nothing, then spec
+        // 16.10's reasons, for the way of its side's resolver, one that notifies or not
+        internal void CheckMade(Procedure procedure, (bool Notifies, RouterSide Side, string Refusal) maker)
+        {
+            if (router.Side != maker.Side)
+            {
+                throw new InvalidOperationException(maker.Refusal);
+            }
+
+            Identity.Check(procedure, (Identity.ResolverWayOf(maker.Side, maker.Notifies), nameof(procedure)));
+        }
+
         internal Resolver<TRequest, TResponse> Create<TRequest, TResponse>(ResolverMade<TRequest, TResponse> made)
         {
             return new Resolver<TRequest, TResponse>(trace, (router, made));

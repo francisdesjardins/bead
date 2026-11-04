@@ -1347,7 +1347,7 @@ public sealed class WebSocketServerTests
         // the device behind it, at destination 7, on the hub's own connection to it: leg B
         await using var device = new WebSocketClient();
 
-        device.Services.GetRequestResolver(Echo, TextAnswered)((request, response) =>
+        device.Services.GetCommandResolver(Echo, TextAnswered)((request, response) =>
         {
             return response.Answer(request.Payload);
         });

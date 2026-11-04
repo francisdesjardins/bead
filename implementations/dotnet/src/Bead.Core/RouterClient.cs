@@ -425,13 +425,13 @@ public sealed class RouterClient : IRouterLike, IRouterTarget, IDisposable
     /// <summary>Only a server notifies: an <see cref="InvalidOperationException"/>.</summary>
     public Task Notify(ReadOnlyMemory<byte> payload, NotifyRequest request)
     {
-        return Task.FromException(new InvalidOperationException("only a server notifies; a client asks with a request"));
+        return Task.FromException(new InvalidOperationException("only a server notifies; a client hears notifications"));
     }
 
     /// <summary>Only a server notifies, even what did not write: an <see cref="InvalidOperationException"/>.</summary>
     public Task Notify(Exception unwritten, NotifyRequest request)
     {
-        return Task.FromException(new InvalidOperationException("only a server notifies; a client asks with a request"));
+        return Task.FromException(new InvalidOperationException("only a server notifies; a client hears notifications"));
     }
 
     /// <summary>Only a server subscribes a connection: an <see cref="InvalidOperationException"/>.</summary>

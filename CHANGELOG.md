@@ -204,9 +204,22 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `RequestOptionsParameters` goes and `IRequestOptions` takes no type parameter. C# generated code
   names the contract 7, `GeneratedCode.SupportsVersion7`, which the runtime holds beside 5 and 6;
   TypeScript generated code stays at 6.
-- **Breaking:** a manager's request and notification makers are a client's router's alone and its
-  command maker a server's alone: the other is refused as it is made, after spec 16.10's reasons,
-  where a notification asked for on a server's router was refused at its first registration.
+- **Breaking:** each of a manager's makers belongs to one side. On a client's router these are the
+  request and notification makers and the command resolver; on a server's, the command maker and
+  the request and notification resolvers, and the notifier among what the last gives. On the other
+  side's router each is refused as it is made, before spec 16.10's reasons. A resolver's kind is
+  now refused as it is asked for, where it was refused as its callback registered it. Before this
+  change, a notification asked for on a server's router was refused at its first registration. A
+  resolver of requests or notifications on a client's router answered commands, traced `request`,
+  its notifier sending nothing and failing no caller. A resolver of commands on a server's router
+  answered requests, traced `command`. A call's step is now typed by its router's side, as its
+  metrics are (`spec/debugging.md` 4.1, 8.2). A client router's refusal of a notify says "only a
+  server notifies; a client hears notifications".
+- **Breaking:** on the Rust side a rule (`Validate<T>`) returns `Result<Judged, Box<dyn Error +
+  Send + Sync>>`. A rule that fails to judge returns its error, answered `PROCEDURE_FAILED` and
+  reported in its own words, as the other sides report its throw. Its panic is reported `a rule
+  panicked: …`, where it was reported as a listener's. At a requester, either fails its call before
+  anything goes (spec 18.2).
 - **Breaking:** a registration takes `RegistrationOptions` (`IRegistrationOptions`): a timeout, a
   destination and a cancellation, and no credential, which its subscribing call never presented.
 
