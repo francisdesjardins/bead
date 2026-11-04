@@ -369,7 +369,7 @@ public sealed class ServiceServerTests
         {
             Assert.Equal(
                 $"noon, {asked}",
-                await greeter.CommandOf(GreeterProcedures.Clock)(asked)(new RequestOptions { ConnectionHandle = ServiceLink.Handle }).WaitAsync(Patience, Cancelled));
+                await greeter.CommandOf(GreeterProcedures.Clock)(asked)(new CommandOptions { ConnectionHandle = ServiceLink.Handle }).WaitAsync(Patience, Cancelled));
         }
 
         Assert.Equal(["requester clock", "requester guarded"], server.Intercepted.Declared.Order(StringComparer.Ordinal));
@@ -461,7 +461,7 @@ public sealed class ServiceServerTests
 
         await Record.ExceptionAsync(() =>
         {
-            return greeter.CommandOf(GreeterProcedures.Clock)("now")(new RequestOptions
+            return greeter.CommandOf(GreeterProcedures.Clock)("now")(new CommandOptions
             {
                 ConnectionHandle = ServiceLink.Handle,
                 Timeout = TimeSpan.FromMilliseconds(50),
@@ -611,7 +611,7 @@ public sealed class ServiceServerTests
         });
         validating.Offer(link.Server);
 
-        var call = new RequestOptions { ConnectionHandle = ServiceLink.Handle };
+        var call = new CommandOptions { ConnectionHandle = ServiceLink.Handle };
         var refused = await Assert.ThrowsAsync<FailureException>(() =>
         {
             return validating.CommandOf(CheckedProcedures.Shout)("")(call).WaitAsync(Patience, Cancelled);

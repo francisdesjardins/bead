@@ -41,11 +41,11 @@ public sealed class ServiceClientTests
     }
 
     // a command's call to the link's one connection
-    private static RequestOptions Call
+    private static CommandOptions Call
     {
         get
         {
-            return new RequestOptions { ConnectionHandle = ServiceLink.Handle };
+            return new CommandOptions { ConnectionHandle = ServiceLink.Handle };
         }
     }
 

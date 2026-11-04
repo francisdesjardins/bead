@@ -84,7 +84,7 @@ test.describe('createServiceManager', () => {
       manager.getRequestResolver(limited, { serializer: serverSerializer })(() => {
         return Promise.resolve();
       });
-      await manager.getRequest(limited, { serializer })({ text: 'hi' })();
+      await manager.getCommand(limited, { serializer })({ text: 'hi' })({ connectionHandle });
 
       expect([
         calls.registerResolver[0]?.maximumPayloadBytes,

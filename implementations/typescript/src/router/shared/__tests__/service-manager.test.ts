@@ -71,7 +71,7 @@ const textRulesOf = () => {
 test.describe('createServiceManager', () => {
   test.describe('what it makes callable', () => {
     test("a requester, a resolver and a notification carry their procedure's members as their own, and keep a function's call, apply and bind", async () => {
-      const { calls, router } = createFakeRouter();
+      const { calls, router } = createFakeRouter('client');
       const manager = createServiceManager(router);
       const stating = (procedureId: number, procedureKind: ProcedureKind) => {
         return {
@@ -438,7 +438,7 @@ test.describe('createServiceManager', () => {
 
   test.describe('getNotification', () => {
     test('the first registration requests, registers, and then hears each notification', async () => {
-      const { calls, deliver, router } = createFakeRouter();
+      const { calls, deliver, router } = createFakeRouter('client');
       const manager = createServiceManager(router);
       const heard: string[] = [];
       const notification = manager.getNotification(echo, { serializer });
@@ -456,7 +456,7 @@ test.describe('createServiceManager', () => {
     });
 
     test('its request takes the destination and the timeout it is given, and names the notification it subscribes', async () => {
-      const { calls, router } = createFakeRouter();
+      const { calls, router } = createFakeRouter('client');
       const manager = createServiceManager(router);
       const notification = manager.getNotification(echo, { serializer });
 
@@ -472,7 +472,7 @@ test.describe('createServiceManager', () => {
     });
 
     test('the router holds it before its request goes out, so a notification right behind the answer is heard', async () => {
-      const { control, deliver, router } = createFakeRouter();
+      const { control, deliver, router } = createFakeRouter('client');
       const manager = createServiceManager(router);
       const heard: string[] = [];
 
@@ -491,7 +491,7 @@ test.describe('createServiceManager', () => {
     });
 
     test('once registered, another callback joins without a request', async () => {
-      const { calls, deliver, router } = createFakeRouter();
+      const { calls, deliver, router } = createFakeRouter('client');
       const manager = createServiceManager(router);
       const heard: string[] = [];
       const notification = manager.getNotification(echo, { serializer });
@@ -509,7 +509,7 @@ test.describe('createServiceManager', () => {
     });
 
     test('callbacks registering at once share one request and one registration', async () => {
-      const { calls, control, deliver, router } = createFakeRouter();
+      const { calls, control, deliver, router } = createFakeRouter('client');
       const manager = createServiceManager(router);
       const heard: string[] = [];
       const notification = manager.getNotification(echo, { serializer });
@@ -537,7 +537,7 @@ test.describe('createServiceManager', () => {
     });
 
     test('a failed request rejects and keeps nothing: the next registration asks again', async () => {
-      const { holds, calls, control, deliver, router } = createFakeRouter();
+      const { holds, calls, control, deliver, router } = createFakeRouter('client');
       const manager = createServiceManager(router);
       const heard: string[] = [];
       const notification = manager.getNotification(echo, { serializer });
@@ -570,7 +570,7 @@ test.describe('createServiceManager', () => {
     });
 
     test('an answer to its subscription that does not decode lets go of it, the router cancelling its call', async () => {
-      const { holds, calls, control, router } = createFakeRouter();
+      const { holds, calls, control, router } = createFakeRouter('client');
       const manager = createServiceManager(router);
       const notification = manager.getNotification(echo, { serializer });
 
@@ -588,7 +588,7 @@ test.describe('createServiceManager', () => {
     });
 
     test('the last callback taken away unregisters the notification; taking one away twice does nothing', async () => {
-      const { holds, calls, deliver, router } = createFakeRouter();
+      const { holds, calls, deliver, router } = createFakeRouter('client');
       const manager = createServiceManager(router);
       const heard: string[] = [];
       const notification = manager.getNotification(echo, { serializer });
@@ -616,7 +616,7 @@ test.describe('createServiceManager', () => {
     });
 
     test('the last callback out unsubscribes with the call id and the answer that subscribed, before the router lets go of it', async () => {
-      const { holds, calls, control, router } = createFakeRouter();
+      const { holds, calls, control, router } = createFakeRouter('client');
       const manager = createServiceManager(router);
       const told: string[] = [];
 
@@ -652,7 +652,7 @@ test.describe('createServiceManager', () => {
     });
 
     test('an unsubscription that fails rejects the last unregister, once the router let go all the same', async () => {
-      const { holds, calls, router } = createFakeRouter();
+      const { holds, calls, router } = createFakeRouter('client');
       const manager = createServiceManager(router);
       const failure = new Error('refused');
       const notification = manager.getNotification(echo, {
@@ -679,7 +679,7 @@ test.describe('createServiceManager', () => {
     });
 
     test('dropped with its connection, it tells "dropped", hears nothing more, has nothing to take away, and asks anew', async () => {
-      const { calls, deliver, drop, router } = createFakeRouter();
+      const { calls, deliver, drop, router } = createFakeRouter('client');
       const manager = createServiceManager(router);
       const heard: string[] = [];
       const dropped: unknown[] = [];
@@ -738,7 +738,7 @@ test.describe('createServiceManager', () => {
     });
 
     test('a registration under way when its notification is dropped fails with a DisconnectError', async () => {
-      const { control, deliver, drop, router } = createFakeRouter();
+      const { control, deliver, drop, router } = createFakeRouter('client');
       const manager = createServiceManager(router);
       const heard: string[] = [];
       const answered = Promise.withResolvers<IRouterResult>();
@@ -770,7 +770,7 @@ test.describe('createServiceManager', () => {
     });
 
     test('"await using" takes the callback away', async () => {
-      const { calls, router } = createFakeRouter();
+      const { calls, router } = createFakeRouter('client');
       const manager = createServiceManager(router);
       const notification = manager.getNotification(echo, { serializer });
 
@@ -786,7 +786,7 @@ test.describe('createServiceManager', () => {
     });
 
     test('a registration while the last one is leaving waits for it, then registers anew', async () => {
-      const { calls, control, deliver, router } = createFakeRouter();
+      const { calls, control, deliver, router } = createFakeRouter('client');
       const manager = createServiceManager(router);
       const heard: string[] = [];
       const notification = manager.getNotification(echo, { serializer });
@@ -813,7 +813,7 @@ test.describe('createServiceManager', () => {
     });
 
     test('taking the same registration away twice leaves another of the same callback alone', async () => {
-      const { calls, deliver, router } = createFakeRouter();
+      const { calls, deliver, router } = createFakeRouter('client');
       const manager = createServiceManager(router);
       const heard: string[] = [];
       const notification = manager.getNotification(echo, { serializer });
@@ -838,7 +838,7 @@ test.describe('createServiceManager', () => {
     });
 
     test('a registration arriving while the router subscribes waits for the subscription', async () => {
-      const { holds, calls, control, router } = createFakeRouter();
+      const { holds, calls, control, router } = createFakeRouter('client');
       const manager = createServiceManager(router);
       const notification = manager.getNotification(echo, { serializer });
       const gate = Promise.withResolvers<undefined>();
@@ -883,7 +883,7 @@ test.describe('createServiceManager', () => {
     });
 
     test('a subscription that fails is undone, so the next registration starts over', async () => {
-      const { holds, calls, control, deliver, router } = createFakeRouter();
+      const { holds, calls, control, deliver, router } = createFakeRouter('client');
       const manager = createServiceManager(router);
       const heard: string[] = [];
       const notification = manager.getNotification(echo, { serializer });
@@ -913,7 +913,7 @@ test.describe('createServiceManager', () => {
     });
 
     test('a second manager on the same router cannot take its procedure over, nor away', async () => {
-      const { calls, deliver, router } = createFakeRouter();
+      const { calls, deliver, router } = createFakeRouter('client');
       const first = createServiceManager(router);
       const second = createServiceManager(router);
       const heard: string[] = [];
@@ -940,7 +940,7 @@ test.describe('createServiceManager', () => {
     });
 
     test('the same procedure gives the same notification, so every callback is heard', async () => {
-      const { deliver, router } = createFakeRouter();
+      const { deliver, router } = createFakeRouter('client');
       const manager = createServiceManager(router);
       const heard: string[] = [];
       const first = manager.getNotification(echo, { serializer });
@@ -960,7 +960,7 @@ test.describe('createServiceManager', () => {
     });
 
     test('the same procedure under another kind, name, revision, deprecation or limit is a programmer error', () => {
-      const manager = createServiceManager(createFakeRouter().router);
+      const manager = createServiceManager(createFakeRouter('client').router);
 
       manager.getNotification(echo, { serializer });
 
@@ -1046,7 +1046,7 @@ test.describe('createServiceManager', () => {
     });
 
     test('a trigger the router never registered is a programmer error', () => {
-      const manager = createServiceManager(createFakeRouter().router);
+      const manager = createServiceManager(createFakeRouter('client').router);
       const notification = manager.getNotification(echo, { serializer });
 
       expect(() => {

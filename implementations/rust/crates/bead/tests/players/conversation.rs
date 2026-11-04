@@ -14,11 +14,11 @@ use bead::testing::{SteppingClock, hexadecimal};
 use bead::{
     BoxFuture, BrokerAdapter, BrokerParticipant, BrokerParticipantOptions, BrokerTransportClient,
     BrokerTransportClientConnectOptions, BrokerTransportClientOptions, BrokerTransportServer,
-    BrokerTransportServerOptions, ClientListener, ConnectionHandle, Credential, CredentialScheme,
-    DebugDirection, EnvelopeKind, MemoryBroker, MemoryBrokerAdapterOptions, MemoryBrokerOptions,
-    MemoryTransportClient, MemoryTransportClientConnectOptions, MemoryTransportClientOptions,
-    MemoryTransportServer, MemoryTransportServerOptions, MetricsRegistry, NEVER,
-    PacingLimitsOptions, RelayOptions, RequestOptions, RouterClientTransport, RouterError,
+    BrokerTransportServerOptions, ClientListener, CommandOptions, ConnectionHandle, Credential,
+    CredentialScheme, DebugDirection, EnvelopeKind, MemoryBroker, MemoryBrokerAdapterOptions,
+    MemoryBrokerOptions, MemoryTransportClient, MemoryTransportClientConnectOptions,
+    MemoryTransportClientOptions, MemoryTransportServer, MemoryTransportServerOptions,
+    MetricsRegistry, NEVER, PacingLimitsOptions, RelayOptions, RouterClientTransport, RouterError,
     RouterLimitsOptions, RouterSide, Sent, Server, ServerListener, ServerOptions, ServerTransport,
     ServiceServer, SharedClock, TracedEnvelope, TransportClientDisconnectOptions, TransportMessage,
     require_credential, require_session, share_leg_b_session,
@@ -938,9 +938,8 @@ fn listen(
             return;
         }
 
-        let mut options = RequestOptions::default();
+        let options = CommandOptions::new(Arc::clone(handle));
 
-        options.connection_handle = Some(Arc::clone(handle));
         drop(asking.call(Value::String(QUESTION.to_owned()), &options));
     };
 

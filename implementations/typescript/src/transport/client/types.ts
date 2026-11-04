@@ -260,7 +260,7 @@ export interface ITransportClientDefineOptions {
 
 /**
  * What a connect takes: its options, optional where every member of them is and required where one
- * is (decision 0004), as a call's `RequestOptionsParameters` is written.
+ * is (decision 0004).
  */
 export type ConnectParameters<ConnectOptions extends ITransportClientConnectOptions> =
   // an object of no member is options of which every member is optional

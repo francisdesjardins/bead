@@ -15,7 +15,7 @@ import type {
   INotificationRegistration,
   IProcedure,
   IReceivedFailure,
-  IRequestOptions,
+  IRegistrationOptions,
   IRouterLike,
 } from './types';
 
@@ -35,9 +35,7 @@ export interface INotificationContext<RequestPayload, ResponsePayload, Notificat
     subscribes: () => INotificationLike
   ) => (
     requestPayload: RequestPayload
-  ) => (
-    options: Pick<IRequestOptions, 'destinationId' | 'signal' | 'timeout'>
-  ) => Promise<{ callId: CallId; payload: ResponsePayload }>;
+  ) => (options: IRegistrationOptions) => Promise<{ callId: CallId; payload: ResponsePayload }>;
   router: Pick<
     IRouterLike,
     'failures' | 'hasNotification' | 'registerNotification' | 'unregisterNotification'
@@ -99,12 +97,13 @@ export const createNotification = <RequestPayload, ResponsePayload, Notification
   let subscription: { callId: CallId; response: ResponsePayload } | undefined;
   let generation = 0;
 
-  const register = async (requestPayload: RequestPayload, options?: IRequestOptions) => {
+  const register = async (requestPayload: RequestPayload, options?: IRegistrationOptions) => {
     // held before it is asked for: a notification sent right behind the answer can come in the
     // same read as the answer, before anything waiting on the answer runs
     try {
       await router.registerNotification(notification);
-      // a notification's own request names no connection, whichever router it goes through
+      // a notification's own request names no connection and presents no credential: its
+      // subscription is the connection's
       const { callId, payload } = await requester(requestPayload)({
         destinationId: options?.destinationId,
         signal: options?.signal,
@@ -147,7 +146,7 @@ export const createNotification = <RequestPayload, ResponsePayload, Notification
         requestPayload: RequestPayload,
         callback: (notification: NotificationPayload) => unknown
       ) => {
-        return async (options?: IRequestOptions): Promise<INotificationRegistration> => {
+        return async (options?: IRegistrationOptions): Promise<INotificationRegistration> => {
           const own = generation;
           // this registration's own, so taking it away takes no other of the same callback
           const listener = (

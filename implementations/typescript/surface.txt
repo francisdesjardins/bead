@@ -598,7 +598,10 @@
   IAdmissionRequest	src/router/shared/types.ts
   IApplicationFailure	src/router/shared/types.ts
   IBoundCall	src/router/shared/types.ts
+  IBoundCommand	src/router/shared/types.ts
   ICallSession	src/router/shared/types.ts
+  ICommand	src/router/shared/types.ts
+  ICommandOptions	src/router/shared/types.ts
   IDescriptorInit	src/service/descriptors.ts
   IFailureCatalogue	src/service/failures.ts
   IJudged	src/router/shared/violations.ts
@@ -612,6 +615,7 @@
   IProcedure	src/router/shared/types.ts
   IReadViolations	src/router/shared/violations.ts
   IRegistrar	src/router/shared/types.ts
+  IRegistrationOptions	src/router/shared/types.ts
   IRequest	src/router/shared/types.ts
   IRequestInit	src/service/descriptors.ts
   IRequestProps	src/router/shared/types.ts
@@ -669,6 +673,9 @@
   IApplicationFailure	src/router/shared/types.ts
   IBeforeRequest	src/router/shared/types.ts
   IBoundCall	src/router/shared/types.ts
+  IBoundCommand	src/router/shared/types.ts
+  ICommand	src/router/shared/types.ts
+  ICommandOptions	src/router/shared/types.ts
   IDebugEvent	src/router/shared/types.ts
   IDebugFilter	src/router/shared/types.ts
   IEventIteratorOptions	src/transport/shared/types.ts
@@ -696,6 +703,7 @@
   IProtocolFailure	src/router/shared/types.ts
   IReceivedFailure	src/router/shared/types.ts
   IRegistrar	src/router/shared/types.ts
+  IRegistrationOptions	src/router/shared/types.ts
   IRequest	src/router/shared/types.ts
   IRequestDependencies	src/router/shared/types.ts
   IRequestHeader	src/router/shared/types.ts
@@ -728,7 +736,6 @@
   REQUEST_DEFAULTS	src/router/shared/service-requester.ts
   RedactedHeader	src/router/shared/types.ts
   RequestDefaults	src/router/shared/service-requester.ts
-  RequestOptionsParameters	src/router/shared/types.ts
   RequestResolverCallback	src/router/shared/types.ts
   ResolverFailure	src/router/shared/types.ts
   RouterAnswer	src/router/shared/types.ts
@@ -1899,7 +1906,7 @@ src/router/shared/service-requester.ts REQUEST_DEFAULTS
 src/router/shared/service-requester.ts RequestDefaults
   type RequestDefaults = Pick<IResolvedRequestOptions, 'closeOnTimeout' | 'timeout'>
 src/router/shared/service-requester.ts resolveRequestOptions
-  const resolveRequestOptions(defaults: RequestDefaults, options?: IRequestOptions): IResolvedRequestOptions
+  const resolveRequestOptions(defaults: RequestDefaults, options?: IRequestOptions | ICommandOptions): IResolvedRequestOptions
 src/router/shared/types.ts AccessRefusalStage
   type AccessRefusalStage = 'admission' | 'credential'
 src/router/shared/types.ts AdmissionFailure
@@ -1955,9 +1962,11 @@ src/router/shared/types.ts IBeforeRequest
     (request: IAdmissionRequest<Handle>): boolean
     readonly refusal?: AdmissionFailure | undefined
 src/router/shared/types.ts IBoundCall
-  interface IBoundCall<Result, Options extends unknown[] = RequestOptionsParameters<string>>
+  interface IBoundCall<Result, Options extends unknown[] = [options?: IRequestOptions]>
     (...options: Options): Promise<Result>
     readonly then?: (guard: never) => never
+src/router/shared/types.ts IBoundCommand
+  type IBoundCommand<Result, Handle extends string = ConnectionHandle> = IBoundCall<Result, [options: ICommandOptions<Handle>]>
 src/router/shared/types.ts ICallSession
   interface ICallSession
     readonly data: unknown
@@ -1973,6 +1982,24 @@ src/router/shared/types.ts IChunkHeader
     isLast: boolean
     kind: typeof EnvelopeKind.CHUNK
     offset: number
+src/router/shared/types.ts ICommand
+  interface ICommand<RequestPayload, ResponsePayload, Handle extends string = ConnectionHandle> extends IProcedure
+    (requestPayload: RequestPayload): IBoundCommand<ResponsePayload, Handle>
+    procedureId: ProcedureId
+    serviceId: ServiceId
+    deprecation?: {message?: string | undefined} | undefined
+    maximumPayloadBytes?: number | undefined
+    procedureKind?: ProcedureKind | undefined
+    procedureName: string
+    serviceRevision: ServiceRevision
+src/router/shared/types.ts ICommandOptions
+  interface ICommandOptions<Handle extends string = ConnectionHandle> extends IRequestOptions
+    closeOnTimeout?: boolean | undefined
+    connectionHandle: Handle
+    credential?: RequestCredential | undefined
+    destinationId?: DestinationId | undefined
+    signal?: AbortSignal | undefined
+    timeout?: number | undefined
 src/router/shared/types.ts ICredentialRefused
   interface ICredentialRefused
     readonly refused: string
@@ -2156,10 +2183,12 @@ src/router/shared/types.ts IReceivedFailure
     code: number
     scope: FailureScope
 src/router/shared/types.ts IRegistrar
-  type IRegistrar = IBoundCall<INotificationRegistration, [options?: Pick<IRequestOptions, 'destinationId' | 'signal' | 'timeout'>]>
+  type IRegistrar = IBoundCall<INotificationRegistration, [options?: IRegistrationOptions]>
+src/router/shared/types.ts IRegistrationOptions
+  type IRegistrationOptions = Pick<IRequestOptions, 'destinationId' | 'signal' | 'timeout'>
 src/router/shared/types.ts IRequest
-  interface IRequest<RequestPayload, ResponsePayload, Handle extends string = ConnectionHandle> extends IProcedure
-    (requestPayload: RequestPayload): IBoundCall<ResponsePayload, RequestOptionsParameters<Handle>>
+  interface IRequest<RequestPayload, ResponsePayload> extends IProcedure
+    (requestPayload: RequestPayload): IBoundCall<ResponsePayload>
     procedureId: ProcedureId
     serviceId: ServiceId
     deprecation?: {message?: string | undefined} | undefined
@@ -2184,10 +2213,8 @@ src/router/shared/types.ts IRequestHeader
     procedureId: ProcedureId
     serviceId: ServiceId
 src/router/shared/types.ts IRequestOptions
-  interface IRequestOptions<Handle extends string = ConnectionHandle>
-    closeOnTimeout?: boolean | undefined
+  interface IRequestOptions
     credential?: RequestCredential | undefined
-    connectionHandle?: Handle | undefined
     destinationId?: DestinationId | undefined
     signal?: AbortSignal | undefined
     timeout?: number | undefined
@@ -2233,9 +2260,9 @@ src/router/shared/types.ts IRequestSerializerServer
 src/router/shared/types.ts IResolvedRequestOptions
   interface IResolvedRequestOptions extends IRequestOptions
     closeOnTimeout?: boolean | undefined
+    connectionHandle?: string | undefined
     timeout: number
     credential?: RequestCredential | undefined
-    connectionHandle?: Handle | undefined
     destinationId?: DestinationId | undefined
     signal?: AbortSignal | undefined
 src/router/shared/types.ts IResponse
@@ -2322,9 +2349,9 @@ src/router/shared/types.ts IServiceManager
     events<K extends SERVICE_MANAGER_EVENTS>(event: K, options?: IEventIteratorOptions): AsyncIterableIterator<ServiceManagerEventMap[K], undefined>
     getNotification<RequestPayload, ResponsePayload, NotificationPayload>(procedure: IProcedure, dependencies: INotificationDependencies<RequestPayload, ResponsePayload, NotificationPayload>): INotification<RequestPayload, NotificationPayload>
     getNotificationResolver<RequestPayload, ResponsePayload, NotificationPayload, Failure extends ResolverFailure = ResolverFailure>(procedure: IProcedure, dependencies: INotificationResolverDependencies<RequestPayload, ResponsePayload, NotificationPayload, Handle>): (callback: NotificationResolverCallback<RequestPayload, ResponsePayload, Failure, Handle>) => INotificationResolver<NotificationPayload, Handle>
-    getCommand<RequestPayload, ResponsePayload>(procedure: IProcedure, dependencies: IRequestDependencies<RequestPayload, ResponsePayload>): IRequest<RequestPayload, ResponsePayload, Handle>
+    getCommand<RequestPayload, ResponsePayload>(procedure: IProcedure, dependencies: IRequestDependencies<RequestPayload, ResponsePayload>): ICommand<RequestPayload, ResponsePayload, Handle>
     getCommandResolver<RequestPayload, ResponsePayload, Failure extends ResolverFailure = ResolverFailure>(procedure: IProcedure, dependencies: IRequestResolverDependencies<RequestPayload, ResponsePayload, Handle>): (callback: RequestResolverCallback<RequestPayload, ResponsePayload, Failure, Handle>) => IRequestResolver<Handle>
-    getRequest<RequestPayload, ResponsePayload>(procedure: IProcedure, dependencies: IRequestDependencies<RequestPayload, ResponsePayload>): IRequest<RequestPayload, ResponsePayload, Handle>
+    getRequest<RequestPayload, ResponsePayload>(procedure: IProcedure, dependencies: IRequestDependencies<RequestPayload, ResponsePayload>): IRequest<RequestPayload, ResponsePayload>
     getRequestResolver<RequestPayload, ResponsePayload, Failure extends ResolverFailure = ResolverFailure>(procedure: IProcedure, dependencies: IRequestResolverDependencies<RequestPayload, ResponsePayload, Handle>): (callback: RequestResolverCallback<RequestPayload, ResponsePayload, Failure, Handle>) => IRequestResolver<Handle>
     off<K extends SERVICE_MANAGER_EVENTS>(event: K, listener: EmitterListener<ServiceManagerEventMap[K]>): this
     on<K extends SERVICE_MANAGER_EVENTS>(event: K, listener: EmitterListener<ServiceManagerEventMap[K]>): this
@@ -2358,8 +2385,6 @@ src/router/shared/types.ts RedactedHeader
   type RedactedHeader = WithoutCredential<EnvelopeHeader> & {credentialScheme?: number | undefined}
 src/router/shared/types.ts RequestCredential
   type RequestCredential = | DefaultCredential | Readonly<{scheme: typeof CredentialScheme.NONE}> | Readonly<{scheme: typeof CredentialScheme.OPAQUE}>
-src/router/shared/types.ts RequestOptionsParameters
-  type RequestOptionsParameters<Handle extends string> = string extends Handle ? [options?: IRequestOptions<Handle>] : [Handle] extends [ServerConnectionHandle] ? [options?: Omit<IRequestOptions<never>, 'closeOnTimeout' | 'connectionHandle'>] : [options: IRequestOptions<Handle> & {connectionHandle: Handle}]
 src/router/shared/types.ts RequestResolverCallback
   type RequestResolverCallback<RequestPayload, ResponsePayload, Failure extends ResolverFailure, Handle extends string = ConnectionHandle> = (request: IRequestProps<RequestPayload, Handle>, response: IResponse<ResponsePayload, Failure>) => Promise<void>
 src/router/shared/types.ts ResolverFailure
@@ -2645,7 +2670,7 @@ src/service/generated-code.ts GENERATED_CODE_SUPPORTS_VERSION_6
 src/service/service-client.ts IServiceClient
   interface IServiceClient<S extends ServiceProcedures>
     readonly notifications: {readonly [Name in keyof S as Name extends NotifyingName<S> ? Name : never]: INotification<GivenOf<S[Name]['request']>, ValueOf<NonNullable<S[Name]['notification']>>>}
-    readonly request: {readonly [Name in keyof S as Name extends AnsweredName<S> ? Name : never]: IRequest<GivenOf<S[Name]['request']>, ValueOf<S[Name]['result']>, RouterClientConnectionHandle>}
+    readonly request: {readonly [Name in keyof S as Name extends AnsweredName<S> ? Name : never]: IRequest<GivenOf<S[Name]['request']>, ValueOf<S[Name]['result']>>}
     on: <Name extends CommandName<S>>(name: Name, callback: ServiceResolverCallback<S[Name], RouterClientConnectionHandle>) => void
 src/service/service-client.ts IServiceClientOptions
   interface IServiceClientOptions<S extends ServiceProcedures> extends IJudgingOptions
@@ -2662,7 +2687,7 @@ src/service/service-server.ts IServiceResponse
   type IServiceResponse<Descriptor extends IServiceDescriptor> = Descriptor extends {readonly procedure: {readonly procedureKind: typeof ProcedureKind.NOTIFIES}} ? INotificationResponse<GivenOf<Descriptor['result']>, ServiceFailureOf<Descriptor>> : IResponse<GivenOf<Descriptor['result']>, ServiceFailureOf<Descriptor>>
 src/service/service-server.ts IServiceServer
   interface IServiceServer<S extends ServiceProcedures, Data = unknown>
-    readonly command: {readonly [Name in keyof S as Name extends CommandName<S> ? Name : never]: IRequest<GivenOf<S[Name]['request']>, ValueOf<S[Name]['result']>, TransportServerConnectionHandle>}
+    readonly command: {readonly [Name in keyof S as Name extends CommandName<S> ? Name : never]: ICommand<GivenOf<S[Name]['request']>, ValueOf<S[Name]['result']>, TransportServerConnectionHandle>}
     readonly notify: {readonly [Name in keyof S as Name extends NotifyingName<S> ? Name : never]: (notification: GivenOf<NonNullable<S[Name]['notification']>>, options?: INotifyOptions<TransportServerConnectionHandle>) => Promise<void>}
     offer: (server: IServer<IServerTransportLike, Data>) => void
     on: <Name extends AnsweredName<S>>(name: Name, callback: ServiceResolverCallback<S[Name]>) => void

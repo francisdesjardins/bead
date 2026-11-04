@@ -11,7 +11,9 @@ use crate::debug::DebugDirection;
 use crate::envelope::{Envelope, ResultHeader};
 use crate::errors::{CallError, ResolverError};
 use crate::failure::{FailureOrigin, ProcedureAddress};
-use crate::managers::service::{RequestDependencies, RequestOptions, RequestResolverDependencies};
+use crate::managers::service::{
+    CommandOptions, RequestDependencies, RequestOptions, RequestResolverDependencies,
+};
 use crate::payloads::{CodecRefusal, JsonCodec, PayloadCodec, TextCodec};
 use crate::router::types::RouterAnswer;
 use crate::testing::pair::{Pair, PairOptions, echo};
@@ -181,10 +183,9 @@ async fn command_roundtrip() {
             let asked = command
                 .call(
                     "now".to_owned(),
-                    &RequestOptions {
-                        connection_handle: Some(request.connection_handle),
+                    &CommandOptions {
                         timeout: Some(super::TIMEOUT),
-                        ..RequestOptions::default()
+                        ..CommandOptions::new(request.connection_handle)
                     },
                 )
                 .expect("the command starts");

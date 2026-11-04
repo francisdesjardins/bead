@@ -246,9 +246,10 @@ that takes none. A client class takes its Bead client, then the layer's options,
 a requester of each procedure its server answers, under the procedure's name, its notifications
 under `notifications`, at the windows its caller gives, unpaced by default
 ([0002](0002-a-subscription-goes-at-its-clients-pace.md)), and `on` for the commands it answers. A
-file names the contract it needs, `GENERATED_CODE_SUPPORTS_VERSION_6` or
-`GeneratedCode.SupportsVersion6`, and a route table 5, `./transcoding`'s
-`GENERATED_CODE_SUPPORTS_VERSION_5` or `GeneratedCode.SupportsVersion5`, the runtimes carrying both
+file names its runtime's contract, `GENERATED_CODE_SUPPORTS_VERSION_6` or
+`GeneratedCode.SupportsVersion7`, each runtime's counter its own, and a route table 5,
+`./transcoding`'s `GENERATED_CODE_SUPPORTS_VERSION_5` or `GeneratedCode.SupportsVersion5`, each
+runtime carrying its own and 5
 ([0018](0018-a-services-procedures-are-typed-descriptors-served-and-called-through-one-layer.md)); a
 service's file imports nothing of Bead's but `./service`, and `./proto` where it binds `proto`, a
 route table `./transcoding`, each from a path relative to its output's folder or a package's name;

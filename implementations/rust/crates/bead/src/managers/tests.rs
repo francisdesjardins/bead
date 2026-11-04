@@ -14,8 +14,8 @@ use crate::errors::CallError;
 use crate::failure::FailureOrigin;
 use crate::identity::{Deprecation, Procedure};
 use crate::managers::service::{
-    DebugEvent, NotificationDependencies, NotifyOptions, RequestDependencies, RequestOptions,
-    RequestResolverDependencies, Response, ServiceManager, TracedError,
+    DebugEvent, NotificationDependencies, NotifyOptions, RegistrationOptions, RequestDependencies,
+    RequestOptions, RequestResolverDependencies, Response, ServiceManager, TracedError,
 };
 use crate::payloads::{CodecRefusal, JsonCodec, PayloadCodec, RawCodec};
 use crate::router::types::{ConnectionHandle, RouterError};
@@ -205,7 +205,7 @@ async fn a_notification_that_does_not_decode_fails_here_for_the_router_to_report
 
             Box::pin(async { Ok(()) })
         }),
-        &RequestOptions::default(),
+        &RegistrationOptions::default(),
     );
 
     pair.settle().await;
@@ -343,7 +343,7 @@ async fn a_notification_whose_value_does_not_write_goes_to_its_router_in_its_pay
     let registering = notification.register(
         Value::Null,
         Arc::new(|_value: Value| Box::pin(async { Ok(()) })),
-        &RequestOptions::default(),
+        &RegistrationOptions::default(),
     );
 
     pair.settle().await;

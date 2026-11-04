@@ -13,7 +13,8 @@ use crate::envelope::{Envelope, FailureHeader};
 use crate::errors::CallError;
 use crate::failure::Failure;
 use crate::managers::service::{
-    NotificationDependencies, RequestOptions, ServiceManager, ServiceManagerOptions, ServiceRouter,
+    NotificationDependencies, RegistrationOptions, ServiceManager, ServiceManagerOptions,
+    ServiceRouter,
 };
 use crate::payloads::TextCodec;
 use crate::{RequestDependencies, UnregisterNotificationOptions};
@@ -74,7 +75,7 @@ async fn a_second_manager_on_the_same_router_cannot_take_its_procedure_over_nor_
             .register(
                 "s".to_owned(),
                 callback(&Heard::default(), ""),
-                &RequestOptions::default()
+                &RegistrationOptions::default()
             )
             .await,
         Err(CallError::Refused(_))
@@ -152,7 +153,7 @@ async fn a_registration_under_way_when_its_notification_is_dropped_fails_with_a_
     let mut registering = notification.register(
         "s".to_owned(),
         callback(&heard, ""),
-        &RequestOptions::default(),
+        &RegistrationOptions::default(),
     );
     pending(&mut registering).await;
     fixture.clock.settle().await;
@@ -199,7 +200,7 @@ async fn a_registration_while_the_last_one_is_leaving_waits_for_it_then_register
     let mut joining = notification.register(
         "s".to_owned(),
         callback(&heard, ""),
-        &RequestOptions::default(),
+        &RegistrationOptions::default(),
     );
     pending(&mut joining).await;
     fixture.clock.settle().await;

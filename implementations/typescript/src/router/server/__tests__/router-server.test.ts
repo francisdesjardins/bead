@@ -2728,7 +2728,7 @@ for (const [label, TrackedWebSocket] of IMPLEMENTATIONS) {
 
         // the server asks the client, naming its connection, on an even call id
         await expect(
-          serverServices.getRequest(ping, { serializer: asking })('ping')({
+          serverServices.getCommand(ping, { serializer: asking })('ping')({
             connectionHandle: await asked.promise,
           })
         ).resolves.toBe('pong');

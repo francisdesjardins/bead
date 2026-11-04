@@ -268,7 +268,7 @@ public sealed class ServiceServer<TService, TData>
     /// called before the service is offered is an <see cref="InvalidOperationException"/>; a command
     /// the service lacks, an <see cref="ArgumentException"/>.
     /// </summary>
-    public Func<TRequest, BoundCall<TResult>> CommandOf<TRequest, TResult, TFailure>(CommandProcedure<TService, TRequest, TResult, TFailure> procedure)
+    public Func<TRequest, BoundCommand<TResult>> CommandOf<TRequest, TResult, TFailure>(CommandProcedure<TService, TRequest, TResult, TFailure> procedure)
         where TFailure : IApplicationFailure
     {
         ArgumentNullException.ThrowIfNull(procedure);
@@ -285,7 +285,7 @@ public sealed class ServiceServer<TService, TData>
                 _commands.TryGetValue(address, out made);
             }
 
-            if (made is not Func<TRequest, BoundCall<TResult>> requester)
+            if (made is not Func<TRequest, BoundCommand<TResult>> requester)
             {
                 throw new InvalidOperationException(
                     $"{procedure.Procedure.ProcedureName} is a command of a service not offered yet: its requester is made as the service is offered");

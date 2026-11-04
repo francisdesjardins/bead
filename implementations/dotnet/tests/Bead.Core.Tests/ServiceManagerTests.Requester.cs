@@ -1,3 +1,5 @@
+using System.Reflection;
+using System.Runtime.CompilerServices;
 using System.Text.Json;
 using System.Text.Json.Serialization.Metadata;
 
@@ -29,32 +31,44 @@ public sealed partial class ServiceManagerTests
     [Fact]
     public async Task Fills_what_the_options_leave_out_and_passes_a_destination_as_it_is()
     {
-        var router = new RecordingRouter();
+        var router = new RecordingRouter(RouterSide.Client);
         var requester = new ServiceManager(router).GetRequest(Echo, Asked)(new Text("a"));
-        var closing = new ServiceManager(router, new ServiceManagerOptions
+        var server = new RecordingRouter();
+        var command = new ServiceManager(server).GetCommand(Echo, Asked)(new Text("a"));
+        var closing = new ServiceManager(server, new ServiceManagerOptions
         {
             Defaults = new RequestDefaults { CloseOnTimeout = true },
-        }).GetRequest(Echo, Asked)(new Text("a"));
+        }).GetCommand(Echo, Asked)(new Text("a"));
 
         await requester().WaitAsync(Patience, Cancelled);
 
         // a destination is the call's alone, passed on as it is, left out included
-        await requester(new RequestOptions { ConnectionHandle = Handle, DestinationId = null }).WaitAsync(Patience, Cancelled);
+        await requester(new RequestOptions { DestinationId = null }).WaitAsync(Patience, Cancelled);
         await requester(new RequestOptions { DestinationId = 4, Timeout = TimeSpan.FromMilliseconds(10) }).WaitAsync(Patience, Cancelled);
 
-        // a close on timeout only where the call or the defaults have one
-        await closing().WaitAsync(Patience, Cancelled);
-        await closing(new RequestOptions { CloseOnTimeout = false }).WaitAsync(Patience, Cancelled);
+        // a command's connection as it names it, and a close on timeout only where the call or the
+        // defaults have one
+        await command(new CommandOptions { ConnectionHandle = Handle, DestinationId = 2 }).WaitAsync(Patience, Cancelled);
+        await closing(new CommandOptions { ConnectionHandle = Handle }).WaitAsync(Patience, Cancelled);
+        await closing(new CommandOptions { CloseOnTimeout = false, ConnectionHandle = Handle }).WaitAsync(Patience, Cancelled);
 
         Assert.Equal(
             [
                 new ResolvedRequestOptions { Timeout = TimeoutDefault },
-                new ResolvedRequestOptions { ConnectionHandle = Handle, Timeout = TimeoutDefault },
+                new ResolvedRequestOptions { Timeout = TimeoutDefault },
                 new ResolvedRequestOptions { DestinationId = 4, Timeout = TimeSpan.FromMilliseconds(10) },
-                new ResolvedRequestOptions { CloseOnTimeout = true, Timeout = TimeoutDefault },
-                new ResolvedRequestOptions { CloseOnTimeout = false, Timeout = TimeoutDefault },
             ],
             router.Requests.Select((sent) =>
+            {
+                return sent.Request.Options;
+            }));
+        Assert.Equal(
+            [
+                new ResolvedRequestOptions { ConnectionHandle = Handle, DestinationId = 2, Timeout = TimeoutDefault },
+                new ResolvedRequestOptions { CloseOnTimeout = true, ConnectionHandle = Handle, Timeout = TimeoutDefault },
+                new ResolvedRequestOptions { CloseOnTimeout = false, ConnectionHandle = Handle, Timeout = TimeoutDefault },
+            ],
+            server.Requests.Select((sent) =>
             {
                 return sent.Request.Options;
             }));
@@ -63,7 +77,7 @@ public sealed partial class ServiceManagerTests
     [Fact]
     public async Task Sends_the_encoded_payload_with_the_resolved_options_and_decodes_the_answer()
     {
-        var router = new RecordingRouter();
+        var router = new RecordingRouter(RouterSide.Client);
 
         var echoed = await new ServiceManager(router).GetRequest(Echo, Asked)(new Text("hello"))(
             new RequestOptions { Timeout = TimeSpan.FromMilliseconds(100) }).WaitAsync(Patience, Cancelled);
@@ -82,7 +96,7 @@ public sealed partial class ServiceManagerTests
     [Fact]
     public async Task Takes_the_manager_defaults_where_the_call_says_nothing_and_its_token_as_given()
     {
-        var router = new RecordingRouter();
+        var router = new RecordingRouter(RouterSide.Client);
         var requester = new ServiceManager(router, new ServiceManagerOptions
         {
             Defaults = new RequestDefaults { Timeout = TimeSpan.FromMilliseconds(50) },
@@ -114,21 +128,144 @@ public sealed partial class ServiceManagerTests
     }
 
     [Fact]
-    public async Task On_a_server_router_names_the_connection_it_goes_to()
+    public async Task A_command_names_the_connection_it_goes_to()
     {
         var router = new RecordingRouter();
+        var command = new ServiceManager(router).GetCommand(Echo, Asked)(new Text("a"));
 
-        await new ServiceManager(router).GetRequest(Echo, Asked)(new Text("a"))(new RequestOptions { ConnectionHandle = Handle })
-            .WaitAsync(Patience, Cancelled);
+        await command(new CommandOptions { ConnectionHandle = Handle }).WaitAsync(Patience, Cancelled);
 
         Assert.Equal(Handle, Assert.Single(router.Requests).Request.Options.ConnectionHandle);
+
+        // * its connection required by its type: a required member, and options without a default
+        Assert.True(typeof(CommandOptions).GetProperty(nameof(CommandOptions.ConnectionHandle))!.IsDefined(typeof(RequiredMemberAttribute), false));
+        Assert.False(Assert.Single(typeof(BoundCommand<Text>).GetMethod("Invoke")!.GetParameters()).HasDefaultValue);
+
+        // ! options a caller whose nullable context is off leaves none are refused as the call is made,
+        // before anything goes
+        Assert.Throws<ArgumentNullException>(() =>
+        {
+            _ = command(null!);
+        });
+        Assert.Single(router.Requests);
+    }
+
+    [Fact]
+    public void A_command_options_carry_every_option_of_a_request()
+    {
+        var command = typeof(CommandOptions).GetProperties(BindingFlags.Public | BindingFlags.Instance).ToDictionary((property) =>
+        {
+            return property.Name;
+        });
+
+        // * CommandOptions repeats RequestOptions' members, which no record inheritance carries over
+        Assert.All(typeof(RequestOptions).GetProperties(BindingFlags.Public | BindingFlags.Instance), (property) =>
+        {
+            Assert.True(command.TryGetValue(property.Name, out var same), $"CommandOptions lacks {property.Name}");
+            Assert.Equal(property.PropertyType, same.PropertyType);
+        });
+    }
+
+    // spec 16.10, 16.11
+    [Fact]
+    public void Makes_requests_and_notifications_on_a_client_router_alone_and_commands_on_a_server_router_alone()
+    {
+        var server = new RecordingRouter();
+        var client = new RecordingRouter(RouterSide.Client);
+        var onServer = new ServiceManager(server);
+        var onClient = new ServiceManager(client);
+
+        // what a maker refuses with, and its message
+        static Exception RefusalOf(Action made)
+        {
+            return Assert.IsAssignableFrom<Exception>(Record.Exception(made));
+        }
+
+        // * the side's refusal, as it is made, after spec 16.10's reasons
+        Assert.Contains("GetCommand", Assert.IsType<InvalidOperationException>(RefusalOf(() =>
+        {
+            onServer.GetRequest(Echo, Asked);
+        })).Message, StringComparison.Ordinal);
+        Assert.Contains("GetRequest", Assert.IsType<InvalidOperationException>(RefusalOf(() =>
+        {
+            onClient.GetCommand(Echo, Asked);
+        })).Message, StringComparison.Ordinal);
+
+        // a notification on a server's router, by its kind: none and a command's refused by the side, a
+        // request's and one that notifies against its kind, as a requester a server's router makes
+        foreach (var kind in new ProcedureKind?[] { null, ProcedureKind.Command })
+        {
+            Assert.IsType<InvalidOperationException>(RefusalOf(() =>
+            {
+                onServer.GetNotification(Echo with { ProcedureKind = kind }, Notified());
+            }));
+        }
+
+        foreach (var kind in new[] { ProcedureKind.Request, ProcedureKind.Notifies })
+        {
+            Assert.Contains("is against its kind", Assert.IsType<ArgumentException>(RefusalOf(() =>
+            {
+                onServer.GetNotification(Echo with { ProcedureKind = kind }, Notified());
+            })).Message, StringComparison.Ordinal);
+        }
+
+        Assert.Contains("is against its kind", Assert.IsType<ArgumentException>(RefusalOf(() =>
+        {
+            onServer.GetRequest(Echo with { ProcedureKind = ProcedureKind.Request }, Asked);
+        })).Message, StringComparison.Ordinal);
+        Assert.Contains("is against its kind", Assert.IsType<ArgumentException>(RefusalOf(() =>
+        {
+            onClient.GetCommand(Echo with { ProcedureKind = ProcedureKind.Command }, Asked);
+        })).Message, StringComparison.Ordinal);
+
+        // out of its range first, whatever the side
+        Assert.Contains("is out of its range", Assert.IsType<ArgumentException>(RefusalOf(() =>
+        {
+            onServer.GetRequest(Echo with { ServiceId = 0 }, Asked);
+        })).Message, StringComparison.Ordinal);
+
+        // a maker refused declares nothing
+        Assert.Empty(server.Declared);
+        Assert.Empty(client.Declared);
+        Assert.Empty(server.RegisteredNotifications);
+
+        // each on its side's router
+        onClient.GetRequest(Echo, Asked);
+        onClient.GetNotification(Echo with { ProcedureId = 2 }, Notified());
+        onServer.GetCommand(Echo, Asked);
+
+        Assert.Equal(["echo", "echo"], client.Declared.Select((declared) =>
+        {
+            return declared.ProcedureName;
+        }));
+        Assert.Equal("echo", Assert.Single(server.Declared).ProcedureName);
+    }
+
+    [Fact]
+    public async Task A_client_request_resolves_no_close_on_timeout()
+    {
+        var router = new RecordingRouter(RouterSide.Client);
+        var manager = new ServiceManager(router, new ServiceManagerOptions
+        {
+            Defaults = new RequestDefaults { CloseOnTimeout = true },
+        });
+        var seen = RecordDebug(manager);
+
+        await manager.GetRequest(Echo, Asked)(new Text("a"))().WaitAsync(Patience, Cancelled);
+
+        // * a close on timeout is a command's alone: a client's request names no connection to close
+        Assert.Null(Assert.Single(router.Requests).Request.Options.CloseOnTimeout);
+        Assert.All(seen, (told) =>
+        {
+            Assert.Null(told.Event.Options?.CloseOnTimeout);
+        });
     }
 
     // debugging 4.1.7
     [Fact]
     public async Task Hands_its_router_the_credential_a_call_presents_and_leaves_it_out_of_its_trace()
     {
-        var router = new RecordingRouter();
+        var router = new RecordingRouter(RouterSide.Client);
         var manager = new ServiceManager(router);
         var seen = RecordDebug(manager);
         var jwt = Credential.Jwt("a.secret.token");
@@ -170,7 +307,7 @@ public sealed partial class ServiceManagerTests
     [Fact]
     public async Task Rethrows_what_the_router_rejects_with_and_tells_debug_its_failure_and_only_a_failure_one()
     {
-        var router = new RecordingRouter();
+        var router = new RecordingRouter(RouterSide.Client);
         var manager = new ServiceManager(router);
         var seen = RecordDebug(manager);
         var requester = manager.GetRequest(Echo, Asked);
@@ -225,7 +362,7 @@ public sealed partial class ServiceManagerTests
     [Fact]
     public async Task A_call_whose_value_does_not_write_fails_before_anything_goes_nothing_requested_traced_or_deprecated()
     {
-        var router = new RecordingRouter();
+        var router = new RecordingRouter(RouterSide.Client);
         var manager = new ServiceManager(router);
         var seen = RecordDebug(manager);
         var deprecated = new List<Procedure>();
@@ -248,7 +385,7 @@ public sealed partial class ServiceManagerTests
     [Fact]
     public async Task Declares_its_requester_to_its_router_as_it_is_made_and_hands_each_of_its_calls_the_series_it_gave()
     {
-        var router = new RecordingRouter();
+        var router = new RecordingRouter(RouterSide.Client);
         var requester = new ServiceManager(router).GetRequest(Echo, Asked);
 
         // declared once, as it is made, before any call
@@ -267,7 +404,7 @@ public sealed partial class ServiceManagerTests
     [Fact]
     public async Task A_deprecated_procedure_raises_deprecated_at_each_call_and_only_a_deprecated_one()
     {
-        var manager = new ServiceManager(new RecordingRouter());
+        var manager = new ServiceManager(new RecordingRouter(RouterSide.Client));
         var seen = new List<Procedure>();
         var old = Echo with { Deprecation = new ProcedureDeprecation { Message = "use echo2" } };
 
@@ -312,7 +449,7 @@ public sealed partial class ServiceManagerTests
         {
             return Record.ExceptionAsync(() =>
             {
-                return call.Manager.GetCommand(Echo, Asked)(new Text("run"))(new RequestOptions
+                return call.Manager.GetCommand(Echo, Asked)(new Text("run"))(new CommandOptions
                 {
                     CloseOnTimeout = call.CloseOnTimeout,
                     ConnectionHandle = Handle,
@@ -337,13 +474,6 @@ public sealed partial class ServiceManagerTests
         Assert.Same(late, await Call((unlessAsked, true)));
         Assert.Equal([Handle, Handle], closed);
 
-        // a request that names no connection has none to close
-        Assert.Same(late, await Record.ExceptionAsync(() =>
-        {
-            return byDefault.GetRequest(Echo, Asked)(new Text("run"))().WaitAsync(Patience, Cancelled);
-        }));
-        Assert.Equal(2, closed.Count);
-
         // an answer, even a refusal, is not silence; nor is a connection gone, or a caller that gave up
         foreach (var other in new Exception[] { refused, new DisconnectException("gone"), new OperationCanceledException() })
         {
@@ -365,7 +495,7 @@ public sealed partial class ServiceManagerTests
 
         Assert.Equal(
             new Text("run"),
-            await command(new Text("run"))(new RequestOptions { ConnectionHandle = Handle }).WaitAsync(Patience, Cancelled));
+            await command(new Text("run"))(new CommandOptions { ConnectionHandle = Handle }).WaitAsync(Patience, Cancelled));
         Assert.Equal(Handle, Assert.Single(router.Requests).Request.Options.ConnectionHandle);
         Assert.Equal([(DebugDirection.Tx, DebugType.Command), (DebugDirection.Rx, DebugType.Command)], StepsOf(seen));
     }
@@ -383,8 +513,8 @@ public sealed partial class ServiceManagerTests
         var seen = RecordDebug(manager);
         var command = manager.GetCommand(Echo, Asked)(new Text("run"));
 
-        await command(new RequestOptions { ConnectionHandle = Handle }).WaitAsync(Patience, Cancelled);
-        await command(new RequestOptions { CloseOnTimeout = false, ConnectionHandle = Handle }).WaitAsync(Patience, Cancelled);
+        await command(new CommandOptions { ConnectionHandle = Handle }).WaitAsync(Patience, Cancelled);
+        await command(new CommandOptions { CloseOnTimeout = false, ConnectionHandle = Handle }).WaitAsync(Patience, Cancelled);
 
         Assert.Equal<bool?>(
             [true, false],

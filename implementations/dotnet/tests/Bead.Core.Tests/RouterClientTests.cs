@@ -145,7 +145,7 @@ public sealed partial class RouterClientTests
     }
 
     [Fact]
-    public async Task Fails_a_command_to_no_connection_or_to_none_named()
+    public async Task Fails_a_command_to_a_connection_not_open()
     {
         using var link = new Link();
 
@@ -155,11 +155,7 @@ public sealed partial class RouterClientTests
 
         await Assert.ThrowsAsync<DisconnectException>(() =>
         {
-            return clock(JsonOf("null"))(new RequestOptions { ConnectionHandle = "type=WS;ip=127.0.0.1;port=1;ordinal=1" }).WaitAsync(Patience, Cancelled);
-        });
-        await Assert.ThrowsAsync<ArgumentException>(() =>
-        {
-            return clock(JsonOf("null"))();
+            return clock(JsonOf("null"))(new CommandOptions { ConnectionHandle = "type=WS;ip=127.0.0.1;port=1;ordinal=1" }).WaitAsync(Patience, Cancelled);
         });
     }
 

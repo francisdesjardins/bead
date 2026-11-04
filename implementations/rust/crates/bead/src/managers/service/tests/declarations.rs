@@ -10,8 +10,8 @@ use crate::constants::{ProtocolCode, RouterSide};
 use crate::envelope::{Credential, Envelope, ResultHeader};
 use crate::failure::Failure;
 use crate::managers::service::{
-    NotificationDependencies, NotificationResolverDependencies, RequestDependencies,
-    RequestOptions, RequestResolverDependencies,
+    CommandOptions, NotificationDependencies, NotificationResolverDependencies,
+    RequestDependencies, RequestResolverDependencies,
 };
 use crate::payloads::{JsonCodec, TextCodec};
 use crate::router::admissions::BeforeRequest;
@@ -370,18 +370,12 @@ async fn hands_the_router_a_procedures_payload_limit_with_its_requests_and_its_r
     );
     let requester = fixture
         .manager
-        .get_request(&limited, RequestDependencies::new(TextCodec, TextCodec))
+        .get_command(&limited, RequestDependencies::new(TextCodec, TextCodec))
         .expect("declared");
     fixture.transport.open(&handle_of(1), true);
     let waiting = requester
-        .call(
-            "hi".to_owned(),
-            &RequestOptions {
-                connection_handle: Some(handle_of(1)),
-                ..RequestOptions::default()
-            },
-        )
-        .expect("a request");
+        .call("hi".to_owned(), &CommandOptions::new(handle_of(1)))
+        .expect("a command");
     fixture.clock.settle().await;
     assert_eq!(
         locked(&declared).as_slice(),

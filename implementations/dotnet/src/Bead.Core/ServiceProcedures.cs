@@ -307,8 +307,8 @@ internal interface IDescribedProcedure
 {
     /// <summary>
     /// A requester of it on <paramref name="services"/>, as a <c>Func</c> of its request to a
-    /// <see cref="BoundCall{TResponse}"/>: a command's, or a request's; its request judged before it
-    /// is written as <paramref name="judging"/> says.
+    /// <see cref="BoundCommand{TResponse}"/> for a command, or to a <see cref="BoundCall{TResponse}"/>
+    /// for a request; its request judged before it is written as <paramref name="judging"/> says.
     /// </summary>
     object RequesterOn(ServiceManager services, RequesterJudging judging);
 

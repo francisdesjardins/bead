@@ -14,7 +14,7 @@ use crate::failure::Failure;
 use crate::identity::{Deprecation, Procedure};
 use crate::managers::service::{
     Notification, NotificationCallback, NotificationDependencies, NotificationRegistration,
-    RequestOptions,
+    RegistrationOptions,
 };
 use crate::payloads::{JsonCodec, TextCodec};
 use crate::router::types::BoxFuture;
@@ -90,8 +90,11 @@ pub(super) async fn subscribed(
     fixture: &ClientFixture,
     (notification, callback): (&News, NotificationCallback<String>),
 ) -> NotificationRegistration {
-    let mut registering =
-        notification.register("subscribe".to_owned(), callback, &RequestOptions::default());
+    let mut registering = notification.register(
+        "subscribe".to_owned(),
+        callback,
+        &RegistrationOptions::default(),
+    );
     pending(&mut registering).await;
     fixture.clock.settle().await;
     let call_id = requests(fixture).last().expect("a request").call_id();
@@ -128,10 +131,10 @@ async fn its_request_takes_the_destination_and_the_timeout_it_is_given_and_names
     let mut registering = notification.register(
         "s".to_owned(),
         callback(&Heard::default(), ""),
-        &RequestOptions {
+        &RegistrationOptions {
             destination_id: Some(3),
             timeout: Some(Duration::from_millis(50)),
-            ..RequestOptions::default()
+            ..RegistrationOptions::default()
         },
     );
     pending(&mut registering).await;
@@ -159,7 +162,7 @@ async fn the_router_holds_it_before_its_request_goes_out_so_a_notification_right
     let mut registering = notification.register(
         "s".to_owned(),
         callback(&heard, ""),
-        &RequestOptions::default(),
+        &RegistrationOptions::default(),
     );
     pending(&mut registering).await;
     fixture.clock.settle().await;
@@ -193,7 +196,7 @@ async fn once_registered_another_callback_joins_without_a_request() {
         .register(
             "subscribe".to_owned(),
             callback(&heard, "second "),
-            &RequestOptions::default(),
+            &RegistrationOptions::default(),
         )
         .await
         .expect("joined");
@@ -213,12 +216,12 @@ async fn callbacks_registering_at_once_share_one_request_and_one_registration() 
     let mut first = notification.register(
         "a".to_owned(),
         callback(&heard, "a "),
-        &RequestOptions::default(),
+        &RegistrationOptions::default(),
     );
     let mut second = notification.register(
         "b".to_owned(),
         callback(&heard, "b "),
-        &RequestOptions::default(),
+        &RegistrationOptions::default(),
     );
     pending(&mut first).await;
     pending(&mut second).await;
@@ -243,7 +246,7 @@ async fn a_failed_request_rejects_and_keeps_nothing_the_next_registration_asks_a
     let mut first = notification.register(
         "a".to_owned(),
         callback(&heard, "a "),
-        &RequestOptions::default(),
+        &RegistrationOptions::default(),
     );
     pending(&mut first).await;
     fixture.clock.settle().await;
@@ -285,7 +288,7 @@ async fn an_answer_to_its_subscription_that_does_not_decode_lets_go_of_it_the_ro
     let mut registering = notification.register(
         serde_json::json!({ "text": "a" }),
         Arc::new(|_| Box::pin(async { Ok(()) })),
-        &RequestOptions::default(),
+        &RegistrationOptions::default(),
     );
     pending(&mut registering).await;
     fixture.clock.settle().await;
@@ -310,7 +313,7 @@ async fn the_last_callback_taken_away_unregisters_the_notification_taking_one_aw
         .register(
             "s".to_owned(),
             callback(&heard, "second "),
-            &RequestOptions::default(),
+            &RegistrationOptions::default(),
         )
         .await
         .expect("joined");
@@ -361,7 +364,7 @@ async fn the_last_callback_out_unsubscribes_with_the_call_id_and_the_answer_that
         .register(
             "s".to_owned(),
             callback(&Heard::default(), ""),
-            &RequestOptions::default(),
+            &RegistrationOptions::default(),
         )
         .await
         .expect("joined");
@@ -381,7 +384,7 @@ async fn taking_the_same_registration_away_twice_leaves_another_of_the_same_call
     let callback = callback(&heard, "");
     let first = subscribed(&fixture, (&notification, Arc::clone(&callback))).await;
     let second = notification
-        .register("s".to_owned(), callback, &RequestOptions::default())
+        .register("s".to_owned(), callback, &RegistrationOptions::default())
         .await
         .expect("joined");
     first.unregister().await.expect("first out");
@@ -408,7 +411,7 @@ async fn the_same_procedure_gives_the_same_notification_so_every_callback_is_hea
         .register(
             "s".to_owned(),
             callback(&heard, "second "),
-            &RequestOptions::default(),
+            &RegistrationOptions::default(),
         )
         .await
         .expect("joined");

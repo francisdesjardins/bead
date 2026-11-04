@@ -17,7 +17,7 @@ use crate::debug::{DebugDirection, TracedEnvelope};
 use crate::envelope::{Envelope, ResultHeader};
 use crate::identity::Procedure;
 use crate::managers::service::{
-    RequestDependencies, RequestOptions, RequestResolverDependencies, Response,
+    CommandOptions, RequestDependencies, RequestResolverDependencies, Response,
 };
 use crate::payloads::JsonCodec;
 use crate::router::client::{RouterClient, RouterClientOptions};
@@ -315,10 +315,7 @@ async fn keeps_its_connection_when_the_application_drops_its_last_handle() {
     );
     assert_eq!(memory.clients().len(), 1, "its server holds it still");
 
-    let options = RequestOptions {
-        connection_handle: Some(connection_handle),
-        ..RequestOptions::default()
-    };
+    let options = CommandOptions::new(connection_handle);
 
     let asked = server
         .services()

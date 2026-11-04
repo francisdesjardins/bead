@@ -331,7 +331,7 @@ public sealed class InteropAdmissions : global::Bead.IServiceAdmissions<InteropP
 public sealed class InteropCommands
 {
     /// <summary>Answers the time where its client is.</summary>
-    public required global::System.Func<global::System.Text.Json.JsonElement, global::Bead.BoundCall<global::System.Text.Json.JsonElement>> Clock { get; init; }
+    public required global::System.Func<global::System.Text.Json.JsonElement, global::Bead.BoundCommand<global::System.Text.Json.JsonElement>> Clock { get; init; }
 }
 
 /// <summary>What notifies the subscribers of each procedure of <c>Interop</c> that notifies.</summary>
@@ -523,5 +523,5 @@ public sealed class InteropClient
 // the contract with the runtime this file needs: an older runtime lacks the constant, and fails here
 file static class GeneratedCodeContract
 {
-    private const bool Supported = global::Bead.GeneratedCode.SupportsVersion6;
+    private const bool Supported = global::Bead.GeneratedCode.SupportsVersion7;
 }

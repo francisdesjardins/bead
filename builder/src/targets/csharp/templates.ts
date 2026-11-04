@@ -306,8 +306,11 @@ export const printService = (service: IServiceEntry, options: ICSharpTemplateOpt
 
     return `global::Bead.${kind}<${procedures}, ${typesOf(procedure)}, ${failureOf(procedure)}>`;
   };
+  // a command's call takes the options that name its connection, a request's every call's
   const requesterOf = (procedure: IProcedureEntry): string => {
-    return `global::System.Func<${typeOf(procedure.request)}, global::Bead.BoundCall<${typeOf(procedure.result)}>>`;
+    const bound = procedure.procedureKind === 'command' ? 'BoundCommand' : 'BoundCall';
+
+    return `global::System.Func<${typeOf(procedure.request)}, global::Bead.${bound}<${typeOf(procedure.result)}>>`;
   };
   const requesterDocOf = (procedure: IProcedureEntry, indent: string): string[] => {
     return docOf(

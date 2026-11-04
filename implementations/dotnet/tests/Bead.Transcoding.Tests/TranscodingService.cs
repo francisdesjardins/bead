@@ -266,7 +266,7 @@ internal sealed class TranscodingService : IAsyncDisposable
 
             try
             {
-                await transcoding.Command.Answer(new Empty())(new RequestOptions { ConnectionHandle = request.ConnectionHandle });
+                await transcoding.Command.Answer(new Empty())(new CommandOptions { ConnectionHandle = request.ConnectionHandle });
             }
             catch (FailureException failed)
             {

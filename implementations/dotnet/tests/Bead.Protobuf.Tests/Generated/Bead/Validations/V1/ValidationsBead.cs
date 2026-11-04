@@ -3658,5 +3658,5 @@ file static class PatternsRules
 // the contract with the runtime this file needs: an older runtime lacks the constant, and fails here
 file static class GeneratedCodeContract
 {
-    private const bool Supported = global::Bead.GeneratedCode.SupportsVersion6;
+    private const bool Supported = global::Bead.GeneratedCode.SupportsVersion7;
 }

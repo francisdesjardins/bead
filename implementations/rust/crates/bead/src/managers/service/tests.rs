@@ -165,16 +165,17 @@ struct ClientFixture {
 
 impl ClientFixture {
     fn new() -> Self {
+        Self::with(&crate::router::client::RouterClientOptions::default())
+    }
+
+    fn with(options: &crate::router::client::RouterClientOptions) -> Self {
         let clock = SteppingClock::new(crate::testing::instants::new_year());
         let shared: SharedClock = Arc::<SteppingClock>::clone(&clock);
         let transport = crate::testing::scripted::ScriptedClient::new(shared);
         let carried: Arc<dyn crate::transport::RouterClientTransport> =
             Arc::<crate::testing::scripted::ScriptedClient>::clone(&transport);
-        let router = crate::router::client::RouterClient::new(
-            carried,
-            &crate::router::client::RouterClientOptions::default(),
-        )
-        .expect("a client router");
+        let router =
+            crate::router::client::RouterClient::new(carried, options).expect("a client router");
         let manager = ServiceManager::new(
             ServiceRouter::Client(router.clone()),
             &ServiceManagerOptions::default(),

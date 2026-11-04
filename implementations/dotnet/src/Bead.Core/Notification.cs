@@ -75,9 +75,9 @@ public interface INotificationRegistration : IAsyncDisposable
 
 /// <summary>
 /// A registration, its payload and callback given: its options, when any, then the registration.
-/// The request that subscribes presents no credential, whatever its options say.
+/// The request that subscribes presents no credential: its subscription is the connection's.
 /// </summary>
-public delegate Task<INotificationRegistration> Registrar(RequestOptions? options = null);
+public delegate Task<INotificationRegistration> Registrar(RegistrationOptions? options = null);
 
 /// <summary>
 /// One procedure's notification, as a service manager makes it: callbacks register on it, one request
@@ -106,7 +106,7 @@ internal sealed class Notification<TRequest, TResponse, TNotification> : INotifi
     private readonly Lock _gate = new();
     private readonly IRouterLike _router;
     private readonly NotificationDependencies<TRequest, TResponse, TNotification> _dependencies;
-    private readonly Func<TRequest, (RequestOptions? Options, INotificationLike Subscribes), Task<(uint CallId, TResponse Response)>> _subscribe;
+    private readonly Func<TRequest, (RegistrationOptions? Options, INotificationLike Subscribes), Task<(uint CallId, TResponse Response)>> _subscribe;
     private readonly Action<Failure?> _onDropped;
     private readonly Action<Exception?, object?> _trace;
     private readonly List<Func<TNotification, Task>> _callbacks = [];
@@ -118,7 +118,7 @@ internal sealed class Notification<TRequest, TResponse, TNotification> : INotifi
     public Notification(
         Procedure procedure,
         (IRouterLike Router, NotificationDependencies<TRequest, TResponse, TNotification> Dependencies) made,
-        (Func<TRequest, (RequestOptions? Options, INotificationLike Subscribes), Task<(uint CallId, TResponse Response)>> Subscribe, Action<Failure?> OnDropped, Action<Exception?, object?> Trace) calls)
+        (Func<TRequest, (RegistrationOptions? Options, INotificationLike Subscribes), Task<(uint CallId, TResponse Response)>> Subscribe, Action<Failure?> OnDropped, Action<Exception?, object?> Trace) calls)
     {
         if (made.Dependencies.Window is < 1)
         {
@@ -232,7 +232,7 @@ internal sealed class Notification<TRequest, TResponse, TNotification> : INotifi
         _onDropped(failure);
     }
 
-    private async Task<INotificationRegistration> Registering(TRequest payload, (Func<TNotification, Task> Callback, RequestOptions? Options, Task Settled) registration)
+    private async Task<INotificationRegistration> Registering(TRequest payload, (Func<TNotification, Task> Callback, RegistrationOptions? Options, Task Settled) registration)
     {
         var (callback, options, settled) = registration;
         int own;
@@ -317,13 +317,13 @@ internal sealed class Notification<TRequest, TResponse, TNotification> : INotifi
     // the one request that subscribes, held by the router before it is asked for, so a notification
     // sent right behind the answer is heard. It presents no credential: its subscription is the
     // connection's, whichever registration asks it
-    private async Task Subscribing(TRequest payload, RequestOptions? options)
+    private async Task Subscribing(TRequest payload, RegistrationOptions? options)
     {
         try
         {
             await _router.RegisterNotification(this);
 
-            var subscription = await _subscribe(payload, (options is null ? null : options with { Credential = null }, this));
+            var subscription = await _subscribe(payload, (options, this));
 
             lock (_gate)
             {

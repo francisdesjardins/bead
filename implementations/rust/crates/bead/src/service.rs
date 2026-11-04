@@ -13,7 +13,7 @@ use crate::errors::{CallError, ProgrammerError};
 use crate::failure::Failure;
 use crate::identity::Procedure;
 use crate::managers::service::{
-    NotificationResolverDependencies, NotificationResolverOf, Notifier, NotifyOptions, Request,
+    Command, NotificationResolverDependencies, NotificationResolverOf, Notifier, NotifyOptions,
     RequestDependencies, RequestResolverDependencies, ResolverCallback, Validate,
 };
 use crate::payloads::PayloadCodec;
@@ -770,7 +770,7 @@ impl ServiceServer {
     pub fn command<Req, Res>(
         &self,
         descriptor: &Descriptor<Req, Res>,
-    ) -> Result<Request<Req, Res>, ProgrammerError>
+    ) -> Result<Command<Req, Res>, ProgrammerError>
     where
         Req: PayloadCodec,
         Res: PayloadCodec,
@@ -780,7 +780,7 @@ impl ServiceServer {
         locked(&self.inner)
             .commands
             .get(&procedure.procedure_name)
-            .and_then(|made| made.downcast_ref::<Request<Req, Res>>())
+            .and_then(|made| made.downcast_ref::<Command<Req, Res>>())
             .cloned()
             .ok_or_else(|| {
                 ProgrammerError::new(format!(

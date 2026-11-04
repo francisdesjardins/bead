@@ -382,7 +382,7 @@ test('writes two services of one .proto in one file, the contract with the runti
 
   expect(content).toContain('public sealed class CommentsServer<TData>\n');
   expect(content).toContain('public sealed class OtherServer<TData>\n');
-  expect(content.match(/GeneratedCode\.SupportsVersion6;/gu)).toHaveLength(1);
+  expect(content.match(/GeneratedCode\.SupportsVersion7;/gu)).toHaveLength(1);
   expect(content.match(/^\/\/ @generated/gmu)).toHaveLength(1);
   expect(content.match(/^namespace /gmu)).toHaveLength(1);
 });

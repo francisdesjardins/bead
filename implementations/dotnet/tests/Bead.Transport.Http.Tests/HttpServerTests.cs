@@ -62,6 +62,12 @@ public sealed class HttpServerTests
         return services.GetRequest(procedure, new RequestDependencies<string, string> { Serializer = Text });
     }
 
+    // a server's command of text, which names its connection
+    private static Func<string, BoundCommand<string>> TextCommander(ServiceManager services, Procedure procedure)
+    {
+        return services.GetCommand(procedure, new RequestDependencies<string, string> { Serializer = Text });
+    }
+
     // what each layer of the server still keeps, each as `layer:count value`
     private static async Task<List<string>> KeptOf(HttpServer<string> server)
     {
@@ -334,7 +340,7 @@ public sealed class HttpServerTests
         var connectionHandle = connected.Server.Transport.ConnectionHandles.Single();
         var commanded = await Record.ExceptionAsync(() =>
         {
-            return TextRequester(connected.Server.Services, Ping)("ping")(new RequestOptions { ConnectionHandle = connectionHandle, Timeout = TimeSpan.FromSeconds(1) })
+            return TextCommander(connected.Server.Services, Ping)("ping")(new CommandOptions { ConnectionHandle = connectionHandle, Timeout = TimeSpan.FromSeconds(1) })
                 .WaitAsync(Patience, Cancelled);
         });
 
@@ -473,7 +479,7 @@ public sealed class HttpServerTests
         });
         Assert.Equal(
             "ping pong",
-            await TextRequester(server.Services, Ping)("ping")(new RequestOptions { ConnectionHandle = connectionHandle, Timeout = TimeSpan.FromSeconds(5) }).WaitAsync(Patience, Cancelled));
+            await TextCommander(server.Services, Ping)("ping")(new CommandOptions { ConnectionHandle = connectionHandle, Timeout = TimeSpan.FromSeconds(5) }).WaitAsync(Patience, Cancelled));
 
         // a call another client makes, relayed to this one
         await using var requester = new BeadHttpClient();

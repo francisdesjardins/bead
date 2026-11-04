@@ -48,7 +48,7 @@ public sealed partial class ServiceManagerTests
     [Fact]
     public async Task Hands_the_router_a_procedure_payload_limit_with_its_requests_and_its_resolver()
     {
-        var router = new RecordingRouter();
+        var router = new RecordingRouter(RouterSide.Client);
         var manager = new ServiceManager(router);
         var limited = Echo with { MaximumPayloadBytes = 64 };
 

@@ -531,7 +531,8 @@ no type of the namespace takes a runtime type's place. A file holds, for each of
 - **`<Name>Admissions`** and **`<Name>Windows`**, the records of its hooks, each required, and of
   the windows of its procedures that notify, which the service layer's options take typed by the
   service; and **`<Name>Commands`**, **`<Name>Notifiers`** and **`<Name>Notifications`**, a member
-  a command, a procedure that notifies, and its notification;
+  a command, a procedure that notifies, and its notification, a command's call a `BoundCommand`,
+  whose options name its connection;
 - **`<Name>Server<TData>`**, where only resolvers are written: the layer's `Command`, `Notify`,
   `On`, `Offer` and `ProceduresWithoutResolver`, over the layer's options, `ServiceServerOptions`,
   given in its one constructor where a procedure names a hook, or by a second, beside one that takes
@@ -544,7 +545,7 @@ rules reach, its `Check(message, sink)` judging each rule in spec 18.5's order i
 `IViolationSink` and returning true where the sink stops it, each rule's site a static readonly
 `ViolationRule`, each pattern's table a `PatternTable` of its classes and a `ushort[]` of its
 cells, `file` keeping each class to its file; and, once, the contract with the runtime,
-`GeneratedCode.SupportsVersion6`. Every doc comment is the description, then what the procedure
+`GeneratedCode.SupportsVersion7`. Every doc comment is the description, then what the procedure
 admits, through one writer: one `///` a line, the text XML-escaped, a `<para>` a paragraph where
 there are two, and each character C# reads as a line's end besides LF, CR, NEL, LS and PS, written
 as its reference, `&#xD;`; a string literal writes them as escapes.

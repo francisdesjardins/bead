@@ -10,8 +10,8 @@ use crate::debug::{DebugDirection, DebugType};
 use crate::envelope::{Envelope, EnvelopeHeader, ResultHeader};
 use crate::errors::CallError;
 use crate::managers::service::{
-    NotificationDependencies, RequestDependencies, RequestOptions, ServiceManager,
-    ServiceManagerOptions, ServiceRouter,
+    NotificationDependencies, RegistrationOptions, RequestDependencies, RequestOptions,
+    ServiceManager, ServiceManagerOptions, ServiceRouter,
 };
 use crate::payloads::TextCodec;
 use crate::router::client::RouterClientOptions;
@@ -284,7 +284,7 @@ async fn a_subscribing_call_binds_its_subscription_before_debug_hears_its_tx_ste
             locked(&hearing).push(news);
             Box::pin(async { Ok(()) })
         }),
-        &RequestOptions::default(),
+        &RegistrationOptions::default(),
     );
     core::future::poll_fn(|context| {
         assert!(registering.as_mut().poll(context).is_pending());

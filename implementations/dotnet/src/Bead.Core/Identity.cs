@@ -99,6 +99,12 @@ internal static class Identity
         return notifies ? DeclarationWay.ServerNotificationResolver : DeclarationWay.ServerResolver;
     }
 
+    /// <summary>The way a requester is declared to a router of <paramref name="side"/>, a notification's subscribing request among them.</summary>
+    public static DeclarationWay RequesterWayOf(RouterSide side)
+    {
+        return side == RouterSide.Client ? DeclarationWay.ClientRequester : DeclarationWay.ServerRequester;
+    }
+
     /// <summary>
     /// Whether <paramref name="name"/> is a procedure's name (16.4): a lower-case ASCII letter, then
     /// up to 62 ASCII letters or digits, read character by character (16.5), never by a regular

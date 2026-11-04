@@ -12,7 +12,9 @@ use super::{ClientFixture, locked};
 use crate::RequestDependencies;
 use crate::envelope::Envelope;
 use crate::errors::CallError;
-use crate::managers::service::{NotificationCallback, NotificationDependencies, RequestOptions};
+use crate::managers::service::{
+    NotificationCallback, NotificationDependencies, RegistrationOptions,
+};
 use crate::payloads::TextCodec;
 
 #[tokio::test]
@@ -28,12 +30,12 @@ async fn is_held_by_the_router_before_its_one_request_goes_out_however_many_regi
     let mut first = notification.register(
         "first".to_owned(),
         callback(&heard, "a "),
-        &RequestOptions::default(),
+        &RegistrationOptions::default(),
     );
     let mut second = notification.register(
         "second".to_owned(),
         callback(&heard, "b "),
-        &RequestOptions::default(),
+        &RegistrationOptions::default(),
     );
     pending(&mut first).await;
     pending(&mut second).await;
@@ -82,7 +84,7 @@ async fn the_last_callback_out_unsubscribes_then_unregisters_the_notification_wi
         .register(
             "s".to_owned(),
             callback(&Heard::default(), ""),
-            &RequestOptions::default(),
+            &RegistrationOptions::default(),
         )
         .await
         .expect("second subscribed");
@@ -122,7 +124,7 @@ async fn a_drop_silences_the_callbacks_tells_the_manager_and_fails_a_registratio
     let mut registering = notification.register(
         "held".to_owned(),
         callback(&heard, ""),
-        &RequestOptions::default(),
+        &RegistrationOptions::default(),
     );
     pending(&mut registering).await;
     fixture.clock.settle().await;
@@ -160,7 +162,7 @@ async fn a_trigger_settles_as_every_callback_did_the_tasks_they_returned_too() {
         })
     });
     let second = notification
-        .register("s".to_owned(), fetching, &RequestOptions::default())
+        .register("s".to_owned(), fetching, &RegistrationOptions::default())
         .await
         .expect("second subscribed");
     let failure: Arc<dyn std::error::Error + Send + Sync> =
@@ -173,7 +175,7 @@ async fn a_trigger_settles_as_every_callback_did_the_tasks_they_returned_too() {
                 let failure = Arc::clone(&failing);
                 Box::pin(async move { Err(failure) })
             }),
-            &RequestOptions::default(),
+            &RegistrationOptions::default(),
         )
         .await
         .expect("third subscribed");
@@ -232,7 +234,7 @@ async fn the_same_callback_registered_twice_is_heard_twice_and_its_registrations
     let callback = callback(&heard, "");
     let first = subscribed(&fixture, (&notification, Arc::clone(&callback))).await;
     let second = notification
-        .register("s".to_owned(), callback, &RequestOptions::default())
+        .register("s".to_owned(), callback, &RegistrationOptions::default())
         .await
         .expect("second subscribed");
     let trigger = |payload| {

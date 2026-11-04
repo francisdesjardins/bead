@@ -257,8 +257,8 @@ async fn reports_a_resolver_that_throws_before_it_returns_and_keeps_taking_envel
 }
 
 #[tokio::test]
-async fn fails_a_command_to_no_connection_or_to_none_named() {
-    use crate::managers::service::{RequestDependencies, RequestOptions};
+async fn fails_a_command_to_a_connection_not_open() {
+    use crate::managers::service::{CommandOptions, RequestDependencies};
     use crate::payloads::TextCodec;
     use crate::testing::pair::{Pair, PairOptions};
 
@@ -273,10 +273,9 @@ async fn fails_a_command_to_no_connection_or_to_none_named() {
     let missing = command
         .call(
             "now".to_owned(),
-            &RequestOptions {
-                connection_handle: Some(Arc::from("type=WS;ip=127.0.0.1;port=1;ordinal=1")),
+            &CommandOptions {
                 timeout: Some(super::TIMEOUT),
-                ..RequestOptions::default()
+                ..CommandOptions::new(Arc::from("type=WS;ip=127.0.0.1;port=1;ordinal=1"))
             },
         )
         .expect("a command names a connection");
@@ -286,15 +285,6 @@ async fn fails_a_command_to_no_connection_or_to_none_named() {
             .expect("settled"),
         Err(crate::errors::CallError::Disconnected(_))
     ));
-    command
-        .call(
-            "now".to_owned(),
-            &RequestOptions {
-                timeout: Some(super::TIMEOUT),
-                ..RequestOptions::default()
-            },
-        )
-        .expect_err("a command must name a connection");
     pair.client.dispose().await;
     pair.server.dispose().await.expect("disposed");
 }

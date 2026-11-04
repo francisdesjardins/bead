@@ -9,6 +9,7 @@ import { type IServiceTrace, tracedCallOf, tracedFailureOf } from './service-tra
 import type {
   CallId,
   DebugType,
+  ICommandOptions,
   INotificationLike,
   IProcedure,
   IRequestDependencies,
@@ -58,7 +59,9 @@ export interface IServiceRequester<Handle extends string> {
     }
   ) => (
     requestPayload: RequestPayload
-  ) => (options?: IRequestOptions<Handle>) => Promise<{ callId: CallId; payload: ResponsePayload }>;
+  ) => (
+    options?: IRequestOptions | ICommandOptions<Handle>
+  ) => Promise<{ callId: CallId; payload: ResponsePayload }>;
   /** The request `procedure` makes, named after it and carrying it. */
   requestOf: <RequestPayload, ResponsePayload>(
     procedure: IProcedure,
@@ -68,7 +71,7 @@ export interface IServiceRequester<Handle extends string> {
     }
   ) => ((
     requestPayload: RequestPayload
-  ) => (options?: IRequestOptions<Handle>) => Promise<ResponsePayload>) &
+  ) => (options?: IRequestOptions | ICommandOptions<Handle>) => Promise<ResponsePayload>) &
     IProcedure;
 }
 
@@ -76,7 +79,10 @@ export interface IServiceRequester<Handle extends string> {
 
 export type REQUEST_DEFAULTS = typeof REQUEST_DEFAULTS;
 
-/** What a call falls back on where its options say nothing: a timeout, and a close on timeout. */
+/**
+ * What a call falls back on where its options say nothing: a timeout, and a close on timeout, which
+ * a command alone reads, as a command alone names a connection to close.
+ */
 export type RequestDefaults = Pick<IResolvedRequestOptions, 'closeOnTimeout' | 'timeout'>;
 
 // constants
@@ -91,23 +97,32 @@ const NOTHING = new Uint8Array(0);
 // helpers
 
 /**
- * `options` with `defaults` where they say nothing — a close on timeout only where `defaults` has one
+ * `options` with `defaults` where they say nothing — a close on timeout a command's alone, which
+ * names the connection it closes, and only where it or `defaults` has one: a request resolves none
  * — and the timeout held as a call's, so the trace, the router and the error tell one number:
  * rounded to the nearest whole millisecond, `Infinity` to wait on, and a {@link ProgrammerError} for
  * any other not from 1 to 2³¹ − 1, 0 among them. `options` is left alone.
  */
 export const resolveRequestOptions = (
   defaults: RequestDefaults,
-  options?: IRequestOptions
+  options?: IRequestOptions | ICommandOptions
 ): IResolvedRequestOptions => {
+  if (options === undefined || !('connectionHandle' in options)) {
+    const { timeout = defaults.timeout, ...request } = options ?? {};
+
+    return { ...request, timeout: assertHeld("a call's timeout", timeout) };
+  }
+
   const {
     closeOnTimeout = defaults.closeOnTimeout,
     timeout: givenTimeout = defaults.timeout,
-    ...rest
-  } = options ?? {};
+    ...command
+  } = options;
   const timeout = assertHeld("a call's timeout", givenTimeout);
 
-  return closeOnTimeout === undefined ? { ...rest, timeout } : { ...rest, closeOnTimeout, timeout };
+  return closeOnTimeout === undefined
+    ? { ...command, timeout }
+    : { ...command, closeOnTimeout, timeout };
 };
 
 // definition
@@ -177,11 +192,15 @@ export const createServiceRequester = <Handle extends string>(
 
     return (requestPayload: RequestPayload) => {
       return async (
-        options?: IRequestOptions<Handle>
+        options?: IRequestOptions | ICommandOptions<Handle>
       ): Promise<{ callId: CallId; payload: ResponsePayload }> => {
         const resolvedOptions = resolveRequestOptions(defaults, options);
         const { closeOnTimeout, destinationId } = resolvedOptions;
-        const connectionHandle = options?.connectionHandle;
+        // a command's alone: a request names no connection
+        const connectionHandle =
+          options !== undefined && 'connectionHandle' in options
+            ? options.connectionHandle
+            : undefined;
         const refusal = refusalOf(requestPayload, destinationId);
         const encoded = refusal === undefined ? serializer.encode(requestPayload) : NOTHING;
         // * the one check a call makes while nobody listens: no clock is read, no step is built
@@ -308,7 +327,9 @@ export const createServiceRequester = <Handle extends string>(
     const requester = callOf(procedure, { dependencies, type });
 
     return nameAfter((requestPayload: RequestPayload) => {
-      return async (options?: IRequestOptions<Handle>): Promise<ResponsePayload> => {
+      return async (
+        options?: IRequestOptions | ICommandOptions<Handle>
+      ): Promise<ResponsePayload> => {
         const { payload } = await requester(requestPayload)(options);
 
         return payload;
