@@ -169,7 +169,7 @@ test.describe('joinTransports', () => {
               return [...new Uint8Array(param)];
             }
 
-            return typeof param === 'object' && param !== null && 'data' in param
+            return typeof param === 'object' && 'data' in param
               ? [...new Uint8Array(param.data as ArrayBuffer)]
               : param;
           }),
@@ -178,10 +178,10 @@ test.describe('joinTransports', () => {
     }
 
     // * what a listener throws is reported with its connection, and the next is told all the same
-    joined.on('connection', (...[, , connectionHandle]) => {
+    joined.on('connection', (...[, connectionHandle]) => {
       throw new Error(`a listener of ${connectionHandle} throws`);
     });
-    joined.on('connection', (...[, , connectionHandle]) => {
+    joined.on('connection', (...[, connectionHandle]) => {
       heard.push(['after', connectionHandle]);
     });
     joined.once('message', () => {
@@ -227,8 +227,8 @@ test.describe('joinTransports', () => {
 
     expect(
       heard.map((entry) => {
-        // a connection's socket and request are its transport's own
-        return entry[0] === 'connection' ? [entry[0], entry[3]] : entry;
+        // a connection's socket and request, one record, are its transport's own
+        return entry[0] === 'connection' ? [entry[0], entry[2]] : entry;
       })
     ).toEqual([
       ['connection', memoryHandle],
@@ -413,7 +413,7 @@ test.describe('joinTransports', () => {
     await first.connect({ server: memory });
     await second.connect({ server: memory });
     await third.connect({});
-    uncountedEmitter.emit('connection', {}, {}, webSocketHandle);
+    uncountedEmitter.emit('connection', { request: {}, socket: {} }, webSocketHandle);
 
     const gauges = joined.gauges();
 

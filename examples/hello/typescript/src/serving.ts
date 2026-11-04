@@ -12,7 +12,7 @@ import { createHTTPGateway } from '@francisdesjardins/bead/http-gateway';
 import { joinTransports } from '@francisdesjardins/bead/joined-transport-server';
 import { createMemoryTransportServer } from '@francisdesjardins/bead/memory-transport-server';
 import { createServer } from '@francisdesjardins/bead/server';
-import { createWSTransportServer } from '@francisdesjardins/bead/ws-transport-server';
+import { createWebSocketTransportServer } from '@francisdesjardins/bead/websocket-transport-server';
 import { WebSocketServer } from 'ws';
 import { HTTP_PROBLEM_TYPES, HTTP_ROUTES, OPENAPI_DOCUMENT } from '#hello/http';
 import { offerHello } from './resolvers.ts';
@@ -25,7 +25,7 @@ import { offerHello } from './resolvers.ts';
  * input closes.
  */
 export const serve = async (port: number): Promise<number> => {
-  const webSocket = createWSTransportServer({ WebSocketServer });
+  const webSocket = createWebSocketTransportServer({ WebSocketServer });
   const memory = createMemoryTransportServer();
 
   await using server = createServer<ReturnType<typeof joinTransports>, string>({

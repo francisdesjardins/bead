@@ -157,7 +157,10 @@ export const createMemoryTransportServer = (
                 }
               })
             );
-            tell(CONNECTION_EVENT, [peer, undefined, connectionHandle]);
+            tell(CONNECTION_EVENT, [
+              Object.freeze({ request: undefined, socket: peer }),
+              connectionHandle,
+            ]);
             resolve({
               close: (wasClean) => {
                 if (isHeld()) {

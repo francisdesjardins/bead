@@ -391,7 +391,7 @@ export interface IWebSocketConstructor {
   readonly OPEN: number;
 }
 
-export interface IWSTransportClientConnectOptions extends ITransportClientAddressOptions {
+export interface IWebSocketTransportClientConnectOptions extends ITransportClientAddressOptions {
   /**
    * The credential its upgrade carries, in its `Authorization`, as given (spec 15.2): what a call
    * presenting `ELSEWHERE` over it stands for at its server, resolved per request; a reconnection
@@ -425,7 +425,7 @@ export interface IWSTransportClientConnectOptions extends ITransportClientAddres
   secured?: boolean | undefined;
 }
 
-export interface IWSTransportClientOptions extends ITransportClientOptions {
+export interface IWebSocketTransportClientOptions extends ITransportClientOptions {
   /**
    * Defaults to {@link TRANSPORT_WEBSOCKET_BINARYTYPE}. `ws`'s `'fragments'` is left out: it delivers
    * an array of buffers, which is not a {@link Data}. `'nodebuffer'` needs `ws`; the global
@@ -455,7 +455,7 @@ export interface IWSTransportClientOptions extends ITransportClientOptions {
    * the global `WebSocket` takes none, its
    * platform's bound applying. Defaults to {@link MAXIMUM_MESSAGE_BYTES}, the default envelope's
    * limit: a router whose `maximumEnvelopeBytes` is raised needs it raised alike, as
-   * `createWSClient` does.
+   * `createWebSocketClient` does.
    */
   maxPayload?: number | undefined;
   /**
@@ -472,7 +472,10 @@ export interface IWSTransportClientOptions extends ITransportClientOptions {
 // types both satisfy these without a cast.
 type Handler<E> = { handler(event: E): void }['handler'];
 
-export type WSTransportClient = ITransportClient<IWebSocketLike, IWSTransportClientConnectOptions>;
+export type WebSocketTransportClient = ITransportClient<
+  IWebSocketLike,
+  IWebSocketTransportClientConnectOptions
+>;
 
 // ── HTTP ──────────────────────────────────────────────────────────────────────
 

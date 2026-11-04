@@ -118,7 +118,7 @@ test.describe('createMemoryTransportServer', () => {
     await using second = createMemoryTransportClient();
     const drawn: unknown[] = [];
 
-    server.on('connection', (...[peer, request, connectionHandle]) => {
+    server.on('connection', (...[{ request, socket: peer }, connectionHandle]) => {
       drawn.push([peer.address, request, connectionHandle]);
     });
     await server.start();
@@ -208,7 +208,7 @@ test.describe('createMemoryTransportServer', () => {
     // in the turn it would be drawn in, refused, and no connection drawn
     const drawn: string[] = [];
 
-    server.on('connection', (...[, , connectionHandle]) => {
+    server.on('connection', (...[, connectionHandle]) => {
       drawn.push(connectionHandle);
     });
     await server.start();
@@ -365,7 +365,7 @@ test.describe('createMemoryTransportServer', () => {
     const heard: number[][] = [];
     const reported: string[] = [];
 
-    server.on('connection', (...[, , connectionHandle]) => {
+    server.on('connection', (...[, connectionHandle]) => {
       drawn.push(connectionHandle);
     });
     server.on('message', ({ data }) => {

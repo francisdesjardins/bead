@@ -26,7 +26,7 @@ import {
 } from '../memory-broker';
 import { createMqttBrokerAdapter } from '../mqtt-broker-adapter';
 import { noop } from '../noop';
-import type { BrokerTopic, IBrokerAdapter } from '../types';
+import type { BrokerTopic, IBrokerAdapter, IBrokerMessage } from '../types';
 import { createTestClock } from './fixtures';
 import { createMqttScript, type IScriptedLink } from './mqtt-script';
 
@@ -1042,7 +1042,7 @@ test.describe('broker participant', () => {
 
     // a message that is no parcel, and a retained one, are acknowledged too
     await peer.adapter.publish({ payload: Uint8Array.of(0xb1), topic: ['bead', 'i', 'server'] });
-    await peer.adapter.publish({ payload: data, retained: true, topic: ['bead', 'i', 'server'] });
+    await peer.adapter.publishRetained({ payload: data, topic: ['bead', 'i', 'server'] });
     await settled();
 
     expect(adapter.unsettled).toBe(0);
@@ -2437,6 +2437,70 @@ test.describe('broker participant', () => {
 
     await client.disconnect();
     await Promise.all([participant.stop(), ada.stop()]);
+  });
+
+  test('drops and reports a message that holds retained, which says it was kept by isRetained', async () => {
+    const broker = createMemoryBroker();
+    const inner = broker.adapter({ id: 'server' });
+    const wrapped = new Map<unknown, unknown>();
+    // * an adapter written for 0.9.0: each message it hands on holds retained, false or true
+    const adapter = Object.assign(Object.create(inner) as IBrokerAdapter, {
+      off: (event: string, listener: (message: IBrokerMessage) => void) => {
+        return inner.off(
+          event as 'message',
+          (wrapped.get(listener) ?? listener) as typeof listener
+        );
+      },
+      on: (event: string, listener: (message: IBrokerMessage) => void) => {
+        const holding =
+          event === 'message'
+            ? (message: IBrokerMessage) => {
+                listener({ ...message, retained: false } as IBrokerMessage);
+              }
+            : listener;
+
+        wrapped.set(listener, holding);
+
+        return inner.on(event as 'message', holding);
+      },
+    });
+    const participant = createBrokerParticipant({ adapter });
+    const transport = participant.transportServer({ names: ['interop'] });
+    const tester = await peerOf(broker, { id: 'tester' });
+    const reported = hearing(participant);
+    const verdicts: unknown[] = [];
+
+    participant.on('debug', ({ direction, verdict }) => {
+      if (direction === 'rx') {
+        verdicts.push(verdict);
+      }
+    });
+
+    await transport.start();
+    await tester.adapter.publish({
+      payload: writeParcel({
+        acceptor: new Uint8Array(8),
+        bound: 65_536,
+        id: 'tester',
+        incarnation: INCARNATION,
+        kind: ParcelKind.OPEN,
+        opener: HALF,
+        sequence: 1,
+      }),
+      topic: NAME,
+    });
+    await settled();
+
+    // * no value of retained is read: an OPEN that holds it is no parcel, settled, and opens nothing
+    expect(wordsOf(reported)).toEqual([
+      'a broker message says it was kept by isRetained: one holding retained is no parcel',
+    ]);
+    expect(reported[0]).toBeInstanceOf(ProgrammerError);
+    expect([tester.heard, transport.clients.length, inner.unsettled]).toEqual([[], 0, 0]);
+    // * traced as a message that is no parcel while a debug listener watches
+    expect(verdicts).toEqual(['no-parcel']);
+
+    await participant.stop();
   });
 
   test('gives no life to a publication of an adapter that offers none', async () => {

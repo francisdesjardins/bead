@@ -33,8 +33,9 @@ public static class GeneratedCode
 
     /// <summary>
     /// The runtime carries <see cref="BoundCommand{TResponse}"/> and <see cref="CommandOptions"/>,
-    /// which a server class's commands are typed by, beside the contract 6: a command's options a
-    /// record of their own, its connection required.
+    /// which a server class's commands are typed by, and <see cref="Notifier{TNotification}"/>,
+    /// which its notifiers are, beside the contract 6: a command's options a record of their own,
+    /// its connection required, and a notifier's optional.
     /// </summary>
     public const bool SupportsVersion7 = true;
 }

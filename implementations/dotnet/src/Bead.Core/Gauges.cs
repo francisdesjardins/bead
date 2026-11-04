@@ -5,7 +5,9 @@ namespace Bead;
 /// <summary>
 /// What a part holds right now: each count by its name, the ceiling some have, the connections it
 /// keeps anything for, and what it found that should never be. Its names are the TypeScript side's,
-/// so a health check reads alike from either.
+/// so a health check reads alike from either. A part builds its own by its initializer, as an
+/// object is on the TypeScript side, and may hand any dictionary and set: Bead freezes each as it
+/// merges a part's gauges into its layer's.
 /// </summary>
 public sealed record Gauges
 {
@@ -29,7 +31,7 @@ public sealed record Gauges
     /// of them keeps anything for, and all they found that should never be. A count two parts name
     /// is an <see cref="ArgumentException"/>.
     /// </summary>
-    public static Gauges Merge(IEnumerable<Gauges> parts)
+    internal static Gauges Merge(IEnumerable<Gauges> parts)
     {
         ArgumentNullException.ThrowIfNull(parts);
 
@@ -67,7 +69,7 @@ public sealed record Gauges
     }
 
     /// <summary>A part's gauges: its counts, and the connections it keeps them for.</summary>
-    public static Gauges Of(IReadOnlyDictionary<string, long> counts, IEnumerable<string> connectionHandles)
+    internal static Gauges Of(IReadOnlyDictionary<string, long> counts, IEnumerable<string> connectionHandles)
     {
         return new Gauges { ConnectionHandles = connectionHandles.ToFrozenSet(), Counts = counts.ToFrozenDictionary() };
     }

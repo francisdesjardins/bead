@@ -933,9 +933,9 @@ public sealed class ServerTests : IAsyncLifetime
 
         Assert.Equal(HealthStatus.Fail, status);
         Assert.Equal(
-            [new HealthCheck(1, HealthStatus.Fail, "1 connections kept that the transport no longer holds")],
+            [new HealthCheck { ObservedValue = 1, Status = HealthStatus.Fail, Output = "1 connections kept that the transport no longer holds" }],
             checks["server:orphans"]);
-        Assert.Equal([new HealthCheck(1, HealthStatus.Fail, "1 connections kept that the transport no longer holds")], checks["router:orphans"]);
+        Assert.Equal([new HealthCheck { ObservedValue = 1, Status = HealthStatus.Fail, Output = "1 connections kept that the transport no longer holds" }], checks["router:orphans"]);
         Assert.Equal(new Dictionary<string, long> { ["connections"] = 0 }, (await Server.Gauges()).Transport.Counts);
         _transport.Counted = new HashSet<string> { Handle };
         Assert.Equal(HealthStatus.Pass, (await Server.Health()).Status);
@@ -953,7 +953,7 @@ public sealed class ServerTests : IAsyncLifetime
         Start(Timeout.InfiniteTimeSpan);
 
         var thrown = new InvalidOperationException("a listener that throws");
-        var refusal = new TransportServerRefusal("127.0.0.1", "rebind.example:8080", null, 50_000, "host-refused", 403);
+        var refusal = new TransportServerRefusal { Address = "127.0.0.1", Authority = "rebind.example:8080", Port = 50_000, Reason = "host-refused", Status = 403 };
         var heard = new List<string>();
 
         // the server gives its transport as IServerTransport, which carries both, whichever
@@ -1263,7 +1263,7 @@ public sealed class ServerTests : IAsyncLifetime
     [Fact]
     public async Task An_ordinary_request_to_the_procedure_of_a_subscription_held_moves_nothing_notify_still_reaches_it()
     {
-        // its TypeScript twin, ws-server.test.ts:975, runs over a WebSocket: the scripted transport
+        // its TypeScript twin, in websocket-server.test.ts, runs over a WebSocket: the scripted transport
         // stands in for it
         var errors = new List<Exception>();
 

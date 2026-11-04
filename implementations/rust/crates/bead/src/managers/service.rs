@@ -194,8 +194,14 @@ impl ServiceRouter {
 
 // ── Options ──────────────────────────────────────────────────────────────────────────────────
 
-/// The timeout a call takes when it gives none.
-pub const DEFAULT_TIMEOUT: Duration = Duration::from_secs(5);
+// the timeout a call takes when it gives none, which the defaults' table states
+const DEFAULT_TIMEOUT: Duration = Duration::from_secs(5);
+
+/// What a manager's calls take when neither they nor its options say: a timeout of 5 s.
+pub const REQUEST_DEFAULTS: RequestDefaults = RequestDefaults {
+    close_on_timeout: None,
+    timeout: Some(DEFAULT_TIMEOUT),
+};
 
 /// What a manager's calls take when they give nothing.
 #[derive(Debug, Clone, Default)]
@@ -203,7 +209,7 @@ pub const DEFAULT_TIMEOUT: Duration = Duration::from_secs(5);
 pub struct RequestDefaults {
     /// Whether a command unanswered past its timeout closes the connection it went to.
     pub close_on_timeout: Option<bool>,
-    /// A call's timeout: [`DEFAULT_TIMEOUT`] when none.
+    /// A call's timeout: the one [`REQUEST_DEFAULTS`] states when none.
     pub timeout: Option<Duration>,
 }
 
@@ -666,7 +672,7 @@ impl ServiceManager {
         self.server_router((procedure, Maker::Command))?;
 
         Ok(Command {
-            shared: self.requester_of(procedure, (dependencies, DebugType::Command))?,
+            made: Handle::Made(self.requester_of(procedure, (dependencies, DebugType::Command))?),
         })
     }
 
@@ -1166,15 +1172,46 @@ impl<Req: PayloadCodec, Res: PayloadCodec> fmt::Debug for Request<Req, Res> {
     }
 }
 
+// ── A handle given before what it sends through is made ──────────────────────────────────────
+
+/// What a handle given before its sender is made reads at each use: the handle made since, or none
+/// yet. The service layer looks its own maps up behind it, so this module reads none of them.
+pub(crate) trait Lookup<Given>: Send + Sync {
+    /// The handle made since it was given, or none yet.
+    fn current(&self) -> Option<Given>;
+}
+
+// what a handle sends through: its sender, made, or a lookup of the handle made since it was given,
+// with its procedure, which it states before
+enum Handle<Made, Given> {
+    Made(Arc<Made>),
+    Looked {
+        procedure: Procedure,
+        lookup: Arc<dyn Lookup<Given>>,
+    },
+}
+
+impl<Made, Given> Clone for Handle<Made, Given> {
+    fn clone(&self) -> Self {
+        match self {
+            Self::Made(made) => Self::Made(Arc::clone(made)),
+            Self::Looked { procedure, lookup } => Self::Looked {
+                procedure: procedure.clone(),
+                lookup: Arc::clone(lookup),
+            },
+        }
+    }
+}
+
 /// A requester of one command, on a server's router: each call names the connection it goes to.
 pub struct Command<Req: PayloadCodec, Res: PayloadCodec> {
-    shared: Arc<RequestShared<Req, Res>>,
+    made: Handle<RequestShared<Req, Res>, Self>,
 }
 
 impl<Req: PayloadCodec, Res: PayloadCodec> Clone for Command<Req, Res> {
     fn clone(&self) -> Self {
         Self {
-            shared: Arc::clone(&self.shared),
+            made: self.made.clone(),
         }
     }
 }
@@ -1183,8 +1220,25 @@ impl<Req: PayloadCodec, Res: PayloadCodec> fmt::Debug for Command<Req, Res> {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter
             .debug_struct("Command")
-            .field("procedure", &self.shared.procedure)
+            .field("procedure", self.procedure_of())
             .finish_non_exhaustive()
+    }
+}
+
+impl<Req: PayloadCodec, Res: PayloadCodec> Command<Req, Res> {
+    // the requester of `procedure` given before it is made: each call looks it up, and one made
+    // before it is refused
+    pub(crate) fn looked(procedure: Procedure, lookup: Arc<dyn Lookup<Self>>) -> Self {
+        Self {
+            made: Handle::Looked { procedure, lookup },
+        }
+    }
+
+    fn procedure_of(&self) -> &Procedure {
+        match &self.made {
+            Handle::Made(shared) => &shared.procedure,
+            Handle::Looked { procedure, .. } => procedure,
+        }
     }
 }
 
@@ -1297,22 +1351,35 @@ where
     /// Its procedure.
     #[must_use]
     pub fn procedure(&self) -> &Procedure {
-        &self.shared.procedure
+        self.procedure_of()
     }
 
     /// Calls its procedure with `payload` on the connection `options` names, sent as it is made.
     ///
     /// # Errors
     ///
-    /// A [`ProgrammerError`] for a timeout spec 1.4 does not hold, or a call its router refuses as
-    /// it is made.
+    /// A [`ProgrammerError`] for a call made before its service is offered, a timeout spec 1.4
+    /// does not hold, or a call its router refuses as it is made.
     pub fn call(
         &self,
         payload: Req::Value,
         options: &CommandOptions,
     ) -> Result<ServiceCall<Res::Value>, ProgrammerError> {
-        let manager = &self.shared.manager;
-        let mut resolved = self.shared.resolved_of(options.timeout)?;
+        let shared = match &self.made {
+            Handle::Made(shared) => shared,
+            Handle::Looked { procedure, lookup } => {
+                let made = lookup.current().ok_or_else(|| {
+                    ProgrammerError::new(format!(
+                        "{} is a command made as its service is offered, not before",
+                        procedure.procedure_name
+                    ))
+                })?;
+
+                return made.call(payload, options);
+            }
+        };
+        let manager = &shared.manager;
+        let mut resolved = shared.resolved_of(options.timeout)?;
 
         resolved.destination_id = options.destination_id;
         resolved.connection_handle = Some(Arc::clone(&options.connection_handle));
@@ -1320,7 +1387,7 @@ where
         resolved.signal.clone_from(&options.signal);
         resolved.close_on_timeout = options.close_on_timeout.or(manager.close_on_timeout);
 
-        self.shared.call_with(payload, (resolved, None))
+        shared.call_with(payload, (resolved, None))
     }
 }
 
@@ -2336,12 +2403,12 @@ where
         self.resolver.register((callback, listed), true)?;
 
         Ok(Notifier {
-            shared: Arc::new(NotifierShared {
+            made: Handle::Made(Arc::new(NotifierShared {
                 manager,
                 router: self.router,
                 procedure,
                 codec: self.notification,
-            }),
+            })),
         })
     }
 }
@@ -2356,23 +2423,38 @@ struct NotifierShared<Not: PayloadCodec> {
 
 /// What notifies the subscriptions of one procedure.
 pub struct Notifier<Not: PayloadCodec> {
-    shared: Arc<NotifierShared<Not>>,
+    made: Handle<NotifierShared<Not>, Self>,
 }
 
 impl<Not: PayloadCodec> Clone for Notifier<Not> {
     fn clone(&self) -> Self {
         Self {
-            shared: Arc::clone(&self.shared),
+            made: self.made.clone(),
         }
     }
 }
 
 impl<Not: PayloadCodec> fmt::Debug for Notifier<Not> {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let procedure = match &self.made {
+            Handle::Made(shared) => &shared.procedure,
+            Handle::Looked { procedure, .. } => procedure,
+        };
+
         formatter
             .debug_struct("Notifier")
-            .field("procedure", &self.shared.procedure)
+            .field("procedure", procedure)
             .finish_non_exhaustive()
+    }
+}
+
+impl<Not: PayloadCodec> Notifier<Not> {
+    // the notifier of `procedure` given before it is made: each notification looks it up, and one
+    // sent before it is made goes to nobody
+    pub(crate) fn looked(procedure: Procedure, lookup: Arc<dyn Lookup<Self>>) -> Self {
+        Self {
+            made: Handle::Looked { procedure, lookup },
+        }
     }
 }
 
@@ -2381,9 +2463,19 @@ where
     Not: PayloadCodec,
     Not::Value: Clone + fmt::Debug + Sync,
 {
-    /// Sends `notification` to each subscription `options` keeps, sent as it is called.
+    /// Sends `notification` to each subscription `options` keeps, sent as it is called; to none
+    /// while it was given before its service is offered and its resolver registered.
     pub fn notify(&self, notification: Not::Value, options: &NotifyOptions) -> BoxFuture<()> {
-        let shared = &self.shared;
+        let shared = match &self.made {
+            Handle::Made(shared) => shared,
+            // * nothing made holds no subscription to send to
+            Handle::Looked { lookup, .. } => {
+                return match lookup.current() {
+                    Some(made) => made.notify(notification, options),
+                    None => Box::pin(async {}),
+                };
+            }
+        };
         let manager = &shared.manager;
         // * the one check a notification makes while nobody listens
         let step = manager.is_debugging().then(|| Step {
@@ -2415,7 +2507,7 @@ where
             request.key.clone_from(&options.key);
             request
         });
-        let shared = Arc::clone(&self.shared);
+        let shared = Arc::clone(shared);
 
         Box::pin(async move {
             let outcome = notified.await;

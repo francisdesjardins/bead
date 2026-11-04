@@ -9,11 +9,11 @@ use bead::testing::scripted::{ScriptedServer, handle_of};
 use bead::{
     BoxFuture, ConnectionHandle, Credential, FailureHeader, NotificationHeader, PayloadCodec,
     ProtocolCode, RequestHeader, ResultHeader, RouterError, RouterSide, Sent, Server,
-    ServerListener, ServerOptions, ServerTransport, ServiceServer, SharedClock, TransportMessage,
+    ServerListener, ServerOptions, ServerTransport, SharedClock, TransportMessage,
 };
 use serde_json::{Value, json};
 
-use crate::{InteropProcedures, interop_procedures, offer_interop};
+use crate::{InteropProcedures, OfferedInterop, interop_procedures, offer_interop};
 
 fn locked<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
     mutex.lock().unwrap_or_else(PoisonError::into_inner)
@@ -82,7 +82,7 @@ struct Fixture {
     server: Server,
     procedures: InteropProcedures,
     handle: ConnectionHandle,
-    _offered: ServiceServer,
+    _offered: OfferedInterop,
 }
 
 impl Fixture {

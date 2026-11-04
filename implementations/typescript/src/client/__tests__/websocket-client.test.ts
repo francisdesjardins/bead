@@ -9,20 +9,20 @@ import {
   stopServer,
 } from '../../transport/shared/__tests__/fixtures';
 import { createFakeWebSocket } from '../../transport/client/__tests__/fake-websocket';
-import { CLOSE_TIMEOUT } from '../../transport/client/ws-transport-client';
+import { CLOSE_TIMEOUT } from '../../transport/client/websocket-transport-client';
 import { bytesOf, readEnvelope, writeEnvelope } from '../../router/shared/envelope';
 import { CredentialScheme } from '../../router/shared/constants';
 import { toSessionToken } from '../../router/shared/identifiers';
 import type { Announcement, Envelope, IFailure, OutgoingEnvelope } from '../../router/shared/types';
 import {
-  createWSClient,
+  createWebSocketClient,
   DisconnectError,
   FailureError,
   FailureScope,
   SERVER_FAILURES,
   TimeoutError,
-  type WSClient,
-} from '../ws-client';
+  type WebSocketClient,
+} from '../websocket-client';
 
 // helpers
 
@@ -113,22 +113,22 @@ const answerTo = (
 
 // definition
 
-test('createWSClient runs on the global WebSocket by default, not yet connected', () => {
-  const client = createWSClient();
+test('createWebSocketClient runs on the global WebSocket by default, not yet connected', () => {
+  const client = createWebSocketClient();
 
   expect(client.transport.isUninitialized()).toBe(true);
   expect(client.router.transport).toBe(client.transport);
 });
 
-test('createWSClient builds its router with the limits given', async () => {
-  const client = createWSClient({ limits: { maximumPayloadBytes: 8 } });
+test('createWebSocketClient builds its router with the limits given', async () => {
+  const client = createWebSocketClient({ limits: { maximumPayloadBytes: 8 } });
 
   await expect(
     client.services.getRequest(echo, { serializer })('much too long')()
   ).rejects.toMatchObject({ detail: 'a payload is 8 bytes at most, not 13' });
 });
 
-test('createWSClient takes a message of an envelope at most, more when the transport says so, and never less', async () => {
+test('createWebSocketClient takes a message of an envelope at most, more when the transport says so, and never less', async () => {
   // envelopes of 256 bytes
   const small = { chunkBytes: 128, maximumEnvelopeBytes: 256, windowBytes: 256 };
 
@@ -152,7 +152,10 @@ test('createWSClient takes a message of an envelope at most, more when the trans
       },
       { CONNECTING: 0, OPEN: 1 }
     ) as unknown as typeof FakeWebSocket;
-    const client = createWSClient({ limits, transport: { maxPayload, WebSocket: Recording } });
+    const client = createWebSocketClient({
+      limits,
+      transport: { maxPayload, WebSocket: Recording },
+    });
     const connecting = client.connect({ host, port: 8_080 });
 
     sockets.at(-1)?.fireOpen();
@@ -170,21 +173,21 @@ test('createWSClient takes a message of an envelope at most, more when the trans
     [small, 255],
   ] as const) {
     expect(() => {
-      return createWSClient({ limits, transport: { maxPayload } });
+      return createWebSocketClient({ limits, transport: { maxPayload } });
     }).toThrow(`maxPayload is an envelope's limit at least`);
   }
 });
 
 for (const [label, TrackedWebSocket] of IMPLEMENTATIONS) {
-  test.describe(`createWSClient, on ${label}`, () => {
+  test.describe(`createWebSocketClient, on ${label}`, () => {
     let envelopes: Awaited<ReturnType<typeof startEnvelopeServer>>;
     let server: WebSocketServer;
-    let client: WSClient;
+    let client: WebSocketClient;
 
     test.beforeEach(async () => {
       envelopes = await startEnvelopeServer();
       server = envelopes.server;
-      client = createWSClient({ transport: { WebSocket: TrackedWebSocket } });
+      client = createWebSocketClient({ transport: { WebSocket: TrackedWebSocket } });
       await client.connect({ host, port: portOf(server) });
     });
 

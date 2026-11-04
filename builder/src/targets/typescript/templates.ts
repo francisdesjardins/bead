@@ -279,13 +279,13 @@ export const printService = (
     failuresTypeOf(),
     ' = ',
     fromRuntime('failuresOf'),
-    '({ codes: { ',
+    `(${String(service.serviceId)}, { `,
     service.failures
       .map((failure) => {
         return `${failure.failureName}: ${String(failure.code)}`;
       })
       .join(', '),
-    ` }, serviceId: ${String(service.serviceId)} });`
+    ' });'
   );
   f.print();
   f.print(

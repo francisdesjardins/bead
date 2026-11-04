@@ -49,10 +49,11 @@ export { SESSION_TOKEN_BYTES } from '../shared/constants';
 export { LONGEST_TIMER, PLATFORM_CLOCK } from '../../transport/shared/clock';
 export type { IClock, TimeoutId } from '../../transport/shared/clock';
 export { GenericError, ProgrammerError } from '../../transport/shared/errors';
-export type { IEventIteratorOptions } from '../../transport/shared/types';
+export type { IEventIteratorOptions, IGauges } from '../../transport/shared/types';
 export type { SessionToken } from '../shared/types';
 export type {
   ISession,
+  ISessionChange,
   ISessionManager,
   ISessionManagerOptions,
   ISessionManagerTimers,
@@ -305,7 +306,7 @@ export const createSessionManager = <Data>(
 
     if (newActivity !== oldActivity) {
       emitIfHeard(LAST_ACTIVITY_CHANGED_EVENT, () => {
-        return [copyOf(storedSession), newActivity, oldActivity];
+        return [{ newValue: newActivity, oldValue: oldActivity, session: copyOf(storedSession) }];
       });
     }
 
@@ -516,7 +517,7 @@ export const createSessionManager = <Data>(
       if (newTimeout !== oldTimeout) {
         manager.resetConnectionInactivityTimeout(storedSession, newTimeout);
         emitIfHeard(CONNECTION_INACTIVITY_TIMEOUT_CHANGED_EVENT, () => {
-          return [copyOf(storedSession), newTimeout, oldTimeout];
+          return [{ newValue: newTimeout, oldValue: oldTimeout, session: copyOf(storedSession) }];
         });
       }
 
@@ -538,7 +539,13 @@ export const createSessionManager = <Data>(
 
       if (!isSimilar) {
         emitIfHeard(DATA_CHANGED_EVENT, () => {
-          return [copyOf(storedSession), structuredClone(newData), oldData];
+          return [
+            {
+              newValue: structuredClone(newData),
+              oldValue: oldData,
+              session: copyOf(storedSession),
+            },
+          ];
         });
       }
 
@@ -573,7 +580,7 @@ export const createSessionManager = <Data>(
       if (newTimeout !== oldTimeout) {
         manager.resetSessionInactivityTimeout(storedSession, newTimeout);
         emitIfHeard(SESSION_INACTIVITY_TIMEOUT_CHANGED_EVENT, () => {
-          return [copyOf(storedSession), newTimeout, oldTimeout];
+          return [{ newValue: newTimeout, oldValue: oldTimeout, session: copyOf(storedSession) }];
         });
       }
 

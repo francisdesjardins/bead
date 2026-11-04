@@ -31,7 +31,7 @@ import { wholeEnvelopeLimitsOf } from '../../../router/shared/whole-envelope-lim
 import { CONNECTION_INACTIVITY_TIMEOUT } from '../../../server/http-server';
 import { createServer } from '../../../server/server';
 import type { IServer, IServerTransportLike } from '../../../server/types';
-import { createWSServer } from '../../../server/ws-server';
+import { createWebSocketServer } from '../../../server/websocket-server';
 import { BrokerRefusedError } from '../../client/broker-transport-client';
 import { createAmqpBrokerAdapter, type IAmqpBrokerAdapter } from '../../shared/amqp-broker-adapter';
 import {
@@ -77,7 +77,11 @@ import type {
   TransportServerConnectionHandle,
 } from '../types';
 import { ACCEPT_TIMEOUT } from '../broker-transport-server';
-import { createWSTransportServer, HEARTBEAT, MAXIMUM_UNSENT_BYTES } from '../ws-transport-server';
+import {
+  createWebSocketTransportServer,
+  HEARTBEAT,
+  MAXIMUM_UNSENT_BYTES,
+} from '../websocket-transport-server';
 import {
   createBrokerPeers,
   expectedSeenOf,
@@ -768,7 +772,7 @@ const serverOf = (
   } = options;
 
   if (transport === 'websocket') {
-    return createWSServer<string>({
+    return createWebSocketServer<string>({
       credentials: interopCredentialsOf(clock, limits),
       limits,
       transport: {
@@ -1507,7 +1511,7 @@ const playBrokerCase = async (
       transportServer.on('error', (error, connectionHandle) => {
         errors.push({ connectionHandle, error });
       });
-      transportServer.on('connection', (...[peer, , connectionHandle]) => {
+      transportServer.on('connection', (...[{ socket: peer }, connectionHandle]) => {
         addresses.set(connectionHandle, peer.id);
       });
       transportServer.on('close', (wasClean, connectionHandle) => {
@@ -1866,7 +1870,9 @@ test.describe('the transports', () => {
   test('bounds default to what the file states', async () => {
     // the bound the WebSocket transport server takes when built alone and told none
     const fake = createFakeWebSocketServer();
-    const wsTransport = createWSTransportServer({ WebSocketServer: fake.FakeWebSocketServer });
+    const wsTransport = createWebSocketTransportServer({
+      WebSocketServer: fake.FakeWebSocketServer,
+    });
     const starting = wsTransport.start({ address: HOST, port: 4_321 });
 
     fake.instances[0]?.emit('listening');

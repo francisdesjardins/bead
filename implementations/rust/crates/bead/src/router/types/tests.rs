@@ -9,7 +9,7 @@ fn gives_several_parts_as_one_and_refuses_a_count_two_of_them_name() {
     use std::collections::{BTreeMap, BTreeSet};
     use std::sync::Arc;
 
-    let merged = Gauges::merged(vec![
+    let merged = Gauges::merge(vec![
         Gauges {
             ceilings: BTreeMap::from([("bytes", 8)]),
             ..Gauges::new(BTreeMap::from([("bytes", 1)]), [Arc::from("a")])
@@ -28,9 +28,9 @@ fn gives_several_parts_as_one_and_refuses_a_count_two_of_them_name() {
         BTreeSet::from(["a", "b"].map(Arc::from))
     );
     assert_eq!(merged.anomalies, ["odd"]);
-    assert_eq!(Gauges::merged(vec![]).expect("no parts"), Gauges::default());
+    assert_eq!(Gauges::merge(vec![]).expect("no parts"), Gauges::default());
 
-    let refused = Gauges::merged(vec![
+    let refused = Gauges::merge(vec![
         Gauges::new(BTreeMap::from([("calls", 1)]), []),
         Gauges::new(BTreeMap::from([("calls", 2)]), []),
     ])
@@ -39,7 +39,7 @@ fn gives_several_parts_as_one_and_refuses_a_count_two_of_them_name() {
 }
 
 #[test]
-fn gives_a_parts_gauges_frozen_what_it_does_not_give_being_none() {
+fn gives_a_part_s_gauges_what_it_does_not_give_being_none() {
     use super::Gauges;
     use std::collections::{BTreeMap, BTreeSet};
     use std::sync::Arc;

@@ -3,10 +3,10 @@
 // dependencies
 
 import {
-  createWSTransportServer,
-  type IWSTransportServerOptions,
-  type WSTransportServer,
-} from '../transport/server/ws-transport-server';
+  createWebSocketTransportServer,
+  type IWebSocketTransportServerOptions,
+  type WebSocketTransportServer,
+} from '../transport/server/websocket-transport-server';
 import { LIMIT_DEFAULTS } from '../router/shared/constants';
 import { limitsOf } from '../router/shared/router-limits';
 import { ProgrammerError } from '../transport/shared/errors';
@@ -21,8 +21,10 @@ export * from './server';
  * A WebSocket server's layers and options: the transport's options, and the rest as a server takes
  * them.
  */
-export interface IWSServerOptions<Data = unknown>
-  extends Omit<IServerLayers<WSTransportServer, Data>, 'transport'>, Omit<IServerOptions, 'clock'> {
+export interface IWebSocketServerOptions<Data = unknown>
+  extends
+    Omit<IServerLayers<WebSocketTransportServer, Data>, 'transport'>,
+    Omit<IServerOptions, 'clock'> {
   /**
    * The transport's options; binary comes as frames, so as `'arraybuffer'` or `'nodebuffer'`. A
    * message is an envelope at most — the limits' `maximumEnvelopeBytes` — unless `maxPayload` says
@@ -31,14 +33,14 @@ export interface IWSServerOptions<Data = unknown>
    * takes. What may wait for a socket, `maximumUnsentBytes`, is what a peer that keeps every rule can
    * be owed under the limits, unless it says otherwise. Its clock is every layer's.
    */
-  transport: Omit<IWSTransportServerOptions, 'binaryType'> & {
+  transport: Omit<IWebSocketTransportServerOptions, 'binaryType'> & {
     binaryType?: 'arraybuffer' | 'nodebuffer' | undefined;
   };
 }
 
 // types
 
-export type WSServer<Data = unknown> = IServer<WSTransportServer, Data>;
+export type WebSocketServer<Data = unknown> = IServer<WebSocketTransportServer, Data>;
 
 // definition
 
@@ -47,13 +49,18 @@ export type WSServer<Data = unknown> = IServer<WSTransportServer, Data>;
  * injected `WebSocketServer`, as its bottom layer.
  *
  * @example
- * import { createWSServer } from '@francisdesjardins/bead/ws-server';
+ * import { createWebSocketServer } from '@francisdesjardins/bead/websocket-server';
  *
- * const server = createWSServer({ closeOnCommandTimeout: true, transport: { WebSocketServer } });
+ * const server = createWebSocketServer({
+ *   closeOnCommandTimeout: true,
+ *   transport: { WebSocketServer },
+ * });
  *
  * void server.transport.start({ port });
  */
-export const createWSServer = <Data = unknown>(options: IWSServerOptions<Data>): WSServer<Data> => {
+export const createWebSocketServer = <Data = unknown>(
+  options: IWebSocketServerOptions<Data>
+): WebSocketServer<Data> => {
   const maximumEnvelopeBytes =
     options.limits?.maximumEnvelopeBytes ?? LIMIT_DEFAULTS.maximumEnvelopeBytes;
   const maxPayload = options.transport.maxPayload ?? maximumEnvelopeBytes;
@@ -76,12 +83,16 @@ export const createWSServer = <Data = unknown>(options: IWSServerOptions<Data>):
       maximumTransfers * windowBytes +
       2 * maximumEnvelopeBytes;
 
-  return createServer<WSTransportServer, Data>(
+  return createServer<WebSocketTransportServer, Data>(
     {
       router: options.router,
       services: options.services,
       sessions: options.sessions,
-      transport: createWSTransportServer({ ...options.transport, maximumUnsentBytes, maxPayload }),
+      transport: createWebSocketTransportServer({
+        ...options.transport,
+        maximumUnsentBytes,
+        maxPayload,
+      }),
     },
     {
       closeOnCommandTimeout: options.closeOnCommandTimeout,

@@ -18,8 +18,14 @@ mod tests;
 /// What an exposition is given as.
 pub const METRICS_CONTENT_TYPE: &str = "text/plain; version=0.0.4; charset=utf-8";
 
-/// The procedures each group of families names at most, when nothing else is given.
-pub const MAXIMUM_PROCEDURES: usize = 1_000;
+// the procedures each group of families names at most, when nothing else is given
+const MAXIMUM_PROCEDURES: usize = 1_000;
+
+/// How a registry is built when its options say nothing: 1000 procedures at most in each group of
+/// families.
+pub const METRICS_REGISTRY_DEFAULTS: MetricsRegistryOptions = MetricsRegistryOptions {
+    maximum_procedures: Some(MAXIMUM_PROCEDURES),
+};
 
 /// How a call ended: its result, a protocol failure by its code, or one of the others.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -66,7 +72,8 @@ impl CallEnding {
 #[non_exhaustive]
 pub struct MetricsRegistryOptions {
     /// The procedures its client families name at most, its server families as many, and its
-    /// notification families as many: [`MAXIMUM_PROCEDURES`] when none, above 0.
+    /// notification families as many: the ones [`METRICS_REGISTRY_DEFAULTS`] states when none,
+    /// above 0.
     pub maximum_procedures: Option<usize>,
 }
 

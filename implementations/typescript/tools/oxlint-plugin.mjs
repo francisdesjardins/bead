@@ -48,15 +48,6 @@ const LISTED_RESTS = Object.freeze({
     "an event a fake socket hears, and its values, as `ws`'s socket emits them",
 });
 
-/** The events of three values, as `map.event`: each goes with the decision on such events (0007). */
-const LISTED_EVENTS = Object.freeze({
-  'SessionManagerEventMap.connectionInactivityTimeoutChanged': 'a session, its new value, its old',
-  'SessionManagerEventMap.dataChanged': 'a session, its new data, its old',
-  'SessionManagerEventMap.lastActivityChanged': 'a session, its new value, its old',
-  'SessionManagerEventMap.sessionInactivityTimeoutChanged': 'a session, its new value, its old',
-  'TransportServerEventMap.connection': 'a socket, the request that opened it, its handle',
-});
-
 const MESSAGES = Object.freeze({
   event: 'an event carries at most two values',
   fourth: 'two parameters, then at most one options object: this is a fourth',
@@ -359,7 +350,7 @@ function judgeSignature(node, scope) {
   }
 }
 
-/** An event map's events, each a tuple of at most two values, but the ones listed. */
+/** An event map's events, each a tuple of at most two values. */
 function judgeEventMap(node, context) {
   const name = node.id.name;
   const members =
@@ -375,8 +366,7 @@ function judgeEventMap(node, context) {
     const isUnbounded = type.elementTypes.some((element) => {
       return element.type === 'TSRestType';
     });
-    const key = `${name}.${member.key.name ?? member.key.value}`;
-    if ((isUnbounded || type.elementTypes.length > 2) && !Object.hasOwn(LISTED_EVENTS, key)) {
+    if (isUnbounded || type.elementTypes.length > 2) {
       context.report({ node: member, message: MESSAGES.event });
     }
   }

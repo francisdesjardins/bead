@@ -508,7 +508,11 @@ where the object is used, a row of the matrix. A callback Bead declares takes it
 `bead-house`'s tests hold it: the parameters, each public `…Options` struct's shape, and each
 options parameter by `&`, as `max-params`, `bead/options-last` and `tools/check-surface.mjs` hold
 the TypeScript side's. The count binds every function. Inside the crate a tuple counts as one
-parameter. On the surface no item takes or gives one
+parameter, and `bead-house` counts the tuples of three elements or more a function takes, its
+parameters' own types alone read, against each member's pin, which may only fall, so a site leaves
+the count by a record of the call and none joins it. It reads what the house reads, each crate's
+tests, benches and fuzz targets among them, where the C# side's count reads its `src` assemblies
+alone: a crate's tests sit in its `src`. On the surface no item takes or gives one
 ([0004](0004-one-behaviour-in-every-language.md)), which `bead-house`'s `tuples.rs` holds: two
 things are two parameters, a third essential thing a record of the call, `RouterRequest` or
 `NotifyRequest`, and several values given back a `#[non_exhaustive]` struct.
@@ -531,8 +535,24 @@ after the event, and the C# side so where it has a type of its own: `CallError::
 interface the other sides give over one object, which narrows it, is a newtype here that holds it,
 `ServiceManagerClient` over `ServiceManager` (C-NEWTYPE), built by the crate alone
 ([0018](0018-a-services-procedures-are-typed-descriptors-served-and-called-through-one-layer.md)).
-The Rust names are the other sides', each held by `tools/names.tsv`
-([0004](0004-one-behaviour-in-every-language.md)).
+An event that tells a change is a struct variant of `SessionEvent`, its fields the other sides'
+`SessionChange` members, `session`, `new_value` and `old_value`, as an event enum's struct variant
+carries named values in Rust (winit's `WindowEvent::CursorMoved { device_id, position }`). A
+callable that holds what it calls through is a struct with its call where the other sides type a
+function: `Notifier`, which the service server's `notifier_of(&descriptor)` gives, beside the
+TypeScript side's `INotifier` and the C# side's delegate `Notifier<TNotification>`, `rendered:
+callable`; the service server gives its handles as C# does, `notifier_of` and `command_of`, `…_of`
+by the rule above, since 0003 keeps `notify` for sending. A set of flags an implementer declares,
+which the wire does not carry, is a bit set of associated constants, as `BrokerCapabilities` is,
+where C# writes a `[Flags]` enum and TypeScript an object of optional booleans, `rendered: flags`
+([0007](0007-csharp-interfaces-blocks-two-parameters-no-warning.md)); clippy's
+`struct_excessive_bools`, denied, refuses a struct of four `bool`. A default Bead declares is
+exported, and one the TypeScript side holds as a table's member is a `const` of the options struct
+that table satisfies, `REQUEST_DEFAULTS`, `RECONNECT_DEFAULTS`, `METRICS_REGISTRY_DEFAULTS`, as
+`LIMIT_DEFAULTS` and `PACING_DEFAULTS` are; `MEMORY_ADDRESS` stays a constant, since Rust's memory
+connect options require their server and hold the address as a `String`, so no `const` of them can
+be written ([0004](0004-one-behaviour-in-every-language.md)). The Rust names are the other sides',
+each held by `tools/names.tsv` ([0004](0004-one-behaviour-in-every-language.md)).
 
 ### Payloads, a `JWT`, randomness
 

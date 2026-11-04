@@ -45,9 +45,9 @@ import type {
   IUpgradeResponseLike,
   IWebSocketConstructor,
   IWebSocketLike,
-  IWSTransportClientConnectOptions,
-  IWSTransportClientOptions,
-  WSTransportClient,
+  IWebSocketTransportClientConnectOptions,
+  IWebSocketTransportClientOptions,
+  WebSocketTransportClient,
 } from './types';
 
 export { CLOSE_TIMEOUT, TRANSPORT_WEBSOCKET_BINARYTYPE } from '../shared/constants';
@@ -58,9 +58,9 @@ export type {
   IUpgradeResponseLike,
   IWebSocketConstructor,
   IWebSocketLike,
-  IWSTransportClientConnectOptions,
-  IWSTransportClientOptions,
-  WSTransportClient,
+  IWebSocketTransportClientConnectOptions,
+  IWebSocketTransportClientOptions,
+  WebSocketTransportClient,
 } from './types';
 
 // constants
@@ -75,7 +75,7 @@ export const CONNECT_DEFAULTS = Object.freeze({
   port: 80,
   secured: false,
   timeout: 30_000,
-} satisfies IWSTransportClientConnectOptions);
+} satisfies IWebSocketTransportClientConnectOptions);
 
 // helpers
 
@@ -133,7 +133,7 @@ const urlOf = ({
   pathname = CONNECT_DEFAULTS.pathname,
   port,
   secured = CONNECT_DEFAULTS.secured,
-}: IWSTransportClientConnectOptions): string => {
+}: IWebSocketTransportClientConnectOptions): string => {
   const authority = host.includes(':') && !host.startsWith('[') ? `[${host}]` : host;
 
   return `${secured ? 'wss' : 'ws'}://${authority}:${String(port)}${pathname.replace(/^\/?(.*)/, '/$1')}`;
@@ -183,13 +183,15 @@ const refusalOf = ({ headers, statusCode }: IUpgradeResponseLike): string => {
  * what comes. A close it begins reads on to its server's Close, what it held dropped (spec 15.12).
  *
  * @example
- * const client = createWSTransportClient();
+ * const client = createWebSocketTransportClient();
  * client.on('message', ({ data }) => {});
  * await client.connect({ host, port });
  * await client.send({ data: 'hello' });
  * await client.disconnect();
  */
-export const createWSTransportClient = (options?: IWSTransportClientOptions): WSTransportClient => {
+export const createWebSocketTransportClient = (
+  options?: IWebSocketTransportClientOptions
+): WebSocketTransportClient => {
   const {
     binaryType = TRANSPORT_WEBSOCKET_BINARYTYPE,
     clock,
@@ -204,7 +206,7 @@ export const createWSTransportClient = (options?: IWSTransportClientOptions): WS
   const heartbeat = assertHeartbeat(givenHeartbeat);
   const closeTimeout = assertHeld('a close timeout', givenCloseTimeout);
 
-  return createTransportClient<IWebSocketLike, IWSTransportClientConnectOptions>(
+  return createTransportClient<IWebSocketLike, IWebSocketTransportClientConnectOptions>(
     (client, { tell }) => {
       // settle the connect or the disconnect in flight, so a socket dropped under either cannot leave
       // it pending, and the client with it
@@ -219,7 +221,7 @@ export const createWSTransportClient = (options?: IWSTransportClientOptions): WS
       let carried: string | undefined;
       // one call per provider identity; an earlier attempt's outcome serves none after it
       const pendingCredentials = new WeakMap<
-        NonNullable<IWSTransportClientConnectOptions['credentialProvider']>,
+        NonNullable<IWebSocketTransportClientConnectOptions['credentialProvider']>,
         Set<() => void>
       >();
 

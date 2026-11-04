@@ -16,6 +16,7 @@ test.describe('the service entry', () => {
     expect(Object.keys(service).toSorted()).toEqual([
       'FailureError',
       'GENERATED_CODE_SUPPORTS_VERSION_6',
+      'GENERATED_CODE_SUPPORTS_VERSION_7',
       'PAYLOAD_CODECS',
       'ProcedureKind',
       'ProgrammerError',

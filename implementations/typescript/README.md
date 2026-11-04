@@ -12,15 +12,15 @@ Nothing in it imports a framework at run time. The specification and the conform
 side plays are in [`spec/`](../../spec/).
 
 ```ts
-import { createWSTransportClient } from '@francisdesjardins/bead/ws-transport-client';
-import { createWSTransportServer } from '@francisdesjardins/bead/ws-transport-server';
+import { createWebSocketTransportClient } from '@francisdesjardins/bead/websocket-transport-client';
+import { createWebSocketTransportServer } from '@francisdesjardins/bead/websocket-transport-server';
 import { createHTTPTransportClient } from '@francisdesjardins/bead/http-transport-client';
 import { createHTTPTransportServer } from '@francisdesjardins/bead/http-transport-server';
 ```
 
 ## The transport
 
-`transport-client`, `ws-transport-client`, `transport-server` and `ws-transport-server` are the
+`transport-client`, `websocket-transport-client`, `transport-server` and `websocket-transport-server` are the
 first layer of a transport → router → service stack, which is why they sit together under
 `src/transport/`, split the way the rest is: `client/`, `server/`, and the `shared/` both stand on.
 
@@ -78,7 +78,7 @@ connection's deadline by the time its bytes take at `minimumSendBytesPerSecond`,
 `sendGracePeriod`, 5 seconds, at least, and a socket that still holds something past it, judged
 each second on the real clock, is dropped. An envelope that would take what waits past
 `maximumUnsentBytes` drops it too: what a peer that keeps every rule can be owed at once,
-184,551,424 bytes under the limits by default, which `createWSServer` derives from its router's.
+184,551,424 bytes under the limits by default, which `createWebSocketServer` derives from its router's.
 Each drop is reported on `error` as its connection closes, naming its bound and its value, and its
 close is not clean; the heartbeat drops a reader that stops behind a large backlog besides. A paced
 subscription queues on the server what a client that falls behind has not credited.
@@ -121,13 +121,13 @@ server.on('refusal', ({ address, authority, origin, port, reason, status }) => {
 ```ts
 import { WebSocketServer } from 'ws';
 
-const server = createWSTransportServer({ WebSocketServer });
+const server = createWebSocketTransportServer({ WebSocketServer });
 server.on('message', ({ data }, connectionHandle) => {
   void server.send({ data }, connectionHandle);
 });
 const { port } = await server.start({ findOpenPort: true });
 
-const client = createWSTransportClient();
+const client = createWebSocketTransportClient();
 client.on('close', (clean) => {
   if (!clean) {
     client.reconnect({ signal: AbortSignal.timeout(30_000) }).catch((reason: unknown) => {
@@ -205,7 +205,7 @@ let token = await signIn();
 const elsewhere = () => {
   return { carried: `Bearer ${token}`, scheme: CredentialScheme.ELSEWHERE } as const;
 };
-const client = createWSClient({ credential: elsewhere(), transport: { WebSocket } });
+const client = createWebSocketClient({ credential: elsewhere(), transport: { WebSocket } });
 
 client.router.on('credentialWithdrawn', () => {
   void signIn().then(async (renewed) => {
@@ -358,7 +358,7 @@ token, an `ELSEWHERE` with nothing to carry, a scheme to come — is a `Programm
 call starts.
 
 ```ts
-const client = createWSClient({ credential: { scheme: CredentialScheme.JWT, token } });
+const client = createWebSocketClient({ credential: { scheme: CredentialScheme.JWT, token } });
 
 // the call that renews presents none: until a default is given again, a call that would present it fails
 client.router.on('credentialWithdrawn', () => {
@@ -457,11 +457,11 @@ what, by connection, call id and session, and `credential-sessions.ts` each cred
 that bounds a subscription, its end timed on the router's clock.
 
 `client` puts the three layers together, bottom up — the transport, the router built on it, the
-services built on the router — each replaceable on its own. `ws-client` is that over WebSocket, and
+services built on the router — each replaceable on its own. `websocket-client` is that over WebSocket, and
 is what an application starts from:
 
 ```ts
-const client = createWSClient();
+const client = createWebSocketClient();
 
 client.services.on('debug', (error, info) => {
   console.log(info.direction, info.procedureName, error);
@@ -543,14 +543,14 @@ among its own options, the session it learned standing for its connection's. Non
 server transports carries a credential beside an envelope it sends, so a command presenting
 `ELSEWHERE` fails before it goes, `DESTINATION_UNREACHABLE`, as a `JWT` command does over a
 connection that is not secure. A command left unanswered past its timeout closes its connection when
-the server's `closeOnCommandTimeout` says so, or the command's own `closeOnTimeout`. `ws-server` is
+the server's `closeOnCommandTimeout` says so, or the command's own `closeOnTimeout`. `websocket-server` is
 the server over WebSocket. A server hears what goes wrong where each layer tells it: a call's on its
 router's `error`, and its transport's — a socket's, or what a listener of its events threw — on the
 transport's `error`, beside each refusal it tells, both on `server.transport` whichever transport it
 was built on ([decision 0023](../../docs/decisions/0023-a-transport-goes-on-through-its-listeners-throw-and-takes-nothing-new-as-it-stops.md)):
 
 ```ts
-const server = createWSServer({
+const server = createWebSocketServer({
   credentials: {
     audience: 'https://api.example.com',
     keys: [{ algorithm: 'ES256', issuer: 'https://id.example.com', jwk }],
@@ -584,7 +584,7 @@ failures it lists, and its payloads' codecs; its failures are a catalogue, `fail
 ```ts
 const { text } = PAYLOAD_CODECS;
 
-export const GreeterFailures = failuresOf({ codes: { NOBODY_TO_GREET: 1 }, serviceId: 7 });
+export const GreeterFailures = failuresOf(7, { NOBODY_TO_GREET: 1 });
 
 export const GreeterProcedures = Object.freeze({
   clock: commandOf({
@@ -786,21 +786,21 @@ reserved as long, or for its timeout when longer — so a late copy of a chunk u
 granted is dropped in silence. A notification, a failure, and the result of a call
 that opens a subscription always go in one envelope.
 
-| Limit                       | By default  | Bounds                                                                                                                                                                                                                                                                     |
-| --------------------------- | ----------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `maximumEnvelopeBytes`      | 16,778,240  | an envelope, as it comes in and as it goes out; the WebSocket transports' `maxPayload` follows it in `createWSServer` and `createWSClient`, never below; built alone, a transport takes 16,778,240, `MAXIMUM_MESSAGE_BYTES`, raised by hand for a router whose envelope is |
-| `chunkBytes`                | 1,048,576   | a chunk's envelope, and the largest a payload goes whole in: a request that comes whole past it, or an opening, is refused `ENVELOPE_TOO_LARGE`, nothing of it held                                                                                                        |
-| `windowBytes`               | 4,194,304   | how far past what it received, from the start, a receiver lets its sender send                                                                                                                                                                                             |
-| `maximumPayloadBytes`       | 16,777,216  | a payload, whole or as a transfer; a procedure's own `maximumPayloadBytes` narrows it                                                                                                                                                                                      |
-| `bufferedBytesBudget`       | 268,435,456 | the bytes every transfer a router receives holds together                                                                                                                                                                                                                  |
-| `maximumTransfers`          | 4           | the transfers a connection receives at once; 0 takes none, and sends none                                                                                                                                                                                                  |
-| `maximumChunkRuns`          | 1,024       | the runs of bytes apart a transfer received holds before it is whole                                                                                                                                                                                                       |
-| `transferInactivityTimeout` | 30,000      | the milliseconds a transfer waits for its next chunk or credit, and a call that received one keeps its call id                                                                                                                                                             |
-| `maximumDetailBytes`        | 1,024       | a failure's detail                                                                                                                                                                                                                                                         |
-| `maximumAnsweringCalls`     | 64          | the calls a connection's peer has a router answer at once — a request past them is refused `CAPACITY_EXCEEDED` before its route, its credential or its transfer — and the calls a requester has wait on a connection, one past them failed before it goes                  |
+| Limit                       | By default  | Bounds                                                                                                                                                                                                                                                                                   |
+| --------------------------- | ----------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `maximumEnvelopeBytes`      | 16,778,240  | an envelope, as it comes in and as it goes out; the WebSocket transports' `maxPayload` follows it in `createWebSocketServer` and `createWebSocketClient`, never below; built alone, a transport takes 16,778,240, `MAXIMUM_MESSAGE_BYTES`, raised by hand for a router whose envelope is |
+| `chunkBytes`                | 1,048,576   | a chunk's envelope, and the largest a payload goes whole in: a request that comes whole past it, or an opening, is refused `ENVELOPE_TOO_LARGE`, nothing of it held                                                                                                                      |
+| `windowBytes`               | 4,194,304   | how far past what it received, from the start, a receiver lets its sender send                                                                                                                                                                                                           |
+| `maximumPayloadBytes`       | 16,777,216  | a payload, whole or as a transfer; a procedure's own `maximumPayloadBytes` narrows it                                                                                                                                                                                                    |
+| `bufferedBytesBudget`       | 268,435,456 | the bytes every transfer a router receives holds together                                                                                                                                                                                                                                |
+| `maximumTransfers`          | 4           | the transfers a connection receives at once; 0 takes none, and sends none                                                                                                                                                                                                                |
+| `maximumChunkRuns`          | 1,024       | the runs of bytes apart a transfer received holds before it is whole                                                                                                                                                                                                                     |
+| `transferInactivityTimeout` | 30,000      | the milliseconds a transfer waits for its next chunk or credit, and a call that received one keeps its call id                                                                                                                                                                           |
+| `maximumDetailBytes`        | 1,024       | a failure's detail                                                                                                                                                                                                                                                                       |
+| `maximumAnsweringCalls`     | 64          | the calls a connection's peer has a router answer at once — a request past them is refused `CAPACITY_EXCEEDED` before its route, its credential or its transfer — and the calls a requester has wait on a connection, one past them failed before it goes                                |
 
 The limits are options of each router and each facade — `createClient(layers, { limits })`,
-`createWSClient({ limits })`, `createServer(layers, { limits })`, `createWSServer({ limits })` — and
+`createWebSocketClient({ limits })`, `createServer(layers, { limits })`, `createWebSocketServer({ limits })` — and
 must hold together, or the router is a `ProgrammerError`: an envelope of 64 bytes at least, a chunk
 from 64 bytes to an envelope, a window of two chunks, a payload within the budget, a call at once at
 least, a timeout a timer holds; and, on a side that takes or presents a `JWT`, a chunk and an
@@ -918,7 +918,7 @@ const isAdmitted = (request: IAdmissionRequest<TransportServerConnectionHandle>)
   );
 };
 
-const server = createWSServer({ relay: { beforeRoute: isAdmitted } });
+const server = createWebSocketServer({ relay: { beforeRoute: isAdmitted } });
 ```
 
 A composition by `||` answers `ACCESS_DENIED` without the default's detail. `shareLegBSession`, in
@@ -1742,7 +1742,7 @@ mean reads from a histogram's `_sum` and `_count`, and a quantile as Prometheus'
 import { createServer } from 'node:http';
 
 const metricsRegistry = createMetricsRegistry();
-const server = createWSServer({ metricsRegistry, transport: { WebSocketServer } });
+const server = createWebSocketServer({ metricsRegistry, transport: { WebSocketServer } });
 
 createServer((request, reply) => {
   if (request.url === '/metrics') {

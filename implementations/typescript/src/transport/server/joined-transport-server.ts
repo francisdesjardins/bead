@@ -24,6 +24,7 @@ import type {
   TransportServerToldEvent,
 } from './types';
 
+export type { IGauges } from '../shared/types';
 export type { IJoinableTransportServer, IJoinedTransportServer } from './types';
 
 // constants
@@ -102,7 +103,7 @@ const clockOf = (transports: readonly IJoinableTransportServer[]): IClock | unde
  *
  * @example
  * const memory = createMemoryTransportServer();
- * const webSocket = createWSTransportServer({ WebSocketServer });
+ * const webSocket = createWebSocketTransportServer({ WebSocketServer });
  * const server = createServer({ transport: joinTransports([memory, webSocket]) });
  *
  * await memory.start();
@@ -154,7 +155,7 @@ export const joinTransports = <const Transports extends readonly IJoinableTransp
     if (transport.gauges === undefined) {
       const handles = new Set<TransportServerConnectionHandle>();
 
-      transport.on(CONNECTION_EVENT, (...[, , connectionHandle]) => {
+      transport.on(CONNECTION_EVENT, (...[, connectionHandle]) => {
         handles.add(connectionHandle);
       });
       transport.on(CLOSE_EVENT, (_, connectionHandle) => {

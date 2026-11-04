@@ -217,7 +217,10 @@ fn writes_each_series_from_one_reading_of_its_counts() {
 
 #[test]
 fn refuses_a_ceiling_that_is_not_a_whole_number_above_0_and_names_1000_procedures_by_default() {
-    assert_eq!(super::MAXIMUM_PROCEDURES, 1_000);
+    assert_eq!(
+        super::METRICS_REGISTRY_DEFAULTS.maximum_procedures,
+        Some(1_000)
+    );
     assert_eq!(
         registry_of(None).state.lock().expect("a registry").maximum,
         1_000

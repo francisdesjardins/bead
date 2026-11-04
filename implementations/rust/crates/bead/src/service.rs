@@ -13,13 +13,12 @@ use crate::errors::{CallError, ProgrammerError};
 use crate::failure::Failure;
 use crate::identity::Procedure;
 use crate::managers::service::{
-    Command, NotificationResolverDependencies, NotificationResolverOf, Notifier, NotifyOptions,
+    Command, Lookup, NotificationResolverDependencies, NotificationResolverOf, Notifier,
     RequestDependencies, RequestResolverDependencies, ResolverCallback, Validate,
 };
 use crate::payloads::PayloadCodec;
 use crate::router::admissions::{BeforeRequest, require_session};
 use crate::router::core::AdmissionRequest;
-use crate::router::types::BoxFuture;
 use crate::server::Server;
 
 #[cfg(test)]
@@ -503,6 +502,30 @@ fn locked(inner: &Mutex<Inner>) -> MutexGuard<'_, Inner> {
     inner.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
+// a handle's lookup in its service's maps: what the offer, or the registration of its resolver, made
+// of its procedure, by its name, which the service holds once
+struct Looking {
+    inner: Arc<Mutex<Inner>>,
+    name: String,
+    // whether it looks among the commands, or the notifiers
+    is_command: bool,
+}
+
+impl<Given: Clone + Send + Sync + 'static> Lookup<Given> for Looking {
+    fn current(&self) -> Option<Given> {
+        let inner = locked(&self.inner);
+        let made = if self.is_command {
+            &inner.commands
+        } else {
+            &inner.notifiers
+        };
+
+        made.get(&self.name)
+            .and_then(|made| made.downcast_ref::<Given>())
+            .cloned()
+    }
+}
+
 // the admission a procedure's rule asks: a session's, or a hook's, refusing ACCESS_DENIED
 fn admission_of(admission: AdmissionRule, bound: &Bound) -> Option<BeforeRequest> {
     match admission {
@@ -762,12 +785,49 @@ impl ServiceServer {
         Ok(())
     }
 
-    /// The requester of the command `descriptor` describes, made as the service was offered.
+    // the lookup of what is made of `descriptor`'s procedure, a procedure of `kind` this service
+    // holds as that same descriptor, refused otherwise, as the other sides' handles are
+    fn looking<Req: PayloadCodec, Res: PayloadCodec>(
+        &self,
+        descriptor: &Descriptor<Req, Res>,
+        kind: ProcedureKind,
+    ) -> Result<Looking, ProgrammerError> {
+        let identity: Made = Arc::<DescriptorInit<Req, Res>>::clone(&descriptor.init);
+        let name = &descriptor.procedure().procedure_name;
+        let held = locked(&self.inner)
+            .procedures
+            .iter()
+            .find(|known| Arc::ptr_eq(&known.descriptor, &identity))
+            .map(|known| known.procedure.procedure_kind);
+
+        match held {
+            None => Err(ProgrammerError::new(format!(
+                "{name} is no procedure of this service"
+            ))),
+            Some(held) if held != Some(kind) => Err(ProgrammerError::new(format!(
+                "{name} is no {} of this service",
+                if kind == ProcedureKind::Command {
+                    "command"
+                } else {
+                    "procedure that notifies"
+                }
+            ))),
+            Some(_) => Ok(Looking {
+                inner: Arc::clone(&self.inner),
+                name: name.clone(),
+                is_command: kind == ProcedureKind::Command,
+            }),
+        }
+    }
+
+    /// The requester of the command `descriptor` describes, given before the service is offered:
+    /// its calls go once the service is offered, and one made before is refused.
     ///
     /// # Errors
     ///
-    /// A [`ProgrammerError`] before the service is offered, or for a command of another service.
-    pub fn command<Req, Res>(
+    /// A [`ProgrammerError`] for a descriptor other than the one this service was built with, or
+    /// one of no command.
+    pub fn command_of<Req, Res>(
         &self,
         descriptor: &Descriptor<Req, Res>,
     ) -> Result<Command<Req, Res>, ProgrammerError>
@@ -775,46 +835,34 @@ impl ServiceServer {
         Req: PayloadCodec,
         Res: PayloadCodec,
     {
-        let procedure = descriptor.procedure();
+        let looking = self.looking(descriptor, ProcedureKind::Command)?;
 
-        locked(&self.inner)
-            .commands
-            .get(&procedure.procedure_name)
-            .and_then(|made| made.downcast_ref::<Command<Req, Res>>())
-            .cloned()
-            .ok_or_else(|| {
-                ProgrammerError::new(format!(
-                    "{} is a command made as its service is offered, not before",
-                    procedure.procedure_name
-                ))
-            })
+        Ok(Lookup::<Command<Req, Res>>::current(&looking)
+            .unwrap_or_else(|| Command::looked(descriptor.procedure().clone(), Arc::new(looking))))
     }
 
-    /// Sends `notification` to the subscriptions of `descriptor`'s procedure that `options` keeps;
-    /// none before the service is offered, or its resolver registered.
-    pub fn notify<Req, Res, Not>(
+    /// The notifier of the procedure `descriptor` describes, given before the service is offered:
+    /// it sends to nobody, and resolves, until the service is offered and its resolver registered.
+    ///
+    /// # Errors
+    ///
+    /// A [`ProgrammerError`] for a descriptor other than the one this service was built with.
+    pub fn notifier_of<Req, Res, Not>(
         &self,
         descriptor: &NotifyingDescriptor<Req, Res, Not>,
-        notification: Not::Value,
-        options: &NotifyOptions,
-    ) -> BoxFuture<()>
+    ) -> Result<Notifier<Not>, ProgrammerError>
     where
         Req: PayloadCodec,
         Res: PayloadCodec,
         Not: PayloadCodec,
-        Not::Value: Clone + fmt::Debug + Sync,
     {
-        let notifier = locked(&self.inner)
-            .notifiers
-            .get(&descriptor.descriptor.procedure().procedure_name)
-            .and_then(|made| made.downcast_ref::<Notifier<Not>>())
-            .cloned();
+        let looking = self.looking(&descriptor.descriptor, ProcedureKind::Notifies)?;
 
-        // * nothing offered, or nothing registered, holds no subscription to send to
-        match notifier {
-            Some(notifier) => notifier.notify(notification, options),
-            None => Box::pin(async {}),
-        }
+        Ok(
+            Lookup::<Notifier<Not>>::current(&looking).unwrap_or_else(|| {
+                Notifier::looked(descriptor.descriptor.procedure().clone(), Arc::new(looking))
+            }),
+        )
     }
 
     /// The procedures that answer, and hold no resolver yet.

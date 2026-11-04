@@ -7,7 +7,7 @@
 
 import { setTimeout } from 'node:timers/promises';
 import { FailureError, FailureScope, ProtocolCode } from '@francisdesjardins/bead/client';
-import { createWSClient } from '@francisdesjardins/bead/ws-client';
+import { createWebSocketClient } from '@francisdesjardins/bead/websocket-client';
 import { HelloClient, HelloFailures } from '#hello';
 
 // constants
@@ -49,7 +49,7 @@ const failureOf = (error: unknown): string => {
 
 /** Calls HelloService on `port`, and writes what it answered. */
 export const call = async (port: number): Promise<number> => {
-  await using client = createWSClient();
+  await using client = createWebSocketClient();
   // at a window of 1: each tick comes once the callback before it settled
   const hello = new HelloClient(client, { windows: { countDown: 1 } });
   let asked = 0;

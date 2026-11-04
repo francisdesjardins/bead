@@ -103,6 +103,13 @@ public sealed record WebSocketTransportClientConnectOptions
     /// The provider's own cancellation is its failure while the attempt's token stays live.
     /// </summary>
     public Func<CancellationToken, ValueTask<string>>? CredentialProvider { get; init; }
+
+    /// <summary>
+    /// What gives the connect up: one cancelled already refuses it before anything moves, one
+    /// cancelled after ends it Closed, each an <see cref="OperationCanceledException"/>. Its own
+    /// connect's alone: a reconnection replays the rest of these options, never this token.
+    /// </summary>
+    public CancellationToken CancellationToken { get; init; }
 }
 
 /// <summary>
@@ -287,9 +294,10 @@ public sealed class WebSocketTransportClient : IRouterClientTransport, IAsyncDis
     /// <see cref="WebSocketException"/> its socket throws, a dispose under way included, ending
     /// Closed.
     /// </summary>
-    public Task Connect(WebSocketTransportClientConnectOptions options, CancellationToken cancellationToken = default)
+    public Task Connect(WebSocketTransportClientConnectOptions options)
     {
-        return Connecting(options, (cancellationToken, false));
+        // none refused where the connect refuses it, in its task
+        return Connecting(options, (options?.CancellationToken ?? CancellationToken.None, false));
     }
 
     /// <summary>
@@ -768,6 +776,10 @@ public sealed class WebSocketTransportClient : IRouterClientTransport, IAsyncDis
         var options = given with
         {
             Timeout = Clocks.AssertHeld(("a connect's timeout", nameof(WebSocketTransportClientConnectOptions.Timeout)), given.Timeout),
+
+            // ! its own connect's, which its call carries: a reconnection replays the rest, never
+            // a token a connect gave
+            CancellationToken = CancellationToken.None,
         };
         var (token, isAttempt) = call;
         ClientWebSocket socket;

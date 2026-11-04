@@ -417,7 +417,7 @@ then, above the services, a function of rules for each message its requests' rul
 `rulesOf<Message>(message, sink)`, which judges each rule in spec 18.5's order into the runtime's
 sink and returns true where the sink stops it, each rule's site, its id, its words and its bounds, a
 frozen constant, and each pattern's table a frozen constant of its classes and a `Uint16Array` of
-its cells; and, once, the contract with the runtime, `GENERATED_CODE_SUPPORTS_VERSION_6`
+its cells; and, once, the contract with the runtime, `GENERATED_CODE_SUPPORTS_VERSION_7`
 ([decision 0018](../docs/decisions/0018-a-services-procedures-are-typed-descriptors-served-and-called-through-one-layer.md),
 [decision 0035](../docs/decisions/0035-a-payload-that-reads-is-held-to-its-messages-rules-before-its-resolver-sees-it.md)).
 Every doc comment is the description, then what the procedure admits, through protoplugin's `jsDoc`,

@@ -9,7 +9,7 @@
 // dependencies
 
 import type { IClient } from '../src/client/types';
-import { CredentialScheme, FailureError } from '../src/client/ws-client';
+import { CredentialScheme, FailureError } from '../src/client/websocket-client';
 import { type IReadViolations, type IViolation, violationsOf } from '../src/service/service';
 import { SignUpClient } from './gen/typescript/demo/v1/sign_up_bead';
 import { curlOf, openApiDocument, refusedOf, welcomedOf } from './over-http';

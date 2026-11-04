@@ -161,7 +161,7 @@ public sealed class FailureException : Exception
     /// <summary>
     /// One of the protocol's failures, as a router of <paramref name="side"/> raises it here.
     /// </summary>
-    public static FailureException OfProtocol(ProtocolCode code, RouterSide side, string detail = "")
+    internal static FailureException OfProtocol(ProtocolCode code, RouterSide side, string detail = "")
     {
         return new FailureException(
             new Failure { Code = (ushort)code, Detail = detail, Scope = FailureScope.Protocol },

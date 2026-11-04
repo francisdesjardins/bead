@@ -514,8 +514,8 @@ export const createMqttBrokerAdapter = (options: IMqttBrokerAdapterOptions): IMq
     }
 
     emitter.emit('message', {
+      isRetained: packet.retain,
       payload: new Uint8Array(packet.payload as Uint8Array),
-      retained: packet.retain,
       settle: () => {
         if (isSettled) {
           return;

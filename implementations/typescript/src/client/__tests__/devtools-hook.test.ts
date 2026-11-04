@@ -16,7 +16,7 @@ import {
 } from '../devtools-hook';
 import { createHTTPClient } from '../http-client';
 import { createWorkerClient } from '../worker-client';
-import { createWSClient } from '../ws-client';
+import { createWebSocketClient } from '../websocket-client';
 
 // helpers
 
@@ -264,7 +264,7 @@ test.describe('announceToDevtools', () => {
 
     for (const client of [
       createClient({ transport: createEchoTransport() }, { devtools: false }),
-      createWSClient({ devtools: false }),
+      createWebSocketClient({ devtools: false }),
       createHTTPClient({ devtools: false }),
       createWorkerClient({ devtools: false, transport: { worker } }),
     ]) {
@@ -274,7 +274,7 @@ test.describe('announceToDevtools', () => {
     expect(sources).toEqual([]);
 
     for (const client of [
-      createWSClient(),
+      createWebSocketClient(),
       createHTTPClient(),
       createWorkerClient({ transport: { worker } }),
     ]) {

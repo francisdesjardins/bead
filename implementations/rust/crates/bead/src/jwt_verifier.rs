@@ -3,7 +3,6 @@
 //! reason; ES256 by `p256` and HS256 by `hmac`, pure Rust (decision 0044).
 
 use core::fmt;
-use core::time::Duration;
 use std::time::SystemTime;
 
 use hmac::{Hmac, KeyInit, Mac};
@@ -170,10 +169,9 @@ pub enum JwtVerdict {
     Refused(JwtRefusal),
 }
 
-/// The leeway for clock skew on `exp` and `nbf`: a constant on every side, never an option.
-pub const JWT_LEEWAY: Duration = Duration::from_secs(60);
-
-const LEEWAY_MILLISECONDS: i64 = 60_000;
+// the leeway for clock skew on `exp` and `nbf`, in milliseconds as a token's times are read: a
+// constant on every side, never an option
+const JWT_LEEWAY: i64 = 60_000;
 
 // the largest integer every side holds exactly
 const LARGEST_SAFE: i64 = 9_007_199_254_740_991;
@@ -426,11 +424,11 @@ fn verdict_of(
     }
 
     let Some(expiry) = milliseconds_of(claims.get("exp"))
-        .filter(|&expiry| expiry <= LARGEST_SAFE.saturating_sub(LEEWAY_MILLISECONDS))
+        .filter(|&expiry| expiry <= LARGEST_SAFE.saturating_sub(JWT_LEEWAY))
     else {
         return JwtVerdict::Refused(JwtRefusal::Exp);
     };
-    let end = expiry.saturating_add(LEEWAY_MILLISECONDS);
+    let end = expiry.saturating_add(JWT_LEEWAY);
 
     if now >= end {
         return JwtVerdict::Refused(JwtRefusal::Exp);
@@ -439,7 +437,7 @@ fn verdict_of(
     if claims.contains_key("nbf") {
         let held = milliseconds_of(claims.get("nbf"));
 
-        if held.is_none_or(|start| now.saturating_add(LEEWAY_MILLISECONDS) < start) {
+        if held.is_none_or(|start| now.saturating_add(JWT_LEEWAY) < start) {
             return JwtVerdict::Refused(JwtRefusal::Nbf);
         }
     }

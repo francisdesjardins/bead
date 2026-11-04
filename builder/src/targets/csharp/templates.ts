@@ -578,7 +578,7 @@ export const printService = (service: IServiceEntry, options: ICSharpTemplateOpt
         doc: [
           `${INDENT}/// <summary>Notifies the subscribers of <c>${procedure.procedureName}</c>.</summary>`,
         ],
-        declaration: `public required global::System.Func<${notifiedOf(procedure)}, global::Bead.NotifyOptions?, global::System.Threading.Tasks.Task> ${upperFirst(procedure.procedureName)} ${accessorsOf(deprecationOf(procedure))}`,
+        declaration: `public required global::Bead.Notifier<${notifiedOf(procedure)}> ${upperFirst(procedure.procedureName)} ${accessorsOf(deprecationOf(procedure))}`,
       };
     })
   );

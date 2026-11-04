@@ -27,7 +27,7 @@ public sealed class HttpCallerTests
     {
         var service = await TranscodingService.Start();
         var gateway = new HttpGateway(Exchanges.OptionsOf(service.Memory, null));
-        var address = await gateway.Start(new HttpGatewayStartOptions { Address = "127.0.0.1", FindOpenPort = true }, Cancelled);
+        var address = await gateway.Start(new HttpGatewayStartOptions { Address = "127.0.0.1", FindOpenPort = true, CancellationToken = Cancelled });
 
         return new Fixture(service, gateway, new Uri($"http://127.0.0.1:{address.Port}"));
     }

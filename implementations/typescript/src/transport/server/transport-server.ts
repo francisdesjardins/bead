@@ -38,7 +38,7 @@ export {
   MESSAGE_EVENT,
   REFUSAL_EVENT,
   TRANSPORT_HTTP,
-  TRANSPORT_WS,
+  TRANSPORT_WEBSOCKET,
 } from '../shared/constants';
 export type { TRANSPORTS } from '../shared/constants';
 export {
@@ -67,12 +67,13 @@ export {
   setReadyStateReconnecting,
   setReadyStateUninitialized,
 } from '../shared/ready-state';
-export type { Data, IEventIteratorOptions, ITransportMessage } from '../shared/types';
+export type { Data, IEventIteratorOptions, IGauges, ITransportMessage } from '../shared/types';
 export type {
   ITransportServer,
   ITransportServerAddress,
   ITransportServerClient,
   ITransportServerClientAware,
+  ITransportServerConnection,
   ITransportServerHandleInfo,
   ITransportServerImplementation,
   ITransportServerDefineOptions,

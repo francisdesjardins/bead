@@ -24,12 +24,12 @@ const INBOX: BrokerTopic = ['bead', 'i', 'ada'];
 const heardBy = (
   adapter: IMemoryBrokerAdapter,
   options?: { isSettling?: boolean }
-): { retained: boolean; text: string; topic: string }[] => {
-  const heard: { retained: boolean; text: string; topic: string }[] = [];
+): { isRetained: boolean; text: string; topic: string }[] => {
+  const heard: { isRetained: boolean; text: string; topic: string }[] = [];
 
-  adapter.on('message', ({ payload, retained, settle, topic }) => {
+  adapter.on('message', ({ isRetained, payload, settle, topic }) => {
     heard.push({
-      retained: retained === true,
+      isRetained: isRetained === true,
       text: new TextDecoder().decode(payload),
       topic: topic.join('/'),
     });
@@ -254,9 +254,9 @@ test.describe('memory broker', () => {
     expect(texts().slice(4)).toEqual(['1', '2']);
 
     // a retained message is handed on marked so
-    await bob.publish({ payload: bytesOf('kept'), retained: true, topic: INBOX });
+    await bob.publishRetained({ payload: bytesOf('kept'), topic: INBOX });
     await settled();
-    expect(heard.at(-1)).toEqual({ retained: true, text: 'kept', topic: 'bead/i/ada' });
+    expect(heard.at(-1)).toEqual({ isRetained: true, text: 'kept', topic: 'bead/i/ada' });
 
     // a link lost publishes its will, and tells its adapter in a later turn; a stop publishes none
     let downs = 0;
@@ -272,7 +272,7 @@ test.describe('memory broker', () => {
     await settled();
 
     expect(downs).toBe(1);
-    expect(heard.at(-1)).toEqual({ retained: false, text: 'gone', topic: 'bead/d/bob' });
+    expect(heard.at(-1)).toEqual({ isRetained: false, text: 'gone', topic: 'bead/d/bob' });
 
     await bob.start({ will: { payload: bytesOf('again'), topic: departure } });
     await bob.stop();
@@ -390,7 +390,7 @@ test.describe('memory broker', () => {
     await settled();
 
     expect(downs).toEqual([{ isTakenOver: true }]);
-    expect(heard).toEqual([{ retained: false, text: 'gone', topic: 'bead/d/bob' }]);
+    expect(heard).toEqual([{ isRetained: false, text: 'gone', topic: 'bead/d/bob' }]);
     // * no link of its id holds its inbox now
     expect(await ada.publish({ payload: bytesOf('x'), topic: ['bead', 'i', 'bob'] })).toBe(
       BROKER_PUBLISHED.NO_SUBSCRIBER

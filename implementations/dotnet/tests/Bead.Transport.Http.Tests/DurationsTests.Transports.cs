@@ -112,7 +112,7 @@ public sealed partial class DurationsTests
 
         await using (server)
         {
-            var port = (await server.Start(Loopback, Cancelled)).Port;
+            var port = (await server.Start(Loopback with { CancellationToken = Cancelled })).Port;
             using var http = new HttpClient(new SocketsHttpHandler { AllowAutoRedirect = false });
             var dues = await drive(new ServerDrive(server, (http, clock, new Uri($"http://{Host}:{port}{HttpTransport.Pathname}"))));
 
@@ -297,7 +297,7 @@ public sealed partial class DurationsTests
 
         await using (client)
         {
-            var connecting = client.Connect(new HttpTransportClientConnectOptions { Host = Host, Port = 8_080 }, Cancelled);
+            var connecting = client.Connect(new HttpTransportClientConnectOptions { Host = Host, Port = 8_080, CancellationToken = Cancelled });
             var drawn = new HttpResponseMessage(HttpStatusCode.Created);
 
             drawn.Headers.TryAddWithoutValidation(HttpTransport.ConnectionTokenHeader, Token);
@@ -554,7 +554,7 @@ public sealed partial class DurationsTests
         {
             Connect = (token) =>
             {
-                return client.Connect(new HttpTransportClientConnectOptions { Host = Host, Port = 80, Timeout = Assert.NotNull(given) }, token);
+                return client.Connect(new HttpTransportClientConnectOptions { Host = Host, Port = 80, Timeout = Assert.NotNull(given), CancellationToken = token });
             },
             StateOf = () =>
             {
@@ -590,7 +590,7 @@ public sealed partial class DurationsTests
             {
                 Connect = (token) =>
                 {
-                    return client.Connect(new WebSocketTransportClientConnectOptions { Host = Host, Port = listener.Port, Timeout = Assert.NotNull(given) }, token);
+                    return client.Connect(new WebSocketTransportClientConnectOptions { Host = Host, Port = listener.Port, Timeout = Assert.NotNull(given), CancellationToken = token });
                 },
                 StateOf = () =>
                 {
@@ -640,7 +640,7 @@ public sealed partial class DurationsTests
         {
             Connect = (token) =>
             {
-                return client.Connect(new MemoryTransportClientConnectOptions { Server = server, Timeout = Assert.NotNull(given) }, token);
+                return client.Connect(new MemoryTransportClientConnectOptions { Server = server, Timeout = Assert.NotNull(given), CancellationToken = token });
             },
             StateOf = () =>
             {
@@ -752,7 +752,7 @@ public sealed partial class DurationsTests
         using var listener = new Listener();
         await using var client = new WebSocketTransportClient(new WebSocketTransportClientOptions { Clock = clock });
         var taps = Channel.CreateUnbounded<TimeSpan>();
-        var connecting = client.Connect(new WebSocketTransportClientConnectOptions { Host = Host, Port = listener.Port }, Cancelled);
+        var connecting = client.Connect(new WebSocketTransportClientConnectOptions { Host = Host, Port = listener.Port, CancellationToken = Cancelled });
         var told = 0;
 
         await Listener.Refuse((await Reached(listener, connecting)).Peer);

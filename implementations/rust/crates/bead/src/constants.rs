@@ -389,7 +389,7 @@ pub enum RouterSide {
 impl RouterSide {
     /// The side at the other end of a connection.
     #[must_use]
-    pub fn peer(self) -> Self {
+    pub(crate) fn peer(self) -> Self {
         match self {
             Self::Client => Self::Server,
             Self::Server => Self::Client,
@@ -416,7 +416,7 @@ impl RouterSide {
 
     /// Which side opened the call `call_id` names: odd, a client; even, a server; none for 0.
     #[must_use]
-    pub fn of_call_id(call_id: u32) -> Option<Self> {
+    pub(crate) fn of_call_id(call_id: u32) -> Option<Self> {
         if call_id == 0 {
             None
         } else if call_id % 2 == 1 {
@@ -437,7 +437,7 @@ impl fmt::Display for RouterSide {
 pub const SESSION_TOKEN_BYTES: usize = 16;
 
 /// How long a call id stays reserved when its call gave no timeout a timer can hold.
-pub const RESERVATION: Duration = Duration::from_secs(5);
+pub(crate) const RESERVATION: Duration = Duration::from_secs(5);
 
 /// The one peer a client has, as its router and its manager name the connection.
 pub const SERVER_CONNECTION_HANDLE: &str = "server";

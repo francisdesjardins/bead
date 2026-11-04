@@ -17,7 +17,7 @@ import {
   MESSAGE_EVENT,
   REFUSAL_EVENT,
   TRANSPORT_WEBSOCKET_BINARYTYPE,
-  TRANSPORT_WS,
+  TRANSPORT_WEBSOCKET,
   WS_TOO_BIG_CODE,
 } from '../shared/constants';
 import { assertHeld, assertHeldFinite, LONGEST_TIMER } from '../shared/clock';
@@ -63,8 +63,8 @@ import type {
   ITransportServerStartOptions,
   IUpgradeSocketLike,
   IWebSocketServerLike,
-  IWSTransportServerOptions,
-  WSTransportServer,
+  IWebSocketTransportServerOptions,
+  WebSocketTransportServer,
 } from './types';
 import {
   BUSY_HANDSHAKE,
@@ -72,7 +72,7 @@ import {
   MALFORMED_HANDSHAKE,
   refusalOfHandshake,
   toldOfHandshake,
-} from './ws-handshake';
+} from './websocket-handshake';
 
 export { CLOSE_TIMEOUT, TRANSPORT_WEBSOCKET_BINARYTYPE } from '../shared/constants';
 export { HEARTBEAT } from '../shared/heartbeat';
@@ -91,10 +91,10 @@ export type {
   IUpgradeSocketLike,
   IWebSocketServerConstructor,
   IWebSocketServerLike,
-  IWSTransportServerOptions,
-  WSTransportServer,
+  IWebSocketTransportServerOptions,
+  WebSocketTransportServer,
 } from './types';
-export { WS_REFUSALS } from './ws-handshake';
+export { WEBSOCKET_REFUSALS } from './websocket-handshake';
 
 // constants
 
@@ -229,12 +229,14 @@ const upgradeCredentialOf = (request: IIncomingMessageLike): string | undefined 
  * it held and what comes (spec 15.12).
  *
  * @example
- * const server = createWSTransportServer({ WebSocketServer });
+ * const server = createWebSocketTransportServer({ WebSocketServer });
  * server.on('message', ({ data }, connectionHandle) => {});
  * const { port } = await server.start({ findOpenPort: true });
  * await server.stop();
  */
-export const createWSTransportServer = (options: IWSTransportServerOptions): WSTransportServer => {
+export const createWebSocketTransportServer = (
+  options: IWebSocketTransportServerOptions
+): WebSocketTransportServer => {
   const {
     binaryType = TRANSPORT_WEBSOCKET_BINARYTYPE,
     clock,
@@ -541,7 +543,7 @@ export const createWSTransportServer = (options: IWSTransportServerOptions): WST
           ip: address,
           ordinal: (ordinal += 1),
           port: remotePort,
-          type: TRANSPORT_WS,
+          type: TRANSPORT_WEBSOCKET,
         });
         const connection: ITransportServerClientAware<IServerSocketLike> = {
           address,
@@ -549,7 +551,7 @@ export const createWSTransportServer = (options: IWSTransportServerOptions): WST
           lastActivity: undefined,
           port: remotePort,
           socket,
-          type: TRANSPORT_WS,
+          type: TRANSPORT_WEBSOCKET,
         };
 
         connections.set(connectionHandle, connection);
@@ -670,14 +672,14 @@ export const createWSTransportServer = (options: IWSTransportServerOptions): WST
           url: request.url,
         });
 
-        tell(CONNECTION_EVENT, [socket, upgrade, connectionHandle]);
+        tell(CONNECTION_EVENT, [Object.freeze({ request: upgrade, socket }), connectionHandle]);
       };
 
       return {
         clock,
         defaults: START_DEFAULTS,
         secure,
-        type: TRANSPORT_WS,
+        type: TRANSPORT_WEBSOCKET,
 
         start: async ({ address, findOpenPort, port, signal }) => {
           assertListeningAddress(address);

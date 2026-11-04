@@ -1,5 +1,5 @@
 <Project Sdk="Microsoft.NET.Sdk">
-  <!-- Bead over WebSocket, on Kestrel: what Bead's ws-transport-server is, on ASP.NET Core. -->
+  <!-- Bead over WebSocket, on Kestrel: what Bead's websocket-transport-server is, on ASP.NET Core. -->
   <PropertyGroup>
     <RootNamespace>Bead.Transport.WebSockets</RootNamespace>
   </PropertyGroup>

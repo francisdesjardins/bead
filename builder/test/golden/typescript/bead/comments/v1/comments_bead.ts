@@ -3,7 +3,7 @@
 /* eslint-disable */
 
 import type { IFailureCatalogue, IListedFailure, IListedFailureError, IServiceClient, IServiceClientOptions, IServiceServer, ServiceResolvers, ServiceServerOptions } from "@francisdesjardins/bead/service";
-import { createServiceClient, createServiceServer, failuresOf, GENERATED_CODE_SUPPORTS_VERSION_6, PAYLOAD_CODECS, requestOf } from "@francisdesjardins/bead/service";
+import { createServiceClient, createServiceServer, failuresOf, GENERATED_CODE_SUPPORTS_VERSION_7, PAYLOAD_CODECS, requestOf } from "@francisdesjardins/bead/service";
 
 
 /**
@@ -96,7 +96,7 @@ export const CommentsFailures: {
    * @deprecated No replacement is named.
    */
   is(error: unknown, name: 'LATE'): error is IListedFailureError<'LATE'>;
-} & IFailureCatalogue<'LATE' | 'EARLY'> = failuresOf({ codes: { LATE: 1, EARLY: 2 }, serviceId: 2 });
+} & IFailureCatalogue<'LATE' | 'EARLY'> = failuresOf(2, { LATE: 1, EARLY: 2 });
 
 /**
  * Each procedure's resolver, by its name: for resolvers written in a module of their own.
@@ -260,7 +260,7 @@ export const OldCommentsProcedures = Object.freeze({
  *
  * @deprecated Use CommentsService.
  */
-export const OldCommentsFailures = failuresOf({ codes: {  }, serviceId: 4 });
+export const OldCommentsFailures = failuresOf(4, {  });
 
 /**
  * Each procedure's resolver, by its name: for resolvers written in a module of their own.
@@ -379,4 +379,4 @@ export class OldCommentsClient {
 }
 
 // the contract with the runtime this file needs: an older runtime lacks the constant, and fails here
-void GENERATED_CODE_SUPPORTS_VERSION_6;
+void GENERATED_CODE_SUPPORTS_VERSION_7;

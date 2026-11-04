@@ -7,6 +7,7 @@ import { type IPayloadCodec, PAYLOAD_CODECS } from '../../router/shared/payloads
 import type { IProcedure, IRequestResolver } from '../../router/shared/types';
 import { violationsOf } from '../../router/shared/violations';
 import { ProgrammerError } from '../../transport/shared/errors';
+import { noop } from '../../transport/shared/noop';
 import { commandOf, type IAdmissionHook, requestOf } from '../descriptors';
 import { createServiceClient } from '../service-client';
 import { createServiceServer } from '../service-server';
@@ -380,6 +381,29 @@ test.describe('createServiceServer', () => {
         return heard;
       })
       .toEqual(['after']);
+  });
+
+  test('gives one notifier for each procedure that notifies, and refuses a procedure its service lacks', () => {
+    const greeter = greeterOf();
+    const notify: Readonly<Record<string, unknown>> = greeter.notify;
+
+    // * one for news, the one procedure that notifies, given before the offer and frozen
+    expect([Object.keys(notify), Object.isFrozen(notify), typeof greeter.notify.news]).toEqual([
+      ['news'],
+      true,
+      'function',
+    ]);
+
+    for (const name of ['sayHello', 'clock', 'missing']) {
+      expect(Object.hasOwn(notify, name), name).toBe(false);
+    }
+
+    expect(() => {
+      Object.assign(notify, { missing: noop });
+    }).toThrow(TypeError);
+
+    // @ts-expect-error a procedure that does not notify has no notifier
+    void greeter.notify.sayHello;
   });
 
   test('lists the procedures without a resolver, which the router answers PROCEDURE_UNKNOWN', async () => {

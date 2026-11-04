@@ -174,9 +174,12 @@ export interface IWorkerPortLike {
  * with it (spec 15.19).
  */
 export interface IBrokerMessage {
+  /**
+   * Handed on as a message its broker kept, which a participant drops in silence (spec 15.23); not
+   * when absent.
+   */
+  readonly isRetained?: boolean | undefined;
   readonly payload: Uint8Array;
-  /** Handed on as a message its broker kept, which a participant drops in silence (spec 15.23). */
-  readonly retained?: boolean | undefined;
   readonly topic: BrokerTopic;
   settle(): void;
 }

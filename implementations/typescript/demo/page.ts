@@ -5,12 +5,12 @@
 import {
   CancelError,
   CredentialScheme,
-  createWSClient,
+  createWebSocketClient,
   FailureError,
   FailureScope,
   ProtocolCode,
   TimeoutError,
-} from '../src/client/ws-client';
+} from '../src/client/websocket-client';
 import { createHTTPClient } from '../src/client/http-client';
 import { createWorkerClient } from '../src/client/worker-client';
 import type { IClient } from '../src/client/types';
@@ -418,7 +418,7 @@ const client: IClient =
   overMqtt?.client ??
   (transport === 'http'
     ? createHTTPClient({ limits, metricsRegistry })
-    : createWSClient({ limits, metricsRegistry }));
+    : createWebSocketClient({ limits, metricsRegistry }));
 const { services } = client;
 // the page's own port: the server relays the upgrade to the Bead server behind it
 const port = Number(

@@ -83,9 +83,9 @@ public sealed class WebSocketClient : IClient
     public IServiceManagerClient Services { get; }
 
     /// <summary>Connects its transport, as <see cref="WebSocketTransportClient.Connect"/> does.</summary>
-    public Task Connect(WebSocketTransportClientConnectOptions options, CancellationToken cancellationToken = default)
+    public Task Connect(WebSocketTransportClientConnectOptions options)
     {
-        return Transport.Connect(options, cancellationToken);
+        return Transport.Connect(options);
     }
 
     /// <summary>Closes its transport's connection, as <see cref="WebSocketTransportClient.CloseConnection"/> does.</summary>

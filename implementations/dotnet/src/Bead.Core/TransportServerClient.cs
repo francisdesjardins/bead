@@ -42,12 +42,23 @@ public static class TransportTypes
 /// One connection, as a transport server's <c>Clients</c> lists it: who is on the other end, and
 /// when it was last heard from — never its socket, nor anything else its transport keeps of it.
 /// </summary>
-/// <param name="Address">The address of who is on the other end.</param>
-/// <param name="ConnectionHandle">The handle the connection is named by.</param>
-/// <param name="LastActivity">
-/// When it was last heard from, on its server's clock: a message over a WebSocket; an exchange of an
-/// envelope, or a listen, begun over HTTP. None until then.
-/// </param>
-/// <param name="Port">The port of who is on the other end, as it connected; 0 when it gave none.</param>
-/// <param name="Type">Its transport's type, one of <see cref="TransportTypes"/>.</param>
-public sealed record TransportServerClient(string Address, string ConnectionHandle, DateTimeOffset? LastActivity, int Port, string Type);
+public sealed record TransportServerClient
+{
+    /// <summary>The address of who is on the other end.</summary>
+    public required string Address { get; init; }
+
+    /// <summary>The handle the connection is named by.</summary>
+    public required string ConnectionHandle { get; init; }
+
+    /// <summary>
+    /// When it was last heard from, on its server's clock: a message over a WebSocket; an exchange of
+    /// an envelope, or a listen, begun over HTTP. None until then.
+    /// </summary>
+    public required DateTimeOffset? LastActivity { get; init; }
+
+    /// <summary>The port of who is on the other end, as it connected; 0 when it gave none.</summary>
+    public required int Port { get; init; }
+
+    /// <summary>Its transport's type, one of <see cref="TransportTypes"/>.</summary>
+    public required string Type { get; init; }
+}

@@ -373,7 +373,7 @@ test('writes two services of one .proto in one file, the contract with the runti
 
   expect(content).toContain('export class CommentsServer<Data = unknown> {');
   expect(content).toContain('export class OtherServer<Data = unknown> {');
-  expect(content.match(/GENERATED_CODE_SUPPORTS_VERSION_6;/gu)).toHaveLength(1);
+  expect(content.match(/GENERATED_CODE_SUPPORTS_VERSION_7;/gu)).toHaveLength(1);
   expect(content.match(/^\/\/ @generated/gmu)).toHaveLength(1);
 });
 
@@ -601,14 +601,14 @@ test('marks a deprecated failure where a caller and a resolver name it', () => {
       '   * @deprecated No replacement is named.',
       '   */',
       "  is(error: unknown, name: 'LATE'): error is IListedFailureError<'LATE'>;",
-      "} & IFailureCatalogue<'LATE' | 'EARLY'> = failuresOf({ codes: { LATE: 1, EARLY: 2 }, serviceId: 2 });",
+      "} & IFailureCatalogue<'LATE' | 'EARLY'> = failuresOf(2, { LATE: 1, EARLY: 2 });",
     ].join('\n')
   );
   expect(content).not.toContain("'EARLY', detail");
   // a catalogue none of whose failures is deprecated is the layer's alone
   expect(
     contentOf(typescriptTarget.generate(interopInput(), INTEROP_OPTIONS), 'interop_bead.ts')
-  ).toContain('export const InteropFailures = failuresOf({');
+  ).toContain('export const InteropFailures = failuresOf(1, {');
 });
 
 test("silences its own uses as its generator's form says", () => {

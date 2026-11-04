@@ -37,13 +37,13 @@ import { startTranscoding } from '../../transcoding/__tests__/transcoding-servic
 import { createHTTPClient, type HTTPClient } from '../http-client';
 import {
   CancelError,
-  createWSClient,
+  createWebSocketClient,
   CredentialScheme,
   FailureScope,
   ProtocolCode,
   TimeoutError,
-  type WSClient,
-} from '../ws-client';
+  type WebSocketClient,
+} from '../websocket-client';
 
 // interfaces
 
@@ -69,7 +69,7 @@ interface IBrokerLink {
 // types
 
 /** A client the interop's cases call through, whichever its transport. */
-type InteropTransportClient = HTTPClient | IClient<BrokerTransportClient> | WSClient;
+type InteropTransportClient = HTTPClient | IClient<BrokerTransportClient> | WebSocketClient;
 
 // constants
 
@@ -162,10 +162,10 @@ const TRANSPORTS = [
   {
     carriesTransfers: true,
     connect: (client: InteropTransportClient, ports: IPorts): Promise<void> => {
-      return (client as WSClient).connect({ host: HOST, port: ports.port });
+      return (client as WebSocketClient).connect({ host: HOST, port: ports.port });
     },
     create: (): InteropTransportClient => {
-      return createWSClient();
+      return createWebSocketClient();
     },
     label: 'WebSocket',
     skipped: undefined,
@@ -860,7 +860,7 @@ test.describe('the C# server of the interop service', () => {
 
           // given the credential at its connect, over ws, which writes it on the upgrade
           await client[Symbol.asyncDispose]();
-          const webSocketClient = createWSClient({ transport: { WebSocket: WsWebSocket } });
+          const webSocketClient = createWebSocketClient({ transport: { WebSocket: WsWebSocket } });
 
           client = webSocketClient;
           made = undefined;

@@ -363,7 +363,7 @@ test.describe('createMemoryTransportClient', () => {
       const heard: number[][] = [];
 
       // * sent in the turn its server draws it, before its client opened: heard once it has, in order
-      server.on('connection', (...[, , connectionHandle]) => {
+      server.on('connection', (...[, connectionHandle]) => {
         void server.send({ data: new Uint8Array([1]) }, connectionHandle);
         void server.send({ data: new Uint8Array([2]) }, connectionHandle);
       });
@@ -412,7 +412,7 @@ test.describe('createMemoryTransportClient', () => {
       const heard: unknown[] = [];
 
       // * sent and closed in the turn its server draws it, before its client opened
-      server.on('connection', (...[, , connectionHandle]) => {
+      server.on('connection', (...[, connectionHandle]) => {
         void server.send({ data: new Uint8Array([1]) }, connectionHandle);
         void server.close(connectionHandle);
       });
@@ -469,7 +469,7 @@ test.describe('createMemoryTransportClient', () => {
 
       // * its dispose in the turn its server draws the connection, before its client opened; what
       // its server sends after goes unheard
-      server.on('connection', (...[, , connectionHandle]) => {
+      server.on('connection', (...[, connectionHandle]) => {
         (client as unknown as ITransportClientInternal)[dispose]();
         void server.send({ data: new Uint8Array([1]) }, connectionHandle);
       });
@@ -631,7 +631,7 @@ test.describe('createMemoryTransportClient', () => {
       const errors: Error[] = [];
       let starts = 0;
 
-      server.on('connection', (...[, , handle]) => {
+      server.on('connection', (...[, handle]) => {
         drawn.push(handle);
       });
       server.on('close', (isClean) => {
@@ -718,7 +718,7 @@ test.describe('createMemoryTransportClient', () => {
     const reported: string[] = [];
     let starts = 0;
 
-    server.on('connection', (...[, , connectionHandle]) => {
+    server.on('connection', (...[, connectionHandle]) => {
       drawn.push(connectionHandle);
     });
     server.on('close', (wasClean, connectionHandle) => {
@@ -781,7 +781,7 @@ test.describe('createMemoryTransportClient', () => {
     const errors: Error[] = [];
     let starts = 0;
 
-    server.on('connection', (...[, , handle]) => {
+    server.on('connection', (...[, handle]) => {
       drawn.push(handle);
     });
     server.on('error', (error) => {
@@ -844,7 +844,7 @@ test.describe('createMemoryTransportClient', () => {
       });
 
       // ! an early message is delivered after Open, within the successful connect's own turn
-      server.on('connection', (...[, , connectionHandle]) => {
+      server.on('connection', (...[, connectionHandle]) => {
         sent.push(server.send({ data: Uint8Array.of(8) }, connectionHandle));
       });
       client.on('message', ({ data }) => {

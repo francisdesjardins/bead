@@ -6,8 +6,8 @@ import type {
   IIncomingMessageLike,
   IServerSocketLike,
   IWebSocketServerConstructor,
-  WSTransportServer,
-} from '../ws-transport-server';
+  WebSocketTransportServer,
+} from '../websocket-transport-server';
 
 /**
  * A `WebSocketServer` a test scripts by hand, for the branches a real one does not take on demand:
@@ -133,12 +133,12 @@ export const createFakeWebSocketServer = (options?: {
    */
   const connect = (
     socket: IServerSocketLike,
-    { remotePort = 40_000, server }: { remotePort?: number; server: WSTransportServer }
+    { remotePort = 40_000, server }: { remotePort?: number; server: WebSocketTransportServer }
   ): TransportServerConnectionHandle => {
     const request = requestOf({ remoteAddress: '10.0.0.1', remotePort });
     let drawn: TransportServerConnectionHandle | undefined;
     const listener = (...params: TransportServerEventMap['connection']) => {
-      [, , drawn] = params;
+      [, drawn] = params;
     };
 
     server.on('connection', listener);

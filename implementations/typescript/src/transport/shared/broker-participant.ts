@@ -96,6 +96,7 @@ export type {
   IBrokerPublication,
   IBrokerStart,
   IBrokerSubscription,
+  IGauges,
 } from './types';
 
 // interfaces
@@ -442,9 +443,10 @@ export const portOf = (participant: IBrokerParticipant): IBrokerParticipantPort 
  * sequence, a copy dropped, a gap a loss; an ACCEPT for no connect it awaits answered with a RESET;
  * an OPEN to a name by the server's transport serving it, or refused 503 when none does; a GONE by
  * the connections bound to the incarnation it names. A message that is no parcel is dropped and
- * reported; a retained one dropped in silence. As its link goes down it closes each connection,
- * unclean, connects anew, and resets each peer it held a connection with. Its stop ends its link in
- * place, its next link another incarnation; its dispose ends it for good (spec 15.21).
+ * reported, one that holds `retained` rather than `isRetained` among them; a retained one dropped in
+ * silence. As its link goes down it closes each connection, unclean, connects anew, and resets each
+ * peer it held a connection with. Its stop ends its link in place, its next link another
+ * incarnation; its dispose ends it for good (spec 15.21).
  *
  * @example
  * const participant = createBrokerParticipant({ adapter: broker.adapter({ id: 'server' }) });
@@ -1465,12 +1467,31 @@ export const createBrokerParticipant = (options: IBrokerParticipantOptions): IBr
 
   // ! taken, handed on or dropped as a copy, then acknowledged: never once a router is done with it
   const take = (message: IBrokerMessage): void => {
-    const { payload, retained, topic } = message;
+    const { isRetained, payload, topic } = message;
     const [first, kind, token = ''] = topic;
 
     try {
+      // ! an adapter that says retained, not isRetained, would hand a kept message on as a parcel
+      if (Object.hasOwn(message, 'retained')) {
+        if (isDebugging()) {
+          traceParcel(undefined, {
+            direction: 'rx',
+            topic,
+            bytes: payload.length,
+            verdict: 'no-parcel',
+          });
+        }
+        report(
+          new ProgrammerError(
+            'a broker message says it was kept by isRetained: one holding retained is no parcel'
+          )
+        );
+
+        return;
+      }
+
       if (
-        retained === true ||
+        isRetained === true ||
         first !== root ||
         topic.length !== 3 ||
         !(
@@ -1484,7 +1505,7 @@ export const createBrokerParticipant = (options: IBrokerParticipantOptions): IBr
             direction: 'rx',
             topic,
             bytes: payload.length,
-            verdict: retained === true ? 'retained' : 'off-topic',
+            verdict: isRetained === true ? 'retained' : 'off-topic',
           });
         }
         return;

@@ -134,7 +134,7 @@ records check, the bound and the filter, and no walk.
 
 **Generated code's contract moves to 6.** A service's generated file calls the runtime codec, which
 a runtime without it lacks, so it names `GENERATED_CODE_SUPPORTS_VERSION_6` and
-`GeneratedCode.SupportsVersion6`, or a later counter of its runtime's, the C# side's 7
+`GeneratedCode.SupportsVersion6`, or a later counter, 7
 ([0018](0018-a-services-procedures-are-typed-descriptors-served-and-called-through-one-layer.md)).
 4 goes from the TypeScript and C# runtimes, since code that names
 it checks no required field and no longer conforms through the runtime. 5, the route table's, stays:
