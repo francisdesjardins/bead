@@ -5,8 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Bead: a binary protocol for calls between a client and a server</title>
     <meta name="description" content="Bead is a binary wire protocol for calls between a client and a server, both ways: a written specification, conformance files every implementation plays, TypeScript and C# at behavioural parity, and a Rust core." />
-    <link rel="canonical" href="https://francisdesjardins.ca/bead/" />
-    <link rel="alternate" hreflang="en" href="https://francisdesjardins.ca/bead/?lng=en" />
+    <link rel="alternate" hreflang="en" href="https://francisdesjardins.ca/bead/" />
     <link rel="alternate" hreflang="fr" href="https://francisdesjardins.ca/bead/?lng=fr" />
     <link rel="alternate" hreflang="x-default" href="https://francisdesjardins.ca/bead/" />
     <meta name="author" content="Francis Desjardins" />
@@ -5491,10 +5490,6 @@ disallowed-methods = [
     return page.getAttribute('data-lang');
   };
 
-  const isAsked = () => {
-    return new URLSearchParams(window.location.search).has('lng');
-  };
-
   // ── Language ────────────────────────────────────────────────────────────────
 
   const headFor = (language) => {
@@ -5504,9 +5499,15 @@ disallowed-methods = [
     document
       .querySelector('meta[name="description"]')
       .setAttribute('content', HEADS[language].description);
-    document
-      .querySelector('link[rel="canonical"]')
-      .setAttribute('href', isAsked() ? `${ADDRESS}?lng=${language}` : ADDRESS);
+    // the canonical is written here alone: the bare address is the English page and `?lng=fr` the
+    // French one, so a static one in the head would contradict the French page's
+    let canonical = document.querySelector('link[rel="canonical"]');
+    if (canonical === null) {
+      canonical = document.createElement('link');
+      canonical.rel = 'canonical';
+      document.head.append(canonical);
+    }
+    canonical.setAttribute('href', language === 'fr' ? `${ADDRESS}?lng=fr` : ADDRESS);
   };
 
   // the page's content and the template's trade places: one language in the document at a time, so
