@@ -25,7 +25,11 @@ public interface IRouterLike
     /// </summary>
     void RegisterResolver(IRequestResolver resolver);
 
-    /// <summary>Answers a request, while its call is open.</summary>
+    /// <summary>
+    /// Answers a request, while its call is open, by the very header its resolver was handed: an
+    /// answer, whole or a transfer, to a request this side never dispatched, is an
+    /// <see cref="ArgumentException"/>, and nothing goes out.
+    /// </summary>
     Task Respond(RouterAnswer response, AnswerTarget target);
 
     /// <summary>

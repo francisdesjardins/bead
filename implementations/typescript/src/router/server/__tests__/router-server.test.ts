@@ -28,6 +28,7 @@ import type {
   IHandedRequestHeader,
   INotificationLike,
   IProcedure,
+  IRequestResolverProps,
   OutgoingEnvelope,
   RequestCredential,
   RouterLimitsOptions,
@@ -1655,6 +1656,44 @@ test.describe('createRouterServer', () => {
       expect(thrown).toEqual([expect.any(DisconnectError)]);
       // nor answered, nor reported: its connection took the call away, and its call id may be
       // another's now
+      expect(sent).toEqual([]);
+      expect(errors).toEqual([]);
+    });
+
+    test('a subscription goes only to a request this router dispatched: a copy of its header is refused, and subscribes nothing', async () => {
+      const { deliver, open, sent, transport } = createScriptedTransport();
+      using router = createRouterServer(transport);
+      const errors = recordErrors(router);
+      const handed: IRequestResolverProps<Handle>[] = [];
+
+      open(first);
+      router.registerResolver(
+        Object.assign((props: IRequestResolverProps<Handle>) => {
+          handed.push(props);
+
+          return Promise.resolve();
+        }, news)
+      );
+      deliver(first, subscribingOf(1));
+      await sleep(0);
+
+      const [request] = handed;
+
+      if (request === undefined) {
+        throw new Error('the request reaches its resolver');
+      }
+
+      // a copy of its header was never dispatched: no call is tied to it (spec 9.3)
+      expect(() => {
+        return router.subscribe({ ...request, header: { ...request.header } });
+      }).toThrow(ProgrammerError);
+      expect(router.notifications.subscriptions()).toEqual([]);
+
+      // its own header subscribes it, the copy having marked nothing
+      expect(router.subscribe(request)).toBe(1);
+      expect(router.notifications.subscriptions()).toEqual([
+        { callId: 1, connectionHandle: first, procedureId: 5, serviceId: 2 },
+      ]);
       expect(sent).toEqual([]);
       expect(errors).toEqual([]);
     });

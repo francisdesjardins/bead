@@ -58,7 +58,7 @@ internal sealed record AnsweringCallsOptions
 /// <summary>
 /// The calls the peer opened and this side still owes an answer, by connection and call id. A
 /// request is found again by its header, the very object dispatched: an answer given a copy of it
-/// finds no call, and goes out whatever became of the call it was for.
+/// finds no call, and is refused.
 ///
 /// What a call receives of its payload leaves with the call, whichever way the call leaves. A call
 /// that received a transfer and ends — answered, refused, cancelled — stays abandoned for the
@@ -162,14 +162,14 @@ internal sealed class AnsweringCalls(AnsweringCallsOptions options)
     }
 
     /// <summary>
-    /// Whether the call of a request is still to be answered; a request never dispatched is taken
-    /// as one to answer.
+    /// Whether the call of a request is still to be answered; a request never dispatched is open to
+    /// none.
     /// </summary>
     public bool IsAnswering(AnswerTarget request)
     {
         if (!_dispatched.TryGetValue(request.Header, out var dispatched))
         {
-            return true;
+            return false;
         }
 
         var entry = Get(new CallAddress(request.Header.CallId, request.ConnectionHandle));

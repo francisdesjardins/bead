@@ -79,8 +79,8 @@ export interface IAnsweringCalls<
   has(call: ICallAddress<Handle>): boolean;
   /**
    * Whether the call of a request is still to be answered: once its answer goes out, or it is
-   * cancelled, or gone with its connection, it is not. A request never dispatched is taken as one to
-   * answer.
+   * cancelled, or gone with its connection, it is not. A request never dispatched is open to none:
+   * a copy of its header finds no call.
    */
   isAnswering(request: IDispatchedRequest<Handle>): boolean;
   /**
@@ -111,7 +111,7 @@ export interface IAnsweringCalls<
  * id, so an answer settles the call its request opened and no other.
  *
  * A request is found again by its header, the very object dispatched: an answer given a copy of it
- * finds no call, and goes out whatever became of the call it was for.
+ * finds no call, and is refused.
  *
  * What a call receives of its payload leaves with the call, whichever way the call leaves:
  * `onRemove` hears it then, once. A call that received a transfer and ends — answered, refused,
@@ -286,7 +286,7 @@ export const createAnsweringCalls = <
       const controller = dispatched.get(header);
       const entry = answering.get(connectionHandle)?.get(header.callId);
 
-      return controller === undefined || (entry?.controller === controller && !entry.isAnswered);
+      return controller !== undefined && entry?.controller === controller && !entry.isAnswered;
     },
     open: ({ connectionHandle, header }, series) => {
       const controller = new AbortController();
