@@ -101,14 +101,14 @@ async fn ends_every_session_of_an_issuer_by_that_issuer_on_every_connection_sid_
                 sid: "one".to_owned(),
             };
             register(state, (1, first(), 5, end, Some(grace())));
-            register(state, (3, first(), 7, end, Some(one.clone())));
+            register(state, (3, first(), 6, end, Some(one.clone())));
             register(state, (1, second(), 5, end, Some(one)));
             register(
                 state,
                 (
                     3,
                     second(),
-                    7,
+                    6,
                     end,
                     Some(SessionIdentifier::JwtSub {
                         issuer: "https://other.example".to_owned(),
