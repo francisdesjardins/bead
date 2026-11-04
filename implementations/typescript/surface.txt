@@ -722,7 +722,9 @@
   IRouterRequest	src/router/shared/types.ts
   IRouterResult	src/router/shared/types.ts
   IServiceManager	src/router/shared/types.ts
+  IServiceManagerClient	src/router/shared/types.ts
   IServiceManagerOptions	src/router/shared/types.ts
+  IServiceManagerServer	src/router/shared/types.ts
   ISubscriber	src/router/shared/types.ts
   IUnregisterNotificationOptions	src/router/shared/types.ts
   METRICS_CONTENT_TYPE	src/router/shared/metrics-registry.ts
@@ -1359,7 +1361,7 @@ src/client/http-client.ts IHTTPClientOptions
   interface IHTTPClientOptions extends Omit<IClientLayers<HTTPTransportClient>, 'transport'>, IClientOptions
     transport?: Omit<IHTTPTransportClientOptions, 'maximumBodyBytes'> | undefined
     router?: | ((transport: Transport, options: IRouterClientOptions) => IRouterClient<Transport>) | undefined
-    services?: | ((router: IRouterClient<Transport>) => IServiceManager<RouterClientConnectionHandle>) | undefined
+    services?: | ((router: IRouterClient<Transport>) => IServiceManagerClient<RouterClientConnectionHandle>) | undefined
     credential?: DefaultCredential | undefined
     credentials?: ICredentials | undefined
     devtools?: boolean | undefined
@@ -1371,7 +1373,7 @@ src/client/http-client.ts createHTTPClient
 src/client/types.ts IClient
   interface IClient<Transport extends IClientTransportLike = IClientTransportLike>
     readonly router: IRouterClient<Transport>
-    readonly services: IServiceManager<RouterClientConnectionHandle>
+    readonly services: IServiceManagerClient<RouterClientConnectionHandle>
     readonly transport: Transport
     connect(...[options]: Parameters<Transport['connect']>): Promise<void>
     disconnect(options?: Parameters<Transport['disconnect']>[0]): Promise<void>
@@ -1380,7 +1382,7 @@ src/client/types.ts IClient
 src/client/types.ts IClientLayers
   interface IClientLayers<Transport extends IClientTransportLike>
     router?: | ((transport: Transport, options: IRouterClientOptions) => IRouterClient<Transport>) | undefined
-    services?: | ((router: IRouterClient<Transport>) => IServiceManager<RouterClientConnectionHandle>) | undefined
+    services?: | ((router: IRouterClient<Transport>) => IServiceManagerClient<RouterClientConnectionHandle>) | undefined
     transport: Transport
 src/client/types.ts IClientOptions
   interface IClientOptions
@@ -1412,7 +1414,7 @@ src/client/worker-client.ts IWorkerClientOptions
   interface IWorkerClientOptions extends Omit<IClientLayers<WorkerTransportClient>, 'transport'>, IClientOptions
     transport: IWorkerTransportClientOptions
     router?: | ((transport: Transport, options: IRouterClientOptions) => IRouterClient<Transport>) | undefined
-    services?: | ((router: IRouterClient<Transport>) => IServiceManager<RouterClientConnectionHandle>) | undefined
+    services?: | ((router: IRouterClient<Transport>) => IServiceManagerClient<RouterClientConnectionHandle>) | undefined
     credential?: DefaultCredential | undefined
     credentials?: ICredentials | undefined
     devtools?: boolean | undefined
@@ -1427,7 +1429,7 @@ src/client/ws-client.ts IWSClientOptions
   interface IWSClientOptions extends Omit<IClientLayers<WSTransportClient>, 'transport'>, IClientOptions
     transport?: | (Omit<IWSTransportClientOptions, 'binaryType'> & {binaryType?: 'arraybuffer' | 'nodebuffer' | undefined}) | undefined
     router?: | ((transport: Transport, options: IRouterClientOptions) => IRouterClient<Transport>) | undefined
-    services?: | ((router: IRouterClient<Transport>) => IServiceManager<RouterClientConnectionHandle>) | undefined
+    services?: | ((router: IRouterClient<Transport>) => IServiceManagerClient<RouterClientConnectionHandle>) | undefined
     credential?: DefaultCredential | undefined
     credentials?: ICredentials | undefined
     devtools?: boolean | undefined
@@ -2336,16 +2338,28 @@ src/router/shared/types.ts IRouterResult
     header: IResultHeader
     payload: Uint8Array
 src/router/shared/types.ts IServiceManager
-  interface IServiceManager<Handle extends string = ConnectionHandle>
+  interface IServiceManager<Handle extends string = ConnectionHandle> extends IServiceManagerClient<Handle>, IServiceManagerServer<Handle>
+    emit<K extends SERVICE_MANAGER_EVENTS>(event: K, ...params: ServiceManagerEventMap[K]): boolean
+    events<K extends SERVICE_MANAGER_EVENTS>(event: K, options?: IEventIteratorOptions): AsyncIterableIterator<ServiceManagerEventMap[K], undefined>
+    off<K extends SERVICE_MANAGER_EVENTS>(event: K, listener: EmitterListener<ServiceManagerEventMap[K]>): this
+    on<K extends SERVICE_MANAGER_EVENTS>(event: K, listener: EmitterListener<ServiceManagerEventMap[K]>): this
+    once<K extends SERVICE_MANAGER_EVENTS>(event: K, listener: EmitterListener<ServiceManagerEventMap[K]>): this
+    removeAllListeners(event?: SERVICE_MANAGER_EVENTS): this
+    readonly isDebugging: boolean
+    getNotification<RequestPayload, ResponsePayload, NotificationPayload>(procedure: IProcedure, dependencies: INotificationDependencies<RequestPayload, ResponsePayload, NotificationPayload>): INotification<RequestPayload, NotificationPayload>
+    getCommandResolver<RequestPayload, ResponsePayload, Failure extends ResolverFailure = ResolverFailure>(procedure: IProcedure, dependencies: IRequestResolverDependencies<RequestPayload, ResponsePayload, Handle>): (callback: RequestResolverCallback<RequestPayload, ResponsePayload, Failure, Handle>) => IRequestResolver<Handle>
+    getRequest<RequestPayload, ResponsePayload>(procedure: IProcedure, dependencies: IRequestDependencies<RequestPayload, ResponsePayload>): IRequest<RequestPayload, ResponsePayload>
+    getNotificationResolver<RequestPayload, ResponsePayload, NotificationPayload, Failure extends ResolverFailure = ResolverFailure>(procedure: IProcedure, dependencies: INotificationResolverDependencies<RequestPayload, ResponsePayload, NotificationPayload, Handle>): (callback: NotificationResolverCallback<RequestPayload, ResponsePayload, Failure, Handle>) => INotificationResolver<NotificationPayload, Handle>
+    getCommand<RequestPayload, ResponsePayload>(procedure: IProcedure, dependencies: IRequestDependencies<RequestPayload, ResponsePayload>): ICommand<RequestPayload, ResponsePayload, Handle>
+    getRequestResolver<RequestPayload, ResponsePayload, Failure extends ResolverFailure = ResolverFailure>(procedure: IProcedure, dependencies: IRequestResolverDependencies<RequestPayload, ResponsePayload, Handle>): (callback: RequestResolverCallback<RequestPayload, ResponsePayload, Failure, Handle>) => IRequestResolver<Handle>
+src/router/shared/types.ts IServiceManagerClient
+  interface IServiceManagerClient<Handle extends string = ConnectionHandle>
     readonly isDebugging: boolean
     emit<K extends SERVICE_MANAGER_EVENTS>(event: K, ...params: ServiceManagerEventMap[K]): boolean
     events<K extends SERVICE_MANAGER_EVENTS>(event: K, options?: IEventIteratorOptions): AsyncIterableIterator<ServiceManagerEventMap[K], undefined>
     getNotification<RequestPayload, ResponsePayload, NotificationPayload>(procedure: IProcedure, dependencies: INotificationDependencies<RequestPayload, ResponsePayload, NotificationPayload>): INotification<RequestPayload, NotificationPayload>
-    getNotificationResolver<RequestPayload, ResponsePayload, NotificationPayload, Failure extends ResolverFailure = ResolverFailure>(procedure: IProcedure, dependencies: INotificationResolverDependencies<RequestPayload, ResponsePayload, NotificationPayload, Handle>): (callback: NotificationResolverCallback<RequestPayload, ResponsePayload, Failure, Handle>) => INotificationResolver<NotificationPayload, Handle>
-    getCommand<RequestPayload, ResponsePayload>(procedure: IProcedure, dependencies: IRequestDependencies<RequestPayload, ResponsePayload>): ICommand<RequestPayload, ResponsePayload, Handle>
     getCommandResolver<RequestPayload, ResponsePayload, Failure extends ResolverFailure = ResolverFailure>(procedure: IProcedure, dependencies: IRequestResolverDependencies<RequestPayload, ResponsePayload, Handle>): (callback: RequestResolverCallback<RequestPayload, ResponsePayload, Failure, Handle>) => IRequestResolver<Handle>
     getRequest<RequestPayload, ResponsePayload>(procedure: IProcedure, dependencies: IRequestDependencies<RequestPayload, ResponsePayload>): IRequest<RequestPayload, ResponsePayload>
-    getRequestResolver<RequestPayload, ResponsePayload, Failure extends ResolverFailure = ResolverFailure>(procedure: IProcedure, dependencies: IRequestResolverDependencies<RequestPayload, ResponsePayload, Handle>): (callback: RequestResolverCallback<RequestPayload, ResponsePayload, Failure, Handle>) => IRequestResolver<Handle>
     off<K extends SERVICE_MANAGER_EVENTS>(event: K, listener: EmitterListener<ServiceManagerEventMap[K]>): this
     on<K extends SERVICE_MANAGER_EVENTS>(event: K, listener: EmitterListener<ServiceManagerEventMap[K]>): this
     once<K extends SERVICE_MANAGER_EVENTS>(event: K, listener: EmitterListener<ServiceManagerEventMap[K]>): this
@@ -2355,6 +2369,18 @@ src/router/shared/types.ts IServiceManagerOptions
     clock?: IClock | undefined
     closeConnection?: ((connectionHandle: Handle) => void) | undefined
     defaults?: | (Partial<Pick<IResolvedRequestOptions, 'timeout'>> & {closeOnTimeout?: boolean | undefined}) | undefined
+src/router/shared/types.ts IServiceManagerServer
+  interface IServiceManagerServer<Handle extends string = ConnectionHandle>
+    readonly isDebugging: boolean
+    emit<K extends Exclude<SERVICE_MANAGER_EVENTS, 'dropped'>>(event: K, ...params: ServiceManagerEventMap[K]): boolean
+    events<K extends Exclude<SERVICE_MANAGER_EVENTS, 'dropped'>>(event: K, options?: IEventIteratorOptions): AsyncIterableIterator<ServiceManagerEventMap[K], undefined>
+    getNotificationResolver<RequestPayload, ResponsePayload, NotificationPayload, Failure extends ResolverFailure = ResolverFailure>(procedure: IProcedure, dependencies: INotificationResolverDependencies<RequestPayload, ResponsePayload, NotificationPayload, Handle>): (callback: NotificationResolverCallback<RequestPayload, ResponsePayload, Failure, Handle>) => INotificationResolver<NotificationPayload, Handle>
+    getCommand<RequestPayload, ResponsePayload>(procedure: IProcedure, dependencies: IRequestDependencies<RequestPayload, ResponsePayload>): ICommand<RequestPayload, ResponsePayload, Handle>
+    getRequestResolver<RequestPayload, ResponsePayload, Failure extends ResolverFailure = ResolverFailure>(procedure: IProcedure, dependencies: IRequestResolverDependencies<RequestPayload, ResponsePayload, Handle>): (callback: RequestResolverCallback<RequestPayload, ResponsePayload, Failure, Handle>) => IRequestResolver<Handle>
+    off<K extends Exclude<SERVICE_MANAGER_EVENTS, 'dropped'>>(event: K, listener: EmitterListener<ServiceManagerEventMap[K]>): this
+    on<K extends Exclude<SERVICE_MANAGER_EVENTS, 'dropped'>>(event: K, listener: EmitterListener<ServiceManagerEventMap[K]>): this
+    once<K extends Exclude<SERVICE_MANAGER_EVENTS, 'dropped'>>(event: K, listener: EmitterListener<ServiceManagerEventMap[K]>): this
+    removeAllListeners(event?: Exclude<SERVICE_MANAGER_EVENTS, 'dropped'>): this
 src/router/shared/types.ts ISessionRequest
   interface ISessionRequest<Handle extends string = ConnectionHandle>
     connectionHandle: Handle
@@ -2469,7 +2495,7 @@ src/server/http-server.ts IHTTPServerOptions
   interface IHTTPServerOptions<Data = unknown> extends Omit<IServerLayers<HTTPTransportServer, Data>, 'transport'>, Omit<IServerOptions, 'clock'>
     transport: Omit<IHTTPTransportServerOptions, 'maximumBodyBytes'>
     router?: | ((transport: Transport, options: IRouterServerOptions) => IRouterServer<Transport>) | undefined
-    services?: | ((router: IRouterServer<Transport>, options: IServiceManagerOptions<TransportServerConnectionHandle>) => IServiceManager<TransportServerConnectionHandle>) | undefined
+    services?: | ((router: IRouterServer<Transport>, options: IServiceManagerOptions<TransportServerConnectionHandle>) => IServiceManagerServer<TransportServerConnectionHandle>) | undefined
     sessions?: ((options: {clock: IClock}) => ISessionManager<Data>) | undefined
     credentials?: ICredentials | undefined
     intake?: IntakeLimitsOptions | undefined
@@ -2486,7 +2512,7 @@ src/server/server.ts createServer
 src/server/types.ts IServer
   interface IServer<Transport extends IServerTransportLike = IServerTransportLike, Data = unknown>
     readonly router: IRouterServer<Transport>
-    readonly services: IServiceManager<TransportServerConnectionHandle>
+    readonly services: IServiceManagerServer<TransportServerConnectionHandle>
     readonly sessions: ISessionManager<Data>
     readonly transport: Transport
     gauges(): ServerGauges
@@ -2498,7 +2524,7 @@ src/server/types.ts IServer
 src/server/types.ts IServerLayers
   interface IServerLayers<Transport extends IServerTransportLike, Data = unknown>
     router?: | ((transport: Transport, options: IRouterServerOptions) => IRouterServer<Transport>) | undefined
-    services?: | ((router: IRouterServer<Transport>, options: IServiceManagerOptions<TransportServerConnectionHandle>) => IServiceManager<TransportServerConnectionHandle>) | undefined
+    services?: | ((router: IRouterServer<Transport>, options: IServiceManagerOptions<TransportServerConnectionHandle>) => IServiceManagerServer<TransportServerConnectionHandle>) | undefined
     sessions?: ((options: {clock: IClock}) => ISessionManager<Data>) | undefined
     transport: Transport
 src/server/types.ts IServerOptions
@@ -2540,7 +2566,7 @@ src/server/worker-server.ts IWorkerServerOptions
   interface IWorkerServerOptions<Data = unknown> extends Omit<IServerLayers<WorkerTransportServer, Data>, 'transport'>, Omit<IServerOptions, 'clock'>
     transport: IWorkerTransportServerOptions
     router?: | ((transport: Transport, options: IRouterServerOptions) => IRouterServer<Transport>) | undefined
-    services?: | ((router: IRouterServer<Transport>, options: IServiceManagerOptions<TransportServerConnectionHandle>) => IServiceManager<TransportServerConnectionHandle>) | undefined
+    services?: | ((router: IRouterServer<Transport>, options: IServiceManagerOptions<TransportServerConnectionHandle>) => IServiceManagerServer<TransportServerConnectionHandle>) | undefined
     sessions?: ((options: {clock: IClock}) => ISessionManager<Data>) | undefined
     credentials?: ICredentials | undefined
     intake?: IntakeLimitsOptions | undefined
@@ -2558,7 +2584,7 @@ src/server/ws-server.ts IWSServerOptions
   interface IWSServerOptions<Data = unknown> extends Omit<IServerLayers<WSTransportServer, Data>, 'transport'>, Omit<IServerOptions, 'clock'>
     transport: Omit<IWSTransportServerOptions, 'binaryType'> & {binaryType?: 'arraybuffer' | 'nodebuffer' | undefined}
     router?: | ((transport: Transport, options: IRouterServerOptions) => IRouterServer<Transport>) | undefined
-    services?: | ((router: IRouterServer<Transport>, options: IServiceManagerOptions<TransportServerConnectionHandle>) => IServiceManager<TransportServerConnectionHandle>) | undefined
+    services?: | ((router: IRouterServer<Transport>, options: IServiceManagerOptions<TransportServerConnectionHandle>) => IServiceManagerServer<TransportServerConnectionHandle>) | undefined
     sessions?: ((options: {clock: IClock}) => ISessionManager<Data>) | undefined
     credentials?: ICredentials | undefined
     intake?: IntakeLimitsOptions | undefined

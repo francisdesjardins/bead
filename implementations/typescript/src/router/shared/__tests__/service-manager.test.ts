@@ -1,4 +1,6 @@
 import { expect, test } from '@playwright/test';
+import type { IClient } from '../../../client/types';
+import type { IServer } from '../../../server/types';
 import type { TransportServerConnectionHandle } from '../../../transport/server/types';
 import { createTestClock } from '../../../transport/shared/__tests__/fixtures';
 import { PLATFORM_CLOCK } from '../../../transport/shared/clock';
@@ -17,6 +19,9 @@ import {
   type IRequestResolver,
   type IRouterResult,
   type IRouterLike,
+  type IServiceManager,
+  type IServiceManagerClient,
+  type IServiceManagerServer,
   type ProcedureKind,
 } from '../service-manager';
 import type { IValidateOptions } from '../violations';
@@ -34,6 +39,11 @@ import {
   serializer,
   serverSerializer,
 } from './service-manager-fixtures';
+
+// types
+
+/** The makers a type of manager declares, by name. */
+type MakersOf<Manager> = Extract<keyof Manager, `get${string}`>;
 
 // constants
 
@@ -1269,5 +1279,57 @@ test.describe('createServiceManager', () => {
     await resolver(propsOf(encode({ text: 'hi' })));
 
     expect(calls.respond[0]?.response).toEqual({ payload: encode({ text: 'hi' }) });
+  });
+
+  // spec 16.11
+  test('types a client’s services and a server’s by their side, each without the other’s makers', () => {
+    const client: IServiceManagerClient = createServiceManager(createFakeRouter('client').router);
+    const server: IServiceManagerServer = createServiceManager(createFakeRouter('server').router);
+
+    // @ts-expect-error a client's services make no command
+    void client.getCommand;
+    // @ts-expect-error nor answer a request
+    void client.getRequestResolver;
+    // @ts-expect-error nor a notification
+    void client.getNotificationResolver;
+    // @ts-expect-error a server's services make no request
+    void server.getRequest;
+    // @ts-expect-error nor a notification
+    void server.getNotification;
+    // @ts-expect-error nor answer a command
+    void server.getCommandResolver;
+    // @ts-expect-error nor hear a notification of its own dropped
+    void server.on('dropped', () => {});
+
+    // * each facade's services hold their side's makers exactly: one more, or one less, does not
+    // compile
+    const clientMakers = {
+      getCommandResolver: true,
+      getNotification: true,
+      getRequest: true,
+    } as const satisfies Record<MakersOf<IClient['services']>, true>;
+    const serverMakers = {
+      getCommand: true,
+      getNotificationResolver: true,
+      getRequestResolver: true,
+    } as const satisfies Record<MakersOf<IServer['services']>, true>;
+
+    // what each type carries, the one manager carries at run time
+    for (const [typed, makers] of [
+      [client, clientMakers],
+      [server, serverMakers],
+    ] as const) {
+      for (const maker of Object.keys(makers)) {
+        expect(typeof Reflect.get(typed, maker), maker).toBe('function');
+      }
+    }
+
+    // past the types, the one manager is still refused as it is made
+    expect(() => {
+      return (client as IServiceManager).getCommand(echo, { serializer });
+    }).toThrow(new ProgrammerError("a client's router makes requests: getRequest"));
+    expect(() => {
+      return (server as IServiceManager).getRequest(echo, { serializer });
+    }).toThrow(new ProgrammerError("a server's router makes commands: getCommand"));
   });
 });

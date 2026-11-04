@@ -11,7 +11,7 @@ import type {
   RouterClientConnectionHandle,
 } from '../router/client/types';
 import type { IMetricsExposition, IMetricsRegistry } from '../router/shared/metrics-registry';
-import type { IDebugEvent, IServiceManager } from '../router/shared/types';
+import type { IDebugEvent, IServiceManagerClient } from '../router/shared/types';
 import type {
   IParticipantDebugEvent,
   IParticipantInspection,
@@ -53,7 +53,7 @@ export interface IDevtoolsListeners {
 export interface IDevtoolsLayers {
   metricsRegistry: IMetricsRegistry | undefined;
   router: IRouterClient;
-  services: IServiceManager<RouterClientConnectionHandle>;
+  services: IServiceManagerClient<RouterClientConnectionHandle>;
 }
 
 // constants

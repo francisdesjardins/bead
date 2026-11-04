@@ -11,7 +11,7 @@ import type {
   DefaultCredential,
   ICredentials,
   IntakeLimitsOptions,
-  IServiceManager,
+  IServiceManagerClient,
   RouterLimitsOptions,
 } from '../router/shared/types';
 
@@ -23,8 +23,11 @@ import type {
  */
 export interface IClient<Transport extends IClientTransportLike = IClientTransportLike> {
   readonly router: IRouterClient<Transport>;
-  /** The requesters and resolvers of the services, made on {@link IClient.router}. */
-  readonly services: IServiceManager<RouterClientConnectionHandle>;
+  /**
+   * A client's services, made on {@link IClient.router}: its requests and notifications, and its
+   * command resolvers.
+   */
+  readonly services: IServiceManagerClient<RouterClientConnectionHandle>;
   readonly transport: Transport;
 
   /** Connects the transport, with its options, optional where every member of them is. */
@@ -55,7 +58,7 @@ export interface IClientLayers<Transport extends IClientTransportLike> {
     | undefined;
   /** Builds the services on the router; `createServiceManager` when not given. */
   services?:
-    | ((router: IRouterClient<Transport>) => IServiceManager<RouterClientConnectionHandle>)
+    | ((router: IRouterClient<Transport>) => IServiceManagerClient<RouterClientConnectionHandle>)
     | undefined;
   transport: Transport;
 }
