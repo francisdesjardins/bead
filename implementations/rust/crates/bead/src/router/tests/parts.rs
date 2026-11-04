@@ -11,9 +11,10 @@ use crate::constants::RouterSide;
 use crate::duration::{LONGEST_TIMER, NEVER};
 use crate::failure::ProcedureAddress;
 use crate::router::parts::{
-    Abandoned, Answering, AnsweringCalls, PendingCalls, PendingRequest, Reservation,
+    Abandoned, Answering, AnsweringCalls, PendingCalls, PendingRequest, RequestReceiving,
+    Reservation,
 };
-use crate::router::types::{CallAddress, ConnectionHandle, Gauges, Signal};
+use crate::router::types::{CallAddress, ConnectionHandle, Gauges, Signal, SignalReason};
 use crate::server::{
     HealthCheck, HealthStatus, LayerGauges, ServerGauges, health_of, layer_gauges_of,
 };
@@ -546,15 +547,9 @@ fn takes_out_every_call_of_a_connection_or_of_every_one_giving_them() {
     assert_eq!([first.is_aborted(), second.is_aborted()], [false, false]);
 
     // The caller owns the very signals returned, and ends them when it chooses.
-    taken[0]
-        .1
-        .signal
-        .abort(crate::router::types::SignalReason::Cancelled);
+    taken[0].1.signal.abort(SignalReason::Cancelled);
     assert_eq!([first.is_aborted(), second.is_aborted()], [true, false]);
-    rest[0]
-        .1
-        .signal
-        .abort(crate::router::types::SignalReason::Cancelled);
+    rest[0].1.signal.abort(SignalReason::Cancelled);
     assert!(second.is_aborted());
 }
 
@@ -670,4 +665,170 @@ fn gauges_largest_answering_calls_under_its_ceiling_maximum_answering_calls_whic
     calls.answering.remove(&handle("a"));
 
     assert_eq!(calls.gauges().counts.get("largestAnsweringCalls"), Some(&1));
+}
+
+// ── The calls a side answers, found by their dispatch ────────────────────────────────────────
+
+// what a call receives, told apart by its transfer
+const fn receiving_of(transfer: u64) -> RequestReceiving {
+    RequestReceiving { transfer }
+}
+
+// the transfer a call left with, when it received one
+fn heard(left: Option<Answering>) -> Option<u64> {
+    left.and_then(|answering| answering.receiving)
+        .map(|receiving| receiving.transfer)
+}
+
+// ! a request is known by the id its dispatch drew, once per request dispatched, as the other sides
+// know it by the very header dispatched: a copy of the header is an id no dispatch of the call drew
+// spec 9.1, 9.4
+#[test]
+fn opens_a_call_as_its_request_is_dispatched_and_finds_it_again_by_that_very_header_alone() {
+    let mut calls = AnsweringCalls::default();
+    let call = call_of((3, "a"));
+    let signal = Signal::new();
+
+    calls.open(
+        &call,
+        Answering {
+            signal: signal.clone(),
+            ..answering_of(1)
+        },
+    );
+
+    assert!(calls.has(&call), "open on a");
+    assert!(!calls.has(&call_of((3, "b"))), "none on b");
+    assert_eq!(
+        calls
+            .answering_of((&call, 1))
+            .map(|answering| answering.dispatched),
+        Some(1),
+        "found by its dispatch"
+    );
+    assert!(
+        calls.is_answering((&call, 1)),
+        "its own dispatch answers it"
+    );
+
+    calls
+        .signal_of((&call, 1))
+        .expect("found by its dispatch")
+        .abort(SignalReason::Cancelled);
+
+    assert!(signal.is_aborted(), "the very signal it was opened with");
+
+    // a copy was never dispatched: it finds no call, and is open to none
+    assert!(
+        calls.answering_of((&call, 2)).is_none(),
+        "a copy finds nothing"
+    );
+    assert!(calls.signal_of((&call, 2)).is_none(), "nor its signal");
+    assert!(!calls.is_answering((&call, 2)), "a copy answers nothing");
+}
+
+// spec 9.3
+#[test]
+fn answers_a_call_no_more_once_its_answer_goes_out_while_the_call_stays_until_closed_a_copy_of_its_header_marking_nothing()
+ {
+    let mut calls = AnsweringCalls::default();
+    let call = call_of((3, "a"));
+
+    calls.open(&call, answering_of(1));
+
+    assert!(!calls.answer((&call, 2)), "a copy marks nothing");
+    assert!(!calls.answer((&call_of((3, "b")), 1)), "nor b's call id");
+    assert!(calls.is_answering((&call, 1)), "still to answer");
+    assert!(calls.answer((&call, 1)), "its own marks it");
+    assert!(!calls.is_answering((&call, 1)), "answered");
+    assert!(calls.has(&call), "the call stays");
+    assert!(calls.forget(&call, Some(1)).is_some(), "until closed");
+    assert!(!calls.has(&call), "closed");
+}
+
+// spec 9.4
+#[test]
+fn answers_a_call_no_more_once_closed_by_its_own_call_taken_or_opened_again() {
+    let mut calls = AnsweringCalls::default();
+    let call = call_of((3, "a"));
+
+    calls.open(&call, answering_of(1));
+
+    assert!(
+        calls.forget(&call, Some(9)).is_none(),
+        "another request's closes nothing"
+    );
+    assert!(calls.is_answering((&call, 1)), "still to answer");
+    assert!(calls.forget(&call, Some(1)).is_some(), "its own closes it");
+    assert!(!calls.has(&call), "closed");
+    assert!(!calls.is_answering((&call, 1)), "answered no more");
+
+    calls.open(&call, answering_of(2));
+
+    // the call id is open again, for another request
+    assert!(!calls.is_answering((&call, 1)), "the first still not");
+    assert_eq!(
+        calls
+            .forget(&call, None)
+            .map(|answering| answering.dispatched),
+        Some(2),
+        "taken"
+    );
+    assert!(calls.forget(&call, None).is_none(), "once");
+    assert!(!calls.is_answering((&call, 2)), "taken, answered no more");
+}
+
+// what a call left with is what its owner hears, given back once, as a call waited on gives its
+// request
+// spec 12.7, 12.10
+#[test]
+fn gives_a_call_what_it_receives_and_hears_it_leave_once_whichever_way_the_call_leaves() {
+    let mut calls = AnsweringCalls::default();
+    let call = call_of((3, "a"));
+    let mut left: Vec<u64> = Vec::new();
+
+    calls.open(&call, answering_of(1));
+
+    // a call not open receives nothing, on a connection with calls open or none
+    calls.attach(&call_of((5, "a")), receiving_of(9));
+    calls.attach(&call_of((5, "b")), receiving_of(9));
+    calls.attach(&call, receiving_of(1));
+
+    assert!(
+        calls.receiving_of(&call_of((5, "a"))).is_none(),
+        "none on a"
+    );
+    assert!(
+        calls.receiving_of(&call_of((5, "b"))).is_none(),
+        "none on b"
+    );
+    assert_eq!(
+        calls
+            .receiving_of(&call)
+            .map(|receiving| receiving.transfer),
+        Some(1),
+        "its own"
+    );
+
+    // another request's dispatch takes nothing out
+    left.extend(heard(calls.forget(&call, Some(9))));
+    left.extend(heard(calls.forget(&call, Some(1))));
+    left.extend(heard(calls.forget(&call, Some(1))));
+
+    assert!(calls.receiving_of(&call).is_none(), "gone with its call");
+
+    calls.open(&call, answering_of(2));
+    calls.attach(&call, receiving_of(2));
+    left.extend(heard(calls.forget(&call, None)));
+    left.extend(heard(calls.forget(&call, None)));
+    calls.open(&call, answering_of(3));
+    calls.open(&call_of((3, "b")), answering_of(4));
+    calls.attach(&call_of((3, "b")), receiving_of(3));
+
+    for (_, answering) in calls.take_all(None) {
+        left.extend(heard(Some(answering)));
+    }
+
+    // a call that received nothing leaves unheard
+    assert_eq!(left, [1, 2, 3], "closed, taken, gone");
 }

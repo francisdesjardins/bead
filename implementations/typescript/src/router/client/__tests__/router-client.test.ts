@@ -3210,10 +3210,22 @@ test.describe('createRouterClient', () => {
     const { deliver, emitter, sent, transport } = createScriptedTransport();
     const router = createRouterClient(transport);
     const errors = recordErrors(router);
+    const handed: IRequestResolverProps<'server'>[] = [];
+
+    // a request of the server's, held unanswered
+    router.registerResolver(
+      Object.assign((props: IRequestResolverProps<'server'>) => {
+        handed.push(props);
+
+        return Promise.resolve();
+      }, service)
+    );
+    deliver({ header: requestHeaderOf(2), kind: EnvelopeKind.REQUEST, payload: new Uint8Array(0) });
 
     const waiting = router.request(new Uint8Array(0), { options, procedure: service });
 
     await sleep(0);
+    expect(handed).toHaveLength(1);
     router[Symbol.dispose]();
     sent.length = 0;
     deliver(resultOf(1));
@@ -3225,7 +3237,7 @@ test.describe('createRouterClient', () => {
     await expect(
       router.respond(
         { payload: new Uint8Array(0) },
-        { connectionHandle: 'server', header: requestHeaderOf(2) }
+        handed[0] ?? { connectionHandle: 'server', header: requestHeaderOf(2) }
       )
     ).rejects.toBeInstanceOf(DisconnectError);
     expect(sent).toEqual([]);

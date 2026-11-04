@@ -1589,13 +1589,34 @@ public sealed partial class RouterCoreTests
             return OnSend?.Invoke(envelope) ?? Task.CompletedTask;
         }
 
+        // the first resolver of echo the test registered through Resolve
+        public Held? Resolver { get; private set; }
+
         public Held Resolve(int? maximumPayloadBytes = null)
         {
             var resolver = new Held(Core) { MaximumPayloadBytes = maximumPayloadBytes };
 
             Core.RegisterResolver(resolver);
+            Resolver ??= resolver;
 
             return resolver;
+        }
+
+        // opens a call as its peer does, a request of echo on `callId` held by the resolver of echo,
+        // registered here when the test registered none, and gives where its answer goes: the very
+        // header its request was dispatched with, which alone answers it
+        public async Task<AnswerTarget> Open(uint callId, string connectionHandle = Handle)
+        {
+            var resolver = Resolver ?? Resolve();
+
+            await Deliver(new Envelope { Header = RequestOf(callId) }, connectionHandle);
+
+            var props = resolver.Requests.Last((request) =>
+            {
+                return request.Header.CallId == callId && request.ConnectionHandle == connectionHandle;
+            });
+
+            return new AnswerTarget(props.ConnectionHandle, props.Header);
         }
 
 

@@ -1113,7 +1113,7 @@ where
             let manager = &shared.manager;
             let procedure = &shared.procedure;
             // the call's id, once its router drew it; none for a call refused first
-            let mut call_id = match traced {
+            let call_id = match traced {
                 Some(_) => call_id.await.ok(),
                 None => None,
             };
@@ -1158,8 +1158,6 @@ where
                     Err(reason)
                 }
                 Ok(result) => {
-                    call_id = Some(result.header.call_id);
-
                     // * a codec's panic fails the call as its refusal does (spec 17.2, item 2)
                     match decoded(&shared.dependencies.result, &result.payload)
                         .unwrap_or_else(|panicked| Err(refusal_saying(&panicked)))

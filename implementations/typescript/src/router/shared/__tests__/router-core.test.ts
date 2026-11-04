@@ -59,6 +59,7 @@ import {
   limits,
   lineOf,
   narrow,
+  openerOn,
   options,
   payloadOf,
   piecesOf,
@@ -449,28 +450,37 @@ test.describe('createRouterCore', () => {
       ]);
       expect(local).toEqual([]);
 
-      await core.respond(
-        { payload: patternOf(64) },
-        { connectionHandle: 'a', header: handled[0]?.header ?? headerOf(1) }
-      );
-      // a copy of its header, which names a destination, finds the handler no more, nor a resolver
-      await core.respond(
-        { payload: patternOf(64) },
-        { connectionHandle: 'a', header: { ...(handled[1]?.header ?? headerOf(7)) } }
-      );
+      const [first, seventh] = handled;
+
+      if (first === undefined || seventh === undefined) {
+        throw new Error('both requests reach the handler');
+      }
+
+      await core.respond({ payload: patternOf(64) }, first);
+      // a copy of its header was never dispatched: it is refused, and nothing goes out on 7
+      await expect(
+        core.respond(
+          { payload: patternOf(64) },
+          { connectionHandle: 'a', header: { ...seventh.header } }
+        )
+      ).rejects.toBeInstanceOf(ProgrammerError);
 
       expect(answersOf(sent)).toEqual([
         ['a', 'failure', 3, ProtocolCode.DESTINATION_UNKNOWN],
         ['a', 'failure', 5, ProtocolCode.ACCESS_DENIED],
         ['a', 'result', 1, [...patternOf(64)]],
-        ['a', 'result', 7, [...patternOf(64)]],
       ]);
+
+      // until its own header answers it
+      await core.respond({ payload: patternOf(64) }, seventh);
+
+      expect(answersOf(sent).at(-1)).toEqual(['a', 'result', 7, [...patternOf(64)]]);
       expect(sent[0]?.envelope).toMatchObject({
         failure: { detail: 'this peer relays nothing, to 6 or elsewhere' },
       });
       // a request for a destination is written by the handler it was routed to, never by a resolver
       // of this side's; one routed to none, by none
-      expect(told).toEqual([undefined, refusing, handler, undefined]);
+      expect(told).toEqual([undefined, refusing, handler, handler]);
     });
 
     test('takes a destination’s admission at its deferred turn, including one removed while its credential waits', async () => {
@@ -2382,16 +2392,25 @@ test.describe('createRouterCore', () => {
 
   test.describe('its answers', () => {
     test('name their call alone: a result with its payload, a failure with its record', async () => {
-      const { port, sent } = createPort();
-      using core = createRouterCore(port);
+      const handled: IRequestResolverProps<Handle>[] = [];
+      const { port, sent } = createPort({
+        handlerOfDestination: () => {
+          return (props) => {
+            handled.push(props);
 
-      await core.respond(
-        { payload: Uint8Array.of(4) },
-        { connectionHandle: 'b', header: headerOf(77) }
-      );
+            return Promise.resolve();
+          };
+        },
+      });
+      using core = createRouterCore(port);
+      const open = openerOn(core);
+
+      await core.respond({ payload: Uint8Array.of(4) }, await open(77, 'b'));
+      core.receive(requestOf(77, { destinationId: 3 }), 'a');
+      await sleep(0);
       await core.respond(
         { failure: { code: 12, detail: 'why', scope: FailureScope.APPLICATION } },
-        { connectionHandle: 'a', header: { ...headerOf(77), destinationId: 3 } }
+        handled[0] ?? { connectionHandle: 'a', header: headerOf(77) }
       );
 
       expect(sent).toEqual([
@@ -2452,27 +2471,22 @@ test.describe('createRouterCore', () => {
         },
       });
       using core = createRouterCore(port);
+      const open = openerOn(core);
+      const [one, three, five, seven] = [
+        await open(1),
+        await open(3),
+        await open(5, 'b'),
+        await open(7),
+      ];
 
-      core.registerResolver(resolverOf(echo));
       control.sendErrors.set('b', new Error('gone'));
 
-      await core.respond(
-        { payload: Uint8Array.of(1) },
-        { connectionHandle: 'a', header: headerOf(1) }
-      );
-      await core.respond(
-        { failure: SERVER_FAILURES.accessDenied },
-        { connectionHandle: 'a', header: headerOf(3) }
-      );
-      await expect(
-        core.respond({ payload: Uint8Array.of(1) }, { connectionHandle: 'b', header: headerOf(5) })
-      ).rejects.toThrow('gone');
+      await core.respond({ payload: Uint8Array.of(1) }, one);
+      await core.respond({ failure: SERVER_FAILURES.accessDenied }, three);
+      await expect(core.respond({ payload: Uint8Array.of(1) }, five)).rejects.toThrow('gone');
       // past its limit, a result is refused before the side hears of it
       await expect(
-        core.respond(
-          { payload: new Uint8Array(0x1000001) },
-          { connectionHandle: 'a', header: headerOf(7) }
-        )
+        core.respond({ payload: new Uint8Array(0x1000001) }, seven)
       ).rejects.toMatchObject({ code: ProtocolCode.PAYLOAD_TOO_LARGE });
 
       expect(told).toEqual([
@@ -2550,15 +2564,12 @@ test.describe('createRouterCore', () => {
         },
       });
       using core = createRouterCore(port);
+      const request = await openerOn(core)(1);
 
-      core.registerResolver(resolverOf(echo));
       control.sessionTokenOf = () => {
         return TOKEN;
       };
-      await core.respond(
-        { payload: new Uint8Array(0) },
-        { connectionHandle: 'a', header: headerOf(1) }
-      );
+      await core.respond({ payload: new Uint8Array(0) }, request);
       core.receive(
         envelopeOf({
           header: { ...headerOf(3), credential: { scheme: CredentialScheme.JWT, token: 'a.b.c' } },
@@ -2570,6 +2581,7 @@ test.describe('createRouterCore', () => {
 
       // the JWT is refused, a scheme this side takes none of
       expect(headers).toEqual([
+        ['rx', headerOf(1)],
         ['tx', { callId: 1, credentialScheme: CredentialScheme.OPAQUE, kind: EnvelopeKind.RESULT }],
         ['rx', { ...headerOf(3), credentialScheme: CredentialScheme.JWT }],
         ['tx', { callId: 3, kind: EnvelopeKind.FAILURE }],
@@ -2948,8 +2960,8 @@ test.describe('createRouterCore', () => {
       await core.respond({ payload: new Uint8Array(0) }, answered);
 
       expect([core.isAnswering(cancelled), core.isAnswering(answered)]).toEqual([false, false]);
-      // a request never dispatched says nothing against it
-      expect(core.isAnswering({ connectionHandle: 'a', header: headerOf(9) })).toBe(true);
+      // a request never dispatched is open to none
+      expect(core.isAnswering({ connectionHandle: 'a', header: headerOf(9) })).toBe(false);
     });
   });
 
@@ -2963,9 +2975,11 @@ test.describe('createRouterCore', () => {
     });
     const answering = Promise.withResolvers<void>();
     let answered: Promise<unknown> | undefined;
+    let handed: IRequestResolverProps<Handle> | undefined;
 
     core.registerResolver(
       Object.assign(async (props: IRequestResolverProps<Handle>) => {
+        handed = props;
         await answering.promise;
         answered = core.respond({ payload: new Uint8Array(0) }, props).catch((reason: unknown) => {
           return reason;
@@ -3001,7 +3015,10 @@ test.describe('createRouterCore', () => {
       core.request(new Uint8Array(0), { connectionHandle: 'a', options, procedure: echo })
     ).rejects.toBeInstanceOf(DisconnectError);
     await expect(
-      core.respond({ payload: new Uint8Array(0) }, { connectionHandle: 'a', header: headerOf(1) })
+      core.respond(
+        { payload: new Uint8Array(0) },
+        handed ?? { connectionHandle: 'a', header: headerOf(5) }
+      )
     ).rejects.toBeInstanceOf(DisconnectError);
     await expect(
       core.send(
@@ -3022,6 +3039,7 @@ test.describe('createRouterCore', () => {
       options: { timeout: 5_000 },
       procedure: echo,
     });
+    const handedClient = await openerOn(clientCore)(2);
 
     expect(clientCore.isDisposed).toBe(false);
     clientCore[Symbol.dispose]();
@@ -3030,13 +3048,7 @@ test.describe('createRouterCore', () => {
       new DisconnectError('the router was disposed before the answer')
     );
     await expect(
-      clientCore.respond(
-        { payload: Uint8Array.of(1) },
-        {
-          connectionHandle: 'a',
-          header: headerOf(2),
-        }
-      )
+      clientCore.respond({ payload: Uint8Array.of(1) }, handedClient)
     ).rejects.toBeInstanceOf(DisconnectError);
     await expect(
       clientCore.send(
@@ -3481,6 +3493,9 @@ test.describe('createRouterCore', () => {
       core.receive(fromHexadecimal('A1 15 00 04  00 00 00 01  00 00 00 00 00 00 00 08  01'), 'a');
       // a chunk past the total of a payload whole ends nothing
       core.receive(chunkOf(3, { offset: 50, payload: new Uint8Array(20), total: 1_024 }), 'a');
+      // its resolver is handed the request in a microtask, which alone this waits for: the call
+      // asking is still heard of in this task
+      await Promise.resolve();
       await core.respond(
         { payload: Uint8Array.of(9) },
         { connectionHandle: 'a', header: seen[0]?.header ?? headerOf(3) }

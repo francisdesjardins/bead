@@ -624,10 +624,15 @@ export interface IRouterCore<Handle extends string> {
   gauges(): IGauges<Handle>;
   /**
    * Whether the call of a request is still to be answered: once its answer goes out, or it is
-   * cancelled, or gone with its connection, it is not. A request this side never dispatched is taken
-   * as one to answer.
+   * cancelled, or gone with its connection, it is not. A request this side never dispatched is open
+   * to none.
    */
   isAnswering(request: { connectionHandle: Handle; header: IHandedRequestHeader }): boolean;
+  /**
+   * Whether this side dispatched a request with `header`, that very object: a copy of it, or a
+   * header built by hand, was never dispatched, and is answered and subscribed by nothing.
+   */
+  isDispatched(header: IHandedRequestHeader): boolean;
   /** Whether this side's `callId` is reserved on `connectionHandle`, since its call ended. */
   isReserved(callId: CallId, connectionHandle: Handle): boolean;
   /**
@@ -717,8 +722,8 @@ export interface IRouterCore<Handle extends string> {
    * cannot go out rejects it. A result past its limit, a transfer where this side sends none, or the
    * result of a call that opens a subscription, which goes in one envelope, is a
    * {@link FailureError}, and nothing goes out. A failure whose code is not an integer from 1 to
-   * 65535, or a transfer for a request this side never dispatched, is a {@link ProgrammerError}, and
-   * nothing goes out.
+   * 65535, or an answer, whole or a transfer, to a request this side never dispatched — a copy of its
+   * header, say — is a {@link ProgrammerError}, and nothing goes out.
    */
   respond(
     response: RouterAnswer,
@@ -983,6 +988,11 @@ export interface IRouterLike<Handle extends string = ConnectionHandle> {
    * loses that step.
    */
   request(payload: Uint8Array, request: IRouterRequest): Promise<IRouterResult>;
+  /**
+   * Answers a request, by the very header its resolver was handed, while its call is open. A request
+   * this side never dispatched — a copy of its header, say — is a {@link ProgrammerError}, and
+   * nothing goes out.
+   */
   respond(
     response: RouterAnswer,
     request: Pick<IRequestResolverProps<Handle>, 'connectionHandle' | 'header'>
@@ -990,10 +1000,10 @@ export interface IRouterLike<Handle extends string = ConnectionHandle> {
   /**
    * Subscribes the connection a request came from to that request's procedure, in the call's
    * session, which bounds it, and gives the call id of the subscription: a server's router does; a
-   * client's, which notifies nobody, cannot. A request that opens no subscription is a
-   * {@link ProgrammerError}: its requester asked for an answer alone. A connection closed, or a
-   * router disposed, is a {@link DisconnectError}; a call its requester cancelled, or one answered
-   * already, a {@link CancelError}.
+   * client's, which notifies nobody, cannot. A request that opens no subscription, or one this side
+   * never dispatched, is a {@link ProgrammerError}: its requester asked for an answer alone, or no
+   * call is tied to it. A connection closed, or a router disposed, is a {@link DisconnectError}; a
+   * call its requester cancelled, or one answered already, a {@link CancelError}.
    */
   subscribe(
     request: Pick<IRequestResolverProps<Handle>, 'connectionHandle' | 'header' | 'session'>

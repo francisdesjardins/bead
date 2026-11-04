@@ -1548,6 +1548,38 @@ public sealed partial class RouterServerTests : IDisposable
     }
 
     [Fact]
+    public async Task A_subscription_goes_only_to_a_request_this_router_dispatched_a_copy_of_its_header_is_refused_and_subscribes_nothing()
+    {
+        var handed = new List<RequestResolverProps>();
+
+        Start();
+        _transport.Open(First);
+        Router.RegisterResolver(new RawResolver(News, (props) =>
+        {
+            handed.Add(props);
+
+            return Task.CompletedTask;
+        }));
+        Deliver(First, SubscribingOf(1));
+        await Settle();
+
+        var request = Assert.Single(handed);
+
+        // a copy of its header was never dispatched: no call is tied to it (spec 9.3)
+        await Assert.ThrowsAsync<ArgumentException>(() =>
+        {
+            return Router.Subscribe(new AnswerTarget(request.ConnectionHandle, request.Header with { })).WaitAsync(Patience, Cancelled);
+        });
+        Assert.Empty(await SubscribedTo(News));
+
+        // its own header subscribes it, the copy having marked nothing
+        Assert.Equal(1u, await Router.Subscribe(new AnswerTarget(request.ConnectionHandle, request.Header)).WaitAsync(Patience, Cancelled));
+        Assert.Equal(["first 1"], await SubscribedTo(News));
+        Assert.Empty(_transport.Sent);
+        Assert.Empty(_errors);
+    }
+
+    [Fact]
     public async Task A_cancel_takes_away_what_its_call_subscribed_in_flight_and_nothing_answers_it()
     {
         var held = new TaskCompletionSource();

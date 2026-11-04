@@ -24,6 +24,7 @@ import {
   echo,
   headerOf,
   limits,
+  openerOn,
   options,
   piecesOf,
   requestOf,
@@ -44,6 +45,7 @@ test.describe('createRouterCore', () => {
     test('announce the session when it changes, and only then', async () => {
       const { control, port, sent } = createPort();
       using core = createRouterCore(port);
+      const open = openerOn(core);
       const tokens: (SessionToken | undefined)[] = [
         TOKEN,
         TOKEN,
@@ -53,6 +55,8 @@ test.describe('createRouterCore', () => {
       ];
 
       for (const [index, token] of tokens.entries()) {
+        const request = await open(index * 2 + 1);
+
         control.sessionTokenOf = () => {
           return token;
         };
@@ -60,15 +64,12 @@ test.describe('createRouterCore', () => {
           index % 2 === 0
             ? { payload: new Uint8Array(0) }
             : { failure: SERVER_FAILURES.accessDenied },
-          { connectionHandle: 'a', header: headerOf(index * 2 + 1) }
+          request
         );
       }
 
       // another connection, with no session yet, is told nothing
-      await core.respond(
-        { payload: new Uint8Array(0) },
-        { connectionHandle: 'b', header: headerOf(1) }
-      );
+      await core.respond({ payload: new Uint8Array(0) }, await open(1, 'b'));
 
       expect(
         sent.map(({ envelope }) => {
@@ -82,21 +83,18 @@ test.describe('createRouterCore', () => {
     test('announce again what an answer that did not go out announced', async () => {
       const { control, port, sent } = createPort();
       using core = createRouterCore(port);
+      const open = openerOn(core);
+      const [first, second] = [await open(1), await open(3)];
 
       control.sessionTokenOf = () => {
         return TOKEN;
       };
       control.sendErrors.set('a', new Error('gone'));
 
-      await expect(
-        core.respond({ payload: new Uint8Array(0) }, { connectionHandle: 'a', header: headerOf(1) })
-      ).rejects.toThrow('gone');
+      await expect(core.respond({ payload: new Uint8Array(0) }, first)).rejects.toThrow('gone');
 
       control.sendErrors.clear();
-      await core.respond(
-        { payload: new Uint8Array(0) },
-        { connectionHandle: 'a', header: headerOf(3) }
-      );
+      await core.respond({ payload: new Uint8Array(0) }, second);
 
       expect(
         sent.map(({ envelope }) => {
@@ -111,6 +109,8 @@ test.describe('createRouterCore', () => {
     test('keep the announcement in the order answers were written, whatever order they settle in', async () => {
       const { control, port, sent } = createPort();
       using core = createRouterCore(port);
+      const open = openerOn(core);
+      const [one, three, five] = [await open(1), await open(3), await open(5)];
       let token: SessionToken | undefined = TOKEN;
 
       control.sessionTokenOf = () => {
@@ -118,17 +118,11 @@ test.describe('createRouterCore', () => {
       };
       control.held = [];
 
-      const first = core.respond(
-        { payload: new Uint8Array(0) },
-        { connectionHandle: 'a', header: headerOf(1) }
-      );
+      const first = core.respond({ payload: new Uint8Array(0) }, one);
 
       token = OTHER_TOKEN;
 
-      const second = core.respond(
-        { payload: new Uint8Array(0) },
-        { connectionHandle: 'a', header: headerOf(3) }
-      );
+      const second = core.respond({ payload: new Uint8Array(0) }, three);
       const [firstSend, secondSend] = control.held;
 
       // the second settles first, then the first fails: what the second wrote stands
@@ -138,10 +132,7 @@ test.describe('createRouterCore', () => {
       await expect(first).rejects.toThrow('gone');
 
       control.held = undefined;
-      await core.respond(
-        { payload: new Uint8Array(0) },
-        { connectionHandle: 'a', header: headerOf(5) }
-      );
+      await core.respond({ payload: new Uint8Array(0) }, five);
 
       expect(
         sent.map(({ envelope }) => {
@@ -157,16 +148,15 @@ test.describe('createRouterCore', () => {
     test('forget the announcement with the connection, even with an answer in flight', async () => {
       const { control, port, sent } = createPort();
       using core = createRouterCore(port);
+      const open = openerOn(core);
+      const request = await open(1);
 
       control.sessionTokenOf = () => {
         return TOKEN;
       };
       control.held = [];
 
-      const inFlight = core.respond(
-        { payload: new Uint8Array(0) },
-        { connectionHandle: 'a', header: headerOf(1) }
-      );
+      const inFlight = core.respond({ payload: new Uint8Array(0) }, request);
 
       core.rejectPending('a closed', 'a');
       // it goes out after all, and undoes nothing
@@ -175,10 +165,7 @@ test.describe('createRouterCore', () => {
 
       // a connection of the same handle is told anew
       control.held = undefined;
-      await core.respond(
-        { payload: new Uint8Array(0) },
-        { connectionHandle: 'a', header: headerOf(3) }
-      );
+      await core.respond({ payload: new Uint8Array(0) }, await open(3));
 
       expect(
         sent.map(({ envelope }) => {
@@ -193,24 +180,20 @@ test.describe('createRouterCore', () => {
     test('fail the answer whose session cannot be told, and announce nothing without a way to', async () => {
       const { control, port, sent } = createPort();
       using core = createRouterCore(port);
+      const request = await openerOn(core)(1);
       const sessionless = new Error('no session');
 
       control.sessionTokenOf = () => {
         throw sessionless;
       };
 
-      await expect(
-        core.respond({ payload: new Uint8Array(0) }, { connectionHandle: 'a', header: headerOf(1) })
-      ).rejects.toBe(sessionless);
+      await expect(core.respond({ payload: new Uint8Array(0) }, request)).rejects.toBe(sessionless);
       expect(sent).toEqual([]);
 
       const { sessionTokenOf: _, ...withoutSessions } = port;
       using bare = createRouterCore(withoutSessions);
 
-      await bare.respond(
-        { payload: new Uint8Array(0) },
-        { connectionHandle: 'a', header: headerOf(1) }
-      );
+      await bare.respond({ payload: new Uint8Array(0) }, await openerOn(bare)(1));
 
       expect(
         sent.map(({ envelope }) => {
@@ -267,7 +250,7 @@ test.describe('createRouterCore', () => {
         const { port, sent } = createPort();
         using core = createRouterCore(port, { limits });
 
-        await core.respond({ failure }, { connectionHandle: 'a', header: headerOf(1) });
+        await core.respond({ failure }, await openerOn(core)(1));
 
         const [{ envelope } = { envelope: undefined }] = sent;
 

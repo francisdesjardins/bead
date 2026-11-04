@@ -586,17 +586,15 @@ export const createRouterCore = <Handle extends string>(
   const resultTransferOf = (
     payload: Uint8Array,
     {
-      controller,
       header,
       maximumPayloadBytes,
       request,
     }: {
-      controller: AbortController | undefined;
       header: IResultHeader;
       maximumPayloadBytes: number;
       request: IHandedRequestHeader;
     }
-  ): { controller: AbortController; outgoing: IOutgoingTransfer } | undefined => {
+  ): IOutgoingTransfer | undefined => {
     const outgoing = transferOf(payload, { header, maximumPayloadBytes });
 
     if (outgoing === undefined) {
@@ -617,13 +615,7 @@ export const createRouterCore = <Handle extends string>(
       );
     }
 
-    if (controller === undefined) {
-      throw new ProgrammerError(
-        `a result goes as a transfer only on a call this router dispatched, not on call ${String(request.callId)}`
-      );
-    }
-
-    return { controller, outgoing };
+    return outgoing;
   };
 
   const respond: IRouterCore<Handle>['respond'] = async (
@@ -637,9 +629,16 @@ export const createRouterCore = <Handle extends string>(
       writeFailure(response.failure);
     }
 
-    // the call this answer is for, when this side dispatched its request; an answer to any other
-    // header ends no call
+    // the call this answer is for, found by the very header its request was dispatched with: a copy,
+    // or a header built by hand, is tied to no call, so nothing could tell it the call's only answer,
+    // nor the call open (spec 9.3, 9.4)
     const controller = answeringCalls.controllerOf(header);
+
+    if (controller === undefined) {
+      throw new ProgrammerError(
+        `an answer goes only to a request this router dispatched, not to call ${String(callId)}`
+      );
+    }
 
     // a call its requester cancelled, its connection took away, or whose call id another request
     // opened since, is answered by nothing: the answer would settle a call it does not belong to;
@@ -650,8 +649,8 @@ export const createRouterCore = <Handle extends string>(
 
     // an answer names its call alone: never its procedure, never its destination
     const result: IResultHeader = { callId, kind: EnvelopeKind.RESULT };
-    // the handler its request was routed to; a copy of a header finds its procedure's, and a request
-    // to a destination never a resolver of this side's
+    // the handler its request was routed to; a request refused before it was routed finds its
+    // procedure's, and a request to a destination never a resolver of this side's
     const resolver =
       handlers.get(header) ??
       (header.destinationId === undefined
@@ -660,7 +659,6 @@ export const createRouterCore = <Handle extends string>(
     const transfer =
       response.failure === undefined
         ? resultTransferOf(response.payload, {
-            controller,
             header: result,
             maximumPayloadBytes: payloadLimitOf(resolver),
             request: header,
@@ -679,7 +677,7 @@ export const createRouterCore = <Handle extends string>(
     // its answer going out: a second goes nowhere, and this one closes the call once done
     answeringCalls.answer({ connectionHandle, header });
 
-    if (controller !== undefined && response.failure !== undefined) {
+    if (response.failure !== undefined) {
       failuresAnswered.set(header, response.failure);
     }
 
@@ -709,30 +707,25 @@ export const createRouterCore = <Handle extends string>(
               connectionHandle,
               // answered: the call id is the peer's to open again
               onHandOff: () => {
-                if (controller !== undefined) {
-                  // * counted, it ends as its transport has it; uncounted, nothing is built for it
-                  if (metrics !== undefined) {
-                    answeringCalls.end({ connectionHandle, header }, ending);
-                  }
-
-                  answeringCalls.close({ callId, connectionHandle }, controller);
+                // * counted, it ends as its transport has it; uncounted, nothing is built for it
+                if (metrics !== undefined) {
+                  answeringCalls.end({ connectionHandle, header }, ending);
                 }
+
+                answeringCalls.close({ callId, connectionHandle }, controller);
               },
             }
           )
-        : sendResult(transfer.outgoing, {
+        : sendResult(transfer, {
             connectionHandle,
-            controller: transfer.controller,
+            controller,
             header: result,
             request: header,
           }));
     } catch (reason) {
       // an answer that did not go out leaves nothing done for it behind, and its call closed
       undo?.();
-
-      if (controller !== undefined) {
-        answeringCalls.close({ callId, connectionHandle }, controller);
-      }
+      answeringCalls.close({ callId, connectionHandle }, controller);
 
       throw reason;
     }
@@ -1625,6 +1618,9 @@ export const createRouterCore = <Handle extends string>(
     },
     isAnswering: (request) => {
       return answeringCalls.isAnswering(request);
+    },
+    isDispatched: (header) => {
+      return answeringCalls.controllerOf(header) !== undefined;
     },
     isReserved: (callId, connectionHandle) => {
       return requester.isReserved(callId, connectionHandle);
