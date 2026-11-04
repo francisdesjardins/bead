@@ -946,7 +946,7 @@ public sealed class SessionManagerTests
     }
 
     [Fact]
-    public void Runs_on_the_clock_its_options_give_the_system_s_when_none()
+    public void Runs_on_the_clock_its_options_give_the_platform_s_when_none()
     {
         var time = new FakeTimeProvider();
 

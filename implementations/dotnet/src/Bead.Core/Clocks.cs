@@ -121,7 +121,8 @@ public static class Clocks
 
     /// <summary>
     /// The clock of a layer built on another: the one beneath it, unless it was given one; one given
-    /// that differs is an <see cref="ArgumentException"/> naming both.
+    /// that differs is an <see cref="ArgumentException"/> naming both. A layer is named in the
+    /// singular, which the refusal's verbs agree with.
     /// </summary>
     internal static TimeProvider Of((TimeProvider? Given, TimeProvider Beneath) clocks, (string Layer, string Below) names)
     {
@@ -136,9 +137,10 @@ public static class Clocks
             $"{names.Layer} runs on the clock of {names.Below}, {NameOf(beneath)}, and was given another, {NameOf(given)}");
     }
 
-    // a clock as a refusal names it: its type, since a test's clock tells its reading instead
+    // a clock as a refusal names it: the platform's, or one of its own, since a test's clock tells
+    // its reading rather than its name
     private static string NameOf(TimeProvider clock)
     {
-        return ReferenceEquals(clock, TimeProvider.System) ? "the system's" : $"a {clock.GetType().Name}";
+        return ReferenceEquals(clock, TimeProvider.System) ? "the platform's" : "one of its own";
     }
 }

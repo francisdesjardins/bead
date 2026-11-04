@@ -276,7 +276,7 @@ public sealed partial class RouterClientTests
         });
 
         Assert.Equal(
-            "a client's router runs on the clock of its transport, a FakeTimeProvider, and was given another, the system's",
+            "a client's router runs on the clock of its transport, one of its own, and was given another, the platform's",
             refusal.Message);
     }
 

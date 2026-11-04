@@ -374,6 +374,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   a `ProgrammerError` on the TypeScript side, an `ArgumentException` on the C# side — and nothing
   goes out. It answered whatever call held that call id: a second answer to an answered call, or one
   after its requester's cancel (spec 9.3, 9.4). Answer with the header the resolver was handed.
+- The refusal of a clock other than the one a layer runs on is one sentence on every side: a
+  server's sessions given another are named "a server's session manager", where the C# and Rust
+  sides named "a server's sessions", and each clock is named "the platform's" or "one of its own",
+  where the C# side named "the system's" or the clock's type.
 
 ### Security
 

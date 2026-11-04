@@ -219,7 +219,7 @@ public sealed class Server<TData> : IBeadServer<TData>
 
         Sessions = new SessionManager<TData>(sessions with
         {
-            Clock = Clocks.Of((sessions.Clock, _clock), ("a server's sessions", "their server")),
+            Clock = Clocks.Of((sessions.Clock, _clock), ("a server's session manager", "its server")),
         });
         RequireSession = new BeforeRequest(
             (request) =>
