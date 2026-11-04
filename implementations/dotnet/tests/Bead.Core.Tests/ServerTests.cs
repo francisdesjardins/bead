@@ -532,6 +532,7 @@ public sealed class ServerTests : IAsyncLifetime
         Assert.Same(Server.ShareLegBSession, server.ShareLegBSession);
         Assert.Same(Server.RequireSession, server.RequireSession);
         Assert.Same(Server.Services, server.Services);
+        Assert.Equal(typeof(IServiceManagerServer), typeof(Server<string>).GetProperty(nameof(Server<string>.Services))!.PropertyType);
     }
 
     [Fact]

@@ -36,7 +36,7 @@ public sealed partial class RouterClientTests
 
     // helpers
 
-    private static Func<JsonElement, BoundCall<JsonElement>> RequesterOf(ServiceManager services, string procedureName)
+    private static Func<JsonElement, BoundCall<JsonElement>> RequesterOf(IServiceManagerClient services, string procedureName)
     {
         return services.GetRequest(
             InteropProcedures.All.Single((procedure) =>
@@ -2604,12 +2604,12 @@ public sealed partial class RouterClientTests
             }
         }
 
-        public ServiceManager ClientServices { get; }
+        public IServiceManagerClient ClientServices { get; }
 
         // the client as a Bead client, its services those above, for the interop's generated client
         public ServiceLink.LinkedClient AsClient { get; }
 
-        public ServiceManager ServerServices { get; }
+        public IServiceManagerServer ServerServices { get; }
 
         public List<IEnvelopeHeader> ClientReceived { get; } = [];
 

@@ -10,7 +10,7 @@ public interface IClient : IAsyncDisposable
     RouterClient Router { get; }
 
     /// <summary>Its services.</summary>
-    ServiceManager Services { get; }
+    IServiceManagerClient Services { get; }
 
     /// <summary>Closes its transport's connection.</summary>
     Task Disconnect(TransportClientDisconnectOptions? options = null);

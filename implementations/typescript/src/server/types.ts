@@ -12,7 +12,7 @@ import type {
   IAdmissionRequest,
   ICredentials,
   IntakeLimitsOptions,
-  IServiceManager,
+  IServiceManagerServer,
   IServiceManagerOptions,
   RouterLimitsOptions,
 } from '../router/shared/types';
@@ -37,8 +37,11 @@ export interface IServer<
   Data = unknown,
 > {
   readonly router: IRouterServer<Transport>;
-  /** The requesters, commands and resolvers of the services, made on {@link IServer.router}. */
-  readonly services: IServiceManager<TransportServerConnectionHandle>;
+  /**
+   * A server's services, made on {@link IServer.router}: its commands, and its request and
+   * notification resolvers.
+   */
+  readonly services: IServiceManagerServer<TransportServerConnectionHandle>;
   /**
    * The connections' sessions. A session is made by a request — a resolver stores it with
    * `sessions.set` — and goes with its connection. Its connection timeout closes the connection;
@@ -119,7 +122,7 @@ export interface IServerLayers<Transport extends IServerTransportLike, Data = un
     | ((
         router: IRouterServer<Transport>,
         options: IServiceManagerOptions<TransportServerConnectionHandle>
-      ) => IServiceManager<TransportServerConnectionHandle>)
+      ) => IServiceManagerServer<TransportServerConnectionHandle>)
     | undefined;
   /**
    * Builds the sessions on the clock it is given, the transport's, which they must run on;

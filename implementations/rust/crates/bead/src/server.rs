@@ -16,9 +16,7 @@ use crate::credentials::Credentials;
 use crate::duration::{NEVER, hold};
 use crate::errors::{CallError, ProgrammerError};
 use crate::managers::notification::PacingLimitsOptions;
-use crate::managers::service::{
-    RequestDefaults, ServiceManager, ServiceManagerOptions, ServiceRouter,
-};
+use crate::managers::service::{RequestDefaults, ServiceManagerOptions, ServiceManagerServer};
 use crate::managers::sessions::{
     Arming, Inactivity, Session, SessionEvent, SessionManagerOptions, SessionState,
 };
@@ -1189,7 +1187,7 @@ impl SessionManager {
 
 struct Shared {
     router: RouterServer,
-    services: ServiceManager,
+    services: ServiceManagerServer,
     sessions: SessionManager,
     transport: Arc<dyn ServerTransport>,
 }
@@ -1282,8 +1280,8 @@ impl Server {
             ),
         )?;
         let closing = router.clone();
-        let services = ServiceManager::new(
-            ServiceRouter::Server(router.clone()),
+        let services = ServiceManagerServer::new(
+            router.clone(),
             &ServiceManagerOptions {
                 close_connection: Some(Arc::new(move |handle: &ConnectionHandle| {
                     let handle = Arc::clone(handle);
@@ -1322,7 +1320,7 @@ impl Server {
 
     /// Its services.
     #[must_use]
-    pub fn services(&self) -> &ServiceManager {
+    pub fn services(&self) -> &ServiceManagerServer {
         &self.shared.services
     }
 

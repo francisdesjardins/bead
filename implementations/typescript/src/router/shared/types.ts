@@ -935,9 +935,9 @@ export interface IRouterCorePort<Handle extends string> {
 
 /**
  * The part of a router a service manager calls: it triggers the notifications registered, calls
- * the resolvers registered, and names the failures its side raises. One manager serves both sides,
- * so each router refuses the half that is not its own: a server notifies and subscribes, and holds
- * no notification; a client holds notifications, and notifies nobody.
+ * the resolvers registered, and names the failures its side raises. The untyped manager serves
+ * either side, so each router refuses the half that is not its own: a server notifies and
+ * subscribes, and holds no notification; a client holds notifications, and notifies nobody.
  */
 export interface IRouterLike<Handle extends string = ConnectionHandle> {
   /** The clock it runs on, its transport's, which what is built on it runs on too. */
@@ -1631,10 +1631,11 @@ export interface IServiceManagerOptions<Handle extends string = ConnectionHandle
 }
 
 /**
- * The resolvers and requesters of the services on one router; `Handle` is how that router names who
- * a request came from.
+ * A client's services, on a client's router (spec 16.11): the requests and notifications it makes
+ * of its server, and the resolvers of the commands it answers; a server's makers are none of its
+ * own. `IClient.services` gives it.
  */
-export interface IServiceManager<Handle extends string = ConnectionHandle> {
+export interface IServiceManagerClient<Handle extends string = ConnectionHandle> {
   /**
    * Whether anyone listens to `debug`: the calls read no clock and build nothing for it otherwise,
    * the one check each makes.
@@ -1658,17 +1659,86 @@ export interface IServiceManager<Handle extends string = ConnectionHandle> {
    * window — unpaced and paced are two — is a {@link ProgrammerError}. A registration cancelled or
    * timed out once its request went out cancels its call, so the other end holds no subscription for
    * it. The serializer of the first ask is the one kept: one procedure's payloads are one
-   * procedure's. Asked for on a server's router, which notifies, it is a {@link ProgrammerError} as
-   * it is made, before spec 16.10's reasons.
+   * procedure's. Past the types, or on a manager over a router whose side its type does not name,
+   * one asked for on a server's router, which notifies, is a {@link ProgrammerError} as it is made,
+   * before spec 16.10's reasons.
    */
   getNotification<RequestPayload, ResponsePayload, NotificationPayload>(
     procedure: IProcedure,
     dependencies: INotificationDependencies<RequestPayload, ResponsePayload, NotificationPayload>
   ): INotification<RequestPayload, NotificationPayload>;
   /**
-   * As {@link IServiceManager.getRequestResolver}, with a `notify` on the resolver, on a server's
-   * router alone. Asked for on a client's router, which hears notifications, it is a
+   * What runs a command, on a client's router alone: the server's request, answered as
+   * {@link IServiceManager.getRequestResolver} answers one; told to `debug` as a `command`. Past the
+   * types, or on a manager over a router whose side its type does not name, one asked for on a
+   * server's router, which answers requests, is a {@link ProgrammerError} as it is made, before
+   * spec 16.10's reasons.
+   */
+  getCommandResolver<
+    RequestPayload,
+    ResponsePayload,
+    Failure extends ResolverFailure = ResolverFailure,
+  >(
+    procedure: IProcedure,
+    dependencies: IRequestResolverDependencies<RequestPayload, ResponsePayload, Handle>
+  ): (
+    callback: RequestResolverCallback<RequestPayload, ResponsePayload, Failure, Handle>
+  ) => IRequestResolver<Handle>;
+  /**
+   * A procedure to call, on a client's router alone; a deprecated one emits `deprecated` at each
+   * call. A call whose value does not write fails before anything goes, and is neither traced nor
+   * deprecated: no call is made. Past the types, or on a manager over a router whose side its type
+   * does not name, one asked for on a server's router, which makes commands, is a
    * {@link ProgrammerError} as it is made, before spec 16.10's reasons.
+   */
+  getRequest<RequestPayload, ResponsePayload>(
+    procedure: IProcedure,
+    dependencies: IRequestDependencies<RequestPayload, ResponsePayload>
+  ): IRequest<RequestPayload, ResponsePayload>;
+  off<K extends SERVICE_MANAGER_EVENTS>(
+    event: K,
+    listener: EmitterListener<ServiceManagerEventMap[K]>
+  ): this;
+  on<K extends SERVICE_MANAGER_EVENTS>(
+    event: K,
+    listener: EmitterListener<ServiceManagerEventMap[K]>
+  ): this;
+  once<K extends SERVICE_MANAGER_EVENTS>(
+    event: K,
+    listener: EmitterListener<ServiceManagerEventMap[K]>
+  ): this;
+  removeAllListeners(event?: SERVICE_MANAGER_EVENTS): this;
+}
+
+/**
+ * A server's services, on a server's router (spec 16.11): the commands it makes of a client, and
+ * the resolvers of the requests and notifications it answers; a client's makers are none of its
+ * own, and no notification of its own is dropped. `IServer.services` gives it.
+ */
+export interface IServiceManagerServer<Handle extends string = ConnectionHandle> {
+  /**
+   * Whether anyone listens to `debug`: the calls read no clock and build nothing for it otherwise,
+   * the one check each makes.
+   */
+  readonly isDebugging: boolean;
+
+  emit<K extends Exclude<SERVICE_MANAGER_EVENTS, 'dropped'>>(
+    event: K,
+    ...params: ServiceManagerEventMap[K]
+  ): boolean;
+  /**
+   * Every `event` from now on, as its arguments, for `for await`; the signal, a `break` or a throw
+   * ends it.
+   */
+  events<K extends Exclude<SERVICE_MANAGER_EVENTS, 'dropped'>>(
+    event: K,
+    options?: IEventIteratorOptions
+  ): AsyncIterableIterator<ServiceManagerEventMap[K], undefined>;
+  /**
+   * As {@link IServiceManager.getRequestResolver}, with a `notify` on the resolver, on a server's
+   * router alone. Past the types, or on a manager over a router whose side its type does not name,
+   * one asked for on a client's router, which hears notifications, is a {@link ProgrammerError} as
+   * it is made, before spec 16.10's reasons.
    */
   getNotificationResolver<
     RequestPayload,
@@ -1689,43 +1759,19 @@ export interface IServiceManager<Handle extends string = ConnectionHandle> {
   /**
    * A command: a procedure the server asks one client to run, on a server's router alone — its
    * options name the connection it goes to, which the types require. The same as
-   * {@link IServiceManager.getRequest} on the wire; told to `debug` as a `command`. Asked for on a
-   * client's router, which makes requests, it is a {@link ProgrammerError} as it is made, before
-   * spec 16.10's reasons.
+   * {@link IServiceManager.getRequest} on the wire; told to `debug` as a `command`. Past the types,
+   * or on a manager over a router whose side its type does not name, one asked for on a client's
+   * router, which makes requests, is a {@link ProgrammerError} as it is made, before spec 16.10's
+   * reasons.
    */
   getCommand<RequestPayload, ResponsePayload>(
     procedure: IProcedure,
     dependencies: IRequestDependencies<RequestPayload, ResponsePayload>
   ): ICommand<RequestPayload, ResponsePayload, Handle>;
   /**
-   * What runs a command, on a client's router alone: the server's request, answered as
-   * {@link IServiceManager.getRequestResolver} answers one; told to `debug` as a `command`. Asked
-   * for on a server's router, which answers requests, it is a {@link ProgrammerError} as it is
-   * made, before spec 16.10's reasons.
-   */
-  getCommandResolver<
-    RequestPayload,
-    ResponsePayload,
-    Failure extends ResolverFailure = ResolverFailure,
-  >(
-    procedure: IProcedure,
-    dependencies: IRequestResolverDependencies<RequestPayload, ResponsePayload, Handle>
-  ): (
-    callback: RequestResolverCallback<RequestPayload, ResponsePayload, Failure, Handle>
-  ) => IRequestResolver<Handle>;
-  /**
-   * A procedure to call, on a client's router alone; a deprecated one emits `deprecated` at each
-   * call. A call whose value does not write fails before anything goes, and is neither traced nor
-   * deprecated: no call is made. Asked for on a server's router, which makes commands, it is a
-   * {@link ProgrammerError} as it is made, before spec 16.10's reasons.
-   */
-  getRequest<RequestPayload, ResponsePayload>(
-    procedure: IProcedure,
-    dependencies: IRequestDependencies<RequestPayload, ResponsePayload>
-  ): IRequest<RequestPayload, ResponsePayload>;
-  /**
    * A procedure to answer, on a server's router alone: given its callback, the resolver is made and
-   * registered in the router. Asked for on a client's router, which answers commands, it is a
+   * registered in the router. Past the types, or on a manager over a router whose side its type
+   * does not name, one asked for on a client's router, which answers commands, is a
    * {@link ProgrammerError} as it is made, before spec 16.10's reasons; then a procedure off spec
    * section 16, or against its kind (16.11), is one, before any other reason. A request
    * `beforeRequest` refuses — before its payload is read — or whose payload does not decode, is
@@ -1742,6 +1788,33 @@ export interface IServiceManager<Handle extends string = ConnectionHandle> {
   ): (
     callback: RequestResolverCallback<RequestPayload, ResponsePayload, Failure, Handle>
   ) => IRequestResolver<Handle>;
+  off<K extends Exclude<SERVICE_MANAGER_EVENTS, 'dropped'>>(
+    event: K,
+    listener: EmitterListener<ServiceManagerEventMap[K]>
+  ): this;
+  on<K extends Exclude<SERVICE_MANAGER_EVENTS, 'dropped'>>(
+    event: K,
+    listener: EmitterListener<ServiceManagerEventMap[K]>
+  ): this;
+  once<K extends Exclude<SERVICE_MANAGER_EVENTS, 'dropped'>>(
+    event: K,
+    listener: EmitterListener<ServiceManagerEventMap[K]>
+  ): this;
+  removeAllListeners(event?: Exclude<SERVICE_MANAGER_EVENTS, 'dropped'>): this;
+}
+
+/**
+ * The resolvers and requesters of the services on one router whose side its type does not name:
+ * both sides' makers, each refused on the other side's router as it is made; `Handle` is how that
+ * router names who a request came from.
+ */
+export interface IServiceManager<Handle extends string = ConnectionHandle>
+  extends IServiceManagerClient<Handle>, IServiceManagerServer<Handle> {
+  emit<K extends SERVICE_MANAGER_EVENTS>(event: K, ...params: ServiceManagerEventMap[K]): boolean;
+  events<K extends SERVICE_MANAGER_EVENTS>(
+    event: K,
+    options?: IEventIteratorOptions
+  ): AsyncIterableIterator<ServiceManagerEventMap[K], undefined>;
   off<K extends SERVICE_MANAGER_EVENTS>(
     event: K,
     listener: EmitterListener<ServiceManagerEventMap[K]>

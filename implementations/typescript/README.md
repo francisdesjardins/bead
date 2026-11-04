@@ -427,33 +427,34 @@ A1 15 20 04  00 00 00 07  00 00 00 00 00 00 00 02
    CREDIT, PACED: two notifications sent at most, the first one's callbacks settled
 ```
 
-The service manager — one for both sides — makes what a requester calls and what answers it, over
-any router that meets `IRouterLike`: a request is answered once, and as `PROCEDURE_FAILED` when its
-resolver fails first. A resolver answers the procedure's own failure, `response(null, { code: 21 })`
-with a code from 1 to 65,535, or a refusal of admission from its router's table. The types refuse
-the protocol's other failures; a code out of that range, or a refusal from the other side's table,
-fails the resolver, and the request is answered as `PROCEDURE_FAILED`, with no detail: the error is
-reported, never the peer's to read (spec 9.0). A `beforeRequest` admits a request only by returning
-`true`: anything else refuses it, with the `refusal` the function carries, or with `ACCESS_DENIED`.
-It is synchronous, and sees the request's header, its connection and the call's session, `session`,
-never its payload: its router asks it through the resolver's `admit` once the request's credential
-resolved and before the payload is read — or comes, for a transfer — so a request refused is never
-decoded, and a resolver called by a router that asked nothing asks it itself, first. An admission of
-the application's own reads the session's data — a token's claims, say — and a callback receives
-the same session, as `request.session`. The header a resolver, its `admit`, its callback and a
-`beforeRequest` are handed, a relay's `beforeRoute` among them, is an `IHandedRequestHeader`: the
-header as it came, but for its credential, a `HandedCredential`, which says of a `JWT` its scheme
-alone. No procedure is handed a bearer credential its call came with: a `JWT`'s token, and what a
-transport carried beside an `ELSEWHERE`, reach the side's verifier, its `credentials`, and a relay,
-which forwards them to leg B, alone (spec 13.1). A callback's
-`request.signal` is aborted when its call ends before its answer — a `CancelError` when its
-requester cancels it, a `DisconnectError` when its connection closes — so it may stop: its answer
-would go nowhere, and what it throws then is not reported. A listener of that signal that throws is
-an uncaught exception, which a peer's cancel can set off. Under `server/`, the session manager
-keeps each connection's session — its token, 16 bytes drawn from `crypto`, its data and two
-inactivity timers — the notification manager who is subscribed to what, by connection, call id and
-session, and `credential-sessions.ts` each credential's session that bounds a subscription, its end
-timed on the router's clock.
+The service manager makes what a requester calls and what answers it, over any router that meets
+`IRouterLike`; a client and a server give it typed by their side, `IServiceManagerClient` and
+`IServiceManagerServer`, each with its side's makers alone. A request is answered once, and as
+`PROCEDURE_FAILED` when its resolver fails first. A resolver answers the procedure's own failure,
+`response(null, { code: 21 })` with a code from 1 to 65,535, or a refusal of admission from its
+router's table. The types refuse the protocol's other failures; a code out of that range, or a
+refusal from the other side's table, fails the resolver, and the request is answered as
+`PROCEDURE_FAILED`, with no detail: the error is reported, never the peer's to read (spec 9.0). A
+`beforeRequest` admits a request only by returning `true`: anything else refuses it, with the
+`refusal` the function carries, or with `ACCESS_DENIED`. It is synchronous, and sees the request's
+header, its connection and the call's session, `session`, never its payload: its router asks it
+through the resolver's `admit` once the request's credential resolved and before the payload is read
+— or comes, for a transfer — so a request refused is never decoded, and a resolver called by a
+router that asked nothing asks it itself, first. An admission of the application's own reads the
+session's data — a token's claims, say — and a callback receives the same session, as
+`request.session`. The header a resolver, its `admit`, its callback and a `beforeRequest` are
+handed, a relay's `beforeRoute` among them, is an `IHandedRequestHeader`: the header as it came, but
+for its credential, a `HandedCredential`, which says of a `JWT` its scheme alone. No procedure is
+handed a bearer credential its call came with: a `JWT`'s token, and what a transport carried beside
+an `ELSEWHERE`, reach the side's verifier, its `credentials`, and a relay, which forwards them to
+leg B, alone (spec 13.1). A callback's `request.signal` is aborted when its call ends before its
+answer — a `CancelError` when its requester cancels it, a `DisconnectError` when its connection
+closes — so it may stop: its answer would go nowhere, and what it throws then is not reported. A
+listener of that signal that throws is an uncaught exception, which a peer's cancel can set off.
+Under `server/`, the session manager keeps each connection's session — its token, 16 bytes drawn
+from `crypto`, its data and two inactivity timers — the notification manager who is subscribed to
+what, by connection, call id and session, and `credential-sessions.ts` each credential's session
+that bounds a subscription, its end timed on the router's clock.
 
 `client` puts the three layers together, bottom up — the transport, the router built on it, the
 services built on the router — each replaceable on its own. `ws-client` is that over WebSocket, and
@@ -533,19 +534,20 @@ credential goes out `ACCESS_DENIED`, so its client keeps a credential that may h
 to keep it puts `refusal` on its own function.
 
 The server asks a client with a command, `getCommand`, whose options, `ICommandOptions`, name the
-connection, which the types require; a server's manager makes no request, notification nor command
-resolver, and a client's no command, request resolver nor notification resolver, each refused as it
-is made. The client runs it with `getCommandResolver`, and
-resolves the command's credential as a server does, by the `credentials` among its own options, the
-session it learned standing for its connection's. None of this package's server transports carries a
-credential beside an envelope it sends, so a command presenting `ELSEWHERE` fails before it goes,
-`DESTINATION_UNREACHABLE`, as a `JWT` command does over a connection that is not secure. A command
-left unanswered past its timeout closes its connection when the server's `closeOnCommandTimeout`
-says so, or the command's own `closeOnTimeout`. `ws-server` is the server over WebSocket. A server
-hears what goes wrong where each layer tells it: a call's on its router's `error`, and its
-transport's — a socket's, or what a listener of its events threw — on the transport's `error`,
-beside each refusal it tells, both on `server.transport` whichever transport it was built on
-([decision 0023](../../docs/decisions/0023-a-transport-goes-on-through-its-listeners-throw-and-takes-nothing-new-as-it-stops.md)):
+connection, which the types require; a server's services carry no request, notification nor command
+resolver, nor a `dropped` event, and a client's no command, request resolver nor notification
+resolver, so the other side's maker does not compile; past the types, or on a manager over a router
+of the application's own, each is refused as it is made. The client runs it with
+`getCommandResolver`, and resolves the command's credential as a server does, by the `credentials`
+among its own options, the session it learned standing for its connection's. None of this package's
+server transports carries a credential beside an envelope it sends, so a command presenting
+`ELSEWHERE` fails before it goes, `DESTINATION_UNREACHABLE`, as a `JWT` command does over a
+connection that is not secure. A command left unanswered past its timeout closes its connection when
+the server's `closeOnCommandTimeout` says so, or the command's own `closeOnTimeout`. `ws-server` is
+the server over WebSocket. A server hears what goes wrong where each layer tells it: a call's on its
+router's `error`, and its transport's — a socket's, or what a listener of its events threw — on the
+transport's `error`, beside each refusal it tells, both on `server.transport` whichever transport it
+was built on ([decision 0023](../../docs/decisions/0023-a-transport-goes-on-through-its-listeners-throw-and-takes-nothing-new-as-it-stops.md)):
 
 ```ts
 const server = createWSServer({

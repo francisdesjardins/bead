@@ -453,6 +453,7 @@ public sealed class WebSocketServerTests
         Assert.Same(server.RequireCredential, beadServer.RequireCredential);
         Assert.NotNull(server.ShareLegBSession);
         Assert.Same(server.ShareLegBSession, beadServer.ShareLegBSession);
+        Assert.Equal(typeof(IServiceManagerServer), typeof(WebSocketServer<string>).GetProperty(nameof(WebSocketServer<string>.Services))!.PropertyType);
     }
 
     [Fact]

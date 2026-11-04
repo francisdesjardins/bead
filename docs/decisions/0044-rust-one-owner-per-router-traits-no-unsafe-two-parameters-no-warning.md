@@ -527,8 +527,11 @@ sides emit is a `…Listener` or an `on_…` the Rust side registers. A TypeScri
 operation met, as std's `io::ErrorKind::TimedOut` does, where the TypeScript side names the error
 after the event, and the C# side so where it has a type of its own: `CallError::Disconnected` is
 `DisconnectError` and `DisconnectException`, `CallError::Cancelled` is `CancelError`,
-`CallError::TimedOut` is `TimeoutError`, which `tools/names.tsv` renders, `rendered: error`. The
-Rust names are the other sides', each held by `tools/names.tsv`
+`CallError::TimedOut` is `TimeoutError`, which `tools/names.tsv` renders, `rendered: error`. An
+interface the other sides give over one object, which narrows it, is a newtype here that holds it,
+`ServiceManagerClient` over `ServiceManager` (C-NEWTYPE), built by the crate alone
+([0018](0018-a-services-procedures-are-typed-descriptors-served-and-called-through-one-layer.md)).
+The Rust names are the other sides', each held by `tools/names.tsv`
 ([0004](0004-one-behaviour-in-every-language.md)).
 
 ### Payloads, a `JWT`, randomness
@@ -660,6 +663,9 @@ byte, and **always built**: no Cargo feature leaves debugging out, which would b
 - **Twin tests** carry the other sides' sentence in snake case, the unit named in a comment just
   above, `// spec 15.13`, which `spec/check.py` reads. Cargo's own runner: `cargo test --workspace
   --all-features --locked`.
+- **A refusal the types make has a consumer twin**: `testing::surface::Consumer` compiles a consumer
+  against the built library and asserts each refusal by its code and its message, on the pinned
+  stable, where rustdoc's `compile_fail` checks no code; a doc example shows what compiles.
 - **Coverage, lines and regions on the pinned stable**, through `cargo llvm-cov`'s LLVM JSON export,
   every test binary's profile merged, the unit tests and the kit left out; read by
   `tools/coverage-report.mjs`, which tells it from istanbul's JSON by its `type`, and held to the

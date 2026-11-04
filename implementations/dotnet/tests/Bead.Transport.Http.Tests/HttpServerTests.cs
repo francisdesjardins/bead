@@ -57,13 +57,13 @@ public sealed class HttpServerTests
         return Convert.ToHexStringLower(SHA256.HashData(payload));
     }
 
-    private static Func<string, BoundCall<string>> TextRequester(ServiceManager services, Procedure procedure)
+    private static Func<string, BoundCall<string>> TextRequester(IServiceManagerClient services, Procedure procedure)
     {
         return services.GetRequest(procedure, new RequestDependencies<string, string> { Serializer = Text });
     }
 
     // a server's command of text, which names its connection
-    private static Func<string, BoundCommand<string>> TextCommander(ServiceManager services, Procedure procedure)
+    private static Func<string, BoundCommand<string>> TextCommander(IServiceManagerServer services, Procedure procedure)
     {
         return services.GetCommand(procedure, new RequestDependencies<string, string> { Serializer = Text });
     }
@@ -211,6 +211,7 @@ public sealed class HttpServerTests
         Assert.Same(server.RequireCredential, beadServer.RequireCredential);
         Assert.NotNull(server.ShareLegBSession);
         Assert.Same(server.ShareLegBSession, beadServer.ShareLegBSession);
+        Assert.Equal(typeof(IServiceManagerServer), typeof(HttpServer<string>).GetProperty(nameof(HttpServer<string>.Services))!.PropertyType);
     }
 
     [Fact]

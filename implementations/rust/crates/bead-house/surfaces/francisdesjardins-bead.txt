@@ -157,7 +157,9 @@ crate
   use managers::service::Response
   use managers::service::ServiceCall
   use managers::service::ServiceManager
+  use managers::service::ServiceManagerClient
   use managers::service::ServiceManagerOptions
+  use managers::service::ServiceManagerServer
   use managers::service::ServiceRouter
   use managers::service::Subscriber
   use managers::service::SubscriberFilter
@@ -535,7 +537,7 @@ crate::client
   struct Client
     fn new(transport: Arc<dyn RouterClientTransport>, options: &ClientOptions) -> Result<Self, ProgrammerError>
     const fn router(&self) -> &RouterClient
-    const fn services(&self) -> &ServiceManager
+    const fn services(&self) -> &ServiceManagerClient
     fn transport(&self) -> Arc<dyn RouterClientTransport>
     fn dispose(&self) -> BoxFuture<()>
     implements Debug
@@ -1225,6 +1227,25 @@ crate::managers::service
     implements Debug
     derives Clone
   type CloseConnection = Arc<dyn Fn(&ConnectionHandle) + Send + Sync>
+  struct ServiceManagerClient
+    fn on_debug(&self, listener: DebugListener) -> ListenerId
+    fn on_deprecated(&self, listener: DeprecatedListener) -> ListenerId
+    fn on_dropped(&self, listener: DroppedListener) -> ListenerId
+    fn off(&self, listener: ListenerId)
+    fn is_debugging(&self) -> bool
+    fn get_request<Req, Res>(&self, procedure: &Procedure, dependencies: RequestDependencies<Req, Res>) -> Result<Request<Req, Res>, ProgrammerError> where Req: PayloadCodec, Res: PayloadCodec, Req::Value: Clone + fmt::Debug + Sync, Res::Value: Clone + fmt::Debug + Sync,
+    fn get_notification<Req, Res, Not>(&self, procedure: &Procedure, dependencies: NotificationDependencies<Req, Res, Not>) -> Result<Notification<Req, Res, Not>, ProgrammerError> where Req: PayloadCodec, Res: PayloadCodec, Not: PayloadCodec, Req::Value: Clone + fmt::Debug + Sync, Res::Value: Clone + fmt::Debug + Sync, Not::Value: Clone + fmt::Debug + Sync,
+    fn get_command_resolver<Req, Res>(&self, procedure: &Procedure, dependencies: RequestResolverDependencies<Req, Res>) -> Result<ResolverOf<Req, Res>, ProgrammerError> where Req: PayloadCodec, Res: PayloadCodec,
+    derives Clone, Debug
+  struct ServiceManagerServer
+    fn on_debug(&self, listener: DebugListener) -> ListenerId
+    fn on_deprecated(&self, listener: DeprecatedListener) -> ListenerId
+    fn off(&self, listener: ListenerId)
+    fn is_debugging(&self) -> bool
+    fn get_command<Req, Res>(&self, procedure: &Procedure, dependencies: RequestDependencies<Req, Res>) -> Result<Command<Req, Res>, ProgrammerError> where Req: PayloadCodec, Res: PayloadCodec, Req::Value: Clone + fmt::Debug + Sync, Res::Value: Clone + fmt::Debug + Sync,
+    fn get_request_resolver<Req, Res>(&self, procedure: &Procedure, dependencies: RequestResolverDependencies<Req, Res>) -> Result<ResolverOf<Req, Res>, ProgrammerError> where Req: PayloadCodec, Res: PayloadCodec,
+    fn get_notification_resolver<Req, Res, Not>(&self, procedure: &Procedure, dependencies: NotificationResolverDependencies<Req, Res, Not>) -> Result<NotificationResolverOf<Req, Res, Not>, ProgrammerError> where Req: PayloadCodec, Res: PayloadCodec, Not: PayloadCodec,
+    derives Clone, Debug
   struct Request<Req: PayloadCodec, Res: PayloadCodec>
     fn procedure(&self) -> &Procedure
     fn call(&self, payload: Req::Value, options: &RequestOptions) -> Result<ServiceCall<Res::Value>, ProgrammerError>
@@ -1841,7 +1862,7 @@ crate::server
   struct Server
     fn new(transport: Arc<dyn ServerTransport>, options: &ServerOptions) -> Result<Self, ProgrammerError>
     fn router(&self) -> &RouterServer
-    fn services(&self) -> &ServiceManager
+    fn services(&self) -> &ServiceManagerServer
     fn sessions(&self) -> &SessionManager
     fn transport(&self) -> Arc<dyn ServerTransport>
     fn gauges(&self) -> BoxFuture<Result<ServerGauges, ProgrammerError>>

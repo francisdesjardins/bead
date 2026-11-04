@@ -80,7 +80,7 @@ public sealed class ServiceClient<TService>
         ArgumentNullException.ThrowIfNull(procedures);
         ArgumentNullException.ThrowIfNull(client);
 
-        _services = client.Services;
+        _services = client.Services.Manager;
         _failFast = options?.FailFast ?? false;
 
         var judging = new RequesterJudging { FailFast = _failFast, Validates = options?.Validates ?? false };

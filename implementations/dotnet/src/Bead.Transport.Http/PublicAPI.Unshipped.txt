@@ -57,3 +57,7 @@ override Bead.Transport.Http.HttpTransportClientConnectOptions.ToString() -> str
 *REMOVED*static Bead.Transport.Http.HttpConnectOptions.operator ==(Bead.Transport.Http.HttpConnectOptions? left, Bead.Transport.Http.HttpConnectOptions? right) -> bool
 static Bead.Transport.Http.HttpTransportClientConnectOptions.operator !=(Bead.Transport.Http.HttpTransportClientConnectOptions? left, Bead.Transport.Http.HttpTransportClientConnectOptions? right) -> bool
 static Bead.Transport.Http.HttpTransportClientConnectOptions.operator ==(Bead.Transport.Http.HttpTransportClientConnectOptions? left, Bead.Transport.Http.HttpTransportClientConnectOptions? right) -> bool
+*REMOVED*Bead.Transport.Http.BeadHttpClient.Services.get -> Bead.ServiceManager!
+*REMOVED*Bead.Transport.Http.HttpServer<TData>.Services.get -> Bead.ServiceManager!
+Bead.Transport.Http.BeadHttpClient.Services.get -> Bead.IServiceManagerClient!
+Bead.Transport.Http.HttpServer<TData>.Services.get -> Bead.IServiceManagerServer!

@@ -175,11 +175,12 @@ const procedureOf = (given: IProcedure): IProcedure => {
 
 /**
  * The requesters and resolvers of the services on one router: what a requester calls, and what
- * answers it on the other side. Both sides of a router use the same manager — a request or a
+ * answers it on the other side. The untyped manager serves either side's router — a request or a
  * notification made on a client's router, a command on a server's; a command answered on a
  * client's, a request or a notification on a server's; each refused on the other's as it is made,
  * its side first, then spec 16.10's reasons — which runs on its router's clock: one its options
- * give that differs is a {@link ProgrammerError}.
+ * give that differs is a {@link ProgrammerError}. A client and a server give it typed by their
+ * side, `IServiceManagerClient` and `IServiceManagerServer`, without the other side's makers.
  *
  * @example
  * import { createServiceManager } from '@francisdesjardins/bead/service-manager';
@@ -597,7 +598,9 @@ export type {
   IRouterLike,
   IRouterRequest,
   IServiceManager,
+  IServiceManagerClient,
   IServiceManagerOptions,
+  IServiceManagerServer,
   ISubscriber,
   IUnregisterNotificationOptions,
   NotificationKey,

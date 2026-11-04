@@ -170,7 +170,7 @@ public sealed class ServiceServer<TService, TData>
 
         Register(procedure, (server) =>
         {
-            server.Services.GetRequestResolver(
+            server.Services.Manager.GetRequestResolver(
                 procedure.Procedure,
                 new RequestResolverDependencies<TRequest, TResult>
                 {
@@ -203,7 +203,7 @@ public sealed class ServiceServer<TService, TData>
 
         Register(procedure, (server) =>
         {
-            var resolver = server.Services.GetNotificationResolver(
+            var resolver = server.Services.Manager.GetNotificationResolver(
                 procedure.Procedure,
                 new NotificationResolverDependencies<TRequest, TResult, TNotification>
                 {
@@ -251,7 +251,7 @@ public sealed class ServiceServer<TService, TData>
 
             foreach (var procedure in _procedures.Values.Where(ServiceLayer.IsCommand))
             {
-                _commands[procedure.Procedure.Address] = ((IDescribedProcedure)procedure).RequesterOn(server.Services, _judging);
+                _commands[procedure.Procedure.Address] = ((IDescribedProcedure)procedure).RequesterOn(server.Services.Manager, _judging);
             }
 
             registering = [.. _resolvers.Values];

@@ -80,7 +80,7 @@ public sealed class HttpServer<TData> : IBeadServer<TData>
     }
 
     /// <summary>Its services.</summary>
-    public ServiceManager Services
+    public IServiceManagerServer Services
     {
         get
         {

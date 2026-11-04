@@ -89,7 +89,7 @@ internal sealed class ServiceLink : IAsyncDisposable
 
         public RouterClient Router { get; }
 
-        public ServiceManager Services { get; }
+        public IServiceManagerClient Services { get; }
 
         public Task Disconnect(TransportClientDisconnectOptions? options = null)
         {

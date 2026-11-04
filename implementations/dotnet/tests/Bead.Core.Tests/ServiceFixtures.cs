@@ -282,7 +282,7 @@ internal sealed class InterceptedServer(Server<string> server) : IBeadServer<str
         }
     }
 
-    public ServiceManager Services
+    public IServiceManagerServer Services
     {
         get
         {
@@ -354,7 +354,7 @@ internal sealed class InterceptedClient(IClient client) : IClient
         }
     }
 
-    public ServiceManager Services
+    public IServiceManagerClient Services
     {
         get
         {

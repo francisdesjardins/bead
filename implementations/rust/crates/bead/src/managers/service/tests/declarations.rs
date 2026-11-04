@@ -619,3 +619,99 @@ async fn hands_the_router_a_procedures_payload_limit_with_its_requests_and_its_r
         ("E0609", "no field"),
     );
 }
+
+// spec 16.11
+#[tokio::test]
+async fn types_a_client_s_services_and_a_server_s_by_their_side_each_without_the_other_s_makers() {
+    let consumer = crate::testing::surface::Consumer::new();
+
+    // * each side's services hold its side's three makers alone, so the other side's does not compile
+    consumer.accepts("pub fn check(client: &bead::Client, server: &bead::Server) { let _ = (bead::ServiceManagerClient::get_request::<bead::TextCodec, bead::TextCodec>, bead::ServiceManagerClient::get_notification::<bead::TextCodec, bead::TextCodec, bead::TextCodec>, bead::ServiceManagerClient::get_command_resolver::<bead::TextCodec, bead::TextCodec>, bead::ServiceManagerServer::get_command::<bead::TextCodec, bead::TextCodec>, bead::ServiceManagerServer::get_request_resolver::<bead::TextCodec, bead::TextCodec>, bead::ServiceManagerServer::get_notification_resolver::<bead::TextCodec, bead::TextCodec, bead::TextCodec>); let _ = (client.services().is_debugging(), server.services().is_debugging()); }");
+    for method in [
+        "get_command",
+        "get_request_resolver",
+        "get_notification_resolver",
+    ] {
+        consumer.refuses(
+            &format!("pub fn check(client: &bead::Client) {{ client.services().{method}(); }}"),
+            ("E0599", &format!("no method named `{method}`")),
+        );
+    }
+    for method in [
+        "get_request",
+        "get_notification",
+        "get_command_resolver",
+        "on_dropped",
+    ] {
+        consumer.refuses(
+            &format!("pub fn check(server: &bead::Server) {{ server.services().{method}(); }}"),
+            ("E0599", &format!("no method named `{method}`")),
+        );
+    }
+    // a facade alone gives its side's services
+    consumer.refuses(
+        "pub fn check(router: bead::RouterClient) { let _ = bead::ServiceManagerClient::new(router, &bead::ServiceManagerOptions::default()); }",
+        ("E0624", "is private"),
+    );
+
+    // what compiles makes each maker and hears each event on its own side
+    let pair = crate::testing::pair::Pair::connected(
+        crate::testing::instants::new_year(),
+        &crate::testing::pair::PairOptions::default(),
+    )
+    .await
+    .expect("a connected pair");
+    let of_kind = |procedure_id, procedure_kind| crate::identity::Procedure {
+        procedure_id,
+        procedure_kind: Some(procedure_kind),
+        ..echo()
+    };
+    let requesting = || RequestDependencies::new(TextCodec, TextCodec);
+    let resolving = || RequestResolverDependencies::new(TextCodec, TextCodec);
+    let client = pair.client.services();
+    let server = pair.server.services();
+
+    client
+        .get_request(&echo(), requesting())
+        .expect("a client makes requests");
+    client
+        .get_notification(
+            &of_kind(2, ProcedureKind::Notifies),
+            NotificationDependencies::new(requesting(), TextCodec),
+        )
+        .expect("a client hears notifications");
+    client
+        .get_command_resolver(&of_kind(3, ProcedureKind::Command), resolving())
+        .expect("a client answers commands");
+    server
+        .get_command(&of_kind(3, ProcedureKind::Command), requesting())
+        .expect("a server makes commands");
+    server
+        .get_request_resolver(&echo(), resolving())
+        .expect("a server answers requests");
+    server
+        .get_notification_resolver(
+            &of_kind(2, ProcedureKind::Notifies),
+            NotificationResolverDependencies::new(resolving(), TextCodec),
+        )
+        .expect("a server notifies");
+
+    let client_heard = [
+        client.on_debug(Arc::new(|_, _| {})),
+        client.on_deprecated(Arc::new(|_| {})),
+        client.on_dropped(Arc::new(|_, _| {})),
+    ];
+    let server_heard = [
+        server.on_debug(Arc::new(|_, _| {})),
+        server.on_deprecated(Arc::new(|_| {})),
+    ];
+
+    assert!(client.is_debugging() && server.is_debugging());
+    for listener in client_heard {
+        client.off(listener);
+    }
+    for listener in server_heard {
+        server.off(listener);
+    }
+    assert!(!client.is_debugging() && !server.is_debugging());
+}

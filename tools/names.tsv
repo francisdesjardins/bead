@@ -252,7 +252,9 @@ ServerTransportLike	IServerTransportLike [record]	IServerTransport [record]	Serv
 ServiceClient	IServiceClient [record], createServiceClient [function]	ServiceClient [record]	-	same
 ServiceClientOptions	IServiceClientOptions [record]	ServiceClientOptions [record]	-	same
 ServiceManager	IServiceManager [record], createServiceManager [function]	ServiceManager [record]	ServiceManager [record]	same
+ServiceManagerClient	IServiceManagerClient [record]	IServiceManagerClient [record]	ServiceManagerClient [record]	same
 ServiceManagerOptions	IServiceManagerOptions [record]	ServiceManagerOptions [record]	ServiceManagerOptions [record]	same
+ServiceManagerServer	IServiceManagerServer [record]	IServiceManagerServer [record]	ServiceManagerServer [record]	same
 ServiceProcedure	-	IServiceProcedure [record]	ServiceProcedure [record]	same
 ServiceResolverCallback	ServiceResolverCallback [function type]	ServiceResolverCallback [function type]	-	same
 ServiceResponse	IServiceResponse [record]	IServiceResponse [record]	-	same
