@@ -6,6 +6,22 @@ use crate::failure::Failure;
 use crate::router::types::LIMIT_DEFAULTS;
 
 #[test]
+fn give_each_side_a_call_id_range_of_its_own_parity() {
+    use crate::router::parts::PendingCalls;
+
+    for (side, (first, last)) in [
+        (RouterSide::Client, (1, 0xffff_ffff)),
+        (RouterSide::Server, (2, 0xffff_fffe)),
+    ] {
+        assert_eq!(side.call_ids(), (first, last));
+        let mut sequence = PendingCalls::bounded(side, last).expect("a side's valid range");
+        let handle = std::sync::Arc::from("a connection");
+        assert_eq!(sequence.draw((&handle, |_id| false)), Some(first));
+        assert_eq!(sequence.draw((&handle, |_id| false)), Some(first + 2));
+    }
+}
+
+#[test]
 fn holds_23_codes_each_once_and_leaves_out_the_ones_to_come() {
     let codes = ProtocolCode::named();
     assert_eq!(codes.len(), 23);
